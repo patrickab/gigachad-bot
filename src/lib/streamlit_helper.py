@@ -1,11 +1,28 @@
 """Streamlit helper functions."""
 
+import os
 from pathlib import Path
 
 import streamlit as st
 
-from src.lib.prompts import SYS_DEBUGGING_PROMPT, SYS_JUPYTER_NOTEBOOK, SYS_LEARNING_MATERIAL, SYS_PROFESSOR_EXPLAINS
-from src.openai_client import OpenAIBaseClient
+from src.lib.prompts import SYS_CONCEPTUAL_OVERVIEW, SYS_EMPTY_PROMPT, SYS_LEARNING_MATERIAL, SYS_PROFESSOR_EXPLAINS, SYS_SHORT_ANSWER
+from src.openai_client import MODELS_GEMINI, MODELS_OPENAI, LLMClient
+
+AVAILABLE_MODELS = []
+
+if os.getenv("OPENAI_API_KEY") is not None:
+    AVAILABLE_MODELS += MODELS_OPENAI
+
+if os.getenv("GEMINI_API_KEY") is not None:
+    AVAILABLE_MODELS += MODELS_GEMINI
+
+AVAILABLE_PROMPTS = {
+    "Short Answer": SYS_SHORT_ANSWER,
+    "High-Level Concept": SYS_CONCEPTUAL_OVERVIEW,
+    "In-Depth Concept": SYS_PROFESSOR_EXPLAINS,
+    "Create Wiki Article": SYS_LEARNING_MATERIAL,
+    "<empty prompt>": SYS_EMPTY_PROMPT,
+}
 
 
 def apply_custom_style() -> None:
@@ -58,12 +75,7 @@ def apply_custom_style() -> None:
 
 def init_session_state() -> None:
     if "client" not in st.session_state:
-        st.session_state.system_prompts = {
-            "Create Learning Material": SYS_LEARNING_MATERIAL,
-            "Professor Explains": SYS_PROFESSOR_EXPLAINS,
-            "Jupyter Notebook": SYS_JUPYTER_NOTEBOOK,
-            "Debugging Joke": SYS_DEBUGGING_PROMPT,
-        }
+        st.session_state.system_prompts = AVAILABLE_PROMPTS
         st.session_state.selected_prompt = "Create Learning Material"
         st.session_state.selected_model = "gpt-4.1-mini"
         st.session_state.client = OpenAIBaseClient(st.session_state.selected_model)
