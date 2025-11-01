@@ -1,17 +1,17 @@
 [project]
 name = "openai-streamlit"
 version = "0.1.0"
-description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "streamlit>=1.47.1", 
+    "google-genai>=1.47.0",
+    "networkx>=3.3",
+    "numpy>=2.3.2",
     "openai>=1.98.0",
     "polars>=1.32.3",
-    "tiktoken>=0.11.0",
-    "numpy>=2.3.2",
+    "streamlit>=1.51.0",
     "streamlit-agraph>=0.0.45",
-    "networkx>=3.3",
+    "tiktoken>=0.11.0",
 ]
 
 [build-system]
@@ -44,7 +44,8 @@ select = [
   "RUF"  # Ruff-native rules
 ]
 ignore = [
-  "RUF100"
+  "RUF100",
+  "B904"
 ]
 
 [tool.ruff.lint.isort]
@@ -52,5 +53,5 @@ force-sort-within-sections = true
 known-first-party = ["openai_client"]
 section-order = ["standard-library", "third-party", "first-party", "local-folder"]
 
-[tool.ruff.format]
 # Enables Ruff formatter with default options (Black-compatible)
+[tool.ruff.format]

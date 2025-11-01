@@ -37,7 +37,7 @@ def _chat_interface() -> None:
 
         if send_btn and prompt:
             with st.chat_message("assistant"):
-                st.session_state.client.chat(prompt)
+                st.session_state.client.chat(model=st.session_state.selected_model, user_message=prompt)
                 st.rerun()
 
 
@@ -50,7 +50,7 @@ def main() -> None:
     init_session_state()
     application_side_bar()
 
-    chat_interface, work_in_progress = st.tabs(["OpenAI - Custom Chat Interface", "Work in Progress"])
+    chat_interface, work_in_progress = st.tabs(["Study Assistant", "Work in Progress"])
 
     with chat_interface:
         _chat_interface()

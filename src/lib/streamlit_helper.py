@@ -77,29 +77,27 @@ def init_session_state() -> None:
     if "client" not in st.session_state:
         st.session_state.system_prompts = AVAILABLE_PROMPTS
         st.session_state.selected_prompt = "Create Learning Material"
-        st.session_state.selected_model = "gpt-4.1-mini"
-        st.session_state.client = OpenAIBaseClient(st.session_state.selected_model)
-        st.session_state.client.set_system_prompt(SYS_LEARNING_MATERIAL)
+        st.session_state.selected_model = AVAILABLE_MODELS[0]
+        st.session_state.client = LLMClient()
+        st.session_state.client._set_system_prompt(SYS_LEARNING_MATERIAL)
         st.session_state.rag_database_repo = ""
 
 
 def application_side_bar() -> None:
     model = st.sidebar.selectbox(
         "Model",
-        ["gpt-5", "gpt-4.1", "gpt-4.1-nano", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"],
+        AVAILABLE_MODELS,
         key="model_select",
-        help="Select Model",
     )
 
     sys_prompt_name = st.sidebar.selectbox(
         "System prompt",
         list(st.session_state.system_prompts.keys()),
         key="prompt_select",
-        help="Select System Prompt",
     )
 
     if sys_prompt_name != st.session_state.selected_prompt:
-        st.session_state.client.set_system_prompt(st.session_state.system_prompts[sys_prompt_name])
+        st.session_state.client._set_system_prompt(st.session_state.system_prompts[sys_prompt_name])
         st.session_state.selected_prompt = sys_prompt_name
 
     if model != st.session_state.selected_model:
@@ -131,16 +129,19 @@ def render_messages(message_container) -> None:  # noqa
 
     message_container.empty()  # Clear previous messages
 
-    messages = st.session_state.client.messages[1:][::-1]
+    messages = st.session_state.client.messages[::-1]
+
+    if len(messages) == 0:
+        return
 
     with message_container:
         for i in range(0, len(messages), 2):
             is_expanded = i == 0
             label = f"QA-Pair  {i // 2}: "
-            user_msg = messages[i + 1]["content"][0]["text"]
-            assistant_msg = messages[i]["content"][0]["text"]
+            _, user_msg = messages[i + 1]
+            _, assistant_msg = messages[i]
 
-            with st.expander(label + user_msg, expanded=is_expanded):
+            with st.expander(label=label, expanded=is_expanded):
                 # Display user and assistant messages
                 st.chat_message("user").markdown(user_msg)
                 st.chat_message("assistant").markdown(assistant_msg)
