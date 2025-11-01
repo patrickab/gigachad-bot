@@ -10,6 +10,7 @@ from src.lib.prompts import (
     SYS_CONCEPTUAL_OVERVIEW,
     SYS_EMPTY_PROMPT,
     SYS_PRECISE_TASK_EXECUTION,
+    SYS_PROMPT_ARCHITECT,
     SYS_SHORT_ANSWER,
 )
 from src.llm_client import MODELS_GEMINI, MODELS_OPENAI, LLMClient
@@ -27,6 +28,7 @@ AVAILABLE_PROMPTS = {
     "Concept - High-Level": SYS_CONCEPTUAL_OVERVIEW,
     "Concept - In-Depth": SYS_CONCEPT_IN_DEPTH,
     "Concept - Article": SYS_ARTICLE,
+    "Prompt Architect": SYS_PROMPT_ARCHITECT,
     "Precise Task Execution": SYS_PRECISE_TASK_EXECUTION,
     "<empty prompt>": SYS_EMPTY_PROMPT,
 }
