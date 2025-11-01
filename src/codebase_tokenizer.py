@@ -151,6 +151,26 @@ def render_codebase_tokenizer() -> None:
     """Render the Codebase Tokenizer tab."""
     st.subheader("Codebase Tokenizer")
 
+    def _find_git_repos(base: Path) -> list[Path]:
+        """Return directories in *base* that contain a .git folder."""
+        return [p for p in base.iterdir() if (p / ".git").exists() and p.is_dir()]
+
+    repos = _find_git_repos(Path.home())
+    if repos:
+        repo = st.selectbox(
+            "Repository",
+            repos,
+            format_func=lambda p: p.name,
+            index=None,
+            placeholder="Select a repository",
+        )
+        if repo is not None:
+            selected = str(repo)
+            if st.session_state.get("selected_repo") != selected:
+                st.session_state.selected_repo = selected
+    else:
+        st.sidebar.info("No Git repositories found")
+
     repo_path_str = st.session_state.get("selected_repo")
     if not repo_path_str:
         st.info("Select a repository from the sidebar.")
@@ -199,9 +219,6 @@ def render_code_graph() -> None:
     cache = st.session_state.get("graph_cache")
     needs_build = st.session_state.get("graph_cache_key") != cache_key
     placeholder = st.empty()
-    if needs_build:
-        with placeholder:
-            st.markdown("<div class='graph-skeleton'></div>", unsafe_allow_html=True)
 
     if needs_build:
         G = nx.DiGraph()

@@ -1,11 +1,33 @@
 """Streamlit helper functions."""
 
-from pathlib import Path
+import os
 
 import streamlit as st
 
-from src.lib.prompts import SYS_DEBUGGING_PROMPT, SYS_JUPYTER_NOTEBOOK, SYS_LEARNING_MATERIAL, SYS_PROFESSOR_EXPLAINS
-from src.openai_client import OpenAIBaseClient
+from src.lib.prompts import (
+    SYS_ARTICLE,
+    SYS_CONCEPT_IN_DEPTH,
+    SYS_CONCEPTUAL_OVERVIEW,
+    SYS_EMPTY_PROMPT,
+    SYS_SHORT_ANSWER,
+)
+from src.llm_client import MODELS_GEMINI, MODELS_OPENAI, LLMClient
+
+AVAILABLE_MODELS = []
+
+if os.getenv("OPENAI_API_KEY") is not None:
+    AVAILABLE_MODELS += MODELS_OPENAI
+
+if os.getenv("GEMINI_API_KEY") is not None:
+    AVAILABLE_MODELS += MODELS_GEMINI
+
+AVAILABLE_PROMPTS = {
+    "Short Answer": SYS_SHORT_ANSWER,
+    "Concept - High-Level": SYS_CONCEPTUAL_OVERVIEW,
+    "Concept - In-Depth": SYS_CONCEPT_IN_DEPTH,
+    "Concept - Article": SYS_ARTICLE,
+    "<empty prompt>": SYS_EMPTY_PROMPT,
+}
 
 
 def apply_custom_style() -> None:
@@ -58,60 +80,70 @@ def apply_custom_style() -> None:
 
 def init_session_state() -> None:
     if "client" not in st.session_state:
-        st.session_state.system_prompts = {
-            "Create Learning Material": SYS_LEARNING_MATERIAL,
-            "Professor Explains": SYS_PROFESSOR_EXPLAINS,
-            "Jupyter Notebook": SYS_JUPYTER_NOTEBOOK,
-            "Debugging Joke": SYS_DEBUGGING_PROMPT,
-        }
-        st.session_state.selected_prompt = "Create Learning Material"
-        st.session_state.selected_model = "gpt-4.1-mini"
-        st.session_state.client = OpenAIBaseClient(st.session_state.selected_model)
-        st.session_state.client.set_system_prompt(SYS_LEARNING_MATERIAL)
+        st.session_state.system_prompts = AVAILABLE_PROMPTS
+        st.session_state.selected_prompt = "<empty prompt>"
+        st.session_state.selected_model = AVAILABLE_MODELS[0]
+        st.session_state.client = LLMClient()
+        st.session_state.client._set_system_prompt(AVAILABLE_PROMPTS["Short Answer"])
         st.session_state.rag_database_repo = ""
 
 
 def application_side_bar() -> None:
     model = st.sidebar.selectbox(
         "Model",
-        ["gpt-5", "gpt-4.1", "gpt-4.1-nano", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"],
+        AVAILABLE_MODELS,
         key="model_select",
-        help="Select Model",
     )
 
     sys_prompt_name = st.sidebar.selectbox(
         "System prompt",
         list(st.session_state.system_prompts.keys()),
         key="prompt_select",
-        help="Select System Prompt",
     )
 
     if sys_prompt_name != st.session_state.selected_prompt:
-        st.session_state.client.set_system_prompt(st.session_state.system_prompts[sys_prompt_name])
+        st.session_state.client._set_system_prompt(st.session_state.system_prompts[sys_prompt_name])
         st.session_state.selected_prompt = sys_prompt_name
 
     if model != st.session_state.selected_model:
         st.session_state.selected_model = model
 
-    def _find_git_repos(base: Path) -> list[Path]:
-        """Return directories in *base* that contain a .git folder."""
-        return [p for p in base.iterdir() if (p / ".git").exists() and p.is_dir()]
+def chat_interface() -> None:
+    _, col_center, _ = st.columns([0.05, 0.9, 0.05])
 
-    repos = _find_git_repos(Path.home())
-    if repos:
-        repo = st.sidebar.selectbox(
-            "Repository",
-            repos,
-            format_func=lambda p: p.name,
-            index=None,
-            placeholder="Select a repository",
-        )
-        if repo is not None:
-            selected = str(repo)
-            if st.session_state.get("selected_repo") != selected:
-                st.session_state.selected_repo = selected
-    else:
-        st.sidebar.info("No Git repositories found")
+    with st.sidebar:
+        st.markdown("---")
+        with st.expander("Options", expanded=False):
+            if st.button("Reset History", key="reset_history_main"):
+                st.session_state.client.reset_history()
+            with st.expander("Store answer", expanded=True):
+                try:
+                    idx_input = st.text_input("Index of message to save", key="index_input_main")
+                    idx = int(idx_input) if idx_input.strip() else 0
+                except ValueError:
+                    st.error("Please enter a valid integer")
+                    idx = 0
+                filename = st.text_input("Filename", key="filename_input_main")
+                if st.button("Save to Markdown", key="save_to_md_main"):
+                    st.session_state.client.write_to_md(filename, idx)
+                    st.success(f"Chat history saved to {filename}")
+
+    with col_center:
+        st.subheader("Chat Interface")
+        st.markdown("---")
+        st.write("")  # Spacer
+        message_container = st.container()
+        render_messages(message_container)
+
+        with st._bottom:
+            prompt = st.chat_input("Send a message")
+
+        if prompt:
+            with st.chat_message("user"):
+                st.markdown(prompt)
+            with st.chat_message("assistant"):
+                st.session_state.client.chat(model=st.session_state.selected_model, user_message=prompt)
+                st.rerun()
 
 
 def render_messages(message_container) -> None:  # noqa
@@ -119,16 +151,19 @@ def render_messages(message_container) -> None:  # noqa
 
     message_container.empty()  # Clear previous messages
 
-    messages = st.session_state.client.messages[1:][::-1]
+    messages = st.session_state.client.messages
+
+    if len(messages) == 0:
+        return
 
     with message_container:
         for i in range(0, len(messages), 2):
-            is_expanded = i == 0
+            is_expanded = i == len(messages) - 2
             label = f"QA-Pair  {i // 2}: "
-            user_msg = messages[i + 1]["content"][0]["text"]
-            assistant_msg = messages[i]["content"][0]["text"]
+            _, user_msg = messages[i]
+            _, assistant_msg = messages[i + 1]
 
-            with st.expander(label + user_msg, expanded=is_expanded):
+            with st.expander(label=label, expanded=is_expanded):
                 # Display user and assistant messages
                 st.chat_message("user").markdown(user_msg)
                 st.chat_message("assistant").markdown(assistant_msg)
