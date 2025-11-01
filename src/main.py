@@ -6,9 +6,10 @@ from src.lib.streamlit_helper import application_side_bar, apply_custom_style, i
 
 
 def _chat_interface() -> None:
-    col_left, col_right = st.columns([0.382, 0.618])  # Golden ratio
+    _, col_center, _ = st.columns([0.05, 0.9, 0.05])
 
-    with col_left:
+    with st.sidebar:
+        st.markdown("---")
         with st.expander("Options", expanded=False):
             if st.button("Reset History", key="reset_history_main"):
                 st.session_state.client.reset_history()
@@ -24,18 +25,19 @@ def _chat_interface() -> None:
                     st.session_state.client.write_to_md(filename, idx)
                     st.success(f"Chat history saved to {filename}")
 
-        prompt = st.text_area("Send a message", key="left_chat_input_main", height=200)
-        send_btn = st.button("Send", key="send_btn_main")
-        st.markdown("---")
-
-    with col_right:
+    with col_center:
         st.subheader("Chat Interface")
         st.markdown("---")
         st.write("")  # Spacer
         message_container = st.container()
         render_messages(message_container)
 
-        if send_btn and prompt:
+        with st._bottom:
+            prompt = st.chat_input("Send a message")
+
+        if prompt:
+            with st.chat_message("user"):
+                st.markdown(prompt)
             with st.chat_message("assistant"):
                 st.session_state.client.chat(model=st.session_state.selected_model, user_message=prompt)
                 st.rerun()

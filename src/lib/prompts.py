@@ -102,7 +102,7 @@ SYS_SHORT_ANSWER = f"""
     {__SYS_FORMAT_GENERAL}
 """
 
-SYS_OBSIDIAN_NOTE = f"""
+SYS_ARTICLE = f"""
     # Task:
     You are a top-class professor creating structured Obsidian notes for advanced scientific topics.
 
@@ -116,30 +116,6 @@ SYS_OBSIDIAN_NOTE = f"""
     {__SYS_WIKI_STYLE}
     {__SYS_FORMAT_GENERAL}
     {__SYS_FORMAT_EMOJI}
-
-    # Obsidian note structure
-    -------------------------
-
-    ---
-    aliases: [<title>, <abbreviation>, <synonym1>, <synonym2>]        # 1–4 alternate names - dont force alias if not applicable
-    tags: [concept, <domain_1>, ..., <domain_n>]           # 2–6 relevant keywords - dont force tags if not applicable
-    summary: ""        # One-line description (for search or hover preview)
-    ---
-
-    # Overview
-    <bulletpoint list (preferred) OR 1–2 sentences (if complex)>
-
-    # Deep Dive
-    <deep dive section with explanations using bulletpoints/tables/formulas/markdown>
-
-    ## Principles
-    - <key points>
-
-    ## Details
-    - <formulas, examples, tables>
-
-    # Conclusion
-    <concise key takeaways>
 """
 
 SYS_EMPTY_PROMPT = ""

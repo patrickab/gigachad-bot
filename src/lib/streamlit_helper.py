@@ -1,15 +1,14 @@
 """Streamlit helper functions."""
 
 import os
-import re
 
 import streamlit as st
 
 from src.lib.prompts import (
+    SYS_ARTICLE,
     SYS_CONCEPT_IN_DEPTH,
     SYS_CONCEPTUAL_OVERVIEW,
     SYS_EMPTY_PROMPT,
-    SYS_OBSIDIAN_NOTE,
     SYS_SHORT_ANSWER,
 )
 from src.openai_client import MODELS_GEMINI, MODELS_OPENAI, LLMClient
@@ -24,9 +23,9 @@ if os.getenv("GEMINI_API_KEY") is not None:
 
 AVAILABLE_PROMPTS = {
     "Short Answer": SYS_SHORT_ANSWER,
-    "High-Level Concept": SYS_CONCEPTUAL_OVERVIEW,
-    "In-Depth Concept": SYS_CONCEPT_IN_DEPTH,
-    "Obsidian Note - Article": SYS_OBSIDIAN_NOTE,
+    "Concept - High-Level": SYS_CONCEPTUAL_OVERVIEW,
+    "Concept - In-Depth": SYS_CONCEPT_IN_DEPTH,
+    "Concept - Article": SYS_ARTICLE,
     "<empty prompt>": SYS_EMPTY_PROMPT,
 }
 
