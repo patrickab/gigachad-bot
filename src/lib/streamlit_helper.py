@@ -1,15 +1,15 @@
 """Streamlit helper functions."""
 
 import os
-from pathlib import Path
+import re
 
 import streamlit as st
 
 from src.lib.prompts import (
+    SYS_CONCEPT_IN_DEPTH,
     SYS_CONCEPTUAL_OVERVIEW,
     SYS_EMPTY_PROMPT,
     SYS_OBSIDIAN_NOTE,
-    SYS_PROFESSOR_EXPLAINS,
     SYS_SHORT_ANSWER,
 )
 from src.openai_client import MODELS_GEMINI, MODELS_OPENAI, LLMClient
@@ -24,9 +24,9 @@ if os.getenv("GEMINI_API_KEY") is not None:
 
 AVAILABLE_PROMPTS = {
     "Short Answer": SYS_SHORT_ANSWER,
-    "Obsidian Note - Article": SYS_OBSIDIAN_NOTE,
     "High-Level Concept": SYS_CONCEPTUAL_OVERVIEW,
-    "In-Depth Concept": SYS_PROFESSOR_EXPLAINS,
+    "In-Depth Concept": SYS_CONCEPT_IN_DEPTH,
+    "Obsidian Note - Article": SYS_OBSIDIAN_NOTE,
     "<empty prompt>": SYS_EMPTY_PROMPT,
 }
 
@@ -109,43 +109,23 @@ def application_side_bar() -> None:
     if model != st.session_state.selected_model:
         st.session_state.selected_model = model
 
-    def _find_git_repos(base: Path) -> list[Path]:
-        """Return directories in *base* that contain a .git folder."""
-        return [p for p in base.iterdir() if (p / ".git").exists() and p.is_dir()]
-
-    repos = _find_git_repos(Path.home())
-    if repos:
-        repo = st.sidebar.selectbox(
-            "Repository",
-            repos,
-            format_func=lambda p: p.name,
-            index=None,
-            placeholder="Select a repository",
-        )
-        if repo is not None:
-            selected = str(repo)
-            if st.session_state.get("selected_repo") != selected:
-                st.session_state.selected_repo = selected
-    else:
-        st.sidebar.info("No Git repositories found")
-
 
 def render_messages(message_container) -> None:  # noqa
     """Render chat messages from session state."""
 
     message_container.empty()  # Clear previous messages
 
-    messages = st.session_state.client.messages[::-1]
+    messages = st.session_state.client.messages
 
     if len(messages) == 0:
         return
 
     with message_container:
         for i in range(0, len(messages), 2):
-            is_expanded = i == 0
+            is_expanded = i == len(messages) - 2
             label = f"QA-Pair  {i // 2}: "
-            _, user_msg = messages[i + 1]
-            _, assistant_msg = messages[i]
+            _, user_msg = messages[i]
+            _, assistant_msg = messages[i + 1]
 
             with st.expander(label=label, expanded=is_expanded):
                 # Display user and assistant messages
