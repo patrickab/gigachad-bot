@@ -93,7 +93,7 @@ def chat_interface() -> None:
             with st.chat_message("user"):
                 st.markdown(prompt)
             with st.chat_message("assistant"):
-                st.session_state.client.chat(model=st.session_state.selected_model, user_message=prompt)
+                st.write_stream(st.session_state.client.chat(model=st.session_state.selected_model, user_message=prompt))
                 st.rerun()
 
 

@@ -1,5 +1,5 @@
 import os
-from typing import List, Tuple
+from typing import Iterator, List, Tuple
 
 from google.genai import Client as GeminiClient
 from google.genai import types
@@ -61,7 +61,7 @@ class LLMClient:
         with open(os.path.join("markdown", filename), "w", encoding="utf-8") as f:
             f.write(content)
 
-    def chat(self, model: str, user_message: str) -> str:
+    def chat(self, model: str, user_message: str) -> Iterator[str]:
         self.messages.append(("user", user_message))
 
         if model in MODELS_OPENAI:
@@ -69,12 +69,18 @@ class LLMClient:
                 [{"role": "system", "content": self.system_prompt}] if self.system_prompt else []
             ) + [{"role": role, "content": msg} for role, msg in self.messages]
 
-            response = self.openai_client.chat.completions.create(
+            stream = self.openai_client.chat.completions.create(
                 model=model,
                 messages=messages,
-                stream=False,
+                stream=True,
             )
-            response = response.choices[0].message.content
+
+            response = ""
+            for chunk in stream:
+                content = chunk.choices[0].delta.content
+                if content:
+                    response += content
+                    yield content # Yield each piece of content as it arrives
 
         if model in MODELS_GEMINI:
             contents = [
@@ -85,12 +91,18 @@ class LLMClient:
                 for role, msg in self.messages
             ]
 
-            response = self.gemini_client.models.generate_content(
+            stream = self.gemini_client.models.generate_content_stream(
                 model=model,
                 config=types.GenerateContentConfig(system_instruction=self.system_prompt, top_p=0.96, temperature=0.2),
                 contents=contents,
             )
-            response = getattr(response, "text", None)
+
+            response = ""
+            for chunk in stream:
+                if chunk.parts:
+                    for part in chunk.parts:
+                        if part.text:
+                            response += part.text
+                            yield part.text
 
         self.messages.append(("assistant", response))
-        return response
