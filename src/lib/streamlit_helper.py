@@ -5,7 +5,14 @@ from pathlib import Path
 
 import streamlit as st
 
-from src.lib.prompts import SYS_CONCEPTUAL_OVERVIEW, SYS_EMPTY_PROMPT, SYS_LEARNING_MATERIAL, SYS_PROFESSOR_EXPLAINS, SYS_SHORT_ANSWER
+from src.lib.prompts import (
+    SYS_CONCEPTUAL_OVERVIEW,
+    SYS_EMPTY_PROMPT,
+    SYS_LEARNING_MATERIAL,
+    SYS_OBSIDIAN_NOTE,
+    SYS_PROFESSOR_EXPLAINS,
+    SYS_SHORT_ANSWER,
+)
 from src.openai_client import MODELS_GEMINI, MODELS_OPENAI, LLMClient
 
 AVAILABLE_MODELS = []
@@ -18,6 +25,7 @@ if os.getenv("GEMINI_API_KEY") is not None:
 
 AVAILABLE_PROMPTS = {
     "Short Answer": SYS_SHORT_ANSWER,
+    "Obsidian Note": SYS_OBSIDIAN_NOTE,
     "High-Level Concept": SYS_CONCEPTUAL_OVERVIEW,
     "In-Depth Concept": SYS_PROFESSOR_EXPLAINS,
     "Create Wiki Article": SYS_LEARNING_MATERIAL,
