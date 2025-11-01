@@ -1,6 +1,6 @@
 # Study Assistant
 
-A study assistant chatbot with flexible, customizable behavior.
+A study assistant with flexible, customizable behavior.
 Use your own chatbot on localhost via API-Calls.
 Permanently adjust knowledge level to your background - no more answers, that are too complex/trivial
 The sidebar allows you to select pre-defined system prompts and swap models on the fly, giving you fine-grained control over the assistant.
@@ -12,7 +12,6 @@ The sidebar allows you to select pre-defined system prompts and swap models on t
 - Support for Gemini API & OpenAI API (easily extendable to any API)
 - Manage your own prompt library & flexibly adjust chatbot behavior as you talk.
 - Store responses from the website directly in your [Obsidian](https://obsidian.com) vault
-- Cloud-sync integration with Obsidian.
 
 ## Demo
 The image below shows response behavior for **the same input** with different **model/system prompt**
@@ -29,3 +28,4 @@ The image below shows response behavior for **the same input** with different **
 - Explore repositories visually and enrich your LLM-queries with context-aware code snippets by using Retrieval Augmented Generation (RAG).
 - Keep your conversations tidy with a compact, expandable history
 - Flexibly finetune LLM-behavior for brainstorming, generation of markdown learning material (markdown & Jupyter notebook) & explanations directly in your browser.
+
