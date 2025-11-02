@@ -1,5 +1,5 @@
 import os
-from typing import Iterator, List, Tuple
+from typing import Iterator, List, Optional, Tuple
 
 from google.genai import Client as GeminiClient
 from google.genai import types
@@ -21,6 +21,7 @@ MODELS_GEMINI = [
 ]
 
 OBSIDIAN_VAULT = "/home/noob/Nextcloud/obsidian"
+
 
 class LLMClient:
     """Base client for LLM chat completions."""
@@ -61,26 +62,35 @@ class LLMClient:
         with open(os.path.join("markdown", filename), "w", encoding="utf-8") as f:
             f.write(content)
 
-    def chat(self, model: str, user_message: str) -> Iterator[str]:
-        self.messages.append(("user", user_message))
-
+    def api_query(
+        self, model: str, user_message: str, system_prompt: str, stream: bool, chat_history: Optional[List[Tuple[str, str]]]
+    ) -> Iterator[str]:
+        """Make a single API query to the LLM."""
         if model in MODELS_OPENAI:
             messages = (
-                [{"role": "system", "content": self.system_prompt}] if self.system_prompt else []
-            ) + [{"role": role, "content": msg} for role, msg in self.messages]
-
-            stream = self.openai_client.chat.completions.create(
-                model=model,
-                messages=messages,
-                stream=True,
+                ([{"role": "system", "content": system_prompt}])
+                + [{"role": role, "content": msg} for role, msg in chat_history or []]
+                + [{"role": "user", "content": user_message}]
             )
-
-            response = ""
-            for chunk in stream:
-                content = chunk.choices[0].delta.content
-                if content:
-                    response += content
-                    yield content # Yield each piece of content as it arrives
+            if stream:
+                stream = self.openai_client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    stream=True,
+                )
+                response = ""
+                for chunk in stream:
+                    content = chunk.choices[0].delta.content
+                    if content:
+                        response += content
+                        yield content
+            else:
+                resp = self.openai_client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                )
+                response = resp.choices[0].message.content
+                yield response
 
         if model in MODELS_GEMINI:
             contents = [
@@ -88,21 +98,38 @@ class LLMClient:
                     "role": ("model" if role == "assistant" else "user"),
                     "parts": [{"text": msg}],
                 }
-                for role, msg in self.messages
+                for role, msg in chat_history or []
+            ] + [
+                {
+                    "role": "user",
+                    "parts": [{"text": user_message}],
+                }
             ]
+            if stream:
+                stream_resp = self.gemini_client.models.generate_content_stream(
+                    model=model,
+                    config=types.GenerateContentConfig(system_instruction=system_prompt, top_p=0.96, temperature=0.2),
+                    contents=contents,
+                )
+                response = ""
+                for chunk in stream_resp:
+                    if chunk.parts:
+                        for part in chunk.parts:
+                            if part.text:
+                                response += part.text
+                                yield part.text
+            else:
+                resp = self.gemini_client.models.generate_content(
+                    model=model,
+                    config=types.GenerateContentConfig(system_instruction=system_prompt, top_p=0.96, temperature=0.2),
+                    contents=contents,
+                )
+                response = "".join(part.text for chunk in resp.chunks for part in chunk.parts if part.text)
+                yield response
 
-            stream = self.gemini_client.models.generate_content_stream(
-                model=model,
-                config=types.GenerateContentConfig(system_instruction=self.system_prompt, top_p=0.96, temperature=0.2),
-                contents=contents,
-            )
+        return response
 
-            response = ""
-            for chunk in stream:
-                if chunk.parts:
-                    for part in chunk.parts:
-                        if part.text:
-                            response += part.text
-                            yield part.text
-
+    def chat(self, model: str, user_message: str) -> Iterator[str]:
+        self.messages.append(("user", user_message))
+        response = yield from self.api_query(model=model, user_messages=user_message, stream=True)
         self.messages.append(("assistant", response))
