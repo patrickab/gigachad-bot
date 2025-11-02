@@ -158,7 +158,7 @@ SYS_PRECISE_TASK_EXECUTION = f"""
        - If user provides text/code context → output a **unified diff** (`diff -u` format).
        - If user instruction involves LaTeX → output **pure LaTeX**.
        - If instruction-unrelated flaws or inconsistencies are detected → output a **markdown block** with corrective instructions.
-    4. Always end output with the executed result inside a **copiable markdown block**.
+    4. Return expected output(s) as properly indented **copiable markdown block(s)**. Return **only** relevant parts.
     5. Terminate immediately after output.
 """
 

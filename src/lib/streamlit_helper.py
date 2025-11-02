@@ -50,7 +50,7 @@ def init_session_state() -> None:
         st.session_state.rag_database_repo = ""
 
 
-@st.cache_data
+@st.cache_resource
 def _extract_text_from_pdf(file: io.BytesIO) -> str:
     """Extract text from uploaded PDF file using pymupdf4llm."""
     # Create temporary file - pymupdf4llm requires a file path but Streamlit's doesnt support that directly
@@ -127,6 +127,46 @@ def chat_interface() -> None:
                 prompt += st.session_state.file_context
                 st.write_stream(st.session_state.client.chat(model=st.session_state.selected_model, user_message=prompt))
                 st.rerun()
+
+@st.cache_data
+def extract_learning_goals(text: str) -> str:
+    stream = st.session_state.client.api_query(
+        model="gemini-2.5-flash-lite",
+        user_message=text,
+        system_prompt=SYS_PDF_TO_LEARNING_GOALS,
+        chat_history=None
+    )
+    pdf_learning_goals = ""
+    for chunk in stream:
+        pdf_learning_goals += chunk
+
+    return pdf_learning_goals
+
+
+def pdf_workspace() -> None:
+    """PDF Workspace for extracting learning goals and summary articles."""
+
+    header, pdf_options = st.columns([0.8, 0.2])
+    with header:
+        st.header("PDF Workspace")
+
+    with pdf_options, st.expander("Options", expanded=False):
+        file = st.file_uploader("Upload PDF", type=["pdf"], key="pdf_workspace_uploader")
+
+        if file is not None:
+            pdf_text = _extract_text_from_pdf(file)
+            learning_goals = extract_learning_goals(pdf_text)
+
+    col_summary_article, col_learning_goals = st.columns([0.618, 0.382])
+    with col_summary_article:
+        st.subheader("Summary Article")
+        st.info("To be implemented...")
+    with col_learning_goals:
+        st.subheader("Learning Goals")
+        st.markdown(learning_goals if file is not None else "")
+        st.markdown("---")
+        st.subheader("Original PDF")
+        st.pdf(file) if file is not None else None
 
 
 def render_messages(message_container) -> None:  # noqa
