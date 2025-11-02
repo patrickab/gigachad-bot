@@ -9,6 +9,7 @@ dependencies = [
     "numpy>=2.3.2",
     "openai>=1.98.0",
     "polars>=1.32.3",
+    "pymupdf4llm>=0.0.27",
     "streamlit>=1.51.0",
     "streamlit-agraph>=0.0.45",
     "tiktoken>=0.11.0",

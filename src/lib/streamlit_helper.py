@@ -1,7 +1,10 @@
 """Streamlit helper functions."""
 
+import io
 import os
+import tempfile
 
+import pymupdf4llm
 import streamlit as st
 
 from src.lib.prompts import (
@@ -9,6 +12,7 @@ from src.lib.prompts import (
     SYS_CONCEPT_IN_DEPTH,
     SYS_CONCEPTUAL_OVERVIEW,
     SYS_EMPTY_PROMPT,
+    SYS_PDF_TO_LEARNING_GOALS,
     SYS_PRECISE_TASK_EXECUTION,
     SYS_PROMPT_ARCHITECT,
     SYS_SHORT_ANSWER,
@@ -30,17 +34,35 @@ AVAILABLE_PROMPTS = {
     "Concept - Article": SYS_ARTICLE,
     "Prompt Architect": SYS_PROMPT_ARCHITECT,
     "Precise Task Execution": SYS_PRECISE_TASK_EXECUTION,
+    "PDF to Learning Goals": SYS_PDF_TO_LEARNING_GOALS,
     "<empty prompt>": SYS_EMPTY_PROMPT,
 }
 
+
 def init_session_state() -> None:
     if "client" not in st.session_state:
+        st.session_state.file_context = ""
         st.session_state.system_prompts = AVAILABLE_PROMPTS
         st.session_state.selected_prompt = "<empty prompt>"
         st.session_state.selected_model = AVAILABLE_MODELS[0]
         st.session_state.client = LLMClient()
         st.session_state.client._set_system_prompt(AVAILABLE_PROMPTS["Short Answer"])
         st.session_state.rag_database_repo = ""
+
+
+@st.cache_data
+def _extract_text_from_pdf(file: io.BytesIO) -> str:
+    """Extract text from uploaded PDF file using pymupdf4llm."""
+    # Create temporary file - pymupdf4llm requires a file path but Streamlit's doesnt support that directly
+    with tempfile.TemporaryDirectory(delete=True) as tmpdir:
+
+        # Preserve filename to allow correct naming of images extracted from PDFs (future proof)
+        temp_file_path = os.path.join(tmpdir, file.name)
+        with open(temp_file_path, "wb") as f:
+            f.write(file.getvalue())
+            text = pymupdf4llm.to_markdown(doc=f, write_images=True)
+
+    return text
 
 
 def application_side_bar() -> None:
@@ -55,16 +77,6 @@ def application_side_bar() -> None:
         list(st.session_state.system_prompts.keys()),
         key="prompt_select",
     )
-
-    if sys_prompt_name != st.session_state.selected_prompt:
-        st.session_state.client._set_system_prompt(st.session_state.system_prompts[sys_prompt_name])
-        st.session_state.selected_prompt = sys_prompt_name
-
-    if model != st.session_state.selected_model:
-        st.session_state.selected_model = model
-
-def chat_interface() -> None:
-    _, col_center, _ = st.columns([0.025, 0.95, 0.025])
 
     with st.sidebar:
         st.markdown("---")
@@ -83,6 +95,21 @@ def chat_interface() -> None:
                     st.session_state.client.write_to_md(filename, idx)
                     st.success(f"Chat history saved to {filename}")
 
+            file = st.file_uploader(type=["pdf", "py", "md", "cpp", "txt"], label="fileloader_sidbar")
+            if file is not None:
+                text = _extract_text_from_pdf(file)
+                st.session_state.file_context = text
+
+    if sys_prompt_name != st.session_state.selected_prompt:
+        st.session_state.client._set_system_prompt(st.session_state.system_prompts[sys_prompt_name])
+        st.session_state.selected_prompt = sys_prompt_name
+
+    if model != st.session_state.selected_model:
+        st.session_state.selected_model = model
+
+def chat_interface() -> None:
+    _, col_center, _ = st.columns([0.025, 0.95, 0.025])
+
     with col_center:
         st.header("Learning Assistant")
         st.markdown("---")
@@ -97,6 +124,7 @@ def chat_interface() -> None:
             with st.chat_message("user"):
                 st.markdown(prompt)
             with st.chat_message("assistant"):
+                prompt += st.session_state.file_context
                 st.write_stream(st.session_state.client.chat(model=st.session_state.selected_model, user_message=prompt))
                 st.rerun()
 
