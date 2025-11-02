@@ -131,5 +131,7 @@ class LLMClient:
 
     def chat(self, model: str, user_message: str) -> Iterator[str]:
         self.messages.append(("user", user_message))
-        response = yield from self.api_query(model=model, user_messages=user_message, stream=True)
+        response = yield from self.api_query(
+            model=model, user_message=user_message, system_prompt=self.system_prompt, chat_history=self.messages, stream=True
+        )
         self.messages.append(("assistant", response))
