@@ -452,6 +452,19 @@ wheels = [
 ]
 
 [[package]]
+name = "ollama"
+version = "0.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d6/47/f9ee32467fe92744474a8c72e138113f3b529fc266eea76abfdec9a33f3b/ollama-0.6.0.tar.gz", hash = "sha256:da2b2d846b5944cfbcee1ca1e6ee0585f6c9d45a2fe9467cbcd096a37383da2f", size = 50811, upload-time = "2025-09-24T22:46:02.417Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b5/c1/edc9f41b425ca40b26b7c104c5f6841a4537bb2552bfa6ca66e81405bb95/ollama-0.6.0-py3-none-any.whl", hash = "sha256:534511b3ccea2dff419ae06c3b58d7f217c55be7897c8ce5868dfb6b219cf7a0", size = 14130, upload-time = "2025-09-24T22:46:01.19Z" },
+]
+
+[[package]]
 name = "openai"
 version = "1.98.0"
 source = { registry = "https://pypi.org/simple" }
@@ -478,10 +491,11 @@ dependencies = [
     { name = "google-genai" },
     { name = "networkx" },
     { name = "numpy" },
+    { name = "ollama" },
     { name = "openai" },
     { name = "polars" },
     { name = "pymupdf4llm" },
-    { name = "streamlit" },
+    { name = "streamlit", extra = ["pdf"] },
     { name = "streamlit-agraph" },
     { name = "tiktoken" },
 ]
@@ -491,10 +505,11 @@ requires-dist = [
     { name = "google-genai", specifier = ">=1.47.0" },
     { name = "networkx", specifier = ">=3.3" },
     { name = "numpy", specifier = ">=2.3.2" },
+    { name = "ollama", specifier = ">=0.6.0" },
     { name = "openai", specifier = ">=1.98.0" },
     { name = "polars", specifier = ">=1.32.3" },
     { name = "pymupdf4llm", specifier = ">=0.0.27" },
-    { name = "streamlit", specifier = ">=1.51.0" },
+    { name = "streamlit", extras = ["pdf"], specifier = ">=1.51.0" },
     { name = "streamlit-agraph", specifier = ">=0.0.45" },
     { name = "tiktoken", specifier = ">=0.11.0" },
 ]
@@ -1048,6 +1063,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/39/60/868371b6482ccd9ef423c6f62650066cf8271fdb2ee84f192695ad6b7a96/streamlit-1.51.0-py3-none-any.whl", hash = "sha256:4008b029f71401ce54946bb09a6a3e36f4f7652cbb48db701224557738cfda38", size = 10171702, upload-time = "2025-10-29T17:07:35.97Z" },
 ]
 
+[package.optional-dependencies]
+pdf = [
+    { name = "streamlit-pdf" },
+]
+
 [[package]]
 name = "streamlit-agraph"
 version = "0.0.45"
@@ -1060,6 +1080,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e6/63/00a16b1500cde32d43177bba1c16d12369ed7d1c8b45ab8162f6552d8519/streamlit-agraph-0.0.45.tar.gz", hash = "sha256:b2b7cf1ad0a40dc906de50792b27f2878b0e186603cb3bc958ed78ca7e469cdd", size = 1299483, upload-time = "2023-01-28T10:26:00.46Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b9/80/8a666e700332a9fe19e458678c95fab4d78340251d2f12da7d2ad915458a/streamlit_agraph-0.0.45-py3-none-any.whl", hash = "sha256:38e7271ffd76a6769968c2e9dfc16cbac7621d62be15af98b62598e1446bee2f", size = 1312064, upload-time = "2023-01-28T10:25:58.043Z" },
+]
+
+[[package]]
+name = "streamlit-pdf"
+version = "1.0.8"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/2a/a0/96e293ca8478674f6cb937d5ad66382ac9c413ccd74bce139a421ea11a38/streamlit_pdf-1.0.8.tar.gz", hash = "sha256:4cfb4cd8713cd5988e8e3ce04eee45bb79fb6551e8be746b45977b2fada86931", size = 1971810, upload-time = "2025-10-13T14:30:26.519Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/69/7e/b762ae5d331b869aab1b612ed2ea6f18d9822e9b2946b3d420c5041cfab5/streamlit_pdf-1.0.8-py3-none-any.whl", hash = "sha256:6ba76ef1dc12250bc63f42cd0c90388eb2af25a62fc0e1c19c7ed27667e74355", size = 2103431, upload-time = "2025-10-13T14:30:24.574Z" },
 ]
 
 [[package]]

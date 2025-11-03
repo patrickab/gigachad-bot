@@ -1,6 +1,6 @@
 import streamlit as st
 
-from src.lib.streamlit_helper import application_side_bar, chat_interface, init_session_state
+from src.lib.streamlit_helper import application_side_bar, chat_interface, init_session_state, pdf_workspace
 
 
 def main() -> None:
@@ -10,8 +10,13 @@ def main() -> None:
 
     init_session_state()
     application_side_bar()
-    chat_interface()
 
+    tab_chat, tab_pdf = st.tabs(["Study Assistant", "PDF Workspace"])
+
+    with tab_chat:
+        chat_interface()
+    with tab_pdf:
+        pdf_workspace()
 
 if __name__ == "__main__":
     main()
