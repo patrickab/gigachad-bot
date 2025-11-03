@@ -8,6 +8,7 @@ import fitz
 import pymupdf4llm
 import streamlit as st
 
+from src.config import MACROTASK_MODEL, MICROTASK_MODEL, MODELS_GEMINI, MODELS_OLLAMA, MODELS_OPENAI, NANOTASK_MODEL, OBSIDIAN_VAULT
 from src.lib.non_user_prompts import SYS_IMAGE_IMPORTANCE, SYS_NOTE_TO_OBSIDIAN_YAML
 from src.lib.prompts import (
     SYS_ARTICLE,
@@ -19,15 +20,18 @@ from src.lib.prompts import (
     SYS_PROMPT_ARCHITECT,
     SYS_SHORT_ANSWER,
 )
-from src.llm_client import MACROTASK_MODEL, MICROTASK_MODEL, MODELS_GEMINI, MODELS_OPENAI, OBSIDIAN_VAULT, LLMClient
+from src.llm_client import LLMClient
 
 AVAILABLE_MODELS = []
 
-if os.getenv("OPENAI_API_KEY") is not None:
+if os.getenv("GEMINI_API_KEY"):
+    AVAILABLE_MODELS += MODELS_GEMINI
+
+if os.getenv("OPENAI_API_KEY"):
     AVAILABLE_MODELS += MODELS_OPENAI
 
-if os.getenv("GEMINI_API_KEY") is not None:
-    AVAILABLE_MODELS += MODELS_GEMINI
+if MODELS_OLLAMA != []:
+    AVAILABLE_MODELS += MODELS_OLLAMA
 
 AVAILABLE_PROMPTS = {
     "Short Answer": SYS_SHORT_ANSWER,
@@ -179,7 +183,7 @@ def write_to_md(filename: str, message: str) -> None:
 
     sys_prompt = SYS_NOTE_TO_OBSIDIAN_YAML.replace("{{file_name_no_ext}}", filename.split(".md")[0])
     yaml_header = _non_streaming_api_query(
-        model="gemini-2.5-flash",
+        model=NANOTASK_MODEL,
         prompt=message,
         system_prompt=sys_prompt.replace("{{user_notes}}", message),
     )

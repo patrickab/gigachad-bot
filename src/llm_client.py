@@ -3,27 +3,13 @@ from typing import Iterator, List, Optional, Tuple
 
 from google.genai import Client as GeminiClient
 from google.genai import types
+from ollama import Client as OllamaClient
 from openai import OpenAI as OpenAIClient
+
+from src.config import MODELS_GEMINI, MODELS_OLLAMA, MODELS_OPENAI
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
-MACROTASK_MODEL = "gemini-2.5-pro"
-MICROTASK_MODEL = "gemini-2.5-flash"
-NANOTASK_MODEL = "gemini-2.5-flash-lite"
-
-MODELS_GEMINI = [
-    "gemini-2.5-flash-lite",
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
-]
-MODELS_OPENAI = [
-    "gpt-5",
-    "gpt-5-mini",
-    "gpt-4o",
-]
-
-OBSIDIAN_VAULT = "/home/noob/Nextcloud/obsidian"
 
 
 class LLMClient:
@@ -48,7 +34,7 @@ class LLMClient:
 
     def api_query(
         self, model: str, user_message: str, system_prompt: str, chat_history: Optional[List[Tuple[str, str]]]
-    ) -> Iterator[str] | str:
+    ) -> Iterator[str]:
         """
         Make a single API query to the LLM.
         Supports both Gemini & OpenAI models.
