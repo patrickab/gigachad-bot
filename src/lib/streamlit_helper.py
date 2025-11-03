@@ -88,17 +88,6 @@ def application_side_bar() -> None:
         with st.expander("Options", expanded=False):
             if st.button("Reset History", key="reset_history_main"):
                 st.session_state.client.reset_history()
-            with st.expander("Store answer", expanded=True):
-                try:
-                    idx_input = st.text_input("Index of message to save", key="index_input_main")
-                    idx = int(idx_input) if idx_input.strip() else 0
-                except ValueError:
-                    st.error("Please enter a valid integer")
-                    idx = 0
-                filename = st.text_input("Filename", key="filename_input_main")
-                if st.button("Save to Markdown", key="save_to_md_main"):
-                    st.session_state.client.write_to_md(filename, idx)
-                    st.success(f"Chat history saved to {filename}")
 
             file = st.file_uploader(type=["pdf", "py", "md", "cpp", "txt"], label="fileloader_sidbar")
             if file is not None:
@@ -168,6 +157,8 @@ def _write_wiki_article(learning_goals: str, important_images: list) -> str: # n
     wiki_prompt = f"""Write an in-depth article
     based on the following learning goals {learning_goals}.
     Instead of simply solving tasks & answering questions, guide the reader towards a deep understanding of the underlying concepts.
+
+    **Depth adaptation**: scale explanation length and detail to the provided bloom tags.
     """
     #You can reference the following images using markdown notation
     #Just write the provided image name without link to localhost.
@@ -213,7 +204,14 @@ def pdf_workspace() -> None:
             st.header("Original PDF")
             st.pdf(file, height=pdf_height) if file is not None else None
 
-
+def option_store_message(message: str, key_suffix: str) -> None:
+    """Uses st.popover for a less intrusive save option."""
+    with st.popover("Store answer"):
+        # Use the key_suffix to ensure widget keys are unique
+        filename = st.text_input("Filename", key=f"filename_input_{key_suffix}")
+        if st.button("Save to Markdown", key=f"save_to_md_{key_suffix}"):
+            st.session_state.client.write_to_md(filename, message)
+            st.success(f"Answer saved to {filename}")
 
 def render_messages(message_container) -> None:  # noqa
     """Render chat messages from session state."""
@@ -236,3 +234,4 @@ def render_messages(message_container) -> None:  # noqa
                 # Display user and assistant messages
                 st.chat_message("user").markdown(user_msg)
                 st.chat_message("assistant").markdown(assistant_msg)
+                option_store_message(assistant_msg, key_suffix=f"{i//2}")
