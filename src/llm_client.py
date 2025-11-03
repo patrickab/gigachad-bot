@@ -43,24 +43,18 @@ class LLMClient:
         """Reset the chat history."""
         self.messages = []
 
-    def write_to_md(self, filename: str, idx: int) -> None:
+    def write_to_md(self, filename: str, message: str) -> None:
         """Write an assistant response to .md (idx: 0 = most recent)."""
         if not filename.endswith(".md"):
             filename += ".md"
 
-        assistant_msgs = [msg for role, msg in self.messages if role == "assistant"]
-        try:
-            content = assistant_msgs[idx]
-        except IndexError:
-            raise IndexError("idx out of range for assistant messages.")
-
         file_path = os.path.join(OBSIDIAN_VAULT, filename)
         with open(file_path, "w", encoding="utf-8") as f:
-            f.write(content)
+            f.write(message)
 
         os.makedirs("markdown", exist_ok=True)
         with open(os.path.join("markdown", filename), "w", encoding="utf-8") as f:
-            f.write(content)
+            f.write(message)
 
     def api_query(
         self, model: str, user_message: str, system_prompt: str, chat_history: Optional[List[Tuple[str, str]]]
