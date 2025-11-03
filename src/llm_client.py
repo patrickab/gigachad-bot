@@ -8,19 +8,19 @@ from openai import OpenAI as OpenAIClient
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-MICROTASK_MODEL = "gemini-2.5-flash"
 MACROTASK_MODEL = "gemini-2.5-pro"
+MICROTASK_MODEL = "gemini-2.5-flash"
+NANOTASK_MODEL = "gemini-2.5-flash-lite"
 
-MODELS_OPENAI = [
-    "gpt-5",
-    "gpt-5-mini",
-    "gpt-4.1-mini",
-    "gpt-4o",
-]
 MODELS_GEMINI = [
     "gemini-2.5-flash-lite",
     "gemini-2.5-flash",
     "gemini-2.5-pro",
+]
+MODELS_OPENAI = [
+    "gpt-5",
+    "gpt-5-mini",
+    "gpt-4o",
 ]
 
 OBSIDIAN_VAULT = "/home/noob/Nextcloud/obsidian"

@@ -28,7 +28,9 @@ SYS_NOTE_TO_OBSIDIAN_YAML = """
   # **Instructions**:
   - **Aliases**: Include common synonyms, abbreviations, alternative phrasings.
   - **Tags**: Include 1-5 general topic keywords. When selecting tags, prioritize consistency:
+      - Order tags by relevance to the main topic.
       - Use tags that notes on related topics would likely have.
+      - Try to add as many relevant tags as possible.
       - Avoid overly specific or unique tags that dont help cluster notes.
   - **Summary**: Concise, one-line summary suitable for hover preview or search.
   - **Format**: Return a **raw YAML header** only. Do not include backticks, code fences, or extra formatting.
