@@ -188,15 +188,27 @@ SYS_PDF_TO_LEARNING_GOALS = f"""
     Focus on exam-relevant, understanding/application-oriented ideas.
     Ignore redundant, decorative, procedural, or low-relevance details.
     Create an extensive list of learning goals for all exam-relevant topics.
+    Incorporate Blooms taxonomy tags (*remember, understand, apply, analyze, evaluate, create*) for each learning goal to guide tone, depth, and progression.
 
     **Format**:
     Comprehensive list of learning goals, as hierarchical list of markdown checkboxes - [ ]
-    Each chapter shall be first-level hierarchy.
-    Aim for minimal verbosity per bulletpoint.
-    Aim for completeness - cover all relevant concepts BUT ignore low-relevance topics.
-    Exclude low-relevance or decorative details.
+    Encode hierarchical progression of concepts to ensure continuity & scaffolding. 
+    Each chapter shall be first-level hierarchy. Subtopics & sub-subtopics shall be nested accordingly.
+    Aim for minimal verbosity & high information density per bulletpoint.
     No checkboxes for chapters.
     The lecture title shall not be considered a chapter.
+
+    **Example output**:
+    ## **Chapter**
+    - [ ] (understand) Learning goal
+    - [ ] (apply) Learning goal
+        - [ ] (analyze) Sub-learning goal
+        - [ ] (evaluate) Sub-learning goal
+    ## **Chapter**
+    - [ ] (remember) Learning goal
+    - [ ] (create) Learning goal
+        - [ ] (apply) Sub-learning goal
+    - [ ] (understand) Sub-learning goal
 
 """
 
