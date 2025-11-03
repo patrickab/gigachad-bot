@@ -25,6 +25,12 @@ class LLMClient:
         if GEMINI_API_KEY is not None:
             self.gemini_client = GeminiClient(api_key=GEMINI_API_KEY)
 
+        if MODELS_OLLAMA != []:
+            self.ollama_client = OllamaClient(
+                host="http://localhost:11434",
+                headers={"x-some-header": "some-value"},
+            )
+
     def _set_system_prompt(self, system_prompt: str) -> None:
         self.sys_prompt = system_prompt
 
@@ -82,6 +88,24 @@ class LLMClient:
                         if part.text:
                             response += part.text
                             yield part.text
+
+        if model in MODELS_OLLAMA:
+            messages = (
+                ([{"role": "system", "content": system_prompt}])
+                + [{"role": role, "content": msg} for role, msg in chat_history or []]
+                + [{"role": "user", "content": user_message}]
+            )
+            stream = self.ollama_client.chat(
+                model=model,
+                messages=messages,
+                stream=True,
+            )
+            response = ""
+            for chunk in stream:
+                content = chunk.get("message", {}).get("content") or chunk.get("response") or ""
+                if content:
+                    response += content
+                    yield content
 
     def chat(self, model: str, user_message: str) -> Iterator[str]:
         self.messages.append(("user", user_message))
