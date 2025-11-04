@@ -1,16 +1,20 @@
 """Streamlit helper functions."""
 
+from datetime import datetime
 import io
+import json
 import os
 import re
 import tempfile
 
 import fitz
+import pandas as pd
 import pymupdf4llm
 import streamlit as st
 
 from src.config import MACROTASK_MODEL, MICROTASK_MODEL, MODELS_GEMINI, MODELS_OLLAMA, MODELS_OPENAI, NANOTASK_MODEL, OBSIDIAN_VAULT
-from src.lib.non_user_prompts import SYS_IMAGE_IMPORTANCE, SYS_NOTE_TO_OBSIDIAN_YAML
+from src.lib.flashcards import DATE_ADDED, NEXT_APPEARANCE, render_flashcards
+from src.lib.non_user_prompts import SYS_IMAGE_IMPORTANCE, SYS_LEARNINGGOALS_TO_FLASHCARDS, SYS_NOTE_TO_OBSIDIAN_YAML
 from src.lib.prompts import (
     SYS_ARTICLE,
     SYS_CONCEPT_IN_DEPTH,
@@ -140,16 +144,16 @@ def _non_streaming_api_query(model: str, prompt: str, system_prompt: str) -> str
 
 
 @st.cache_data
-def _extract_learning_goals(text: str) -> str:
-    """Extract learning goals from PDF text."""
-    print("Extracting learning goals...")
+def _generate_learning_goals(text: str) -> str:
+    """Generate learning goals from PDF text."""
+    print("Generating learning goals...")
     return _non_streaming_api_query(model=MACROTASK_MODEL, prompt=text, system_prompt=SYS_PDF_TO_LEARNING_GOALS)
 
 
 @st.cache_data
-def _extract_image_importance(pdf_text: str, learning_goals: str) -> str:
-    """Extract image importance from PDF text and learning goals."""
-    print("Extracting image importance...")
+def _generate_image_importance(pdf_text: str, learning_goals: str) -> str:
+    """Generate image importance from PDF text and learning goals."""
+    print("Generating image importance...")
     response = _non_streaming_api_query(
         model=MICROTASK_MODEL,
         prompt="## Learning Goals\n" + learning_goals + "\n\n## PDF Content\n" + pdf_text,
@@ -157,6 +161,21 @@ def _extract_image_importance(pdf_text: str, learning_goals: str) -> str:
     )
     return response
 
+@st.cache_data
+def _generate_flashcards(learning_goals: str) -> pd.DataFrame:
+    """Generate flashcards from learning goals."""
+    print("Generating flashcards...")
+    response = _non_streaming_api_query(
+        model=MACROTASK_MODEL,
+        prompt=learning_goals,
+        system_prompt=SYS_LEARNINGGOALS_TO_FLASHCARDS,
+    )
+    response = response.split("```json")[ -1].split("```")[0]  # Clean up response if necessary
+    flashcards = json.loads(response)
+    df_flashcards = pd.DataFrame(flashcards)
+    df_flashcards[DATE_ADDED] = datetime.now()
+    df_flashcards[NEXT_APPEARANCE] = datetime.now()
+    return df_flashcards
 
 @st.cache_data
 def _write_wiki_article(learning_goals: str, important_images: list) -> str:  # noqa
@@ -198,7 +217,7 @@ def write_to_md(filename: str, message: str) -> None:
 def pdf_workspace() -> None:
     """PDF Workspace for extracting learning goals and summary articles."""
 
-    tab_pdf, tab_summary = st.tabs(["PDF Viewer/Uploader", "PDF Summary", ])
+    tab_pdf, tab_summary, tab_flashcards = st.tabs(["PDF Viewer/Uploader", "PDF Summary", "PDF Flashcards"])
 
     with tab_pdf:
 
@@ -207,8 +226,8 @@ def pdf_workspace() -> None:
 
         if file is not None:
             pdf_text, pdf_height = _extract_text_from_pdf(file)
-            learning_goals = _extract_learning_goals(pdf_text)
-            # image_importance = json.loads(_extract_image_importance(pdf_text, learning_goals))
+            learning_goals = _generate_learning_goals(pdf_text)
+            # image_importance = json.loads(_generate_image_importance(pdf_text, learning_goals))
             # important_images = [img for img in image_importance if img["importance"] != "Low"]
             wiki_article = _write_wiki_article(learning_goals, important_images=[])
 
@@ -237,6 +256,13 @@ def pdf_workspace() -> None:
     with tab_summary:
         st.markdown(wiki_article if file is not None else "")
         option_store_message(wiki_article, key_suffix="pdf_wiki_article") if file is not None else None
+
+    with tab_flashcards:
+        if file is not None:
+            flashcards_df = _generate_flashcards(learning_goals)
+            render_flashcards(flashcards_df)
+        else:
+            st.info("Upload a PDF in the 'PDF Viewer/Uploader' tab to generate flashcards.")
 
 def option_store_message(message: str, key_suffix: str) -> None:
     """Uses st.popover for a less intrusive save option."""
