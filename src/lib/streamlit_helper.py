@@ -229,7 +229,6 @@ def pdf_workspace() -> None:
             learning_goals = _generate_learning_goals(pdf_text)
             # image_importance = json.loads(_generate_image_importance(pdf_text, learning_goals))
             # important_images = [img for img in image_importance if img["importance"] != "Low"]
-            wiki_article = _write_wiki_article(learning_goals, important_images=[])
 
             col_learning_goals, col_pdf = st.columns([0.5,0.5])
 
@@ -254,13 +253,25 @@ def pdf_workspace() -> None:
                 st.pdf(file, height=pdf_height) if file is not None else None
 
     with tab_summary:
-        st.markdown(wiki_article if file is not None else "")
-        option_store_message(wiki_article, key_suffix="pdf_wiki_article") if file is not None else None
+        if file is not None:
+            button = st.button("Generate Summary Article")
+            if button:
+                wiki_article = _write_wiki_article(learning_goals, important_images=[])
+                st.markdown(wiki_article if file is not None else "")
+                option_store_message(wiki_article, key_suffix="pdf_wiki_article") if file is not None else None
+            else:
+                st.info("Click the button to generate the summary article.")
+        else:
+            st.info("Upload a PDF in the 'PDF Viewer/Uploader' tab to generate a summary article.")
 
     with tab_flashcards:
         if file is not None:
-            flashcards_df = _generate_flashcards(learning_goals)
-            render_flashcards(flashcards_df)
+            button = st.button("Generate Flashcards", key="generate_flashcards_button")
+            if button:
+                flashcards_df = _generate_flashcards(learning_goals)
+                render_flashcards(flashcards_df)
+            else:
+                st.info("Click the button to generate flashcards.")
         else:
             st.info("Upload a PDF in the 'PDF Viewer/Uploader' tab to generate flashcards.")
 
