@@ -69,7 +69,7 @@ def _extract_text_from_pdf(file: io.BytesIO) -> str:
         temp_file_path = os.path.join(tmpdir, file.name)
         with open(temp_file_path, "wb") as f:
             f.write(file.getvalue())
-            text = pymupdf4llm.to_markdown(doc=f, write_images=True)
+            text = pymupdf4llm.to_markdown(doc=f, write_images=False)
 
         # Get the height of first page
         doc = fitz.open(temp_file_path)
