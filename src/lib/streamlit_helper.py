@@ -1,24 +1,35 @@
 """Streamlit helper functions."""
 
+from datetime import datetime
 import io
+import json
 import os
+import re
 import tempfile
 
 import fitz
+import pandas as pd
 import pymupdf4llm
+from st_copy import copy_button
 import streamlit as st
 
 from src.config import MACROTASK_MODEL, MICROTASK_MODEL, MODELS_GEMINI, MODELS_OLLAMA, MODELS_OPENAI, NANOTASK_MODEL, OBSIDIAN_VAULT
-from src.lib.non_user_prompts import SYS_IMAGE_IMPORTANCE, SYS_NOTE_TO_OBSIDIAN_YAML
+from src.lib.flashcards import DATE_ADDED, NEXT_APPEARANCE, render_flashcards
+from src.lib.non_user_prompts import (
+    SYS_IMAGE_IMPORTANCE,
+    SYS_LEARNINGGOALS_TO_FLASHCARDS,
+    SYS_NOTE_TO_OBSIDIAN_YAML,
+    SYS_PDF_TO_ARTICLE,
+    SYS_PDF_TO_LEARNING_GOALS,
+)
 from src.lib.prompts import (
     SYS_ARTICLE,
     SYS_CONCEPT_IN_DEPTH,
     SYS_CONCEPTUAL_OVERVIEW,
     SYS_EMPTY_PROMPT,
-    SYS_PDF_TO_LEARNING_GOALS,
     SYS_PRECISE_TASK_EXECUTION,
     SYS_PROMPT_ARCHITECT,
-    SYS_SHORT_ANSWER,
+    SYS_QUICK_OVERVIEW,
 )
 from src.llm_client import LLMClient
 
@@ -34,7 +45,7 @@ if MODELS_OLLAMA != []:
     AVAILABLE_MODELS += MODELS_OLLAMA
 
 AVAILABLE_PROMPTS = {
-    "Short Answer": SYS_SHORT_ANSWER,
+    "Quick Overview": SYS_QUICK_OVERVIEW,
     "Concept - High-Level": SYS_CONCEPTUAL_OVERVIEW,
     "Concept - In-Depth": SYS_CONCEPT_IN_DEPTH,
     "Concept - Article": SYS_ARTICLE,
@@ -51,7 +62,7 @@ def init_session_state() -> None:
         st.session_state.selected_prompt = "<empty prompt>"
         st.session_state.selected_model = AVAILABLE_MODELS[0]
         st.session_state.client = LLMClient()
-        st.session_state.client._set_system_prompt(AVAILABLE_PROMPTS["Short Answer"])
+        st.session_state.client._set_system_prompt(next(iter(st.session_state.system_prompts.values()))) # set to first prompt
         st.session_state.rag_database_repo = ""
 
 
@@ -64,11 +75,11 @@ def _extract_text_from_pdf(file: io.BytesIO) -> str:
         temp_file_path = os.path.join(tmpdir, file.name)
         with open(temp_file_path, "wb") as f:
             f.write(file.getvalue())
-            text = pymupdf4llm.to_markdown(doc=f, write_images=True)
+            text = pymupdf4llm.to_markdown(doc=f, write_images=False)
 
         # Get the height of first page
         doc = fitz.open(temp_file_path)
-        doc_height = int(doc[0].rect.height * 1.1)  # Scale up for better visibility
+        doc_height = int(doc[0].rect.height * 1.5)  # Scale up for better visibility
 
     return text, doc_height
 
@@ -106,11 +117,9 @@ def application_side_bar() -> None:
 
 
 def chat_interface() -> None:
-    _, col_center, _ = st.columns([0.025, 0.95, 0.025])
+    col_left, _ = st.columns([0.9, 0.1])
 
-    with col_center:
-        st.header("Learning Assistant")
-        st.markdown("---")
+    with col_left:
         st.write("")  # Spacer
         message_container = st.container()
         render_messages(message_container)
@@ -141,16 +150,16 @@ def _non_streaming_api_query(model: str, prompt: str, system_prompt: str) -> str
 
 
 @st.cache_data
-def _extract_learning_goals(text: str) -> str:
-    """Extract learning goals from PDF text."""
-    print("Extracting learning goals...")
+def _generate_learning_goals(text: str) -> str:
+    """Generate learning goals from PDF text."""
+    print("Generating learning goals...")
     return _non_streaming_api_query(model=MACROTASK_MODEL, prompt=text, system_prompt=SYS_PDF_TO_LEARNING_GOALS)
 
 
 @st.cache_data
-def _extract_image_importance(pdf_text: str, learning_goals: str) -> str:
-    """Extract image importance from PDF text and learning goals."""
-    print("Extracting image importance...")
+def _generate_image_importance(pdf_text: str, learning_goals: str) -> str:
+    """Generate image importance from PDF text and learning goals."""
+    print("Generating image importance...")
     response = _non_streaming_api_query(
         model=MICROTASK_MODEL,
         prompt="## Learning Goals\n" + learning_goals + "\n\n## PDF Content\n" + pdf_text,
@@ -158,22 +167,38 @@ def _extract_image_importance(pdf_text: str, learning_goals: str) -> str:
     )
     return response
 
+@st.cache_data
+def _generate_flashcards(learning_goals: str) -> pd.DataFrame:
+    """Generate flashcards from learning goals."""
+    print("Generating flashcards...")
+    response = _non_streaming_api_query(
+        model=MACROTASK_MODEL,
+        prompt=learning_goals,
+        system_prompt=SYS_LEARNINGGOALS_TO_FLASHCARDS,
+    )
+    response = response.split("```json")[ -1].split("```")[0]  # Clean up response if necessary
+    flashcards = json.loads(response)
+    df_flashcards = pd.DataFrame(flashcards)
+    df_flashcards[DATE_ADDED] = datetime.now()
+    df_flashcards[NEXT_APPEARANCE] = datetime.now()
+    return df_flashcards
 
 @st.cache_data
-def _write_wiki_article(learning_goals: str, important_images: list) -> str:  # noqa
-    wiki_prompt = f"""Write an in-depth article
-    based on the following learning goals {learning_goals}.
-    Instead of simply solving tasks & answering questions, guide the reader towards a deep understanding of the underlying concepts.
-
-    **Depth adaptation**: scale explanation length and detail to the provided bloom tags.
-    """
-    # You can reference the following images using markdown notation
-    # Just write the provided image name without link to localhost.
-    #![](image_name.png)
-    # Do so only for images
-    # {important_images}.
+def _generate_wiki_article(pdf_text: str, learning_goals: str) -> str:  # noqa
     print("Writing wiki article...")
-    return _non_streaming_api_query(model=MACROTASK_MODEL, prompt=wiki_prompt, system_prompt=SYS_ARTICLE)
+    wiki_prompt = f"""
+    Consider the following learning goals:
+    
+    {learning_goals}
+    
+    Dynamically adjust depth of explanation to the provided Bloom's taxonomy tags.
+    Use the hierarchy of learning goals to structure the article.
+    Generate a comprehensive study article based on the following PDF content.
+
+    {pdf_text}
+    """
+
+    return _non_streaming_api_query(model=MACROTASK_MODEL, prompt=wiki_prompt, system_prompt=SYS_PDF_TO_ARTICLE)
 
 
 def write_to_md(filename: str, message: str) -> None:
@@ -196,41 +221,64 @@ def write_to_md(filename: str, message: str) -> None:
     with open(os.path.join("markdown", filename), "w", encoding="utf-8") as f:
         f.write(yaml_header + "\n" + message)
 
-
 def pdf_workspace() -> None:
     """PDF Workspace for extracting learning goals and summary articles."""
 
-    header, pdf_options = st.columns([0.66, 0.33])
-    with header:
-        st.header("PDF Workspace")
+    tab_pdf, tab_summary, tab_flashcards = st.tabs(["PDF Viewer/Uploader", "PDF Summary", "PDF Flashcards"])
 
-    with pdf_options, st.expander("Options", expanded=False):
-        file = st.file_uploader("Upload PDF", type=["pdf"], key="pdf_workspace_uploader")
+    with tab_pdf:
+
+        with st.popover("Options"):
+            file = st.file_uploader("Upload PDF", type=["pdf"], key="pdf_workspace_uploader")
 
         if file is not None:
             pdf_text, pdf_height = _extract_text_from_pdf(file)
-            learning_goals = _extract_learning_goals(pdf_text)
-            # image_importance = json.loads(_extract_image_importance(pdf_text, learning_goals))
-            # important_images = [img for img in image_importance if img["importance"] != "Low"]
-            wiki_article = _write_wiki_article(learning_goals, important_images=[])
+            learning_goals = _generate_learning_goals(pdf_text)
 
-    st.markdown(wiki_article if file is not None else "")
-    option_store_message(wiki_article, key_suffix="pdf_wiki_article") if file is not None else None
+            col_learning_goals, col_pdf = st.columns([0.5,0.5])
 
-    if file is not None:
-        st.markdown("---")
+            with col_learning_goals:
+                st.header("Learning Goals")
 
-        with st.sidebar.expander("Learning Goals", expanded=False):
-            st.header("Learning Goals")
-            st.markdown(learning_goals if file is not None else "")
-            option_store_message(learning_goals, key_suffix="pdf_learning_goals") if file is not None else None
+                if file is not None and learning_goals:
 
-        st.markdown("---")
+                    parts = re.split(r'(?m)^\#\s*(.*)\s*$', learning_goals)  # -> [before, h1, c1, h2, c2, ...]
+                    for title, content in zip(parts[1::2], parts[2::2], strict=True):
+                        if content == "\n": # Empty content = title of pdf without learning goals
+                            st.markdown(f"##{title.strip()}")
+                        else: # Actual learning goal section
+                            with st.expander(title.strip()):
+                                if content.strip():
+                                    st.markdown(content.strip()) # noqa
 
-        with st.sidebar.expander("PDF Details", expanded=True):
-            st.header("Original PDF")
-            st.pdf(file, height=pdf_height) if file is not None else None
+                option_store_message(learning_goals, key_suffix="pdf_learning_goals") if file is not None else None
 
+            with col_pdf:
+                st.header("Original PDF")
+                st.pdf(file, height=pdf_height) if file is not None else None
+
+    with tab_summary:
+        if file is not None:
+            button = st.button("Generate Summary Article")
+            if button:
+                wiki_article = _generate_wiki_article(pdf_text=pdf_text, learning_goals=learning_goals)
+                st.markdown(wiki_article if file is not None else "")
+                option_store_message(wiki_article, key_suffix="pdf_wiki_article") if file is not None else None
+            else:
+                st.info("Click the button to generate the summary article.")
+        else:
+            st.info("Upload a PDF in the 'PDF Viewer/Uploader' tab to generate a summary article.")
+
+    with tab_flashcards:
+        if file is not None:
+            button = st.button("Generate Flashcards", key="generate_flashcards_button")
+            if button:
+                flashcards_df = _generate_flashcards(learning_goals)
+                render_flashcards(flashcards_df)
+            else:
+                st.info("Click the button to generate flashcards.")
+        else:
+            st.info("Upload a PDF in the 'PDF Viewer/Uploader' tab to generate flashcards.")
 
 def option_store_message(message: str, key_suffix: str) -> None:
     """Uses st.popover for a less intrusive save option."""
@@ -261,6 +309,32 @@ def render_messages(message_container) -> None:  # noqa
 
             with st.expander(label=label, expanded=is_expanded):
                 # Display user and assistant messages
-                st.chat_message("user").markdown(user_msg)
-                st.chat_message("assistant").markdown(assistant_msg)
+                with st.chat_message("user"):
+                    st.markdown(user_msg)
+                    copy_button(user_msg)
+
+                with st.chat_message("assistant"):
+                    st.markdown(assistant_msg)
+                    copy_button(assistant_msg)
+
                 option_store_message(assistant_msg, key_suffix=f"{i // 2}")
+
+def apply_custom_css() -> None:
+    """Apply custom CSS styles to Streamlit app."""
+    st.markdown(
+        """
+        <style>
+        /* Overall app background and text color with Times New Roman */
+        .stApp {
+            font-family: 'Times New Roman', serif;
+        }
+
+        /* Box shadow for code blocks */
+        pre {
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+        }
+
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )

@@ -1,6 +1,6 @@
 import streamlit as st
 
-from src.lib.streamlit_helper import application_side_bar, chat_interface, init_session_state, pdf_workspace
+from src.lib.streamlit_helper import application_side_bar, apply_custom_css, chat_interface, init_session_state, pdf_workspace
 
 
 def main() -> None:
@@ -8,6 +8,7 @@ def main() -> None:
 
     st.set_page_config(page_title="Learning Assistant", page_icon=":robot:", layout="wide", initial_sidebar_state="collapsed")
 
+    apply_custom_css()
     init_session_state()
     application_side_bar()
 
