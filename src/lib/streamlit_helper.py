@@ -15,13 +15,18 @@ import streamlit as st
 
 from src.config import MACROTASK_MODEL, MICROTASK_MODEL, MODELS_GEMINI, MODELS_OLLAMA, MODELS_OPENAI, NANOTASK_MODEL, OBSIDIAN_VAULT
 from src.lib.flashcards import DATE_ADDED, NEXT_APPEARANCE, render_flashcards
-from src.lib.non_user_prompts import SYS_IMAGE_IMPORTANCE, SYS_LEARNINGGOALS_TO_FLASHCARDS, SYS_NOTE_TO_OBSIDIAN_YAML
+from src.lib.non_user_prompts import (
+    SYS_IMAGE_IMPORTANCE,
+    SYS_LEARNINGGOALS_TO_FLASHCARDS,
+    SYS_NOTE_TO_OBSIDIAN_YAML,
+    SYS_PDF_TO_ARTICLE,
+    SYS_PDF_TO_LEARNING_GOALS,
+)
 from src.lib.prompts import (
     SYS_ARTICLE,
     SYS_CONCEPT_IN_DEPTH,
     SYS_CONCEPTUAL_OVERVIEW,
     SYS_EMPTY_PROMPT,
-    SYS_PDF_TO_LEARNING_GOALS,
     SYS_PRECISE_TASK_EXECUTION,
     SYS_PROMPT_ARCHITECT,
     SYS_QUICK_OVERVIEW,
@@ -179,20 +184,21 @@ def _generate_flashcards(learning_goals: str) -> pd.DataFrame:
     return df_flashcards
 
 @st.cache_data
-def _write_wiki_article(learning_goals: str, important_images: list) -> str:  # noqa
-    wiki_prompt = f"""Write an in-depth article
-    based on the following learning goals {learning_goals}.
-    Instead of simply solving tasks & answering questions, guide the reader towards a deep understanding of the underlying concepts.
-
-    **Depth adaptation**: scale explanation length and detail to the provided bloom tags.
-    """
-    # You can reference the following images using markdown notation
-    # Just write the provided image name without link to localhost.
-    #![](image_name.png)
-    # Do so only for images
-    # {important_images}.
+def _generate_wiki_article(pdf_text: str, learning_goals: str) -> str:  # noqa
     print("Writing wiki article...")
-    return _non_streaming_api_query(model=MACROTASK_MODEL, prompt=wiki_prompt, system_prompt=SYS_ARTICLE)
+    wiki_prompt = f"""
+    Consider the following learning goals:
+    
+    {learning_goals}
+    
+    Dynamically adjust depth of explanation to the provided Bloom's taxonomy tags.
+    Use the hierarchy of learning goals to structure the article.
+    Generate a comprehensive study article based on the following PDF content.
+
+    {pdf_text}
+    """
+
+    return _non_streaming_api_query(model=MACROTASK_MODEL, prompt=wiki_prompt, system_prompt=SYS_PDF_TO_ARTICLE)
 
 
 def write_to_md(filename: str, message: str) -> None:
@@ -228,8 +234,6 @@ def pdf_workspace() -> None:
         if file is not None:
             pdf_text, pdf_height = _extract_text_from_pdf(file)
             learning_goals = _generate_learning_goals(pdf_text)
-            # image_importance = json.loads(_generate_image_importance(pdf_text, learning_goals))
-            # important_images = [img for img in image_importance if img["importance"] != "Low"]
 
             col_learning_goals, col_pdf = st.columns([0.5,0.5])
 
@@ -257,7 +261,7 @@ def pdf_workspace() -> None:
         if file is not None:
             button = st.button("Generate Summary Article")
             if button:
-                wiki_article = _write_wiki_article(learning_goals, important_images=[])
+                wiki_article = _generate_wiki_article(pdf_text=pdf_text, learning_goals=learning_goals)
                 st.markdown(wiki_article if file is not None else "")
                 option_store_message(wiki_article, key_suffix="pdf_wiki_article") if file is not None else None
             else:
@@ -323,22 +327,6 @@ def apply_custom_css() -> None:
         /* Overall app background and text color with Times New Roman */
         .stApp {
             font-family: 'Times New Roman', serif;
-        }
-
-        /* Code, pre, and LaTeX math uses Roboto Mono with default coloring */
-        code {
-            font-family: 'Cascadia Code', monospace;
-            background-color: #1e1e1e; /* subtle dark block background */
-            padding: 4px 6px;
-            border-radius: 6px;
-            line-height: 1.4;
-            white-space: pre-wrap;
-            word-break: break-word;
-            user-select: text;
-        }
-
-        pre code {
-            color: "#ff00ff";
         }
 
         /* Box shadow for code blocks */
