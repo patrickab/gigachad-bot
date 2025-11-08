@@ -23,6 +23,7 @@ from src.lib.non_user_prompts import (
     SYS_PDF_TO_LEARNING_GOALS,
 )
 from src.lib.prompts import (
+    SYS_AI_TUTOR,
     SYS_ARTICLE,
     SYS_CONCEPT_IN_DEPTH,
     SYS_CONCEPTUAL_OVERVIEW,
@@ -46,6 +47,7 @@ if MODELS_OLLAMA != []:
 
 AVAILABLE_PROMPTS = {
     "Quick Overview": SYS_QUICK_OVERVIEW,
+    "AI Tutor": SYS_AI_TUTOR,
     "Concept - High-Level": SYS_CONCEPTUAL_OVERVIEW,
     "Concept - In-Depth": SYS_CONCEPT_IN_DEPTH,
     "Concept - Article": SYS_ARTICLE,
