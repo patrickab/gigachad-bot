@@ -141,14 +141,14 @@ def application_side_bar() -> None:
                     with st.expander(history, expanded=False):
                         col_load, col_delete, col_archive = st.columns(3)
                         with col_load:
-                            if st.button("🔄", key=f"load_{history}"):
+                            if st.button("⟳", key=f"load_{history}"):
                                 st.session_state.client.load_history(os.path.join(CHAT_HISTORY_FOLDER, history + '.csv'))
                         with col_delete:
-                            if st.button("🗑️", key=f"delete_{history}"):
+                            if st.button("🗑", key=f"delete_{history}"):
                                 os.remove(os.path.join(CHAT_HISTORY_FOLDER, history + '.csv'))
                                 st.rerun()
                         with col_archive:
-                            if st.button("📁", key=f"archive_{history}"):
+                            if st.button("⛁", key=f"archive_{history}"):
                                 if not os.path.exists(CHAT_HISTORY_FOLDER + '/archived/'):
                                     os.makedirs(CHAT_HISTORY_FOLDER + '/archived/')
                                 os.rename(
