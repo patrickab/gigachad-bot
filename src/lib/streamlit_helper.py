@@ -13,7 +13,16 @@ import pymupdf4llm
 from st_copy import copy_button
 import streamlit as st
 
-from src.config import MACROTASK_MODEL, MICROTASK_MODEL, MODELS_GEMINI, MODELS_OLLAMA, MODELS_OPENAI, NANOTASK_MODEL, OBSIDIAN_VAULT
+from src.config import (
+    CHAT_HISTORY_FOLDER,
+    MACROTASK_MODEL,
+    MICROTASK_MODEL,
+    MODELS_GEMINI,
+    MODELS_OLLAMA,
+    MODELS_OPENAI,
+    NANOTASK_MODEL,
+    OBSIDIAN_VAULT,
+)
 from src.lib.flashcards import DATE_ADDED, NEXT_APPEARANCE, render_flashcards
 from src.lib.non_user_prompts import (
     SYS_IMAGE_IMPORTANCE,
@@ -23,6 +32,7 @@ from src.lib.non_user_prompts import (
     SYS_PDF_TO_LEARNING_GOALS,
 )
 from src.lib.prompts import (
+    SYS_AI_TUTOR,
     SYS_ARTICLE,
     SYS_CONCEPT_IN_DEPTH,
     SYS_CONCEPTUAL_OVERVIEW,
@@ -46,6 +56,7 @@ if MODELS_OLLAMA != []:
 
 AVAILABLE_PROMPTS = {
     "Quick Overview": SYS_QUICK_OVERVIEW,
+    "AI Tutor": SYS_AI_TUTOR,
     "Concept - High-Level": SYS_CONCEPTUAL_OVERVIEW,
     "Concept - In-Depth": SYS_CONCEPT_IN_DEPTH,
     "Concept - Article": SYS_ARTICLE,
@@ -107,6 +118,44 @@ def application_side_bar() -> None:
             if file is not None:
                 text = _extract_text_from_pdf(file)
                 st.session_state.file_context = text
+
+            if st.session_state.client.messages != []:
+                st.markdown("---")
+                with st.popover("Save History"):
+                    filename = st.text_input("Filename", key="history_filename_input")
+                    if st.button("Save Chat History", key="save_chat_history_button"):
+                        if not os.path.exists(CHAT_HISTORY_FOLDER):
+                            os.makedirs(CHAT_HISTORY_FOLDER)
+                        st.session_state.client.store_history(CHAT_HISTORY_FOLDER + '/' + filename + '.csv')
+                        st.success("Successfully saved chat")
+
+        if os.path.exists(CHAT_HISTORY_FOLDER):
+            chat_histories = [f.replace('.csv', '') for f in os.listdir(CHAT_HISTORY_FOLDER) if f.endswith('.csv')]
+        else:
+            chat_histories = []
+        
+        if chat_histories != []:
+            st.markdown("---")
+            with st.expander("Chat Histories", expanded=False):
+                for history in chat_histories:
+                    with st.expander(history, expanded=False):
+                        col_load, col_delete, col_archive = st.columns(3)
+                        with col_load:
+                            if st.button("⟳", key=f"load_{history}"):
+                                st.session_state.client.load_history(os.path.join(CHAT_HISTORY_FOLDER, history + '.csv'))
+                        with col_delete:
+                            if st.button("🗑", key=f"delete_{history}"):
+                                os.remove(os.path.join(CHAT_HISTORY_FOLDER, history + '.csv'))
+                                st.rerun()
+                        with col_archive:
+                            if st.button("⛁", key=f"archive_{history}"):
+                                if not os.path.exists(CHAT_HISTORY_FOLDER + '/archived/'):
+                                    os.makedirs(CHAT_HISTORY_FOLDER + '/archived/')
+                                os.rename(
+                                    os.path.join(CHAT_HISTORY_FOLDER, history + '.csv'),
+                                    os.path.join(CHAT_HISTORY_FOLDER, 'archived', history + '.csv')
+                                )
+                                st.rerun()
 
     if sys_prompt_name != st.session_state.selected_prompt:
         st.session_state.client._set_system_prompt(st.session_state.system_prompts[sys_prompt_name])
@@ -251,7 +300,7 @@ def pdf_workspace() -> None:
                                 if content.strip():
                                     st.markdown(content.strip()) # noqa
 
-                option_store_message(learning_goals, key_suffix="pdf_learning_goals") if file is not None else None
+                options_message(assistant_message=learning_goals, key_suffix="pdf_learning_goals") if file is not None else None
 
             with col_pdf:
                 st.header("Original PDF")
@@ -263,7 +312,7 @@ def pdf_workspace() -> None:
             if button:
                 wiki_article = _generate_wiki_article(pdf_text=pdf_text, learning_goals=learning_goals)
                 st.markdown(wiki_article if file is not None else "")
-                option_store_message(wiki_article, key_suffix="pdf_wiki_article") if file is not None else None
+                options_message(assistant_message=wiki_article, key_suffix="pdf_wiki_article") if file is not None else None
             else:
                 st.info("Click the button to generate the summary article.")
         else:
@@ -280,15 +329,27 @@ def pdf_workspace() -> None:
         else:
             st.info("Upload a PDF in the 'PDF Viewer/Uploader' tab to generate flashcards.")
 
-def option_store_message(message: str, key_suffix: str) -> None:
+def options_message(assistant_message: str, key_suffix: str, user_message: str = None, index: int = None) -> None: # noqa
     """Uses st.popover for a less intrusive save option."""
-    with st.popover("Store answer"):
-        # Use the key_suffix to ensure widget keys are unique
-        filename = st.text_input("Filename", key=f"filename_input_{key_suffix}")
-        if st.button("Save to Markdown", key=f"save_to_md_{key_suffix}"):
-            write_to_md(filename=filename, message=message)
-            st.success(f"Answer saved to {filename}")
+    with st.popover("Options"):
+        with st.popover("Store answer"):
+            # Use the key_suffix to ensure widget keys are unique
+            filename = st.text_input("Filename", key=f"filename_input_{key_suffix}")
+            if st.button("Save to Markdown", key=f"save_to_md_{key_suffix}"):
+                write_to_md(filename=filename, message=assistant_message)
+                st.success(f"Answer saved to {filename}")
 
+        with st.popover("Copy Messages"):
+            if user_message is not None:
+                st.markdown("**Copy User Message**")
+                copy_button(text=user_message)
+
+            st.markdown("**Asssistant Message**")
+            copy_button(text=assistant_message)
+
+        if index is not None and st.button("🗑", key=f"del_{index}"):
+            del st.session_state.client.messages[index:index+2]
+            st.rerun()
 
 def render_messages(message_container) -> None:  # noqa
     """Render chat messages from session state."""
@@ -302,7 +363,7 @@ def render_messages(message_container) -> None:  # noqa
 
     with message_container:
         for i in range(0, len(messages), 2):
-            is_expanded = i == len(messages) - 2
+            is_expanded = i == len(messages) - 2 # expand only the latest message
             label = f"QA-Pair  {i // 2}: "
             _, user_msg = messages[i]
             _, assistant_msg = messages[i + 1]
@@ -311,13 +372,16 @@ def render_messages(message_container) -> None:  # noqa
                 # Display user and assistant messages
                 with st.chat_message("user"):
                     st.markdown(user_msg)
-                    copy_button(user_msg)
+                    # Copy button only works for expanded expanders
+                    if is_expanded:
+                        copy_button(user_msg)
 
                 with st.chat_message("assistant"):
                     st.markdown(assistant_msg)
-                    copy_button(assistant_msg)
+                    if is_expanded:
+                        copy_button(assistant_msg)
 
-                option_store_message(assistant_msg, key_suffix=f"{i // 2}")
+                options_message(assistant_message=assistant_msg, key_suffix=f"{i // 2}", user_message=user_msg, index=i)
 
 def apply_custom_css() -> None:
     """Apply custom CSS styles to Streamlit app."""

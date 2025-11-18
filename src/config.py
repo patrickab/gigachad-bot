@@ -3,6 +3,7 @@ import subprocess
 # Set to empty string if you dont use Obsidian
 # Note: You can sync obsidian with Nextcloud, Dropbox, etc. to enable cloud integration of your notes.
 OBSIDIAN_VAULT = "/home/noob/Nextcloud/obsidian"
+CHAT_HISTORY_FOLDER = "./chat_histories"
 
 # Adjust to your preferred models
 MACROTASK_MODEL = "gemini-2.5-pro"
