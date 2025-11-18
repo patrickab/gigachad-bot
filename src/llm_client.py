@@ -4,7 +4,6 @@ from typing import Iterator, List, Optional, Tuple
 
 from google.genai import Client as GeminiClient
 from google.genai import types
-from google.genai.errors import ServerError
 from ollama import Client as OllamaClient
 from openai import OpenAI as OpenAIClient
 
@@ -94,24 +93,18 @@ class LLMClient:
                     "parts": [{"text": user_message}],
                 }
             ]
-            try:
-                stream_resp = self.gemini_client.models.generate_content_stream(
-                    model=model,
-                    config=types.GenerateContentConfig(system_instruction=system_prompt, top_p=0.96, temperature=0.2),
-                    contents=contents,
-                )
-                response = ""
-                for chunk in stream_resp:
-                    if chunk.parts:
-                        for part in chunk.parts:
-                            if part.text:
-                                response += part.text
-                                yield part.text
-            except ServerError:
-                # wait 3 seconds & retry until server responds
-                import time
-                time.sleep(3)
-                self.api_query(model, user_message, system_prompt, chat_history)
+            stream_resp = self.gemini_client.models.generate_content_stream(
+                model=model,
+                config=types.GenerateContentConfig(system_instruction=system_prompt, top_p=0.96, temperature=0.2),
+                contents=contents,
+            )
+            response = ""
+            for chunk in stream_resp:
+                if chunk.parts:
+                    for part in chunk.parts:
+                        if part.text:
+                            response += part.text
+                            yield part.text
 
         if model in MODELS_OLLAMA:
             messages = (
@@ -132,9 +125,18 @@ class LLMClient:
                     yield content
 
     def chat(self, model: str, user_message: str) -> Iterator[str]:
-        self.messages.append(("user", user_message))
         response = ""
-        for chunk in self.api_query(model=model, user_message=user_message, system_prompt=self.sys_prompt, chat_history=self.messages):
-            response += chunk
-            yield chunk
+        try:
+            for chunk in self.api_query(
+                                model=model,
+                                user_message=user_message,
+                                system_prompt=self.sys_prompt,
+                                chat_history=self.messages):
+
+                    response += chunk
+                    yield chunk
+        except Exception as e:
+            yield f"Error: {e!s}"
+            return
+        self.messages.append(("user", user_message))
         self.messages.append(("assistant", response))
