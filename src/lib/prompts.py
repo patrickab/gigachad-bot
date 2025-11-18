@@ -54,7 +54,6 @@ __SYS_FORMAT_GENERAL = """
         - Inline math:\n$E=mc^2$
         - Block math:\n$$\na^2 + b^2 = c^2\n$$
 
-
     - Write bullet points in this format:
     **Heading for list**
         - **keyword(s)**: <(comment style) OR (concise explanation in max 1-2 sentences)>

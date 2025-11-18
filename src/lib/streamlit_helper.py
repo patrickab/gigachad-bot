@@ -12,6 +12,7 @@ import pandas as pd
 import pymupdf4llm
 from st_copy import copy_button
 import streamlit as st
+from streamlit_paste_button import paste_image_button as pbutton
 
 from src.config import (
     CHAT_HISTORY_FOLDER,
@@ -114,7 +115,8 @@ def application_side_bar() -> None:
             if st.button("Reset History", key="reset_history_main"):
                 st.session_state.client.reset_history()
 
-            file = st.file_uploader(type=["pdf", "py", "md", "cpp", "txt"], label="fileloader_sidbar")
+            st.markdown("---")
+            file = st.file_uploader(type=["pdf", "py", "md", "cpp", "txt"], label="Upload file context (.pdf/.txt/.py)")
             if file is not None:
                 text = _extract_text_from_pdf(file)
                 st.session_state.file_context = text
@@ -128,6 +130,13 @@ def application_side_bar() -> None:
                             os.makedirs(CHAT_HISTORY_FOLDER)
                         st.session_state.client.store_history(CHAT_HISTORY_FOLDER + '/' + filename + '.csv')
                         st.success("Successfully saved chat")
+
+        st.markdown("---")
+        with st.expander("Paste Image"):
+            paste_result = pbutton("Click to paste image from clipboard")
+            if paste_result.image_data is not None:
+                st.write('Pasted image:')
+                st.image(paste_result.image_data)
 
         if os.path.exists(CHAT_HISTORY_FOLDER):
             chat_histories = [f.replace('.csv', '') for f in os.listdir(CHAT_HISTORY_FOLDER) if f.endswith('.csv')]
