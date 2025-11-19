@@ -95,6 +95,7 @@ class LLMClient:
                     yield content
 
         if model in MODELS_GEMINI:
+
             history = [
                 {
                     "role": ("model" if role == "assistant" else "user"),
@@ -102,6 +103,7 @@ class LLMClient:
                 }
                 for role, msg in chat_history or []
             ]
+
             user_parts = [types.Part(text=user_message)]
             if img.image_data is not None:
                 user_parts.append(
@@ -126,11 +128,17 @@ class LLMClient:
                             yield part.text
 
         if model in MODELS_OLLAMA:
-            messages = (
-                ([{"role": "system", "content": system_prompt}])
-                + [{"role": role, "content": msg} for role, msg in chat_history or []]
-                + [{"role": "user", "content": user_message}]
-            )
+
+            messages = [{"role": "system", "content": system_prompt}]
+            if chat_history != []:
+                messages.append([{"role": role, "content": msg} for role, msg in chat_history])
+            user_message_payload = {"role": "user", "content": user_message}
+
+            if img.image_data is not None:
+                user_message_payload["images"] = [convert_img_to_bytes(img.image_data)]
+
+            messages.append(user_message_payload)
+
             stream = self.ollama_client.chat(
                 model=model,
                 messages=messages,
