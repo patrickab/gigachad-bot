@@ -135,8 +135,9 @@ class LLMClient:
 
                     response += chunk
                     yield chunk
-        except Exception as e:
-            yield f"Error: {e!s}"
-            return
+        except Exception:
+            # yield exception to avoid breaking the stream - will be handled in streamlit_helper.py
+            # This is a workaround due to limitations in streaming error handling.
+            yield Exception("Errororororor!!11!")
         self.messages.append(("user", user_message))
         self.messages.append(("assistant", response))

@@ -12,7 +12,7 @@ import pandas as pd
 import pymupdf4llm
 from st_copy import copy_button
 import streamlit as st
-from streamlit_paste_button import paste_image_button, PasteResult
+from streamlit_paste_button import PasteResult, paste_image_button
 
 from src.config import (
     CHAT_HISTORY_FOLDER,
@@ -137,7 +137,10 @@ def application_side_bar() -> None:
         with st.expander("Paste Image"):
             paste_result = paste_image_button("Paste from clipboard")
             st.session_state.paste_result = paste_result
-            if (paste_result.image_data is not None) and (paste_result.image_data != st.session_state.last_sent_image.image_data):
+
+            # Blocking logic because paste_image_button always returns the most recent pasted image
+            is_new_image = (paste_result.image_data is not None) and (paste_result.image_data != st.session_state.last_sent_image.image_data) # noqa
+            if is_new_image:
                 st.image(paste_result.image_data)
                 st.session_state.pasted_image = paste_result
 
@@ -191,6 +194,7 @@ def chat_interface() -> None:
         if prompt:
             with st.chat_message("user"):
                 st.markdown(prompt)
+                copy_button(prompt)
             with st.chat_message("assistant"):
                 prompt += st.session_state.file_context
 
@@ -200,9 +204,14 @@ def chat_interface() -> None:
                         user_message=prompt,
                         img=st.session_state.pasted_image))
 
-                st.session_state.last_sent_image = st.session_state.pasted_image
-                st.session_state.pasted_image = PasteResult(image_data=None)
-                st.rerun()
+                if st.session_state.client.messages[-1][1] == "":
+                    st.error("An error occurred while processing your request. Please try again.", icon="🚨")
+                    st.session_state.client.messages = st.session_state.client.messages[:-2]
+                else:
+                    # Clear pasted image after use
+                    st.session_state.last_sent_image = st.session_state.pasted_image
+                    st.session_state.pasted_image = PasteResult(image_data=None)
+                    st.rerun()
 
 
 def _non_streaming_api_query(model: str, prompt: str, system_prompt: str) -> str:
