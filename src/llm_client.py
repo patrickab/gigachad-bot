@@ -103,7 +103,7 @@ class LLMClient:
                 for role, msg in chat_history or []
             ]
             user_parts = [types.Part(text=user_message)]
-            if img is not None:
+            if img.image_data is not None:
                 user_parts.append(
                     types.Part.from_bytes(
                         data=convert_img_to_bytes(img.image_data),
