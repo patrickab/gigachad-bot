@@ -2,7 +2,7 @@ import base64
 import csv
 from io import BytesIO
 import os
-from typing import Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from google.genai import Client as GeminiClient
 from google.genai import types
@@ -58,6 +58,40 @@ class LLMClient:
         """Reset the chat history."""
         self.messages = []
 
+    def _query_openai(self, model: str, messages: List[Dict]) -> Iterator[str]:
+        stream = self.openai_client.chat.completions.create(
+            model=model,
+            messages=messages,
+            stream=True,
+        )
+        for chunk in stream:
+            content = chunk.choices[0].delta.content
+            if content:
+                yield content
+
+    def _query_gemini(self, model: str, system_prompt: str, contents: List) -> Iterator[str]:
+        stream_resp = self.gemini_client.models.generate_content_stream(
+            model=model,
+            config=types.GenerateContentConfig(system_instruction=system_prompt, top_p=0.96, temperature=0.2),
+            contents=contents,
+        )
+        for chunk in stream_resp:
+            if chunk.parts:
+                for part in chunk.parts:
+                    if part.text:
+                        yield part.text
+
+    def _query_ollama(self, model: str, messages: List[Dict]) -> Iterator[str]:
+        stream = self.ollama_client.chat(
+            model=model,
+            messages=messages,
+            stream=True,
+        )
+        for chunk in stream:
+            content = chunk.get("message", {}).get("content") or chunk.get("response") or ""
+            if content:
+                yield content
+
     def api_query(
         self, model: str,
         user_message: str,
@@ -67,32 +101,36 @@ class LLMClient:
     ) -> Iterator[str]:
         """
         Make a single API query to the LLM.
-        Supports both Gemini & OpenAI models.
+        Supports Gemini, OpenAI, and Ollama models.
         """
 
-        def convert_img_to_bytes(img: PasteResult, format: str = 'png') -> bytes:
+        def _convert_img_to_bytes(img: PasteResult, format: str = 'png') -> bytes:
             """Converts a Pillow Image object into bytes."""
-            # 1. Save the Pillow image to an in-memory byte buffer
             buffer = BytesIO()
             img.save(buffer, format=format)
             return buffer.getvalue()
 
-        def convert_bytes_to_base64(img_bytes: bytes) -> str:
+        def _convert_bytes_to_base64(img_bytes: bytes) -> str:
             """Convert bytes to base64 string."""
             return base64.b64encode(img_bytes).decode('utf-8')
 
-        if img.image_data is not None:
-            byte_image = convert_img_to_bytes(img.image_data)
-            base_64_image = convert_bytes_to_base64(byte_image)
+        byte_image = None
+        base_64_image = None
+        if img and img.image_data:
+            byte_image = _convert_img_to_bytes(img.image_data)
+            base_64_image = _convert_bytes_to_base64(byte_image)
 
         if model in MODELS_OPENAI:
+
+            # Load History
             messages = (
                 ([{"role": "system", "content": system_prompt}])
                 + [{"role": role, "content": msg} for role, msg in chat_history or []]
             )
 
+            # Prepare user message
             user_content = [{"type": "text", "text": user_message}]
-            if img.image_data is not None:
+            if base_64_image:
                 user_content.append({
                     "type": "image_url",
                     "image_url": {
@@ -100,21 +138,13 @@ class LLMClient:
                     }
                 })
 
+            # Assemble final message
             messages.append({"role": "user", "content": user_content})
-            stream = self.openai_client.chat.completions.create(
-                model=model,
-                messages=messages,
-                stream=True,
-            )
-            response = ""
-            for chunk in stream:
-                content = chunk.choices[0].delta.content
-                if content:
-                    response += content
-                    yield content
+            yield from self._query_openai(model, messages)
 
         if model in MODELS_GEMINI:
 
+            # Load History
             history = [
                 {
                     "role": ("model" if role == "assistant" else "user"),
@@ -123,52 +153,34 @@ class LLMClient:
                 for role, msg in chat_history or []
             ]
 
+            # Prepare user message
             user_parts = [types.Part(text=user_message)]
-            if img.image_data is not None:
+            if byte_image:
                 user_parts.append(
                     types.Part.from_bytes(
                         data=byte_image,
                         mime_type="image/png")
                     )
 
+            # Assemble final contents
             contents = [*history, types.Content(role="user", parts=user_parts)]
-
-            stream_resp = self.gemini_client.models.generate_content_stream(
-                model=model,
-                config=types.GenerateContentConfig(system_instruction=system_prompt, top_p=0.96, temperature=0.2),
-                contents=contents,
-            )
-            response = ""
-            for chunk in stream_resp:
-                if chunk.parts:
-                    for part in chunk.parts:
-                        if part.text:
-                            response += part.text
-                            yield part.text
+            yield from self._query_gemini(model, system_prompt, contents)
 
         if model in MODELS_OLLAMA:
 
+            # Load History
             messages = [{"role": "system", "content": system_prompt}]
-            if chat_history != []:
-                messages.append([{"role": role, "content": msg} for role, msg in chat_history])
-            user_message_payload = {"role": "user", "content": user_message}
+            if chat_history:
+                messages.extend([{"role": role, "content": msg} for role, msg in chat_history])
 
-            if img.image_data is not None:
+            # Prepare user message
+            user_message_payload = {"role": "user", "content": user_message}
+            if base_64_image:
                 user_message_payload["images"] = [base_64_image]
 
+            # Assemble final message
             messages.append(user_message_payload)
-
-            stream = self.ollama_client.chat(
-                model=model,
-                messages=messages,
-                stream=True,
-            )
-            response = ""
-            for chunk in stream:
-                content = chunk.get("message", {}).get("content") or chunk.get("response") or ""
-                if content:
-                    response += content
-                    yield content
+            yield from self._query_ollama(model, messages)
 
     def chat(self, model: str, user_message: str, img: Optional[PasteResult]=None) -> Iterator[str]:
         response = ""
