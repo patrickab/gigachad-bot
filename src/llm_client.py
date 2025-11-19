@@ -1,3 +1,4 @@
+import base64
 import csv
 from io import BytesIO
 import os
@@ -70,18 +71,36 @@ class LLMClient:
         """
 
         def convert_img_to_bytes(img: PasteResult, format: str = 'png') -> bytes:
-            """Converts a Pillow Image object into a Gemini API types.Part object."""
+            """Converts a Pillow Image object into bytes."""
             # 1. Save the Pillow image to an in-memory byte buffer
             buffer = BytesIO()
             img.save(buffer, format=format)
             return buffer.getvalue()
 
+        def convert_bytes_to_base64(img_bytes: bytes) -> str:
+            """Convert bytes to base64 string."""
+            return base64.b64encode(img_bytes).decode('utf-8')
+
+        if img.image_data is not None:
+            byte_image = convert_img_to_bytes(img.image_data)
+            base_64_image = convert_bytes_to_base64(byte_image)
+
         if model in MODELS_OPENAI:
             messages = (
                 ([{"role": "system", "content": system_prompt}])
                 + [{"role": role, "content": msg} for role, msg in chat_history or []]
-                + [{"role": "user", "content": user_message}]
             )
+
+            user_content = [{"type": "text", "text": user_message}]
+            if img.image_data is not None:
+                user_content.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/png;base64,{base_64_image}"
+                    }
+                })
+
+            messages.append({"role": "user", "content": user_content})
             stream = self.openai_client.chat.completions.create(
                 model=model,
                 messages=messages,
@@ -108,7 +127,7 @@ class LLMClient:
             if img.image_data is not None:
                 user_parts.append(
                     types.Part.from_bytes(
-                        data=convert_img_to_bytes(img.image_data),
+                        data=byte_image,
                         mime_type="image/png")
                     )
 
@@ -135,7 +154,7 @@ class LLMClient:
             user_message_payload = {"role": "user", "content": user_message}
 
             if img.image_data is not None:
-                user_message_payload["images"] = [convert_img_to_bytes(img.image_data)]
+                user_message_payload["images"] = [base_64_image]
 
             messages.append(user_message_payload)
 
