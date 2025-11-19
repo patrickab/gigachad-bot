@@ -12,7 +12,7 @@ import pandas as pd
 import pymupdf4llm
 from st_copy import copy_button
 import streamlit as st
-from streamlit_paste_button import paste_image_button as pbutton
+from streamlit_paste_button import paste_image_button, PasteResult
 
 from src.config import (
     CHAT_HISTORY_FOLDER,
@@ -76,6 +76,8 @@ def init_session_state() -> None:
         st.session_state.client = LLMClient()
         st.session_state.client._set_system_prompt(next(iter(st.session_state.system_prompts.values()))) # set to first prompt
         st.session_state.rag_database_repo = ""
+        st.session_state.pasted_image = PasteResult(image_data=None)
+        st.session_state.last_sent_image = PasteResult(image_data=None)
 
 
 @st.cache_resource
@@ -133,10 +135,11 @@ def application_side_bar() -> None:
 
         st.markdown("---")
         with st.expander("Paste Image"):
-            paste_result = pbutton("Click to paste image from clipboard")
-            if paste_result.image_data is not None:
-                st.write('Pasted image:')
+            paste_result = paste_image_button("Paste from clipboard")
+            st.session_state.paste_result = paste_result
+            if (paste_result.image_data is not None) and (paste_result.image_data != st.session_state.last_sent_image.image_data):
                 st.image(paste_result.image_data)
+                st.session_state.pasted_image = paste_result
 
         if os.path.exists(CHAT_HISTORY_FOLDER):
             chat_histories = [f.replace('.csv', '') for f in os.listdir(CHAT_HISTORY_FOLDER) if f.endswith('.csv')]
@@ -190,7 +193,15 @@ def chat_interface() -> None:
                 st.markdown(prompt)
             with st.chat_message("assistant"):
                 prompt += st.session_state.file_context
-                st.write_stream(st.session_state.client.chat(model=st.session_state.selected_model, user_message=prompt))
+
+                st.write_stream(
+                    st.session_state.client.chat(
+                        model=st.session_state.selected_model,
+                        user_message=prompt,
+                        img=st.session_state.pasted_image))
+
+                st.session_state.last_sent_image = st.session_state.pasted_image
+                st.session_state.pasted_image = PasteResult(image_data=None)
                 st.rerun()
 
 
