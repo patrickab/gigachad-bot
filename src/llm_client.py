@@ -1,4 +1,5 @@
 import csv
+from io import BytesIO
 import os
 from typing import Iterator, List, Optional, Tuple
 
@@ -6,6 +7,7 @@ from google.genai import Client as GeminiClient
 from google.genai import types
 from ollama import Client as OllamaClient
 from openai import OpenAI as OpenAIClient
+from streamlit_paste_button import PasteResult
 
 from src.config import MODELS_GEMINI, MODELS_OLLAMA, MODELS_OPENAI
 
@@ -56,12 +58,24 @@ class LLMClient:
         self.messages = []
 
     def api_query(
-        self, model: str, user_message: str, system_prompt: str, chat_history: Optional[List[Tuple[str, str]]]
+        self, model: str,
+        user_message: str,
+        system_prompt: str,
+        chat_history: Optional[List[Tuple[str, str]]],
+        img: Optional[PasteResult]=None
     ) -> Iterator[str]:
         """
         Make a single API query to the LLM.
         Supports both Gemini & OpenAI models.
         """
+
+        def convert_img_to_bytes(img: PasteResult, format: str = 'png') -> bytes:
+            """Converts a Pillow Image object into a Gemini API types.Part object."""
+            # 1. Save the Pillow image to an in-memory byte buffer
+            buffer = BytesIO()
+            img.save(buffer, format=format)
+            return buffer.getvalue()
+
         if model in MODELS_OPENAI:
             messages = (
                 ([{"role": "system", "content": system_prompt}])
@@ -81,18 +95,23 @@ class LLMClient:
                     yield content
 
         if model in MODELS_GEMINI:
-            contents = [
+            history = [
                 {
                     "role": ("model" if role == "assistant" else "user"),
-                    "parts": [{"text": msg}],
+                    "parts": [types.Part(text=msg)],
                 }
                 for role, msg in chat_history or []
-            ] + [
-                {
-                    "role": "user",
-                    "parts": [{"text": user_message}],
-                }
             ]
+            user_parts = [types.Part(text=user_message)]
+            if img is not None:
+                user_parts.append(
+                    types.Part.from_bytes(
+                        data=convert_img_to_bytes(img.image_data),
+                        mime_type="image/png")
+                    )
+
+            contents = [*history, types.Content(role="user", parts=user_parts)]
+
             stream_resp = self.gemini_client.models.generate_content_stream(
                 model=model,
                 config=types.GenerateContentConfig(system_instruction=system_prompt, top_p=0.96, temperature=0.2),
@@ -124,18 +143,19 @@ class LLMClient:
                     response += content
                     yield content
 
-    def chat(self, model: str, user_message: str) -> Iterator[str]:
+    def chat(self, model: str, user_message: str, img: Optional[PasteResult]=None) -> Iterator[str]:
         response = ""
         try:
             for chunk in self.api_query(
                                 model=model,
                                 user_message=user_message,
                                 system_prompt=self.sys_prompt,
-                                chat_history=self.messages):
+                                chat_history=self.messages,
+                                img=img):
 
                     response += chunk
                     yield chunk
-        except Exception:
+        except Exception as e: # noqa
             # yield exception to avoid breaking the stream - will be handled in streamlit_helper.py
             # This is a workaround due to limitations in streaming error handling.
             yield Exception("Errororororor!!11!")
