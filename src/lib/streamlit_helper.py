@@ -12,9 +12,11 @@ import pandas as pd
 import pymupdf4llm
 from st_copy import copy_button
 import streamlit as st
+from streamlit_paste_button import PasteResult, paste_image_button
 
 from src.config import (
     CHAT_HISTORY_FOLDER,
+    LOCAL_NANOTASK_MODEL,
     MACROTASK_MODEL,
     MICROTASK_MODEL,
     MODELS_GEMINI,
@@ -25,6 +27,7 @@ from src.config import (
 )
 from src.lib.flashcards import DATE_ADDED, NEXT_APPEARANCE, render_flashcards
 from src.lib.non_user_prompts import (
+    SYS_CAPTION_GENERATOR,
     SYS_IMAGE_IMPORTANCE,
     SYS_LEARNINGGOALS_TO_FLASHCARDS,
     SYS_NOTE_TO_OBSIDIAN_YAML,
@@ -75,6 +78,9 @@ def init_session_state() -> None:
         st.session_state.client = LLMClient()
         st.session_state.client._set_system_prompt(next(iter(st.session_state.system_prompts.values()))) # set to first prompt
         st.session_state.rag_database_repo = ""
+        st.session_state.pasted_image = PasteResult(image_data=None)
+        st.session_state.last_sent_image = PasteResult(image_data=None)
+        st.session_state.usr_msg_captions = []
 
 
 @st.cache_resource
@@ -114,7 +120,8 @@ def application_side_bar() -> None:
             if st.button("Reset History", key="reset_history_main"):
                 st.session_state.client.reset_history()
 
-            file = st.file_uploader(type=["pdf", "py", "md", "cpp", "txt"], label="fileloader_sidbar")
+            st.markdown("---")
+            file = st.file_uploader(type=["pdf", "py", "md", "cpp", "txt"], label="Upload file context (.pdf/.txt/.py)")
             if file is not None:
                 text = _extract_text_from_pdf(file)
                 st.session_state.file_context = text
@@ -128,6 +135,32 @@ def application_side_bar() -> None:
                             os.makedirs(CHAT_HISTORY_FOLDER)
                         st.session_state.client.store_history(CHAT_HISTORY_FOLDER + '/' + filename + '.csv')
                         st.success("Successfully saved chat")
+
+        st.markdown("---")
+        with st.expander("Upload Image"):
+            # check wether streamlit background is in dark mode or light mode
+            bg_color = st.get_option("theme.base")  # 'light' or 'dark
+            if bg_color == "dark":
+                button_color_bg = "#34373E"
+                button_color_txt = "#FFFFFF"
+                button_color_hover = "#45494E"
+            else:
+                button_color_bg = "#E6E6E6"
+                button_color_txt = "#000000"
+                button_color_hover = "#CCCCCC"
+
+            paste_result = paste_image_button("Paste from clipboard",
+                        background_color=button_color_bg,
+                        text_color=button_color_txt,
+                        hover_background_color=button_color_hover)
+
+            st.session_state.paste_result = paste_result
+
+            # Blocking logic because paste_image_button always returns the most recent pasted image
+            is_new_image = (paste_result.image_data is not None) and (paste_result.image_data != st.session_state.last_sent_image.image_data) # noqa
+            if is_new_image:
+                st.image(paste_result.image_data)
+                st.session_state.pasted_image = paste_result
 
         if os.path.exists(CHAT_HISTORY_FOLDER):
             chat_histories = [f.replace('.csv', '') for f in os.listdir(CHAT_HISTORY_FOLDER) if f.endswith('.csv')]
@@ -179,10 +212,33 @@ def chat_interface() -> None:
         if prompt:
             with st.chat_message("user"):
                 st.markdown(prompt)
+                copy_button(prompt)
             with st.chat_message("assistant"):
                 prompt += st.session_state.file_context
-                st.write_stream(st.session_state.client.chat(model=st.session_state.selected_model, user_message=prompt))
-                st.rerun()
+
+                st.write_stream(
+                    st.session_state.client.chat(
+                        model=st.session_state.selected_model,
+                        user_message=prompt,
+                        img=st.session_state.pasted_image))
+
+                if st.session_state.client.messages[-1][1] == "":
+                    st.error("An error occurred while processing your request. Please try again.", icon="🚨")
+                    st.session_state.client.messages = st.session_state.client.messages[:-2]
+                else:
+                    # Clear pasted image after use
+                    st.session_state.last_sent_image = st.session_state.pasted_image
+                    st.session_state.pasted_image = PasteResult(image_data=None)
+                    # Caption user message
+                    if LOCAL_NANOTASK_MODEL in MODELS_OLLAMA: # avoids functioncall for new users without ollama setup
+                        caption = _non_streaming_api_query(
+                            model=LOCAL_NANOTASK_MODEL,
+                            prompt=prompt[:80],  # limit prompt length for captioning to avoid long processing times
+                            system_prompt=SYS_CAPTION_GENERATOR
+                        )
+                        st.session_state.usr_msg_captions += [caption]
+
+                    st.rerun()
 
 
 def _non_streaming_api_query(model: str, prompt: str, system_prompt: str) -> str:
@@ -364,7 +420,7 @@ def render_messages(message_container) -> None:  # noqa
     with message_container:
         for i in range(0, len(messages), 2):
             is_expanded = i == len(messages) - 2 # expand only the latest message
-            label = f"QA-Pair  {i // 2}: "
+            label = f"QA-Pair {i // 2}: " if len(st.session_state.usr_msg_captions) == 0 else st.session_state.usr_msg_captions[i // 2]
             _, user_msg = messages[i]
             _, assistant_msg = messages[i + 1]
 

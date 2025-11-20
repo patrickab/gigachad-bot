@@ -10,6 +10,11 @@ MACROTASK_MODEL = "gemini-2.5-pro"
 MICROTASK_MODEL = "gemini-2.5-flash"
 NANOTASK_MODEL = "gemini-2.5-flash"
 
+# Specify local ollama model to use additional features like captioning of user prompts.
+# Not strictly necessary, enhances user experience slightly. Will be ignored if ollama is not installed.
+# Granite 4: Minimal hardware, very fast - can be run on any smartphone - competent for easy tasks.
+LOCAL_NANOTASK_MODEL = "granite4:1b"
+
 MODELS_GEMINI = [
     "gemini-2.5-flash-lite",
     "gemini-2.5-flash",
