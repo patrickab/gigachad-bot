@@ -16,6 +16,7 @@ from streamlit_paste_button import PasteResult, paste_image_button
 
 from src.config import (
     CHAT_HISTORY_FOLDER,
+    LOCAL_NANOTASK_MODEL,
     MACROTASK_MODEL,
     MICROTASK_MODEL,
     MODELS_GEMINI,
@@ -26,6 +27,7 @@ from src.config import (
 )
 from src.lib.flashcards import DATE_ADDED, NEXT_APPEARANCE, render_flashcards
 from src.lib.non_user_prompts import (
+    SYS_CAPTION_GENERATOR,
     SYS_IMAGE_IMPORTANCE,
     SYS_LEARNINGGOALS_TO_FLASHCARDS,
     SYS_NOTE_TO_OBSIDIAN_YAML,
@@ -78,6 +80,7 @@ def init_session_state() -> None:
         st.session_state.rag_database_repo = ""
         st.session_state.pasted_image = PasteResult(image_data=None)
         st.session_state.last_sent_image = PasteResult(image_data=None)
+        st.session_state.usr_msg_captions = []
 
 
 @st.cache_resource
@@ -226,6 +229,15 @@ def chat_interface() -> None:
                     # Clear pasted image after use
                     st.session_state.last_sent_image = st.session_state.pasted_image
                     st.session_state.pasted_image = PasteResult(image_data=None)
+                    # Caption user message
+                    if LOCAL_NANOTASK_MODEL in MODELS_OLLAMA: # avoids functioncall for new users without ollama setup
+                        caption = _non_streaming_api_query(
+                            model=LOCAL_NANOTASK_MODEL,
+                            prompt=prompt[:80],  # limit prompt length for captioning to avoid long processing times
+                            system_prompt=SYS_CAPTION_GENERATOR
+                        )
+                        st.session_state.usr_msg_captions += [caption]
+
                     st.rerun()
 
 
@@ -408,7 +420,7 @@ def render_messages(message_container) -> None:  # noqa
     with message_container:
         for i in range(0, len(messages), 2):
             is_expanded = i == len(messages) - 2 # expand only the latest message
-            label = f"QA-Pair  {i // 2}: "
+            label = f"QA-Pair {i // 2}: " if len(st.session_state.usr_msg_captions) == 0 else st.session_state.usr_msg_captions[i // 2]
             _, user_msg = messages[i]
             _, assistant_msg = messages[i + 1]
 
