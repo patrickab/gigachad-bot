@@ -14,7 +14,7 @@ from src.config import MODELS_GEMINI, MODELS_OLLAMA, MODELS_OPENAI
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
+EMPTY_PASTE_RESULT = PasteResult(image_data=None)
 
 class LLMClient:
     """
@@ -102,7 +102,7 @@ class LLMClient:
         user_message: str,
         system_prompt: str,
         chat_history: Optional[List[Tuple[str, str]]],
-        img: Optional[PasteResult]
+        img: Optional[PasteResult]=EMPTY_PASTE_RESULT
     ) -> Iterator[str]:
         """
         Make a single API query to the LLM.
@@ -187,7 +187,7 @@ class LLMClient:
             messages.append(user_message_payload)
             yield from self._query_ollama(model, messages)
 
-    def chat(self, model: str, user_message: str, img: Optional[PasteResult]) -> Iterator[str]:
+    def chat(self, model: str, user_message: str, img: Optional[PasteResult]=EMPTY_PASTE_RESULT) -> Iterator[str]:
         response = ""
         try:
             for chunk in self.api_query(
