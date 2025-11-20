@@ -17,7 +17,15 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 
 class LLMClient:
-    """Base client for LLM chat completions."""
+    """
+    LLM client for streaming chat completions.
+    Serves as wrapper for Ollama, OpenAI & Gemini clients.
+
+    Includes:
+       - System prompt management
+       - Multimodal support (text + images)
+       - Chat history management (store/load/reset)
+    """
 
     def __init__(self) -> None:
         self.messages: List[Tuple[str, str]] = []  # [(role, message)]
@@ -30,10 +38,7 @@ class LLMClient:
             self.gemini_client = GeminiClient(api_key=GEMINI_API_KEY)
 
         if MODELS_OLLAMA != []:
-            self.ollama_client = OllamaClient(
-                host="http://localhost:11434",
-                headers={"x-some-header": "some-value"},
-            )
+            self.ollama_client = OllamaClient(host="http://localhost:11434")
 
     def _set_system_prompt(self, system_prompt: str) -> None:
         self.sys_prompt = system_prompt
@@ -97,7 +102,7 @@ class LLMClient:
         user_message: str,
         system_prompt: str,
         chat_history: Optional[List[Tuple[str, str]]],
-        img: Optional[PasteResult]=None
+        img: Optional[PasteResult]
     ) -> Iterator[str]:
         """
         Make a single API query to the LLM.
@@ -182,7 +187,7 @@ class LLMClient:
             messages.append(user_message_payload)
             yield from self._query_ollama(model, messages)
 
-    def chat(self, model: str, user_message: str, img: Optional[PasteResult]=None) -> Iterator[str]:
+    def chat(self, model: str, user_message: str, img: Optional[PasteResult]) -> Iterator[str]:
         response = ""
         try:
             for chunk in self.api_query(
@@ -197,6 +202,7 @@ class LLMClient:
         except Exception as e: # noqa
             # yield exception to avoid breaking the stream - will be handled in streamlit_helper.py
             # This is a workaround due to limitations in streaming error handling.
+            # Error handling only works if assistant response is empty.
             yield Exception("Errororororor!!11!")
         self.messages.append(("user", user_message))
         self.messages.append(("assistant", response))
