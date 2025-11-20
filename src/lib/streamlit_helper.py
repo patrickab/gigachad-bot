@@ -134,8 +134,23 @@ def application_side_bar() -> None:
                         st.success("Successfully saved chat")
 
         st.markdown("---")
-        with st.expander("Paste Image"):
-            paste_result = paste_image_button("Paste from clipboard")
+        with st.expander("Upload Image"):
+            # check wether streamlit background is in dark mode or light mode
+            bg_color = st.get_option("theme.base")  # 'light' or 'dark
+            if bg_color == "dark":
+                button_color_bg = "#34373E"
+                button_color_txt = "#FFFFFF"
+                button_color_hover = "#45494E"
+            else:
+                button_color_bg = "#E6E6E6"
+                button_color_txt = "#000000"
+                button_color_hover = "#CCCCCC"
+
+            paste_result = paste_image_button("Paste from clipboard",
+                        background_color=button_color_bg,
+                        text_color=button_color_txt,
+                        hover_background_color=button_color_hover)
+
             st.session_state.paste_result = paste_result
 
             # Blocking logic because paste_image_button always returns the most recent pasted image
