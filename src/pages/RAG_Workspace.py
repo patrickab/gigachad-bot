@@ -1,6 +1,6 @@
 import os
 
-from rag_database.rag_config import DatabaseKeys
+from rag_database.rag_config import MODEL_CONFIG, DatabaseKeys
 from rag_database.rag_database import RagDatabase, RAGQuery
 import streamlit as st
 

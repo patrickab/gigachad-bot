@@ -12,7 +12,6 @@ from streamlit_paste_button import PasteResult, paste_image_button
 
 from src.config import (
     CHAT_HISTORY_FOLDER,
-    EMBEDDING_MODELS,
     MODELS_GEMINI,
     MODELS_OLLAMA,
     MODELS_OPENAI,
@@ -41,8 +40,9 @@ if os.getenv("OPENAI_API_KEY"):
     AVAILABLE_LLM_MODELS += MODELS_OPENAI
 
 if MODELS_OLLAMA != []:
+    ignore_embedding_models = ["embeddinggemma:300m"]
     AVAILABLE_LLM_MODELS += MODELS_OLLAMA
-    AVAILABLE_LLM_MODELS = [model for model in AVAILABLE_LLM_MODELS if model not in EMBEDDING_MODELS]
+    AVAILABLE_LLM_MODELS = [model for model in AVAILABLE_LLM_MODELS if model not in ignore_embedding_models]
 
 AVAILABLE_PROMPTS = {
     "Quick Overview": SYS_QUICK_OVERVIEW,

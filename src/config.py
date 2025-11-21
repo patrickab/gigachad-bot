@@ -26,13 +26,6 @@ MODELS_OPENAI = [
     "gpt-4o",
 ]
 
-EMBEDDING_MODELS = [
-    "gemini-embedding-001",
-    "text-embedding-3-small",
-    "text-embedding-3-large",
-    "embeddinggemma:300m",
-]
-
 MODELS_OLLAMA = []
 try:  # if ollama is available, add ollama models
     result = subprocess.run(["ollama", "list"], capture_output=True, text=True, check=True)
