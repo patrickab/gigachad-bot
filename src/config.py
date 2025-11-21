@@ -2,8 +2,8 @@ import subprocess
 
 # Set to empty string if you dont use Obsidian
 # Note: You can sync obsidian with Nextcloud, Dropbox, etc. to enable cloud integration of your notes.
-OBSIDIAN_VAULT = "/home/noob/Nextcloud/obsidian"
-CHAT_HISTORY_FOLDER = "./chat_histories"
+DIRECTORY_OBSIDIAN_VAULT = "/home/noob/Nextcloud/obsidian"
+DIRECTORY_CHAT_HISTORIES = "./chat_histories"
 
 # Adjust to your preferred models
 MACROTASK_MODEL = "gemini-2.5-pro"
@@ -35,8 +35,8 @@ except (FileNotFoundError, subprocess.CalledProcessError):
 
 ### RAG related config
 # Define obsidian subfolder for RAG documents
-OBSIDIAN_RAG = "digital-garden"
-# Adjust preferred model - supports embeddinggemma:300m, text-embedding-3-small, gemini-embedding-001, gemini-embedding-001
+DIRECTORY_OBSIDIAN_DOCS = "digital-garden"
+DIRECTORY_EMBEDDINGS = "./embeddings"
 # Expects API-Keys in environment variables & Huggingface tokens for tokenizer
 DEFAULT_EMBEDDING_MODEL = "gemini-embedding-001"
 RAG_K_DOCS = 5

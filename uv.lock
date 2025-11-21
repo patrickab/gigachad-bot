@@ -1071,7 +1071,7 @@ wheels = [
 [[package]]
 name = "rag-database"
 version = "0.1.0"
-source = { git = "ssh://git@github.com/patrickab/rag-database.git?rev=main#afc16c2b483b468d7f0e75028ce718800f6772c6" }
+source = { git = "ssh://git@github.com/patrickab/rag-database.git?rev=main#1ee5bb2bf0cc3ab527f6a66bb30085acb84f7b30" }
 dependencies = [
     { name = "google-genai" },
     { name = "langchain-text-splitters" },

@@ -11,12 +11,12 @@ import streamlit as st
 from streamlit_paste_button import PasteResult, paste_image_button
 
 from src.config import (
-    CHAT_HISTORY_FOLDER,
+    DIRECTORY_CHAT_HISTORIES,
+    DIRECTORY_OBSIDIAN_VAULT,
     MODELS_GEMINI,
     MODELS_OLLAMA,
     MODELS_OPENAI,
     NANOTASK_MODEL,
-    OBSIDIAN_VAULT,
 )
 from src.lib.non_user_prompts import SYS_NOTE_TO_OBSIDIAN_YAML
 from src.lib.prompts import (
@@ -120,9 +120,9 @@ def default_sidebar_chat() -> None:
                 with st.popover("Save History"):
                     filename = st.text_input("Filename", key="history_filename_input")
                     if st.button("Save Chat History", key="save_chat_history_button"):
-                        if not os.path.exists(CHAT_HISTORY_FOLDER):
-                            os.makedirs(CHAT_HISTORY_FOLDER)
-                        st.session_state.client.store_history(CHAT_HISTORY_FOLDER + '/' + filename + '.csv')
+                        if not os.path.exists(DIRECTORY_CHAT_HISTORIES):
+                            os.makedirs(DIRECTORY_CHAT_HISTORIES)
+                        st.session_state.client.store_history(DIRECTORY_CHAT_HISTORIES + '/' + filename + '.csv')
                         st.success("Successfully saved chat")
 
         # ---------------------------------------------- Image Paste & Chat Histories ---------------------------------------------- #
@@ -152,8 +152,8 @@ def default_sidebar_chat() -> None:
                 st.image(paste_result.image_data)
                 st.session_state.pasted_image = paste_result
 
-        if os.path.exists(CHAT_HISTORY_FOLDER):
-            chat_histories = [f.replace('.csv', '') for f in os.listdir(CHAT_HISTORY_FOLDER) if f.endswith('.csv')]
+        if os.path.exists(DIRECTORY_CHAT_HISTORIES):
+            chat_histories = [f.replace('.csv', '') for f in os.listdir(DIRECTORY_CHAT_HISTORIES) if f.endswith('.csv')]
         else:
             chat_histories = []
         
@@ -165,18 +165,18 @@ def default_sidebar_chat() -> None:
                         col_load, col_delete, col_archive = st.columns(3)
                         with col_load:
                             if st.button("⟳", key=f"load_{history}"):
-                                st.session_state.client.load_history(os.path.join(CHAT_HISTORY_FOLDER, history + '.csv'))
+                                st.session_state.client.load_history(os.path.join(DIRECTORY_CHAT_HISTORIES, history + '.csv'))
                         with col_delete:
                             if st.button("🗑", key=f"delete_{history}"):
-                                os.remove(os.path.join(CHAT_HISTORY_FOLDER, history + '.csv'))
+                                os.remove(os.path.join(DIRECTORY_CHAT_HISTORIES, history + '.csv'))
                                 st.rerun()
                         with col_archive:
                             if st.button("⛁", key=f"archive_{history}"):
-                                if not os.path.exists(CHAT_HISTORY_FOLDER + '/archived/'):
-                                    os.makedirs(CHAT_HISTORY_FOLDER + '/archived/')
+                                if not os.path.exists(DIRECTORY_CHAT_HISTORIES + '/archived/'):
+                                    os.makedirs(DIRECTORY_CHAT_HISTORIES + '/archived/')
                                 os.rename(
-                                    os.path.join(CHAT_HISTORY_FOLDER, history + '.csv'),
-                                    os.path.join(CHAT_HISTORY_FOLDER, 'archived', history + '.csv')
+                                    os.path.join(DIRECTORY_CHAT_HISTORIES, history + '.csv'),
+                                    os.path.join(DIRECTORY_CHAT_HISTORIES, 'archived', history + '.csv')
                                 )
                                 st.rerun()
 
@@ -204,7 +204,7 @@ def write_to_md(filename: str, message: str) -> None:
         system_prompt=sys_prompt.replace("{{user_notes}}", message),
     )
 
-    file_path = os.path.join(OBSIDIAN_VAULT, filename)
+    file_path = os.path.join(DIRECTORY_OBSIDIAN_VAULT, filename)
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(yaml_header + "\n" + message)
 

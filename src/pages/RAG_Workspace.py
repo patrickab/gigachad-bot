@@ -1,10 +1,11 @@
 import os
 
-from rag_database.rag_config import MODEL_CONFIG, DatabaseKeys
+import polars as pl
+from rag_database.rag_config import EMPTY_RAG_SCHEMA, MODEL_CONFIG, DatabaseKeys
 from rag_database.rag_database import RagDatabase, RAGQuery
 import streamlit as st
 
-from src.config import DEFAULT_EMBEDDING_MODEL, OBSIDIAN_RAG, OBSIDIAN_VAULT, RAG_K_DOCS
+from src.config import DEFAULT_EMBEDDING_MODEL, DIRECTORY_EMBEDDINGS, DIRECTORY_OBSIDIAN_DOCS, DIRECTORY_OBSIDIAN_VAULT, RAG_K_DOCS
 
 
 def rag_sidebar() -> None:
@@ -16,9 +17,20 @@ def rag_sidebar() -> None:
         )
 
 @st.cache_resource
-def load_rag_database(doc_path: str, model: str) -> RagDatabase:
-    """Initialize RAG Database with .md documents."""
-    rag_db = RagDatabase(model=model)
+def load_rag_database(doc_path: str, model: str, label: str) -> RagDatabase:
+    """
+    Initialize RAG Database with .md documents.
+    Loads existing embeddings if available.
+    Embed new documents & update database accordingly.
+    """
+
+    parquet_embeddings = f"{DIRECTORY_EMBEDDINGS}/{label}_{model}.parquet"
+    if os.path.exists(parquet_embeddings): # noqa
+        rag_dataframe = pl.read_parquet(parquet_embeddings)
+    else:
+        rag_dataframe = EMPTY_RAG_SCHEMA
+
+    rag_db = RagDatabase(model=model, database=rag_dataframe)
     titles = []
     texts = []
     documents = [f for f in os.listdir(doc_path) if f.endswith('.md')]
@@ -26,8 +38,9 @@ def load_rag_database(doc_path: str, model: str) -> RagDatabase:
     for doc in documents:
         with open(f"{doc_path}/{doc}", "r") as f:
             text = f.read()
-            texts.append(text)
-            titles.append(doc)
+            if not rag_db.is_document_in_database(doc):
+                texts.append(text)
+                titles.append(doc)
 
     rag_db.add_documents(titles=titles, texts=texts)
     return rag_db
@@ -35,7 +48,11 @@ def load_rag_database(doc_path: str, model: str) -> RagDatabase:
 def rag_workspace_obsidian() -> None:
     """RAG Workspace for retrieval-augmented generation on specifiable obsidian vault."""
     if st.button("Initialize RAG Database", key="load_rag_db"):
-        rag_database = load_rag_database(f"{OBSIDIAN_VAULT}/{OBSIDIAN_RAG}/", st.session_state.selected_embedding_model)
+        rag_database = load_rag_database(
+            doc_path=f"{DIRECTORY_OBSIDIAN_VAULT}/{DIRECTORY_OBSIDIAN_DOCS}/",
+            model=st.session_state.selected_embedding_model,
+            label="rag_db_obsidian"
+        )
 
         with st._bottom:
             rag_query = st.chat_input("Send a message", key="rag_input")
