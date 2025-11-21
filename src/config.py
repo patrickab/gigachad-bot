@@ -32,3 +32,11 @@ try:  # if ollama is available, add ollama models
     MODELS_OLLAMA += [line.split()[0] for line in result.stdout.strip().splitlines()[1:]]
 except (FileNotFoundError, subprocess.CalledProcessError):
     pass  # ollama not available or command failed
+
+### RAG related config
+# Define obsidian subfolder for RAG documents
+OBSIDIAN_RAG = "digital-garden"
+# Adjust preferred model - supports embeddinggemma:300m, text-embedding-3-small, gemini-embedding-001, gemini-embedding-001
+# Expects API-Keys in environment variables & Huggingface tokens for tokenizer
+DEFAULT_EMBEDDING_MODEL = "gemini-embedding-001"
+RAG_K_DOCS = 5

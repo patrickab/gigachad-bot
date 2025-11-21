@@ -379,3 +379,61 @@ def render_chat_with_your_codebase() -> None:
             with st.chat_message("assistant"):
                 st.session_state.client.chat(augmented_prompt)
                 st.rerun()
+
+# RAG Related code
+
+def split_code_chunk(code_chunk: str) -> tuple[str, str]:
+    """Split a code chunk into natural language and code components.
+
+    The *natural language* part consists of the signature together with any
+    docstring and inline comments.  The *code* part contains the signature and
+    the executable code with docstrings and comments removed.
+    """
+
+    # Parse the chunk to obtain the first definition (function/class)
+    try:
+        module = ast.parse(code_chunk)
+        node = module.body[0]
+    except Exception:
+        return code_chunk, code_chunk
+
+    lines = code_chunk.splitlines()
+    signature = lines[0].strip() if lines else ""
+
+    # Extract docstring
+    docstring = ast.get_docstring(node) or ""
+
+    # Collect comments using tokenize
+    comments: list[str] = []
+    for tok in tokenize.generate_tokens(io.StringIO(code_chunk).readline):
+        if tok.type == tokenize.COMMENT:
+            comments.append(tok.string)
+
+    natural_language_parts = [signature]
+    if docstring:
+        natural_language_parts.append(f'"""{docstring}"""')
+    natural_language_parts.extend(comments)
+    natural_language_chunk = "\n".join(natural_language_parts).strip()
+
+    # Remove docstring from AST and unparse to code-only representation
+    try:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            body = node.body
+            if (
+                body
+                and isinstance(body[0], ast.Expr)
+                and isinstance(getattr(body[0], "value", None), ast.Constant)
+                and isinstance(body[0].value.value, str)
+            ):
+                body = body[1:]
+                node.body = body
+            code_chunk_clean = ast.unparse(node)
+        else:
+            code_chunk_clean = code_chunk
+    except Exception:
+        code_chunk_clean = code_chunk
+
+    return natural_language_chunk, code_chunk_clean
+
+
+

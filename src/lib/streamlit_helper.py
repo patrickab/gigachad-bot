@@ -10,6 +10,7 @@ import tempfile
 import fitz
 import pandas as pd
 import pymupdf4llm
+from rag_database.rag_database import RagDatabase, RAGQuery
 from st_copy import copy_button
 import streamlit as st
 from streamlit_paste_button import PasteResult, paste_image_button
@@ -23,7 +24,9 @@ from src.config import (
     MODELS_OLLAMA,
     MODELS_OPENAI,
     NANOTASK_MODEL,
+    OBSIDIAN_RAG,
     OBSIDIAN_VAULT,
+    RAG_K_DOCS,
 )
 from src.lib.flashcards import DATE_ADDED, NEXT_APPEARANCE, render_flashcards
 from src.lib.non_user_prompts import (
@@ -195,7 +198,7 @@ def chat_interface() -> None:
         render_messages(message_container)
 
         with st._bottom:
-            prompt = st.chat_input("Send a message")
+            prompt = st.chat_input("Send a message", key="chat_input")
 
         if prompt:
             with st.chat_message("user"):
@@ -262,6 +265,32 @@ def render_messages(message_container) -> None:  # noqa
                 options_message(assistant_message=assistant_msg, key_suffix=f"{i // 2}", user_message=user_msg, index=i)
 
 
+# ----------------------------------------------------- RAG Workspace functions ---------------------------------------------------- #
+@st.cache_resource
+def load_rag_database(doc_path: str) -> RagDatabase:
+    """Initialize RAG Database with .md documents."""
+    rag_db = RagDatabase()
+    titles = []
+    texts = []
+    documents = [f for f in os.listdir(doc_path) if f.endswith('.md')]
+
+    for doc in documents:
+        with open(f"{doc_path}/{doc}", "r") as f:
+            text = f.read()
+            texts.append(text)
+            titles.append(doc)
+
+    rag_db.add_documents(titles=titles, texts=texts)
+    return rag_db
+
+def rag_workspace() -> None:
+    """RAG Workspace for retrieval-augmented generation."""
+    rag_database = load_rag_database(f"{OBSIDIAN_VAULT}/{OBSIDIAN_RAG}/")
+    with st._bottom:
+
+        rag_query = st.chat_input("Send a message", key="rag_input")
+        rag_query = RAGQuery(query=rag_query, k_documents=RAG_K_DOCS)
+        rag_response = rag_database.rag_process_query(rag_query)
 
 # ----------------------------------------------------- PDF Workspace functions ----------------------------------------------------- #
 @st.cache_data
