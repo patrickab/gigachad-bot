@@ -83,24 +83,6 @@ def init_session_state() -> None:
         st.session_state.usr_msg_captions = []
 
 
-@st.cache_resource
-def _extract_text_from_pdf(file: io.BytesIO) -> str:
-    """Extract text from uploaded PDF file using pymupdf4llm."""
-    # Create temporary file - pymupdf4llm requires a file path but Streamlit's doesnt support that directly
-    with tempfile.TemporaryDirectory(delete=True) as tmpdir:
-        # Preserve filename to allow correct naming of images extracted from PDFs (future proof)
-        temp_file_path = os.path.join(tmpdir, file.name)
-        with open(temp_file_path, "wb") as f:
-            f.write(file.getvalue())
-            text = pymupdf4llm.to_markdown(doc=f, write_images=False)
-
-        # Get the height of first page
-        doc = fitz.open(temp_file_path)
-        doc_height = int(doc[0].rect.height * 1.5)  # Scale up for better visibility
-
-    return text, doc_height
-
-
 def application_side_bar() -> None:
     model = st.sidebar.selectbox(
         "Model",
@@ -117,13 +99,18 @@ def application_side_bar() -> None:
     with st.sidebar:
         st.markdown("---")
         with st.expander("Options", expanded=False):
+            st.session_state.bool_caption_usr_msg = st.toggle("Caption User Messages", key="caption_toggle", value=False)
+            st.markdown("---")
             if st.button("Reset History", key="reset_history_main"):
                 st.session_state.client.reset_history()
 
             st.markdown("---")
             file = st.file_uploader(type=["pdf", "py", "md", "cpp", "txt"], label="Upload file context (.pdf/.txt/.py)")
             if file is not None:
-                text = _extract_text_from_pdf(file)
+                if file.type == "application/pdf":
+                    text, _ = _extract_text_from_pdf(file)
+                else:
+                    text = file.getvalue().decode("utf-8")
                 st.session_state.file_context = text
 
             if st.session_state.client.messages != []:
@@ -198,6 +185,7 @@ def application_side_bar() -> None:
         st.session_state.selected_model = model
 
 
+# ---------------------------------------------------- Chat Interface functions ---------------------------------------------------- #
 def chat_interface() -> None:
     col_left, _ = st.columns([0.9, 0.1])
 
@@ -230,7 +218,8 @@ def chat_interface() -> None:
                     st.session_state.last_sent_image = st.session_state.pasted_image
                     st.session_state.pasted_image = PasteResult(image_data=None)
                     # Caption user message
-                    if LOCAL_NANOTASK_MODEL in MODELS_OLLAMA: # avoids functioncall for new users without ollama setup
+                    # Blocks new users without local ollama setup
+                    if LOCAL_NANOTASK_MODEL in MODELS_OLLAMA and st.session_state.bool_caption_usr_msg:
                         caption = _non_streaming_api_query(
                             model=LOCAL_NANOTASK_MODEL,
                             prompt=prompt[:80],  # limit prompt length for captioning to avoid long processing times
@@ -240,20 +229,41 @@ def chat_interface() -> None:
 
                     st.rerun()
 
+def render_messages(message_container) -> None:  # noqa
+    """Render chat messages from session state."""
 
-def _non_streaming_api_query(model: str, prompt: str, system_prompt: str) -> str:
-    """
-    Converts streaming response generator to generic string.
-    Required for @st.cache_data compatibility.
-    """
-    stream = st.session_state.client.api_query(model=model, user_message=prompt, system_prompt=system_prompt, chat_history=None)
-    response_text = ""
-    for chunk in stream:
-        response_text += chunk
+    message_container.empty()  # Clear previous messages
 
-    return response_text
+    messages = st.session_state.client.messages
+
+    if len(messages) == 0:
+        return
+
+    with message_container:
+        for i in range(0, len(messages), 2):
+            is_expanded = i == len(messages) - 2 # expand only the latest message
+            label = f"QA-Pair {i // 2}: " if len(st.session_state.usr_msg_captions) == 0 else st.session_state.usr_msg_captions[i // 2]
+            _, user_msg = messages[i]
+            _, assistant_msg = messages[i + 1]
+
+            with st.expander(label=label, expanded=is_expanded):
+                # Display user and assistant messages
+                with st.chat_message("user"):
+                    st.markdown(user_msg)
+                    # Copy button only works for expanded expanders
+                    if is_expanded:
+                        copy_button(user_msg)
+
+                with st.chat_message("assistant"):
+                    st.markdown(assistant_msg)
+                    if is_expanded:
+                        copy_button(assistant_msg)
+
+                options_message(assistant_message=assistant_msg, key_suffix=f"{i // 2}", user_message=user_msg, index=i)
 
 
+
+# ----------------------------------------------------- PDF Workspace functions ----------------------------------------------------- #
 @st.cache_data
 def _generate_learning_goals(text: str) -> str:
     """Generate learning goals from PDF text."""
@@ -305,26 +315,6 @@ def _generate_wiki_article(pdf_text: str, learning_goals: str) -> str:  # noqa
 
     return _non_streaming_api_query(model=MACROTASK_MODEL, prompt=wiki_prompt, system_prompt=SYS_PDF_TO_ARTICLE)
 
-
-def write_to_md(filename: str, message: str) -> None:
-    """Write an assistant response to .md (idx: 0 = most recent)."""
-    if not filename.endswith(".md"):
-        filename += ".md"
-
-    sys_prompt = SYS_NOTE_TO_OBSIDIAN_YAML.replace("{{file_name_no_ext}}", filename.split(".md")[0])
-    yaml_header = _non_streaming_api_query(
-        model=NANOTASK_MODEL,
-        prompt=message,
-        system_prompt=sys_prompt.replace("{{user_notes}}", message),
-    )
-
-    file_path = os.path.join(OBSIDIAN_VAULT, filename)
-    with open(file_path, "w", encoding="utf-8") as f:
-        f.write(yaml_header + "\n" + message)
-
-    os.makedirs("markdown", exist_ok=True)
-    with open(os.path.join("markdown", filename), "w", encoding="utf-8") as f:
-        f.write(yaml_header + "\n" + message)
 
 def pdf_workspace() -> None:
     """PDF Workspace for extracting learning goals and summary articles."""
@@ -385,6 +375,40 @@ def pdf_workspace() -> None:
         else:
             st.info("Upload a PDF in the 'PDF Viewer/Uploader' tab to generate flashcards.")
 
+
+# ------------------------------------------------------ Helper functions ----------------------------------------------------- #
+def _non_streaming_api_query(model: str, prompt: str, system_prompt: str) -> str:
+    """
+    Converts streaming response generator to generic string.
+    Required for @st.cache_data compatibility.
+    """
+    stream = st.session_state.client.api_query(model=model, user_message=prompt, system_prompt=system_prompt, chat_history=None)
+    response_text = ""
+    for chunk in stream:
+        response_text += chunk
+
+    return response_text
+
+def write_to_md(filename: str, message: str) -> None:
+    """Write an assistant response to .md (idx: 0 = most recent)."""
+    if not filename.endswith(".md"):
+        filename += ".md"
+
+    sys_prompt = SYS_NOTE_TO_OBSIDIAN_YAML.replace("{{file_name_no_ext}}", filename.split(".md")[0])
+    yaml_header = _non_streaming_api_query(
+        model=NANOTASK_MODEL,
+        prompt=message,
+        system_prompt=sys_prompt.replace("{{user_notes}}", message),
+    )
+
+    file_path = os.path.join(OBSIDIAN_VAULT, filename)
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(yaml_header + "\n" + message)
+
+    os.makedirs("markdown", exist_ok=True)
+    with open(os.path.join("markdown", filename), "w", encoding="utf-8") as f:
+        f.write(yaml_header + "\n" + message)
+
 def options_message(assistant_message: str, key_suffix: str, user_message: str = None, index: int = None) -> None: # noqa
     """Uses st.popover for a less intrusive save option."""
     with st.popover("Options"):
@@ -407,38 +431,6 @@ def options_message(assistant_message: str, key_suffix: str, user_message: str =
             del st.session_state.client.messages[index:index+2]
             st.rerun()
 
-def render_messages(message_container) -> None:  # noqa
-    """Render chat messages from session state."""
-
-    message_container.empty()  # Clear previous messages
-
-    messages = st.session_state.client.messages
-
-    if len(messages) == 0:
-        return
-
-    with message_container:
-        for i in range(0, len(messages), 2):
-            is_expanded = i == len(messages) - 2 # expand only the latest message
-            label = f"QA-Pair {i // 2}: " if len(st.session_state.usr_msg_captions) == 0 else st.session_state.usr_msg_captions[i // 2]
-            _, user_msg = messages[i]
-            _, assistant_msg = messages[i + 1]
-
-            with st.expander(label=label, expanded=is_expanded):
-                # Display user and assistant messages
-                with st.chat_message("user"):
-                    st.markdown(user_msg)
-                    # Copy button only works for expanded expanders
-                    if is_expanded:
-                        copy_button(user_msg)
-
-                with st.chat_message("assistant"):
-                    st.markdown(assistant_msg)
-                    if is_expanded:
-                        copy_button(assistant_msg)
-
-                options_message(assistant_message=assistant_msg, key_suffix=f"{i // 2}", user_message=user_msg, index=i)
-
 def apply_custom_css() -> None:
     """Apply custom CSS styles to Streamlit app."""
     st.markdown(
@@ -458,3 +450,22 @@ def apply_custom_css() -> None:
         """,
         unsafe_allow_html=True,
     )
+
+@st.cache_resource
+def _extract_text_from_pdf(file: io.BytesIO) -> str:
+    """Extract text from uploaded PDF file using pymupdf4llm."""
+    # Create temporary file - pymupdf4llm requires a file path but Streamlit's doesnt support that directly
+    # However, streamlits file uploader returns a BytesIO object which we can write to a temp file & read from there
+    # Using with context manager ensures temp file is deleted after use
+    with tempfile.TemporaryDirectory(delete=True) as tmpdir:
+        # Preserve filename to allow correct naming of images extracted from PDFs (future proof)
+        temp_file_path = os.path.join(tmpdir, file.name)
+        with open(temp_file_path, "wb") as f:
+            f.write(file.getvalue())
+            text = pymupdf4llm.to_markdown(doc=f, write_images=False)
+
+        # Get the height of first page
+        doc = fitz.open(temp_file_path)
+        doc_height = int(doc[0].rect.height * 1.5)  # Scale up for better visibility
+
+    return text, doc_height
