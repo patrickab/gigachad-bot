@@ -33,6 +33,7 @@ def ocr_workspace() -> None:
             )
         )
         st.session_state.imgs_sent.append(st.session_state.pasted_image)
+        st.rerun()
 
     if "ocr_response" in st.session_state:
 
