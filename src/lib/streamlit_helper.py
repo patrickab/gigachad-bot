@@ -82,6 +82,13 @@ def init_chat_variables() -> None:
 def paste_img_button() -> PasteResult:
     """Handle image pasting in Streamlit app."""
 
+    if st.session_state.imgs_sent != [EMPTY_PASTE_RESULT]:
+        with st.expander("Previously pasted images:"):
+            for idx, img in enumerate(st.session_state.imgs_sent):
+                if img != EMPTY_PASTE_RESULT:
+                    with st.expander(f"Image {idx+1}"):
+                        st.image(img.image_data, caption=f"Image {idx+1}")
+
     # check wether streamlit background is in dark mode or light mode
     bg_color = st.get_option("theme.base")  # 'light' or 'dark
     if bg_color == "dark":
