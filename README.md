@@ -1,22 +1,26 @@
-# Study Assistant
+# Giagachad Bot
 
-A study assistant with flexible, customizable behavior.
-Use your own chatbot on localhost via API-Calls.
-Permanently adjust knowledge level to your background - no more answers, that are too complex/trivial
-The sidebar allows you to select pre-defined system prompts and swap models on the fly, giving you fine-grained control over the assistant.
+A knowledge-management assistant with flexible, customizable behavior.
+Use your own chatbot on localhost via API-Calls to your preferred provider (current support: OpenAI, Gemini, Ollama - Claude support coming soon)
+Permanently adjust knowledge level to your background - no more answers, that are too trivial or too complex.
+The sidebar allows you to select pre-defined system prompts and swap models on the fly, giving you fine-grained control over your assistants behavior.
 
 ## Core Features
+- Retrieval Augmented Generation (RAG).
+- Optical Character Recognition (OCR) and img-to-LaTeX including webbased editor.
 - Clean markdown/LaTeX formatting.
-- Adjust the length, complexity of the answer.
-- LLM responses with table of contents incl. links to response sections
-- Support for all [Ollama](https://ollama.com/search) open-source models
-- Support for Gemini API & OpenAI API (easily extendable to any API)
+- Automatic adjustment of the answer length to the complexity of your query.
+- Fine-grained control over answer length via flexible system prompts.
+- Chat History Management & Storage on your local disk.
+- Support for all [Ollama](https://ollama.com/search) open-source models.
+- Support for Gemini API & OpenAI API (easily extendable to any API).
 - Manage your own prompt library & flexibly adjust chatbot behavior as you talk.
-- Store responses from the website directly in your [Obsidian](https://obsidian.com) vault
+- Store responses from the website directly in your [Obsidian](https://obsidian.com) vault.
+- Automatically generated YAML-headers for your Obsidian notes.
 
 ## Demo
-The image below shows response behavior for **the same input** with different **model/system prompt**
-<img width="2345" height="1439" alt="chatbot-demo" src="https://github.com/user-attachments/assets/77f87cc0-a14c-4b23-9410-0413bc3f5bd0" />
+
+https://github.com/user-attachments/assets/c21ec4b0-2c92-419c-a46e-36453efce309
 
 ## Installation & Setup
 - Clone the repo.
@@ -26,8 +30,5 @@ The image below shows response behavior for **the same input** with different **
 - Use `./run.sh` to start the application
 
 ## Work in Progress
-- Explore repositories visually and enrich your LLM-queries with context-aware code snippets by using Retrieval Augmented Generation (RAG).
-- Keep your conversations tidy with a compact, expandable history
-- Flexibly finetune LLM-behavior for brainstorming, generation of markdown learning material (markdown & Jupyter notebook) & explanations directly in your browser.
-
+- OCR-based PDF miner for conversion of entire books into embeddings.
 
