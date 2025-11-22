@@ -98,7 +98,7 @@ def pdf_workspace() -> None:
                                 if content.strip():
                                     st.markdown(content.strip()) # noqa
 
-                options_message(assistant_message=learning_goals, key_suffix="pdf_learning_goals") if file is not None else None
+                options_message(assistant_message=learning_goals, button_key="pdf_learning_goals") if file is not None else None
 
             with col_pdf:
                 st.header("Original PDF")
@@ -110,7 +110,7 @@ def pdf_workspace() -> None:
             if button:
                 wiki_article = _generate_wiki_article(pdf_text=pdf_text, learning_goals=learning_goals)
                 st.markdown(wiki_article if file is not None else "")
-                options_message(assistant_message=wiki_article, key_suffix="pdf_wiki_article") if file is not None else None
+                options_message(assistant_message=wiki_article, button_key="pdf_wiki_article") if file is not None else None
             else:
                 st.info("Click the button to generate the summary article.")
         else:

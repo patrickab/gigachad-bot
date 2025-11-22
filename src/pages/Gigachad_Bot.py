@@ -81,7 +81,7 @@ def render_messages(message_container) -> None:  # noqa
                     if is_expanded:
                         copy_button(assistant_msg)
 
-                options_message(assistant_message=assistant_msg, key_suffix=f"{i // 2}", user_message=user_msg, index=i)
+                options_message(assistant_message=assistant_msg, button_key=f"{i // 2}", user_message=user_msg, index=i)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@
 import io
 import os
 import tempfile
+from typing import Optional
 
 import fitz
 import pymupdf4llm
@@ -14,6 +15,7 @@ from src.config import (
     DIRECTORY_CHAT_HISTORIES,
     DIRECTORY_OBSIDIAN_VAULT,
     MODELS_GEMINI,
+    MODELS_OCR_OLLAMA,
     MODELS_OLLAMA,
     MODELS_OPENAI,
     NANOTASK_MODEL,
@@ -29,7 +31,7 @@ from src.lib.prompts import (
     SYS_PROMPT_ARCHITECT,
     SYS_QUICK_OVERVIEW,
 )
-from src.llm_client import LLMClient
+from src.llm_client import EMPTY_PASTE_RESULT, LLMClient
 
 AVAILABLE_LLM_MODELS = []
 
@@ -40,9 +42,9 @@ if os.getenv("OPENAI_API_KEY"):
     AVAILABLE_LLM_MODELS += MODELS_OPENAI
 
 if MODELS_OLLAMA != []:
-    ignore_embedding_models = ["embeddinggemma:300m"]
+    ignore_models = ["embeddinggemma:300m", *MODELS_OCR_OLLAMA]
     AVAILABLE_LLM_MODELS += MODELS_OLLAMA
-    AVAILABLE_LLM_MODELS = [model for model in AVAILABLE_LLM_MODELS if model not in ignore_embedding_models]
+    AVAILABLE_LLM_MODELS = [model for model in AVAILABLE_LLM_MODELS if model not in ignore_models]
 
 AVAILABLE_PROMPTS = {
     "Quick Overview": SYS_QUICK_OVERVIEW,
@@ -57,9 +59,16 @@ AVAILABLE_PROMPTS = {
 
 
 def init_session_state() -> None:
-    """Initialize session state variables. Called within main directly after startup."""
+    """
+    Initialize session state variables.
+    Called within main directly after startup.
+
+    Use for global session state variables.
+    """
     if "client" not in st.session_state:
         st.session_state.client = LLMClient()
+        st.session_state.imgs_sent = [EMPTY_PASTE_RESULT]
+        st.session_state.pasted_image = EMPTY_PASTE_RESULT
 
 def init_chat_variables() -> None:
     """Initialize session state variables for chat."""
@@ -68,12 +77,9 @@ def init_chat_variables() -> None:
         st.session_state.selected_model = AVAILABLE_LLM_MODELS[0]
         st.session_state.selected_prompt = next(iter(AVAILABLE_PROMPTS.keys()))
         st.session_state.system_prompts = AVAILABLE_PROMPTS
-        st.session_state.pasted_image = PasteResult(image_data=None)
-        st.session_state.imgs_sent = [PasteResult(image_data=None)]
         st.session_state.usr_msg_captions = []
-        st.session_state.client = LLMClient()
 
-def paste_img() -> PasteResult:
+def paste_img_button() -> PasteResult:
     """Handle image pasting in Streamlit app."""
 
     # check wether streamlit background is in dark mode or light mode
@@ -92,7 +98,15 @@ def paste_img() -> PasteResult:
                 text_color=button_color_txt,
                 hover_background_color=button_color_hover)
 
-    return paste_result
+    if paste_result not in st.session_state.imgs_sent:
+
+        st.session_state.pasted_image = paste_result
+        st.image(paste_result.image_data)
+        return paste_result
+
+    else: # set pasted_image to None
+        st.session_state.pasted_image = EMPTY_PASTE_RESULT
+        return EMPTY_PASTE_RESULT
 
 def default_sidebar_chat() -> None:
     """Render the default sidebar for chat applications."""
@@ -150,14 +164,7 @@ def default_sidebar_chat() -> None:
         st.markdown("---")
         with st.expander("Upload Image"):
 
-            paste_result = paste_img()
-            st.session_state.paste_result = paste_result
-
-            # Blocking logic because paste_image_button always returns the most recent pasted image
-            is_new_image = (paste_result.image_data is not None) and (paste_result.image_data != st.session_state.last_sent_image.image_data) # noqa
-            if is_new_image:
-                st.image(paste_result.image_data)
-                st.session_state.pasted_image = paste_result
+            paste_img_button()
 
         if os.path.exists(DIRECTORY_CHAT_HISTORIES):
             chat_histories = [f.replace('.csv', '') for f in os.listdir(DIRECTORY_CHAT_HISTORIES) if f.endswith('.csv')]
@@ -187,12 +194,17 @@ def default_sidebar_chat() -> None:
                                 )
                                 st.rerun()
 
-def _non_streaming_api_query(model: str, prompt: str, system_prompt: str) -> str:
+def _non_streaming_api_query(model: str, prompt: str, system_prompt: str, img:Optional[PasteResult] = EMPTY_PASTE_RESULT) -> str:
     """
     Converts streaming response generator to generic string.
     Required for @st.cache_data compatibility.
     """
-    stream = st.session_state.client.api_query(model=model, user_message=prompt, system_prompt=system_prompt, chat_history=None)
+    stream = st.session_state.client.api_query(
+        model=model,
+        user_message=prompt,
+        system_prompt=system_prompt,
+        chat_history=None, img=img)
+
     response_text = ""
     for chunk in stream:
         response_text += chunk
@@ -219,13 +231,13 @@ def write_to_md(filename: str, message: str) -> None:
     with open(os.path.join("markdown", filename), "w", encoding="utf-8") as f:
         f.write(yaml_header + "\n" + message)
 
-def options_message(assistant_message: str, key_suffix: str, user_message: str = None, index: int = None) -> None: # noqa
+def options_message(assistant_message: str, button_key: str, user_message: str = None, index: int = None) -> None: # noqa
     """Uses st.popover for a less intrusive save option."""
     with st.popover("Options"):
         with st.popover("Store answer"):
-            # Use the key_suffix to ensure widget keys are unique
-            filename = st.text_input("Filename", key=f"filename_input_{key_suffix}")
-            if st.button("Save to Markdown", key=f"save_to_md_{key_suffix}"):
+            # Use the button_key to ensure widget keys are unique
+            filename = st.text_input("Filename", key=f"filename_input_{button_key}")
+            if st.button("Save to Markdown", key=f"save_to_md_{button_key}"):
                 write_to_md(filename=filename, message=assistant_message)
                 st.success(f"Answer saved to {filename}")
 
