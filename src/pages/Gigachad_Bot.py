@@ -6,6 +6,8 @@ from config import LOCAL_NANOTASK_MODEL, MODELS_OLLAMA
 from lib.non_user_prompts import SYS_CAPTION_GENERATOR
 from lib.streamlit_helper import _non_streaming_api_query, default_sidebar_chat, options_message
 
+EMPTY_PASTE_RESULT = PasteResult(image_data=None)
+
 
 # ---------------------------------------------------- Chat Interface functions ---------------------------------------------------- #
 def chat_interface() -> None:
@@ -25,31 +27,32 @@ def chat_interface() -> None:
                 copy_button(prompt)
             with st.chat_message("assistant"):
                 prompt += st.session_state.file_context
+                system_prompt = st.session_state.system_prompts[st.session_state.selected_prompt]
+                img = st.session_state.pasted_image # defaults to EMPTY_PASTE_RESULT if no image pasted
 
                 st.write_stream(
                     st.session_state.client.chat(
                         model=st.session_state.selected_model,
                         user_message=prompt,
-                        img=st.session_state.pasted_image))
+                        system_prompt=system_prompt,
+                        img=img
+                    )
+                )
 
-                if st.session_state.client.messages[-1][1] == "":
-                    st.error("An error occurred while processing your request. Please try again.", icon="🚨")
-                    st.session_state.client.messages = st.session_state.client.messages[:-2]
-                else:
-                    # Clear pasted image after use
-                    st.session_state.last_sent_image = st.session_state.pasted_image
-                    st.session_state.pasted_image = PasteResult(image_data=None)
-                    # Caption user message
-                    # Blocks new users without local ollama setup
-                    if LOCAL_NANOTASK_MODEL in MODELS_OLLAMA and st.session_state.bool_caption_usr_msg:
-                        caption = _non_streaming_api_query(
-                            model=LOCAL_NANOTASK_MODEL,
-                            prompt=prompt[:80],  # limit prompt length for captioning to avoid long processing times
-                            system_prompt=SYS_CAPTION_GENERATOR
-                        )
-                        st.session_state.usr_msg_captions += [caption]
+                # Clear pasted image after use
+                st.session_state.last_sent_image = img
+                st.session_state.pasted_image = EMPTY_PASTE_RESULT
+                # Caption user message
+                # Blocks new users without local ollama setup
+                if LOCAL_NANOTASK_MODEL in MODELS_OLLAMA and st.session_state.bool_caption_usr_msg:
+                    caption = _non_streaming_api_query(
+                        model=LOCAL_NANOTASK_MODEL,
+                        prompt=prompt[:80],  # limit prompt length for captioning to avoid long processing times
+                        system_prompt=SYS_CAPTION_GENERATOR
+                    )
+                    st.session_state.usr_msg_captions += [caption]
 
-                    st.rerun()
+                st.rerun()
 
 def render_messages(message_container) -> None:  # noqa
     """Render chat messages from session state."""
@@ -65,8 +68,8 @@ def render_messages(message_container) -> None:  # noqa
         for i in range(0, len(messages), 2):
             is_expanded = i == len(messages) - 2 # expand only the latest message
             label = f"QA-Pair {i // 2}: " if len(st.session_state.usr_msg_captions) == 0 else st.session_state.usr_msg_captions[i // 2]
-            _, user_msg = messages[i]
-            _, assistant_msg = messages[i + 1]
+            user_msg = messages[i]["content"]
+            assistant_msg = messages[i + 1]["content"]
 
             with st.expander(label=label, expanded=is_expanded):
                 # Display user and assistant messages

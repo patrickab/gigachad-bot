@@ -4,8 +4,7 @@ from streamlit_ace import THEMES, st_ace
 
 from lib.non_user_prompts import SYS_OCR_TEXT_EXTRACTION
 from src.config import MODELS_OCR_OLLAMA
-from src.lib.streamlit_helper import options_message, paste_img_button
-from src.llm_client import EMPTY_PASTE_RESULT
+from src.lib.streamlit_helper import EMPTY_PASTE_RESULT, options_message, paste_img_button
 
 
 def ocr_sidebar() -> None:
@@ -22,7 +21,6 @@ def ocr_sidebar() -> None:
 def ocr_workspace() -> None:
     """OCR Workspace page for uploading images and extracting text using OCR."""
 
-
     is_new_image = st.session_state.pasted_image != EMPTY_PASTE_RESULT and st.session_state.pasted_image not in st.session_state.imgs_sent # noqa
     if is_new_image:
         st.session_state.ocr_response = st.write_stream(
@@ -37,12 +35,12 @@ def ocr_workspace() -> None:
 
     if "ocr_response" in st.session_state:
 
-        default = "chaos"
         with st.sidebar:
+            default_theme = "chaos"
             selected_theme = st.selectbox(
                 label="Editor Theme",
                 options=THEMES,
-                index=THEMES.index(default),
+                index=THEMES.index(default_theme),
                 key="ocr_editor_theme"
             )
 
