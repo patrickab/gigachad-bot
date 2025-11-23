@@ -6,6 +6,7 @@ from rag_database.rag_database import RagDatabase, RAGQuery
 import streamlit as st
 
 from src.config import DEFAULT_EMBEDDING_MODEL, DIRECTORY_EMBEDDINGS, DIRECTORY_OBSIDIAN_DOCS, DIRECTORY_OBSIDIAN_VAULT, RAG_K_DOCS
+from src.lib.streamlit_helper import nyan_cat_spinner
 
 DATABASE_LABAL_OBSIDIAN = "obsidian"
 
@@ -23,11 +24,13 @@ def rag_sidebar() -> None:
         )
 
         if st.button("Initialize RAG Database", key="load_rag_db"):
-            database = load_rag_database(
-                doc_path=f"{DIRECTORY_OBSIDIAN_VAULT}/{DIRECTORY_OBSIDIAN_DOCS}/",
-                model=st.session_state.selected_embedding_model,
-                label=DATABASE_LABAL_OBSIDIAN
-            )
+
+            with nyan_cat_spinner():
+                database = load_rag_database(
+                    doc_path=f"{DIRECTORY_OBSIDIAN_VAULT}/{DIRECTORY_OBSIDIAN_DOCS}/",
+                    model=st.session_state.selected_embedding_model,
+                    label=DATABASE_LABAL_OBSIDIAN
+                )
             st.session_state.rag_databases.setdefault(DATABASE_LABAL_OBSIDIAN, {})[st.session_state.selected_embedding_model] = database # noqa
 
         st.markdown("---")

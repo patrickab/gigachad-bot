@@ -1,9 +1,11 @@
 """Streamlit helper functions."""
 
+import base64
+from contextlib import contextmanager
 import io
 import os
 import tempfile
-from typing import Optional
+from typing import Iterator, Optional
 
 import fitz
 import pymupdf4llm
@@ -298,3 +300,25 @@ def _extract_text_from_pdf(file: io.BytesIO) -> str:
         doc_height = int(doc[0].rect.height * 1.5)  # Scale up for better visibility
 
     return text, doc_height
+
+@contextmanager
+def nyan_cat_spinner() -> Iterator:
+    """Display nyan cat spinner animation."""
+    file_path = "assets/nyan-cat.gif"
+    placeholder = st.empty()
+
+
+    with open(file_path, "rb") as f:
+        contents = f.read()
+        data_url = base64.b64encode(contents).decode("utf-8")
+
+    try:
+        with placeholder.container():
+            st.markdown(
+                f'<img src="data:image/gif;base64,{data_url}" alt="nyan cat gif" width="150">',
+                unsafe_allow_html=True,
+            )
+            yield
+
+    finally:
+        placeholder.empty()
