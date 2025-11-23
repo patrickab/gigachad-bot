@@ -33,7 +33,9 @@ from src.lib.prompts import (
     SYS_PROMPT_ARCHITECT,
     SYS_QUICK_OVERVIEW,
 )
-from src.llm_client import EMPTY_PASTE_RESULT, LLMClient
+from src.llm_client import LLMClient
+
+EMPTY_PASTE_RESULT = PasteResult(image_data=None)
 
 AVAILABLE_LLM_MODELS = []
 
@@ -136,7 +138,6 @@ def default_sidebar_chat() -> None:
         )
 
         if sys_prompt_name != st.session_state.selected_prompt:
-            st.session_state.client._set_system_prompt(st.session_state.system_prompts[sys_prompt_name])
             st.session_state.selected_prompt = sys_prompt_name
 
         if model != st.session_state.selected_model:

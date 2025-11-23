@@ -2,46 +2,178 @@ import base64
 import csv
 from io import BytesIO
 import os
+import shutil
+import subprocess
 from typing import Dict, Iterator, List, Optional, Tuple
 
-from google.genai import Client as GeminiClient
-from google.genai import types
+from litellm import completion
 from ollama import Client as OllamaClient
-from openai import OpenAI as OpenAIClient
+from openai import OpenAI as VLLMClient
 from streamlit_paste_button import PasteResult
 
-from src.config import MODELS_GEMINI, MODELS_OLLAMA, MODELS_OPENAI
+from src.config import MODELS_GEMINI, MODELS_OPENAI
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 EMPTY_PASTE_RESULT = PasteResult(image_data=None)
 
-class LLMClient:
-    """
-    LLM client for streaming chat completions.
-    Serves as wrapper for Ollama, OpenAI & Gemini clients.
 
-    Includes:
-       - System prompt management
-       - Multimodal support (text + images)
-       - Chat history management (store/load/reset)
+def _has_nvidia_gpu() -> bool:
     """
+    Check for NVIDIA GPU availability using standard library only.
+    Returns True if 'nvidia-smi' is found and executes successfully.
+    """
+    # 1. Check if the binary exists in PATH
+    if not shutil.which("nvidia-smi"):
+        return False
+            
+    # 2. Try executing it to ensure drivers are actually working
+    try:
+        # Run nvidia-smi to query GPU count. 
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=count", "--format=csv,noheader"], 
+            capture_output=True, 
+            text=True, 
+            timeout=3
+        )
+
+        if result.returncode == 0:
+            count = int(result.stdout.strip())
+            return count > 0
+
+    except (subprocess.SubprocessError, ValueError):
+        return False
+
+    return False
+
+API_CLIENT_INFO = {
+    "is_ollama_installed": shutil.which("ollama") is not None,
+    "is_gpu_available": False #_has_nvidia_gpu() # GPU behavior remains to be tested
+}
+
+class LLMClient:
 
     def __init__(self) -> None:
-        self.messages: List[Tuple[str, str]] = []  # [(role, message)]
-        self.sys_prompt: str = ""
 
-        if OPENAI_API_KEY is not None:
-            self.openai_client = OpenAIClient(api_key=OPENAI_API_KEY)
+        self.messages: List[Tuple[str, str]] = [] # [role, message] - only store text for efficiency
+        self.sys_prompt = ""
 
-        if GEMINI_API_KEY is not None:
-            self.gemini_client = GeminiClient(api_key=GEMINI_API_KEY)
-
-        if MODELS_OLLAMA != []:
+        if API_CLIENT_INFO["is_ollama_installed"]:
             self.ollama_client = OllamaClient(host="http://localhost:11434")
+        if API_CLIENT_INFO["is_gpu_available"]:
+            self.vllm_client = VLLMClient(base_url="http://localhost:8000")
 
-    def _set_system_prompt(self, system_prompt: str) -> None:
-        self.sys_prompt = system_prompt
+    # -------------------------------- Core LLM Interaction -------------------------------- #
+
+    def _process_image(self, img: PasteResult) -> Optional[str]:
+        buffer = BytesIO()
+        img.image_data.save(buffer, format="PNG")
+        base64_image = base64.b64encode(buffer.getvalue()).decode('utf-8')
+        return f"data:image/png;base64,{base64_image}"
+
+    def api_query(
+        self, model: str,
+        user_message: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+        chat_history: Optional[List[Tuple[str, str]]]=None,
+        img: Optional[PasteResult] = EMPTY_PASTE_RESULT,
+        **kwargs: Dict[str, any]
+    ) -> Iterator[str]:
+        """
+        Stateless API call using LiteLLM to unify the request format.
+        Routes to the correct local/cloud settings based on __init__ detection.
+        """
+
+        # 1. Set defaults
+        api_base = None
+        custom_llm_provider = None
+
+        # 2. Prepare Messages
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        if chat_history:
+            messages.extend(chat_history)
+        if user_message:
+            if img.image_data is None:
+                # Text-only Format: Simple string
+                content_payload = user_message
+            else:
+                base64_img = self._process_image(img)
+                # Multimodal Format: List of dictionaries
+                content_payload = [
+                    {"type": "text", "text": user_message},
+                    {"type": "image_url", "image_url": {"url": base64_img}}
+                ]
+
+            messages.append({"role": "user", "content": content_payload})
+
+        # 3. Determine Provider
+        is_cloud_model = (model in MODELS_OPENAI) or (model in MODELS_GEMINI)
+
+        if not is_cloud_model:
+            # Routing Logic: Prefer vLLM (GPU) > Ollama (CPU)
+            if API_CLIENT_INFO["is_gpu_available"]:
+                # Use vLLM settings
+                api_base = str(self.vllm_client.base_url)
+                custom_llm_provider = "openai" # vLLM mimics OpenAI
+            
+            else:
+                # Use Ollama settings
+                api_base = "http://localhost:11434"
+                custom_llm_provider = "ollama"
+
+                # LiteLLM requires 'ollama/' prefix
+                if not model.startswith("ollama/"):
+                    model = f"ollama/{model}"
+        else:
+            if model in MODELS_OPENAI:
+                model = f"openai/{model}"
+            elif model in MODELS_GEMINI:
+                model = f"gemini/{model}"
+
+        # 4. Execute request via LiteLLM
+        try:
+            assert messages[0]['role'] == 'system'
+            response = completion(
+                model=model,
+                messages=messages,
+                stream=True,
+                api_base=api_base,
+                custom_llm_provider=custom_llm_provider,
+                **kwargs # Pass temperature, top_p, etc.
+            )
+
+            for chunk in response:
+                content = chunk.choices[0].delta.content
+                if content:
+                    yield content
+
+        except Exception as e:
+            yield f"API Error: {e!s}"
+
+    def chat(self, model: str,
+        user_message: str,
+        system_prompt: Optional[str] = "",
+        img: Optional[PasteResult] = EMPTY_PASTE_RESULT,
+        **kwargs: Dict[str, any]
+    ) -> Iterator[str]:
+        """Stateful Chat Wrapper"""
+        response = ""
+        stream = self.api_query(
+            model=model,
+            user_message=user_message,
+            system_prompt=system_prompt,
+            chat_history=self.messages,
+            img=img,
+            **kwargs)
+
+        for chunk in stream:
+            response += chunk
+            yield chunk
+
+        self.messages.append({"role": "user", "content": user_message})
+        self.messages.append({"role": "assistant", "content": response})
+
+    # -------------------------------- Streamlit State Management -------------------------------- #
 
     def store_history(self, filename: str) -> None:
         """Store message history to filesytem."""
@@ -60,155 +192,4 @@ class LLMClient:
             self.messages = [(row['role'], row['message']) for row in reader]
 
     def reset_history(self) -> None:
-        """Reset the chat history."""
         self.messages = []
-
-    def _query_openai(self, model: str, messages: List[Dict]) -> Iterator[str]:
-        stream = self.openai_client.chat.completions.create(
-            model=model,
-            messages=messages,
-            stream=True,
-        )
-        for chunk in stream:
-            content = chunk.choices[0].delta.content
-            if content:
-                yield content
-
-    def _query_gemini(self, model: str, system_prompt: str, contents: List) -> Iterator[str]:
-        stream_resp = self.gemini_client.models.generate_content_stream(
-            model=model,
-            config=types.GenerateContentConfig(system_instruction=system_prompt, top_p=0.96, temperature=0.2),
-            contents=contents,
-        )
-        for chunk in stream_resp:
-            if chunk.parts:
-                for part in chunk.parts:
-                    if part.text:
-                        yield part.text
-
-    def _query_ollama(self, model: str, messages: List[Dict]) -> Iterator[str]:
-        stream = self.ollama_client.chat(
-            model=model,
-            messages=messages,
-            stream=True,
-        )
-        for chunk in stream:
-            content = chunk.get("message", {}).get("content") or chunk.get("response") or ""
-            if content:
-                yield content
-
-    def api_query(
-        self, model: str,
-        user_message: Optional[str]=None,
-        system_prompt: Optional[str]=None,
-        chat_history: Optional[List[Tuple[str, str]]]=None,
-        img: Optional[PasteResult]=EMPTY_PASTE_RESULT
-    ) -> Iterator[str]:
-        """
-        Make a single API query to the LLM.
-        Supports Gemini, OpenAI, and Ollama models.
-        """
-
-        def _convert_img_to_bytes(img: PasteResult, format: str = 'png') -> bytes:
-            """Converts a Pillow Image object into bytes."""
-            buffer = BytesIO()
-            img.save(buffer, format=format)
-            return buffer.getvalue()
-
-        def _convert_bytes_to_base64(img_bytes: bytes) -> str:
-            """Convert bytes to base64 string."""
-            return base64.b64encode(img_bytes).decode('utf-8')
-
-        byte_image = None
-        base_64_image = None
-        if img and img.image_data:
-            byte_image = _convert_img_to_bytes(img.image_data)
-            base_64_image = _convert_bytes_to_base64(byte_image)
-
-        if model in MODELS_OPENAI:
-
-            # Load History
-            messages = (
-                ([{"role": "system", "content": system_prompt}])
-                + [{"role": role, "content": msg} for role, msg in chat_history or []]
-            )
-
-            # Prepare user message
-            user_content: List[Dict] = []
-            if user_message:
-                user_content = [{"type": "text", "text": user_message}]
-            if base_64_image:
-                user_content.append({
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/png;base64,{base_64_image}"
-                    }
-                })
-
-            # Assemble final message
-            messages.append({"role": "user", "content": user_content})
-            yield from self._query_openai(model, messages)
-
-        if model in MODELS_GEMINI:
-
-            # Load History
-            history = [
-                {
-                    "role": ("model" if role == "assistant" else "user"),
-                    "parts": [types.Part(text=msg)],
-                }
-                for role, msg in chat_history or []
-            ]
-
-            # Prepare user message
-            user_parts: List[types.Part] = []
-            if user_message:
-                user_parts = [types.Part(text=user_message)]
-            if byte_image:
-                user_parts.append(
-                    types.Part.from_bytes(
-                        data=byte_image,
-                        mime_type="image/png")
-                    )
-
-            # Assemble final contents
-            contents = [*history, types.Content(role="user", parts=user_parts)]
-            yield from self._query_gemini(model, system_prompt, contents)
-
-        if model in MODELS_OLLAMA:
-
-            # Load History
-            messages = [{"role": "system", "content": system_prompt}]
-            if chat_history:
-                messages.extend([{"role": role, "content": msg} for role, msg in chat_history])
-
-            # Prepare user message
-            user_message_payload: Dict = {"role": "user", "content": ""}
-            if user_message:
-                user_message_payload["content"] = user_message
-            if base_64_image:
-                user_message_payload["images"] = [base_64_image]
-
-            # Assemble final message
-            messages.append(user_message_payload)
-            yield from self._query_ollama(model, messages)
-
-    def chat(self, model: str, user_message: str, img: Optional[PasteResult]=EMPTY_PASTE_RESULT) -> Iterator[str]:
-        response = ""
-        try:
-            for chunk in self.api_query(
-                                model=model,
-                                user_message=user_message,
-                                system_prompt=self.sys_prompt,
-                                chat_history=self.messages,
-                                img=img):
-
-                    response += chunk
-                    yield chunk
-        except Exception as e: # noqa
-            # yield exception to avoid breaking the stream - will be handled in streamlit_helper.py
-            # This is a workaround due to limitations in streaming error handling.
-            # Error handling only works if assistant response is empty.
-            yield Exception("Errororororor!!11!")
-        self.messages.append(("user", user_message))
-        self.messages.append(("assistant", response))
