@@ -99,9 +99,9 @@ class LLMClient:
 
     def api_query(
         self, model: str,
-        user_message: str,
-        system_prompt: str,
-        chat_history: Optional[List[Tuple[str, str]]],
+        user_message: Optional[str]=None,
+        system_prompt: Optional[str]=None,
+        chat_history: Optional[List[Tuple[str, str]]]=None,
         img: Optional[PasteResult]=EMPTY_PASTE_RESULT
     ) -> Iterator[str]:
         """
@@ -134,7 +134,9 @@ class LLMClient:
             )
 
             # Prepare user message
-            user_content = [{"type": "text", "text": user_message}]
+            user_content: List[Dict] = []
+            if user_message:
+                user_content = [{"type": "text", "text": user_message}]
             if base_64_image:
                 user_content.append({
                     "type": "image_url",
@@ -159,7 +161,9 @@ class LLMClient:
             ]
 
             # Prepare user message
-            user_parts = [types.Part(text=user_message)]
+            user_parts: List[types.Part] = []
+            if user_message:
+                user_parts = [types.Part(text=user_message)]
             if byte_image:
                 user_parts.append(
                     types.Part.from_bytes(
@@ -179,7 +183,9 @@ class LLMClient:
                 messages.extend([{"role": role, "content": msg} for role, msg in chat_history])
 
             # Prepare user message
-            user_message_payload = {"role": "user", "content": user_message}
+            user_message_payload: Dict = {"role": "user", "content": ""}
+            if user_message:
+                user_message_payload["content"] = user_message
             if base_64_image:
                 user_message_payload["images"] = [base_64_image]
 

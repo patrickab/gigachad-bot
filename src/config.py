@@ -40,3 +40,6 @@ DIRECTORY_EMBEDDINGS = "./embeddings"
 # Expects API-Keys in environment variables & Huggingface tokens for tokenizer
 DEFAULT_EMBEDDING_MODEL = "gemini-embedding-001"
 RAG_K_DOCS = 5
+
+### OCR related config
+MODELS_OCR_OLLAMA = ["gemini-2.5-flash","qwen3-vl:2b", "qwen3-vl:8b"]

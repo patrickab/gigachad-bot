@@ -14,6 +14,7 @@ dependencies = [
     "rag-database @ git+ssh://git@github.com/patrickab/rag-database.git@main",
     "st-copy>=1.1.2",
     "streamlit[pdf]>=1.51.0",
+    "streamlit-ace>=0.1.1",
     "streamlit-agraph>=0.0.45",
     "streamlit-paste-button>=0.1.2",
     "tiktoken>=0.11.0",
