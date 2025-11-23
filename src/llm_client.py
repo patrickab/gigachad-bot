@@ -45,9 +45,6 @@ def _has_nvidia_gpu() -> bool:
     return False
 
 API_CLIENT_INFO = {
-    "openai_api_key": os.getenv("OPENAI_API_KEY"),
-    "gemini_api_key": os.getenv("GEMINI_API_KEY"),
-    "anthropic_api_key": os.getenv("ANTHROPIC_API_KEY"),
     "is_ollama_installed": shutil.which("ollama") is not None,
     "is_gpu_available": False #_has_nvidia_gpu() # GPU behavior remains to be tested
 }
