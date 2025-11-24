@@ -7,8 +7,6 @@ dependencies = [
     "litellm>=1.80.5",
     "networkx>=3.3",
     "numpy>=2.3.2",
-    "ollama>=0.6.0",
-    "openai>=1.98.0",
     "polars>=1.32.3",
     "pymupdf4llm>=0.0.27",
     "rag-database @ git+ssh://git@github.com/patrickab/rag-database.git@main",
