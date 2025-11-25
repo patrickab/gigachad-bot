@@ -1,3 +1,6 @@
 markdown
 img
 __pycache__
+src/static
+chat_histories
+data

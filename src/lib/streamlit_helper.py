@@ -69,6 +69,12 @@ def init_session_state() -> None:
 
     Use for global session state variables.
     """
+    # Create static directory for serving PDFs
+    st.session_state.static_dir = os.path.join("src", "static")
+    st.session_state.app_static_dir = os.path.join("app", "static")
+    if not os.path.exists(st.session_state.static_dir):
+        os.makedirs(st.session_state.static_dir)
+
     if "client" not in st.session_state:
         st.session_state.workspace = "main"
         st.session_state.client = LLMClient()
@@ -83,6 +89,14 @@ def init_chat_variables() -> None:
         st.session_state.selected_prompt = next(iter(AVAILABLE_PROMPTS.keys()))
         st.session_state.system_prompts = AVAILABLE_PROMPTS
         st.session_state.usr_msg_captions = []
+
+def print_metrics(dict_metrics: dict[str,int|float], n_columns: Optional[int]=None) -> None:
+    """Print metrics in Streamlit columns."""
+    if n_columns is None:
+        n_columns = len(dict_metrics)
+    cols = st.columns(n_columns)
+    for idx, (metric_name, metric_value) in enumerate(dict_metrics.items()):
+        cols[idx % n_columns].metric(f"**{metric_name}:**", value=metric_value, border=True)
 
 def paste_img_button() -> PasteResult:
     """Handle image pasting in Streamlit app."""
