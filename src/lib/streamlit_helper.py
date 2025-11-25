@@ -135,7 +135,7 @@ def paste_img_button() -> PasteResult:
         st.session_state.pasted_image = EMPTY_PASTE_RESULT
         return EMPTY_PASTE_RESULT
 
-def editor(text_to_edit: str, language: str) -> str:
+def editor(text_to_edit: str, language: str, key: str) -> str:
     """Create an ACE editor for displaying OCR extracted text."""
     default_theme = "chaos"
     selected_theme = st.selectbox(
@@ -147,7 +147,7 @@ def editor(text_to_edit: str, language: str) -> str:
 
     line_count = text_to_edit.count("\n") + 1
     adaptive_height = line_count*15
-    content = st_ace(value=text_to_edit, language=language, height=adaptive_height, key="latex_editor", theme=selected_theme) # noqa
+    content = st_ace(value=text_to_edit, language=language, height=adaptive_height, key=f"editor_{key}", theme=selected_theme)
     content # noqa
     return content
 
