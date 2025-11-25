@@ -142,9 +142,11 @@ def vlm_markdown_miner() -> None:
     st.title("VLM Markdown Miner")
     
     st.markdown("""
-    **Hardware Requirements:**
+    **Recommended Hardware:**
     - GPU with at least 8GB VRAM.
     - CPU with at least 16GB RAM.
+
+    Note: short, simple PDFs without images can be processed with CPU only - may be very very slow.
     """)
 
     if st.button("Run VLM Markdown Miner", key="run_vlm_markdown_miner"):
