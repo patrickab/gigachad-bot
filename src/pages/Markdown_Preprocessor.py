@@ -3,7 +3,7 @@ import subprocess
 
 import streamlit as st
 
-from src.config import DIRECTORY_RAG_INPUT, DIRECTORY_VLM_OUTPUT
+from src.config import DIRECTORY_RAG_INPUT, DIRECTORY_VLM_OUTPUT, SERVER_APP_RAG_INPUT
 from src.lib.streamlit_helper import editor
 
 
@@ -29,7 +29,7 @@ def data_wrangler(vlm_output: list[str]) -> None:
         # Convert ![](/images/<img-filename>) to ![](){DIRECTORY_RAG_INPUT/images/<img-filename>} image paths
         with open(f"{DIRECTORY_RAG_INPUT}/{output}/{md_file}", "r") as f:
             md_content = f.read()
-            md_content = md_content.replace("![](images", f"![]({DIRECTORY_RAG_INPUT}/{output}/images")
+            md_content = md_content.replace("![](images", f"![]({SERVER_APP_RAG_INPUT}/{output}/images")
             with open(f"{DIRECTORY_RAG_INPUT}/{output}/{md_file}", "w") as f:
                 f.write(md_content)
 
@@ -54,7 +54,6 @@ def markdown_preprocessor() -> None:
             contents = os.listdir(f"{DIRECTORY_RAG_INPUT}/{output}")
             md_file = next(f for f in contents if f.endswith(".md"))
             md_filepath = f"{DIRECTORY_RAG_INPUT}/{output}/{md_file}"    
-            imgs_path = f"{DIRECTORY_RAG_INPUT}/{output}/images"
 
             with open(md_filepath, "r") as f:
                 md_content = f.read()

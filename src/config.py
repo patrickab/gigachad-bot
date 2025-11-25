@@ -3,6 +3,7 @@ import subprocess
 # Fileserver data location
 SERVER_STATIC_DIR = "src/static"
 SERVER_APP_STATIC_DIR = "app/static"
+SERVER_APP_RAG_INPUT = SERVER_APP_STATIC_DIR + "/rag_input" # path used for fileserver access
 
 # Set to empty string if you dont use Obsidian
 # Note: You can sync obsidian with Nextcloud, Dropbox, etc. to enable cloud integration of your notes.
