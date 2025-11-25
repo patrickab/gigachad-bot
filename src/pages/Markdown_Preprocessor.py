@@ -37,6 +37,13 @@ def markdown_preprocessor() -> None:
                 os.makedirs(f"{DIRECTORY_RAG_INPUT}/{output}", exist_ok=True)
                 subprocess.run(["cp", "-r", md_filepath, imgs_path, f"./{DIRECTORY_RAG_INPUT}/{output}"], check=True)
 
+                # Convert ![](/images/<img-filename>) to ![](){DIRECTORY_RAG_INPUT/images/<img-filename>} image paths
+                with open(f"{DIRECTORY_RAG_INPUT}/{output}/{md_file}", "r") as f:
+                    md_content = f.read()
+                    md_content = md_content.replace("![](/images/", f"![]({DIRECTORY_RAG_INPUT}/{output}/images/")
+                    with open(f"{DIRECTORY_RAG_INPUT}/{output}/{md_file}", "w") as f:
+                        f.write(md_content)
+
         # Display editor & preview
         for output in vlm_output:
 
