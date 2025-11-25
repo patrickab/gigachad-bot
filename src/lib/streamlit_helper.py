@@ -11,6 +11,7 @@ import fitz
 import pymupdf4llm
 from st_copy import copy_button
 import streamlit as st
+from streamlit_ace import THEMES, st_ace
 from streamlit_paste_button import PasteResult, paste_image_button
 
 from src.config import (
@@ -133,6 +134,22 @@ def paste_img_button() -> PasteResult:
     else: # set pasted_image to None
         st.session_state.pasted_image = EMPTY_PASTE_RESULT
         return EMPTY_PASTE_RESULT
+
+def editor(text_to_edit: str, language: str) -> str:
+    """Create an ACE editor for displaying OCR extracted text."""
+    default_theme = "chaos"
+    selected_theme = st.selectbox(
+        label="Editor Theme",
+        options=THEMES,
+        index=THEMES.index(default_theme),
+        key="ocr_editor_theme"
+    )
+
+    line_count = text_to_edit.count("\n") + 1
+    adaptive_height = line_count*15
+    content = st_ace(value=text_to_edit, language=language, height=adaptive_height, key="latex_editor", theme=selected_theme) # noqa
+    content # noqa
+    return content
 
 def default_sidebar_chat() -> None:
     """Render the default sidebar for chat applications."""

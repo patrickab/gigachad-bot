@@ -1,10 +1,9 @@
 
 import streamlit as st
-from streamlit_ace import THEMES, st_ace
 
 from lib.non_user_prompts import SYS_OCR_TEXT_EXTRACTION
 from src.config import MODELS_OCR_OLLAMA
-from src.lib.streamlit_helper import EMPTY_PASTE_RESULT, options_message, paste_img_button
+from src.lib.streamlit_helper import EMPTY_PASTE_RESULT, editor, options_message, paste_img_button
 
 
 def ocr_sidebar() -> None:
@@ -34,21 +33,8 @@ def ocr_workspace() -> None:
         st.rerun()
 
     if "ocr_response" in st.session_state:
-
-        with st.sidebar:
-            default_theme = "chaos"
-            selected_theme = st.selectbox(
-                label="Editor Theme",
-                options=THEMES,
-                index=THEMES.index(default_theme),
-                key="ocr_editor_theme"
-            )
-
         options_message(assistant_message=st.session_state.ocr_response, button_key="ocr_paste")
-        line_count = st.session_state.ocr_response.count("\n") + 1
-        adaptive_height = line_count*15
-        content = st_ace(value=st.session_state.ocr_response, language="latex", height=adaptive_height, key="latex_editor", theme=selected_theme) # noqa
-        content # noqa
+        editor()
 
 
 def main() -> None:
