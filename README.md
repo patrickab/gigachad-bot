@@ -4,7 +4,8 @@ A knowledge-management assistant with flexible, customizable behavior.
 Use your own chatbot
 - (a) via CPU/GPU local inference
 - (b) via API-Calls to your preferred provider
-- currently tested: OpenAI, Gemini, Ollama   -   currently supported: any [litellm](https://www.litellm.ai/) compatible provider works
+- **currently tested**: OpenAI, Gemini, Ollama
+- **currently supported**: any [litellm](https://www.litellm.ai/) compatible provider works
 
 Permanently adjust knowledge level to your background - no more answers, that are too trivial or too complex.
 The sidebar allows you to select pre-defined system prompts and swap models on the fly, giving you fine-grained control over your assistants behavior.
@@ -33,5 +34,6 @@ https://github.com/user-attachments/assets/c21ec4b0-2c92-419c-a46e-36453efce309
 
 ## Work in Progress
 - OCR-based PDF miner for conversion of entire books into embeddings.
+
 
 
