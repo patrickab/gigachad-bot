@@ -10,9 +10,10 @@ from src.lib.streamlit_helper import print_metrics
 def init_pdf_preprocessor() -> None:
     """Initialize PDF Preprocessor session state variables."""
     # Initialize session state for persistent storage across reruns
-    if 'copy_uploaded_files' not in st.session_state:
-        st.session_state.copy_uploaded_files = []
+    if 'uploaded_files' not in st.session_state:
+        st.session_state.uploaded_files = []
         st.session_state.preprocessed_filepaths = []
+        st.session_state.deleted_filepaths = []
         st.session_state.total_pdfs_preprocessed = 0
         st.session_state.total_mb_preprocessed = 0.0
         st.session_state.total_pages_preprocessed = 0
@@ -32,61 +33,65 @@ def pdf_preprocessor() -> None:
     with cols[0]:
         uploaded_files = st.file_uploader("Upload PDFs", type=["pdf"], accept_multiple_files=True, key="pdf_preprocessor_uploader")
 
-    # Block execution / notify user
-    if not uploaded_files:
-        with cols[0]:
-            st.info("Upload a file to begin preprocessing.")
-        return
+        if not uploaded_files: # Block execution / notify user
+            with cols[0]:
+                st.info("Upload a file to begin preprocessing.")
+            return
 
     # Convert single file to list for uniform processing
     if not isinstance(uploaded_files, list):
         uploaded_files = [uploaded_files] if uploaded_files is not None else []
 
     # Store uploaded files in seperate list due to Streamlit uploader limitations
-    processed_names = {f.name for f in st.session_state.copy_uploaded_files}
-    if st.session_state.copy_uploaded_files == [] and st.session_state.total_pdfs_preprocessed == 0:
+    processed_names = {f.name for f in st.session_state.uploaded_files}
+    if st.session_state.uploaded_files == [] and st.session_state.total_pdfs_preprocessed == 0:
         for file in uploaded_files:
             if file.name not in processed_names:
-                st.session_state.copy_uploaded_files.append(file)
+                st.session_state.uploaded_files.append(file)
 
                 # Store file on server for iframe rendering
                 file_path = os.path.join(st.session_state.static_dir, file.name)
                 with open(file_path, "wb") as f:
                     f.write(file.getbuffer())
 
-    if len(st.session_state.preprocessed_filepaths) == len(st.session_state.copy_uploaded_files):
-        st.success("All uploaded PDFs have been preprocessed - proceed to VLM Extraction or upload new PDFs.")
-        return
+    processed_filepaths = st.session_state.preprocessed_filepaths + st.session_state.deleted_filepaths
+    if len(processed_filepaths) == len(uploaded_files):
+        with cols[0]:
+            st.success("All uploaded PDFs have been preprocessed - proceed to VLM Extraction or upload new PDFs.")
+        with cols[1]:
+            if st.session_state.pdf_preprocessor_metrics:
+                print_metrics(dict_metrics=st.session_state.pdf_preprocessor_metrics, n_columns=3)
+            return
 
     with cols[1]:
 
-        pdf_preprocessor_metrics = {
-            "Total PDFs (in memory)": len(st.session_state.copy_uploaded_files),
-            "Total File Size MB (in memory)": round(sum(st.session_state.copy_uploaded_files[i].size for i in range(len(st.session_state.copy_uploaded_files)))/(1024*1024), 1), # noqa
-            "Total Pages (in memory)": sum(fitz.open(stream=st.session_state.copy_uploaded_files[i].getvalue(), filetype="pdf").page_count for i in range(len(st.session_state.copy_uploaded_files))), # noqa
+        st.session_state.pdf_preprocessor_metrics = {
+            "Total PDFs (in memory)": len(st.session_state.uploaded_files),
+            "Total File Size MB (in memory)": round(sum(st.session_state.uploaded_files[i].size for i in range(len(st.session_state.uploaded_files)))/(1024*1024), 1), # noqa
+            "Total Pages (in memory)": sum(fitz.open(stream=st.session_state.uploaded_files[i].getvalue(), filetype="pdf").page_count for i in range(len(st.session_state.uploaded_files))), # noqa
             "Total PDFs (preprocessed)": st.session_state.total_pdfs_preprocessed,
             "Total File Size MB (preprocessed)": f"{st.session_state.total_mb_preprocessed:.2f}",
             "Total Pages (preprocessed)": st.session_state.total_pages_preprocessed,
         }
-        print_metrics(dict_metrics=pdf_preprocessor_metrics, n_columns=3)
+        print_metrics(dict_metrics=st.session_state.pdf_preprocessor_metrics, n_columns=3)
 
     st.divider()
 
-    relocated_filepaths = [os.path.join(st.session_state.static_dir, f.name) for f in st.session_state.copy_uploaded_files]
+    relocated_filepaths = [os.path.join(st.session_state.static_dir, f.name) for f in st.session_state.uploaded_files]
 
 
     pdf_cols = st.columns([1,1])
 
-    for i in range(len(st.session_state.copy_uploaded_files[:2])): # Restrict to first 2 PDFs for memory efficiency
-        with pdf_cols[i%2], st.expander(f"Preview: {st.session_state.copy_uploaded_files[i].name}", expanded=True):
+    for i in range(len(st.session_state.uploaded_files[:2])): # Restrict to first 2 PDFs for memory efficiency
+        with pdf_cols[i%2], st.expander(f"Preview: {st.session_state.uploaded_files[i].name}", expanded=True):
 
-            file_bytes = st.session_state.copy_uploaded_files[i].getvalue()
+            file_bytes = st.session_state.uploaded_files[i].getvalue()
             doc = fitz.open(stream=file_bytes, filetype="pdf")
             num_pages = doc.page_count
 
             metrics_dict = {
                 "Pages": num_pages,
-                "File Size (MB)": f"{st.session_state.copy_uploaded_files[i].size/(1024*1024):.2f}",
+                "File Size (MB)": f"{st.session_state.uploaded_files[i].size/(1024*1024):.2f}",
             }
             print_metrics(dict_metrics=metrics_dict)
 
@@ -99,13 +104,11 @@ def pdf_preprocessor() -> None:
 
             cols = st.columns(2)
             if cols[0].button("Delete", type="primary", use_container_width=True, key=f"delete_button_{i}"):
-                # To ensure proper deletion, we need to manage the file on disk as well
-                # This requires that the file was saved in the first place, which the original code did.
-                if os.path.exists(relocated_filepaths[i]):
-                    os.remove(relocated_filepaths[i])
-                st.session_state.copy_uploaded_files.pop(i)
+                st.session_state.uploaded_files.pop(i)
+                st.session_state.deleted_filepaths.append(relocated_filepaths[i])
+                os.remove(relocated_filepaths[i])
 
-                if len(st.session_state.copy_uploaded_files) == 0:
+                if len(st.session_state.uploaded_files) == 0:
                     st.success("All uploaded PDFs have been preprocessed - proceed to VLM Extraction or upload new PDFs.") # noqa
                     st.session_state.all_pdfs_preprocessed = True
                     st.rerun()
@@ -119,19 +122,22 @@ def pdf_preprocessor() -> None:
                     new_doc = fitz.open()
                     new_doc.insert_pdf(doc, from_page=start_p-1, to_page=end_p-1)
 
-                    base_name, ext = os.path.splitext(st.session_state.copy_uploaded_files[i].name)
+                    base_name, ext = os.path.splitext(st.session_state.uploaded_files[i].name)
                     sliced_filename = f"{base_name}_preprocessed_{start_p}-{end_p}{ext}"
                     sliced_filepath = os.path.join(st.session_state.static_dir, sliced_filename)
 
+                    # Store sliced PDF & remove original server-file from static - PDF source location remains untouched
                     new_doc.save(sliced_filepath)
                     new_doc.close()
+                    os.remove(relocated_filepaths[i])
+
                     st.session_state.preprocessed_filepaths.append(sliced_filepath)
-                    st.session_state.copy_uploaded_files.pop(i)
+                    st.session_state.uploaded_files.pop(i)
                     st.session_state.total_pdfs_preprocessed += 1
                     st.session_state.total_mb_preprocessed += os.path.getsize(sliced_filepath)/(1024*1024)
                     st.session_state.total_pages_preprocessed += (end_p - start_p + 1)
 
-                    if len(st.session_state.copy_uploaded_files) == 0:
+                    if len(st.session_state.uploaded_files) == 0:
                         st.success("All uploaded PDFs have been preprocessed - proceed to VLM Extraction or upload new PDFs.") # noqa
                         st.session_state.all_pdfs_preprocessed = True
                     else:
@@ -142,7 +148,7 @@ def pdf_preprocessor() -> None:
 
             # Render the iframe pointing to the static file URL**
             # The URL will be `app/static/<selected_filename>.pdf?t=<timestamp>` to avoid caching issues
-            pdf_url = f"{st.session_state.app_static_dir}/{st.session_state.copy_uploaded_files[i].name}?t={int(time.time())}"
+            pdf_url = f"{st.session_state.app_static_dir}/{st.session_state.uploaded_files[i].name}?t={int(time.time())}"
 
             st.markdown(
                 f'''

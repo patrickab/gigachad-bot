@@ -16,6 +16,7 @@ PAGES = {
     ],
     "RAG Data Miner": [
         st.Page("pages/PDF_Preprocessor.py"),
+        st.Page("pages/VLM_Markdown_Miner.py"),
     ],
 }
 
