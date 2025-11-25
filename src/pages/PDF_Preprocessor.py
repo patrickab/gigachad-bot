@@ -78,7 +78,7 @@ def pdf_preprocessor() -> None:
 
     st.divider()
 
-    relocated_filepaths = [os.path.join(st.session_state.static_dir, f.name) for f in st.session_state.uploaded_files]
+    relocated_filepaths = [os.path.join(SERVER_STATIC_DIR, f.name) for f in st.session_state.uploaded_files]
 
 
     pdf_cols = st.columns([1,1])
@@ -162,8 +162,6 @@ def pdf_preprocessor() -> None:
                 ''',
                 unsafe_allow_html=True
             )
-    
-
 
 if __name__ == "__main__":
     init_pdf_preprocessor()

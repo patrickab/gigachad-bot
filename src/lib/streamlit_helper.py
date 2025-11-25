@@ -321,7 +321,6 @@ def nyan_cat_spinner() -> Iterator:
     file_path = "assets/nyan-cat.gif"
     placeholder = st.empty()
 
-
     with open(file_path, "rb") as f:
         contents = f.read()
         data_url = base64.b64encode(contents).decode("utf-8")
