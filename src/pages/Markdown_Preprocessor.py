@@ -7,6 +7,11 @@ from src.config import DIRECTORY_RAG_INPUT, DIRECTORY_VLM_OUTPUT
 from src.lib.streamlit_helper import editor
 
 
+def init_session_state() -> None:
+    """Initialize session state variables for the Markdown Preprocessor."""
+    if "edited_markdown_files" not in st.session_state:
+        st.session_state.moved_outputs = []
+
 def markdown_preprocessor() -> None:
     """Markdown Preprocessor for Obsidian Notes."""
     _,center, _ = st.columns([1,8,1])
@@ -17,24 +22,36 @@ def markdown_preprocessor() -> None:
         vlm_output = [d.split("converted_")[1] for d in vlm_output]
         vlm_output = [d.split(".pdf")[0] for d in vlm_output]
 
+        # Move files only once per session
+        if st.session_state.moved_outputs == []:
+
+            for output in vlm_output:
+                # Construct paths
+                content_path = f"./{DIRECTORY_VLM_OUTPUT}/converted_{output}.pdf/{output}/auto"
+                contents = os.listdir(content_path)
+
+                # Identify file locations & copy to RAG input directory
+                md_file = next(f for f in contents if f.endswith(".md"))
+                md_filepath = f"{content_path}/{md_file}"
+                imgs_path = content_path + "/images"
+                os.makedirs(f"{DIRECTORY_RAG_INPUT}/{output}", exist_ok=True)
+                subprocess.run(["cp", "-r", md_filepath, imgs_path, f"./{DIRECTORY_RAG_INPUT}/{output}"], check=True)
+
+        # Display editor & preview
         for output in vlm_output:
 
-            content_path = f"./{DIRECTORY_VLM_OUTPUT}/converted_{output}.pdf/{output}/auto"
-            contents = os.listdir(content_path)
-            md_filepath = next(f for f in contents if f.endswith(".md"))
-            imgs_path = content_path + "/images"
+            # Update md_filepath to new location
+            contents = os.listdir(f"{DIRECTORY_RAG_INPUT}/{output}")
+            md_file = next(f for f in contents if f.endswith(".md"))
+            md_filepath = f"{DIRECTORY_RAG_INPUT}/{output}/{md_file}"    
+            imgs_path = f"{DIRECTORY_RAG_INPUT}/{output}/images"
+
+            with open(md_filepath, "r") as f:
+                md_content = f.read()
 
             with st.expander(output):
 
                 cols_spacer = st.columns([0.1,0.9])
-
-                imgs = os.listdir(imgs_path)
-    
-                imsgs_paths = [f"{imgs_path}/{img}" for img in imgs]
-                md_path = f"{content_path}/{md_filepath}"
-
-                with open(md_path, "r") as f:
-                    md_content = f.read()
 
                 cols = st.columns(2)
 
@@ -45,10 +62,11 @@ def markdown_preprocessor() -> None:
 
                 with cols_spacer[0]:
                     if st.button("Save Changes", key=f"save_md_{output}"):
-                        with open(md_path, "w") as f:
+                        with open(md_filepath, "w") as f:
                             f.write(edited_text)
                         st.success(f"Saved changes to {md_filepath}")
 
 
 if __name__ == "__main__":
+    init_session_state()
     markdown_preprocessor()

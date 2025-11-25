@@ -8,7 +8,8 @@ SERVER_APP_STATIC_DIR = "app/static"
 # Note: You can sync obsidian with Nextcloud, Dropbox, etc. to enable cloud integration of your notes.
 DIRECTORY_OBSIDIAN_VAULT = "/home/noob/Nextcloud/obsidian"
 DIRECTORY_CHAT_HISTORIES = "./chat_histories"
-DIRECTORY_VLM_OUTPUT = SERVER_STATIC_DIR + "/minerU_output"
+DIRECTORY_VLM_OUTPUT = SERVER_STATIC_DIR + "/minerU_output" # VLM data miner output location
+DIRECTORY_RAG_INPUT = SERVER_STATIC_DIR + "/rag_input" # prepared markdown files for RAG embeddings
 
 # Adjust to your preferred models
 MACROTASK_MODEL = "gemini-2.5-pro"
