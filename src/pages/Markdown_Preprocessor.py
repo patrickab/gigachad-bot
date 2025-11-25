@@ -12,6 +12,27 @@ def init_session_state() -> None:
     if "edited_markdown_files" not in st.session_state:
         st.session_state.moved_outputs = []
 
+def data_wrangler(vlm_output: list[str]) -> None:
+    """Move VLM output files to RAG input directory."""
+    for output in vlm_output:
+        # Construct paths
+        content_path = f"./{DIRECTORY_VLM_OUTPUT}/converted_{output}.pdf/{output}/auto"
+        contents = os.listdir(content_path)
+
+        # Identify file locations & copy to RAG input directory
+        md_file = next(f for f in contents if f.endswith(".md"))
+        md_filepath = f"{content_path}/{md_file}"
+        imgs_path = content_path + "/images"
+        os.makedirs(f"{DIRECTORY_RAG_INPUT}/{output}", exist_ok=True)
+        subprocess.run(["cp", "-r", md_filepath, imgs_path, f"./{DIRECTORY_RAG_INPUT}/{output}"], check=True)
+
+        # Convert ![](/images/<img-filename>) to ![](){DIRECTORY_RAG_INPUT/images/<img-filename>} image paths
+        with open(f"{DIRECTORY_RAG_INPUT}/{output}/{md_file}", "r") as f:
+            md_content = f.read()
+            md_content = md_content.replace("![](images", f"![]({DIRECTORY_RAG_INPUT}/{output}/images")
+            with open(f"{DIRECTORY_RAG_INPUT}/{output}/{md_file}", "w") as f:
+                f.write(md_content)
+
 def markdown_preprocessor() -> None:
     """Markdown Preprocessor for Obsidian Notes."""
     _,center, _ = st.columns([1,8,1])
@@ -24,25 +45,7 @@ def markdown_preprocessor() -> None:
 
         # Move files only once per session
         if st.session_state.moved_outputs == []:
-
-            for output in vlm_output:
-                # Construct paths
-                content_path = f"./{DIRECTORY_VLM_OUTPUT}/converted_{output}.pdf/{output}/auto"
-                contents = os.listdir(content_path)
-
-                # Identify file locations & copy to RAG input directory
-                md_file = next(f for f in contents if f.endswith(".md"))
-                md_filepath = f"{content_path}/{md_file}"
-                imgs_path = content_path + "/images"
-                os.makedirs(f"{DIRECTORY_RAG_INPUT}/{output}", exist_ok=True)
-                subprocess.run(["cp", "-r", md_filepath, imgs_path, f"./{DIRECTORY_RAG_INPUT}/{output}"], check=True)
-
-                # Convert ![](/images/<img-filename>) to ![](){DIRECTORY_RAG_INPUT/images/<img-filename>} image paths
-                with open(f"{DIRECTORY_RAG_INPUT}/{output}/{md_file}", "r") as f:
-                    md_content = f.read()
-                    md_content = md_content.replace("![](/images/", f"![]({DIRECTORY_RAG_INPUT}/{output}/images/")
-                    with open(f"{DIRECTORY_RAG_INPUT}/{output}/{md_file}", "w") as f:
-                        f.write(md_content)
+            data_wrangler(vlm_output)
 
         # Display editor & preview
         for output in vlm_output:
