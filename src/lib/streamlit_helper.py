@@ -16,6 +16,7 @@ from streamlit_paste_button import PasteResult, paste_image_button
 from src.config import (
     DIRECTORY_CHAT_HISTORIES,
     DIRECTORY_OBSIDIAN_VAULT,
+    DIRECTORY_VLM_OUTPUT,
     MODELS_GEMINI,
     MODELS_OCR_OLLAMA,
     MODELS_OLLAMA,
@@ -72,6 +73,7 @@ def init_session_state() -> None:
     """
     # Create static directory for serving PDFs
     os.makedirs(SERVER_STATIC_DIR, exist_ok=True)
+    os.makedirs(DIRECTORY_VLM_OUTPUT, exist_ok=True)
 
     if "client" not in st.session_state:
         st.session_state.workspace = "main"
