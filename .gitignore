@@ -3,3 +3,4 @@ img
 __pycache__
 chat_histories
 data
+src/static
