@@ -16,55 +16,6 @@ def init_session_state() -> None:
         st.session_state.moved_outputs = []
         st.session_state.parsed_outputs = []
 
-def fix_heading_levels(infile: iter, outfile: iter) -> None:
-    """
-    Streams file line-by-line to maintain O(1) memory usage regardless of file size.
-    Uses regex to robustly identify variable-depth decimal numbering (e.g., '1.2.3')
-    that simple string splitting cannot reliably distinguish from heading text.
-    """
-    # Regex explanation:
-    # ^#\s+          : Matches a line starting with one hash and whitespace
-    # (?P<nums>...)  : Captures the numbering group
-    # \d+            : Starts with digits
-    # (?:\.\d+)*     : Followed by zero or more groups of (.digits)
-
-    # Rest of line is purposefully not matched for efficiency.
-    # Only numbering pattern at linestart is relevant.
-    pattern = re.compile(r'^#\s+(?P<nums>\d+(?:\.\d+)*)')
-
-    for line in infile:
-        # Only check lines that actually start with "# " to save regex time
-        if line.startswith('# '):
-            match = pattern.match(line)
-            if match:
-                numbering = match.group('nums')
-
-                # Calculate level based on dots. 
-                # "1" -> 0 dots -> Level 1
-                # "1.1" -> 1 dot -> Level 2
-                # "1.1.1" -> 2 dots -> Level 3
-                # We strip trailing dots just in case "1.1." appears
-                level = numbering.strip('.').count('.') + 1
-
-                # Cap the level at 6 (Standard Markdown limit), 
-                # though you can remove this if your specific dialect supports deeper nesting.
-                level = min(level, 6)
-
-                # Replace the single '#' with the correct number of '#'
-                # We use line[1:] to keep the original spacing and text
-                new_line = ('#' * level) + line[1:]
-                outfile.write(new_line)
-            else:
-                # Starts with # but no number pattern found (e.g., "# Introduction")
-                # # Text -> no dots -> no heading
-                line = line.replace('#', '', 1)
-                # remove leading space & trailing \n
-                line = line.lstrip().rstrip('\n') + '\n'
-                line = "**" + line + "**"  # Bold the text instead
-                outfile.write(line)
-        else:
-            # Not a heading line
-            outfile.write(line)
 
 def data_wrangler(vlm_output: list[str]) -> None:
     """
@@ -74,6 +25,57 @@ def data_wrangler(vlm_output: list[str]) -> None:
         - # x.x -> ## x.x
         - # x.x.x -> ### x.x.x
     """
+
+    def fix_heading_levels(infile: iter, outfile: iter) -> None:
+        """
+        Streams file line-by-line to maintain O(1) memory usage regardless of file size.
+        Uses regex to robustly identify variable-depth decimal numbering (e.g., '1.2.3')
+        that simple string splitting cannot reliably distinguish from heading text.
+        """
+        # Regex explanation:
+        # ^#\s+          : Matches a line starting with one hash and whitespace
+        # (?P<nums>...)  : Captures the numbering group
+        # \d+            : Starts with digits
+        # (?:\.\d+)*     : Followed by zero or more groups of (.digits)
+
+        # Rest of line is purposefully not matched for efficiency.
+        # Only numbering pattern at linestart is relevant.
+        pattern = re.compile(r'^#\s+(?P<nums>\d+(?:\.\d+)*)')
+
+        for line in infile:
+            # Only check lines that actually start with "# " to save regex time
+            if line.startswith('# '):
+                match = pattern.match(line)
+                if match:
+                    numbering = match.group('nums')
+
+                    # Calculate level based on dots. 
+                    # "1" -> 0 dots -> Level 1
+                    # "1.1" -> 1 dot -> Level 2
+                    # "1.1.1" -> 2 dots -> Level 3
+                    # We strip trailing dots just in case "1.1." appears
+                    level = numbering.strip('.').count('.') + 1
+
+                    # Cap the level at 6 (Standard Markdown limit), 
+                    # though you can remove this if your specific dialect supports deeper nesting.
+                    level = min(level, 6)
+
+                    # Replace the single '#' with the correct number of '#'
+                    # We use line[1:] to keep the original spacing and text
+                    new_line = ('#' * level) + line[1:]
+                    outfile.write(new_line)
+                else:
+                    # Starts with # but no number pattern found (e.g., "# Introduction")
+                    # # Text -> no dots -> no heading
+                    line = line.replace('#', '', 1)
+                    # remove leading space & trailing \n
+                    line = line.lstrip().rstrip('\n') + '\n'
+                    line = "**" + line + "**"  # Bold the text instead
+                    outfile.write(line)
+            else:
+                # Not a heading line
+                outfile.write(line)
+
     for output_name in vlm_output:
         # Construct paths
         content_path = f"./{DIRECTORY_VLM_OUTPUT}/converted_{output_name}.pdf/{output_name}/auto"
