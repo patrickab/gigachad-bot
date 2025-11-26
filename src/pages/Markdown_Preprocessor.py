@@ -66,29 +66,29 @@ def fix_heading_levels(infile: iter, outfile: iter) -> None:
 
 def data_wrangler(vlm_output: list[str]) -> None:
     """
-    1. Move VLM output files to RAG input directory.
+    1. Move VLM output_name files to RAG input directory.
     2. Fix image paths in markdown files.
     3. Fix heading levels in markdown files. 
         - # x.x -> ## x.x
         - # x.x.x -> ### x.x.x
     """
-    for output in vlm_output:
+    for output_name in vlm_output:
         # Construct paths
-        content_path = f"./{DIRECTORY_VLM_OUTPUT}/converted_{output}.pdf/{output}/auto"
+        content_path = f"./{DIRECTORY_VLM_OUTPUT}/converted_{output_name}.pdf/{output_name}/auto"
         contents = os.listdir(content_path)
 
         # Identify file locations & copy to RAG input directory
         md_file = next(f for f in contents if f.endswith(".md"))
         md_filepath = f"{content_path}/{md_file}"
         imgs_path = content_path + "/images"
-        os.makedirs(f"{DIRECTORY_RAG_INPUT}/{output}", exist_ok=True)
-        subprocess.run(["cp", "-r", md_filepath, imgs_path, f"./{DIRECTORY_RAG_INPUT}/{output}"], check=True)
+        os.makedirs(f"{DIRECTORY_RAG_INPUT}/{output_name}", exist_ok=True)
+        subprocess.run(["cp", "-r", md_filepath, imgs_path, f"./{DIRECTORY_RAG_INPUT}/{output_name}"], check=True)
 
         # Convert ![](/images/<img-filename>) to ![](){DIRECTORY_RAG_INPUT/images/<img-filename>} image paths
-        with open(f"{DIRECTORY_RAG_INPUT}/{output}/{md_file}", "r") as f:
+        with open(f"{DIRECTORY_RAG_INPUT}/{output_name}/{md_file}", "r") as f:
             md_content = f.read()
-            md_content = md_content.replace("![](images", f"![]({SERVER_APP_RAG_INPUT}/{output}/images")
-            with open(f"{DIRECTORY_RAG_INPUT}/{output}/{md_file}", "w") as f:
+            md_content = md_content.replace("![](images", f"![]({SERVER_APP_RAG_INPUT}/{output_name}/images")
+            with open(f"{DIRECTORY_RAG_INPUT}/{output_name}/{md_file}", "w") as f:
                 f.write(md_content)
 
         # Create a temporary file to write the fixed content
@@ -99,7 +99,7 @@ def data_wrangler(vlm_output: list[str]) -> None:
 
         # Replace original file with fixed file
         os.replace(temp_filepath, md_filepath)
-        print(f"Moved and processed files for {output}")
+        print(f"Moved and processed files for {output_name}")
 
 def markdown_preprocessor() -> None:
     """Markdown Preprocessor for Obsidian Notes."""
@@ -116,29 +116,30 @@ def markdown_preprocessor() -> None:
             data_wrangler(vlm_output)
 
         # Display editor & preview
-        for output in vlm_output:
+        for output_name in vlm_output:
 
             # Update md_filepath to new location
-            contents = os.listdir(f"{DIRECTORY_RAG_INPUT}/{output}")
+            contents = os.listdir(f"{DIRECTORY_RAG_INPUT}/{output_name}")
             md_file = next(f for f in contents if f.endswith(".md"))
-            md_filepath = f"{DIRECTORY_RAG_INPUT}/{output}/{md_file}"    
+            md_filepath = f"{DIRECTORY_RAG_INPUT}/{output_name}/{md_file}"
 
             with open(md_filepath, "r") as f:
                 md_content = f.read()
+                md_content = md_content[9000:] # Ignore first 9000 chars (bloat)
 
-            with st.expander(output):
+            with st.expander(output_name):
 
                 cols_spacer = st.columns([0.1,0.9])
 
                 cols = st.columns(2)
 
                 with cols[0]:
-                    edited_text = editor(language="latex", text_to_edit=md_content, key=output)
+                    edited_text = editor(language="latex", text_to_edit=md_content, key=output_name)
                 with cols[1]:
                     st.markdown(edited_text)
 
                 with cols_spacer[0]:
-                    if st.button("Save Changes", key=f"save_md_preprocessor_{output}"):
+                    if st.button("Save Changes", key=f"save_md_preprocessor_{output_name}"):
                         # Replace edited content back to file
                         with open(md_filepath, "w") as f:
                             f.write(edited_text)
@@ -218,58 +219,79 @@ def parse_markdown_to_chunks(markdown_text: str) -> list[dict]:
 
 def markdown_chunker() -> None:
     """Inspect preprocessed markdown chunks."""
+
+    def render_chunks(chunks: list[dict], output_name:str) -> None:
+
+        def render_chunk(chunks: list[dict], chunk: dict, output_name:str, i: str) -> None:
+            cols_buttons = st.columns([1,1,8])
+            cols_text = st.columns([1,1])
+
+            with cols_text[0]:
+                edited_text = editor(language="latex", text_to_edit=chunk['content'], key=f"editor_{output_name}_{i}") # noqa
+            with cols_text[1]:
+                st.markdown(edited_text)
+
+            if cols_buttons[0].button("Save Chunk Changes", key=f"save_md_chunker_{output_name}_{i}"):
+                chunks[i-1]['content'] = edited_text
+                st.success(f"Saved changes to {md_filepath}")
+                st.rerun()
+            if cols_buttons[1].button("Delete Chunk", key=f"delete_md_chunker_{output_name}_{i}"):
+                chunks.remove(chunk)
+                st.rerun()
+    
+            return chunks, chunk
+
+        level_1 = 1
+        for i, chunk in enumerate([c for c in chunks if c["metadata"]["level"] == level_1], start=1):
+            with st.expander(f"{chunk['title']}"):
+                chunks, chunk = render_chunk(chunks, chunk, output_name=output_name, i=f"{level_1}_{i}")
+                # while consecutive cunks of lower levels exist, render them too
+                level_2 = 2
+                for j, chunk in enumerate([c for c in chunks if c["metadata"]["level"] == level_2 and c["metadata"]["h1"] == chunk["metadata"]["h1"]], start=1): # noqa
+                    with st.expander(f"{chunk['title']}"):
+                        chunks, chunk = render_chunk(chunks, chunk, output_name=output_name, i=f"{chunk["title"]}")
+                        level_3 = 3
+                        for k, chunk in enumerate([c for c in chunks if c["metadata"]["level"] == level_3 and c["metadata"]["h2"] == chunk["metadata"]["h2"]], start=1): # noqa
+                            with st.expander(f"{chunk['title']}"):
+                                chunks, chunk = render_chunk(chunks, chunk, output_name=output_name, i=f"{chunk["title"]}") # noqa
+
+        return chunks
+
     _,center, _ = st.columns([1,8,1])
 
     directory_preprocessed_output = os.listdir(DIRECTORY_RAG_INPUT)
 
     with center:
 
-        for output in directory_preprocessed_output:
+        for output_name in directory_preprocessed_output:
 
-            md_filepath = f"{DIRECTORY_RAG_INPUT}/{output}/{output}.md"
+            md_filepath = f"{DIRECTORY_RAG_INPUT}/{output_name}/{output_name}.md"
 
-            if output not in st.session_state.parsed_outputs:
+            if output_name not in st.session_state.parsed_outputs:
                 with open(md_filepath, "r") as f:
                     md_content = f.read()
                     chunks = parse_markdown_to_chunks(md_content)
-                st.session_state.parsed_outputs.append(output)
+                st.session_state.parsed_outputs.append(output_name)
 
-            if st.button(f"Store {output}"):
-                titles = [chunk['title'] for chunk in chunks]
-                contents = [chunk['content'] for chunk in chunks]
-                metadata = [chunk['metadata'] for chunk in chunks]
+            with st.expander(output_name):
 
-                chunked_dataframe = pl.DataFrame(
+                if st.button("Store chunks to Parquet", key=f"store_md_chunks_{output_name}", type="primary"):
+                    titles = [chunk['title'] for chunk in chunks]
+                    contents = [chunk['content'] for chunk in chunks]
+                    metadata = [chunk['metadata'] for chunk in chunks]
 
-                    {
-                        DatabaseKeys.KEY_TITLE: titles,
-                        DatabaseKeys.KEY_TXT: contents,
-                        DatabaseKeys.KEY_METADATA: metadata,
-                    }
-                )
-                chunked_dataframe.write_parquet(f"{DIRECTORY_RAG_INPUT}/{output}/chunked_{output}.parquet")
+                    chunked_dataframe = pl.DataFrame(
 
-            with st.expander(output):
+                        {
+                            DatabaseKeys.KEY_TITLE: titles,
+                            DatabaseKeys.KEY_TXT: contents,
+                            DatabaseKeys.KEY_METADATA: metadata,
+                        }
+                    )
+                    chunked_dataframe.write_parquet(f"{DIRECTORY_RAG_INPUT}/{output_name}/chunked_{output_name}.parquet")
 
-                for i, chunk in enumerate(chunks[:100], start=1):
 
-                    with st.expander(f"{chunk['title']}", expanded=False):
-
-                        cols_buttons = st.columns([1,1,8])
-                        cols_text = st.columns([1,1])
-
-                        with cols_text[0]:
-                            edited_text = editor(language="latex", text_to_edit=chunk['content'], key=f"editor_{output}_{i}") # noqa
-                        with cols_text[1]:
-                            st.markdown(edited_text)
-
-                        if cols_buttons[0].button("Save Chunk Changes", key=f"save_md_chunker_{output}_{i}"):
-                            chunks[i-1]['content'] = edited_text
-                            st.success(f"Saved changes to {md_filepath}")
-                            st.rerun()
-                        if cols_buttons[1].button("Delete Chunk", key=f"delete_md_chunker_{output}_{i}"):
-                            chunks.remove(chunk)
-                            st.rerun()
+                chunks = render_chunks(chunks=chunks, output_name=output_name)
 
 if __name__ == "__main__":
     init_session_state()
