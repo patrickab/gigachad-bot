@@ -39,24 +39,26 @@ def data_wrangler(vlm_output: list[str]) -> None:
     for output_name in vlm_output:
         # 1. Set up paths and copy files
         content_path = f"./{DIRECTORY_VLM_OUTPUT}/converted_{output_name}.pdf/{output_name}/auto"
-        dest_path = f"./{DIRECTORY_MD_PREPROCESSING_1}/{output_name}"
+        md_dest_path = f"./{DIRECTORY_MD_PREPROCESSING_1}/{output_name}"
+        imgs_dest_path = f"{SERVER_APP_RAG_INPUT}/{output_name}/images"
 
         contents = os.listdir(content_path)
         md_file = next(f for f in contents if f.endswith(".md"))
         md_filepath = f"{content_path}/{md_file}"
         imgs_path = f"{content_path}/images"
 
-        os.makedirs(dest_path, exist_ok=True)
-        subprocess.run(["cp", "-r", md_filepath, imgs_path, dest_path], check=True)
+        os.makedirs(md_dest_path, exist_ok=True)
+        subprocess.run(["cp", md_filepath, md_dest_path], check=True)
+        subprocess.run(["cp", "-r", imgs_path, imgs_dest_path], check=True)
 
         # 2. Process the copied markdown file in a single pass
-        processed_md_filepath = f"{dest_path}/{md_file}"
+        processed_md_filepath = f"{md_dest_path}/{md_file}"
         temp_filepath = f"{processed_md_filepath}.tmp"
 
         with open(processed_md_filepath, "r") as infile, open(temp_filepath, "w") as outfile:
             for line in infile:
                 # Fix image paths
-                line = line.replace("![](images", f"![]({SERVER_APP_RAG_INPUT}/{output_name}/images")
+                line = line.replace("![](images", f"![]({imgs_dest_path}")
 
                 # Fix heading levels
                 if line.startswith('# '):
@@ -144,6 +146,7 @@ def parse_markdown_to_chunks(markdown_text: str) -> list[dict]:
             - title
             - metadata
     """
+    # TODO: Introduce robustness to Codeblocks
     lines = markdown_text.split('\n')
 
     # State tracking
