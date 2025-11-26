@@ -27,6 +27,7 @@ def init_session_state() -> None:
         st.session_state.parsed_outputs = []
         st.session_state.preprocessor_active = False
         st.session_state.chunker_active = False
+        st.session_state.is_chunk_df_initialized = False
 
 # ---------------------------- Preprocessing Step 1 - Move Paths / Fix Headings / Adjust MD Image Paths ---------------------------- #
 def data_wrangler(vlm_output: list[str]) -> None:
@@ -81,7 +82,6 @@ def data_wrangler(vlm_output: list[str]) -> None:
                 processed_lines.append(line)
 
         processed_md_filepath.write_text("\n".join(processed_lines), encoding="utf-8")
-        print(f"Processed files for {output_name}")
 
 
 def markdown_preprocessor() -> None:
@@ -127,7 +127,6 @@ def markdown_preprocessor() -> None:
 
             with open(md_filepath, "r") as f:
                 md_content = f.read()
-                md_content = md_content[9000:] # Ignore first 9000 chars (bloat) # do not use in production
 
             with st.expander(output_name):
 
@@ -255,7 +254,7 @@ def render_chunks(output_name: str) -> None:
 
     # Ensure a unique, stable row identifier exists for editing/deleting
     if "chunk_id" not in chunks_df.columns:
-        chunks_df = chunks_df.with_row_count("chunk_id")
+        chunks_df = chunks_df.with_row_index("chunk_id")
         st.session_state.chunk_dfs[output_name] = chunks_df
 
     def render_chunk(row: dict) -> None:
@@ -341,8 +340,9 @@ def markdown_chunker() -> None:
             md_filepath = f"{DIRECTORY_MD_PREPROCESSING_1}/{output_name}/{output_name}.md"
 
             # Parse and store DataFrame in session state on first run for this file
-            if output_name not in st.session_state.chunk_dfs:
+            if not st.session_state.is_chunk_df_initialized:
                 st.session_state.chunk_dfs[output_name] = parse_markdown_to_chunks(md_filepath)
+                st.session_state.is_chunk_df_initialized = True
 
             with st.expander(output_name):
                 if st.button("Store chunks to Parquet", key=f"store_md_chunks_{output_name}", type="primary"):
@@ -359,20 +359,22 @@ def markdown_chunker() -> None:
 if __name__ == "__main__":
 
     init_session_state()
-    selection = st.sidebar.radio("Select Page", options=["Markdown Preprocessor", "Markdown Chunker", "Fufu"], index=0, key="markdown_page_selector")  # noqa
+    selection = st.sidebar.radio("Select Page", options=["Markdown Preprocessor", "Markdown Chunker"], index=0, key="markdown_page_selector")  # noqa
 
-    if selection == "Markdown Preprocessor":
+    _, center, _ = st.columns([1, 8, 1])
+    with center:
+        if selection == "Markdown Preprocessor":
 
-        if st.button("Initialize Preprocessor"):
-            st.session_state.preprocessor_active = True
+            if st.sidebar.button("Initialize Preprocessor"):
+                st.session_state.preprocessor_active = True
 
-        if st.session_state.preprocessor_active is True:
-            markdown_preprocessor()
+            if st.session_state.preprocessor_active is True:
+                markdown_preprocessor()
 
-    elif selection == "Markdown Chunker":
+        elif selection == "Markdown Chunker":
 
-        if st.button("Initialize Chunker"):
-            st.session_state.chunker_active = True
+            if st.sidebar.button("Initialize Chunker"):
+                st.session_state.chunker_active = True
 
-        if st.session_state.chunker_active is True:
-            markdown_chunker()
+            if st.session_state.chunker_active is True:
+                markdown_chunker()
