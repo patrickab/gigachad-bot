@@ -742,7 +742,7 @@ wheels = [
 
 [[package]]
 name = "langsmith"
-version = "0.4.46"
+version = "0.4.48"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -753,9 +753,9 @@ dependencies = [
     { name = "requests-toolbelt" },
     { name = "zstandard" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/03/e8/c91f5e34aa0e7cba90d31e3915866d655507732d0f67dd3986dbaf8eff63/langsmith-0.4.46.tar.gz", hash = "sha256:0b73d47ebd0a27ea10edec1717f36f6a865cb9ffc7f4e6a419e2cea1ab3c5b1e", size = 986987, upload-time = "2025-11-21T23:00:04.985Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/99/ea/494f2a59e71b2448223308b95210e7669d6a58c7d8ad77d848493b867c77/langsmith-0.4.48.tar.gz", hash = "sha256:d8e2b957254f046b3156567dc4b906a363d2645bf8f18537b6e290660b2a1e33", size = 986040, upload-time = "2025-11-26T01:06:52.713Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d6/cb/02610a918e7630687d7fae0f668035b92def7ba0e1a7956bdf1f7098a32c/langsmith-0.4.46-py3-none-any.whl", hash = "sha256:783c16ef108c42a16ec2d8bc68067b969f3652e2fe82ca1289007baf947e4500", size = 411938, upload-time = "2025-11-21T23:00:03.514Z" },
+    { url = "https://files.pythonhosted.org/packages/19/23/54ac7435ddd2d03ce638329808f8fc2d3b23a236a3b5afaddf740be9cd61/langsmith-0.4.48-py3-none-any.whl", hash = "sha256:cf4cc3c17696f1ad1212d629409d0f8ce2038709777c22906534a22d5fdf42c6", size = 410629, upload-time = "2025-11-26T01:06:51.001Z" },
 ]
 
 [[package]]
@@ -784,7 +784,7 @@ wheels = [
 [[package]]
 name = "llm-baseclient"
 version = "0.1.0"
-source = { git = "ssh://git@github.com/patrickab/llm-baseclient.git?rev=main#2b27bdb2e600ccc3515cbede68386086f5d16a0d" }
+source = { git = "ssh://git@github.com/patrickab/llm-baseclient.git?rev=main#f695c88ca9d556ab584c8127d2eea743bba369ee" }
 dependencies = [
     { name = "litellm" },
     { name = "streamlit-paste-button" },
@@ -1600,15 +1600,15 @@ wheels = [
 
 [[package]]
 name = "pymupdf4llm"
-version = "0.2.2"
+version = "0.2.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pymupdf" },
     { name = "tabulate" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ec/26/e1226c5329d0c901cd42649e4e8d7544636524c31e95a84f4dcf7c25731d/pymupdf4llm-0.2.2.tar.gz", hash = "sha256:d8dee8451e31ec39daf691687403bf2a98ac7e7b8709400a4e13a582eab835c6", size = 59501, upload-time = "2025-11-17T11:10:20.204Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b6/f6/f72a41eff8b2afd178a4a71c897efe3d081fb4432a780f77ee019c8ccf8e/pymupdf4llm-0.2.4.tar.gz", hash = "sha256:324c4ef04d60123de52e04f35e3f3df7bab0846c940e13150bacb8bfde83da4b", size = 62257, upload-time = "2025-11-25T12:32:41.869Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/26/23/08be1528f3ccb8c245e9a7b247255d6853a8e162b1451f4888f2006c52f0/pymupdf4llm-0.2.2-py3-none-any.whl", hash = "sha256:e7777d083f5f7c7daa804c3423804c309a7e096d682773c01e9dd4bb060f4a56", size = 62063, upload-time = "2025-11-17T11:10:22.452Z" },
+    { url = "https://files.pythonhosted.org/packages/4a/4d/9a5687ebb788b2573d43238bb42647ea39443aa2dee772a44cd597ac2d38/pymupdf4llm-0.2.4-py3-none-any.whl", hash = "sha256:2b18896c3ae9403525a375977ce603e515af96195df84d8d1593041b14cd7f00", size = 64896, upload-time = "2025-11-25T12:32:44.388Z" },
 ]
 
 [[package]]
@@ -1699,7 +1699,7 @@ wheels = [
 [[package]]
 name = "rag-database"
 version = "0.1.0"
-source = { git = "ssh://git@github.com/patrickab/rag-database.git?rev=main#91becf3b848aebcd103022a10215d02d965fa44f" }
+source = { git = "ssh://git@github.com/patrickab/rag-database.git?rev=main#3e517f7fbeb29623961db323b0d9559e4c3a5348" }
 dependencies = [
     { name = "google-genai" },
     { name = "langchain-text-splitters" },
@@ -2225,7 +2225,7 @@ wheels = [
 
 [[package]]
 name = "transformers"
-version = "4.57.1"
+version = "4.57.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "filelock" },
@@ -2239,9 +2239,9 @@ dependencies = [
     { name = "tokenizers" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d6/68/a39307bcc4116a30b2106f2e689130a48de8bd8a1e635b5e1030e46fcd9e/transformers-4.57.1.tar.gz", hash = "sha256:f06c837959196c75039809636cd964b959f6604b75b8eeec6fdfc0440b89cc55", size = 10142511, upload-time = "2025-10-14T15:39:26.18Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/dd/70/d42a739e8dfde3d92bb2fff5819cbf331fe9657323221e79415cd5eb65ee/transformers-4.57.3.tar.gz", hash = "sha256:df4945029aaddd7c09eec5cad851f30662f8bd1746721b34cc031d70c65afebc", size = 10139680, upload-time = "2025-11-25T15:51:30.139Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/71/d3/c16c3b3cf7655a67db1144da94b021c200ac1303f82428f2beef6c2e72bb/transformers-4.57.1-py3-none-any.whl", hash = "sha256:b10d05da8fa67dc41644dbbf9bc45a44cb86ae33da6f9295f5fbf5b7890bd267", size = 11990925, upload-time = "2025-10-14T15:39:23.085Z" },
+    { url = "https://files.pythonhosted.org/packages/6a/6b/2f416568b3c4c91c96e5a365d164f8a4a4a88030aa8ab4644181fdadce97/transformers-4.57.3-py3-none-any.whl", hash = "sha256:c77d353a4851b1880191603d36acb313411d3577f6e2897814f333841f7003f4", size = 11993463, upload-time = "2025-11-25T15:51:26.493Z" },
 ]
 
 [[package]]
