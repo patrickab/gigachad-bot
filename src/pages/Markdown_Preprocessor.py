@@ -3,6 +3,7 @@ NOTE TO MY SELF: Every step in this pipeline shall seperate streamlit UI & data 
 Required for later building API endpoints for automation.
 """
 
+import json
 import os
 import pathlib
 from pathlib import Path
@@ -150,6 +151,14 @@ def markdown_preprocessor() -> None:
 
 
 # ----------------------------- Preprocessing Step 2 - Chunking / Hierarchy / Parquet Storage ----------------------------- #
+SCHEME_METADATA = {
+    "level": pl.Int8,
+    "h1": pl.String,
+    "h2": pl.String,
+    "h3": pl.String,
+    "context_path": pl.String
+}
+
 def parse_ingestion_payload(markdown_filepath: str) -> RAGIngestionPayload:
     """
     Helper function called in 2nd level markdown preprocessor.
@@ -191,18 +200,20 @@ def parse_ingestion_payload(markdown_filepath: str) -> RAGIngestionPayload:
         # Create the comprehensive context string for the embedding
         context_string = f"{current_h1} > {current_h2} > {current_h3}"
 
-        # This is the object you send to your embedding function
-        chunk_record = {
-            "text_content": text_content,
-            "text_embedding": f"{context_string}\n\n{text_content}",
-            "title": title,
-            "metadata": {
+        metadata = {
                 "level": 3 if current_h3 != "General" else 2 if current_h2 != "General" else 1,
                 "h1": current_h1,
                 "h2": current_h2,
                 "h3": current_h3,
                 "context_path": context_string
-            },
+        }
+
+        # This is the object you send to your embedding function
+        chunk_record = {
+            "title": title,
+            "metadata": json.dumps(metadata),
+            "text_content": text_content,
+            "text_embedding": f"{context_string}\n\n{text_content}",
         }
         chunks.append(chunk_record)
 
@@ -241,9 +252,9 @@ def parse_ingestion_payload(markdown_filepath: str) -> RAGIngestionPayload:
     # Rename columns to match the database schema
     df = df.rename({
         "title": DatabaseKeys.KEY_TITLE,
+        "metadata": DatabaseKeys.KEY_METADATA,
         "text_content": DatabaseKeys.KEY_TXT_RETRIEVAL,
         "text_embedding": DatabaseKeys.KEY_TXT_EMBEDDING,
-        "metadata": DatabaseKeys.KEY_METADATA
     })
 
     return RAGIngestionPayload(df=df)
@@ -257,13 +268,9 @@ def render_chunks(output_name: str) -> None:
     payload = st.session_state.rag_ingestion_payload[output_name]
     chunks_df = payload.df
 
-    # Ensure a unique, stable row identifier exists for editing/deleting
-    if "chunk_id" not in chunks_df.columns:
-        st.session_state.rag_ingestion_payload[output_name].df = chunks_df.with_row_index("chunk_id")
-
     def render_chunk(row: dict) -> None:
         """Renders a single chunk (DataFrame row) with editing capabilities."""
-        unique_key = f"{output_name}_{row['chunk_id']}"
+        unique_key = f"{output_name}_{row[DatabaseKeys.KEY_TITLE]}"
 
         # Buttons to toggle between viewing and editing mode
         toggle_cols = st.columns([1, 1, 8])
@@ -277,13 +284,13 @@ def render_chunks(output_name: str) -> None:
         if st.session_state.get(f"edit_mode_{unique_key}", False): # In edit mode
             cols_text = st.columns([1, 1])
             with cols_text[0]:
-                editor_key = f"editor_{output_name}_{row[DatabaseKeys.KEY_TITLE]}_{row['chunk_id']}"
+                editor_key = f"editor_{output_name}_{row[DatabaseKeys.KEY_TITLE]}"
                 edited_text = editor(language="latex", text_to_edit=row[DatabaseKeys.KEY_TXT_RETRIEVAL], key=editor_key)
 
                 if action_cols[0].button("Save Chunk Changes", key=f"save_md_chunker_{unique_key}"):
                     current_df = st.session_state.rag_ingestion_payload[output_name].df
                     updated_df = current_df.with_columns(
-                        pl.when(pl.col("chunk_id") == row['chunk_id'])
+                        pl.when(pl.col(DatabaseKeys.KEY_TITLE) == row[DatabaseKeys.KEY_TITLE])
                         .then(pl.lit(edited_text))
                         .otherwise(pl.col(DatabaseKeys.KEY_TXT_RETRIEVAL))
                         .alias(DatabaseKeys.KEY_TXT_RETRIEVAL)
@@ -293,7 +300,7 @@ def render_chunks(output_name: str) -> None:
                     st.rerun()
                 if action_cols[1].button("Delete Chunk", key=f"delete_md_chunker_{unique_key}"):
                     current_df = st.session_state.rag_ingestion_payload[output_name].df
-                    updated_df = current_df.filter(pl.col("chunk_id") != row['chunk_id'])
+                    updated_df = current_df.filter(pl.col(DatabaseKeys.KEY_TITLE) != row[DatabaseKeys.KEY_TITLE])
                     st.session_state.rag_ingestion_payload[output_name].df = updated_df
                     st.rerun()
 
@@ -302,15 +309,20 @@ def render_chunks(output_name: str) -> None:
         else: # In view mode
             st.markdown(row[DatabaseKeys.KEY_TXT_RETRIEVAL])
 
-    # Hierarchy rendering using DataFrame filters
-    level_1_df = chunks_df.filter(pl.col(DatabaseKeys.KEY_METADATA).struct.field("level") == 1)
-    level_2_df = chunks_df.filter(pl.col(DatabaseKeys.KEY_METADATA).struct.field("level") == 2)
-    level_3_df = chunks_df.filter(pl.col(DatabaseKeys.KEY_METADATA).struct.field("level") == 3)
+    # Parse metadata JSON strings and extract hierarchy levels
+    chunks_df_with_metadata = chunks_df.with_columns(
+        pl.col(DatabaseKeys.KEY_METADATA)
+        .str.json_decode(dtype=pl.Struct(SCHEME_METADATA))
+    )
+
+    level_1_df = chunks_df_with_metadata.filter(pl.col(DatabaseKeys.KEY_METADATA).struct.field("level") == 1)
+    level_2_df = chunks_df_with_metadata.filter(pl.col(DatabaseKeys.KEY_METADATA).struct.field("level") == 2)
+    level_3_df = chunks_df_with_metadata.filter(pl.col(DatabaseKeys.KEY_METADATA).struct.field("level") == 3)
 
     for l1_row in level_1_df.to_dicts():
         with st.expander(f"{l1_row[DatabaseKeys.KEY_TITLE]}"):
             render_chunk(l1_row)
-            l2_children = level_2_df.filter(pl.col(DatabaseKeys.KEY_METADATA).struct.field("h1") == l1_row[DatabaseKeys.KEY_TITLE])
+            l2_children = level_2_df.filter(pl.col(DatabaseKeys.KEY_METADATA).struct.field("h1") == l1_row[DatabaseKeys.KEY_TITLE]) # noqa
             for l2_row in l2_children.to_dicts():
                 with st.expander(f"{l2_row[DatabaseKeys.KEY_TITLE]}"):
                     render_chunk(l2_row)
@@ -351,8 +363,7 @@ def markdown_chunker() -> None:
             with st.expander(output_name):
                 if st.button("Store chunks to Parquet", key=f"store_md_chunks_{output_name}", type="primary"):
                     payload = st.session_state.rag_ingestion_payload[output_name]
-                    df_to_save = payload.df.drop("chunk_id") if "chunk_id" in payload.df.columns else payload.df
-                    save_payload = RAGIngestionPayload(df=df_to_save)
+                    save_payload = RAGIngestionPayload(df=payload.df)
                     save_payload.to_parquet(pathlib.Path(f"{DIRECTORY_RAG_INPUT}/{output_name}/chunked_{output_name}.parquet"))
 
                 # Render the interactive chunk editor, which operates on session_state directly
