@@ -31,6 +31,7 @@ def init_session_state() -> None:
         st.session_state.preprocessor_active = False
         st.session_state.chunker_active = False
         st.session_state.is_rag_ingestion_payload_initialized = False
+        st.session_state.is_edit_mode_active = False
 
 # ---------------------------- Preprocessing Step 1 - Move Paths / Fix Headings / Adjust MD Image Paths ---------------------------- #
 def data_wrangler(vlm_output: list[str]) -> None:
@@ -291,20 +292,18 @@ def render_chunks(output_name: str) -> None:
     def render_chunk(row: dict) -> None:
         """Renders a single chunk (as a dict) with editing capabilities."""
         unique_key_suffix = f"{output_name}_{row['unique_id']}"
-        edit_mode_key = f"edit_mode_{unique_key_suffix}"
 
         # --- UI for Toggling Edit/View Mode ---
         toggle_cols = st.columns([1, 1, 8])
         if toggle_cols[0].button("Edit", key=f"edit_btn_{unique_key_suffix}"):
-            st.session_state[edit_mode_key] = True
-        if toggle_cols[1].button("View", key=f"view_btn_{unique_key_suffix}"):
-            st.session_state[edit_mode_key] = False
+            st.session_state.is_edit_mode_active = True
 
-        if st.session_state.get(edit_mode_key, False):
+        if st.session_state.is_edit_mode_active is True:
             # --- Edit Mode ---
             editor_key = f"editor_{unique_key_suffix}"
             original_text = row[DatabaseKeys.KEY_TXT_RETRIEVAL]
-            edited_text = editor(text_to_edit=original_text, language="markdown", key=editor_key)
+            edited_text = editor(text_to_edit=original_text, language="latex", key=editor_key)
+            edited_text # noqa
 
             action_cols = st.columns([1, 1, 8])
             if action_cols[0].button("Save", key=f"save_btn_{unique_key_suffix}"):
@@ -316,7 +315,7 @@ def render_chunks(output_name: str) -> None:
                     .alias(DatabaseKeys.KEY_TXT_RETRIEVAL)
                 )
                 st.session_state.rag_ingestion_payload[output_name].df = updated_df
-                st.session_state[edit_mode_key] = False
+                st.session_state.is_edit_mode_active = False
                 st.rerun()  # Rerun to reflect changes and exit edit mode
 
             if action_cols[1].button("Delete", key=f"delete_btn_{unique_key_suffix}"):
