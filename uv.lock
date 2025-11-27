@@ -795,7 +795,7 @@ wheels = [
 
 [[package]]
 name = "litellm"
-version = "1.80.6"
+version = "1.80.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -812,9 +812,9 @@ dependencies = [
     { name = "tiktoken" },
     { name = "tokenizers" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/37/1e/aa07da6a377e0b069031b8d067d93a61a8e2918e85db2ba1a26818420bd4/litellm-1.80.6.tar.gz", hash = "sha256:0a79728677775c314a668683fb6c9236295f20cea717df3c802e378b3ca2b78b", size = 11958034, upload-time = "2025-11-27T18:17:47.534Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a5/3f/af532014449c3931ae6cad2d97d267dd43d0de006060a8cbf0962e004024/litellm-1.80.7.tar.gz", hash = "sha256:3977a8d195aef842d01c18bf9e22984829363c6a4b54daf9a43c9dd9f190b42c", size = 12023127, upload-time = "2025-11-27T23:03:52.474Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0e/7a/2d7783921d690687ce75d3b5f32dbaf33de282a23ede4c9c669dfb7cc279/litellm-1.80.6-py3-none-any.whl", hash = "sha256:27fcde2f03c8e0d3e1fcd370fec3ad04bd322eef7b2366b00231bb8e19336d27", size = 10766717, upload-time = "2025-11-27T18:17:44.7Z" },
+    { url = "https://files.pythonhosted.org/packages/54/e0/2e60a0c09235fd7b55297390c557923f3c35a9cf001914222c26a7857d2b/litellm-1.80.7-py3-none-any.whl", hash = "sha256:f7d993f78c1e0e4e1202b2a925cc6540b55b6e5fb055dd342d88b145ab3102ed", size = 10848321, upload-time = "2025-11-27T23:03:50.002Z" },
 ]
 
 [[package]]
@@ -1737,7 +1737,7 @@ wheels = [
 [[package]]
 name = "rag-database"
 version = "0.1.0"
-source = { git = "ssh://git@github.com/patrickab/rag-database.git?rev=main#25e1632d26078b0eef3282dadf44d37c70f0dd37" }
+source = { git = "ssh://git@github.com/patrickab/rag-database.git?rev=main#82cabe573bb86eccf366a32cf558acb729ac4c5c" }
 dependencies = [
     { name = "google-genai" },
     { name = "langchain-text-splitters" },
