@@ -191,7 +191,8 @@ def parse_markdown_to_chunks(markdown_filepath: str) -> pl.DataFrame:
 
         # This is the object you send to your embedding function
         chunk_record = {
-            "content": text_content,
+            "text_content": text_content,
+            "text_embedding": f"{context_string}\n\n{text_content}",
             "title": title,
             "metadata": {
                 "level": 3 if current_h3 != "General" else 2 if current_h2 != "General" else 1,
@@ -200,7 +201,6 @@ def parse_markdown_to_chunks(markdown_filepath: str) -> pl.DataFrame:
                 "h3": current_h3,
                 "context_path": context_string
             },
-            # "embedding_text": f"{context_string}\n\n{text_content}" # Optional: Prepend context for better vectors
         }
         chunks.append(chunk_record)
 
@@ -238,11 +238,12 @@ def parse_markdown_to_chunks(markdown_filepath: str) -> pl.DataFrame:
     # Rename columns to match the database schema
     df = df.rename({
         "title": DatabaseKeys.KEY_TITLE,
-        "content": DatabaseKeys.KEY_TXT,
+        "text_content": DatabaseKeys.KEY_TXT_RETRIEVAL,
+        "text_embedding": DatabaseKeys.KEY_TXT_EMBEDDING,
         "metadata": DatabaseKeys.KEY_METADATA
     })
 
-    return df.select(DatabaseKeys.KEY_TITLE, DatabaseKeys.KEY_TXT, DatabaseKeys.KEY_METADATA)
+    return df.select(DatabaseKeys.KEY_TITLE, DatabaseKeys.KEY_TXT_RETRIEVAL, DatabaseKeys.KEY_TXT_EMBEDDING, DatabaseKeys.KEY_METADATA)
 
 def render_chunks(output_name: str) -> None:
     """
