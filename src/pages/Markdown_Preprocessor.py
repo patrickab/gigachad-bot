@@ -4,10 +4,12 @@ Required for later building API endpoints for automation.
 """
 
 import os
+import pathlib
 from pathlib import Path
 import shutil
 
 import polars as pl
+from rag_database.dataclasses import RAGIngestionPayload
 from rag_database.rag_config import DatabaseKeys
 import streamlit as st
 
@@ -27,7 +29,7 @@ def init_session_state() -> None:
         st.session_state.parsed_outputs = []
         st.session_state.preprocessor_active = False
         st.session_state.chunker_active = False
-        st.session_state.is_chunk_df_initialized = False
+        st.session_state.is_rag_ingestion_payload_initialized = False
 
 # ---------------------------- Preprocessing Step 1 - Move Paths / Fix Headings / Adjust MD Image Paths ---------------------------- #
 def data_wrangler(vlm_output: list[str]) -> None:
@@ -148,9 +150,9 @@ def markdown_preprocessor() -> None:
 
 
 # ----------------------------- Preprocessing Step 2 - Chunking / Hierarchy / Parquet Storage ----------------------------- #
-def parse_markdown_to_chunks(markdown_filepath: str) -> pl.DataFrame:
+def parse_ingestion_payload(markdown_filepath: str) -> RAGIngestionPayload:
     """
-    Helper function called in 2nd level markdown preprocessor
+    Helper function called in 2nd level markdown preprocessor.
     Parses markdown text into hierarchical chunks based on heading levels.
     Each chunk is associated with its most specific heading (H1, H2, or H3).
 
@@ -160,8 +162,8 @@ def parse_markdown_to_chunks(markdown_filepath: str) -> pl.DataFrame:
         with open(markdown_filepath, "r", encoding="utf-8") as f:
             markdown_text = f.read()
     except FileNotFoundError:
-        # Return an empty DataFrame with the correct schema if the file doesn't exist
-        return pl.DataFrame({key: [] for key in [DatabaseKeys.KEY_TITLE, DatabaseKeys.KEY_TXT, DatabaseKeys.KEY_METADATA]})
+        empty_df = pl.DataFrame({key: [] for key in [DatabaseKeys.KEY_TITLE, DatabaseKeys.KEY_TXT_RETRIEVAL, DatabaseKeys.KEY_TXT_EMBEDDING, DatabaseKeys.KEY_METADATA]}) # noqa
+        return RAGIngestionPayload(df=empty_df)
 
     lines = markdown_text.split("\n")
 
@@ -230,7 +232,8 @@ def parse_markdown_to_chunks(markdown_filepath: str) -> pl.DataFrame:
     save_chunk()
 
     if not chunks:
-        return pl.DataFrame({key: [] for key in [DatabaseKeys.KEY_TITLE, DatabaseKeys.KEY_TXT, DatabaseKeys.KEY_METADATA]})
+        empty_df = pl.DataFrame({key: [] for key in [DatabaseKeys.KEY_TITLE, DatabaseKeys.KEY_TXT_RETRIEVAL, DatabaseKeys.KEY_TXT_EMBEDDING, DatabaseKeys.KEY_METADATA]}) # noqa
+        return RAGIngestionPayload(df=empty_df)
 
     # Create DataFrame directly from the list of dictionaries
     df = pl.DataFrame(chunks)
@@ -243,7 +246,7 @@ def parse_markdown_to_chunks(markdown_filepath: str) -> pl.DataFrame:
         "metadata": DatabaseKeys.KEY_METADATA
     })
 
-    return df.select(DatabaseKeys.KEY_TITLE, DatabaseKeys.KEY_TXT_RETRIEVAL, DatabaseKeys.KEY_TXT_EMBEDDING, DatabaseKeys.KEY_METADATA)
+    return RAGIngestionPayload(df=df)
 
 def render_chunks(output_name: str) -> None:
     """
@@ -251,12 +254,12 @@ def render_chunks(output_name: str) -> None:
     Modifications (save/delete) are performed directly on the DataFrame in session state.
     """
     # Get the DataFrame from session state
-    chunks_df = st.session_state.chunk_dfs[output_name]
+    payload = st.session_state.rag_ingestion_payload[output_name]
+    chunks_df = payload.df
 
     # Ensure a unique, stable row identifier exists for editing/deleting
     if "chunk_id" not in chunks_df.columns:
-        chunks_df = chunks_df.with_row_index("chunk_id")
-        st.session_state.chunk_dfs[output_name] = chunks_df
+        st.session_state.rag_ingestion_payload[output_name].df = chunks_df.with_row_index("chunk_id")
 
     def render_chunk(row: dict) -> None:
         """Renders a single chunk (DataFrame row) with editing capabilities."""
@@ -275,29 +278,29 @@ def render_chunks(output_name: str) -> None:
             cols_text = st.columns([1, 1])
             with cols_text[0]:
                 editor_key = f"editor_{output_name}_{row[DatabaseKeys.KEY_TITLE]}_{row['chunk_id']}"
-                edited_text = editor(language="latex", text_to_edit=row[DatabaseKeys.KEY_TXT], key=editor_key)
+                edited_text = editor(language="latex", text_to_edit=row[DatabaseKeys.KEY_TXT_RETRIEVAL], key=editor_key)
 
                 if action_cols[0].button("Save Chunk Changes", key=f"save_md_chunker_{unique_key}"):
-                    current_df = st.session_state.chunk_dfs[output_name]
+                    current_df = st.session_state.rag_ingestion_payload[output_name].df
                     updated_df = current_df.with_columns(
                         pl.when(pl.col("chunk_id") == row['chunk_id'])
                         .then(pl.lit(edited_text))
-                        .otherwise(pl.col(DatabaseKeys.KEY_TXT))
-                        .alias(DatabaseKeys.KEY_TXT)
+                        .otherwise(pl.col(DatabaseKeys.KEY_TXT_RETRIEVAL))
+                        .alias(DatabaseKeys.KEY_TXT_RETRIEVAL)
                     )
-                    st.session_state.chunk_dfs[output_name] = updated_df
+                    st.session_state.rag_ingestion_payload[output_name].df = updated_df
                     st.session_state[f"edit_mode_{unique_key}"] = False # Exit edit mode
                     st.rerun()
                 if action_cols[1].button("Delete Chunk", key=f"delete_md_chunker_{unique_key}"):
-                    current_df = st.session_state.chunk_dfs[output_name]
+                    current_df = st.session_state.rag_ingestion_payload[output_name].df
                     updated_df = current_df.filter(pl.col("chunk_id") != row['chunk_id'])
-                    st.session_state.chunk_dfs[output_name] = updated_df
+                    st.session_state.rag_ingestion_payload[output_name].df = updated_df
                     st.rerun()
 
             with cols_text[1]:
                 st.markdown(edited_text)
         else: # In view mode
-            st.markdown(row[DatabaseKeys.KEY_TXT])
+            st.markdown(row[DatabaseKeys.KEY_TXT_RETRIEVAL])
 
     # Hierarchy rendering using DataFrame filters
     level_1_df = chunks_df.filter(pl.col(DatabaseKeys.KEY_METADATA).struct.field("level") == 1)
@@ -311,7 +314,7 @@ def render_chunks(output_name: str) -> None:
             for l2_row in l2_children.to_dicts():
                 with st.expander(f"{l2_row[DatabaseKeys.KEY_TITLE]}"):
                     render_chunk(l2_row)
-                    l3_children = level_3_df.filter(pl.col(DatabaseKeys.KEY_METADATA).struct.field("h2") == l2_row[DatabaseKeys.KEY_TITLE])
+                    l3_children = level_3_df.filter(pl.col(DatabaseKeys.KEY_METADATA).struct.field("h2") == l2_row[DatabaseKeys.KEY_TITLE]) # noqa
                     for l3_row in l3_children.to_dicts():
                         with st.expander(f"{l3_row[DatabaseKeys.KEY_TITLE]}"):
                             render_chunk(l3_row)
@@ -333,26 +336,24 @@ def markdown_chunker() -> None:
     directory_preprocessed_output = os.listdir(DIRECTORY_MD_PREPROCESSING_1)
 
     # Initialize session state for holding DataFrames
-    if 'chunk_dfs' not in st.session_state:
-        st.session_state.chunk_dfs = {}
+    if 'rag_ingestion_payload' not in st.session_state:
+        st.session_state.rag_ingestion_payload = {}
 
     with center:
         for output_name in directory_preprocessed_output:
             md_filepath = f"{DIRECTORY_MD_PREPROCESSING_1}/{output_name}/{output_name}.md"
 
             # Parse and store DataFrame in session state on first run for this file
-            if not st.session_state.is_chunk_df_initialized:
-                st.session_state.chunk_dfs[output_name] = parse_markdown_to_chunks(md_filepath)
-                st.session_state.is_chunk_df_initialized = True
+            if not st.session_state.is_rag_ingestion_payload_initialized:
+                st.session_state.rag_ingestion_payload[output_name] = parse_ingestion_payload(md_filepath)
+                st.session_state.is_rag_ingestion_payload_initialized = True
 
             with st.expander(output_name):
                 if st.button("Store chunks to Parquet", key=f"store_md_chunks_{output_name}", type="primary"):
-                    # On button click, write the current state of the DataFrame to Parquet
-                    # Drop the temporary 'chunk_id' if it exists before saving
-                    df_to_save = st.session_state.chunk_dfs[output_name]
-                    if "chunk_id" in df_to_save.columns:
-                        df_to_save = df_to_save.drop("chunk_id")
-                    df_to_save.write_parquet(f"{DIRECTORY_RAG_INPUT}/{output_name}/chunked_{output_name}.parquet")
+                    payload = st.session_state.rag_ingestion_payload[output_name]
+                    df_to_save = payload.df.drop("chunk_id") if "chunk_id" in payload.df.columns else payload.df
+                    save_payload = RAGIngestionPayload(df=df_to_save)
+                    save_payload.to_parquet(pathlib.Path(f"{DIRECTORY_RAG_INPUT}/{output_name}/chunked_{output_name}.parquet"))
 
                 # Render the interactive chunk editor, which operates on session_state directly
                 render_chunks(output_name=output_name)
