@@ -153,7 +153,7 @@ def rag_sidebar() -> None:
                         with st.expander(f"**Model**:{model}", expanded=False), st.expander("Inspect Database", expanded=False):
                             st.dataframe(rag_db.vector_db.database)
                             if st.button("Store Database", key=f"store_rag_db_{label}_{model}"):
-                                parquet_embeddings = f"{DIRECTORY_EMBEDDINGS}/{selection}.parquet"
+                                parquet_embeddings = f"{DIRECTORY_EMBEDDINGS}/{label}_{model}.parquet"
                                 rag_db.vector_db.database.write_parquet(parquet_embeddings) # noqa
                                 st.success(f"Stored RAG Database '{label}' to {parquet_embeddings}")
 
