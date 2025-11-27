@@ -3,16 +3,19 @@ NOTE TO MY SELF: Every step in this pipeline shall seperate streamlit UI & data 
 Required for later building API endpoints for automation.
 """
 import json
+import math
 import os
 import pathlib
 from pathlib import Path
 import re
 import shutil
 
+import networkx as nx
 import polars as pl
 from rag_database.dataclasses import RAGIngestionPayload
 from rag_database.rag_config import DatabaseKeys
 import streamlit as st
+from streamlit_agraph import Config, Edge, Node, agraph  # type: ignore
 
 from src.config import (
     DIRECTORY_MD_PREPROCESSING_1,
@@ -33,6 +36,8 @@ def init_session_state() -> None:
         st.session_state.is_rag_ingestion_payload_initialized = False
         st.session_state.is_edit_mode_active = False
         st.session_state.staging_complete = False
+        st.session_state.rag_ingestion_payload = {}
+        st.session_state.selected_graph_document = None
 
 # ---------------------------- Preprocessing Step 1 - Move Paths / Fix Headings / Adjust MD Image Paths ---------------------------- #
 def _transform_headings(lines: list[str]) -> list[str]:
@@ -179,12 +184,19 @@ def render_preprocessor() -> None:
 
 
 # ----------------------------- Preprocessing Step 2 - Chunking / Hierarchy / Parquet Storage ----------------------------- #
+class MetadataKeys:
+    LEVEL = "level"
+    KEY_H1 = "h1"
+    KEY_H2 = "h2"
+    KEY_H3 = "h3"
+    CONTEXT_PATH = "context_path"
+
 METADATA_SCHEMA = {
-    "level": pl.Int8,
-    "h1": pl.String,
-    "h2": pl.String,
-    "h3": pl.String,
-    "context_path": pl.String,
+    MetadataKeys.LEVEL: pl.Int8,
+    MetadataKeys.KEY_H1: pl.String,
+    MetadataKeys.KEY_H2: pl.String,
+    MetadataKeys.KEY_H3: pl.String,
+    MetadataKeys.CONTEXT_PATH: pl.String,
 }
 
 DEFAULT_HEADING = "General"
@@ -295,6 +307,7 @@ def create_ingestion_payload(markdown_filepath: str) -> RAGIngestionPayload:
     return RAGIngestionPayload(df=pl.DataFrame(chunks))
 
 
+# ------ Rendering & Editing of Chunks in Hierarchical Format ------ #
 def render_chunks(output_name: str) -> None:
     """
     Renders an interactive, hierarchical editor for chunks in a Streamlit app.
@@ -415,6 +428,131 @@ def markdown_chunker() -> None:
                 # Render the interactive chunk editor, which operates on session_state directly
                 render_chunks(output_name=output_name)
 
+def render_document_graph() -> None:
+    """Render a hierarchical graph view of the document chunks."""
+
+    st.header("Document Hierarchy Graph")
+
+    if st.session_state.rag_ingestion_payload == {}:
+        st.info("No processed document data available to build the graph.")
+        return
+
+    selected_graph_document = st.selectbox(
+        "Select Document",
+        options=st.session_state.rag_ingestion_payload.keys(),
+        key="selected_document_for_graph"
+    )
+
+    if selected_graph_document is not None:
+        st.session_state.selected_graph_document = selected_graph_document
+    else:
+        return
+
+    processed_df = st.session_state.rag_ingestion_payload[selected_graph_document].df
+
+    # --- 1. Build the Graph from DataFrame Hierarchy ---
+    G = nx.DiGraph()
+    # Add a root node for the entire document set
+    document_root_node = "DOCUMENT ROOT"
+    G.add_node(document_root_node, level=-1, label=document_root_node)
+
+    # Use a dictionary to map node IDs to their corresponding text content
+    node_id_to_content = {}
+
+    # Unpack metadata for easier access
+    df = processed_df.with_columns(
+        pl.col("metadata").str.json_decode(dtype=pl.Struct(METADATA_SCHEMA))
+    ).unnest("metadata")
+
+    for row in df.iter_rows(named=True):
+        # Create unique, path-like IDs for each node to avoid collisions
+        h1_id = row[MetadataKeys.KEY_H1]
+        h2_id = f"{h1_id} > {row[MetadataKeys.KEY_H2]}"
+        h3_id = f"{h2_id} > {row[MetadataKeys.KEY_H3]}"
+        chunk_id = f"{h3_id} > {row[DatabaseKeys.KEY_TITLE]}"
+
+        # Add nodes and edges, ensuring parent nodes are created
+        G.add_node(h1_id, level=1, label=row[MetadataKeys.KEY_H1])
+        G.add_edge(document_root_node, h1_id)
+
+        if row[MetadataKeys.KEY_H2] != "General":
+            G.add_node(h2_id, level=2, label=row[MetadataKeys.KEY_H2])
+            G.add_edge(h1_id, h2_id)
+
+        if row[MetadataKeys.KEY_H3] != "General":
+            G.add_node(h3_id, level=3, label=row[MetadataKeys.KEY_H3])
+            G.add_edge(h2_id, h3_id)
+
+        # The chunk itself is a leaf node
+        parent_id = h3_id if row[MetadataKeys.KEY_H3] != "General" \
+            else h2_id if row[MetadataKeys.KEY_H2] != "General" \
+            else h1_id
+
+        G.add_node(chunk_id, level=4, label=row[DatabaseKeys.KEY_TITLE])
+        G.add_edge(parent_id, chunk_id)
+
+        # Store the chunk's content for the click-to-view feature
+        node_id_to_content[chunk_id] = row[DatabaseKeys.KEY_TXT_RETRIEVAL]
+
+    # --- 2. Configure Node and Edge Styles ---
+    nodes: list[Node] = []
+    edges: list[Edge] = []
+
+    level_colors = {
+        -1: "#ff6b6b",  # Root
+        1: "#ffd93d",   # H1
+        2: "#6bcb77",   # H2
+        3: "#4d96ff",   # H3
+        4: "#f06595",   # Chunk
+    }
+
+    for node_id, attrs in G.nodes(data=True):
+        level = attrs.get("level", 4)
+        is_leaf = G.out_degree(node_id) == 0
+        content_length = len(node_id_to_content.get(node_id, ""))
+
+        nodes.append(Node(
+            id=node_id,
+            label=str(attrs.get("label", node_id)),
+            size=max(int(math.log1p(content_length) * 3), 10) if is_leaf else 15,
+            color=level_colors.get(level, "#AEC6CF"),
+            title=node_id,  # Tooltip shows the full path
+            shape="box" if is_leaf else "ellipse",
+        ))
+
+    for source, target in G.edges():
+        edges.append(Edge(
+            source=source,
+            target=target,
+            color="rgba(255,255,255,0.3)",
+        ))
+
+    # --- 3. Render the Graph and Interaction Expander ---
+    config = Config(
+        width="100%",
+        height=700,
+        directed=True,
+        physics=False, # Physics is not ideal for tree structures
+        hierarchical={
+            "enabled": True,
+            "sortMethod": "directed", # Sorts from the root
+            "direction": "UD",       # Up-Down direction
+            "levelSeparation": 150,
+        },
+        backgroundColor="#1a1a1a",
+    )
+
+    selected_node_id = agraph(nodes=nodes, edges=edges, config=config)
+
+    with st.expander("Selected Document Chunk", expanded=True):
+        if selected_node_id and selected_node_id in node_id_to_content:
+            st.markdown(f"### {G.nodes[selected_node_id].get('label', 'Content')}")
+            st.markdown(node_id_to_content[selected_node_id])
+        elif selected_node_id:
+            st.info("This is a heading node. Click on a rectangular document node to see its content.")
+        else:
+            st.info("Click a rectangular node in the graph to display its content here.")
+
 def main() -> None:
     init_session_state()
     selection = st.sidebar.radio("Select Page", options=["Markdown Preprocessor", "Markdown Chunker"], index=0, key="markdown_page_selector")  # noqa
@@ -435,7 +573,11 @@ def main() -> None:
                 st.session_state.chunker_active = True
 
             if st.session_state.chunker_active is True:
-                markdown_chunker()
+                tabs = st.tabs(["Chunk Editor", "Document Graph"])
+                with tabs[0]:
+                    markdown_chunker()
+                with tabs[1]:
+                    render_document_graph()
 
 if __name__ == "__main__":
     main()
