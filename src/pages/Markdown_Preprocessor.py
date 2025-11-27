@@ -2,11 +2,11 @@
 NOTE TO MY SELF: Every step in this pipeline shall seperate streamlit UI & data processing logic without user interaction.
 Required for later building API endpoints for automation.
 """
-
 import json
 import os
 import pathlib
 from pathlib import Path
+import re
 import shutil
 
 import polars as pl
@@ -32,123 +32,150 @@ def init_session_state() -> None:
         st.session_state.chunker_active = False
         st.session_state.is_rag_ingestion_payload_initialized = False
         st.session_state.is_edit_mode_active = False
+        st.session_state.staging_complete = False
 
 # ---------------------------- Preprocessing Step 1 - Move Paths / Fix Headings / Adjust MD Image Paths ---------------------------- #
-def data_wrangler(vlm_output: list[str]) -> None:
+def _transform_headings(lines: list[str]) -> list[str]:
     """
-    Copies and processes VLM output files. For each file, it:
-    1. Copies the markdown file and its images to DIRECTORY_MD_PREPROCESSING_1.
-    2. Adjusts image paths in the copied markdown file to be server-accessible.
-    3. Corrects heading levels in the copied file:
-        - '# 1.2 Title' -> '## 1.2 Title'
-        - '# Title'     -> '**Title**'
+    Rewrites markdown heading lines based on specific formatting rules.
+    - Converts numeric-prefixed H1s (e.g., '# 1.2 Title') to their correct level ('## 1.2 Title').
+    - Converts non-numeric H1s (e.g., '# Conclusion') to bolded text.
     """
-
-    for output_name in vlm_output:
-
-        # 1. Set up paths.
-        content_path = Path(DIRECTORY_VLM_OUTPUT) / f"converted_{output_name}.pdf" / output_name / "auto"
-        md_dest_path = Path(DIRECTORY_MD_PREPROCESSING_1) / output_name
-        imgs_src_path = content_path / "images"
-        app_imgs_dest_path = Path(SERVER_APP_RAG_INPUT) / output_name / "images" # app images need
-        static_imgs_dest_path = Path(DIRECTORY_RAG_INPUT) / output_name / "images" # fileserver accessible images
-
-        # Use glob to find the markdown file; more explicit and safer than list comprehension with next().
-        try:
-            md_file_path = next(content_path.glob("*.md"))
-        except StopIteration:
-            print(f"Warning: No markdown file found in {content_path} for {output_name}. Skipping.")
+    processed_lines = []
+    for line in lines:
+        if not line.startswith("# "):
+            processed_lines.append(line)
             continue
 
-        md_dest_path.mkdir(parents=True, exist_ok=True)
+        heading_content = line[2:].strip()
+        first_word = heading_content.split(" ", 1)[0]
+        numeric_part = first_word.rstrip(".")
 
-        # Use shutil for platform-independent file operations.
-        processed_md_filepath = md_dest_path / md_file_path.name
-        shutil.copy(md_file_path, processed_md_filepath)
-        if imgs_src_path.exists() and imgs_src_path.is_dir():
-            shutil.copytree(imgs_src_path, static_imgs_dest_path, dirs_exist_ok=True) # 2. Copy folder
+        if numeric_part.replace(".", "").isdigit():
+            level = numeric_part.count(".") + 1
+            processed_lines.append(f"{'#' * min(level, 6)} {heading_content}")
+        else:
+            processed_lines.append(f"**{heading_content}**")
+    return processed_lines
 
-        content = processed_md_filepath.read_text(encoding="utf-8")
-        content = content.replace("![](images", f"![]({app_imgs_dest_path}")
-        lines = content.splitlines()
-        processed_lines = []
-        for line in lines:
-            if line.startswith("# "):
-                heading_content = line[2:].lstrip()
-                first_word = heading_content.split(" ", 1)[0]
-                numeric_part = first_word.rstrip(".")
-                if numeric_part and numeric_part.replace(".", "").isdigit():
-                    level = numeric_part.count(".") + 1
-                    processed_lines.append(f"{'#' * min(level, 6)} {heading_content}")
-                else:
-                    processed_lines.append(f"**{heading_content.strip()}**")
-            else:
-                processed_lines.append(line)
+IMAGE_PATH_PATTERN = re.compile(r"!\[(.*?)\]\(images/")
 
-        processed_md_filepath.write_text("\n".join(processed_lines), encoding="utf-8")
+def _process_document(doc_id: str) -> None:
+    """Copies, cleans, and restructures a single document and its assets."""
+    try:
+        source_base_path = Path(DIRECTORY_VLM_OUTPUT) / f"converted_{doc_id}.pdf" / doc_id / "auto"
+        dest_base_path = Path(DIRECTORY_MD_PREPROCESSING_1) / doc_id
+        source_imgs_path = source_base_path / "images"
+        static_imgs_dest_path = Path(DIRECTORY_RAG_INPUT) / doc_id / "images"
+        server_img_url_path = Path(SERVER_APP_RAG_INPUT) / doc_id / "images"
 
+        try:
+            source_md_path = next(source_base_path.glob("*.md"))
+        except StopIteration:
+            st.warning(f"No markdown file found for '{doc_id}'. Skipping.")
+            return
 
-def markdown_preprocessor() -> None:
+        dest_base_path.mkdir(parents=True, exist_ok=True)
+        dest_md_path = dest_base_path / source_md_path.name
+        shutil.copy(source_md_path, dest_md_path)
+
+        if source_imgs_path.is_dir():
+            shutil.copytree(source_imgs_path, static_imgs_dest_path, dirs_exist_ok=True)
+
+        original_content = dest_md_path.read_text(encoding="utf-8")
+        content_with_updated_img_paths = IMAGE_PATH_PATTERN.sub(
+            rf"![\1]({server_img_url_path}/", original_content
+        )
+
+        lines = content_with_updated_img_paths.splitlines()
+        processed_lines = _transform_headings(lines)
+        dest_md_path.write_text("\n".join(processed_lines), encoding="utf-8")
+
+    except (IOError, OSError) as e:
+        st.error(f"Failed to process '{doc_id}': {e}")
+
+def _get_doc_ids(source_directory: str) -> list[str]:
+    """Retrieves document IDs from the VLM output directory."""
+    source_path = Path(source_directory)
+
+    if not source_path.is_dir():
+        return []
+
+    doc_ids = [
+        path.name.replace("converted_", "").replace(".pdf", "")
+        for path in source_path.glob("converted_*.pdf")
+        if path.is_dir()
+    ]
+
+    doc_ids = sorted(doc_ids)
+    return doc_ids
+
+def stage_vlm_outputs(source_directory: str) -> None:
     """
-    First level processing step:
+    Copies and processes all VLM output files for preprocessing.
 
-    Markdown Preprocessor for Obsidian-Compatible Markdown Notes.
-    1. Datawrangling
-        - fixes heading levels
-        - adjusts image paths to fileserver paths
-        - moves VLM output files to 1st level MD preprocessing folder.
-    2. Editor & Preview
-        - Displays editor & markdown preview with images for each VLM output.
-        - Allows to make manual adjustments before saving data for 2nd level preprocessing.
+    For each document, this function:
+    1. Copies the markdown file and its images to the preprocessing directory.
+    2. Adjusts image paths within the markdown to be server-accessible URLs.
+    3. Transforms markdown headings to a consistent, hierarchical format.
     """
-    _,center, _ = st.columns([1,8,1])
+    doc_ids = _get_doc_ids(source_directory)
 
-    if st.sidebar.button("Exit Markdown Preprocessor"):
-        st.session_state.preprocess_active = False
+    for doc_id in doc_ids:
+        _process_document(doc_id)
+
+def _render_document_editor(doc_id: str, base_path: Path) -> None:
+    """Displays a markdown editor and preview for a single document."""
+    try:
+        md_filepath = next(base_path.glob("*.md"))
+    except StopIteration:
+        st.warning(f"Markdown file for '{doc_id}' not found. Skipping.")
         return
 
-    with center:
-        st.title("Markdown Preprocessor")
+    with st.expander(doc_id):
+        original_content = md_filepath.read_text(encoding="utf-8")
+        editor_cols = st.columns(2)
+        with editor_cols[0]:
+            st.subheader("Editor")
+            edited_text = editor(
+                text_to_edit=original_content,
+                language="markdown",
+                key=f"editor_{doc_id}"
+            )
+        with editor_cols[1]:
+            st.subheader("Preview")
+            st.markdown(edited_text)
 
-        vlm_output = os.listdir(DIRECTORY_VLM_OUTPUT)
-        vlm_output = [d.split("converted_")[1] for d in vlm_output]
-        vlm_output = [d.split(".pdf")[0] for d in vlm_output]
-
-        # Execute data wrangling only once per session
-        if st.session_state.is_data_wrangling_needed is True:
-            st.session_state.is_data_wrangling_needed = False
-            data_wrangler(vlm_output)
-
-        # Display editor & preview
-        for output_name in vlm_output:
-
-            output_path = Path(DIRECTORY_MD_PREPROCESSING_1) / output_name
+        if st.button("Save Changes", key=f"save_{doc_id}"):
             try:
-                md_filepath = next(output_path.glob("*.md"))
-            except StopIteration:
-                st.warning(f"Markdown file for '{output_name}' not found. Skipping.")
-                continue
+                md_filepath.write_text(edited_text, encoding="utf-8")
+                st.success(f"Saved changes to {md_filepath.name}")
+            except (IOError, OSError) as e:
+                st.error(f"Could not save file for '{doc_id}': {e}")
 
-            with open(md_filepath, "r") as f:
-                md_content = f.read()
+def render_preprocessor() -> None:
+    """
+    Renders the UI for the first-level markdown preprocessing step.
 
-            with st.expander(output_name):
+    This page allows users to trigger a one-time data staging process that
+    copies and standardizes VLM outputs, then manually review, edit, and save
+    each document before it proceeds to the next stage.
+    """
+    st.title("Markdown Preprocessing & Review")
 
-                cols_spacer = st.columns([0.1,0.9])
+    if st.sidebar.button("Exit Preprocessor"):
+        st.session_state.preprocess_active = False
+        st.rerun()
 
-                cols = st.columns(2)
+    if not st.session_state.staging_complete:
+        stage_vlm_outputs(DIRECTORY_VLM_OUTPUT)
+        st.session_state.staging_complete = True
+        st.success("Document staging complete.")
 
-                with cols[0]:
-                    edited_text = editor(language="latex", text_to_edit=md_content, key=output_name)
-                with cols[1]:
-                    st.markdown(edited_text)
-
-                with cols_spacer[0]:
-                    if st.button("Save Changes", key=f"save_md_preprocessor_{output_name}"):
-                        # Replace edited content back to file
-                        with open(md_filepath, "w") as f:
-                            f.write(edited_text)
-                        st.success(f"Saved changes to {md_filepath}")
+    st.header("Document Editors")
+    for doc_id in _get_doc_ids(DIRECTORY_VLM_OUTPUT):
+        doc_path = Path(DIRECTORY_MD_PREPROCESSING_1) / doc_id
+        _render_document_editor(doc_id, doc_path)
 
 
 # ----------------------------- Preprocessing Step 2 - Chunking / Hierarchy / Parquet Storage ----------------------------- #
@@ -400,7 +427,7 @@ def main() -> None:
                 st.session_state.preprocessor_active = True
 
             if st.session_state.preprocessor_active is True:
-                markdown_preprocessor()
+                render_preprocessor()
 
         elif selection == "Markdown Chunker":
 
