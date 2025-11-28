@@ -97,7 +97,7 @@ def sidebar() -> None:
                 st.rerun()
 
             if st.button("Store Dataframe"):
-                path = st.text_input("Enter file path to store dataframe:", value="dataframe_output.parquet")
+                path = st.text_input("Enter file path to store dataframe:")
                 if path:
                     # get filename from path
                     filename = os.path.basename(path)
