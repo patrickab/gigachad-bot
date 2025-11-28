@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Tuple
 
 from rag_database.dataclasses import RAGIngestionPayload, RAGQuery
 from rag_database.rag_config import MODEL_CONFIG, DatabaseKeys

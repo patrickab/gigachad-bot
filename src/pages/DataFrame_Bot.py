@@ -97,11 +97,12 @@ def sidebar() -> None:
                 st.rerun()
 
             if st.button("Store Dataframe"):
-                path = st.text_input("Enter file path to store dataframe:")
+                st.session_state.show_path_input = True
+
+            if st.session_state.get("show_path_input", False):
+                path = st.text_input("Enter file path to store dataframe:", key="dataframe_path_input")
                 if path:
-                    # get filename from path
                     filename = os.path.basename(path)
-                    # backup
                     backup_dir = "src/static/DataFrame_Backup/"
                     os.makedirs(backup_dir, exist_ok=True)
                     backup_path = os.path.join(backup_dir, filename)
@@ -109,6 +110,7 @@ def sidebar() -> None:
                     st.success(f"Original DataFrame backed up to {backup_path}")
                     st.session_state.display_dataframe.to_parquet(path)
                     st.success(f"New DataFrame stored to {path}")
+                    st.session_state.show_path_input = False
 
 
 class DataFrame_Bot:
