@@ -129,7 +129,7 @@ def paste_img_button() -> PasteResult:
         st.session_state.pasted_image = EMPTY_PASTE_RESULT
         return EMPTY_PASTE_RESULT
 
-def editor(text_to_edit: str, language: str, key: str, height: int = None) -> str:
+def editor(text_to_edit: str, language: str, key: str, height: Optional[int] = None) -> str:
     """Create an ACE editor for displaying OCR extracted text."""
     default_theme = "chaos"
     selected_theme = st.selectbox(
