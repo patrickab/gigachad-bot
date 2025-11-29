@@ -1,11 +1,12 @@
 import os
 
+from rag_database.rag_database import RagDatabase, RAGQuery, RAGResponse
 from st_copy import copy_button
 import streamlit as st
 from streamlit_paste_button import PasteResult
 
 from config import DIRECTORY_CHAT_HISTORIES, LOCAL_NANOTASK_MODEL, MODELS_OLLAMA
-from lib.non_user_prompts import SYS_CAPTION_GENERATOR
+from lib.non_user_prompts import SYS_CAPTION_GENERATOR, SYS_RAG
 from lib.streamlit_helper import (
     AVAILABLE_LLM_MODELS,
     AVAILABLE_PROMPTS,
@@ -47,6 +48,21 @@ def chat_interface() -> None:
             with st.chat_message("assistant"):
                 prompt += st.session_state.file_context
                 system_prompt = st.session_state.system_prompts[st.session_state.selected_prompt]
+
+                if st.session_state.is_rag_active:
+                    rag_db: RagDatabase = st.session_state.rag_databases[st.session_state.selected_rag_database][st.session_state.selected_embedding_model] # noqa
+                    rag_query = RAGQuery(query=prompt, k_documents=st.session_state.k_query_documents)
+                    rag_response: RAGResponse = rag_db.rag_process_query(rag_query=rag_query)
+                    titles = rag_response.titles
+                    texts = rag_response.texts
+
+                    retrieved_information = "<context>"
+                    for title, text in zip(titles, texts, strict=True):
+                        retrieved_information += f"\n\n<doc title=\"{title}\">\n{text}</doc>\n" # noqa
+                    retrieved_information += "</context>"
+
+                    system_prompt = system_prompt + "\n\n" + SYS_RAG + "\n\n# RAG Retrieved Context:\n" + retrieved_information
+
                 img = st.session_state.pasted_image # defaults to EMPTY_PASTE_RESULT if no image pasted
 
                 st.write_stream(

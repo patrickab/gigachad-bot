@@ -95,7 +95,7 @@ def obsidian_dataloader(model: str) -> Tuple[RagDatabase, RAGIngestionPayload]:
 def rag_sidebar() -> None:
     """RAG Workspace Sidebar for RAG Database selection & initialization."""
 
-    with st.sidebar, st.expander("RAG Workspace Options", expanded=True):
+    with st.sidebar, st.expander("RAG Workspace Options", expanded=False):
 
         st.session_state.selected_embedding_model = st.selectbox(
             "Select Embedding Model",
@@ -157,6 +157,10 @@ def rag_sidebar() -> None:
                                 rag_db.vector_db.database.write_parquet(parquet_embeddings) # noqa
                                 st.success(f"Stored RAG Database '{label}' to {parquet_embeddings}")
 
+        st.session_state.k_query_documents = st.number_input(
+            "Number of documents to retrieve per query", min_value=1, max_value=20, value=5, step=1, key="k_docs",
+        )
+
 def rag_workspace() -> None:
     """RAG Workspace main function."""
     st.title("RAG Workspace")
@@ -165,7 +169,7 @@ def rag_workspace() -> None:
 
     if prompt:
         rag_db: RagDatabase = st.session_state.rag_databases[st.session_state.selected_rag_database][st.session_state.selected_embedding_model] # noqa
-        query = RAGQuery(query=prompt, k_documents=5)
+        query = RAGQuery(query=prompt, k_documents=st.session_state.k_query_documents)
         rag_response = rag_db.rag_process_query(rag_query=query)
         with st.chat_message("user"):
             st.markdown(prompt)
