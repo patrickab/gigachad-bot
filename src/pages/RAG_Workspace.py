@@ -95,7 +95,7 @@ def obsidian_dataloader(model: str) -> Tuple[RagDatabase, RAGIngestionPayload]:
 def rag_sidebar() -> None:
     """RAG Workspace Sidebar for RAG Database selection & initialization."""
 
-    with st.sidebar:
+    with st.sidebar, st.expander("RAG Workspace Options", expanded=True):
 
         st.session_state.selected_embedding_model = st.selectbox(
             "Select Embedding Model",
