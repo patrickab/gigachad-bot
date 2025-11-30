@@ -123,8 +123,8 @@ def pdf_preprocessor() -> None:
                     new_doc = fitz.open()
                     new_doc.insert_pdf(doc, from_page=start_p-1, to_page=end_p-1)
 
-                    base_name, ext = os.path.splitext(st.session_state.uploaded_files[i].name)
-                    sliced_filename = f"{base_name}_preprocessed_{start_p}-{end_p}{ext}"
+                    base_name, _ = os.path.splitext(st.session_state.uploaded_files[i].name)
+                    sliced_filename = f"{base_name}.pdf"
                     sliced_filepath = os.path.join(SERVER_STATIC_DIR, sliced_filename)
 
                     # Store sliced PDF & remove original server-file from static - PDF source location remains untouched

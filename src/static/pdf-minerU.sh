@@ -12,7 +12,7 @@ for file in src/static/*.pdf; do
     filename_no_ext="${filename%.*}"
 
     # Create new filename
-    new_filename="converted_${filename_no_ext}.pdf"
+    new_filename="${filename_no_ext}"
 
     # Perform conversion
     echo "Converting '$file' to '$new_filename'"
