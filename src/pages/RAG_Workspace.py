@@ -157,7 +157,7 @@ def rag_sidebar() -> None:
                                 rag_db.vector_db.database.write_parquet(parquet_embeddings) # noqa
                                 st.success(f"Stored RAG Database '{label}' to {parquet_embeddings}")
 
-        st.session_state.k_query_documents = st.number_input(
+        st.session_state.k_query_documents = st.slider(
             "Number of documents to retrieve per query", min_value=1, max_value=20, value=5, step=1, key="k_docs",
         )
 
