@@ -273,12 +273,14 @@ def create_ingestion_payload(markdown_filepath: str) -> RAGIngestionPayload:
             "context_path": context_path,
         }
 
+        text_without_image_links = re.sub(r"!\[.*?\]\(.*?\)", "", text_content).strip()
+
         # The record to be added to the DataFrame
         chunk_record = {
             DatabaseKeys.KEY_TITLE: title,
             DatabaseKeys.KEY_METADATA: json.dumps(metadata),
             DatabaseKeys.KEY_TXT_RETRIEVAL: text_content,
-            DatabaseKeys.KEY_TXT_EMBEDDING: f"{context_path}\n\n{text_content}",
+            DatabaseKeys.KEY_TXT_EMBEDDING: f"{context_path}\n\n{text_without_image_links}",
         }
         chunks.append(chunk_record)
 
