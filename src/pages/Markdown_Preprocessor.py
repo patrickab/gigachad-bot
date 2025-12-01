@@ -326,14 +326,12 @@ def render_chunks(output_name: str) -> None:
                      `st.session_state`.
     """
     payload = st.session_state.rag_ingestion_payload[output_name]
-
     if payload.df.is_empty():
         st.info("No chunks to display.")
         return
 
     # --- Logic for Merging Chunks (Absorbing Lowest Level) ---
     if st.button("Merge Chunks (Absorb Lowest Level)"):
-
         # Keep index order to sort back correctly after split
         df = payload.df.with_row_index("index_order")
 
@@ -373,8 +371,13 @@ def render_chunks(output_name: str) -> None:
                     .group_by(group_keys)
                     .agg([
                         pl.col(DatabaseKeys.KEY_TITLE).str.join(" > ").alias("c_titles"),
-                        pl.col(DatabaseKeys.KEY_TXT_RETRIEVAL).str.join("\n\n").alias("c_texts_retrieval"),
-                        pl.col(DatabaseKeys.KEY_TXT_EMBEDDING).str.join("\n\n").alias("c_texts_embeddings")
+                        pl.col(DatabaseKeys.KEY_TXT_RETRIEVAL).str.join("\n\n").alias("c_texts"),
+                        # Remove first line (old context) from child embeddings before joining
+                        pl.col(DatabaseKeys.KEY_TXT_EMBEDDING)
+                          .str.replace(r"^[^\n]*\n", "")
+                          .str.strip_chars()
+                          .str.join("\n\n")
+                          .alias("c_embs")
                     ])
                 )
 
@@ -387,14 +390,22 @@ def render_chunks(output_name: str) -> None:
                       .alias(DatabaseKeys.KEY_TITLE),
 
                     # Append children text
-                    pl.when(pl.col("c_texts_retrieval").is_not_null())
-                      .then(pl.format("{}\n\n{}", pl.col(DatabaseKeys.KEY_TXT_RETRIEVAL), pl.col("c_texts_retrieval")))
+                    pl.when(pl.col("c_texts").is_not_null())
+                      .then(pl.format("{}\n\n{}", pl.col(DatabaseKeys.KEY_TXT_RETRIEVAL), pl.col("c_texts")))
                       .otherwise(pl.col(DatabaseKeys.KEY_TXT_RETRIEVAL))
                       .alias(DatabaseKeys.KEY_TXT_RETRIEVAL),
 
-                    # Append children embedding context
-                    pl.when(pl.col("c_texts_embeddings").is_not_null())
-                      .then(pl.format("{}\n\n{}", pl.col(DatabaseKeys.KEY_TXT_EMBEDDING), pl.col("c_texts_embeddings")))
+                    # Append children embedding context (Use Merged Title as first line)
+                    pl.when(pl.col("c_embs").is_not_null())
+                      .then(pl.format(
+                          "{}\n\n{}\n\n{}",
+                          # 1. New Merged Title as First Line
+                          pl.format("{} > {}", pl.col(DatabaseKeys.KEY_TITLE), pl.col("c_titles")),
+                          # 2. Parent Body (Original Embedding minus first line)
+                          pl.col(DatabaseKeys.KEY_TXT_EMBEDDING).str.replace(r"^[^\n]*\n", "").str.strip_chars(),
+                          # 3. Aggregated Children Bodies
+                          pl.col("c_embs")
+                      ))
                       .otherwise(pl.col(DatabaseKeys.KEY_TXT_EMBEDDING))
                       .alias(DatabaseKeys.KEY_TXT_EMBEDDING),
                 ])
