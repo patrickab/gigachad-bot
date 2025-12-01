@@ -1,5 +1,6 @@
 import os
 
+from llm_baseclient.client import LLMClient
 from rag_database.rag_database import DatabaseKeys, RagDatabase, RAGQuery, RAGResponse
 from st_copy import copy_button
 import streamlit as st
@@ -65,14 +66,16 @@ def chat_interface() -> None:
 
                     system_prompt = system_prompt + "\n\n" + SYS_RAG + "\n\n# RAG Retrieved Context:\n" + retrieved_information
 
-                img = st.session_state.pasted_image # defaults to EMPTY_PASTE_RESULT if no image pasted
+                img: PasteResult = st.session_state.pasted_image # defaults to EMPTY_PASTE_RESULT if no image pasted
+                client: LLMClient = st.session_state.client
 
                 st.write_stream(
-                    st.session_state.client.chat(
+                    client.chat(
                         model=st.session_state.selected_model,
                         user_message=prompt,
                         system_prompt=system_prompt,
-                        img=img
+                        img=img.image_data,
+                        stream=True,
                     )
                 )
 

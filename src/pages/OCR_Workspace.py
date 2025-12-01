@@ -2,7 +2,7 @@
 import streamlit as st
 
 from lib.non_user_prompts import SYS_OCR_TEXT_EXTRACTION
-from src.lib.streamlit_helper import EMPTY_PASTE_RESULT, editor, model_selector, options_message, paste_img_button
+from src.lib.streamlit_helper import EMPTY_PASTE_RESULT, PasteResult, editor, model_selector, options_message, paste_img_button
 
 
 def ocr_sidebar() -> None:
@@ -17,11 +17,12 @@ def ocr_workspace() -> None:
 
     is_new_image = st.session_state.pasted_image != EMPTY_PASTE_RESULT and st.session_state.pasted_image not in st.session_state.imgs_sent # noqa
     if is_new_image:
+        img: PasteResult = st.session_state.pasted_image
         st.session_state.ocr_response = st.write_stream(
             st.session_state.client.api_query(
             model=st.session_state.selected_model_ocr,
             system_prompt=SYS_OCR_TEXT_EXTRACTION,
-            img=st.session_state.pasted_image
+            img=img.image_data
             )
         )
         st.session_state.imgs_sent.append(st.session_state.pasted_image)
