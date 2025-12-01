@@ -124,25 +124,24 @@ def pdf_preprocessor() -> None:
                     new_doc.insert_pdf(doc, from_page=start_p-1, to_page=end_p-1)
 
                     base_name, _ = os.path.splitext(st.session_state.uploaded_files[i].name)
-                    sliced_filename = f"{base_name}.pdf"
-                    sliced_filepath = os.path.join(SERVER_STATIC_DIR, sliced_filename)
+                    new_name = f"{base_name}.pdf"
+                    new_filepath = os.path.join(SERVER_STATIC_DIR, new_name)
 
                     # Store sliced PDF & remove original server-file from static - PDF source location remains untouched
-                    new_doc.save(sliced_filepath)
+                    new_doc.save(new_filepath)
                     new_doc.close()
-                    os.remove(relocated_filepaths[i])
 
-                    st.session_state.preprocessed_filepaths.append(sliced_filepath)
+                    st.session_state.preprocessed_filepaths.append(new_filepath)
                     st.session_state.uploaded_files.pop(i)
                     st.session_state.total_pdfs_preprocessed += 1
-                    st.session_state.total_mb_preprocessed += os.path.getsize(sliced_filepath)/(1024*1024)
+                    st.session_state.total_mb_preprocessed += os.path.getsize(new_filepath)/(1024*1024)
                     st.session_state.total_pages_preprocessed += (end_p - start_p + 1)
 
                     if len(st.session_state.uploaded_files) == 0:
                         st.success("All uploaded PDFs have been preprocessed - proceed to VLM Extraction or upload new PDFs.") # noqa
                         st.session_state.all_pdfs_preprocessed = True
                     else:
-                        st.success(f"Preprocessed and saved: {sliced_filename}")
+                        st.success(f"Preprocessed and saved: {new_name}")
                     st.rerun()
                 else:
                     st.error("Invalid Range")
