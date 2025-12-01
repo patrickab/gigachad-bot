@@ -860,7 +860,7 @@ wheels = [
 [[package]]
 name = "llm-baseclient"
 version = "0.1.0"
-source = { git = "ssh://git@github.com/patrickab/llm-baseclient.git?rev=main#f695c88ca9d556ab584c8127d2eea743bba369ee" }
+source = { git = "ssh://git@github.com/patrickab/llm-baseclient.git?rev=main#9e52f738c827c906f6506a157f55a67f37719066" }
 dependencies = [
     { name = "litellm" },
     { name = "streamlit-paste-button" },
