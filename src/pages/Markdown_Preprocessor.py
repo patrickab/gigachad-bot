@@ -65,7 +65,7 @@ IMAGE_PATH_PATTERN = re.compile(r"!\[(.*?)\]\(images/")
 def _process_document(doc_id: str) -> None:
     """Copies, cleans, and restructures a single document and its assets."""
     try:
-        source_base_path = Path(DIRECTORY_VLM_OUTPUT) / doc_id / "auto"
+        source_base_path = Path(DIRECTORY_VLM_OUTPUT) / doc_id / doc_id / "auto"
         dest_base_path = Path(DIRECTORY_MD_PREPROCESSING_1) / doc_id
         source_imgs_path = source_base_path / "images"
         static_imgs_dest_path = Path(DIRECTORY_RAG_INPUT) / doc_id / "images"
@@ -166,6 +166,30 @@ def _render_document_editor(doc_id: str, base_path: Path) -> None:
             if st.button("Edit Document", key=f"edit_{doc_id}"):
                 st.session_state.is_doc_edit_mode_active[doc_id] = True
                 st.rerun()
+
+            lvl_1_heading = st.text_input("Provide Level 1 Heading (with number) for LLM Preprocessing", key=f"llm_heading_{doc_id}")
+            if st.button("LLM Preprocess Document", key=f"llm_preprocess_{doc_id}"):
+                if not lvl_1_heading.strip():
+                    st.error("Level 1 Heading cannot be empty.")
+                else:
+                    user_message = (
+                        f"Level 1 Heading: # {lvl_1_heading.strip()}\n---\n"
+                        f"<original content>\n{original_content}\n</original content>"
+                    )
+                    try:
+                        with st.spinner("LLM is processing the document..."):
+                            stream = st.session_state.client.api_query(
+                                model=st.session_state.md_model,
+                                user_message=user_message,
+                                system_prompt=SYS_LECTURE_SUMMARIZER,
+                            )
+                            processed_content = "".join(chunk for chunk in stream)
+                        md_filepath.write_text(processed_content, encoding="utf-8")
+                        st.success(f"Document '{doc_id}' preprocessed and saved.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"An error occurred during preprocessing: {e}")
+
 
             st.subheader("Preview")
             st.markdown(original_content, unsafe_allow_html=True)
@@ -533,7 +557,9 @@ def markdown_chunker() -> None:
 
 def main() -> None:
     init_session_state()
-    selection = st.sidebar.radio("Select Page", options=["Markdown Preprocessor", "Markdown Chunker"], index=0, key="markdown_page_selector")  # noqa
+    with st.sidebar:
+        st.session_state.md_model = model_selector(key="markdown_preprocessor")
+        selection = st.radio("Select Page", options=["Markdown Preprocessor", "Markdown Chunker"], index=0, key="markdown_page_selector")  # noqa
 
     _, center, _ = st.columns([1, 8, 1])
     with center:
