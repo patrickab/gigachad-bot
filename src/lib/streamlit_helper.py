@@ -103,6 +103,11 @@ def print_metrics(dict_metrics: dict[str,int|float], n_columns: Optional[int]=No
     for idx, (metric_name, metric_value) in enumerate(dict_metrics.items()):
         cols[idx % n_columns].metric(f"**{metric_name}:**", value=metric_value, border=True)
 
+def streamlit_img_to_bytes(img: PasteResult) -> bytes:
+    buffer = io.BytesIO()
+    img.image_data.save(buffer, format="PNG")
+    return buffer.getvalue()
+
 def paste_img_button() -> PasteResult:
     """Handle image pasting in Streamlit app."""
 

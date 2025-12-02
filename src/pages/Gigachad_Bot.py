@@ -16,6 +16,7 @@ from lib.streamlit_helper import (
     model_selector,
     options_message,
     paste_img_button,
+    streamlit_img_to_bytes,
 )
 from pages.RAG_Workspace import init_rag_workspace, rag_sidebar
 
@@ -79,7 +80,7 @@ def chat_interface() -> None:
                         model=st.session_state.selected_model,
                         user_message=prompt,
                         system_prompt=system_prompt,
-                        img=img.image_data,
+                        img=streamlit_img_to_bytes(img),
                         stream=True,
                         **kwargs,
                     )
