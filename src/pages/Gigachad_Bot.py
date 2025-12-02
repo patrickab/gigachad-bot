@@ -80,7 +80,7 @@ def chat_interface() -> None:
                         model=st.session_state.selected_model,
                         user_message=prompt,
                         system_prompt=system_prompt,
-                        img=streamlit_img_to_bytes(img),
+                        img=streamlit_img_to_bytes(img) if img.image_data is not None else None,
                         stream=True,
                         **kwargs,
                     )
