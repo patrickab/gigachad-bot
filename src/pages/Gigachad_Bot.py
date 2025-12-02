@@ -68,6 +68,11 @@ def chat_interface() -> None:
 
                 img: PasteResult = st.session_state.pasted_image # defaults to EMPTY_PASTE_RESULT if no image pasted
                 client: LLMClient = st.session_state.client
+                kwargs = {
+                    "temperature": st.session_state.llm_temperature,
+                    "top_p": st.session_state.llm_top_p,
+                    "reasoning_effort": st.session_state.llm_reasoning_effort,
+                }
 
                 st.write_stream(
                     client.chat(
@@ -76,6 +81,7 @@ def chat_interface() -> None:
                         system_prompt=system_prompt,
                         img=img.image_data,
                         stream=True,
+                        **kwargs,
                     )
                 )
 
@@ -154,6 +160,29 @@ def gigachad_sidebar() -> None:
         if model != st.session_state.selected_model:
             st.session_state.selected_model = model
 
+        # ------------------------------------------------------ Model Config ------------------------------------------------------ #
+        with st.expander("Model Configuration", expanded=False):
+            st.session_state.llm_temperature = st.slider(
+                "Temperature",
+                min_value=0.0,
+                max_value=2.0,
+                value=0.2,
+                step=0.05,
+                key="temperature",
+            )
+            st.session_state.llm_top_p = st.slider(
+                "Top-p (nucleus sampling)",
+                min_value=0.0,
+                max_value=1.0,
+                value=0.95,
+                step=0.05,
+                key="top_p",
+            )
+            st.session_state.llm_reasoning_effort = st.selectbox(
+                "Reasoning Effort",
+                options=["low", "medium", "high"],
+                key="reasoning_effort",
+            )
 
         # -------------------------------------------------------- RAG Mode -------------------------------------------------------- #
         st.markdown("---")
