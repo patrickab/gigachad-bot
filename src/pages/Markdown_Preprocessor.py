@@ -291,11 +291,11 @@ def create_ingestion_payload(markdown_filepath: str) -> RAGIngestionPayload:
         context_path = f"{current_h1} > {current_h2} > {current_h3}"
 
         metadata = {
-            "level": level,
-            "h1": current_h1,
-            "h2": current_h2,
-            "h3": current_h3,
-            "context_path": context_path,
+            MetadataKeys.LEVEL: level,
+            MetadataKeys.KEY_H1: current_h1,
+            MetadataKeys.KEY_H2: current_h2,
+            MetadataKeys.KEY_H3: current_h3,
+            MetadataKeys.CONTEXT_PATH: context_path,
         }
 
         text_without_image_links = re.sub(r"!\[.*?\]\(.*?\)", "", text_content).strip()
