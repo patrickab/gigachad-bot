@@ -65,7 +65,7 @@ def _transform_headings(lines: list[str]) -> list[str]:
             processed_lines.append(f"**{heading_content}**")
     return processed_lines
 
-IMAGE_PATH_PATTERN = re.compile(r"!\[(.*?)\]\(images/")
+IMAGE_PATH_PATTERN_SERVER = re.compile(r"!\[(.*?)\]\(images/") # used for mapping image paths to server URLs
 
 def _process_document(doc_id: str) -> None:
     """Copies, cleans, and restructures a single document and its assets."""
@@ -90,9 +90,7 @@ def _process_document(doc_id: str) -> None:
             shutil.copytree(source_imgs_path, static_imgs_dest_path, dirs_exist_ok=True)
 
         original_content = dest_md_path.read_text(encoding="utf-8")
-        content_with_updated_img_paths = IMAGE_PATH_PATTERN.sub(
-            rf"![\1]({server_img_url_path}/", original_content
-        )
+        content_with_updated_img_paths = IMAGE_PATH_PATTERN_SERVER.sub(rf"![\1]({server_img_url_path}/", original_content)
 
         lines = content_with_updated_img_paths.splitlines()
         processed_lines = _transform_headings(lines)
@@ -125,6 +123,8 @@ def stage_vlm_outputs(source_directory: str) -> None:
         _process_document(doc_id)
         st.session_state.is_doc_edit_mode_active[doc_id] = False
 
+IMAGE_LINK_PATTERN_MD = re.compile(r"!\[.*?\]\s*\((?:.*?)\)") # used for extracting complete markdown image links
+
 def _render_document_editor(doc_id: str, base_path: Path) -> None:
     """Displays a markdown editor and preview for a single document."""
     try:
@@ -134,9 +134,35 @@ def _render_document_editor(doc_id: str, base_path: Path) -> None:
         return
 
     # Load the original content once per render
-    original_content = md_filepath.read_text(encoding="utf-8")
+    if f"original_content_{doc_id}" not in st.session_state:
+        st.session_state[f"original_content_{doc_id}"] = md_filepath.read_text(encoding="utf-8")
+        st.session_state[f"md_images_{doc_id}"] = IMAGE_LINK_PATTERN_MD.findall(st.session_state[f"original_content_{doc_id}"])
+
+    md_images = st.session_state[f"md_images_{doc_id}"]
+    original_content = st.session_state[f"original_content_{doc_id}"]
 
     with st.expander(doc_id):
+
+        if md_images:
+
+            col_buttons = st.columns([1,1,8])
+            with col_buttons[0]:
+                if st.button("Keep Image", key=f"store_img_{doc_id}"):
+                    # Remove the current image from the list
+                    st.session_state[f"md_images_{doc_id}"].pop(0)
+                    st.rerun()
+
+            with col_buttons[1]:
+                if st.button("Delete Image", key=f"delete_img_{doc_id}"):
+                    # Remove image from the original content & list
+                    st.session_state[f"original_content_{doc_id}"] = original_content.replace(md_images[0], "")
+                    st.session_state[f"md_images_{doc_id}"].pop(0)
+                    st.rerun()
+
+            st.markdown(md_images[0])
+
+        else:
+            st.info("No images found or all images processed.")
 
         if st.session_state.is_doc_edit_mode_active[doc_id]:
 
