@@ -165,9 +165,55 @@ def _render_document_editor(doc_id: str, base_path: Path) -> None:
 
                     st.rerun()
         else:
+
             if st.button("Edit Document", key=f"edit_{doc_id}"):
                 st.session_state.is_doc_edit_mode_active[doc_id] = True
                 st.rerun()
+
+            st.subheader("Preview")
+            st.markdown(original_content, unsafe_allow_html=True)
+
+def render_preprocessor() -> None:
+    """
+    Renders the UI for the first-level markdown preprocessing step.
+
+    This page allows users to trigger a one-time data staging process that
+    copies and standardizes VLM outputs, then manually review, edit, and save
+    each document before it proceeds to the next stage.
+    """
+    st.title("Markdown Preprocessing & Review")
+
+    if st.sidebar.button("Exit Preprocessor"):
+        st.session_state.preprocess_active = False
+        st.rerun()
+
+    if not st.session_state.staging_complete:
+        stage_vlm_outputs(DIRECTORY_VLM_OUTPUT)
+        st.session_state.staging_complete = True
+        st.success("Document staging complete.")
+
+    st.header("Document Editors")
+    for doc_id in _get_doc_ids(DIRECTORY_VLM_OUTPUT):
+        doc_path = Path(DIRECTORY_MD_PREPROCESSING_1) / doc_id
+        _render_document_editor(doc_id, doc_path)
+
+
+# -------------------------------------- Preprocessing Step 2 - LLM Formatting / Enhancement -------------------------------------- #
+def render_llm_processor() -> None:
+    """Use LLM to structure & enhance markdown documents."""
+
+    st.title("LLM Formatting/Enhancement")
+    for doc_id in _get_doc_ids(DIRECTORY_MD_PREPROCESSING_1):
+
+        doc_path = Path(DIRECTORY_MD_PREPROCESSING_1) / doc_id
+        try:
+            md_filepath = next(doc_path.glob("*.md"))
+            original_content = md_filepath.read_text(encoding="utf-8")
+        except StopIteration:
+            st.warning(f"Markdown file for '{doc_id}' not found. Skipping.")
+            continue
+
+        with st.expander(doc_id):
 
             llm_kwargs = {
                 "temperature": st.session_state.llm_temperature,
@@ -198,7 +244,6 @@ def _render_document_editor(doc_id: str, base_path: Path) -> None:
                         st.rerun()
                     except Exception as e:
                         st.error(f"An error occurred during preprocessing: {e}")
-
             if st.button("LLM Enhance Document", key=f"llm_enhance_{doc_id}"):
                 try:
                     with st.spinner("LLM is enhancing the document..."):
@@ -222,32 +267,7 @@ def _render_document_editor(doc_id: str, base_path: Path) -> None:
             st.subheader("Preview")
             st.markdown(original_content, unsafe_allow_html=True)
 
-def render_preprocessor() -> None:
-    """
-    Renders the UI for the first-level markdown preprocessing step.
-
-    This page allows users to trigger a one-time data staging process that
-    copies and standardizes VLM outputs, then manually review, edit, and save
-    each document before it proceeds to the next stage.
-    """
-    st.title("Markdown Preprocessing & Review")
-
-    if st.sidebar.button("Exit Preprocessor"):
-        st.session_state.preprocess_active = False
-        st.rerun()
-
-    if not st.session_state.staging_complete:
-        stage_vlm_outputs(DIRECTORY_VLM_OUTPUT)
-        st.session_state.staging_complete = True
-        st.success("Document staging complete.")
-
-    st.header("Document Editors")
-    for doc_id in _get_doc_ids(DIRECTORY_VLM_OUTPUT):
-        doc_path = Path(DIRECTORY_MD_PREPROCESSING_1) / doc_id
-        _render_document_editor(doc_id, doc_path)
-
-
-# ----------------------------- Preprocessing Step 2 - Chunking / Hierarchy / Parquet Storage ----------------------------- #
+# ----------------------------- Preprocessing Step 3 - Chunking / Hierarchy / Parquet Storage ----------------------------- #
 class MetadataKeys:
     LEVEL = "level"
     KEY_H1 = "h1"
@@ -589,20 +609,25 @@ def main() -> None:
         st.session_state.md_model = model_selector(key="markdown_preprocessor")
         llm_params_sidebar()
         st.markdown("---")
-        selection = st.radio("Select Page", options=["Markdown Preprocessor", "Markdown Chunker"], index=0, key="markdown_page_selector")  # noqa
+        selection = st.radio("Select Page", options=["Markdown Preprocessor","LLM Formatting/Enhancement", "Markdown Chunker"], index=0, key="markdown_page_selector")  # noqa
 
     _, center, _ = st.columns([1, 8, 1])
     with center:
         if selection == "Markdown Preprocessor":
-
             if st.sidebar.button("Initialize Preprocessor"):
                 st.session_state.preprocessor_active = True
 
             if st.session_state.preprocessor_active is True:
                 render_preprocessor()
 
-        elif selection == "Markdown Chunker":
+        elif selection == "LLM Formatting/Enhancement":
+            if st.sidebar.button("Initialize LLM Enhancer"):
+                st.session_state.llm_processor_active = True
 
+            if st.session_state.llm_processor_active is True:
+                render_llm_processor()
+
+        elif selection == "Markdown Chunker":
             if st.sidebar.button("Initialize Chunker"):
                 st.session_state.chunker_active = True
 
