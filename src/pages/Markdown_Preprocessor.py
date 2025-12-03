@@ -141,66 +141,64 @@ def _render_document_editor(doc_id: str, base_path: Path) -> None:
     md_images = st.session_state[f"md_images_{doc_id}"]
     original_content = st.session_state[f"original_content_{doc_id}"]
 
-    with st.expander(doc_id):
+    if md_images:
 
-        if md_images:
-
-            col_buttons = st.columns([1,1,8])
-            with col_buttons[0]:
-                if st.button("Keep Image", key=f"store_img_{doc_id}"):
-                    # Remove the current image from the list
-                    st.session_state[f"md_images_{doc_id}"].pop(0)
-                    st.rerun()
-
-            with col_buttons[1]:
-                if st.button("Delete Image", key=f"delete_img_{doc_id}"):
-                    # Remove image from the original content & list
-                    st.session_state[f"original_content_{doc_id}"] = original_content.replace(md_images[0], "")
-                    st.session_state[f"md_images_{doc_id}"].pop(0)
-                    st.rerun()
-
-            st.markdown(md_images[0])
-
-        else:
-            st.info("No images found or all images processed.")
-
-        if st.session_state.is_doc_edit_mode_active[doc_id]:
-
-            button_col = st.columns([1, 8])
-
-            st.subheader("Editor")
-            text_cols = st.columns([1,1])
-            with text_cols[0]:
-                edited_text = editor(
-                    text_to_edit=original_content,
-                    language="markdown",
-                    key=f"editor_{doc_id}"
-                )
-            with text_cols[1]:
-                st.subheader("Preview")
-                st.markdown(edited_text, unsafe_allow_html=True)
-
-            # Check for changes and save automatically
-            if button_col[0].button("Save Changes", key=f"view_{doc_id}"):
-                st.session_state.is_doc_edit_mode_active[doc_id] = False
-
-                if edited_text != original_content:
-                    try:
-                        md_filepath.write_text(edited_text, encoding="utf-8")
-                        st.success(f"Saved changes to {md_filepath.name}")
-                        st.rerun() 
-                    except (IOError, OSError) as e:
-                        st.error(f"Could not save file for '{doc_id}': {e}")
-
-                    st.rerun()
-        else:
-
-            if st.button("Edit Document", key=f"edit_{doc_id}"):
-                st.session_state.is_doc_edit_mode_active[doc_id] = True
+        col_buttons = st.columns([1,1,8])
+        with col_buttons[0]:
+            if st.button("Keep Image", key=f"store_img_{doc_id}"):
+                # Remove the current image from the list
+                st.session_state[f"md_images_{doc_id}"].pop(0)
                 st.rerun()
 
+        with col_buttons[1]:
+            if st.button("Delete Image", key=f"delete_img_{doc_id}"):
+                # Remove image from the original content & list
+                st.session_state[f"original_content_{doc_id}"] = original_content.replace(md_images[0], "")
+                st.session_state[f"md_images_{doc_id}"].pop(0)
+                st.rerun()
+
+        st.markdown(md_images[0])
+
+    else:
+        st.info("No images found or all images processed.")
+
+    if st.session_state.is_doc_edit_mode_active[doc_id]:
+
+        button_col = st.columns([1, 8])
+
+        st.subheader("Editor")
+        text_cols = st.columns([1,1])
+        with text_cols[0]:
+            edited_text = editor(
+                text_to_edit=original_content,
+                language="markdown",
+                key=f"editor_{doc_id}"
+            )
+        with text_cols[1]:
             st.subheader("Preview")
-            st.markdown(original_content, unsafe_allow_html=True)
+            st.markdown(edited_text, unsafe_allow_html=True)
+
+        # Check for changes and save automatically
+        if button_col[0].button("Save Changes", key=f"view_{doc_id}"):
+            st.session_state.is_doc_edit_mode_active[doc_id] = False
+
+            if edited_text != original_content:
+                try:
+                    md_filepath.write_text(edited_text, encoding="utf-8")
+                    st.success(f"Saved changes to {md_filepath.name}")
+                    st.rerun() 
+                except (IOError, OSError) as e:
+                    st.error(f"Could not save file for '{doc_id}': {e}")
+
+                st.rerun()
+    else:
+
+        if st.button("Edit Document", key=f"edit_{doc_id}"):
+            st.session_state.is_doc_edit_mode_active[doc_id] = True
+            st.rerun()
+
+        st.subheader("Preview")
+        st.markdown(original_content, unsafe_allow_html=True)
 
 def render_preprocessor() -> None:
     """
@@ -222,9 +220,9 @@ def render_preprocessor() -> None:
         st.success("Document staging complete.")
 
     st.header("Document Editors")
-    for doc_id in _get_doc_ids(DIRECTORY_VLM_OUTPUT):
-        doc_path = Path(DIRECTORY_MD_PREPROCESSING_1) / doc_id
-        _render_document_editor(doc_id, doc_path)
+    selected_doc = st.selectbox("Select Document to Edit", options=_get_doc_ids(DIRECTORY_VLM_OUTPUT))
+    selected_doc_path = Path(DIRECTORY_MD_PREPROCESSING_1) / selected_doc
+    _render_document_editor(selected_doc, selected_doc_path)
 
 
 # -------------------------------------- Preprocessing Step 2 - LLM Formatting / Enhancement -------------------------------------- #
@@ -232,68 +230,60 @@ def render_llm_processor() -> None:
     """Use LLM to structure & enhance markdown documents."""
 
     st.title("LLM Formatting/Enhancement")
-    for doc_id in _get_doc_ids(DIRECTORY_MD_PREPROCESSING_1):
+    selected_document = st.selectbox("Select Document to Process", options=_get_doc_ids(DIRECTORY_MD_PREPROCESSING_1))
+    doc_path = Path(DIRECTORY_MD_PREPROCESSING_1) / selected_document
+    try:
+        md_filepath = next(doc_path.glob("*.md"))
+        original_content = md_filepath.read_text(encoding="utf-8")
+    except StopIteration:
+        st.warning(f"Markdown file for '{selected_document}' not found. Skipping.")
 
-        doc_path = Path(DIRECTORY_MD_PREPROCESSING_1) / doc_id
-        try:
-            md_filepath = next(doc_path.glob("*.md"))
-            original_content = md_filepath.read_text(encoding="utf-8")
-        except StopIteration:
-            st.warning(f"Markdown file for '{doc_id}' not found. Skipping.")
-            continue
+    # --- LLM Inputs Sidebar --- #
+    llm_kwargs = {
+        "temperature": st.session_state.llm_temperature,
+        "top_p": st.session_state.llm_top_p,
+        "reasoning_effort": st.session_state.llm_reasoning_effort,
+    }
+    lvl_1_heading = st.text_input("Provide Level 1 Heading (with number) for LLM Preprocessing", key=f"llm_heading_{selected_document}")
 
-        with st.expander(doc_id):
+    if st.button("LLM Preprocess Document", key=f"llm_preprocess_{selected_document}"):
+        user_message = (
+            f"Enhance the following document for clarity, structure, and completeness while preserving all original information\n" # noqa
+            f"Level 1 Heading: # {lvl_1_heading.strip()}\n---\n"
+            f"<original content>\n{original_content}\n</original content>"
+        )
+        with st.spinner("...processing the document"):
+            stream = st.session_state.client.api_query(
+                model=st.session_state.md_model,
+                user_message=user_message,
+                system_prompt=SYS_LECTURE_SUMMARIZER,
+                **llm_kwargs,
+            )
+            processed_content = "".join(chunk for chunk in stream)
 
-            llm_kwargs = {
-                "temperature": st.session_state.llm_temperature,
-                "top_p": st.session_state.llm_top_p,
-                "reasoning_effort": st.session_state.llm_reasoning_effort,
-            }
+        md_filepath.write_text(processed_content, encoding="utf-8")
+        st.success(f"Document '{selected_document}' preprocessed and saved.")
+        st.rerun()
 
-            lvl_1_heading = st.text_input("Provide Level 1 Heading (with number) for LLM Preprocessing", key=f"llm_heading_{doc_id}")
-            if st.button("LLM Preprocess Document", key=f"llm_preprocess_{doc_id}"):
-                if not lvl_1_heading.strip():
-                    st.error("Level 1 Heading cannot be empty.")
-                else:
-                    user_message = (
-                        f"Level 1 Heading: # {lvl_1_heading.strip()}\n---\n"
-                        f"<original content>\n{original_content}\n</original content>"
-                    )
-                    try:
-                        with st.spinner("LLM is processing the document..."):
-                            stream = st.session_state.client.api_query(
-                                model=st.session_state.md_model,
-                                user_message=user_message,
-                                system_prompt=SYS_LECTURE_SUMMARIZER,
-                                **llm_kwargs,
-                            )
-                            processed_content = "".join(chunk for chunk in stream)
-                        md_filepath.write_text(processed_content, encoding="utf-8")
-                        st.success(f"Document '{doc_id}' preprocessed and saved.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"An error occurred during preprocessing: {e}")
-            if st.button("LLM Enhance Document", key=f"llm_enhance_{doc_id}"):
-                try:
-                    with st.spinner("LLM is enhancing the document..."):
-                        user_message = (
-                            f"<original content>\n{original_content}\n</original content>"
-                        )
-                        stream = st.session_state.client.api_query(
-                            model=st.session_state.md_model,
-                            user_message=user_message,
-                            system_prompt=SYS_LECTURE_ENHENCER,
-                            **llm_kwargs,
-                        )
-                        enhanced_content = "".join(chunk for chunk in stream)
-                    md_filepath.write_text(enhanced_content, encoding="utf-8")
-                    st.success(f"Document '{doc_id}' enhanced and saved.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"An error occurred during enhancement: {e}")
+    if st.button("LLM Enhance Document", key=f"llm_enhance_{selected_document}"):
+        with st.spinner("...enhancing the document"):
+            user_message = (
+                f"<original content>\n{original_content}\n</original content>"
+            )
+            stream = st.session_state.client.api_query(
+                model=st.session_state.md_model,
+                user_message=user_message,
+                system_prompt=SYS_LECTURE_ENHENCER,
+                **llm_kwargs,
+            )
+            enhanced_content = "".join(chunk for chunk in stream)
 
-            st.subheader("Preview")
-            st.markdown(original_content, unsafe_allow_html=True)
+        md_filepath.write_text(enhanced_content, encoding="utf-8")
+        st.success(f"Document '{selected_document}' enhanced and saved.")
+        st.rerun()
+
+    st.subheader("Preview")
+    st.markdown(original_content, unsafe_allow_html=True)
 
 # ----------------------------- Preprocessing Step 3 - Chunking / Hierarchy / Parquet Storage ----------------------------- #
 class MetadataKeys:
@@ -604,32 +594,31 @@ def markdown_chunker() -> None:
         return
 
     _, center, _ = st.columns([1, 8, 1])
-    directory_preprocessed_output = sorted(os.listdir(DIRECTORY_MD_PREPROCESSING_1))
-    directory_preprocessed_output = [dir for dir in directory_preprocessed_output if dir != "archive"]
+    directories_preprocessed_output = sorted(os.listdir(DIRECTORY_MD_PREPROCESSING_1))
+    directories_preprocessed_output = [dir for dir in directories_preprocessed_output if dir != "archive"]
 
     # Set all payload initialization flags to False
     if st.session_state.is_payload_initialized == {}:
-        for output_name in directory_preprocessed_output:
+        for output_name in directories_preprocessed_output:
             st.session_state.is_payload_initialized[output_name] = False
 
     with center:
-        for output_name in directory_preprocessed_output:
-            md_filepath = f"{DIRECTORY_MD_PREPROCESSING_1}/{output_name}/{output_name}.md"
+        selected_output = st.selectbox("Select Document to Chunk/Edit", options=directories_preprocessed_output)
+        md_filepath = f"{DIRECTORY_MD_PREPROCESSING_1}/{selected_output}/{selected_output}.md"
 
-            # Parse and store DataFrame in session state on first run for this file
-            if not st.session_state.is_payload_initialized[output_name]:
-                st.session_state.rag_ingestion_payload[output_name] = create_ingestion_payload(md_filepath)
-                st.session_state.is_payload_initialized[output_name] = True
+        # Parse and store DataFrame in session state on first run for this file
+        if not st.session_state.is_payload_initialized[selected_output]:
+            st.session_state.rag_ingestion_payload[selected_output] = create_ingestion_payload(md_filepath)
+            st.session_state.is_payload_initialized[selected_output] = True
 
-            with st.expander(output_name):
-                if st.button("Store chunks to Parquet", key=f"store_md_chunks_{output_name}", type="primary"):
-                    payload = st.session_state.rag_ingestion_payload[output_name]
-                    save_payload = RAGIngestionPayload(df=payload.df)
-                    save_payload.to_parquet(pathlib.Path(f"{DIRECTORY_RAG_INPUT}/{output_name}/{output_name}_ingestion_payload.parquet"))
-                    st.success(f"Stored chunked data for '{output_name}' to Parquet.")
+        if st.button("Store chunks to Parquet", key=f"store_md_chunks_{selected_output}", type="primary"):
+            payload = st.session_state.rag_ingestion_payload[selected_output]
+            save_payload = RAGIngestionPayload(df=payload.df)
+            save_payload.to_parquet(pathlib.Path(f"{DIRECTORY_RAG_INPUT}/{selected_output}/{selected_output}_ingestion_payload.parquet"))
+            st.success(f"Stored chunked data for '{selected_output}' to Parquet.")
 
-                # Render the interactive chunk editor, which operates on session_state directly
-                render_chunks(output_name=output_name)
+        # Render the interactive chunk editor, which operates on session_state directly
+        render_chunks(output_name=selected_output)
 
 def main() -> None:
     init_session_state()
