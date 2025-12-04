@@ -84,16 +84,23 @@ def _preprocess_document(doc_id: str) -> None:
         dest_base_path.mkdir(parents=True, exist_ok=True)
         dest_md_path = dest_base_path / source_md_path.name
         shutil.copy(source_md_path, dest_md_path)
-
-        if source_imgs_path.is_dir():
-            shutil.copytree(source_imgs_path, static_imgs_dest_path, dirs_exist_ok=True)
+        shutil.copytree(source_imgs_path, static_imgs_dest_path, dirs_exist_ok=True)
 
         original_content = dest_md_path.read_text(encoding="utf-8")
         content_with_updated_img_paths = IMAGE_PATH_PATTERN_SERVER.sub(rf"![\1]({server_img_url_path}/", original_content)
 
         lines = content_with_updated_img_paths.splitlines()
         processed_lines = _transform_headings(lines)
-        dest_md_path.write_text("\n".join(processed_lines), encoding="utf-8")
+        final_content = "\n".join(processed_lines)
+        dest_md_path.write_text(final_content, encoding="utf-8")
+
+        if static_imgs_dest_path.is_dir():
+            referenced_images = {Path(url).name for url in IMAGE_LINK_PATTERN_MD.findall(final_content)}
+            referenced_images = {img_name.rstrip(')') for img_name in referenced_images}
+            for img_file in static_imgs_dest_path.iterdir():
+                if img_file.is_file() and img_file.name not in referenced_images:
+                    img_file.unlink()
+
 
     except (IOError, OSError) as e:
         st.error(f"Failed to process '{doc_id}': {e}")
@@ -136,6 +143,9 @@ def _render_document_editor(doc_id: str, base_path: Path) -> None:
     if f"md_content_{doc_id}" not in st.session_state:
         st.session_state[f"md_content_{doc_id}"] = md_filepath.read_text(encoding="utf-8")
         st.session_state[f"md_images_{doc_id}"] = IMAGE_LINK_PATTERN_MD.findall(st.session_state[f"md_content_{doc_id}"])
+        # Dynamically determine zero-padding based on the total number of images
+        st.session_state[f"padding_width_{doc_id}"] = len(str(len(st.session_state[f"md_images_{doc_id}"])))
+        st.session_state[f"n_kept_images_{doc_id}"] = 0
 
     if st.button("Save Document", key=f"save_doc_{doc_id}"):
         md_filepath.write_text(st.session_state[f"md_content_{doc_id}"], encoding="utf-8")
@@ -147,26 +157,51 @@ def _render_document_editor(doc_id: str, base_path: Path) -> None:
 
     if selection == "Image Review":
         md_images = st.session_state[f"md_images_{doc_id}"]
+        static_imgs_dest_path = Path(DIRECTORY_RAG_INPUT) / doc_id / "images"
 
         if md_images:
             col_buttons = st.columns([1,1,8])
             with col_buttons[0]:
                 if st.button("Keep Image", key=f"store_img_{doc_id}"):
-                    # Remove the current image from the list
-                    st.session_state[f"md_images_{doc_id}"].pop(0)
+
+                    # 1. Increment counter and get current image link
+                    st.session_state[f"n_kept_images_{doc_id}"] += 1
+                    n_kept = st.session_state[f"n_kept_images_{doc_id}"]
+                    padding = st.session_state[f"padding_width_{doc_id}"]
+                    current_md_link = st.session_state[f"md_images_{doc_id}"].pop(0)
+
+                    # 2. Extract path, generate new filename, rename file, and update content
+                    if match := re.search(r"\((.*?)\)", current_md_link):
+                        old_path = Path(match.group(1))
+                        new_filename = f"{n_kept:0{padding}}{old_path.suffix}"
+
+                        (static_imgs_dest_path / old_path.name).rename(static_imgs_dest_path / new_filename)
+
+                        new_md_link = current_md_link.replace(old_path.name, new_filename)
+                        st.session_state[f"md_content_{doc_id}"] = st.session_state[f"md_content_{doc_id}"].replace(current_md_link, new_md_link) # noqa
+
                     st.rerun()
 
             with col_buttons[1]:
                 if st.button("Delete Image", key=f"delete_img_{doc_id}"):
+
                     # Remove image from the original content & list
                     st.session_state[f"md_content_{doc_id}"] = original_content.replace(md_images[0], "<removed image>")
-                    st.session_state[f"md_images_{doc_id}"].pop(0)
+                    img = st.session_state[f"md_images_{doc_id}"].pop(0)
+
+                    # Also delete the image file from disk
+                    if match := re.search(r"\((.*?)\)", img):
+                        img_filename = Path(match.group(1)).name
+                        (static_imgs_dest_path / img_filename).unlink(missing_ok=True)
+
                     st.rerun()
 
             st.markdown(md_images[0])
 
         else:
             st.info("No images found or all images processed.")
+            md_images = IMAGE_LINK_PATTERN_MD.findall(st.session_state[f"md_content_{doc_id}"])
+
 
     if selection == "Document Edit/Preview":
 
@@ -243,7 +278,7 @@ def render_llm_processor() -> None:
         "top_p": st.session_state.llm_top_p,
         "reasoning_effort": st.session_state.llm_reasoning_effort,
     }
-    lvl_1_heading = st.text_input("Provide Level 1 Heading (with number) for LLM Preprocessing", key=f"llm_heading_{selected_document}")
+    lvl_1_heading = st.text_input("Provide Level 1 Heading (with number) for LLM Preprocessing", key=f"llm_heading_{selected_document}") # noqa
 
     if st.button("LLM Preprocess Document", key=f"llm_preprocess_{selected_document}"):
         user_message = (
