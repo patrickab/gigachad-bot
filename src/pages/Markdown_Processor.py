@@ -12,7 +12,8 @@ import streamlit as st
 
 from lib.non_user_prompts import SYS_LECTURE_ENHENCER, SYS_LECTURE_SUMMARIZER
 from src.config import (
-    DIRECTORY_MD_PREPROCESSING_1,
+    DIRECTORY_LLM_PREPROCESSING,
+    DIRECTORY_MD_PREPROCESSING,
     DIRECTORY_RAG_INPUT,
     DIRECTORY_VLM_OUTPUT,
     SERVER_APP_RAG_INPUT,
@@ -27,7 +28,7 @@ def init_session_state() -> None:
         st.session_state.parsed_outputs = []
 
         st.session_state.preprocessor_active = False
-        st.session_state.llm_processor_active = False
+        st.session_state.llm_preprocessor_active = False
         st.session_state.chunker_active = False
 
         st.session_state.is_doc_edit_mode_active = {} # per document
@@ -66,7 +67,7 @@ def _preprocess_document(doc_id: str) -> None:
     """Copies, cleans, and restructures a single document and its assets."""
     try:
         source_base_path = Path(DIRECTORY_VLM_OUTPUT) / doc_id / doc_id / "auto"
-        dest_base_path = Path(DIRECTORY_MD_PREPROCESSING_1) / doc_id
+        dest_base_path = Path(DIRECTORY_MD_PREPROCESSING) / doc_id
         source_imgs_path = source_base_path / "images"
         static_imgs_dest_path = Path(DIRECTORY_RAG_INPUT) / doc_id / "images"
         server_img_url_path = Path(SERVER_APP_RAG_INPUT) / doc_id / "images"
@@ -249,22 +250,29 @@ def render_preprocessor() -> None:
 
     st.header("Document Editors")
     selected_doc = st.selectbox("Select Document to Edit", options=_get_doc_ids(DIRECTORY_VLM_OUTPUT))
-    selected_doc_path = Path(DIRECTORY_MD_PREPROCESSING_1) / selected_doc
+    selected_doc_path = Path(DIRECTORY_MD_PREPROCESSING) / selected_doc
     _render_document_editor(selected_doc, selected_doc_path)
 
 
 # -------------------------------------- Preprocessing Step 2 - LLM Formatting / Enhancement -------------------------------------- #
-def render_llm_processor() -> None:
+def render_llm_preprocessor() -> None:
     """Use LLM to structure & enhance markdown documents."""
 
     st.title("LLM Formatting/Enhancement")
-    selected_document = st.selectbox("Select Document to Process", options=_get_doc_ids(DIRECTORY_MD_PREPROCESSING_1))
-    doc_path = Path(DIRECTORY_MD_PREPROCESSING_1) / selected_document
-    try:
-        md_filepath = next(doc_path.glob("*.md"))
-        original_content = md_filepath.read_text(encoding="utf-8")
-    except StopIteration:
-        st.warning(f"Markdown file for '{selected_document}' not found. Skipping.")
+    selected_document = st.selectbox("Select Document to Process", options=_get_doc_ids(DIRECTORY_MD_PREPROCESSING))
+    source_doc_path = Path(DIRECTORY_MD_PREPROCESSING) / selected_document
+    dest_doc_path = Path(DIRECTORY_LLM_PREPROCESSING) / selected_document
+
+    # once initially, copy source doc to dest doc path
+    if f"llm_staged_{selected_document}" not in st.session_state:
+        dest_doc_path.mkdir(parents=True, exist_ok=True)
+        source_md_filepath = next(source_doc_path.glob("*.md"))
+        dest_md_filepath = dest_doc_path / source_md_filepath.name
+        shutil.copy(source_md_filepath, dest_md_filepath)
+        st.session_state[f"llm_staged_{selected_document}"] = True
+
+    md_filepath = next(dest_doc_path.glob("*.md"))
+    original_content = md_filepath.read_text(encoding="utf-8")
 
     # --- LLM Inputs Sidebar --- #
     llm_kwargs = {
@@ -622,7 +630,7 @@ def markdown_chunker() -> None:
         return
 
     _, center, _ = st.columns([1, 8, 1])
-    directories_preprocessed_output = sorted(os.listdir(DIRECTORY_MD_PREPROCESSING_1))
+    directories_preprocessed_output = sorted(os.listdir(DIRECTORY_MD_PREPROCESSING))
     directories_preprocessed_output = [dir for dir in directories_preprocessed_output if dir != "archive"]
 
     # Set all payload initialization flags to False
@@ -632,7 +640,7 @@ def markdown_chunker() -> None:
 
     with center:
         selected_output = st.selectbox("Select Document to Chunk/Edit", options=directories_preprocessed_output)
-        md_filepath = f"{DIRECTORY_MD_PREPROCESSING_1}/{selected_output}/{selected_output}.md"
+        md_filepath = f"{DIRECTORY_MD_PREPROCESSING}/{selected_output}/{selected_output}.md"
 
         # Parse and store DataFrame in session state on first run for this file
         if not st.session_state.is_payload_initialized[selected_output]:
@@ -654,7 +662,7 @@ def main() -> None:
         st.session_state.md_model = model_selector(key="markdown_preprocessor")
         llm_params_sidebar()
         st.markdown("---")
-        selection = st.radio("Select Page", options=["Markdown Preprocessor","LLM Formatting/Enhancement", "Markdown Chunker"], index=0, key="markdown_page_selector")  # noqa
+        selection = st.radio("Select Page", options=["Markdown Preprocessor","LLM Preprocessor", "Markdown Chunker"], index=0, key="markdown_page_selector")  # noqa
 
     _, center, _ = st.columns([1, 8, 1])
     with center:
@@ -665,12 +673,12 @@ def main() -> None:
             if st.session_state.preprocessor_active is True:
                 render_preprocessor()
 
-        elif selection == "LLM Formatting/Enhancement":
-            if st.sidebar.button("Initialize LLM Enhancer"):
-                st.session_state.llm_processor_active = True
+        elif selection == "LLM Preprocessor":
+            if st.sidebar.button("Initialize LLM Preprocessor"):
+                st.session_state.llm_preprocessor_active = True
 
-            if st.session_state.llm_processor_active is True:
-                render_llm_processor()
+            if st.session_state.llm_preprocessor_active is True:
+                render_llm_preprocessor()
 
         elif selection == "Markdown Chunker":
             if st.sidebar.button("Initialize Chunker"):
