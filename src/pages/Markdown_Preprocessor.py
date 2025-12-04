@@ -133,71 +133,71 @@ def _render_document_editor(doc_id: str, base_path: Path) -> None:
         return
 
     # Load the original content once per render
-    if f"original_content_{doc_id}" not in st.session_state:
-        st.session_state[f"original_content_{doc_id}"] = md_filepath.read_text(encoding="utf-8")
-        st.session_state[f"md_images_{doc_id}"] = IMAGE_LINK_PATTERN_MD.findall(st.session_state[f"original_content_{doc_id}"])
+    if f"md_content_{doc_id}" not in st.session_state:
+        st.session_state[f"md_content_{doc_id}"] = md_filepath.read_text(encoding="utf-8")
+        st.session_state[f"md_images_{doc_id}"] = IMAGE_LINK_PATTERN_MD.findall(st.session_state[f"md_content_{doc_id}"])
 
-    md_images = st.session_state[f"md_images_{doc_id}"]
-    original_content = st.session_state[f"original_content_{doc_id}"]
+    if st.button("Save Document", key=f"save_doc_{doc_id}"):
+        md_filepath.write_text(st.session_state[f"md_content_{doc_id}"], encoding="utf-8")
+        st.success(f"Saved changes to {md_filepath.name}")
+        st.rerun()
 
-    if md_images:
+    selection = st.radio("Select Mode", options=["Image Review", "Document Edit/Preview"], key=f"doc_mode_{doc_id}")
+    original_content = st.session_state[f"md_content_{doc_id}"]
 
-        col_buttons = st.columns([1,1,8])
-        with col_buttons[0]:
-            if st.button("Keep Image", key=f"store_img_{doc_id}"):
-                # Remove the current image from the list
-                st.session_state[f"md_images_{doc_id}"].pop(0)
+    if selection == "Image Review":
+        md_images = st.session_state[f"md_images_{doc_id}"]
+
+        if md_images:
+            col_buttons = st.columns([1,1,8])
+            with col_buttons[0]:
+                if st.button("Keep Image", key=f"store_img_{doc_id}"):
+                    # Remove the current image from the list
+                    st.session_state[f"md_images_{doc_id}"].pop(0)
+                    st.rerun()
+
+            with col_buttons[1]:
+                if st.button("Delete Image", key=f"delete_img_{doc_id}"):
+                    # Remove image from the original content & list
+                    st.session_state[f"md_content_{doc_id}"] = original_content.replace(md_images[0], "<removed image>")
+                    st.session_state[f"md_images_{doc_id}"].pop(0)
+                    st.rerun()
+
+            st.markdown(md_images[0])
+
+        else:
+            st.info("No images found or all images processed.")
+
+    if selection == "Document Edit/Preview":
+
+        if not st.session_state.is_doc_edit_mode_active[doc_id]:
+
+            if st.button("Edit Document", key=f"edit_{doc_id}"):
+                st.session_state.is_doc_edit_mode_active[doc_id] = True
                 st.rerun()
 
-        with col_buttons[1]:
-            if st.button("Delete Image", key=f"delete_img_{doc_id}"):
-                # Remove image from the original content & list
-                st.session_state[f"original_content_{doc_id}"] = original_content.replace(md_images[0], "")
-                st.session_state[f"md_images_{doc_id}"].pop(0)
-                st.rerun()
-
-        st.markdown(md_images[0])
-
-    else:
-        st.info("No images found or all images processed.")
-
-    if st.session_state.is_doc_edit_mode_active[doc_id]:
-
-        button_col = st.columns([1, 8])
-
-        st.subheader("Editor")
-        text_cols = st.columns([1,1])
-        with text_cols[0]:
-            edited_text = editor(
-                text_to_edit=original_content,
-                language="markdown",
-                key=f"editor_{doc_id}"
-            )
-        with text_cols[1]:
             st.subheader("Preview")
-            st.markdown(edited_text, unsafe_allow_html=True)
+            st.markdown(original_content, unsafe_allow_html=True)
 
-        # Check for changes and save automatically
-        if button_col[0].button("Save Changes", key=f"view_{doc_id}"):
-            st.session_state.is_doc_edit_mode_active[doc_id] = False
+        else:
 
-            if edited_text != original_content:
-                try:
-                    md_filepath.write_text(edited_text, encoding="utf-8")
-                    st.success(f"Saved changes to {md_filepath.name}")
-                    st.rerun() 
-                except (IOError, OSError) as e:
-                    st.error(f"Could not save file for '{doc_id}': {e}")
+            button_col = st.columns([1, 8])
 
-                st.rerun()
-    else:
+            st.subheader("Editor")
+            text_cols = st.columns([1,1])
+            with text_cols[0]:
+                st.session_state[f"md_content_{doc_id}"] = editor(
+                    text_to_edit=original_content,
+                    language="markdown",
+                    key=f"editor_{doc_id}"
+                )
+            with text_cols[1]:
+                st.subheader("Preview")
+                st.markdown(st.session_state[f"md_content_{doc_id}"], unsafe_allow_html=True)
 
-        if st.button("Edit Document", key=f"edit_{doc_id}"):
-            st.session_state.is_doc_edit_mode_active[doc_id] = True
-            st.rerun()
-
-        st.subheader("Preview")
-        st.markdown(original_content, unsafe_allow_html=True)
+            # Check for changes and save automatically
+            if button_col[0].button("Exit Edit Mode", key=f"view_{doc_id}"):
+                st.session_state.is_doc_edit_mode_active[doc_id] = False
 
 def render_preprocessor() -> None:
     """
