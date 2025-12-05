@@ -37,6 +37,7 @@ from src.lib.prompts import (
     SYS_PRECISE_TASK_EXECUTION,
     SYS_PROMPT_ENGINEER,
     SYS_QUICK_OVERVIEW,
+    SYS_RAG_TUTOR,
     SYS_TUTOR,
 )
 from src.llm_client import LLMClient
@@ -60,6 +61,7 @@ AVAILABLE_PROMPTS = {
     "Quick Overview": SYS_QUICK_OVERVIEW,
     "Advisor": SYS_ADVISOR,
     "Tutor": SYS_TUTOR,
+    "RAG Tutor": SYS_RAG_TUTOR,
     "Concept - High-Level": SYS_CONCEPTUAL_OVERVIEW,
     "Concept - In-Depth": SYS_CONCEPT_IN_DEPTH,
     "Concept - Article": SYS_ARTICLE,
