@@ -672,7 +672,7 @@ def main() -> None:
         st.session_state.md_model = model_selector(key="markdown_preprocessor")
         llm_params_sidebar()
         st.markdown("---")
-        selection = st.radio("Select Page", options=["Markdown Preprocessor","LLM Preprocessor", "Markdown Chunker"], index=0, key="markdown_page_selector")  # noqa
+        selection = st.radio("Select Page", options=["Markdown Preprocessor","LLM Preprocessor", "Markdown Chunker", "View Document"], index=0, key="markdown_page_selector")  # noqa
 
     _, center, _ = st.columns([1, 8, 1])
     with center:
@@ -696,6 +696,12 @@ def main() -> None:
 
             if st.session_state.chunker_active is True:
                 markdown_chunker()
+
+        elif selection == "View Document":
+            file = st.file_uploader("Upload a Markdown File", type=["md"])
+            if file is not None:
+                content = file.read().decode("utf-8")
+                st.markdown(content, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
