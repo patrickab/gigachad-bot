@@ -218,7 +218,8 @@ def _render_document_editor(doc_id: str, base_path: Path) -> None:
                 st.session_state[f"md_content_{doc_id}"] = editor(
                     text_to_edit=original_content,
                     language="markdown",
-                    key=f"editor_{doc_id}"
+                    key=f"editor_{doc_id}",
+                    height=800,
                 )
             with text_cols[1]:
                 st.subheader("Preview")
@@ -569,7 +570,7 @@ def render_chunks(output_name: str) -> None:
             # --- Edit Mode ---
             editor_key = f"editor_{unique_key_suffix}"
             original_text = row[DatabaseKeys.KEY_TXT_RETRIEVAL]
-            edited_text = editor(text_to_edit=original_text, language="latex", key=editor_key)
+            edited_text = editor(text_to_edit=original_text, language="latex", key=editor_key, height=800)
             edited_text # noqa
 
             action_cols = st.columns([1, 1, 8])
