@@ -637,9 +637,11 @@ def markdown_chunker() -> None:
     if selected_origin == "LLM Preprocessed":
         directories_preprocessed_output = sorted(os.listdir(DIRECTORY_LLM_PREPROCESSING))
         directories_preprocessed_output = [dir for dir in directories_preprocessed_output if dir != "archive"]
+        SOURCE = DIRECTORY_LLM_PREPROCESSING
     else:
         directories_preprocessed_output = sorted(os.listdir(DIRECTORY_MD_PREPROCESSING))
         directories_preprocessed_output = [dir for dir in directories_preprocessed_output if dir != "archive"]
+        SOURCE = DIRECTORY_MD_PREPROCESSING
 
     # Set all payload initialization flags to False
     if st.session_state.is_payload_initialized == {}:
@@ -648,7 +650,7 @@ def markdown_chunker() -> None:
 
     with center:
         selected_output = st.selectbox("Select Document to Chunk/Edit", options=directories_preprocessed_output)
-        md_filepath = f"{DIRECTORY_MD_PREPROCESSING}/{selected_output}/{selected_output}.md"
+        md_filepath = f"{SOURCE}/{selected_output}/{selected_output}.md"
 
         # Parse and store DataFrame in session state on first run for this file
         if not st.session_state.is_payload_initialized[selected_output]:
