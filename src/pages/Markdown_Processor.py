@@ -45,22 +45,18 @@ def _transform_headings(lines: list[str]) -> list[str]:
     - Converts numeric-prefixed H1s (e.g., '# 1.2 Title') to their correct level ('## 1.2 Title').
     - Converts non-numeric H1s (e.g., '# Conclusion') to bolded text.
     """
-    processed_lines = []
+    processed = []
     for line in lines:
-        if not line.startswith("# "):
-            processed_lines.append(line)
-            continue
-
-        heading_content = line[2:].strip()
-        first_word = heading_content.split(" ", 1)[0]
-        numeric_part = first_word.rstrip(".")
-
-        if numeric_part.replace(".", "").isdigit():
-            level = numeric_part.count(".") + 1
-            processed_lines.append(f"{'#' * min(level, 6)} {heading_content}")
-        else:
-            processed_lines.append(f"**{heading_content}**")
-    return processed_lines
+        if line.startswith("# "):
+            content = line[2:].strip()
+            numeric_part = content.split(" ", 1)[0].rstrip(".")
+            if numeric_part.replace(".", "").isdigit():
+                level = numeric_part.count(".") + 1
+                line = f"{'#' * min(level, 6)} {content}"
+            else:
+                line = f"**{content}**"
+        processed.append(line)
+    return processed
 
 IMAGE_PATH_PATTERN_SERVER = re.compile(r"!\[(.*?)\]\(images/") # used for mapping image paths to server URLs
 
@@ -84,21 +80,17 @@ def _preprocess_document(doc_id: str) -> None:
         shutil.copy(source_md_path, dest_md_path)
         shutil.copytree(source_imgs_path, static_imgs_dest_path, dirs_exist_ok=True)
 
-        original_content = dest_md_path.read_text(encoding="utf-8")
-        content_with_updated_img_paths = IMAGE_PATH_PATTERN_SERVER.sub(rf"![\1]({server_img_url_path}/", original_content)
-
-        lines = content_with_updated_img_paths.splitlines()
-        processed_lines = _transform_headings(lines)
-        final_content = "\n".join(processed_lines)
+        content = dest_md_path.read_text(encoding="utf-8")
+        content = IMAGE_PATH_PATTERN_SERVER.sub(rf"![\1]({server_img_url_path}/", content)
+        lines = _transform_headings(content.splitlines())
+        final_content = "\n".join(lines)
         dest_md_path.write_text(final_content, encoding="utf-8")
 
         if static_imgs_dest_path.is_dir():
-            referenced_images = {Path(url).name for url in IMAGE_LINK_PATTERN_MD.findall(final_content)}
-            referenced_images = {img_name.rstrip(')') for img_name in referenced_images}
+            referenced_images = {Path(url).name.rstrip(')') for url in IMAGE_LINK_PATTERN_MD.findall(final_content)}
             for img_file in static_imgs_dest_path.iterdir():
                 if img_file.is_file() and img_file.name not in referenced_images:
                     img_file.unlink()
-
 
     except (IOError, OSError) as e:
         st.error(f"Failed to process '{doc_id}': {e}")
@@ -106,11 +98,9 @@ def _preprocess_document(doc_id: str) -> None:
 def _get_doc_ids(source_directory: str) -> list[str]:
     """Retrieves document IDs from the VLM output directory."""
     source_path = Path(source_directory)
-    if not source_path.is_dir():
-        return []
-    doc_ids = [path.name for path in source_path.glob("*") if path.is_dir() and path.name != "archive"]
-    doc_ids = sorted(doc_ids)
-    return doc_ids
+    if source_path.is_dir():
+        return sorted([p.name for p in source_path.iterdir() if p.is_dir() and p.name != "archive"])
+    return []
 
 def _get_doc_paths(base_dir: str) -> list[str]:
     subdirs = _get_doc_ids(base_dir)
@@ -141,99 +131,90 @@ def _render_document_editor(doc_id: str, base_path: Path) -> None:
         st.warning(f"Markdown file for '{doc_id}' not found. Skipping.")
         return
 
-    # Load the original content once per render
+    # Load original content only once per render
     if f"md_content_{doc_id}" not in st.session_state:
-        st.session_state[f"md_content_{doc_id}"] = md_filepath.read_text(encoding="utf-8")
-        st.session_state[f"md_images_{doc_id}"] = IMAGE_LINK_PATTERN_MD.findall(st.session_state[f"md_content_{doc_id}"])
+        content = md_filepath.read_text(encoding="utf-8")
+        images = IMAGE_LINK_PATTERN_MD.findall(content)
+        st.session_state[f"md_content_{doc_id}"] = content
+        st.session_state[f"md_images_{doc_id}"] = images
         # Dynamically determine zero-padding based on the total number of images
-        st.session_state[f"padding_width_{doc_id}"] = len(str(len(st.session_state[f"md_images_{doc_id}"])))
+        st.session_state[f"padding_width_{doc_id}"] = len(str(len(images)))
         st.session_state[f"n_kept_images_{doc_id}"] = 0
 
     selection = st.radio("Select Mode", options=["Image Review", "Document Edit/Preview"], key=f"doc_mode_{doc_id}")
-    original_content = st.session_state[f"md_content_{doc_id}"]
+    content = st.session_state[f"md_content_{doc_id}"]
 
     if selection == "Image Review":
         md_images = st.session_state[f"md_images_{doc_id}"]
         static_imgs_dest_path = Path(DIRECTORY_RAG_INPUT) / doc_id / "images"
 
-        if md_images:
-            col_buttons = st.columns([1,1,8])
-            with col_buttons[0]:
-                if st.button("Keep Image", key=f"store_img_{doc_id}"):
-
-                    # 1. Increment counter and get current image link
-                    st.session_state[f"n_kept_images_{doc_id}"] += 1
-                    n_kept = st.session_state[f"n_kept_images_{doc_id}"]
-                    padding = st.session_state[f"padding_width_{doc_id}"]
-                    current_md_link = st.session_state[f"md_images_{doc_id}"].pop(0)
-
-                    # 2. Extract path, generate new filename, rename file, and update content
-                    if match := re.search(r"\((.*?)\)", current_md_link):
-                        old_path = Path(match.group(1))
-                        new_filename = f"{n_kept:0{padding}}{old_path.suffix}"
-
-                        (static_imgs_dest_path / old_path.name).rename(static_imgs_dest_path / new_filename)
-
-                        new_md_link = current_md_link.replace(old_path.name, new_filename)
-                        st.session_state[f"md_content_{doc_id}"] = st.session_state[f"md_content_{doc_id}"].replace(current_md_link, new_md_link) # noqa
-
-                    md_filepath.write_text(st.session_state[f"md_content_{doc_id}"], encoding="utf-8")
-                    st.rerun()
-
-            with col_buttons[1]:
-                if st.button("Delete Image", key=f"delete_img_{doc_id}"):
-
-                    # Remove image from the original content & list
-                    st.session_state[f"md_content_{doc_id}"] = original_content.replace(md_images[0], "<removed image>")
-                    img = st.session_state[f"md_images_{doc_id}"].pop(0)
-
-                    # Also delete the image file from disk
-                    if match := re.search(r"\((.*?)\)", img):
-                        img_filename = Path(match.group(1)).name
-                        (static_imgs_dest_path / img_filename).unlink(missing_ok=True)
-
-                    md_filepath.write_text(st.session_state[f"md_content_{doc_id}"], encoding="utf-8")
-                    st.rerun()
-
-            st.markdown(md_images[0])
-
-        else:
+        if not md_images:
             st.info("No images found or all images processed.")
-            md_images = IMAGE_LINK_PATTERN_MD.findall(st.session_state[f"md_content_{doc_id}"])
+            return
 
+        keep_col, delete_col, _ = st.columns([1, 1, 8])
+        current_md_link = md_images[0]
+
+        if keep_col.button("Keep Image", key=f"store_img_{doc_id}"):
+            # 1. Increment counter and get current image link
+            st.session_state[f"n_kept_images_{doc_id}"] += 1
+            n_kept = st.session_state[f"n_kept_images_{doc_id}"]
+            padding = st.session_state[f"padding_width_{doc_id}"]
+            md_images.pop(0)
+
+            # 2. Extract path, generate new filename, rename file, and update content
+            if match := re.search(r"\((.*?)\)", current_md_link):
+                old_path = Path(match.group(1))
+                new_filename = f"{n_kept:0{padding}}{old_path.suffix}"
+                (static_imgs_dest_path / old_path.name).rename(static_imgs_dest_path / new_filename)
+                new_md_link = current_md_link.replace(old_path.name, new_filename)
+                st.session_state[f"md_content_{doc_id}"] = content.replace(current_md_link, new_md_link)
+            md_filepath.write_text(st.session_state[f"md_content_{doc_id}"], encoding="utf-8")
+            st.rerun()
+
+        if delete_col.button("Delete Image", key=f"delete_img_{doc_id}"):
+            st.session_state[f"md_content_{doc_id}"] = content.replace(current_md_link, "<removed image>")
+            img_to_delete = md_images.pop(0)
+
+            # Remove image from the original content & list
+            if match := re.search(r"\((.*?)\)", img_to_delete):
+                img_filename = Path(match.group(1)).name
+                (static_imgs_dest_path / img_filename).unlink(missing_ok=True)
+
+            # Also delete the image file from disk
+            md_filepath.write_text(st.session_state[f"md_content_{doc_id}"], encoding="utf-8")
+            st.rerun()
+
+        st.markdown(current_md_link)
 
     if selection == "Document Edit/Preview":
+        is_edit_mode = st.session_state.is_doc_edit_mode_active.get(doc_id, False)
 
-        if not st.session_state.is_doc_edit_mode_active[doc_id]:
-
+        if not is_edit_mode:
             if st.button("Edit Document", key=f"edit_{doc_id}"):
                 st.session_state.is_doc_edit_mode_active[doc_id] = True
                 st.rerun()
-
             st.subheader("Preview")
-            st.markdown(original_content, unsafe_allow_html=True)
-
+            st.markdown(content, unsafe_allow_html=True)
         else:
-
-            button_col = st.columns([1, 8])
-
             st.subheader("Editor")
-            text_cols = st.columns([1,1])
-            with text_cols[0]:
-                st.session_state[f"md_content_{doc_id}"] = editor(
-                    text_to_edit=original_content,
+            editor_col, preview_col = st.columns(2)
+            with editor_col:
+                edited_content = editor(
+                    text_to_edit=content,
                     language="markdown",
                     key=f"editor_{doc_id}",
                     height=800,
                 )
-            with text_cols[1]:
+                st.session_state[f"md_content_{doc_id}"] = edited_content
+            with preview_col:
                 st.subheader("Preview")
-                st.markdown(st.session_state[f"md_content_{doc_id}"], unsafe_allow_html=True)
+                st.markdown(edited_content, unsafe_allow_html=True)
 
-            # Check for changes and save automatically
-            if button_col[0].button("Exit Edit Mode", key=f"view_{doc_id}"):
-                md_filepath.write_text(st.session_state[f"md_content_{doc_id}"], encoding="utf-8")
+            if st.button("Exit Edit Mode", key=f"view_{doc_id}"):
+                md_filepath.write_text(edited_content, encoding="utf-8")
                 st.session_state.is_doc_edit_mode_active[doc_id] = False
+                st.rerun()
 
 def render_preprocessor() -> None:
     """
@@ -256,78 +237,70 @@ def render_preprocessor() -> None:
 
     st.header("Document Editors")
     selected_doc = st.selectbox("Select Document to Edit", options=_get_doc_ids(DIRECTORY_VLM_OUTPUT))
+    if selected_doc is None:
+        st.info("No documents available for preprocessing.")
+        return
     selected_doc_path = Path(DIRECTORY_MD_PREPROCESSING) / selected_doc
     _render_document_editor(selected_doc, selected_doc_path)
 
 
 # -------------------------------------- Preprocessing Step 2 - LLM Formatting / Enhancement -------------------------------------- #
+def _run_llm_action(md_filepath: Path, user_message: str, system_prompt: str, llm_kwargs: dict) -> None:
+    """Helper to run an LLM action, update file, and notify user."""
+    with st.spinner("Processing document..."):
+        stream = st.session_state.client.api_query(
+            model=st.session_state.md_model,
+            user_message=user_message,
+            system_prompt=system_prompt,
+            **llm_kwargs,
+        )
+        processed_content = "".join(chunk for chunk in stream)
+
+    md_filepath.write_text(processed_content, encoding="utf-8")
+    st.rerun()
+
 def render_llm_preprocessor() -> None:
     """Use LLM to structure & enhance markdown documents."""
-
     st.title("LLM Formatting/Enhancement")
     selected_document = st.selectbox("Select Document to Process", options=_get_doc_ids(DIRECTORY_MD_PREPROCESSING))
+
     source_doc_path = Path(DIRECTORY_MD_PREPROCESSING) / selected_document
     dest_doc_path = Path(DIRECTORY_LLM_PREPROCESSING) / selected_document
+    source_md_filepath = next(source_doc_path.glob("*.md"))
+    dest_md_filepath = dest_doc_path / source_md_filepath.name
 
-    # once initially, copy source doc to dest doc path
+    # Stage the source document to the destination if it hasn't been already
     if f"llm_staged_{selected_document}" not in st.session_state:
         dest_doc_path.mkdir(parents=True, exist_ok=True)
-        source_md_filepath = next(source_doc_path.glob("*.md"))
-        dest_md_filepath = dest_doc_path / source_md_filepath.name
         shutil.copy(source_md_filepath, dest_md_filepath)
         st.session_state[f"llm_staged_{selected_document}"] = True
 
-    md_filepath = next(dest_doc_path.glob("*.md"))
-    original_content = md_filepath.read_text(encoding="utf-8")
+    original_content = dest_md_filepath.read_text(encoding="utf-8")
 
-    # --- LLM Inputs Sidebar --- #
+    # --- LLM Inputs & Actions ---
     llm_kwargs = {
         "temperature": st.session_state.llm_temperature,
         "top_p": st.session_state.llm_top_p,
         "reasoning_effort": st.session_state.llm_reasoning_effort,
     }
-    lvl_1_heading = st.text_input("Provide Level 1 Heading (with number) for LLM Preprocessing", key=f"llm_heading_{selected_document}") # noqa
+    lvl_1_heading = st.text_input("Provide Level 1 Heading (with number)", key=f"llm_heading_{selected_document}")
 
     if st.button("Reset Document to Preprocessed Markdown", key=f"reset_llm_{selected_document}"):
-        shutil.copy(source_md_filepath, md_filepath)
+        shutil.copy(source_md_filepath, dest_md_filepath)
         st.success(f"Document '{selected_document}' reset to original markdown.")
         st.rerun()
 
     if st.button("LLM Preprocess Document", key=f"llm_preprocess_{selected_document}"):
-        user_message = (
-            f"Enhance the following document for clarity, structure, and completeness while preserving all original information\n" # noqa
-            f"Level 1 Heading: # {lvl_1_heading.strip()}\n---\n"
-            f"<original content>\n{original_content}\n</original content>"
-        )
-        with st.spinner("...processing the document"):
-            stream = st.session_state.client.api_query(
-                model=st.session_state.md_model,
-                user_message=user_message,
-                system_prompt=SYS_LECTURE_SUMMARIZER,
-                **llm_kwargs,
-            )
-            processed_content = "".join(chunk for chunk in stream)
-
-        md_filepath.write_text(processed_content, encoding="utf-8")
-        st.success(f"Document '{selected_document}' preprocessed and saved.")
-        st.rerun()
+        user_message = f"""
+        Enhance the following document for clarity, structure, and completeness while preserving all original information\n
+        Level 1 Heading: # {lvl_1_heading.strip()}\n
+        ---\n<original content>\n{original_content}\n</original content>
+        """
+        _run_llm_action(dest_md_filepath, user_message, SYS_LECTURE_SUMMARIZER, llm_kwargs)
 
     if st.button("LLM Enhance Document", key=f"llm_enhance_{selected_document}"):
-        with st.spinner("...enhancing the document"):
-            user_message = (
-                f"<original content>\n{original_content}\n</original content>"
-            )
-            stream = st.session_state.client.api_query(
-                model=st.session_state.md_model,
-                user_message=user_message,
-                system_prompt=SYS_LECTURE_ENHENCER,
-                **llm_kwargs,
-            )
-            enhanced_content = "".join(chunk for chunk in stream)
-
-        md_filepath.write_text(enhanced_content, encoding="utf-8")
-        st.success(f"Document '{selected_document}' enhanced and saved.")
-        st.rerun()
+        user_message = f"<original content>\n{original_content}\n</original content>"
+        _run_llm_action(dest_md_filepath, user_message, SYS_LECTURE_ENHENCER, llm_kwargs)
 
     st.subheader("Preview")
     st.markdown(original_content, unsafe_allow_html=True)
@@ -348,7 +321,7 @@ METADATA_SCHEMA = {
     MetadataKeys.CONTEXT_PATH: pl.String,
 }
 
-DEFAULT_HEADING = "General"
+DEFAULT_HEADING = "<None>"
 
 def create_ingestion_payload(markdown_filepath: str) -> RAGIngestionPayload:
     """
