@@ -203,7 +203,7 @@ def _non_streaming_api_query(model: str, prompt: str, system_prompt: str, img:Op
         model=model,
         user_message=prompt,
         system_prompt=system_prompt,
-        chat_history=None, img=img)
+        chat_history=None, img=img.image_data)
 
     response_text = ""
     for chunk in stream:
