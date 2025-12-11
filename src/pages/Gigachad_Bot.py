@@ -80,7 +80,7 @@ def chat_interface() -> None:
                 st.write_stream(
                     client.chat(
                         model=st.session_state.selected_model,
-                        user_message=prompt,
+                        user_msg=prompt,
                         system_prompt=system_prompt,
                         img=streamlit_img_to_bytes(img) if img.image_data is not None else None,
                         stream=True,

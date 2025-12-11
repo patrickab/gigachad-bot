@@ -11,20 +11,21 @@ NANOTASK_MODEL = "gemini-2.5-flash"
 LOCAL_NANOTASK_MODEL = "granite4:1b"
 
 MODELS_GEMINI = [
-    "gemini-2.5-flash-lite",
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
+    "gemini/gemini-2.5-flash-lite",
+    "gemini/gemini-2.5-flash",
+    "gemini/gemini-2.5-pro",
 ]
+
 MODELS_OPENAI = [
-    "gpt-5",
-    "gpt-5-mini",
-    "gpt-4o",
+    "openai/gpt-5",
+    "openai/gpt-5-mini",
+    "openai/gpt-4o",
 ]
 
 MODELS_OLLAMA = []
 try:  # if ollama is available, add ollama models
     result = subprocess.run(["ollama", "list"], capture_output=True, text=True, check=True)
-    MODELS_OLLAMA += [line.split()[0] for line in result.stdout.strip().splitlines()[1:]]
+    MODELS_OLLAMA += [f"ollama/{line.split()[0]}" for line in result.stdout.strip().splitlines()[1:]]
 except (FileNotFoundError, subprocess.CalledProcessError):
     pass  # ollama not available or command failed
 
