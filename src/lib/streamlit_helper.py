@@ -14,21 +14,16 @@ import streamlit as st
 from streamlit_ace import THEMES, st_ace
 from streamlit_paste_button import PasteResult, paste_image_button
 
-from src.config import (
+from config import (
     DIRECTORY_EMBEDDINGS,
     DIRECTORY_LLM_PREPROCESSING,
     DIRECTORY_OBSIDIAN_VAULT,
     DIRECTORY_RAG_INPUT,
     DIRECTORY_VLM_OUTPUT,
-    MODELS_GEMINI,
-    MODELS_OCR_OLLAMA,
-    MODELS_OLLAMA,
-    MODELS_OPENAI,
-    NANOTASK_MODEL,
     SERVER_STATIC_DIR,
 )
-from src.lib.non_user_prompts import SYS_NOTE_TO_OBSIDIAN_YAML
-from src.lib.prompts import (
+from lib.non_user_prompts import SYS_NOTE_TO_OBSIDIAN_YAML
+from lib.prompts import (
     SYS_ADVISOR,
     SYS_ARTICLE,
     SYS_CONCEPT_IN_DEPTH,
@@ -40,7 +35,14 @@ from src.lib.prompts import (
     SYS_RAG_TUTOR,
     SYS_TUTOR,
 )
-from src.llm_client import LLMClient
+from llm_client import LLMClient
+from llm_config import (
+    MODELS_GEMINI,
+    MODELS_OCR_OLLAMA,
+    MODELS_OLLAMA,
+    MODELS_OPENAI,
+    NANOTASK_MODEL,
+)
 
 EMPTY_PASTE_RESULT = PasteResult(image_data=None)
 

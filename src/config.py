@@ -1,5 +1,3 @@
-import subprocess
-
 # Fileserver data location
 SERVER_STATIC_DIR = "src/static"
 SERVER_APP_STATIC_DIR = "app/static"
@@ -14,41 +12,7 @@ DIRECTORY_MD_PREPROCESSING = SERVER_STATIC_DIR + "/md_preprocessing" # preproces
 DIRECTORY_LLM_PREPROCESSING = SERVER_STATIC_DIR + "/llm_preprocessing" # LLM processed markdown files location
 DIRECTORY_RAG_INPUT = SERVER_STATIC_DIR + "/rag_input" # prepared markdown files for RAG embeddings
 
-# Adjust to your preferred models
-MACROTASK_MODEL = "gemini-2.5-pro"
-MICROTASK_MODEL = "gemini-2.5-flash"
-NANOTASK_MODEL = "gemini-2.5-flash"
-
-# Specify local ollama model to use additional features like captioning of user prompts.
-# Not strictly necessary, enhances user experience slightly. Will be ignored if ollama is not installed.
-# Granite 4: Minimal hardware, very fast - can be run on any smartphone - competent for easy tasks.
-LOCAL_NANOTASK_MODEL = "granite4:1b"
-
-MODELS_GEMINI = [
-    "gemini-2.5-flash-lite",
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
-]
-MODELS_OPENAI = [
-    "gpt-5",
-    "gpt-5-mini",
-    "gpt-4o",
-]
-
-MODELS_OLLAMA = []
-try:  # if ollama is available, add ollama models
-    result = subprocess.run(["ollama", "list"], capture_output=True, text=True, check=True)
-    MODELS_OLLAMA += [line.split()[0] for line in result.stdout.strip().splitlines()[1:]]
-except (FileNotFoundError, subprocess.CalledProcessError):
-    pass  # ollama not available or command failed
-
 ### RAG related config
 # Define obsidian subfolder for RAG documents
 DIRECTORY_OBSIDIAN_DOCS = "digital-garden"
 DIRECTORY_EMBEDDINGS = "./embeddings"
-# Expects API-Keys in environment variables & Huggingface tokens for tokenizer
-DEFAULT_EMBEDDING_MODEL = "gemini-embedding-001"
-RAG_K_DOCS = 5
-
-### OCR related config
-MODELS_OCR_OLLAMA = ["qwen3-vl:2b", "qwen3-vl:8b"]

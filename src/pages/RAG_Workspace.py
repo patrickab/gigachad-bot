@@ -7,14 +7,14 @@ from rag_database.rag_config import MODEL_CONFIG, DatabaseKeys
 from rag_database.rag_database import RagDatabase
 import streamlit as st
 
-from src.config import (
-    DEFAULT_EMBEDDING_MODEL,
+from config import (
     DIRECTORY_EMBEDDINGS,
     DIRECTORY_OBSIDIAN_DOCS,
     DIRECTORY_OBSIDIAN_VAULT,
     DIRECTORY_RAG_INPUT,
 )
-from src.lib.streamlit_helper import nyan_cat_spinner
+from lib.streamlit_helper import nyan_cat_spinner
+from llm_config import DEFAULT_EMBEDDING_MODEL
 
 DATABASE_LABEL_OBSIDIAN = "obsidian"
 

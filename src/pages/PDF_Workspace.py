@@ -5,13 +5,13 @@ import re
 import pandas as pd
 import streamlit as st
 
-from src.config import MACROTASK_MODEL
-from src.lib.flashcards import DATE_ADDED, NEXT_APPEARANCE, render_flashcards
-from src.lib.non_user_prompts import (
+from lib.flashcards import DATE_ADDED, NEXT_APPEARANCE, render_flashcards
+from lib.non_user_prompts import (
     SYS_LEARNINGGOALS_TO_FLASHCARDS,
     SYS_PDF_TO_LEARNING_GOALS,
 )
-from src.lib.streamlit_helper import _extract_text_from_pdf, _non_streaming_api_query, options_message
+from lib.streamlit_helper import _extract_text_from_pdf, _non_streaming_api_query, options_message
+from llm_config import MACROTASK_MODEL
 
 
 @st.cache_data

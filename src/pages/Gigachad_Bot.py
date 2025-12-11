@@ -6,7 +6,7 @@ from st_copy import copy_button
 import streamlit as st
 from streamlit_paste_button import PasteResult
 
-from config import DIRECTORY_CHAT_HISTORIES, LOCAL_NANOTASK_MODEL, MODELS_OLLAMA
+from config import DIRECTORY_CHAT_HISTORIES
 from lib.non_user_prompts import SYS_CAPTION_GENERATOR, SYS_RAG
 from lib.streamlit_helper import (
     AVAILABLE_LLM_MODELS,
@@ -19,6 +19,7 @@ from lib.streamlit_helper import (
     paste_img_button,
     streamlit_img_to_bytes,
 )
+from llm_config import LOCAL_NANOTASK_MODEL, MODELS_OLLAMA
 from pages.RAG_Workspace import init_rag_workspace, rag_sidebar
 
 EMPTY_PASTE_RESULT = PasteResult(image_data=None)

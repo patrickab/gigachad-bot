@@ -10,15 +10,15 @@ from rag_database.dataclasses import RAGIngestionPayload
 from rag_database.rag_config import DatabaseKeys
 import streamlit as st
 
-from lib.non_user_prompts import SYS_LECTURE_ENHENCER, SYS_LECTURE_SUMMARIZER
-from src.config import (
+from config import (
     DIRECTORY_LLM_PREPROCESSING,
     DIRECTORY_MD_PREPROCESSING,
     DIRECTORY_RAG_INPUT,
     DIRECTORY_VLM_OUTPUT,
     SERVER_APP_RAG_INPUT,
 )
-from src.lib.streamlit_helper import editor, llm_params_sidebar, model_selector
+from lib.non_user_prompts import SYS_LECTURE_ENHENCER, SYS_LECTURE_SUMMARIZER
+from lib.streamlit_helper import editor, llm_params_sidebar, model_selector
 
 
 def init_session_state() -> None:

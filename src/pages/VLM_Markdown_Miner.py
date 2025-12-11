@@ -11,7 +11,7 @@ from ansi2html import Ansi2HTMLConverter
 import streamlit as st
 
 from config import DIRECTORY_VLM_OUTPUT
-from src.lib.streamlit_helper import nyan_cat_spinner
+from lib.streamlit_helper import nyan_cat_spinner
 
 
 class ConsoleBuffer:

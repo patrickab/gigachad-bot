@@ -5,7 +5,7 @@ import fitz
 import streamlit as st
 
 from config import SERVER_APP_STATIC_DIR, SERVER_STATIC_DIR
-from src.lib.streamlit_helper import print_metrics
+from lib.streamlit_helper import print_metrics
 
 
 def init_pdf_preprocessor() -> None:
