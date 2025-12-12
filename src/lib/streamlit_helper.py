@@ -61,14 +61,13 @@ if MODELS_OLLAMA != []:
 
 AVAILABLE_PROMPTS = {
     "Quick Overview": SYS_QUICK_OVERVIEW,
+    "Code Assistant": SYS_CODE_OPERATOR,
     "Advisor": SYS_ADVISOR,
-    "Tutor": SYS_TUTOR,
-    "RAG Tutor": SYS_RAG_TUTOR,
+    "Tutor": SYS_RAG_TUTOR,
     "Concept - High-Level": SYS_CONCEPTUAL_OVERVIEW,
     "Concept - In-Depth": SYS_CONCEPT_IN_DEPTH,
     "Concept - Article": SYS_ARTICLE,
     "Prompt Engineer": SYS_PROMPT_ENGINEER,
-    "Coding Assistant": SYS_CODE_OPERATOR,
     "<empty prompt>": SYS_EMPTY_PROMPT,
 }
 
