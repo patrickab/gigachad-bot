@@ -33,7 +33,6 @@ from lib.prompts import (
     SYS_PROMPT_ENGINEER,
     SYS_QUICK_OVERVIEW,
     SYS_RAG_TUTOR,
-    SYS_TUTOR,
 )
 from llm_client import LLMClient
 from llm_config import (
