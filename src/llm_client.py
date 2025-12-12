@@ -37,7 +37,8 @@ class LLMClient(LLMClient):
         with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
             writer = csv.writer(csvfile)
             writer.writerow(['role', 'message'])
-            writer.writerows(self.messages)
+            for msg in self.messages:
+                writer.writerow([msg["role"], msg["content"]])
 
     def load_history(self, filename: str) -> None:
         """Load message history from filesystem."""
@@ -46,7 +47,8 @@ class LLMClient(LLMClient):
 
         with open(filename, 'r', newline='', encoding='utf-8') as csvfile:
             reader = csv.DictReader(csvfile)
-            self.messages = [(row['role'], row['message']) for row in reader]
+            messages = [{"role": row["role"], "content": row["message"]} for row in reader]
+            self.messages = messages
 
     def reset_history(self) -> None:
         self.messages = []
