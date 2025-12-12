@@ -2,7 +2,15 @@
 import streamlit as st
 
 from lib.non_user_prompts import SYS_OCR_TEXT_EXTRACTION
-from lib.streamlit_helper import EMPTY_PASTE_RESULT, PasteResult, editor, model_selector, options_message, paste_img_button, streamlit_img_to_bytes
+from lib.streamlit_helper import (
+    EMPTY_PASTE_RESULT,
+    PasteResult,
+    editor,
+    model_selector,
+    options_message,
+    paste_img_button,
+    streamlit_img_to_bytes,
+)
 
 
 def ocr_sidebar() -> None:
