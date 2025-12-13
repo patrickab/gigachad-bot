@@ -196,21 +196,15 @@ def editor(text_to_edit: str, language: str, key: str, height: Optional[int] = N
     return content
 
 def _non_streaming_api_query(model: str, prompt: str, system_prompt: str, img:Optional[PasteResult] = EMPTY_PASTE_RESULT) -> str:
-    """
-    Converts streaming response generator to generic string.
-    Required for @st.cache_data compatibility.
-    """
-    stream = st.session_state.client.api_query(
+    """TODO: remove - Legacy helper - can be replaced by client api calls"""
+    response = st.session_state.client.api_query(
         model=model,
         user_message=prompt,
         system_prompt=system_prompt,
+        stream=False,
         chat_history=None, img=img.image_data)
 
-    response_text = ""
-    for chunk in stream:
-        response_text += chunk
-
-    return response_text
+    return response
 
 def write_to_md(filename: str, message: str) -> None:
     """Write an assistant response to .md (idx: 0 = most recent)."""
