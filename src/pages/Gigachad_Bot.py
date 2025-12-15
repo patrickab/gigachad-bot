@@ -155,7 +155,7 @@ def gigachad_sidebar() -> None:
     with st.sidebar:
 
         #------------------------------------------------- Model & Prompt Selection ------------------------------------------------- #
-        model = model_selector(key="gigachad_bot")
+        model_selector(key="gigachad_bot")
 
         sys_prompt_name = st.selectbox(
             "System prompt",
@@ -165,9 +165,6 @@ def gigachad_sidebar() -> None:
 
         if sys_prompt_name != st.session_state.selected_prompt:
             st.session_state.selected_prompt = sys_prompt_name
-
-        if model != st.session_state.selected_model:
-            st.session_state.selected_model = model
 
         # ------------------------------------------------------ Model Config ------------------------------------------------------ #
         llm_params_sidebar()
