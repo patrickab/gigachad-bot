@@ -40,6 +40,7 @@ from llm_config import (
     MODELS_OCR_OLLAMA,
     MODELS_OLLAMA,
     MODELS_OPENAI,
+    MODELS_VLLM,
     NANOTASK_MODEL,
 )
 
@@ -57,6 +58,9 @@ if MODELS_OLLAMA != []:
     ignore_models = ["embeddinggemma:300m", *MODELS_OCR_OLLAMA]
     AVAILABLE_LLM_MODELS += MODELS_OLLAMA
     AVAILABLE_LLM_MODELS = [model for model in AVAILABLE_LLM_MODELS if model not in ignore_models]
+
+if MODELS_VLLM != []:
+    AVAILABLE_LLM_MODELS += MODELS_VLLM
 
 AVAILABLE_PROMPTS = {
     "Quick Overview": SYS_QUICK_OVERVIEW,
@@ -91,12 +95,38 @@ def init_session_state() -> None:
         st.session_state.imgs_sent = [EMPTY_PASTE_RESULT]
         st.session_state.pasted_image = EMPTY_PASTE_RESULT
 
-def model_selector(key:str) -> None:
-    """Create a model selection dropdown in Streamlit sidebar."""
-    return st.selectbox(
-        "Select LLM",
-        AVAILABLE_LLM_MODELS,
-        key=f"model_select_{key}",
+def model_selector(key: str) -> dict:
+    """Create model selection dropdowns in Streamlit sidebar expanders."""
+    model_options = []
+    model_configs = {}
+
+    if MODELS_GEMINI != []:
+        model_options.append("Gemini")
+        model_configs["Gemini"] = (MODELS_GEMINI, "gemini/")
+    if MODELS_OPENAI != []:
+        model_options.append("OpenAI")
+        model_configs["OpenAI"] = (MODELS_OPENAI, "openai/")
+    if MODELS_OLLAMA != []:
+        model_options.append("Ollama")
+        model_configs["Ollama"] = (MODELS_OLLAMA, "ollama/")
+    if MODELS_VLLM != []:
+        model_options.append("VLLM")
+        model_configs["VLLM"] = (MODELS_VLLM, "hosted_vllm/")
+
+    selected_provider = st.radio(
+        label="Model Provider",
+        options=model_options,
+        index=0,
+        horizontal=True,
+        key=f"model_provider_radio_{key}",
+    )
+    models_list, litellm_prefix = model_configs[selected_provider]
+
+    st.session_state.selected_model = st.selectbox(
+        label=f"Models ({selected_provider})",
+        options=models_list,
+        format_func=lambda model: model.replace(litellm_prefix, ""),
+        key=f"{selected_provider}_model_select_{key}",
     )
 
 def llm_params_sidebar()-> None:
