@@ -1,3 +1,4 @@
+import os
 import subprocess
 
 # Adjust to your preferred models
@@ -29,6 +30,20 @@ try:  # if ollama is available, add ollama models
     MODELS_OLLAMA += [f"ollama/{line.split()[0]}" for line in result.stdout.strip().splitlines()[1:]]
 except (FileNotFoundError, subprocess.CalledProcessError):
     pass  # ollama not available or command failed
+
+HUGGINGFACE_DIR = os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub")
+MODELS_VLLM = os.listdir(HUGGINGFACE_DIR) if os.path.exists(HUGGINGFACE_DIR) else []
+MODELS_VLLM = [model.replace("models--", "", 1) for model in MODELS_VLLM if model.startswith("models--")]
+MODELS_VLLM = [model.replace("--", "/", 1) for model in MODELS_VLLM]
+MODELS_VLLM = [f"hosted_vllm/{model}" for model in MODELS_VLLM]
+
+ministral_14b_quantized = "hosted_vllm/cyankiwi/Ministral-3-14B-Instruct-2512-AWQ-4bit"
+VLLM_STARTUP_COMMANDS = {
+    ministral_14b_quantized:
+        f"vllm serve {ministral_14b_quantized.replace('hosted_vllm/', '')} "
+        "--port 8000 --gpu-memory-utilization 0.95 --max-model-len 4000 "
+        "--max-num-seqs 1 --enforce-eager"
+}
 
 # Expects API-Keys in environment variables & Huggingface tokens for tokenizer
 DEFAULT_EMBEDDING_MODEL = "gemini-embedding-001"

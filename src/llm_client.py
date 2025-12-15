@@ -1,11 +1,12 @@
 import csv
 import os
-from typing import List, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from llm_baseclient.client import LLMClient
+from openai.types.chat import ChatCompletion
 from streamlit_paste_button import PasteResult
 
-EMPTY_PASTE_RESULT = PasteResult(image_data=None)
+from llm_config import VLLM_STARTUP_COMMANDS
 
 
 class LLMClient(LLMClient):
@@ -30,6 +31,15 @@ class LLMClient(LLMClient):
         super().__init__()
         self.messages: List[Tuple[str, str]] = [] # [role, message] - only store text for efficiency
         self.sys_prompt = ""
+
+    # -------------------------------- LLM Interaction -------------------------------- #
+    def chat(self, model: str, vllm_cmd: Optional[str] = None, **kwargs: Dict[str, any]) -> Iterator[str] | ChatCompletion:
+        """Overrides base chat method to add hardware-aware defaults."""
+        if vllm_cmd is None and model in VLLM_STARTUP_COMMANDS:
+            vllm_cmd = VLLM_STARTUP_COMMANDS[model]
+            vllm_cmd = vllm_cmd.split()
+
+        return super().chat(model=model,vllm_cmd=vllm_cmd,**kwargs,)
 
     # -------------------------------- Streamlit State Management -------------------------------- #
     def store_history(self, filename: str) -> None:
