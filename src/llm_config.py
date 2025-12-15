@@ -40,8 +40,8 @@ MODELS_VLLM = [f"hosted_vllm/{model}" for model in MODELS_VLLM]
 ministral_14b_quantized = "hosted_vllm/cyankiwi/Ministral-3-14B-Instruct-2512-AWQ-4bit"
 VLLM_STARTUP_COMMANDS = {
     ministral_14b_quantized:
-        f"vllm serve {ministral_14b_quantized.replace('hosted_vllm/', '')} "
-        "--port 8000 --gpu-memory-utilization 0.95 --max-model-len 4000 "
+        f"vllm serve {ministral_14b_quantized.replace('hosted_vllm/', '')} " +
+        "--port 8000 --gpu-memory-utilization 0.95 --max-model-len 2800 " +
         "--max-num-seqs 1 --enforce-eager"
 }
 
