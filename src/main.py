@@ -6,9 +6,12 @@ from src.lib.streamlit_helper import (
 )
 
 PAGES = {
-    "Gigachad Bot": [
+    "Chatbots": [
         st.Page("pages/Gigachad_Bot.py"),
         st.Page("pages/DataFrame_Bot.py")
+    ],
+    "Agents": [
+        st.Page("pages/Code_Agent.py"),
     ],
     "Workspaces": [
         st.Page("pages/RAG_Workspace.py"),
