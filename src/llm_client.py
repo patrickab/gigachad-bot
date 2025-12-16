@@ -1,14 +1,15 @@
 import csv
 import os
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Tuple, Union
 
-from llm_baseclient.client import LLMClient
+from litellm.types.utils import ModelResponse
+from llm_baseclient.client import LLMClient as BaseLLMClient
 from openai.types.chat import ChatCompletion
 
 from llm_config import EXLLAMA_CONFIG, VLLM_CONFIG
 
 
-class LLMClient(LLMClient):
+class LLMClient(BaseLLMClient):
     """
     Custom Hardware-Aware LLM Client supporting
        - Open source: vLLM (GPU) / Ollama (CPU) / Huggingface.
@@ -31,21 +32,30 @@ class LLMClient(LLMClient):
         self.sys_prompt = ""
 
     # -------------------------------- LLM Interaction -------------------------------- #
-    def chat(self, model: str, vllm_cmd: Optional[str] = None, **kwargs: Dict[str, any]) -> Iterator[str] | ChatCompletion:
-        """Overrides base chat method to add hardware-aware defaults."""
-        if model in VLLM_CONFIG:
-            vllm_cmd = VLLM_CONFIG[model]
-            vllm_cmd = vllm_cmd.split()
+    def _apply_model_config(self, model: str, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply model-specific configurations to kwargs."""
+        if model in VLLM_CONFIG and "hosted_vllm/" in model:
+            kwargs["vllm_cmd"] = VLLM_CONFIG[model].split()
 
-        if model in EXLLAMA_CONFIG:
-            config = EXLLAMA_CONFIG[model]
-            kwargs["tabby_config"] = config
+        if model in EXLLAMA_CONFIG and "tabby/" in model:
+            kwargs["tabby_config"] = EXLLAMA_CONFIG[model]
 
-        return super().chat(
-            model=model,
-            vllm_cmd=vllm_cmd,
-            **kwargs,
-        )
+        return kwargs
+
+    def chat(self, model: str, **kwargs: Dict[str, Any]) -> Iterator[str] | ChatCompletion:
+        """Overrides base chat method to add startup configs."""
+        kwargs = self._apply_model_config(model, kwargs)
+        return super().chat(model=model, **kwargs)
+
+    def api_query(self, model: str, **kwargs: Dict[str, Any]) -> Iterator[str] | ChatCompletion:
+        """Overrides base api_query to add startup configs."""
+        kwargs = self._apply_model_config(model, kwargs)
+        return super().api_query(model=model, **kwargs)
+
+    def batch_api_query(self, model: str, **kwargs: Dict[str, Any]) -> List[Union[ModelResponse, Exception]]:
+        """Overrides base batch_api_query to add startup configs."""
+        kwargs = self._apply_model_config(model, kwargs)
+        return super().batch_api_query(model=model, **kwargs)
 
     # -------------------------------- Streamlit State Management -------------------------------- #
     def store_history(self, filename: str) -> None:
