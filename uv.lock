@@ -930,7 +930,7 @@ wheels = [
 [[package]]
 name = "llm-baseclient"
 version = "0.1.0"
-source = { git = "ssh://git@github.com/patrickab/llm-baseclient.git?rev=main#cedcd6ed56750ecabd5304b7991dc771cf3dd121" }
+source = { git = "ssh://git@github.com/patrickab/llm-baseclient.git?rev=main#5a2cc815dd5e0605d71398822922bd41f8a90fe8" }
 dependencies = [
     { name = "filetype" },
     { name = "litellm" },
