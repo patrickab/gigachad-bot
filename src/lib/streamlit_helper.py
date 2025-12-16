@@ -36,6 +36,7 @@ from lib.prompts import (
 )
 from llm_client import LLMClient
 from llm_config import (
+    MODELS_EXLLAMA,
     MODELS_GEMINI,
     MODELS_OCR_OLLAMA,
     MODELS_OLLAMA,
@@ -112,6 +113,9 @@ def model_selector(key: str) -> dict:
     if MODELS_VLLM != []:
         model_options.append("VLLM")
         model_configs["VLLM"] = (MODELS_VLLM, "hosted_vllm/")
+    if MODELS_EXLLAMA != []:
+        model_options.append("ExLlama")
+        model_configs["ExLlama"] = (MODELS_EXLLAMA, "openai/")  # TabbyAPI uses OpenAI-convention
 
     selected_provider = st.radio(
         label="Model Provider",
