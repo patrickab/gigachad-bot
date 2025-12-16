@@ -3,6 +3,8 @@ import subprocess
 
 # --- Constants ---
 HOME = os.path.expanduser("~")
+DIRECTORY_TABBY = os.path.join(HOME, "tabbyAPI")
+HUGGINGFACE_DIR = os.path.join(HOME, ".cache", "huggingface", "hub")
 
 # --- Static Model Definitions ---
 MODELS_GEMINI = [
@@ -28,7 +30,6 @@ except (FileNotFoundError, subprocess.CalledProcessError):
     pass  # Ollama unavailable
 
 # --- Dynamic Discovery: VLLM (HuggingFace) ---
-HUGGINGFACE_DIR = os.path.join(HOME, ".cache", "huggingface", "hub")
 MODELS_VLLM = []
 
 if os.path.exists(HUGGINGFACE_DIR):
@@ -43,7 +44,7 @@ if os.path.exists(HUGGINGFACE_DIR):
 def vllm_cmd(model: str, max_tokens: int) -> str:
     """Efficiency optimizations to fit large models into small GPU."""
     # Runtime dependency check for specific quantized models
-    if model == qwen_coder_14b_bnb_4bit:
+    if "bnb" in model:
         try:
             import bitsandbytes  # noqa
         except ImportError:
@@ -71,7 +72,6 @@ VLLM_CONFIG = {
 }
 
 # --- Dynamic Discovery: TabbyAPI ---
-DIRECTORY_TABBY = os.path.join(HOME, "tabbyAPI")
 MODELS_EXLLAMA = []
 
 if os.path.exists(os.path.join(DIRECTORY_TABBY, "models")):
