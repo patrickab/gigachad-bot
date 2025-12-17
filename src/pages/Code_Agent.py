@@ -1,140 +1,152 @@
 import json
 import shlex
-from typing import List
+from typing import Any, Dict
 
-from langchain_core.tools import StructuredTool, tool
-from langchain_core.utils.function_calling import convert_to_openai_tool
 from llm_baseclient.client import LLMClient
 import streamlit as st
 
+from lib.agents.tools import get_aci_tools
 from src.lib.agents.docker_sandbox import DockerSandbox
 
 # --- CORE LOGIC (Decoupled from UI) ---
 
 
-class ACIRuntime:
+class CodeAgentTools:
     """
-    Autonomous Coding Interface Runtime.
-    Manages the Sandbox and Tool definitions independent of the UI.
-    This class can be instantiated in a CLI script or a Web App.
+    The Runtime implementation of the Agent-Computer Interface (ACI).
+    Maps abstract Pydantic tools to concrete DockerSandbox commands.
     """
 
-    def __init__(self, github_url: str) -> None:
+    def __init__(self, sandbox: DockerSandbox) -> None:
+        self.sandbox = sandbox
+
+    def get_definitions(self) -> list[dict]:
+        """Exposes the schemas to the LLM Client."""
+        return get_aci_tools()
+
+    def execute(self, tool_name: str, arguments: Dict[str, Any]) -> str:
         """
-        Initialize the ACI runtime with a Docker-backed sandbox.
+        Dispatcher: Routes the tool name to the actual Python method.
         """
-        self.sandbox = DockerSandbox(repo_url=github_url)
-        self.tools = self._init_tools()
-        self.tools_map = {t.name: t for t in self.tools}
-        self.tools_schema = [convert_to_openai_tool(t) for t in self.tools]
+        method = getattr(self, f"_{tool_name}", None)
+        if not method:
+            return f"Error: Tool '{tool_name}' not found."
 
-    def _init_tools(self) -> List[StructuredTool]:
-        """Initialize tools with access to the specific sandbox instance."""
+        try:
+            return method(**arguments)
+        except Exception as e:
+            return f"Error executing {tool_name}: {e!s}"
 
-        @tool
-        def execute_python(code: str) -> str:
-            """
-            Executes Python code in a secure Docker sandbox.
-            Returns stdout, stderr, and handles image artifacts.
-            """
-            execution = self.sandbox.run_code(code)
-            output = ""
-            if execution.logs.stdout:
-                output += f"Output:\n{execution.logs.stdout}\n"
-            if execution.logs.stderr:
-                output += f"Error:\n{execution.logs.stderr}\n"
+    # --- Tool Implementations ---
 
-            for result in execution.results:
-                if hasattr(result, "png") and result.png:
-                    output += "[Image generated]"
+    def _read_file(self, path: str, start_line: int = 1, end_line: int = 100) -> str:
+        try:
+            content = self.sandbox.files.read(path)
+            lines = content.splitlines()
 
-            return output if output else "Code executed successfully."
+            # Handle 1-based indexing
+            start_idx = max(0, start_line - 1)
+            end_idx = min(len(lines), end_line)
 
-        @tool
-        def read_file(path: str, start_line: int = 1, end_line: int = 100) -> str:
-            """Reads a file from start_line to end_line with line numbers."""
-            try:
-                content = self.sandbox.files.read(path)
-                lines = content.splitlines()
-                start_idx = max(0, start_line - 1)
-                end_idx = min(len(lines), end_line)
+            selected_lines = lines[start_idx:end_idx]
 
-                selected_lines = lines[start_idx:end_idx]
-                output = []
-                for i, line in enumerate(selected_lines):
-                    output.append(f"{start_idx + i + 1}: {line}")
-                return "\n".join(output)
-            except Exception as e:
-                return f"Error reading file: {e}"
+            # Add line numbers for the LLM
+            output = []
+            for i, line in enumerate(selected_lines):
+                output.append(f"{start_idx + i + 1}: {line}")
 
-        @tool
-        def edit_file(path: str, start_line: int, end_line: int, new_content: str) -> str:
-            """Replaces lines [start_line, end_line] with new_content and validates syntax."""
-            try:
-                content = self.sandbox.files.read(path)
-                lines = content.splitlines()
+            if not output:
+                return "File is empty or range is invalid."
 
-                new_lines = new_content.splitlines()
-                start_idx = max(0, start_line - 1)
+            return "\n".join(output)
+        except Exception as e:
+            return f"Error reading file: {e}"
 
-                candidate_lines = lines[:start_idx] + new_lines + lines[end_line:]
-                candidate_content = "\n".join(candidate_lines)
+    def _edit_file(self, path: str, start_line: int, end_line: int, new_content: str) -> str:
+        # TODO: Safety checks - "expected_start_line=code[start_line] expected_end_line=code[end_line]"
+        try:
+            # 1. Read original
+            content = self.sandbox.files.read(path)
+            lines = content.splitlines()
 
-                temp_path = f"{path}.temp"
-                self.sandbox.files.write(temp_path, candidate_content)
+            # 2. Prepare Slicing (1-based to 0-based)
+            start_idx = max(0, start_line - 1)
+            end_idx = end_line  # Python slice end is exclusive, which matches 1-based inclusive logic perfectly
 
-                proc = self.sandbox.commands.run(
-                    f"python3 -m py_compile {shlex.quote(temp_path)}"
-                )
+            # 3. Apply Edit in Memory
+            new_lines_list = new_content.splitlines()
 
-                if proc.exit_code != 0:
-                    self.sandbox.commands.run(f"rm {temp_path}")
-                    return f"Error: Syntax Error: {proc.stderr}"
+            # Safety Check: Are we extending the file?
+            if start_idx > len(lines):
+                return f"Error: Start line {start_line} is beyond end of file ({len(lines)} lines)."
 
-                self.sandbox.files.write(path, candidate_content)
-                self.sandbox.commands.run(f"rm {temp_path}")
-                return "Success"
-            except Exception as e:
-                return f"Error editing file: {e}"
+            # Reconstruct content
+            final_lines = lines[:start_idx] + new_lines_list + lines[end_idx:]
+            final_content = "\n".join(final_lines)
 
-        @tool
-        def list_dir(path: str = ".") -> str:
-            """Lists files in a directory."""
-            proc = self.sandbox.commands.run(f"ls -F {shlex.quote(path)}")
+            # 4. Write to Temp File
+            temp_path = f"{path}.temp_lint"
+            self.sandbox.files.write(temp_path, final_content)
+
+            # 5. Auto-Lint (Syntax Check)
+            # We use py_compile to check for syntax errors before overwriting
+            lint_cmd = f"python3 -m py_compile {shlex.quote(temp_path)}"
+            proc = self.sandbox.commands.run(lint_cmd)
+
             if proc.exit_code != 0:
-                return f"Error: {proc.stderr}"
+                # Cleanup and Fail
+                self.sandbox.commands.run(f"rm {temp_path}")
+                return f"❌ Edit Rejected: Syntax Error in generated code.\n{proc.stderr}"
 
-            lines = proc.stdout.splitlines()
-            if len(lines) > 50:
-                return "\n".join(lines[:50]) + "\n... Output truncated."
-            return proc.stdout
+            # 6. Commit Change
+            self.sandbox.commands.run(f"mv {temp_path} {path}")
+            return "✅ Success: File edited and syntax verified."
 
-        @tool
-        def search_code(query: str, dir: str = ".") -> str:
-            """Searches for a string in files."""
-            proc = self.sandbox.commands.run(
-                f"grep -rn {shlex.quote(query)} {shlex.quote(dir)} | head -n 20"
-            )
-            return proc.stdout if proc.stdout else "No matches found."
+        except Exception as e:
+            return f"Error editing file: {e}"
 
-        @tool
-        def run_shell(command: str) -> str:
-            """Executes a shell command inside the Docker sandbox."""
-            proc = self.sandbox.commands.run(command)
-            return (
-                f"STDOUT:\n{proc.stdout}\n"
-                f"STDERR:\n{proc.stderr}\n"
-                f"Exit Code: {proc.exit_code}"
-            )
+    def _search_code(self, query: str, dir: str = ".") -> str:
+        # Implements the robust grep logic ignoring venv/git
+        # -r: recursive
+        # -n: line numbers
+        # -H: print filename
+        # -I: ignore binary files
+        # --exclude-dir: ignore noise
 
-        return [
-            execute_python,
-            read_file,
-            edit_file,
-            list_dir,
-            search_code,
-            run_shell,
-        ]
+        ignore_dirs = "{.git,.venv,venv,__pycache__,node_modules,.mypy_cache}"
+
+        cmd = (
+            f"grep -rnH -I "
+            f"--exclude-dir={ignore_dirs} "
+            f"{shlex.quote(query)} {shlex.quote(dir)} "
+            f"| head -n 200"
+        )
+
+        proc = self.sandbox.commands.run(cmd)
+
+        if proc.exit_code != 0 and not proc.stdout:
+            return "No matches found."
+
+        return proc.stdout
+
+    def _list_dir(self, path: str = ".") -> str:
+        # -F adds trailing / to dirs
+        proc = self.sandbox.commands.run(f"ls -F {shlex.quote(path)}")
+        if proc.exit_code != 0:
+            return f"Error: {proc.stderr}"
+
+        lines = proc.stdout.splitlines()
+
+        # Filter out hidden noise if needed, or just truncate
+        filtered = [line for line in lines if not line.startswith("__") and not line.startswith(".git")]
+
+        if len(filtered) > 50:
+            return "\n".join(filtered[:50]) + "\n... (Output truncated)"
+        return "\n".join(filtered)
+
+    def _run_shell(self, command: str) -> str:
+        proc = self.sandbox.commands.run(command)
+        return f"STDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}\nExit Code: {proc.exit_code}"
 
 
 SYSTEM_PROMPT = (
