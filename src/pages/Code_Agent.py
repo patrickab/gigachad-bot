@@ -381,5 +381,6 @@ def main() -> None:
                 elif event["type"] == "error":
                     st.error(event["content"])
 
+
 if __name__ == "__main__":
     main()
