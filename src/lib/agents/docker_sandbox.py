@@ -55,7 +55,7 @@ DockerSandbox: Foundation for Agentic, Git-Native, Test-Driven Development in Is
 * **_DockerFiles** — Read and write files inside the container.
 * **_DockerCommands** — Execute shell commands inside the container.
 * **DockerExecution** — Collect logs and execution results.
-* **DockerProcess** — Represent stdout, stderr, and exit codes.
+* **DockerProcessResult** — Represent stdout, stderr, and exit codes.
 """
 
 import os
@@ -96,7 +96,7 @@ class DockerExecution:
         self.results = results
 
 
-class DockerProcess:
+class DockerProcessResult:
     """Low-level process result from container exec."""
 
     def __init__(self, stdout: str = "", stderr: str = "", exit_code: int = 0) -> None:
@@ -172,7 +172,7 @@ class _DockerCommands:
     def __init__(self, sandbox_instance: "DockerSandbox") -> None:
         self._sandbox = sandbox_instance
 
-    def run(self, command: str) -> DockerProcess:
+    def run(self, command: str) -> DockerProcessResult:
         logger.debug("Sandbox: Running command: %s", command)
         result = self._sandbox._run_in_container(command)
         if result.exit_code != 0:
@@ -306,7 +306,7 @@ CMD ["tail", "-f", "/dev/null"]
             self._run_in_container("uv pip install --system -r requirements.txt")
             logger.debug("Sandbox: Dependencies installed successfully")
 
-    def _run_in_container(self, command: str) -> DockerProcess:
+    def _run_in_container(self, command: str) -> DockerProcessResult:
         # Single-shot exec with stdout/stderr capture
         logger.debug("Sandbox: Executing in container: %s", command)
         if not self.container_id:
@@ -316,19 +316,20 @@ CMD ["tail", "-f", "/dev/null"]
 
         container = self.docker_client.containers.get(self.container_id)
         try:
-            res = container.exec_run(
-                cmd=f"/bin/bash -c '{command}'",
+            exec_result = container.exec_run(
+                cmd=["/bin/bash", "-c", command], 
                 workdir="/app/workspace",
+                stream=False,
                 demux=True,
             )
-            stdout = res.output[0].decode() if res.output[0] else ""
-            stderr = res.output[1].decode() if res.output[1] else ""
-            logger.debug("Sandbox: Container execution completed with exit code %d", res.exit_code)
-            return DockerProcess(stdout, stderr, res.exit_code)
+            stdout = exec_result.output[0].decode() if exec_result.output[0] else ""
+            stderr = exec_result.output[1].decode() if exec_result.output[1] else ""
+            logger.debug("Sandbox: Container execution completed with exit code %d", exec_result.exit_code)
+            return DockerProcessResult(stdout, stderr, exec_result.exit_code)
         except Exception as e:
             error_msg = f"Docker exec error: {e}"
             logger.error("Sandbox: %s", error_msg)
-            return DockerProcess(stderr=error_msg, exit_code=1)
+            return DockerProcessResult(stderr=error_msg, exit_code=1)
 
     def run_code(self, code: str) -> DockerExecution:
         """Writes and executes a temporary Python script in-container."""
