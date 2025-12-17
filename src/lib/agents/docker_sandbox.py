@@ -1,63 +1,4 @@
-"""
-DockerSandbox: Foundation for Agentic, Git-Native, Test-Driven Development in Isolated Environments
-
-# Core Behavior:
-================
-- Initializes from a git repository or scratchpad with automatic cloning/pulling.
-- Runs all commands inside an isolated Docker container built with `uv` for fast dependency resolution and caching.
-- Exposes file I/O and command execution APIs that enforce container encapsulation.
-- Automatically mounts the host workspace for seamless local-dev parity.
-- Supports test-driven workflows via programmatic script execution and result introspection.
-
-## What It Does
-===============
-* Create an ephemeral Docker container for code execution.
-* Initialize a git workspace by cloning or creating a repository.
-* Run all commands **only inside the container**.
-* Expose controlled APIs for file I/O and command execution.
-* Mount the host workspace for local parity and persistence.
-* Support test-driven development with executable scripts and captured results.
-* Enforce clear authority boundaries between host and container.
-
---- Overview
-
-### Initialization
-==================
-* Clone or pull a git repository, or start from an empty workspace.
-* Build a Docker image using `python:3.11-slim`.
-* Install `uv`, `git`, and common tooling.
-* Start a container tied to the sandbox instance lifecycle.
-
-### Execution
-=============
-* Execute shell commands inside the container.
-* Run Python code and scripts programmatically.
-* Capture stdout, stderr, exit codes, and logs.
-* Read and write files inside the container via streamed I/O.
-
-### Isolation
-=============
-* Mount the host repo at `/app/workspace` (read/write).
-* Hide host virtual environments with dummy mounts.
-* Share a persistent `uv` cache volume for faster installs.
-* Allow container access to host services when needed.
-
-### Lifecycle
-=============
-* Treat the container as disposable.
-* Automatically clean up the container on sandbox termination.
-
----
-
-## Key Components
-=================
-* **DockerSandbox** — Primary interface; manages lifecycle and orchestration.
-* **_DockerFiles** — Read and write files inside the container.
-* **_DockerCommands** — Execute shell commands inside the container.
-* **DockerExecution** — Collect logs and execution results.
-* **DockerProcessResult** — Represent stdout, stderr, and exit codes.
-"""
-
+from dataclasses import dataclass
 import os
 import subprocess
 import tarfile
@@ -66,203 +7,122 @@ import time
 from typing import List, Optional
 
 import docker
-from docker.errors import NotFound
+from docker.errors import DockerException, NotFound
 
 from lib.utils.logger import get_logger
 
 logger = get_logger()
 
 
-class DockerExecutionLogs:
+@dataclass
+class ExecutionLogs:
     """Captured stdout/stderr from an execution."""
 
-    def __init__(self, stdout: str = "", stderr: str = "") -> None:
-        self.stdout = stdout
-        self.stderr = stderr
+    stdout: str = ""
+    stderr: str = ""
 
 
-class DockerExecutionResult:
-    """Optional structured results (e.g. images, artifacts)."""
+@dataclass
+class Artifacts:
+    """Optional structured results (e.g. images, binary data)."""
 
-    def __init__(self, png: Optional[bytes] = None) -> None:
-        self.png = png
-
-
-class DockerExecution:
-    """High-level execution outcome."""
-
-    def __init__(self, logs: DockerExecutionLogs, results: List[DockerExecutionResult]) -> None:
-        self.logs = logs
-        self.results = results
+    png: Optional[bytes] = None
 
 
-class DockerProcessResult:
-    """Low-level process result from container exec."""
+@dataclass
+class CodeExecution:
+    """High-level outcome of a code execution request."""
 
-    def __init__(self, stdout: str = "", stderr: str = "", exit_code: int = 0) -> None:
-        self.stdout = stdout
-        self.stderr = stderr
-        self.exit_code = exit_code
+    logs: ExecutionLogs
+    results: List[Artifacts]
 
 
-class _DockerFiles:
-    """File I/O strictly scoped to the running container."""
+@dataclass
+class CommandResult:
+    """Low-level result from a shell command."""
 
-    def __init__(self, sandbox_instance: "DockerSandbox") -> None:
-        self._sandbox = sandbox_instance
+    stdout: str = ""
+    stderr: str = ""
+    exit_code: int = 0
+
+
+class SandboxFileSystem:
+    """Handles file I/O strictly scoped to the running container."""
+
+    def __init__(self, sandbox: "DockerSandbox") -> None:
+        self._sandbox = sandbox
 
     def read(self, path: str) -> str:
-        logger.debug("Sandbox: Reading file '%s'", path)
-        # Simple read via container shell
-        proc = self._sandbox._run_in_container(f"cat {path}")
-        if proc.exit_code != 0:
-            error_msg = f"Failed to read file {path}: {proc.stderr}"
-            logger.error("Sandbox: %s", error_msg)
-            raise Exception(error_msg)
-        logger.debug("Sandbox: Successfully read file '%s'", path)
-        return proc.stdout
+        """Reads a text file from the container."""
+        logger.debug("FileSystem: Reading '%s'", path)
+        result = self._sandbox.exec_run(f"cat {path}")
+
+        if result.exit_code != 0:
+            msg = f"Read failed for {path}: {result.stderr}"
+            logger.error(msg)
+            raise IOError(msg)
+
+        return result.stdout
 
     def write(self, path: str, content: str) -> None:
-        logger.debug("Sandbox: Writing to file '%s'", path)
-        # Writes via tar+put_archive (Docker-safe file injection)
-        if not self._sandbox.container_id:
-            error_msg = "Docker sandbox container is not running."
-            logger.error("Sandbox: %s", error_msg)
-            raise RuntimeError(error_msg)
+        """Writes text content to a file in the container."""
+        logger.debug("FileSystem: Writing to '%s'", path)
+        container = self._sandbox.get_container()
 
-        container = self._sandbox.docker_client.containers.get(self._sandbox.container_id)
-        container_dir = os.path.dirname(path)
-        container_filename = os.path.basename(path)
+        # Ensure parent directory exists
+        directory = os.path.dirname(path)
+        if directory and directory != "/":
+            self._sandbox.exec_run(f"mkdir -p {directory}")
 
-        if container_dir and container_dir != "/":
-            proc = self._sandbox._run_in_container(f"mkdir -p {container_dir}")
-            if proc.exit_code != 0:
-                error_msg = f"Failed to create directory {container_dir}: {proc.stderr}"
-                logger.error("Sandbox: %s", error_msg)
-                raise Exception(error_msg)
-
+        # Use tar archive to safely inject file into container
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
-                temp_file = os.path.join(temp_dir, container_filename)
-                with open(temp_file, "w", encoding="utf-8") as f:
+                filename = os.path.basename(path)
+                local_path = os.path.join(temp_dir, filename)
+
+                with open(local_path, "w", encoding="utf-8") as f:
                     f.write(content)
 
-                tar_path = os.path.join(temp_dir, "temp.tar")
+                tar_path = os.path.join(temp_dir, "payload.tar")
                 with tarfile.open(tar_path, "w") as tar:
-                    tar.add(temp_file, arcname=container_filename)
+                    tar.add(local_path, arcname=filename)
 
                 with open(tar_path, "rb") as f:
                     tar_data = f.read()
 
-                target = container_dir if container_dir else "/"
-                if not container.put_archive(target, tar_data):
-                    error_msg = "put_archive failed"
-                    logger.error("Sandbox: %s", error_msg)
-                    raise Exception(error_msg)
-            logger.debug("Sandbox: Successfully wrote to file '%s'", path)
+                target_dir = directory if directory else "/"
+                if not container.put_archive(target_dir, tar_data):
+                    raise IOError("Docker put_archive failed")
+
         except Exception as e:
-            error_msg = f"Docker error during file write: {e}"
-            logger.error("Sandbox: %s", error_msg)
-            raise Exception(error_msg)
+            logger.error("FileSystem: Write error: %s", e)
+            raise IOError(f"Failed to write {path}: {e}")
 
 
-class _DockerCommands:
-    """Command execution facade."""
+class SandboxShell:
+    """Facade for executing shell commands in the sandbox."""
 
-    def __init__(self, sandbox_instance: "DockerSandbox") -> None:
-        self._sandbox = sandbox_instance
+    def __init__(self, sandbox: "DockerSandbox") -> None:
+        self._sandbox = sandbox
 
-    def run(self, command: str) -> DockerProcessResult:
-        logger.debug("Sandbox: Running command: %s", command)
-        result = self._sandbox._run_in_container(command)
+    def run(self, command: str) -> CommandResult:
+        """Executes a shell command and logs the outcome."""
+        logger.debug("Shell: Executing '%s'", command)
+        result = self._sandbox.exec_run(command)
+
         if result.exit_code != 0:
-            logger.warning("Sandbox: Command exited with code %d: %s", result.exit_code, command)
+            logger.warning("Shell: Command failed (code %d): %s", result.exit_code, command)
         else:
-            logger.debug("Sandbox: Command executed successfully: %s", command)
+            logger.debug("Shell: Command success")
+
         return result
 
 
 class DockerSandbox:
-    """Manages repo prep, image/container lifecycle, and execution APIs."""
+    """Orchestrates the Docker environment, repository cloning, and code execution."""
 
-    def __init__(
-        self,
-        repo_url: str,
-        branch: str,
-        image_name: str = "aci-docker-sandbox:latest",
-    ) -> None:
-        logger.info("Sandbox: Initializing DockerSandbox with repo_url=%s, branch=%s", repo_url, branch)
-
-        if not repo_url.endswith(".git"):
-            repo_url = repo_url + ".git"
-        if not repo_url.startswith("https://"):
-            repo_url = "https://" + repo_url
-
-        try:
-            self.docker_client = docker.from_env()
-            # Verify connection
-            self.docker_client.ping()
-        except docker.errors.DockerException as e:
-            logger.error("Failed to connect to Docker: %s", str(e), stacklevel=4)
-            raise RuntimeError(
-                "Docker is not running or not accessible. "
-                "Ensure Docker is installed and running, and that you have "
-                "the necessary permissions to access it."
-            )
-
-        self.image_name = image_name
-        self.container_id: Optional[str] = None
-        self.container_name = f"aci-sandbox-{os.urandom(4).hex()}"
-
-        # Host-side workspace (for auth, visibility, persistence)
-        self.host_workspace_root = os.path.abspath(os.path.expanduser("~/agent_workspaces"))
-        self.repo_name = repo_url.split("/")[-1].replace(".git", "") if repo_url else "scratchpad"
-        self.host_repo_path = os.path.join(self.host_workspace_root, self.repo_name)
-
-        if repo_url:
-            self._prepare_repository(repo_url, branch)
-        else:
-            logger.debug("Sandbox: Creating scratchpad workspace at %s", self.host_repo_path)
-            os.makedirs(self.host_repo_path, exist_ok=True)
-
-        self.files = _DockerFiles(self)
-        self.commands = _DockerCommands(self)
-
-        self._ensure_image_and_container()
-
-        # Auto-install deps if conventional requirements.txt exists
-        if repo_url:
-            self._install_dependencies()
-        logger.info("Sandbox: DockerSandbox initialized successfully")
-
-    def _prepare_repository(self, repo_url: str, branch: str) -> None:
-        """Clone once; reuse if already present."""
-        logger.debug("Sandbox: Preparing repository %s (branch: %s)", repo_url, branch)
-        if os.path.exists(self.host_repo_path):
-            logger.debug("Sandbox: Repository already exists at %s", self.host_repo_path)
-            return
-        try:
-            logger.info("Sandbox: Cloning repository %s to %s", repo_url, self.host_repo_path)
-            subprocess.run(
-                ["git", "clone", "-b", branch, repo_url, self.host_repo_path],
-                check=True,
-                capture_output=True,
-            )
-            logger.debug("Sandbox: Repository cloned successfully")
-        except subprocess.CalledProcessError as e:
-            error_msg = f"Git clone failed: {e.stderr.decode()}"
-            logger.error("Sandbox: %s", error_msg)
-            raise Exception(error_msg)
-
-    def _ensure_image_and_container(self) -> None:
-        logger.debug("Sandbox: Ensuring Docker image and container")
-        # Build image if missing
-        try:
-            self.docker_client.images.get(self.image_name)
-            logger.debug("Sandbox: Docker image %s found", self.image_name)
-        except docker.errors.ImageNotFound:
-            logger.info("Sandbox: Building Docker image %s", self.image_name)
-            dockerfile = """
+    DEFAULT_IMAGE = "aci-docker-sandbox:latest"
+    DOCKERFILE_TEMPLATE = """
 FROM python:3.11-slim
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 ENV UV_CACHE_DIR="/uv_cache"
@@ -272,108 +132,162 @@ RUN apt-get update && apt-get install -y git curl grep procps build-essential \
 WORKDIR /app/workspace
 CMD ["tail", "-f", "/dev/null"]
 """
-            with tempfile.TemporaryDirectory() as td:
-                with open(os.path.join(td, "Dockerfile"), "w") as f:
-                    f.write(dockerfile)
-                self.docker_client.images.build(path=td, tag=self.image_name, rm=True)
-            logger.debug("Sandbox: Docker image built successfully")
 
-        # Shared uv cache volume
+    def __init__(self, repo_url: str, branch: str, image_name: str = DEFAULT_IMAGE) -> None:
+        logger.info("Sandbox: Initializing for %s (branch: %s)", repo_url, branch)
+
+        self.image_name = image_name
+        self.container_name = f"aci-sandbox-{os.urandom(4).hex()}"
+        self.container_id: Optional[str] = None
+
+        # Normalize Repo URL
+        if repo_url and not repo_url.endswith(".git"):
+            repo_url += ".git"
+        if repo_url and not repo_url.startswith("https://"):
+            repo_url = "https://" + repo_url
+
+        # Setup Workspace Paths
+        self.workspace_root = os.path.abspath(os.path.expanduser("~/agent_workspaces"))
+        self.repo_name = repo_url.split("/")[-1].replace(".git", "") if repo_url else "scratchpad"
+        self.host_repo_path = os.path.join(self.workspace_root, self.repo_name)
+
+        # Initialize Docker Client
         try:
-            self.docker_client.volumes.get("agent_uv_cache")
-            logger.debug("Sandbox: UV cache volume found")
-        except NotFound:
-            logger.info("Sandbox: Creating UV cache volume")
-            self.docker_client.volumes.create("agent_uv_cache")
+            self.client = docker.from_env()
+            self.client.ping()
+        except DockerException as e:
+            logger.critical("Docker unavailable: %s", e)
+            raise RuntimeError("Docker is not accessible. Please ensure the daemon is running.")
 
-        # Start (or reuse) container
-        try:
-            container = self.docker_client.containers.get(self.container_name)
-            if container.status != "running":
-                logger.info("Sandbox: Starting existing container %s", self.container_name)
-                container.start()
-            self.container_id = container.id
-            logger.debug("Sandbox: Using existing container %s", self.container_name)
-        except NotFound:
-            logger.info("Sandbox: Creating new container %s", self.container_name)
-            container = self.docker_client.containers.run(
-                self.image_name,
-                name=self.container_name,
-                detach=True,
-                extra_hosts={"host.docker.internal": "host-gateway"},
-                environment={"LLM_API_BASE": "http://host.docker.internal:4000"},
-                volumes={
-                    self.host_repo_path: {"bind": "/app/workspace", "mode": "rw"},
-                    "agent_uv_cache": {"bind": "/uv_cache", "mode": "rw"},
-                    # Hide host venvs to avoid leakage
-                    "/dummy_venv_mount": {"bind": "/app/workspace/.venv", "mode": "rw"},
-                    "/dummy_venv_mount_2": {"bind": "/app/workspace/venv", "mode": "rw"},
-                },
-                remove=False,
-            )
-            self.container_id = container.id
-            time.sleep(1)
-            logger.debug("Sandbox: New container started with ID %s", self.container_id)
+        # Setup Environment
+        if repo_url:
+            self._clone_repository(repo_url, branch)
+        else:
+            os.makedirs(self.host_repo_path, exist_ok=True)
 
-    def _install_dependencies(self) -> None:
-        """Installs requirements.txt using uv into system Python."""
-        req_path = os.path.join(self.host_repo_path, "requirements.txt")
-        if os.path.exists(req_path):
-            logger.info("Sandbox: Installing dependencies from requirements.txt")
-            self._run_in_container("uv pip install --system -r requirements.txt")
-            logger.debug("Sandbox: Dependencies installed successfully")
+        self._provision_image()
+        self._start_container()
 
-    def _run_in_container(self, command: str) -> DockerProcessResult:
-        # Single-shot exec with stdout/stderr capture
-        logger.debug("Sandbox: Executing in container: %s", command)
+        # Initialize Helpers
+        self.files = SandboxFileSystem(self)
+        self.commands = SandboxShell(self)
+
+        if repo_url:
+            self._install_dependencies()
+
+        logger.info("Sandbox: Ready (Container: %s)", self.container_name)
+
+    def get_container(self) -> docker.models.containers.Container:
+        """Retrieves the active container object."""
         if not self.container_id:
-            error_msg = "Docker sandbox container is not running."
-            logger.error("Sandbox: %s", error_msg)
-            raise RuntimeError(error_msg)
+            raise RuntimeError("Container not running")
+        return self.client.containers.get(self.container_id)
 
-        container = self.docker_client.containers.get(self.container_id)
+    def exec_run(self, command: str) -> CommandResult:
+        """Executes a command directly in the container."""
         try:
-            exec_result = container.exec_run(
-                cmd=["/bin/bash", "-c", command], 
-                workdir="/app/workspace",
-                stream=False,
-                demux=True,
-            )
-            stdout = exec_result.output[0].decode() if exec_result.output[0] else ""
-            stderr = exec_result.output[1].decode() if exec_result.output[1] else ""
-            logger.debug("Sandbox: Container execution completed with exit code %d", exec_result.exit_code)
-            return DockerProcessResult(stdout, stderr, exec_result.exit_code)
-        except Exception as e:
-            error_msg = f"Docker exec error: {e}"
-            logger.error("Sandbox: %s", error_msg)
-            return DockerProcessResult(stderr=error_msg, exit_code=1)
+            container = self.get_container()
+            exec_res = container.exec_run(cmd=["/bin/bash", "-c", command], workdir="/app/workspace", demux=True)
 
-    def run_code(self, code: str) -> DockerExecution:
-        """Writes and executes a temporary Python script in-container."""
-        logger.debug("Sandbox: Running Python code snippet")
-        name = f"temp_script_{os.urandom(4).hex()}.py"
-        path = f"/app/workspace/{name}"
-        try:
-            self.files.write(path, code)
-            proc = self._run_in_container(f"python3 {name}")
-            self._run_in_container(f"rm {name}")
-            logger.debug("Sandbox: Python code executed successfully")
-            return DockerExecution(DockerExecutionLogs(proc.stdout, proc.stderr), [])
+            stdout = exec_res.output[0].decode() if exec_res.output[0] else ""
+            stderr = exec_res.output[1].decode() if exec_res.output[1] else ""
+            return CommandResult(stdout, stderr, exec_res.exit_code)
+
         except Exception as e:
-            error_msg = f"Error running Python code: {e}"
-            logger.error("Sandbox: %s", error_msg, exc_info=True)
-            return DockerExecution(DockerExecutionLogs(stderr=error_msg), [])
+            logger.error("Exec failed: %s", e)
+            return CommandResult(stderr=str(e), exit_code=1)
+
+    def run_code(self, code: str) -> CodeExecution:
+        """Injects and executes a Python script."""
+        script_name = f"script_{os.urandom(4).hex()}.py"
+        script_path = f"/app/workspace/{script_name}"
+
+        try:
+            self.files.write(script_path, code)
+            result = self.exec_run(f"python3 {script_name}")
+            self.exec_run(f"rm {script_name}")
+
+            logs = ExecutionLogs(result.stdout, result.stderr)
+            return CodeExecution(logs, [])
+
+        except Exception as e:
+            logger.error("Code execution failed: %s", e)
+            return CodeExecution(ExecutionLogs(stderr=str(e)), [])
 
     def stop(self) -> None:
-        """Stop and remove the container."""
-        logger.info("Sandbox: Stopping container")
-        if self.container_id:
-            try:
-                c = self.docker_client.containers.get(self.container_id)
-                c.stop()
-                c.remove()
-                logger.debug("Sandbox: Container stopped and removed")
-            except NotFound:
-                logger.warning("Sandbox: Container not found during stop operation")
-                pass
+        """Terminates and removes the container."""
+        if not self.container_id:
+            return
+
+        try:
+            container = self.client.containers.get(self.container_id)
+            container.stop()
+            container.remove()
+            logger.info("Sandbox: Container %s removed", self.container_name)
+        except NotFound:
+            pass
+        finally:
             self.container_id = None
+
+    def _clone_repository(self, url: str, branch: str) -> None:
+        if os.path.exists(self.host_repo_path):
+            return
+
+        logger.info("Sandbox: Cloning %s...", url)
+        try:
+            subprocess.run(["git", "clone", "-b", branch, url, self.host_repo_path], check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"Git clone failed: {e.stderr.decode()}")
+
+    def _provision_image(self) -> None:
+        """Ensures the Docker image exists, building it if necessary."""
+        try:
+            self.client.images.get(self.image_name)
+        except docker.errors.ImageNotFound:
+            logger.info("Sandbox: Building image %s...", self.image_name)
+            with tempfile.TemporaryDirectory() as td:
+                with open(os.path.join(td, "Dockerfile"), "w") as f:
+                    f.write(self.DOCKERFILE_TEMPLATE)
+                self.client.images.build(path=td, tag=self.image_name, rm=True)
+
+    def _start_container(self) -> None:
+        """Starts the sandbox container with necessary volume mounts."""
+        # Ensure cache volume
+        try:
+            self.client.volumes.get("agent_uv_cache")
+        except NotFound:
+            self.client.volumes.create("agent_uv_cache")
+
+        # Check for existing container
+        try:
+            container = self.client.containers.get(self.container_name)
+            if container.status != "running":
+                container.start()
+            self.container_id = container.id
+            return
+        except NotFound:
+            pass
+
+        # Start new container
+        logger.info("Sandbox: Launching container %s", self.container_name)
+        container = self.client.containers.run(
+            self.image_name,
+            name=self.container_name,
+            detach=True,
+            extra_hosts={"host.docker.internal": "host-gateway"},
+            environment={"LLM_API_BASE": "http://host.docker.internal:4000"},
+            volumes={
+                self.host_repo_path: {"bind": "/app/workspace", "mode": "rw"},
+                "agent_uv_cache": {"bind": "/uv_cache", "mode": "rw"},
+                "/dummy_venv_mount": {"bind": "/app/workspace/.venv", "mode": "rw"},
+                "/dummy_venv_mount_2": {"bind": "/app/workspace/venv", "mode": "rw"},
+            },
+            remove=False,
+        )
+        self.container_id = container.id
+        time.sleep(1)  # Allow process startup
+
+    def _install_dependencies(self) -> None:
+        if os.path.exists(os.path.join(self.host_repo_path, "requirements.txt")):
+            logger.info("Sandbox: Installing dependencies...")
+            self.exec_run("uv pip install --system -r requirements.txt")

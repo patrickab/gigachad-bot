@@ -83,7 +83,9 @@ class EditFile(AgentTool):
         temp_path = f"{self.path}.temp_lint"
         sandbox.files.write(temp_path, "\n".join(final_lines))
 
-        if (proc := sandbox.commands.run(f"python3 -m py_compile {shlex.quote(temp_path)}")).exit_code != 0:
+        # Verify syntax using the container's python
+        cmd = f"python3 -m py_compile {shlex.quote(temp_path)}"
+        if (proc := sandbox.commands.run(cmd)).exit_code != 0:
             sandbox.commands.run(f"rm {temp_path}")
             return f"❌ Edit Rejected: Syntax Error.\n{proc.stderr}"
 
