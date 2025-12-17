@@ -187,12 +187,29 @@ class DockerSandbox:
 
     def __init__(
         self,
-        repo_url: Optional[str] = None,
-        branch: str = "main",
-        image_name: str = "agent-worker-uv",
+        repo_url: str,
+        branch: str,
+        image_name: str = "aci-docker-sandbox:latest",
     ) -> None:
         logger.info("Sandbox: Initializing DockerSandbox with repo_url=%s, branch=%s", repo_url, branch)
-        self.docker_client = docker.from_env()
+
+        if not repo_url.endswith(".git"):
+            repo_url = repo_url + ".git"
+        if not repo_url.startswith("https://"):
+            repo_url = "https://" + repo_url
+
+        try:
+            self.docker_client = docker.from_env()
+            # Verify connection
+            self.docker_client.ping()
+        except docker.errors.DockerException as e:
+            logger.error("Failed to connect to Docker: %s", str(e), stacklevel=4)
+            raise RuntimeError(
+                "Docker is not running or not accessible. "
+                "Ensure Docker is installed and running, and that you have "
+                "the necessary permissions to access it."
+            )
+
         self.image_name = image_name
         self.container_id: Optional[str] = None
         self.container_name = f"aci-sandbox-{os.urandom(4).hex()}"
