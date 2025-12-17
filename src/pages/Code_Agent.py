@@ -1,12 +1,12 @@
 import json
 import shlex
-from typing import Any, Dict, List, Type
+from typing import Any, Dict, Generator, List, Type
 
 from llm_baseclient.client import LLMClient
 from pydantic import BaseModel, Field
 import streamlit as st
 
-from lib.streamlit_helper import model_selector, render_messages
+from lib.streamlit_helper import model_selector
 from lib.utils.logger import get_logger
 from src.lib.agents.docker_sandbox import DockerSandbox
 
@@ -246,74 +246,98 @@ class CodeAgentTools:
 class CodeAgent:
     """
     Autonomous Agent that uses LLMClient and CodeAgentTools to solve tasks.
-    Implements the Think -> Act -> Observe loop.
+    Implements the Think -> Act -> Observe loop with UI feedback.
     """
 
-    def __init__(self, tools: CodeAgentTools) -> None:
+    def __init__(self, repo_url: str, branch: str = "main") -> None:
+        # 1. Initialize Components
         self.client = LLMClient()
-        self.tools = tools
-        self.system_prompt = (
-            "You are an expert software engineer. "
-            "You have access to a Linux environment and python tools. "
-            "Always verify your code changes by running tests or scripts. "
-            "Do not hallucinate file contents; read them first."
-        )
-        self.messages: List[Dict[str, Any]] = [{"role": "system", "content": self.system_prompt}]
+        self.sandbox = DockerSandbox(repo_url=repo_url, branch=branch)
+        self.tools = CodeAgentTools(self.sandbox)
+        self.tool_definitions = self.tools.get_definitions()
 
-    def run(self, task: str, max_steps: int = 10):
-        """Executes the agent loop for a given task."""
-        self.messages.append({"role": "user", "content": task})
+        # 2. ACI-Specific System Prompt (The "Brain" Logic)
+        self.system_prompt = (
+            "You are an expert software engineer working in a sandboxed environment.\n"
+            "TOOLS: You have access to 'read_file', 'edit_file', 'run_shell', etc.\n"
+            "PROTOCOL:\n"
+            "1. EXPLORE: Always list_dir and read_file before editing.\n"
+            "2. VERIFY: Always create a reproduction script or test case before fixing.\n"
+            "3. EDIT: Use edit_file with precise line numbers (derived from read_file).\n"
+            "4. TEST: Run your test script to confirm the fix.\n"
+            "5. DONE: When the test passes, output 'TASK_COMPLETE'."
+        )
+
+        # 3. Inject System Prompt if history is empty
+        if not self.client.messages:
+            self.client.messages.append({"role": "system", "content": self.system_prompt})
+
+    def run(self, task: str, max_steps: int = 15) -> Generator[Dict[str, Any], None, None]:
+        """
+        Executes the agent loop, yielding events for the UI.
+        Yields: {'type': str, 'content': str, 'name': str, 'args': str}
+        """
+
+        # 1. Initial Call to LLM
+        # We pass the user task here.
+        response = self.client.chat(
+            model=st.session_state.get("selected_model", "gpt-4o"),  # Fallback default
+            user_msg=task,
+            tools=self.tool_definitions,
+            stream=False,
+        )
 
         step = 0
         while step < max_steps:
             step += 1
-            yield {"type": "status", "content": f"Step {step}/{max_steps}: Thinking..."}
-
-            # 1. Call LLM
-            try:
-                response = self.client.chat(
-                    model=st.session_state.selected_model,
-                    messages=self.messages,
-                    tools=self.tools.get_definitions(),
-                    tool_choice="auto",
-                )
-            except Exception as e:
-                yield {"type": "error", "content": f"LLM Error: {e}"}
-                break
-
-            # Handle LiteLLM/OpenAI response format
-            # Assuming response is a ModelResponse object or similar dict-like structure
             message = response.choices[0].message
-            self.messages.append(message)  # Add assistant thought to history
 
-            # 2. Check for Tool Calls
-            if not message.tool_calls:
-                # Agent finished or just talking
-                yield {"type": "response", "content": message.content}
-                if message.content and "TASK_COMPLETE" in message.content:  # Simple stop condition
+            # --- CASE A: Tool Call (The Agent wants to act) ---
+            if message.tool_calls:
+                # Yield status update to UI
+                yield {"type": "status", "content": f"Step {step}: Agent is using tools..."}
+
+                for tool_call in message.tool_calls:
+                    func_name = tool_call.function.name
+                    args_str = tool_call.function.arguments
+
+                    # Yield the intent (Show user what tool is being called)
+                    yield {"type": "tool_call", "name": func_name, "args": args_str}
+
+                    try:
+                        # Parse Arguments
+                        args = json.loads(args_str)
+
+                        # Execute Tool (ACI Runtime)
+                        result = self.tools.execute(func_name, args)
+                    except Exception as e:
+                        result = f"Error executing tool: {e!s}"
+                        yield {"type": "error", "content": result}
+
+                    # Yield the result (Show user the output)
+                    yield {"type": "tool_result", "content": result}
+
+                    # Update LLM History (Critical for State)
+                    self.client.add_tool_result(tool_call_id=tool_call.id, output=result)
+
+                # Recursion: Call LLM again with the tool outputs
+                # user_msg is None because we are continuing the existing thread
+                response = self.client.chat(
+                    model=st.session_state.get("selected_model", "gpt-4o"), user_msg=None, tools=self.tool_definitions, stream=False
+                )
+
+            # --- CASE B: Text Response (The Agent wants to talk or is done) ---
+            else:
+                content = message.content
+                yield {"type": "response", "content": content}
+
+                # Stop Condition 1: Explicit Token
+                if "TASK_COMPLETE" in content:
                     break
-                # If no tool calls and no explicit stop, we might prompt again or stop.
-                # For this loop, we assume if it doesn't call a tool, it's waiting for user or done.
+
+                # Stop Condition 2: Model yielded text instead of tools (HITL)
+                # We break to allow the user to reply.
                 break
-
-            # 3. Execute Tools
-            for tool_call in message.tool_calls:
-                func_name = tool_call.function.name
-                func_args_str = tool_call.function.arguments
-                call_id = tool_call.id
-
-                yield {"type": "tool_call", "name": func_name, "args": func_args_str}
-
-                try:
-                    args = json.loads(func_args_str)
-                    result = self.tools.execute(func_name, args)
-                except json.JSONDecodeError:
-                    result = "Error: Invalid JSON arguments provided."
-
-                yield {"type": "tool_result", "content": result}
-
-                # 4. Feed Observation back to LLM
-                self.messages.append({"role": "tool", "tool_call_id": call_id, "name": func_name, "content": str(result)})
 
 
 # --- STREAMLIT INTERFACE ---
@@ -325,21 +349,16 @@ def main() -> None:
     with st.sidebar:
         model_selector(key="code_agent")
         st.subheader("🔧 Sandbox Configuration")
-        github_url = st.text_input("GitHub Repository URL")
+        repo_url = st.text_input("GitHub Repository URL")
 
-        if github_url and "agent" not in st.session_state:
-            try:
-                sandbox = DockerSandbox(github_url=github_url)
-                tools = CodeAgentTools(sandbox)
-                client = LLMClient()
-                st.session_state.agent = CodeAgent(client, tools)
-                st.success("Agent Initialized")
-            except Exception as e:
-                st.error(f"Failed to initialize agent: {e}")
-                logger.critical(f"Agent Initialization Failed: {e}")
-        else:
+        if not repo_url:
             st.warning("Provide a valid GitHub URL to initialize the agent.")
             return
+
+        if repo_url and "code_agent" not in st.session_state:
+            st.session_state.code_agent = CodeAgent(repo_url=repo_url, branch="main")
+            st.success("Agent Initialized")
+            st.rerun()
 
         debug_mode = st.toggle("Debug Mode", value=False)
         if st.button("Reset Agent"):
@@ -347,39 +366,57 @@ def main() -> None:
             st.session_state.messages = []
             st.rerun()
 
-    with st.expander("Agent Messages", expanded=debug_mode):
-        message_container = st.container()
-        render_messages(message_container, client=client)
-
-    with st._bottom():
+    with st._bottom:
         prompt = st.chat_input("Assign a task to the agent...")
 
     if prompt:
+        # Show User Message
         with st.chat_message("user"):
             st.markdown(prompt)
+        # (Optional) Add to UI history
+        # st.session_state.messages.append({"role": "user", "content": prompt})
 
         # Run Agent
         with st.chat_message("assistant"):
-            container = st.empty()
+            container = st.container()
+            status_container = container.empty()
+            response_placeholder = container.empty()
             full_response = ""
 
             # Stream agent steps
-            agent = st.session_state.agent
-            for event in agent.run(prompt):
-                if event["type"] == "status":
-                    with st.status(event["content"], expanded=True):
-                        pass  # Just showing status
-                elif event["type"] == "tool_call":
-                    with st.expander(f"🛠️ Executing: {event['name']}"):
-                        st.code(event["args"], language="json")
-                elif event["type"] == "tool_result":
-                    with st.expander("📄 Result", expanded=debug_mode):
-                        st.code(event["content"])
-                elif event["type"] == "response":
-                    full_response = event["content"]
-                    container.markdown(full_response)
-                elif event["type"] == "error":
-                    st.error(event["content"])
+            code_agent: CodeAgent = st.session_state.code_agent
+
+            try:
+                for event in code_agent.run(prompt):
+                    # A. Status Update (Spinner logic)
+                    if event["type"] == "status":
+                        status_container.status(event["content"], state="running")
+
+                    # B. Tool Call (Expandable details)
+                    elif event["type"] == "tool_call":
+                        with container.expander(f"🛠️ Executing: {event['name']}"):
+                            st.code(event["args"], language="json")
+
+                    # C. Tool Result (Output)
+                    elif event["type"] == "tool_result":
+                        with container.expander("📄 Result", expanded=debug_mode):
+                            st.code(event["content"])
+
+                    # D. Final/Text Response
+                    elif event["type"] == "response":
+                        status_container.empty()  # Remove status spinner
+                        full_response = event["content"]
+                        response_placeholder.markdown(full_response)
+
+                    # E. Error
+                    elif event["type"] == "error":
+                        container.error(event["content"])
+
+                # (Optional) Add to UI history
+                # st.session_state.messages.append({"role": "assistant", "content": full_response})
+
+            except Exception as e:
+                st.error(f"Runtime Error: {e}")
 
 
 if __name__ == "__main__":
