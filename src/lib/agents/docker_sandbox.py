@@ -68,6 +68,10 @@ from typing import List, Optional
 import docker
 from docker.errors import NotFound
 
+from lib.utils.logger import get_logger
+
+logger = get_logger()
+
 
 class DockerExecutionLogs:
     """Captured stdout/stderr from an execution."""
@@ -108,16 +112,23 @@ class _DockerFiles:
         self._sandbox = sandbox_instance
 
     def read(self, path: str) -> str:
+        logger.debug("Sandbox: Reading file '%s'", path)
         # Simple read via container shell
         proc = self._sandbox._run_in_container(f"cat {path}")
         if proc.exit_code != 0:
-            raise Exception(f"Failed to read file {path}: {proc.stderr}")
+            error_msg = f"Failed to read file {path}: {proc.stderr}"
+            logger.error("Sandbox: %s", error_msg)
+            raise Exception(error_msg)
+        logger.debug("Sandbox: Successfully read file '%s'", path)
         return proc.stdout
 
     def write(self, path: str, content: str) -> None:
+        logger.debug("Sandbox: Writing to file '%s'", path)
         # Writes via tar+put_archive (Docker-safe file injection)
         if not self._sandbox.container_id:
-            raise RuntimeError("Docker sandbox container is not running.")
+            error_msg = "Docker sandbox container is not running."
+            logger.error("Sandbox: %s", error_msg)
+            raise RuntimeError(error_msg)
 
         container = self._sandbox.docker_client.containers.get(self._sandbox.container_id)
         container_dir = os.path.dirname(path)
@@ -126,7 +137,9 @@ class _DockerFiles:
         if container_dir and container_dir != "/":
             proc = self._sandbox._run_in_container(f"mkdir -p {container_dir}")
             if proc.exit_code != 0:
-                raise Exception(f"Failed to create directory {container_dir}: {proc.stderr}")
+                error_msg = f"Failed to create directory {container_dir}: {proc.stderr}"
+                logger.error("Sandbox: %s", error_msg)
+                raise Exception(error_msg)
 
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
@@ -143,9 +156,14 @@ class _DockerFiles:
 
                 target = container_dir if container_dir else "/"
                 if not container.put_archive(target, tar_data):
-                    raise Exception("put_archive failed")
+                    error_msg = "put_archive failed"
+                    logger.error("Sandbox: %s", error_msg)
+                    raise Exception(error_msg)
+            logger.debug("Sandbox: Successfully wrote to file '%s'", path)
         except Exception as e:
-            raise Exception(f"Docker error during file write: {e}")
+            error_msg = f"Docker error during file write: {e}"
+            logger.error("Sandbox: %s", error_msg)
+            raise Exception(error_msg)
 
 
 class _DockerCommands:
@@ -155,7 +173,13 @@ class _DockerCommands:
         self._sandbox = sandbox_instance
 
     def run(self, command: str) -> DockerProcess:
-        return self._sandbox._run_in_container(command)
+        logger.debug("Sandbox: Running command: %s", command)
+        result = self._sandbox._run_in_container(command)
+        if result.exit_code != 0:
+            logger.warning("Sandbox: Command exited with code %d: %s", result.exit_code, command)
+        else:
+            logger.debug("Sandbox: Command executed successfully: %s", command)
+        return result
 
 
 class DockerSandbox:
@@ -167,6 +191,7 @@ class DockerSandbox:
         branch: str = "main",
         image_name: str = "agent-worker-uv",
     ) -> None:
+        logger.info("Sandbox: Initializing DockerSandbox with repo_url=%s, branch=%s", repo_url, branch)
         self.docker_client = docker.from_env()
         self.image_name = image_name
         self.container_id: Optional[str] = None
@@ -180,6 +205,7 @@ class DockerSandbox:
         if repo_url:
             self._prepare_repository(repo_url, branch)
         else:
+            logger.debug("Sandbox: Creating scratchpad workspace at %s", self.host_repo_path)
             os.makedirs(self.host_repo_path, exist_ok=True)
 
         self.files = _DockerFiles(self)
@@ -190,25 +216,35 @@ class DockerSandbox:
         # Auto-install deps if conventional requirements.txt exists
         if repo_url:
             self._install_dependencies()
+        logger.info("Sandbox: DockerSandbox initialized successfully")
 
     def _prepare_repository(self, repo_url: str, branch: str) -> None:
         """Clone once; reuse if already present."""
+        logger.debug("Sandbox: Preparing repository %s (branch: %s)", repo_url, branch)
         if os.path.exists(self.host_repo_path):
+            logger.debug("Sandbox: Repository already exists at %s", self.host_repo_path)
             return
         try:
+            logger.info("Sandbox: Cloning repository %s to %s", repo_url, self.host_repo_path)
             subprocess.run(
                 ["git", "clone", "-b", branch, repo_url, self.host_repo_path],
                 check=True,
                 capture_output=True,
             )
+            logger.debug("Sandbox: Repository cloned successfully")
         except subprocess.CalledProcessError as e:
-            raise Exception(f"Git clone failed: {e.stderr.decode()}")
+            error_msg = f"Git clone failed: {e.stderr.decode()}"
+            logger.error("Sandbox: %s", error_msg)
+            raise Exception(error_msg)
 
     def _ensure_image_and_container(self) -> None:
+        logger.debug("Sandbox: Ensuring Docker image and container")
         # Build image if missing
         try:
             self.docker_client.images.get(self.image_name)
+            logger.debug("Sandbox: Docker image %s found", self.image_name)
         except docker.errors.ImageNotFound:
+            logger.info("Sandbox: Building Docker image %s", self.image_name)
             dockerfile = """
 FROM python:3.11-slim
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
@@ -223,20 +259,26 @@ CMD ["tail", "-f", "/dev/null"]
                 with open(os.path.join(td, "Dockerfile"), "w") as f:
                     f.write(dockerfile)
                 self.docker_client.images.build(path=td, tag=self.image_name, rm=True)
+            logger.debug("Sandbox: Docker image built successfully")
 
         # Shared uv cache volume
         try:
             self.docker_client.volumes.get("agent_uv_cache")
+            logger.debug("Sandbox: UV cache volume found")
         except NotFound:
+            logger.info("Sandbox: Creating UV cache volume")
             self.docker_client.volumes.create("agent_uv_cache")
 
         # Start (or reuse) container
         try:
             container = self.docker_client.containers.get(self.container_name)
             if container.status != "running":
+                logger.info("Sandbox: Starting existing container %s", self.container_name)
                 container.start()
             self.container_id = container.id
+            logger.debug("Sandbox: Using existing container %s", self.container_name)
         except NotFound:
+            logger.info("Sandbox: Creating new container %s", self.container_name)
             container = self.docker_client.containers.run(
                 self.image_name,
                 name=self.container_name,
@@ -254,16 +296,23 @@ CMD ["tail", "-f", "/dev/null"]
             )
             self.container_id = container.id
             time.sleep(1)
+            logger.debug("Sandbox: New container started with ID %s", self.container_id)
 
     def _install_dependencies(self) -> None:
         """Installs requirements.txt using uv into system Python."""
-        if os.path.exists(os.path.join(self.host_repo_path, "requirements.txt")):
+        req_path = os.path.join(self.host_repo_path, "requirements.txt")
+        if os.path.exists(req_path):
+            logger.info("Sandbox: Installing dependencies from requirements.txt")
             self._run_in_container("uv pip install --system -r requirements.txt")
+            logger.debug("Sandbox: Dependencies installed successfully")
 
     def _run_in_container(self, command: str) -> DockerProcess:
         # Single-shot exec with stdout/stderr capture
+        logger.debug("Sandbox: Executing in container: %s", command)
         if not self.container_id:
-            raise RuntimeError("Docker sandbox container is not running.")
+            error_msg = "Docker sandbox container is not running."
+            logger.error("Sandbox: %s", error_msg)
+            raise RuntimeError(error_msg)
 
         container = self.docker_client.containers.get(self.container_id)
         try:
@@ -274,32 +323,39 @@ CMD ["tail", "-f", "/dev/null"]
             )
             stdout = res.output[0].decode() if res.output[0] else ""
             stderr = res.output[1].decode() if res.output[1] else ""
+            logger.debug("Sandbox: Container execution completed with exit code %d", res.exit_code)
             return DockerProcess(stdout, stderr, res.exit_code)
         except Exception as e:
-            return DockerProcess(stderr=f"Docker exec error: {e}", exit_code=1)
+            error_msg = f"Docker exec error: {e}"
+            logger.error("Sandbox: %s", error_msg)
+            return DockerProcess(stderr=error_msg, exit_code=1)
 
     def run_code(self, code: str) -> DockerExecution:
         """Writes and executes a temporary Python script in-container."""
+        logger.debug("Sandbox: Running Python code snippet")
         name = f"temp_script_{os.urandom(4).hex()}.py"
         path = f"/app/workspace/{name}"
         try:
             self.files.write(path, code)
             proc = self._run_in_container(f"python3 {name}")
             self._run_in_container(f"rm {name}")
+            logger.debug("Sandbox: Python code executed successfully")
             return DockerExecution(DockerExecutionLogs(proc.stdout, proc.stderr), [])
         except Exception as e:
-            return DockerExecution(DockerExecutionLogs(stderr=str(e)), [])
+            error_msg = f"Error running Python code: {e}"
+            logger.error("Sandbox: %s", error_msg, exc_info=True)
+            return DockerExecution(DockerExecutionLogs(stderr=error_msg), [])
 
     def stop(self) -> None:
         """Stop and remove the container."""
+        logger.info("Sandbox: Stopping container")
         if self.container_id:
             try:
                 c = self.docker_client.containers.get(self.container_id)
                 c.stop()
                 c.remove()
+                logger.debug("Sandbox: Container stopped and removed")
             except NotFound:
+                logger.warning("Sandbox: Container not found during stop operation")
                 pass
             self.container_id = None
-
-    def __del__(self) -> None:
-        self.stop()
