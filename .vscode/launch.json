@@ -4,14 +4,19 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-        
         {
-            "name": "Python Debugger: Current File",
+            "name": "Pytest",
             "type": "debugpy",
             "request": "launch",
-            "program": "${file}",
+            "module": "pytest",
+            "args": [
+                "${file}"
+            ],
             "console": "integratedTerminal",
-            "justMyCode": false
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}:${workspaceFolder}/src"
+            }
         },
         {
           "type": "debugpy",
