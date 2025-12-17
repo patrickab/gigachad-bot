@@ -9,6 +9,7 @@ from typing import Iterator, Optional
 
 import fitz
 import pymupdf4llm
+from rag_database.rag_database import DatabaseKeys
 from st_copy import copy_button
 import streamlit as st
 from streamlit_ace import THEMES, st_ace
@@ -155,6 +156,44 @@ def llm_params_sidebar()-> None:
             options=["none","low", "medium", "high"],
             key="reasoning_effort",
         )
+
+def render_messages(message_container, client: LLMClient) -> None:  # noqa
+    """Render chat messages from session state."""
+
+    message_container.empty()  # Clear previous messages
+
+    messages = client.messages
+
+    if len(messages) == 0:
+        return
+
+    with message_container:
+        for i in range(0, len(messages), 2):
+            is_last = i == len(messages) - 2 # expand only the last message / display RAG context
+            label = f"QA-Pair {i // 2}: " if len(st.session_state.usr_msg_captions) == 0 else st.session_state.usr_msg_captions[i // 2]
+            user_msg = messages[i]["content"]
+            assistant_msg = messages[i + 1]["content"]
+
+            with st.expander(label=label, expanded=is_last):
+                # Display user and assistant messages
+                with st.chat_message("user"):
+                    st.markdown(user_msg)
+                    # Copy button only works for expanded expanders
+                    if is_last:
+                        copy_button(user_msg)
+
+                with st.chat_message("assistant"):
+                    st.markdown(assistant_msg)
+                    if is_last and st.session_state.is_rag_active:
+                        documents = st.session_state.rag_response.to_polars()
+                        for doc in documents.iter_rows(named=True):
+                            with st.expander(f"**Similarity**: {doc[DatabaseKeys.KEY_SIMILARITIES]:.2f}   -  **Title**: {doc[DatabaseKeys.KEY_TITLE]}"): # noqa
+                                st.markdown(doc[DatabaseKeys.KEY_TXT_RETRIEVAL])
+
+                    if is_last:
+                        copy_button(assistant_msg)
+
+                options_message(assistant_message=assistant_msg, button_key=f"{i // 2}", user_message=user_msg, index=i)
 
 def print_metrics(dict_metrics: dict[str,int|float], n_columns: Optional[int]=None) -> None:
     """Print metrics in Streamlit columns."""
