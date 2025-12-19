@@ -1,21 +1,30 @@
 from dataclasses import dataclass
 from pathlib import Path
 import subprocess
-from typing import List
+from typing import Generic, List, Optional, TypeVar
 
 import streamlit as st
+import os
 
 from lib.streamlit_helper import model_selector
-from lib.utils.logger import get_logger
+from pydantic import BaseModel
+from abc import abstractmethod, ABC
 
-logger = get_logger()
+class AgentCommand(BaseModel, ABC):
+    executable: str # commandline executable (assume preinstalled)
+    workspace: Path = Path.cwd()  # path to agent workspace (automatically setup by agent) / default current working directory
+    args: List[str] = [] # optional list of commandline arguments
+    env_vars: Optional[dict[str, str]] = None  # optional environment variables
 
-@dataclass
-class Command:
-    name: str
-    args: List[str]
+    @abstractmethod
+    def construct_args(self) -> List[str]:
+        """Construct the full commandline arguments for the agent command."""
+        ...
 
-class CodeAgent:
+TCommand = TypeVar("TCommand", bound=AgentCommand)
+
+
+class CodeAgent(ABC, Generic[TCommand]):
     """Generic base class for Code Agents."""
     def __init__(self, repo_url: str, branch: str) -> None:
         self.repo_url = repo_url
@@ -30,67 +39,109 @@ class CodeAgent:
         # Try dependency installation if requirements.txt or pyproject.toml found. If fails, pass silently & let agent handle it.
         return Path.home() / "agent_sandbox" / <repo_name>  # Placeholder repo name must be inferred from git repository
 
-    def define_command(self) -> Command:
-        """Return Streamlit UI for definition of agent-specific command."""
-        raise NotImplementedError # unimplemented baseclass method
-
-    def _execute_agent_command(self, command: Command) -> None:
+    def _execute_agent_command(self, command: TCommand) -> None:
         """Execute the agent command in its workspace using subprocess."""
-        # NOTE: Using st.spinner direct the user to commandline or agent web UI instead of streaming output in Streamlit
-        subprocess.run([command.name, *command.args],capture_output=False, cwd=self.path_agent_workspace)
+        # TODO: Use st.spinner direct the user to commandline or agent web UI instead of streaming output in Streamlit
+        # blocks UI until command completes.
+        subprocess.run(
+            [command.executable, *command.args],
+            capture_output=False,
+            cwd=command.workspace,
+            env={**os.environ, **(command.env_vars or {})}, # TODO: ensure that this is correct syntax
+        )
 
-    def run(self, task: str, command: Command) -> None:
-        """Appends the task to the command according to agent command syntax."""
-        raise NotImplementedError  # unimplemented baseclass method
+    @abstractmethod
+    def run(self, task: str, command: TCommand) -> None:
+        """Combines task with command according to agent-specific syntax."""
+        ...
 
-    def get_diff(self, workspace: Path) -> str:
+    @abstractmethod
+    def ui_define_command(self) -> TCommand:
+        """Define the agent command with Streamlit UI."""
+        ...
+
+    def get_diff(self) -> str:
         # TODO: get git diff from the agent workspace & return as string
-        diff = subprocess.run(["git", "diff"], cwd=workspace, capture_output=True, text=True)
-        return diff.stdout
+        return "Diff placeholder"
 
 
-class AiderCodeAgent(CodeAgent):
+class AiderCommand(AgentCommand):
+    """Aider-specific command definition."""
+    command_executable: str = "aider"
+
+    model_architect: str
+    model_editor: str
+    edit_format: str = "diff" | "whole" | "udiff"
+    no_commit: bool = True
+
+    def construct_args(self) -> List[str]:
+        """
+        Construct the full commandline arguments for aider.
+        User-friendly way to set common flags.
+        """
+        args = [
+            "--architect-model", self.model_architect,
+            "--editor-model", self.model_editor,
+            "--edit-format", self.edit_format,
+        ]
+        if self.no_commit:
+            args.append("--no-commit")
+
+        self.args = self.args + args
+
+
+class AiderCodeAgent(CodeAgent[AiderCommand]):
     """Autonomous Aider Code Agent."""
 
-    def run(self, task: str, command: Command) -> None:
-        """Executes the agent loop, yielding UI events."""
-        # TODO: prepare environment variables eg OLLAMA_API_BASE=https://ollama.com:443
-        # add task to command depending on agent type
-        command.args.extend(["--message", task])
-        self._execute_agent_command(command)
-
-    def define_command(self) -> Command:
-        """Return Streamlit UI for definition of agent-specific command."""
+    def ui_define_command(self) -> AiderCommand:
+        """Define the Aider command with Streamlit UI."""
+        command = AiderCommand(
+            executable="aider",
+            args=[],
+            workspace=self.path_agent_workspace,
+        )
         st.markdown("## Select Architect Model")
-        st.session_state.model_architect = model_selector(key="code_agent_architect")
+        command.model_architect = model_selector(key="code_agent_architect")
         st.markdown("## Select Editor Model")
-        st.session_state.model_editor = model_selector(key="code_agent_editor")
+        command.model_editor = model_selector(key="code_agent_editor")
         st.markdown("---")
+        st.markdown("## Select Edit Format")
+        command.edit_format = st.selectbox(
+            "Select Edit Format",
+            options=["diff", "whole", "udiff"],
+        )
 
         st.markdown("## Select Flags for Aider Command")
-
         # TODO: Create user-friendly Streamlit controls for common aider flags:
-        # - Selectbox for enum flags (--edit-format: diff/whole/udiff)
         # - Selectbox for (map-tokens: 1024-8192 in multiples of powers of 2)
-
         # TODO: use st.multiselect for --no-commit, --browser, --no-stream, --edit-format diff
         # TODO: think about +5 most relevant flags for aider command & add them to multiselect
 
-        return Command(
-            name="aider",
-            args=[
-                "--architect",
-                st.session_state.model_architect,
-                "--editor-model",
-                st.session_state.model_editor,
-                "--repo",
-                st.session_state.repo_url,
-                "--branch",
-                st.session_state.branch,
-                # add other flags from multiselect here
-            ],
-        ) 
+        return command
 
+    def run(self, task: str, command: AiderCommand) -> None:
+        """Executes the agent loop, yielding UI events."""
+        # TODO: add task to command accordig to aider syntax
+        # TODO: Prepare environment variables (e.g. OLLAMA_API_BASE)
+        # Pass them to _execute_agent_command via command.env_vars
+        command.args.extend(["--message", task])
+        command.construct_args()
+        self._execute_agent_command(command)
+
+
+
+# Get subclasses and their names
+agent_subclasses = CodeAgent.__subclasses__()
+
+# Map name -> class
+agent_subclass_dict = {cls.__name__: cls for cls in agent_subclasses}
+agent_subclass_names = list(agent_subclass_dict.keys())
+
+@st.cache_resource
+def get_agent(agent_type: str, repo_url: str, branch: str):
+    """Getter method to avoid re-instantiation on every interaction."""
+    agent_cls: type[CodeAgent] = agent_subclass_dict[agent_type]
+    return agent_cls(repo_url, branch)
 
 def main() -> None:
     st.set_page_config(page_title="Agent-in-a-Box", layout="wide")
@@ -105,25 +156,20 @@ def main() -> None:
             st.warning("Please provide both Repository URL and Branch to proceed.")
             st.stop()
 
-        # Get subclasses and their names
-        subclasses = CodeAgent.__subclasses__()
-        subclass_dict = {cls.__name__: cls for cls in subclasses}  # Map name -> class
-        subclass_names = list(subclass_dict.keys())
-
         # Store selected class name
         st.session_state.selected_agent = st.selectbox(
             "Select Code Agent",
-            options=subclass_names,
+            options=agent_subclass_names,
             key="code_agent_selector"
         )
 
         # Retrieve and instantiate the actual class
-        selected_agent: type[CodeAgent] = subclass_dict[st.session_state.selected_agent]
-        selected_agent = selected_agent(
+        selected_agent = get_agent(
+            agent_type=st.session_state.selected_agent,
             repo_url=st.session_state.repo_url,
             branch=st.session_state.branch,
         )
-        command = selected_agent.define_command()
+        command = selected_agent.ui_define_command()
 
     with st._bottom:
         task = st.chat_input("Assign a task to the agent...")
@@ -134,7 +180,6 @@ def main() -> None:
 
         with st.chat_message("assistant"):
             selected_agent.run(task=task, command=command)
-            # wait for completion without streaming output
             diff = selected_agent.get_diff()
             st.markdown(diff, unsafe_allow_html=True)
 
