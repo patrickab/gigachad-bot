@@ -6,3 +6,4 @@ data
 src/static
 embeddings
 src/archive
+.aider*
