@@ -1,14 +1,13 @@
-import json
 import shlex
-from typing import Any, Dict, Generator, List
+from typing import Any, Dict, Generator, List, Optional
 
-from llm_baseclient.client import LLMClient
 from pydantic import BaseModel, Field
 import streamlit as st
 
 from lib.agents.docker_sandbox import DockerSandbox
-from lib.streamlit_helper import model_selector
+from lib.streamlit_helper import copy_button, model_selector
 from lib.utils.logger import get_logger
+from llm_client import LLMClient
 
 logger = get_logger()
 
@@ -48,11 +47,11 @@ class AgentTool(BaseModel):
 
 
 class ReadFile(AgentTool):
-    """Reads a file section with line numbers. Use before editing."""
+    """Reads a file with line numbers for context. Essential before using EditFile."""
 
-    path: str = Field(..., description="Relative path to file")
-    start_line: int = Field(1, description="Start line (1-based)")
-    end_line: int = Field(100, description="End line (1-based)")
+    path: str = Field(..., description="Path relative to repository root.")
+    start_line: int = Field(1, description="First line to read (1-indexed).")
+    end_line: int = Field(100, description="Last line to read (inclusive).")
 
     def run(self, sandbox: DockerSandbox) -> str:
         content = sandbox.files.read(self.path)
