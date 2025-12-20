@@ -49,7 +49,7 @@ class AgentCommand(BaseModel, ABC):
         args = [
             item for k, v in fields.items() for item in ([f"--{self._snake_to_kebab(k)}"] + ([] if isinstance(v, bool) else [str(v)]))
         ]
-        self.args += args
+        return self.args + args
 
 
 TCommand = TypeVar("TCommand", bound=AgentCommand)
@@ -280,18 +280,22 @@ class Aider(CodeAgent[AiderCommand]):
                 default=[common_flags[0], common_flags[1]],
                 accept_new_options=True,
             )
+            cmd = AiderCommand(
+                workspace=self.path_agent_workspace,
+                args=flags + DEFAULT_ARGS_AIDER,
+                env_vars=ENV_VARS_AIDER,
+                model=model_architect,
+                editor_model=model_editor,
+                reasoning_effort=reasoning_effort,
+                edit_format=edit_format,
+                no_commit=no_commit,
+                map_tokens=map_tokens,
+            )
+            with st.expander("Display Command", expanded=True):
+                args = cmd.construct_args()
+                st.code(f"aider {'\n\t'.join(args)}", language="bash")
 
-        return AiderCommand(
-            workspace=self.path_agent_workspace,
-            args=flags + DEFAULT_ARGS_AIDER,
-            env_vars=ENV_VARS_AIDER,
-            model=model_architect,
-            editor_model=model_editor,
-            reasoning_effort=reasoning_effort,
-            edit_format=edit_format,
-            no_commit=no_commit,
-            map_tokens=map_tokens,
-        )
+        return cmd
 
 
 # Agent registry: dynamic discovery for extensible multi-agent support
