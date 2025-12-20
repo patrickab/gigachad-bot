@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 import shlex
 import subprocess
-from typing import Any, Dict, Generic, List, Optional, TypeVar
+from typing import Any, Dict, Generic, List, Literal, Optional, TypeVar
 
 import git
 from pydantic import BaseModel, Field
@@ -34,9 +34,19 @@ class AgentCommand(BaseModel, ABC):
     args: List[str] = Field(default_factory=list, description="CLI arguments excluding executable")
     env_vars: Optional[Dict[str, str]] = Field(default=None, description="Environment variable overrides")
 
-    @abstractmethod
+    def _snake_to_kebab(self, s: str) -> str:
+        """Convert snake_case to kebab-case."""
+        return s.replace("_", "-")
+
     def construct_args(self) -> List[str]:
-        """Construct full commandline arguments."""
+        """Construct aider argument list."""
+        # This model dump will include all class values of the subclass
+        # The fields is a dict of all class attributes intended for CLI
+        fields = self.model_dump(exclude={"executable", "workspace","args", "env_vars"})
+        self.args = [
+            item for k, v in fields.items() for item in ([f"--{self._snake_to_kebab(k)}"] + ([] if isinstance(v, bool) else [str(v)]))
+        ]
+
 
 TCommand = TypeVar("TCommand", bound=AgentCommand)
 
@@ -56,12 +66,6 @@ class CodeAgent(ABC, Generic[TCommand]):
         instance: CodeAgent
            - initialized workspace path
            - ready for command execution
-
-    Errors:
-        git.GitCommandError
-           - clone or checkout failures
-        OSError
-           - filesystem permission issues
 
     Side Effects:
         - creates ~/agent_sandbox directory
@@ -90,12 +94,6 @@ class CodeAgent(ABC, Generic[TCommand]):
                - absolute path to repo root
                - guaranteed to exist on success
 
-        Errors:
-            git.GitCommandError
-               - clone or checkout failures
-            OSError
-               - directory creation failures
-
         Side Effects:
             - creates ~/agent_sandbox/<repo_name>
             - runs optional dependency installation
@@ -109,30 +107,22 @@ class CodeAgent(ABC, Generic[TCommand]):
 
         workspace: Path = sandbox_root / repo_name
 
-        try:
-            if workspace.exists() and (workspace / ".git").exists():
-                repo = git.Repo(workspace)
-                repo.remotes.origin.set_url(repo_url)
-                repo.remotes.origin.fetch()
-            else:
-                repo = git.Repo.clone_from(repo_url, workspace)
+        if workspace.exists() and (workspace / ".git").exists():
+            subprocess.run(
+                ["git", "-C", str(workspace), "pull"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+        else:
+            subprocess.run(
+                ["git", "clone", "--branch", branch, repo_url, str(workspace)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
 
-            target_head = repo.heads[branch] if branch in repo.heads else repo.create_head(branch)
-            target_head.checkout()
-
-            try:
-                repo.remotes.origin.pull(branch)
-            except git.GitCommandError:
-                st.warning(f"Git pull failed for branch '{branch}'. Using local state.")
-
-            self._try_install_dependencies(workspace)
-        except git.GitCommandError as exc:
-            st.error(f"Git operation failed: {exc}")
-            raise
-        except OSError as exc:
-            st.error(f"Workspace setup failed: {exc}")
-            raise
-
+        self._try_install_dependencies(workspace)
         return workspace
 
     def _try_install_dependencies(self, workspace: Path) -> None:
@@ -181,17 +171,13 @@ class CodeAgent(ABC, Generic[TCommand]):
                - running child process handle
                - stdout/stderr inherited by parent
 
-        Errors:
-            OSError
-               - executable not found
-               - spawn failure
-
         Side Effects:
             - starts external process
         """
         full_env: Dict[str, str] = dict(os.environ)
-        if command.env_vars:
-            full_env.update(command.env_vars)
+        # NOTE: disable for now
+        # if command.env_vars:
+        #    full_env.update(command.env_vars)
 
         full_cmd: List[str] = [command.executable, *command.construct_args()]
 
@@ -236,101 +222,44 @@ class CodeAgent(ABC, Generic[TCommand]):
 
     def get_diff(self) -> str:
         """Return git diff for workspace."""
-        try:
-            repo = git.Repo(self.path_agent_workspace)
-            diff_text: str = repo.git.diff()
-            return diff_text
-        except git.GitCommandError as exc:
-            st.error(f"Failed to compute git diff: {exc}")
-            return ""
+        result = subprocess.run(
+            ["git", "-C", str(self.path_agent_workspace), "diff"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return result.stdout
 
 
 class AiderCommand(AgentCommand):
     """Aider-specific command definition."""
 
-    model_architect: str = Field(..., description="Architect LLM identifier")
-    model_editor: str = Field(..., description="Editor LLM identifier")
-    reasoning_effort: str = Field(default="high", description="Reasoning effort: low|medium|high")
-    edit_format: str = Field(default="diff", description="Edit format: diff|whole|udiff")
+    model: str = Field(..., description="Architect LLM identifier")
+    editor_model: str = Field(..., description="Editor LLM identifier")
+    reasoning_effort: Literal["low", "medium", "high"] = Field(default="high", description="Reasoning effort")
+    edit_format: Literal["diff", "whole", "udiff"] = Field(default="diff", description="Edit format")
     no_commit: bool = Field(default=True, description="Disable git commits")
-    map_tokens: int = Field(default=4096, description="Context map tokens")
-    extra_flags: List[str] = Field(default_factory=list, description="Raw aider flags")
-
-    def construct_args(self) -> List[str]:
-        """Construct aider argument list."""
-        base: List[str] = list(self.args)
-        base.extend(
-            [
-                "--architect-model",
-                self.model_architect,
-                "--editor-model",
-                self.model_editor,
-                "--reasoning-effort",
-                self.reasoning_effort,
-                "--edit-format",
-                self.edit_format,
-                "--map-tokens",
-                str(self.map_tokens),
-            ]
-        )
-        if self.no_commit:
-            base.append("--no-commit")
-        if self.extra_flags:
-            base.extend(self.extra_flags)
-        self.args = base
-        return base
-
+    map_tokens: Literal[1024, 2048, 4096, 8192] = Field(default=4096, description="Context map tokens")
 
 class Aider(CodeAgent[AiderCommand]):
-    """Autonomous Aider Code Agent."""
+    """Aider Code Agent."""
 
     def ui_define_command(self) -> AiderCommand:
         """Define the Aider command with Streamlit UI."""
-
+        st.markdown("# Model Control")
         with st.expander("", expanded=True):
-            st.markdown("# Model Control")
-            st.markdown("### Reasoning Effort")
-            reasoning_effort = st.selectbox(
-                "Reasoning effort",
-                options=["low", "medium", "high"],
-                index=2,
-                key="aider_reasoning_effort",
-            )
-
-            st.markdown("### Architect Model")
+            reasoning_effort = st.selectbox("Reasoning effort", ["low", "medium", "high"], index=2, key="aider_reasoning_effort")
             model_architect = model_selector(key="code_agent_architect")
-
-            st.markdown("### Editor Model")
             model_editor = model_selector(key="code_agent_editor")
 
-
         st.markdown("---")
+        st.markdown("# Advanced Command Control")
         with st.expander("", expanded=False):
-            st.markdown("# Advanced Command Control")
-            st.markdown("### Edit Format")
-            edit_format = st.selectbox(
-                "Select Edit Format",
-                options=["diff", "whole", "udiff"],
-                index=0,
-                key="aider_edit_format",
-            )
+            edit_format = st.selectbox("Select Edit Format", ["diff", "whole", "udiff"], index=0, key="aider_edit_format")
+            map_tokens = st.selectbox("Context map tokens", [1024, 2048, 4096, 8192], index=0, key="aider_map_tokens")
+            no_commit = st.toggle("Disable git commits (--no-commit)", value=True, key="aider_no_commit")
 
-            st.markdown("### Token Controls")
-            map_tokens = st.selectbox(
-                "Context map tokens",
-                options=[1024, 2048, 4096, 8192],
-                index=0,
-                key="aider_map_tokens",
-            )
-
-            st.markdown("### Flags")
-            no_commit = st.toggle(
-                "Disable git commits (--no-commit)",
-                value=True,
-                key="aider_no_commit",
-            )
-
-            extra_flags_str: str = st.text_input(
+            extra_flags_str = st.text_input(
                 "Extra aider flags (advanced)",
                 value="",
                 help="Raw aider flags, space-separated; do not include models or edit-format here.",
@@ -338,30 +267,15 @@ class Aider(CodeAgent[AiderCommand]):
             )
             extra_flags = shlex.split(extra_flags_str) if extra_flags_str.strip() else []
 
-            st.markdown("## Environment")
-            ollama_base: str = st.text_input(
-                "OLLAMA_API_BASE (optional)",
-                value=os.environ.get("OLLAMA_API_BASE", ""),
-                key="aider_ollama_api_base",
-            )
-
-        env_vars: Dict[str, str] = {}
-        if ollama_base.strip():
-            env_vars["OLLAMA_API_BASE"] = ollama_base.strip()
-        env_vars = env_vars or None
         command = AiderCommand(
-            # Base class
             executable="aider",
             workspace=self.path_agent_workspace,
             args=extra_flags,
-            env_vars=env_vars,
-            # Aider-specific
-            model_architect=model_architect,
-            model_editor=model_editor,
+            model=model_architect,
+            editor_model=model_editor,
             reasoning_effort=reasoning_effort,
             edit_format=edit_format,
             map_tokens=map_tokens,
-            extra_flags=extra_flags,
             no_commit=no_commit,
         )
 
@@ -379,11 +293,9 @@ class Aider(CodeAgent[AiderCommand]):
             process = self._execute_agent_command(command)
 
         st.info(
-            "Aider started. Interact with it in your terminal or configured UI. "
-            "Return here after completion to view the git diff."
+            "Aider started. Interact with it in your terminal or configured UI. Return here after completion to view the git diff."
         )
         st.caption(f"Spawned process PID: {process.pid}")
-
 
 
 # Agent registry: dynamic discovery for extensible multi-agent support
@@ -391,11 +303,19 @@ agent_subclasses = CodeAgent.__subclasses__()
 agent_subclass_dict = {cls.__name__: cls for cls in agent_subclasses}
 agent_subclass_names = list(agent_subclass_dict.keys())
 
+
 @st.cache_resource
 def get_agent(agent_type: str, repo_url: str, branch: str) -> CodeAgent[Any]:
     """Instantiate and cache agent instance."""
     agent_cls: type[CodeAgent[Any]] = agent_subclass_dict[agent_type]
     return agent_cls(repo_url, branch)
+
+def get_remote_branches(repo_url: str) -> list[str]:
+    """Extract branch names from remote repository."""
+    return [
+        ref.split("\t")[1].replace("refs/heads/", "")
+        for ref in git.Git().ls_remote("--heads", repo_url).splitlines()
+    ]
 
 def main() -> None:
     """Streamlit entrypoint for multi-agent code workspace."""
@@ -407,12 +327,8 @@ def main() -> None:
             selected_agent_name: str = st.selectbox("Select Code Agent", options=agent_subclass_names, key="code_agent_selector")
             repo_url: str = st.text_input("GitHub Repository URL", value="https://github.com/patrickab/gigachad-bot", key="repo_url")
             if repo_url:
-
                 if "branches" not in st.session_state:
-                    st.session_state.branches = [
-                        ref.split('\t')[1].replace('refs/heads/', '')
-                        for ref in git.Git().ls_remote('--heads', repo_url).splitlines()
-                    ]
+                    st.session_state.branches = get_remote_branches(repo_url)
 
                 branch = st.selectbox("Select Branch", options=st.session_state.branches, index=0, key="branch_selector")
 
