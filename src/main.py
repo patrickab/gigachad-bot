@@ -1,6 +1,6 @@
 import streamlit as st
 
-from src.lib.streamlit_helper import (
+from lib.streamlit_helper import (
     apply_custom_css,
     init_session_state,
 )
