@@ -11,7 +11,7 @@ import streamlit as st
 from lib.streamlit_helper import model_selector
 
 ENV_VARS_AIDER = {"OLLAMA_API_BASE": "http://127.0.0.1:11434"}
-DEFAULT_ARGS_AIDER = ["--dark-mode", "--no-auto-commits", "--code-theme", "inkpot", "--pretty"]
+DEFAULT_ARGS_AIDER = ["--dark-mode", "--code-theme", "inkpot", "--pretty"]
 
 
 class AgentCommand(BaseModel, ABC):
@@ -45,11 +45,11 @@ class AgentCommand(BaseModel, ABC):
         """Construct aider argument list."""
         # This model dump will include all class values of the subclass
         # The fields is a dict of all class attributes intended for CLI
-        fields = self.model_dump(exclude={"executable", "workspace", "args", "env_vars"})
+        fields = self.model_dump(exclude={"executable", "workspace", "args", "env_vars", "task_injection_template"})
         args = [
             item for k, v in fields.items() for item in ([f"--{self._snake_to_kebab(k)}"] + ([] if isinstance(v, bool) else [str(v)]))
         ]
-        return self.args + args
+        return args +self.args
 
 
 TCommand = TypeVar("TCommand", bound=AgentCommand)
@@ -250,7 +250,6 @@ class AiderCommand(AgentCommand):
     editor_model: str = Field(..., description="Editor LLM identifier")
     reasoning_effort: Literal["low", "medium", "high"] = Field(default="high", description="Reasoning effort")
     edit_format: Literal["diff", "whole", "udiff"] = Field(default="diff", description="Edit format")
-    no_commit: bool = Field(default=True, description="Disable git commits")
     map_tokens: Literal[1024, 2048, 4096, 8192] = Field(default=4096, description="Context map tokens")
 
 
@@ -270,9 +269,8 @@ class Aider(CodeAgent[AiderCommand]):
         with st.expander("", expanded=True):
             edit_format = st.selectbox("Select Edit Format", ["diff", "whole", "udiff"], index=0, key="aider_edit_format")
             map_tokens = st.selectbox("Context map tokens", [1024, 2048, 4096, 8192], index=0, key="aider_map_tokens")
-            no_commit = st.toggle("--no-commit", value=True, key="aider_no_commit")
 
-            common_flags = ["--architect", "--no-auto-commits", "--no-stream", "--browser", "--yes", "--cache-prompts"]
+            common_flags = ["--architect", "--no-commit", "--no-stream", "--browser", "--yes", "--cache-prompts"]
             flags = st.multiselect(
                 "Common aider flags",
                 options=common_flags,
@@ -288,7 +286,6 @@ class Aider(CodeAgent[AiderCommand]):
                 editor_model=model_editor,
                 reasoning_effort=reasoning_effort,
                 edit_format=edit_format,
-                no_commit=no_commit,
                 map_tokens=map_tokens,
             )
             with st.expander("Display Command", expanded=True):
