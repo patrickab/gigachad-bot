@@ -10,7 +10,14 @@ import streamlit as st
 
 from lib.streamlit_helper import model_selector
 
-ENV_VARS_AIDER = {"OLLAMA_API_BASE": "http://127.0.0.1:11434"}
+ENV_VARS_AIDER = {
+    "OLLAMA_API_BASE": "http://127.0.0.1:11434",
+    "GIT_AUTHOR_NAME": "patrickab",
+    "GIT_AUTHOR_EMAIL": "patrick.a.bitzer@gmail.com",
+    "GIT_COMMITTER_NAME":"patrickab",
+    "GIT_COMMITTER_EMAIL":"patrick.a.bitzer@gmail.com",
+}
+
 DEFAULT_ARGS_AIDER = ["--dark-mode", "--code-theme", "inkpot", "--pretty"]
 
 
@@ -192,7 +199,7 @@ class CodeAgent(ABC, Generic[TCommand]):
 
         return process
 
-    def run(self, task: str, command: TCommand) -> None:
+    def run(self, command: TCommand, task: Optional[str] = None) -> None:
         """Combines task with command according to agent-specific syntax.
 
         Input:
@@ -206,8 +213,9 @@ class CodeAgent(ABC, Generic[TCommand]):
         Side Effects:
             - may start external processes
         """
-        injected_task = [token.format(task=task) for token in command.task_injection_template]
-        command.args += injected_task
+        if task:
+            injected_task = [token.format(task=task) for token in command.task_injection_template]
+            command.args += injected_task
         with st.spinner("Starting aider in terminal or browser; interact there."):
             process = self._execute_agent_command(command)
             st.caption(f"Spawned process PID: {process.pid}")
@@ -270,7 +278,7 @@ class Aider(CodeAgent[AiderCommand]):
             edit_format = st.selectbox("Select Edit Format", ["diff", "whole", "udiff"], index=0, key="aider_edit_format")
             map_tokens = st.selectbox("Context map tokens", [1024, 2048, 4096, 8192], index=0, key="aider_map_tokens")
 
-            common_flags = ["--architect", "--no-commit", "--no-stream", "--browser", "--yes", "--cache-prompts"]
+            common_flags = ["--architect", "--no-auto-commit", "--no-stream", "--browser", "--yes", "--cache-prompts"]
             flags = st.multiselect(
                 "Common aider flags",
                 options=common_flags,
@@ -337,7 +345,8 @@ def main() -> None:
                 st.button("Initialize Agent", key="init_agent_button", on_click=init_agent)
 
         else:
-            # Agent in session state - configure command
+            execute_button = st.columns(1)
+
             selected_agent: CodeAgent[Any] = st.session_state.selected_agent
 
             # Data Extraction
@@ -365,6 +374,13 @@ def main() -> None:
                     st.rerun()
 
             command: AgentCommand = selected_agent.ui_define_command()
+            with execute_button[0]:
+                st.button(
+                    "Execute Command",
+                    use_container_width=True,
+                    type="primary",
+                    on_click=lambda: selected_agent.run(command=command),
+                )
 
     with st._bottom:
         task: Optional[str] = st.chat_input("Assign a task to the agent...")
