@@ -22,6 +22,8 @@ ENV_VARS_AIDER = {
     "GIT_COMMITTER_NAME": GIT_NAME,
     "GIT_AUTHOR_EMAIL": GIT_EMAIL,
     "GIT_COMMITTER_EMAIL": GIT_EMAIL,
+    "GEMINI_API_KEY": os.getenv("GEMINI_API_KEY", ""),
+    "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY", ""),
 }
 
 DEFAULT_ARGS_AIDER = ["--dark-mode", "--code-theme", "inkpot", "--pretty"]
