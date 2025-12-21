@@ -5,6 +5,7 @@ import subprocess
 from typing import Any, Dict, Generic, List, Literal, Optional, TypeVar
 
 import git
+from llm_baseclient.config import OLLAMA_PORT
 from pydantic import BaseModel, Field
 import streamlit as st
 
@@ -16,12 +17,12 @@ GIT_NAME = subprocess.run(["git", "config", "--global", "user.name"], capture_ou
 GIT_EMAIL = subprocess.run(["git", "config", "--global", "user.email"], capture_output=True, text=True).stdout.strip()
 
 ENV_VARS_AIDER = {
-    "OLLAMA_API_BASE": "http://127.0.0.1:11434",
+    "OLLAMA_API_BASE": f"http://host.docker.internal:{OLLAMA_PORT}",
     "GIT_AUTHOR_NAME": GIT_NAME,
     "GIT_COMMITTER_NAME": GIT_NAME,
     "GIT_AUTHOR_EMAIL": GIT_EMAIL,
     "GIT_COMMITTER_EMAIL": GIT_EMAIL,
-    }
+}
 
 DEFAULT_ARGS_AIDER = ["--dark-mode", "--code-theme", "inkpot", "--pretty"]
 

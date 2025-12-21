@@ -9,10 +9,10 @@ Security Architecture - Defense in Depth
 2. Kernel-Level Isolation (gVisor)
 
     - Sandboxed System Calls:
-        Uses the 'runsc' runtime to provide a dedicated 
+        Uses the 'runsc' runtime to provide a dedicated
         guest kernel for the container.
     - Host Protection:
-        Acts as a "firewall" between the container and the host 
+        Acts as a "firewall" between the container and the host
 
 3. Hardened User Identity & Capability Stripping
 
@@ -21,7 +21,7 @@ Security Architecture - Defense in Depth
     - Enforce 'no-new-privileges':
         Prevent privilege escalation attacks
     - Non-Root Enforcement:
-        Containers are forced to run as an unprivileged user 
+        Containers are forced to run as an unprivileged user
         (UID 1000), removing administrative power by default.
 
 4. Rootless Infrastructure Architecture
@@ -34,7 +34,7 @@ Security Architecture - Defense in Depth
 5. Ephemeral Lifecycle Management
     - Destruction on Completion:
         Containers are strictly temporary
-        Automatically destroyed after task execution. 
+        Automatically destroyed after task execution.
 
 6. Network Perimeter Control
     - Traffic Segregation:
@@ -115,20 +115,40 @@ class DockerSandbox:
             "-it",
             "--rm",
             "--runtime=runsc",
-            # In Rootless mode, we MUST run as internal root (0:0) to map correctly to external host user (1000:1000).
-            # Security is handled by the Rootless Daemon + gVisor, not by this flag.
-            "--user", "0:0", 
+            "--user",
+            "0:0",  # Internal Root -> Host User 1000 (Rootless)
+            # --- NETWORKING FIXES ---
+            "--network",
+            "bridge",
+            "--add-host=host.docker.internal:host-gateway",
+            "--dns",
+            "8.8.8.8",
+            # --- SECURITY/CAPABILITY ADJUSTMENTS ---
+            # Drop everything first for security...
             "--cap-drop=ALL",
-            "--security-opt", "no-new-privileges",
-            "--network", "bridge",
-            # Add ':z' to handle SELinux contexts (common on Linux) - tells Docker "This content is shared between containers and host"
-            "-v", f"{abs_repo_path}:/workspace:z", 
-            "-w", "/workspace",
-            "-e", "HOME=/workspace",    
+            # ...but add back ONLY what tcpdump needs to sniff traffic
+            "--cap-add=NET_ADMIN",
+            "--cap-add=NET_RAW",
+            "--security-opt",
+            "no-new-privileges",
+            # --- MOUNTS ---
+            "-v",
+            f"{abs_repo_path}:/workspace:z",
+            "-w",
+            "/workspace",
+            "-e",
+            "HOME=/workspace",
             self.dockerimage_name,
             "/bin/bash",
         ]
-        cmd.extend(["-c", agent_cmd])
+
+        # Command to log network traffic from sandbox to host
+        # We use 'timeout' or backgrounding.
+        # Note: We sleep 1 to ensure tcpdump is listening before the agent starts.
+        wrapped_cmd = f"tcpdump -l -A -i eth0 > /workspace/network_traffic.log 2>&1 & sleep 1; {agent_cmd}"
+
+        self.logger.info(f"Executing command: {' '.join(cmd)}")
+        cmd.extend(["-c", wrapped_cmd])
 
         try:
             subprocess.run(cmd, check=True)
