@@ -8,7 +8,7 @@ import git
 from pydantic import BaseModel, Field
 import streamlit as st
 
-from lib.agents.sandbox import DockerSandbox, ExecutionResult
+from lib.agents.sandbox import DockerSandbox
 from lib.streamlit_helper import model_selector
 
 ENV_VARS_AIDER = {"OLLAMA_API_BASE": "http://127.0.0.1:11434"}
@@ -165,17 +165,12 @@ class CodeAgent(ABC, Generic[TCommand]):
             # ignore installation failures; agent expected to handle env issues
             return
 
-    def _execute_agent_command(self, command: TCommand) -> ExecutionResult:
+    def _execute_agent_command(self, command: TCommand) -> None:
         """Execute the agent command in its workspace using DockerSandbox.
 
         Input:
             command: TCommand
                - fully configured agent command
-
-        Output:
-            result: ExecutionResult
-               - captured stdout/stderr and exit code
-               - artifacts_path with container /app contents
 
         Side Effects:
             - runs agent inside secure Docker sandbox
@@ -193,12 +188,10 @@ class CodeAgent(ABC, Generic[TCommand]):
 
         sandbox = DockerSandbox()
         try:
-            result = sandbox.run(code_repo_path=str(command.workspace), command=shell_cmd)
+            sandbox.run_interactive_shell(code_repo_path=str(command.workspace), cmd=shell_cmd)
         except Exception as exc:
             st.error(f"Failed to run agent in sandbox: {exc}")
             raise
-
-        return result
 
     def run(self, command: TCommand, task: Optional[str] = None) -> None:
         """Combines task with command according to agent-specific syntax.
@@ -222,16 +215,7 @@ class CodeAgent(ABC, Generic[TCommand]):
 
     @abstractmethod
     def ui_define_command(self) -> TCommand:
-        """Define the agent command with Streamlit UI.
-
-        Input:
-            None
-
-        Output:
-            command: TCommand
-               - fully configured command model
-               - ready for execution
-        """
+        """Define the agent command with Streamlit UI."""
         raise NotImplementedError
 
     def get_diff(self) -> str:
