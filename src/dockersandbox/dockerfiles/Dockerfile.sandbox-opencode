@@ -1,0 +1,3 @@
+
+FROM sandbox-base:latest
+RUN brew install opencode

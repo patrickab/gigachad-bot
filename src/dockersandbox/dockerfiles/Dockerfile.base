@@ -2,7 +2,6 @@
 FROM python:3.11-slim
 
 # System Layer
-# Added 'procps' and 'file' which are often required by Homebrew on Linux
 RUN apt-get update && apt-get install -y --no-install-recommends     git curl ca-certificates build-essential tcpdump     gcc g++ make libc6-dev procps file     && rm -rf /var/lib/apt/lists/*
 
 # Tooling Layer

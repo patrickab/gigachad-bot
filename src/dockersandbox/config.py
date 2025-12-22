@@ -8,6 +8,10 @@ DOCKERTAG_BASE = "sandbox-base"
 DOCKERTAG_AIDER = "sandbox-aider"
 DOCKERTAG_GEMINI = "sandbox-gemini"
 DOCKERTAG_QWEN = "sandbox-qwen"
+DOCKERTAG_OPENCODE = "sandbox-opencode"
+DOCKERTAG_CODEX = "sandbox-codex"
+DOCKERTAG_CLAUDE = "sandbox-claude"
+DOCKERTAG_CURSOR = "sandbox-cursor"
 
 DOCKERFILE_BASE = """
 FROM python:3.11-slim
@@ -55,5 +59,30 @@ RUN brew install gemini-cli
     f"{DOCKERTAG_QWEN}": f"""
 FROM {DOCKERTAG_BASE}:latest
 RUN brew install qwen-code
+""",
+    # OpenCode
+    f"{DOCKERTAG_OPENCODE}": f"""
+FROM {DOCKERTAG_BASE}:latest
+RUN brew install opencode
+""",
+    # Codex
+    f"{DOCKERTAG_CODEX}": f"""
+FROM {DOCKERTAG_BASE}:latest
+RUN brew install --cask codex
+""",
+    # Claude Code
+    f"{DOCKERTAG_CLAUDE}": f"""
+FROM {DOCKERTAG_BASE}:latest
+RUN brew install --cask claude-code
+""",
+    # Cursor CLI
+f"{DOCKERTAG_CURSOR}": f"""
+FROM {DOCKERTAG_BASE}:latest
+# Use && to separate commands and \\ to continue the line in Docker
+RUN curl https://cursor.com/install -fsS | bash && \\
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+
+# Update PATH for the image persistently
+ENV PATH="/root/.local/bin:${{PATH}}"
 """,
 }

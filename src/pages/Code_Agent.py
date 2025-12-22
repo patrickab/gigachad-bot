@@ -9,7 +9,15 @@ from llm_baseclient.config import OLLAMA_PORT
 from pydantic import BaseModel, Field
 import streamlit as st
 
-from dockersandbox.config import DOCKERTAG_AIDER, DOCKERTAG_GEMINI, DOCKERTAG_QWEN
+from dockersandbox.config import (
+    DOCKERTAG_AIDER,
+    DOCKERTAG_CLAUDE,
+    DOCKERTAG_CODEX,
+    DOCKERTAG_CURSOR,
+    DOCKERTAG_GEMINI,
+    DOCKERTAG_OPENCODE,
+    DOCKERTAG_QWEN,
+)
 from dockersandbox.sandbox import DockerSandbox
 from lib.streamlit_helper import model_selector
 
@@ -304,6 +312,42 @@ class Aider(CodeAgent[AiderCommand]):
         return cmd
 
 
+class OpenCodeCommand(AgentCommand):
+    """OpenCode-specific command definition."""
+
+    executable: str = "opencode"
+
+
+class OpenCode(CodeAgent[OpenCodeCommand]):
+    """OpenCode Code Agent."""
+
+    DOCKERTAG = DOCKERTAG_OPENCODE
+
+    def ui_define_command(self) -> OpenCodeCommand:
+        """Define the OpenCode command with Streamlit UI."""
+        st.markdown("# OpenCode Command")
+        with st.expander("", expanded=True):
+            extra_args_str = st.text_input(
+                "Extra CLI arguments (optional)",
+                value="",
+                key="opencode_extra_args",
+                help="Space-separated extra arguments passed directly to the OpenCode CLI",
+            )
+            extra_args = extra_args_str.split() if extra_args_str.strip() else []
+
+            cmd = OpenCodeCommand(
+                workspace=self.path_agent_workspace,
+                args=extra_args,
+            )
+
+            with st.expander("Display Command", expanded=True):
+                args = cmd.construct_args()
+                formatted_args = "\n\t".join(args)
+                st.code(f"{cmd.executable} {formatted_args}", language="bash")
+
+        return cmd
+
+
 class GeminiCommand(AgentCommand):
     """Gemini-specific command definition."""
 
@@ -366,6 +410,114 @@ class Qwen(CodeAgent[QwenCommand]):
             extra_args = extra_args_str.split() if extra_args_str.strip() else []
 
             cmd = QwenCommand(
+                workspace=self.path_agent_workspace,
+                args=extra_args,
+            )
+
+            with st.expander("Display Command", expanded=True):
+                args = cmd.construct_args()
+                formatted_args = "\n\t".join(args)
+                st.code(f"{cmd.executable} {formatted_args}", language="bash")
+
+        return cmd
+
+
+class CodexCommand(AgentCommand):
+    """Codex-specific command definition."""
+
+    executable: str = "codex"
+
+
+class Codex(CodeAgent[CodexCommand]):
+    """Codex Code Agent."""
+
+    DOCKERTAG = DOCKERTAG_CODEX
+
+    def ui_define_command(self) -> CodexCommand:
+        """Define the Codex command with Streamlit UI."""
+        st.markdown("# Codex Command")
+        with st.expander("", expanded=True):
+            extra_args_str = st.text_input(
+                "Extra CLI arguments (optional)",
+                value="",
+                key="codex_extra_args",
+                help="Space-separated extra arguments passed directly to the Codex CLI",
+            )
+            extra_args = extra_args_str.split() if extra_args_str.strip() else []
+
+            cmd = CodexCommand(
+                workspace=self.path_agent_workspace,
+                args=extra_args,
+            )
+
+            with st.expander("Display Command", expanded=True):
+                args = cmd.construct_args()
+                formatted_args = "\n\t".join(args)
+                st.code(f"{cmd.executable} {formatted_args}", language="bash")
+
+        return cmd
+
+
+class ClaudeCodeCommand(AgentCommand):
+    """Claude Code-specific command definition."""
+
+    executable: str = "claude"  # adjust if your CLI entrypoint differs
+
+
+class ClaudeCode(CodeAgent[ClaudeCodeCommand]):
+    """Claude Code Agent."""
+
+    DOCKERTAG = DOCKERTAG_CLAUDE
+
+    def ui_define_command(self) -> ClaudeCodeCommand:
+        """Define the Claude Code command with Streamlit UI."""
+        st.markdown("# Claude Code Command")
+        with st.expander("", expanded=True):
+            extra_args_str = st.text_input(
+                "Extra CLI arguments (optional)",
+                value="",
+                key="claude_code_extra_args",
+                help="Space-separated extra arguments passed directly to the Claude Code CLI",
+            )
+            extra_args = extra_args_str.split() if extra_args_str.strip() else []
+
+            cmd = ClaudeCodeCommand(
+                workspace=self.path_agent_workspace,
+                args=extra_args,
+            )
+
+            with st.expander("Display Command", expanded=True):
+                args = cmd.construct_args()
+                formatted_args = "\n\t".join(args)
+                st.code(f"{cmd.executable} {formatted_args}", language="bash")
+
+        return cmd
+
+
+class CursorCommand(AgentCommand):
+    """Cursor CLI-specific command definition."""
+
+    executable: str = "cursor-agent"
+
+
+class Cursor(CodeAgent[CursorCommand]):
+    """Cursor CLI Code Agent."""
+
+    DOCKERTAG = DOCKERTAG_CURSOR
+
+    def ui_define_command(self) -> CursorCommand:
+        """Define the Cursor CLI command with Streamlit UI."""
+        st.markdown("# Cursor CLI Command")
+        with st.expander("", expanded=True):
+            extra_args_str = st.text_input(
+                "Extra CLI arguments (optional)",
+                value="",
+                key="cursor_extra_args",
+                help="Space-separated extra arguments passed directly to the Cursor CLI",
+            )
+            extra_args = extra_args_str.split() if extra_args_str.strip() else []
+
+            cmd = CursorCommand(
                 workspace=self.path_agent_workspace,
                 args=extra_args,
             )
