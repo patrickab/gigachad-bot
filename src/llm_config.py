@@ -11,14 +11,14 @@ NANOTASK_MODEL = "gemini/gemini-2.5-flash-lite"
 
 # --- Static Model Definitions ---
 MODELS_GEMINI = [
+    "gemini/gemini-3-flash-preview",
     "gemini/gemini-2.5-flash-lite",
-    "gemini/gemini-2.5-flash",
-    "gemini/gemini-2.5-pro",
     "ollama/gemini-3-pro-preview",
 ]
 
 MODELS_OPENAI = [
-    "openai/gpt-5",
+    "openai/gpt-5.1",
+    "openai/o1",
     "openai/gpt-5-mini",
     "openai/gpt-4o",
 ]

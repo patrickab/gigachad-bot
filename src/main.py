@@ -1,14 +1,17 @@
 import streamlit as st
 
-from src.lib.streamlit_helper import (
+from lib.streamlit_helper import (
     apply_custom_css,
     init_session_state,
 )
 
 PAGES = {
-    "Gigachad Bot": [
+    "Chatbots": [
         st.Page("pages/Gigachad_Bot.py"),
         st.Page("pages/DataFrame_Bot.py")
+    ],
+    "Agents": [
+        st.Page("pages/Code_Agent.py"),
     ],
     "Workspaces": [
         st.Page("pages/RAG_Workspace.py"),

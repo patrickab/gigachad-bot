@@ -1,0 +1,17 @@
+
+FROM python:3.11-slim
+
+# System Layer
+RUN apt-get update && apt-get install -y --no-install-recommends     git curl ca-certificates build-essential     && rm -rf /var/lib/apt/lists/*
+
+# Tooling Layer (uv)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+
+# Security Layer (Non-root)
+RUN useradd -m -u 1000 sandbox_user
+WORKDIR /workspace
+RUN chown sandbox_user:sandbox_user /workspace
+
+# Environment
+ENV UV_SYSTEM_PYTHON=1
+ENV PATH="/home/sandbox_user/.local/bin:$PATH"

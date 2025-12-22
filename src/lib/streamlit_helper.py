@@ -2,13 +2,19 @@
 
 import base64
 from contextlib import contextmanager
+import hashlib
 import io
+import math
 import os
+from pathlib import Path
 import tempfile
 from typing import Iterator, Optional
 
 import fitz
+from PIL import Image
 import pymupdf4llm
+from rag_database.rag_database import DatabaseKeys
+import requests
 from st_copy import copy_button
 import streamlit as st
 from streamlit_ace import THEMES, st_ace
@@ -30,6 +36,7 @@ from lib.prompts import (
     SYS_CONCEPT_IN_DEPTH,
     SYS_CONCEPTUAL_OVERVIEW,
     SYS_EMPTY_PROMPT,
+    SYS_MATH_PROOF,
     SYS_PROMPT_ENGINEER,
     SYS_QUICK_OVERVIEW,
     SYS_RAG_TUTOR,
@@ -60,6 +67,7 @@ AVAILABLE_PROMPTS = {
     "Code Assistant": SYS_CODE_OPERATOR,
     "Advisor": SYS_ADVISOR,
     "Tutor": SYS_RAG_TUTOR,
+    "Math Proof": SYS_MATH_PROOF,
     "Concept - High-Level": SYS_CONCEPTUAL_OVERVIEW,
     "Concept - In-Depth": SYS_CONCEPT_IN_DEPTH,
     "Concept - Article": SYS_ARTICLE,
@@ -88,20 +96,21 @@ def init_session_state() -> None:
         st.session_state.imgs_sent = [EMPTY_PASTE_RESULT]
         st.session_state.pasted_image = EMPTY_PASTE_RESULT
 
+
 def model_selector(key: str) -> dict:
     """Create model selection dropdowns in Streamlit sidebar expanders."""
     model_options = []
     model_configs = {}
 
+    if MODELS_OLLAMA != []:
+        model_options.append("Ollama")
+        model_configs["Ollama"] = (MODELS_OLLAMA, "ollama/")
     if MODELS_GEMINI != []:
         model_options.append("Gemini")
         model_configs["Gemini"] = (MODELS_GEMINI, "gemini/")
     if MODELS_OPENAI != []:
         model_options.append("OpenAI")
         model_configs["OpenAI"] = (MODELS_OPENAI, "openai/")
-    if MODELS_OLLAMA != []:
-        model_options.append("Ollama")
-        model_configs["Ollama"] = (MODELS_OLLAMA, "ollama/")
     if MODELS_VLLM != []:
         model_options.append("VLLM")
         model_configs["VLLM"] = (MODELS_VLLM, "hosted_vllm/")
@@ -118,17 +127,17 @@ def model_selector(key: str) -> dict:
     )
     models_list, litellm_prefix = model_configs[selected_provider]
 
-    st.session_state.selected_model = st.selectbox(
+    return st.selectbox(
         label=f"Models ({selected_provider})",
         options=models_list,
         format_func=lambda model: model.replace(litellm_prefix, ""),
         key=f"{selected_provider}_model_select_{key}",
     )
 
-def llm_params_sidebar()-> None:
+
+def llm_params_sidebar() -> None:
     """Create LLM parameter sliders in Streamlit expander."""
     with st.expander("Model Configuration", expanded=False):
-
         if st.session_state.selected_prompt == "Code Assistant":
             st.session_state.refactor_code = st.toggle("Refactor code", value=False, key="refactor_code_toggle")
 
@@ -150,11 +159,53 @@ def llm_params_sidebar()-> None:
         )
         st.session_state.llm_reasoning_effort = st.selectbox(
             "Reasoning Effort",
-            options=["none","low", "medium", "high"],
+            options=["none", "low", "medium", "high"],
             key="reasoning_effort",
         )
 
-def print_metrics(dict_metrics: dict[str,int|float], n_columns: Optional[int]=None) -> None:
+
+def render_messages(message_container, client: LLMClient) -> None:  # noqa
+    """Render chat messages from session state."""
+
+    message_container.empty()  # Clear previous messages
+
+    messages = client.messages
+
+    if len(messages) == 0:
+        return
+
+    with message_container:
+        for i in range(0, len(messages), 2):
+            is_last = i == len(messages) - 2  # expand only the last message / display RAG context
+            label = f"QA-Pair {i // 2}: " if len(st.session_state.usr_msg_captions) == 0 else st.session_state.usr_msg_captions[i // 2]
+            user_msg = messages[i]["content"]
+            assistant_msg = messages[i + 1]["content"]
+
+            with st.expander(label=label, expanded=is_last):
+                # Display user and assistant messages
+                with st.chat_message("user"):
+                    st.markdown(user_msg)
+                    # Copy button only works for expanded expanders
+                    if is_last:
+                        copy_button(user_msg)
+
+                with st.chat_message("assistant"):
+                    st.markdown(assistant_msg)
+                    if is_last and st.session_state.is_rag_active:
+                        documents = st.session_state.rag_response.to_polars()
+                        for doc in documents.iter_rows(named=True):
+                            with st.expander(
+                                f"**Similarity**: {doc[DatabaseKeys.KEY_SIMILARITIES]:.2f}   -  **Title**: {doc[DatabaseKeys.KEY_TITLE]}"
+                            ):  # noqa
+                                st.markdown(doc[DatabaseKeys.KEY_TXT_RETRIEVAL])
+
+                    if is_last:
+                        copy_button(assistant_msg)
+
+                options_message(assistant_message=assistant_msg, button_key=f"{i // 2}", user_message=user_msg, index=i)
+
+
+def print_metrics(dict_metrics: dict[str, int | float], n_columns: Optional[int] = None) -> None:
     """Print metrics in Streamlit columns."""
     if n_columns is None:
         n_columns = len(dict_metrics)
@@ -162,75 +213,194 @@ def print_metrics(dict_metrics: dict[str,int|float], n_columns: Optional[int]=No
     for idx, (metric_name, metric_value) in enumerate(dict_metrics.items()):
         cols[idx % n_columns].metric(f"**{metric_name}:**", value=metric_value, border=True)
 
+
 def streamlit_img_to_bytes(img: PasteResult) -> bytes:
     buffer = io.BytesIO()
     img.image_data.save(buffer, format="PNG")
     return buffer.getvalue()
 
+
+def downscale_img(
+    img: str | bytes | Path | Image.Image,
+    max_tokens: int,
+    grid_size: int = 28,
+    tokens_per_patch: int = 1,
+    row_overhead_tokens: int = 1,
+    output_format: str = "JPEG",
+    quality: int = 85,
+) -> str:
+    """
+    Preserves aspect ratio (area-scaling) and aligns to ViT patches (grid_size) for spatial accuracy.
+    Optimizes GPU inference efficiency within token budget.
+
+    JPEG: Fastest TTFT (optimized CPU decoding).
+    PNG: Max fidelity (lossless).
+    """
+    # 1. Normalize Input to PIL Image
+    if isinstance(img, Image.Image):
+        pass
+    elif hasattr(img, "image_data"):  # Streamlit PasteResult
+        img = Image.open(io.BytesIO(streamlit_img_to_bytes(img)))
+    elif isinstance(img, (str, Path)):
+        src = str(img)
+        if src.startswith("http"):
+            img = Image.open(io.BytesIO(requests.get(src, timeout=10).content))
+        elif src.startswith("data:image"):
+            img = Image.open(io.BytesIO(base64.b64decode(src.partition(",")[-1])))
+        else:
+            img = Image.open(Path(src))
+    else:
+        img = Image.open(io.BytesIO(img) if isinstance(img, bytes) else img)
+
+    # 2. Universal Resizing Logic
+    def get_tokens(w: int, h: int) -> int:
+        pw, ph = math.ceil(w / grid_size), math.ceil(h / grid_size)
+        return (pw * ph * tokens_per_patch) + (ph * row_overhead_tokens)
+
+    w, h = img.size
+    curr_tokens = get_tokens(w, h)
+
+    scale = 1.0
+    if curr_tokens > max_tokens:
+        scale = math.sqrt(max_tokens / curr_tokens)
+
+    # Snap to Grid (Preserving Aspect Ratio)
+    fw = max(grid_size, round((w * scale) / grid_size) * grid_size)
+    fh = max(grid_size, round((h * scale) / grid_size) * grid_size)
+
+    # Iterative refinement to guarantee budget compliance
+    while get_tokens(fw, fh) > max_tokens and (fw > grid_size or fh > grid_size):
+        if fw > fh:
+            fw -= grid_size
+        else:
+            fh -= grid_size
+
+    if (fw, fh) != (w, h):
+        img = img.resize((fw, fh), Image.Resampling.LANCZOS)
+
+    # 3. Configurable Encoding (Optimized for Localhost)
+    if output_format.upper() in ["JPEG", "JPG"]:
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        save_params = {"quality": quality, "optimize": False}
+    elif output_format.upper() == "PNG":
+        save_params = {"optimize": False}
+    else:
+        save_params = {"quality": quality}
+
+    buf = io.BytesIO()
+    img.save(buf, format=output_format, **save_params)
+    b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+    return f"data:image/{output_format.lower()};base64,{b64}"
+
+
+def get_img_hash(img: PasteResult) -> str:
+    """Generate SHA256 hash for a pasted image."""
+    img_bytes = streamlit_img_to_bytes(img)
+    return hashlib.sha256(img_bytes).hexdigest()
+
 def paste_img_button() -> PasteResult:
-    """Handle image pasting in Streamlit app."""
+    """Handle image pasting in Streamlit app with hashing and state control."""
+
+    if "sent_hashes" not in st.session_state:
+        st.session_state.sent_hashes = set()
+    if "imgs_sent" not in st.session_state:
+        st.session_state.imgs_sent = [EMPTY_PASTE_RESULT]
+
+    # 1. Resizing Configuration UI
+    st.session_state.use_resize = st.toggle("Enable Image Resizing", value=True, help="Downscale image to fit model token limits")
+
+    params = {}
+    if st.session_state.use_resize:
+        with st.expander("Compression Configurations"):
+            c1, c2 = st.columns(2)
+            params["max_tokens"] = c1.number_input("Max Tokens", value=800, step=100)
+            params["grid_size"] = c1.number_input("Grid Size", value=28, step=1)
+            params["tokens_per_patch"] = c1.number_input("Tokens per Patch", value=1)
+            params["output_format"] = c2.selectbox("Format", ["PNG", "JPEG"], index=0)
+            params["quality"] = c2.slider("Quality", 1, 100, 85)
+            params["row_overhead_tokens"] = c2.number_input("Row Overhead", value=1)
+    else:
+        # Defaults for raw conversion when resizing is disabled
+        params = {"output_format": "PNG", "quality": 85}
 
     if st.session_state.imgs_sent != [EMPTY_PASTE_RESULT]:
         with st.expander("Previously pasted images:"):
             for idx, img in enumerate(st.session_state.imgs_sent):
                 if img != EMPTY_PASTE_RESULT:
-                    with st.expander(f"Image {idx+1}"):
-                        st.image(img.image_data, caption=f"Image {idx+1}")
+                    with st.expander(f"Image {idx + 1}"):
+                        st.image(img.image_data, caption=f"Image {idx + 1}")
 
-    # check wether streamlit background is in dark mode or light mode
-    bg_color = st.get_option("theme.base")  # 'light' or 'dark
+    # 2. Button Theme Logic
+    bg_color = st.get_option("theme.base")
     if bg_color == "dark":
-        button_color_bg = "#34373E"
-        button_color_txt = "#FFFFFF"
-        button_color_hover = "#45494E"
+        button_color_bg, button_color_txt, button_color_hover = "#34373E", "#FFFFFF", "#45494E"
     else:
-        button_color_bg = "#E6E6E6"
-        button_color_txt = "#000000"
-        button_color_hover = "#CCCCCC"
+        button_color_bg, button_color_txt, button_color_hover = "#E6E6E6", "#000000", "#CCCCCC"
 
-    paste_result = paste_image_button("Paste from clipboard",
-                background_color=button_color_bg,
-                text_color=button_color_txt,
-                hover_background_color=button_color_hover)
+    paste_result = paste_image_button(
+        "Paste from clipboard",
+        background_color=button_color_bg,
+        text_color=button_color_txt,
+        hover_background_color=button_color_hover,
+    )
 
-    if paste_result not in st.session_state.imgs_sent:
-
-        st.session_state.pasted_image = paste_result
-        st.image(paste_result.image_data)
-        return paste_result
-
-    else: # set pasted_image to None
+    def return_empty() -> PasteResult:
         st.session_state.pasted_image = EMPTY_PASTE_RESULT
+        st.session_state.api_img = None
         return EMPTY_PASTE_RESULT
+
+    is_image_pasted = paste_result is not None and paste_result.image_data is not None
+    if not is_image_pasted:
+        return return_empty()
+
+    img_hash = get_img_hash(paste_result)
+    if img_hash in st.session_state.sent_hashes:
+        return return_empty()
+
+    # 3. Processing and State Control
+    if st.session_state.use_resize:
+        st.session_state.api_img = downscale_img(paste_result.image_data, **params)
+        st.image(paste_result.image_data, caption="Pasted Image (original)")
+        st.image(st.session_state.api_img, caption="Pasted Image (resized)")
+    else:
+        # Raw conversion to Base64 without scaling
+        img = Image.open(io.BytesIO(streamlit_img_to_bytes(paste_result)))
+        if img.mode != "RGB" and params["output_format"] == "JPEG":
+            img = img.convert("RGB")
+
+        buf = io.BytesIO()
+        img.save(buf, format=params["output_format"], quality=params["quality"])
+        st.image(img, caption="Pasted Image")
+
+        b64 = base64.b64encode(buf.getvalue()).decode()
+        st.session_state.api_img = f"data:image/{params['output_format'].lower()};base64,{b64}"
+
+    st.session_state.pasted_image = paste_result
+    return paste_result
 
 def editor(text_to_edit: str, language: str, key: str, height: Optional[int] = None) -> str:
     """Create an ACE editor for displaying OCR extracted text."""
     default_theme = "chaos"
-    selected_theme = st.selectbox(
-        label="Editor Theme",
-        options=THEMES,
-        index=THEMES.index(default_theme),
-        key=f"editor_theme_{key}"
-    )
+    selected_theme = st.selectbox(label="Editor Theme", options=THEMES, index=THEMES.index(default_theme), key=f"editor_theme_{key}")
 
     line_count = text_to_edit.count("\n") + 1
     if height is None:
-        height = line_count*15
+        height = line_count * 15
 
-    content = st_ace(value=text_to_edit, language=language, height=height, key=f"editor_{key}", theme=selected_theme) #noqa
-    content # noqa
+    content = st_ace(value=text_to_edit, language=language, height=height, key=f"editor_{key}", theme=selected_theme)  # noqa
+    content  # noqa
     return content
 
-def _non_streaming_api_query(model: str, prompt: str, system_prompt: str, img:Optional[PasteResult] = EMPTY_PASTE_RESULT) -> str:
+
+def _non_streaming_api_query(model: str, prompt: str, system_prompt: str, img: Optional[PasteResult] = EMPTY_PASTE_RESULT) -> str:
     """TODO: remove - Legacy helper - can be replaced by client api calls"""
     response = st.session_state.client.api_query(
-        model=model,
-        user_message=prompt,
-        system_prompt=system_prompt,
-        stream=False,
-        chat_history=None, img=img.image_data)
+        model=model, user_message=prompt, system_prompt=system_prompt, stream=False, chat_history=None, img=img.image_data
+    )
 
     return response
+
 
 def write_to_md(filename: str, message: str) -> None:
     """Write an assistant response to .md (idx: 0 = most recent)."""
@@ -252,7 +422,8 @@ def write_to_md(filename: str, message: str) -> None:
     with open(os.path.join("markdown", filename), "w", encoding="utf-8") as f:
         f.write(yaml_header + "\n" + message)
 
-def options_message(assistant_message: str, button_key: str, user_message: str = None, index: int = None) -> None: # noqa
+
+def options_message(assistant_message: str, button_key: str, user_message: str = None, index: int = None) -> None:  # noqa
     """Uses st.popover for a less intrusive save option."""
     with st.popover("Options"):
         with st.popover("Store answer"):
@@ -271,8 +442,9 @@ def options_message(assistant_message: str, button_key: str, user_message: str =
             copy_button(text=assistant_message)
 
         if index is not None and st.button("🗑", key=f"del_{index}"):
-            del st.session_state.client.messages[index:index+2]
+            del st.session_state.client.messages[index : index + 2]
             st.rerun()
+
 
 def apply_custom_css() -> None:
     """Apply custom CSS styles to Streamlit app."""
@@ -294,6 +466,7 @@ def apply_custom_css() -> None:
         unsafe_allow_html=True,
     )
 
+
 @st.cache_resource
 def _extract_text_from_pdf(file: io.BytesIO) -> str:
     """Extract text from uploaded PDF file using pymupdf4llm."""
@@ -312,6 +485,7 @@ def _extract_text_from_pdf(file: io.BytesIO) -> str:
         doc_height = int(doc[0].rect.height * 1.5)  # Scale up for better visibility
 
     return text, doc_height
+
 
 @contextmanager
 def nyan_cat_spinner() -> Iterator:

@@ -1,7 +1,7 @@
 import os
 
 from llm_baseclient.client import LLMClient
-from rag_database.rag_database import DatabaseKeys, RagDatabase, RAGQuery, RAGResponse
+from rag_database.rag_database import RagDatabase, RAGQuery, RAGResponse
 from st_copy import copy_button
 import streamlit as st
 from streamlit_paste_button import PasteResult
@@ -13,11 +13,11 @@ from lib.streamlit_helper import (
     AVAILABLE_PROMPTS,
     _extract_text_from_pdf,
     _non_streaming_api_query,
+    get_img_hash,
     llm_params_sidebar,
     model_selector,
-    options_message,
     paste_img_button,
-    streamlit_img_to_bytes,
+    render_messages,
 )
 from pages.RAG_Workspace import init_rag_workspace, rag_sidebar
 
@@ -40,7 +40,7 @@ def chat_interface() -> None:
     with col_left:
         st.write("")  # Spacer
         message_container = st.container()
-        render_messages(message_container)
+        render_messages(message_container, client=st.session_state.client)
 
         with st._bottom:
             prompt = st.chat_input("Send a message", key="chat_input")
@@ -74,7 +74,7 @@ def chat_interface() -> None:
 
                     system_prompt = system_prompt + "\n\n" + SYS_RAG + "\n\n# RAG Retrieved Context:\n" + retrieved_information
 
-                img: PasteResult = st.session_state.pasted_image # defaults to EMPTY_PASTE_RESULT if no image pasted
+                api_img: PasteResult = st.session_state.api_img
                 client: LLMClient = st.session_state.client
                 kwargs = {
                     "temperature": st.session_state.llm_temperature,
@@ -87,15 +87,21 @@ def chat_interface() -> None:
                         model=st.session_state.selected_model,
                         user_msg=prompt,
                         system_prompt=system_prompt,
-                        img=streamlit_img_to_bytes(img) if img.image_data is not None else None,
+                        img=api_img,
                         stream=True,
                         **kwargs,
                     )
                 )
 
                 # Clear pasted image after use
-                st.session_state.last_sent_image = img
-                st.session_state.pasted_image = EMPTY_PASTE_RESULT
+                if api_img:
+                    img_hash = get_img_hash(st.session_state.pasted_image)
+                    st.session_state.sent_hashes.add(img_hash)
+                    st.session_state.imgs_sent.append(st.session_state.pasted_image)
+                    st.session_state.api_img = None
+                    st.session_state.pasted_image = EMPTY_PASTE_RESULT
+                    st.rerun()
+
                 # Caption user message
                 if st.session_state.bool_caption_usr_msg:
                     caption = _non_streaming_api_query(
@@ -107,44 +113,6 @@ def chat_interface() -> None:
 
                 st.rerun()
 
-def render_messages(message_container) -> None:  # noqa
-    """Render chat messages from session state."""
-
-    message_container.empty()  # Clear previous messages
-
-    messages = st.session_state.client.messages
-
-    if len(messages) == 0:
-        return
-
-    with message_container:
-        for i in range(0, len(messages), 2):
-            is_last = i == len(messages) - 2 # expand only the last message / display RAG context
-            label = f"QA-Pair {i // 2}: " if len(st.session_state.usr_msg_captions) == 0 else st.session_state.usr_msg_captions[i // 2]
-            user_msg = messages[i]["content"]
-            assistant_msg = messages[i + 1]["content"]
-
-            with st.expander(label=label, expanded=is_last):
-                # Display user and assistant messages
-                with st.chat_message("user"):
-                    st.markdown(user_msg)
-                    # Copy button only works for expanded expanders
-                    if is_last:
-                        copy_button(user_msg)
-
-                with st.chat_message("assistant"):
-                    st.markdown(assistant_msg)
-                    if is_last and st.session_state.is_rag_active:
-                        documents = st.session_state.rag_response.to_polars()
-                        for doc in documents.iter_rows(named=True):
-                            with st.expander(f"**Similarity**: {doc[DatabaseKeys.KEY_SIMILARITIES]:.2f}   -  **Title**: {doc[DatabaseKeys.KEY_TITLE]}"): # noqa
-                                st.markdown(doc[DatabaseKeys.KEY_TXT_RETRIEVAL])
-
-                    if is_last:
-                        copy_button(assistant_msg)
-
-                options_message(assistant_message=assistant_msg, button_key=f"{i // 2}", user_message=user_msg, index=i)
-
 # ----------------------------------------------------------- Sidebar ----------------------------------------------------------- #
 def gigachad_sidebar() -> None:
     """Render the sidebar for gigachad bot."""
@@ -153,16 +121,13 @@ def gigachad_sidebar() -> None:
     with st.sidebar:
 
         #------------------------------------------------- Model & Prompt Selection ------------------------------------------------- #
-        model_selector(key="gigachad_bot")
+        st.session_state.selected_model = model_selector(key="gigachad_bot")
 
-        sys_prompt_name = st.selectbox(
+        st.session_state.selected_prompt = st.selectbox(
             "System prompt",
             list(st.session_state.system_prompts.keys()),
             key="prompt_select",
         )
-
-        if sys_prompt_name != st.session_state.selected_prompt:
-            st.session_state.selected_prompt = sys_prompt_name
 
         # ------------------------------------------------------ Model Config ------------------------------------------------------ #
         llm_params_sidebar()

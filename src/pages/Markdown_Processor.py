@@ -708,7 +708,7 @@ def markdown_chunker() -> None:
 def main() -> None:
     init_session_state()
     with st.sidebar:
-        st.session_state.md_model = model_selector(key="markdown_preprocessor")
+        st.session_state.selected_model = model_selector(key="markdown_preprocessor")
         llm_params_sidebar()
         st.markdown("---")
         selection = st.radio("Select Page", options=["Markdown Preprocessor","LLM Preprocessor", "Markdown Chunker", "View Document"], index=0, key="markdown_page_selector")  # noqa

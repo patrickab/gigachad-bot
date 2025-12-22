@@ -1,6 +1,6 @@
 import csv
 import os
-from typing import Any, Dict, Iterator, List, Tuple, Union
+from typing import Any, Dict, Iterator, List, Union
 
 from litellm.types.utils import ModelResponse
 from llm_baseclient.client import LLMClient as BaseLLMClient
@@ -28,7 +28,7 @@ class LLMClient(BaseLLMClient):
 
     def __init__(self) -> None:
         super().__init__()
-        self.messages: List[Tuple[str, str]] = []  # [role, message] - only store text for efficiency
+        self.messages: List[Dict[str, str]] = []  # [role, message] - only store text for efficiency
         self.sys_prompt = ""
 
     # -------------------------------- LLM Interaction -------------------------------- #
@@ -62,7 +62,7 @@ class LLMClient(BaseLLMClient):
         """Store message history to filesytem."""
         with open(filename, "w", newline="", encoding="utf-8") as csvfile:
             writer = csv.writer(csvfile)
-            writer.writerow(["role", "message"])
+            writer.writerow(["role", "content"])
             for msg in self.messages:
                 writer.writerow([msg["role"], msg["content"]])
 
@@ -73,7 +73,7 @@ class LLMClient(BaseLLMClient):
 
         with open(filename, "r", newline="", encoding="utf-8") as csvfile:
             reader = csv.DictReader(csvfile)
-            messages = [{"role": row["role"], "content": row["message"]} for row in reader]
+            messages = [{"role": row["role"], "content": row["content"]} for row in reader]
             self.messages = messages
 
     def reset_history(self) -> None:
