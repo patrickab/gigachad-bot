@@ -302,35 +302,83 @@ class Aider(CodeAgent[AiderCommand]):
             )
             with st.expander("Display Command", expanded=True):
                 args = cmd.construct_args()
-                st.code(f"aider {'\n\t'.join(args)}", language="bash")
+                formatted_args = "\n\t".join(args)
+                st.code(f"{cmd.executable} {formatted_args}", language="bash")
 
         return cmd
 
 
 class GeminiCommand(AgentCommand):
     """Gemini-specific command definition."""
-    pass  # Placeholder for future implementation
 
-class GeminiCodeAgent(CodeAgent[GeminiCommand]):
+    executable: str = "gemini"
+
+class Gemini(CodeAgent[GeminiCommand]):
     """Gemini Code Agent."""
     DOCKERTAG = DOCKERTAG_GEMINI
 
     def ui_define_command(self) -> GeminiCommand:
         """Define the Gemini command with Streamlit UI."""
-        pass  # Placeholder for future implementation
+        st.markdown("# Gemini Command")
+        with st.expander("", expanded=True):
+
+            # Extra raw flags/args if user wants to customize
+            extra_args_str = st.text_input(
+                "Extra CLI arguments (optional)",
+                value="",
+                key="gemini_extra_args",
+                help="Space-separated extra arguments passed directly to the Gemini CLI",
+            )
+            extra_args = extra_args_str.split() if extra_args_str.strip() else []
+
+            cmd = GeminiCommand(
+                workspace=self.path_agent_workspace,
+                args=extra_args,
+            )
+
+            with st.expander("Display Command", expanded=True):
+                args = cmd.construct_args()
+                formatted_args = "\n\t".join(args)
+                st.code(f"{cmd.executable} {formatted_args}", language="bash")
+
+        return cmd
 
 
 class QwenCommand(AgentCommand):
     """Qwen-specific command definition."""
-    pass  # Placeholder for future implementation
 
-class QwenCodeAgent(CodeAgent[GeminiCommand]):
+    # Baseclass constants
+    executable: str = "qwen"
+
+class Qwen(CodeAgent[QwenCommand]):
     """Qwen Code Agent."""
     DOCKERTAG = DOCKERTAG_QWEN
 
-    def ui_define_command(self) -> GeminiCommand:
+    def ui_define_command(self) -> QwenCommand:
         """Define the Qwen command with Streamlit UI."""
-        pass  # Placeholder for future implementation
+        st.markdown("# Qwen Command")
+        with st.expander("", expanded=True):
+
+            extra_args_str = st.text_input(
+                "Extra CLI arguments (optional)",
+                value="",
+                key="qwen_extra_args",
+                help="Space-separated extra arguments passed directly to the Qwen CLI",
+            )
+            extra_args = extra_args_str.split() if extra_args_str.strip() else []
+
+            cmd = QwenCommand(
+                workspace=self.path_agent_workspace,
+                args=extra_args,
+            )
+
+            with st.expander("Display Command", expanded=True):
+                args = cmd.construct_args()
+                formatted_args = "\n\t".join(args)
+                st.code(f"{cmd.executable} {formatted_args}", language="bash")
+
+        return cmd
+
 
 # Agent registry: dynamic discovery for extensible multi-agent support
 agent_subclasses = CodeAgent.__subclasses__()

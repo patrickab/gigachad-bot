@@ -2,16 +2,25 @@
 FROM python:3.11-slim
 
 # System Layer
-RUN apt-get update && apt-get install -y --no-install-recommends     git curl ca-certificates build-essential     && rm -rf /var/lib/apt/lists/*
+# Added 'procps' and 'file' which are often required by Homebrew on Linux
+RUN apt-get update && apt-get install -y --no-install-recommends     git curl ca-certificates build-essential tcpdump     gcc g++ make libc6-dev procps file     && rm -rf /var/lib/apt/lists/*
 
-# Tooling Layer (uv)
+# Tooling Layer
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+ENV NONINTERACTIVE=1
+RUN git clone https://github.com/Homebrew/brew /home/linuxbrew/.linuxbrew/Homebrew
+RUN mkdir -p /home/linuxbrew/.linuxbrew/bin     && ln -s /home/linuxbrew/.linuxbrew/Homebrew/bin/brew /home/linuxbrew/.linuxbrew/bin/brew
 
-# Security Layer (Non-root)
-RUN useradd -m -u 1000 sandbox_user
+ENV HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew
+ENV HOMEBREW_CELLAR=/home/linuxbrew/.linuxbrew/Cellar
+ENV HOMEBREW_REPOSITORY=/home/linuxbrew/.linuxbrew/Homebrew
+ENV PATH=/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:$PATH
+
+RUN brew update
+
+# Workspace
 WORKDIR /workspace
-RUN chown sandbox_user:sandbox_user /workspace
-
-# Environment
 ENV UV_SYSTEM_PYTHON=1
-ENV PATH="/home/sandbox_user/.local/bin:$PATH"
+
+# Entrypoint
+CMD ["/bin/bash"]
