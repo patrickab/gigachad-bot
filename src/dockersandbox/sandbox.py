@@ -47,7 +47,7 @@ import logging
 import os
 import subprocess
 from typing import Dict, Optional
-
+from lib.utils.logger import get_logger
 import docker
 
 
@@ -82,7 +82,7 @@ class DockerSandbox:
     """
 
     def __init__(self, dockerimage_name: str) -> None:
-        self.logger = logging.getLogger(__name__)
+        self.logger = get_logger()
         self.client = docker.from_env()
         self.dockerimage_name = dockerimage_name
         self._verify_environment()
@@ -162,8 +162,8 @@ class DockerSandbox:
         # Note: We sleep 1 to ensure tcpdump is listening before the agent starts.
         wrapped_cmd = f"tcpdump -l -A -i eth0 > /workspace/network_traffic.log 2>&1 & sleep 1; {agent_cmd}"
 
-        self.logger.info(f"Executing command: {' '.join(cmd)}")
         cmd.extend(["-c", wrapped_cmd])
+        self.logger.info(f"Executing command: {' '.join(cmd)}")
 
         try:
             subprocess.run(cmd, check=True)
