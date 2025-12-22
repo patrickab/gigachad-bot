@@ -16,7 +16,7 @@ from lib.streamlit_helper import model_selector
 GIT_NAME = subprocess.run(["git", "config", "--global", "user.name"], capture_output=True, text=True).stdout.strip()
 GIT_EMAIL = subprocess.run(["git", "config", "--global", "user.email"], capture_output=True, text=True).stdout.strip()
 
-ENV_VARS_AIDER = {
+ENV_VARS = {
     "OLLAMA_API_BASE": f"http://host.docker.internal:{OLLAMA_PORT}",
     "GIT_AUTHOR_NAME": GIT_NAME,
     "GIT_COMMITTER_NAME": GIT_NAME,
@@ -50,8 +50,8 @@ class AgentCommand(BaseModel, ABC):
     executable: str = Field(..., description="CLI executable name")
     workspace: Path = Field(default_factory=Path.cwd, description="Agent workspace directory")
     args: List[str] = Field(default_factory=list, description="CLI arguments excluding executable")
-    env_vars: Optional[Dict[str, str]] = Field(default=None, description="Environment variable overrides")
     task_injection_template: List[str] = Field(default_factory=list, description="Task injection template")
+    env_vars: Dict[str, str] = Field(default=ENV_VARS, description="Environment variable overrides")
 
     def _snake_to_kebab(self, s: str) -> str:
         """Convert snake_case to kebab-case."""
@@ -294,7 +294,6 @@ class Aider(CodeAgent[AiderCommand]):
             cmd = AiderCommand(
                 workspace=self.path_agent_workspace,
                 args=flags + DEFAULT_ARGS_AIDER,
-                env_vars=ENV_VARS_AIDER,
                 model=model_architect,
                 editor_model=model_editor,
                 reasoning_effort=reasoning_effort,
