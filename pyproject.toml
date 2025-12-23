@@ -4,8 +4,8 @@ version = "0.1.0"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "Agents-in-a-box @ git+ssh://git@github.com/patrickab/Agents-in-a-box.git",
     "ansi2html>=1.9.2",
-    "docker>=7.1.0",
     "litellm>=1.80.5",
     "llm-baseclient @ git+ssh://git@github.com/patrickab/llm-baseclient.git@main",
     "networkx>=3.3",

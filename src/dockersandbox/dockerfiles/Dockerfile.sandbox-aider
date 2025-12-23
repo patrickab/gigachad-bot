@@ -1,5 +1,0 @@
-
-FROM sandbox-base:latest
-RUN uv pip install aider-chat
-# Switch to non-root after installation
-USER sandbox_user
