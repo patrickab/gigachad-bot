@@ -1,8 +1,0 @@
-
-FROM sandbox-base:latest
-# Use && to separate commands and \ to continue the line in Docker
-RUN curl https://cursor.com/install -fsS | bash && \
-    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-
-# Update PATH for the image persistently
-ENV PATH="/root/.local/bin:${PATH}"
