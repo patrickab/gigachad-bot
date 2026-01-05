@@ -1,6 +1,5 @@
 import os
 
-from llm_baseclient.client import LLMClient
 from rag_database.rag_database import RagDatabase, RAGQuery, RAGResponse
 from st_copy import copy_button
 import streamlit as st
@@ -19,9 +18,11 @@ from lib.streamlit_helper import (
     paste_img_button,
     render_messages,
 )
+from llm_client import LLMClient
 from pages.RAG_Workspace import init_rag_workspace, rag_sidebar
 
 EMPTY_PASTE_RESULT = PasteResult(image_data=None)
+
 
 def init_chat_variables() -> None:
     """Initialize session state variables for chat."""
@@ -32,6 +33,7 @@ def init_chat_variables() -> None:
         st.session_state.system_prompts = AVAILABLE_PROMPTS
         st.session_state.usr_msg_captions = []
         st.session_state.refactor_code = False
+
 
 # ---------------------------------------------------- Chat Interface functions ---------------------------------------------------- #
 def chat_interface() -> None:
@@ -50,16 +52,17 @@ def chat_interface() -> None:
                 st.markdown(prompt)
                 copy_button(prompt)
             with st.chat_message("assistant"):
-
                 # Can be toggled if "Code Assistant" prompt is selected
                 if st.session_state.refactor_code and st.session_state.selected_prompt == "Code Assistant":
-                    prompt = f"Analyze this module for possibilities of more concise implementation - without loss of robustness, compatibility or understandability :\n\n <code>\n{prompt}\n</code>" # noqa
+                    prompt = f"Analyze this module for possibilities of more concise implementation - without loss of robustness, compatibility or understandability :\n\n <code>\n{prompt}\n</code>"  # noqa
                     st.session_state.refactor_code = False
 
                 system_prompt = st.session_state.system_prompts[st.session_state.selected_prompt]
 
                 if st.session_state.is_rag_active:
-                    rag_db: RagDatabase = st.session_state.rag_databases[st.session_state.selected_rag_database][st.session_state.selected_embedding_model] # noqa
+                    rag_db: RagDatabase = st.session_state.rag_databases[st.session_state.selected_rag_database][
+                        st.session_state.selected_embedding_model
+                    ]  # noqa
                     rag_query = RAGQuery(query=prompt, k_documents=st.session_state.k_query_documents)
                     rag_response: RAGResponse = rag_db.rag_process_query(rag_query=rag_query)
                     st.session_state.rag_response = rag_response
@@ -69,11 +72,12 @@ def chat_interface() -> None:
 
                     retrieved_information = "<context>"
                     for title, text in zip(titles, texts, strict=True):
-                        retrieved_information += f"\n\n<doc title=\"{title}\">\n{text}</doc>\n" # noqa
+                        retrieved_information += f'\n\n<doc title="{title}">\n{text}</doc>\n'  # noqa
                     retrieved_information += "</context>"
 
                     system_prompt = system_prompt + "\n\n" + SYS_RAG + "\n\n# RAG Retrieved Context:\n" + retrieved_information
 
+                # Defaults to empty image if not provided
                 api_img: PasteResult = st.session_state.api_img
                 client: LLMClient = st.session_state.client
                 kwargs = {
@@ -107,11 +111,12 @@ def chat_interface() -> None:
                     caption = _non_streaming_api_query(
                         model=st.session_state.selected_model,
                         prompt=prompt[:80],  # limit prompt length for captioning to avoid long processing times
-                        system_prompt=SYS_CAPTION_GENERATOR
+                        system_prompt=SYS_CAPTION_GENERATOR,
                     )
                     st.session_state.usr_msg_captions += [caption]
 
                 st.rerun()
+
 
 # ----------------------------------------------------------- Sidebar ----------------------------------------------------------- #
 def gigachad_sidebar() -> None:
@@ -119,8 +124,7 @@ def gigachad_sidebar() -> None:
     init_chat_variables()
 
     with st.sidebar:
-
-        #------------------------------------------------- Model & Prompt Selection ------------------------------------------------- #
+        # ------------------------------------------------- Model & Prompt Selection ------------------------------------------------- #
         st.session_state.selected_model = model_selector(key="gigachad_bot")
 
         st.session_state.selected_prompt = st.selectbox(
@@ -140,7 +144,6 @@ def gigachad_sidebar() -> None:
             rag_sidebar()
         else:
             st.session_state.is_rag_active = False
-
 
         # -------------------------------------------------- Options & File Upload -------------------------------------------------- #
         st.markdown("---")
@@ -166,17 +169,16 @@ def gigachad_sidebar() -> None:
                     if st.button("Save Chat History", key="save_chat_history_button"):
                         if not os.path.exists(DIRECTORY_CHAT_HISTORIES):
                             os.makedirs(DIRECTORY_CHAT_HISTORIES)
-                        st.session_state.client.store_history(DIRECTORY_CHAT_HISTORIES + '/' + filename + '.csv')
+                        st.session_state.client.store_history(DIRECTORY_CHAT_HISTORIES + "/" + filename + ".csv")
                         st.success("Successfully saved chat")
 
         # ---------------------------------------------- Paste Image & Chat Histories ---------------------------------------------- #
         st.markdown("---")
         with st.expander("Upload Image"):
-
             paste_img_button()
 
         if os.path.exists(DIRECTORY_CHAT_HISTORIES):
-            chat_histories = [f.replace('.csv', '') for f in os.listdir(DIRECTORY_CHAT_HISTORIES) if f.endswith('.csv')]
+            chat_histories = [f.replace(".csv", "") for f in os.listdir(DIRECTORY_CHAT_HISTORIES) if f.endswith(".csv")]
         else:
             chat_histories = []
 
@@ -188,20 +190,21 @@ def gigachad_sidebar() -> None:
                         col_load, col_delete, col_archive = st.columns(3)
                         with col_load:
                             if st.button("⟳", key=f"load_{history}"):
-                                st.session_state.client.load_history(os.path.join(DIRECTORY_CHAT_HISTORIES, history + '.csv'))
+                                st.session_state.client.load_history(os.path.join(DIRECTORY_CHAT_HISTORIES, history + ".csv"))
                         with col_delete:
                             if st.button("🗑", key=f"delete_{history}"):
-                                os.remove(os.path.join(DIRECTORY_CHAT_HISTORIES, history + '.csv'))
+                                os.remove(os.path.join(DIRECTORY_CHAT_HISTORIES, history + ".csv"))
                                 st.rerun()
                         with col_archive:
                             if st.button("⛁", key=f"archive_{history}"):
-                                if not os.path.exists(DIRECTORY_CHAT_HISTORIES + '/archived/'):
-                                    os.makedirs(DIRECTORY_CHAT_HISTORIES + '/archived/')
+                                if not os.path.exists(DIRECTORY_CHAT_HISTORIES + "/archived/"):
+                                    os.makedirs(DIRECTORY_CHAT_HISTORIES + "/archived/")
                                 os.rename(
-                                    os.path.join(DIRECTORY_CHAT_HISTORIES, history + '.csv'),
-                                    os.path.join(DIRECTORY_CHAT_HISTORIES, 'archived', history + '.csv')
+                                    os.path.join(DIRECTORY_CHAT_HISTORIES, history + ".csv"),
+                                    os.path.join(DIRECTORY_CHAT_HISTORIES, "archived", history + ".csv"),
                                 )
                                 st.rerun()
+
 
 if __name__ == "__main__":
     st.set_page_config(

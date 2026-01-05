@@ -51,6 +51,7 @@ select = [
   "RUF"  # Ruff-native rules
 ]
 ignore = [
+  "RuffTC001",
   "RUF100",
   "B904",
   "TC002"
