@@ -63,7 +63,7 @@ IMAGE_PATH_PATTERN_SERVER = re.compile(r"!\[(.*?)\]\(images/") # used for mappin
 def _preprocess_document(doc_id: str) -> None:
     """Copies, cleans, and restructures a single document and its assets."""
     try:
-        source_base_path = Path(DIRECTORY_VLM_OUTPUT) / doc_id / doc_id / "auto"
+        source_base_path = Path(DIRECTORY_VLM_OUTPUT) / doc_id / doc_id / "hybrid_auto"
         dest_base_path = Path(DIRECTORY_MD_PREPROCESSING) / doc_id
         source_imgs_path = source_base_path / "images"
         static_imgs_dest_path = Path(DIRECTORY_RAG_INPUT) / doc_id / "images"

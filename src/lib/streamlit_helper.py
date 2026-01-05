@@ -95,6 +95,7 @@ def init_session_state() -> None:
         st.session_state.client = LLMClient()
         st.session_state.imgs_sent = [EMPTY_PASTE_RESULT]
         st.session_state.pasted_image = EMPTY_PASTE_RESULT
+        st.session_state.selected_prompt = next(iter(AVAILABLE_PROMPTS.keys()))
 
 
 def model_selector(key: str) -> dict:
@@ -299,6 +300,7 @@ def get_img_hash(img: PasteResult) -> str:
     img_bytes = streamlit_img_to_bytes(img)
     return hashlib.sha256(img_bytes).hexdigest()
 
+
 def paste_img_button() -> PasteResult:
     """Handle image pasting in Streamlit app with hashing and state control."""
 
@@ -379,6 +381,7 @@ def paste_img_button() -> PasteResult:
     st.session_state.pasted_image = paste_result
     return paste_result
 
+
 def editor(text_to_edit: str, language: str, key: str, height: Optional[int] = None) -> str:
     """Create an ACE editor for displaying OCR extracted text."""
     default_theme = "chaos"
@@ -396,8 +399,14 @@ def editor(text_to_edit: str, language: str, key: str, height: Optional[int] = N
 def _non_streaming_api_query(model: str, prompt: str, system_prompt: str, img: Optional[PasteResult] = EMPTY_PASTE_RESULT) -> str:
     """TODO: remove - Legacy helper - can be replaced by client api calls"""
     response = st.session_state.client.api_query(
-        model=model, user_message=prompt, system_prompt=system_prompt, stream=False, chat_history=None, img=img.image_data
+        model=model,
+        user_message=prompt,
+        system_prompt=system_prompt,
+        stream=False,
+        chat_history=None,
+        img=img.image_data,
     )
+    print(response)
 
     return response
 
@@ -408,11 +417,14 @@ def write_to_md(filename: str, message: str) -> None:
         filename += ".md"
 
     sys_prompt = SYS_NOTE_TO_OBSIDIAN_YAML.replace("{{file_name_no_ext}}", filename.split(".md")[0])
-    yaml_header = _non_streaming_api_query(
+    llm_client = st.session_state.client
+    response = llm_client.api_query(
         model=NANOTASK_MODEL,
-        prompt=message,
+        user_msg=message,
         system_prompt=sys_prompt.replace("{{user_notes}}", message),
+        stream=False,
     )
+    yaml_header = response.choices[0]["message"]["content"]
 
     file_path = os.path.join(DIRECTORY_OBSIDIAN_VAULT, filename)
     with open(file_path, "w", encoding="utf-8") as f:
