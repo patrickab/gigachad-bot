@@ -131,32 +131,37 @@ class DataFrame_Bot:
                 executable Python code as string
                 explanatory text/comments as markdown
         """
-        column_info = str(st.session_state.display_dataframe.dtypes.to_dict())
+        column_dtypes = str(st.session_state.display_dataframe.dtypes.to_dict())
+        column_names = list(st.session_state.display_dataframe.columns)
         sample_data = str(st.session_state.display_dataframe.head(5))
 
         user_prompt = f"""
         # User Query Data
     
         DataFrame Information:
-        Columns and types:
-        {column_info}
 
-        Sample data:
+        # Columns dtypes:
+        {column_dtypes}
+
+        # Column names:
+        {column_names}
+
+        # Sample data:
         {sample_data}
 
         User Query: {user_query}
         """
 
         try:
-            stream = self.client.api_query(
+            response = self.client.api_query(
                 model=st.session_state.selected_model,
-                user_message=user_prompt,
+                user_msg=user_prompt,
                 system_prompt=SYS_DATAFRAME_BOT,
+                stream=False,
             )
 
-            response = ""
-            for chunk in stream:
-                response += chunk
+
+            response = response.choices[0].message.content
 
             if not response:
                 return "No code generated", "No code generated"
