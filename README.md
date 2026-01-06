@@ -1,5 +1,5 @@
 # GenAI Toolbox
-A collection of utilities for personal use. Created for experimenting & making my workflows easier and more efficient.
+A collection of utilities for personal use. Created for experimenting & making my workflows more efficient.
 
 ## Core Features
 - Customizable library of system prompts for recurring tasks.
@@ -28,6 +28,7 @@ https://github.com/user-attachments/assets/4a977472-dfbb-4166-a53e-c3c35025a939
 - Create a virtual environment using `uv sync`.
 - Activate your virtual environment using `source .venv/bin/activate`
 - Use `./run.sh` to start the application
+
 
 
 
