@@ -1,5 +1,5 @@
 # GenAI Toolbox
-A collection of GenAI utilities for personal use. Created to make my workflows easier & more efficient.
+A collection of GenAI utilities for personal use. Created for experimenting with different models & making my workflows easier and more efficient.
 
 ## Core Features
 - Customizable library of system prompts for recurring tasks.
@@ -20,6 +20,7 @@ https://github.com/user-attachments/assets/4a977472-dfbb-4166-a53e-c3c35025a939
 - Token-efficient image compression for fast local inference at scale.
 - Store responses directly into [Obsidian](https://obsidian.md/) vault (with automatically generated YAML-headers).
 - Chat History Management & Storage on local disk.
+- ...and much more to explore :)
 
 ## Installation & Setup
 - Clone the repo.
@@ -27,6 +28,7 @@ https://github.com/user-attachments/assets/4a977472-dfbb-4166-a53e-c3c35025a939
 - Create a virtual environment using `uv sync`.
 - Activate your virtual environment using `source .venv/bin/activate`
 - Use `./run.sh` to start the application
+
 
 
 
