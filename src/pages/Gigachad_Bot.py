@@ -1,7 +1,7 @@
 import os
 
-from st_copy import copy_button
 import streamlit as st
+from st_copy import copy_button
 from streamlit_paste_button import PasteResult
 
 from config import DIRECTORY_CHAT_HISTORIES
@@ -105,16 +105,21 @@ def gigachad_sidebar() -> None:
             list(st.session_state.system_prompts.keys()),
             key="prompt_select",
         )
-        st.markdown("---")
 
-        # ------------------------------------------------------ Model Config ------------------------------------------------------ #
-        llm_params_sidebar()
+        st.session_state.llm_reasoning_effort = st.selectbox(
+            "Reasoning Effort",
+            options=["none", "low", "medium", "high"],
+            key="reasoning_effort",
+        )
 
         # -------------------------------------------------- Options & File Upload -------------------------------------------------- #
         st.markdown("---")
         with st.expander("Options", expanded=False):
-            st.markdown("---")
+
+            llm_params_sidebar()
+
             if st.button("Reset History", key="reset_history_main"):
+                st.markdown("---")
                 st.session_state.client.reset_history()
 
             if st.session_state.client.messages != []:

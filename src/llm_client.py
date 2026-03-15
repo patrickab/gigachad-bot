@@ -6,8 +6,6 @@ from litellm.types.utils import ModelResponse
 from llm_baseclient.client import LLMClient as BaseLLMClient
 from openai.types.chat import ChatCompletion
 
-from llm_config import EXLLAMA_CONFIG, VLLM_CONFIG
-
 
 class LLMClient(BaseLLMClient):
     """
@@ -30,15 +28,39 @@ class LLMClient(BaseLLMClient):
         super().__init__()
         self.messages: List[Dict[str, str]] = []  # [role, message] - only store text for efficiency
         self.sys_prompt = ""
+        self._vllm_config = None
+        self._exllama_config = None
 
     # -------------------------------- LLM Interaction -------------------------------- #
-    def _apply_model_config(self, model: str, kwargs: Dict[str, Any]) -> Dict[str, Any]:
-        """Apply model-specific configurations to kwargs."""
-        if model in VLLM_CONFIG and "hosted_vllm/" in model:
-            kwargs["vllm_cmd"] = VLLM_CONFIG[model].split()
+    def _load_vllm_config(self) -> Dict[str, List[str]]:
+        """Lazy-load vLLM config only if needed (avoids importing torch/vllm unnecessarily)."""
+        if self._vllm_config is None:
+            try:
+                from llm_config import VLLM_CONFIG
+                self._vllm_config = VLLM_CONFIG
+            except ImportError:
+                self._vllm_config = {}
+        return self._vllm_config
 
-        if model in EXLLAMA_CONFIG and "tabby/" in model:
-            kwargs["tabby_config"] = EXLLAMA_CONFIG[model]
+    def _load_exllama_config(self) -> Dict[str, Any]:
+        """Lazy-load ExLlama config only if needed."""
+        if self._exllama_config is None:
+            try:
+                from llm_config import EXLLAMA_CONFIG
+                self._exllama_config = EXLLAMA_CONFIG
+            except ImportError:
+                self._exllama_config = {}
+        return self._exllama_config
+
+    def _apply_model_config(self, model: str, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply model-specific configurations to kwargs, lazily loading heavy deps."""
+        vllm_config = self._load_vllm_config()
+        if model in vllm_config and "hosted_vllm/" in model:
+            kwargs["vllm_cmd"] = vllm_config[model].split()
+
+        exllama_config = self._load_exllama_config()
+        if model in exllama_config and "tabby/" in model:
+            kwargs["tabby_config"] = exllama_config[model]
 
         return kwargs
 
@@ -59,7 +81,7 @@ class LLMClient(BaseLLMClient):
 
     # -------------------------------- Streamlit State Management -------------------------------- #
     def store_history(self, filename: str) -> None:
-        """Store message history to filesytem."""
+        """Store message history to filesystem."""
         with open(filename, "w", newline="", encoding="utf-8") as csvfile:
             writer = csv.writer(csvfile)
             writer.writerow(["role", "content"])

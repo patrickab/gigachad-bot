@@ -126,28 +126,22 @@ def model_selector(key: str) -> dict:
 
 def llm_params_sidebar() -> None:
     """Create LLM parameter sliders in Streamlit expander."""
-    with st.expander("Model Configuration", expanded=False):
-        st.session_state.llm_temperature = st.slider(
-            "Temperature",
-            min_value=0.0,
-            max_value=2.0,
-            value=0.2,
-            step=0.05,
-            key="temperature",
-        )
-        st.session_state.llm_top_p = st.slider(
-            "Top-p (nucleus sampling)",
-            min_value=0.0,
-            max_value=1.0,
-            value=0.95,
-            step=0.05,
-            key="top_p",
-        )
-        st.session_state.llm_reasoning_effort = st.selectbox(
-            "Reasoning Effort",
-            options=["none", "low", "medium", "high"],
-            key="reasoning_effort",
-        )
+    st.session_state.llm_temperature = st.slider(
+        "Temperature",
+        min_value=0.0,
+        max_value=2.0,
+        value=0.2,
+        step=0.05,
+        key="temperature",
+    )
+    st.session_state.llm_top_p = st.slider(
+        "Top-p (nucleus sampling)",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.95,
+        step=0.05,
+        key="top_p",
+    )
 
 
 def render_messages(message_container, client: LLMClient) -> None:  # noqa
@@ -372,33 +366,6 @@ def paste_img_button() -> PasteResult:
 
     st.session_state.pasted_image = paste_result
     return paste_result
-
-
-def editor(
-    text_to_edit: str, language: str, key: str, height: Optional[int] = None
-) -> str:
-    """Create an ACE editor for displaying OCR extracted text."""
-    default_theme = "chaos"
-    selected_theme = st.selectbox(
-        label="Editor Theme",
-        options=THEMES,
-        index=THEMES.index(default_theme),
-        key=f"editor_theme_{key}",
-    )
-
-    line_count = text_to_edit.count("\n") + 1
-    if height is None:
-        height = line_count * 15
-
-    content = st_ace(
-        value=text_to_edit,
-        language=language,
-        height=height,
-        key=f"editor_{key}",
-        theme=selected_theme,
-    )  # noqa
-    content  # noqa
-    return content
 
 
 def write_to_md(filename: str, message: str) -> None:
