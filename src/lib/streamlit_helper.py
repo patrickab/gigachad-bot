@@ -3,10 +3,10 @@
 import base64
 import hashlib
 import io
+import math
 import os
 from pathlib import Path
-from typing import Optional
-import math
+
 import requests
 import streamlit as st
 from PIL import Image
@@ -28,7 +28,6 @@ from lib.prompts import (
 )
 from llm_client import LLMClient
 from llm_config import (
-    MODELS_EXLLAMA,
     MODELS_GEMINI,
     MODELS_OLLAMA,
     MODELS_OPENAI,
@@ -97,15 +96,6 @@ def model_selector(key: str) -> dict:
     if MODELS_OPENAI != []:
         model_options.append("OpenAI")
         model_configs["OpenAI"] = (MODELS_OPENAI, "openai/")
-    if MODELS_VLLM != []:
-        model_options.append("VLLM")
-        model_configs["VLLM"] = (MODELS_VLLM, "hosted_vllm/")
-    if MODELS_EXLLAMA != []:
-        model_options.append("ExLlama")
-        model_configs["ExLlama"] = (
-            MODELS_EXLLAMA,
-            "openai/",
-        )  # TabbyAPI uses OpenAI-convention
 
     selected_provider = st.radio(
         label="Model Provider",

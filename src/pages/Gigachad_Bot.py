@@ -65,8 +65,9 @@ def chat_interface() -> None:
                 kwargs = {
                     "temperature": st.session_state.llm_temperature,
                     "top_p": st.session_state.llm_top_p,
-                    "reasoning_effort": st.session_state.llm_reasoning_effort,
                 }
+                if st.session_state.reasoning_effort != "none":
+                    kwargs["reasoning_effort"] = st.session_state.reasoning_effort
 
                 st.write_stream(
                     client.chat(
@@ -106,16 +107,19 @@ def gigachad_sidebar() -> None:
             key="prompt_select",
         )
 
-        st.session_state.llm_reasoning_effort = st.selectbox(
+        st.session_state.llm_reasoning_effort = st.select_slider(
             "Reasoning Effort",
             options=["none", "low", "medium", "high"],
             key="reasoning_effort",
         )
 
+        st.markdown("---")
+        with st.expander("Upload Image"):
+            paste_img_button()
+
         # -------------------------------------------------- Options & File Upload -------------------------------------------------- #
         st.markdown("---")
         with st.expander("Options", expanded=False):
-
             llm_params_sidebar()
 
             if st.button("Reset History", key="reset_history_main"):
@@ -134,15 +138,12 @@ def gigachad_sidebar() -> None:
                         )
                         st.success("Successfully saved chat")
 
-        # ---------------------------------------------- Paste Image & Chat Histories ---------------------------------------------- #
-        st.markdown("---")
-        with st.expander("Upload Image"):
-            paste_img_button()
+        # ---------------------------------------------- Chat Histories ---------------------------------------------- #
 
         if os.path.exists(DIRECTORY_CHAT_HISTORIES):
             chat_histories = [
                 f.replace(".csv", "")
-                for f in os.listdir(DIRECTORY_CHAT_HISTORIES)
+                for f in sorted(os.listdir(DIRECTORY_CHAT_HISTORIES))
                 if f.endswith(".csv")
             ]
         else:

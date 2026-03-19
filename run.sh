@@ -1,2 +1,2 @@
 #!/bin/sh
-streamlit run src/main.py
+source .venv/bin/activate && streamlit run src/main.py
