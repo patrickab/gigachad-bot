@@ -4,7 +4,7 @@ version = "0.1.0"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "litellm>=1.80.5",
+    "litellm>=1.83.12",
     "llm-baseclient @ git+ssh://git@github.com/patrickab/llm-baseclient.git@main",
     "st-copy>=1.1.2",
     "streamlit-ace>=0.1.1",
