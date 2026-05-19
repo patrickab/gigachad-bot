@@ -446,7 +446,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "litellm", specifier = ">=1.80.5" },
-    { name = "llm-baseclient", git = "ssh://git@github.com/patrickab/llm-baseclient.git?rev=main" },
+    { name = "llm-baseclient", git = "https://github.com/patrickab/llm-baseclient.git?rev=main" },
     { name = "st-copy", specifier = ">=1.1.2" },
     { name = "streamlit-ace", specifier = ">=0.1.1" },
     { name = "streamlit-paste-button", specifier = ">=0.1.2" },
@@ -790,7 +790,7 @@ wheels = [
 [[package]]
 name = "llm-baseclient"
 version = "0.1.0"
-source = { git = "ssh://git@github.com/patrickab/llm-baseclient.git?rev=main#5a1ad96e809ca78c7d5e7fc03cfe0860ff3812b0" }
+source = { git = "https://github.com/patrickab/llm-baseclient.git?rev=main#5a1ad96e809ca78c7d5e7fc03cfe0860ff3812b0" }
 dependencies = [
     { name = "filetype" },
     { name = "litellm" },
