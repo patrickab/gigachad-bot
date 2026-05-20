@@ -9,6 +9,7 @@ PAGES = {
     "Workspaces": [
         st.Page("pages/Gigachad_Bot.py"),
         st.Page("pages/OCR_Workspace.py"),
+        st.Page("pages/Deep_Research.py"),
     ],
 }
 

@@ -7,3 +7,4 @@ src/static
 embeddings
 src/archive
 .aider*
+.gpt-researcher-config.json
