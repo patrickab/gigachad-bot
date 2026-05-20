@@ -6,11 +6,13 @@ import io
 import math
 import os
 from pathlib import Path
+from typing import Optional
 
 import requests
 import streamlit as st
 from PIL import Image
 from st_copy import copy_button
+from streamlit_ace import THEMES, st_ace
 from streamlit_paste_button import PasteResult, paste_image_button
 
 from config import (
@@ -176,6 +178,33 @@ def render_messages(message_container, client: LLMClient) -> None:  # noqa
                     user_message=user_msg,
                     index=i,
                 )
+
+
+def editor(
+    text_to_edit: str, language: str, key: str, height: Optional[int] = None
+) -> str:
+    """Create an ACE editor for displaying OCR extracted text."""
+    default_theme = "chaos"
+    selected_theme = st.selectbox(
+        label="Editor Theme",
+        options=THEMES,
+        index=THEMES.index(default_theme),
+        key=f"editor_theme_{key}",
+    )
+
+    line_count = text_to_edit.count("\n") + 1
+    if height is None:
+        height = line_count * 15
+
+    content = st_ace(
+        value=text_to_edit,
+        language=language,
+        height=height,
+        key=f"editor_{key}",
+        theme=selected_theme,
+    )  # noqa
+    content  # noqa
+    return content
 
 
 def streamlit_img_to_bytes(img: PasteResult) -> bytes:

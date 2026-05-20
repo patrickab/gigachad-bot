@@ -2,19 +2,20 @@ import streamlit as st
 
 from lib.non_user_prompts import SYS_OCR_TEXT_EXTRACTION
 from lib.streamlit_helper import (
+    EMPTY_PASTE_RESULT,
     PasteResult,
+    editor,
     get_img_hash,
-    model_selector,
     options_message,
     paste_img_button,
-    EMPTY_PASTE_RESULT
 )
 from llm_client import LLMClient
 from llm_config import DEFAULT_VISION_MODEL
 
+
 def ocr_sidebar() -> None:
     with st.sidebar:
-        #st.session_state.selected_model_ocr = model_selector(key="ocr_workspace")
+        # st.session_state.selected_model_ocr = model_selector(key="ocr_workspace")
         st.session_state.selected_model_ocr = DEFAULT_VISION_MODEL
 
         paste_img_button()
@@ -30,11 +31,11 @@ def ocr_workspace() -> None:
 
     if img != EMPTY_PASTE_RESULT and img is not None:
         response = client.api_query(
-                model=model,
-                system_prompt=SYS_OCR_TEXT_EXTRACTION,
-                img=img,
-                stream=False,
-            )
+            model=model,
+            system_prompt=SYS_OCR_TEXT_EXTRACTION,
+            img=img,
+            stream=False,
+        )
         # Todo: Rewrite LLM Client to return only text instead of response objects
         st.session_state.ocr_response = response.choices[0].message.content
         img_hash = get_img_hash(st.session_state.pasted_image)
@@ -43,7 +44,6 @@ def ocr_workspace() -> None:
         st.session_state.api_img = None
         st.session_state.pasted_image = EMPTY_PASTE_RESULT
         st.rerun()
-
 
     if "ocr_response" in st.session_state:
         options_message(
