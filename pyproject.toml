@@ -5,7 +5,7 @@ readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "gpt-researcher>=0.14.0",
-    "langchain-ollama>=0.3.0",
+    "langchain-ollama>=1.1.0",
     "litellm>=1.80.5",
     "llm-baseclient @ git+https://github.com/patrickab/llm-baseclient.git@main",
     "st-copy>=1.1.2",
