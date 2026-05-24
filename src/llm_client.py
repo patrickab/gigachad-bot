@@ -1,5 +1,6 @@
 import csv
 import os
+from pathlib import Path
 from typing import Any, Dict, Iterator, List, Union
 
 from litellm.types.utils import ModelResponse
@@ -91,7 +92,8 @@ class LLMClient(BaseLLMClient):
     # -------------------------------- Streamlit State Management -------------------------------- #
     def store_history(self, filename: str) -> None:
         """Store message history to filesystem."""
-        with open(filename, "w", newline="", encoding="utf-8") as csvfile:
+        filepath = Path(filename)
+        with filepath.open("w", newline="", encoding="utf-8") as csvfile:
             writer = csv.writer(csvfile)
             writer.writerow(["role", "content"])
             for msg in self.messages:
@@ -99,10 +101,11 @@ class LLMClient(BaseLLMClient):
 
     def load_history(self, filename: str) -> None:
         """Load message history from filesystem."""
-        if not os.path.exists(filename):
+        filepath = Path(filename)
+        if not filepath.exists():
             return
 
-        with open(filename, "r", newline="", encoding="utf-8") as csvfile:
+        with filepath.open("r", newline="", encoding="utf-8") as csvfile:
             reader = csv.DictReader(csvfile)
             messages = [
                 {"role": row["role"], "content": row["content"]} for row in reader

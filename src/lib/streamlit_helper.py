@@ -29,7 +29,6 @@ from lib.prompts import (
     SYS_TUTOR,
 )
 from llm_client import LLMClient
-from llm_baseclient.client import downscale_img
 from llm_config import (
     MODELS_GEMINI,
     MODELS_OLLAMA,
@@ -293,7 +292,9 @@ def paste_img_button() -> PasteResult:
 
     # 3. Processing and State Control
     if st.session_state.use_resize:
-        st.session_state.api_img = downscale_img(paste_result.image_data, **params)
+        st.session_state.api_img = st.session_state.client.downscale_img(
+            paste_result.image_data, **params
+        )
         st.image(st.session_state.api_img, caption="Pasted Image (resized)")
     else:
         # Raw conversion to Base64 without scaling
@@ -331,12 +332,13 @@ def write_to_md(filename: str, message: str) -> None:
     )
     yaml_header = response.choices[0]["message"]["content"]
 
-    file_path = os.path.join(DIRECTORY_OBSIDIAN_VAULT, filename)
+    file_path = DIRECTORY_OBSIDIAN_VAULT / filename
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(yaml_header + "\n" + message)
 
-    os.makedirs("markdown", exist_ok=True)
-    with open(os.path.join("markdown", filename), "w", encoding="utf-8") as f:
+    markdown_dir = Path("markdown")
+    markdown_dir.mkdir(exist_ok=True)
+    with open(markdown_dir / filename, "w", encoding="utf-8") as f:
         f.write(yaml_header + "\n" + message)
 
 

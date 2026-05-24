@@ -1,10 +1,11 @@
 import os
 import subprocess
+from pathlib import Path
 
 # --- Constants ---
-HOME = os.path.expanduser("~")
-DIRECTORY_TABBY = os.path.join(HOME, "tabbyAPI")
-HUGGINGFACE_DIR = os.path.join(HOME, ".cache", "huggingface", "hub")
+HOME = Path.home()
+DIRECTORY_TABBY = HOME / "tabbyAPI"
+HUGGINGFACE_DIR = HOME / ".cache" / "huggingface" / "hub"
 
 # --- Model Defaults ---
 NANOTASK_MODEL = "ollama/devstral-2:123b-cloud"
@@ -38,23 +39,24 @@ except (FileNotFoundError, subprocess.CalledProcessError):
 # --- Dynamic Discovery: VLLM (HuggingFace) ---
 MODELS_VLLM = []
 
-if os.path.exists(HUGGINGFACE_DIR):
+if HUGGINGFACE_DIR.exists():
     # Parse "models--author--model" -> "hosted_vllm/author/model"
     MODELS_VLLM = [
-        f"hosted_vllm/{m.replace('models--', '', 1).replace('--', '/', 1)}"
-        for m in os.listdir(HUGGINGFACE_DIR)
-        if m.startswith("models--")
+        f"hosted_vllm/{m.name.replace('models--', '', 1).replace('--', '/', 1)}"
+        for m in HUGGINGFACE_DIR.iterdir()
+        if m.name.startswith("models--")
     ]
 
 
 # --- Dynamic Discovery: TabbyAPI ---
 MODELS_EXLLAMA = []
 
-if os.path.exists(os.path.join(DIRECTORY_TABBY, "models")):
+tabby_models_dir = DIRECTORY_TABBY / "models"
+if tabby_models_dir.exists():
     MODELS_EXLLAMA = [
-        f"tabby/{m}"
-        for m in os.listdir(os.path.join(DIRECTORY_TABBY, "models"))
-        if m != "place_your_models_here.txt"
+        f"tabby/{m.name}"
+        for m in tabby_models_dir.iterdir()
+        if m.name != "place_your_models_here.txt"
     ]
 
 qwen_coder_14b_exl2 = "Qwen2.5-Coder-14B-Instruct-exl2"

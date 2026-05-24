@@ -5,12 +5,14 @@ import os
 import streamlit as st
 from st_copy import copy_button
 
+from pathlib import Path
+
 EMBEDDING_DEFAULT = "ollama:nomic-embed-text"
 DEPTH_DEFAULT = 2
 BREADTH_DEFAULT = 4
 OLLAMA_BASE = "http://localhost:11434"
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), os.pardir, os.pardir, ".gpt-researcher-config.json")
+CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / ".gpt-researcher-config.json"
 
 from lib.streamlit_helper import model_selector
 
@@ -38,9 +40,9 @@ def _write_config(fast: str, smart: str, strategic: str, depth: int, breadth: in
     }
     if reasoning != "none":
         config["REASONING_EFFORT"] = reasoning
-    with open(CONFIG_PATH, "w") as f:
+    with CONFIG_PATH.open("w") as f:
         json.dump(config, f)
-    return CONFIG_PATH
+    return str(CONFIG_PATH)
 
 
 def _apply_runtime_env(reasoning: str) -> None:

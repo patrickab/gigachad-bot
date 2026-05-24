@@ -131,20 +131,19 @@ def gigachad_sidebar() -> None:
                 with st.popover("Save History"):
                     filename = st.text_input("Filename", key="history_filename_input")
                     if st.button("Save Chat History", key="save_chat_history_button"):
-                        if not os.path.exists(DIRECTORY_CHAT_HISTORIES):
-                            os.makedirs(DIRECTORY_CHAT_HISTORIES)
+                        DIRECTORY_CHAT_HISTORIES.mkdir(parents=True, exist_ok=True)
                         st.session_state.client.store_history(
-                            DIRECTORY_CHAT_HISTORIES + "/" + filename + ".csv"
+                            str(DIRECTORY_CHAT_HISTORIES / f"{filename}.csv")
                         )
                         st.success("Successfully saved chat")
 
         # ---------------------------------------------- Chat Histories ---------------------------------------------- #
 
-        if os.path.exists(DIRECTORY_CHAT_HISTORIES):
+        if DIRECTORY_CHAT_HISTORIES.exists():
             chat_histories = [
-                f.replace(".csv", "")
-                for f in sorted(os.listdir(DIRECTORY_CHAT_HISTORIES))
-                if f.endswith(".csv")
+                f.relative_to(DIRECTORY_CHAT_HISTORIES)
+                for f in sorted(DIRECTORY_CHAT_HISTORIES.rglob("*.csv"))
+                if f.is_file() and "archived" not in f.parts
             ]
         else:
             chat_histories = []
@@ -152,39 +151,25 @@ def gigachad_sidebar() -> None:
         if chat_histories != []:
             st.markdown("---")
             with st.expander("Chat Histories", expanded=False):
-                for history in chat_histories:
+                for history_path in chat_histories:
+                    history = str(history_path.with_suffix(""))
                     with st.expander(history, expanded=False):
                         col_load, col_delete, col_archive = st.columns(3)
                         with col_load:
                             if st.button("⟳", key=f"load_{history}"):
                                 st.session_state.client.load_history(
-                                    os.path.join(
-                                        DIRECTORY_CHAT_HISTORIES, history + ".csv"
-                                    )
+                                    str(DIRECTORY_CHAT_HISTORIES / history_path)
                                 )
                         with col_delete:
                             if st.button("🗑", key=f"delete_{history}"):
-                                os.remove(
-                                    os.path.join(
-                                        DIRECTORY_CHAT_HISTORIES, history + ".csv"
-                                    )
-                                )
+                                (DIRECTORY_CHAT_HISTORIES / history_path).unlink()
                                 st.rerun()
                         with col_archive:
                             if st.button("⛁", key=f"archive_{history}"):
-                                if not os.path.exists(
-                                    DIRECTORY_CHAT_HISTORIES + "/archived/"
-                                ):
-                                    os.makedirs(DIRECTORY_CHAT_HISTORIES + "/archived/")
-                                os.rename(
-                                    os.path.join(
-                                        DIRECTORY_CHAT_HISTORIES, history + ".csv"
-                                    ),
-                                    os.path.join(
-                                        DIRECTORY_CHAT_HISTORIES,
-                                        "archived",
-                                        history + ".csv",
-                                    ),
+                                archive_dir = DIRECTORY_CHAT_HISTORIES / "archived"
+                                archive_dir.mkdir(parents=True, exist_ok=True)
+                                (DIRECTORY_CHAT_HISTORIES / history_path).rename(
+                                    archive_dir / history_path.name
                                 )
                                 st.rerun()
 
