@@ -1,11 +1,11 @@
 from typing import Any, Dict, Iterator, List, Union
 
 from litellm.types.utils import ModelResponse
-from llm_baseclient.client import LLMClient as BaseLLMClient
+from llm_baseclient.client import LLMClient
 from openai.types.chat import ChatCompletion
 
 
-class LLMClient(BaseLLMClient):
+class LLMClient(LLMClient):
     """
     Custom Hardware-Aware LLM Client supporting
        - Open source: vLLM (GPU) / Ollama (CPU) / Huggingface.

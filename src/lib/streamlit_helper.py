@@ -3,10 +3,15 @@
 import base64
 import hashlib
 import io
-import os
 from pathlib import Path
 from typing import Optional
 
+from llm_baseclient.config import (
+    AVAILABLE_MODELS,
+    MODELS_GEMINI,
+    MODELS_OLLAMA,
+    MODELS_OPENAI,
+)
 from PIL import Image
 from st_copy import copy_button
 import streamlit as st
@@ -26,22 +31,11 @@ from lib.prompts import (
     SYS_TUTOR,
 )
 from llm_client import LLMClient
-from llm_config import (
-    MODELS_GEMINI,
-    MODELS_OLLAMA,
-    MODELS_OPENAI,
-    MODELS_VLLM,
-    NANOTASK_MODEL,
-)
+from llm_config import NANOTASK_MODEL
 
 EMPTY_PASTE_RESULT = PasteResult(image_data=None)
 
-AVAILABLE_LLM_MODELS = (
-    (MODELS_GEMINI if os.getenv("GEMINI_API_KEY") else [])
-    + (MODELS_OPENAI if os.getenv("OPENAI_API_KEY") else [])
-    + [m for m in MODELS_OLLAMA if m != "ollama/embeddinggemma:300m"]
-    + MODELS_VLLM
-)
+AVAILABLE_LLM_MODELS = AVAILABLE_MODELS
 
 AVAILABLE_PROMPTS = {
     "Quick Overview": SYS_QUICK_OVERVIEW,
