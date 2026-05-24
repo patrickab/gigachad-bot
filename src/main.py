@@ -8,8 +8,8 @@ from lib.streamlit_helper import (
 PAGES = {
     "Workspaces": [
         st.Page("pages/Gigachad_Bot.py"),
-        st.Page("pages/OCR_Workspace.py"),
         st.Page("pages/Deep_Research.py"),
+        st.Page("pages/OCR_Workspace.py"),
     ],
 }
 

@@ -3,12 +3,10 @@
 import base64
 import hashlib
 import io
-import math
 import os
 from pathlib import Path
 from typing import Optional
 
-import requests
 import streamlit as st
 from PIL import Image
 from st_copy import copy_button
