@@ -125,7 +125,7 @@ def gigachad_sidebar() -> None:
                     filename = st.text_input("Filename", key="history_filename_input")
                     if st.button("Save Chat History", key="save_chat_history_button"):
                         DIRECTORY_CHAT_HISTORIES.mkdir(parents=True, exist_ok=True)
-                        st.session_state.client.store_history(str(DIRECTORY_CHAT_HISTORIES / f"{filename}.csv"))
+                        st.session_state.client.store_history(str(DIRECTORY_CHAT_HISTORIES / f"{filename}.json"))
                         st.success("Successfully saved chat")
 
         # ---------------------------------------------- Chat Histories ---------------------------------------------- #
@@ -133,7 +133,7 @@ def gigachad_sidebar() -> None:
         if DIRECTORY_CHAT_HISTORIES.exists():
             chat_histories = [
                 f.relative_to(DIRECTORY_CHAT_HISTORIES)
-                for f in sorted(DIRECTORY_CHAT_HISTORIES.rglob("*.csv"))
+                for f in sorted(DIRECTORY_CHAT_HISTORIES.rglob("*.json"))
                 if f.is_file() and "archived" not in f.parts
             ]
         else:
