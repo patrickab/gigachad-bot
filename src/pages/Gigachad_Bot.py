@@ -1,3 +1,6 @@
+from pathlib import Path
+from typing import Dict, List
+
 from st_copy import copy_button
 import streamlit as st
 from streamlit_paste_button import PasteResult
@@ -142,23 +145,44 @@ def gigachad_sidebar() -> None:
         if chat_histories != []:
             st.markdown("---")
             with st.expander("Chat Histories", expanded=False):
+                by_dir: Dict[str, List[Path]] = {}
                 for history_path in chat_histories:
-                    history = str(history_path.with_suffix(""))
-                    with st.expander(history, expanded=False):
-                        col_load, col_delete, col_archive = st.columns(3)
-                        with col_load:
-                            if st.button("⟳", key=f"load_{history}"):
-                                st.session_state.client.load_history(str(DIRECTORY_CHAT_HISTORIES / history_path))
-                        with col_delete:
-                            if st.button("🗑", key=f"delete_{history}"):
-                                (DIRECTORY_CHAT_HISTORIES / history_path).unlink()
-                                st.rerun()
-                        with col_archive:
-                            if st.button("⛁", key=f"archive_{history}"):
-                                archive_dir = DIRECTORY_CHAT_HISTORIES / "archived"
-                                archive_dir.mkdir(parents=True, exist_ok=True)
-                                (DIRECTORY_CHAT_HISTORIES / history_path).rename(archive_dir / history_path.name)
-                                st.rerun()
+                    dir_key = str(history_path.parent) if history_path.parent != Path(".") else "."
+                    by_dir.setdefault(dir_key, []).append(history_path)
+
+                for dir_name, files in by_dir.items():
+                    if dir_name == ".":
+                        for history_path in files:
+                            _history_expander(
+                                str(history_path.with_suffix("")),
+                                DIRECTORY_CHAT_HISTORIES / history_path,
+                            )
+                    else:
+                        with st.expander(dir_name, expanded=False):
+                            for history_path in files:
+                                _history_expander(
+                                    str(history_path.with_suffix("")),
+                                    DIRECTORY_CHAT_HISTORIES / history_path,
+                                )
+
+
+def _history_expander(label: str, full_path: Path) -> None:
+    """Render load/delete/archive buttons inside an expander for a single chat history."""
+    with st.expander(label, expanded=False):
+        col_load, col_delete, col_archive = st.columns(3)
+        with col_load:
+            if st.button("⟳", key=f"load_{label}"):
+                st.session_state.client.load_history(str(full_path))
+        with col_delete:
+            if st.button("🗑", key=f"delete_{label}"):
+                full_path.unlink()
+                st.rerun()
+        with col_archive:
+            if st.button("⛁", key=f"archive_{label}"):
+                archive_dir = DIRECTORY_CHAT_HISTORIES / "archived"
+                archive_dir.mkdir(parents=True, exist_ok=True)
+                full_path.rename(archive_dir / full_path.name)
+                st.rerun()
 
 
 if __name__ == "__main__":
