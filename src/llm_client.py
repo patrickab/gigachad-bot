@@ -4,75 +4,46 @@ from litellm.types.utils import ModelResponse
 from llm_baseclient.client import LLMClient
 from openai.types.chat import ChatCompletion
 
+from llm_config import MODEL_CONFIGS
+
 
 class LLMClient(LLMClient):
     """
-    Custom Hardware-Aware LLM Client supporting
-       - Open source: vLLM (GPU) / Ollama (CPU) / Huggingface.
-       - Commercial: OpenAI, Google Gemini, Anthropic Claude.
+    LLM Client supporting
+       - Open source: vLLM / Ollama / Huggingface with local CPU/GPU inference.
+       - Commercial: OpenAI, Gemini, Anthropic, etc - any provider supported by LiteLLM.
+
+    Kept as module inside this project for future extensibility.
+
+    Automatically spawns & manages local inference servers (vLLM, Ollama).
+    Allowing dynamic switching between backends/models during runtime.
+
+    Assumes:
+        For Commercial Providers:
+            - API keys in environment.
+        For vLLM / Ollama:
+            - Local provider software installed.
+            - Local models already downloaded.
 
     Supports:
         - stateless & stateful interactions
         - streaming & non-streaming responses
         - text-only & multimodal inputs
         - images provided as
-            (1) file paths or
+            (1) file paths
             (2) raw bytes
-
-    Extended with Streamlit state management methods.
+            (3) base64 data URIs
+            (4) web URLs
     """
 
-    def __init__(self) -> None:
-        super().__init__()
-        # [role, message] - only store text for efficiency
-        self.messages: List[Dict[str, str]] = []
-        self.sys_prompt = ""
-        self._vllm_config = None
-        self._exllama_config = None
-
-    # -------------------------------- LLM Interaction -------------------------------- #
-    def _load_vllm_config(self) -> Dict[str, List[str]]:
-        """Lazy-load vLLM config only if needed (avoids importing torch/vllm unnecessarily)."""
-        if self._vllm_config is None:
-            try:
-                from llm_config import VLLM_CONFIG
-
-                self._vllm_config = VLLM_CONFIG
-            except ImportError:
-                self._vllm_config = {}
-        return self._vllm_config
-
-    def _load_exllama_config(self) -> Dict[str, Any]:
-        """Lazy-load ExLlama config only if needed."""
-        if self._exllama_config is None:
-            try:
-                from llm_config import EXLLAMA_CONFIG
-
-                self._exllama_config = EXLLAMA_CONFIG
-            except ImportError:
-                self._exllama_config = {}
-        return self._exllama_config
-
-    def _apply_model_config(self, model: str, kwargs: Dict[str, Any]) -> Dict[str, Any]:
-        """Apply model-specific configurations to kwargs, lazily loading heavy deps."""
-        vllm_config = self._load_vllm_config()
-        if model in vllm_config and "hosted_vllm/" in model:
-            kwargs["vllm_cmd"] = vllm_config[model].split()
-
-        exllama_config = self._load_exllama_config()
-        if model in exllama_config and "tabby/" in model:
-            kwargs["tabby_config"] = exllama_config[model]
-
-        return kwargs
+    def __init__(self, model_configs: Dict[str, Any] | None = None) -> None:
+        super().__init__(model_configs=model_configs or MODEL_CONFIGS)
 
     def chat(self, model: str, **kwargs: Dict[str, Any]) -> Iterator[str] | ChatCompletion:
-        """Overrides base chat method to add startup configs."""
-        return super().chat(model=model, **self._apply_model_config(model, kwargs))
+        return super().chat(model=model, **kwargs)
 
     def api_query(self, model: str, **kwargs: Dict[str, Any]) -> Iterator[str] | ChatCompletion:
-        """Overrides base api_query to add startup configs."""
-        return super().api_query(model=model, **self._apply_model_config(model, kwargs))
+        return super().api_query(model=model, **kwargs)
 
     def batch_api_query(self, model: str, **kwargs: Dict[str, Any]) -> List[Union[ModelResponse, Exception]]:
-        """Overrides base batch_api_query to add startup configs."""
-        return super().batch_api_query(model=model, **self._apply_model_config(model, kwargs))
+        return super().batch_api_query(model=model, **kwargs)

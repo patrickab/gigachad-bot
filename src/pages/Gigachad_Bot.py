@@ -37,7 +37,7 @@ def chat_interface() -> None:
         message_container = st.container()
         render_messages(message_container, client=st.session_state.client)
 
-        with st._bottom:
+        with st.bottom:
             prompt = st.chat_input("Send a message", key="chat_input")
 
         if prompt:

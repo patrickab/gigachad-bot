@@ -31,7 +31,7 @@ from lib.prompts import (
     SYS_TUTOR,
 )
 from llm_client import LLMClient
-from llm_config import NANOTASK_MODEL
+from llm_config import MODEL_CONFIGS, NANOTASK_MODEL
 
 EMPTY_PASTE_RESULT = PasteResult(image_data=None)
 
@@ -58,7 +58,7 @@ def init_session_state() -> None:
 
     if "client" not in st.session_state:
         st.session_state.workspace = "main"
-        st.session_state.client = LLMClient()
+        st.session_state.client = LLMClient(model_configs=MODEL_CONFIGS)
         st.session_state.imgs_sent = [EMPTY_PASTE_RESULT]
         st.session_state.pasted_image = EMPTY_PASTE_RESULT
         st.session_state.selected_prompt = next(iter(AVAILABLE_PROMPTS.keys()))
