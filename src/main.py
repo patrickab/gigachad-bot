@@ -14,9 +14,8 @@ PAGES = {
 }
 
 if __name__ == "__main__":
+    st.set_page_config(page_title="Gigachad-Bot", page_icon=":robot:", layout="wide")
     init_session_state()
     apply_custom_css()
-    st.set_page_config(page_title="Gigachad-Bot", page_icon=":robot:", layout="wide")
 
-    pages = st.navigation(pages=PAGES, position="top")
-    pages.run()
+    st.navigation(pages=PAGES, position="top").run()

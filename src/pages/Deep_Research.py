@@ -1,11 +1,12 @@
 import asyncio
 import json
 import os
-
-import streamlit as st
-from st_copy import copy_button
-
 from pathlib import Path
+
+from st_copy import copy_button
+import streamlit as st
+
+from lib.streamlit_helper import model_selector
 
 EMBEDDING_DEFAULT = "ollama:nomic-embed-text"
 DEPTH_DEFAULT = 2
@@ -13,8 +14,6 @@ BREADTH_DEFAULT = 4
 OLLAMA_BASE = "http://localhost:11434"
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / ".gpt-researcher-config.json"
-
-from lib.streamlit_helper import model_selector
 
 
 def _get_event_loop() -> asyncio.AbstractEventLoop:
@@ -133,8 +132,14 @@ def deep_research_main() -> None:
         messages_container = st.container()
 
     with messages_container:
-        for i, (query, report, sources, cost) in enumerate(
-            zip(st.session_state.dr_queries, st.session_state.dr_reports, st.session_state.dr_sources_list, st.session_state.dr_costs_list)
+        for _i, (query, report, sources, cost) in enumerate(
+            zip(
+                st.session_state.dr_queries,
+                st.session_state.dr_reports,
+                st.session_state.dr_sources_list,
+                st.session_state.dr_costs_list,
+                strict=False,
+            )
         ):
             with st.chat_message("user"):
                 st.markdown(query)
@@ -166,7 +171,7 @@ def deep_research_main() -> None:
             copy_button(query)
 
         with st.chat_message("assistant"):
-            with st.spinner(f"Researching..."):
+            with st.spinner("Researching..."):
                 try:
                     loop = _get_event_loop()
                     report, sources, costs = loop.run_until_complete(

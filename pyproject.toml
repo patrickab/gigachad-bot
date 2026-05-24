@@ -42,10 +42,10 @@ select = [
   "RUF"  # Ruff-native rules
 ]
 ignore = [
-  "RuffTC001",
+  "TCH001",
+  "TCH002",
   "RUF100",
-  "B904",
-  "TC002"
+  "B904"
 ]
 
 [tool.ruff.lint.isort]

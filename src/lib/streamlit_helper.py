@@ -7,9 +7,9 @@ import os
 from pathlib import Path
 from typing import Optional
 
-import streamlit as st
 from PIL import Image
 from st_copy import copy_button
+import streamlit as st
 from streamlit_ace import THEMES, st_ace
 from streamlit_paste_button import PasteResult, paste_image_button
 
@@ -37,23 +37,12 @@ from llm_config import (
 
 EMPTY_PASTE_RESULT = PasteResult(image_data=None)
 
-AVAILABLE_LLM_MODELS = []
-
-if os.getenv("GEMINI_API_KEY"):
-    AVAILABLE_LLM_MODELS += MODELS_GEMINI
-
-if os.getenv("OPENAI_API_KEY"):
-    AVAILABLE_LLM_MODELS += MODELS_OPENAI
-
-if MODELS_OLLAMA != []:
-    ignore_models = ["embeddinggemma:300m"]
-    AVAILABLE_LLM_MODELS += MODELS_OLLAMA
-    AVAILABLE_LLM_MODELS = [
-        model for model in AVAILABLE_LLM_MODELS if model not in ignore_models
-    ]
-
-if MODELS_VLLM != []:
-    AVAILABLE_LLM_MODELS += MODELS_VLLM
+AVAILABLE_LLM_MODELS = (
+    (MODELS_GEMINI if os.getenv("GEMINI_API_KEY") else [])
+    + (MODELS_OPENAI if os.getenv("OPENAI_API_KEY") else [])
+    + [m for m in MODELS_OLLAMA if m != "ollama/embeddinggemma:300m"]
+    + MODELS_VLLM
+)
 
 AVAILABLE_PROMPTS = {
     "Quick Overview": SYS_QUICK_OVERVIEW,
@@ -84,32 +73,26 @@ def init_session_state() -> None:
 
 def model_selector(key: str) -> dict:
     """Create model selection dropdowns in Streamlit sidebar expanders."""
-    model_options = []
-    model_configs = {}
-
-    if MODELS_OLLAMA != []:
-        model_options.append("Ollama")
-        model_configs["Ollama"] = (MODELS_OLLAMA, "ollama/")
-    if MODELS_GEMINI != []:
-        model_options.append("Gemini")
-        model_configs["Gemini"] = (MODELS_GEMINI, "gemini/")
-    if MODELS_OPENAI != []:
-        model_options.append("OpenAI")
-        model_configs["OpenAI"] = (MODELS_OPENAI, "openai/")
+    configs = {
+        "Ollama": (MODELS_OLLAMA, "ollama/"),
+        "Gemini": (MODELS_GEMINI, "gemini/"),
+        "OpenAI": (MODELS_OPENAI, "openai/"),
+    }
+    active_configs = {k: v for k, v in configs.items() if v[0]}
 
     selected_provider = st.radio(
         label="Model Provider",
-        options=model_options,
+        options=list(active_configs.keys()),
         index=0,
         horizontal=True,
         key=f"model_provider_radio_{key}",
     )
-    models_list, litellm_prefix = model_configs[selected_provider]
+    models_list, prefix = active_configs[selected_provider]
 
     return st.selectbox(
         label=f"Models ({selected_provider})",
         options=models_list,
-        format_func=lambda model: model.replace(litellm_prefix, ""),
+        format_func=lambda m: m.replace(prefix, ""),
         key=f"{selected_provider}_model_select_{key}",
     )
 
@@ -146,14 +129,8 @@ def render_messages(message_container, client: LLMClient) -> None:  # noqa
 
     with message_container:
         for i in range(0, len(messages), 2):
-            is_last = (
-                i == len(messages) - 2
-            )  # expand only the last message / display RAG context
-            label = (
-                f"QA-Pair {i // 2}: "
-                if len(st.session_state.usr_msg_captions) == 0
-                else st.session_state.usr_msg_captions[i // 2]
-            )
+            is_last = i == len(messages) - 2  # expand only the last message / display RAG context
+            label = f"QA-Pair {i // 2}: " if len(st.session_state.usr_msg_captions) == 0 else st.session_state.usr_msg_captions[i // 2]
             user_msg = messages[i]["content"]
             assistant_msg = messages[i + 1]["content"]
 
@@ -178,9 +155,7 @@ def render_messages(message_container, client: LLMClient) -> None:  # noqa
                 )
 
 
-def editor(
-    text_to_edit: str, language: str, key: str, height: Optional[int] = None
-) -> str:
+def editor(text_to_edit: str, language: str, key: str, height: Optional[int] = None) -> str:
     """Create an ACE editor for displaying OCR extracted text."""
     default_theme = "chaos"
     selected_theme = st.selectbox(
@@ -290,9 +265,7 @@ def paste_img_button() -> PasteResult:
 
     # 3. Processing and State Control
     if st.session_state.use_resize:
-        st.session_state.api_img = st.session_state.client.downscale_img(
-            paste_result.image_data, **params
-        )
+        st.session_state.api_img = st.session_state.client.downscale_img(paste_result.image_data, **params)
         st.image(st.session_state.api_img, caption="Pasted Image (resized)")
     else:
         # Raw conversion to Base64 without scaling
@@ -305,9 +278,7 @@ def paste_img_button() -> PasteResult:
         st.image(img, caption="Pasted Image")
 
         b64 = base64.b64encode(buf.getvalue()).decode()
-        st.session_state.api_img = (
-            f"data:image/{params['output_format'].lower()};base64,{b64}"
-        )
+        st.session_state.api_img = f"data:image/{params['output_format'].lower()};base64,{b64}"
 
     st.session_state.pasted_image = paste_result
     return paste_result
@@ -318,9 +289,7 @@ def write_to_md(filename: str, message: str) -> None:
     if not filename.endswith(".md"):
         filename += ".md"
 
-    sys_prompt = SYS_NOTE_TO_OBSIDIAN_YAML.replace(
-        "{{file_name_no_ext}}", filename.split(".md")[0]
-    )
+    sys_prompt = SYS_NOTE_TO_OBSIDIAN_YAML.replace("{{file_name_no_ext}}", filename.split(".md")[0])
     llm_client = st.session_state.client
     response = llm_client.api_query(
         model=NANOTASK_MODEL,
@@ -340,9 +309,7 @@ def write_to_md(filename: str, message: str) -> None:
         f.write(yaml_header + "\n" + message)
 
 
-def options_message(
-    assistant_message: str, button_key: str, user_message: str = None, index: int = None
-) -> None:  # noqa
+def options_message(assistant_message: str, button_key: str, user_message: str | None = None, index: int | None = None) -> None:  # noqa
     """Uses st.popover for a less intrusive save option."""
     with st.popover("Options"):
         with st.popover("Store answer"):

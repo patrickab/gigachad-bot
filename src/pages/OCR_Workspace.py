@@ -46,12 +46,8 @@ def ocr_workspace() -> None:
         st.rerun()
 
     if "ocr_response" in st.session_state:
-        options_message(
-            assistant_message=st.session_state.ocr_response, button_key="ocr_paste"
-        )
-        edited_content = editor(
-            text_to_edit=st.session_state.ocr_response, language="markdown", key="ocr"
-        )
+        options_message(assistant_message=st.session_state.ocr_response, button_key="ocr_paste")
+        edited_content = editor(text_to_edit=st.session_state.ocr_response, language="markdown", key="ocr")
         st.markdown(edited_content)
         st.session_state.ocr_response = edited_content
 

@@ -1,7 +1,5 @@
-import os
-
-import streamlit as st
 from st_copy import copy_button
+import streamlit as st
 from streamlit_paste_button import PasteResult
 
 from config import DIRECTORY_CHAT_HISTORIES
@@ -48,16 +46,11 @@ def chat_interface() -> None:
                 copy_button(prompt)
             with st.chat_message("assistant"):
                 # Can be toggled if "Code Assistant" prompt is selected
-                if (
-                    st.session_state.refactor_code
-                    and st.session_state.selected_prompt == "Code Assistant"
-                ):
+                if st.session_state.refactor_code and st.session_state.selected_prompt == "Code Assistant":
                     prompt = f"Analyze this module for possibilities of more concise implementation - without loss of robustness, compatibility or understandability :\n\n <code>\n{prompt}\n</code>"  # noqa
                     st.session_state.refactor_code = False
 
-                system_prompt = st.session_state.system_prompts[
-                    st.session_state.selected_prompt
-                ]
+                system_prompt = st.session_state.system_prompts[st.session_state.selected_prompt]
 
                 # Defaults to empty image if not provided
                 api_img: PasteResult = st.session_state.api_img
@@ -98,7 +91,7 @@ def gigachad_sidebar() -> None:
     init_chat_variables()
 
     with st.sidebar:
-        # ------------------------------------------------- Model & Prompt Selection ------------------------------------------------- #
+        # --- Model & Prompt Selection ---
         st.session_state.selected_model = model_selector(key="gigachad_bot")
 
         st.session_state.selected_prompt = st.selectbox(
@@ -132,9 +125,7 @@ def gigachad_sidebar() -> None:
                     filename = st.text_input("Filename", key="history_filename_input")
                     if st.button("Save Chat History", key="save_chat_history_button"):
                         DIRECTORY_CHAT_HISTORIES.mkdir(parents=True, exist_ok=True)
-                        st.session_state.client.store_history(
-                            str(DIRECTORY_CHAT_HISTORIES / f"{filename}.csv")
-                        )
+                        st.session_state.client.store_history(str(DIRECTORY_CHAT_HISTORIES / f"{filename}.csv"))
                         st.success("Successfully saved chat")
 
         # ---------------------------------------------- Chat Histories ---------------------------------------------- #
@@ -157,9 +148,7 @@ def gigachad_sidebar() -> None:
                         col_load, col_delete, col_archive = st.columns(3)
                         with col_load:
                             if st.button("⟳", key=f"load_{history}"):
-                                st.session_state.client.load_history(
-                                    str(DIRECTORY_CHAT_HISTORIES / history_path)
-                                )
+                                st.session_state.client.load_history(str(DIRECTORY_CHAT_HISTORIES / history_path))
                         with col_delete:
                             if st.button("🗑", key=f"delete_{history}"):
                                 (DIRECTORY_CHAT_HISTORIES / history_path).unlink()
@@ -168,9 +157,7 @@ def gigachad_sidebar() -> None:
                             if st.button("⛁", key=f"archive_{history}"):
                                 archive_dir = DIRECTORY_CHAT_HISTORIES / "archived"
                                 archive_dir.mkdir(parents=True, exist_ok=True)
-                                (DIRECTORY_CHAT_HISTORIES / history_path).rename(
-                                    archive_dir / history_path.name
-                                )
+                                (DIRECTORY_CHAT_HISTORIES / history_path).rename(archive_dir / history_path.name)
                                 st.rerun()
 
 

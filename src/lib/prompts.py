@@ -1,8 +1,6 @@
 # ruff: noqa
 
-_MAX_INFO_MIN_VERBOSITY = (
-    "Adhere to the principle of minimum verbosity maximum information."
-)
+_MAX_INFO_MIN_VERBOSITY = "Adhere to the principle of minimum verbosity maximum information."
 _LAYERED_MARKDOWN_STRUCTURE = "Use markdown to structure responses for skimmable layout to reduce cognitive overload."
 
 __SYS_RESPONSE_BEHAVIOR = """
