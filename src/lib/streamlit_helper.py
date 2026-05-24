@@ -16,7 +16,6 @@ from streamlit_paste_button import PasteResult, paste_image_button
 from config import (
     DIRECTORY_OBSIDIAN_VAULT,
 )
-from lib.non_user_prompts import SYS_NOTE_TO_OBSIDIAN_YAML
 from lib.prompts import (
     SYS_ADVISOR,
     SYS_ARTICLE,
@@ -286,27 +285,17 @@ def paste_img_button() -> PasteResult:
 
 def write_to_md(filename: str, message: str) -> None:
     """Write an assistant response to .md (idx: 0 = most recent)."""
-    if not filename.endswith(".md"):
-        filename += ".md"
-
-    sys_prompt = SYS_NOTE_TO_OBSIDIAN_YAML.replace("{{file_name_no_ext}}", filename.split(".md")[0])
     llm_client = st.session_state.client
-    response = llm_client.api_query(
+
+    file_path = DIRECTORY_OBSIDIAN_VAULT / f"{filename}.md"
+    llm_client.write_to_obsidian(
+        file_path=file_path,
+        message=message,
         model=NANOTASK_MODEL,
-        user_msg=message,
-        system_prompt=sys_prompt.replace("{{user_notes}}", message),
-        stream=False,
     )
-    yaml_header = response.choices[0]["message"]["content"]
 
-    file_path = DIRECTORY_OBSIDIAN_VAULT / filename
-    with open(file_path, "w", encoding="utf-8") as f:
-        f.write(yaml_header + "\n" + message)
-
-    markdown_dir = Path("markdown")
-    markdown_dir.mkdir(exist_ok=True)
-    with open(markdown_dir / filename, "w", encoding="utf-8") as f:
-        f.write(yaml_header + "\n" + message)
+    # Also write a copy to the local markdown dir using the simple text writer
+    llm_client.write_to_md(file_path=Path("markdown") / f"{filename}.md", message=file_path.read_text(encoding="utf-8"))
 
 
 def options_message(assistant_message: str, button_key: str, user_message: str | None = None, index: int | None = None) -> None:  # noqa
