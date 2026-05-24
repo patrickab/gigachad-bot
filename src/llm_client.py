@@ -1,5 +1,3 @@
-import csv
-from pathlib import Path
 from typing import Any, Dict, Iterator, List, Union
 
 from litellm.types.utils import ModelResponse
@@ -78,20 +76,3 @@ class LLMClient(BaseLLMClient):
     def batch_api_query(self, model: str, **kwargs: Dict[str, Any]) -> List[Union[ModelResponse, Exception]]:
         """Overrides base batch_api_query to add startup configs."""
         return super().batch_api_query(model=model, **self._apply_model_config(model, kwargs))
-
-    # -------------------------------- Streamlit State Management -------------------------------- #
-    def store_history(self, filename: str) -> None:
-        """Store message history to filesystem."""
-        with Path(filename).open("w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow(["role", "content"])
-            writer.writerows([msg["role"], msg["content"]] for msg in self.messages)
-
-    def load_history(self, filename: str) -> None:
-        """Load message history from filesystem."""
-        if (p := Path(filename)).exists():
-            with p.open("r", newline="", encoding="utf-8") as f:
-                self.messages = list(csv.DictReader(f))
-
-    def reset_history(self) -> None:
-        self.messages = []
