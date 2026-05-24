@@ -26,7 +26,8 @@ class LLMClient(BaseLLMClient):
 
     def __init__(self) -> None:
         super().__init__()
-        self.messages: List[Dict[str, str]] = []  # [role, message] - only store text for efficiency
+        # [role, message] - only store text for efficiency
+        self.messages: List[Dict[str, str]] = []
         self.sys_prompt = ""
         self._vllm_config = None
         self._exllama_config = None
@@ -37,6 +38,7 @@ class LLMClient(BaseLLMClient):
         if self._vllm_config is None:
             try:
                 from llm_config import VLLM_CONFIG
+
                 self._vllm_config = VLLM_CONFIG
             except ImportError:
                 self._vllm_config = {}
@@ -47,6 +49,7 @@ class LLMClient(BaseLLMClient):
         if self._exllama_config is None:
             try:
                 from llm_config import EXLLAMA_CONFIG
+
                 self._exllama_config = EXLLAMA_CONFIG
             except ImportError:
                 self._exllama_config = {}
@@ -64,17 +67,23 @@ class LLMClient(BaseLLMClient):
 
         return kwargs
 
-    def chat(self, model: str, **kwargs: Dict[str, Any]) -> Iterator[str] | ChatCompletion:
+    def chat(
+        self, model: str, **kwargs: Dict[str, Any]
+    ) -> Iterator[str] | ChatCompletion:
         """Overrides base chat method to add startup configs."""
         kwargs = self._apply_model_config(model, kwargs)
         return super().chat(model=model, **kwargs)
 
-    def api_query(self, model: str, **kwargs: Dict[str, Any]) -> Iterator[str] | ChatCompletion:
+    def api_query(
+        self, model: str, **kwargs: Dict[str, Any]
+    ) -> Iterator[str] | ChatCompletion:
         """Overrides base api_query to add startup configs."""
         kwargs = self._apply_model_config(model, kwargs)
         return super().api_query(model=model, **kwargs)
 
-    def batch_api_query(self, model: str, **kwargs: Dict[str, Any]) -> List[Union[ModelResponse, Exception]]:
+    def batch_api_query(
+        self, model: str, **kwargs: Dict[str, Any]
+    ) -> List[Union[ModelResponse, Exception]]:
         """Overrides base batch_api_query to add startup configs."""
         kwargs = self._apply_model_config(model, kwargs)
         return super().batch_api_query(model=model, **kwargs)
@@ -95,7 +104,9 @@ class LLMClient(BaseLLMClient):
 
         with open(filename, "r", newline="", encoding="utf-8") as csvfile:
             reader = csv.DictReader(csvfile)
-            messages = [{"role": row["role"], "content": row["content"]} for row in reader]
+            messages = [
+                {"role": row["role"], "content": row["content"]} for row in reader
+            ]
             self.messages = messages
 
     def reset_history(self) -> None:
