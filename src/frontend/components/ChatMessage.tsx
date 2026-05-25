@@ -1,8 +1,8 @@
 "use client"
 
 import { motion } from "framer-motion"
-import { memo } from "react"
-import { Bot, Copy, Trash2, User } from "lucide-react"
+import { memo, useState } from "react"
+import { Bot, Check, Copy, Trash2, User } from "lucide-react"
 import { MarkdownRenderer } from "./MarkdownRenderer"
 
 interface ChatMessageProps {
@@ -14,6 +14,14 @@ interface ChatMessageProps {
 
 function ChatMessageInner({ role, content, index, onDelete }: ChatMessageProps) {
   const isUser = role === "user"
+  const [copied, setCopied] = useState(false)
+
+  function handleCopy() {
+    navigator.clipboard.writeText(content).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
 
   return (
     <motion.div
@@ -33,7 +41,7 @@ function ChatMessageInner({ role, content, index, onDelete }: ChatMessageProps) 
           </div>
         )}
       </div>
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 flex flex-col">
         <div className="mb-0.5 text-xs font-medium text-zinc-500">{isUser ? "You" : "Assistant"}</div>
         {isUser ? (
           <p className="text-sm whitespace-pre-wrap text-zinc-200">{content}</p>
@@ -45,26 +53,39 @@ function ChatMessageInner({ role, content, index, onDelete }: ChatMessageProps) 
             Thinking…
           </span>
         )}
-      </div>
-      <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-        {content && (
-          <button
-            onClick={() => navigator.clipboard.writeText(content)}
-            className="rounded p-1 hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300"
-            title="Copy"
-          >
-            <Copy className="h-3.5 w-3.5" />
-          </button>
-        )}
-        {onDelete && (
-          <button
-            onClick={() => onDelete(index)}
-            className="rounded p-1 hover:bg-zinc-800 text-zinc-500 hover:text-red-400"
-            title="Delete pair"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
-        )}
+        <div className="flex items-center justify-end gap-1 mt-1 opacity-0 transition-opacity group-hover:opacity-100">
+          {content && (
+            <div className="relative">
+              <button
+                onClick={handleCopy}
+                className="rounded p-1 hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300"
+                title="Copy"
+              >
+                {copied ? <Check className="h-3.5 w-3.5 text-cyan-400" /> : <Copy className="h-3.5 w-3.5" />}
+              </button>
+              {copied && (
+                <motion.span
+                  initial={{ opacity: 0, y: 0 }}
+                  animate={{ opacity: 1, y: -8 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.4 }}
+                  className="absolute -top-5 left-1/2 -translate-x-1/2 text-[10px] text-cyan-400 pointer-events-none whitespace-nowrap"
+                >
+                  Copied!
+                </motion.span>
+              )}
+            </div>
+          )}
+          {onDelete && (
+            <button
+              onClick={() => onDelete(index)}
+              className="rounded p-1 hover:bg-zinc-800 text-zinc-500 hover:text-red-400"
+              title="Delete pair"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
       </div>
     </motion.div>
   )

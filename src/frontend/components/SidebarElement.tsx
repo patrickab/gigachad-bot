@@ -1,10 +1,9 @@
 import { ElementType } from "react"
-import { motion } from "framer-motion"
 
 interface SidebarElementProps {
   id: string
   icon: ElementType
-  title: string
+  title?: string
   onClick: () => void
   collapsed: boolean
   isActive?: boolean
@@ -31,7 +30,7 @@ export function SidebarElement({
       } ${collapsed ? "justify-center" : "justify-start gap-3"} ${className}`}
     >
       <Icon className="h-4 w-4 shrink-0" />
-      {!collapsed && (
+      {!collapsed && title && (
         <span className="text-sm font-medium truncate">{title}</span>
       )}
     </button>

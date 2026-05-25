@@ -9,6 +9,7 @@ interface SidebarProps {
   collapsed: boolean
   onToggle: () => void
   histories: Record<string, string[]>
+  historiesLoading?: boolean
   onHistoryLoad: (filename: string) => void
   onHistoryRefresh: () => void
   onSave: () => void
@@ -19,6 +20,7 @@ export function Sidebar({
   collapsed,
   onToggle,
   histories,
+  historiesLoading,
   onHistoryLoad,
   onHistoryRefresh,
   onSave,
@@ -31,7 +33,6 @@ export function Sidebar({
     collapsed,
   })
 
-  // Separate the top-level controls (e.g. toggle) from main items
   const toggleItem = sidebarItems.find(item => item.id === "toggle-collapse")
   const mainItems = sidebarItems.filter(item => item.id !== "toggle-collapse")
 
@@ -42,23 +43,26 @@ export function Sidebar({
       transition={{ duration: 0.25, ease: "easeInOut" }}
       className="shrink-0 border-r border-zinc-800 bg-zinc-950 flex flex-col overflow-hidden"
     >
-      <div className={`flex items-center px-2 py-2 border-b border-zinc-800 h-[60px] ${collapsed ? "justify-center" : "justify-between"}`}>
+      <div className="flex items-center justify-between px-2 py-2 border-b border-zinc-800 h-[60px]">
         {!collapsed && (
-          <span className="text-sm font-semibold text-zinc-200 px-2">Gigachad</span>
+          <span className="text-sm font-semibold text-zinc-200 px-2">GigaChat Bot</span>
         )}
-        {toggleItem && (
-          <SidebarElement
-            {...toggleItem}
-            collapsed={true} // Toggle button itself is always icon-only
-            className="w-auto p-1.5 hover:bg-zinc-900"
-          />
-        )}
+        <div className={collapsed ? "flex justify-center w-full" : "flex justify-end"}>
+          {toggleItem && (
+            <SidebarElement
+              {...toggleItem}
+              collapsed={collapsed}
+              className="w-auto p-1.5 hover:bg-zinc-900"
+            />
+          )}
+        </div>
       </div>
       
       <div className="flex-1 overflow-y-auto py-3 flex flex-col gap-2">
         <div className="px-2">
           <ChatHistoryManager 
-            histories={histories} 
+            histories={histories}
+            historiesLoading={historiesLoading}
             onLoad={onHistoryLoad} 
             onRefresh={onHistoryRefresh} 
             collapsed={collapsed}
@@ -77,8 +81,6 @@ export function Sidebar({
             />
           ))}
         </div>
-        
-        <div className="flex-1" />
       </div>
     </motion.aside>
   )

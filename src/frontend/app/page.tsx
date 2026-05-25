@@ -27,6 +27,7 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
     models,
     prompts,
     histories,
+    historiesLoading,
     refreshHistories,
     loadHistory,
     deleteMessagePair,
@@ -73,6 +74,21 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
       refreshHistories()
     }
   }, [messages, refreshHistories])
+
+  useEffect(() => {
+    function handler(e: KeyboardEvent) {
+      if (e.altKey && e.key === "s") {
+        e.preventDefault()
+        handleSidebarSave()
+      }
+      if (e.altKey && e.key === "r") {
+        e.preventDefault()
+        reset()
+      }
+    }
+    document.addEventListener("keydown", handler)
+    return () => document.removeEventListener("keydown", handler)
+  }, [handleSidebarSave, reset])
 
   const disableAll = useCallback(() => {
     setResearchEnabled(false)
@@ -145,6 +161,7 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
         collapsed={collapsed}
         onToggle={() => setCollapsed(!collapsed)}
         histories={histories}
+        historiesLoading={historiesLoading}
         onHistoryLoad={loadHistory}
         onHistoryRefresh={refreshHistories}
         onSave={handleSidebarSave}

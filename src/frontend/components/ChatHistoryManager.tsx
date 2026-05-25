@@ -6,16 +6,18 @@ import { motion, AnimatePresence } from "framer-motion"
 import { archiveChatHistory, deleteChatHistory, loadChatHistory, saveChatHistory } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { SidebarElement } from "./SidebarElement"
+import { Skeleton } from "./Skeleton"
 
 interface ChatHistoryManagerProps {
   histories: Record<string, string[]>
+  historiesLoading?: boolean
   onLoad: (filename: string) => void
   onRefresh: () => void
   collapsed?: boolean
   onExpand?: () => void
 }
 
-export function ChatHistoryManager({ histories, onLoad, onRefresh, collapsed, onExpand }: ChatHistoryManagerProps) {
+export function ChatHistoryManager({ histories, historiesLoading, onLoad, onRefresh, collapsed, onExpand }: ChatHistoryManagerProps) {
   const [open, setOpen] = useState(false)
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set())
   const [loadingFile, setLoadingFile] = useState<string | null>(null)
@@ -86,64 +88,74 @@ export function ChatHistoryManager({ histories, onLoad, onRefresh, collapsed, on
             className="overflow-hidden"
           >
             <div className="space-y-1 pl-1">
-              {dirs.map(([dir, files]) => (
-                <div key={dir}>
-                  <button
-                    onClick={() =>
-                      setExpandedDirs((prev) => {
-                        const next = new Set(prev)
-                        if (next.has(dir)) next.delete(dir)
-                        else next.add(dir)
-                        return next
-                      })
-                    }
-                    className="flex items-center gap-1.5 px-2 py-1 text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors w-full"
-                  >
-                    <Folder className="h-3 w-3" />
-                    {dir}
-                  </button>
-                  <AnimatePresence>
-                    {expandedDirs.has(dir) &&
-                      files.map((file) => {
-                        const path = dir === "root" ? file : `${dir}/${file}`
-                        return (
-                          <motion.div
-                            key={path}
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: "auto" }}
-                            exit={{ opacity: 0, height: 0 }}
-                            className="flex items-center gap-1 pl-5 pr-2 py-0.5"
-                          >
-                            <button
-                              onClick={() => handleLoad(file, dir)}
-                              disabled={loadingFile === path}
-                              className="flex-1 truncate text-left text-[11px] text-zinc-400 hover:text-zinc-200 transition-colors"
-                            >
-                              {loadingFile === path ? (
-                                <Loader2 className="inline h-3 w-3 animate-spin mr-1" />
-                              ) : null}
-                              {file.replace(".json", "")}
-                            </button>
-                            <button
-                              onClick={() => handleArchive(file, dir)}
-                              className="rounded p-0.5 text-zinc-600 hover:text-amber-400 transition-colors"
-                            >
-                              <Archive className="h-3 w-3" />
-                            </button>
-                            <button
-                              onClick={() => handleDelete(file, dir)}
-                              className="rounded p-0.5 text-zinc-600 hover:text-red-400 transition-colors"
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </button>
-                          </motion.div>
-                        )
-                      })}
-                  </AnimatePresence>
+              {historiesLoading ? (
+                <div className="space-y-1.5 px-2 py-1">
+                  <Skeleton className="h-3 w-24" />
+                  <Skeleton className="h-3 w-32" />
+                  <Skeleton className="h-3 w-20" />
                 </div>
-              ))}
-              {dirs.length === 0 && (
-                <p className="px-2 py-2 text-[11px] text-zinc-600">No saved chats.</p>
+              ) : (
+                <>
+                  {dirs.map(([dir, files]) => (
+                    <div key={dir}>
+                      <button
+                        onClick={() =>
+                          setExpandedDirs((prev) => {
+                            const next = new Set(prev)
+                            if (next.has(dir)) next.delete(dir)
+                            else next.add(dir)
+                            return next
+                          })
+                        }
+                        className="flex items-center gap-1.5 px-2 py-1 text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors w-full"
+                      >
+                        <Folder className="h-3 w-3" />
+                        {dir}
+                      </button>
+                      <AnimatePresence>
+                        {expandedDirs.has(dir) &&
+                          files.map((file) => {
+                            const path = dir === "root" ? file : `${dir}/${file}`
+                            return (
+                              <motion.div
+                                key={path}
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: "auto" }}
+                                exit={{ opacity: 0, height: 0 }}
+                                className="flex items-center gap-1 pl-5 pr-2 py-0.5"
+                              >
+                                <button
+                                  onClick={() => handleLoad(file, dir)}
+                                  disabled={loadingFile === path}
+                                  className="flex-1 truncate text-left text-[11px] text-zinc-400 hover:text-zinc-200 transition-colors"
+                                >
+                                  {loadingFile === path ? (
+                                    <Loader2 className="inline h-3 w-3 animate-spin mr-1" />
+                                  ) : null}
+                                  {file.replace(".json", "")}
+                                </button>
+                                <button
+                                  onClick={() => handleArchive(file, dir)}
+                                  className="rounded p-0.5 text-zinc-600 hover:text-amber-400 transition-colors"
+                                >
+                                  <Archive className="h-3 w-3" />
+                                </button>
+                                <button
+                                  onClick={() => handleDelete(file, dir)}
+                                  className="rounded p-0.5 text-zinc-600 hover:text-red-400 transition-colors"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </button>
+                              </motion.div>
+                            )
+                          })}
+                      </AnimatePresence>
+                    </div>
+                  ))}
+                  {dirs.length === 0 && (
+                    <p className="px-2 py-2 text-[11px] text-zinc-600">No saved chats.</p>
+                  )}
+                </>
               )}
             </div>
           </motion.div>

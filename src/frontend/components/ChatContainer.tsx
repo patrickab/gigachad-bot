@@ -80,6 +80,8 @@ export function ChatContainer({
           onSend={onSend}
           onOCRRequest={onOCRRequest}
           disabled={isStreaming}
+          isStreaming={isStreaming}
+          onCancel={onCancel}
           researchEnabled={researchEnabled}
           onResearchToggle={onResearchToggle}
           webSearchEnabled={webSearchEnabled}

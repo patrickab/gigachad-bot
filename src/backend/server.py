@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 from fastapi.responses import StreamingResponse
 
-from config import DIRECTORY_CHAT_HISTORIES
+from config import DIRECTORY_CHAT_HISTORIES, SMALL_MODEL
 from lib.prompts import (
     SYS_ADVISOR,
     SYS_ARTICLE,
@@ -92,7 +92,7 @@ class TavilySearchRequest(BaseModel):
     query: str
     num_queries: int = 3
     results_per_query: int = 5
-    expander_model: str = "ollama/gemma4:31b-cloud"
+    expander_model: str = SMALL_MODEL
 
 
 class OCRRequest(BaseModel):
@@ -160,10 +160,11 @@ async def chat(req: ChatRequest) -> StreamingResponse:
 
     async def event_stream() -> Any:
         try:
+            c.reset_history()
             for chunk in c.api_query(
                 model=req.model,
                 user_msg=req.user_msg,
-                user_msg_history=req.messages,
+                user_msg_history=[],
                 system_prompt=req.system_prompt,
                 img=img,
                 stream=True,
@@ -186,10 +187,11 @@ async def chat_nonstream(req: ChatRequest) -> dict[str, Any]:
 
     img = _decode_image(req.img_base64)
 
+    c.reset_history()
     response = c.api_query(
         model=req.model,
         user_msg=req.user_msg,
-        user_msg_history=req.messages,
+        user_msg_history=[],
         system_prompt=req.system_prompt,
         img=img,
         stream=False,

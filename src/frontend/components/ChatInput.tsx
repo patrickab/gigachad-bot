@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { ArrowUp, Plus, LayoutGrid, Mic, Search, Globe, Sigma, X, Maximize2 } from "lucide-react"
+import { ArrowUp, Plus, LayoutGrid, Mic, Search, Globe, Sigma, Square, X, Maximize2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { downscaleImage as apiDownscale } from "@/lib/api"
 
@@ -10,6 +10,8 @@ interface ChatInputProps {
   onSend: (text: string, imageDataUrl: string | null) => void
   onOCRRequest?: (image: string) => void
   disabled?: boolean
+  isStreaming?: boolean
+  onCancel?: () => void
   researchEnabled?: boolean
   onResearchToggle?: () => void
   webSearchEnabled?: boolean
@@ -23,6 +25,8 @@ export function ChatInput({
   onSend,
   onOCRRequest,
   disabled,
+  isStreaming,
+  onCancel,
   researchEnabled,
   onResearchToggle,
   webSearchEnabled,
@@ -302,16 +306,26 @@ export function ChatInput({
             >
               <Mic className={cn("h-4 w-4", isListening && "animate-pulse")} />
             </button>
-            <button
-              onClick={handleSubmit}
-              disabled={disabled || !canSend}
-              className={cn(
-                "rounded-full p-2.5 transition-all",
-                canSend && !disabled ? "bg-white text-black hover:bg-zinc-200" : "bg-zinc-800 text-zinc-500"
-              )}
-            >
-              <ArrowUp className="h-4 w-4" />
-            </button>
+            {isStreaming ? (
+              <button
+                onClick={onCancel}
+                className="rounded-full p-2.5 transition-all bg-white text-black hover:bg-zinc-200"
+                title="Stop generating"
+              >
+                <Square className="h-4 w-4 fill-current" />
+              </button>
+            ) : (
+              <button
+                onClick={handleSubmit}
+                disabled={disabled || !canSend}
+                className={cn(
+                  "rounded-full p-2.5 transition-all",
+                  canSend && !disabled ? "bg-white text-black hover:bg-zinc-200" : "bg-zinc-800 text-zinc-500"
+                )}
+              >
+                <ArrowUp className="h-4 w-4" />
+              </button>
+            )}
           </div>
         </div>
       </div>

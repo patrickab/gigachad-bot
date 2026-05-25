@@ -32,6 +32,7 @@ export interface UseChatReturn {
   models: ModelsResponse | null
   prompts: string[]
   histories: Record<string, string[]>
+  historiesLoading: boolean
   refreshHistories: () => Promise<void>
   error: string | null
   loadHistory: (filename: string) => Promise<void>
@@ -45,6 +46,7 @@ export function useChat(): UseChatReturn {
   const [models, setModels] = useState<ModelsResponse | null>(null)
   const [prompts, setPrompts] = useState<string[]>([])
   const [histories, setHistories] = useState<Record<string, string[]>>({})
+  const [historiesLoading, setHistoriesLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const abortRef = useRef<(() => void) | null>(null)
   const assistantRef = useRef<Message | null>(null)
@@ -61,6 +63,8 @@ export function useChat(): UseChatReturn {
       setHistories(data.histories ?? {})
     } catch {
       // unavailable
+    } finally {
+      setHistoriesLoading(false)
     }
   }
 
@@ -73,15 +77,10 @@ export function useChat(): UseChatReturn {
       const assistantMsg: Message = { role: "assistant", content: "" }
       assistantRef.current = assistantMsg
 
-      let prevMessages: Message[] = []
-
-      setMessages((prev) => {
-        prevMessages = prev
-        return [...prev, userMsg, assistantMsg]
-      })
+      setMessages((prev) => [...prev, userMsg, assistantMsg])
 
       try {
-        const { stream, abort } = createChatStream({ ...req, messages: prevMessages })
+        const { stream, abort } = createChatStream({ ...req, messages: [] })
         abortRef.current = abort
 
         const reader = stream
@@ -198,7 +197,6 @@ export function useChat(): UseChatReturn {
         query: params.query,
         num_queries: params.numQueries,
         results_per_query: params.resultsPerQuery,
-        expander_model: "ollama/gemma3:4b",
       })
 
       if (result.results.length === 0) {
@@ -252,6 +250,7 @@ export function useChat(): UseChatReturn {
     models,
     prompts,
     histories,
+    historiesLoading,
     refreshHistories: loadHistories,
     error,
     loadHistory: loadHistoryMessages,

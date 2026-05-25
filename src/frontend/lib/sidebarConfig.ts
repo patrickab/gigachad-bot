@@ -12,7 +12,6 @@ export const getSidebarConfig = (actions: SidebarActionConfig) => {
     {
       id: "toggle-collapse",
       icon: actions.collapsed ? PanelLeft : PanelLeftClose,
-      title: actions.collapsed ? "Expand Sidebar" : "Collapse Sidebar",
       onClick: actions.onToggleCollapse,
     },
     {

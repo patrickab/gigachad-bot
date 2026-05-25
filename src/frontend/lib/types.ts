@@ -51,7 +51,7 @@ export interface TavilySearchRequest {
   query: string
   num_queries: number
   results_per_query: number
-  expander_model: string
+  expander_model?: string
 }
 
 export interface TavilySearchResult {

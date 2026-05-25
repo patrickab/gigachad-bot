@@ -42,11 +42,65 @@ export function TabManager({ renderContent }: TabManagerProps) {
   const closeTab = useCallback((id: string) => {
     setTabs((prev) => {
       if (prev.length <= 1) return prev
+      const idx = prev.findIndex((t) => t.id === id)
       const next = prev.filter((t) => t.id !== id)
-      if (id === activeTab) setActiveTab(next[0]?.id ?? "")
+      if (id === activeTab) {
+        const targetIdx = Math.max(0, idx - 1)
+        setActiveTab(next[targetIdx]?.id ?? "")
+      }
       return next
     })
   }, [activeTab])
+
+  const closeActiveTab = useCallback(() => {
+    closeTab(activeTab)
+  }, [activeTab, closeTab])
+
+  const switchToNextTab = useCallback(() => {
+    setActiveTab((current) => {
+      const idx = tabs.findIndex((t) => t.id === current)
+      const next = (idx + 1) % tabs.length
+      return tabs[next].id
+    })
+  }, [tabs])
+
+  const switchToPrevTab = useCallback(() => {
+    setActiveTab((current) => {
+      const idx = tabs.findIndex((t) => t.id === current)
+      const prev = (idx - 1 + tabs.length) % tabs.length
+      return tabs[prev].id
+    })
+  }, [tabs])
+
+  useEffect(() => {
+    function handler(e: KeyboardEvent) {
+      if (e.altKey && e.key === "t") {
+        e.preventDefault()
+        addTab()
+      }
+      if (e.altKey && e.key === "w") {
+        e.preventDefault()
+        closeActiveTab()
+      }
+      if (e.key === "Tab" && !e.altKey && !e.ctrlKey && !e.metaKey) {
+        const target = e.target as HTMLElement
+        const isEditable =
+          target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable
+        if (!isEditable) {
+          e.preventDefault()
+          if (e.shiftKey) {
+            switchToPrevTab()
+          } else {
+            switchToNextTab()
+          }
+        }
+      }
+    }
+    document.addEventListener("keydown", handler)
+    return () => document.removeEventListener("keydown", handler)
+  }, [addTab, closeActiveTab, switchToNextTab, switchToPrevTab])
 
   const startRename = useCallback((id: string) => {
     setEditingTab(id)
@@ -105,6 +159,7 @@ export function TabManager({ renderContent }: TabManagerProps) {
                     : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/30"
                 )}
                 onClick={() => setActiveTab(tab.id)}
+                onContextMenu={(e) => { e.preventDefault(); closeTab(tab.id) }}
                 onDoubleClick={() => startRename(tab.id)}
               >
                 {isEditing ? (
