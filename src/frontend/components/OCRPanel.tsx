@@ -3,13 +3,9 @@
 import { useEffect, useRef, useState, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { X, Check } from "lucide-react"
-import { Light as SyntaxHighlighter } from "react-syntax-highlighter"
-import latex from "react-syntax-highlighter/dist/cjs/languages/hljs/latex"
-import { atomOneDark } from "react-syntax-highlighter/dist/cjs/styles/hljs"
 import { MarkdownRenderer } from "./MarkdownRenderer"
+import { ConsoleEditor } from "./ConsoleEditor"
 import { createOCRStream } from "@/lib/api"
-
-SyntaxHighlighter.registerLanguage("latex", latex)
 
 interface OCRPanelProps {
   image: string
@@ -23,8 +19,6 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
   const [isStreaming, setIsStreaming] = useState(true)
   const abortRef = useRef<(() => void) | null>(null)
   const confirmedRef = useRef(false)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const backdropRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const { stream, abort } = createOCRStream(image, model)
@@ -49,13 +43,6 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
 
     return () => { abort() }
   }, [image, model])
-
-  const syncScroll = useCallback(() => {
-    if (textareaRef.current && backdropRef.current) {
-      backdropRef.current.scrollTop = textareaRef.current.scrollTop
-      backdropRef.current.scrollLeft = textareaRef.current.scrollLeft
-    }
-  }, [])
 
   const doConfirm = useCallback(() => {
     if (confirmedRef.current) return
@@ -119,41 +106,12 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
             <div className="px-3 py-1.5 border-b border-zinc-800/30 text-[10px] text-zinc-600 font-medium uppercase tracking-wider">
               Console
             </div>
-            <div className="relative flex-1 min-h-0">
-              <div
-                ref={backdropRef}
-                className="absolute inset-0 overflow-hidden pointer-events-none"
-                aria-hidden
-              >
-                <SyntaxHighlighter
-                  language="latex"
-                  style={atomOneDark}
-                  customStyle={{
-                    margin: 0,
-                    padding: "1rem",
-                    fontSize: "0.75rem",
-                    lineHeight: "1.625",
-                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                    background: "transparent",
-                    minHeight: "100%",
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                    overflowWrap: "break-word",
-                  }}
-                >
-                  {output || " "}
-                </SyntaxHighlighter>
-              </div>
-              <textarea
-                ref={textareaRef}
-                className="relative w-full h-full resize-none bg-transparent p-4 text-xs font-mono leading-relaxed outline-none text-transparent caret-zinc-300 placeholder:text-zinc-600"
-                value={output}
-                onChange={(e) => setOutput(e.target.value)}
-                onScroll={syncScroll}
-                placeholder="Waiting for output..."
-                spellCheck={false}
-              />
-            </div>
+            <ConsoleEditor
+              value={output}
+              onChange={setOutput}
+              language="latex"
+              placeholder="Waiting for output..."
+            />
           </div>
           <div className="w-1/2 flex flex-col min-w-0">
             <div className="px-3 py-1.5 border-b border-zinc-800/30 text-[10px] text-zinc-600 font-medium uppercase tracking-wider flex items-center gap-2">
