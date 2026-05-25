@@ -1,6 +1,10 @@
+import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
+
+import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -20,6 +24,7 @@ from lib.prompts import (
     SYS_QUICK_OVERVIEW,
     SYS_TUTOR,
 )
+from lib.non_user_prompts import SYS_TAVILY_QUERY_EXPANSION
 from llm_client import LLMClient
 from llm_config import MODEL_CONFIGS
 
@@ -67,6 +72,24 @@ class SaveRequest(BaseModel):
 
 class MoveRequest(BaseModel):
     target_dir: str | None = None
+
+
+class ResearchRequest(BaseModel):
+    query: str
+    fast_model: str
+    smart_model: str
+    strategic_model: str
+    depth: int = 2
+    breadth: int = 4
+    reasoning_effort: str | None = None
+    report_type: str = "deep"
+
+
+class TavilySearchRequest(BaseModel):
+    query: str
+    num_queries: int = 3
+    results_per_query: int = 5
+    expander_model: str = "ollama/gemma3:4b"
 
 
 def get_client() -> LLMClient:
@@ -237,3 +260,102 @@ def _decode_image(base64_data: str | None) -> bytes | None:
     if match:
         return base64.b64decode(match.group(1))
     return base64.b64decode(base64_data)
+
+
+@app.post("/api/research")
+async def research(req: ResearchRequest) -> dict[str, Any]:
+    from gpt_researcher import GPTResearcher
+
+    config_path = Path(__file__).resolve().parent.parent.parent / ".gpt-researcher-config.json"
+
+    config: dict[str, Any] = {
+        "RETRIEVER": "tavily",
+        "EMBEDDING": "ollama:nomic-embed-text",
+        "FAST_LLM": f"litellm:{req.fast_model}",
+        "SMART_LLM": f"litellm:{req.smart_model}",
+        "STRATEGIC_LLM": f"litellm:{req.strategic_model}",
+        "DEEP_RESEARCH_DEPTH": req.depth,
+        "DEEP_RESEARCH_BREADTH": req.breadth,
+    }
+    if req.reasoning_effort and req.reasoning_effort != "none":
+        config["REASONING_EFFORT"] = req.reasoning_effort
+
+    with config_path.open("w") as f:
+        json.dump(config, f)
+
+    os.environ["OLLAMA_API_BASE"] = "http://localhost:11434"
+    os.environ["OLLAMA_BASE_URL"] = "http://localhost:11434"
+    if req.reasoning_effort and req.reasoning_effort != "none":
+        os.environ["REASONING_EFFORT"] = req.reasoning_effort
+
+    researcher = GPTResearcher(
+        query=req.query,
+        report_type=req.report_type,
+        config_path=str(config_path),
+    )
+    await researcher.conduct_research()
+    report = await researcher.write_report()
+    sources = researcher.get_source_urls()
+    costs = researcher.get_costs()
+
+    return {"report": report, "sources": sources, "costs": costs}
+
+
+@app.post("/api/tavily-search")
+def tavily_search(req: TavilySearchRequest) -> dict[str, Any]:
+    api_key = os.environ.get("TAVILY_API_KEY", "")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="TAVILY_API_KEY not set")
+
+    c = get_client()
+    prompt = SYS_TAVILY_QUERY_EXPANSION.replace("{k}", str(req.num_queries))
+
+    queries: list[str] = []
+    try:
+        response = c.chat(
+            model=req.expander_model,
+            user_msg=req.query,
+            system_prompt=prompt,
+            temperature=0.4,
+            top_p=0.95,
+            stream=False,
+        )
+        raw = response.choices[0].message.content or ""
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[-1].rsplit("\n", 1)[0]
+        parsed = json.loads(raw)
+        if isinstance(parsed, list) and all(isinstance(q, str) for q in parsed):
+            queries = parsed[:req.num_queries]
+    except Exception:
+        queries = [req.query]
+
+    if not queries:
+        queries = [req.query]
+
+    all_results: list[dict[str, Any]] = []
+    for q in queries:
+        try:
+            r = requests.post(
+                "https://api.tavily.com/search",
+                json={
+                    "api_key": api_key,
+                    "query": q,
+                    "max_results": req.results_per_query,
+                    "search_depth": "basic",
+                },
+                timeout=30,
+            )
+            r.raise_for_status()
+            data = r.json()
+            for item in data.get("results", [])[:req.results_per_query]:
+                all_results.append({
+                    "title": item.get("title", ""),
+                    "url": item.get("url", ""),
+                    "content": item.get("content", ""),
+                    "score": item.get("score", 0.0),
+                })
+        except Exception:
+            pass
+
+    return {"results": all_results, "queries": queries}

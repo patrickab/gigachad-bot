@@ -1,4 +1,4 @@
-import type { ChatHistoriesResponse, ChatRequest, Message, ModelsResponse } from "./types"
+import type { ChatHistoriesResponse, ChatRequest, Message, ModelsResponse, ResearchRequest, TavilySearchRequest, TavilySearchResult } from "./types"
 
 const BASE = "/api"
 
@@ -108,4 +108,20 @@ export async function deleteChatHistory(filename: string): Promise<void> {
 
 export async function archiveChatHistory(filename: string): Promise<void> {
   await request(`/chat-histories/${filename}/archive`, { method: "PUT" })
+}
+
+export async function runResearch(req: ResearchRequest): Promise<{ report: string; sources: string[]; costs: number }> {
+  return request("/research", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  })
+}
+
+export async function runTavilySearch(req: TavilySearchRequest): Promise<TavilySearchResult> {
+  return request<TavilySearchResult>("/tavily-search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  })
 }

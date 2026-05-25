@@ -14,6 +14,10 @@ interface ChatContainerProps {
   onCancel: () => void
   onDeletePair: (index: number) => void
   className?: string
+  researchEnabled?: boolean
+  onResearchToggle?: () => void
+  webSearchEnabled?: boolean
+  onWebSearchToggle?: () => void
 }
 
 export function ChatContainer({
@@ -23,6 +27,10 @@ export function ChatContainer({
   onCancel,
   onDeletePair,
   className,
+  researchEnabled,
+  onResearchToggle,
+  webSearchEnabled,
+  onWebSearchToggle,
 }: ChatContainerProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -42,8 +50,8 @@ export function ChatContainer({
   }
 
   return (
-    <div className={cn("flex flex-col h-full", className)}>
-      <div className="flex-1 overflow-y-auto">
+    <div className={cn("flex flex-col h-full relative", className)}>
+      <div className="flex-1 overflow-y-auto pb-6">
         {pairs.length === 0 && (
           <div className="flex h-full items-center justify-center">
             <p className="text-sm text-zinc-600">Send a message to start.</p>
@@ -59,8 +67,15 @@ export function ChatContainer({
         </AnimatePresence>
         <div ref={bottomRef} />
       </div>
-      <div className="shrink-0 border-t border-zinc-800 bg-zinc-950 p-4">
-        <ChatInput onSend={onSend} disabled={isStreaming} />
+      <div className="shrink-0 px-4 pb-6 z-10">
+        <ChatInput
+          onSend={onSend}
+          disabled={isStreaming}
+          researchEnabled={researchEnabled}
+          onResearchToggle={onResearchToggle}
+          webSearchEnabled={webSearchEnabled}
+          onWebSearchToggle={onWebSearchToggle}
+        />
       </div>
     </div>
   )

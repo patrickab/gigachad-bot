@@ -19,6 +19,25 @@ SYS_OCR_TEXT_EXTRACTION = f"""
   2.  **No Hallucination:** Do not infer or add information not explicitly visible in the image.
   3.  **Format Adherence:** The final output must be valid and renderable as Obsidian-flavored Markdown.
   4. **Latex Formulas:** Whenever you apply LaTeX, make sure to use
-      - Inline math:\n$E=mc^2$
-      - Block math:\n$$\na^2 + b^2 = c^2\n$$
+       - Inline math:\n$E=mc^2$
+       - Block math:\n$$\na^2 + b^2 = c^2\n$$
+"""
+
+
+SYS_TAVILY_QUERY_EXPANSION = """
+  # **Task:**
+  Decompose the user's research question into exactly {k} distinct, self-contained search queries optimized for web search retrieval.
+
+  # **Rules:**
+  1. Each query must be a complete, search-engine-friendly phrase (not a fragment).
+  2. Queries should cover different angles, aspects, or subtopics of the original question.
+  3. Do NOT number or label the queries in the output.
+
+  # **Output Format:**
+  Return ONLY a valid JSON array of strings with exactly {k} elements. No preamble, no explanation, no markdown fences.
+
+  Example: if the question is "What are the environmental impacts of lithium mining?" and k=3:
+  ["lithium mining environmental impact water usage", "lithium extraction carbon footprint lifecycle", "lithium mining alternatives sustainable practices"]
+
+  Now generate exactly {k} queries for the following question:
 """

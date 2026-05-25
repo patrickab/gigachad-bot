@@ -17,6 +17,20 @@ interface MoreOptionsMenuProps {
   onTopPChange: (v: number) => void
   onRefresh: () => void
   onReset: () => void
+  researchEnabled?: boolean
+  researchDepth?: number
+  onResearchDepthChange?: (v: number) => void
+  researchBreadth?: number
+  onResearchBreadthChange?: (v: number) => void
+  researchReasoning?: string
+  onResearchReasoningChange?: (v: string) => void
+  researchReportType?: string
+  onResearchReportTypeChange?: (v: string) => void
+  webSearchEnabled?: boolean
+  webSearchNumQueries?: number
+  onWebSearchNumQueriesChange?: (v: number) => void
+  webSearchResultsPerQuery?: number
+  onWebSearchResultsPerQueryChange?: (v: number) => void
 }
 
 export function MoreOptionsMenu({
@@ -29,6 +43,20 @@ export function MoreOptionsMenu({
   onTopPChange,
   onRefresh,
   onReset,
+  researchEnabled,
+  researchDepth,
+  onResearchDepthChange,
+  researchBreadth,
+  onResearchBreadthChange,
+  researchReasoning,
+  onResearchReasoningChange,
+  researchReportType,
+  onResearchReportTypeChange,
+  webSearchEnabled,
+  webSearchNumQueries,
+  onWebSearchNumQueriesChange,
+  webSearchResultsPerQuery,
+  onWebSearchResultsPerQueryChange,
 }: MoreOptionsMenuProps) {
   const [open, setOpen] = useState(false)
   const [showSaveInput, setShowSaveInput] = useState(false)
@@ -105,6 +133,100 @@ export function MoreOptionsMenu({
               />
             </div>
 
+            {webSearchEnabled && (
+              <div className="pt-2 border-t border-zinc-800/50 space-y-3">
+                <div className="flex items-center gap-2 text-xs font-medium text-sky-400">
+                  <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
+                  Web Search
+                </div>
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[10px] text-zinc-600">
+                    <span>Query count</span>
+                    <span>{webSearchNumQueries}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="1" max="5" step="1"
+                    value={webSearchNumQueries}
+                    onChange={(e) => onWebSearchNumQueriesChange?.(Number(e.target.value))}
+                    className="w-full h-1 bg-zinc-800 rounded-full appearance-none cursor-pointer accent-sky-500"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[10px] text-zinc-600">
+                    <span>Results/query</span>
+                    <span>{webSearchResultsPerQuery}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="1" max="10" step="1"
+                    value={webSearchResultsPerQuery}
+                    onChange={(e) => onWebSearchResultsPerQueryChange?.(Number(e.target.value))}
+                    className="w-full h-1 bg-zinc-800 rounded-full appearance-none cursor-pointer accent-sky-500"
+                  />
+                </div>
+              </div>
+            )}
+
+            {researchEnabled && (
+              <div className="pt-2 border-t border-zinc-800/50 space-y-3">
+                <div className="flex items-center gap-2 text-xs font-medium text-amber-400">
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+                  Research Parameters
+                </div>
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[10px] text-zinc-600">
+                    <span>Depth</span>
+                    <span>{researchDepth}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="1" max="4" step="1"
+                    value={researchDepth}
+                    onChange={(e) => onResearchDepthChange?.(Number(e.target.value))}
+                    className="w-full h-1 bg-zinc-800 rounded-full appearance-none cursor-pointer accent-amber-500"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[10px] text-zinc-600">
+                    <span>Breadth</span>
+                    <span>{researchBreadth}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="2" max="6" step="1"
+                    value={researchBreadth}
+                    onChange={(e) => onResearchBreadthChange?.(Number(e.target.value))}
+                    className="w-full h-1 bg-zinc-800 rounded-full appearance-none cursor-pointer accent-amber-500"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <span className="text-[10px] text-zinc-600">Reasoning effort</span>
+                  <select
+                    value={researchReasoning}
+                    onChange={(e) => onResearchReasoningChange?.(e.target.value)}
+                    className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-300 outline-none focus:border-zinc-700"
+                  >
+                    <option value="none">None</option>
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-[10px] text-zinc-600">Report type</span>
+                  <select
+                    value={researchReportType}
+                    onChange={(e) => onResearchReportTypeChange?.(e.target.value)}
+                    className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-300 outline-none focus:border-zinc-700"
+                  >
+                    <option value="deep">Deep (recursive)</option>
+                    <option value="research_report">Standard (single-pass)</option>
+                  </select>
+                </div>
+              </div>
+            )}
+
             {/* Actions */}
             <div className="pt-2 border-t border-zinc-800/50 space-y-1">
               {showSaveInput ? (
@@ -143,7 +265,7 @@ export function MoreOptionsMenu({
                   Save Chat History
                 </button>
               )}
-              
+
               <button
                 onClick={() => {
                   onReset()
