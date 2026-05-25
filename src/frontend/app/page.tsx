@@ -8,7 +8,10 @@ import { MoreOptionsMenu } from "@/components/MoreOptionsMenu"
 import { ReasoningSelector } from "@/components/ReasoningSelector"
 import { ResearchModelsBar } from "@/components/ResearchModelsBar"
 import { ThemeToggle } from "@/components/ThemeToggle"
+import { OCRPanel } from "@/components/OCRPanel"
 import { useChat } from "@/hooks/useChat"
+
+const DEFAULT_VISION_MODEL = "ollama/qwen3-vl:235b-instruct-cloud"
 
 export default function Home() {
   const {
@@ -25,9 +28,10 @@ export default function Home() {
     refreshHistories,
     loadHistory,
     deleteMessagePair,
+    addMessagePair,
   } = useChat()
 
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(true)
   const [selectedModel, setSelectedModel] = useState("")
   const [selectedPrompt, setSelectedPrompt] = useState<string | null>(null)
   const [temperature, setTemperature] = useState(0.2)
@@ -47,14 +51,33 @@ export default function Home() {
   const [webSearchNumQueries, setWebSearchNumQueries] = useState(3)
   const [webSearchResultsPerQuery, setWebSearchResultsPerQuery] = useState(5)
 
+  const [ocrEnabled, setOCREnabled] = useState(false)
+  const [ocrModel, setOCRModel] = useState(DEFAULT_VISION_MODEL)
+  const [ocrImage, setOCRImage] = useState<string | null>(null)
+  const [downscaleImages, setDownscaleImages] = useState(true)
+
+  const disableAll = () => {
+    setResearchEnabled(false)
+    setWebSearchEnabled(false)
+    setOCREnabled(false)
+  }
+
   const toggleResearch = () => {
-    setResearchEnabled(!researchEnabled)
-    if (webSearchEnabled) setWebSearchEnabled(false)
+    if (researchEnabled) { setResearchEnabled(false); return }
+    disableAll()
+    setResearchEnabled(true)
   }
 
   const toggleWebSearch = () => {
-    setWebSearchEnabled(!webSearchEnabled)
-    if (researchEnabled) setResearchEnabled(false)
+    if (webSearchEnabled) { setWebSearchEnabled(false); return }
+    disableAll()
+    setWebSearchEnabled(true)
+  }
+
+  const toggleOCR = () => {
+    if (ocrEnabled) { setOCREnabled(false); return }
+    disableAll()
+    setOCREnabled(true)
   }
 
   const handleSend = useCallback(
@@ -85,6 +108,7 @@ export default function Home() {
           top_p: topP,
           reasoning_effort: reasoningEffort === "none" ? null : reasoningEffort,
           img_base64: imageDataUrl,
+          downscale_images: downscaleImages,
         })
       }
     },
@@ -92,7 +116,7 @@ export default function Home() {
       webSearchEnabled, webSearchNumQueries, webSearchResultsPerQuery,
       researchEnabled, researchFastModel, researchSmartModel, researchStrategicModel,
       researchDepth, researchBreadth, researchReasoning, researchReportType,
-      selectedModel, selectedPrompt, temperature, topP, reasoningEffort,
+      selectedModel, selectedPrompt, temperature, topP, reasoningEffort, downscaleImages,
       send, research, webSearch,
     ]
   )
@@ -158,6 +182,12 @@ export default function Home() {
               onWebSearchNumQueriesChange={setWebSearchNumQueries}
               webSearchResultsPerQuery={webSearchResultsPerQuery}
               onWebSearchResultsPerQueryChange={setWebSearchResultsPerQuery}
+              ocrEnabled={ocrEnabled}
+              ocrModel={ocrModel}
+              onOCRModelChange={setOCRModel}
+              downscaleImages={downscaleImages}
+              onDownscaleImagesChange={setDownscaleImages}
+              models={models}
             />
           </div>
         </header>
@@ -172,7 +202,25 @@ export default function Home() {
             onResearchToggle={toggleResearch}
             webSearchEnabled={webSearchEnabled}
             onWebSearchToggle={toggleWebSearch}
+            ocrEnabled={ocrEnabled}
+            onOCRToggle={toggleOCR}
+            onOCRRequest={setOCRImage}
+            downscaleImages={downscaleImages}
           />
+          {ocrEnabled && ocrImage && (
+            <OCRPanel
+              image={ocrImage}
+              model={ocrModel || DEFAULT_VISION_MODEL}
+              onComplete={(output) => {
+                addMessagePair("OCR Request", output)
+                setOCRImage(null)
+              }}
+              onClose={() => {
+                setOCRImage(null)
+                setOCREnabled(false)
+              }}
+            />
+          )}
         </div>
       </main>
     </div>
