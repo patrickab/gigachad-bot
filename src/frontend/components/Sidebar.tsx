@@ -22,16 +22,10 @@ export function Sidebar({
 }: SidebarProps) {
   const sidebarItems = getSidebarConfig({
     onToggleCollapse: onToggle,
-    onNewChat: () => {
-      // Currently, starting a new chat is usually handled by clearing state in the parent
-      // but we add this here as a structural example. If there's a clear new chat method
-      // passed from parent, use that here. For now, it might just be a placeholder.
-      console.log("New chat clicked")
-    },
     collapsed,
   })
 
-  // Separate the top-level controls (e.g. toggle) from main items (e.g. New Chat)
+  // Separate the top-level controls (e.g. toggle) from main items
   const toggleItem = sidebarItems.find(item => item.id === "toggle-collapse")
   const mainItems = sidebarItems.filter(item => item.id !== "toggle-collapse")
 
@@ -56,6 +50,18 @@ export function Sidebar({
       </div>
       
       <div className="flex-1 overflow-y-auto py-3 flex flex-col gap-2">
+        <div className="px-2">
+          <ChatHistoryManager 
+            histories={histories} 
+            onLoad={onHistoryLoad} 
+            onRefresh={onHistoryRefresh} 
+            collapsed={collapsed}
+            onExpand={() => {
+              if (collapsed) onToggle()
+            }}
+          />
+        </div>
+
         <div className="px-2 flex flex-col gap-1">
           {mainItems.map((item) => (
             <SidebarElement
@@ -67,12 +73,6 @@ export function Sidebar({
         </div>
         
         <div className="flex-1" />
-        
-        {!collapsed && (
-          <div className="px-3">
-            <ChatHistoryManager histories={histories} onLoad={onHistoryLoad} onRefresh={onHistoryRefresh} />
-          </div>
-        )}
       </div>
     </motion.aside>
   )

@@ -5,14 +5,17 @@ import { useState, useEffect, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { archiveChatHistory, deleteChatHistory, loadChatHistory, saveChatHistory } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import { SidebarElement } from "./SidebarElement"
 
 interface ChatHistoryManagerProps {
   histories: Record<string, string[]>
   onLoad: (filename: string) => void
   onRefresh: () => void
+  collapsed?: boolean
+  onExpand?: () => void
 }
 
-export function ChatHistoryManager({ histories, onLoad, onRefresh }: ChatHistoryManagerProps) {
+export function ChatHistoryManager({ histories, onLoad, onRefresh, collapsed, onExpand }: ChatHistoryManagerProps) {
   const [open, setOpen] = useState(false)
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set())
   const [loadingFile, setLoadingFile] = useState<string | null>(null)
@@ -41,27 +44,40 @@ export function ChatHistoryManager({ histories, onLoad, onRefresh }: ChatHistory
   }
 
   return (
-    <div className="space-y-1">
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-xs font-medium text-zinc-500 hover:bg-zinc-900 transition-colors"
-      >
-        <span className="flex items-center gap-2">
-          <Clock className="h-3.5 w-3.5" />
-          Histories
-          {totalFiles > 0 && (
-            <span className="rounded-full bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500">{totalFiles}</span>
-          )}
-        </span>
-        <motion.span animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.2 }}>
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="text-zinc-500">
-            <path d="M4 2L8 6L4 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          </svg>
-        </motion.span>
-      </button>
+    <div className="space-y-1 w-full">
+      {collapsed ? (
+        <SidebarElement
+          id="histories-collapsed"
+          icon={Clock}
+          title="Histories"
+          collapsed={true}
+          onClick={() => {
+            if (onExpand) onExpand()
+            setOpen(true)
+          }}
+        />
+      ) : (
+        <button
+          onClick={() => setOpen(!open)}
+          className="flex w-full items-center justify-between p-2 rounded-md transition-colors text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
+        >
+          <span className="flex items-center gap-3">
+            <Clock className="h-4 w-4 shrink-0" />
+            <span className="text-sm font-medium">Histories</span>
+            {totalFiles > 0 && (
+              <span className="rounded-full bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500">{totalFiles}</span>
+            )}
+          </span>
+          <motion.span animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.2 }}>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="text-zinc-500">
+              <path d="M4 2L8 6L4 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </motion.span>
+        </button>
+      )}
 
       <AnimatePresence>
-        {open && (
+        {!collapsed && open && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
