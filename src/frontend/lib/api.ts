@@ -37,6 +37,7 @@ export function createChatStream(
     temperature: req.temperature ?? 0.2,
     top_p: req.top_p ?? 0.95,
     downscale_images: req.downscale_images ?? true,
+    messages: req.messages ?? [],
   }
   if (req.reasoning_effort) body.reasoning_effort = req.reasoning_effort
   if (req.img_base64) body.img_base64 = req.img_base64
@@ -107,8 +108,12 @@ export async function loadChatHistory(filename: string): Promise<{ messages: Mes
   return request(`/chat-histories/${filename}`)
 }
 
-export async function saveChatHistory(filename: string): Promise<{ status: string; filename: string }> {
-  return request(`/chat-histories/${filename}`, { method: "PUT" })
+export async function saveChatHistory(filename: string, messages: Message[] = []): Promise<{ status: string; filename: string }> {
+  return request(`/chat-histories/${filename}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages }),
+  })
 }
 
 export async function deleteChatHistory(filename: string): Promise<void> {

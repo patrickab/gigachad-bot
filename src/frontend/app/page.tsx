@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { Sidebar } from "@/components/Sidebar"
 import { ChatContainer } from "@/components/ChatContainer"
 import { ModelSelector } from "@/components/ModelSelector"
@@ -9,12 +9,13 @@ import { ReasoningSelector } from "@/components/ReasoningSelector"
 import { ResearchModelsBar } from "@/components/ResearchModelsBar"
 import { ThemeToggle } from "@/components/ThemeToggle"
 import { OCRPanel } from "@/components/OCRPanel"
+import { TabManager } from "@/components/TabManager"
+import type { Tab } from "@/components/TabManager"
 import { useChat } from "@/hooks/useChat"
-import { saveChatHistory } from "@/lib/api"
 
 const DEFAULT_VISION_MODEL = "ollama/qwen3-vl:235b-instruct-cloud"
 
-export default function Home() {
+function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: string) => void }) {
   const {
     messages,
     isStreaming,
@@ -57,37 +58,45 @@ export default function Home() {
   const [ocrImage, setOCRImage] = useState<string | null>(null)
   const [downscaleImages, setDownscaleImages] = useState(true)
 
-  const handleSaveChat = async () => {
+  useEffect(() => {
+    if (researchEnabled) onModeLabel("Deep Research")
+    else if (webSearchEnabled) onModeLabel("Web Search")
+    else if (ocrEnabled) onModeLabel("LaTeX OCR")
+    else onModeLabel("Chat")
+  }, [researchEnabled, webSearchEnabled, ocrEnabled, onModeLabel])
+
+  const handleSidebarSave = useCallback(async () => {
     const name = window.prompt("Enter name for chat:")
-    if (name && name.trim()) {
-      await saveChatHistory(`${name.trim()}.json`)
+    if (name?.trim()) {
+      const { saveChatHistory } = await import("@/lib/api")
+      await saveChatHistory(`${name.trim()}.json`, messages)
       refreshHistories()
     }
-  }
+  }, [messages, refreshHistories])
 
-  const disableAll = () => {
+  const disableAll = useCallback(() => {
     setResearchEnabled(false)
     setWebSearchEnabled(false)
     setOCREnabled(false)
-  }
+  }, [])
 
-  const toggleResearch = () => {
+  const toggleResearch = useCallback(() => {
     if (researchEnabled) { setResearchEnabled(false); return }
     disableAll()
     setResearchEnabled(true)
-  }
+  }, [researchEnabled, disableAll])
 
-  const toggleWebSearch = () => {
+  const toggleWebSearch = useCallback(() => {
     if (webSearchEnabled) { setWebSearchEnabled(false); return }
     disableAll()
     setWebSearchEnabled(true)
-  }
+  }, [webSearchEnabled, disableAll])
 
-  const toggleOCR = () => {
+  const toggleOCR = useCallback(() => {
     if (ocrEnabled) { setOCREnabled(false); return }
     disableAll()
     setOCREnabled(true)
-  }
+  }, [ocrEnabled, disableAll])
 
   const handleSend = useCallback(
     (text: string, imageDataUrl: string | null) => {
@@ -131,15 +140,15 @@ export default function Home() {
   )
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-full overflow-hidden">
       <Sidebar
         collapsed={collapsed}
         onToggle={() => setCollapsed(!collapsed)}
         histories={histories}
         onHistoryLoad={loadHistory}
         onHistoryRefresh={refreshHistories}
+        onSave={handleSidebarSave}
         onReset={reset}
-        onSave={() => {}}
       />
       <main className="flex-1 min-w-0 flex flex-col relative bg-zinc-950">
         <header className="h-[60px] shrink-0 flex items-center px-4 gap-4 bg-zinc-950 z-40 border-b border-zinc-800/50">
@@ -177,6 +186,9 @@ export default function Home() {
               onTemperatureChange={setTemperature}
               topP={topP}
               onTopPChange={setTopP}
+              onRefresh={refreshHistories}
+              onReset={reset}
+              messages={messages}
               researchEnabled={researchEnabled}
               researchDepth={researchDepth}
               onResearchDepthChange={setResearchDepth}
@@ -233,5 +245,13 @@ export default function Home() {
         </div>
       </main>
     </div>
+  )
+}
+
+export default function Home() {
+  return (
+    <TabManager
+      renderContent={(tab, onModeLabel) => <TabContent tab={tab} onModeLabel={onModeLabel} />}
+    />
   )
 }

@@ -14,6 +14,7 @@ export interface ChatRequest {
   reasoning_effort?: string | null
   img_base64?: string | null
   downscale_images?: boolean
+  messages?: Message[]
 }
 
 export interface ModelsResponse {

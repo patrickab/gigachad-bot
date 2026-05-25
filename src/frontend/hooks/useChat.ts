@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { createChatStream, fetchHistory, fetchModels, fetchPrompts, listChatHistories, loadChatHistory as loadApiHistory, resetHistory, runResearch, runTavilySearch } from "@/lib/api"
+import { createChatStream, fetchModels, fetchPrompts, listChatHistories, loadChatHistory as loadApiHistory, runResearch, runTavilySearch } from "@/lib/api"
 import type { ChatRequest, Message, ModelsResponse } from "@/lib/types"
 
 export interface ResearchParams {
@@ -52,18 +52,8 @@ export function useChat(): UseChatReturn {
   useEffect(() => {
     fetchModels().then(setModels).catch(console.error)
     fetchPrompts().then(setPrompts).catch(console.error)
-    loadInitialHistory()
     loadHistories()
   }, [])
-
-  async function loadInitialHistory() {
-    try {
-      const data = await fetchHistory()
-      setMessages(data.messages ?? [])
-    } catch {
-      // no saved state
-    }
-  }
 
   async function loadHistories() {
     try {
@@ -83,10 +73,15 @@ export function useChat(): UseChatReturn {
       const assistantMsg: Message = { role: "assistant", content: "" }
       assistantRef.current = assistantMsg
 
-      setMessages((prev) => [...prev, userMsg, assistantMsg])
+      let prevMessages: Message[] = []
+
+      setMessages((prev) => {
+        prevMessages = prev
+        return [...prev, userMsg, assistantMsg]
+      })
 
       try {
-        const { stream, abort } = createChatStream(req)
+        const { stream, abort } = createChatStream({ ...req, messages: prevMessages })
         abortRef.current = abort
 
         const reader = stream
@@ -121,7 +116,6 @@ export function useChat(): UseChatReturn {
   }, [])
 
   const reset = useCallback(async () => {
-    await resetHistory()
     setMessages([])
   }, [])
 

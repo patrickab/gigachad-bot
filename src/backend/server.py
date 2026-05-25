@@ -65,10 +65,12 @@ class ChatRequest(BaseModel):
     reasoning_effort: str | None = None
     img_base64: str | None = None
     downscale_images: bool = True
+    messages: list[dict[str, Any]] = []
 
 
 class SaveRequest(BaseModel):
-    filename: str
+    filename: str | None = None
+    messages: list[dict[str, Any]] = []
 
 
 class MoveRequest(BaseModel):
@@ -139,12 +141,11 @@ async def get_prompts() -> dict[str, list[str]]:
 
 @app.get("/api/history")
 async def get_history() -> dict[str, Any]:
-    return {"messages": get_client().messages}
+    return {"messages": []}
 
 
 @app.delete("/api/history")
 async def reset_history() -> dict[str, str]:
-    get_client().reset_history()
     return {"status": "ok"}
 
 
@@ -159,9 +160,10 @@ async def chat(req: ChatRequest) -> StreamingResponse:
 
     async def event_stream() -> Any:
         try:
-            for chunk in c.chat(
+            for chunk in c.api_query(
                 model=req.model,
                 user_msg=req.user_msg,
+                user_msg_history=req.messages,
                 system_prompt=req.system_prompt,
                 img=img,
                 stream=True,
@@ -184,16 +186,17 @@ async def chat_nonstream(req: ChatRequest) -> dict[str, Any]:
 
     img = _decode_image(req.img_base64)
 
-    response = c.chat(
+    response = c.api_query(
         model=req.model,
         user_msg=req.user_msg,
+        user_msg_history=req.messages,
         system_prompt=req.system_prompt,
         img=img,
         stream=False,
         **kwargs,
     )
     content = response.choices[0].message.content or ""
-    return {"content": content, "messages": c.messages}
+    return {"content": content}
 
 
 @app.get("/api/chat-histories")
@@ -214,8 +217,8 @@ async def load_chat_history(filename: str) -> dict[str, Any]:
     filepath = _resolve_history_path(filename)
     if not filepath.exists():
         raise HTTPException(status_code=404, detail="Chat history not found")
-    get_client().load_history(str(filepath))
-    return {"messages": get_client().messages, "filename": filename}
+    messages = json.loads(filepath.read_text(encoding="utf-8"))
+    return {"messages": messages, "filename": filename}
 
 
 @app.put("/api/chat-histories/{filename:path}")
@@ -223,7 +226,7 @@ async def save_chat_history(filename: str, data: SaveRequest | None = None) -> d
     DIRECTORY_CHAT_HISTORIES.mkdir(parents=True, exist_ok=True)
     name = filename if not data or not data.filename else data.filename
     filepath = DIRECTORY_CHAT_HISTORIES / name
-    get_client().store_history(str(filepath))
+    filepath.write_text(json.dumps(data.messages if data else [], indent=2), encoding="utf-8")
     return {"status": "ok", "filename": str(name)}
 
 
