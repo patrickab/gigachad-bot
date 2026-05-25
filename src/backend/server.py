@@ -92,7 +92,7 @@ class TavilySearchRequest(BaseModel):
     query: str
     num_queries: int = 3
     results_per_query: int = 5
-    expander_model: str = "ollama/gemma3:4b"
+    expander_model: str = "ollama/gemma4:31b-cloud"
 
 
 class OCRRequest(BaseModel):
