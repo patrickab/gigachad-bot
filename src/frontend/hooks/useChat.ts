@@ -36,6 +36,7 @@ export interface UseChatReturn {
   error: string | null
   loadHistory: (filename: string) => Promise<void>
   deleteMessagePair: (index: number) => void
+  addMessagePair: (userContent: string, assistantContent: string) => void
 }
 
 export function useChat(): UseChatReturn {
@@ -238,6 +239,14 @@ export function useChat(): UseChatReturn {
     }
   }, [])
 
+  const addMessagePair = useCallback((userContent: string, assistantContent: string) => {
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", content: userContent },
+      { role: "assistant", content: assistantContent },
+    ])
+  }, [])
+
   return {
     messages,
     isStreaming,
@@ -253,5 +262,6 @@ export function useChat(): UseChatReturn {
     error,
     loadHistory: loadHistoryMessages,
     deleteMessagePair,
+    addMessagePair,
   }
 }

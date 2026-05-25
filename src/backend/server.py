@@ -24,9 +24,9 @@ from lib.prompts import (
     SYS_QUICK_OVERVIEW,
     SYS_TUTOR,
 )
-from lib.non_user_prompts import SYS_TAVILY_QUERY_EXPANSION
+from lib.non_user_prompts import SYS_TAVILY_QUERY_EXPANSION, SYS_OCR_TEXT_EXTRACTION
 from llm_client import LLMClient
-from llm_config import MODEL_CONFIGS
+from llm_config import MODEL_CONFIGS, DEFAULT_VISION_MODEL
 
 try:
     from llm_baseclient.config import AVAILABLE_MODELS, MODELS_GEMINI, MODELS_OLLAMA, MODELS_OPENAI
@@ -64,6 +64,7 @@ class ChatRequest(BaseModel):
     top_p: float = 0.95
     reasoning_effort: str | None = None
     img_base64: str | None = None
+    downscale_images: bool = True
 
 
 class SaveRequest(BaseModel):
@@ -90,6 +91,16 @@ class TavilySearchRequest(BaseModel):
     num_queries: int = 3
     results_per_query: int = 5
     expander_model: str = "ollama/gemma3:4b"
+
+
+class OCRRequest(BaseModel):
+    img_base64: str
+    model: str = ""
+
+
+class DownscaleRequest(BaseModel):
+    img_base64: str
+    max_tokens: int = 2048
 
 
 def get_client() -> LLMClient:
@@ -312,7 +323,7 @@ def tavily_search(req: TavilySearchRequest) -> dict[str, Any]:
 
     queries: list[str] = []
     try:
-        response = c.chat(
+        response = c.api_query(
             model=req.expander_model,
             user_msg=req.query,
             system_prompt=prompt,
@@ -359,3 +370,38 @@ def tavily_search(req: TavilySearchRequest) -> dict[str, Any]:
             pass
 
     return {"results": all_results, "queries": queries}
+
+
+@app.post("/api/ocr")
+async def ocr(req: OCRRequest) -> StreamingResponse:
+    c = get_client()
+    model = req.model or DEFAULT_VISION_MODEL
+    img = _decode_image(req.img_base64)
+
+    async def event_stream() -> Any:
+        try:
+            for chunk in c.api_query(
+                model=model,
+                user_msg="Extract all text and LaTeX from this image.",
+                system_prompt=SYS_OCR_TEXT_EXTRACTION,
+                img=img,
+                temperature=0.1,
+                top_p=0.95,
+                stream=True,
+            ):
+                yield {"event": "token", "data": chunk}
+            yield {"event": "done", "data": ""}
+        except Exception as e:
+            yield {"event": "error", "data": str(e)}
+
+    return EventSourceResponse(event_stream())
+
+
+@app.post("/api/downscale-image")
+def downscale_image(req: DownscaleRequest) -> dict[str, str]:
+    c = get_client()
+    try:
+        result = c.downscale_img(img=req.img_base64, max_tokens=req.max_tokens)
+        return {"img_base64": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

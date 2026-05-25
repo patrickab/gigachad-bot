@@ -18,6 +18,10 @@ interface ChatContainerProps {
   onResearchToggle?: () => void
   webSearchEnabled?: boolean
   onWebSearchToggle?: () => void
+  ocrEnabled?: boolean
+  onOCRToggle?: () => void
+  onOCRRequest?: (image: string) => void
+  downscaleImages?: boolean
 }
 
 export function ChatContainer({
@@ -31,6 +35,10 @@ export function ChatContainer({
   onResearchToggle,
   webSearchEnabled,
   onWebSearchToggle,
+  ocrEnabled,
+  onOCRToggle,
+  onOCRRequest,
+  downscaleImages,
 }: ChatContainerProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -70,11 +78,15 @@ export function ChatContainer({
       <div className="shrink-0 px-4 pb-6 z-10">
         <ChatInput
           onSend={onSend}
+          onOCRRequest={onOCRRequest}
           disabled={isStreaming}
           researchEnabled={researchEnabled}
           onResearchToggle={onResearchToggle}
           webSearchEnabled={webSearchEnabled}
           onWebSearchToggle={onWebSearchToggle}
+          ocrEnabled={ocrEnabled}
+          onOCRToggle={onOCRToggle}
+          downscaleImages={downscaleImages}
         />
       </div>
     </div>

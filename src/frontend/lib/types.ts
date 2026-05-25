@@ -13,6 +13,7 @@ export interface ChatRequest {
   top_p?: number
   reasoning_effort?: string | null
   img_base64?: string | null
+  downscale_images?: boolean
 }
 
 export interface ModelsResponse {
@@ -55,4 +56,9 @@ export interface TavilySearchRequest {
 export interface TavilySearchResult {
   results: { title: string; url: string; content: string; score: number }[]
   queries: string[]
+}
+
+export interface OCRRequest {
+  img_base64: string
+  model: string
 }

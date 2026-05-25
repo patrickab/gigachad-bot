@@ -7,6 +7,11 @@ import rehypeKatex from "rehype-katex"
 import rehypeRaw from "rehype-raw"
 import type { Components } from "react-markdown"
 import { memo } from "react"
+import { Light as SyntaxHighlighter } from "react-syntax-highlighter"
+import latex from "react-syntax-highlighter/dist/cjs/languages/hljs/latex"
+import { atomOneDark } from "react-syntax-highlighter/dist/cjs/styles/hljs"
+
+SyntaxHighlighter.registerLanguage("latex", latex)
 
 const components: Components = {
   pre({ children }) {
@@ -22,10 +27,21 @@ const components: Components = {
         </code>
       )
     }
+    const codeString = String(children).replace(/\n$/, "")
     return (
-      <code className={className} {...props}>
-        {children}
-      </code>
+      <SyntaxHighlighter
+        language={match ? match[1] : "text"}
+        style={atomOneDark}
+        customStyle={{
+          margin: 0,
+          borderRadius: "0.5rem",
+          fontSize: "0.75rem",
+          lineHeight: "1.6",
+        }}
+        PreTag="div"
+      >
+        {codeString}
+      </SyntaxHighlighter>
     )
   },
   table({ children }) {

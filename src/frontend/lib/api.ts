@@ -36,6 +36,7 @@ export function createChatStream(
     system_prompt: req.system_prompt ?? "",
     temperature: req.temperature ?? 0.2,
     top_p: req.top_p ?? 0.95,
+    downscale_images: req.downscale_images ?? true,
   }
   if (req.reasoning_effort) body.reasoning_effort = req.reasoning_effort
   if (req.img_base64) body.img_base64 = req.img_base64
@@ -58,10 +59,14 @@ export function createChatStream(
         const reader = res.body.getReader()
         const decoder = new TextDecoder()
         let buffer = ""
+        let eventData: string[] = []
 
         async function pump(): Promise<void> {
           const { done, value } = await reader.read()
           if (done) {
+            if (eventData.length > 0) {
+              controller_stream.enqueue(new TextEncoder().encode(eventData.join("\n")))
+            }
             controller_stream.close()
             return
           }
@@ -69,16 +74,20 @@ export function createChatStream(
           const lines = buffer.split("\n")
           buffer = lines.pop() ?? ""
 
-          for (const line of lines) {
-            const trimmed = line.trim()
-            if (!trimmed || trimmed.startsWith("event:")) continue
-            if (trimmed.startsWith("data:")) {
-              try {
-                const data = trimmed.slice(5).trim()
-                if (data) controller_stream.enqueue(new TextEncoder().encode(data))
-              } catch {
-                controller_stream.enqueue(new TextEncoder().encode(trimmed.slice(5).trim()))
+          for (let line of lines) {
+            if (line.endsWith("\r")) line = line.slice(0, -1)
+            
+            if (!line) {
+              if (eventData.length > 0) {
+                controller_stream.enqueue(new TextEncoder().encode(eventData.join("\n")))
+                eventData = []
               }
+              continue
+            }
+            if (line.startsWith("event:")) continue
+            if (line.startsWith("data:")) {
+              let d = line.startsWith("data: ") ? line.slice(6) : line.slice(5)
+              eventData.push(d)
             }
           }
           return pump()
@@ -124,4 +133,70 @@ export async function runTavilySearch(req: TavilySearchRequest): Promise<TavilyS
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(req),
   })
+}
+
+export async function downscaleImage(imgBase64: string, maxTokens: number = 4096): Promise<string> {
+  const data = await request<{ img_base64: string }>("/downscale-image", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ img_base64: imgBase64, max_tokens: maxTokens }),
+  })
+  return data.img_base64
+}
+
+export function createOCRStream(
+  imgBase64: string,
+  model: string
+): { stream: ReadableStreamDefaultReader<Uint8Array>; abort: () => void } {
+  const controller = new AbortController()
+  const promise = fetch(`${BASE}/ocr`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ img_base64: imgBase64, model }),
+    signal: controller.signal,
+  })
+  return {
+    stream: new ReadableStream({
+      async start(ctrl) {
+        const res = await promise
+        if (!res.ok || !res.body) { ctrl.error(await res.text()); return }
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ""
+        let eventData: string[] = []
+        async function pump(): Promise<void> {
+          const { done, value } = await reader.read()
+          if (done) { 
+            if (eventData.length > 0) {
+              ctrl.enqueue(new TextEncoder().encode(eventData.join("\n")))
+            }
+            ctrl.close(); 
+            return 
+          }
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split("\n")
+          buffer = lines.pop() ?? ""
+          for (let line of lines) {
+            if (line.endsWith("\r")) line = line.slice(0, -1)
+            
+            if (!line) {
+              if (eventData.length > 0) {
+                ctrl.enqueue(new TextEncoder().encode(eventData.join("\n")))
+                eventData = []
+              }
+              continue
+            }
+            if (line.startsWith("event:")) continue
+            if (line.startsWith("data:")) {
+              let d = line.startsWith("data: ") ? line.slice(6) : line.slice(5)
+              eventData.push(d)
+            }
+          }
+          return pump()
+        }
+        return pump()
+      },
+    }).getReader(),
+    abort: () => controller.abort(),
+  }
 }
