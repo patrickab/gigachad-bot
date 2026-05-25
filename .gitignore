@@ -8,3 +8,15 @@ embeddings
 src/archive
 .aider*
 .gpt-researcher-config.json
+
+# Python virtualenv / linter cache
+.venv
+.ruff_cache
+
+# Next.js / Node
+.next
+src/frontend/node_modules
+src/frontend/.next
+src/frontend/out
+src/frontend/build
+src/frontend/.env.local

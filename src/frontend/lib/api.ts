@@ -1,0 +1,111 @@
+import type { ChatHistoriesResponse, ChatRequest, Message, ModelsResponse } from "./types"
+
+const BASE = "/api"
+
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, options)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function fetchModels(): Promise<ModelsResponse> {
+  return request<ModelsResponse>("/models")
+}
+
+export async function fetchPrompts(): Promise<string[]> {
+  const data = await request<{ prompts: string[] }>("/prompts")
+  return data.prompts
+}
+
+export async function fetchHistory(): Promise<{ messages: Message[] }> {
+  return request("/history")
+}
+
+export async function resetHistory(): Promise<void> {
+  await request("/history", { method: "DELETE" })
+}
+
+export function createChatStream(
+  req: ChatRequest
+): { stream: ReadableStreamDefaultReader<Uint8Array>; abort: () => void } {
+  const controller = new AbortController()
+
+  const body: Record<string, unknown> = {
+    model: req.model,
+    user_msg: req.user_msg,
+    system_prompt: req.system_prompt ?? "",
+    temperature: req.temperature ?? 0.2,
+    top_p: req.top_p ?? 0.95,
+  }
+  if (req.reasoning_effort) body.reasoning_effort = req.reasoning_effort
+  if (req.img_base64) body.img_base64 = req.img_base64
+
+  const promise = fetch(`${BASE}/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal: controller.signal,
+  })
+
+  return {
+    stream: new ReadableStream({
+      async start(controller_stream) {
+        const res = await promise
+        if (!res.ok || !res.body) {
+          controller_stream.error(await res.text())
+          return
+        }
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ""
+
+        async function pump(): Promise<void> {
+          const { done, value } = await reader.read()
+          if (done) {
+            controller_stream.close()
+            return
+          }
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split("\n")
+          buffer = lines.pop() ?? ""
+
+          for (const line of lines) {
+            const trimmed = line.trim()
+            if (!trimmed || trimmed.startsWith("event:")) continue
+            if (trimmed.startsWith("data:")) {
+              try {
+                const data = trimmed.slice(5).trim()
+                if (data) controller_stream.enqueue(new TextEncoder().encode(data))
+              } catch {
+                controller_stream.enqueue(new TextEncoder().encode(trimmed.slice(5).trim()))
+              }
+            }
+          }
+          return pump()
+        }
+        return pump()
+      },
+    }).getReader(),
+    abort: () => controller.abort(),
+  }
+}
+
+export async function listChatHistories(): Promise<ChatHistoriesResponse> {
+  return request<ChatHistoriesResponse>("/chat-histories")
+}
+
+export async function loadChatHistory(filename: string): Promise<{ messages: Message[]; filename: string }> {
+  return request(`/chat-histories/${filename}`)
+}
+
+export async function saveChatHistory(filename: string): Promise<{ status: string; filename: string }> {
+  return request(`/chat-histories/${filename}`, { method: "PUT" })
+}
+
+export async function deleteChatHistory(filename: string): Promise<void> {
+  await request(`/chat-histories/${filename}`, { method: "DELETE" })
+}
+
+export async function archiveChatHistory(filename: string): Promise<void> {
+  await request(`/chat-histories/${filename}/archive`, { method: "PUT" })
+}

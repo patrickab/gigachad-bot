@@ -12,10 +12,14 @@
 - Store responses directly into [Obsidian](https://obsidian.md/) vault (with automatically generated YAML-headers).
 - Chat History Management & Storage on local disk.
 
+## Tech Stack
+- **Frontend**: Next.js 15 + React + Tailwind CSS v4 + Framer Motion
+- **Backend**: FastAPI + SSE (Server-Sent Events) streaming
+
 ## Installation & Setup
 - Clone the repo.
-- Store your `OPENAI_API_KEY` or `GEMINI_API_KEY` as environment variable  (e.g. in `~/.bashrc`).
+- Store your `OPENAI_API_KEY` or `GEMINI_API_KEY` as environment variable (e.g. in `~/.bashrc`).
 - Alternatively you can get a free API key from Ollama.
-- Create a virtual environment using `uv sync`.
-- Activate your virtual environment using `source .venv/bin/activate`
-- Use `./run.sh` to start the application
+- Run `uv sync` to install Python dependencies.
+- Run `uv run gigachad-install` to install Node.js into the venv and frontend dependencies.
+- Use `./run.sh` to start the application (backend on `:8001`, frontend on `:2999`).

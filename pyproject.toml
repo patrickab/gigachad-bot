@@ -4,14 +4,19 @@ version = "0.1.0"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
+    "fastapi>=0.115.0",
     "gpt-researcher>=0.14.0",
     "langchain-ollama>=0.3.0",
     "litellm>=1.80.5",
     "llm-baseclient @ git+https://github.com/patrickab/llm-baseclient.git@main",
-    "st-copy>=1.1.2",
-    "streamlit-ace>=0.1.1",
-    "streamlit-paste-button>=0.1.2",
+    "nodeenv>=1.10.0",
+    "python-multipart>=0.0.18",
+    "sse-starlette>=2.2.0",
+    "uvicorn[standard]>=0.34.0",
 ]
+
+[project.scripts]
+gigachad-install = "src.backend.install_deps:main"
 
 [build-system]
 requires = ["hatchling"]
