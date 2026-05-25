@@ -11,6 +11,8 @@ interface SidebarProps {
   histories: Record<string, string[]>
   onHistoryLoad: (filename: string) => void
   onHistoryRefresh: () => void
+  onSave: () => void
+  onReset: () => void
 }
 
 export function Sidebar({
@@ -19,9 +21,13 @@ export function Sidebar({
   histories,
   onHistoryLoad,
   onHistoryRefresh,
+  onSave,
+  onReset,
 }: SidebarProps) {
   const sidebarItems = getSidebarConfig({
     onToggleCollapse: onToggle,
+    onSave,
+    onReset,
     collapsed,
   })
 

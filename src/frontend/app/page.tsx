@@ -10,6 +10,7 @@ import { ResearchModelsBar } from "@/components/ResearchModelsBar"
 import { ThemeToggle } from "@/components/ThemeToggle"
 import { OCRPanel } from "@/components/OCRPanel"
 import { useChat } from "@/hooks/useChat"
+import { saveChatHistory } from "@/lib/api"
 
 const DEFAULT_VISION_MODEL = "ollama/qwen3-vl:235b-instruct-cloud"
 
@@ -55,6 +56,14 @@ export default function Home() {
   const [ocrModel, setOCRModel] = useState(DEFAULT_VISION_MODEL)
   const [ocrImage, setOCRImage] = useState<string | null>(null)
   const [downscaleImages, setDownscaleImages] = useState(true)
+
+  const handleSaveChat = async () => {
+    const name = window.prompt("Enter name for chat:")
+    if (name && name.trim()) {
+      await saveChatHistory(`${name.trim()}.json`)
+      refreshHistories()
+    }
+  }
 
   const disableAll = () => {
     setResearchEnabled(false)
@@ -129,6 +138,8 @@ export default function Home() {
         histories={histories}
         onHistoryLoad={loadHistory}
         onHistoryRefresh={refreshHistories}
+        onReset={reset}
+        onSave={() => {}}
       />
       <main className="flex-1 min-w-0 flex flex-col relative bg-zinc-950">
         <header className="h-[60px] shrink-0 flex items-center px-4 gap-4 bg-zinc-950 z-40 border-b border-zinc-800/50">
@@ -166,8 +177,6 @@ export default function Home() {
               onTemperatureChange={setTemperature}
               topP={topP}
               onTopPChange={setTopP}
-              onRefresh={refreshHistories}
-              onReset={reset}
               researchEnabled={researchEnabled}
               researchDepth={researchDepth}
               onResearchDepthChange={setResearchDepth}
