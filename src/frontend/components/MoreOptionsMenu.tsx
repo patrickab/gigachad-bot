@@ -28,11 +28,9 @@ interface MoreOptionsMenuProps {
   onResearchReasoningChange?: (v: string) => void
   researchReportType?: string
   onResearchReportTypeChange?: (v: string) => void
-  webSearchEnabled?: boolean
-  webSearchNumQueries?: number
-  onWebSearchNumQueriesChange?: (v: number) => void
-  webSearchResultsPerQuery?: number
-  onWebSearchResultsPerQueryChange?: (v: number) => void
+  morphicSearchEnabled?: boolean
+  searchDepth?: "quick" | "adaptive"
+  onSearchDepthChange?: (v: "quick" | "adaptive") => void
   ocrEnabled?: boolean
   ocrModel?: string
   onOCRModelChange?: (v: string) => void
@@ -61,11 +59,9 @@ export function MoreOptionsMenu({
   onResearchReasoningChange,
   researchReportType,
   onResearchReportTypeChange,
-  webSearchEnabled,
-  webSearchNumQueries,
-  onWebSearchNumQueriesChange,
-  webSearchResultsPerQuery,
-  onWebSearchResultsPerQueryChange,
+  morphicSearchEnabled,
+  searchDepth,
+  onSearchDepthChange,
   ocrEnabled,
   ocrModel,
   onOCRModelChange,
@@ -194,37 +190,35 @@ export function MoreOptionsMenu({
               </div>
             )}
 
-            {webSearchEnabled && (
-              <div className="pt-2 border-t border-zinc-800/50 space-y-3">
+            {morphicSearchEnabled && (
+              <div className="pt-2 border-t border-zinc-800/50 space-y-2">
                 <div className="flex items-center gap-2 text-xs font-medium text-sky-400">
                   <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
-                  Web Search
+                  Search Depth
                 </div>
-                <div className="space-y-1">
-                  <div className="flex justify-between text-[10px] text-zinc-600">
-                    <span>Query count</span>
-                    <span>{webSearchNumQueries}</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="1" max="5" step="1"
-                    value={webSearchNumQueries}
-                    onChange={(e) => onWebSearchNumQueriesChange?.(Number(e.target.value))}
-                    className="w-full h-1 bg-zinc-800 rounded-full appearance-none cursor-pointer accent-sky-500"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <div className="flex justify-between text-[10px] text-zinc-600">
-                    <span>Results/query</span>
-                    <span>{webSearchResultsPerQuery}</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="1" max="10" step="1"
-                    value={webSearchResultsPerQuery}
-                    onChange={(e) => onWebSearchResultsPerQueryChange?.(Number(e.target.value))}
-                    className="w-full h-1 bg-zinc-800 rounded-full appearance-none cursor-pointer accent-sky-500"
-                  />
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => onSearchDepthChange?.("quick")}
+                    className={cn(
+                      "flex-1 rounded-lg px-2 py-1.5 text-[11px] font-medium transition-colors",
+                      searchDepth === "quick"
+                        ? "bg-zinc-700 text-zinc-100"
+                        : "bg-zinc-900 text-zinc-500 hover:text-zinc-300"
+                    )}
+                  >
+                    Quick
+                  </button>
+                  <button
+                    onClick={() => onSearchDepthChange?.("adaptive")}
+                    className={cn(
+                      "flex-1 rounded-lg px-2 py-1.5 text-[11px] font-medium transition-colors",
+                      searchDepth === "adaptive"
+                        ? "bg-zinc-700 text-zinc-100"
+                        : "bg-zinc-900 text-zinc-500 hover:text-zinc-300"
+                    )}
+                  >
+                    Adaptive
+                  </button>
                 </div>
               </div>
             )}

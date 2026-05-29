@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import datetime
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +15,7 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 from fastapi.responses import StreamingResponse
 
-from config import DIRECTORY_CHAT_HISTORIES, SMALL_MODEL
+from config import DIRECTORY_CHAT_HISTORIES, SMALL_MODEL, MORPHIC_URL
 from lib.prompts import (
     SYS_ADVISOR,
     SYS_ARTICLE,
@@ -24,7 +25,7 @@ from lib.prompts import (
     SYS_QUICK_OVERVIEW,
     SYS_TUTOR,
 )
-from lib.non_user_prompts import SYS_TAVILY_QUERY_EXPANSION, SYS_OCR_TEXT_EXTRACTION
+from lib.non_user_prompts import SYS_OCR_TEXT_EXTRACTION
 from llm_client import LLMClient
 from llm_config import MODEL_CONFIGS, DEFAULT_VISION_MODEL
 
@@ -88,11 +89,10 @@ class ResearchRequest(BaseModel):
     report_type: str = "deep"
 
 
-class TavilySearchRequest(BaseModel):
+class MorphicSearchRequest(BaseModel):
     query: str
-    num_queries: int = 3
-    results_per_query: int = 5
-    expander_model: str = SMALL_MODEL
+    search_depth: str = "adaptive"
+    model: str = ""
 
 
 class OCRRequest(BaseModel):
@@ -317,64 +317,54 @@ async def research(req: ResearchRequest) -> dict[str, Any]:
     return {"report": report, "sources": sources, "costs": costs}
 
 
-@app.post("/api/tavily-search")
-def tavily_search(req: TavilySearchRequest) -> dict[str, Any]:
-    api_key = os.environ.get("TAVILY_API_KEY", "")
-    if not api_key:
-        raise HTTPException(status_code=500, detail="TAVILY_API_KEY not set")
+@app.post("/api/morphic-search")
+async def morphic_search(req: MorphicSearchRequest) -> StreamingResponse:
+    import httpx
+    import uuid
 
-    c = get_client()
-    prompt = SYS_TAVILY_QUERY_EXPANSION.replace("{k}", str(req.num_queries))
+    chat_id = str(uuid.uuid4())
 
-    queries: list[str] = []
-    try:
-        response = c.api_query(
-            model=req.expander_model,
-            user_msg=req.query,
-            system_prompt=prompt,
-            temperature=0.4,
-            top_p=0.95,
-            stream=False,
-        )
-        raw = response.choices[0].message.content or ""
-        raw = raw.strip()
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[-1].rsplit("\n", 1)[0]
-        parsed = json.loads(raw)
-        if isinstance(parsed, list) and all(isinstance(q, str) for q in parsed):
-            queries = parsed[:req.num_queries]
-    except Exception:
-        queries = [req.query]
+    morphic_payload = {
+        "message": {"role": "user", "parts": [{"type": "text", "text": req.query}]},
+        "chatId": chat_id,
+        "trigger": "submit-message",
+        "isNewChat": True,
+    }
 
-    if not queries:
-        queries = [req.query]
+    cookies: dict[str, str] = {"searchMode": req.search_depth}
+    if req.model:
+        provider_id = "ollama"
+        model_id = req.model
+        if model_id.startswith("ollama/"):
+            model_id = model_id[len("ollama/"):]
+        elif "/" in model_id:
+            provider_id, model_id = model_id.split("/", 1)
+        cookies["selectedModel"] = f"{provider_id}:{model_id}"
 
-    all_results: list[dict[str, Any]] = []
-    for q in queries:
-        try:
-            r = requests.post(
-                "https://api.tavily.com/search",
-                json={
-                    "api_key": api_key,
-                    "query": q,
-                    "max_results": req.results_per_query,
-                    "search_depth": "basic",
+    async def event_stream():
+        async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as client:
+            async with client.stream(
+                "POST",
+                f"{MORPHIC_URL.rstrip('/')}/api/chat",
+                json=morphic_payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Cookie": "; ".join(f"{k}={v}" for k, v in cookies.items()),
                 },
-                timeout=30,
-            )
-            r.raise_for_status()
-            data = r.json()
-            for item in data.get("results", [])[:req.results_per_query]:
-                all_results.append({
-                    "title": item.get("title", ""),
-                    "url": item.get("url", ""),
-                    "content": item.get("content", ""),
-                    "score": item.get("score", 0.0),
-                })
-        except Exception:
-            pass
+            ) as response:
+                if response.status_code != 200:
+                    error_body = await response.aread()
+                    yield f"event: error\ndata: {error_body.decode(errors='replace')}\n\n"
+                    return
+                async for line in response.aiter_lines():
+                    if line.strip():
+                        yield line + "\n"
 
-    return {"results": all_results, "queries": queries}
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/plain; charset=utf-8",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/api/ocr")

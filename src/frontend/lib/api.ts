@@ -1,4 +1,4 @@
-import type { ChatHistoriesResponse, ChatRequest, Message, ModelsResponse, ResearchRequest, TavilySearchRequest, TavilySearchResult } from "./types"
+import type { ChatHistoriesResponse, ChatRequest, Message, ModelsResponse, ResearchRequest } from "./types"
 
 const BASE = "/api"
 
@@ -37,7 +37,12 @@ export function createChatStream(
     temperature: req.temperature ?? 0.2,
     top_p: req.top_p ?? 0.95,
     downscale_images: req.downscale_images ?? true,
-    messages: req.messages ?? [],
+    messages: (req.messages ?? []).map((m: Message) => ({
+      role: m.role,
+      content: m.content,
+      tool_call_id: m.tool_call_id,
+      tool_calls: m.tool_calls,
+    })),
   }
   if (req.reasoning_effort) body.reasoning_effort = req.reasoning_effort
   if (req.img_base64) body.img_base64 = req.img_base64
@@ -126,14 +131,6 @@ export async function archiveChatHistory(filename: string): Promise<void> {
 
 export async function runResearch(req: ResearchRequest): Promise<{ report: string; sources: string[]; costs: number }> {
   return request("/research", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(req),
-  })
-}
-
-export async function runTavilySearch(req: TavilySearchRequest): Promise<TavilySearchResult> {
-  return request<TavilySearchResult>("/tavily-search", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(req),

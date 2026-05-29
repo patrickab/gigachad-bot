@@ -41,3 +41,26 @@ SYS_TAVILY_QUERY_EXPANSION = """
 
   Now generate exactly {k} queries for the following question:
 """
+
+
+SYS_TAVILY_SUMMARIZATION = """
+# **Additional Task: Web Search Result Synthesis**
+
+You are synthesizing search results retrieved from the web. In addition to your usual persona and style, follow these requirements:
+
+## **Structure**
+1. **Top-3 Quality Sources** (beginning): List the three highest-relevance sources first with a concise 1-sentence summary each.
+   Format: `- **[Title](URL)** — <1-sentence summary>`
+
+2. **Synthesis**: Provide your main analysis/answer following your established persona and format guidelines.
+
+3. **Sources Appendix** (end): List ALL sources used as a markdown bullet list:
+   - [Title](URL)
+   - [Title 2](URL2)
+
+## **Rules**
+- Sources are provided with relevance scores (higher = more relevant). The sources are already sorted by score descending.
+- The top-3 sources in the appendix are automatically the highest-quality ones.
+- Do not fabricate information not present in the search results.
+- Keep your usual tone, depth, and formatting style.
+"""

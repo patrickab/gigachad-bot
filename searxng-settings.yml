@@ -1,0 +1,19 @@
+use_default_settings: true
+server:
+  port: 8888
+  bind_address: '0.0.0.0'
+  limiter: false
+  public_instance: false
+  secret_key: 'gigachad-morphic-searxng-secret'
+  image_proxy: false
+  http_protocol_version: '1.0'
+  method: 'POST'
+  default_http_headers:
+    X-Content-Type-Options: nosniff
+    X-Download-Options: noopen
+    X-Robots-Tag: noindex, nofollow
+    Referrer-Policy: no-referrer
+
+search:
+  formats:
+    - json

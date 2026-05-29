@@ -16,8 +16,8 @@ interface ChatContainerProps {
   className?: string
   researchEnabled?: boolean
   onResearchToggle?: () => void
-  webSearchEnabled?: boolean
-  onWebSearchToggle?: () => void
+  morphicSearchEnabled?: boolean
+  onMorphicSearchToggle?: () => void
   ocrEnabled?: boolean
   onOCRToggle?: () => void
   onOCRRequest?: (image: string) => void
@@ -33,8 +33,8 @@ export function ChatContainer({
   className,
   researchEnabled,
   onResearchToggle,
-  webSearchEnabled,
-  onWebSearchToggle,
+  morphicSearchEnabled,
+  onMorphicSearchToggle,
   ocrEnabled,
   onOCRToggle,
   onOCRRequest,
@@ -69,7 +69,7 @@ export function ChatContainer({
           {pairs.map(({ user, assistant, globalIndex }) => (
             <div key={globalIndex} className="group">
               <ChatMessage role="user" content={user.content} index={globalIndex} onDelete={onDeletePair} />
-              <ChatMessage role="assistant" content={assistant.content} index={globalIndex} onDelete={onDeletePair} />
+              <ChatMessage role="assistant" content={assistant.content} morphic_result={assistant.morphic_result} index={globalIndex} onDelete={onDeletePair} />
             </div>
           ))}
         </AnimatePresence>
@@ -84,8 +84,8 @@ export function ChatContainer({
           onCancel={onCancel}
           researchEnabled={researchEnabled}
           onResearchToggle={onResearchToggle}
-          webSearchEnabled={webSearchEnabled}
-          onWebSearchToggle={onWebSearchToggle}
+          morphicSearchEnabled={morphicSearchEnabled}
+          onMorphicSearchToggle={onMorphicSearchToggle}
           ocrEnabled={ocrEnabled}
           onOCRToggle={onOCRToggle}
           downscaleImages={downscaleImages}

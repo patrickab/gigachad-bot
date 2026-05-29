@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 # Base directory of the project
@@ -15,3 +16,5 @@ DIRECTORY_CHAT_HISTORIES = BASE_DIR / "chat_histories"
 # Used for lightweight tasks like query expansion, where speed matters more than raw capability.
 # Should point to a small local model or a fast cloud model.
 SMALL_MODEL = "ollama/gemma4:31b-cloud"
+
+MORPHIC_URL = os.environ.get("MORPHIC_URL", "http://localhost:3001")

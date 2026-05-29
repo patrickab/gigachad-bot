@@ -3,6 +3,7 @@ export interface Message {
   content: string
   tool_call_id?: string
   tool_calls?: unknown[]
+  morphic_result?: MorphicSearchResult
 }
 
 export interface ChatRequest {
@@ -47,16 +48,17 @@ export interface ResearchResult {
   costs: number
 }
 
-export interface TavilySearchRequest {
+export interface MorphicSearchParams {
   query: string
-  num_queries: number
-  results_per_query: number
-  expander_model?: string
+  searchDepth: "quick" | "adaptive"
+  model?: string
 }
 
-export interface TavilySearchResult {
-  results: { title: string; url: string; content: string; score: number }[]
-  queries: string[]
+export interface MorphicSearchResult {
+  query: string
+  sources: { title: string; url: string; content: string }[]
+  images: string[]
+  citationMap?: Record<string, { title: string; url: string; content: string }>
 }
 
 export interface OCRRequest {

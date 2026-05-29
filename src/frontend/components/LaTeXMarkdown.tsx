@@ -3,6 +3,7 @@
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
+import remarkBreaks from "remark-breaks"
 import rehypeKatex from "rehype-katex"
 import rehypeRaw from "rehype-raw"
 import type { Components } from "react-markdown"
@@ -10,6 +11,7 @@ import { memo } from "react"
 import { Light as SyntaxHighlighter } from "react-syntax-highlighter"
 import latex from "react-syntax-highlighter/dist/cjs/languages/hljs/latex"
 import { atomOneDark } from "react-syntax-highlighter/dist/cjs/styles/hljs"
+import "katex/dist/katex.min.css" // ensure katex styles are loaded
 
 SyntaxHighlighter.registerLanguage("latex", latex)
 
@@ -53,11 +55,11 @@ const components: Components = {
   },
 }
 
-function MarkdownRendererInner({ content }: { content: string }) {
+function LaTeXMarkdownInner({ content }: { content: string }) {
   return (
     <div className="markdown-body text-sm leading-relaxed">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
+        remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
         rehypePlugins={[rehypeKatex, rehypeRaw]}
         components={components}
       >
@@ -67,4 +69,4 @@ function MarkdownRendererInner({ content }: { content: string }) {
   )
 }
 
-export const MarkdownRenderer = memo(MarkdownRendererInner)
+export const LaTeXMarkdown = memo(LaTeXMarkdownInner)

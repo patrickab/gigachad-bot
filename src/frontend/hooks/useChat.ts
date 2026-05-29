@@ -1,8 +1,9 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { createChatStream, fetchModels, fetchPrompts, listChatHistories, loadChatHistory as loadApiHistory, runResearch, runTavilySearch } from "@/lib/api"
-import type { ChatRequest, Message, ModelsResponse } from "@/lib/types"
+import { createChatStream, fetchModels, fetchPrompts, listChatHistories, loadChatHistory as loadApiHistory, runResearch } from "@/lib/api"
+import { morphicFetch, parseMorphicStream } from "@/lib/morphic"
+import type { ChatRequest, Message, ModelsResponse, MorphicSearchParams } from "@/lib/types"
 
 export interface ResearchParams {
   query: string
@@ -15,12 +16,6 @@ export interface ResearchParams {
   reportType: string
 }
 
-export interface WebSearchParams {
-  query: string
-  numQueries: number
-  resultsPerQuery: number
-}
-
 export interface UseChatReturn {
   messages: Message[]
   isStreaming: boolean
@@ -28,7 +23,7 @@ export interface UseChatReturn {
   cancel: () => void
   reset: () => Promise<void>
   research: (params: ResearchParams) => Promise<void>
-  webSearch: (params: WebSearchParams) => Promise<void>
+  morphicSearch: (params: MorphicSearchParams) => Promise<void>
   models: ModelsResponse | null
   prompts: string[]
   histories: Record<string, string[]>
@@ -182,7 +177,7 @@ export function useChat(): UseChatReturn {
     }
   }, [])
 
-  const webSearch = useCallback(async (params: WebSearchParams) => {
+  const morphicSearch = useCallback(async (params: MorphicSearchParams) => {
     setError(null)
     setIsStreaming(true)
 
@@ -193,37 +188,36 @@ export function useChat(): UseChatReturn {
     setMessages((prev) => [...prev, userMsg, assistantMsg])
 
     try {
-      const result = await runTavilySearch({
-        query: params.query,
-        num_queries: params.numQueries,
-        results_per_query: params.resultsPerQuery,
-      })
+      const { promise, abort } = morphicFetch(params)
+      abortRef.current = abort
 
-      if (result.results.length === 0) {
-        assistantMsg.content = "**Web Search** — no results found."
-      } else {
-        const lines = result.results.map(
-          (r) => `- **[${r.title}](${r.url})** (score: ${r.score.toFixed(3)})\n  ${r.content.slice(0, 300)}${r.content.length > 300 ? "..." : ""}`
-        )
-        const queriesLine = result.queries.length
-          ? `\n> Search queries: ${result.queries.map((q) => `"${q}"`).join(", ")}\n`
-          : ""
-        assistantMsg.content = `**Web Search Results** (${result.results.length} results)\n${queriesLine}\n${lines.join("\n\n")}`
+      const acc = { text: "", sources: [] as { title: string; url: string; content: string }[], images: [] as string[], query: params.query, citationMap: undefined as Record<string, { title: string; url: string; content: string }> | undefined }
+
+      const res = await promise
+      const set = () => setMessages((prev) => { const c = [...prev]; c[c.length - 1] = { ...assistantMsg }; return c })
+
+      for await (const event of parseMorphicStream(res)) {
+        if (event.type === "text" && event.text) {
+          acc.text += event.text
+          assistantMsg.content = acc.text
+          set()
+        } else if (event.type === "source") {
+          if (event.sources) acc.sources = [...acc.sources, ...event.sources]
+          if (event.images) acc.images = [...new Set([...acc.images, ...event.images])]
+          if (event.query) acc.query = event.query
+          if (event.citationMap) acc.citationMap = event.citationMap
+          assistantMsg.morphic_result = { query: acc.query, sources: acc.sources, images: acc.images, citationMap: acc.citationMap }
+          set()
+        } else if (event.type === "error") {
+          throw new Error(event.text || "Morphic search error")
+        }
       }
-
-      setMessages((prev) => {
-        const copy = [...prev]
-        copy[copy.length - 1] = { ...assistantMsg }
-        return copy
-      })
     } catch (e) {
-      setError((e as Error).message || "Web search failed")
-      assistantMsg.content = `Web search error: ${(e as Error).message}`
-      setMessages((prev) => {
-        const copy = [...prev]
-        copy[copy.length - 1] = { ...assistantMsg }
-        return copy
-      })
+      if ((e as Error).name === "AbortError") return
+      const msg = (e as Error)?.message ?? "Search failed"
+      setError(msg)
+      assistantMsg.content = assistantMsg.content || `Search error: ${msg}`
+      setMessages((prev) => { const c = [...prev]; c[c.length - 1] = { ...assistantMsg }; return c })
     } finally {
       setIsStreaming(false)
       abortRef.current = null
@@ -245,7 +239,7 @@ export function useChat(): UseChatReturn {
     send,
     cancel,
     research,
-    webSearch,
+    morphicSearch,
     reset,
     models,
     prompts,

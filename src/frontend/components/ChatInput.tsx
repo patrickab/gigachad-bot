@@ -14,8 +14,8 @@ interface ChatInputProps {
   onCancel?: () => void
   researchEnabled?: boolean
   onResearchToggle?: () => void
-  webSearchEnabled?: boolean
-  onWebSearchToggle?: () => void
+  morphicSearchEnabled?: boolean
+  onMorphicSearchToggle?: () => void
   ocrEnabled?: boolean
   onOCRToggle?: () => void
   downscaleImages?: boolean
@@ -29,8 +29,8 @@ export function ChatInput({
   onCancel,
   researchEnabled,
   onResearchToggle,
-  webSearchEnabled,
-  onWebSearchToggle,
+  morphicSearchEnabled,
+  onMorphicSearchToggle,
   ocrEnabled,
   onOCRToggle,
   downscaleImages,
@@ -236,9 +236,9 @@ export function ChatInput({
                 <Search className="h-3 w-3" />Research
               </button>
             )}
-            {webSearchEnabled && (
+            {morphicSearchEnabled && (
               <button
-                onClick={() => onWebSearchToggle?.()}
+                onClick={() => onMorphicSearchToggle?.()}
                 className="flex items-center gap-1.5 rounded-full bg-sky-500/10 border border-sky-500/30 px-2.5 py-1 text-xs font-medium text-sky-400 hover:bg-sky-500/20 hover:border-sky-500/50 transition-colors"
               >
                 <Globe className="h-3 w-3" />Search
@@ -276,9 +276,9 @@ export function ChatInput({
                       <Search className="h-3.5 w-3.5 text-amber-400" />Deep Research
                     </button>
                   )}
-                  {!webSearchEnabled && (
+                  {!morphicSearchEnabled && (
                     <button
-                      onClick={() => { onWebSearchToggle?.(); setShowTools(false) }}
+                      onClick={() => { onMorphicSearchToggle?.(); setShowTools(false) }}
                       className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800/50 transition-colors"
                     >
                       <Globe className="h-3.5 w-3.5 text-sky-400" />Web Search

@@ -3,16 +3,19 @@
 import { motion } from "framer-motion"
 import { memo, useState } from "react"
 import { Bot, Check, Copy, Trash2, User } from "lucide-react"
-import { MarkdownRenderer } from "./MarkdownRenderer"
+import { LaTeXMarkdown } from "./LaTeXMarkdown"
+import { MorphicSearchResult } from "./MorphicSearchResult"
+import type { Message } from "@/lib/types"
 
 interface ChatMessageProps {
   role: "user" | "assistant"
   content: string
   index: number
   onDelete?: (index: number) => void
+  morphic_result?: Message["morphic_result"]
 }
 
-function ChatMessageInner({ role, content, index, onDelete }: ChatMessageProps) {
+function ChatMessageInner({ role, content, index, onDelete, morphic_result }: ChatMessageProps) {
   const isUser = role === "user"
   const [copied, setCopied] = useState(false)
 
@@ -46,7 +49,7 @@ function ChatMessageInner({ role, content, index, onDelete }: ChatMessageProps) 
         {isUser ? (
           <p className="text-sm whitespace-pre-wrap text-zinc-200">{content}</p>
         ) : content ? (
-          <MarkdownRenderer content={content} />
+          <MorphicSearchResult content={content} morphic_result={morphic_result} />
         ) : (
           <span className="inline-flex items-center gap-1 text-zinc-500 text-sm">
             <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-sky-400" />

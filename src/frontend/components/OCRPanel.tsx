@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { X, Check } from "lucide-react"
-import { MarkdownRenderer } from "./MarkdownRenderer"
+import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { ConsoleEditor } from "./ConsoleEditor"
 import { createOCRStream } from "@/lib/api"
 
@@ -122,7 +122,7 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
               <div className="p-4 flex flex-col">
                 {output ? (
                   <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4 mb-3">
-                    <MarkdownRenderer content={output} />
+                    <LaTeXMarkdown content={output} />
                   </div>
                 ) : (
                   <div className="text-xs text-zinc-600 italic px-1 mb-3">Preview appears as output streams...</div>

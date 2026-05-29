@@ -1,0 +1,61 @@
+name: morphic-sidecar
+
+services:
+  morphic:
+    image: ghcr.io/miurla/morphic:latest
+    command: npx next start -H 0.0.0.0
+    environment:
+      DATABASE_URL: postgresql://morphic:morphic@morphic-postgres:5432/morphic
+      DATABASE_RESTRICTED_URL: postgresql://morphic:morphic@morphic-postgres:5432/morphic
+      DATABASE_SSL_DISABLED: "true"
+      LOCAL_REDIS_URL: redis://morphic-redis:6379
+      SEARCH_API: searxng
+      SEARXNG_API_URL: http://morphic-searxng:8080
+      ENABLE_AUTH: "false"
+      ENABLE_GUEST_CHAT: "true"
+      ANONYMOUS_USER_ID: gigachad-user
+      MORPHIC_CLOUD_DEPLOYMENT: "false"
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "3001:3000"
+    depends_on:
+      morphic-postgres:
+        condition: service_healthy
+      morphic-redis:
+        condition: service_started
+      morphic-searxng:
+        condition: service_started
+
+  morphic-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: morphic
+      POSTGRES_PASSWORD: morphic
+      POSTGRES_DB: morphic
+    volumes:
+      - morphic_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U morphic"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  morphic-redis:
+    image: redis:alpine
+    volumes:
+      - morphic_redis_data:/data
+    command: redis-server --appendonly yes
+
+  morphic-searxng:
+    image: searxng/searxng
+    volumes:
+      - ./searxng-settings.yml:/etc/searxng/settings.yml
+      - ./searxng-limiter.toml:/etc/searxng/limiter.toml
+      - morphic_searxng_data:/data
+
+volumes:
+  morphic_postgres_data:
+  morphic_redis_data:
+  morphic_searxng_data:

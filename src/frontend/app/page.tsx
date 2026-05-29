@@ -22,7 +22,7 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
     send,
     cancel,
     research,
-    webSearch,
+    morphicSearch,
     reset,
     models,
     prompts,
@@ -50,9 +50,8 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
   const [researchReasoning, setResearchReasoning] = useState("medium")
   const [researchReportType, setResearchReportType] = useState("deep")
 
-  const [webSearchEnabled, setWebSearchEnabled] = useState(false)
-  const [webSearchNumQueries, setWebSearchNumQueries] = useState(3)
-  const [webSearchResultsPerQuery, setWebSearchResultsPerQuery] = useState(5)
+  const [morphicSearchEnabled, setMorphicSearchEnabled] = useState(false)
+  const [searchDepth, setSearchDepth] = useState<"quick" | "adaptive">("adaptive")
 
   const [ocrEnabled, setOCREnabled] = useState(false)
   const [ocrModel, setOCRModel] = useState(DEFAULT_VISION_MODEL)
@@ -61,10 +60,10 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
 
   useEffect(() => {
     if (researchEnabled) onModeLabel("Deep Research")
-    else if (webSearchEnabled) onModeLabel("Web Search")
+    else if (morphicSearchEnabled) onModeLabel("Search")
     else if (ocrEnabled) onModeLabel("LaTeX OCR")
     else onModeLabel("Chat")
-  }, [researchEnabled, webSearchEnabled, ocrEnabled, onModeLabel])
+  }, [researchEnabled, morphicSearchEnabled, ocrEnabled, onModeLabel])
 
   const handleSidebarSave = useCallback(async () => {
     const name = window.prompt("Enter name for chat:")
@@ -92,7 +91,7 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
 
   const disableAll = useCallback(() => {
     setResearchEnabled(false)
-    setWebSearchEnabled(false)
+    setMorphicSearchEnabled(false)
     setOCREnabled(false)
   }, [])
 
@@ -102,11 +101,11 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
     setResearchEnabled(true)
   }, [researchEnabled, disableAll])
 
-  const toggleWebSearch = useCallback(() => {
-    if (webSearchEnabled) { setWebSearchEnabled(false); return }
+  const toggleMorphicSearch = useCallback(() => {
+    if (morphicSearchEnabled) { setMorphicSearchEnabled(false); return }
     disableAll()
-    setWebSearchEnabled(true)
-  }, [webSearchEnabled, disableAll])
+    setMorphicSearchEnabled(true)
+  }, [morphicSearchEnabled, disableAll])
 
   const toggleOCR = useCallback(() => {
     if (ocrEnabled) { setOCREnabled(false); return }
@@ -116,11 +115,11 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
 
   const handleSend = useCallback(
     (text: string, imageDataUrl: string | null) => {
-      if (webSearchEnabled) {
-        webSearch({
+      if (morphicSearchEnabled) {
+        morphicSearch({
           query: text,
-          numQueries: webSearchNumQueries,
-          resultsPerQuery: webSearchResultsPerQuery,
+          searchDepth,
+          model: selectedModel || undefined,
         })
       } else if (researchEnabled) {
         research({
@@ -147,11 +146,11 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
       }
     },
     [
-      webSearchEnabled, webSearchNumQueries, webSearchResultsPerQuery,
+      morphicSearchEnabled, searchDepth,
       researchEnabled, researchFastModel, researchSmartModel, researchStrategicModel,
       researchDepth, researchBreadth, researchReasoning, researchReportType,
       selectedModel, selectedPrompt, temperature, topP, reasoningEffort, downscaleImages,
-      send, research, webSearch,
+      send, research, morphicSearch,
     ]
   )
 
@@ -215,11 +214,9 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
               onResearchReasoningChange={setResearchReasoning}
               researchReportType={researchReportType}
               onResearchReportTypeChange={setResearchReportType}
-              webSearchEnabled={webSearchEnabled}
-              webSearchNumQueries={webSearchNumQueries}
-              onWebSearchNumQueriesChange={setWebSearchNumQueries}
-              webSearchResultsPerQuery={webSearchResultsPerQuery}
-              onWebSearchResultsPerQueryChange={setWebSearchResultsPerQuery}
+              morphicSearchEnabled={morphicSearchEnabled}
+              searchDepth={searchDepth}
+              onSearchDepthChange={setSearchDepth}
               ocrEnabled={ocrEnabled}
               ocrModel={ocrModel}
               onOCRModelChange={setOCRModel}
@@ -238,8 +235,8 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
             onDeletePair={deleteMessagePair}
             researchEnabled={researchEnabled}
             onResearchToggle={toggleResearch}
-            webSearchEnabled={webSearchEnabled}
-            onWebSearchToggle={toggleWebSearch}
+            morphicSearchEnabled={morphicSearchEnabled}
+            onMorphicSearchToggle={toggleMorphicSearch}
             ocrEnabled={ocrEnabled}
             onOCRToggle={toggleOCR}
             onOCRRequest={setOCRImage}

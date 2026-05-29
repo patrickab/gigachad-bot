@@ -1,6 +1,8 @@
 #!/bin/sh
 set -e
 
+export MORPHIC_URL="${MORPHIC_URL:-http://localhost:3001}"
+
 # Use Node.js from the virtual environment
 export PATH="$(pwd)/.venv/bin:$PATH"
 
