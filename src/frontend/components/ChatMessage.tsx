@@ -49,7 +49,11 @@ function ChatMessageInner({ role, content, index, onDelete, morphic_result }: Ch
         {isUser ? (
           <p className="text-sm whitespace-pre-wrap text-zinc-200">{content}</p>
         ) : content ? (
-          <MorphicSearchResult content={content} morphic_result={morphic_result} />
+          morphic_result ? (
+            <MorphicSearchResult content={content} morphic_result={morphic_result} />
+          ) : (
+            <LaTeXMarkdown content={content} />
+          )
         ) : (
           <span className="inline-flex items-center gap-1 text-zinc-500 text-sm">
             <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-sky-400" />
