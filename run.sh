@@ -1,28 +1,27 @@
-#!/bin/sh
-set -e
+#!/bin/bash
 
 export MORPHIC_URL="${MORPHIC_URL:-http://localhost:3001}"
 
-# Use Node.js from the virtual environment
 export PATH="$(pwd)/.venv/bin:$PATH"
 
-# Start FastAPI backend
 echo "Starting backend on http://127.0.0.1:8001"
 source .venv/bin/activate
 uvicorn src.backend.server:app --host 127.0.0.1 --port 8001 &
 BACKEND_PID=$!
 
-# Start Next.js frontend dev server
 echo "Starting frontend on http://127.0.0.1:2999"
-cd src/frontend && npm run dev &
+npm --prefix src/frontend run dev &
 FRONTEND_PID=$!
 
 cleanup() {
   echo "Shutting down..."
-  kill $BACKEND_PID $FRONTEND_PID 2>/dev/null
-  wait
+  for PID in $BACKEND_PID $FRONTEND_PID; do
+    kill -TERM -- "-$PID" 2>/dev/null || kill -TERM "$PID" 2>/dev/null || true
+  done
+  wait 2>/dev/null || true
+  echo "Done."
 }
 
 trap cleanup INT TERM
 
-wait $BACKEND_PID $FRONTEND_PID
+wait

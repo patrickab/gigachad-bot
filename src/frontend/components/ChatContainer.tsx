@@ -1,10 +1,11 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useMemo } from "react"
 import { AnimatePresence } from "framer-motion"
 import type { Message } from "@/lib/types"
 import { ChatMessage } from "./ChatMessage"
 import { ChatInput } from "./ChatInput"
+import { SourcesSidebar } from "./SourcesSidebar"
 import { cn } from "@/lib/utils"
 
 interface ChatContainerProps {
@@ -42,6 +43,13 @@ export function ChatContainer({
 }: ChatContainerProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
+  const lastMorphicResult = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].morphic_result) return messages[i].morphic_result
+    }
+    return undefined
+  }, [messages])
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
@@ -58,39 +66,42 @@ export function ChatContainer({
   }
 
   return (
-    <div className={cn("flex flex-col h-full relative", className)}>
-      <div className="flex-1 overflow-y-auto pb-6">
-        {pairs.length === 0 && (
-          <div className="flex h-full items-center justify-center">
-            <p className="text-sm text-zinc-600">Send a message to start.</p>
-          </div>
-        )}
-        <AnimatePresence>
-          {pairs.map(({ user, assistant, globalIndex }) => (
-            <div key={globalIndex} className="group">
-              <ChatMessage role="user" content={user.content} index={globalIndex} onDelete={onDeletePair} />
-              <ChatMessage role="assistant" content={assistant.content} morphic_result={assistant.morphic_result} index={globalIndex} onDelete={onDeletePair} />
+    <div className={cn("flex h-full relative", className)}>
+      <div className="flex-1 min-w-0 flex flex-col">
+        <div className="flex-1 overflow-y-auto pb-6">
+          {pairs.length === 0 && (
+            <div className="flex h-full items-center justify-center">
+              <p className="text-sm text-zinc-600">Send a message to start.</p>
             </div>
-          ))}
-        </AnimatePresence>
-        <div ref={bottomRef} />
+          )}
+          <AnimatePresence>
+            {pairs.map(({ user, assistant, globalIndex }) => (
+              <div key={globalIndex} className="group">
+                <ChatMessage role="user" content={user.content} index={globalIndex} onDelete={onDeletePair} />
+                <ChatMessage role="assistant" content={assistant.content} morphic_result={assistant.morphic_result} index={globalIndex} onDelete={onDeletePair} />
+              </div>
+            ))}
+          </AnimatePresence>
+          <div ref={bottomRef} />
+        </div>
+        <div className="shrink-0 px-4 pb-6 z-10">
+          <ChatInput
+            onSend={onSend}
+            onOCRRequest={onOCRRequest}
+            disabled={isStreaming}
+            isStreaming={isStreaming}
+            onCancel={onCancel}
+            researchEnabled={researchEnabled}
+            onResearchToggle={onResearchToggle}
+            morphicSearchEnabled={morphicSearchEnabled}
+            onMorphicSearchToggle={onMorphicSearchToggle}
+            ocrEnabled={ocrEnabled}
+            onOCRToggle={onOCRToggle}
+            downscaleImages={downscaleImages}
+          />
+        </div>
       </div>
-      <div className="shrink-0 px-4 pb-6 z-10">
-        <ChatInput
-          onSend={onSend}
-          onOCRRequest={onOCRRequest}
-          disabled={isStreaming}
-          isStreaming={isStreaming}
-          onCancel={onCancel}
-          researchEnabled={researchEnabled}
-          onResearchToggle={onResearchToggle}
-          morphicSearchEnabled={morphicSearchEnabled}
-          onMorphicSearchToggle={onMorphicSearchToggle}
-          ocrEnabled={ocrEnabled}
-          onOCRToggle={onOCRToggle}
-          downscaleImages={downscaleImages}
-        />
-      </div>
+      <SourcesSidebar result={lastMorphicResult} />
     </div>
   )
 }
