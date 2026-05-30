@@ -7,6 +7,8 @@ import { ChatMessage } from "./ChatMessage"
 import { ChatInput } from "./ChatInput"
 import { SourcesSidebar } from "./SourcesSidebar"
 import { cn } from "@/lib/utils"
+import { useModeState } from "@/hooks/useModeState"
+import { useSettings } from "@/contexts/SettingsContext"
 
 interface ChatContainerProps {
   messages: Message[]
@@ -15,14 +17,7 @@ interface ChatContainerProps {
   onCancel: () => void
   onDeletePair: (index: number) => void
   className?: string
-  researchEnabled?: boolean
-  onResearchToggle?: () => void
-  morphicSearchEnabled?: boolean
-  onMorphicSearchToggle?: () => void
-  ocrEnabled?: boolean
-  onOCRToggle?: () => void
   onOCRRequest?: (image: string) => void
-  downscaleImages?: boolean
 }
 
 export function ChatContainer({
@@ -32,15 +27,10 @@ export function ChatContainer({
   onCancel,
   onDeletePair,
   className,
-  researchEnabled,
-  onResearchToggle,
-  morphicSearchEnabled,
-  onMorphicSearchToggle,
-  ocrEnabled,
-  onOCRToggle,
   onOCRRequest,
-  downscaleImages,
 }: ChatContainerProps) {
+  const { researchEnabled, morphicSearchEnabled, ocrEnabled, toggleResearch, toggleMorphicSearch, toggleOCR } = useModeState()
+  const { downscaleImages } = useSettings()
   const bottomRef = useRef<HTMLDivElement>(null)
 
   const lastMorphicResult = useMemo(() => {
@@ -91,13 +81,6 @@ export function ChatContainer({
             disabled={isStreaming}
             isStreaming={isStreaming}
             onCancel={onCancel}
-            researchEnabled={researchEnabled}
-            onResearchToggle={onResearchToggle}
-            morphicSearchEnabled={morphicSearchEnabled}
-            onMorphicSearchToggle={onMorphicSearchToggle}
-            ocrEnabled={ocrEnabled}
-            onOCRToggle={onOCRToggle}
-            downscaleImages={downscaleImages}
           />
         </div>
       </div>

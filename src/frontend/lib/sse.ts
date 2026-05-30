@@ -1,3 +1,5 @@
+import { API_BASE } from "./config"
+
 export interface SSEStreamResult {
   stream: ReadableStreamDefaultReader<Uint8Array>
   abort: () => void
@@ -6,7 +8,7 @@ export interface SSEStreamResult {
 export function createSSEStream(
   path: string,
   body: Record<string, unknown>,
-  base: string = "/api"
+  base: string = API_BASE
 ): SSEStreamResult {
   const controller = new AbortController()
 

@@ -13,6 +13,8 @@ import { TabManager } from "@/components/TabManager"
 import type { Tab } from "@/components/TabManager"
 import { useChat } from "@/hooks/useChat"
 import { useModeState } from "@/hooks/useModeState"
+import { useSettings, SettingsProvider } from "@/contexts/SettingsContext"
+import { DEFAULT_VISION_MODEL } from "@/lib/config"
 
 const MODE_LABELS: Record<string, string> = {
   research: "Deep Research",
@@ -20,8 +22,6 @@ const MODE_LABELS: Record<string, string> = {
   ocr: "LaTeX OCR",
   chat: "Chat",
 }
-
-const DEFAULT_VISION_MODEL = "ollama/qwen3-vl:235b-instruct-cloud"
 
 function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: string) => void }) {
   const {
@@ -51,26 +51,10 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
     toggleOCR,
   } = useModeState()
 
+  const settings = useSettings()
+
   const [collapsed, setCollapsed] = useState(true)
-  const [selectedModel, setSelectedModel] = useState("")
-  const [selectedPrompt, setSelectedPrompt] = useState<string | null>(null)
-  const [temperature, setTemperature] = useState(0.2)
-  const [topP, setTopP] = useState(0.95)
-  const [reasoningEffort, setReasoningEffort] = useState("none")
-
-  const [researchFastModel, setResearchFastModel] = useState("")
-  const [researchSmartModel, setResearchSmartModel] = useState("")
-  const [researchStrategicModel, setResearchStrategicModel] = useState("")
-  const [researchDepth, setResearchDepth] = useState(2)
-  const [researchBreadth, setResearchBreadth] = useState(4)
-  const [researchReasoning, setResearchReasoning] = useState("medium")
-  const [researchReportType, setResearchReportType] = useState("deep")
-
-  const [searchDepth, setSearchDepth] = useState<"quick" | "adaptive">("adaptive")
-
-  const [ocrModel, setOCRModel] = useState(DEFAULT_VISION_MODEL)
   const [ocrImage, setOCRImage] = useState<string | null>(null)
-  const [downscaleImages, setDownscaleImages] = useState(true)
 
   useEffect(() => {
     if (researchEnabled) onModeLabel("Deep Research")
@@ -108,38 +92,38 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
       if (morphicSearchEnabled) {
         morphicSearch({
           query: text,
-          searchDepth,
-          model: selectedModel || undefined,
+          searchDepth: settings.searchDepth,
+          model: settings.selectedModel || undefined,
         })
       } else if (researchEnabled) {
         research({
           query: text,
-          fastModel: researchFastModel,
-          smartModel: researchSmartModel,
-          strategicModel: researchStrategicModel,
-          depth: researchDepth,
-          breadth: researchBreadth,
-          reasoningEffort: researchReasoning,
-          reportType: researchReportType,
+          fastModel: settings.researchFastModel,
+          smartModel: settings.researchSmartModel,
+          strategicModel: settings.researchStrategicModel,
+          depth: settings.researchDepth,
+          breadth: settings.researchBreadth,
+          reasoningEffort: settings.researchReasoning,
+          reportType: settings.researchReportType,
         })
       } else {
         send({
-          model: selectedModel,
+          model: settings.selectedModel,
           user_msg: text,
-          system_prompt: selectedPrompt ?? "",
-          temperature,
-          top_p: topP,
-          reasoning_effort: reasoningEffort === "none" ? null : reasoningEffort,
+          system_prompt: settings.selectedPrompt ?? "",
+          temperature: settings.temperature,
+          top_p: settings.topP,
+          reasoning_effort: settings.reasoningEffort === "none" ? null : settings.reasoningEffort,
           img_base64: imageDataUrl,
-          downscale_images: downscaleImages,
+          downscale_images: settings.downscaleImages,
         })
       }
     },
     [
-      morphicSearchEnabled, searchDepth,
-      researchEnabled, researchFastModel, researchSmartModel, researchStrategicModel,
-      researchDepth, researchBreadth, researchReasoning, researchReportType,
-      selectedModel, selectedPrompt, temperature, topP, reasoningEffort, downscaleImages,
+      morphicSearchEnabled, settings.searchDepth,
+      researchEnabled, settings.researchFastModel, settings.researchSmartModel, settings.researchStrategicModel,
+      settings.researchDepth, settings.researchBreadth, settings.researchReasoning, settings.researchReportType,
+      settings.selectedModel, settings.selectedPrompt, settings.temperature, settings.topP, settings.reasoningEffort, settings.downscaleImages,
       send, research, morphicSearch,
     ]
   )
@@ -161,22 +145,22 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
           {researchEnabled ? (
             <ResearchModelsBar
               models={models}
-              fastModel={researchFastModel}
-              smartModel={researchSmartModel}
-              strategicModel={researchStrategicModel}
-              onFastModelChange={setResearchFastModel}
-              onSmartModelChange={setResearchSmartModel}
-              onStrategicModelChange={setResearchStrategicModel}
+              fastModel={settings.researchFastModel}
+              smartModel={settings.researchSmartModel}
+              strategicModel={settings.researchStrategicModel}
+              onFastModelChange={settings.setResearchFastModel}
+              onSmartModelChange={settings.setResearchSmartModel}
+              onStrategicModelChange={settings.setResearchStrategicModel}
             />
           ) : (
             <div className="flex items-center gap-4">
               <ModelSelector
                 models={models}
-                selectedModel={selectedModel}
-                onSelect={setSelectedModel}
+                selectedModel={settings.selectedModel}
+                onSelect={settings.setSelectedModel}
               />
               <div className="w-px h-4 bg-zinc-800" />
-              <ReasoningSelector reasoningEffort={reasoningEffort} onReasoningChange={setReasoningEffort} />
+              <ReasoningSelector reasoningEffort={settings.reasoningEffort} onReasoningChange={settings.setReasoningEffort} />
             </div>
           )}
 
@@ -186,32 +170,13 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
             <ThemeToggle />
             <MoreOptionsMenu
               prompts={prompts}
-              selectedPrompt={selectedPrompt}
-              onPromptSelect={setSelectedPrompt}
-              temperature={temperature}
-              onTemperatureChange={setTemperature}
-              topP={topP}
-              onTopPChange={setTopP}
               onRefresh={refreshHistories}
               onReset={reset}
+              onSave={async (name, msgs) => {
+                const { saveChatHistory } = await import("@/lib/api")
+                await saveChatHistory(name, msgs)
+              }}
               messages={messages}
-              researchEnabled={researchEnabled}
-              researchDepth={researchDepth}
-              onResearchDepthChange={setResearchDepth}
-              researchBreadth={researchBreadth}
-              onResearchBreadthChange={setResearchBreadth}
-              researchReasoning={researchReasoning}
-              onResearchReasoningChange={setResearchReasoning}
-              researchReportType={researchReportType}
-              onResearchReportTypeChange={setResearchReportType}
-              morphicSearchEnabled={morphicSearchEnabled}
-              searchDepth={searchDepth}
-              onSearchDepthChange={setSearchDepth}
-              ocrEnabled={ocrEnabled}
-              ocrModel={ocrModel}
-              onOCRModelChange={setOCRModel}
-              downscaleImages={downscaleImages}
-              onDownscaleImagesChange={setDownscaleImages}
               models={models}
             />
           </div>
@@ -223,19 +188,12 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
             onSend={handleSend}
             onCancel={cancel}
             onDeletePair={deleteMessagePair}
-            researchEnabled={researchEnabled}
-            onResearchToggle={toggleResearch}
-            morphicSearchEnabled={morphicSearchEnabled}
-            onMorphicSearchToggle={toggleMorphicSearch}
-            ocrEnabled={ocrEnabled}
-            onOCRToggle={toggleOCR}
             onOCRRequest={setOCRImage}
-            downscaleImages={downscaleImages}
           />
           {ocrEnabled && ocrImage && (
             <OCRPanel
               image={ocrImage}
-              model={ocrModel || DEFAULT_VISION_MODEL}
+              model={settings.ocrModel || DEFAULT_VISION_MODEL}
               onComplete={(output) => {
                 addMessagePair("OCR Request", output)
                 setOCRImage(null)
@@ -254,8 +212,10 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
 
 export default function Home() {
   return (
-    <TabManager
-      renderContent={(tab, onModeLabel) => <TabContent tab={tab} onModeLabel={onModeLabel} />}
-    />
+    <SettingsProvider>
+      <TabManager
+        renderContent={(tab, onModeLabel) => <TabContent tab={tab} onModeLabel={onModeLabel} />}
+      />
+    </SettingsProvider>
   )
 }

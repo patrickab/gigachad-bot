@@ -1,6 +1,5 @@
 import type { MorphicSearchParams } from "./types"
-
-const BASE = "/api"
+import { API_BASE } from "./config"
 
 export interface MorphicParsedEvent {
   type: "text" | "source" | "error" | "done"
@@ -13,7 +12,7 @@ export interface MorphicParsedEvent {
 
 export function morphicFetch(params: MorphicSearchParams) {
   const controller = new AbortController()
-  const promise = fetch(`${BASE}/morphic-search`, {
+  const promise = fetch(`${API_BASE}/morphic-search`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({

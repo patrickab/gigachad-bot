@@ -1,5 +1,7 @@
 "use client"
 
+import { REASONING_LEVELS } from "@/lib/config"
+
 interface ReasoningSelectorProps {
   reasoningEffort: string
   onReasoningChange: (v: string) => void
@@ -8,7 +10,7 @@ interface ReasoningSelectorProps {
 export function ReasoningSelector({ reasoningEffort, onReasoningChange }: ReasoningSelectorProps) {
   return (
     <div className="flex rounded-md bg-zinc-900/50 p-0.5 border border-zinc-800/50 h-[24px] items-center">
-      {["none", "low", "medium", "high"].map((level) => (
+      {REASONING_LEVELS.map((level) => (
         <button
           key={level}
           onClick={() => onReasoningChange(level)}

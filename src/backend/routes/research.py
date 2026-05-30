@@ -1,7 +1,13 @@
+import contextlib
+import json
+import os
+import tempfile
 from typing import Any
 
 from fastapi import APIRouter
 from pydantic import BaseModel
+
+from config import OLLAMA_BASE_URL
 
 router = APIRouter(prefix="/api", tags=["research"])
 
@@ -19,13 +25,7 @@ class ResearchRequest(BaseModel):
 
 @router.post("/research")
 async def research(req: ResearchRequest) -> dict[str, Any]:
-    import json
-    import os
-    from pathlib import Path
-
     from gpt_researcher import GPTResearcher
-
-    config_path = Path(__file__).resolve().parent.parent.parent.parent / ".gpt-researcher-config.json"
 
     config: dict[str, Any] = {
         "RETRIEVER": "tavily",
@@ -39,22 +39,39 @@ async def research(req: ResearchRequest) -> dict[str, Any]:
     if req.reasoning_effort and req.reasoning_effort != "none":
         config["REASONING_EFFORT"] = req.reasoning_effort
 
-    with config_path.open("w") as f:
-        json.dump(config, f)
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", prefix="gpt-researcher-", delete=False
+    ) as tmp:
+        json.dump(config, tmp)
+        config_path = tmp.name
 
-    os.environ["OLLAMA_API_BASE"] = "http://localhost:11434"
-    os.environ["OLLAMA_BASE_URL"] = "http://localhost:11434"
-    if req.reasoning_effort and req.reasoning_effort != "none":
-        os.environ["REASONING_EFFORT"] = req.reasoning_effort
+    saved_env: dict[str, str | None] = {}
+    env_keys = ["OLLAMA_API_BASE", "OLLAMA_BASE_URL", "REASONING_EFFORT"]
+    for key in env_keys:
+        saved_env[key] = os.environ.get(key)
 
-    researcher = GPTResearcher(
-        query=req.query,
-        report_type=req.report_type,
-        config_path=str(config_path),
-    )
-    await researcher.conduct_research()
-    report = await researcher.write_report()
-    sources = researcher.get_source_urls()
-    costs = researcher.get_costs()
+    try:
+        os.environ["OLLAMA_API_BASE"] = OLLAMA_BASE_URL
+        os.environ["OLLAMA_BASE_URL"] = OLLAMA_BASE_URL
+        if req.reasoning_effort and req.reasoning_effort != "none":
+            os.environ["REASONING_EFFORT"] = req.reasoning_effort
+
+        researcher = GPTResearcher(
+            query=req.query,
+            report_type=req.report_type,
+            config_path=config_path,
+        )
+        await researcher.conduct_research()
+        report = await researcher.write_report()
+        sources = researcher.get_source_urls()
+        costs = researcher.get_costs()
+    finally:
+        for key, val in saved_env.items():
+            if val is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = val
+        with contextlib.suppress(OSError):
+            os.unlink(config_path)
 
     return {"report": report, "sources": sources, "costs": costs}

@@ -1,5 +1,9 @@
 import base64
+from contextlib import contextmanager
 import re
+from typing import Any, Iterator
+
+from sse_starlette.sse import EventSourceResponse
 
 from llm_client import LLMClient
 from llm_config import MODEL_CONFIGS
@@ -21,6 +25,16 @@ def shutdown_client() -> None:
         _client = None
 
 
+@contextmanager
+def request_client() -> Iterator[LLMClient]:
+    c = get_client()
+    c.reset_history()
+    try:
+        yield c
+    finally:
+        c.reset_history()
+
+
 def decode_image(base64_data: str | None) -> bytes | None:
     if not base64_data:
         return None
@@ -28,3 +42,15 @@ def decode_image(base64_data: str | None) -> bytes | None:
     if match:
         return base64.b64decode(match.group(1))
     return base64.b64decode(base64_data)
+
+
+def sse_event_stream(chunks: Iterator[str]) -> EventSourceResponse:
+    async def event_stream() -> Any:
+        try:
+            for chunk in chunks:
+                yield {"event": "token", "data": chunk}
+            yield {"event": "done", "data": ""}
+        except Exception as e:
+            yield {"event": "error", "data": str(e)}
+
+    return EventSourceResponse(event_stream())

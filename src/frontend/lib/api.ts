@@ -1,11 +1,10 @@
 import type { ChatHistoriesResponse, ChatRequest, Message, ModelsResponse, ResearchRequest } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
-
-const BASE = "/api"
+import { API_BASE, DEFAULT_TEMPERATURE, DEFAULT_TOP_P, DEFAULT_DOWNSCALE_IMAGES } from "./config"
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, options)
+  const res = await fetch(`${API_BASE}${path}`, options)
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
@@ -32,9 +31,9 @@ export function createChatStream(req: ChatRequest): SSEStreamResult {
     model: req.model,
     user_msg: req.user_msg,
     system_prompt: req.system_prompt ?? "",
-    temperature: req.temperature ?? 0.2,
-    top_p: req.top_p ?? 0.95,
-    downscale_images: req.downscale_images ?? true,
+    temperature: req.temperature ?? DEFAULT_TEMPERATURE,
+    top_p: req.top_p ?? DEFAULT_TOP_P,
+    downscale_images: req.downscale_images ?? DEFAULT_DOWNSCALE_IMAGES,
     messages: (req.messages ?? []).map((m: Message) => ({
       role: m.role,
       content: m.content,

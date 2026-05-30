@@ -1,6 +1,7 @@
 "use client"
 
 import { SlidersHorizontal } from "lucide-react"
+import { ParamSlider } from "./ParamSlider"
 
 interface LLMParamsProps {
   temperature: number
@@ -22,36 +23,22 @@ export function LLMParams({
         Parameters
       </div>
       <div className="space-y-3">
-        <div className="space-y-1">
-          <div className="flex justify-between text-[10px] text-zinc-600">
-            <span>Temperature</span>
-            <span>{temperature.toFixed(2)}</span>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max="2"
-            step="0.05"
-            value={temperature}
-            onChange={(e) => onTemperatureChange(Number.parseFloat(e.target.value))}
-            className="w-full h-1 bg-zinc-800 rounded-full appearance-none cursor-pointer accent-sky-500"
-          />
-        </div>
-        <div className="space-y-1">
-          <div className="flex justify-between text-[10px] text-zinc-600">
-            <span>Top-p</span>
-            <span>{topP.toFixed(2)}</span>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.05"
-            value={topP}
-            onChange={(e) => onTopPChange(Number.parseFloat(e.target.value))}
-            className="w-full h-1 bg-zinc-800 rounded-full appearance-none cursor-pointer accent-sky-500"
-          />
-        </div>
+        <ParamSlider
+          label="Temperature"
+          value={temperature}
+          onChange={onTemperatureChange}
+          min={0}
+          max={2}
+          step={0.05}
+        />
+        <ParamSlider
+          label="Top-p"
+          value={topP}
+          onChange={onTopPChange}
+          min={0}
+          max={1}
+          step={0.05}
+        />
       </div>
     </div>
   )

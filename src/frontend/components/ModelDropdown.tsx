@@ -5,8 +5,9 @@ import { Check } from "lucide-react"
 import type { Provider } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { displayName, groupByProvider, activeProviders } from "@/lib/models"
-import { useState, useRef, useEffect, type ReactNode } from "react"
+import { useState, useRef, useCallback, type ReactNode } from "react"
 import type { ModelsResponse } from "@/lib/types"
+import { useClickOutside } from "@/hooks/useClickOutside"
 
 interface Tab {
   key: string
@@ -49,13 +50,8 @@ export function ModelDropdown({
   const [activeTab, setActiveTab] = useState<Provider>("Ollama")
   const ref = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    function handler(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener("mousedown", handler)
-    return () => document.removeEventListener("mousedown", handler)
-  }, [])
+  const close = useCallback(() => setOpen(false), [])
+  useClickOutside(ref, close)
 
   const available = groupByProvider(models)
   const providers = activeProviders(available)

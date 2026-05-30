@@ -11,11 +11,11 @@ from st_copy import copy_button
 import streamlit as st
 
 from streamlit_helper import model_selector
+from config import OLLAMA_BASE_URL
 
 EMBEDDING_DEFAULT = "ollama:nomic-embed-text"
 DEPTH_DEFAULT = 2
 BREADTH_DEFAULT = 4
-OLLAMA_BASE = "http://localhost:11434"
 
 CONFIG_PATH = PathLib(__file__).resolve().parent.parent.parent.parent / ".gpt-researcher-config.json"
 
@@ -49,8 +49,8 @@ def _write_config(fast: str, smart: str, strategic: str, depth: int, breadth: in
 
 
 def _apply_runtime_env(reasoning: str) -> None:
-    os.environ["OLLAMA_API_BASE"] = OLLAMA_BASE
-    os.environ["OLLAMA_BASE_URL"] = OLLAMA_BASE
+    os.environ["OLLAMA_API_BASE"] = OLLAMA_BASE_URL
+    os.environ["OLLAMA_BASE_URL"] = OLLAMA_BASE_URL
     if reasoning != "none":
         os.environ["REASONING_EFFORT"] = reasoning
 

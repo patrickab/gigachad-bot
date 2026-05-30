@@ -18,3 +18,4 @@ DIRECTORY_CHAT_HISTORIES = BASE_DIR / "chat_histories"
 SMALL_MODEL = "ollama/gemma4:31b-cloud"
 
 MORPHIC_URL = os.environ.get("MORPHIC_URL", "http://localhost:3001")
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")

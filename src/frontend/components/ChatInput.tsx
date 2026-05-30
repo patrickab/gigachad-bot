@@ -5,6 +5,11 @@ import { motion, AnimatePresence } from "framer-motion"
 import { ArrowUp, Plus, LayoutGrid, Mic, Search, Globe, Sigma, Square, X, Maximize2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { downscaleImage as apiDownscale } from "@/lib/api"
+import { IMAGE_DOWNSCALE_MAX } from "@/lib/config"
+import { useClickOutside } from "@/hooks/useClickOutside"
+import { useModeState } from "@/hooks/useModeState"
+import { useSettings } from "@/contexts/SettingsContext"
+import { PillButton } from "./PillButton"
 
 interface ChatInputProps {
   onSend: (text: string, imageDataUrl: string | null) => void
@@ -12,13 +17,6 @@ interface ChatInputProps {
   disabled?: boolean
   isStreaming?: boolean
   onCancel?: () => void
-  researchEnabled?: boolean
-  onResearchToggle?: () => void
-  morphicSearchEnabled?: boolean
-  onMorphicSearchToggle?: () => void
-  ocrEnabled?: boolean
-  onOCRToggle?: () => void
-  downscaleImages?: boolean
 }
 
 export function ChatInput({
@@ -27,14 +25,10 @@ export function ChatInput({
   disabled,
   isStreaming,
   onCancel,
-  researchEnabled,
-  onResearchToggle,
-  morphicSearchEnabled,
-  onMorphicSearchToggle,
-  ocrEnabled,
-  onOCRToggle,
-  downscaleImages,
 }: ChatInputProps) {
+  const { researchEnabled, morphicSearchEnabled, ocrEnabled, toggleResearch, toggleMorphicSearch, toggleOCR } = useModeState()
+  const { downscaleImages } = useSettings()
+
   const [text, setText] = useState("")
   const [image, setImage] = useState<string | null>(null)
   const [downscaledImage, setDownscaledImage] = useState<string | null>(null)
@@ -47,19 +41,14 @@ export function ChatInput({
   const recognitionRef = useRef<any>(null)
   const textRef = useRef(text)
 
+  const closeTools = useCallback(() => setShowTools(false), [])
+  useClickOutside(toolsRef, closeTools)
+
   useEffect(() => { textRef.current = text }, [text])
 
   useEffect(() => {
-    function handler(e: MouseEvent) {
-      if (toolsRef.current && !toolsRef.current.contains(e.target as Node)) setShowTools(false)
-    }
-    document.addEventListener("mousedown", handler)
-    return () => document.removeEventListener("mousedown", handler)
-  }, [])
-
-  useEffect(() => {
     if (!image) { setDownscaledImage(null); return }
-    apiDownscale(image, 2048).then(setDownscaledImage).catch(() => {})
+    apiDownscale(image, IMAGE_DOWNSCALE_MAX).then(setDownscaledImage).catch(() => {})
   }, [image])
 
   const adjustHeight = useCallback(() => {
@@ -229,28 +218,19 @@ export function ChatInput({
               <Plus className="h-4 w-4" />
             </button>
             {researchEnabled && (
-              <button
-                onClick={() => onResearchToggle?.()}
-                className="flex items-center gap-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 px-2.5 py-1 text-xs font-medium text-amber-400 hover:bg-amber-500/20 hover:border-amber-500/50 transition-colors"
-              >
-                <Search className="h-3 w-3" />Research
-              </button>
+              <PillButton accent="amber" active onClick={() => toggleResearch()} icon={<Search className="h-3 w-3" />}>
+                Research
+              </PillButton>
             )}
             {morphicSearchEnabled && (
-              <button
-                onClick={() => onMorphicSearchToggle?.()}
-                className="flex items-center gap-1.5 rounded-full bg-sky-500/10 border border-sky-500/30 px-2.5 py-1 text-xs font-medium text-sky-400 hover:bg-sky-500/20 hover:border-sky-500/50 transition-colors"
-              >
-                <Globe className="h-3 w-3" />Search
-              </button>
+              <PillButton accent="sky" active onClick={() => toggleMorphicSearch()} icon={<Globe className="h-3 w-3" />}>
+                Search
+              </PillButton>
             )}
             {ocrEnabled && (
-              <button
-                onClick={() => onOCRToggle?.()}
-                className="flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-1 text-xs font-medium text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-500/50 transition-colors"
-              >
-                <Sigma className="h-3 w-3" />LaTeX
-              </button>
+              <PillButton accent="emerald" active onClick={() => toggleOCR()} icon={<Sigma className="h-3 w-3" />}>
+                LaTeX
+              </PillButton>
             )}
           </div>
           <div className="flex items-center gap-1">
@@ -270,7 +250,7 @@ export function ChatInput({
                 <div className="absolute bottom-full right-0 mb-2 w-56 rounded-xl border border-zinc-800 bg-zinc-950 p-2 shadow-2xl">
                   {!researchEnabled && (
                     <button
-                      onClick={() => { onResearchToggle?.(); setShowTools(false) }}
+                      onClick={() => { toggleResearch(); setShowTools(false) }}
                       className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800/50 transition-colors"
                     >
                       <Search className="h-3.5 w-3.5 text-amber-400" />Deep Research
@@ -278,7 +258,7 @@ export function ChatInput({
                   )}
                   {!morphicSearchEnabled && (
                     <button
-                      onClick={() => { onMorphicSearchToggle?.(); setShowTools(false) }}
+                      onClick={() => { toggleMorphicSearch(); setShowTools(false) }}
                       className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800/50 transition-colors"
                     >
                       <Globe className="h-3.5 w-3.5 text-sky-400" />Web Search
@@ -286,7 +266,7 @@ export function ChatInput({
                   )}
                   {!ocrEnabled && (
                     <button
-                      onClick={() => { onOCRToggle?.(); setShowTools(false) }}
+                      onClick={() => { toggleOCR(); setShowTools(false) }}
                       className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800/50 transition-colors"
                     >
                       <Sigma className="h-3.5 w-3.5 text-emerald-400" />LaTeX OCR
