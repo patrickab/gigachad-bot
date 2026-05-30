@@ -8,25 +8,44 @@ import rehypeKatex from "rehype-katex"
 import rehypeRaw from "rehype-raw"
 import type { Components } from "react-markdown"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Light as SyntaxHighlighter } from "react-syntax-highlighter"
-import latex from "react-syntax-highlighter/dist/cjs/languages/hljs/latex"
-import { atomOneDark } from "react-syntax-highlighter/dist/cjs/styles/hljs"
+import { highlightCode } from "@/lib/shiki-highlighter"
 import { motion, AnimatePresence } from "framer-motion"
-import { Globe } from "lucide-react"
+import { Check, Copy, Globe } from "lucide-react"
 import "katex/dist/katex.min.css"
 
-SyntaxHighlighter.registerLanguage("latex", latex)
+function CodeBlock({ codeString, language }: { codeString: string; language: string }) {
+  const [copied, setCopied] = useState(false)
+  const html = useMemo(() => highlightCode(codeString, language), [codeString, language])
 
-interface CitationPillProps {
-  node?: unknown
-  children?: React.ReactNode
-  href?: string
-  title?: string
-  "data-title"?: string
-  "data-content"?: string
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(codeString).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }, [codeString])
+
+  return (
+    <div className="group/code relative">
+      {html ? (
+        <div
+          className="[&_pre]:!rounded-md [&_pre]:!p-4 [&_pre]:!m-0 [&_pre]:!text-[0.75rem] [&_pre]:!leading-[1.6]"
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      ) : (
+        <pre className="rounded-md p-4 m-0 text-[0.75rem] leading-[1.6] bg-[#1e1e1e] text-[#d4d4d4] overflow-x-auto"><code>{codeString}</code></pre>
+      )}
+      <button
+        onClick={handleCopy}
+        className="absolute top-2 right-2 rounded p-1 opacity-0 transition-opacity group-hover/code:opacity-100 hover:bg-zinc-700/60 text-zinc-500 hover:text-zinc-300"
+        title="Copy code"
+      >
+        {copied ? <Check className="h-3.5 w-3.5 text-cyan-400" /> : <Copy className="h-3.5 w-3.5" />}
+      </button>
+    </div>
+  )
 }
 
-function CitationPill({ node, children, href, title, ...props }: CitationPillProps) {
+function CitationPill({ node, children, href, title, ...props }: any) {
   const [show, setShow] = useState(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -92,34 +111,20 @@ function CitationPill({ node, children, href, title, ...props }: CitationPillPro
 
 const sharedComponents: Components = {
   pre({ children }) {
-    return <pre>{children}</pre>
+    return <>{children}</>
   },
-  code({ className, children, ...props }) {
+  code({ className, children, node, ...props }) {
     const match = /language-(\w+)/.exec(className || "")
-    const isInline = !match && !className
-    if (isInline) {
+    if (!match && !className) {
       return (
         <code className={className} {...props}>
           {children}
         </code>
       )
     }
+    const language = match ? match[1] : "text"
     const codeString = String(children).replace(/\n$/, "")
-    return (
-      <SyntaxHighlighter
-        language={match ? match[1] : "text"}
-        style={atomOneDark}
-        customStyle={{
-          margin: 0,
-          borderRadius: "0.5rem",
-          fontSize: "0.75rem",
-          lineHeight: "1.6",
-        }}
-        PreTag="div"
-      >
-        {codeString}
-      </SyntaxHighlighter>
-    )
+    return <CodeBlock codeString={codeString} language={language} />
   },
   table({ children }) {
     return (
@@ -133,7 +138,6 @@ const sharedComponents: Components = {
 function LaTeXMarkdownInner({ content, citationMap }: { content: string; citationMap?: Record<string, { title: string; url: string; content: string }> }) {
   const allComponents = useMemo<Components>(() => ({
     ...sharedComponents,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     a({ node, children, href, title, ...props }: any) {
       const num = String(children)
       const info = citationMap?.[num]

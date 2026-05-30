@@ -49,9 +49,39 @@
 pre {
   overflow-x: auto;
   border-radius: var(--radius-md);
-  padding: 1rem;
-  background: #18181b;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+}
+
+[data-rehype-pretty-code-figure] pre {
+  padding: 0.75rem 1rem;
+}
+
+[data-rehype-pretty-code-figure] pre > code {
+  display: grid;
+}
+
+[data-rehype-pretty-code-figure] [data-line] {
+  padding: 0 1rem;
+  border-left: 2px solid transparent;
+}
+
+[data-rehype-pretty-code-figure] [data-highlighted-line] {
+  background: rgba(255, 255, 255, 0.06);
+  border-left-color: var(--color-cyan-400);
+}
+
+[data-rehype-pretty-code-title] {
+  padding: 0.5rem 1rem;
+  font-size: 0.75rem;
+  color: var(--color-zinc-400);
+  background: #1e1e1e;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+[data-rehype-pretty-code-title] + pre {
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  margin-top: 0;
 }
 
 code {
