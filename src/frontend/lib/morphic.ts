@@ -1,13 +1,19 @@
 import type { MorphicSearchParams } from "./types"
 import { API_BASE } from "./config"
 
+export interface MorphicResultItem {
+  title: string
+  url: string
+  content: string
+}
+
 export interface MorphicParsedEvent {
   type: "text" | "source" | "error" | "done"
   text?: string
-  sources?: { title: string; url: string; content: string }[]
+  sources?: MorphicResultItem[]
   images?: string[]
   query?: string
-  citationMap?: Record<string, { title: string; url: string; content: string }>
+  citationMap?: Record<string, MorphicResultItem>
 }
 
 export function morphicFetch(params: MorphicSearchParams) {
@@ -55,7 +61,7 @@ export async function* parseMorphicStream(
             const o = p.output
             yield {
               type: "source",
-              sources: o.results.map((r: any) => ({ title: r.title ?? "", url: r.url ?? "", content: r.content ?? "" })),
+              sources: o.results.map((r: MorphicResultItem) => ({ title: r.title ?? "", url: r.url ?? "", content: r.content ?? "" })),
               images: o.images ?? [],
               query: o.query ?? "",
               citationMap: o.citationMap,
@@ -67,7 +73,8 @@ export async function* parseMorphicStream(
       }
     }
   } catch (e) {
-    if ((e as Error).name !== "AbortError") yield { type: "error", text: (e as Error).message }
+    if (e instanceof Error && e.name === "AbortError") return
+    yield { type: "error", text: e instanceof Error ? e.message : String(e) }
   } finally {
     reader.releaseLock()
   }

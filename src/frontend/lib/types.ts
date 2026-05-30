@@ -1,3 +1,5 @@
+import type { MorphicResultItem } from "./morphic"
+
 export interface Message {
   role: "user" | "assistant" | "system" | "tool"
   content: string
@@ -56,9 +58,9 @@ export interface MorphicSearchParams {
 
 export interface MorphicSearchResult {
   query: string
-  sources: { title: string; url: string; content: string }[]
+  sources: MorphicResultItem[]
   images: string[]
-  citationMap?: Record<string, { title: string; url: string; content: string }>
+  citationMap?: Record<string, MorphicResultItem>
 }
 
 export interface OCRRequest {

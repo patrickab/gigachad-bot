@@ -168,8 +168,7 @@ def editor(text_to_edit: str, language: str, key: str, height: Optional[int] = N
         height=height,
         key=f"editor_{key}",
         theme=selected_theme,
-    )  # noqa
-    content  # noqa
+    )
     return content
 
 

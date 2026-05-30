@@ -41,13 +41,3 @@ async def get_models() -> dict:
 @router.get("/prompts")
 async def get_prompts() -> dict[str, list[str]]:
     return {"prompts": list(PROMPT_MAP.keys())}
-
-
-@router.get("/history")
-async def get_history() -> dict:
-    return {"messages": []}
-
-
-@router.delete("/history")
-async def reset_history() -> dict[str, str]:
-    return {"status": "ok"}

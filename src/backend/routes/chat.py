@@ -1,7 +1,7 @@
 from typing import Any
 
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from .deps import decode_image, request_client, sse_event_stream
@@ -13,12 +13,11 @@ class ChatRequest(BaseModel):
     model: str
     user_msg: str
     system_prompt: str = ""
-    temperature: float = 0.2
-    top_p: float = 0.95
+    temperature: float = Field(default=0.2, ge=0, le=2)
+    top_p: float = Field(default=0.95, ge=0, le=1)
     reasoning_effort: str | None = None
     img_base64: str | None = None
     downscale_images: bool = True
-    messages: list[dict[str, Any]] = []
 
 
 def _build_kwargs(req: ChatRequest) -> dict[str, Any]:

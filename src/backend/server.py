@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
 import sys
 
@@ -14,12 +15,19 @@ from backend.routes.morphic import router as morphic_router
 from backend.routes.ocr import router as ocr_router
 from backend.routes.research import router as research_router
 
-app = FastAPI(title="gigachad-bot")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    get_client()
+    yield
+    shutdown_client()
+
+
+app = FastAPI(title="gigachad-bot", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -30,13 +38,3 @@ app.include_router(models_router)
 app.include_router(morphic_router)
 app.include_router(ocr_router)
 app.include_router(research_router)
-
-
-@app.on_event("startup")
-async def startup() -> None:
-    get_client()
-
-
-@app.on_event("shutdown")
-async def shutdown() -> None:
-    shutdown_client()

@@ -2,19 +2,22 @@
 
 import { useEffect, useState } from "react"
 import { Sun, Moon } from "lucide-react"
+import { STORAGE_KEY_THEME } from "@/lib/config"
 
 export function ThemeToggle() {
   const [theme, setTheme] = useState<"light" | "dark">("dark")
 
   useEffect(() => {
-    const stored = localStorage.getItem("theme")
-    if (stored === "light" || stored === "dark") setTheme(stored)
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY_THEME)
+      if (stored === "light" || stored === "dark") setTheme(stored)
+    } catch {}
   }, [])
 
   function toggle() {
     const next = theme === "dark" ? "light" : "dark"
     setTheme(next)
-    localStorage.setItem("theme", next)
+    try { localStorage.setItem(STORAGE_KEY_THEME, next) } catch {}
     document.documentElement.className = next
   }
 

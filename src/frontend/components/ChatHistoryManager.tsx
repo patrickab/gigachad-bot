@@ -21,6 +21,7 @@ export function ChatHistoryManager({ histories, historiesLoading, onLoad, onRefr
   const [open, setOpen] = useState(false)
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set())
   const [loadingFile, setLoadingFile] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   const dirs = Object.entries(histories)
   const totalFiles = dirs.reduce((sum, [, files]) => sum + files.length, 0)
@@ -28,21 +29,37 @@ export function ChatHistoryManager({ histories, historiesLoading, onLoad, onRefr
   async function handleLoad(filename: string, dir: string) {
     const path = dir === "root" ? filename : `${dir}/${filename}`
     setLoadingFile(path)
-    await loadChatHistory(path)
-    onLoad(path)
-    setLoadingFile(null)
+    setError(null)
+    try {
+      await loadChatHistory(path)
+      onLoad(path)
+    } catch (e) {
+      setError((e as Error).message || "Failed to load history")
+    } finally {
+      setLoadingFile(null)
+    }
   }
 
   async function handleDelete(filename: string, dir: string) {
     const path = dir === "root" ? filename : `${dir}/${filename}`
-    await deleteChatHistory(path)
-    onRefresh()
+    setError(null)
+    try {
+      await deleteChatHistory(path)
+      onRefresh()
+    } catch (e) {
+      setError((e as Error).message || "Failed to delete history")
+    }
   }
 
   async function handleArchive(filename: string, dir: string) {
     const path = dir === "root" ? filename : `${dir}/${filename}`
-    await archiveChatHistory(path)
-    onRefresh()
+    setError(null)
+    try {
+      await archiveChatHistory(path)
+      onRefresh()
+    } catch (e) {
+      setError((e as Error).message || "Failed to archive history")
+    }
   }
 
   return (
@@ -152,7 +169,10 @@ export function ChatHistoryManager({ histories, historiesLoading, onLoad, onRefr
                       </AnimatePresence>
                     </div>
                   ))}
-                  {dirs.length === 0 && (
+                  {error && (
+            <p className="px-2 py-1 text-[11px] text-red-400">{error}</p>
+          )}
+          {dirs.length === 0 && (
                     <p className="px-2 py-2 text-[11px] text-zinc-600">No saved chats.</p>
                   )}
                 </>

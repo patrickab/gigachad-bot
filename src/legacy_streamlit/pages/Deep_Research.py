@@ -12,8 +12,8 @@ import streamlit as st
 
 from streamlit_helper import model_selector
 from config import OLLAMA_BASE_URL
+from lib.research_config import build_research_config
 
-EMBEDDING_DEFAULT = "ollama:nomic-embed-text"
 DEPTH_DEFAULT = 2
 BREADTH_DEFAULT = 4
 
@@ -32,17 +32,14 @@ def _to_litellm_model(raw: str) -> str:
 
 
 def _write_config(fast: str, smart: str, strategic: str, depth: int, breadth: int, reasoning: str) -> str:
-    config = {
-        "RETRIEVER": "tavily",
-        "EMBEDDING": EMBEDDING_DEFAULT,
-        "FAST_LLM": f"litellm:{fast}",
-        "SMART_LLM": f"litellm:{smart}",
-        "STRATEGIC_LLM": f"litellm:{strategic}",
-        "DEEP_RESEARCH_DEPTH": depth,
-        "DEEP_RESEARCH_BREADTH": breadth,
-    }
-    if reasoning != "none":
-        config["REASONING_EFFORT"] = reasoning
+    config = build_research_config(
+        fast_model=fast,
+        smart_model=smart,
+        strategic_model=strategic,
+        depth=depth,
+        breadth=breadth,
+        reasoning_effort=reasoning,
+    )
     with CONFIG_PATH.open("w") as f:
         json.dump(config, f)
     return str(CONFIG_PATH)

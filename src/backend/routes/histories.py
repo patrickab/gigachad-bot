@@ -41,7 +41,7 @@ async def load_chat_history(filename: str) -> dict[str, Any]:
 async def save_chat_history(filename: str, data: SaveRequest | None = None) -> dict[str, str]:
     DIRECTORY_CHAT_HISTORIES.mkdir(parents=True, exist_ok=True)
     name = filename if not data or not data.filename else data.filename
-    filepath = DIRECTORY_CHAT_HISTORIES / name
+    filepath = _resolve_history_path(name)
     filepath.write_text(json.dumps(data.messages if data else [], indent=2), encoding="utf-8")
     return {"status": "ok", "filename": str(name)}
 
@@ -69,7 +69,9 @@ async def archive_chat_history(filename: str) -> dict[str, str]:
 @router.post("/{filename:path}/unarchive")
 async def unarchive_chat_history(filename: str) -> dict[str, str]:
     archive_dir = DIRECTORY_CHAT_HISTORIES / "archived"
-    filepath = archive_dir / filename
+    filepath = (archive_dir / filename).resolve()
+    if not str(filepath).startswith(str(archive_dir.resolve())):
+        raise HTTPException(status_code=400, detail="Invalid path")
     if not filepath.exists():
         raise HTTPException(status_code=404, detail="Unreachable history")
     filepath.rename(DIRECTORY_CHAT_HISTORIES / filepath.name)
@@ -77,4 +79,7 @@ async def unarchive_chat_history(filename: str) -> dict[str, str]:
 
 
 def _resolve_history_path(filename: str) -> Path:
-    return DIRECTORY_CHAT_HISTORIES / filename
+    resolved = (DIRECTORY_CHAT_HISTORIES / filename).resolve()
+    if not str(resolved).startswith(str(DIRECTORY_CHAT_HISTORIES.resolve())):
+        raise HTTPException(status_code=400, detail="Invalid path")
+    return resolved

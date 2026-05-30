@@ -1,7 +1,7 @@
 import type { ChatHistoriesResponse, ChatRequest, Message, ModelsResponse, ResearchRequest } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
-import { API_BASE, DEFAULT_TEMPERATURE, DEFAULT_TOP_P, DEFAULT_DOWNSCALE_IMAGES } from "./config"
+import { API_BASE, DEFAULT_TEMPERATURE, DEFAULT_TOP_P, DEFAULT_DOWNSCALE_IMAGES, IMAGE_DOWNSCALE_MAX } from "./config"
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, options)
@@ -16,14 +16,6 @@ export async function fetchModels(): Promise<ModelsResponse> {
 export async function fetchPrompts(): Promise<string[]> {
   const data = await request<{ prompts: string[] }>("/prompts")
   return data.prompts
-}
-
-export async function fetchHistory(): Promise<{ messages: Message[] }> {
-  return request("/history")
-}
-
-export async function resetHistory(): Promise<void> {
-  await request("/history", { method: "DELETE" })
 }
 
 export function createChatStream(req: ChatRequest): SSEStreamResult {
@@ -79,7 +71,7 @@ export async function runResearch(req: ResearchRequest): Promise<{ report: strin
   })
 }
 
-export async function downscaleImage(imgBase64: string, maxTokens: number = 4096): Promise<string> {
+export async function downscaleImage(imgBase64: string, maxTokens: number = IMAGE_DOWNSCALE_MAX): Promise<string> {
   const data = await request<{ img_base64: string }>("/downscale-image", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

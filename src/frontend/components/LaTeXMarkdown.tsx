@@ -17,7 +17,16 @@ import "katex/dist/katex.min.css"
 
 SyntaxHighlighter.registerLanguage("latex", latex)
 
-function CitationPill({ node, children, href, title, ...props }: any) {
+interface CitationPillProps {
+  node?: unknown
+  children?: React.ReactNode
+  href?: string
+  title?: string
+  "data-title"?: string
+  "data-content"?: string
+}
+
+function CitationPill({ node, children, href, title, ...props }: CitationPillProps) {
   const [show, setShow] = useState(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -124,6 +133,7 @@ const sharedComponents: Components = {
 function LaTeXMarkdownInner({ content, citationMap }: { content: string; citationMap?: Record<string, { title: string; url: string; content: string }> }) {
   const allComponents = useMemo<Components>(() => ({
     ...sharedComponents,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     a({ node, children, href, title, ...props }: any) {
       const num = String(children)
       const info = citationMap?.[num]
