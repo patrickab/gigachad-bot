@@ -1,4 +1,6 @@
 import type { ChatHistoriesResponse, ChatRequest, Message, ModelsResponse, ResearchRequest } from "./types"
+import { createSSEStream } from "./sse"
+import type { SSEStreamResult } from "./sse"
 
 const BASE = "/api"
 
@@ -25,11 +27,7 @@ export async function resetHistory(): Promise<void> {
   await request("/history", { method: "DELETE" })
 }
 
-export function createChatStream(
-  req: ChatRequest
-): { stream: ReadableStreamDefaultReader<Uint8Array>; abort: () => void } {
-  const controller = new AbortController()
-
+export function createChatStream(req: ChatRequest): SSEStreamResult {
   const body: Record<string, unknown> = {
     model: req.model,
     user_msg: req.user_msg,
@@ -47,62 +45,7 @@ export function createChatStream(
   if (req.reasoning_effort) body.reasoning_effort = req.reasoning_effort
   if (req.img_base64) body.img_base64 = req.img_base64
 
-  const promise = fetch(`${BASE}/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    signal: controller.signal,
-  })
-
-  return {
-    stream: new ReadableStream({
-      async start(controller_stream) {
-        const res = await promise
-        if (!res.ok || !res.body) {
-          controller_stream.error(await res.text())
-          return
-        }
-        const reader = res.body.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ""
-        let eventData: string[] = []
-
-        async function pump(): Promise<void> {
-          const { done, value } = await reader.read()
-          if (done) {
-            if (eventData.length > 0) {
-              controller_stream.enqueue(new TextEncoder().encode(eventData.join("\n")))
-            }
-            controller_stream.close()
-            return
-          }
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split("\n")
-          buffer = lines.pop() ?? ""
-
-          for (let line of lines) {
-            if (line.endsWith("\r")) line = line.slice(0, -1)
-            
-            if (!line) {
-              if (eventData.length > 0) {
-                controller_stream.enqueue(new TextEncoder().encode(eventData.join("\n")))
-                eventData = []
-              }
-              continue
-            }
-            if (line.startsWith("event:")) continue
-            if (line.startsWith("data:")) {
-              let d = line.startsWith("data: ") ? line.slice(6) : line.slice(5)
-              eventData.push(d)
-            }
-          }
-          return pump()
-        }
-        return pump()
-      },
-    }).getReader(),
-    abort: () => controller.abort(),
-  }
+  return createSSEStream("/chat", body)
 }
 
 export async function listChatHistories(): Promise<ChatHistoriesResponse> {
@@ -149,56 +92,6 @@ export async function downscaleImage(imgBase64: string, maxTokens: number = 4096
 export function createOCRStream(
   imgBase64: string,
   model: string
-): { stream: ReadableStreamDefaultReader<Uint8Array>; abort: () => void } {
-  const controller = new AbortController()
-  const promise = fetch(`${BASE}/ocr`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ img_base64: imgBase64, model }),
-    signal: controller.signal,
-  })
-  return {
-    stream: new ReadableStream({
-      async start(ctrl) {
-        const res = await promise
-        if (!res.ok || !res.body) { ctrl.error(await res.text()); return }
-        const reader = res.body.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ""
-        let eventData: string[] = []
-        async function pump(): Promise<void> {
-          const { done, value } = await reader.read()
-          if (done) { 
-            if (eventData.length > 0) {
-              ctrl.enqueue(new TextEncoder().encode(eventData.join("\n")))
-            }
-            ctrl.close(); 
-            return 
-          }
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split("\n")
-          buffer = lines.pop() ?? ""
-          for (let line of lines) {
-            if (line.endsWith("\r")) line = line.slice(0, -1)
-            
-            if (!line) {
-              if (eventData.length > 0) {
-                ctrl.enqueue(new TextEncoder().encode(eventData.join("\n")))
-                eventData = []
-              }
-              continue
-            }
-            if (line.startsWith("event:")) continue
-            if (line.startsWith("data:")) {
-              let d = line.startsWith("data: ") ? line.slice(6) : line.slice(5)
-              eventData.push(d)
-            }
-          }
-          return pump()
-        }
-        return pump()
-      },
-    }).getReader(),
-    abort: () => controller.abort(),
-  }
+): SSEStreamResult {
+  return createSSEStream("/ocr", { img_base64: imgBase64, model })
 }

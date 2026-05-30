@@ -1,4 +1,8 @@
+import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
+from pathlib import Path as PathLib
 from typing import Dict, List
 
 from st_copy import copy_button
@@ -6,7 +10,7 @@ import streamlit as st
 from streamlit_paste_button import PasteResult
 
 from config import DIRECTORY_CHAT_HISTORIES
-from lib.streamlit_helper import (
+from streamlit_helper import (
     AVAILABLE_LLM_MODELS,
     AVAILABLE_PROMPTS,
     get_img_hash,
@@ -21,7 +25,6 @@ EMPTY_PASTE_RESULT = PasteResult(image_data=None)
 
 
 def init_chat_variables() -> None:
-    """Initialize session state variables for chat."""
     if "system_prompts" not in st.session_state:
         st.session_state.file_context = ""
         st.session_state.selected_model = AVAILABLE_LLM_MODELS[0]
@@ -31,12 +34,11 @@ def init_chat_variables() -> None:
         st.session_state.refactor_code = False
 
 
-# ---------------------------------------------------- Chat Interface functions ---------------------------------------------------- #
 def chat_interface() -> None:
     col_left, _ = st.columns([0.9, 0.1])
 
     with col_left:
-        st.write("")  # Spacer
+        st.write("")
         message_container = st.container()
         render_messages(message_container, client=st.session_state.client)
 
@@ -48,14 +50,12 @@ def chat_interface() -> None:
                 st.markdown(prompt)
                 copy_button(prompt)
             with st.chat_message("assistant"):
-                # Can be toggled if "Code Assistant" prompt is selected
                 if st.session_state.refactor_code and st.session_state.selected_prompt == "Code Assistant":
-                    prompt = f"Analyze this module for possibilities of more concise implementation - without loss of robustness, compatibility or understandability :\n\n <code>\n{prompt}\n</code>"  # noqa
+                    prompt = f"Analyze this module for possibilities of more concise implementation - without loss of robustness, compatibility or understandability :\n\n <code>\n{prompt}\n</code>"
                     st.session_state.refactor_code = False
 
                 system_prompt = st.session_state.system_prompts[st.session_state.selected_prompt]
 
-                # Defaults to empty image if not provided
                 api_img: PasteResult = st.session_state.api_img
                 client: LLMClient = st.session_state.client
                 kwargs = {
@@ -76,7 +76,6 @@ def chat_interface() -> None:
                     )
                 )
 
-                # Clear pasted image after use
                 if api_img:
                     img_hash = get_img_hash(st.session_state.pasted_image)
                     st.session_state.sent_hashes.add(img_hash)
@@ -88,13 +87,10 @@ def chat_interface() -> None:
                 st.rerun()
 
 
-# ----------------------------------------------------------- Sidebar ----------------------------------------------------------- #
 def gigachad_sidebar() -> None:
-    """Render the sidebar for gigachad bot."""
     init_chat_variables()
 
     with st.sidebar:
-        # --- Model & Prompt Selection ---
         st.session_state.selected_model = model_selector(key="gigachad_bot")
 
         st.session_state.selected_prompt = st.selectbox(
@@ -113,7 +109,6 @@ def gigachad_sidebar() -> None:
         with st.expander("Upload Image"):
             paste_img_button()
 
-        # -------------------------------------------------- Options & File Upload -------------------------------------------------- #
         st.markdown("---")
         with st.expander("Options", expanded=False):
             llm_params_sidebar()
@@ -131,8 +126,6 @@ def gigachad_sidebar() -> None:
                         st.session_state.client.store_history(str(DIRECTORY_CHAT_HISTORIES / f"{filename}.json"))
                         st.success("Successfully saved chat")
 
-        # ---------------------------------------------- Chat Histories ---------------------------------------------- #
-
         if DIRECTORY_CHAT_HISTORIES.exists():
             chat_histories = [
                 f.relative_to(DIRECTORY_CHAT_HISTORIES)
@@ -145,9 +138,9 @@ def gigachad_sidebar() -> None:
         if chat_histories != []:
             st.markdown("---")
             with st.expander("Chat Histories", expanded=False):
-                by_dir: Dict[str, List[Path]] = {}
+                by_dir: Dict[str, List[PathLib]] = {}
                 for history_path in chat_histories:
-                    dir_key = str(history_path.parent) if history_path.parent != Path(".") else "."
+                    dir_key = str(history_path.parent) if history_path.parent != PathLib(".") else "."
                     by_dir.setdefault(dir_key, []).append(history_path)
 
                 for dir_name, files in by_dir.items():
@@ -166,8 +159,7 @@ def gigachad_sidebar() -> None:
                                 )
 
 
-def _history_expander(label: str, full_path: Path) -> None:
-    """Render load/delete/archive buttons inside an expander for a single chat history."""
+def _history_expander(label: str, full_path: PathLib) -> None:
     with st.expander(label, expanded=False):
         col_load, col_delete, col_archive = st.columns(3)
         with col_load:

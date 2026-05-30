@@ -1,19 +1,23 @@
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
 import asyncio
 import json
 import os
-from pathlib import Path
+from pathlib import Path as PathLib
 
 from st_copy import copy_button
 import streamlit as st
 
-from lib.streamlit_helper import model_selector
+from streamlit_helper import model_selector
 
 EMBEDDING_DEFAULT = "ollama:nomic-embed-text"
 DEPTH_DEFAULT = 2
 BREADTH_DEFAULT = 4
 OLLAMA_BASE = "http://localhost:11434"
 
-CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / ".gpt-researcher-config.json"
+CONFIG_PATH = PathLib(__file__).resolve().parent.parent.parent.parent / ".gpt-researcher-config.json"
 
 
 def _get_event_loop() -> asyncio.AbstractEventLoop:

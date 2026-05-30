@@ -1,9 +1,10 @@
-import streamlit as st
+import sys
+from pathlib import Path
 
-from lib.streamlit_helper import (
-    apply_custom_css,
-    init_session_state,
-)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import streamlit as st
+from streamlit_helper import apply_custom_css, init_session_state
 
 PAGES = {
     "Workspaces": [

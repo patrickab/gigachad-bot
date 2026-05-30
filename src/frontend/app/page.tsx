@@ -12,6 +12,14 @@ import { OCRPanel } from "@/components/OCRPanel"
 import { TabManager } from "@/components/TabManager"
 import type { Tab } from "@/components/TabManager"
 import { useChat } from "@/hooks/useChat"
+import { useModeState } from "@/hooks/useModeState"
+
+const MODE_LABELS: Record<string, string> = {
+  research: "Deep Research",
+  search: "Search",
+  ocr: "LaTeX OCR",
+  chat: "Chat",
+}
 
 const DEFAULT_VISION_MODEL = "ollama/qwen3-vl:235b-instruct-cloud"
 
@@ -34,6 +42,15 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
     addMessagePair,
   } = useChat()
 
+  const {
+    researchEnabled,
+    morphicSearchEnabled,
+    ocrEnabled,
+    toggleResearch,
+    toggleMorphicSearch,
+    toggleOCR,
+  } = useModeState()
+
   const [collapsed, setCollapsed] = useState(true)
   const [selectedModel, setSelectedModel] = useState("")
   const [selectedPrompt, setSelectedPrompt] = useState<string | null>(null)
@@ -41,7 +58,6 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
   const [topP, setTopP] = useState(0.95)
   const [reasoningEffort, setReasoningEffort] = useState("none")
 
-  const [researchEnabled, setResearchEnabled] = useState(false)
   const [researchFastModel, setResearchFastModel] = useState("")
   const [researchSmartModel, setResearchSmartModel] = useState("")
   const [researchStrategicModel, setResearchStrategicModel] = useState("")
@@ -50,10 +66,8 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
   const [researchReasoning, setResearchReasoning] = useState("medium")
   const [researchReportType, setResearchReportType] = useState("deep")
 
-  const [morphicSearchEnabled, setMorphicSearchEnabled] = useState(false)
   const [searchDepth, setSearchDepth] = useState<"quick" | "adaptive">("adaptive")
 
-  const [ocrEnabled, setOCREnabled] = useState(false)
   const [ocrModel, setOCRModel] = useState(DEFAULT_VISION_MODEL)
   const [ocrImage, setOCRImage] = useState<string | null>(null)
   const [downscaleImages, setDownscaleImages] = useState(true)
@@ -88,30 +102,6 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
     document.addEventListener("keydown", handler)
     return () => document.removeEventListener("keydown", handler)
   }, [handleSidebarSave, reset])
-
-  const disableAll = useCallback(() => {
-    setResearchEnabled(false)
-    setMorphicSearchEnabled(false)
-    setOCREnabled(false)
-  }, [])
-
-  const toggleResearch = useCallback(() => {
-    if (researchEnabled) { setResearchEnabled(false); return }
-    disableAll()
-    setResearchEnabled(true)
-  }, [researchEnabled, disableAll])
-
-  const toggleMorphicSearch = useCallback(() => {
-    if (morphicSearchEnabled) { setMorphicSearchEnabled(false); return }
-    disableAll()
-    setMorphicSearchEnabled(true)
-  }, [morphicSearchEnabled, disableAll])
-
-  const toggleOCR = useCallback(() => {
-    if (ocrEnabled) { setOCREnabled(false); return }
-    disableAll()
-    setOCREnabled(true)
-  }, [ocrEnabled, disableAll])
 
   const handleSend = useCallback(
     (text: string, imageDataUrl: string | null) => {
@@ -252,7 +242,7 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
               }}
               onClose={() => {
                 setOCRImage(null)
-                setOCREnabled(false)
+                toggleOCR()
               }}
             />
           )}

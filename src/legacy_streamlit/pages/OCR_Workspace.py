@@ -1,7 +1,11 @@
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
 import streamlit as st
 
-from lib.non_user_prompts import SYS_OCR_TEXT_EXTRACTION
-from lib.streamlit_helper import (
+from lib.prompts import SYS_OCR_TEXT_EXTRACTION
+from streamlit_helper import (
     EMPTY_PASTE_RESULT,
     PasteResult,
     editor,
@@ -15,16 +19,11 @@ from llm_config import DEFAULT_VISION_MODEL
 
 def ocr_sidebar() -> None:
     with st.sidebar:
-        # st.session_state.selected_model_ocr = model_selector(key="ocr_workspace")
         st.session_state.selected_model_ocr = DEFAULT_VISION_MODEL
-
         paste_img_button()
 
 
 def ocr_workspace() -> None:
-    """OCR Workspace page for uploading images and extracting text using OCR."""
-
-    # Defaults to empty image if not provided
     img: PasteResult = st.session_state.api_img
     model: str = st.session_state.selected_model_ocr
     client: LLMClient = st.session_state.client
@@ -36,7 +35,6 @@ def ocr_workspace() -> None:
             img=img,
             stream=False,
         )
-        # Todo: Rewrite LLM Client to return only text instead of response objects
         st.session_state.ocr_response = response.choices[0].message.content
         img_hash = get_img_hash(st.session_state.pasted_image)
         st.session_state.sent_hashes.add(img_hash)
@@ -53,7 +51,6 @@ def ocr_workspace() -> None:
 
 
 def main() -> None:
-    """Main function to run the OCR Workspace page."""
     ocr_sidebar()
     ocr_workspace()
 
