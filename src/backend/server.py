@@ -5,6 +5,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import langchain_community.chat_models as _lccm
+
 _lccm_dir = Path(_lccm.__file__).parent
 _litellm_shim = _lccm_dir / "litellm.py"
 if not _litellm_shim.exists():
@@ -12,14 +13,19 @@ if not _litellm_shim.exists():
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from backend.routes.chat import router as chat_router
 from backend.routes.deps import get_client, shutdown_client
 from backend.routes.histories import router as histories_router
+from backend.routes.mineru import router as mineru_router
 from backend.routes.models import router as models_router
 from backend.routes.morphic import router as morphic_router
 from backend.routes.ocr import router as ocr_router
 from backend.routes.research import router as research_router
+from config import DIRECTORY_OUTPUT_MINERU, ensure_directories
+
+ensure_directories()
 
 
 @asynccontextmanager
@@ -42,5 +48,8 @@ app.include_router(chat_router)
 app.include_router(histories_router)
 app.include_router(models_router)
 app.include_router(morphic_router)
+app.include_router(mineru_router)
 app.include_router(ocr_router)
 app.include_router(research_router)
+
+app.mount("/mineru/images", StaticFiles(directory=str(DIRECTORY_OUTPUT_MINERU / "images")), name="mineru_images")
