@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
+import type React from "react"
 import { fetchModels, fetchPrompts } from "@/lib/api"
 import type { ChatRequest, Message, ModelsResponse, MorphicSearchParams } from "@/lib/types"
 import { useChatStream } from "./useChatStream"
@@ -26,6 +27,7 @@ export interface UseChatReturn {
   loadHistory: (filename: string) => Promise<void>
   deleteMessagePair: (index: number) => void
   addMessagePair: (userContent: string, assistantContent: string) => void
+  setMessages: React.Dispatch<React.SetStateAction<Message[]>>
   error: string | null
 }
 
@@ -91,6 +93,7 @@ export function useChat(): UseChatReturn {
     loadHistory,
     deleteMessagePair,
     addMessagePair,
+    setMessages,
     error,
   }
 }

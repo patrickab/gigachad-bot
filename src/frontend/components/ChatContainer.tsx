@@ -1,17 +1,18 @@
 "use client"
 
-import { useEffect, useRef, useMemo } from "react"
+import { useEffect, useRef, useMemo, useState } from "react"
 import { AnimatePresence } from "framer-motion"
 import type { Message } from "@/lib/types"
 import { ChatMessage } from "./ChatMessage"
 import { ChatInput } from "./ChatInput"
 import { SourcesSidebar } from "./SourcesSidebar"
+import { ChevronRight, ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface ChatContainerProps {
   messages: Message[]
   isStreaming: boolean
-  onSend: (text: string, imageDataUrl: string | null) => void
+  onSend: (text: string, imageDataUrl: string | null, pdfFile?: File | null) => void
   onCancel: () => void
   onDeletePair: (index: number) => void
   className?: string
@@ -37,7 +38,17 @@ export function ChatContainer({
   }, [messages])
 
   useEffect(() => {
+    const el = bottomRef.current?.parentElement
+    if (!el) return
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    if (!nearBottom) return
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [messages])
+
+  const [manualOverrides, setManualOverrides] = useState<Map<number, boolean>>(new Map())
+
+  useEffect(() => {
+    if (messages.length === 0) setManualOverrides(new Map())
   }, [messages])
 
   const pairs: { user: Message; assistant: Message; globalIndex: number }[] = []
@@ -51,6 +62,29 @@ export function ChatContainer({
     }
   }
 
+  const lastGlobalIndex = pairs.length > 0 ? pairs[pairs.length - 1].globalIndex : -1
+
+  function abbreviate(text: string): string {
+    const firstLine = text.split("\n")[0]
+    if (firstLine.length <= 80) return firstLine
+    return firstLine.slice(0, 80) + "\u2026"
+  }
+
+  function isExpanded(idx: number): boolean {
+    const override = manualOverrides.get(idx)
+    if (override !== undefined) return override
+    return idx === lastGlobalIndex
+  }
+
+  function togglePair(idx: number) {
+    setManualOverrides(prev => {
+      const next = new Map(prev)
+      const current = isExpanded(idx)
+      next.set(idx, !current)
+      return next
+    })
+  }
+
   return (
     <div className={cn("flex h-full relative", className)}>
       <div className="flex-1 min-w-0 flex flex-col">
@@ -61,22 +95,44 @@ export function ChatContainer({
             </div>
           )}
           <AnimatePresence>
-            {pairs.map(({ user, assistant, globalIndex }) => (
-              <div key={globalIndex} className="group">
-                <ChatMessage role="user" content={user.content} index={globalIndex} onDelete={onDeletePair} />
-                <ChatMessage
-                  role="assistant"
-                  content={assistant.content}
-                  morphic_result={assistant.morphic_result}
-                  research_steps={assistant.research_steps}
-                  research_progress={assistant.research_progress}
-                  research_trace_id={assistant.research_trace_id}
-                  isStreaming={isStreaming}
-                  index={globalIndex}
-                  onDelete={onDeletePair}
-                />
-              </div>
-            ))}
+            {pairs.map(({ user, assistant, globalIndex }) => {
+              const expanded = isExpanded(globalIndex)
+              const isLast = globalIndex === lastGlobalIndex
+              const qLabel = abbreviate(user.content)
+              return (
+                <div key={globalIndex} className="group">
+                  {!isLast && (
+                    <button
+                      onClick={() => togglePair(globalIndex)}
+                      className="w-full flex items-center gap-2 px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-900/50 transition-colors"
+                    >
+                      {expanded ? (
+                        <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+                      ) : (
+                        <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+                      )}
+                      <span className="truncate text-left">{qLabel}</span>
+                    </button>
+                  )}
+                  {expanded && (
+                    <>
+                      <ChatMessage role="user" content={user.content} index={globalIndex} onDelete={onDeletePair} />
+                      <ChatMessage
+                        role="assistant"
+                        content={assistant.content}
+                        morphic_result={assistant.morphic_result}
+                        research_steps={assistant.research_steps}
+                        research_progress={assistant.research_progress}
+                        research_trace_id={assistant.research_trace_id}
+                        isStreaming={isStreaming}
+                        index={globalIndex}
+                        onDelete={onDeletePair}
+                      />
+                    </>
+                  )}
+                </div>
+              )
+            })}
           </AnimatePresence>
           <div ref={bottomRef} />
         </div>

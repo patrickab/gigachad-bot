@@ -14,6 +14,7 @@ import type { Tab } from "@/components/TabManager"
 import { useChat } from "@/hooks/useChat"
 import { useModeState, ModeProvider } from "@/hooks/useModeState"
 import { useSettings, SettingsProvider } from "@/contexts/SettingsContext"
+import { parsePdf as apiParsePdf } from "@/lib/api"
 import { DEFAULT_VISION_MODEL } from "@/lib/config"
 
 const MODE_LABELS: Record<string, string> = {
@@ -40,6 +41,7 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
     loadHistory,
     deleteMessagePair,
     addMessagePair,
+    setMessages,
   } = useChat()
 
   const {
@@ -87,8 +89,31 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
     return () => document.removeEventListener("keydown", handler)
   }, [handleSidebarSave, reset])
 
-  const handleSend = useCallback(
-    (text: string, imageDataUrl: string | null) => {
+const handleSend = useCallback(
+    async (text: string, imageDataUrl: string | null, pdfFile?: File | null) => {
+      if (pdfFile) {
+        if (morphicSearchEnabled || researchEnabled) {
+          return
+        }
+        const query = text.trim()
+        addMessagePair("📄 " + pdfFile.name, "Processing PDF...")
+        try {
+          const result = await apiParsePdf(pdfFile, query, "pipeline", settings.selectedModel)
+          setMessages((prev) => {
+            const copy = [...prev]
+            copy[copy.length - 1] = { role: "assistant", content: result.answer ?? result.markdown_content }
+            return copy
+          })
+        } catch {
+          setMessages((prev) => {
+            const copy = [...prev]
+            copy[copy.length - 1] = { role: "assistant", content: "Error: Failed to parse PDF." }
+            return copy
+          })
+        }
+        return
+      }
+
       if (morphicSearchEnabled) {
         morphicSearch({
           query: text,
@@ -124,7 +149,7 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
       researchEnabled, settings.researchFastModel, settings.researchSmartModel, settings.researchStrategicModel,
       settings.researchDepth, settings.researchBreadth, settings.researchReasoning, settings.researchReportType,
       settings.selectedModel, settings.selectedPrompt, settings.temperature, settings.topP, settings.reasoningEffort, settings.downscaleImages,
-      send, research, morphicSearch,
+      send, research, morphicSearch, addMessagePair, setMessages,
     ]
   )
 

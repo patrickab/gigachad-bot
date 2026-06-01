@@ -117,3 +117,15 @@ export interface OCRRequest {
   img_base64: string
   model: string
 }
+
+export interface MineruResult {
+  filename: string
+  output_dir: string
+  markdown_content: string
+  answer: string | null
+  query: string | null
+}
+
+export interface MineruBatchResponse {
+  results: MineruResult[]
+}

@@ -1,4 +1,4 @@
-import type { ChatHistoriesResponse, ChatRequest, Message, ModelsResponse, ResearchRequest, ResearchTrace, ResearchTraceSummary } from "./types"
+import type { ChatHistoriesResponse, ChatRequest, Message, MineruBatchResponse, MineruResult, ModelsResponse, ResearchRequest, ResearchTrace, ResearchTraceSummary } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { API_BASE, DEFAULT_TEMPERATURE, DEFAULT_TOP_P, DEFAULT_DOWNSCALE_IMAGES, IMAGE_DOWNSCALE_MAX } from "./config"
@@ -106,4 +106,15 @@ export function createOCRStream(
   model: string
 ): SSEStreamResult {
   return createSSEStream("/ocr", { img_base64: imgBase64, model })
+}
+
+export async function parsePdf(file: File, query = "", backend = "pipeline", model = ""): Promise<MineruResult> {
+  const form = new FormData()
+  form.append("file", file)
+  if (query) form.append("query", query)
+  if (backend !== "pipeline") form.append("backend", backend)
+  if (model) form.append("model", model)
+  const res = await fetch(`${API_BASE}/mineru/parse`, { method: "POST", body: form })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
 }

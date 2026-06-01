@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { ArrowUp, Plus, LayoutGrid, Mic, Search, Globe, Sigma, Square, X, Maximize2 } from "lucide-react"
+import { ArrowUp, Plus, LayoutGrid, Mic, Search, Globe, Sigma, Square, X, Maximize2, FileText, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { downscaleImage as apiDownscale } from "@/lib/api"
 import { IMAGE_DOWNSCALE_MAX } from "@/lib/config"
@@ -12,7 +12,7 @@ import { useSettings } from "@/contexts/SettingsContext"
 import { PillButton } from "./PillButton"
 
 interface ChatInputProps {
-  onSend: (text: string, imageDataUrl: string | null) => void
+  onSend: (text: string, imageDataUrl: string | null, pdfFile?: File | null) => void
   onOCRRequest?: (image: string) => void
   disabled?: boolean
   isStreaming?: boolean
@@ -32,6 +32,8 @@ export function ChatInput({
   const [text, setText] = useState("")
   const [image, setImage] = useState<string | null>(null)
   const [downscaledImage, setDownscaledImage] = useState<string | null>(null)
+  const [pdfFile, setPdfFile] = useState<File | null>(null)
+  const [isProcessingPdf, setIsProcessingPdf] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
   const [isListening, setIsListening] = useState(false)
   const [showTools, setShowTools] = useState(false)
@@ -63,9 +65,12 @@ export function ChatInput({
     setDownscaledImage(null)
   }, [])
 
+  const clearPdf = useCallback(() => setPdfFile(null), [])
+
   const handleSubmit = useCallback(() => {
+    if (isProcessingPdf) return
     const trimmed = text.trim()
-    if (!trimmed && !image) return
+    if (!trimmed && !image && !pdfFile) return
     if (ocrEnabled && image) {
       onOCRRequest?.(image)
       setText("")
@@ -73,11 +78,12 @@ export function ChatInput({
       requestAnimationFrame(() => adjustHeight())
       return
     }
-    onSend(trimmed || "Describe this image.", image)
+    onSend(trimmed || "", image, pdfFile)
     setText("")
     clearImage()
+    clearPdf()
     requestAnimationFrame(() => adjustHeight())
-  }, [text, image, onSend, onOCRRequest, ocrEnabled, clearImage, adjustHeight])
+  }, [text, image, pdfFile, onSend, onOCRRequest, ocrEnabled, clearImage, clearPdf, adjustHeight, isProcessingPdf])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit() }
@@ -101,9 +107,16 @@ export function ChatInput({
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    const reader = new FileReader()
-    reader.onload = () => setImage(reader.result as string)
-    reader.readAsDataURL(file)
+    if (file.type === "application/pdf") {
+      setPdfFile(file)
+      setImage(null)
+      setDownscaledImage(null)
+    } else {
+      const reader = new FileReader()
+      reader.onload = () => setImage(reader.result as string)
+      reader.readAsDataURL(file)
+      setPdfFile(null)
+    }
     e.target.value = ""
   }, [])
 
@@ -141,7 +154,7 @@ export function ChatInput({
     setIsListening(true)
   }, [isListening, adjustHeight])
 
-  const canSend = text.trim().length > 0 || !!image
+  const canSend = text.trim().length > 0 || !!image || !!pdfFile
   const previewSrc = (downscaleImages !== false && downscaledImage) ? downscaledImage : image
   const displaySrc = showPreview ? image : previewSrc
 
@@ -194,6 +207,29 @@ export function ChatInput({
         </motion.div>
       )}
 
+      {pdfFile && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.96 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="relative mb-2"
+        >
+          <div className="flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-800/40 px-3 py-2 pr-8">
+            {isProcessingPdf ? (
+              <Loader2 className="h-5 w-5 animate-spin text-zinc-400" />
+            ) : (
+              <FileText className="h-5 w-5 text-blue-400" />
+            )}
+            <span className="max-w-[200px] truncate text-sm text-zinc-300">{pdfFile.name}</span>
+          </div>
+          <button
+            onClick={clearPdf}
+            className="absolute right-1 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-zinc-400 hover:text-red-400"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </motion.div>
+      )}
+
       <div className="rounded-2xl border border-zinc-800/60 bg-zinc-900/90 shadow-xl shadow-black/30 backdrop-blur-sm p-4 transition-colors focus-within:border-zinc-700">
         <textarea
           ref={textareaRef}
@@ -208,7 +244,7 @@ export function ChatInput({
         />
         <div className="mt-3 flex items-center justify-between">
           <div className="flex items-center gap-1">
-            <input ref={fileRef} type="file" accept="image/*" onChange={handleFileSelect} className="hidden" />
+            <input ref={fileRef} type="file" accept="image/*,application/pdf" onChange={handleFileSelect} className="hidden" />
             <button
               onClick={() => fileRef.current?.click()}
               disabled={disabled}
