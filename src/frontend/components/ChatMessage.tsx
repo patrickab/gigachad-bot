@@ -5,6 +5,7 @@ import { memo, useState } from "react"
 import { Bot, Check, Copy, Trash2, User } from "lucide-react"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { MorphicSearchResult } from "./MorphicSearchResult"
+import { ResearchTrace } from "./ResearchTrace"
 import type { Message } from "@/lib/types"
 
 interface ChatMessageProps {
@@ -13,9 +14,13 @@ interface ChatMessageProps {
   index: number
   onDelete?: (index: number) => void
   morphic_result?: Message["morphic_result"]
+  research_steps?: Message["research_steps"]
+  research_progress?: Message["research_progress"]
+  research_trace_id?: string
+  isStreaming?: boolean
 }
 
-function ChatMessageInner({ role, content, index, onDelete, morphic_result }: ChatMessageProps) {
+function ChatMessageInner({ role, content, index, onDelete, morphic_result, research_steps, research_progress, research_trace_id, isStreaming }: ChatMessageProps) {
   const isUser = role === "user"
   const [copied, setCopied] = useState(false)
 
@@ -25,6 +30,8 @@ function ChatMessageInner({ role, content, index, onDelete, morphic_result }: Ch
       setTimeout(() => setCopied(false), 1500)
     })
   }
+
+  const isResearchRunning = !isUser && isStreaming && research_steps && research_steps.length > 0
 
   return (
     <motion.div
@@ -48,20 +55,33 @@ function ChatMessageInner({ role, content, index, onDelete, morphic_result }: Ch
         <div className="mb-0.5 text-xs font-medium text-zinc-500">{isUser ? "You" : "Assistant"}</div>
         {isUser ? (
           <p className="text-sm whitespace-pre-wrap text-zinc-200">{content}</p>
-        ) : content ? (
+        ) : content && !isResearchRunning ? (
           morphic_result ? (
             <MorphicSearchResult content={content} morphic_result={morphic_result} />
           ) : (
-            <LaTeXMarkdown content={content} />
+            <LaTeXMarkdown content={content} streaming={isStreaming} />
           )
+        ) : content ? (
+          <span className="inline-flex items-center gap-1 text-zinc-500 text-sm">
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-sky-400" />
+            {content}
+          </span>
         ) : (
           <span className="inline-flex items-center gap-1 text-zinc-500 text-sm">
             <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-sky-400" />
             Thinking…
           </span>
         )}
+        {!isUser && (research_steps && research_steps.length > 0) && (
+          <ResearchTrace
+            steps={research_steps}
+            progress={research_progress}
+            traceId={research_trace_id}
+            isLive={isStreaming}
+          />
+        )}
         <div className="flex items-center justify-end gap-1 mt-1 opacity-0 transition-opacity group-hover:opacity-100">
-          {content && (
+          {content && !isResearchRunning && (
             <div className="relative">
               <button
                 onClick={handleCopy}

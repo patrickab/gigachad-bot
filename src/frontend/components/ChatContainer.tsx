@@ -7,8 +7,6 @@ import { ChatMessage } from "./ChatMessage"
 import { ChatInput } from "./ChatInput"
 import { SourcesSidebar } from "./SourcesSidebar"
 import { cn } from "@/lib/utils"
-import { useModeState } from "@/hooks/useModeState"
-import { useSettings } from "@/contexts/SettingsContext"
 
 interface ChatContainerProps {
   messages: Message[]
@@ -29,8 +27,6 @@ export function ChatContainer({
   className,
   onOCRRequest,
 }: ChatContainerProps) {
-  const { researchEnabled, morphicSearchEnabled, ocrEnabled, toggleResearch, toggleMorphicSearch, toggleOCR } = useModeState()
-  const { downscaleImages } = useSettings()
   const bottomRef = useRef<HTMLDivElement>(null)
 
   const lastMorphicResult = useMemo(() => {
@@ -68,7 +64,17 @@ export function ChatContainer({
             {pairs.map(({ user, assistant, globalIndex }) => (
               <div key={globalIndex} className="group">
                 <ChatMessage role="user" content={user.content} index={globalIndex} onDelete={onDeletePair} />
-                <ChatMessage role="assistant" content={assistant.content} morphic_result={assistant.morphic_result} index={globalIndex} onDelete={onDeletePair} />
+                <ChatMessage
+                  role="assistant"
+                  content={assistant.content}
+                  morphic_result={assistant.morphic_result}
+                  research_steps={assistant.research_steps}
+                  research_progress={assistant.research_progress}
+                  research_trace_id={assistant.research_trace_id}
+                  isStreaming={isStreaming}
+                  index={globalIndex}
+                  onDelete={onDeletePair}
+                />
               </div>
             ))}
           </AnimatePresence>

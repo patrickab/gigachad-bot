@@ -6,6 +6,9 @@ export interface Message {
   tool_call_id?: string
   tool_calls?: unknown[]
   morphic_result?: MorphicSearchResult
+  research_trace_id?: string
+  research_steps?: ResearchTraceStep[]
+  research_progress?: ResearchTraceProgress
 }
 
 export interface ChatRequest {
@@ -44,10 +47,57 @@ export interface ResearchRequest {
   report_type: string
 }
 
+export interface ResearchParams {
+  query: string
+  fastModel: string
+  smartModel: string
+  strategicModel: string
+  depth: number
+  breadth: number
+  reasoningEffort: string
+  reportType: string
+}
+
 export interface ResearchResult {
   report: string
   sources: string[]
   costs: number
+}
+
+export interface ResearchTraceStep {
+  step: string
+  event_type: string
+  details: Record<string, unknown>
+  timestamp: number
+}
+
+export interface ResearchTraceProgress {
+  current_depth: number
+  total_depth: number
+  current_breadth: number
+  total_breadth: number
+  current_query: string | null
+  completed_queries: number
+  total_queries: number
+}
+
+export interface ResearchTrace {
+  run_id: string
+  query: string
+  started_at: number
+  finished_at: number | null
+  duration_s: number | null
+  steps: ResearchTraceStep[]
+  progress: ResearchTraceProgress | null
+}
+
+export interface ResearchTraceSummary {
+  run_id: string
+  query: string
+  started_at: number
+  finished_at: number | null
+  duration_s: number | null
+  step_count: number
 }
 
 export interface MorphicSearchParams {

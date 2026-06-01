@@ -1,10 +1,10 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { createContext, useCallback, useContext, useState, type ReactNode } from "react"
 
 export type AppMode = "chat" | "research" | "search" | "ocr"
 
-export interface UseModeStateReturn {
+export interface ModeState {
   mode: AppMode
   researchEnabled: boolean
   morphicSearchEnabled: boolean
@@ -15,7 +15,15 @@ export interface UseModeStateReturn {
   setMode: (mode: AppMode) => void
 }
 
-export function useModeState(): UseModeStateReturn {
+const ModeContext = createContext<ModeState | null>(null)
+
+export function useModeState(): ModeState {
+  const ctx = useContext(ModeContext)
+  if (!ctx) throw new Error("useModeState must be used within ModeProvider")
+  return ctx
+}
+
+export function ModeProvider({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<AppMode>("chat")
 
   const toggleResearch = useCallback(() => {
@@ -30,7 +38,7 @@ export function useModeState(): UseModeStateReturn {
     setMode((prev) => prev === "ocr" ? "chat" : "ocr")
   }, [])
 
-  return {
+  const value: ModeState = {
     mode,
     researchEnabled: mode === "research",
     morphicSearchEnabled: mode === "search",
@@ -40,4 +48,10 @@ export function useModeState(): UseModeStateReturn {
     toggleOCR,
     setMode,
   }
+
+  return (
+    <ModeContext.Provider value={value}>
+      {children}
+    </ModeContext.Provider>
+  )
 }

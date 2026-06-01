@@ -1,3 +1,4 @@
+import asyncio
 import base64
 from contextlib import contextmanager
 import re
@@ -44,10 +45,17 @@ def decode_image(base64_data: str | None) -> bytes | None:
     return base64.b64decode(base64_data)
 
 
+_SENTINEL = object()
+
 def sse_event_stream(chunks: Iterator[str]) -> EventSourceResponse:
     async def event_stream() -> Any:
         try:
-            for chunk in chunks:
+            loop = asyncio.get_running_loop()
+            it = iter(chunks)
+            while True:
+                chunk = await loop.run_in_executor(None, lambda: next(it, _SENTINEL))
+                if chunk is _SENTINEL:
+                    break
                 yield {"event": "token", "data": chunk}
             yield {"event": "done", "data": ""}
         except Exception as e:

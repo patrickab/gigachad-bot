@@ -21,17 +21,23 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
   const confirmedRef = useRef(false)
 
   useEffect(() => {
-    const { stream, abort } = createOCRStream(image, model)
-    abortRef.current = abort
+    const stream = createOCRStream(image, model)
+    abortRef.current = stream.abort
     let text = ""
 
     async function read() {
       try {
-        while (true) {
-          const { done, value } = await stream.read()
-          if (done) break
-          text += new TextDecoder().decode(value, { stream: true })
-          setOutput(text)
+        for await (const event of stream) {
+          if (event.event === "token") {
+            text += event.data
+            setOutput(text)
+          } else if (event.event === "done") {
+            break
+          } else if (event.event === "error") {
+            text += `\n\nError: ${event.data}`
+            setOutput(text)
+            break
+          }
         }
       } catch {
         // aborted or error
@@ -41,7 +47,7 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
     }
     read()
 
-    return () => { abort() }
+    return () => { stream.abort() }
   }, [image, model])
 
   const doConfirm = useCallback(() => {

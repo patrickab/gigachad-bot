@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useMemo, useRef } from "react"
-import { highlightCode } from "@/lib/shiki-highlighter"
+import { highlightCode } from "@/lib/markdown-syntax-highlighting"
 import { cn } from "@/lib/utils"
 
 interface ConsoleEditorProps {

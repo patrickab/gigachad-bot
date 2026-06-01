@@ -12,7 +12,7 @@ import { OCRPanel } from "@/components/OCRPanel"
 import { TabManager } from "@/components/TabManager"
 import type { Tab } from "@/components/TabManager"
 import { useChat } from "@/hooks/useChat"
-import { useModeState } from "@/hooks/useModeState"
+import { useModeState, ModeProvider } from "@/hooks/useModeState"
 import { useSettings, SettingsProvider } from "@/contexts/SettingsContext"
 import { DEFAULT_VISION_MODEL } from "@/lib/config"
 
@@ -170,14 +170,6 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
             <ThemeToggle />
             <MoreOptionsMenu
               prompts={prompts}
-              onRefresh={refreshHistories}
-              onReset={reset}
-              onSave={async (name, msgs) => {
-                const { saveChatHistory } = await import("@/lib/api")
-                await saveChatHistory(name, msgs)
-              }}
-              messages={messages}
-              models={models}
             />
           </div>
         </header>
@@ -213,9 +205,11 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
 export default function Home() {
   return (
     <SettingsProvider>
-      <TabManager
-        renderContent={(tab, onModeLabel) => <TabContent tab={tab} onModeLabel={onModeLabel} />}
-      />
+      <ModeProvider>
+        <TabManager
+          renderContent={(tab, onModeLabel) => <TabContent tab={tab} onModeLabel={onModeLabel} />}
+        />
+      </ModeProvider>
     </SettingsProvider>
   )
 }

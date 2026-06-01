@@ -4,6 +4,12 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import langchain_community.chat_models as _lccm
+_lccm_dir = Path(_lccm.__file__).parent
+_litellm_shim = _lccm_dir / "litellm.py"
+if not _litellm_shim.exists():
+    _litellm_shim.write_text("from langchain_litellm import ChatLiteLLM\n\n__all__ = [\"ChatLiteLLM\"]\n")
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 

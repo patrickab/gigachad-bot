@@ -1,8 +1,13 @@
 import { API_BASE } from "./config"
 
+export interface SSEEvent {
+  event: string
+  data: string
+}
+
 export interface SSEStreamResult {
-  stream: ReadableStreamDefaultReader<Uint8Array>
   abort: () => void
+  [Symbol.asyncIterator]: () => AsyncIterator<SSEEvent>
 }
 
 export function createSSEStream(
@@ -19,53 +24,71 @@ export function createSSEStream(
     signal: controller.signal,
   })
 
-  return {
-    stream: new ReadableStream({
-      async start(ctrl) {
-        const res = await promise
-        if (!res.ok || !res.body) {
-          ctrl.error(await res.text())
-          return
-        }
-        const reader = res.body.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ""
-        let eventData: string[] = []
+  async function* iterate(): AsyncGenerator<SSEEvent> {
+    const res = await promise
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(text || `HTTP ${res.status}`)
+    }
+    if (!res.body) {
+      throw new Error("No response body")
+    }
 
-        async function pump(): Promise<void> {
-          const { done, value } = await reader.read()
-          if (done) {
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ""
+    let currentEvent = "message"
+    let eventData: string[] = []
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) {
+          if (eventData.length > 0) {
+            yield { event: currentEvent, data: eventData.join("\n") }
+          }
+          break
+        }
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split("\n")
+        buffer = lines.pop() ?? ""
+
+        for (let line of lines) {
+          if (line.endsWith("\r")) line = line.slice(0, -1)
+
+          if (!line) {
             if (eventData.length > 0) {
-              ctrl.enqueue(new TextEncoder().encode(eventData.join("\n")))
+              yield { event: currentEvent, data: eventData.join("\n") }
+              eventData = []
+              currentEvent = "message"
             }
-            ctrl.close()
-            return
+            continue
           }
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split("\n")
-          buffer = lines.pop() ?? ""
-
-          for (let line of lines) {
-            if (line.endsWith("\r")) line = line.slice(0, -1)
-
-            if (!line) {
-              if (eventData.length > 0) {
-                ctrl.enqueue(new TextEncoder().encode(eventData.join("\n")))
-                eventData = []
-              }
-              continue
-            }
-            if (line.startsWith("event:")) continue
-            if (line.startsWith("data:")) {
-              let d = line.startsWith("data: ") ? line.slice(6) : line.slice(5)
-              eventData.push(d)
-            }
+          if (line.startsWith("event:")) {
+            currentEvent = line.slice(6).trim()
+            continue
           }
-          return pump()
+          if (line.startsWith("data:")) {
+            const d = line.startsWith("data: ") ? line.slice(6) : line.slice(5)
+            eventData.push(d)
+          }
         }
-        return pump()
-      },
-    }).getReader(),
+      }
+    } finally {
+      reader.releaseLock()
+    }
+  }
+
+  return {
     abort: () => controller.abort(),
+    [Symbol.asyncIterator]: () => iterate(),
+  }
+}
+
+export async function* readSSEEvents(
+  stream: SSEStreamResult
+): AsyncGenerator<SSEEvent> {
+  for await (const event of stream) {
+    yield event
   }
 }

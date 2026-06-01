@@ -14,46 +14,76 @@ export interface UseChatStreamReturn {
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>
 }
 
+const FLUSH_MS = 60
+
 export function useChatStream(): UseChatStreamReturn {
   const [messages, setMessages] = useState<Message[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   const abortRef = useRef<(() => void) | null>(null)
-  const assistantRef = useRef<Message | null>(null)
 
   const send = useCallback(
     async (req: ChatRequest) => {
       setIsStreaming(true)
 
-      const userMsg: Message = { role: "user", content: req.user_msg }
       const assistantMsg: Message = { role: "assistant", content: "" }
-      assistantRef.current = assistantMsg
 
-      setMessages((prev) => [...prev, userMsg, assistantMsg])
+      setMessages((prev) => [
+        ...prev,
+        { role: "user", content: req.user_msg },
+        assistantMsg,
+      ])
+
+      let lastFlush = 0
+      let pending = false
+
+      const flush = () => {
+        pending = false
+        lastFlush = performance.now()
+        setMessages((prev) => {
+          const copy = [...prev]
+          copy[copy.length - 1] = { ...assistantMsg }
+          return copy
+        })
+      }
+
+      const scheduleFlush = () => {
+        if (pending) return
+        const now = performance.now()
+        const delay = Math.max(0, FLUSH_MS - (now - lastFlush))
+        if (delay <= 0) {
+          flush()
+        } else {
+          pending = true
+          setTimeout(flush, delay)
+        }
+      }
 
       try {
-        const { stream, abort } = createChatStream({ ...req, messages: [] })
-        abortRef.current = abort
+        const stream = createChatStream({ ...req, messages: [] })
+        abortRef.current = stream.abort
 
-        const reader = stream
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          const text = new TextDecoder().decode(value, { stream: true })
-          if (text) {
-            assistantMsg.content += text
-            setMessages((prev) => {
-              const copy = [...prev]
-              copy[copy.length - 1] = { ...assistantMsg }
-              return copy
-            })
+        for await (const event of stream) {
+          if (event.event === "token") {
+            assistantMsg.content += event.data
+            scheduleFlush()
+          } else if (event.event === "done") {
+            break
+          } else if (event.event === "error") {
+            assistantMsg.content += `\n\nError: ${event.data}`
+            scheduleFlush()
+            break
           }
         }
       } catch (e) {
         if ((e as Error).name === "AbortError") return
       } finally {
+        setMessages((prev) => {
+          const copy = [...prev]
+          copy[copy.length - 1] = { ...assistantMsg }
+          return copy
+        })
         setIsStreaming(false)
         abortRef.current = null
-        assistantRef.current = null
       }
     },
     []

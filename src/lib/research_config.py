@@ -3,7 +3,7 @@ import tempfile
 from typing import Any
 
 EMBEDDING_DEFAULT = "ollama:nomic-embed-text"
-RETRIEVER_DEFAULT = "tavily"
+RETRIEVER_DEFAULT = "searx"
 
 
 def build_research_config(

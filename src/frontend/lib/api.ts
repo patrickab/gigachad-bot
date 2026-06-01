@@ -1,4 +1,4 @@
-import type { ChatHistoriesResponse, ChatRequest, Message, ModelsResponse, ResearchRequest } from "./types"
+import type { ChatHistoriesResponse, ChatRequest, Message, ModelsResponse, ResearchRequest, ResearchTrace, ResearchTraceSummary } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { API_BASE, DEFAULT_TEMPERATURE, DEFAULT_TOP_P, DEFAULT_DOWNSCALE_IMAGES, IMAGE_DOWNSCALE_MAX } from "./config"
@@ -16,6 +16,14 @@ export async function fetchModels(): Promise<ModelsResponse> {
 export async function fetchPrompts(): Promise<string[]> {
   const data = await request<{ prompts: string[] }>("/prompts")
   return data.prompts
+}
+
+export async function fetchHistory(): Promise<{ messages: Message[] }> {
+  return request("/history")
+}
+
+export async function resetHistory(): Promise<void> {
+  await request("/history", { method: "DELETE" })
 }
 
 export function createChatStream(req: ChatRequest): SSEStreamResult {
@@ -63,12 +71,25 @@ export async function archiveChatHistory(filename: string): Promise<void> {
   await request(`/chat-histories/${filename}/archive`, { method: "PUT" })
 }
 
-export async function runResearch(req: ResearchRequest): Promise<{ report: string; sources: string[]; costs: number }> {
-  return request("/research", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(req),
+export function createResearchStream(req: ResearchRequest): SSEStreamResult {
+  return createSSEStream("/research", {
+    query: req.query,
+    fast_model: req.fast_model,
+    smart_model: req.smart_model,
+    strategic_model: req.strategic_model,
+    depth: req.depth,
+    breadth: req.breadth,
+    reasoning_effort: req.reasoning_effort,
+    report_type: req.report_type,
   })
+}
+
+export async function listResearchTraces(): Promise<{ traces: ResearchTraceSummary[] }> {
+  return request("/research-traces")
+}
+
+export async function getResearchTrace(runId: string): Promise<ResearchTrace> {
+  return request(`/research-traces/${runId}`)
 }
 
 export async function downscaleImage(imgBase64: string, maxTokens: number = IMAGE_DOWNSCALE_MAX): Promise<string> {

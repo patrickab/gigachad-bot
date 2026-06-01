@@ -8,10 +8,35 @@ import rehypeKatex from "rehype-katex"
 import rehypeRaw from "rehype-raw"
 import type { Components } from "react-markdown"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { highlightCode } from "@/lib/shiki-highlighter"
+import { highlightCode } from "@/lib/markdown-syntax-highlighting"
 import { motion, AnimatePresence } from "framer-motion"
 import { Check, Copy, Globe } from "lucide-react"
 import "katex/dist/katex.min.css"
+
+const FULL_REMARK_PLUGINS = [remarkGfm, remarkMath, remarkBreaks]
+const FULL_REHYPE_PLUGINS = [rehypeKatex, rehypeRaw]
+const STREAMING_REMARK_PLUGINS = [remarkGfm, remarkBreaks]
+const STREAMING_REHYPE_PLUGINS = [rehypeRaw]
+
+const streamingComponents: Components = {
+  pre({ children }) {
+    return <>{children}</>
+  },
+  code({ className, children, ...props }) {
+    return (
+      <code className={className} {...props}>
+        {children}
+      </code>
+    )
+  },
+  table({ children }) {
+    return (
+      <div className="overflow-x-auto">
+        <table>{children}</table>
+      </div>
+    )
+  },
+}
 
 function CodeBlock({ codeString, language }: { codeString: string; language: string }) {
   const [copied, setCopied] = useState(false)
@@ -135,7 +160,7 @@ const sharedComponents: Components = {
   },
 }
 
-function LaTeXMarkdownInner({ content, citationMap }: { content: string; citationMap?: Record<string, { title: string; url: string; content: string }> }) {
+function LaTeXMarkdownInner({ content, citationMap, streaming }: { content: string; citationMap?: Record<string, { title: string; url: string; content: string }>; streaming?: boolean }) {
   const allComponents = useMemo<Components>(() => ({
     ...sharedComponents,
     a({ node, children, href, title, ...props }: any) {
@@ -162,12 +187,24 @@ function LaTeXMarkdownInner({ content, citationMap }: { content: string; citatio
     },
   }), [citationMap])
 
+  const remarkPlugins = streaming
+    ? STREAMING_REMARK_PLUGINS
+    : FULL_REMARK_PLUGINS
+
+  const rehypePlugins = streaming
+    ? STREAMING_REHYPE_PLUGINS
+    : FULL_REHYPE_PLUGINS
+
+  const components = streaming
+    ? streamingComponents
+    : allComponents
+
   return (
     <div className="markdown-body text-sm leading-relaxed">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
-        rehypePlugins={[rehypeKatex, rehypeRaw]}
-        components={allComponents}
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={rehypePlugins}
+        components={components}
       >
         {content}
       </ReactMarkdown>
