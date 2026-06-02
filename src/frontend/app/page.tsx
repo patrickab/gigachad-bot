@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Sidebar } from "@/components/Sidebar"
 import { ChatContainer } from "@/components/ChatContainer"
 import { ModelSelector } from "@/components/ModelSelector"
@@ -14,8 +14,9 @@ import type { Tab } from "@/components/TabManager"
 import { useChat } from "@/hooks/useChat"
 import { useModeState, ModeProvider } from "@/hooks/useModeState"
 import { useSettings, SettingsProvider } from "@/contexts/SettingsContext"
-import { parsePdfs as apiParsePdfs } from "@/lib/api"
+import { saveChatHistory as apiSaveChatHistory, deleteChatUploads, parseFiles } from "@/lib/api"
 import { DEFAULT_VISION_MODEL } from "@/lib/config"
+import type { Attachment, Message } from "@/lib/types"
 
 const MODE_LABELS: Record<string, string> = {
   research: "Deep Research",
@@ -24,7 +25,34 @@ const MODE_LABELS: Record<string, string> = {
   chat: "Chat",
 }
 
-function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: string) => void }) {
+function buildLLMMessage(text: string, attachments: Attachment[]): { userMsg: string; hiddenContent: string; imgBase64: string | null } {
+  let userMsg = text
+  let imgBase64: string | null = null
+
+  const textParts: string[] = []
+  const imgAtts: Attachment[] = []
+
+  for (const a of attachments) {
+    if (a.mime.startsWith("image/")) {
+      imgAtts.push(a)
+    } else {
+      const content = a.parsedMd ?? a.content
+      if (content) textParts.push(`### ${a.name}\n\n${content}`)
+    }
+  }
+
+  if (imgAtts.length > 0) {
+    imgBase64 = "pending"
+  }
+
+  const hiddenContent = textParts.length > 0
+    ? "**Attached files:**\n\n" + textParts.join("\n\n") + "\n\n## END"
+    : ""
+
+  return { userMsg, hiddenContent, imgBase64 }
+}
+
+function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: (label: string) => void; onChatSaved: (tabId: string, chatFilename: string) => void }) {
   const {
     messages,
     isStreaming,
@@ -57,6 +85,16 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
 
   const [collapsed, setCollapsed] = useState(true)
   const [ocrImage, setOCRImage] = useState<string | null>(null)
+  const [chatId, setChatId] = useState(() => tab.chatId)
+  const [activeAttachment, setActiveAttachment] = useState<Attachment | null>(null)
+
+  const handleHistoryLoad = useCallback(async (filename: string) => {
+    const result = await loadHistory(filename)
+    if (result.chat_id) {
+      setChatId(result.chat_id)
+      onChatSaved(tab.id, filename)
+    }
+  }, [loadHistory, tab.id, onChatSaved])
 
   useEffect(() => {
     if (researchEnabled) onModeLabel("Deep Research")
@@ -68,11 +106,12 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
   const handleSidebarSave = useCallback(async () => {
     const name = window.prompt("Enter name for chat:")
     if (name?.trim()) {
-      const { saveChatHistory } = await import("@/lib/api")
-      await saveChatHistory(`${name.trim()}.json`, messages)
+      const filename = name.trim() + ".json"
+      onChatSaved(tab.id, filename)
+      await apiSaveChatHistory(filename, messages, chatId)
       refreshHistories()
     }
-  }, [messages, refreshHistories])
+  }, [messages, chatId, tab.id, refreshHistories, onChatSaved])
 
   useEffect(() => {
     function handler(e: KeyboardEvent) {
@@ -90,34 +129,107 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
   }, [handleSidebarSave, reset])
 
   const handleSend = useCallback(
-    async (text: string, imageDataUrl: string | null, pdfFiles?: File[] | null) => {
-      if (pdfFiles && pdfFiles.length > 0) {
-        if (morphicSearchEnabled || researchEnabled) {
-          return
+    async (text: string, attachments: Attachment[]) => {
+      if (morphicSearchEnabled || researchEnabled) {
+        if (attachments.length > 0) return
+      }
+
+      if (attachments.length > 0) {
+        const pdfNames = attachments.filter(a => a.mime === "application/pdf").map(a => a.name)
+
+        const initialAttachments = attachments.map(a =>
+          a.mime === "application/pdf" ? { ...a, parsing: true } : a
+        )
+
+        const { hiddenContent } = buildLLMMessage(text, attachments)
+
+        setMessages(prev => [
+          ...prev,
+          { role: "user" as const, content: text, attachments: initialAttachments, hiddenContent: undefined },
+          { role: "assistant" as const, content: "" },
+        ])
+
+        const firstPdf = initialAttachments.find(a => a.mime === "application/pdf")
+        if (firstPdf) {
+          setActiveAttachment(firstPdf)
         }
-        const query = text.trim()
-        const label = pdfFiles.length === 1 ? pdfFiles[0].name : `${pdfFiles.length} PDFs`
-        addMessagePair("📄 " + label, "Processing...")
-        try {
-          const batch = await apiParsePdfs(pdfFiles, query, "pipeline", settings.selectedModel)
-          const merged = batch.results
-            .map((r) => {
-              const content = r.answer ?? r.markdown_content
-              return `### ${r.filename}\n\n${content}`
+
+        let enriched = initialAttachments
+        let finalHiddenContent = hiddenContent
+        if (pdfNames.length > 0) {
+          try {
+            const parsed = await parseFiles(chatId, pdfNames)
+            enriched = initialAttachments.map(a => {
+              if (a.mime !== "application/pdf") return a
+              const p = parsed.find(r => r.name === a.name)
+              return { ...a, parsing: false, parsedMd: p?.parsedMd ?? undefined }
             })
-            .join("\n\n---\n\n")
-          setMessages((prev) => {
-            const copy = [...prev]
-            copy[copy.length - 1] = { role: "assistant", content: merged }
-            return copy
-          })
-        } catch {
-          setMessages((prev) => {
-            const copy = [...prev]
-            copy[copy.length - 1] = { role: "assistant", content: "Error: Failed to parse PDFs." }
-            return copy
-          })
+            setMessages(prev => {
+              const copy = [...prev]
+              const lastUserIdx = copy.length - 2
+              if (lastUserIdx >= 0 && copy[lastUserIdx].role === "user") {
+                copy[lastUserIdx] = { ...copy[lastUserIdx], attachments: enriched }
+              }
+              return copy
+            })
+            const parsedPdf = enriched.find(a => a.mime === "application/pdf")
+            if (parsedPdf) {
+              setActiveAttachment(parsedPdf)
+            }
+            const { hiddenContent: updatedHidden } = buildLLMMessage(text, enriched)
+            finalHiddenContent = updatedHidden
+          } catch {
+            enriched = initialAttachments.map(a =>
+              a.mime === "application/pdf" ? { ...a, parsing: false } : a
+            )
+            setMessages(prev => {
+              const copy = [...prev]
+              const lastUserIdx = copy.length - 2
+              if (lastUserIdx >= 0 && copy[lastUserIdx].role === "user") {
+                copy[lastUserIdx] = { ...copy[lastUserIdx], attachments: enriched }
+              }
+              return copy
+            })
+          }
         }
+
+        setMessages(prev => {
+          const copy = [...prev]
+          const lastUserIdx = copy.length - 2
+          if (lastUserIdx >= 0 && copy[lastUserIdx].role === "user") {
+            copy[lastUserIdx] = { ...copy[lastUserIdx], hiddenContent: finalHiddenContent }
+          }
+          return copy
+        })
+
+        const imgAtt = enriched.find(a => a.mime.startsWith("image/"))
+        let finalImgBase64: string | null = null
+        if (imgAtt) {
+          try {
+            const resp = await fetch(imgAtt.url)
+            const blob = await resp.blob()
+            finalImgBase64 = await new Promise<string>((resolve) => {
+              const reader = new FileReader()
+              reader.onload = () => resolve(reader.result as string)
+              reader.readAsDataURL(blob)
+            })
+          } catch {}
+        }
+
+        const llmMsg = finalHiddenContent
+          ? (text ? `${finalHiddenContent}\n\n${text}` : finalHiddenContent)
+          : text
+
+        send({
+          model: settings.selectedModel,
+          user_msg: llmMsg,
+          system_prompt: settings.selectedPrompt ?? "",
+          temperature: settings.temperature,
+          top_p: settings.topP,
+          reasoning_effort: settings.reasoningEffort === "none" ? null : settings.reasoningEffort,
+          img_base64: finalImgBase64,
+          downscale_images: settings.downscaleImages,
+        }, true)
         return
       }
 
@@ -146,7 +258,7 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
           temperature: settings.temperature,
           top_p: settings.topP,
           reasoning_effort: settings.reasoningEffort === "none" ? null : settings.reasoningEffort,
-          img_base64: imageDataUrl,
+          img_base64: null,
           downscale_images: settings.downscaleImages,
         })
       }
@@ -156,7 +268,7 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
       researchEnabled, settings.researchFastModel, settings.researchSmartModel, settings.researchStrategicModel,
       settings.researchDepth, settings.researchBreadth, settings.researchReasoning, settings.researchReportType,
       settings.selectedModel, settings.selectedPrompt, settings.temperature, settings.topP, settings.reasoningEffort, settings.downscaleImages,
-      send, research, morphicSearch, addMessagePair, setMessages,
+      send, research, morphicSearch, setMessages, chatId,
     ]
   )
 
@@ -167,7 +279,7 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
         onToggle={() => setCollapsed(!collapsed)}
         histories={histories}
         historiesLoading={historiesLoading}
-        onHistoryLoad={loadHistory}
+        onHistoryLoad={handleHistoryLoad}
         onHistoryRefresh={refreshHistories}
         onSave={handleSidebarSave}
         onReset={reset}
@@ -207,12 +319,16 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
         </header>
         <div className="flex-1 overflow-hidden relative">
           <ChatContainer
+            chatId={chatId}
             messages={messages}
             isStreaming={isStreaming}
             onSend={handleSend}
             onCancel={cancel}
             onDeletePair={deleteMessagePair}
             onOCRRequest={setOCRImage}
+            activeAttachment={activeAttachment}
+            onAttachmentClick={setActiveAttachment}
+            onCloseAttachmentSidebar={() => setActiveAttachment(null)}
           />
           {ocrEnabled && ocrImage && (
             <OCRPanel
@@ -235,11 +351,26 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
 }
 
 export default function Home() {
+  const tabChatFilenames = useRef<Map<string, string | null>>(new Map())
+
+  const handleChatSaved = useCallback((tabId: string, chatFilename: string) => {
+    tabChatFilenames.current.set(tabId, chatFilename)
+  }, [])
+
+  const handleTabClose = useCallback((tab: Tab) => {
+    const filename = tabChatFilenames.current.get(tab.id)
+    if (!filename) {
+      deleteChatUploads(tab.chatId).catch(() => {})
+    }
+    tabChatFilenames.current.delete(tab.id)
+  }, [])
+
   return (
     <SettingsProvider>
       <ModeProvider>
         <TabManager
-          renderContent={(tab, onModeLabel) => <TabContent tab={tab} onModeLabel={onModeLabel} />}
+          onCloseTab={handleTabClose}
+          renderContent={(tab, onModeLabel) => <TabContent tab={tab} onModeLabel={onModeLabel} onChatSaved={handleChatSaved} />}
         />
       </ModeProvider>
     </SettingsProvider>

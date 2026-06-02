@@ -7,7 +7,7 @@ import type { ChatRequest, Message } from "@/lib/types"
 export interface UseChatStreamReturn {
   messages: Message[]
   isStreaming: boolean
-  send: (req: ChatRequest) => Promise<void>
+  send: (req: ChatRequest, skipAddMessages?: boolean) => Promise<void>
   cancel: () => void
   deleteMessagePair: (index: number) => void
   addMessagePair: (userContent: string, assistantContent: string) => void
@@ -22,16 +22,18 @@ export function useChatStream(): UseChatStreamReturn {
   const abortRef = useRef<(() => void) | null>(null)
 
   const send = useCallback(
-    async (req: ChatRequest) => {
+    async (req: ChatRequest, skipAddMessages = false) => {
       setIsStreaming(true)
 
       const assistantMsg: Message = { role: "assistant", content: "" }
 
-      setMessages((prev) => [
-        ...prev,
-        { role: "user", content: req.user_msg },
-        assistantMsg,
-      ])
+      if (!skipAddMessages) {
+        setMessages((prev) => [
+          ...prev,
+          { role: "user", content: req.user_msg },
+          assistantMsg,
+        ])
+      }
 
       let lastFlush = 0
       let pending = false

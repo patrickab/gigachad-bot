@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from config import DIRECTORY_CHAT_HISTORIES
+from backend.routes.files import delete_chat_upload_dir
 
 router = APIRouter(prefix="/api/chat-histories", tags=["histories"])
 
@@ -13,6 +14,7 @@ router = APIRouter(prefix="/api/chat-histories", tags=["histories"])
 class SaveRequest(BaseModel):
     filename: str | None = None
     messages: list[dict[str, Any]] = []
+    chat_id: str | None = None
 
 
 @router.get("")
@@ -33,8 +35,10 @@ async def load_chat_history(filename: str) -> dict[str, Any]:
     filepath = _resolve_history_path(filename)
     if not filepath.exists():
         raise HTTPException(status_code=404, detail="Chat history not found")
-    messages = json.loads(filepath.read_text(encoding="utf-8"))
-    return {"messages": messages, "filename": filename}
+    raw = json.loads(filepath.read_text(encoding="utf-8"))
+    if isinstance(raw, list):
+        return {"messages": raw, "filename": filename, "chat_id": None}
+    return {"messages": raw.get("messages", []), "filename": filename, "chat_id": raw.get("chat_id")}
 
 
 @router.put("/{filename:path}")
@@ -42,7 +46,11 @@ async def save_chat_history(filename: str, data: SaveRequest | None = None) -> d
     DIRECTORY_CHAT_HISTORIES.mkdir(parents=True, exist_ok=True)
     name = filename if not data or not data.filename else data.filename
     filepath = _resolve_history_path(name)
-    filepath.write_text(json.dumps(data.messages if data else [], indent=2), encoding="utf-8")
+    if data and data.chat_id:
+        payload = {"chat_id": data.chat_id, "messages": data.messages}
+    else:
+        payload = data.messages if data else []
+    filepath.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return {"status": "ok", "filename": str(name)}
 
 
@@ -51,7 +59,14 @@ async def delete_chat_history(filename: str) -> dict[str, str]:
     filepath = _resolve_history_path(filename)
     if not filepath.exists():
         raise HTTPException(status_code=404, detail="Chat history not found")
+    try:
+        raw = json.loads(filepath.read_text(encoding="utf-8"))
+        chat_id = raw.get("chat_id") if isinstance(raw, dict) else None
+    except Exception:
+        chat_id = None
     filepath.unlink()
+    if chat_id:
+        delete_chat_upload_dir(chat_id)
     return {"status": "ok"}
 
 

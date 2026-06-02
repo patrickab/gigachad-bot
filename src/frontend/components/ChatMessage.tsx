@@ -6,7 +6,8 @@ import { Bot, Check, Copy, Trash2, User } from "lucide-react"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { MorphicSearchResult } from "./MorphicSearchResult"
 import { ResearchTrace } from "./ResearchTrace"
-import type { Message } from "@/lib/types"
+import { MessageAttachments } from "./MessageAttachments"
+import type { Message, Attachment } from "@/lib/types"
 
 interface ChatMessageProps {
   role: "user" | "assistant"
@@ -18,9 +19,11 @@ interface ChatMessageProps {
   research_progress?: Message["research_progress"]
   research_trace_id?: string
   isStreaming?: boolean
+  attachments?: Attachment[]
+  onAttachmentClick?: (attachment: Attachment) => void
 }
 
-function ChatMessageInner({ role, content, index, onDelete, morphic_result, research_steps, research_progress, research_trace_id, isStreaming }: ChatMessageProps) {
+function ChatMessageInner({ role, content, index, onDelete, morphic_result, research_steps, research_progress, research_trace_id, isStreaming, attachments, onAttachmentClick }: ChatMessageProps) {
   const isUser = role === "user"
   const [copied, setCopied] = useState(false)
 
@@ -54,7 +57,12 @@ function ChatMessageInner({ role, content, index, onDelete, morphic_result, rese
       <div className="min-w-0 flex-1 flex flex-col">
         <div className="mb-0.5 text-xs font-medium text-zinc-500">{isUser ? "You" : "Assistant"}</div>
         {isUser ? (
-          <p className="text-sm whitespace-pre-wrap text-zinc-200">{content}</p>
+          <>
+            {content && <p className="text-sm whitespace-pre-wrap text-zinc-200">{content}</p>}
+            {attachments && attachments.length > 0 && (
+              <MessageAttachments attachments={attachments} onClick={onAttachmentClick ?? (() => {})} />
+            )}
+          </>
         ) : content && !isResearchRunning ? (
           morphic_result ? (
             <MorphicSearchResult content={content} morphic_result={morphic_result} />

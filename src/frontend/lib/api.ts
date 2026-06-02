@@ -1,4 +1,4 @@
-import type { ChatHistoriesResponse, ChatRequest, Message, MineruBatchResponse, MineruResult, ModelsResponse, ResearchRequest, ResearchTrace, ResearchTraceSummary } from "./types"
+import type { Attachment, ChatHistoriesResponse, ChatRequest, Message, MineruBatchResponse, MineruResult, ModelsResponse, ResearchRequest, ResearchTrace, ResearchTraceSummary } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { API_BASE, DEFAULT_TEMPERATURE, DEFAULT_TOP_P, DEFAULT_DOWNSCALE_IMAGES, IMAGE_DOWNSCALE_MAX } from "./config"
@@ -51,15 +51,15 @@ export async function listChatHistories(): Promise<ChatHistoriesResponse> {
   return request<ChatHistoriesResponse>("/chat-histories")
 }
 
-export async function loadChatHistory(filename: string): Promise<{ messages: Message[]; filename: string }> {
+export async function loadChatHistory(filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null }> {
   return request(`/chat-histories/${filename}`)
 }
 
-export async function saveChatHistory(filename: string, messages: Message[] = []): Promise<{ status: string; filename: string }> {
+export async function saveChatHistory(filename: string, messages: Message[] = [], chatId?: string): Promise<{ status: string; filename: string }> {
   return request(`/chat-histories/${filename}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ messages, chat_id: chatId ?? null }),
   })
 }
 
@@ -128,4 +128,42 @@ export async function parsePdfs(files: File[], query = "", backend = "pipeline",
   const res = await fetch(`${API_BASE}/mineru/parse-batch`, { method: "POST", body: form })
   if (!res.ok) throw new Error(await res.text())
   return res.json()
+}
+
+function _apiOrigin(): string {
+  const url = new URL(API_BASE)
+  return url.origin
+}
+
+export function chatFileUrl(chatId: string, filename: string): string {
+  return `${_apiOrigin()}/chat-uploads/${chatId}/${encodeURIComponent(filename)}`
+}
+
+export async function uploadFile(chatId: string, file: File): Promise<Attachment> {
+  const form = new FormData()
+  form.append("file", file)
+  const res = await fetch(`${API_BASE}/files/upload?chat_id=${encodeURIComponent(chatId)}`, { method: "POST", body: form })
+  if (!res.ok) throw new Error(await res.text())
+  const data = await res.json()
+  return { ...data, url: chatFileUrl(chatId, data.name) }
+}
+
+export interface ParsedAttachment {
+  name: string
+  parsedMd: string | null
+}
+
+export async function parseFiles(chatId: string, filenames: string[]): Promise<ParsedAttachment[]> {
+  const params = filenames.map(f => `filenames=${encodeURIComponent(f)}`).join("&")
+  const res = await fetch(`${API_BASE}/files/parse?chat_id=${encodeURIComponent(chatId)}&${params}`, { method: "POST" })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function deleteAttachment(chatId: string, filename: string): Promise<void> {
+  await request(`/files/chat/${chatId}/att/${encodeURIComponent(filename)}`, { method: "DELETE" })
+}
+
+export async function deleteChatUploads(chatId: string): Promise<void> {
+  await request(`/files/chat/${chatId}`, { method: "DELETE" })
 }

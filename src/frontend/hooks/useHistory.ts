@@ -8,7 +8,7 @@ export interface UseHistoryReturn {
   histories: Record<string, string[]>
   historiesLoading: boolean
   refreshHistories: () => Promise<void>
-  loadHistory: (filename: string) => Promise<Message[]>
+  loadHistory: (filename: string) => Promise<{ messages: Message[]; chat_id: string | null }>
   error: string | null
 }
 
@@ -28,14 +28,13 @@ export function useHistory(): UseHistoryReturn {
     }
   }, [])
 
-  const loadHistory = useCallback(async (filename: string): Promise<Message[]> => {
+  const loadHistory = useCallback(async (filename: string): Promise<{ messages: Message[]; chat_id: string | null }> => {
     try {
       const data = await loadApiHistory(filename)
-      const msgs = data.messages ?? []
-      return msgs
+      return { messages: data.messages ?? [], chat_id: data.chat_id ?? null }
     } catch (e) {
       setError((e as Error).message)
-      return []
+      return { messages: [], chat_id: null }
     }
   }, [])
 

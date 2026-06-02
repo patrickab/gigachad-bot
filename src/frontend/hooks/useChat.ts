@@ -14,7 +14,7 @@ export type { ResearchParams }
 export interface UseChatReturn {
   messages: Message[]
   isStreaming: boolean
-  send: (req: ChatRequest) => Promise<void>
+  send: (req: ChatRequest, skipAddMessages?: boolean) => Promise<void>
   cancel: () => void
   reset: () => Promise<void>
   research: (params: ResearchParams) => Promise<void>
@@ -24,7 +24,7 @@ export interface UseChatReturn {
   histories: Record<string, string[]>
   historiesLoading: boolean
   refreshHistories: () => Promise<void>
-  loadHistory: (filename: string) => Promise<void>
+  loadHistory: (filename: string) => Promise<{ messages: Message[]; chat_id: string | null }>
   deleteMessagePair: (index: number) => void
   addMessagePair: (userContent: string, assistantContent: string) => void
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>
@@ -73,8 +73,9 @@ export function useChat(): UseChatReturn {
   }, [setMessages])
 
   const loadHistory = useCallback(async (filename: string) => {
-    const msgs = await loadHistoryRaw(filename)
-    if (msgs.length > 0) setMessages(msgs)
+    const result = await loadHistoryRaw(filename)
+    if (result.messages.length > 0) setMessages(result.messages)
+    return result
   }, [loadHistoryRaw, setMessages])
 
   return {

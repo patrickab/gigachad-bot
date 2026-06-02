@@ -1,8 +1,19 @@
 import type { MorphicResultItem } from "./morphic"
 
+export interface Attachment {
+  name: string
+  mime: string
+  url: string
+  content?: string
+  parsedMd?: string
+  parsing?: boolean
+}
+
 export interface Message {
   role: "user" | "assistant" | "system" | "tool"
   content: string
+  attachments?: Attachment[]
+  hiddenContent?: string
   tool_call_id?: string
   tool_calls?: unknown[]
   morphic_result?: MorphicSearchResult

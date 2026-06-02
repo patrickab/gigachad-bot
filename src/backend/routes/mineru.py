@@ -1,4 +1,7 @@
 import logging
+import os
+import signal
+import threading
 from pathlib import Path
 import re
 import shutil
@@ -14,6 +17,43 @@ from .deps import request_client
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/mineru", tags=["mineru"])
+
+_active_servers: list[object] = []
+_active_servers_lock = threading.Lock()
+_cancel_event = threading.Event()
+
+
+def kill_all_mineru_servers() -> None:
+    _cancel_event.set()
+    with _active_servers_lock:
+        servers = list(_active_servers)
+        _active_servers.clear()
+    for srv in servers:
+        try:
+            srv.stop()
+        except Exception:
+            log.exception("Error stopping MinerU server during shutdown")
+
+
+def reset_cancel() -> None:
+    _cancel_event.clear()
+
+
+def should_cancel() -> bool:
+    return _cancel_event.is_set()
+
+
+def register_mineru_server(server: object) -> None:
+    with _active_servers_lock:
+        _active_servers.append(server)
+
+
+def unregister_mineru_server(server: object) -> None:
+    with _active_servers_lock:
+        try:
+            _active_servers.remove(server)
+        except ValueError:
+            pass
 
 
 class MineruResult(BaseModel):
@@ -43,6 +83,9 @@ async def _parse_pdf(
     rewritten to match the new layout.
     """
     from mineru.cli import api_client
+
+    if should_cancel():
+        raise RuntimeError("MinerU parse cancelled")
 
     pdf_path = Path(pdf_path)
     stem = pdf_path.stem
@@ -85,6 +128,7 @@ async def _parse_pdf(
         tmp_dir = Path(tmp_extract)
 
         local = api_client.LocalAPIServer()
+        register_mineru_server(local)
         base_url = local.start()
         async with httpx.AsyncClient(timeout=api_client.build_http_timeout()) as cli:
             try:
@@ -95,6 +139,7 @@ async def _parse_pdf(
                 api_client.safe_extract_zip(zp, tmp_dir)
                 zp.unlink(missing_ok=True)
             finally:
+                unregister_mineru_server(local)
                 local.stop()
 
         md_files = sorted(tmp_dir.glob("**/*.md"), key=lambda p: len(p.name))

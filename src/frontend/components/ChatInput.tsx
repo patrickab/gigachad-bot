@@ -2,24 +2,34 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { ArrowUp, Plus, LayoutGrid, Mic, Search, Globe, Sigma, Square, X, Maximize2, FileText } from "lucide-react"
+import { ArrowUp, Plus, LayoutGrid, Mic, Search, Globe, Sigma, Square, X, FileText, Image as ImageIcon, File } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { downscaleImage as apiDownscale } from "@/lib/api"
+import { uploadFile as apiUploadFile } from "@/lib/api"
+import type { Attachment } from "@/lib/types"
 import { IMAGE_DOWNSCALE_MAX } from "@/lib/config"
+import { downscaleImage as apiDownscale } from "@/lib/api"
 import { useClickOutside } from "@/hooks/useClickOutside"
 import { useModeState } from "@/hooks/useModeState"
 import { useSettings } from "@/contexts/SettingsContext"
 import { PillButton } from "./PillButton"
 
 interface ChatInputProps {
-  onSend: (text: string, imageDataUrl: string | null, pdfFiles?: File[] | null) => void
-  onOCRRequest?: (image: string) => void
+  chatId: string
+  onSend: (text: string, attachments: Attachment[]) => void
+  onOCRRequest?: (imageDataUrl: string) => void
   disabled?: boolean
   isStreaming?: boolean
   onCancel?: () => void
 }
 
+function fileIcon(mime: string) {
+  if (mime.startsWith("image/")) return ImageIcon
+  if (mime === "application/pdf") return FileText
+  return File
+}
+
 export function ChatInput({
+  chatId,
   onSend,
   onOCRRequest,
   disabled,
@@ -30,12 +40,10 @@ export function ChatInput({
   const { downscaleImages } = useSettings()
 
   const [text, setText] = useState("")
-  const [image, setImage] = useState<string | null>(null)
-  const [downscaledImage, setDownscaledImage] = useState<string | null>(null)
-  const [pdfFiles, setPdfFiles] = useState<File[]>([])
-  const [showPreview, setShowPreview] = useState(false)
-  const [isListening, setIsListening] = useState(false)
+  const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [uploadingNames, setUploadingNames] = useState<Set<string>>(new Set())
   const [showTools, setShowTools] = useState(false)
+  const [isListening, setIsListening] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const toolsRef = useRef<HTMLDivElement>(null)
@@ -47,11 +55,6 @@ export function ChatInput({
 
   useEffect(() => { textRef.current = text }, [text])
 
-  useEffect(() => {
-    if (!image) { setDownscaledImage(null); return }
-    apiDownscale(image, IMAGE_DOWNSCALE_MAX).then(setDownscaledImage).catch(() => {})
-  }, [image])
-
   const adjustHeight = useCallback(() => {
     const el = textareaRef.current
     if (!el) return
@@ -59,30 +62,32 @@ export function ChatInput({
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`
   }, [])
 
-  const clearImage = useCallback(() => {
-    setImage(null)
-    setDownscaledImage(null)
-  }, [])
-
-  const clearPdfs = useCallback(() => setPdfFiles([]), [])
-  const clearPdf = useCallback((idx: number) => setPdfFiles(prev => prev.filter((_, i) => i !== idx)), [])
+  const clearAttachments = useCallback(() => setAttachments([]), [])
+  const removeAttachment = useCallback((name: string) => setAttachments(prev => prev.filter(a => a.name !== name)), [])
 
   const handleSubmit = useCallback(() => {
     const trimmed = text.trim()
-    if (!trimmed && !image && pdfFiles.length === 0) return
-    if (ocrEnabled && image) {
-      onOCRRequest?.(image)
-      setText("")
-      clearImage()
-      requestAnimationFrame(() => adjustHeight())
-      return
+    if (!trimmed && attachments.length === 0) return
+    if (ocrEnabled) {
+      const imgAtt = attachments.find(a => a.mime.startsWith("image/"))
+      if (imgAtt && onOCRRequest) {
+        fetch(imgAtt.url)
+          .then(r => r.blob())
+          .then(blob => new Promise<string>((resolve) => {
+            const reader = new FileReader()
+            reader.onload = () => resolve(reader.result as string)
+            reader.readAsDataURL(blob)
+          }))
+          .then(b64 => { onOCRRequest(b64); setText(""); clearAttachments(); requestAnimationFrame(() => adjustHeight()) })
+          .catch(() => {})
+        return
+      }
     }
-    onSend(trimmed || "", image, pdfFiles.length > 0 ? pdfFiles : null)
+    onSend(trimmed || "", attachments)
     setText("")
-    clearImage()
-    clearPdfs()
+    clearAttachments()
     requestAnimationFrame(() => adjustHeight())
-  }, [text, image, pdfFiles, onSend, onOCRRequest, ocrEnabled, clearImage, clearPdfs, adjustHeight])
+  }, [text, attachments, onSend, onOCRRequest, ocrEnabled, clearAttachments, adjustHeight])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit() }
@@ -95,38 +100,31 @@ export function ChatInput({
         e.preventDefault()
         const blob = item.getAsFile()
         if (!blob) continue
-        const reader = new FileReader()
-        reader.onload = () => setImage(reader.result as string)
-        reader.readAsDataURL(blob)
+        const name = blob.name || `pasted-image.${item.type.split("/")[1] || "png"}`
+        if (!(blob instanceof File)) return
+        setUploadingNames(prev => new Set(prev).add(name))
+        apiUploadFile(chatId, blob)
+          .then(att => setAttachments(prev => [...prev, att]))
+          .catch(() => {})
+          .finally(() => setUploadingNames(prev => { const n = new Set(prev); n.delete(name); return n }))
         break
       }
     }
-  }, [])
+  }, [chatId])
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFiles = Array.from(e.target.files ?? [])
-    if (selectedFiles.length === 0) return
-
-    const pdfs: File[] = []
-    let gotImage = false
-    for (const file of selectedFiles) {
-      if (file.type === "application/pdf") {
-        pdfs.push(file)
-      } else if (!gotImage) {
-        const reader = new FileReader()
-        reader.onload = () => setImage(reader.result as string)
-        reader.readAsDataURL(file)
-        gotImage = true
-      }
-    }
-    if (pdfs.length > 0) {
-      setPdfFiles(prev => [...prev, ...pdfs])
-      if (!gotImage) { setImage(null); setDownscaledImage(null) }
-    } else {
-      setPdfFiles([])
+    const selected = Array.from(e.target.files ?? [])
+    if (selected.length === 0) return
+    for (const file of selected) {
+      const name = file.name
+      setUploadingNames(prev => new Set(prev).add(name))
+      apiUploadFile(chatId, file)
+        .then(att => setAttachments(prev => [...prev, att]))
+        .catch(() => {})
+        .finally(() => setUploadingNames(prev => { const n = new Set(prev); n.delete(name); return n }))
     }
     e.target.value = ""
-  }, [])
+  }, [chatId])
 
   const toggleListening = useCallback(() => {
     if (isListening) { recognitionRef.current?.stop(); setIsListening(false); return }
@@ -162,79 +160,38 @@ export function ChatInput({
     setIsListening(true)
   }, [isListening, adjustHeight])
 
-  const canSend = text.trim().length > 0 || !!image || pdfFiles.length > 0
-  const previewSrc = (downscaleImages !== false && downscaledImage) ? downscaledImage : image
-  const displaySrc = showPreview ? image : previewSrc
+  const canSend = text.trim().length > 0 || attachments.length > 0
 
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mx-auto w-full max-w-3xl">
-      <AnimatePresence>
-        {showPreview && image && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-8"
-            onClick={() => setShowPreview(false)}
-          >
-            <img
-              src={image}
-              alt="Full preview"
-              className="max-h-full max-w-full rounded-lg object-contain"
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {image && (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.96 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="relative mb-2"
-        >
-          <div className="group relative">
-            <img
-              src={previewSrc ?? image}
-              alt="Attached"
-              className="h-20 w-20 rounded-xl border border-zinc-700 object-cover cursor-pointer hover:border-zinc-500 transition-colors"
-              onClick={() => setShowPreview(true)}
-            />
-            <button
-              onClick={() => setShowPreview(true)}
-              className="absolute right-1 bottom-1 rounded-md bg-black/60 p-0.5 text-zinc-400 opacity-0 group-hover:opacity-100 transition-opacity"
-            >
-              <Maximize2 className="h-3 w-3" />
-            </button>
-          </div>
-          <button
-            onClick={clearImage}
-            className="absolute -right-1.5 -top-1.5 rounded-full bg-zinc-800 p-0.5 text-zinc-400 hover:text-red-400"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </motion.div>
-      )}
-
-      {pdfFiles.length > 0 && (
+      {attachments.length > 0 && (
         <motion.div
           initial={{ opacity: 0, scale: 0.96 }}
           animate={{ opacity: 1, scale: 1 }}
           className="relative mb-2 flex flex-wrap gap-2"
         >
-          {pdfFiles.map((file, idx) => (
-            <motion.div key={`${file.name}-${idx}`} layout className="relative">
-              <div className="flex items-center gap-1.5 rounded-xl border border-zinc-700 bg-zinc-800/40 px-2.5 py-1.5 pr-6">
-                <FileText className="h-3.5 w-3.5 shrink-0 text-blue-400" />
-                <span className="max-w-[160px] truncate text-xs text-zinc-300">{file.name}</span>
-              </div>
-              <button
-                onClick={() => clearPdf(idx)}
-                className="absolute -right-1 -top-1 rounded-full bg-zinc-800 p-0.5 text-zinc-400 hover:text-red-400"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </motion.div>
-          ))}
+          {attachments.map((att) => {
+            const Icon = fileIcon(att.mime)
+            const uploading = uploadingNames.has(att.name)
+            return (
+              <motion.div key={att.name} layout className="relative">
+                <div className="flex items-center gap-1.5 rounded-xl border border-zinc-700 bg-zinc-800/40 px-2.5 py-1.5 pr-6">
+                  {uploading ? (
+                    <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-300" />
+                  ) : (
+                    <Icon className="h-3.5 w-3.5 shrink-0 text-blue-400" />
+                  )}
+                  <span className="max-w-[160px] truncate text-xs text-zinc-300">{att.name}</span>
+                </div>
+                <button
+                  onClick={() => removeAttachment(att.name)}
+                  className="absolute -right-1 -top-1 rounded-full bg-zinc-800 p-0.5 text-zinc-400 hover:text-red-400"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </motion.div>
+            )
+          })}
         </motion.div>
       )}
 
@@ -252,7 +209,7 @@ export function ChatInput({
         />
         <div className="mt-3 flex items-center justify-between">
           <div className="flex items-center gap-1">
-            <input ref={fileRef} type="file" accept="image/*,application/pdf" multiple onChange={handleFileSelect} className="hidden" />
+            <input ref={fileRef} type="file" accept="image/*,application/pdf,.md,.txt,.csv,.json,.xml,.yaml,.yml,.toml,.rst,.log,.py,.js,.ts,.jsx,.tsx,.css,.html,.sh,.bash,.zsh,.go,.rs,.java,.c,.cpp,.h,.hpp,.rb,.php,.sql,.r,.tex,.bib" multiple onChange={handleFileSelect} className="hidden" />
             <button
               onClick={() => fileRef.current?.click()}
               disabled={disabled}

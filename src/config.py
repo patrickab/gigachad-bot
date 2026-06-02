@@ -23,6 +23,7 @@ SMALL_MODEL = "ollama/gemma4:31b-cloud"
 DIRECTORY_OUTPUT_MINERU = DIRECTORY_CLOUD / "Documents" / "Mineru"
 DIRECTORY_OUTPUT_PDF = DIRECTORY_CLOUD / "Documents" / "PDFs"
 
+DIRECTORY_CHAT_UPLOADS = DIRECTORY_CLOUD / "Documents" / "ChatUploads"
 MORPHIC_URL = os.environ.get("MORPHIC_URL", "http://localhost:3001")
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 SEARX_URL = os.environ.get("SEARX_URL", "http://localhost:8888")
@@ -36,6 +37,7 @@ def ensure_directories() -> None:
         DIRECTORY_OUTPUT_MINERU,
         DIRECTORY_OUTPUT_MINERU / "images",
         DIRECTORY_OUTPUT_PDF,
+        DIRECTORY_CHAT_UPLOADS,
     ]
     for d in _dirs:
         d.mkdir(parents=True, exist_ok=True)

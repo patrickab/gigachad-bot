@@ -27,6 +27,7 @@ cleanup() {
   for PID in $BACKEND_PID $FRONTEND_PID; do
     kill -TERM -- "-$PID" 2>/dev/null || kill -TERM "$PID" 2>/dev/null || true
   done
+  pkill -f "mineru.cli.fast_api" 2>/dev/null || true
   docker compose -f docker-compose.morphic.yml down
   wait 2>/dev/null || true
   echo "Done."

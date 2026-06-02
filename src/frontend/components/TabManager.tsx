@@ -7,21 +7,23 @@ import { cn } from "@/lib/utils"
 export interface Tab {
   id: string
   name: string | null
+  chatId: string
 }
 
 let tabIdCounter = 0
 
-function nextId(): string {
-  return `tab-${++tabIdCounter}`
+function nextTab(): Tab {
+  return { id: `tab-${++tabIdCounter}`, name: null, chatId: crypto.randomUUID() }
 }
 
 interface TabManagerProps {
   renderContent: (tab: Tab, onModeLabel: (label: string) => void) => React.ReactNode
+  onCloseTab?: (tab: Tab) => void
 }
 
-const INITIAL_TAB: Tab = { id: nextId(), name: null }
+const INITIAL_TAB: Tab = nextTab()
 
-export function TabManager({ renderContent }: TabManagerProps) {
+export function TabManager({ renderContent, onCloseTab }: TabManagerProps) {
   const [tabs, setTabs] = useState<Tab[]>([INITIAL_TAB])
   const [activeTab, setActiveTab] = useState(INITIAL_TAB.id)
   const [editingTab, setEditingTab] = useState<string | null>(null)
@@ -34,7 +36,7 @@ export function TabManager({ renderContent }: TabManagerProps) {
   }, [editingTab])
 
   const addTab = useCallback(() => {
-    const tab: Tab = { id: nextId(), name: null }
+    const tab = nextTab()
     setTabs((prev) => [...prev, tab])
     setActiveTab(tab.id)
   }, [])
@@ -42,15 +44,17 @@ export function TabManager({ renderContent }: TabManagerProps) {
   const closeTab = useCallback((id: string) => {
     setTabs((prev) => {
       if (prev.length <= 1) return prev
-      const idx = prev.findIndex((t) => t.id === id)
+      const tab = prev.find((t) => t.id === id)
+      if (tab) onCloseTab?.(tab)
       const next = prev.filter((t) => t.id !== id)
       if (id === activeTab) {
+        const idx = prev.findIndex((t) => t.id === id)
         const targetIdx = Math.max(0, idx - 1)
         setActiveTab(next[targetIdx]?.id ?? "")
       }
       return next
     })
-  }, [activeTab])
+  }, [activeTab, onCloseTab])
 
   const closeActiveTab = useCallback(() => {
     closeTab(activeTab)

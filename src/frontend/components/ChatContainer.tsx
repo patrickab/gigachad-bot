@@ -2,24 +2,30 @@
 
 import { useEffect, useRef, useMemo, useState } from "react"
 import { AnimatePresence } from "framer-motion"
-import type { Message } from "@/lib/types"
+import type { Message, Attachment } from "@/lib/types"
 import { ChatMessage } from "./ChatMessage"
 import { ChatInput } from "./ChatInput"
 import { SourcesSidebar } from "./SourcesSidebar"
+import { AttachmentSidebar } from "./AttachmentSidebar"
 import { ChevronRight, ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface ChatContainerProps {
+  chatId: string
   messages: Message[]
   isStreaming: boolean
-  onSend: (text: string, imageDataUrl: string | null, pdfFiles?: File[] | null) => void
+  onSend: (text: string, attachments: Attachment[]) => void
   onCancel: () => void
   onDeletePair: (index: number) => void
   className?: string
   onOCRRequest?: (image: string) => void
+  activeAttachment?: Attachment | null
+  onAttachmentClick?: (attachment: Attachment) => void
+  onCloseAttachmentSidebar?: () => void
 }
 
 export function ChatContainer({
+  chatId,
   messages,
   isStreaming,
   onSend,
@@ -27,6 +33,9 @@ export function ChatContainer({
   onDeletePair,
   className,
   onOCRRequest,
+  activeAttachment,
+  onAttachmentClick,
+  onCloseAttachmentSidebar,
 }: ChatContainerProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -51,6 +60,9 @@ export function ChatContainer({
     if (messages.length === 0) setManualOverrides(new Map())
   }, [messages])
 
+  const handleAttachmentClick = onAttachmentClick ?? ((_a: Attachment) => {})
+  const handleCloseAttachmentSidebar = onCloseAttachmentSidebar ?? (() => {})
+
   const pairs: { user: Message; assistant: Message; globalIndex: number }[] = []
   for (let i = 0; i < messages.length; i += 2) {
     if (messages[i]?.role === "user") {
@@ -64,10 +76,18 @@ export function ChatContainer({
 
   const lastGlobalIndex = pairs.length > 0 ? pairs[pairs.length - 1].globalIndex : -1
 
-  function abbreviate(text: string): string {
-    const firstLine = text.split("\n")[0]
-    if (firstLine.length <= 80) return firstLine
-    return firstLine.slice(0, 80) + "\u2026"
+  function abbreviate(text: string, msg?: Message): string {
+    if (text) {
+      const firstLine = text.split("\n")[0]
+      if (firstLine.length <= 80) return firstLine
+      return firstLine.slice(0, 80) + "\u2026"
+    }
+    const atts = msg?.attachments
+    if (atts && atts.length > 0) {
+      const names = atts.map(a => a.name).join(", ")
+      return names.length <= 80 ? names : names.slice(0, 80) + "\u2026"
+    }
+    return "(empty)"
   }
 
   function isExpanded(idx: number): boolean {
@@ -98,7 +118,7 @@ export function ChatContainer({
             {pairs.map(({ user, assistant, globalIndex }) => {
               const expanded = isExpanded(globalIndex)
               const isLast = globalIndex === lastGlobalIndex
-              const qLabel = abbreviate(user.content)
+              const qLabel = abbreviate(user.content, user)
               return (
                 <div key={globalIndex} className="group">
                   {!isLast && (
@@ -116,7 +136,14 @@ export function ChatContainer({
                   )}
                   {expanded && (
                     <>
-                      <ChatMessage role="user" content={user.content} index={globalIndex} onDelete={onDeletePair} />
+                      <ChatMessage
+                        role="user"
+                        content={user.content}
+                        attachments={user.attachments}
+                        onAttachmentClick={handleAttachmentClick}
+                        index={globalIndex}
+                        onDelete={onDeletePair}
+                      />
                       <ChatMessage
                         role="assistant"
                         content={assistant.content}
@@ -138,6 +165,7 @@ export function ChatContainer({
         </div>
         <div className="shrink-0 px-4 pb-6 z-10">
           <ChatInput
+            chatId={chatId}
             onSend={onSend}
             onOCRRequest={onOCRRequest}
             disabled={isStreaming}
@@ -146,6 +174,14 @@ export function ChatContainer({
           />
         </div>
       </div>
+      {activeAttachment && chatId && (
+        <AttachmentSidebar
+          attachment={activeAttachment}
+          chatId={chatId}
+          onClose={handleCloseAttachmentSidebar}
+          isPdf={activeAttachment.mime === "application/pdf"}
+        />
+      )}
       <SourcesSidebar result={lastMorphicResult} />
     </div>
   )
