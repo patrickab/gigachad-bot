@@ -51,6 +51,11 @@ async def _parse_pdf(
     images_dir = output_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
 
+    extracted_md = output_dir / f"{stem}.md"
+    if extracted_md.exists():
+        log.info("MinerU already extracted for %s", stem)
+        return extracted_md, images_dir
+
     if backend == "auto":
         backend = _detect_backend()
     log.info("MinerU using backend: %s", backend)
