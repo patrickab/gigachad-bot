@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic"
 import { motion } from "framer-motion"
 import { memo, useMemo, useState } from "react"
-import { Bot, Brain, Check, Copy, Loader2, Trash2, User } from "lucide-react"
+import { Bot, Brain, Check, ChevronUp, Copy, Loader2, Trash2, User } from "lucide-react"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { ResearchTrace } from "./ResearchTrace"
 import { MessageAttachments } from "./MessageAttachments"
@@ -28,9 +28,11 @@ interface ChatMessageProps {
   attachments?: Attachment[]
   messageIndex?: number
   onAttachmentClick?: (attachment: Attachment) => void
+  collapsibleUser?: boolean
+  onCollapse?: () => void
 }
 
-function ChatMessageInner({ role, content, index, onDelete, morphic_result, research_steps, research_progress, research_trace_id, isStreaming, attachments, onAttachmentClick }: ChatMessageProps) {
+function ChatMessageInner({ role, content, index, onDelete, morphic_result, research_steps, research_progress, research_trace_id, isStreaming, attachments, onAttachmentClick, collapsibleUser, onCollapse }: ChatMessageProps) {
   const isUser = role === "user"
   const [copied, setCopied] = useState(false)
 
@@ -66,13 +68,20 @@ function ChatMessageInner({ role, content, index, onDelete, morphic_result, rese
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
-      className={`flex gap-3 px-4 py-3 ${isUser ? "bg-zinc-900/50" : "bg-zinc-950"}`}
+      onClick={isUser && collapsibleUser ? onCollapse : undefined}
+      className={`flex gap-3 px-4 py-3 ${isUser ? "bg-zinc-900/50" : "bg-zinc-950"} ${isUser && collapsibleUser ? "cursor-pointer hover:bg-zinc-900/80 transition-colors" : ""}`}
     >
       <div className="mt-0.5 shrink-0">
         {isUser ? (
-          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-zinc-800">
-            <User className="h-3.5 w-3.5 text-zinc-400" />
-          </div>
+          collapsibleUser ? (
+            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-zinc-800" title="Click to collapse">
+              <ChevronUp className="h-3.5 w-3.5 text-zinc-400" />
+            </div>
+          ) : (
+            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-zinc-800">
+              <User className="h-3.5 w-3.5 text-zinc-400" />
+            </div>
+          )
         ) : (
           <div className="flex h-7 w-7 items-center justify-center rounded-full bg-sky-600/20">
             <Bot className="h-3.5 w-3.5 text-sky-400" />
@@ -152,7 +161,7 @@ function ChatMessageInner({ role, content, index, onDelete, morphic_result, rese
           {content && !isResearchRunning && (
             <div className="relative">
               <button
-                onClick={handleCopy}
+                onClick={(e) => { e.stopPropagation(); handleCopy() }}
                 className="rounded p-1 hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300"
                 title="Copy"
               >
@@ -173,7 +182,7 @@ function ChatMessageInner({ role, content, index, onDelete, morphic_result, rese
           )}
           {onDelete && (
             <button
-              onClick={() => onDelete(index)}
+              onClick={(e) => { e.stopPropagation(); onDelete(index) }}
               className="rounded p-1 hover:bg-zinc-800 text-zinc-500 hover:text-red-400"
               title="Delete pair"
             >

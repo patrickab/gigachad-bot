@@ -7,10 +7,12 @@ import type { Message, Attachment } from "@/lib/types"
 import { ChatMessage } from "./ChatMessage"
 import { ChatInput } from "./ChatInput"
 import { ContextSidebar, type ExpandedEntry } from "./ContextSidebar"
-import { ChevronRight, ChevronDown, PanelRight } from "lucide-react"
+import { ChevronRight, PanelRight, User } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const SourcesSidebar = dynamic(() => import("./SourcesSidebar").then(m => m.SourcesSidebar), { ssr: false })
+
+const DEFAULT_EXPANDED_TAIL = 2
 
 interface ChatContainerProps {
   chatId: string
@@ -108,6 +110,9 @@ export function ChatContainer({
   }
 
   const lastGlobalIndex = pairs.length > 0 ? pairs[pairs.length - 1].globalIndex : -1
+  const tailStartGlobalIndex = pairs.length > DEFAULT_EXPANDED_TAIL
+    ? pairs[pairs.length - DEFAULT_EXPANDED_TAIL].globalIndex
+    : (pairs.length > 0 ? pairs[0].globalIndex : -1)
 
   function abbreviate(text: string, msg?: Message): string {
     if (text) {
@@ -126,7 +131,7 @@ export function ChatContainer({
   function isExpanded(idx: number): boolean {
     const override = manualOverrides.get(idx)
     if (override !== undefined) return override
-    return idx === lastGlobalIndex
+    return idx >= tailStartGlobalIndex
   }
 
   function togglePair(idx: number) {
@@ -154,17 +159,22 @@ export function ChatContainer({
               const qLabel = abbreviate(user.content, user)
               return (
                 <div key={globalIndex} className="group">
-                  {!isLast && (
+                  {!expanded && !isLast && (
                     <button
                       onClick={() => togglePair(globalIndex)}
-                      className="w-full flex items-center gap-2 px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-900/50 transition-colors"
-                    >
-                      {expanded ? (
-                        <ChevronDown className="h-3.5 w-3.5 shrink-0" />
-                      ) : (
-                        <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+                      className={cn(
+                        "w-full mx-3 my-1.5 flex items-center gap-2.5 px-3 py-2 rounded-lg",
+                        "border border-zinc-800/60 bg-zinc-900/30",
+                        "text-sm text-zinc-400 hover:bg-zinc-900/70 hover:border-zinc-700 hover:text-zinc-200",
+                        "transition-colors group/pair"
                       )}
-                      <span className="truncate text-left">{qLabel}</span>
+                      style={{ width: "calc(100% - 1.5rem)" }}
+                    >
+                      <div className="flex h-7 w-7 items-center justify-center rounded-full bg-zinc-800 shrink-0">
+                        <User className="h-3.5 w-3.5 text-zinc-500" />
+                      </div>
+                      <span className="truncate text-left flex-1">{qLabel}</span>
+                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-600 group-hover/pair:text-zinc-400" />
                     </button>
                   )}
                   {expanded && (
@@ -176,6 +186,8 @@ export function ChatContainer({
                         index={globalIndex}
                         onAttachmentClick={(att) => handleAttachmentClick(globalIndex, att)}
                         onDelete={onDeletePair}
+                        collapsibleUser={!isLast}
+                        onCollapse={!isLast ? () => togglePair(globalIndex) : undefined}
                       />
                       <ChatMessage
                         role="assistant"
