@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils"
 interface ChatContainerProps {
   messages: Message[]
   isStreaming: boolean
-  onSend: (text: string, imageDataUrl: string | null, pdfFile?: File | null) => void
+  onSend: (text: string, imageDataUrl: string | null, pdfFiles?: File[] | null) => void
   onCancel: () => void
   onDeletePair: (index: number) => void
   className?: string

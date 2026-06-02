@@ -118,3 +118,14 @@ export async function parsePdf(file: File, query = "", backend = "pipeline", mod
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
+
+export async function parsePdfs(files: File[], query = "", backend = "pipeline", model = ""): Promise<MineruBatchResponse> {
+  const form = new FormData()
+  for (const file of files) form.append("files", file)
+  if (query) form.append("query", query)
+  if (backend !== "pipeline") form.append("backend", backend)
+  if (model) form.append("model", model)
+  const res = await fetch(`${API_BASE}/mineru/parse-batch`, { method: "POST", body: form })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}

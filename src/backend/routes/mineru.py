@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 import re
+import shutil
 import tempfile
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -113,12 +114,16 @@ async def _parse_pdf(
             renaming.append((img_path, new_dest))
 
         for old_path, new_path in renaming:
-            old_rel = str(old_path.relative_to(tmp_dir))
-            new_rel = str(new_path.relative_to(output_dir))
-            md_content = md_content.replace(old_rel, new_rel)
+            old_name = old_path.name
+            new_name = new_path.name
+            md_content = re.sub(
+                r'\]\([^)]*' + re.escape(old_name) + r'\)',
+                r'](images/' + new_name + r')',
+                md_content,
+            )
 
         for old_path, new_path in renaming:
-            old_path.rename(new_path)
+            shutil.move(str(old_path), str(new_path))
 
         final_md_path = output_dir / f"{stem}.md"
         final_md_path.write_text(md_content, encoding="utf-8")

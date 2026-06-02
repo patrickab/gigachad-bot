@@ -20,3 +20,4 @@ src/frontend/.next
 src/frontend/out
 src/frontend/build
 src/frontend/.env.local
+src/frontend/tsconfig.tsbuildinfo

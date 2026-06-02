@@ -14,7 +14,7 @@ import type { Tab } from "@/components/TabManager"
 import { useChat } from "@/hooks/useChat"
 import { useModeState, ModeProvider } from "@/hooks/useModeState"
 import { useSettings, SettingsProvider } from "@/contexts/SettingsContext"
-import { parsePdf as apiParsePdf } from "@/lib/api"
+import { parsePdfs as apiParsePdfs } from "@/lib/api"
 import { DEFAULT_VISION_MODEL } from "@/lib/config"
 
 const MODE_LABELS: Record<string, string> = {
@@ -89,25 +89,32 @@ function TabContent({ tab, onModeLabel }: { tab: Tab; onModeLabel: (label: strin
     return () => document.removeEventListener("keydown", handler)
   }, [handleSidebarSave, reset])
 
-const handleSend = useCallback(
-    async (text: string, imageDataUrl: string | null, pdfFile?: File | null) => {
-      if (pdfFile) {
+  const handleSend = useCallback(
+    async (text: string, imageDataUrl: string | null, pdfFiles?: File[] | null) => {
+      if (pdfFiles && pdfFiles.length > 0) {
         if (morphicSearchEnabled || researchEnabled) {
           return
         }
         const query = text.trim()
-        addMessagePair("📄 " + pdfFile.name, "Processing PDF...")
+        const label = pdfFiles.length === 1 ? pdfFiles[0].name : `${pdfFiles.length} PDFs`
+        addMessagePair("📄 " + label, "Processing...")
         try {
-          const result = await apiParsePdf(pdfFile, query, "pipeline", settings.selectedModel)
+          const batch = await apiParsePdfs(pdfFiles, query, "pipeline", settings.selectedModel)
+          const merged = batch.results
+            .map((r) => {
+              const content = r.answer ?? r.markdown_content
+              return `### ${r.filename}\n\n${content}`
+            })
+            .join("\n\n---\n\n")
           setMessages((prev) => {
             const copy = [...prev]
-            copy[copy.length - 1] = { role: "assistant", content: result.answer ?? result.markdown_content }
+            copy[copy.length - 1] = { role: "assistant", content: merged }
             return copy
           })
         } catch {
           setMessages((prev) => {
             const copy = [...prev]
-            copy[copy.length - 1] = { role: "assistant", content: "Error: Failed to parse PDF." }
+            copy[copy.length - 1] = { role: "assistant", content: "Error: Failed to parse PDFs." }
             return copy
           })
         }
