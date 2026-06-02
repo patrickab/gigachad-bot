@@ -7,7 +7,7 @@ import type { Message, Attachment } from "@/lib/types"
 import { ChatMessage } from "./ChatMessage"
 import { ChatInput } from "./ChatInput"
 import { ContextSidebar, type ExpandedEntry } from "./ContextSidebar"
-import { ChevronRight, ChevronDown } from "lucide-react"
+import { ChevronRight, ChevronDown, PanelRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const SourcesSidebar = dynamic(() => import("./SourcesSidebar").then(m => m.SourcesSidebar), { ssr: false })
@@ -209,10 +209,10 @@ export function ChatContainer({
         {allAttachments.length > 0 && !contextOpen && (
           <button
             onClick={() => { setContextOpen(true); setExpandedEntries([]) }}
-            className="absolute right-0 top-1/2 -translate-y-1/2 z-20 inline-flex items-center gap-1 rounded-l-lg border border-r-0 border-zinc-800 bg-zinc-900/80 px-2 py-2 text-[11px] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300 transition-colors"
+            title={`${allAttachments.length} context ${allAttachments.length === 1 ? "file" : "files"}`}
+            className="absolute right-0 top-1/2 -translate-y-1/2 z-20 flex items-center justify-center h-10 w-10 rounded-l-lg border border-r-0 border-zinc-800 bg-zinc-950/80 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
           >
-            <span className="writing-mode-vertical [writing-mode:vertical-rl] [text-orientation:mixed]">{allAttachments.length} context {allAttachments.length === 1 ? "file" : "files"}</span>
-            <ChevronRight className="h-3 w-3" />
+            <PanelRight className="h-4 w-4" />
           </button>
         )}
       </div>

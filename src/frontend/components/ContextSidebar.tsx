@@ -57,6 +57,16 @@ function AttachmentViewer({ attachment, chatId }: { attachment: Attachment; chat
   return <p className="p-2 text-xs text-zinc-500">No preview available</p>
 }
 
+function Collapse({ open, children }: { open: boolean; children: React.ReactNode }) {
+  return (
+    <div className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+      <div className="overflow-hidden">
+        {children}
+      </div>
+    </div>
+  )
+}
+
 interface ExpandedEntry {
   messageIndex: number
   attachmentName: string
@@ -87,10 +97,15 @@ function ContextSidebarInner({
     return att?.attachment.mime === "application/pdf"
   })
 
-  const [width, setWidth] = useState(320)
+  const [width, setWidth] = useState(expandedPdf ? 50 : 320)
+  const [mounted, setMounted] = useState(false)
   const dragging = useRef(false)
   const containerRef = useRef<HTMLDivElement>(null)
-  const prevExpandedPdf = useRef(expandedPdf)
+  const prevExpandedPdf = useRef(!expandedPdf)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   useEffect(() => {
     if (expandedPdf && !prevExpandedPdf.current) setWidth(50)
@@ -136,7 +151,7 @@ function ContextSidebarInner({
   return (
     <div
       ref={containerRef}
-      className="shrink-0 border-l border-zinc-800 bg-zinc-950 flex flex-col overflow-hidden relative"
+      className={`shrink-0 border-l border-zinc-800 bg-zinc-950 flex flex-col overflow-hidden relative transition-[width] duration-200 ease-in-out ${mounted ? "" : "!transition-none"}`}
       style={isPct ? { width: `${width}%` } : { width: `${width}px` }}
     >
       <div
@@ -175,8 +190,8 @@ function ContextSidebarInner({
                   <X className="h-3 w-3" />
                 </button>
               </div>
-              {expanded && (
-                expandedPdf ? (
+              <Collapse open={expanded}>
+                {expandedPdf ? (
                   <div className="flex-1 min-h-0 overflow-y-auto">
                     <AttachmentViewer attachment={att} chatId={chatId} />
                   </div>
@@ -184,8 +199,8 @@ function ContextSidebarInner({
                   <div className="max-h-[60vh] overflow-y-auto">
                     <AttachmentViewer attachment={att} chatId={chatId} />
                   </div>
-                )
-              )}
+                )}
+              </Collapse>
             </div>
           )
         })}

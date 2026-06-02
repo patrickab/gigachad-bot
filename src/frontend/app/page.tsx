@@ -153,6 +153,17 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
               const p = parsed.find(r => r.name === a.name)
               return { ...a, parsedMd: p?.parsedMd ?? undefined }
             })
+
+            if (!text.trim()) {
+              setMessages(prev => {
+                const copy = [...prev]
+                const last = copy[copy.length - 1]
+                if (last?.role === "assistant" && !last.content) {
+                  copy[copy.length - 1] = { ...last, content: "Documents parsed - how can I help you?" }
+                }
+                return copy
+              })
+            }
           } catch {}
         }
 
@@ -348,12 +359,14 @@ export default function Home() {
 
   return (
     <SettingsProvider>
-      <ModeProvider>
         <TabManager
           onCloseTab={handleTabClose}
-          renderContent={(tab, onModeLabel) => <TabContent tab={tab} onModeLabel={onModeLabel} onChatSaved={handleChatSaved} />}
+          renderContent={(tab, onModeLabel) => (
+            <ModeProvider>
+              <TabContent tab={tab} onModeLabel={onModeLabel} onChatSaved={handleChatSaved} />
+            </ModeProvider>
+          )}
         />
-      </ModeProvider>
     </SettingsProvider>
   )
 }
