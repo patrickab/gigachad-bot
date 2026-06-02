@@ -5,7 +5,7 @@ readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "fastapi>=0.136.3",
-    "gpt-researcher>=0.14.0",
+    "gpt-researcher>=0.15.1",
     "langchain-litellm>=0.6.0",
     "langchain-ollama>=0.3.0",
     "litellm>=1.80.5",
