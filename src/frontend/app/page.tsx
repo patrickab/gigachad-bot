@@ -14,7 +14,7 @@ import type { Tab } from "@/components/TabManager"
 import { useChat } from "@/hooks/useChat"
 import { useModeState, ModeProvider } from "@/hooks/useModeState"
 import { useSettings, SettingsProvider } from "@/contexts/SettingsContext"
-import { saveChatHistory as apiSaveChatHistory, deleteChatUploads, parseFiles } from "@/lib/api"
+import { saveChatHistory as apiSaveChatHistory, deleteChatUploads, parseFiles, deleteAttachment } from "@/lib/api"
 import { DEFAULT_VISION_MODEL } from "@/lib/config"
 import type { Attachment, Message } from "@/lib/types"
 
@@ -86,7 +86,6 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
   const [collapsed, setCollapsed] = useState(true)
   const [ocrImage, setOCRImage] = useState<string | null>(null)
   const [chatId, setChatId] = useState(() => tab.chatId)
-  const [activeAttachment, setActiveAttachment] = useState<Attachment | null>(null)
 
   const handleHistoryLoad = useCallback(async (filename: string) => {
     const result = await loadHistory(filename)
@@ -135,69 +134,36 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
       }
 
       if (attachments.length > 0) {
-        const pdfNames = attachments.filter(a => a.mime === "application/pdf").map(a => a.name)
-
-        const initialAttachments = attachments.map(a =>
-          a.mime === "application/pdf" ? { ...a, parsing: true } : a
-        )
-
-        const { hiddenContent } = buildLLMMessage(text, attachments)
-
         setMessages(prev => [
           ...prev,
-          { role: "user" as const, content: text, attachments: initialAttachments, hiddenContent: undefined },
+          { role: "user" as const, content: text, attachments },
           { role: "assistant" as const, content: "" },
         ])
 
-        const firstPdf = initialAttachments.find(a => a.mime === "application/pdf")
-        if (firstPdf) {
-          setActiveAttachment(firstPdf)
-        }
+        const pdfNames = attachments.filter(a => a.mime === "application/pdf").map(a => a.name)
 
-        let enriched = initialAttachments
-        let finalHiddenContent = hiddenContent
+        let enriched = attachments
+        let finalHiddenContent: string | undefined
+
         if (pdfNames.length > 0) {
           try {
             const parsed = await parseFiles(chatId, pdfNames)
-            enriched = initialAttachments.map(a => {
+            enriched = attachments.map(a => {
               if (a.mime !== "application/pdf") return a
               const p = parsed.find(r => r.name === a.name)
-              return { ...a, parsing: false, parsedMd: p?.parsedMd ?? undefined }
+              return { ...a, parsedMd: p?.parsedMd ?? undefined }
             })
-            setMessages(prev => {
-              const copy = [...prev]
-              const lastUserIdx = copy.length - 2
-              if (lastUserIdx >= 0 && copy[lastUserIdx].role === "user") {
-                copy[lastUserIdx] = { ...copy[lastUserIdx], attachments: enriched }
-              }
-              return copy
-            })
-            const parsedPdf = enriched.find(a => a.mime === "application/pdf")
-            if (parsedPdf) {
-              setActiveAttachment(parsedPdf)
-            }
-            const { hiddenContent: updatedHidden } = buildLLMMessage(text, enriched)
-            finalHiddenContent = updatedHidden
-          } catch {
-            enriched = initialAttachments.map(a =>
-              a.mime === "application/pdf" ? { ...a, parsing: false } : a
-            )
-            setMessages(prev => {
-              const copy = [...prev]
-              const lastUserIdx = copy.length - 2
-              if (lastUserIdx >= 0 && copy[lastUserIdx].role === "user") {
-                copy[lastUserIdx] = { ...copy[lastUserIdx], attachments: enriched }
-              }
-              return copy
-            })
-          }
+          } catch {}
         }
+
+        const { hiddenContent } = buildLLMMessage(text, enriched)
+        finalHiddenContent = hiddenContent
 
         setMessages(prev => {
           const copy = [...prev]
           const lastUserIdx = copy.length - 2
           if (lastUserIdx >= 0 && copy[lastUserIdx].role === "user") {
-            copy[lastUserIdx] = { ...copy[lastUserIdx], hiddenContent: finalHiddenContent }
+            copy[lastUserIdx] = { ...copy[lastUserIdx], attachments: enriched, hiddenContent: finalHiddenContent }
           }
           return copy
         })
@@ -272,6 +238,23 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
     ]
   )
 
+  const handleRemoveAttachment = useCallback((messageIndex: number, attachmentName: string) => {
+    setMessages(prev => {
+      const copy = [...prev]
+      if (copy[messageIndex] && copy[messageIndex].attachments) {
+        const att = copy[messageIndex].attachments!.find(a => a.name === attachmentName)
+        if (att) {
+          deleteAttachment(chatId, attachmentName).catch(() => {})
+        }
+        copy[messageIndex] = {
+          ...copy[messageIndex],
+          attachments: copy[messageIndex].attachments!.filter(a => a.name !== attachmentName),
+        }
+      }
+      return copy
+    })
+  }, [setMessages, chatId])
+
   return (
     <div className="flex h-full overflow-hidden">
       <Sidebar
@@ -326,9 +309,7 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
             onCancel={cancel}
             onDeletePair={deleteMessagePair}
             onOCRRequest={setOCRImage}
-            activeAttachment={activeAttachment}
-            onAttachmentClick={setActiveAttachment}
-            onCloseAttachmentSidebar={() => setActiveAttachment(null)}
+            onRemoveAttachment={handleRemoveAttachment}
           />
           {ocrEnabled && ocrImage && (
             <OCRPanel

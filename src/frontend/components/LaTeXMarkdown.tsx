@@ -57,7 +57,7 @@ function CodeBlock({ codeString, language }: { codeString: string; language: str
           dangerouslySetInnerHTML={{ __html: html }}
         />
       ) : (
-        <pre className="rounded-md p-4 m-0 text-[0.75rem] leading-[1.6] bg-[#1e1e1e] text-[#d4d4d4] overflow-x-auto"><code>{codeString}</code></pre>
+        <pre className="rounded-md p-4 m-0 text-[0.75rem] leading-[1.6] bg-zinc-900 text-zinc-300 overflow-x-auto"><code>{codeString}</code></pre>
       )}
       <button
         onClick={handleCopy}

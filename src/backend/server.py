@@ -24,7 +24,7 @@ from backend.routes.histories import router as histories_router
 from backend.routes.mineru import kill_all_mineru_servers, reset_cancel
 from backend.routes.mineru import router as mineru_router
 from backend.routes.models import router as models_router
-from backend.routes.morphic import router as morphic_router
+from backend.routes.morphic import router as morphic_router, stop_morphic
 from backend.routes.ocr import router as ocr_router
 from backend.routes.research import router as research_router
 from config import DIRECTORY_CHAT_UPLOADS, DIRECTORY_OUTPUT_MINERU, ensure_directories
@@ -48,6 +48,7 @@ async def lifespan(app: FastAPI):
     yield
     shutdown_client()
     kill_all_mineru_servers()
+    stop_morphic()
 
 
 app = FastAPI(title="gigachad-bot", lifespan=lifespan)

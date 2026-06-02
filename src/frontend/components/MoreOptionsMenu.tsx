@@ -85,7 +85,7 @@ export function MoreOptionsMenu({
                       )}
                     >
                       <span className={cn(
-                        "absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform",
+                        "absolute top-0.5 h-4 w-4 rounded-full bg-zinc-50 transition-transform",
                         settings.downscaleImages ? "left-[18px]" : "left-0.5"
                       )} />
                     </button>

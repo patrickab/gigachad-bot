@@ -1,6 +1,7 @@
 import { createHighlighterCoreSync, type HighlighterCore } from "shiki/core"
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript"
 import darkPlus from "@shikijs/themes/dark-plus"
+import lightPlus from "@shikijs/themes/light-plus"
 import javascript from "@shikijs/langs/javascript"
 import typescript from "@shikijs/langs/typescript"
 import python from "@shikijs/langs/python"
@@ -36,7 +37,7 @@ let highlighter: HighlighterCore | null = null
 export function getHighlighter(): HighlighterCore {
   if (!highlighter) {
     highlighter = createHighlighterCoreSync({
-      themes: [darkPlus],
+      themes: [darkPlus, lightPlus],
       langs: [
         javascript,
         typescript,
@@ -92,10 +93,24 @@ export function highlightCode(code: string, lang: string): string {
   const hl = getHighlighter()
   const safeLang = hl.getLoadedLanguages().includes(resolved) ? resolved : "text"
   try {
-    return hl.codeToHtml(code, { lang: safeLang, theme: "dark-plus" })
+    return hl.codeToHtml(code, {
+      lang: safeLang,
+      themes: {
+        dark: "dark-plus",
+        light: "light-plus",
+      },
+      defaultColor: false,
+    })
   } catch {
     try {
-      return hl.codeToHtml(code, { lang: "text", theme: "dark-plus" })
+      return hl.codeToHtml(code, {
+        lang: "text",
+        themes: {
+          dark: "dark-plus",
+          light: "light-plus",
+        },
+        defaultColor: false,
+      })
     } catch {
       return ""
     }

@@ -1,13 +1,15 @@
 "use client"
 
+import dynamic from "next/dynamic"
 import { motion } from "framer-motion"
 import { memo, useState } from "react"
 import { Bot, Check, Copy, Trash2, User } from "lucide-react"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
-import { MorphicSearchResult } from "./MorphicSearchResult"
 import { ResearchTrace } from "./ResearchTrace"
 import { MessageAttachments } from "./MessageAttachments"
 import type { Message, Attachment } from "@/lib/types"
+
+const MorphicSearchResult = dynamic(() => import("./MorphicSearchResult").then(m => m.MorphicSearchResult), { ssr: false })
 
 interface ChatMessageProps {
   role: "user" | "assistant"
@@ -20,6 +22,7 @@ interface ChatMessageProps {
   research_trace_id?: string
   isStreaming?: boolean
   attachments?: Attachment[]
+  messageIndex?: number
   onAttachmentClick?: (attachment: Attachment) => void
 }
 

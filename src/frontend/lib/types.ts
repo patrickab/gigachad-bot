@@ -6,7 +6,7 @@ export interface Attachment {
   url: string
   content?: string
   parsedMd?: string
-  parsing?: boolean
+
 }
 
 export interface Message {

@@ -101,7 +101,6 @@ export function ChatInput({
         const blob = item.getAsFile()
         if (!blob) continue
         const name = blob.name || `pasted-image.${item.type.split("/")[1] || "png"}`
-        if (!(blob instanceof File)) return
         setUploadingNames(prev => new Set(prev).add(name))
         apiUploadFile(chatId, blob)
           .then(att => setAttachments(prev => [...prev, att]))
@@ -290,7 +289,7 @@ export function ChatInput({
             {isStreaming ? (
               <button
                 onClick={onCancel}
-                className="rounded-full p-2.5 transition-all bg-white text-black hover:bg-zinc-200"
+                className="rounded-full p-2.5 transition-all bg-zinc-50 text-zinc-950 hover:bg-zinc-200"
                 title="Stop generating"
               >
                 <Square className="h-4 w-4 fill-current" />
@@ -301,7 +300,7 @@ export function ChatInput({
                 disabled={disabled || !canSend}
                 className={cn(
                   "rounded-full p-2.5 transition-all",
-                  canSend && !disabled ? "bg-white text-black hover:bg-zinc-200" : "bg-zinc-800 text-zinc-500"
+                  canSend && !disabled ? "bg-zinc-50 text-zinc-950 hover:bg-zinc-200" : "bg-zinc-800 text-zinc-500"
                 )}
               >
                 <ArrowUp className="h-4 w-4" />

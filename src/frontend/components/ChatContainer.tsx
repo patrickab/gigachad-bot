@@ -1,14 +1,16 @@
 "use client"
 
-import { useEffect, useRef, useMemo, useState } from "react"
+import dynamic from "next/dynamic"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence } from "framer-motion"
 import type { Message, Attachment } from "@/lib/types"
 import { ChatMessage } from "./ChatMessage"
 import { ChatInput } from "./ChatInput"
-import { SourcesSidebar } from "./SourcesSidebar"
-import { AttachmentSidebar } from "./AttachmentSidebar"
+import { ContextSidebar, type ExpandedEntry } from "./ContextSidebar"
 import { ChevronRight, ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
+
+const SourcesSidebar = dynamic(() => import("./SourcesSidebar").then(m => m.SourcesSidebar), { ssr: false })
 
 interface ChatContainerProps {
   chatId: string
@@ -19,9 +21,7 @@ interface ChatContainerProps {
   onDeletePair: (index: number) => void
   className?: string
   onOCRRequest?: (image: string) => void
-  activeAttachment?: Attachment | null
-  onAttachmentClick?: (attachment: Attachment) => void
-  onCloseAttachmentSidebar?: () => void
+  onRemoveAttachment?: (messageIndex: number, attachmentName: string) => void
 }
 
 export function ChatContainer({
@@ -33,9 +33,7 @@ export function ChatContainer({
   onDeletePair,
   className,
   onOCRRequest,
-  activeAttachment,
-  onAttachmentClick,
-  onCloseAttachmentSidebar,
+  onRemoveAttachment,
 }: ChatContainerProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -45,6 +43,44 @@ export function ChatContainer({
     }
     return undefined
   }, [messages])
+
+  const allAttachments = useMemo<{ messageIndex: number; attachment: Attachment }[]>(() => {
+    const seen = new Set<string>()
+    const entries: { messageIndex: number; attachment: Attachment }[] = []
+    for (let i = 0; i < messages.length; i++) {
+      const atts = messages[i].attachments
+      if (!atts) continue
+      for (const att of atts) {
+        const key = `${i}-${att.name}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        entries.push({ messageIndex: i, attachment: att })
+      }
+    }
+    return entries
+  }, [messages])
+
+  const [contextOpen, setContextOpen] = useState(false)
+  const [expandedEntries, setExpandedEntries] = useState<ExpandedEntry[]>([])
+
+  const handleAttachmentClick = useCallback((messageIndex: number, attachment: Attachment) => {
+    setContextOpen(true)
+    setExpandedEntries([{ messageIndex, attachmentName: attachment.name }])
+  }, [])
+
+  const handleToggleExpand = useCallback((mi: number, name: string) => {
+    setExpandedEntries(prev => {
+      const idx = prev.findIndex(e => e.messageIndex === mi && e.attachmentName === name)
+      if (idx >= 0) {
+        return prev.filter((_, i) => i !== idx)
+      }
+      return [...prev, { messageIndex: mi, attachmentName: name }]
+    })
+  }, [])
+
+  const handleRemoveAttachment = useCallback((mi: number, name: string) => {
+    onRemoveAttachment?.(mi, name)
+  }, [onRemoveAttachment])
 
   useEffect(() => {
     const el = bottomRef.current?.parentElement
@@ -59,9 +95,6 @@ export function ChatContainer({
   useEffect(() => {
     if (messages.length === 0) setManualOverrides(new Map())
   }, [messages])
-
-  const handleAttachmentClick = onAttachmentClick ?? ((_a: Attachment) => {})
-  const handleCloseAttachmentSidebar = onCloseAttachmentSidebar ?? (() => {})
 
   const pairs: { user: Message; assistant: Message; globalIndex: number }[] = []
   for (let i = 0; i < messages.length; i += 2) {
@@ -107,9 +140,9 @@ export function ChatContainer({
 
   return (
     <div className={cn("flex h-full relative", className)}>
-      <div className="flex-1 min-w-0 flex flex-col">
+      <div className="flex-1 min-w-0 flex flex-col relative">
         <div className="flex-1 overflow-y-auto pb-6">
-          {pairs.length === 0 && (
+          {pairs.length === 0 && !contextOpen && (
             <div className="flex h-full items-center justify-center">
               <p className="text-sm text-zinc-600">Send a message to start.</p>
             </div>
@@ -140,8 +173,8 @@ export function ChatContainer({
                         role="user"
                         content={user.content}
                         attachments={user.attachments}
-                        onAttachmentClick={handleAttachmentClick}
                         index={globalIndex}
+                        onAttachmentClick={(att) => handleAttachmentClick(globalIndex, att)}
                         onDelete={onDeletePair}
                       />
                       <ChatMessage
@@ -173,13 +206,24 @@ export function ChatContainer({
             onCancel={onCancel}
           />
         </div>
+        {allAttachments.length > 0 && !contextOpen && (
+          <button
+            onClick={() => { setContextOpen(true); setExpandedEntries([]) }}
+            className="absolute right-0 top-1/2 -translate-y-1/2 z-20 inline-flex items-center gap-1 rounded-l-lg border border-r-0 border-zinc-800 bg-zinc-900/80 px-2 py-2 text-[11px] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300 transition-colors"
+          >
+            <span className="writing-mode-vertical [writing-mode:vertical-rl] [text-orientation:mixed]">{allAttachments.length} context {allAttachments.length === 1 ? "file" : "files"}</span>
+            <ChevronRight className="h-3 w-3" />
+          </button>
+        )}
       </div>
-      {activeAttachment && chatId && (
-        <AttachmentSidebar
-          attachment={activeAttachment}
+      {contextOpen && chatId && allAttachments.length > 0 && (
+        <ContextSidebar
           chatId={chatId}
-          onClose={handleCloseAttachmentSidebar}
-          isPdf={activeAttachment.mime === "application/pdf"}
+          messages={allAttachments}
+          expandedEntries={expandedEntries}
+          onToggle={handleToggleExpand}
+          onRemoveAttachment={handleRemoveAttachment}
+          onClose={() => setContextOpen(false)}
         />
       )}
       <SourcesSidebar result={lastMorphicResult} />
