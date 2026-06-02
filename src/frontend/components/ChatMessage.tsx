@@ -2,14 +2,18 @@
 
 import dynamic from "next/dynamic"
 import { motion } from "framer-motion"
-import { memo, useState } from "react"
-import { Bot, Check, Copy, Trash2, User } from "lucide-react"
+import { memo, useMemo, useState } from "react"
+import { Bot, Brain, Check, Copy, Loader2, Trash2, User } from "lucide-react"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { ResearchTrace } from "./ResearchTrace"
 import { MessageAttachments } from "./MessageAttachments"
 import type { Message, Attachment } from "@/lib/types"
 
 const MorphicSearchResult = dynamic(() => import("./MorphicSearchResult").then(m => m.MorphicSearchResult), { ssr: false })
+
+const PULSE_DURATION_S = 1.4
+const PULSE_SCALE_PEAK = 1.12
+const THOUGHT_VERTICAL_SPACING = "my-3"
 
 interface ChatMessageProps {
   role: "user" | "assistant"
@@ -29,6 +33,24 @@ interface ChatMessageProps {
 function ChatMessageInner({ role, content, index, onDelete, morphic_result, research_steps, research_progress, research_trace_id, isStreaming, attachments, onAttachmentClick }: ChatMessageProps) {
   const isUser = role === "user"
   const [copied, setCopied] = useState(false)
+
+  const { thought, cleanContent } = useMemo(() => {
+    const startTag = "<thought>\n"
+    const endTag = "\n</thought>"
+    const startIdx = content.indexOf(startTag)
+    if (startIdx === -1) return { thought: null, cleanContent: content }
+
+    const endIdx = content.indexOf(endTag, startIdx + startTag.length)
+    const before = content.slice(0, startIdx)
+
+    if (endIdx !== -1) {
+      const t = content.slice(startIdx + startTag.length, endIdx).trim() || null
+      const clean = (before + content.slice(endIdx + endTag.length)).trim()
+      return { thought: t, cleanContent: clean }
+    }
+    const t = content.slice(startIdx + startTag.length).trim() || null
+    return { thought: t, cleanContent: before.trim() }
+  }, [content])
 
   function handleCopy() {
     navigator.clipboard.writeText(content).then(() => {
@@ -70,19 +92,54 @@ function ChatMessageInner({ role, content, index, onDelete, morphic_result, rese
           morphic_result ? (
             <MorphicSearchResult content={content} morphic_result={morphic_result} />
           ) : (
-            <LaTeXMarkdown content={content} streaming={isStreaming} />
+            <>
+              {thought && (
+                <details className={`group ${THOUGHT_VERTICAL_SPACING} pl-4`} open={isStreaming}>
+                  <summary className="cursor-pointer select-none list-none flex items-center gap-1.5 text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors marker:text-zinc-600">
+                    <motion.span
+                      animate={isStreaming ? { scale: [1, PULSE_SCALE_PEAK, 1] } : { scale: 1 }}
+                      transition={{ repeat: Infinity, duration: PULSE_DURATION_S, ease: "easeInOut" }}
+                      className="inline-flex"
+                    >
+                      <Brain className="h-3 w-3 text-zinc-400 group-hover:text-sky-400 transition-colors" />
+                    </motion.span>
+                    <span className="font-medium tracking-wide uppercase group-hover:text-sky-400 transition-colors">Reasoning</span>
+                  </summary>
+                  <p className="mt-1 pl-4 border-l-2 border-zinc-800/80 text-xs text-zinc-500 leading-relaxed whitespace-pre-wrap italic">
+                    {thought}
+                  </p>
+                </details>
+              )}
+              <LaTeXMarkdown content={cleanContent} streaming={isStreaming} />
+            </>
           )
         ) : content ? (
           <span className="inline-flex items-center gap-1 text-zinc-500 text-sm">
             <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-sky-400" />
             {content}
           </span>
-        ) : (
-          <span className="inline-flex items-center gap-1 text-zinc-500 text-sm">
-            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-sky-400" />
-            Thinking…
+        ) : thought ? (
+          <details className={`group ${THOUGHT_VERTICAL_SPACING} pl-4`} open={isStreaming}>
+            <summary className="cursor-pointer select-none list-none flex items-center gap-1.5 text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors marker:text-zinc-600">
+              <motion.span
+                animate={isStreaming ? { scale: [1, PULSE_SCALE_PEAK, 1] } : { scale: 1 }}
+                transition={{ repeat: Infinity, duration: PULSE_DURATION_S, ease: "easeInOut" }}
+                className="inline-flex"
+              >
+                <Brain className="h-3 w-3 text-zinc-400 group-hover:text-sky-400 transition-colors" />
+              </motion.span>
+              <span className="font-medium tracking-wide uppercase group-hover:text-sky-400 transition-colors">Reasoning</span>
+            </summary>
+            <p className="mt-1 pl-4 border-l-2 border-zinc-800/80 text-xs text-zinc-500 leading-relaxed whitespace-pre-wrap italic">
+              {thought}
+            </p>
+          </details>
+        ) : isStreaming ? (
+          <span className="inline-flex items-center gap-2 text-zinc-500 text-sm">
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-600" />
+            <span>Processing…</span>
           </span>
-        )}
+        ) : null}
         {!isUser && (research_steps && research_steps.length > 0) && (
           <ResearchTrace
             steps={research_steps}
