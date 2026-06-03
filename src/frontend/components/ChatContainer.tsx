@@ -222,7 +222,7 @@ export function ChatContainer({
           <button
             onClick={() => { setContextOpen(true); setExpandedEntries([]) }}
             title={`${allAttachments.length} context ${allAttachments.length === 1 ? "file" : "files"}`}
-            className="absolute right-0 top-1/2 -translate-y-1/2 z-20 flex items-center justify-center h-10 w-10 rounded-l-lg border border-r-0 border-zinc-800 bg-zinc-950/80 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
+            className="absolute right-0 top-2 z-20 flex items-center justify-center h-10 w-10 rounded-l-lg border border-r-0 border-zinc-800 bg-zinc-950/80 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
           >
             <PanelRight className="h-4 w-4" />
           </button>
