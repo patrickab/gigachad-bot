@@ -4,6 +4,10 @@ import { motion } from "framer-motion"
 import { ChatHistoryManager } from "./ChatHistoryManager"
 import { SidebarElement } from "./SidebarElement"
 import { getSidebarConfig } from "@/lib/sidebarConfig"
+import { CHROME_UNIT_PX } from "@/lib/config"
+
+const COLLAPSED_WIDTH = 50
+const EXPANDED_WIDTH = 280
 
 interface SidebarProps {
   collapsed: boolean
@@ -34,12 +38,12 @@ export function Sidebar({
   })
 
   const toggleItem = sidebarItems.find(item => item.id === "toggle-collapse")
-  const mainItems = sidebarItems.filter(item => item.id !== "toggle-collapse")
+  const mainItems = sidebarItems.filter(item => item.id !== "toggle-collapse" && item.id !== "save-chat" && item.id !== "reset-chat")
 
   return (
     <motion.aside
       initial={false}
-      animate={{ width: collapsed ? 50 : 280 }}
+      animate={{ width: collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH }}
       transition={{ duration: 0.25, ease: "easeInOut" }}
       className="shrink-0 border-r border-zinc-800 bg-zinc-950 flex flex-col overflow-hidden"
     >
@@ -57,14 +61,14 @@ export function Sidebar({
           )}
         </div>
       </div>
-      
+
       <div className="flex-1 overflow-y-auto py-3 flex flex-col gap-2">
         <div className="px-2">
-          <ChatHistoryManager 
+          <ChatHistoryManager
             histories={histories}
             historiesLoading={historiesLoading}
-            onLoad={onHistoryLoad} 
-            onRefresh={onHistoryRefresh} 
+            onLoad={onHistoryLoad}
+            onRefresh={onHistoryRefresh}
             collapsed={collapsed}
             onExpand={() => {
               if (collapsed) onToggle()

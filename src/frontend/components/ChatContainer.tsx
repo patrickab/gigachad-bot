@@ -1,16 +1,14 @@
 "use client"
 
-import dynamic from "next/dynamic"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence } from "framer-motion"
 import type { Message, Attachment } from "@/lib/types"
 import { ChatMessage } from "./ChatMessage"
 import { ChatInput } from "./ChatInput"
-import { ContextSidebar, type ExpandedEntry } from "./ContextSidebar"
+import { ChatSidebar } from "./ChatSidebar"
+import { getChatSidebarConfig } from "./chatSidebarConfig"
 import { ChevronRight, PanelRight, User } from "lucide-react"
 import { cn } from "@/lib/utils"
-
-const SourcesSidebar = dynamic(() => import("./SourcesSidebar").then(m => m.SourcesSidebar), { ssr: false })
 
 const DEFAULT_EXPANDED_TAIL = 2
 
@@ -63,10 +61,12 @@ export function ChatContainer({
   }, [messages])
 
   const [contextOpen, setContextOpen] = useState(false)
-  const [expandedEntries, setExpandedEntries] = useState<ExpandedEntry[]>([])
+  const [chatSidebarCollapsed, setChatSidebarCollapsed] = useState(false)
+  const [expandedEntries, setExpandedEntries] = useState<{ messageIndex: number; attachmentName: string }[]>([])
 
   const handleAttachmentClick = useCallback((messageIndex: number, attachment: Attachment) => {
     setContextOpen(true)
+    setChatSidebarCollapsed(false)
     setExpandedEntries([{ messageIndex, attachmentName: attachment.name }])
   }, [])
 
@@ -143,6 +143,28 @@ export function ChatContainer({
     })
   }
 
+  const sidebarElements = useMemo(
+    () =>
+      getChatSidebarConfig({
+        chatId,
+        allAttachments,
+        expandedEntries,
+        onToggleAttachment: handleToggleExpand,
+        onRemoveAttachment: handleRemoveAttachment,
+        lastMorphicResult,
+      }),
+    [chatId, allAttachments, expandedEntries, handleToggleExpand, handleRemoveAttachment, lastMorphicResult]
+  )
+
+  const hasSidebarContent = sidebarElements.length > 0
+
+  useEffect(() => {
+    if (!hasSidebarContent) {
+      setContextOpen(false)
+      setChatSidebarCollapsed(false)
+    }
+  }, [hasSidebarContent])
+
   return (
     <div className={cn("flex h-full relative", className)}>
       <div className="flex-1 min-w-0 flex flex-col relative">
@@ -218,27 +240,23 @@ export function ChatContainer({
             onCancel={onCancel}
           />
         </div>
-        {allAttachments.length > 0 && !contextOpen && (
+        {hasSidebarContent && !contextOpen && (
           <button
-            onClick={() => { setContextOpen(true); setExpandedEntries([]) }}
-            title={`${allAttachments.length} context ${allAttachments.length === 1 ? "file" : "files"}`}
+            onClick={() => setContextOpen(true)}
+            title="Open sidebar"
             className="absolute right-0 top-2 z-20 flex items-center justify-center h-10 w-10 rounded-l-lg border border-r-0 border-zinc-800 bg-zinc-950/80 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
           >
             <PanelRight className="h-4 w-4" />
           </button>
         )}
       </div>
-      {contextOpen && chatId && allAttachments.length > 0 && (
-        <ContextSidebar
-          chatId={chatId}
-          messages={allAttachments}
-          expandedEntries={expandedEntries}
-          onToggle={handleToggleExpand}
-          onRemoveAttachment={handleRemoveAttachment}
-          onClose={() => setContextOpen(false)}
+      {hasSidebarContent && contextOpen && chatId && (
+        <ChatSidebar
+          collapsed={chatSidebarCollapsed}
+          onToggle={() => setChatSidebarCollapsed((c) => !c)}
+          elements={sidebarElements}
         />
       )}
-      <SourcesSidebar result={lastMorphicResult} />
     </div>
   )
 }
