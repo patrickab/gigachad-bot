@@ -99,6 +99,17 @@ async def _parse_pdf(
         log.info("MinerU already extracted for %s", stem)
         return extracted_md, images_dir
 
+    global_md = DIRECTORY_OUTPUT_MINERU / f"{stem}.md"
+    if global_md.exists():
+        log.info("MinerU already extracted for %s (global cache)", stem)
+        shutil.copy2(global_md, extracted_md)
+        global_images = DIRECTORY_OUTPUT_MINERU / "images"
+        if global_images.exists():
+            for img in global_images.iterdir():
+                if img.is_file() and img.name.startswith(stem):
+                    shutil.copy2(img, images_dir / img.name)
+        return extracted_md, images_dir
+
     if backend == "auto":
         backend = _detect_backend()
     log.info("MinerU using backend: %s", backend)
