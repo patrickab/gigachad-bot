@@ -195,118 +195,121 @@ export function ChatInput({
         </motion.div>
       )}
 
-      <div className="relative z-10 rounded-2xl border border-zinc-700/40 bg-zinc-900/60 shadow-[0_0_40px_10px_rgba(0,0,0,0.4)] backdrop-blur-xl p-4 transition-colors focus-within:border-zinc-600/50">
-        <textarea
-          ref={textareaRef}
-          rows={1}
-          value={text}
-          onChange={(e) => { setText(e.target.value); adjustHeight() }}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          disabled={disabled}
-          placeholder="Send a Message"
-          className="w-full resize-none bg-transparent text-base text-zinc-100 placeholder:text-zinc-500 outline-none"
-        />
-        <div className="mt-3 flex items-center justify-between">
-          <div className="flex items-center gap-1">
-            <input ref={fileRef} type="file" accept="image/*,application/pdf,.md,.txt,.csv,.json,.xml,.yaml,.yml,.toml,.rst,.log,.py,.js,.ts,.jsx,.tsx,.css,.html,.sh,.bash,.zsh,.go,.rs,.java,.c,.cpp,.h,.hpp,.rb,.php,.sql,.r,.tex,.bib" multiple onChange={handleFileSelect} className="hidden" />
-            <button
-              onClick={() => fileRef.current?.click()}
-              disabled={disabled}
-              className="rounded-full p-2 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 transition-colors disabled:opacity-30"
-              title="Add resources"
-            >
-              <Plus className="h-4 w-4" />
-            </button>
-            {researchEnabled && (
-              <PillButton accent="amber" active onClick={() => toggleResearch()} icon={<Search className="h-3 w-3" />}>
-                Research
-              </PillButton>
-            )}
-            {morphicSearchEnabled && (
-              <PillButton accent="sky" active onClick={() => toggleMorphicSearch()} icon={<Globe className="h-3 w-3" />}>
-                Search
-              </PillButton>
-            )}
-            {ocrEnabled && (
-              <PillButton accent="emerald" active onClick={() => toggleOCR()} icon={<Sigma className="h-3 w-3" />}>
-                LaTeX
-              </PillButton>
-            )}
-          </div>
-          <div className="flex items-center gap-1">
-            <div className="relative" ref={toolsRef}>
+      <div className="relative">
+        <div className="absolute inset-0 rounded-2xl shadow-[0_0_40px_10px_rgba(0,0,0,0.4)] pointer-events-none" />
+        <div className="relative z-10 rounded-2xl border border-zinc-700/40 bg-zinc-900/60 backdrop-blur-xl p-4 transition-colors focus-within:border-zinc-600/50">
+          <textarea
+            ref={textareaRef}
+            rows={1}
+            value={text}
+            onChange={(e) => { setText(e.target.value); adjustHeight() }}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            disabled={disabled}
+            placeholder="Send a Message"
+            className="w-full resize-none bg-transparent text-base text-zinc-100 placeholder:text-zinc-500 outline-none"
+          />
+          <div className="mt-3 flex items-center justify-between">
+            <div className="flex items-center gap-1">
+              <input ref={fileRef} type="file" accept="image/*,application/pdf,.md,.txt,.csv,.json,.xml,.yaml,.yml,.toml,.rst,.log,.py,.js,.ts,.jsx,.tsx,.css,.html,.sh,.bash,.zsh,.go,.rs,.java,.c,.cpp,.h,.hpp,.rb,.php,.sql,.r,.tex,.bib" multiple onChange={handleFileSelect} className="hidden" />
               <button
-                onClick={() => setShowTools(!showTools)}
+                onClick={() => fileRef.current?.click()}
                 disabled={disabled}
-                className={cn(
-                  "rounded-full p-2 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 transition-colors disabled:opacity-30",
-                  showTools && "bg-zinc-800 text-zinc-200"
-                )}
-                title="Tools"
+                className="rounded-full p-2 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 transition-colors disabled:opacity-30"
+                title="Add resources"
               >
-                <LayoutGrid className="h-4 w-4" />
+                <Plus className="h-4 w-4" />
               </button>
-              {showTools && (
-                <div className="absolute bottom-full right-0 mb-2 w-56 rounded-xl border border-zinc-800 bg-zinc-950 p-2 shadow-2xl">
-                  {!researchEnabled && (
-                    <button
-                      onClick={() => { toggleResearch(); setShowTools(false) }}
-                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800/50 transition-colors"
-                    >
-                      <Search className="h-3.5 w-3.5 text-amber-400" />Deep Research
-                    </button>
-                  )}
-                  {!morphicSearchEnabled && (
-                    <button
-                      onClick={() => { toggleMorphicSearch(); setShowTools(false) }}
-                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800/50 transition-colors"
-                    >
-                      <Globe className="h-3.5 w-3.5 text-sky-400" />Web Search
-                    </button>
-                  )}
-                  {!ocrEnabled && (
-                    <button
-                      onClick={() => { toggleOCR(); setShowTools(false) }}
-                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800/50 transition-colors"
-                    >
-                      <Sigma className="h-3.5 w-3.5 text-emerald-400" />LaTeX OCR
-                    </button>
-                  )}
-                </div>
+              {researchEnabled && (
+                <PillButton accent="amber" active onClick={() => toggleResearch()} icon={<Search className="h-3 w-3" />}>
+                  Research
+                </PillButton>
+              )}
+              {morphicSearchEnabled && (
+                <PillButton accent="sky" active onClick={() => toggleMorphicSearch()} icon={<Globe className="h-3 w-3" />}>
+                  Search
+                </PillButton>
+              )}
+              {ocrEnabled && (
+                <PillButton accent="emerald" active onClick={() => toggleOCR()} icon={<Sigma className="h-3 w-3" />}>
+                  LaTeX
+                </PillButton>
               )}
             </div>
-            <button
-              onClick={toggleListening}
-              disabled={disabled}
-              className={cn(
-                "rounded-full p-2 transition-colors disabled:opacity-30",
-                isListening ? "bg-red-500/20 text-red-400 hover:bg-red-500/30" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
-              )}
-              title="Voice input"
-            >
-              <Mic className={cn("h-4 w-4", isListening && "animate-pulse")} />
-            </button>
-            {isStreaming ? (
-              <button
-                onClick={onCancel}
-                className="rounded-full p-2.5 transition-all bg-zinc-50 text-zinc-950 hover:bg-zinc-200"
-                title="Stop generating"
-              >
-                <Square className="h-4 w-4 fill-current" />
-              </button>
-            ) : (
-              <button
-                onClick={handleSubmit}
-                disabled={disabled || !canSend}
-                className={cn(
-                  "rounded-full p-2.5 transition-all",
-                  canSend && !disabled ? "bg-zinc-50 text-zinc-950 hover:bg-zinc-200" : "bg-zinc-800 text-zinc-500"
+            <div className="flex items-center gap-1">
+              <div className="relative" ref={toolsRef}>
+                <button
+                  onClick={() => setShowTools(!showTools)}
+                  disabled={disabled}
+                  className={cn(
+                    "rounded-full p-2 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 transition-colors disabled:opacity-30",
+                    showTools && "bg-zinc-800 text-zinc-200"
+                  )}
+                  title="Tools"
+                >
+                  <LayoutGrid className="h-4 w-4" />
+                </button>
+                {showTools && (
+                  <div className="absolute bottom-full right-0 mb-2 w-56 rounded-xl border border-zinc-800 bg-zinc-950 p-2 shadow-2xl">
+                    {!researchEnabled && (
+                      <button
+                        onClick={() => { toggleResearch(); setShowTools(false) }}
+                        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800/50 transition-colors"
+                      >
+                        <Search className="h-3.5 w-3.5 text-amber-400" />Deep Research
+                      </button>
+                    )}
+                    {!morphicSearchEnabled && (
+                      <button
+                        onClick={() => { toggleMorphicSearch(); setShowTools(false) }}
+                        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800/50 transition-colors"
+                      >
+                        <Globe className="h-3.5 w-3.5 text-sky-400" />Web Search
+                      </button>
+                    )}
+                    {!ocrEnabled && (
+                      <button
+                        onClick={() => { toggleOCR(); setShowTools(false) }}
+                        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800/50 transition-colors"
+                      >
+                        <Sigma className="h-3.5 w-3.5 text-emerald-400" />LaTeX OCR
+                      </button>
+                    )}
+                  </div>
                 )}
+              </div>
+              <button
+                onClick={toggleListening}
+                disabled={disabled}
+                className={cn(
+                  "rounded-full p-2 transition-colors disabled:opacity-30",
+                  isListening ? "bg-red-500/20 text-red-400 hover:bg-red-500/30" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+                )}
+                title="Voice input"
               >
-                <ArrowUp className="h-4 w-4" />
+                <Mic className={cn("h-4 w-4", isListening && "animate-pulse")} />
               </button>
-            )}
+              {isStreaming ? (
+                <button
+                  onClick={onCancel}
+                  className="rounded-full p-2.5 transition-all bg-zinc-50 text-zinc-950 hover:bg-zinc-200"
+                  title="Stop generating"
+                >
+                  <Square className="h-4 w-4 fill-current" />
+                </button>
+              ) : (
+                <button
+                  onClick={handleSubmit}
+                  disabled={disabled || !canSend}
+                  className={cn(
+                    "rounded-full p-2.5 transition-all",
+                    canSend && !disabled ? "bg-zinc-50 text-zinc-950 hover:bg-zinc-200" : "bg-zinc-800 text-zinc-500"
+                  )}
+                >
+                  <ArrowUp className="h-4 w-4" />
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
