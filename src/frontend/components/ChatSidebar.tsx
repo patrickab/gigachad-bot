@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef } from "react"
 import { motion, useMotionValue, useTransform, animate } from "framer-motion"
 import { ExpandableSidebarElement } from "./ExpandableSidebarElement"
 
-const MIN_EXPANDED_WIDTH = 200
-const MAX_EXPANDED_WIDTH = 600
+export const MIN_SIDEBAR_WIDTH = 200
+export const MAX_SIDEBAR_WIDTH = 600
 
 export interface ChatSidebarElementConfig {
   id: string
@@ -49,7 +49,7 @@ export function ChatSidebar({ elements, width, onWidthChange }: ChatSidebarProps
       const onMouseMove = (ev: MouseEvent) => {
         if (!dragging.current) return
         const newPx = startWidth + (startX - ev.clientX)
-        const clamped = Math.min(MAX_EXPANDED_WIDTH, Math.max(MIN_EXPANDED_WIDTH, newPx))
+        const clamped = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, newPx))
         motionWidth.set(clamped)
       }
 
@@ -57,7 +57,7 @@ export function ChatSidebar({ elements, width, onWidthChange }: ChatSidebarProps
         if (!dragging.current) return
         dragging.current = false
         const finalWidth = motionWidth.get()
-        const clamped = Math.min(MAX_EXPANDED_WIDTH, Math.max(MIN_EXPANDED_WIDTH, finalWidth))
+        const clamped = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, finalWidth))
         motionWidth.set(clamped)
         onWidthChange(clamped)
         document.removeEventListener("mousemove", onMouseMove)

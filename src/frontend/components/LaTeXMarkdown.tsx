@@ -107,27 +107,27 @@ function CitationPill({ node, children, href, title, ...props }: any) {
       </a>
       <AnimatePresence>
         {show && (
-          <motion.div
+          <motion.span
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.9, opacity: 0 }}
             transition={{ duration: 0.15, ease: "easeOut" }}
             onMouseEnter={handleEnter}
             onMouseLeave={handleLeave}
-            className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 rounded-md border border-zinc-800 bg-zinc-900 p-2.5 shadow-xl z-50"
+            className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 rounded-md border border-zinc-800 bg-zinc-900 p-2.5 shadow-xl z-50 block"
           >
-            <div className="flex items-center gap-1.5 mb-0.5">
+            <span className="flex items-center gap-1.5 mb-0.5">
               <Globe className="h-2.5 w-2.5 text-sky-400 shrink-0" />
               <span className="text-[10px] font-medium text-sky-400 truncate">{children}</span>
-            </div>
+            </span>
             {popupTitle && (
-              <div className="text-[10px] font-medium text-zinc-300 mb-0.5 line-clamp-2">{popupTitle}</div>
+              <span className="text-[10px] font-medium text-zinc-300 mb-0.5 line-clamp-2 block">{popupTitle}</span>
             )}
             {popupContent && (
-              <div className="text-[9px] text-zinc-500 line-clamp-3">{popupContent}</div>
+              <span className="text-[9px] text-zinc-500 line-clamp-3 block">{popupContent}</span>
             )}
-            <div className="absolute left-1/2 -translate-x-1/2 -bottom-1 w-2 h-2 rotate-45 bg-zinc-900 border-r border-b border-zinc-800" />
-          </motion.div>
+            <span className="absolute left-1/2 -translate-x-1/2 -bottom-1 w-2 h-2 rotate-45 bg-zinc-900 border-r border-b border-zinc-800 block" />
+          </motion.span>
         )}
       </AnimatePresence>
     </span>

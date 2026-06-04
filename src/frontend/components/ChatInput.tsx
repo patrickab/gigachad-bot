@@ -162,8 +162,7 @@ export function ChatInput({
   const canSend = text.trim().length > 0 || attachments.length > 0
 
   return (
-    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mx-auto w-full max-w-3xl relative">
-      <div className="absolute -top-8 left-0 right-0 h-8 bg-gradient-to-t from-zinc-950/80 to-transparent pointer-events-none" />
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mx-auto w-full max-w-3xl">
       {attachments.length > 0 && (
         <motion.div
           initial={{ opacity: 0, scale: 0.96 }}
@@ -175,7 +174,7 @@ export function ChatInput({
             const uploading = uploadingNames.has(att.name)
             return (
               <motion.div key={att.name} layout className="relative">
-                <div className="flex items-center gap-1.5 rounded-xl border border-zinc-700 bg-zinc-800/40 px-2.5 py-1.5 pr-6">
+                <div className="flex items-center gap-1.5 rounded-xl border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 pr-6">
                   {uploading ? (
                     <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-300" />
                   ) : (
@@ -195,7 +194,7 @@ export function ChatInput({
         </motion.div>
       )}
 
-      <div className="rounded-2xl border border-zinc-700/40 bg-zinc-900/60 backdrop-blur-xl p-4 transition-colors focus-within:border-zinc-600/50">
+      <div className="rounded-2xl border border-zinc-700/40 bg-zinc-900 p-4 transition-colors focus-within:border-zinc-600/50">
           <textarea
             ref={textareaRef}
             rows={1}

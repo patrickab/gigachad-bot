@@ -1,11 +1,11 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence } from "framer-motion"
 import type { Message, Attachment } from "@/lib/types"
 import { ChatMessage } from "./ChatMessage"
 import { ChatInput } from "./ChatInput"
-import { ChatSidebar } from "./ChatSidebar"
+import { ChatSidebar, MAX_SIDEBAR_WIDTH } from "./ChatSidebar"
 import { getChatSidebarConfig } from "./chatSidebarConfig"
 import { ChevronLeft, ChevronRight, User } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -169,6 +169,29 @@ export function ChatContainer({
   )
 
   const hasSidebarContent = sidebarElements.length > 0
+  const containerRef = useRef<HTMLDivElement>(null)
+  const inputAreaRef = useRef<HTMLDivElement>(null)
+  const [measuredWidth, setMeasuredWidth] = useState(0)
+  const [inputAreaHeight, setInputAreaHeight] = useState(0)
+  const chatMaxWidth = measuredWidth > 0 ? Math.max(0, measuredWidth - MAX_SIDEBAR_WIDTH) : undefined
+
+  useLayoutEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    setMeasuredWidth(el.clientWidth)
+  }, [])
+
+  useEffect(() => {
+    const el = inputAreaRef.current
+    if (!el) return
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setInputAreaHeight(entry.contentRect.height)
+      }
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
 
   useEffect(() => {
     if (!hasSidebarContent) {
@@ -177,9 +200,10 @@ export function ChatContainer({
   }, [hasSidebarContent])
 
   return (
-    <div className={cn("flex h-full relative", className)}>
+    <div ref={containerRef} className={cn("flex h-full relative", className)}>
       <div className="flex-1 min-w-0 flex flex-col relative">
-        <div className="flex-1 overflow-y-auto pb-28">
+        <div className="flex-1 overflow-y-auto" style={{ paddingBottom: Math.max(192, inputAreaHeight + 24) }}>
+          <div className="mx-auto" style={{ maxWidth: chatMaxWidth || undefined }}>
           {pairs.length === 0 && (
             <div className="flex h-full items-center justify-center">
               <p className="text-sm text-zinc-600">Send a message to start.</p>
@@ -240,9 +264,12 @@ export function ChatContainer({
             })}
           </AnimatePresence>
           <div ref={bottomRef} />
+          </div>
         </div>
-        <div className="absolute bottom-0 left-0 right-0 z-10 pb-6 pointer-events-none">
-          <div className="mx-auto max-w-3xl pointer-events-auto px-4">
+        <div ref={inputAreaRef} className="absolute bottom-0 left-0 right-0 z-10 pointer-events-none">
+          <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-zinc-950 via-zinc-950/60 to-transparent pointer-events-none" />
+          <div className="relative pb-6 pointer-events-auto">
+            <div className="mx-auto" style={chatMaxWidth ? { maxWidth: chatMaxWidth } : undefined}>
             <ChatInput
               chatId={chatId}
               onSend={onSend}
@@ -251,6 +278,7 @@ export function ChatContainer({
               isStreaming={isStreaming}
               onCancel={onCancel}
             />
+            </div>
           </div>
         </div>
         {hasSidebarContent && !contextOpen && (
