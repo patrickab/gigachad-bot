@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, useCallback, useContext, useState, type ReactNode } from "react"
-import { DEFAULT_TEMPERATURE, DEFAULT_TOP_P, DEFAULT_DOWNSCALE_IMAGES, DEFAULT_VISION_MODEL } from "@/lib/config"
+import { DEFAULT_TEMPERATURE, DEFAULT_TOP_P, DEFAULT_DOWNSCALE_IMAGES, DEFAULT_VISION_MODEL, DEFAULT_MODEL } from "@/lib/config"
 
 export interface SettingsState {
   selectedModel: string
@@ -45,7 +45,7 @@ export function useSettings(): SettingsState {
 }
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
-  const [selectedModel, setSelectedModel] = useState("")
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL)
   const [selectedPrompt, setSelectedPrompt] = useState<string | null>(null)
   const [temperature, setTemperature] = useState(DEFAULT_TEMPERATURE)
   const [topP, setTopP] = useState(DEFAULT_TOP_P)

@@ -1,4 +1,4 @@
-import { createHighlighterCoreSync, type HighlighterCore } from "shiki/core"
+import { createHighlighterCore, type HighlighterCore } from "shiki/core"
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript"
 import darkPlus from "@shikijs/themes/dark-plus"
 import lightPlus from "@shikijs/themes/light-plus"
@@ -32,11 +32,11 @@ import toml from "@shikijs/langs/toml"
 import ini from "@shikijs/langs/ini"
 import diff from "@shikijs/langs/diff"
 
-let highlighter: HighlighterCore | null = null
+let highlighterPromise: Promise<HighlighterCore> | null = null
 
-export function getHighlighter(): HighlighterCore {
-  if (!highlighter) {
-    highlighter = createHighlighterCoreSync({
+export function getHighlighter(): Promise<HighlighterCore> {
+  if (!highlighterPromise) {
+    highlighterPromise = createHighlighterCore({
       themes: [darkPlus, lightPlus],
       langs: [
         javascript,
@@ -72,7 +72,7 @@ export function getHighlighter(): HighlighterCore {
       engine: createJavaScriptRegexEngine(),
     })
   }
-  return highlighter
+  return highlighterPromise
 }
 
 const LANG_ALIASES: Record<string, string> = {
@@ -88,9 +88,9 @@ const LANG_ALIASES: Record<string, string> = {
   kt: "kotlin",
 }
 
-export function highlightCode(code: string, lang: string): string {
+export async function highlightCode(code: string, lang: string): Promise<string> {
   const resolved = LANG_ALIASES[lang] ?? lang
-  const hl = getHighlighter()
+  const hl = await getHighlighter()
   const safeLang = hl.getLoadedLanguages().includes(resolved) ? resolved : "text"
   try {
     return hl.codeToHtml(code, {

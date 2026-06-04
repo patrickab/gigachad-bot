@@ -41,7 +41,15 @@ const streamingComponents: Components = {
 
 function CodeBlock({ codeString, language }: { codeString: string; language: string }) {
   const [copied, setCopied] = useState(false)
-  const html = useMemo(() => highlightCode(codeString, language), [codeString, language])
+  const [html, setHtml] = useState("")
+
+  useEffect(() => {
+    let cancelled = false
+    highlightCode(codeString, language).then((result) => {
+      if (!cancelled) setHtml(result)
+    })
+    return () => { cancelled = true }
+  }, [codeString, language])
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(codeString).then(() => {

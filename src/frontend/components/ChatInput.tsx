@@ -1,17 +1,20 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import { ArrowUp, Plus, LayoutGrid, Mic, Search, Globe, Sigma, Square, X, FileText, Image as ImageIcon, File, BookOpen } from "lucide-react"
+import { ArrowUp, Plus, LayoutGrid, Mic, Search, Globe, Sigma, Square, X, FileText, Image as ImageIcon, File as FileIcon, BookOpen, FileUp, Pencil } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { uploadFile as apiUploadFile } from "@/lib/api"
 import type { Attachment } from "@/lib/types"
-import { IMAGE_DOWNSCALE_MAX } from "@/lib/config"
-import { downscaleImage as apiDownscale } from "@/lib/api"
+import { DEFAULT_VISION_MODEL } from "@/lib/config"
 import { useClickOutside } from "@/hooks/useClickOutside"
 import { useModeState } from "@/hooks/useModeState"
 import { useSettings } from "@/contexts/SettingsContext"
 import { PillButton } from "./PillButton"
+import { DrawingCanvas } from "./DrawingCanvas"
+import { OCRPanel } from "./OCRPanel"
+import { AttachmentPreview } from "./AttachmentPreview"
 
 interface ChatInputProps {
   chatId: string
@@ -25,7 +28,7 @@ interface ChatInputProps {
 function fileIcon(mime: string) {
   if (mime.startsWith("image/")) return ImageIcon
   if (mime === "application/pdf") return FileText
-  return File
+  return FileIcon
 }
 
 export function ChatInput({
@@ -37,21 +40,29 @@ export function ChatInput({
   onCancel,
 }: ChatInputProps) {
   const { researchEnabled, morphicSearchEnabled, ocrEnabled, studyEnabled, toggleResearch, toggleMorphicSearch, toggleOCR, toggleStudy } = useModeState()
-  const { downscaleImages } = useSettings()
+  const { ocrModel } = useSettings()
 
   const [text, setText] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [uploadingNames, setUploadingNames] = useState<Set<string>>(new Set())
   const [showTools, setShowTools] = useState(false)
+  const [showAttachMenu, setShowAttachMenu] = useState(false)
+  const [showDrawing, setShowDrawing] = useState(false)
+  const [drawingOcrActive, setDrawingOcrActive] = useState(false)
+  const [drawingOcrImage, setDrawingOcrImage] = useState<string | null>(null)
+  const [previewAttachment, setPreviewAttachment] = useState<Attachment | null>(null)
   const [isListening, setIsListening] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const toolsRef = useRef<HTMLDivElement>(null)
+  const attachMenuRef = useRef<HTMLDivElement>(null)
   const recognitionRef = useRef<any>(null)
   const textRef = useRef(text)
 
   const closeTools = useCallback(() => setShowTools(false), [])
+  const closeAttachMenu = useCallback(() => setShowAttachMenu(false), [])
   useClickOutside(toolsRef, closeTools)
+  useClickOutside(attachMenuRef, closeAttachMenu)
 
   useEffect(() => { textRef.current = text }, [text])
 
@@ -90,8 +101,8 @@ export function ChatInput({
   }, [text, attachments, onSend, onOCRRequest, ocrEnabled, clearAttachments, adjustHeight])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit() }
-  }, [handleSubmit])
+    if (e.key === "Enter" && !e.shiftKey && !isStreaming) { e.preventDefault(); handleSubmit() }
+  }, [handleSubmit, isStreaming])
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     const items = e.clipboardData.items
@@ -174,7 +185,10 @@ export function ChatInput({
             const uploading = uploadingNames.has(att.name)
             return (
               <motion.div key={att.name} layout className="relative">
-                <div className="flex items-center gap-1.5 rounded-xl border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 pr-6">
+                <div
+                  onClick={() => setPreviewAttachment(att)}
+                  className="flex items-center gap-1.5 rounded-xl border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 pr-6 cursor-pointer hover:border-zinc-600 transition-colors"
+                >
                   {uploading ? (
                     <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-300" />
                   ) : (
@@ -194,7 +208,7 @@ export function ChatInput({
         </motion.div>
       )}
 
-      <div className="rounded-2xl border border-zinc-700/40 bg-zinc-900 p-4 transition-colors focus-within:border-zinc-600/50">
+      <div className="relative z-20 rounded-2xl border border-zinc-700/40 bg-zinc-900 p-4 transition-colors focus-within:border-zinc-600/50">
           <textarea
             ref={textareaRef}
             rows={1}
@@ -202,21 +216,48 @@ export function ChatInput({
             onChange={(e) => { setText(e.target.value); adjustHeight() }}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            disabled={disabled}
+            disabled={disabled && !isStreaming}
             placeholder="Send a Message"
             className="w-full resize-none bg-transparent text-base text-zinc-100 placeholder:text-zinc-500 outline-none"
           />
           <div className="mt-3 flex items-center justify-between">
             <div className="flex items-center gap-1">
               <input ref={fileRef} type="file" accept="image/*,application/pdf,.md,.txt,.csv,.json,.xml,.yaml,.yml,.toml,.rst,.log,.py,.js,.ts,.jsx,.tsx,.css,.html,.sh,.bash,.zsh,.go,.rs,.java,.c,.cpp,.h,.hpp,.rb,.php,.sql,.r,.tex,.bib" multiple onChange={handleFileSelect} className="hidden" />
-              <button
-                onClick={() => fileRef.current?.click()}
-                disabled={disabled}
-                className="rounded-full p-2 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 transition-colors disabled:opacity-30"
-                title="Add resources"
-              >
-                <Plus className="h-4 w-4" />
-              </button>
+              <div className="relative" ref={attachMenuRef}>
+                <button
+                  onClick={() => setShowAttachMenu(!showAttachMenu)}
+                  disabled={disabled}
+                  className={cn(
+                    "rounded-full p-2 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 transition-colors disabled:opacity-30",
+                    showAttachMenu && "bg-zinc-800 text-zinc-200"
+                  )}
+                  title="Add resources"
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+                {showAttachMenu && (
+                  <div className="absolute bottom-full left-0 mb-2 w-48 rounded-xl border border-zinc-800 bg-zinc-950 p-2 shadow-2xl">
+                    <button
+                      onClick={() => { fileRef.current?.click(); setShowAttachMenu(false) }}
+                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800/50 transition-colors"
+                    >
+                      <FileUp className="h-3.5 w-3.5 text-zinc-400" />Upload File
+                    </button>
+                    <button
+                      onClick={() => { setShowAttachMenu(false); setShowDrawing(true) }}
+                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800/50 transition-colors"
+                    >
+                      <Pencil className="h-3.5 w-3.5 text-zinc-400" />Drawing
+                    </button>
+                    <button
+                      onClick={() => { setShowAttachMenu(false); setDrawingOcrActive(true); setShowDrawing(true) }}
+                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800/50 transition-colors"
+                    >
+                      <Pencil className="h-3.5 w-3.5 text-emerald-400" />Drawing (OCR)
+                    </button>
+                  </div>
+                )}
+              </div>
               {researchEnabled && (
                 <PillButton accent="amber" active onClick={() => toggleResearch()} icon={<Search className="h-3 w-3" />}>
                   Research
@@ -322,6 +363,50 @@ export function ChatInput({
             </div>
           </div>
         </div>
+      {showDrawing && (
+        <DrawingCanvas
+          chatId={chatId}
+          onConfirm={(att) => {
+            setShowDrawing(false)
+
+            if (drawingOcrActive) {
+              setDrawingOcrActive(false)
+              fetch(att.url)
+                .then(r => r.blob())
+                .then(blob => new Promise<string>(resolve => {
+                  const reader = new FileReader()
+                  reader.onload = () => resolve(reader.result as string)
+                  reader.readAsDataURL(blob)
+                }))
+                .then(b64 => setDrawingOcrImage(b64))
+                .catch(() => {})
+            } else {
+              setAttachments(prev => [...prev, att])
+            }
+          }}
+          onClose={() => { setShowDrawing(false); setDrawingOcrActive(false) }}
+        />
+      )}
+      {drawingOcrImage && createPortal(
+        <div className="fixed inset-0 z-[90]">
+          <OCRPanel
+            image={drawingOcrImage}
+            model={ocrModel || DEFAULT_VISION_MODEL}
+            onComplete={async (output) => {
+              setDrawingOcrImage(null)
+              const blob = new Blob([output], { type: "text/markdown" })
+              const file = new File([blob], `drawing-ocr-${Date.now()}.md`, { type: "text/markdown" })
+              try {
+                const att = await apiUploadFile(chatId, file)
+                setAttachments(prev => [...prev, att])
+              } catch {}
+            }}
+            onClose={() => setDrawingOcrImage(null)}
+          />
+        </div>,
+        document.body,
+      )}
+      <AttachmentPreview attachment={previewAttachment} chatId={chatId} onClose={() => setPreviewAttachment(null)} />
     </motion.div>
   )
 }
