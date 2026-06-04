@@ -162,12 +162,13 @@ export function ChatInput({
   const canSend = text.trim().length > 0 || attachments.length > 0
 
   return (
-    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mx-auto w-full max-w-3xl">
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mx-auto w-full max-w-3xl relative">
+      <div className="absolute -top-8 left-0 right-0 h-8 bg-gradient-to-t from-zinc-950/80 to-transparent pointer-events-none" />
       {attachments.length > 0 && (
         <motion.div
           initial={{ opacity: 0, scale: 0.96 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="relative mb-2 flex flex-wrap gap-2"
+          className="relative z-10 mb-2 flex flex-wrap gap-2"
         >
           {attachments.map((att) => {
             const Icon = fileIcon(att.mime)
@@ -194,7 +195,7 @@ export function ChatInput({
         </motion.div>
       )}
 
-      <div className="rounded-2xl border border-zinc-800/60 bg-zinc-900/90 shadow-xl shadow-black/30 backdrop-blur-sm p-4 transition-colors focus-within:border-zinc-700">
+      <div className="relative z-10 rounded-2xl border border-zinc-700/40 bg-zinc-900/60 shadow-2xl shadow-black/50 backdrop-blur-xl p-4 transition-colors focus-within:border-zinc-600/50">
         <textarea
           ref={textareaRef}
           rows={1}

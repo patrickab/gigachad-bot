@@ -179,7 +179,7 @@ export function ChatContainer({
   return (
     <div className={cn("flex h-full relative", className)}>
       <div className="flex-1 min-w-0 flex flex-col relative">
-        <div className="flex-1 overflow-y-auto pb-6">
+        <div className="flex-1 overflow-y-auto pb-28">
           {pairs.length === 0 && (
             <div className="flex h-full items-center justify-center">
               <p className="text-sm text-zinc-600">Send a message to start.</p>
@@ -241,15 +241,17 @@ export function ChatContainer({
           </AnimatePresence>
           <div ref={bottomRef} />
         </div>
-        <div className="shrink-0 px-4 pb-6 z-10">
-          <ChatInput
-            chatId={chatId}
-            onSend={onSend}
-            onOCRRequest={onOCRRequest}
-            disabled={isStreaming}
-            isStreaming={isStreaming}
-            onCancel={onCancel}
-          />
+        <div className="absolute bottom-0 left-0 right-0 z-10 pb-6 pointer-events-none">
+          <div className="mx-auto max-w-3xl pointer-events-auto px-4">
+            <ChatInput
+              chatId={chatId}
+              onSend={onSend}
+              onOCRRequest={onOCRRequest}
+              disabled={isStreaming}
+              isStreaming={isStreaming}
+              onCancel={onCancel}
+            />
+          </div>
         </div>
         {hasSidebarContent && !contextOpen && (
           <button
