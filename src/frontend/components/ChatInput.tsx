@@ -195,7 +195,7 @@ export function ChatInput({
         </motion.div>
       )}
 
-      <div className="relative z-10 rounded-2xl border border-zinc-700/40 bg-zinc-900/60 shadow-2xl shadow-black/50 backdrop-blur-xl p-4 transition-colors focus-within:border-zinc-600/50">
+      <div className="relative z-10 rounded-2xl border border-zinc-700/40 bg-zinc-900/60 shadow-[0_0_40px_10px_rgba(0,0,0,0.4)] backdrop-blur-xl p-4 transition-colors focus-within:border-zinc-600/50">
         <textarea
           ref={textareaRef}
           rows={1}
