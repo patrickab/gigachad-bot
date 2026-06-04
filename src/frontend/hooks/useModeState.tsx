@@ -2,16 +2,18 @@
 
 import { createContext, useCallback, useContext, useState, type ReactNode } from "react"
 
-export type AppMode = "chat" | "research" | "search" | "ocr"
+export type AppMode = "chat" | "research" | "search" | "ocr" | "study"
 
 export interface ModeState {
   mode: AppMode
   researchEnabled: boolean
   morphicSearchEnabled: boolean
   ocrEnabled: boolean
+  studyEnabled: boolean
   toggleResearch: () => void
   toggleMorphicSearch: () => void
   toggleOCR: () => void
+  toggleStudy: () => void
   setMode: (mode: AppMode) => void
 }
 
@@ -38,14 +40,20 @@ export function ModeProvider({ children }: { children: ReactNode }) {
     setMode((prev) => prev === "ocr" ? "chat" : "ocr")
   }, [])
 
+  const toggleStudy = useCallback(() => {
+    setMode((prev) => prev === "study" ? "chat" : "study")
+  }, [])
+
   const value: ModeState = {
     mode,
     researchEnabled: mode === "research",
     morphicSearchEnabled: mode === "search",
     ocrEnabled: mode === "ocr",
+    studyEnabled: mode === "study",
     toggleResearch,
     toggleMorphicSearch,
     toggleOCR,
+    toggleStudy,
     setMode,
   }
 

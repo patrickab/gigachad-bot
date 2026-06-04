@@ -27,6 +27,7 @@ from backend.routes.models import router as models_router
 from backend.routes.morphic import router as morphic_router, stop_morphic
 from backend.routes.ocr import router as ocr_router
 from backend.routes.research import router as research_router
+from backend.routes.study import router as study_router
 from config import DIRECTORY_CHAT_UPLOADS, DIRECTORY_OUTPUT_MINERU, ensure_directories
 
 ensure_directories()
@@ -68,6 +69,7 @@ app.include_router(morphic_router)
 app.include_router(mineru_router)
 app.include_router(ocr_router)
 app.include_router(research_router)
+app.include_router(study_router)
 
 app.mount("/mineru/images", StaticFiles(directory=str(DIRECTORY_OUTPUT_MINERU / "images")), name="mineru_images")
 

@@ -161,7 +161,31 @@ const sharedComponents: Components = {
   },
 }
 
-function LaTeXMarkdownInner({ content, citationMap, streaming, compact }: { content: string; citationMap?: Record<string, { title: string; url: string; content: string }>; streaming?: boolean; compact?: boolean }) {
+function LaTeXMarkdownInner({ content, citationMap, streaming, compact, onContentChange }: { content: string; citationMap?: Record<string, { title: string; url: string; content: string }>; streaming?: boolean; compact?: boolean; onContentChange?: (newContent: string) => void }) {
+  const checkboxLines = useMemo(() => {
+    if (!onContentChange) return []
+    const lines = content.split("\n")
+    const indices: number[] = []
+    for (let i = 0; i < lines.length; i++) {
+      if (/^- \[[ x]\]/.test(lines[i].trimStart())) indices.push(i)
+    }
+    return indices
+  }, [content, !!onContentChange])
+
+  const handleToggle = useCallback((idx: number, wasChecked: boolean) => {
+    if (!onContentChange) return
+    const lineIdx = checkboxLines[idx]
+    if (lineIdx === undefined) return
+    const lines = content.split("\n")
+    lines[lineIdx] = wasChecked
+      ? lines[lineIdx].replace("- [x]", "- [ ]")
+      : lines[lineIdx].replace("- [ ]", "- [x]")
+    onContentChange(lines.join("\n"))
+  }, [content, checkboxLines, onContentChange])
+
+  const checkboxIdx = useRef(0)
+  if (onContentChange) checkboxIdx.current = 0
+
   const allComponents = useMemo<Components>(() => ({
     ...sharedComponents,
     a({ node, children, href, title, ...props }: any) {
@@ -188,6 +212,21 @@ function LaTeXMarkdownInner({ content, citationMap, streaming, compact }: { cont
     },
   }), [citationMap])
 
+  const interactiveInput = onContentChange ? {
+    input({ checked, type, ...rest }: any) {
+      if (type !== "checkbox") return <input type={type} checked={checked} {...rest} />
+      const idx = checkboxIdx.current++
+      return (
+        <input
+          type="checkbox"
+          checked={checked}
+          className="mr-1.5 accent-sky-500 cursor-pointer"
+          onChange={() => handleToggle(idx, !!checked)}
+        />
+      )
+    },
+  } : null
+
   const remarkPlugins = streaming
     ? STREAMING_REMARK_PLUGINS
     : FULL_REMARK_PLUGINS
@@ -196,9 +235,8 @@ function LaTeXMarkdownInner({ content, citationMap, streaming, compact }: { cont
     ? STREAMING_REHYPE_PLUGINS
     : FULL_REHYPE_PLUGINS
 
-  const components = streaming
-    ? streamingComponents
-    : allComponents
+  const baseComponents = streaming ? streamingComponents : allComponents
+  const components = interactiveInput ? { ...baseComponents, ...interactiveInput } : baseComponents
 
   return (
     <div className={cn("text-sm leading-relaxed", compact ? "markdown-body-compact" : "markdown-body")}>

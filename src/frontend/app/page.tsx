@@ -15,6 +15,7 @@ import type { Tab } from "@/components/TabManager"
 import { useChat } from "@/hooks/useChat"
 import { useModeState, ModeProvider } from "@/hooks/useModeState"
 import { useSettings, SettingsProvider } from "@/contexts/SettingsContext"
+import { handleStudyPdf, updateLastMsg as updateLastAssistant } from "@/hooks/useStudyHandler"
 import { saveChatHistory as apiSaveChatHistory, deleteChatUploads, parseFiles, deleteAttachment } from "@/lib/api"
 import { DEFAULT_VISION_MODEL } from "@/lib/config"
 import type { Attachment, Message } from "@/lib/types"
@@ -23,6 +24,7 @@ const MODE_LABELS: Record<string, string> = {
   research: "Deep Research",
   search: "Search",
   ocr: "LaTeX OCR",
+  study: "PDF Study",
   chat: "Chat",
 }
 
@@ -53,6 +55,19 @@ function buildLLMMessage(text: string, attachments: Attachment[]): { userMsg: st
   return { userMsg, hiddenContent, imgBase64 }
 }
 
+function defaultSendParams(settings: ReturnType<typeof useSettings>, overrides: Record<string, unknown> = {}) {
+  return {
+    model: settings.selectedModel,
+    system_prompt: settings.selectedPrompt ?? "",
+    temperature: settings.temperature,
+    top_p: settings.topP,
+    reasoning_effort: settings.reasoningEffort === "none" ? null : settings.reasoningEffort,
+    downscale_images: settings.downscaleImages,
+    img_base64: null,
+    ...overrides,
+  }
+}
+
 function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: (label: string) => void; onChatSaved: (tabId: string, chatFilename: string) => void }) {
   const {
     messages,
@@ -77,9 +92,11 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
     researchEnabled,
     morphicSearchEnabled,
     ocrEnabled,
+    studyEnabled,
     toggleResearch,
     toggleMorphicSearch,
     toggleOCR,
+    toggleStudy,
   } = useModeState()
 
   const settings = useSettings()
@@ -101,8 +118,9 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
     if (researchEnabled) onModeLabel("Deep Research")
     else if (morphicSearchEnabled) onModeLabel("Search")
     else if (ocrEnabled) onModeLabel("LaTeX OCR")
+    else if (studyEnabled) onModeLabel("PDF Study")
     else onModeLabel("Chat")
-  }, [researchEnabled, morphicSearchEnabled, ocrEnabled, onModeLabel])
+  }, [researchEnabled, morphicSearchEnabled, ocrEnabled, studyEnabled, onModeLabel])
 
   const openSaveModal = useCallback(() => {
     setSaveModalOpen(true)
@@ -118,14 +136,8 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
 
   useEffect(() => {
     function handler(e: KeyboardEvent) {
-      if (e.altKey && e.key === "s") {
-        e.preventDefault()
-        openSaveModal()
-      }
-      if (e.altKey && e.key === "r") {
-        e.preventDefault()
-        reset()
-      }
+      if (e.altKey && e.key === "s") { e.preventDefault(); openSaveModal() }
+      if (e.altKey && e.key === "r") { e.preventDefault(); reset() }
     }
     document.addEventListener("keydown", handler)
     return () => document.removeEventListener("keydown", handler)
@@ -137,6 +149,14 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
         if (attachments.length > 0) return
       }
 
+      // Study mode with PDF attachment
+      if (studyEnabled && attachments.some(a => a.mime === "application/pdf")) {
+        await handleStudyPdf(text, attachments, chatId, settings.selectedModel, setMessages)
+        toggleStudy()
+        return
+      }
+
+      // Attachments (non-study)
       if (attachments.length > 0) {
         setMessages(prev => [
           ...prev,
@@ -145,9 +165,7 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
         ])
 
         const pdfNames = attachments.filter(a => a.mime === "application/pdf").map(a => a.name)
-
         let enriched = attachments
-        let finalHiddenContent: string | undefined
 
         if (pdfNames.length > 0) {
           try {
@@ -157,101 +175,50 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
               const p = parsed.find(r => r.name === a.name)
               return { ...a, parsedMd: p?.parsedMd ?? undefined }
             })
-
             if (!text.trim()) {
-              setMessages(prev => {
-                const copy = [...prev]
-                const last = copy[copy.length - 1]
-                if (last?.role === "assistant" && !last.content) {
-                  copy[copy.length - 1] = { ...last, content: "Documents parsed - how can I help you?" }
-                }
-                return copy
-              })
+              updateLastAssistant(setMessages, m => ({ ...m, content: "Documents parsed - how can I help you?" }))
               return
             }
-          } catch {}
+          } catch { }
         }
 
         const { hiddenContent } = buildLLMMessage(text, enriched)
-        finalHiddenContent = hiddenContent
 
         setMessages(prev => {
           const copy = [...prev]
-          const lastUserIdx = copy.length - 2
-          if (lastUserIdx >= 0 && copy[lastUserIdx].role === "user") {
-            copy[lastUserIdx] = { ...copy[lastUserIdx], attachments: enriched, hiddenContent: finalHiddenContent }
-          }
+          const idx = copy.length - 2
+          if (idx >= 0 && copy[idx].role === "user") copy[idx] = { ...copy[idx], attachments: enriched, hiddenContent }
           return copy
         })
 
         const imgAtt = enriched.find(a => a.mime.startsWith("image/"))
-        let finalImgBase64: string | null = null
+        let imgBase64: string | null = null
         if (imgAtt) {
           try {
             const resp = await fetch(imgAtt.url)
             const blob = await resp.blob()
-            finalImgBase64 = await new Promise<string>((resolve) => {
-              const reader = new FileReader()
-              reader.onload = () => resolve(reader.result as string)
-              reader.readAsDataURL(blob)
-            })
-          } catch {}
+            imgBase64 = await new Promise<string>(resolve => { const r = new FileReader(); r.onload = () => resolve(r.result as string); r.readAsDataURL(blob) })
+          } catch { }
         }
 
-        const llmMsg = finalHiddenContent
-          ? (text ? `${finalHiddenContent}\n\n${text}` : finalHiddenContent)
-          : text
-
-        send({
-          model: settings.selectedModel,
-          user_msg: llmMsg,
-          system_prompt: settings.selectedPrompt ?? "",
-          temperature: settings.temperature,
-          top_p: settings.topP,
-          reasoning_effort: settings.reasoningEffort === "none" ? null : settings.reasoningEffort,
-          img_base64: finalImgBase64,
-          downscale_images: settings.downscaleImages,
-        }, true)
+        const llmMsg = hiddenContent ? (text ? `${hiddenContent}\n\n${text}` : hiddenContent) : text
+        send({ ...defaultSendParams(settings), user_msg: llmMsg, img_base64: imgBase64, downscale_images: settings.downscaleImages }, true)
         return
       }
 
+      // Mode dispatch (no attachments)
       if (morphicSearchEnabled) {
-        morphicSearch({
-          query: text,
-          searchDepth: settings.searchDepth,
-          model: settings.selectedModel || undefined,
-        })
+        morphicSearch({ query: text, searchDepth: settings.searchDepth, model: settings.selectedModel || undefined })
       } else if (researchEnabled) {
         research({
-          query: text,
-          fastModel: settings.researchFastModel,
-          smartModel: settings.researchSmartModel,
-          strategicModel: settings.researchStrategicModel,
-          depth: settings.researchDepth,
-          breadth: settings.researchBreadth,
-          reasoningEffort: settings.researchReasoning,
-          reportType: settings.researchReportType,
+          query: text, fastModel: settings.researchFastModel, smartModel: settings.researchSmartModel, strategicModel: settings.researchStrategicModel,
+          depth: settings.researchDepth, breadth: settings.researchBreadth, reasoningEffort: settings.researchReasoning, reportType: settings.researchReportType,
         })
       } else {
-        send({
-          model: settings.selectedModel,
-          user_msg: text,
-          system_prompt: settings.selectedPrompt ?? "",
-          temperature: settings.temperature,
-          top_p: settings.topP,
-          reasoning_effort: settings.reasoningEffort === "none" ? null : settings.reasoningEffort,
-          img_base64: null,
-          downscale_images: settings.downscaleImages,
-        })
+        send({ ...defaultSendParams(settings), user_msg: text })
       }
     },
-    [
-      morphicSearchEnabled, settings.searchDepth,
-      researchEnabled, settings.researchFastModel, settings.researchSmartModel, settings.researchStrategicModel,
-      settings.researchDepth, settings.researchBreadth, settings.researchReasoning, settings.researchReportType,
-      settings.selectedModel, settings.selectedPrompt, settings.temperature, settings.topP, settings.reasoningEffort, settings.downscaleImages,
-      send, research, morphicSearch, setMessages, chatId,
-    ]
+    [morphicSearchEnabled, researchEnabled, studyEnabled, chatId, settings, send, research, morphicSearch, setMessages, toggleStudy],
   )
 
   const handleRemoveAttachment = useCallback((messageIndex: number, attachmentName: string) => {
@@ -259,17 +226,26 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
       const copy = [...prev]
       if (copy[messageIndex] && copy[messageIndex].attachments) {
         const att = copy[messageIndex].attachments!.find(a => a.name === attachmentName)
-        if (att) {
-          deleteAttachment(chatId, attachmentName).catch(() => {})
-        }
-        copy[messageIndex] = {
-          ...copy[messageIndex],
-          attachments: copy[messageIndex].attachments!.filter(a => a.name !== attachmentName),
-        }
+        if (att) deleteAttachment(chatId, attachmentName).catch(() => { })
+        copy[messageIndex] = { ...copy[messageIndex], attachments: copy[messageIndex].attachments!.filter(a => a.name !== attachmentName) }
       }
       return copy
     })
   }, [setMessages, chatId])
+
+  const handleAttachmentContentChange = useCallback((messageIndex: number, attachmentName: string, newContent: string) => {
+    setMessages(prev => {
+      const copy = [...prev]
+      const msg = copy[messageIndex]
+      if (msg?.attachments) {
+        copy[messageIndex] = {
+          ...msg,
+          attachments: msg.attachments.map(a => a.name === attachmentName ? { ...a, content: newContent } : a),
+        }
+      }
+      return copy
+    })
+  }, [setMessages])
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -297,11 +273,7 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
             />
           ) : (
             <div className="flex items-center gap-4">
-              <ModelSelector
-                models={models}
-                selectedModel={settings.selectedModel}
-                onSelect={settings.setSelectedModel}
-              />
+              <ModelSelector models={models} selectedModel={settings.selectedModel} onSelect={settings.setSelectedModel} />
               <div className="w-px h-4 bg-zinc-800" />
               <ReasoningSelector reasoningEffort={settings.reasoningEffort} onReasoningChange={settings.setReasoningEffort} />
             </div>
@@ -311,9 +283,7 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
 
           <div className="flex items-center gap-2">
             <ThemeToggle />
-            <MoreOptionsMenu
-              prompts={prompts}
-            />
+            <MoreOptionsMenu prompts={prompts} />
           </div>
         </header>
         <div className="flex-1 overflow-hidden relative">
@@ -326,28 +296,19 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
             onDeletePair={deleteMessagePair}
             onOCRRequest={setOCRImage}
             onRemoveAttachment={handleRemoveAttachment}
+            onAttachmentContentChange={handleAttachmentContentChange}
           />
           {ocrEnabled && ocrImage && (
             <OCRPanel
               image={ocrImage}
               model={settings.ocrModel || DEFAULT_VISION_MODEL}
-              onComplete={(output) => {
-                addMessagePair("OCR Request", output)
-                setOCRImage(null)
-              }}
-              onClose={() => {
-                setOCRImage(null)
-                toggleOCR()
-              }}
+              onComplete={(output) => { addMessagePair("OCR Request", output); setOCRImage(null) }}
+              onClose={() => { setOCRImage(null); toggleOCR() }}
             />
           )}
         </div>
       </main>
-      <SaveChatModal
-        open={saveModalOpen}
-        onClose={() => setSaveModalOpen(false)}
-        onSave={handleSaveSubmit}
-      />
+      <SaveChatModal open={saveModalOpen} onClose={() => setSaveModalOpen(false)} onSave={handleSaveSubmit} />
     </div>
   )
 }
@@ -361,22 +322,20 @@ export default function Home() {
 
   const handleTabClose = useCallback((tab: Tab) => {
     const filename = tabChatFilenames.current.get(tab.id)
-    if (!filename) {
-      deleteChatUploads(tab.chatId).catch(() => {})
-    }
+    if (!filename) deleteChatUploads(tab.chatId).catch(() => { })
     tabChatFilenames.current.delete(tab.id)
   }, [])
 
   return (
     <SettingsProvider>
-        <TabManager
-          onCloseTab={handleTabClose}
-          renderContent={(tab, onModeLabel) => (
-            <ModeProvider>
-              <TabContent tab={tab} onModeLabel={onModeLabel} onChatSaved={handleChatSaved} />
-            </ModeProvider>
-          )}
-        />
+      <TabManager
+        onCloseTab={handleTabClose}
+        renderContent={(tab, onModeLabel) => (
+          <ModeProvider>
+            <TabContent tab={tab} onModeLabel={onModeLabel} onChatSaved={handleChatSaved} />
+          </ModeProvider>
+        )}
+      />
     </SettingsProvider>
   )
 }

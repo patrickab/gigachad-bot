@@ -24,6 +24,7 @@ interface ChatContainerProps {
   className?: string
   onOCRRequest?: (image: string) => void
   onRemoveAttachment?: (messageIndex: number, attachmentName: string) => void
+  onAttachmentContentChange?: (messageIndex: number, attachmentName: string, newContent: string) => void
 }
 
 export function ChatContainer({
@@ -36,8 +37,11 @@ export function ChatContainer({
   className,
   onOCRRequest,
   onRemoveAttachment,
+  onAttachmentContentChange,
 }: ChatContainerProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const isPinnedToBottomRef = useRef(true)
 
   const lastMorphicResult = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -87,10 +91,18 @@ export function ChatContainer({
   }, [onRemoveAttachment])
 
   useEffect(() => {
-    const el = bottomRef.current?.parentElement
+    const el = scrollContainerRef.current
     if (!el) return
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
-    if (!nearBottom) return
+    const handleScroll = () => {
+      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+      isPinnedToBottomRef.current = nearBottom
+    }
+    el.addEventListener("scroll", handleScroll, { passive: true })
+    return () => el.removeEventListener("scroll", handleScroll)
+  }, [])
+
+  useEffect(() => {
+    if (!isPinnedToBottomRef.current) return
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
@@ -152,6 +164,11 @@ export function ChatContainer({
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const leaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  const handleSend = useCallback((text: string, attachments: Attachment[]) => {
+    isPinnedToBottomRef.current = true
+    onSend(text, attachments)
+  }, [onSend])
+
   const handleMouseEnter = (globalIndex: number) => {
     if (leaveTimeoutRef.current) {
       clearTimeout(leaveTimeoutRef.current)
@@ -191,6 +208,7 @@ export function ChatContainer({
         expandedEntries,
         onToggleAttachment: handleToggleExpand,
         onRemoveAttachment: handleRemoveAttachment,
+        onAttachmentContentChange,
         lastMorphicResult,
         isElementOpen: (id) => openElements.has(id),
         onElementOpenChange: (id, open) => {
@@ -202,7 +220,7 @@ export function ChatContainer({
           })
         },
       }),
-    [chatId, allAttachments, expandedEntries, handleToggleExpand, handleRemoveAttachment, lastMorphicResult, openElements]
+    [chatId, allAttachments, expandedEntries, handleToggleExpand, handleRemoveAttachment, onAttachmentContentChange, lastMorphicResult, openElements]
   )
 
   const hasSidebarContent = sidebarElements.length > 0
@@ -239,13 +257,9 @@ export function ChatContainer({
   return (
     <div ref={containerRef} className={cn("flex h-full relative", className)}>
       <div className="flex-1 min-w-0 flex flex-col relative">
-        <div className="flex-1 overflow-y-auto" style={{ paddingBottom: inputAreaHeight + BOTTOM_GAP_PX }}>
+        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto" style={{ paddingBottom: inputAreaHeight + BOTTOM_GAP_PX }}>
           <div className="mx-auto" style={{ maxWidth: chatMaxWidth || undefined }}>
-          {pairs.length === 0 && (
-            <div className="flex h-full items-center justify-center">
-              <p className="text-sm text-zinc-600">Send a message to start.</p>
-            </div>
-          )}
+
           <AnimatePresence>
             {pairs.map(({ user, assistant, globalIndex }) => {
               const expanded = isExpanded(globalIndex)
@@ -342,7 +356,7 @@ export function ChatContainer({
             <div className="mx-auto" style={chatMaxWidth ? { maxWidth: chatMaxWidth } : undefined}>
             <ChatInput
               chatId={chatId}
-              onSend={onSend}
+              onSend={handleSend}
               onOCRRequest={onOCRRequest}
               disabled={isStreaming}
               isStreaming={isStreaming}

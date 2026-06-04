@@ -43,18 +43,21 @@ interface PillButtonProps {
   children: ReactNode
   onClick?: () => void
   className?: string
+  disabled?: boolean
 }
 
-export function PillButton({ accent = "zinc", active, icon, children, onClick, className }: PillButtonProps) {
+export function PillButton({ accent = "zinc", active, icon, children, onClick, className, disabled }: PillButtonProps) {
   const a = ACCENT_MAP[accent]
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       className={cn(
         "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
         active
           ? cn(a.bg, a.border, a.text, "border", a.hoverBg, a.hoverBorder)
           : "bg-zinc-900 text-zinc-500 hover:text-zinc-300",
+        disabled && "opacity-50 cursor-not-allowed",
         className
       )}
     >

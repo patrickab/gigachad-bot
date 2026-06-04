@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { ArrowUp, Plus, LayoutGrid, Mic, Search, Globe, Sigma, Square, X, FileText, Image as ImageIcon, File } from "lucide-react"
+import { ArrowUp, Plus, LayoutGrid, Mic, Search, Globe, Sigma, Square, X, FileText, Image as ImageIcon, File, BookOpen } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { uploadFile as apiUploadFile } from "@/lib/api"
 import type { Attachment } from "@/lib/types"
@@ -36,7 +36,7 @@ export function ChatInput({
   isStreaming,
   onCancel,
 }: ChatInputProps) {
-  const { researchEnabled, morphicSearchEnabled, ocrEnabled, toggleResearch, toggleMorphicSearch, toggleOCR } = useModeState()
+  const { researchEnabled, morphicSearchEnabled, ocrEnabled, studyEnabled, toggleResearch, toggleMorphicSearch, toggleOCR, toggleStudy } = useModeState()
   const { downscaleImages } = useSettings()
 
   const [text, setText] = useState("")
@@ -232,6 +232,11 @@ export function ChatInput({
                   LaTeX
                 </PillButton>
               )}
+              {studyEnabled && (
+                <PillButton accent="sky" active onClick={() => toggleStudy()} icon={<BookOpen className="h-3 w-3" />}>
+                  Study
+                </PillButton>
+              )}
             </div>
             <div className="flex items-center gap-1">
               <div className="relative" ref={toolsRef}>
@@ -270,6 +275,14 @@ export function ChatInput({
                         className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800/50 transition-colors"
                       >
                         <Sigma className="h-3.5 w-3.5 text-emerald-400" />LaTeX OCR
+                      </button>
+                    )}
+                    {!studyEnabled && (
+                      <button
+                        onClick={() => { toggleStudy(); setShowTools(false) }}
+                        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800/50 transition-colors"
+                      >
+                        <BookOpen className="h-3.5 w-3.5 text-sky-400" />PDF Study
                       </button>
                     )}
                   </div>

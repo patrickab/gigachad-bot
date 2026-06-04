@@ -21,7 +21,7 @@ function AttachmentIcon({ mime }: { mime: string }) {
   return <FileText className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
 }
 
-function AttachmentViewer({ attachment, chatId }: { attachment: Attachment; chatId: string }) {
+function AttachmentViewer({ attachment, chatId, onContentChange }: { attachment: Attachment; chatId: string; onContentChange?: (newContent: string) => void }) {
   if (attachment.mime.startsWith("image/")) {
     return (
       <div className="p-2">
@@ -40,7 +40,7 @@ function AttachmentViewer({ attachment, chatId }: { attachment: Attachment; chat
     const rewritten = rewriteImages(content, chatId)
     return (
       <div className="p-2 max-h-[500px] overflow-y-auto">
-        <LaTeXMarkdown content={rewritten} />
+        <LaTeXMarkdown content={rewritten} onContentChange={onContentChange} />
       </div>
     )
   }
@@ -81,12 +81,14 @@ function ContextBody({
   expandedEntries,
   onToggleAttachment,
   onRemoveAttachment,
+  onAttachmentContentChange,
 }: {
   chatId: string
   allAttachments: { messageIndex: number; attachment: Attachment }[]
   expandedEntries: { messageIndex: number; attachmentName: string }[]
   onToggleAttachment: (messageIndex: number, attachmentName: string) => void
   onRemoveAttachment: (messageIndex: number, attachmentName: string) => void
+  onAttachmentContentChange?: (messageIndex: number, attachmentName: string, newContent: string) => void
 }) {
   const isExpanded = (mi: number, name: string) =>
     expandedEntries.some((e) => e.messageIndex === mi && e.attachmentName === name)
@@ -124,7 +126,7 @@ function ContextBody({
             </div>
             {expanded && (
               <div className="max-h-[60vh] overflow-y-auto">
-                <AttachmentViewer attachment={att} chatId={chatId} />
+                <AttachmentViewer attachment={att} chatId={chatId} onContentChange={onAttachmentContentChange ? (nc: string) => onAttachmentContentChange(mi, att.name, nc) : undefined} />
               </div>
             )}
           </div>
@@ -196,6 +198,7 @@ export interface ChatSidebarConfig {
   expandedEntries: { messageIndex: number; attachmentName: string }[]
   onToggleAttachment: (messageIndex: number, attachmentName: string) => void
   onRemoveAttachment: (messageIndex: number, attachmentName: string) => void
+  onAttachmentContentChange?: (messageIndex: number, attachmentName: string, newContent: string) => void
   lastMorphicResult?: MorphicSearchResult
   isElementOpen: (id: string) => boolean
   onElementOpenChange: (id: string, open: boolean) => void
@@ -207,6 +210,7 @@ export const getChatSidebarConfig = ({
   expandedEntries,
   onToggleAttachment,
   onRemoveAttachment,
+  onAttachmentContentChange,
   lastMorphicResult,
   isElementOpen,
   onElementOpenChange,
@@ -221,15 +225,16 @@ export const getChatSidebarConfig = ({
       badge: allAttachments.length,
       open: isElementOpen("context"),
       onOpenChange: (o) => onElementOpenChange("context", o),
-      body: (
-        <ContextBody
-          chatId={chatId}
-          allAttachments={allAttachments}
-          expandedEntries={expandedEntries}
-          onToggleAttachment={onToggleAttachment}
-          onRemoveAttachment={onRemoveAttachment}
-        />
-      ),
+        body: (
+          <ContextBody
+            chatId={chatId}
+            allAttachments={allAttachments}
+            expandedEntries={expandedEntries}
+            onToggleAttachment={onToggleAttachment}
+            onRemoveAttachment={onRemoveAttachment}
+            onAttachmentContentChange={onAttachmentContentChange}
+          />
+        ),
     })
   }
 

@@ -140,3 +140,16 @@ export interface MineruResult {
 export interface MineruBatchResponse {
   results: MineruResult[]
 }
+
+export interface StudyProcessRequest {
+  markdown: string
+  filename: string
+  model: string
+}
+
+export interface StudyProcessResponse {
+  filename: string
+  topics: { label: string }[]
+  overview: string
+  article: string
+}

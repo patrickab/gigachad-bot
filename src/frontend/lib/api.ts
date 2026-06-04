@@ -1,4 +1,4 @@
-import type { Attachment, ChatHistoriesResponse, ChatRequest, Message, MineruBatchResponse, MineruResult, ModelsResponse, ResearchRequest, ResearchTrace, ResearchTraceSummary } from "./types"
+import type { Attachment, ChatHistoriesResponse, ChatRequest, Message, MineruBatchResponse, MineruResult, ModelsResponse, ResearchRequest, ResearchTrace, ResearchTraceSummary, StudyProcessRequest, StudyProcessResponse } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { API_BASE, DEFAULT_TEMPERATURE, DEFAULT_TOP_P, DEFAULT_DOWNSCALE_IMAGES, IMAGE_DOWNSCALE_MAX } from "./config"
@@ -166,4 +166,12 @@ export async function deleteAttachment(chatId: string, filename: string): Promis
 
 export async function deleteChatUploads(chatId: string): Promise<void> {
   await request(`/files/chat/${chatId}`, { method: "DELETE" })
+}
+
+export async function processStudyPdf(req: StudyProcessRequest): Promise<StudyProcessResponse> {
+  return request<StudyProcessResponse>("/study/process", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  })
 }
