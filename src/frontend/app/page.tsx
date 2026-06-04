@@ -9,6 +9,7 @@ import { ReasoningSelector } from "@/components/ReasoningSelector"
 import { ResearchModelsBar } from "@/components/ResearchModelsBar"
 import { ThemeToggle } from "@/components/ThemeToggle"
 import { OCRPanel } from "@/components/OCRPanel"
+import { SaveChatModal } from "@/components/SaveChatModal"
 import { TabManager } from "@/components/TabManager"
 import type { Tab } from "@/components/TabManager"
 import { useChat } from "@/hooks/useChat"
@@ -86,6 +87,7 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
   const [collapsed, setCollapsed] = useState(true)
   const [ocrImage, setOCRImage] = useState<string | null>(null)
   const [chatId, setChatId] = useState(() => tab.chatId)
+  const [saveModalOpen, setSaveModalOpen] = useState(false)
 
   const handleHistoryLoad = useCallback(async (filename: string) => {
     const result = await loadHistory(filename)
@@ -102,21 +104,23 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
     else onModeLabel("Chat")
   }, [researchEnabled, morphicSearchEnabled, ocrEnabled, onModeLabel])
 
-  const handleSidebarSave = useCallback(async () => {
-    const name = window.prompt("Enter name for chat:")
-    if (name?.trim()) {
-      const filename = name.trim() + ".json"
-      onChatSaved(tab.id, filename)
-      await apiSaveChatHistory(filename, messages, chatId)
-      refreshHistories()
-    }
+  const openSaveModal = useCallback(() => {
+    setSaveModalOpen(true)
+  }, [])
+
+  const handleSaveSubmit = useCallback(async (name: string) => {
+    const filename = name + ".json"
+    onChatSaved(tab.id, filename)
+    await apiSaveChatHistory(filename, messages, chatId)
+    refreshHistories()
+    setSaveModalOpen(false)
   }, [messages, chatId, tab.id, refreshHistories, onChatSaved])
 
   useEffect(() => {
     function handler(e: KeyboardEvent) {
       if (e.altKey && e.key === "s") {
         e.preventDefault()
-        handleSidebarSave()
+        openSaveModal()
       }
       if (e.altKey && e.key === "r") {
         e.preventDefault()
@@ -125,7 +129,7 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
     }
     document.addEventListener("keydown", handler)
     return () => document.removeEventListener("keydown", handler)
-  }, [handleSidebarSave, reset])
+  }, [openSaveModal, reset])
 
   const handleSend = useCallback(
     async (text: string, attachments: Attachment[]) => {
@@ -276,7 +280,7 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
         historiesLoading={historiesLoading}
         onHistoryLoad={handleHistoryLoad}
         onHistoryRefresh={refreshHistories}
-        onSave={handleSidebarSave}
+        onSave={openSaveModal}
         onReset={reset}
       />
       <main className="flex-1 min-w-0 flex flex-col relative bg-zinc-950">
@@ -339,6 +343,11 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
           )}
         </div>
       </main>
+      <SaveChatModal
+        open={saveModalOpen}
+        onClose={() => setSaveModalOpen(false)}
+        onSave={handleSaveSubmit}
+      />
     </div>
   )
 }
