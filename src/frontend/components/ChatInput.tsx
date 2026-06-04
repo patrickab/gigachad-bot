@@ -195,9 +195,7 @@ export function ChatInput({
         </motion.div>
       )}
 
-      <div className="relative">
-        <div className="absolute inset-0 rounded-2xl shadow-[0_0_40px_10px_rgba(0,0,0,0.4)] pointer-events-none" />
-        <div className="relative z-10 rounded-2xl border border-zinc-700/40 bg-zinc-900/60 backdrop-blur-xl p-4 transition-colors focus-within:border-zinc-600/50">
+      <div className="rounded-2xl border border-zinc-700/40 bg-zinc-900/60 backdrop-blur-xl p-4 transition-colors focus-within:border-zinc-600/50">
           <textarea
             ref={textareaRef}
             rows={1}
@@ -312,7 +310,6 @@ export function ChatInput({
             </div>
           </div>
         </div>
-      </div>
     </motion.div>
   )
 }
