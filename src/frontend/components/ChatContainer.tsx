@@ -235,7 +235,7 @@ export function ChatContainer({
                     </button>
                   )}
                   {expanded && (
-                    <>
+                    <div className="mx-3 my-4 rounded-xl border border-zinc-800/40 bg-assistant-message shadow-sm overflow-hidden">
                       <ChatMessage
                         role="user"
                         content={user.content}
@@ -246,18 +246,20 @@ export function ChatContainer({
                         collapsibleUser={!isLast}
                         onCollapse={!isLast ? () => togglePair(globalIndex) : undefined}
                       />
-                      <ChatMessage
-                        role="assistant"
-                        content={assistant.content}
-                        morphic_result={assistant.morphic_result}
-                        research_steps={assistant.research_steps}
-                        research_progress={assistant.research_progress}
-                        research_trace_id={assistant.research_trace_id}
-                        isStreaming={isStreaming}
-                        index={globalIndex}
-                        onDelete={onDeletePair}
-                      />
-                    </>
+                      <div className="mx-5 mb-5 rounded-lg bg-zinc-900 border border-zinc-800/30 shadow-[0_-8px_24px_rgba(0,0,0,0.4)] overflow-hidden">
+                        <ChatMessage
+                          role="assistant"
+                          content={assistant.content}
+                          morphic_result={assistant.morphic_result}
+                          research_steps={assistant.research_steps}
+                          research_progress={assistant.research_progress}
+                          research_trace_id={assistant.research_trace_id}
+                          isStreaming={isStreaming}
+                          index={globalIndex}
+                          onDelete={onDeletePair}
+                        />
+                      </div>
+                    </div>
                   )}
                 </div>
               )

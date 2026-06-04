@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic"
 import { motion } from "framer-motion"
 import { memo, useMemo, useState } from "react"
-import { Bot, Brain, Check, ChevronUp, Copy, Loader2, Trash2, User } from "lucide-react"
+import { Bot, Brain, Check, Copy, Loader2, Trash2, User } from "lucide-react"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { ResearchTrace } from "./ResearchTrace"
 import { MessageAttachments } from "./MessageAttachments"
@@ -69,19 +69,13 @@ function ChatMessageInner({ role, content, index, onDelete, morphic_result, rese
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
       onClick={isUser && collapsibleUser ? onCollapse : undefined}
-      className={`flex gap-3 px-4 py-3 ${isUser ? "bg-zinc-900/50" : "bg-zinc-950"} ${isUser && collapsibleUser ? "cursor-pointer hover:bg-zinc-900/80 transition-colors" : ""}`}
+      className={`flex gap-3 px-5 py-4 ${isUser && collapsibleUser ? "cursor-pointer" : ""}`}
     >
       <div className="mt-0.5 shrink-0">
         {isUser ? (
-          collapsibleUser ? (
-            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-zinc-800" title="Click to collapse">
-              <ChevronUp className="h-3.5 w-3.5 text-zinc-400" />
-            </div>
-          ) : (
-            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-zinc-800">
-              <User className="h-3.5 w-3.5 text-zinc-400" />
-            </div>
-          )
+          <div className={`flex h-7 w-7 items-center justify-center rounded-full bg-zinc-800 ${isUser && collapsibleUser ? "hover:bg-zinc-700 transition-colors" : ""}`} title={collapsibleUser ? "Click to collapse" : undefined}>
+            <User className="h-3.5 w-3.5 text-zinc-400" />
+          </div>
         ) : (
           <div className="flex h-7 w-7 items-center justify-center rounded-full bg-sky-600/20">
             <Bot className="h-3.5 w-3.5 text-sky-400" />
@@ -103,7 +97,7 @@ function ChatMessageInner({ role, content, index, onDelete, morphic_result, rese
           ) : (
             <>
               {thought && (
-                <details className={`group ${THOUGHT_VERTICAL_SPACING} pl-4`} open={isStreaming}>
+                <details className={`group ${THOUGHT_VERTICAL_SPACING} pl-4`}>
                   <summary className="cursor-pointer select-none list-none flex items-center gap-1.5 text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors marker:text-zinc-600">
                     <motion.span
                       animate={isStreaming ? { scale: [1, PULSE_SCALE_PEAK, 1] } : { scale: 1 }}
@@ -128,7 +122,7 @@ function ChatMessageInner({ role, content, index, onDelete, morphic_result, rese
             {content}
           </span>
         ) : thought ? (
-          <details className={`group ${THOUGHT_VERTICAL_SPACING} pl-4`} open={isStreaming}>
+          <details className={`group ${THOUGHT_VERTICAL_SPACING} pl-4`}>
             <summary className="cursor-pointer select-none list-none flex items-center gap-1.5 text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors marker:text-zinc-600">
               <motion.span
                 animate={isStreaming ? { scale: [1, PULSE_SCALE_PEAK, 1] } : { scale: 1 }}
