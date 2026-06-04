@@ -85,7 +85,7 @@ pre {
 }
 
 code {
-  font-family: var(--font-mono);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   font-size: 0.875em;
 }
 
@@ -217,12 +217,14 @@ code {
   background: var(--color-zinc-200);
 }
 
-.shiki {
+.shiki,
+.shiki span {
   color: var(--shiki-dark);
   background-color: var(--shiki-dark-bg);
 }
 
-.light .shiki {
+.light .shiki,
+.light .shiki span {
   color: var(--shiki-light);
   background-color: var(--shiki-light-bg);
 }
