@@ -154,6 +154,57 @@ code {
   text-decoration: underline;
 }
 
+.markdown-body-compact h1,
+.markdown-body-compact h2,
+.markdown-body-compact h3,
+.markdown-body-compact h4 {
+  margin-top: 0.5em;
+  margin-bottom: 0.3em;
+  font-size: 1em;
+}
+
+.markdown-body-compact p {
+  margin-bottom: 0.4em;
+  line-height: 1.5;
+}
+
+.markdown-body-compact ul,
+.markdown-body-compact ol {
+  margin-bottom: 0.4em;
+  padding-left: 1.25em;
+}
+
+.markdown-body-compact li {
+  margin-bottom: 0.15em;
+}
+
+.markdown-body-compact blockquote {
+  border-left: 2px solid var(--color-zinc-700);
+  padding-left: 0.75rem;
+  margin: 0.4em 0;
+  color: var(--color-zinc-400);
+}
+
+.markdown-body-compact table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.4em 0;
+}
+
+.markdown-body-compact th,
+.markdown-body-compact td {
+  border: 1px solid var(--color-zinc-700);
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+  font-size: 0.9em;
+}
+
+.markdown-body-compact hr {
+  border: none;
+  border-top: 1px solid var(--color-zinc-800);
+  margin: 0.5em 0;
+}
+
 .light pre {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }

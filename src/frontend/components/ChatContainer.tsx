@@ -8,6 +8,7 @@ import { ChatInput } from "./ChatInput"
 import { ChatSidebar, MAX_SIDEBAR_WIDTH } from "./ChatSidebar"
 import { getChatSidebarConfig } from "./chatSidebarConfig"
 import { ChevronLeft, ChevronRight, User } from "lucide-react"
+import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { cn } from "@/lib/utils"
 
 const DEFAULT_EXPANDED_TAIL = 2
@@ -146,6 +147,41 @@ export function ChatContainer({
     })
   }
 
+  const [hoveredPair, setHoveredPair] = useState<number | null>(null)
+  const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const leaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const handleMouseEnter = (globalIndex: number) => {
+    if (leaveTimeoutRef.current) {
+      clearTimeout(leaveTimeoutRef.current)
+      leaveTimeoutRef.current = null
+    }
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current)
+    hoverTimeoutRef.current = setTimeout(() => {
+      setHoveredPair(globalIndex)
+    }, 500)
+  }
+
+  const handleMouseLeave = () => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current)
+      hoverTimeoutRef.current = null
+    }
+    if (leaveTimeoutRef.current) clearTimeout(leaveTimeoutRef.current)
+    leaveTimeoutRef.current = setTimeout(() => {
+      setHoveredPair(null)
+      leaveTimeoutRef.current = null
+    }, 100)
+  }
+
+  // Clean up timeouts on unmount
+  useEffect(() => {
+    return () => {
+      if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current)
+      if (leaveTimeoutRef.current) clearTimeout(leaveTimeoutRef.current)
+    }
+  }, [])
+
   const sidebarElements = useMemo(
     () =>
       getChatSidebarConfig({
@@ -214,12 +250,15 @@ export function ChatContainer({
               const expanded = isExpanded(globalIndex)
               const isLast = globalIndex === lastGlobalIndex
               const qLabel = abbreviate(user.content, user)
+              const showPreview = hoveredPair === globalIndex
               return (
-                <div key={globalIndex} className="group">
+                <div key={globalIndex} className="group relative">
                   {!expanded && !isLast && (
                     <div
+                      onMouseEnter={() => handleMouseEnter(globalIndex)}
+                      onMouseLeave={handleMouseLeave}
                       onClick={() => togglePair(globalIndex)}
-                      className="mx-3 my-4 rounded-xl border border-zinc-800/40 bg-assistant-message shadow-sm overflow-hidden cursor-pointer"
+                      className="mx-3 my-4 rounded-xl border border-zinc-800/40 bg-assistant-message shadow-sm overflow-hidden cursor-pointer transition-all duration-300"
                     >
                       <div className="flex gap-3 px-5 py-4 items-start">
                         <div className="mt-0.5 shrink-0">
@@ -229,9 +268,36 @@ export function ChatContainer({
                         </div>
                         <div className="min-w-0 flex-1 flex flex-col">
                           <div className="mb-0.5 text-xs font-medium text-zinc-500">You</div>
-                          <span className="text-sm text-zinc-200 truncate">{qLabel}</span>
+                          {showPreview ? (
+                            <div className="max-h-[15vh] overflow-y-auto">
+                              <LaTeXMarkdown content={user.content} compact />
+                            </div>
+                          ) : (
+                            <span className="text-sm text-zinc-200 truncate">{qLabel}</span>
+                          )}
                         </div>
                         <ChevronRight className="h-4 w-4 shrink-0 text-zinc-600 mt-1" />
+                      </div>
+                      <div
+                        className={cn(
+                          "grid transition-[grid-template-rows] duration-300 ease-out",
+                          showPreview ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+                        )}
+                      >
+                        <div className="overflow-hidden">
+                          <div className="px-5 pb-4">
+                            {assistant.content && (
+                              <div className="rounded-lg bg-zinc-900 border border-zinc-800/30 shadow-[0_-8px_24px_rgba(0,0,0,0.4)] overflow-hidden">
+                                <div className="px-4 py-3">
+                                  <div className="text-xs font-medium text-zinc-500 mb-1">Assistant</div>
+                        <div className="max-h-[25vh] overflow-y-auto">
+                          <LaTeXMarkdown content={assistant.content} compact />
+                        </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   )}

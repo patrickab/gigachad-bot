@@ -8,6 +8,7 @@ import rehypeKatex from "rehype-katex"
 import rehypeRaw from "rehype-raw"
 import type { Components } from "react-markdown"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { cn } from "@/lib/utils"
 import { highlightCode } from "@/lib/markdown-syntax-highlighting"
 import { motion, AnimatePresence } from "framer-motion"
 import { Check, Copy, Globe } from "lucide-react"
@@ -160,7 +161,7 @@ const sharedComponents: Components = {
   },
 }
 
-function LaTeXMarkdownInner({ content, citationMap, streaming }: { content: string; citationMap?: Record<string, { title: string; url: string; content: string }>; streaming?: boolean }) {
+function LaTeXMarkdownInner({ content, citationMap, streaming, compact }: { content: string; citationMap?: Record<string, { title: string; url: string; content: string }>; streaming?: boolean; compact?: boolean }) {
   const allComponents = useMemo<Components>(() => ({
     ...sharedComponents,
     a({ node, children, href, title, ...props }: any) {
@@ -200,7 +201,7 @@ function LaTeXMarkdownInner({ content, citationMap, streaming }: { content: stri
     : allComponents
 
   return (
-    <div className="markdown-body text-sm leading-relaxed">
+    <div className={cn("text-sm leading-relaxed", compact ? "markdown-body-compact" : "markdown-body")}>
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
         rehypePlugins={rehypePlugins}
