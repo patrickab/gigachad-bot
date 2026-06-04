@@ -12,6 +12,7 @@ import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { cn } from "@/lib/utils"
 
 const DEFAULT_EXPANDED_TAIL = 2
+const BOTTOM_GAP_PX = 16 // Gap between last message and chat input, matching my-4 between QA pairs
 
 interface ChatContainerProps {
   chatId: string
@@ -238,7 +239,7 @@ export function ChatContainer({
   return (
     <div ref={containerRef} className={cn("flex h-full relative", className)}>
       <div className="flex-1 min-w-0 flex flex-col relative">
-        <div className="flex-1 overflow-y-auto" style={{ paddingBottom: Math.max(192, inputAreaHeight + 24) }}>
+        <div className="flex-1 overflow-y-auto" style={{ paddingBottom: inputAreaHeight + BOTTOM_GAP_PX }}>
           <div className="mx-auto" style={{ maxWidth: chatMaxWidth || undefined }}>
           {pairs.length === 0 && (
             <div className="flex h-full items-center justify-center">
