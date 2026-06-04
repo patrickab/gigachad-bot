@@ -163,6 +163,7 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
                 }
                 return copy
               })
+              return
             }
           } catch {}
         }
