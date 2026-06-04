@@ -217,22 +217,23 @@ export function ChatContainer({
               return (
                 <div key={globalIndex} className="group">
                   {!expanded && !isLast && (
-                    <button
+                    <div
                       onClick={() => togglePair(globalIndex)}
-                      className={cn(
-                        "w-full mx-3 my-1.5 flex items-center gap-2.5 px-3 py-2 rounded-lg",
-                        "border border-zinc-800/60 bg-zinc-900/30",
-                        "text-sm text-zinc-400 hover:bg-zinc-900/70 hover:border-zinc-700 hover:text-zinc-200",
-                        "transition-colors group/pair"
-                      )}
-                      style={{ width: "calc(100% - 1.5rem)" }}
+                      className="mx-3 my-4 rounded-xl border border-zinc-800/40 bg-assistant-message shadow-sm overflow-hidden cursor-pointer"
                     >
-                      <div className="flex h-7 w-7 items-center justify-center rounded-full bg-zinc-800 shrink-0">
-                        <User className="h-3.5 w-3.5 text-zinc-500" />
+                      <div className="flex gap-3 px-5 py-4 items-start">
+                        <div className="mt-0.5 shrink-0">
+                          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-zinc-800">
+                            <User className="h-3.5 w-3.5 text-zinc-400" />
+                          </div>
+                        </div>
+                        <div className="min-w-0 flex-1 flex flex-col">
+                          <div className="mb-0.5 text-xs font-medium text-zinc-500">You</div>
+                          <span className="text-sm text-zinc-200 truncate">{qLabel}</span>
+                        </div>
+                        <ChevronRight className="h-4 w-4 shrink-0 text-zinc-600 mt-1" />
                       </div>
-                      <span className="truncate text-left flex-1">{qLabel}</span>
-                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-600 group-hover/pair:text-zinc-400" />
-                    </button>
+                    </div>
                   )}
                   {expanded && (
                     <div className="mx-3 my-4 rounded-xl border border-zinc-800/40 bg-assistant-message shadow-sm overflow-hidden">
