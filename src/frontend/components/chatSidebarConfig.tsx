@@ -1,6 +1,7 @@
 "use client"
 
-import { FileText, Image as ImageIcon, Globe, X } from "lucide-react"
+import { useState } from "react"
+import { FileText, Image as ImageIcon, Globe, X, ChevronDown, ChevronRight } from "lucide-react"
 import dynamic from "next/dynamic"
 import type { Attachment, MorphicSearchResult } from "@/lib/types"
 import { API_BASE } from "@/lib/config"
@@ -31,18 +32,7 @@ function AttachmentViewer({ attachment, chatId }: { attachment: Attachment; chat
 
   if (attachment.mime === "application/pdf") {
     const parsedContent = attachment.parsedMd
-    return (
-      <div className="flex flex-col h-full">
-        <div className="flex-1 min-h-0">
-          <PdfViewer url={attachment.url} />
-        </div>
-        {parsedContent && (
-          <div className="border-t border-zinc-800 p-2 max-h-[40%] overflow-y-auto">
-            <LaTeXMarkdown content={rewriteImages(parsedContent, chatId)} />
-          </div>
-        )}
-      </div>
-    )
+    return <PdfAttachmentViewer url={attachment.url} parsedContent={parsedContent} chatId={chatId} />
   }
 
   const content = attachment.parsedMd ?? attachment.content
@@ -56,6 +46,33 @@ function AttachmentViewer({ attachment, chatId }: { attachment: Attachment; chat
   }
 
   return <p className="p-2 text-xs text-zinc-500">No preview available</p>
+}
+
+function PdfAttachmentViewer({ url, parsedContent, chatId }: { url: string; parsedContent?: string; chatId: string }) {
+  const [mdOpen, setMdOpen] = useState(false)
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex-1 min-h-0">
+        <PdfViewer url={url} />
+      </div>
+      {parsedContent && (
+        <div className="border-t border-zinc-800">
+          <button
+            onClick={() => setMdOpen((o) => !o)}
+            className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/50 transition-colors"
+          >
+            {mdOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+            Markdown
+          </button>
+          {mdOpen && (
+            <div className="p-2 max-h-[40vh] overflow-y-auto border-t border-zinc-800">
+              <LaTeXMarkdown content={rewriteImages(parsedContent, chatId)} />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function ContextBody({
@@ -180,6 +197,8 @@ export interface ChatSidebarConfig {
   onToggleAttachment: (messageIndex: number, attachmentName: string) => void
   onRemoveAttachment: (messageIndex: number, attachmentName: string) => void
   lastMorphicResult?: MorphicSearchResult
+  isElementOpen: (id: string) => boolean
+  onElementOpenChange: (id: string, open: boolean) => void
 }
 
 export const getChatSidebarConfig = ({
@@ -189,6 +208,8 @@ export const getChatSidebarConfig = ({
   onToggleAttachment,
   onRemoveAttachment,
   lastMorphicResult,
+  isElementOpen,
+  onElementOpenChange,
 }: ChatSidebarConfig): ChatSidebarElementConfig[] => {
   const elements: ChatSidebarElementConfig[] = []
 
@@ -198,6 +219,8 @@ export const getChatSidebarConfig = ({
       icon: FileText,
       title: "Context",
       badge: allAttachments.length,
+      open: isElementOpen("context"),
+      onOpenChange: (o) => onElementOpenChange("context", o),
       body: (
         <ContextBody
           chatId={chatId}
@@ -218,6 +241,8 @@ export const getChatSidebarConfig = ({
       icon: Globe,
       title: lastMorphicResult.query,
       badge: sources.length,
+      open: isElementOpen("sources"),
+      onOpenChange: (o) => onElementOpenChange("sources", o),
       body: <SourcesBody result={lastMorphicResult} />,
     })
   }

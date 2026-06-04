@@ -1,54 +1,65 @@
 "use client"
 
-import { ElementType, ReactNode, useCallback, useEffect, useRef, useState } from "react"
-import { motion } from "framer-motion"
-import { PanelRightClose, PanelRightOpen } from "lucide-react"
+import { useCallback, useEffect, useRef } from "react"
+import { motion, useMotionValue, useTransform, animate } from "framer-motion"
 import { ExpandableSidebarElement } from "./ExpandableSidebarElement"
-import { CHROME_UNIT_PX } from "@/lib/config"
 
-const COLLAPSED_WIDTH = 50
-const DEFAULT_EXPANDED_WIDTH = 320
 const MIN_EXPANDED_WIDTH = 200
 const MAX_EXPANDED_WIDTH = 600
 
 export interface ChatSidebarElementConfig {
   id: string
-  icon: ElementType
+  icon: React.ElementType
   title: string
-  badge?: ReactNode
-  body: ReactNode
+  badge?: React.ReactNode
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  body: React.ReactNode
 }
 
 interface ChatSidebarProps {
-  collapsed: boolean
-  onToggle: () => void
   elements: ChatSidebarElementConfig[]
+  width: number
+  onWidthChange: (w: number) => void
 }
 
-export function ChatSidebar({ collapsed, onToggle, elements }: ChatSidebarProps) {
-  const [width, setWidth] = useState(DEFAULT_EXPANDED_WIDTH)
-  const [mounted, setMounted] = useState(false)
+export function ChatSidebar({ elements, width, onWidthChange }: ChatSidebarProps) {
   const dragging = useRef(false)
+  const motionWidth = useMotionValue(width)
 
   useEffect(() => {
-    setMounted(true)
-  }, [])
+    const controls = animate(motionWidth, width, {
+      type: "spring",
+      stiffness: 400,
+      damping: 40,
+      mass: 0.6,
+    })
+    return controls.stop
+  }, [width, motionWidth])
+
+  const widthStyle = useTransform(motionWidth, (v) => `${v}px`)
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault()
       dragging.current = true
       const startX = e.clientX
-      const startWidth = width
+      const startWidth = motionWidth.get()
 
       const onMouseMove = (ev: MouseEvent) => {
         if (!dragging.current) return
         const newPx = startWidth + (startX - ev.clientX)
-        setWidth(Math.min(MAX_EXPANDED_WIDTH, Math.max(MIN_EXPANDED_WIDTH, newPx)))
+        const clamped = Math.min(MAX_EXPANDED_WIDTH, Math.max(MIN_EXPANDED_WIDTH, newPx))
+        motionWidth.set(clamped)
       }
 
       const onMouseUp = () => {
+        if (!dragging.current) return
         dragging.current = false
+        const finalWidth = motionWidth.get()
+        const clamped = Math.min(MAX_EXPANDED_WIDTH, Math.max(MIN_EXPANDED_WIDTH, finalWidth))
+        motionWidth.set(clamped)
+        onWidthChange(clamped)
         document.removeEventListener("mousemove", onMouseMove)
         document.removeEventListener("mouseup", onMouseUp)
       }
@@ -56,75 +67,34 @@ export function ChatSidebar({ collapsed, onToggle, elements }: ChatSidebarProps)
       document.addEventListener("mousemove", onMouseMove)
       document.addEventListener("mouseup", onMouseUp)
     },
-    [width]
+    [motionWidth, onWidthChange]
   )
 
   return (
     <motion.aside
       initial={false}
-      animate={{ width: collapsed ? COLLAPSED_WIDTH : width }}
-      transition={{ duration: 0.25, ease: "easeInOut" }}
-      className={`shrink-0 border-l border-zinc-800 bg-zinc-950 flex flex-col overflow-hidden relative ${mounted ? "" : "!transition-none"}`}
+      style={{ width: widthStyle }}
+      className="shrink-0 border-l border-zinc-800 bg-zinc-950 flex flex-col overflow-hidden relative"
     >
-      {!collapsed && (
-        <div
-          className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-zinc-700 active:bg-blue-500/50 transition-colors z-10"
-          onMouseDown={handleMouseDown}
-        />
-      )}
       <div
-        className="flex items-center gap-2 px-3 border-b border-zinc-800/50"
-        style={{ height: `${CHROME_UNIT_PX}px` }}
-      >
-        {collapsed ? (
-          <button
-            onClick={onToggle}
-            className="w-full flex items-center justify-center rounded p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50 transition-colors"
-            title="Expand sidebar"
+        className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-zinc-700 active:bg-blue-500/50 transition-colors z-10"
+        onMouseDown={handleMouseDown}
+      />
+      <div className="flex-1 overflow-y-auto">
+        {elements.map((el) => (
+          <ExpandableSidebarElement
+            key={el.id}
+            id={el.id}
+            icon={el.icon}
+            title={el.title}
+            badge={el.badge}
+            open={el.open}
+            onOpenChange={el.onOpenChange}
           >
-            <PanelRightOpen className="h-4 w-4" />
-          </button>
-        ) : (
-          <>
-            <span className="text-sm font-semibold text-zinc-200 px-1">Chat</span>
-            <div className="flex-1" />
-            <button
-              onClick={onToggle}
-              className="rounded p-0.5 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
-              title="Collapse sidebar"
-            >
-              <PanelRightClose className="h-3.5 w-3.5" />
-            </button>
-          </>
-        )}
+            {el.body}
+          </ExpandableSidebarElement>
+        ))}
       </div>
-      {collapsed ? (
-        <div className="flex-1 overflow-y-auto py-2 flex flex-col items-center gap-1">
-          {elements.map(({ id, icon: Icon, title }) => (
-            <button
-              key={id}
-              className="flex h-8 w-8 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200 transition-colors"
-              title={title}
-            >
-              <Icon className="h-4 w-4" />
-            </button>
-          ))}
-        </div>
-      ) : (
-        <div className="flex-1 overflow-y-auto">
-          {elements.map((el) => (
-            <ExpandableSidebarElement
-              key={el.id}
-              id={el.id}
-              icon={el.icon}
-              title={el.title}
-              badge={el.badge}
-            >
-              {el.body}
-            </ExpandableSidebarElement>
-          ))}
-        </div>
-      )}
     </motion.aside>
   )
 }

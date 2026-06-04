@@ -189,6 +189,14 @@ async def _parse_pdf(
         final_md_path = output_dir / f"{stem}.md"
         final_md_path.write_text(md_content, encoding="utf-8")
 
+    if output_dir != DIRECTORY_OUTPUT_MINERU:
+        global_md_path = DIRECTORY_OUTPUT_MINERU / f"{stem}.md"
+        if not global_md_path.exists():
+            shutil.copy2(final_md_path, global_md_path)
+            for img in images_dir.iterdir():
+                if img.is_file() and img.name.startswith(stem):
+                    shutil.copy2(img, DIRECTORY_OUTPUT_MINERU / "images" / img.name)
+
     return final_md_path, images_dir
 
 

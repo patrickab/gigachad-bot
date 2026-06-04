@@ -7,7 +7,7 @@ import { ChatMessage } from "./ChatMessage"
 import { ChatInput } from "./ChatInput"
 import { ChatSidebar } from "./ChatSidebar"
 import { getChatSidebarConfig } from "./chatSidebarConfig"
-import { ChevronRight, PanelRight, User } from "lucide-react"
+import { ChevronLeft, ChevronRight, User } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const DEFAULT_EXPANDED_TAIL = 2
@@ -61,12 +61,12 @@ export function ChatContainer({
   }, [messages])
 
   const [contextOpen, setContextOpen] = useState(false)
-  const [chatSidebarCollapsed, setChatSidebarCollapsed] = useState(false)
   const [expandedEntries, setExpandedEntries] = useState<{ messageIndex: number; attachmentName: string }[]>([])
+  const [sidebarWidth, setSidebarWidth] = useState(320)
+  const [openElements, setOpenElements] = useState<Set<string>>(new Set())
 
   const handleAttachmentClick = useCallback((messageIndex: number, attachment: Attachment) => {
     setContextOpen(true)
-    setChatSidebarCollapsed(false)
     setExpandedEntries([{ messageIndex, attachmentName: attachment.name }])
   }, [])
 
@@ -95,7 +95,10 @@ export function ChatContainer({
   const [manualOverrides, setManualOverrides] = useState<Map<number, boolean>>(new Map())
 
   useEffect(() => {
-    if (messages.length === 0) setManualOverrides(new Map())
+    if (messages.length === 0) {
+      setManualOverrides(new Map())
+      setOpenElements(new Set())
+    }
   }, [messages])
 
   const pairs: { user: Message; assistant: Message; globalIndex: number }[] = []
@@ -152,8 +155,17 @@ export function ChatContainer({
         onToggleAttachment: handleToggleExpand,
         onRemoveAttachment: handleRemoveAttachment,
         lastMorphicResult,
+        isElementOpen: (id) => openElements.has(id),
+        onElementOpenChange: (id, open) => {
+          setOpenElements((prev) => {
+            const next = new Set(prev)
+            if (open) next.add(id)
+            else next.delete(id)
+            return next
+          })
+        },
       }),
-    [chatId, allAttachments, expandedEntries, handleToggleExpand, handleRemoveAttachment, lastMorphicResult]
+    [chatId, allAttachments, expandedEntries, handleToggleExpand, handleRemoveAttachment, lastMorphicResult, openElements]
   )
 
   const hasSidebarContent = sidebarElements.length > 0
@@ -161,7 +173,6 @@ export function ChatContainer({
   useEffect(() => {
     if (!hasSidebarContent) {
       setContextOpen(false)
-      setChatSidebarCollapsed(false)
     }
   }, [hasSidebarContent])
 
@@ -169,7 +180,7 @@ export function ChatContainer({
     <div className={cn("flex h-full relative", className)}>
       <div className="flex-1 min-w-0 flex flex-col relative">
         <div className="flex-1 overflow-y-auto pb-6">
-          {pairs.length === 0 && !contextOpen && (
+          {pairs.length === 0 && (
             <div className="flex h-full items-center justify-center">
               <p className="text-sm text-zinc-600">Send a message to start.</p>
             </div>
@@ -244,18 +255,25 @@ export function ChatContainer({
           <button
             onClick={() => setContextOpen(true)}
             title="Open sidebar"
-            className="absolute right-0 top-2 z-20 flex items-center justify-center h-10 w-10 rounded-l-lg border border-r-0 border-zinc-800 bg-zinc-950/80 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
+            aria-label="Open sidebar"
+            className="absolute right-0 top-3 z-30 flex items-center justify-center h-12 w-4 rounded-l-md border border-r-0 border-zinc-700 bg-zinc-800/80 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100 hover:w-5 transition-all shadow-sm"
           >
-            <PanelRight className="h-4 w-4" />
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+        )}
+        {hasSidebarContent && contextOpen && (
+          <button
+            onClick={() => setContextOpen(false)}
+            title="Collapse sidebar"
+            aria-label="Collapse sidebar"
+            className="absolute right-0 top-3 z-30 flex items-center justify-center h-12 w-4 rounded-l-md border border-r-0 border-zinc-700 bg-zinc-800/80 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100 hover:w-5 transition-all shadow-sm"
+          >
+            <ChevronLeft className="h-4 w-4" />
           </button>
         )}
       </div>
       {hasSidebarContent && contextOpen && chatId && (
-        <ChatSidebar
-          collapsed={chatSidebarCollapsed}
-          onToggle={() => setChatSidebarCollapsed((c) => !c)}
-          elements={sidebarElements}
-        />
+        <ChatSidebar elements={sidebarElements} width={sidebarWidth} onWidthChange={setSidebarWidth} />
       )}
     </div>
   )

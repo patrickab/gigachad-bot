@@ -1,6 +1,6 @@
 "use client"
 
-import { ElementType, ReactNode, useState } from "react"
+import { ElementType, ReactNode } from "react"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -22,15 +22,16 @@ export interface ExpandableSidebarElementProps {
   icon: ElementType
   title: string
   badge?: ReactNode
+  open: boolean
+  onOpenChange: (open: boolean) => void
   children: ReactNode
 }
 
-export function ExpandableSidebarElement({ icon: Icon, title, badge, children }: ExpandableSidebarElementProps) {
-  const [open, setOpen] = useState(false)
+export function ExpandableSidebarElement({ icon: Icon, title, badge, open, onOpenChange, children }: ExpandableSidebarElementProps) {
   return (
     <div className="border-b border-zinc-800/50">
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => onOpenChange(!open)}
         className="w-full flex items-center gap-2 px-3 py-2 text-zinc-300 hover:bg-zinc-900/50 transition-colors"
       >
         {open ? (
