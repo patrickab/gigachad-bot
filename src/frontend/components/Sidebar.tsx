@@ -1,11 +1,12 @@
 "use client"
 
 import { motion } from "framer-motion"
-import { ProjectTree } from "./ProjectTree"
-import { HistoryTree } from "./HistoryTree"
+import { VaultTree, type VaultTreeItem } from "./VaultTree"
+import { FileText, FolderKanban, LayoutDashboard, Clock } from "lucide-react"
 import { SidebarElement } from "./SidebarElement"
 import { getSidebarConfig } from "@/lib/sidebarConfig"
 import { useProject } from "@/contexts/ProjectContext"
+import type { ProjectListItem, ProjectTab } from "@/lib/types"
 import { archiveChatHistory, createDirectory, moveHistoryItem, Element, Vault } from "@/lib/api"
 
 const COLLAPSED_WIDTH = 50
@@ -90,9 +91,12 @@ export function Sidebar({
 
       <div className="flex-1 overflow-y-auto py-3 flex flex-col gap-2">
         <div className="px-2">
-          <ProjectTree
-            projects={projects}
-            activeProject={activeProject}
+          <VaultTree
+            sectionIcon={FolderKanban}
+            sectionTitle="Projects"
+            storageKey="expanded_project_folders"
+            count={projects.length}
+            items={buildProjectItems(projects, activeProject)}
             collapsed={collapsed}
             open={projectsOpen}
             onOpenChange={onProjectsOpenChange}
@@ -117,10 +121,11 @@ export function Sidebar({
         </div>
 
         <div className="px-2">
-          <HistoryTree
-            rootFiles={rootFiles}
-            histories={histories}
-            projects={projects}
+          <VaultTree
+            sectionIcon={Clock}
+            sectionTitle="Histories"
+            storageKey="expanded_history_folders"
+            items={buildHistoryItems(rootFiles, histories, projects)}
             collapsed={collapsed}
             open={historiesOpen}
             onOpenChange={onHistoriesOpenChange}
@@ -163,4 +168,68 @@ export function Sidebar({
       </div>
     </motion.aside>
   )
+}
+
+function buildProjectItems(
+  projects: ProjectListItem[],
+  activeProject: string | null,
+): VaultTreeItem<string>[] {
+  return projects.map((project) => ({
+    id: project.slug,
+    label: project.name,
+    type: "vault",
+    data: project.slug,
+    isActive: activeProject === project.slug,
+    children: [
+      {
+        id: `${project.slug}/__dashboard__`,
+        label: "Dashboard",
+        type: "element",
+        icon: LayoutDashboard,
+        isSystem: true,
+        data: project.slug,
+      },
+      ...(project.tabs ?? [])
+        .filter((tab: ProjectTab) => !tab.filename.startsWith("untitled-"))
+        .map((tab: ProjectTab) => ({
+          id: `${project.slug}/${tab.filename}`,
+          label: tab.name ?? tab.title ?? tab.filename.replace(".json", ""),
+          type: "element" as const,
+          data: `${project.slug}/${tab.filename}`,
+          icon: FileText,
+        })),
+    ],
+  }))
+}
+
+function buildHistoryItems(
+  rootFiles: string[],
+  histories: Record<string, string[]>,
+  projects: ProjectListItem[],
+): VaultTreeItem<string>[] {
+  const projectSlugs = new Set(projects.map((p) => p.slug))
+
+  const folderItems = Object.entries(histories)
+    .filter(([dir]) => !projectSlugs.has(dir))
+    .map(([dir, files]) => ({
+      id: dir,
+      label: dir,
+      type: "folder" as const,
+      data: dir,
+      children: files.map((file) => ({
+        id: `${dir}/${file}`,
+        label: file.replace(".json", ""),
+        type: "element" as const,
+        data: `${dir}/${file}`,
+      })),
+    }))
+
+  const rootItems = rootFiles.map((file) => ({
+    id: file,
+    label: file.replace(".json", ""),
+    type: "element" as const,
+    data: file,
+  }))
+
+  return [...folderItems, ...rootItems]
 }

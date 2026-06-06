@@ -44,6 +44,49 @@ export function ChatInput({
   const { researchEnabled, morphicSearchEnabled, ocrEnabled, studyEnabled, toggleResearch, toggleMorphicSearch, toggleOCR, toggleStudy } = useModeState()
   const { ocrModel } = useSettings()
 
+  const tools = [
+    {
+      id: "research",
+      label: "Deep Research",
+      shortLabel: "Research",
+      icon: Search,
+      color: "text-amber-400",
+      accent: "amber",
+      enabled: researchEnabled,
+      toggle: toggleResearch,
+    },
+    {
+      id: "morphic",
+      label: "Web Search",
+      shortLabel: "Search",
+      icon: Globe,
+      color: "text-sky-400",
+      accent: "sky",
+      enabled: morphicSearchEnabled,
+      toggle: toggleMorphicSearch,
+    },
+    {
+      id: "ocr",
+      label: "LaTeX OCR",
+      shortLabel: "LaTeX",
+      icon: Sigma,
+      color: "text-emerald-400",
+      accent: "emerald",
+      enabled: ocrEnabled,
+      toggle: toggleOCR,
+    },
+    {
+      id: "study",
+      label: "PDF Study",
+      shortLabel: "Study",
+      icon: BookOpen,
+      color: "text-sky-400",
+      accent: "sky",
+      enabled: studyEnabled,
+      toggle: toggleStudy,
+    },
+  ]
+
   const [text, setText] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [uploadingNames, setUploadingNames] = useState<Set<string>>(new Set())
@@ -260,26 +303,17 @@ export function ChatInput({
                   </div>
                 )}
               </div>
-              {researchEnabled && (
-                <PillButton accent="amber" active onClick={() => toggleResearch()} icon={<Search className="h-3 w-3" />}>
-                  Research
+              {tools.filter(t => t.enabled).map(t => (
+                <PillButton
+                  key={t.id}
+                  accent={t.accent as any}
+                  active
+                  onClick={() => t.toggle()}
+                  icon={<t.icon className="h-3 w-3" />}
+                >
+                  {t.shortLabel}
                 </PillButton>
-              )}
-              {morphicSearchEnabled && (
-                <PillButton accent="sky" active onClick={() => toggleMorphicSearch()} icon={<Globe className="h-3 w-3" />}>
-                  Search
-                </PillButton>
-              )}
-              {ocrEnabled && (
-                <PillButton accent="emerald" active onClick={() => toggleOCR()} icon={<Sigma className="h-3 w-3" />}>
-                  LaTeX
-                </PillButton>
-              )}
-              {studyEnabled && (
-                <PillButton accent="sky" active onClick={() => toggleStudy()} icon={<BookOpen className="h-3 w-3" />}>
-                  Study
-                </PillButton>
-              )}
+              ))}
             </div>
             <div className="flex items-center gap-1">
               <div className="relative" ref={toolsRef}>
@@ -296,38 +330,15 @@ export function ChatInput({
                 </button>
                 {showTools && (
                   <div className="absolute bottom-full right-0 mb-2 w-56 rounded-xl border border-zinc-800 bg-zinc-950 p-2 shadow-2xl">
-                    {!researchEnabled && (
+                    {tools.filter(t => !t.enabled).map(t => (
                       <button
-                        onClick={() => { toggleResearch(); setShowTools(false) }}
+                        key={t.id}
+                        onClick={() => { t.toggle(); setShowTools(false) }}
                         className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800/50 transition-colors"
                       >
-                        <Search className="h-3.5 w-3.5 text-amber-400" />Deep Research
+                        <t.icon className={cn("h-3.5 w-3.5", t.color)} />{t.label}
                       </button>
-                    )}
-                    {!morphicSearchEnabled && (
-                      <button
-                        onClick={() => { toggleMorphicSearch(); setShowTools(false) }}
-                        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800/50 transition-colors"
-                      >
-                        <Globe className="h-3.5 w-3.5 text-sky-400" />Web Search
-                      </button>
-                    )}
-                    {!ocrEnabled && (
-                      <button
-                        onClick={() => { toggleOCR(); setShowTools(false) }}
-                        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800/50 transition-colors"
-                      >
-                        <Sigma className="h-3.5 w-3.5 text-emerald-400" />LaTeX OCR
-                      </button>
-                    )}
-                    {!studyEnabled && (
-                      <button
-                        onClick={() => { toggleStudy(); setShowTools(false) }}
-                        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800/50 transition-colors"
-                      >
-                        <BookOpen className="h-3.5 w-3.5 text-sky-400" />PDF Study
-                      </button>
-                    )}
+                    ))}
                   </div>
                 )}
               </div>

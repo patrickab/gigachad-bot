@@ -1,13 +1,14 @@
 "use client"
 
 import { motion, AnimatePresence } from "framer-motion"
-import { Check } from "lucide-react"
+import { Check, ChevronDown } from "lucide-react"
 import type { Provider } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { displayName, groupByProvider, activeProviders } from "@/lib/models"
 import { useState, useRef, useCallback, type ReactNode } from "react"
 import type { ModelsResponse } from "@/lib/types"
 import { useClickOutside } from "@/hooks/useClickOutside"
+import { Skeleton } from "./Skeleton"
 
 interface Tab {
   key: string
@@ -22,7 +23,7 @@ interface ModelDropdownProps {
   extraTabs?: Tab[]
   activeExtraTab?: string
   onExtraTabChange?: (key: string) => void
-  children: (props: { open: boolean; onToggle: () => void }) => ReactNode
+  children?: (props: { open: boolean; onToggle: () => void }) => ReactNode
 }
 
 const ACCENT_CLASSES = {
@@ -53,14 +54,40 @@ export function ModelDropdown({
   const close = useCallback(() => setOpen(false), [])
   useClickOutside(ref, close)
 
+  if (models === null) {
+    return (
+      <div className="flex flex-col gap-1.5 px-2">
+        <Skeleton className="h-5 w-16" />
+        <Skeleton className="h-3 w-28" />
+      </div>
+    )
+  }
+
   const available = groupByProvider(models)
   const providers = activeProviders(available)
   const currentModels = available[activeTab] ?? []
   const accentClasses = ACCENT_CLASSES[accent]
 
+  const defaultTrigger = (
+    <>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 transition-colors"
+      >
+        <span>Model</span>
+        <ChevronDown className="h-3 w-3 text-zinc-500" />
+      </button>
+      {selectedModel && (
+        <span className="text-[10px] italic text-zinc-500 px-2 truncate max-w-[150px]">
+          {displayName(selectedModel)}
+        </span>
+      )}
+    </>
+  )
+
   return (
     <div className="relative z-50 flex flex-col items-start" ref={ref}>
-      {children({ open, onToggle: () => setOpen((o) => !o) })}
+      {children ? children({ open, onToggle: () => setOpen((o) => !o) }) : defaultTrigger}
 
       <AnimatePresence>
         {open && (

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { Sidebar } from "@/components/Sidebar"
 import { ChatContainer } from "@/components/ChatContainer"
 import { MAX_SIDEBAR_WIDTH } from "@/components/ChatSidebar"
-import { ModelSelector } from "@/components/ModelSelector"
+import { ModelDropdown } from "@/components/ModelDropdown"
 import { MoreOptionsMenu } from "@/components/MoreOptionsMenu"
 import { ReasoningSelector } from "@/components/ReasoningSelector"
 import { ResearchModelsBar } from "@/components/ResearchModelsBar"
@@ -398,7 +398,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
             />
           ) : (
             <div className="flex items-center gap-4">
-              <ModelSelector models={models} selectedModel={settings.selectedModel} onSelect={settings.setSelectedModel} />
+              <ModelDropdown models={models} selectedModel={settings.selectedModel} onSelect={settings.setSelectedModel} />
               <div className="w-px h-4 bg-zinc-800" />
               <ReasoningSelector reasoningEffort={settings.reasoningEffort} onReasoningChange={settings.setReasoningEffort} />
             </div>

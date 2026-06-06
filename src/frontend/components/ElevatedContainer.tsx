@@ -3,6 +3,11 @@
 import React, { createContext, useContext, useState } from "react"
 import { cn } from "@/lib/utils"
 
+// Global/local default styling configurations for consistent theme fallbacks
+const DEFAULT_DARK = "var(--color-zinc-950)"
+const DEFAULT_BRIGHT = "var(--color-zinc-900)"
+const DEFAULT_NUM_LEVELS = 3
+
 interface ElevationContextType {
   level: number
   numLevels: number
@@ -26,9 +31,9 @@ export interface ElevationProviderProps {
  */
 export function ElevationProvider({
   children,
-  darkColor = "var(--color-zinc-950)",
-  brightColor = "var(--color-zinc-900)",
-  numLevels = 3,
+  darkColor = DEFAULT_DARK,
+  brightColor = DEFAULT_BRIGHT,
+  numLevels = DEFAULT_NUM_LEVELS,
   startLevel = 0,
 }: ElevationProviderProps) {
   return (
@@ -38,9 +43,10 @@ export function ElevationProvider({
   )
 }
 
-export interface ElevatedContainerProps extends React.HTMLAttributes<HTMLDivElement> {
+export interface ElevatedContainerProps extends React.HTMLAttributes<HTMLElement> {
   children?: React.ReactNode
-  asButton?: boolean
+  as?: React.ElementType     // Highly extensible: lets the developer render any HTML tag or custom React component (aside, section, motion.div, etc.)
+  asButton?: boolean         // For backwards compatibility
   castShadow?: boolean       // Whether to show a default flat shadow
   hoverLift?: boolean        // Opt-in for dynamic hover lifting & downward shadow-casting (for cards)
   darkColor?: string         // Local stack override
@@ -56,6 +62,7 @@ export const ElevatedContainer = React.forwardRef<any, ElevatedContainerProps>(
     {
       children,
       className,
+      as,
       asButton = false,
       castShadow = true,
       hoverLift = false,      // Disabled by default to protect flat interfaces (like the chat feed)
@@ -69,25 +76,30 @@ export const ElevatedContainer = React.forwardRef<any, ElevatedContainerProps>(
   ) => {
     const parentContext = useContext(ElevationContext)
     const [hovered, setHovered] = useState(false)
+    const [focused, setFocused] = useState(false) // Keyboard focus tracking for premium accessibility
 
-    // Resolve Context properties
-    const finalDark = darkColor ?? parentContext?.darkColor ?? "var(--color-zinc-950)"
-    const finalBright = brightColor ?? parentContext?.brightColor ?? "var(--color-zinc-900)"
-    const finalNumLevels = numLevels ?? parentContext?.numLevels ?? 3
+    // Resolve Context properties with clean, predictable cascade fallbacks
+    const finalDark = darkColor ?? parentContext?.darkColor ?? DEFAULT_DARK
+    const finalBright = brightColor ?? parentContext?.brightColor ?? DEFAULT_BRIGHT
+    const finalNumLevels = numLevels ?? parentContext?.numLevels ?? DEFAULT_NUM_LEVELS
     const currentLevel = parentContext ? parentContext.level : 0
 
-    // Compute dynamic linear interpolation
+    // Compute dynamic linear interpolation percentage:
+    // This scales the level (e.g. 0, 1, 2) smoothly to a percentage (e.g. 0%, 50%, 100%)
+    // spanning between the `darkColor` base (Level 0) and the `brightColor` ceiling (highest Level).
     const percentage = finalNumLevels > 1
       ? Math.min(100, Math.max(0, (currentLevel * 100) / (finalNumLevels - 1)))
       : 0
 
-    const displayPercentage = hovered && asButton
+    // Active triggers (mouse hover or keyboard focus) shift the percentage 8% further towards brightColor for an responsive spotlight feel
+    const isActive = (hovered || focused) && asButton
+    const displayPercentage = isActive
       ? Math.min(100, percentage + 8)
       : percentage
 
     const backgroundColor = `color-mix(in srgb, ${finalDark}, ${finalBright} ${displayPercentage}%)`
 
-    // Increment depth level for any nested elements
+    // Increment depth level for any nested child elements to enable automatic visual hierarchy
     const nextContext: ElevationContextType = {
       level: currentLevel + 1,
       numLevels: finalNumLevels,
@@ -95,7 +107,8 @@ export const ElevatedContainer = React.forwardRef<any, ElevatedContainerProps>(
       brightColor: finalBright,
     }
 
-    const Component = (asButton ? "button" : "div") as any
+    // Extensible Component tag resolution
+    const Component = as ?? (asButton ? "button" : "div") as any
 
     return (
       <ElevationContext.Provider value={nextContext}>
@@ -112,6 +125,14 @@ export const ElevatedContainer = React.forwardRef<any, ElevatedContainerProps>(
           onMouseLeave={(e: any) => {
             setHovered(false)
             props.onMouseLeave?.(e)
+          }}
+          onFocus={(e: any) => {
+            setFocused(true)
+            props.onFocus?.(e)
+          }}
+          onBlur={(e: any) => {
+            setFocused(false)
+            props.onBlur?.(e)
           }}
           className={cn(
             "relative transition-all duration-200",
