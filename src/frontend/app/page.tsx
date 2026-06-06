@@ -119,6 +119,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     reset,
     models,
     prompts,
+    rootFiles,
     histories,
     historiesLoading,
     refreshHistories,
@@ -168,7 +169,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       if (data.messages.length > 0) setMessages(data.messages)
       if (data.chat_id) setChatId(data.chat_id)
       if (data.title) onTitleLoaded(tab.id, data.title)
-    }).catch(() => {})
+    }).catch(() => { })
   }, [tab.historyFile, activeProject, setMessages, onTitleLoaded])
 
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -185,9 +186,9 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       }
       const title = tab.title ?? undefined
       if (activeProject) {
-        saveProjectTab(activeProject, filename, messages, chatId, tab.name ?? undefined, title).catch(() => {})
+        saveProjectTab(activeProject, filename, messages, chatId, tab.name ?? undefined, title).catch(() => { })
       } else {
-        apiSaveChatHistory(filename, messages, chatId, title).catch(() => {})
+        apiSaveChatHistory(filename, messages, chatId, title).catch(() => { })
       }
     }, 2000)
     return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current) }
@@ -225,7 +226,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       try {
         await saveProjectTab(activeProject, targetFilename, messages, chatId, tab.name ?? undefined, name)
         if (wasUntitled && oldUntitled) await deleteProjectTab(activeProject, oldUntitled)
-      } catch {}
+      } catch { }
       onHistoryFileChanged(tab.id, buildHistoryFile(targetFilename, activeProject))
     } else {
       let resultPath = newFilename
@@ -233,11 +234,11 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         if (wasUntitled && oldHistoryFile) {
           const result = await renameChatHistory(oldHistoryFile, name)
           resultPath = result.new_path
-          apiSaveChatHistory(result.filename, messages, chatId, name).catch(() => {})
+          apiSaveChatHistory(result.filename, messages, chatId, name).catch(() => { })
         } else {
           await apiSaveChatHistory(newFilename, messages, chatId, name)
         }
-      } catch {}
+      } catch { }
       onHistoryFileChanged(tab.id, resultPath)
     }
     refreshHistories()
@@ -359,6 +360,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       <Sidebar
         collapsed={sidebarCollapsed}
         onToggle={onSidebarToggle}
+        rootFiles={rootFiles}
         histories={histories}
         historiesLoading={historiesLoading}
         onHistoryLoad={handleHistoryLoad}
@@ -445,13 +447,13 @@ function AppContent() {
     if (tab.historyFile && !tab.title) {
       const { slug, filename } = parseHistoryFile(tab.historyFile)
       if (slug && activeProject) {
-        deleteProjectTab(slug, filename).catch(() => {})
+        deleteProjectTab(slug, filename).catch(() => { })
       } else {
-        apiDeleteChatHistory(tab.historyFile).catch(() => {})
-        deleteChatUploads(tab.chatId, null).catch(() => {})
+        apiDeleteChatHistory(tab.historyFile).catch(() => { })
+        deleteChatUploads(tab.chatId, null).catch(() => { })
       }
     } else if (tab.historyFile && tab.title) {
-      deleteChatUploads(tab.chatId, activeProject).catch(() => {})
+      deleteChatUploads(tab.chatId, activeProject).catch(() => { })
     }
   }, [activeProject])
 
@@ -462,7 +464,7 @@ function AppContent() {
       (tabId, historyFile) => {
         tabManagerRef.current?.updateTabHistoryFile(tabId, historyFile)
       },
-    ).catch(() => {})
+    ).catch(() => { })
   }, [activeProject, syncTabs])
 
   const loadedProjectRef = useRef<string | null>(null)

@@ -1,12 +1,12 @@
 "use client"
 
-import { FolderKanban, Loader2, Plus, Trash2, X } from "lucide-react"
+import { FolderKanban, Loader2, Plus, Trash2, X, LayoutDashboard } from "lucide-react"
 import { useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { cn } from "@/lib/utils"
 import { useProject } from "@/contexts/ProjectContext"
 import { useSafeAction } from "@/hooks/useSafeAction"
-import { SidebarElement, ChevronToggle } from "./SidebarElement"
+import { SidebarElement } from "./SidebarElement"
 import { Skeleton } from "./Skeleton"
 
 interface ProjectManagerProps {
@@ -17,8 +17,9 @@ interface ProjectManagerProps {
 }
 
 export function ProjectManager({ collapsed, open, onOpenChange, onExpand }: ProjectManagerProps) {
-  const { projects, projectsLoading, activeProject, openProject, createProject, deleteProject } = useProject()
+  const { projects, projectsLoading, activeProject, openProject, createProject, deleteProject, setDashboardOpen } = useProject()
   const { run, error } = useSafeAction()
+  const sortedProjects = [...projects].sort((a, b) => a.name.localeCompare(b.name))
   const [newProjectName, setNewProjectName] = useState("")
   const [showNewProject, setShowNewProject] = useState(false)
 
@@ -46,19 +47,29 @@ export function ProjectManager({ collapsed, open, onOpenChange, onExpand }: Proj
         />
       ) : (
         <>
-          <button
-            onClick={() => onOpenChange(!open)}
-            className="flex w-full items-center justify-between p-2 rounded-md transition-colors text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
-          >
-            <span className="flex items-center gap-3">
-              <FolderKanban className="h-4 w-4 shrink-0" />
+          <div className="flex w-full items-center justify-between p-1.5 rounded-md text-zinc-400 hover:bg-zinc-800/20 group">
+            <button
+              onClick={() => onOpenChange(!open)}
+              className="flex-1 flex items-center gap-3 p-1 rounded-md text-left transition-colors hover:text-zinc-200"
+            >
+              <FolderKanban className="h-4 w-4 shrink-0 text-zinc-400" />
               <span className="text-sm font-medium">Projects</span>
               {projects.length > 0 && (
-                <span className="rounded-full bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500">{projects.length}</span>
+                <span className="rounded-full bg-zinc-850 px-1.5 py-0.5 text-[10px] text-zinc-500 font-semibold">{projects.length}</span>
               )}
-            </span>
-            <ChevronToggle open={open} />
-          </button>
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                onOpenChange(true)
+                setShowNewProject(true)
+              }}
+              className="p-1 rounded text-zinc-500 hover:text-cyan-400 hover:bg-zinc-900 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+              title="New project"
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          </div>
 
           <AnimatePresence>
             {open && (
@@ -77,34 +88,57 @@ export function ProjectManager({ collapsed, open, onOpenChange, onExpand }: Proj
                     </div>
                   ) : (
                     <>
-                      {projects.map((proj) => (
-                        <motion.div
-                          key={proj.slug}
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: "auto" }}
-                          exit={{ opacity: 0, height: 0 }}
-                          className="flex items-center gap-1 pl-5 pr-2 py-0.5"
-                        >
-                          <button
-                            onClick={() => handleOpenProject(proj.slug)}
-                            className={cn(
-                              "flex-1 truncate text-left text-[11px] transition-colors",
-                              activeProject === proj.slug
-                                ? "text-cyan-400 font-medium"
-                                : "text-zinc-400 hover:text-zinc-200"
+                      {sortedProjects.map((proj) => {
+                        const isActive = activeProject === proj.slug
+                        return (
+                          <div key={proj.slug} className="flex flex-col gap-0.5">
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: "auto" }}
+                              exit={{ opacity: 0, height: 0 }}
+                              className={cn(
+                                "flex items-center gap-2 pl-4 pr-2 py-1 rounded-md transition-all duration-200 ease-out border border-transparent",
+                                isActive
+                                  ? "bg-cyan-500/10 text-cyan-400 border-cyan-500/20"
+                                  : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/40"
+                              )}
+                            >
+                              <button
+                                onClick={() => handleOpenProject(proj.slug)}
+                                className={cn(
+                                  "flex-1 truncate text-left text-xs transition-colors",
+                                  isActive ? "font-semibold text-cyan-400" : "font-medium"
+                                )}
+                              >
+                                {proj.name}
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleDeleteProject(proj.slug) }}
+                                className="rounded p-0.5 text-zinc-600 hover:text-red-400 transition-colors"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </button>
+                            </motion.div>
+                            {isActive && (
+                              <motion.div
+                                initial={{ opacity: 0, y: -4 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -4 }}
+                                className="pl-8 pr-2 py-1"
+                              >
+                                <button
+                                  onClick={() => setDashboardOpen(true)}
+                                  className="flex items-center gap-2 text-[11px] text-zinc-500 hover:text-cyan-400 transition-colors w-full text-left font-medium"
+                                >
+                                  <LayoutDashboard className="h-3.5 w-3.5 shrink-0" />
+                                  <span>Dashboard</span>
+                                </button>
+                              </motion.div>
                             )}
-                          >
-                            {proj.name}
-                          </button>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleDeleteProject(proj.slug) }}
-                            className="rounded p-0.5 text-zinc-600 hover:text-red-400 transition-colors"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        </motion.div>
-                      ))}
-                      {showNewProject ? (
+                          </div>
+                        )
+                      })}
+                      {showNewProject && (
                         <div className="flex items-center gap-1 pl-5 pr-2 py-0.5">
                           <input
                             autoFocus
@@ -130,14 +164,6 @@ export function ProjectManager({ collapsed, open, onOpenChange, onExpand }: Proj
                             <X className="h-3 w-3" />
                           </button>
                         </div>
-                      ) : (
-                        <button
-                          onClick={() => setShowNewProject(true)}
-                          className="flex items-center gap-1 pl-5 pr-2 py-1 text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors"
-                        >
-                          <Plus className="h-3 w-3" />
-                          New project
-                        </button>
                       )}
                       {projects.length === 0 && !showNewProject && (
                         <p className="px-2 py-1 text-[11px] text-zinc-600">No projects yet.</p>

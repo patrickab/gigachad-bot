@@ -5,6 +5,7 @@ import { listChatHistories, loadChatHistory as loadApiHistory } from "@/lib/api"
 import type { Message } from "@/lib/types"
 
 export interface UseHistoryReturn {
+  rootFiles: string[]
   histories: Record<string, string[]>
   historiesLoading: boolean
   refreshHistories: () => Promise<void>
@@ -13,6 +14,7 @@ export interface UseHistoryReturn {
 }
 
 export function useHistory(): UseHistoryReturn {
+  const [rootFiles, setRootFiles] = useState<string[]>([])
   const [histories, setHistories] = useState<Record<string, string[]>>({})
   const [historiesLoading, setHistoriesLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -20,6 +22,7 @@ export function useHistory(): UseHistoryReturn {
   const refreshHistories = useCallback(async () => {
     try {
       const data = await listChatHistories()
+      setRootFiles(data.files ?? [])
       setHistories(data.histories ?? {})
     } catch {
       // unavailable
@@ -38,5 +41,5 @@ export function useHistory(): UseHistoryReturn {
     }
   }, [])
 
-  return { histories, historiesLoading, refreshHistories, loadHistory, error }
+  return { rootFiles, histories, historiesLoading, refreshHistories, loadHistory, error }
 }

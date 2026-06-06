@@ -1,12 +1,10 @@
 "use client"
 
 import { motion } from "framer-motion"
-import { LayoutDashboard } from "lucide-react"
 import { ChatHistoryManager } from "./ChatHistoryManager"
 import { ProjectManager } from "./ProjectManager"
 import { SidebarElement } from "./SidebarElement"
 import { getSidebarConfig } from "@/lib/sidebarConfig"
-import { useProject } from "@/contexts/ProjectContext"
 
 const COLLAPSED_WIDTH = 50
 const EXPANDED_WIDTH = 280
@@ -14,6 +12,7 @@ const EXPANDED_WIDTH = 280
 interface SidebarProps {
   collapsed: boolean
   onToggle: () => void
+  rootFiles: string[]
   histories: Record<string, string[]>
   historiesLoading?: boolean
   onHistoryLoad: (filename: string) => void
@@ -29,6 +28,7 @@ interface SidebarProps {
 export function Sidebar({
   collapsed,
   onToggle,
+  rootFiles,
   histories,
   historiesLoading,
   onHistoryLoad,
@@ -40,8 +40,6 @@ export function Sidebar({
   historiesOpen,
   onHistoriesOpenChange,
 }: SidebarProps) {
-  const { activeProject, setDashboardOpen } = useProject()
-
   const expandIfCollapsed = () => { if (collapsed) onToggle() }
 
   const sidebarItems = getSidebarConfig({
@@ -88,6 +86,7 @@ export function Sidebar({
 
         <div className="px-2">
           <ChatHistoryManager
+            rootFiles={rootFiles}
             histories={histories}
             historiesLoading={historiesLoading}
             onLoad={onHistoryLoad}
@@ -96,20 +95,9 @@ export function Sidebar({
             open={historiesOpen}
             onOpenChange={onHistoriesOpenChange}
             onExpand={expandIfCollapsed}
+            onReset={onReset}
           />
         </div>
-
-        {activeProject && (
-          <div className="px-2">
-            <SidebarElement
-              icon={LayoutDashboard}
-              title="Dashboard"
-              collapsed={collapsed}
-              onClick={() => setDashboardOpen(true)}
-              isActive={false}
-            />
-          </div>
-        )}
 
         <div className="px-2 flex flex-col gap-1">
           {mainItems.map((item) => (

@@ -53,6 +53,13 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const syncVersionRef = useRef(0)
   const bumpVersion = useCallback(() => { syncVersionRef.current++ }, [])
 
+  // Mirror of `projectData` for use inside stable callbacks. Reading via ref
+  // (instead of the state value) keeps `syncTabs` identity stable across
+  // `setProjectData(updated)` calls, which would otherwise re-create it and
+  // trigger an effect-driven re-invocation loop in `TabManager`.
+  const projectDataRef = useRef<ProjectData | null>(null)
+  useEffect(() => { projectDataRef.current = projectData }, [projectData])
+
   const runGuarded = useCallback(
     async <T,>(fn: (project: string) => Promise<T>): Promise<T | null> => {
       if (!activeProject) return null
@@ -138,7 +145,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     tabs: { id: string; name: string | null; historyFile: string | null; title: string | null; chatId: string }[],
     updateHistoryFile: (tabId: string, historyFile: string) => void,
   ) => {
-    if (!activeProject || !projectData) return
+    const current = projectDataRef.current
+    if (!activeProject || !current) return
     const version = syncVersionRef.current
     const projectAtCall = activeProject
     const projectTabs: ProjectTab[] = []
@@ -153,11 +161,11 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         updateHistoryFile(t.id, `${projectAtCall}/${filename}`)
       }
     }
-    const stateUpdate: ProjectStateUpdate = { kanban: projectData.kanban, tabs: projectTabs }
+    const stateUpdate: ProjectStateUpdate = { kanban: current.kanban, tabs: projectTabs }
     const updated = await apiUpdateProjectKanban(projectAtCall, stateUpdate)
     if (syncVersionRef.current !== version) return
     setProjectData(updated)
-  }, [activeProject, projectData])
+  }, [activeProject])
 
   const value: ProjectContextState = {
     activeProject,

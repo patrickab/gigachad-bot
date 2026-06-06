@@ -42,6 +42,7 @@ export interface ModelsResponse {
 }
 
 export interface ChatHistoriesResponse {
+  files: string[]
   histories: Record<string, string[]>
 }
 

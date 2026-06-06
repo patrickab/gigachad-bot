@@ -21,6 +21,7 @@ export interface UseChatReturn {
   morphicSearch: (params: MorphicSearchParams) => Promise<void>
   models: ModelsResponse | null
   prompts: string[]
+  rootFiles: string[]
   histories: Record<string, string[]>
   historiesLoading: boolean
   refreshHistories: () => Promise<void>
@@ -35,7 +36,7 @@ export function useChat(): UseChatReturn {
   const { messages, isStreaming, send, cancel, deleteMessagePair, addMessagePair, setMessages } = useChatStream()
   const { research: doResearch, error: researchError } = useResearch()
   const { morphicSearch: doMorphicSearch, error: morphicError } = useMorphicSearch()
-  const { histories, historiesLoading, refreshHistories, loadHistory: loadHistoryRaw } = useHistory()
+  const { rootFiles, histories, historiesLoading, refreshHistories, loadHistory: loadHistoryRaw } = useHistory()
 
   const [models, setModels] = useState<ModelsResponse | null>(null)
   const [prompts, setPrompts] = useState<string[]>([])
@@ -88,6 +89,7 @@ export function useChat(): UseChatReturn {
     morphicSearch,
     models,
     prompts,
+    rootFiles,
     histories,
     historiesLoading,
     refreshHistories,

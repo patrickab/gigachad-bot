@@ -83,6 +83,7 @@ async def list_chat_histories() -> dict[str, Any]:
     if not DIRECTORY_CHAT_HISTORIES.exists():
         return {"histories": {}}
 
+    root_files: list[str] = []
     histories: dict[str, list[str]] = {}
 
     if DIRECTORY_CHAT_HISTORIES.is_dir():
@@ -92,13 +93,17 @@ async def list_chat_histories() -> dict[str, Any]:
             if f.name == "_uploads" and f.is_dir():
                 continue
             if f.is_file() and f.suffix == ".json" and f.name != "archived":
-                histories.setdefault("root", []).append(f.name)
+                if f.name.startswith("untitled-"):
+                    continue
+                root_files.append(f.name)
             elif f.is_dir() and (f / PROJECT_JSON).is_file() and f.name not in ("_uploads", "archived"):
                 for sf in sorted(f.iterdir()):
                     if sf.is_file() and sf.suffix == ".json" and sf.name != PROJECT_JSON:
+                        if sf.name.startswith("untitled-"):
+                            continue
                         histories.setdefault(f.name, []).append(sf.name)
 
-    return {"histories": histories}
+    return {"files": root_files, "histories": histories}
 
 
 @router.get("/{filename:path}")
