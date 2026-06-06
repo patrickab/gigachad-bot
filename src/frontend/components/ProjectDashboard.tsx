@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Plus, X } from "lucide-react"
+import { Plus, Layers, Activity, CheckCircle2, ArrowRight, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useProject } from "@/contexts/ProjectContext"
 import type { KanbanColumnId } from "@/lib/types"
@@ -17,6 +17,12 @@ const NEXT_STATE: Record<KanbanColumnId, KanbanColumnId> = {
   backlog: "doing",
   doing: "done",
   done: "backlog",
+}
+
+const PREV_STATE: Record<KanbanColumnId, KanbanColumnId> = {
+  backlog: "done",
+  doing: "backlog",
+  done: "doing",
 }
 
 interface AddCardModalProps {
@@ -54,6 +60,13 @@ function AddCardModal({ open, onClose, onAdd, defaultState }: AddCardModalProps)
     onClose()
   }
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLFormElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault()
+      submit()
+    }
+  }
+
   return (
     <AnimatePresence>
       {open && (
@@ -62,7 +75,7 @@ function AddCardModal({ open, onClose, onAdd, defaultState }: AddCardModalProps)
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.15 }}
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-[2px]"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md"
           onClick={onClose}
         >
           <motion.div
@@ -71,17 +84,21 @@ function AddCardModal({ open, onClose, onAdd, defaultState }: AddCardModalProps)
             exit={{ opacity: 0, scale: 0.96, y: 8 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-sm mx-4 rounded-xl border border-zinc-700/60 bg-zinc-800 shadow-2xl overflow-hidden"
+            className="w-full max-w-sm mx-4 rounded-xl border border-zinc-800 bg-zinc-950 shadow-2xl overflow-hidden"
           >
             <div className="px-5 pt-5 pb-3">
-              <div className="flex items-center gap-2 text-sm font-medium text-zinc-200">
+              <div className="flex items-center gap-2 text-sm font-medium text-zinc-300">
                 <Plus className="h-4 w-4 text-cyan-400" />
-                Add Card
+                Add Card to <span className="text-zinc-400 font-semibold uppercase text-xs">{defaultState}</span>
               </div>
             </div>
 
             <form
-              onSubmit={(e) => { e.preventDefault(); submit() }}
+              onSubmit={(e) => {
+                e.preventDefault()
+                submit()
+              }}
+              onKeyDown={handleKeyDown}
               className="px-5 pb-5 space-y-3"
             >
               <input
@@ -90,26 +107,27 @@ function AddCardModal({ open, onClose, onAdd, defaultState }: AddCardModalProps)
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 className={cn(
-                  "w-full rounded-lg border border-zinc-700 bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500",
+                  "w-full rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-600",
                   "outline-none transition-all duration-200",
                   "focus:border-cyan-500/40 focus:shadow-[0_0_20px_rgba(6,182,212,0.06)]"
                 )}
+                placeholder="Title"
+                required
                 autoComplete="off"
                 spellCheck={false}
-                placeholder="Title"
               />
               <input
                 type="text"
                 value={desc}
                 onChange={(e) => setDesc(e.target.value)}
                 className={cn(
-                  "w-full rounded-lg border border-zinc-700 bg-zinc-900/60 px-3 py-2 text-sm text-zinc-300 placeholder-zinc-500",
+                  "w-full rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-600",
                   "outline-none transition-all duration-200",
                   "focus:border-cyan-500/40 focus:shadow-[0_0_20px_rgba(6,182,212,0.06)]"
                 )}
+                placeholder="Description (optional)"
                 autoComplete="off"
                 spellCheck={false}
-                placeholder="Description (optional)"
               />
               <button type="submit" className="hidden" />
             </form>
@@ -140,13 +158,17 @@ function CardTooltip({ description, children }: CardTooltipProps) {
       <AnimatePresence>
         {visible && (
           <motion.div
-            initial={{ opacity: 0, y: 2 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 2 }}
-            transition={{ duration: 0.1 }}
-            className="absolute left-0 right-0 top-full z-50 mt-0.5 rounded-md border border-zinc-600/50 bg-zinc-700 shadow-lg px-2.5 py-2 max-h-[30%] overflow-y-auto"
+            initial={{ opacity: 0, scale: 0.95, y: 4 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 4 }}
+            transition={{ duration: 0.15, ease: "easeOut" }}
+            className="absolute left-1/2 -translate-x-1/2 bottom-full z-50 mb-2.5 w-64 rounded-lg border border-zinc-700 bg-zinc-800 shadow-[0_12px_24px_rgba(0,0,0,0.5)] p-3 text-left pointer-events-none"
           >
-            <p className="text-[11px] text-zinc-200 whitespace-pre-wrap leading-relaxed">{description}</p>
+            {/* Tiny arrow pointing down */}
+            <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-zinc-800" />
+            <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-[5px] border-4 border-transparent border-t-zinc-700 -z-10" />
+            
+            <p className="text-[11px] text-zinc-300 font-normal whitespace-pre-wrap leading-relaxed">{description}</p>
           </motion.div>
         )}
       </AnimatePresence>
@@ -186,7 +208,7 @@ export function ProjectDashboard() {
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: 0.15 }}
-        className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 backdrop-blur-sm"
+        className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 backdrop-blur-md"
         onClick={() => setDashboardOpen(false)}
       >
         <motion.div
@@ -195,52 +217,105 @@ export function ProjectDashboard() {
           exit={{ opacity: 0, scale: 0.96 }}
           transition={{ duration: 0.2, ease: "easeOut" }}
           onClick={(e) => e.stopPropagation()}
-          className="w-1/2 h-1/2 min-w-[600px] min-h-[400px] rounded-xl border border-zinc-600/60 bg-zinc-800 shadow-2xl flex flex-col overflow-hidden"
+          className="w-11/12 max-w-5xl h-[75vh] max-h-[720px] rounded-2xl border-none bg-zinc-950 shadow-[0_35px_100px_rgba(0,0,0,0.95)] flex flex-col overflow-hidden p-6"
         >
-          <div className="px-4 py-3 border-b border-zinc-700/50">
-            <h2 className="text-sm font-medium text-zinc-100">{activeProject}</h2>
-          </div>
-
-          <div className="flex-1 flex gap-3 p-4 overflow-hidden">
+          {/* Columns Canvas */}
+          <div className="flex-1 flex gap-4 overflow-hidden bg-zinc-950">
             {COLUMNS.map((col) => {
               const cards = cardsByColumn(col.id)
+              
+              // Dynamic state colors for colormix columns
+              const isBacklog = col.id === "backlog"
+              const isDoing = col.id === "doing"
+              const isDone = col.id === "done"
+
               return (
-                <div key={col.id} className="flex-1 flex flex-col min-w-0">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">
-                      {col.label} <span className="text-zinc-500 font-normal">({cards.length})</span>
-                    </span>
-                    <button
-                      onClick={() => setAddModalState(col.id)}
-                      className="p-1 rounded hover:bg-zinc-700 text-zinc-500 hover:text-cyan-400 transition-colors"
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                    </button>
+                <div
+                  key={col.id}
+                  className={cn(
+                    "flex-1 flex flex-col min-w-0 rounded-2xl border bg-assistant-message p-4 h-full shadow-[0_4px_20px_rgba(0,0,0,0.4)]",
+                    isBacklog && "border-zinc-800/40 border-t-2 border-t-amber-500/35",
+                    isDoing && "border-zinc-800/40 border-t-2 border-t-cyan-500/45",
+                    isDone && "border-zinc-800/40 border-t-2 border-t-emerald-500/35"
+                  )}
+                >
+                  {/* Column Header */}
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className={cn(
+                        "p-1 rounded-md",
+                        isBacklog && "bg-amber-500/10 text-amber-400",
+                        isDoing && "bg-cyan-500/10 text-cyan-400",
+                        isDone && "bg-emerald-500/10 text-emerald-400"
+                      )}>
+                        {isBacklog && <Layers className="h-3.5 w-3.5" />}
+                        {isDoing && <Activity className="h-3.5 w-3.5" />}
+                        {isDone && <CheckCircle2 className="h-3.5 w-3.5" />}
+                      </span>
+                      <span className="text-xs font-semibold text-zinc-200 tracking-wide uppercase">
+                        {col.label}
+                      </span>
+                      <span className={cn(
+                        "text-[10px] font-mono px-1.5 py-0.5 rounded-full border",
+                        isBacklog && "bg-amber-500/5 text-amber-400/80 border-amber-500/15",
+                        isDoing && "bg-cyan-500/5 text-cyan-400/80 border-cyan-500/15",
+                        isDone && "bg-emerald-500/5 text-emerald-400/80 border-emerald-500/15"
+                      )}>
+                        {cards.length}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+
+                  {/* Cards List */}
+                  <div
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      const cardId = e.dataTransfer.getData("text/plain")
+                      if (cardId) moveCard(cardId, col.id)
+                    }}
+                    className="flex-1 overflow-y-auto space-y-3 pr-1 scrollbar-thin"
+                  >
                     {cards.map((card) => (
                       <CardTooltip key={card.id} description={card.description}>
                         <button
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData("text/plain", card.id)
+                          }}
                           onClick={() => moveCard(card.id, NEXT_STATE[col.id])}
-                          className="w-full text-left p-2.5 rounded-lg border border-zinc-600/40 bg-zinc-700/50 hover:bg-zinc-600/50 hover:border-zinc-500/40 transition-colors group"
+                          onContextMenu={(e) => {
+                            e.preventDefault()
+                            moveCard(card.id, PREV_STATE[col.id])
+                          }}
+                          className={cn(
+                            "w-full text-left p-3.5 rounded-xl border border-zinc-800/40 bg-zinc-900 hover:bg-zinc-850/60 shadow-sm hover:shadow-[0_8px_20px_rgba(0,0,0,0.35)] relative hover:z-10 transition-all duration-200 group cursor-pointer overflow-hidden"
+                          )}
                         >
-                          <div className="flex items-start justify-between gap-1">
-                            <span className="text-xs text-zinc-100 break-words leading-snug">{card.title}</span>
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="text-xs font-medium text-zinc-100 break-words leading-relaxed">{card.title}</span>
                             <span
                               onClick={async (e) => { e.stopPropagation(); await deleteCard(card.id) }}
-                              className="shrink-0 opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-zinc-500/40 text-zinc-500 hover:text-red-400 transition-all"
+                              className="shrink-0 opacity-0 group-hover:opacity-100 p-1 rounded-lg hover:bg-zinc-800 text-zinc-500 hover:text-red-400 transition-all"
+                              title="Delete Card"
                             >
                               <X className="h-3 w-3" />
                             </span>
                           </div>
+                          
                           {card.description && (
-                            <p className="text-[11px] text-zinc-400 mt-1 truncate">{card.description}</p>
+                            <p className="text-[11px] text-zinc-400 mt-1.5 line-clamp-2 leading-relaxed font-normal">{card.description}</p>
                           )}
                         </button>
                       </CardTooltip>
                     ))}
                     {cards.length === 0 && (
-                      <div className="py-4 text-center text-[11px] text-zinc-500">Empty</div>
+                      <button
+                        onClick={() => setAddModalState(col.id)}
+                        className="w-full flex items-center justify-center gap-2 py-3.5 px-3.5 rounded-xl border border-dashed border-zinc-800/60 hover:border-zinc-700/80 hover:bg-zinc-950/10 text-zinc-500 hover:text-zinc-400 transition-all duration-200 group cursor-pointer"
+                      >
+                        <Plus className="h-4 w-4 stroke-[2] group-hover:text-zinc-300 transition-colors" />
+                        <span className="text-xs font-medium">Click to Add Card</span>
+                      </button>
                     )}
                   </div>
                 </div>
