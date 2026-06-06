@@ -10,6 +10,7 @@ import { getChatSidebarConfig } from "./chatSidebarConfig"
 import { ChevronLeft, ChevronRight, User } from "lucide-react"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { cn } from "@/lib/utils"
+import { ElevationProvider, ElevatedContainer } from "./ElevatedContainer"
 
 const DEFAULT_EXPANDED_TAIL = 2
 const BOTTOM_GAP_PX = 16 // Gap between last message and chat input, matching my-4 between QA pairs
@@ -256,7 +257,8 @@ export function ChatContainer({
         <div ref={scrollContainerRef} className="flex-1 overflow-y-auto" style={{ paddingBottom: inputAreaHeight + BOTTOM_GAP_PX }}>
           <div className="mx-auto" style={{ maxWidth: chatMaxWidth || undefined }}>
 
-          <AnimatePresence>
+          <ElevationProvider darkColor="var(--color-zinc-950)" brightColor="var(--color-zinc-900)" numLevels={3} startLevel={1}>
+            <AnimatePresence>
             {pairs.map(({ user, assistant, globalIndex }) => {
               const expanded = isExpanded(globalIndex)
               const isLast = globalIndex === lastGlobalIndex
@@ -265,11 +267,11 @@ export function ChatContainer({
               return (
                 <div key={globalIndex} className="group relative">
                   {!expanded && !isLast && (
-                    <div
+                    <ElevatedContainer
                       onMouseEnter={() => handleMouseEnter(globalIndex)}
                       onMouseLeave={handleMouseLeave}
                       onClick={() => togglePair(globalIndex)}
-                      className="mx-3 my-4 rounded-xl border border-zinc-800/40 bg-assistant-message shadow-sm overflow-hidden cursor-pointer transition-all duration-300"
+                      className="mx-3 my-4 rounded-xl border border-zinc-800/40 shadow-sm overflow-hidden cursor-pointer transition-all duration-300"
                     >
                       <div className="flex gap-3 px-5 py-4 items-start">
                         <div className="mt-0.5 shrink-0">
@@ -298,22 +300,22 @@ export function ChatContainer({
                         <div className="overflow-hidden">
                           <div className="px-5 pb-4">
                             {assistant.content && (
-                              <div className="rounded-lg bg-zinc-900 border border-zinc-800/30 shadow-[0_-8px_24px_rgba(0,0,0,0.4)] overflow-hidden">
+                              <ElevatedContainer className="rounded-lg border border-zinc-800/30 overflow-hidden">
                                 <div className="px-4 py-3">
                                   <div className="text-xs font-medium text-zinc-500 mb-1">Assistant</div>
                         <div className="max-h-[25vh] overflow-y-auto">
                           <LaTeXMarkdown content={assistant.content} compact />
                         </div>
-                                </div>
-                              </div>
+                                  </div>
+                              </ElevatedContainer>
                             )}
                           </div>
                         </div>
                       </div>
-                    </div>
+                    </ElevatedContainer>
                   )}
                   {expanded && (
-                    <div className="mx-3 my-4 rounded-xl border border-zinc-800/40 bg-assistant-message shadow-sm overflow-hidden">
+                    <ElevatedContainer className="mx-3 my-4 rounded-xl border border-zinc-800/40 overflow-hidden">
                       <ChatMessage
                         role="user"
                         content={user.content}
@@ -324,7 +326,7 @@ export function ChatContainer({
                         collapsibleUser={!isLast}
                         onCollapse={!isLast ? () => togglePair(globalIndex) : undefined}
                       />
-                      <div className="mx-5 mb-5 rounded-lg bg-zinc-900 border border-zinc-800/30 shadow-[0_-8px_24px_rgba(0,0,0,0.4)] overflow-hidden">
+                      <ElevatedContainer className="mx-5 mb-5 rounded-lg border border-zinc-800/30 overflow-hidden">
                         <ChatMessage
                           role="assistant"
                           content={assistant.content}
@@ -336,13 +338,14 @@ export function ChatContainer({
                           index={globalIndex}
                           onDelete={onDeletePair}
                         />
-                      </div>
-                    </div>
+                      </ElevatedContainer>
+                    </ElevatedContainer>
                   )}
                 </div>
               )
             })}
           </AnimatePresence>
+          </ElevationProvider>
           <div ref={bottomRef} />
           </div>
         </div>

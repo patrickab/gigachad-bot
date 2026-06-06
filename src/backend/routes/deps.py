@@ -48,6 +48,7 @@ def decode_image(base64_data: str | None) -> bytes | None:
 
 _SENTINEL = object()
 
+
 def sse_event_stream(chunks: Iterator[str] | Iterator[str | dict]) -> EventSourceResponse:
     async def event_stream() -> Any:
         try:

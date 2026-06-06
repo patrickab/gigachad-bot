@@ -139,11 +139,13 @@ async def list_projects() -> dict[str, Any]:
     for p in meta.get("projects", []):
         project_dir = _resolve_project_dir(p["slug"])
         data = _read_project(project_dir)
-        projects.append({
-            "name": p["name"],
-            "slug": p["slug"],
-            "tabs": data.get("tabs", []),
-        })
+        projects.append(
+            {
+                "name": p["name"],
+                "slug": p["slug"],
+                "tabs": data.get("tabs", []),
+            }
+        )
     return {"projects": projects}
 
 

@@ -15,7 +15,11 @@ from config import OLLAMA_BASE_URL, SEARX_URL
 from lib.research_config import build_research_config, write_research_config
 from lib.research_trace import ResearchTrace
 
-TRACES_DIR = Path(os.environ.get("RESEARCH_TRACES_DIR", str(Path(__file__).resolve().parent.parent.parent.parent / "chat_histories" / "research_traces")))
+TRACES_DIR = Path(
+    os.environ.get(
+        "RESEARCH_TRACES_DIR", str(Path(__file__).resolve().parent.parent.parent.parent / "chat_histories" / "research_traces")
+    )
+)
 
 router = APIRouter(prefix="/api", tags=["research"])
 
@@ -42,30 +46,39 @@ class SSEWriter:
         await self.queue.put((event, payload))
 
     async def send_step(self, step: str, event_type: str, details: dict | None = None) -> None:
-        await self.send("step", {
-            "step": step,
-            "event_type": event_type,
-            "details": details or {},
-            "timestamp": time.time(),
-        })
+        await self.send(
+            "step",
+            {
+                "step": step,
+                "event_type": event_type,
+                "details": details or {},
+                "timestamp": time.time(),
+            },
+        )
 
     async def send_progress(self, progress) -> None:
-        await self.send("progress", {
-            "current_depth": getattr(progress, "current_depth", 0),
-            "total_depth": getattr(progress, "total_depth", 0),
-            "current_breadth": getattr(progress, "current_breadth", 0),
-            "total_breadth": getattr(progress, "total_breadth", 0),
-            "current_query": getattr(progress, "current_query", None),
-            "completed_queries": getattr(progress, "completed_queries", 0),
-            "total_queries": getattr(progress, "total_queries", 0),
-        })
+        await self.send(
+            "progress",
+            {
+                "current_depth": getattr(progress, "current_depth", 0),
+                "total_depth": getattr(progress, "total_depth", 0),
+                "current_breadth": getattr(progress, "current_breadth", 0),
+                "total_breadth": getattr(progress, "total_breadth", 0),
+                "current_query": getattr(progress, "current_query", None),
+                "completed_queries": getattr(progress, "completed_queries", 0),
+                "total_queries": getattr(progress, "total_queries", 0),
+            },
+        )
 
     async def send_result(self, report: str, sources: list[str], costs: float) -> None:
-        await self.send("result", {
-            "report": report,
-            "sources": sources,
-            "costs": costs,
-        })
+        await self.send(
+            "result",
+            {
+                "report": report,
+                "sources": sources,
+                "costs": costs,
+            },
+        )
 
     async def send_error(self, message: str) -> None:
         await self.send("error", {"message": message})
@@ -99,6 +112,7 @@ def on_progress_factory(writer: SSEWriter, trace: ResearchTrace):
             loop.create_task(writer.send_progress(progress))
         except RuntimeError:
             pass
+
     return on_progress
 
 
@@ -133,6 +147,7 @@ async def research(req: ResearchRequest):
             nonlocal report, sources, costs
             try:
                 import logging
+
                 _log = logging.getLogger("research_route")
                 _log.info("[research] Waiting for _env_lock...")
                 async with _env_lock:
@@ -172,6 +187,7 @@ async def research(req: ResearchRequest):
                             else:
                                 os.environ[key] = val
                         import contextlib
+
                         with contextlib.suppress(OSError):
                             os.unlink(config_path)
 
@@ -183,6 +199,7 @@ async def research(req: ResearchRequest):
                 _log.info("[research] Done!")
             except Exception as e:
                 import traceback
+
                 _log = logging.getLogger("research_route")
                 _log.error(f"[research] FAILED: {e}")
                 traceback.print_exc()
@@ -217,14 +234,16 @@ async def list_traces() -> dict[str, Any]:
     for f in sorted(TRACES_DIR.glob("*.json"), reverse=True):
         try:
             data = json.loads(f.read_text())
-            traces.append({
-                "run_id": data["run_id"],
-                "query": data["query"],
-                "started_at": data["started_at"],
-                "finished_at": data["finished_at"],
-                "duration_s": data.get("duration_s"),
-                "step_count": len(data.get("steps", [])),
-            })
+            traces.append(
+                {
+                    "run_id": data["run_id"],
+                    "query": data["query"],
+                    "started_at": data["started_at"],
+                    "finished_at": data["finished_at"],
+                    "duration_s": data.get("duration_s"),
+                    "step_count": len(data.get("steps", [])),
+                }
+            )
         except (json.JSONDecodeError, KeyError):
             continue
     return {"traces": traces}
@@ -235,6 +254,7 @@ async def get_trace(run_id: str) -> dict[str, Any]:
     path = TRACES_DIR / f"{run_id}.json"
     if not path.exists():
         from fastapi.responses import JSONResponse
+
         return JSONResponse(status_code=404, content={"error": "Trace not found"})
     data = json.loads(path.read_text())
     return data

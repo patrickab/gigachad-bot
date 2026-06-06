@@ -178,8 +178,8 @@ async def _parse_pdf(
             old_name = old_path.name
             new_name = new_path.name
             md_content = re.sub(
-                r'\]\([^)]*' + re.escape(old_name) + r'\)',
-                r'](images/' + new_name + r')',
+                r"\]\([^)]*" + re.escape(old_name) + r"\)",
+                r"](images/" + new_name + r")",
                 md_content,
             )
 
@@ -210,7 +210,7 @@ def _detect_backend() -> str:
 
 def _rewrite_images_for_frontend(md_content: str) -> str:
     """Rewrite relative ``images/`` refs to absolute ``/mineru/images/`` URLs."""
-    return re.sub(r'\(images/([^)]+)\)', r'(/mineru/images/\1)', md_content)
+    return re.sub(r"\(images/([^)]+)\)", r"(/mineru/images/\1)", md_content)
 
 
 @router.post("/parse", response_model=MineruResult)

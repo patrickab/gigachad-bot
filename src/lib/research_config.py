@@ -31,9 +31,7 @@ def build_research_config(
 
 
 def write_research_config(config: dict[str, Any]) -> str:
-    tmp = tempfile.NamedTemporaryFile(
-        mode="w", suffix=".json", prefix="gpt-researcher-", delete=False
-    )
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", prefix="gpt-researcher-", delete=False)
     json.dump(config, tmp)
     tmp.close()
     return tmp.name

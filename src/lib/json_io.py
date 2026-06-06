@@ -1,4 +1,5 @@
 """Shared I/O helpers for backend routes."""
+
 import json
 from pathlib import Path
 from typing import Any

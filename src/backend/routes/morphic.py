@@ -93,21 +93,24 @@ async def morphic_search(req: MorphicSearchRequest) -> StreamingResponse:
         provider_id = "ollama"
         model_id = req.model
         if model_id.startswith("ollama/"):
-            model_id = model_id[len("ollama/"):]
+            model_id = model_id[len("ollama/") :]
         elif "/" in model_id:
             provider_id, model_id = model_id.split("/", 1)
         cookies["selectedModel"] = f"{provider_id}:{model_id}"
 
     async def event_stream():
-        async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as client, client.stream(
-            "POST",
-            f"{MORPHIC_URL.rstrip('/')}/api/chat",
-            json=morphic_payload,
-            headers={
-                "Content-Type": "application/json",
-                "Cookie": "; ".join(f"{k}={v}" for k, v in cookies.items()),
-            },
-        ) as response:
+        async with (
+            httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as client,
+            client.stream(
+                "POST",
+                f"{MORPHIC_URL.rstrip('/')}/api/chat",
+                json=morphic_payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Cookie": "; ".join(f"{k}={v}" for k, v in cookies.items()),
+                },
+            ) as response,
+        ):
             if response.status_code != 200:
                 error_body = await response.aread()
                 yield f"event: error\ndata: {error_body.decode(errors='replace')}\n\n"
