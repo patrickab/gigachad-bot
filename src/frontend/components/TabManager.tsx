@@ -44,6 +44,8 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, ref }: Tab
   const [customNames, setCustomNames] = useState<Record<string, string | null>>({})
   const inputRef = useRef<HTMLInputElement>(null)
   const initInProgressRef = useRef(false)
+  const onTabsChangeRef = useRef(onTabsChange)
+  useEffect(() => { onTabsChangeRef.current = onTabsChange }, [onTabsChange])
 
   useImperativeHandle(ref, () => ({
     initTabs: (newTabs: Tab[]) => {
@@ -76,8 +78,8 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, ref }: Tab
       initInProgressRef.current = false
       return
     }
-    onTabsChange?.(tabs)
-  }, [tabs, onTabsChange])
+    onTabsChangeRef.current?.(tabs)
+  }, [tabs])
 
   const addTab = useCallback(() => {
     const tab = nextTab()

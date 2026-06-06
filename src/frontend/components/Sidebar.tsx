@@ -1,10 +1,12 @@
 "use client"
 
 import { motion } from "framer-motion"
-import { ChatHistoryManager } from "./ChatHistoryManager"
-import { ProjectManager } from "./ProjectManager"
+import { ProjectTree } from "./ProjectTree"
+import { HistoryTree } from "./HistoryTree"
 import { SidebarElement } from "./SidebarElement"
 import { getSidebarConfig } from "@/lib/sidebarConfig"
+import { useProject } from "@/contexts/ProjectContext"
+import { archiveChatHistory, createDirectory, moveHistoryItem, Element, Vault } from "@/lib/api"
 
 const COLLAPSED_WIDTH = 50
 const EXPANDED_WIDTH = 280
@@ -40,6 +42,16 @@ export function Sidebar({
   historiesOpen,
   onHistoriesOpenChange,
 }: SidebarProps) {
+  const {
+    projects,
+    activeProject,
+    openProject,
+    closeProject,
+    createProject,
+    deleteProject,
+    setDashboardOpen,
+  } = useProject()
+
   const expandIfCollapsed = () => { if (collapsed) onToggle() }
 
   const sidebarItems = getSidebarConfig({
@@ -50,7 +62,9 @@ export function Sidebar({
   })
 
   const toggleItem = sidebarItems.find(item => item.id === "toggle-collapse")
-  const mainItems = sidebarItems.filter(item => item.id !== "toggle-collapse" && item.id !== "save-chat" && item.id !== "reset-chat")
+  const mainItems = sidebarItems.filter(
+    item => item.id !== "toggle-collapse" && item.id !== "save-chat" && item.id !== "reset-chat",
+  )
 
   return (
     <motion.aside
@@ -76,26 +90,64 @@ export function Sidebar({
 
       <div className="flex-1 overflow-y-auto py-3 flex flex-col gap-2">
         <div className="px-2">
-          <ProjectManager
+          <ProjectTree
+            projects={projects}
+            activeProject={activeProject}
             collapsed={collapsed}
             open={projectsOpen}
             onOpenChange={onProjectsOpenChange}
             onExpand={expandIfCollapsed}
+            onVaultClick={(id) => {
+              if (activeProject === id) {
+                closeProject()
+              } else {
+                openProject(id)
+              }
+            }}
+            onVaultDelete={(id) => deleteProject(id)}
+            onAddVault={(name) => createProject(name)}
+            onDashboardClick={(vaultId) => {
+              openProject(vaultId)
+              setDashboardOpen(true)
+            }}
+            onElementClick={(item) => {
+              if (item.data && !item.isSystem) onHistoryLoad(item.data)
+            }}
           />
         </div>
 
         <div className="px-2">
-          <ChatHistoryManager
+          <HistoryTree
             rootFiles={rootFiles}
             histories={histories}
-            historiesLoading={historiesLoading}
-            onLoad={onHistoryLoad}
-            onRefresh={onHistoryRefresh}
+            projects={projects}
             collapsed={collapsed}
             open={historiesOpen}
             onOpenChange={onHistoriesOpenChange}
             onExpand={expandIfCollapsed}
-            onReset={onReset}
+            plusTitle="New folder"
+            onElementClick={(item) => {
+              if (item.data) onHistoryLoad(item.data)
+            }}
+            onElementArchive={(item) => {
+              if (item.data) archiveChatHistory(item.data).then(onHistoryRefresh)
+            }}
+            onElementDelete={(item) => {
+              if (item.data) new Element(item.data).delete().then(onHistoryRefresh)
+            }}
+            onAddFolder={async (parentId: string | null, name: string) => {
+              await createDirectory(parentId ?? "", name)
+              onHistoryRefresh()
+              onHistoriesOpenChange(true)
+            }}
+            onVaultDelete={async (id: string) => {
+              await new Vault(id).delete()
+              onHistoryRefresh()
+            }}
+            onMoveElement={async (elementId: string, targetId: string | null) => {
+              await moveHistoryItem(elementId, targetId ?? "")
+              onHistoryRefresh()
+            }}
           />
         </div>
 

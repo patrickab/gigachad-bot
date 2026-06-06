@@ -103,7 +103,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const createProject = useCallback(async (name: string) => {
     await apiCreateProject(name)
     await refreshProjects()
-  }, [refreshProjects])
+    await openProject(name)
+  }, [refreshProjects, openProject])
 
   const deleteProject = useCallback(async (name: string) => {
     await apiDeleteProject(name)
@@ -165,7 +166,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     const updated = await apiUpdateProjectKanban(projectAtCall, stateUpdate)
     if (syncVersionRef.current !== version) return
     setProjectData(updated)
-  }, [activeProject])
+    await refreshProjects()
+  }, [activeProject, refreshProjects])
 
   const value: ProjectContextState = {
     activeProject,

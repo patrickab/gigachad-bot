@@ -90,26 +90,6 @@ def model_selector(key: str) -> dict:
     )
 
 
-def llm_params_sidebar() -> None:
-    """Create LLM parameter sliders in Streamlit expander."""
-    st.session_state.llm_temperature = st.slider(
-        "Temperature",
-        min_value=0.0,
-        max_value=2.0,
-        value=0.2,
-        step=0.05,
-        key="temperature",
-    )
-    st.session_state.llm_top_p = st.slider(
-        "Top-p (nucleus sampling)",
-        min_value=0.0,
-        max_value=1.0,
-        value=0.95,
-        step=0.05,
-        key="top_p",
-    )
-
-
 def render_messages(message_container, client: LLMClient) -> None:  # noqa
     """Render chat messages from session state."""
 

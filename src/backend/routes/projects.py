@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from config import DIRECTORY_CHAT_HISTORIES
 from backend.routes.files import delete_chat_upload_dir
-from backend.routes.histories import SaveRequest
+from backend.routes.histories import SaveRequest, _load_chat_file
 from lib.json_io import safe_read_json
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -135,7 +135,16 @@ class ProjectStateModel(BaseModel):
 @router.get("")
 async def list_projects() -> dict[str, Any]:
     meta = _read_meta()
-    return {"projects": [{"name": p["name"], "slug": p["slug"]} for p in meta.get("projects", [])]}
+    projects: list[dict[str, Any]] = []
+    for p in meta.get("projects", []):
+        project_dir = _resolve_project_dir(p["slug"])
+        data = _read_project(project_dir)
+        projects.append({
+            "name": p["name"],
+            "slug": p["slug"],
+            "tabs": data.get("tabs", []),
+        })
+    return {"projects": projects}
 
 
 @router.get("/{slug}")
@@ -270,11 +279,25 @@ async def save_project_tab(slug: str, filename: str, data: SaveTabRequest) -> di
     project_dir = _resolve_project_dir(slug)
     tab_path = project_dir / filename
     tab_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Prevent cross-chat overwrites: if the file exists and has a chat_id,
+    # the incoming chat_id must match.
+    if tab_path.exists():
+        existing = _load_chat_file(tab_path)
+        if existing and existing.get("chat_id") and data.chat_id:
+            if existing["chat_id"] != data.chat_id:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Chat ID mismatch: cannot overwrite an existing project tab with a different chat_id",
+                )
+
     payload = {"messages": data.messages}
     if data.chat_id:
         payload["chat_id"] = data.chat_id
     if data.title:
         payload["title"] = data.title
+    if data.usage:
+        payload["usage"] = data.usage
     tab_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     project_data = _read_project(project_dir)
     tabs = project_data.get("tabs", [])

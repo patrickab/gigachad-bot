@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import type React from "react"
 import { fetchModels, fetchPrompts } from "@/lib/api"
-import type { ChatRequest, Message, ModelsResponse, MorphicSearchParams } from "@/lib/types"
+import type { ChatRequest, Message, ModelsResponse, MorphicSearchParams, Usage } from "@/lib/types"
 import { useChatStream } from "./useChatStream"
 import { useResearch, type ResearchParams } from "./useResearch"
 import { useMorphicSearch } from "./useMorphicSearch"
@@ -30,10 +30,12 @@ export interface UseChatReturn {
   addMessagePair: (userContent: string, assistantContent: string) => void
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>
   error: string | null
+  totalUsage: Usage
+  setTotalUsage: React.Dispatch<React.SetStateAction<Usage>>
 }
 
 export function useChat(): UseChatReturn {
-  const { messages, isStreaming, send, cancel, deleteMessagePair, addMessagePair, setMessages } = useChatStream()
+  const { messages, isStreaming, send, cancel, deleteMessagePair, addMessagePair, setMessages, totalUsage, setTotalUsage } = useChatStream()
   const { research: doResearch, error: researchError } = useResearch()
   const { morphicSearch: doMorphicSearch, error: morphicError } = useMorphicSearch()
   const { rootFiles, histories, historiesLoading, refreshHistories, loadHistory: loadHistoryRaw } = useHistory()
@@ -71,7 +73,8 @@ export function useChat(): UseChatReturn {
 
   const reset = useCallback(async () => {
     setMessages([])
-  }, [setMessages])
+    setTotalUsage({ prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 })
+  }, [setMessages, setTotalUsage])
 
   const loadHistory = useCallback(async (filename: string) => {
     const result = await loadHistoryRaw(filename)
@@ -98,5 +101,7 @@ export function useChat(): UseChatReturn {
     addMessagePair,
     setMessages,
     error,
+    totalUsage,
+    setTotalUsage,
   }
 }

@@ -1,9 +1,9 @@
-import type { Attachment, ChatHistoriesResponse, ChatRequest, KanbanCard, Message, ModelsResponse, ProjectData, ProjectListItem, ProjectStateUpdate, ResearchRequest, StudyProcessRequest, StudyProcessResponse } from "./types"
+import type { Attachment, ChatHistoriesResponse, ChatRequest, KanbanCard, Message, ModelsResponse, ProjectData, ProjectListItem, ProjectStateUpdate, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
-import { API_BASE, DEFAULT_TEMPERATURE, DEFAULT_TOP_P, DEFAULT_DOWNSCALE_IMAGES } from "./config"
+import { API_BASE, DEFAULT_TEMPERATURE, DEFAULT_DOWNSCALE_IMAGES } from "./config"
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+export async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, options)
   if (!res.ok) {
     let message = res.statusText
@@ -43,7 +43,6 @@ export function createChatStream(req: ChatRequest): SSEStreamResult {
     user_msg: req.user_msg,
     system_prompt: req.system_prompt ?? "",
     temperature: req.temperature ?? DEFAULT_TEMPERATURE,
-    top_p: req.top_p ?? DEFAULT_TOP_P,
     downscale_images: req.downscale_images ?? DEFAULT_DOWNSCALE_IMAGES,
     messages: (req.messages ?? []).map((m: Message) => ({
       role: m.role,
@@ -62,15 +61,15 @@ export async function listChatHistories(): Promise<ChatHistoriesResponse> {
   return request<ChatHistoriesResponse>("/chat-histories")
 }
 
-export async function loadChatHistory(filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null; title: string | null }> {
+export async function loadChatHistory(filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null; title: string | null; usage: Usage | null }> {
   return request(`/chat-histories/${filename}`)
 }
 
-export async function saveChatHistory(filename: string, messages: Message[] = [], chatId?: string, title?: string): Promise<{ status: string; filename: string }> {
+export async function saveChatHistory(filename: string, messages: Message[] = [], chatId?: string, title?: string, usage?: Usage): Promise<{ status: string; filename: string }> {
   return request(`/chat-histories/${filename}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, chat_id: chatId ?? null, title: title ?? null }),
+    body: JSON.stringify({ messages, chat_id: chatId ?? null, title: title ?? null, usage: usage ?? null }),
   })
 }
 
@@ -88,6 +87,22 @@ export async function renameChatHistory(oldPath: string, newTitle: string): Prom
 
 export async function archiveChatHistory(filename: string): Promise<void> {
   await request(`/chat-histories/${filename}/archive`, { method: "PUT" })
+}
+
+export async function createDirectory(parentPath: string, name: string): Promise<{ status: string; path: string }> {
+  return request("/chat-histories/mkdir", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ parent_path: parentPath, name }),
+  })
+}
+
+export async function moveHistoryItem(filename: string, targetDir: string): Promise<{ status: string; new_path: string }> {
+  return request("/chat-histories/move", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename, target_dir: targetDir }),
+  })
 }
 
 export function createResearchStream(req: ResearchRequest): SSEStreamResult {
@@ -233,11 +248,11 @@ export async function deleteProjectCard(name: string, cardId: string): Promise<v
   await request(`/projects/${encodeURIComponent(name)}/cards/${cardId}`, { method: "DELETE" })
 }
 
-export async function saveProjectTab(name: string, filename: string, messages: Message[], chatId?: string, tabName?: string, title?: string): Promise<{ status: string }> {
+export async function saveProjectTab(name: string, filename: string, messages: Message[], chatId?: string, tabName?: string, title?: string, usage?: Usage): Promise<{ status: string }> {
   return request(`/projects/${encodeURIComponent(name)}/tabs/${encodeURIComponent(filename)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ filename, messages, chat_id: chatId ?? null, tab_name: tabName ?? null, title: title ?? null }),
+    body: JSON.stringify({ filename, messages, chat_id: chatId ?? null, tab_name: tabName ?? null, title: title ?? null, usage: usage ?? null }),
   })
 }
 
@@ -245,6 +260,31 @@ export async function deleteProjectTab(name: string, filename: string): Promise<
   await request(`/projects/${encodeURIComponent(name)}/tabs/${encodeURIComponent(filename)}`, { method: "DELETE" })
 }
 
-export async function loadProjectTab(name: string, filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null; title: string | null }> {
+export async function loadProjectTab(name: string, filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null; title: string | null; usage: Usage | null }> {
   return request(`/chat-histories/${encodeURIComponent(name)}/${encodeURIComponent(filename)}`)
+}
+
+export abstract class Entry {
+  constructor(public readonly id: string) {}
+  abstract delete(): Promise<void>
+}
+
+export class Element extends Entry {
+  async delete(): Promise<void> {
+    await request(`/chat-histories/${this.id}`, { method: "DELETE" })
+  }
+}
+
+export class Vault extends Entry {
+  async delete(): Promise<void> {
+    await request(`/chat-histories/${this.id}`, { method: "DELETE" })
+  }
+}
+
+export class Directory extends Vault {}
+
+export class Project extends Vault {
+  async delete(): Promise<void> {
+    await request(`/projects/${encodeURIComponent(this.id)}`, { method: "DELETE" })
+  }
 }

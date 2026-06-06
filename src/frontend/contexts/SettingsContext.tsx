@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, useCallback, useContext, useState, type ReactNode } from "react"
-import { DEFAULT_TEMPERATURE, DEFAULT_TOP_P, DEFAULT_DOWNSCALE_IMAGES, DEFAULT_VISION_MODEL, DEFAULT_MODEL } from "@/lib/config"
+import { DEFAULT_TEMPERATURE, DEFAULT_DOWNSCALE_IMAGES, DEFAULT_VISION_MODEL, DEFAULT_MODEL } from "@/lib/config"
 
 export interface SettingsState {
   selectedModel: string
@@ -10,8 +10,6 @@ export interface SettingsState {
   setSelectedPrompt: (v: string | null) => void
   temperature: number
   setTemperature: (v: number) => void
-  topP: number
-  setTopP: (v: number) => void
   reasoningEffort: string
   setReasoningEffort: (v: string) => void
   downscaleImages: boolean
@@ -48,7 +46,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL)
   const [selectedPrompt, setSelectedPrompt] = useState<string | null>(null)
   const [temperature, setTemperature] = useState(DEFAULT_TEMPERATURE)
-  const [topP, setTopP] = useState(DEFAULT_TOP_P)
   const [reasoningEffort, setReasoningEffort] = useState("none")
   const [downscaleImages, setDownscaleImages] = useState(DEFAULT_DOWNSCALE_IMAGES)
 
@@ -68,7 +65,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     selectedModel, setSelectedModel,
     selectedPrompt, setSelectedPrompt,
     temperature, setTemperature,
-    topP, setTopP,
     reasoningEffort, setReasoningEffort,
     downscaleImages, setDownscaleImages,
     researchFastModel, setResearchFastModel,

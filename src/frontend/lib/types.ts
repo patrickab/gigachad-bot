@@ -1,5 +1,11 @@
 import type { MorphicResultItem } from "./morphic"
 
+export interface Usage {
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+}
+
 export interface Attachment {
   name: string
   mime: string
@@ -27,7 +33,6 @@ export interface ChatRequest {
   user_msg: string
   system_prompt?: string
   temperature?: number
-  top_p?: number
   reasoning_effort?: string | null
   img_base64?: string | null
   downscale_images?: boolean
@@ -143,4 +148,5 @@ export interface ProjectTab {
 export interface ProjectListItem {
   name: string
   slug: string
+  tabs?: ProjectTab[]
 }

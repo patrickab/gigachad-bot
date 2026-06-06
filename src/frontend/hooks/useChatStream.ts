@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react"
 import { createChatStream } from "@/lib/api"
-import type { ChatRequest, Message } from "@/lib/types"
+import type { ChatRequest, Message, Usage } from "@/lib/types"
 
 export interface UseChatStreamReturn {
   messages: Message[]
@@ -12,6 +12,8 @@ export interface UseChatStreamReturn {
   deleteMessagePair: (index: number) => void
   addMessagePair: (userContent: string, assistantContent: string) => void
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>
+  totalUsage: Usage
+  setTotalUsage: React.Dispatch<React.SetStateAction<Usage>>
 }
 
 const FLUSH_MS = 60
@@ -19,6 +21,7 @@ const FLUSH_MS = 60
 export function useChatStream(): UseChatStreamReturn {
   const [messages, setMessages] = useState<Message[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
+  const [totalUsage, setTotalUsage] = useState<Usage>({ prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 })
   const abortRef = useRef<(() => void) | null>(null)
 
   const send = useCallback(
@@ -68,6 +71,13 @@ export function useChatStream(): UseChatStreamReturn {
           if (event.event === "token") {
             assistantMsg.content += event.data
             scheduleFlush()
+          } else if (event.event === "usage") {
+            const turn: Usage = JSON.parse(event.data)
+            setTotalUsage((prev) => ({
+              prompt_tokens: prev.prompt_tokens + turn.prompt_tokens,
+              completion_tokens: prev.completion_tokens + turn.completion_tokens,
+              total_tokens: prev.total_tokens + turn.total_tokens,
+            }))
           } else if (event.event === "done") {
             break
           } else if (event.event === "error") {
@@ -112,5 +122,5 @@ export function useChatStream(): UseChatStreamReturn {
     ])
   }, [])
 
-  return { messages, isStreaming, send, cancel, deleteMessagePair, addMessagePair, setMessages }
+  return { messages, isStreaming, send, cancel, deleteMessagePair, addMessagePair, setMessages, totalUsage, setTotalUsage }
 }

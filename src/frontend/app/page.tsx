@@ -14,6 +14,7 @@ import { SaveChatModal } from "@/components/SaveChatModal"
 import { TabManager, nextTab } from "@/components/TabManager"
 import type { Tab, TabManagerHandle } from "@/components/TabManager"
 import { ProjectDashboard } from "@/components/ProjectDashboard"
+import { TokenCounter } from "@/components/TokenCounter"
 import { useChat } from "@/hooks/useChat"
 import { useModeState, ModeProvider } from "@/hooks/useModeState"
 import { useSettings, SettingsProvider } from "@/contexts/SettingsContext"
@@ -32,7 +33,7 @@ import {
   renameChatHistory,
 } from "@/lib/api"
 import { DEFAULT_VISION_MODEL } from "@/lib/config"
-import type { Attachment, Message } from "@/lib/types"
+import type { Attachment, Message, Usage } from "@/lib/types"
 
 function shortIdFromChatId(chatId: string): string {
   const cleaned = chatId.replace(/[^a-zA-Z0-9]/g, "")
@@ -87,7 +88,6 @@ function defaultSendParams(settings: ReturnType<typeof useSettings>, overrides: 
     model: settings.selectedModel,
     system_prompt: settings.selectedPrompt ?? "",
     temperature: settings.temperature,
-    top_p: settings.topP,
     reasoning_effort: settings.reasoningEffort === "none" ? null : settings.reasoningEffort,
     downscale_images: settings.downscaleImages,
     img_base64: null,
@@ -95,12 +95,13 @@ function defaultSendParams(settings: ReturnType<typeof useSettings>, overrides: 
   }
 }
 
-function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleLoaded, sidebarCollapsed, onSidebarToggle, projectsOpen, onProjectsOpenChange, historiesOpen, onHistoriesOpenChange, activeProject }: {
+function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleLoaded, onOpenChat, sidebarCollapsed, onSidebarToggle, projectsOpen, onProjectsOpenChange, historiesOpen, onHistoriesOpenChange, activeProject }: {
   tab: Tab
   isActive: boolean
   onModeLabel: (label: string) => void
   onHistoryFileChanged: (tabId: string, historyFile: string) => void
   onTitleLoaded: (tabId: string, title: string | null) => void
+  onOpenChat: (historyFile: string) => void
   sidebarCollapsed: boolean
   onSidebarToggle: () => void
   projectsOpen: boolean
@@ -123,10 +124,11 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     histories,
     historiesLoading,
     refreshHistories,
-    loadHistory,
     deleteMessagePair,
     addMessagePair,
     setMessages,
+    totalUsage,
+    setTotalUsage,
   } = useChat()
 
   const {
@@ -141,6 +143,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   } = useModeState()
 
   const settings = useSettings()
+  const hasUsage = totalUsage.total_tokens > 0 ? totalUsage : undefined
 
   const [ocrImage, setOCRImage] = useState<string | null>(null)
   const [chatId, setChatId] = useState(() => tab.chatId)
@@ -169,12 +172,25 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       if (data.messages.length > 0) setMessages(data.messages)
       if (data.chat_id) setChatId(data.chat_id)
       if (data.title) onTitleLoaded(tab.id, data.title)
+      if (data.usage) setTotalUsage(data.usage)
     }).catch(() => { })
   }, [tab.historyFile, activeProject, setMessages, onTitleLoaded])
 
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     if (messages.length === 0) return
+
+    // Only untitled conversations in projects are allowed to persist/autosave on disk.
+    // Non-project untitled chats live strictly in memory and are never written to disk.
+    if (!activeProject) return
+
+    // Only autosave to untitled draft files — never overwrite a titled history
+    // automatically. Titled files are modified exclusively via Alt+S (SaveChatModal).
+    if (tab.historyFile) {
+      const { filename } = parseHistoryFile(tab.historyFile)
+      if (!filename.startsWith("untitled-")) return
+    }
+
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
     autoSaveTimerRef.current = setTimeout(() => {
       const filename = tab.historyFile
@@ -185,21 +201,17 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         onHistoryFileChanged(tab.id, historyFile)
       }
       const title = tab.title ?? undefined
-      if (activeProject) {
-        saveProjectTab(activeProject, filename, messages, chatId, tab.name ?? undefined, title).catch(() => { })
-      } else {
-        apiSaveChatHistory(filename, messages, chatId, title).catch(() => { })
-      }
+      saveProjectTab(activeProject, filename, messages, chatId, tab.name ?? undefined, title, hasUsage).catch(() => { })
     }, 2000)
     return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current) }
-  }, [messages, activeProject, tab.historyFile, tab.name, tab.title, chatId, tab.id, onHistoryFileChanged])
+  }, [messages, activeProject, tab.historyFile, tab.name, tab.title, chatId, tab.id, totalUsage, onHistoryFileChanged])
 
-  const handleHistoryLoad = useCallback(async (filename: string) => {
-    const result = await loadHistory(filename)
-    if (result.chat_id) {
-      setChatId(result.chat_id)
-    }
-  }, [loadHistory])
+  const handleHistoryLoad = useCallback((filename: string) => {
+    onOpenChat(filename)
+    // Loading is handled by the target tab's init effect — do NOT call loadHistory
+    // here; that would load the clicked history into the current tab's messages,
+    // causing the autosave to overwrite it.
+  }, [onOpenChat])
 
   useEffect(() => {
     if (researchEnabled) onModeLabel("Deep Research")
@@ -224,7 +236,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     if (activeProject) {
       const targetFilename = newFilename
       try {
-        await saveProjectTab(activeProject, targetFilename, messages, chatId, tab.name ?? undefined, name)
+        await saveProjectTab(activeProject, targetFilename, messages, chatId, tab.name ?? undefined, name, hasUsage)
         if (wasUntitled && oldUntitled) await deleteProjectTab(activeProject, oldUntitled)
       } catch { }
       onHistoryFileChanged(tab.id, buildHistoryFile(targetFilename, activeProject))
@@ -234,16 +246,16 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         if (wasUntitled && oldHistoryFile) {
           const result = await renameChatHistory(oldHistoryFile, name)
           resultPath = result.new_path
-          apiSaveChatHistory(result.filename, messages, chatId, name).catch(() => { })
+          apiSaveChatHistory(result.filename, messages, chatId, name, hasUsage).catch(() => { })
         } else {
-          await apiSaveChatHistory(newFilename, messages, chatId, name)
+          await apiSaveChatHistory(newFilename, messages, chatId, name, hasUsage)
         }
       } catch { }
       onHistoryFileChanged(tab.id, resultPath)
     }
     refreshHistories()
     setSaveModalOpen(false)
-  }, [messages, chatId, tab.id, tab.name, tab.historyFile, tab.title, activeProject, refreshHistories, onHistoryFileChanged])
+  }, [messages, chatId, tab.id, tab.name, tab.historyFile, tab.title, totalUsage, activeProject, refreshHistories, onHistoryFileChanged])
 
   useEffect(() => {
     function handler(e: KeyboardEvent) {
@@ -395,6 +407,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           <div className="flex-1" />
 
           <div className="flex items-center gap-2">
+            <TokenCounter usage={totalUsage} />
             <ThemeToggle />
             <MoreOptionsMenu prompts={prompts} />
           </div>
@@ -433,7 +446,8 @@ function AppContent() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
   const [projectsOpen, setProjectsOpen] = useState(true)
   const [historiesOpen, setHistoriesOpen] = useState(false)
-  const { activeProject, projectData, dashboardOpen, syncTabs } = useProject()
+  const { activeProject, projectData, dashboardOpen, syncTabs, setDashboardOpen, closeProject } = useProject()
+  const pendingHistoryRef = useRef<string | null>(null)
 
   const handleHistoryFileChanged = useCallback((tabId: string, historyFile: string) => {
     tabManagerRef.current?.updateTabHistoryFile(tabId, historyFile)
@@ -442,6 +456,27 @@ function AppContent() {
   const handleTitleLoaded = useCallback((tabId: string, title: string | null) => {
     tabManagerRef.current?.updateTabTitle(tabId, title)
   }, [])
+
+  const handleOpenChat = useCallback((historyFile: string) => {
+    const tabs = tabManagerRef.current?.getTabs() ?? []
+    const existing = tabs.find((t) => t.historyFile === historyFile)
+    if (existing) {
+      tabManagerRef.current?.switchToTab(existing.id)
+      return
+    }
+    // Context switch: clicking a non-project history while a project is active
+    // closes the project first, then opens the history in a fresh tab
+    if (activeProject && !historyFile.includes("/")) {
+      pendingHistoryRef.current = historyFile
+      closeProject()
+      return
+    }
+    const filename = historyFile.includes("/")
+      ? historyFile.split("/").pop()!
+      : historyFile
+    const label = filename.replace(".json", "")
+    tabManagerRef.current?.addTabWithName(label, historyFile)
+  }, [activeProject, closeProject])
 
   const handleTabClose = useCallback((tab: Tab) => {
     if (tab.historyFile && !tab.title) {
@@ -474,7 +509,14 @@ function AppContent() {
     loadedProjectRef.current = activeProject
 
     if (!activeProject || !projectData) {
-      tabManagerRef.current?.initTabs([nextTab()])
+      const pending = pendingHistoryRef.current
+      if (pending) {
+        pendingHistoryRef.current = null
+        const label = pending.replace(".json", "")
+        tabManagerRef.current?.initTabs([nextTab(label, pending)])
+      } else {
+        tabManagerRef.current?.initTabs([nextTab()])
+      }
     } else {
       const newTabs: Tab[] = projectData.tabs.map((t) =>
         nextTab(t.name, `${activeProject}/${t.filename}`, t.title)
@@ -483,6 +525,14 @@ function AppContent() {
       tabManagerRef.current?.initTabs(newTabs)
     }
   }, [activeProject, projectData])
+
+  useEffect(() => {
+    function handler(e: KeyboardEvent) {
+      if (e.altKey && e.key === "d") { e.preventDefault(); setDashboardOpen(!dashboardOpen) }
+    }
+    document.addEventListener("keydown", handler)
+    return () => document.removeEventListener("keydown", handler)
+  }, [setDashboardOpen, dashboardOpen])
 
   return (
     <ModeProvider>
@@ -497,6 +547,7 @@ function AppContent() {
             onModeLabel={onModeLabel}
             onHistoryFileChanged={handleHistoryFileChanged}
             onTitleLoaded={handleTitleLoaded}
+            onOpenChat={handleOpenChat}
             sidebarCollapsed={sidebarCollapsed}
             onSidebarToggle={() => setSidebarCollapsed((c) => !c)}
             projectsOpen={projectsOpen}

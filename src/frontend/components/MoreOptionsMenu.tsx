@@ -66,8 +66,6 @@ export function MoreOptionsMenu({
                   <LLMParams
                     temperature={settings.temperature}
                     onTemperatureChange={settings.setTemperature}
-                    topP={settings.topP}
-                    onTopPChange={settings.setTopP}
                   />
                 </div>
 

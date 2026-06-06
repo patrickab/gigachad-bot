@@ -14,7 +14,6 @@ from streamlit_helper import (
     AVAILABLE_LLM_MODELS,
     AVAILABLE_PROMPTS,
     get_img_hash,
-    llm_params_sidebar,
     model_selector,
     paste_img_button,
     render_messages,
@@ -58,10 +57,7 @@ def chat_interface() -> None:
 
                 api_img: PasteResult = st.session_state.api_img
                 client: LLMClient = st.session_state.client
-                kwargs = {
-                    "temperature": st.session_state.llm_temperature,
-                    "top_p": st.session_state.llm_top_p,
-                }
+                kwargs = {"temperature": 0.2}
                 if st.session_state.reasoning_effort != "none":
                     kwargs["reasoning_effort"] = st.session_state.reasoning_effort
 
@@ -111,8 +107,6 @@ def gigachad_sidebar() -> None:
 
         st.markdown("---")
         with st.expander("Options", expanded=False):
-            llm_params_sidebar()
-
             if st.button("Reset History", key="reset_history_main"):
                 st.markdown("---")
                 st.session_state.client.reset_history()

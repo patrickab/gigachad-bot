@@ -14,14 +14,13 @@ class ChatRequest(BaseModel):
     user_msg: str
     system_prompt: str = ""
     temperature: float = Field(default=0.2, ge=0, le=2)
-    top_p: float = Field(default=0.95, ge=0, le=1)
     reasoning_effort: str | None = None
     img_base64: str | None = None
     downscale_images: bool = True
 
 
 def _build_kwargs(req: ChatRequest) -> dict[str, Any]:
-    kwargs: dict[str, Any] = {"temperature": req.temperature, "top_p": req.top_p}
+    kwargs: dict[str, Any] = {"temperature": req.temperature}
     if req.reasoning_effort and req.reasoning_effort != "none":
         kwargs["reasoning_effort"] = req.reasoning_effort
     return kwargs
@@ -39,6 +38,7 @@ async def chat(req: ChatRequest) -> EventSourceResponse:
             system_prompt=req.system_prompt,
             img=img,
             stream=True,
+            return_usage=True,
             **kwargs,
         )
         return sse_event_stream(chunks)

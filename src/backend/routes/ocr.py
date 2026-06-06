@@ -31,7 +31,6 @@ async def ocr(req: OCRRequest) -> EventSourceResponse:
             system_prompt=SYS_OCR_TEXT_EXTRACTION,
             img=img,
             temperature=0.1,
-            top_p=0.95,
             stream=True,
         )
         return sse_event_stream(chunks)

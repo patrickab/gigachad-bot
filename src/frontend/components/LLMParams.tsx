@@ -6,15 +6,11 @@ import { ParamSlider } from "./ParamSlider"
 interface LLMParamsProps {
   temperature: number
   onTemperatureChange: (v: number) => void
-  topP: number
-  onTopPChange: (v: number) => void
 }
 
 export function LLMParams({
   temperature,
   onTemperatureChange,
-  topP,
-  onTopPChange,
 }: LLMParamsProps) {
   return (
     <div className="space-y-3">
@@ -29,14 +25,6 @@ export function LLMParams({
           onChange={onTemperatureChange}
           min={0}
           max={2}
-          step={0.05}
-        />
-        <ParamSlider
-          label="Top-p"
-          value={topP}
-          onChange={onTopPChange}
-          min={0}
-          max={1}
           step={0.05}
         />
       </div>
