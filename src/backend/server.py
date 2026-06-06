@@ -26,9 +26,10 @@ from backend.routes.mineru import router as mineru_router
 from backend.routes.models import router as models_router
 from backend.routes.morphic import router as morphic_router, stop_morphic
 from backend.routes.ocr import router as ocr_router
+from backend.routes.projects import router as projects_router
 from backend.routes.research import router as research_router
 from backend.routes.study import router as study_router
-from config import DIRECTORY_CHAT_UPLOADS, DIRECTORY_OUTPUT_MINERU, ensure_directories
+from config import DIRECTORY_CHAT_HISTORIES, DIRECTORY_CHAT_UPLOADS, DIRECTORY_OUTPUT_MINERU, ensure_directories
 
 ensure_directories()
 
@@ -68,10 +69,17 @@ app.include_router(models_router)
 app.include_router(morphic_router)
 app.include_router(mineru_router)
 app.include_router(ocr_router)
+app.include_router(projects_router)
 app.include_router(research_router)
 app.include_router(study_router)
 
 app.mount("/mineru/images", StaticFiles(directory=str(DIRECTORY_OUTPUT_MINERU / "images")), name="mineru_images")
 
+# Non-project uploads are still served from /chat-uploads for backward compatibility.
+# Project-scoped uploads are served from /chat-histories/<slug>/_uploads/ (mounted below).
 if DIRECTORY_CHAT_UPLOADS.exists():
     app.mount("/chat-uploads", StaticFiles(directory=str(DIRECTORY_CHAT_UPLOADS)), name="chat_uploads")
+
+# Mount chat_histories root for project uploads access.
+if DIRECTORY_CHAT_HISTORIES.exists():
+    app.mount("/chat-histories", StaticFiles(directory=str(DIRECTORY_CHAT_HISTORIES), html=False), name="chat_histories")

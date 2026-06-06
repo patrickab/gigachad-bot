@@ -1,8 +1,9 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { Sidebar } from "@/components/Sidebar"
 import { ChatContainer } from "@/components/ChatContainer"
+import { MAX_SIDEBAR_WIDTH } from "@/components/ChatSidebar"
 import { ModelSelector } from "@/components/ModelSelector"
 import { MoreOptionsMenu } from "@/components/MoreOptionsMenu"
 import { ReasoningSelector } from "@/components/ReasoningSelector"
@@ -10,22 +11,48 @@ import { ResearchModelsBar } from "@/components/ResearchModelsBar"
 import { ThemeToggle } from "@/components/ThemeToggle"
 import { OCRPanel } from "@/components/OCRPanel"
 import { SaveChatModal } from "@/components/SaveChatModal"
-import { TabManager } from "@/components/TabManager"
-import type { Tab } from "@/components/TabManager"
+import { TabManager, nextTab } from "@/components/TabManager"
+import type { Tab, TabManagerHandle } from "@/components/TabManager"
+import { ProjectDashboard } from "@/components/ProjectDashboard"
 import { useChat } from "@/hooks/useChat"
 import { useModeState, ModeProvider } from "@/hooks/useModeState"
 import { useSettings, SettingsProvider } from "@/contexts/SettingsContext"
+import { useProject, ProjectProvider } from "@/contexts/ProjectContext"
 import { handleStudyPdf, updateLastMsg as updateLastAssistant } from "@/hooks/useStudyHandler"
-import { saveChatHistory as apiSaveChatHistory, deleteChatUploads, parseFiles, deleteAttachment } from "@/lib/api"
+import {
+  saveChatHistory as apiSaveChatHistory,
+  deleteChatHistory as apiDeleteChatHistory,
+  loadChatHistory as apiLoadChatHistory,
+  deleteChatUploads,
+  parseFiles,
+  deleteAttachment,
+  saveProjectTab,
+  deleteProjectTab,
+  loadProjectTab,
+  renameChatHistory,
+} from "@/lib/api"
 import { DEFAULT_VISION_MODEL } from "@/lib/config"
 import type { Attachment, Message } from "@/lib/types"
 
-const MODE_LABELS: Record<string, string> = {
-  research: "Deep Research",
-  search: "Search",
-  ocr: "LaTeX OCR",
-  study: "PDF Study",
-  chat: "Chat",
+function shortIdFromChatId(chatId: string): string {
+  const cleaned = chatId.replace(/[^a-zA-Z0-9]/g, "")
+  return cleaned.slice(0, 12).toLowerCase() || "tab"
+}
+
+function buildHistoryFile(filename: string, slug: string | null): string {
+  return slug ? `${slug}/${filename}` : filename
+}
+
+function parseHistoryFile(historyFile: string): { slug: string | null; filename: string } {
+  const parts = historyFile.split("/")
+  if (parts.length > 1) {
+    return { slug: parts[0], filename: parts.slice(1).join("/") }
+  }
+  return { slug: null, filename: historyFile }
+}
+
+function untitledFilename(chatId: string): string {
+  return `untitled-${shortIdFromChatId(chatId)}.json`
 }
 
 function buildLLMMessage(text: string, attachments: Attachment[]): { userMsg: string; hiddenContent: string; imgBase64: string | null } {
@@ -68,7 +95,20 @@ function defaultSendParams(settings: ReturnType<typeof useSettings>, overrides: 
   }
 }
 
-function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: (label: string) => void; onChatSaved: (tabId: string, chatFilename: string) => void }) {
+function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleLoaded, sidebarCollapsed, onSidebarToggle, projectsOpen, onProjectsOpenChange, historiesOpen, onHistoriesOpenChange, activeProject }: {
+  tab: Tab
+  isActive: boolean
+  onModeLabel: (label: string) => void
+  onHistoryFileChanged: (tabId: string, historyFile: string) => void
+  onTitleLoaded: (tabId: string, title: string | null) => void
+  sidebarCollapsed: boolean
+  onSidebarToggle: () => void
+  projectsOpen: boolean
+  onProjectsOpenChange: (open: boolean) => void
+  historiesOpen: boolean
+  onHistoriesOpenChange: (open: boolean) => void
+  activeProject: string | null
+}) {
   const {
     messages,
     isStreaming,
@@ -101,18 +141,64 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
 
   const settings = useSettings()
 
-  const [collapsed, setCollapsed] = useState(true)
   const [ocrImage, setOCRImage] = useState<string | null>(null)
   const [chatId, setChatId] = useState(() => tab.chatId)
   const [saveModalOpen, setSaveModalOpen] = useState(false)
+  const loadedRef = useRef(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [measuredWidth, setMeasuredWidth] = useState(0)
+
+  useLayoutEffect(() => {
+    if (!isActive) return
+    const el = containerRef.current
+    if (!el) return
+    setMeasuredWidth(el.clientWidth)
+  }, [isActive])
+
+  const chatMaxWidth = measuredWidth > 0 ? Math.max(0, measuredWidth - MAX_SIDEBAR_WIDTH) : undefined
+
+  useEffect(() => {
+    if (!tab.historyFile || loadedRef.current) return
+    loadedRef.current = true
+    const { slug, filename } = parseHistoryFile(tab.historyFile)
+    const loader = slug && activeProject
+      ? loadProjectTab(slug, filename)
+      : apiLoadChatHistory(tab.historyFile)
+    loader.then((data) => {
+      if (data.messages.length > 0) setMessages(data.messages)
+      if (data.chat_id) setChatId(data.chat_id)
+      if (data.title) onTitleLoaded(tab.id, data.title)
+    }).catch(() => {})
+  }, [tab.historyFile, activeProject, setMessages, onTitleLoaded])
+
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (messages.length === 0) return
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
+    autoSaveTimerRef.current = setTimeout(() => {
+      const filename = tab.historyFile
+        ? parseHistoryFile(tab.historyFile).filename
+        : untitledFilename(chatId)
+      const historyFile = buildHistoryFile(filename, activeProject)
+      if (historyFile !== tab.historyFile) {
+        onHistoryFileChanged(tab.id, historyFile)
+      }
+      const title = tab.title ?? undefined
+      if (activeProject) {
+        saveProjectTab(activeProject, filename, messages, chatId, tab.name ?? undefined, title).catch(() => {})
+      } else {
+        apiSaveChatHistory(filename, messages, chatId, title).catch(() => {})
+      }
+    }, 2000)
+    return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current) }
+  }, [messages, activeProject, tab.historyFile, tab.name, tab.title, chatId, tab.id, onHistoryFileChanged])
 
   const handleHistoryLoad = useCallback(async (filename: string) => {
     const result = await loadHistory(filename)
     if (result.chat_id) {
       setChatId(result.chat_id)
-      onChatSaved(tab.id, filename)
     }
-  }, [loadHistory, tab.id, onChatSaved])
+  }, [loadHistory])
 
   useEffect(() => {
     if (researchEnabled) onModeLabel("Deep Research")
@@ -127,12 +213,36 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
   }, [])
 
   const handleSaveSubmit = useCallback(async (name: string) => {
-    const filename = name + ".json"
-    onChatSaved(tab.id, filename)
-    await apiSaveChatHistory(filename, messages, chatId)
+    const newFilename = name + ".json"
+    const oldHistoryFile = tab.historyFile
+    const oldUntitled = oldHistoryFile
+      ? parseHistoryFile(oldHistoryFile).filename
+      : null
+    const wasUntitled = oldUntitled?.startsWith("untitled-") ?? false
+
+    if (activeProject) {
+      const targetFilename = newFilename
+      try {
+        await saveProjectTab(activeProject, targetFilename, messages, chatId, tab.name ?? undefined, name)
+        if (wasUntitled && oldUntitled) await deleteProjectTab(activeProject, oldUntitled)
+      } catch {}
+      onHistoryFileChanged(tab.id, buildHistoryFile(targetFilename, activeProject))
+    } else {
+      let resultPath = newFilename
+      try {
+        if (wasUntitled && oldHistoryFile) {
+          const result = await renameChatHistory(oldHistoryFile, name)
+          resultPath = result.new_path
+          apiSaveChatHistory(result.filename, messages, chatId, name).catch(() => {})
+        } else {
+          await apiSaveChatHistory(newFilename, messages, chatId, name)
+        }
+      } catch {}
+      onHistoryFileChanged(tab.id, resultPath)
+    }
     refreshHistories()
     setSaveModalOpen(false)
-  }, [messages, chatId, tab.id, refreshHistories, onChatSaved])
+  }, [messages, chatId, tab.id, tab.name, tab.historyFile, tab.title, activeProject, refreshHistories, onHistoryFileChanged])
 
   useEffect(() => {
     function handler(e: KeyboardEvent) {
@@ -149,14 +259,12 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
         if (attachments.length > 0) return
       }
 
-      // Study mode with PDF attachment
       if (studyEnabled && attachments.some(a => a.mime === "application/pdf")) {
         await handleStudyPdf(text, attachments, chatId, settings.selectedModel, setMessages)
         toggleStudy()
         return
       }
 
-      // Attachments (non-study)
       if (attachments.length > 0) {
         setMessages(prev => [
           ...prev,
@@ -169,7 +277,7 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
 
         if (pdfNames.length > 0) {
           try {
-            const parsed = await parseFiles(chatId, pdfNames)
+            const parsed = await parseFiles(chatId, pdfNames, activeProject)
             enriched = attachments.map(a => {
               if (a.mime !== "application/pdf") return a
               const p = parsed.find(r => r.name === a.name)
@@ -206,7 +314,6 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
         return
       }
 
-      // Mode dispatch (no attachments)
       if (morphicSearchEnabled) {
         morphicSearch({ query: text, searchDepth: settings.searchDepth, model: settings.selectedModel || undefined })
       } else if (researchEnabled) {
@@ -218,7 +325,7 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
         send({ ...defaultSendParams(settings), user_msg: text })
       }
     },
-    [morphicSearchEnabled, researchEnabled, studyEnabled, chatId, settings, send, research, morphicSearch, setMessages, toggleStudy],
+    [morphicSearchEnabled, researchEnabled, studyEnabled, chatId, activeProject, settings, send, research, morphicSearch, setMessages, toggleStudy],
   )
 
   const handleRemoveAttachment = useCallback((messageIndex: number, attachmentName: string) => {
@@ -226,12 +333,12 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
       const copy = [...prev]
       if (copy[messageIndex] && copy[messageIndex].attachments) {
         const att = copy[messageIndex].attachments!.find(a => a.name === attachmentName)
-        if (att) deleteAttachment(chatId, attachmentName).catch(() => { })
+        if (att) deleteAttachment(chatId, attachmentName, activeProject).catch(() => { })
         copy[messageIndex] = { ...copy[messageIndex], attachments: copy[messageIndex].attachments!.filter(a => a.name !== attachmentName) }
       }
       return copy
     })
-  }, [setMessages, chatId])
+  }, [setMessages, chatId, activeProject])
 
   const handleAttachmentContentChange = useCallback((messageIndex: number, attachmentName: string, newContent: string) => {
     setMessages(prev => {
@@ -248,16 +355,20 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
   }, [setMessages])
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div ref={containerRef} className="flex h-full overflow-hidden">
       <Sidebar
-        collapsed={collapsed}
-        onToggle={() => setCollapsed(!collapsed)}
+        collapsed={sidebarCollapsed}
+        onToggle={onSidebarToggle}
         histories={histories}
         historiesLoading={historiesLoading}
         onHistoryLoad={handleHistoryLoad}
         onHistoryRefresh={refreshHistories}
         onSave={openSaveModal}
         onReset={reset}
+        projectsOpen={projectsOpen}
+        onProjectsOpenChange={onProjectsOpenChange}
+        historiesOpen={historiesOpen}
+        onHistoriesOpenChange={onHistoriesOpenChange}
       />
       <main className="flex-1 min-w-0 flex flex-col relative bg-zinc-950">
         <header className="h-[60px] shrink-0 flex items-center px-4 gap-4 bg-zinc-950 z-40 border-b border-zinc-800/50">
@@ -297,6 +408,8 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
             onOCRRequest={setOCRImage}
             onRemoveAttachment={handleRemoveAttachment}
             onAttachmentContentChange={handleAttachmentContentChange}
+            slug={activeProject}
+            chatMaxWidth={chatMaxWidth}
           />
           {ocrEnabled && ocrImage && (
             <OCRPanel
@@ -313,29 +426,96 @@ function TabContent({ tab, onModeLabel, onChatSaved }: { tab: Tab; onModeLabel: 
   )
 }
 
-export default function Home() {
-  const tabChatFilenames = useRef<Map<string, string | null>>(new Map())
+function AppContent() {
+  const tabManagerRef = useRef<TabManagerHandle>(null)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
+  const [projectsOpen, setProjectsOpen] = useState(true)
+  const [historiesOpen, setHistoriesOpen] = useState(false)
+  const { activeProject, projectData, dashboardOpen, syncTabs } = useProject()
 
-  const handleChatSaved = useCallback((tabId: string, chatFilename: string) => {
-    tabChatFilenames.current.set(tabId, chatFilename)
+  const handleHistoryFileChanged = useCallback((tabId: string, historyFile: string) => {
+    tabManagerRef.current?.updateTabHistoryFile(tabId, historyFile)
+  }, [])
+
+  const handleTitleLoaded = useCallback((tabId: string, title: string | null) => {
+    tabManagerRef.current?.updateTabTitle(tabId, title)
   }, [])
 
   const handleTabClose = useCallback((tab: Tab) => {
-    const filename = tabChatFilenames.current.get(tab.id)
-    if (!filename) deleteChatUploads(tab.chatId).catch(() => { })
-    tabChatFilenames.current.delete(tab.id)
-  }, [])
+    if (tab.historyFile && !tab.title) {
+      const { slug, filename } = parseHistoryFile(tab.historyFile)
+      if (slug && activeProject) {
+        deleteProjectTab(slug, filename).catch(() => {})
+      } else {
+        apiDeleteChatHistory(tab.historyFile).catch(() => {})
+        deleteChatUploads(tab.chatId, null).catch(() => {})
+      }
+    } else if (tab.historyFile && tab.title) {
+      deleteChatUploads(tab.chatId, activeProject).catch(() => {})
+    }
+  }, [activeProject])
+
+  const handleTabsChange = useCallback((tabs: Tab[]) => {
+    if (!activeProject) return
+    syncTabs(
+      tabs.map((t) => ({ id: t.id, name: t.name, historyFile: t.historyFile, title: t.title, chatId: t.chatId })),
+      (tabId, historyFile) => {
+        tabManagerRef.current?.updateTabHistoryFile(tabId, historyFile)
+      },
+    ).catch(() => {})
+  }, [activeProject, syncTabs])
+
+  const loadedProjectRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (activeProject === loadedProjectRef.current) return
+    loadedProjectRef.current = activeProject
+
+    if (!activeProject || !projectData) {
+      tabManagerRef.current?.initTabs([nextTab()])
+    } else {
+      const newTabs: Tab[] = projectData.tabs.map((t) =>
+        nextTab(t.name, `${activeProject}/${t.filename}`, t.title)
+      )
+      if (newTabs.length === 0) newTabs.push(nextTab())
+      tabManagerRef.current?.initTabs(newTabs)
+    }
+  }, [activeProject, projectData])
 
   return (
-    <SettingsProvider>
+    <ModeProvider>
       <TabManager
+        ref={tabManagerRef}
         onCloseTab={handleTabClose}
-        renderContent={(tab, onModeLabel) => (
-          <ModeProvider>
-            <TabContent tab={tab} onModeLabel={onModeLabel} onChatSaved={handleChatSaved} />
-          </ModeProvider>
+        onTabsChange={handleTabsChange}
+        renderContent={(tab, onModeLabel, isActive) => (
+          <TabContent
+            tab={tab}
+            isActive={isActive}
+            onModeLabel={onModeLabel}
+            onHistoryFileChanged={handleHistoryFileChanged}
+            onTitleLoaded={handleTitleLoaded}
+            sidebarCollapsed={sidebarCollapsed}
+            onSidebarToggle={() => setSidebarCollapsed((c) => !c)}
+            projectsOpen={projectsOpen}
+            onProjectsOpenChange={setProjectsOpen}
+            historiesOpen={historiesOpen}
+            onHistoriesOpenChange={setHistoriesOpen}
+            activeProject={activeProject}
+          />
         )}
       />
+      {dashboardOpen && <ProjectDashboard />}
+    </ModeProvider>
+  )
+}
+
+export default function Home() {
+  return (
+    <SettingsProvider>
+      <ProjectProvider>
+        <AppContent />
+      </ProjectProvider>
     </SettingsProvider>
   )
 }

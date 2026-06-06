@@ -84,7 +84,6 @@ export function ChatSidebar({ elements, width, onWidthChange }: ChatSidebarProps
         {elements.map((el) => (
           <ExpandableSidebarElement
             key={el.id}
-            id={el.id}
             icon={el.icon}
             title={el.title}
             badge={el.badge}

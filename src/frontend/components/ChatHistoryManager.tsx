@@ -1,12 +1,14 @@
 "use client"
 
-import { Archive, Clock, Folder, Loader2, RotateCcw, Save, Trash2, X } from "lucide-react"
-import { useState, useEffect, useRef } from "react"
+import { Archive, Clock, Folder, Loader2, Trash2 } from "lucide-react"
+import { useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { archiveChatHistory, deleteChatHistory, loadChatHistory, saveChatHistory } from "@/lib/api"
-import { cn } from "@/lib/utils"
-import { SidebarElement } from "./SidebarElement"
+import { archiveChatHistory, deleteChatHistory, loadChatHistory } from "@/lib/api"
+import { useSafeAction } from "@/hooks/useSafeAction"
+import { SidebarElement, ChevronToggle } from "./SidebarElement"
 import { Skeleton } from "./Skeleton"
+
+const pathOf = (dir: string, filename: string) => dir === "root" ? filename : `${dir}/${filename}`
 
 interface ChatHistoryManagerProps {
   histories: Record<string, string[]>
@@ -14,70 +16,49 @@ interface ChatHistoryManagerProps {
   onLoad: (filename: string) => void
   onRefresh: () => void
   collapsed?: boolean
+  open: boolean
+  onOpenChange: (open: boolean) => void
   onExpand?: () => void
 }
 
-export function ChatHistoryManager({ histories, historiesLoading, onLoad, onRefresh, collapsed, onExpand }: ChatHistoryManagerProps) {
-  const [open, setOpen] = useState(false)
+export function ChatHistoryManager({ histories, historiesLoading, onLoad, onRefresh, collapsed, open, onOpenChange, onExpand }: ChatHistoryManagerProps) {
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set())
   const [loadingFile, setLoadingFile] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const { run, error } = useSafeAction()
 
   const dirs = Object.entries(histories)
   const totalFiles = dirs.reduce((sum, [, files]) => sum + files.length, 0)
 
-  async function handleLoad(filename: string, dir: string) {
-    const path = dir === "root" ? filename : `${dir}/${filename}`
+  const handleLoad = (filename: string, dir: string) => {
+    const path = pathOf(dir, filename)
     setLoadingFile(path)
-    setError(null)
-    try {
+    return run("load history", async () => {
       await loadChatHistory(path)
       onLoad(path)
-    } catch (e) {
-      setError((e as Error).message || "Failed to load history")
-    } finally {
-      setLoadingFile(null)
-    }
+    }).finally(() => setLoadingFile(null))
   }
 
-  async function handleDelete(filename: string, dir: string) {
-    const path = dir === "root" ? filename : `${dir}/${filename}`
-    setError(null)
-    try {
-      await deleteChatHistory(path)
-      onRefresh()
-    } catch (e) {
-      setError((e as Error).message || "Failed to delete history")
-    }
-  }
+  const handleDelete = (filename: string, dir: string) =>
+    run("delete history", async () => { await deleteChatHistory(pathOf(dir, filename)); onRefresh() })
 
-  async function handleArchive(filename: string, dir: string) {
-    const path = dir === "root" ? filename : `${dir}/${filename}`
-    setError(null)
-    try {
-      await archiveChatHistory(path)
-      onRefresh()
-    } catch (e) {
-      setError((e as Error).message || "Failed to archive history")
-    }
-  }
+  const handleArchive = (filename: string, dir: string) =>
+    run("archive history", async () => { await archiveChatHistory(pathOf(dir, filename)); onRefresh() })
 
   return (
     <div className="space-y-1 w-full">
       {collapsed ? (
-        <SidebarElement
-          id="histories-collapsed"
-          icon={Clock}
-          title="Histories"
+          <SidebarElement
+            icon={Clock}
+            title="Histories"
           collapsed={true}
           onClick={() => {
             if (onExpand) onExpand()
-            setOpen(true)
+            onOpenChange(true)
           }}
         />
       ) : (
         <button
-          onClick={() => setOpen(!open)}
+            onClick={() => onOpenChange(!open)}
           className="flex w-full items-center justify-between p-2 rounded-md transition-colors text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
         >
           <span className="flex items-center gap-3">
@@ -87,11 +68,7 @@ export function ChatHistoryManager({ histories, historiesLoading, onLoad, onRefr
               <span className="rounded-full bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500">{totalFiles}</span>
             )}
           </span>
-          <motion.span animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.2 }}>
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="text-zinc-500">
-              <path d="M4 2L8 6L4 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-          </motion.span>
+          <ChevronToggle open={open} />
         </button>
       )}
 
@@ -119,8 +96,7 @@ export function ChatHistoryManager({ histories, historiesLoading, onLoad, onRefr
                         onClick={() =>
                           setExpandedDirs((prev) => {
                             const next = new Set(prev)
-                            if (next.has(dir)) next.delete(dir)
-                            else next.add(dir)
+                            next.has(dir) ? next.delete(dir) : next.add(dir)
                             return next
                           })
                         }
@@ -132,7 +108,7 @@ export function ChatHistoryManager({ histories, historiesLoading, onLoad, onRefr
                       <AnimatePresence>
                         {expandedDirs.has(dir) &&
                           files.map((file) => {
-                            const path = dir === "root" ? file : `${dir}/${file}`
+                            const path = pathOf(dir, file)
                             return (
                               <motion.div
                                 key={path}
@@ -170,9 +146,9 @@ export function ChatHistoryManager({ histories, historiesLoading, onLoad, onRefr
                     </div>
                   ))}
                   {error && (
-            <p className="px-2 py-1 text-[11px] text-red-400">{error}</p>
-          )}
-          {dirs.length === 0 && (
+                    <p className="px-2 py-1 text-[11px] text-red-400">{error}</p>
+                  )}
+                  {dirs.length === 0 && (
                     <p className="px-2 py-2 text-[11px] text-zinc-600">No saved chats.</p>
                   )}
                 </>

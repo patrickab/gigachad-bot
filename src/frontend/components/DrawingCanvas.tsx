@@ -37,9 +37,10 @@ interface DrawingCanvasProps {
   chatId: string
   onConfirm: (attachment: Attachment) => void
   onClose: () => void
+  slug?: string | null
 }
 
-export function DrawingCanvas({ chatId, onConfirm, onClose }: DrawingCanvasProps) {
+export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: DrawingCanvasProps) {
   const [strokes, setStrokes] = useState<StrokeData[]>([])
   const [currentPoints, setCurrentPoints] = useState<number[][]>([])
   const [isDrawing, setIsDrawing] = useState(false)
@@ -85,7 +86,7 @@ export function DrawingCanvas({ chatId, onConfirm, onClose }: DrawingCanvasProps
   const getPointerPos = useCallback(
     (e: React.PointerEvent<SVGSVGElement>) => {
       const svg = svgRef.current
-      if (!svg) return [0, 0, 0.5] as number[]
+      if (!svg) return [0, 0, 0.5]
       const rect = svg.getBoundingClientRect()
       const x = e.clientX - rect.left
       const y = e.clientY - rect.top
@@ -177,14 +178,14 @@ export function DrawingCanvas({ chatId, onConfirm, onClose }: DrawingCanvasProps
       const blob = await renderStrokesToJpeg(strokes, width, height)
       const timestamp = Date.now()
       const file = new File([blob], `drawing-${timestamp}.jpg`, { type: "image/jpeg" })
-      const att = await apiUploadFile(chatId, file)
+      const att = await apiUploadFile(chatId, file, slug)
       onConfirm(att)
     } catch {
       // silently fail
     } finally {
       setIsExporting(false)
     }
-  }, [strokes, chatId, onConfirm])
+  }, [strokes, chatId, slug, onConfirm])
 
   const currentStrokeOutline =
     currentPoints.length >= 2

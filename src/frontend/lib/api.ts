@@ -1,11 +1,22 @@
-import type { Attachment, ChatHistoriesResponse, ChatRequest, Message, MineruBatchResponse, MineruResult, ModelsResponse, ResearchRequest, ResearchTrace, ResearchTraceSummary, StudyProcessRequest, StudyProcessResponse } from "./types"
+import type { Attachment, ChatHistoriesResponse, ChatRequest, KanbanCard, Message, ModelsResponse, ProjectData, ProjectListItem, ProjectStateUpdate, ResearchRequest, StudyProcessRequest, StudyProcessResponse } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
-import { API_BASE, DEFAULT_TEMPERATURE, DEFAULT_TOP_P, DEFAULT_DOWNSCALE_IMAGES, IMAGE_DOWNSCALE_MAX } from "./config"
+import { API_BASE, DEFAULT_TEMPERATURE, DEFAULT_TOP_P, DEFAULT_DOWNSCALE_IMAGES } from "./config"
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, options)
-  if (!res.ok) throw new Error(await res.text())
+  if (!res.ok) {
+    let message = res.statusText
+    try {
+      const body = await res.json()
+      if (body && typeof body === "object" && "detail" in body) {
+        message = String(body.detail)
+      }
+    } catch {
+      // not json, use status text
+    }
+    throw new Error(message)
+  }
   return res.json()
 }
 
@@ -51,20 +62,28 @@ export async function listChatHistories(): Promise<ChatHistoriesResponse> {
   return request<ChatHistoriesResponse>("/chat-histories")
 }
 
-export async function loadChatHistory(filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null }> {
+export async function loadChatHistory(filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null; title: string | null }> {
   return request(`/chat-histories/${filename}`)
 }
 
-export async function saveChatHistory(filename: string, messages: Message[] = [], chatId?: string): Promise<{ status: string; filename: string }> {
+export async function saveChatHistory(filename: string, messages: Message[] = [], chatId?: string, title?: string): Promise<{ status: string; filename: string }> {
   return request(`/chat-histories/${filename}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, chat_id: chatId ?? null }),
+    body: JSON.stringify({ messages, chat_id: chatId ?? null, title: title ?? null }),
   })
 }
 
 export async function deleteChatHistory(filename: string): Promise<void> {
   await request(`/chat-histories/${filename}`, { method: "DELETE" })
+}
+
+export async function renameChatHistory(oldPath: string, newTitle: string): Promise<{ status: string; new_path: string; filename: string }> {
+  return request(`/chat-histories/rename`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ old_path: oldPath, new_title: newTitle }),
+  })
 }
 
 export async function archiveChatHistory(filename: string): Promise<void> {
@@ -84,23 +103,6 @@ export function createResearchStream(req: ResearchRequest): SSEStreamResult {
   })
 }
 
-export async function listResearchTraces(): Promise<{ traces: ResearchTraceSummary[] }> {
-  return request("/research-traces")
-}
-
-export async function getResearchTrace(runId: string): Promise<ResearchTrace> {
-  return request(`/research-traces/${runId}`)
-}
-
-export async function downscaleImage(imgBase64: string, maxTokens: number = IMAGE_DOWNSCALE_MAX): Promise<string> {
-  const data = await request<{ img_base64: string }>("/downscale-image", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ img_base64: imgBase64, max_tokens: maxTokens }),
-  })
-  return data.img_base64
-}
-
 export function createOCRStream(
   imgBase64: string,
   model: string
@@ -108,44 +110,38 @@ export function createOCRStream(
   return createSSEStream("/ocr", { img_base64: imgBase64, model })
 }
 
-export async function parsePdf(file: File, query = "", backend = "pipeline", model = ""): Promise<MineruResult> {
-  const form = new FormData()
-  form.append("file", file)
-  if (query) form.append("query", query)
-  if (backend !== "pipeline") form.append("backend", backend)
-  if (model) form.append("model", model)
-  const res = await fetch(`${API_BASE}/mineru/parse`, { method: "POST", body: form })
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
-}
-
-export async function parsePdfs(files: File[], query = "", backend = "pipeline", model = ""): Promise<MineruBatchResponse> {
-  const form = new FormData()
-  for (const file of files) form.append("files", file)
-  if (query) form.append("query", query)
-  if (backend !== "pipeline") form.append("backend", backend)
-  if (model) form.append("model", model)
-  const res = await fetch(`${API_BASE}/mineru/parse-batch`, { method: "POST", body: form })
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
-}
-
 function _apiOrigin(): string {
   const url = new URL(API_BASE)
   return url.origin
 }
 
-export function chatFileUrl(chatId: string, filename: string): string {
-  return `${_apiOrigin()}/chat-uploads/${chatId}/${encodeURIComponent(filename)}`
+function _uploadsPath(chatId: string, slug: string | null): string {
+  const safe = encodeURIComponent(chatId)
+  if (slug) return `/chat-histories/${encodeURIComponent(slug)}/_uploads/${safe}`
+  return `/chat-uploads/${safe}`
 }
 
-export async function uploadFile(chatId: string, file: File): Promise<Attachment> {
+export function uploadsBase(chatId: string, slug: string | null): string {
+  return `${_apiOrigin()}${_uploadsPath(chatId, slug)}`
+}
+
+export function rewriteImages(content: string, chatId: string, slug: string | null): string {
+  return content.replace(/\(images\/([^)]+)\)/g, `(${uploadsBase(chatId, slug)}/images/$1)`)
+}
+
+export function chatFileUrl(chatId: string, filename: string, slug: string | null = null): string {
+  return `${uploadsBase(chatId, slug)}/${encodeURIComponent(filename)}`
+}
+
+export async function uploadFile(chatId: string, file: File, slug: string | null = null): Promise<Attachment> {
   const form = new FormData()
   form.append("file", file)
-  const res = await fetch(`${API_BASE}/files/upload?chat_id=${encodeURIComponent(chatId)}`, { method: "POST", body: form })
+  const params = new URLSearchParams({ chat_id: chatId })
+  if (slug) params.set("slug", slug)
+  const res = await fetch(`${API_BASE}/files/upload?${params}`, { method: "POST", body: form })
   if (!res.ok) throw new Error(await res.text())
   const data = await res.json()
-  return { ...data, url: chatFileUrl(chatId, data.name) }
+  return { ...data, url: chatFileUrl(chatId, data.name, slug) }
 }
 
 export interface ParsedAttachment {
@@ -153,19 +149,23 @@ export interface ParsedAttachment {
   parsedMd: string | null
 }
 
-export async function parseFiles(chatId: string, filenames: string[]): Promise<ParsedAttachment[]> {
-  const params = filenames.map(f => `filenames=${encodeURIComponent(f)}`).join("&")
-  const res = await fetch(`${API_BASE}/files/parse?chat_id=${encodeURIComponent(chatId)}&${params}`, { method: "POST" })
+export async function parseFiles(chatId: string, filenames: string[], slug: string | null = null): Promise<ParsedAttachment[]> {
+  const params = new URLSearchParams({ chat_id: chatId })
+  for (const f of filenames) params.append("filenames", f)
+  if (slug) params.set("slug", slug)
+  const res = await fetch(`${API_BASE}/files/parse?${params}`, { method: "POST" })
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
 
-export async function deleteAttachment(chatId: string, filename: string): Promise<void> {
-  await request(`/files/chat/${chatId}/att/${encodeURIComponent(filename)}`, { method: "DELETE" })
+export async function deleteAttachment(chatId: string, filename: string, slug: string | null = null): Promise<void> {
+  const params = slug ? `?slug=${encodeURIComponent(slug)}` : ""
+  await request(`/files/chat/${chatId}/att/${encodeURIComponent(filename)}${params}`, { method: "DELETE" })
 }
 
-export async function deleteChatUploads(chatId: string): Promise<void> {
-  await request(`/files/chat/${chatId}`, { method: "DELETE" })
+export async function deleteChatUploads(chatId: string, slug: string | null = null): Promise<void> {
+  const params = slug ? `?slug=${encodeURIComponent(slug)}` : ""
+  await request(`/files/chat/${chatId}${params}`, { method: "DELETE" })
 }
 
 export async function processStudyPdf(req: StudyProcessRequest): Promise<StudyProcessResponse> {
@@ -174,4 +174,77 @@ export async function processStudyPdf(req: StudyProcessRequest): Promise<StudyPr
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(req),
   })
+}
+
+export async function listProjects(): Promise<ProjectListItem[]> {
+  const data = await request<{ projects: ProjectListItem[] }>("/projects")
+  return data.projects
+}
+
+export async function loadProject(name: string): Promise<ProjectData> {
+  return request<ProjectData>(`/projects/${encodeURIComponent(name)}`)
+}
+
+export async function createProject(name: string): Promise<ProjectData> {
+  return request<ProjectData>("/projects", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  })
+}
+
+export async function deleteProject(name: string): Promise<void> {
+  await request(`/projects/${encodeURIComponent(name)}`, { method: "DELETE" })
+}
+
+export async function updateProjectKanban(name: string, data: ProjectStateUpdate): Promise<ProjectData> {
+  return request<ProjectData>(`/projects/${encodeURIComponent(name)}/state`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  })
+}
+
+export async function addProjectCard(name: string, title: string, description: string = "", state: string = "backlog"): Promise<KanbanCard> {
+  return request<KanbanCard>(`/projects/${encodeURIComponent(name)}/cards`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title, description, state }),
+  })
+}
+
+export async function moveProjectCard(name: string, cardId: string, state: string): Promise<KanbanCard> {
+  return request<KanbanCard>(`/projects/${encodeURIComponent(name)}/cards/${cardId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ state }),
+  })
+}
+
+export async function updateProjectCard(name: string, cardId: string, title?: string, description?: string): Promise<KanbanCard> {
+  return request<KanbanCard>(`/projects/${encodeURIComponent(name)}/cards/${cardId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title, ...(description !== undefined ? { description } : {}) }),
+  })
+}
+
+export async function deleteProjectCard(name: string, cardId: string): Promise<void> {
+  await request(`/projects/${encodeURIComponent(name)}/cards/${cardId}`, { method: "DELETE" })
+}
+
+export async function saveProjectTab(name: string, filename: string, messages: Message[], chatId?: string, tabName?: string, title?: string): Promise<{ status: string }> {
+  return request(`/projects/${encodeURIComponent(name)}/tabs/${encodeURIComponent(filename)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename, messages, chat_id: chatId ?? null, tab_name: tabName ?? null, title: title ?? null }),
+  })
+}
+
+export async function deleteProjectTab(name: string, filename: string): Promise<void> {
+  await request(`/projects/${encodeURIComponent(name)}/tabs/${encodeURIComponent(filename)}`, { method: "DELETE" })
+}
+
+export async function loadProjectTab(name: string, filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null; title: string | null }> {
+  return request(`/chat-histories/${encodeURIComponent(name)}/${encodeURIComponent(filename)}`)
 }

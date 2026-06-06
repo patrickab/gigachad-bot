@@ -18,7 +18,6 @@ function Collapse({ open, children }: { open: boolean; children: ReactNode }) {
 }
 
 export interface ExpandableSidebarElementProps {
-  id: string
   icon: ElementType
   title: string
   badge?: ReactNode

@@ -8,7 +8,7 @@ import tempfile
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
-from config import DIRECTORY_CHAT_HISTORIES, DIRECTORY_CHAT_UPLOADS
+from config import DIRECTORY_CHAT_HISTORIES, chat_upload_dir, uploads_dir_for
 
 from backend.routes.mineru import should_cancel
 
@@ -28,8 +28,8 @@ class ParsedAttachment(BaseModel):
     parsedMd: str | None = None
 
 
-def delete_chat_upload_dir(chat_id: str) -> None:
-    path = DIRECTORY_CHAT_UPLOADS / chat_id
+def delete_chat_upload_dir(chat_id: str, slug: str | None = None) -> None:
+    path = chat_upload_dir(chat_id, slug)
     if path.exists():
         shutil.rmtree(path)
 
@@ -62,11 +62,12 @@ def _classify_mime(mime: str) -> str:
 async def upload_file(
     file: UploadFile = File(...),
     chat_id: str = Query(...),
+    slug: str | None = Query(default=None),
 ):
     if not file.filename:
         raise HTTPException(status_code=400, detail="Missing filename")
 
-    chat_dir = DIRECTORY_CHAT_UPLOADS / chat_id
+    chat_dir = chat_upload_dir(chat_id, slug)
     chat_dir.mkdir(parents=True, exist_ok=True)
 
     deduped = _dedup_name(chat_dir, file.filename)
@@ -92,8 +93,9 @@ async def upload_file(
 async def parse_attachments(
     filenames: list[str] = Query(...),
     chat_id: str = Query(...),
+    slug: str | None = Query(default=None),
 ):
-    chat_dir = DIRECTORY_CHAT_UPLOADS / chat_id
+    chat_dir = chat_upload_dir(chat_id, slug)
     if not chat_dir.exists():
         raise HTTPException(status_code=404, detail="Chat upload directory not found")
 
@@ -131,14 +133,14 @@ async def parse_attachments(
 
 
 @router.delete("/chat/{chat_id}")
-async def delete_chat_files(chat_id: str):
-    delete_chat_upload_dir(chat_id)
+async def delete_chat_files(chat_id: str, slug: str | None = Query(default=None)):
+    delete_chat_upload_dir(chat_id, slug)
     return {"status": "ok"}
 
 
 @router.delete("/chat/{chat_id}/att/{filename:path}")
-async def delete_single_file(chat_id: str, filename: str):
-    path = DIRECTORY_CHAT_UPLOADS / chat_id / filename
+async def delete_single_file(chat_id: str, filename: str, slug: str | None = Query(default=None)):
+    path = chat_upload_dir(chat_id, slug) / filename
     if not path.exists():
         raise HTTPException(status_code=404, detail="File not found")
     path.unlink()
@@ -147,7 +149,7 @@ async def delete_single_file(chat_id: str, filename: str):
 
 @router.post("/gc")
 async def gc_orphan_uploads():
-    known_chat_ids: set[str] = set()
+    known_chat_ids: set[tuple[str | None, str]] = set()
     if DIRECTORY_CHAT_HISTORIES.exists():
         for f in DIRECTORY_CHAT_HISTORIES.rglob("*.json"):
             if "archived" in f.parts:
@@ -155,14 +157,31 @@ async def gc_orphan_uploads():
             try:
                 data = json.loads(f.read_text(encoding="utf-8"))
                 if isinstance(data, dict) and data.get("chat_id"):
-                    known_chat_ids.add(data["chat_id"])
+                    rel = f.relative_to(DIRECTORY_CHAT_HISTORIES)
+                    slug = rel.parts[0] if len(rel.parts) > 1 else None
+                    if slug in ("_uploads", "projects-meta.json"):
+                        continue
+                    if slug and not (DIRECTORY_CHAT_HISTORIES / slug).is_dir():
+                        slug = None
+                    known_chat_ids.add((slug, data["chat_id"]))
             except Exception:
                 continue
 
     cleaned = 0
-    if DIRECTORY_CHAT_UPLOADS.exists():
-        for d in DIRECTORY_CHAT_UPLOADS.iterdir():
-            if d.is_dir() and d.name not in known_chat_ids:
+    for uploads_root in [uploads_dir_for(None)] + [
+        DIRECTORY_CHAT_HISTORIES / slug / "_uploads"
+        for slug_dir in (DIRECTORY_CHAT_HISTORIES.iterdir() if DIRECTORY_CHAT_HISTORIES.exists() else [])
+        if slug_dir.is_dir() and (slug_dir / "_uploads").is_dir()
+        for slug in [slug_dir.name]
+    ]:
+        if not uploads_root.exists():
+            continue
+        slug = None
+        rel = uploads_root.relative_to(DIRECTORY_CHAT_HISTORIES)
+        if len(rel.parts) > 1 and rel.parts[0] not in ("_uploads",):
+            slug = rel.parts[0]
+        for d in uploads_root.iterdir():
+            if d.is_dir() and (slug, d.name) not in known_chat_ids:
                 shutil.rmtree(d)
                 cleaned += 1
 

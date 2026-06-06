@@ -4,16 +4,11 @@ import { useState } from "react"
 import { FileText, Image as ImageIcon, Globe, X, ChevronDown, ChevronRight } from "lucide-react"
 import dynamic from "next/dynamic"
 import type { Attachment, MorphicSearchResult } from "@/lib/types"
-import { API_BASE } from "@/lib/config"
+import { rewriteImages } from "@/lib/api"
 import { LaTeXMarkdown } from "@/components/LaTeXMarkdown"
 import type { ChatSidebarElementConfig } from "@/components/ChatSidebar"
 
 const PdfViewer = dynamic(() => import("./PdfViewer").then((m) => ({ default: m.PdfViewer })), { ssr: false })
-
-function rewriteImages(content: string, chatId: string): string {
-  const origin = new URL(API_BASE).origin
-  return content.replace(/\(images\/([^)]+)\)/g, `(${origin}/chat-uploads/${chatId}/images/$1)`)
-}
 
 function AttachmentIcon({ mime }: { mime: string }) {
   if (mime.startsWith("image/")) return <ImageIcon className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
@@ -21,7 +16,7 @@ function AttachmentIcon({ mime }: { mime: string }) {
   return <FileText className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
 }
 
-function AttachmentViewer({ attachment, chatId, onContentChange }: { attachment: Attachment; chatId: string; onContentChange?: (newContent: string) => void }) {
+function AttachmentViewer({ attachment, chatId, slug, onContentChange }: { attachment: Attachment; chatId: string; slug: string | null; onContentChange?: (newContent: string) => void }) {
   if (attachment.mime.startsWith("image/")) {
     return (
       <div className="p-2">
@@ -32,12 +27,12 @@ function AttachmentViewer({ attachment, chatId, onContentChange }: { attachment:
 
   if (attachment.mime === "application/pdf") {
     const parsedContent = attachment.parsedMd
-    return <PdfAttachmentViewer url={attachment.url} parsedContent={parsedContent} chatId={chatId} />
+    return <PdfAttachmentViewer url={attachment.url} parsedContent={parsedContent} chatId={chatId} slug={slug} />
   }
 
   const content = attachment.parsedMd ?? attachment.content
   if (content) {
-    const rewritten = rewriteImages(content, chatId)
+    const rewritten = rewriteImages(content, chatId, slug)
     return (
       <div className="p-2 max-h-[500px] overflow-y-auto">
         <LaTeXMarkdown content={rewritten} onContentChange={onContentChange} />
@@ -48,7 +43,7 @@ function AttachmentViewer({ attachment, chatId, onContentChange }: { attachment:
   return <p className="p-2 text-xs text-zinc-500">No preview available</p>
 }
 
-function PdfAttachmentViewer({ url, parsedContent, chatId }: { url: string; parsedContent?: string; chatId: string }) {
+function PdfAttachmentViewer({ url, parsedContent, chatId, slug }: { url: string; parsedContent?: string; chatId: string; slug: string | null }) {
   const [mdOpen, setMdOpen] = useState(false)
   return (
     <div className="flex flex-col h-full">
@@ -66,7 +61,7 @@ function PdfAttachmentViewer({ url, parsedContent, chatId }: { url: string; pars
           </button>
           {mdOpen && (
             <div className="p-2 max-h-[40vh] overflow-y-auto border-t border-zinc-800">
-              <LaTeXMarkdown content={rewriteImages(parsedContent, chatId)} />
+              <LaTeXMarkdown content={rewriteImages(parsedContent, chatId, slug)} />
             </div>
           )}
         </div>
@@ -77,6 +72,7 @@ function PdfAttachmentViewer({ url, parsedContent, chatId }: { url: string; pars
 
 function ContextBody({
   chatId,
+  slug,
   allAttachments,
   expandedEntries,
   onToggleAttachment,
@@ -84,6 +80,7 @@ function ContextBody({
   onAttachmentContentChange,
 }: {
   chatId: string
+  slug: string | null
   allAttachments: { messageIndex: number; attachment: Attachment }[]
   expandedEntries: { messageIndex: number; attachmentName: string }[]
   onToggleAttachment: (messageIndex: number, attachmentName: string) => void
@@ -126,7 +123,7 @@ function ContextBody({
             </div>
             {expanded && (
               <div className="max-h-[60vh] overflow-y-auto">
-                <AttachmentViewer attachment={att} chatId={chatId} onContentChange={onAttachmentContentChange ? (nc: string) => onAttachmentContentChange(mi, att.name, nc) : undefined} />
+                <AttachmentViewer attachment={att} chatId={chatId} slug={slug} onContentChange={onAttachmentContentChange ? (nc: string) => onAttachmentContentChange(mi, att.name, nc) : undefined} />
               </div>
             )}
           </div>
@@ -194,6 +191,7 @@ function SourcesBody({ result }: { result: MorphicSearchResult }) {
 
 export interface ChatSidebarConfig {
   chatId: string
+  slug: string | null
   allAttachments: { messageIndex: number; attachment: Attachment }[]
   expandedEntries: { messageIndex: number; attachmentName: string }[]
   onToggleAttachment: (messageIndex: number, attachmentName: string) => void
@@ -206,6 +204,7 @@ export interface ChatSidebarConfig {
 
 export const getChatSidebarConfig = ({
   chatId,
+  slug,
   allAttachments,
   expandedEntries,
   onToggleAttachment,
@@ -228,6 +227,7 @@ export const getChatSidebarConfig = ({
         body: (
           <ContextBody
             chatId={chatId}
+            slug={slug}
             allAttachments={allAttachments}
             expandedEntries={expandedEntries}
             onToggleAttachment={onToggleAttachment}

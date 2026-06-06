@@ -9,8 +9,6 @@ export const DEFAULT_DOWNSCALE_IMAGES = true
 export const DEFAULT_VISION_MODEL = "ollama/qwen3-vl:235b-instruct-cloud"
 export const DEFAULT_MODEL = "ollama/gemma4:31b-cloud"
 
-export const IMAGE_DOWNSCALE_MAX = 2048
-
 export const STORAGE_KEY_THEME = "theme"
 
 export const CHROME_UNIT_PX = 60

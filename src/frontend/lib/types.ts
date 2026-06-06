@@ -69,12 +69,6 @@ export interface ResearchParams {
   reportType: string
 }
 
-export interface ResearchResult {
-  report: string
-  sources: string[]
-  costs: number
-}
-
 export interface ResearchTraceStep {
   step: string
   event_type: string
@@ -92,25 +86,6 @@ export interface ResearchTraceProgress {
   total_queries: number
 }
 
-export interface ResearchTrace {
-  run_id: string
-  query: string
-  started_at: number
-  finished_at: number | null
-  duration_s: number | null
-  steps: ResearchTraceStep[]
-  progress: ResearchTraceProgress | null
-}
-
-export interface ResearchTraceSummary {
-  run_id: string
-  query: string
-  started_at: number
-  finished_at: number | null
-  duration_s: number | null
-  step_count: number
-}
-
 export interface MorphicSearchParams {
   query: string
   searchDepth: "quick" | "adaptive"
@@ -124,23 +99,6 @@ export interface MorphicSearchResult {
   citationMap?: Record<string, MorphicResultItem>
 }
 
-export interface OCRRequest {
-  img_base64: string
-  model: string
-}
-
-export interface MineruResult {
-  filename: string
-  output_dir: string
-  markdown_content: string
-  answer: string | null
-  query: string | null
-}
-
-export interface MineruBatchResponse {
-  results: MineruResult[]
-}
-
 export interface StudyProcessRequest {
   markdown: string
   filename: string
@@ -152,4 +110,36 @@ export interface StudyProcessResponse {
   topics: { label: string }[]
   overview: string
   article: string
+}
+
+export type KanbanColumnId = "backlog" | "doing" | "done"
+
+export interface KanbanCard {
+  id: string
+  title: string
+  description: string
+  state: KanbanColumnId
+}
+
+export interface ProjectData {
+  name: string
+  slug: string
+  kanban: KanbanCard[]
+  tabs: ProjectTab[]
+}
+
+export interface ProjectStateUpdate {
+  kanban: KanbanCard[]
+  tabs: ProjectTab[]
+}
+
+export interface ProjectTab {
+  filename: string
+  name: string | null
+  title: string | null
+}
+
+export interface ProjectListItem {
+  name: string
+  slug: string
 }

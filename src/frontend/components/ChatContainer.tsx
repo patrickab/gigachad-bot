@@ -1,11 +1,11 @@
 "use client"
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence } from "framer-motion"
 import type { Message, Attachment } from "@/lib/types"
 import { ChatMessage } from "./ChatMessage"
 import { ChatInput } from "./ChatInput"
-import { ChatSidebar, MAX_SIDEBAR_WIDTH } from "./ChatSidebar"
+import { ChatSidebar } from "./ChatSidebar"
 import { getChatSidebarConfig } from "./chatSidebarConfig"
 import { ChevronLeft, ChevronRight, User } from "lucide-react"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
@@ -22,6 +22,8 @@ interface ChatContainerProps {
   onCancel: () => void
   onDeletePair: (index: number) => void
   className?: string
+  slug?: string | null
+  chatMaxWidth?: number
   onOCRRequest?: (image: string) => void
   onRemoveAttachment?: (messageIndex: number, attachmentName: string) => void
   onAttachmentContentChange?: (messageIndex: number, attachmentName: string, newContent: string) => void
@@ -35,6 +37,8 @@ export function ChatContainer({
   onCancel,
   onDeletePair,
   className,
+  slug = null,
+  chatMaxWidth,
   onOCRRequest,
   onRemoveAttachment,
   onAttachmentContentChange,
@@ -204,6 +208,7 @@ export function ChatContainer({
     () =>
       getChatSidebarConfig({
         chatId,
+        slug,
         allAttachments,
         expandedEntries,
         onToggleAttachment: handleToggleExpand,
@@ -220,21 +225,12 @@ export function ChatContainer({
           })
         },
       }),
-    [chatId, allAttachments, expandedEntries, handleToggleExpand, handleRemoveAttachment, onAttachmentContentChange, lastMorphicResult, openElements]
+    [chatId, slug, allAttachments, expandedEntries, handleToggleExpand, handleRemoveAttachment, onAttachmentContentChange, lastMorphicResult, openElements]
   )
 
   const hasSidebarContent = sidebarElements.length > 0
-  const containerRef = useRef<HTMLDivElement>(null)
   const inputAreaRef = useRef<HTMLDivElement>(null)
-  const [measuredWidth, setMeasuredWidth] = useState(0)
   const [inputAreaHeight, setInputAreaHeight] = useState(0)
-  const chatMaxWidth = measuredWidth > 0 ? Math.max(0, measuredWidth - MAX_SIDEBAR_WIDTH) : undefined
-
-  useLayoutEffect(() => {
-    const el = containerRef.current
-    if (!el) return
-    setMeasuredWidth(el.clientWidth)
-  }, [])
 
   useEffect(() => {
     const el = inputAreaRef.current
@@ -255,7 +251,7 @@ export function ChatContainer({
   }, [hasSidebarContent])
 
   return (
-    <div ref={containerRef} className={cn("flex h-full relative", className)}>
+    <div className={cn("flex h-full relative", className)}>
       <div className="flex-1 min-w-0 flex flex-col relative">
         <div ref={scrollContainerRef} className="flex-1 overflow-y-auto" style={{ paddingBottom: inputAreaHeight + BOTTOM_GAP_PX }}>
           <div className="mx-auto" style={{ maxWidth: chatMaxWidth || undefined }}>
@@ -361,25 +357,16 @@ export function ChatContainer({
               disabled={isStreaming}
               isStreaming={isStreaming}
               onCancel={onCancel}
+              slug={slug}
             />
             </div>
           </div>
         </div>
-        {hasSidebarContent && !contextOpen && (
+        {hasSidebarContent && (
           <button
-            onClick={() => setContextOpen(true)}
-            title="Open sidebar"
-            aria-label="Open sidebar"
-            className="absolute right-0 top-3 z-30 flex items-center justify-center h-12 w-4 rounded-l-md border border-r-0 border-zinc-700 bg-zinc-800/80 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100 hover:w-5 transition-all shadow-sm"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-        )}
-        {hasSidebarContent && contextOpen && (
-          <button
-            onClick={() => setContextOpen(false)}
-            title="Collapse sidebar"
-            aria-label="Collapse sidebar"
+            onClick={() => setContextOpen((c) => !c)}
+            title={contextOpen ? "Collapse sidebar" : "Open sidebar"}
+            aria-label={contextOpen ? "Collapse sidebar" : "Open sidebar"}
             className="absolute right-0 top-3 z-30 flex items-center justify-center h-12 w-4 rounded-l-md border border-r-0 border-zinc-700 bg-zinc-800/80 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100 hover:w-5 transition-all shadow-sm"
           >
             <ChevronLeft className="h-4 w-4" />

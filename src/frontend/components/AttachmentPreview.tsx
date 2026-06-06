@@ -7,16 +7,11 @@ import { X } from "lucide-react"
 import dynamic from "next/dynamic"
 import { LaTeXMarkdown } from "@/components/LaTeXMarkdown"
 import type { Attachment } from "@/lib/types"
-import { API_BASE } from "@/lib/config"
+import { rewriteImages } from "@/lib/api"
 
 const PdfViewer = dynamic(() => import("./PdfViewer").then((m) => ({ default: m.PdfViewer })), { ssr: false })
 
-function rewriteImages(content: string, chatId: string): string {
-  const origin = new URL(API_BASE).origin
-  return content.replace(/\(images\/([^)]+)\)/g, `(${origin}/chat-uploads/${chatId}/images/$1)`)
-}
-
-function PreviewContent({ attachment, chatId }: { attachment: Attachment; chatId: string }) {
+function PreviewContent({ attachment, chatId, slug }: { attachment: Attachment; chatId: string; slug: string | null }) {
   if (attachment.mime.startsWith("image/")) {
     return (
       <div className="flex items-center justify-center p-6 overflow-auto max-h-[80vh]">
@@ -35,7 +30,7 @@ function PreviewContent({ attachment, chatId }: { attachment: Attachment; chatId
 
   const content = attachment.parsedMd ?? attachment.content
   if (content) {
-    const rewritten = rewriteImages(content, chatId)
+    const rewritten = rewriteImages(content, chatId, slug)
     return (
       <div className="flex-1 min-h-0 overflow-y-auto p-6">
         <div className="max-w-3xl mx-auto">
@@ -55,10 +50,11 @@ function PreviewContent({ attachment, chatId }: { attachment: Attachment; chatId
 interface AttachmentPreviewProps {
   attachment: Attachment | null
   chatId: string
+  slug?: string | null
   onClose: () => void
 }
 
-export function AttachmentPreview({ attachment, chatId, onClose }: AttachmentPreviewProps) {
+export function AttachmentPreview({ attachment, chatId, slug = null, onClose }: AttachmentPreviewProps) {
   useEffect(() => {
     if (!attachment) return
     function handler(e: KeyboardEvent) {
@@ -101,7 +97,7 @@ export function AttachmentPreview({ attachment, chatId, onClose }: AttachmentPre
               <X className="h-4 w-4" />
             </button>
           </div>
-          <PreviewContent attachment={attachment} chatId={chatId} />
+          <PreviewContent attachment={attachment} chatId={chatId} slug={slug} />
         </motion.div>
       </motion.div>
     </AnimatePresence>,

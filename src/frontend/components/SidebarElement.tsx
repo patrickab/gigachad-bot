@@ -1,7 +1,7 @@
 import { ElementType } from "react"
+import { motion } from "framer-motion"
 
 interface SidebarElementProps {
-  id: string
   icon: ElementType
   title?: string
   onClick: () => void
@@ -11,7 +11,6 @@ interface SidebarElementProps {
 }
 
 export function SidebarElement({
-  id,
   icon: Icon,
   title,
   onClick,
@@ -36,3 +35,14 @@ export function SidebarElement({
     </button>
   )
 }
+
+export function ChevronToggle({ open }: { open: boolean }) {
+  return (
+    <motion.span animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.2 }}>
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="text-zinc-500">
+        <path d="M4 2L8 6L4 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+    </motion.span>
+  )
+}
+

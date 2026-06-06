@@ -1,10 +1,12 @@
 "use client"
 
 import { motion } from "framer-motion"
+import { LayoutDashboard } from "lucide-react"
 import { ChatHistoryManager } from "./ChatHistoryManager"
+import { ProjectManager } from "./ProjectManager"
 import { SidebarElement } from "./SidebarElement"
 import { getSidebarConfig } from "@/lib/sidebarConfig"
-import { CHROME_UNIT_PX } from "@/lib/config"
+import { useProject } from "@/contexts/ProjectContext"
 
 const COLLAPSED_WIDTH = 50
 const EXPANDED_WIDTH = 280
@@ -18,6 +20,10 @@ interface SidebarProps {
   onHistoryRefresh: () => void
   onSave: () => void
   onReset: () => void
+  projectsOpen: boolean
+  onProjectsOpenChange: (open: boolean) => void
+  historiesOpen: boolean
+  onHistoriesOpenChange: (open: boolean) => void
 }
 
 export function Sidebar({
@@ -29,7 +35,15 @@ export function Sidebar({
   onHistoryRefresh,
   onSave,
   onReset,
+  projectsOpen,
+  onProjectsOpenChange,
+  historiesOpen,
+  onHistoriesOpenChange,
 }: SidebarProps) {
+  const { activeProject, setDashboardOpen } = useProject()
+
+  const expandIfCollapsed = () => { if (collapsed) onToggle() }
+
   const sidebarItems = getSidebarConfig({
     onToggleCollapse: onToggle,
     onSave,
@@ -64,17 +78,38 @@ export function Sidebar({
 
       <div className="flex-1 overflow-y-auto py-3 flex flex-col gap-2">
         <div className="px-2">
+          <ProjectManager
+            collapsed={collapsed}
+            open={projectsOpen}
+            onOpenChange={onProjectsOpenChange}
+            onExpand={expandIfCollapsed}
+          />
+        </div>
+
+        <div className="px-2">
           <ChatHistoryManager
             histories={histories}
             historiesLoading={historiesLoading}
             onLoad={onHistoryLoad}
             onRefresh={onHistoryRefresh}
             collapsed={collapsed}
-            onExpand={() => {
-              if (collapsed) onToggle()
-            }}
+            open={historiesOpen}
+            onOpenChange={onHistoriesOpenChange}
+            onExpand={expandIfCollapsed}
           />
         </div>
+
+        {activeProject && (
+          <div className="px-2">
+            <SidebarElement
+              icon={LayoutDashboard}
+              title="Dashboard"
+              collapsed={collapsed}
+              onClick={() => setDashboardOpen(true)}
+              isActive={false}
+            />
+          </div>
+        )}
 
         <div className="px-2 flex flex-col gap-1">
           {mainItems.map((item) => (

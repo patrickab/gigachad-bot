@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react"
 import { Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -8,32 +8,76 @@ export interface Tab {
   id: string
   name: string | null
   chatId: string
+  historyFile: string | null
+  title: string | null
+}
+
+interface TabManagerProps {
+  renderContent: (tab: Tab, onModeLabel: (label: string) => void, isActive: boolean) => React.ReactNode
+  onCloseTab?: (tab: Tab) => void
+  onTabsChange?: (tabs: Tab[]) => void
+  ref?: React.Ref<TabManagerHandle>
+}
+
+export interface TabManagerHandle {
+  initTabs: (tabs: Tab[]) => void
+  switchToTab: (tabId: string) => void
+  addTabWithName: (name: string | null, historyFile: string | null) => string
+  getTabs: () => Tab[]
+  updateTabHistoryFile: (tabId: string, historyFile: string) => void
+  updateTabTitle: (tabId: string, title: string | null) => void
 }
 
 let tabIdCounter = 0
 
-function nextTab(): Tab {
-  return { id: `tab-${++tabIdCounter}`, name: null, chatId: crypto.randomUUID() }
-}
-
-interface TabManagerProps {
-  renderContent: (tab: Tab, onModeLabel: (label: string) => void) => React.ReactNode
-  onCloseTab?: (tab: Tab) => void
+export function nextTab(name: string | null = null, historyFile: string | null = null, title: string | null = null): Tab {
+  return { id: `tab-${++tabIdCounter}`, name, chatId: crypto.randomUUID(), historyFile, title }
 }
 
 const INITIAL_TAB: Tab = nextTab()
 
-export function TabManager({ renderContent, onCloseTab }: TabManagerProps) {
+export function TabManager({ renderContent, onCloseTab, onTabsChange, ref }: TabManagerProps) {
   const [tabs, setTabs] = useState<Tab[]>([INITIAL_TAB])
   const [activeTab, setActiveTab] = useState(INITIAL_TAB.id)
   const [editingTab, setEditingTab] = useState<string | null>(null)
   const [modeLabels, setModeLabels] = useState<Record<string, string>>({})
   const [customNames, setCustomNames] = useState<Record<string, string | null>>({})
   const inputRef = useRef<HTMLInputElement>(null)
+  const initInProgressRef = useRef(false)
+
+  useImperativeHandle(ref, () => ({
+    initTabs: (newTabs: Tab[]) => {
+      initInProgressRef.current = true
+      setTabs(newTabs)
+      if (newTabs.length > 0) setActiveTab(newTabs[0].id)
+    },
+    switchToTab: (tabId: string) => setActiveTab(tabId),
+    addTabWithName: (name: string | null, historyFile: string | null) => {
+      const tab = nextTab(name, historyFile)
+      setTabs((prev) => [...prev, tab])
+      setActiveTab(tab.id)
+      return tab.id
+    },
+    getTabs: () => tabs,
+    updateTabHistoryFile: (tabId: string, historyFile: string) => {
+      setTabs((prev) => prev.map((t) => t.id === tabId ? { ...t, historyFile } : t))
+    },
+    updateTabTitle: (tabId: string, title: string | null) => {
+      setTabs((prev) => prev.map((t) => t.id === tabId ? { ...t, title } : t))
+    },
+  }), [tabs])
 
   useEffect(() => {
     if (editingTab) inputRef.current?.focus()
   }, [editingTab])
+
+  useEffect(() => {
+    if (initInProgressRef.current) {
+      initInProgressRef.current = false
+      return
+    }
+    onTabsChange?.(tabs)
+  }, [tabs, onTabsChange])
 
   const addTab = useCallback(() => {
     const tab = nextTab()
@@ -203,14 +247,15 @@ export function TabManager({ renderContent, onCloseTab }: TabManagerProps) {
       </div>
       <div className="flex-1 min-h-0 overflow-hidden relative">
         {tabs.map((tab) => {
+          const isActive = tab.id === activeTab
           const hook = (label: string) => updateModeLabel(tab.id, label)
           return (
             <div
               key={tab.id}
               className="h-full"
-              style={{ display: tab.id === activeTab ? undefined : "none" }}
+              style={{ display: isActive ? undefined : "none" }}
             >
-              {renderContent(tab, hook)}
+              {renderContent(tab, hook, isActive)}
             </div>
           )
         })}

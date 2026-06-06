@@ -23,6 +23,7 @@ interface ChatInputProps {
   disabled?: boolean
   isStreaming?: boolean
   onCancel?: () => void
+  slug?: string | null
 }
 
 function fileIcon(mime: string) {
@@ -38,6 +39,7 @@ export function ChatInput({
   disabled,
   isStreaming,
   onCancel,
+  slug = null,
 }: ChatInputProps) {
   const { researchEnabled, morphicSearchEnabled, ocrEnabled, studyEnabled, toggleResearch, toggleMorphicSearch, toggleOCR, toggleStudy } = useModeState()
   const { ocrModel } = useSettings()
@@ -113,14 +115,14 @@ export function ChatInput({
         if (!blob) continue
         const name = blob.name || `pasted-image.${item.type.split("/")[1] || "png"}`
         setUploadingNames(prev => new Set(prev).add(name))
-        apiUploadFile(chatId, blob)
+        apiUploadFile(chatId, blob, slug)
           .then(att => setAttachments(prev => [...prev, att]))
           .catch(() => {})
           .finally(() => setUploadingNames(prev => { const n = new Set(prev); n.delete(name); return n }))
         break
       }
     }
-  }, [chatId])
+  }, [chatId, slug])
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(e.target.files ?? [])
@@ -128,13 +130,13 @@ export function ChatInput({
     for (const file of selected) {
       const name = file.name
       setUploadingNames(prev => new Set(prev).add(name))
-      apiUploadFile(chatId, file)
+      apiUploadFile(chatId, file, slug)
         .then(att => setAttachments(prev => [...prev, att]))
         .catch(() => {})
         .finally(() => setUploadingNames(prev => { const n = new Set(prev); n.delete(name); return n }))
     }
     e.target.value = ""
-  }, [chatId])
+  }, [chatId, slug])
 
   const toggleListening = useCallback(() => {
     if (isListening) { recognitionRef.current?.stop(); setIsListening(false); return }
@@ -397,7 +399,7 @@ export function ChatInput({
               const blob = new Blob([output], { type: "text/markdown" })
               const file = new File([blob], `drawing-ocr-${Date.now()}.md`, { type: "text/markdown" })
               try {
-                const att = await apiUploadFile(chatId, file)
+                const att = await apiUploadFile(chatId, file, slug)
                 setAttachments(prev => [...prev, att])
               } catch {}
             }}
@@ -406,7 +408,7 @@ export function ChatInput({
         </div>,
         document.body,
       )}
-      <AttachmentPreview attachment={previewAttachment} chatId={chatId} onClose={() => setPreviewAttachment(null)} />
+      <AttachmentPreview attachment={previewAttachment} chatId={chatId} slug={slug} onClose={() => setPreviewAttachment(null)} />
     </motion.div>
   )
 }
