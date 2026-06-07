@@ -1,5 +1,7 @@
 # A chatinterface for personal use.
 
+<img width="400" height="400" alt="image" src="https://github.com/user-attachments/assets/34727936-ddbd-44d7-b191-d57084b30984" />
+
 ## Core Features
 - Customizable library of system prompts for recurring tasks.
 - Unified access to 2100+ models from 100+ providers using [LiteLLM](https://models.litellm.ai/) 
