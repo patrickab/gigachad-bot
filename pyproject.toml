@@ -7,7 +7,7 @@ dependencies = [
     "fastapi>=0.136.3",
     "gpt-researcher>=0.15.1",
     "langchain-litellm>=0.6.0",
-    "langchain-ollama>=0.3.0",
+    "langchain-ollama>=1.1.0",
     "litellm>=1.87.0",
     "llm-baseclient @ git+https://github.com/patrickab/llm-baseclient.git@main",
     "mineru[all]>=3.2.2",
