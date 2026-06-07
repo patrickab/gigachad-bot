@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react"
-import type { ProjectData, ProjectListItem, ProjectStateUpdate, ProjectTab } from "@/lib/types"
+import type { ProjectData, ProjectListItem, ProjectStateUpdate, ProjectTab, KanbanCard, KanbanColumnId } from "@/lib/types"
 import {
   listProjects as apiListProjects,
   loadProject as apiLoadProject,
@@ -122,11 +122,39 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }, [runGuarded])
 
   const moveCard = useCallback(async (cardId: string, state: string) => {
-    const updated = await runGuarded((p) => apiMoveProjectCard(p, cardId, state))
-    if (updated) setProjectData((prev) => prev ? {
-      ...prev,
-      kanban: prev.kanban.map((c) => c.id === cardId ? updated : c),
-    } : prev)
+    const nextState = state as KanbanColumnId
+    let originalCard: KanbanCard | undefined = undefined
+
+    setProjectData((prev) => {
+      if (!prev) return prev
+      originalCard = prev.kanban.find((c) => c.id === cardId)
+      return {
+        ...prev,
+        kanban: prev.kanban.map((c) => c.id === cardId ? { ...c, state: nextState } : c),
+      }
+    })
+
+    try {
+      const updated = await runGuarded((p) => apiMoveProjectCard(p, cardId, state))
+      if (updated) {
+        setProjectData((prev) => prev ? {
+          ...prev,
+          kanban: prev.kanban.map((c) => c.id === cardId ? updated : c),
+        } : prev)
+      } else if (originalCard) {
+        setProjectData((prev) => prev ? {
+          ...prev,
+          kanban: prev.kanban.map((c) => c.id === cardId ? originalCard! : c),
+        } : prev)
+      }
+    } catch (err) {
+      if (originalCard) {
+        setProjectData((prev) => prev ? {
+          ...prev,
+          kanban: prev.kanban.map((c) => c.id === cardId ? originalCard! : c),
+        } : prev)
+      }
+    }
   }, [runGuarded])
 
   const deleteCard = useCallback(async (cardId: string) => {

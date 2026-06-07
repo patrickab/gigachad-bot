@@ -67,17 +67,17 @@ function ChatMessageInner({ role, content, index, onDelete, morphic_result, rese
     <motion.div
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.2 }}
+      transition={{ duration: 0.25 }}
       onClick={isUser && collapsibleUser ? onCollapse : undefined}
-      className={`flex gap-3 px-5 py-4 ${isUser && collapsibleUser ? "cursor-pointer" : ""}`}
+      className={`flex gap-3 px-6 py-5 ${isUser && collapsibleUser ? "cursor-pointer" : ""}`}
     >
       <div className="mt-0.5 shrink-0">
         {isUser ? (
-          <div className={`flex h-7 w-7 items-center justify-center rounded-full bg-zinc-800 ${isUser && collapsibleUser ? "hover:bg-zinc-700 transition-colors" : ""}`} title={collapsibleUser ? "Click to collapse" : undefined}>
+          <div className={`flex h-7 w-7 items-center justify-center rounded-xl bg-zinc-800 ${isUser && collapsibleUser ? "hover:bg-zinc-700 transition-colors" : ""}`} title={collapsibleUser ? "Click to collapse" : undefined}>
             <User className="h-3.5 w-3.5 text-zinc-400" />
           </div>
         ) : (
-          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-sky-600/20">
+          <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-sky-600/20">
             <Bot className="h-3.5 w-3.5 text-sky-400" />
           </div>
         )}

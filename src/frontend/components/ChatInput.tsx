@@ -253,7 +253,7 @@ export function ChatInput({
         </motion.div>
       )}
 
-      <div className="relative z-20 rounded-2xl border border-zinc-700/40 bg-zinc-900 p-4 transition-colors focus-within:border-zinc-600/50">
+      <div className="relative z-20 rounded-3xl border border-zinc-700/25 bg-zinc-900 p-4 transition-all duration-300 shadow-[0_8px_30px_rgba(0,0,0,0.05)] focus-within:shadow-[0_8px_30px_rgba(6,182,212,0.04)] focus-within:border-cyan-500/30">
           <textarea
             ref={textareaRef}
             rows={1}
@@ -356,8 +356,7 @@ export function ChatInput({
               {isStreaming ? (
                 <button
                   onClick={onCancel}
-                  className="rounded-full p-2.5 transition-all bg-zinc-50 text-zinc-950 hover:bg-zinc-200"
-                  title="Stop generating"
+                  className="rounded-full p-2.5 transition-all duration-300 bg-zinc-50 text-zinc-950 hover:bg-zinc-200"                  title="Stop generating"
                 >
                   <Square className="h-4 w-4 fill-current" />
                 </button>
@@ -366,7 +365,7 @@ export function ChatInput({
                   onClick={handleSubmit}
                   disabled={disabled || !canSend}
                   className={cn(
-                    "rounded-full p-2.5 transition-all",
+                    "rounded-full p-2.5 transition-all duration-300",
                     canSend && !disabled ? "bg-zinc-50 text-zinc-950 hover:bg-zinc-200" : "bg-zinc-800 text-zinc-500"
                   )}
                 >
