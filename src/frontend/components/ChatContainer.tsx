@@ -12,7 +12,7 @@ import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { cn } from "@/lib/utils"
 import { ElevationProvider, ElevatedContainer } from "./ElevatedContainer"
 
-const DEFAULT_EXPANDED_TAIL = 2
+const DEFAULT_EXPANDED_TAIL = 1
 const BOTTOM_GAP_PX = 16
 
 interface ChatContainerProps {
@@ -120,16 +120,19 @@ export function ChatContainer({
     }
   }, [messages])
 
-  const pairs: { user: Message; assistant: Message; globalIndex: number }[] = []
-  for (let i = 0; i < messages.length; i += 2) {
-    if (messages[i]?.role === "user") {
-      pairs.push({
-        user: messages[i],
-        assistant: messages[i + 1] ?? { role: "assistant", content: "" },
-        globalIndex: i,
-      })
+  const pairs = useMemo<{ user: Message; assistant: Message; globalIndex: number }[]>(() => {
+    const out: { user: Message; assistant: Message; globalIndex: number }[] = []
+    for (let i = 0; i < messages.length; i += 2) {
+      if (messages[i]?.role === "user") {
+        out.push({
+          user: messages[i],
+          assistant: messages[i + 1] ?? { role: "assistant", content: "" },
+          globalIndex: i,
+        })
+      }
     }
-  }
+    return out
+  }, [messages])
 
   const lastGlobalIndex = pairs.length > 0 ? pairs[pairs.length - 1].globalIndex : -1
   const tailStartGlobalIndex = pairs.length > DEFAULT_EXPANDED_TAIL
@@ -150,7 +153,7 @@ export function ChatContainer({
     return "(empty)"
   }
 
-  function isExpanded(idx: number): boolean {
+  function isExpandedNormal(idx: number): boolean {
     const override = manualOverrides.get(idx)
     if (override !== undefined) return override
     return idx >= tailStartGlobalIndex
@@ -166,8 +169,32 @@ export function ChatContainer({
   }
 
   const [hoveredPair, setHoveredPair] = useState<number | null>(null)
+  const [keyboardFocusIdx, setKeyboardFocusIdx] = useState<number | null>(null)
+  const collapsedRefs = useRef<Map<number, HTMLDivElement>>(new Map())
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const leaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const collapsedList = useMemo<number[]>(() => {
+    const gs: number[] = []
+    for (let i = 0; i < messages.length; i += 2) {
+      if (messages[i]?.role === "user" && !isExpandedNormal(i) && i !== lastGlobalIndex) {
+        gs.push(i)
+      }
+    }
+    return gs
+  }, [messages, lastGlobalIndex, manualOverrides])
+
+  const activeFocusedGlobalIndex =
+    keyboardFocusIdx !== null && keyboardFocusIdx >= 0 && keyboardFocusIdx < collapsedList.length
+      ? collapsedList[keyboardFocusIdx]
+      : null
+
+  function isExpanded(idx: number): boolean {
+    if (activeFocusedGlobalIndex !== null) {
+      if (idx === activeFocusedGlobalIndex - 2 || idx === activeFocusedGlobalIndex - 4) return false
+    }
+    return isExpandedNormal(idx)
+  }
 
   const handleSend = useCallback((text: string, attachments: Attachment[]) => {
     isPinnedToBottomRef.current = true
@@ -186,10 +213,7 @@ export function ChatContainer({
   }
 
   const handleMouseLeave = () => {
-    if (hoverTimeoutRef.current) {
-      clearTimeout(hoverTimeoutRef.current)
-      hoverTimeoutRef.current = null
-    }
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current)
     if (leaveTimeoutRef.current) clearTimeout(leaveTimeoutRef.current)
     leaveTimeoutRef.current = setTimeout(() => {
       setHoveredPair(null)
@@ -203,6 +227,65 @@ export function ChatContainer({
       if (leaveTimeoutRef.current) clearTimeout(leaveTimeoutRef.current)
     }
   }, [])
+
+  const navigateFocus = useCallback((key: "ArrowUp" | "ArrowDown") => {
+    if (collapsedList.length === 0) {
+      setKeyboardFocusIdx(null)
+      return
+    }
+    setKeyboardFocusIdx((cur) => {
+      const start = cur ?? (key === "ArrowDown" ? -1 : collapsedList.length)
+      return Math.max(0, Math.min(start + (key === "ArrowDown" ? 1 : -1), collapsedList.length - 1))
+    })
+  }, [collapsedList])
+
+  const confirmFocus = useCallback(() => {
+    if (keyboardFocusIdx === null || keyboardFocusIdx < 0 || keyboardFocusIdx >= collapsedList.length) return
+    togglePair(collapsedList[keyboardFocusIdx])
+    setKeyboardFocusIdx(null)
+  }, [keyboardFocusIdx, collapsedList, togglePair])
+
+  useEffect(() => {
+    const eat = (e: KeyboardEvent) => { e.preventDefault(); e.stopPropagation() }
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const ctrl = e.ctrlKey || e.metaKey
+      if (ctrl && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+        eat(e)
+        navigateFocus(e.key)
+        scrollContainerRef.current?.focus()
+      } else if (e.key === "Enter" && keyboardFocusIdx !== null) {
+        eat(e)
+        confirmFocus()
+      } else if (e.key === "Escape" && keyboardFocusIdx !== null) {
+        eat(e)
+        setKeyboardFocusIdx(null)
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown, true)
+    return () => window.removeEventListener("keydown", handleKeyDown, true)
+  }, [navigateFocus, confirmFocus, keyboardFocusIdx])
+
+  useEffect(() => {
+    if (keyboardFocusIdx === null) return
+    const container = scrollContainerRef.current
+    if (!container) return
+
+    const atTop = keyboardFocusIdx < 3
+    const targetIdx = atTop ? 0 : keyboardFocusIdx - 3
+    const targetGlobalIdx = collapsedList[targetIdx]
+    if (targetGlobalIdx === undefined) return
+    const el = collapsedRefs.current.get(targetGlobalIdx)
+    if (!el) return
+
+    const elRect = el.getBoundingClientRect()
+    const containerRect = container.getBoundingClientRect()
+    const offset = (atTop ? elRect.top : elRect.bottom) - containerRect.top
+
+    container.scrollTo({
+      top: container.scrollTop + offset,
+      behavior: "smooth"
+    })
+  }, [keyboardFocusIdx, collapsedList])
 
   const sidebarElements = useMemo(
     () =>
@@ -253,7 +336,12 @@ export function ChatContainer({
   return (
     <div className={cn("flex h-full relative", className)}>
       <div className="flex-1 min-w-0 flex flex-col relative">
-        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto text-ink" style={{ paddingBottom: inputAreaHeight + BOTTOM_GAP_PX }}>
+        <div
+          ref={scrollContainerRef}
+          tabIndex={-1}
+          className="flex-1 overflow-y-auto text-ink outline-none"
+          style={{ paddingBottom: inputAreaHeight + BOTTOM_GAP_PX }}
+        >
           <div className="mx-auto" style={{ maxWidth: chatMaxWidth || undefined }}>
 
           <ElevationProvider darkColor="var(--paper)" brightColor="var(--surface-elevated)" numLevels={3} startLevel={1}>
@@ -262,15 +350,25 @@ export function ChatContainer({
               const expanded = isExpanded(globalIndex)
               const isLast = globalIndex === lastGlobalIndex
               const qLabel = abbreviate(user.content, user)
-              const showPreview = hoveredPair === globalIndex
+              const showPreview = hoveredPair === globalIndex || activeFocusedGlobalIndex === globalIndex
               return (
                 <div key={globalIndex} className="group relative">
                   {!expanded && !isLast && (
                     <ElevatedContainer
+                      ref={(el) => {
+                        if (el) collapsedRefs.current.set(globalIndex, el)
+                        else collapsedRefs.current.delete(globalIndex)
+                      }}
                       onMouseEnter={() => handleMouseEnter(globalIndex)}
                       onMouseLeave={handleMouseLeave}
-                      onClick={() => togglePair(globalIndex)}
-                      className="mx-3 my-4 rounded-xl border border-divider/40 shadow-sm overflow-hidden cursor-pointer transition-all duration-300"
+                      onClick={() => {
+                        togglePair(globalIndex)
+                        setKeyboardFocusIdx(null)
+                      }}
+                      className={cn(
+                        "mx-3 my-4 rounded-xl border border-divider/40 shadow-sm overflow-hidden cursor-pointer transition-all duration-300",
+                        activeFocusedGlobalIndex === globalIndex && "ring-1 ring-ink-muted/50"
+                      )}
                     >
                       <div className="flex gap-3 px-5 py-4 items-start">
                         <div className="mt-0.5 shrink-0">
