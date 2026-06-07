@@ -1,4 +1,4 @@
-# Gigachad
+# GigaChat Bot
 
 A minimalist, local-first LLM web interface. Designed for focus and custom workflows.
 
