@@ -8,7 +8,7 @@ export function Skeleton({ className }: SkeletonProps) {
   return (
     <div
       className={cn(
-        "animate-shimmer rounded bg-gradient-to-r from-zinc-800 via-zinc-700 to-zinc-800",
+        "animate-shimmer rounded bg-gradient-to-r from-surface-elevated via-surface to-surface-elevated",
         className
       )}
     />

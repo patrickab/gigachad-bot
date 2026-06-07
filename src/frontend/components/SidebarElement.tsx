@@ -24,8 +24,8 @@ export function SidebarElement({
       title={collapsed ? title : undefined}
       className={`w-full flex items-center p-2 rounded-md transition-colors ${
         isActive
-          ? "bg-zinc-800 text-zinc-100"
-          : "text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
+          ? "bg-surface-elevated text-ink"
+          : "text-ink-muted hover:bg-surface-elevated/50 hover:text-ink"
       } ${collapsed ? "justify-center" : "justify-start gap-3"} ${className}`}
     >
       <Icon className="h-4 w-4 shrink-0" />
@@ -39,7 +39,7 @@ export function SidebarElement({
 export function ChevronToggle({ open }: { open: boolean }) {
   return (
     <motion.span animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.2 }}>
-      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="text-zinc-500">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="text-ink-subtle">
         <path d="M4 2L8 6L4 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
       </svg>
     </motion.span>

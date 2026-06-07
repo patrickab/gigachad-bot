@@ -72,18 +72,18 @@ export function Sidebar({
       initial={false}
       animate={{ width: collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH }}
       transition={{ duration: 0.25, ease: "easeInOut" }}
-      className="shrink-0 border-r border-zinc-800 bg-zinc-950 flex flex-col overflow-hidden"
+      className="shrink-0 border-r border-divider bg-paper flex flex-col overflow-hidden"
     >
-      <div className="flex items-center justify-between px-2 py-2 border-b border-zinc-800 h-[60px]">
+      <div className="flex items-center justify-between px-2 py-2 border-b border-divider h-[60px]">
         {!collapsed && (
-          <span className="text-sm font-semibold text-zinc-200 px-2">GigaChat Bot</span>
+          <span className="text-sm font-semibold text-ink px-2">GigaChat Bot</span>
         )}
         <div className={collapsed ? "flex justify-center w-full" : "flex justify-end"}>
           {toggleItem && (
             <SidebarElement
               {...toggleItem}
               collapsed={collapsed}
-              className="w-auto p-1.5 hover:bg-zinc-900"
+              className="w-auto p-1.5 hover:bg-surface"
             />
           )}
         </div>

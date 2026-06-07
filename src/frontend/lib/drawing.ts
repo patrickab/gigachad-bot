@@ -47,6 +47,7 @@ export function renderStrokesToJpeg(
   strokes: StrokeData[],
   width: number,
   height: number,
+  bgColor: string,
 ): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const canvas = document.createElement("canvas")
@@ -59,7 +60,7 @@ export function renderStrokesToJpeg(
       return
     }
     ctx.scale(scale, scale)
-    ctx.fillStyle = "#ffffff"
+    ctx.fillStyle = bgColor
     ctx.fillRect(0, 0, width, height)
 
     for (const stroke of strokes) {

@@ -28,11 +28,11 @@ interface ModelDropdownProps {
 
 const ACCENT_CLASSES = {
   sky: {
-    selected: "bg-sky-500/10 text-sky-400",
+    selected: "bg-surface-elevated text-ink",
     check: "h-4 w-4",
   },
   amber: {
-    selected: "bg-amber-500/10 text-amber-400",
+    selected: "bg-surface-elevated text-ink",
     check: "h-3.5 w-3.5",
   },
 } as const
@@ -72,13 +72,13 @@ export function ModelDropdown({
     <>
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 transition-colors"
+        className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium text-ink-muted hover:text-ink hover:bg-surface transition-colors"
       >
         <span>Model</span>
-        <ChevronDown className="h-3 w-3 text-zinc-500" />
+        <ChevronDown className="h-3 w-3 text-ink-subtle" />
       </button>
       {selectedModel && (
-        <span className="text-[10px] italic text-zinc-500 px-2 truncate max-w-[150px]">
+        <span className="text-[10px] italic text-ink-subtle px-2 truncate max-w-[150px]">
           {displayName(selectedModel)}
         </span>
       )}
@@ -96,11 +96,11 @@ export function ModelDropdown({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
             transition={{ duration: 0.15 }}
-            className="absolute left-0 top-full mt-1 w-72 rounded-xl border border-zinc-800 bg-zinc-900 shadow-2xl flex flex-col overflow-hidden"
+            className="absolute left-0 top-full mt-1 w-72 rounded-xl border border-divider bg-surface shadow-2xl flex flex-col overflow-hidden"
           >
-            <div className="p-1.5 border-b border-zinc-800 shrink-0 space-y-1.5">
+            <div className="p-1.5 border-b border-divider shrink-0 space-y-1.5">
               {extraTabs && extraTabs.length > 0 && (
-                <div className="flex rounded-lg bg-zinc-950 p-0.5">
+                <div className="flex rounded-lg bg-paper p-0.5">
                   {extraTabs.map((tab) => (
                     <button
                       key={tab.key}
@@ -108,8 +108,8 @@ export function ModelDropdown({
                       className={cn(
                         "flex-1 rounded-md px-2 py-1.5 text-xs font-medium capitalize transition-colors",
                         tab.key === activeExtraTab
-                          ? "bg-zinc-800 text-zinc-100 shadow-sm"
-                          : "text-zinc-500 hover:text-zinc-300"
+                          ? "bg-surface-elevated text-ink shadow-sm"
+                          : "text-ink-subtle hover:text-ink"
                       )}
                     >
                       {tab.label}
@@ -117,7 +117,7 @@ export function ModelDropdown({
                   ))}
                 </div>
               )}
-              <div className="flex rounded-lg bg-zinc-950 p-0.5">
+              <div className="flex rounded-lg bg-paper p-0.5">
                 {providers.map((p) => (
                   <button
                     key={p}
@@ -125,8 +125,8 @@ export function ModelDropdown({
                     className={cn(
                       "flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
                       p === activeTab
-                        ? "bg-zinc-800 text-zinc-100 shadow-sm"
-                        : "text-zinc-500 hover:text-zinc-300"
+                        ? "bg-surface-elevated text-ink shadow-sm"
+                        : "text-ink-subtle hover:text-ink"
                     )}
                   >
                     {p}
@@ -137,7 +137,7 @@ export function ModelDropdown({
 
             <div className="max-h-[50vh] overflow-y-auto p-1.5 space-y-0.5">
               {currentModels.length === 0 ? (
-                <div className="py-4 text-center text-xs text-zinc-500">No models available</div>
+                <div className="py-4 text-center text-xs text-ink-subtle">No models available</div>
               ) : (
                 currentModels.map((m) => (
                   <button
@@ -150,7 +150,7 @@ export function ModelDropdown({
                       "flex w-full items-center justify-between rounded-md px-2 py-2 text-sm transition-colors",
                       m === selectedModel
                         ? accentClasses.selected
-                        : "text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                        : "text-ink hover:bg-surface-elevated hover:text-ink"
                     )}
                   >
                     <span className="truncate">{displayName(m)}</span>

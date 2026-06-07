@@ -32,9 +32,9 @@ const STEP_ICONS: Record<string, React.ReactNode> = {
 }
 
 const TYPE_COLORS: Record<string, string> = {
-  research: "text-sky-400 bg-sky-400/10",
-  tool: "text-amber-400 bg-amber-400/10",
-  action: "text-violet-400 bg-violet-400/10",
+  research: "text-ink bg-surface-elevated",
+  tool: "text-ink bg-surface-elevated",
+  action: "text-ink bg-surface-elevated",
 }
 
 function stepIcon(step: string, eventType: string) {
@@ -44,7 +44,7 @@ function stepIcon(step: string, eventType: string) {
 }
 
 function stepColor(eventType: string) {
-  return TYPE_COLORS[eventType] || "text-zinc-400 bg-zinc-400/10"
+  return TYPE_COLORS[eventType] || "text-ink-muted bg-hover"
 }
 
 function formatTime(ts: number) {
@@ -70,37 +70,37 @@ function ResearchTraceInner({ steps = [], progress, traceId, isLive }: Props) {
   const isFinished = lastStep?.step === "report_completed" || lastStep?.step === "conclusion_completed" || lastStep?.step === "deep_research_complete"
 
   return (
-    <div className="mt-2 rounded-md border border-zinc-800 bg-zinc-900/60 overflow-hidden">
+    <div className="mt-2 rounded-md border border-divider bg-surface/60 overflow-hidden">
       <button
         onClick={() => setExpanded(e => !e)}
-        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-zinc-800/50 transition-colors text-left"
+        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-surface-elevated/50 transition-colors text-left"
       >
         {expanded ? (
-          <ChevronDown className="h-3.5 w-3.5 text-zinc-500 shrink-0" />
+          <ChevronDown className="h-3.5 w-3.5 text-ink-subtle shrink-0" />
         ) : (
-          <ChevronRight className="h-3.5 w-3.5 text-zinc-500 shrink-0" />
+          <ChevronRight className="h-3.5 w-3.5 text-ink-subtle shrink-0" />
         )}
-        <span className="text-[11px] font-medium text-zinc-400">
+        <span className="text-[11px] font-medium text-ink-muted">
           Research Trace
         </span>
-        <span className="text-[10px] text-zinc-600 ml-auto">
+        <span className="text-[10px] text-ink-faint ml-auto">
           {steps.length} step{steps.length !== 1 ? "s" : ""}
         </span>
         {progress && (
-          <span className="text-[10px] text-sky-400">
+          <span className="text-[10px] text-ink">
             {progress.completed_queries}/{progress.total_queries} queries
           </span>
         )}
         {isLive && !isFinished && (
-          <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-sky-400 ml-1" />
+          <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-ink ml-1" />
         )}
         {traceId && (
-          <span className="text-[9px] text-zinc-600 font-mono ml-1">#{traceId}</span>
+          <span className="text-[9px] text-ink-faint font-mono ml-1">#{traceId}</span>
         )}
       </button>
 
       {expanded && (
-        <div className="border-t border-zinc-800/50 max-h-80 overflow-y-auto">
+        <div className="border-t border-divider/50 max-h-80 overflow-y-auto">
           {steps.map((step, idx) => {
             const isOpen = expandedSteps.has(idx)
             const hasDetails = step.details && Object.keys(step.details).length > 0
@@ -111,21 +111,21 @@ function ResearchTraceInner({ steps = [], progress, traceId, isLive }: Props) {
               <div key={idx} className="group">
                 <button
                   onClick={() => hasDetails ? toggleStep(idx) : undefined}
-                  className={`w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-zinc-800/30 transition-colors ${hasDetails ? "cursor-pointer" : "cursor-default"}`}
+                  className={`w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-surface-elevated/30 transition-colors ${hasDetails ? "cursor-pointer" : "cursor-default"}`}
                 >
                   <div className="flex items-center gap-1.5 min-w-0 flex-1">
                     <div className={`shrink-0 flex items-center justify-center h-5 w-5 rounded ${colorClass}`}>
                       {stepIcon(step.step, step.event_type)}
                     </div>
-                    <span className="text-[11px] text-zinc-300 truncate flex-1">
+                    <span className="text-[11px] text-ink truncate flex-1">
                       {formatStepLabel(step.step, step.event_type)}
                     </span>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {hasDetails && (
-                      <ChevronDown className={`h-3 w-3 text-zinc-600 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                      <ChevronDown className={`h-3 w-3 text-ink-faint transition-transform ${isOpen ? "rotate-180" : ""}`} />
                     )}
-                    <span className="text-[9px] text-zinc-600 font-mono flex items-center gap-1">
+                    <span className="text-[9px] text-ink-faint font-mono flex items-center gap-1">
                       <Clock className="h-2.5 w-2.5" />
                       {formatTime(step.timestamp)}
                     </span>
@@ -133,13 +133,13 @@ function ResearchTraceInner({ steps = [], progress, traceId, isLive }: Props) {
                 </button>
                 {isOpen && hasDetails && (
                   <div className="px-3 pb-2 ml-7">
-                    <pre className="text-[9px] text-zinc-500 bg-zinc-950 rounded p-2 overflow-x-auto whitespace-pre-wrap break-all">
+                    <pre className="text-[9px] text-ink-subtle bg-paper rounded p-2 overflow-x-auto whitespace-pre-wrap break-all">
                       {JSON.stringify(step.details, null, 2)}
                     </pre>
                   </div>
                 )}
                 {!isLast && (
-                  <div className="ml-[1.375rem] h-px bg-zinc-800/50" />
+                  <div className="ml-[1.375rem] h-px bg-surface-elevated/50" />
                 )}
               </div>
             )

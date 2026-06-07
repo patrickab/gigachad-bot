@@ -66,14 +66,14 @@ function CodeBlock({ codeString, language }: { codeString: string; language: str
           dangerouslySetInnerHTML={{ __html: html }}
         />
       ) : (
-        <pre className="rounded-md p-4 m-0 text-[0.75rem] leading-[1.6] bg-zinc-900 text-zinc-300 overflow-x-auto"><code>{codeString}</code></pre>
+        <pre className="rounded-md p-4 m-0 text-[0.75rem] leading-[1.6] bg-surface text-ink overflow-x-auto"><code>{codeString}</code></pre>
       )}
       <button
         onClick={handleCopy}
-        className="absolute top-2 right-2 rounded p-1 opacity-0 transition-opacity group-hover/code:opacity-100 hover:bg-zinc-700/60 text-zinc-500 hover:text-zinc-300"
+        className="absolute top-2 right-2 rounded p-1 opacity-0 transition-opacity group-hover/code:opacity-100 hover:bg-surface-elevated/60 text-ink-subtle hover:text-ink"
         title="Copy code"
       >
-        {copied ? <Check className="h-3.5 w-3.5 text-cyan-400" /> : <Copy className="h-3.5 w-3.5" />}
+        {copied ? <Check className="h-3.5 w-3.5 text-ink" /> : <Copy className="h-3.5 w-3.5" />}
       </button>
     </div>
   )
@@ -110,7 +110,7 @@ function CitationPill({ node, children, href, title, ...props }: any) {
         rel="noopener noreferrer"
         onMouseEnter={handleEnter}
         onMouseLeave={handleLeave}
-        className="inline-flex items-center rounded-full bg-zinc-800/40 border border-zinc-700/40 px-1.5 py-0 text-[10px] text-zinc-400 hover:bg-zinc-700/50 hover:border-zinc-600/50 transition-colors no-underline"
+        className="inline-flex items-center rounded-full bg-surface-elevated/40 border border-divider-strong/40 px-1.5 py-0 text-[10px] text-ink-muted hover:bg-hover hover:border-divider-strong transition-colors no-underline"
       >
         {children}
       </a>
@@ -123,19 +123,19 @@ function CitationPill({ node, children, href, title, ...props }: any) {
             transition={{ duration: 0.15, ease: "easeOut" }}
             onMouseEnter={handleEnter}
             onMouseLeave={handleLeave}
-            className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 rounded-md border border-zinc-800 bg-zinc-900 p-2.5 shadow-xl z-50 block"
+            className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 rounded-md border border-divider bg-surface p-2.5 shadow-xl z-50 block"
           >
             <span className="flex items-center gap-1.5 mb-0.5">
-              <Globe className="h-2.5 w-2.5 text-sky-400 shrink-0" />
-              <span className="text-[10px] font-medium text-sky-400 truncate">{children}</span>
+              <Globe className="h-2.5 w-2.5 text-ink shrink-0" />
+              <span className="text-[10px] font-medium text-ink truncate">{children}</span>
             </span>
             {popupTitle && (
-              <span className="text-[10px] font-medium text-zinc-300 mb-0.5 line-clamp-2 block">{popupTitle}</span>
+              <span className="text-[10px] font-medium text-ink mb-0.5 line-clamp-2 block">{popupTitle}</span>
             )}
             {popupContent && (
-              <span className="text-[9px] text-zinc-500 line-clamp-3 block">{popupContent}</span>
+              <span className="text-[9px] text-ink-subtle line-clamp-3 block">{popupContent}</span>
             )}
-            <span className="absolute left-1/2 -translate-x-1/2 -bottom-1 w-2 h-2 rotate-45 bg-zinc-900 border-r border-b border-zinc-800 block" />
+            <span className="absolute left-1/2 -translate-x-1/2 -bottom-1 w-2 h-2 rotate-45 bg-surface border-r border-b border-divider block" />
           </motion.span>
         )}
       </AnimatePresence>
@@ -213,7 +213,7 @@ function LaTeXMarkdownInner({ content, citationMap, streaming, compact, onConten
         )
       }
       return (
-        <a href={href} title={title} className="text-sky-400 hover:text-sky-300 underline underline-offset-2" {...props}>
+        <a href={href} title={title} className="text-ink hover:text-ink underline underline-offset-2" {...props}>
           {children}
         </a>
       )
@@ -228,7 +228,7 @@ function LaTeXMarkdownInner({ content, citationMap, streaming, compact, onConten
         <input
           type="checkbox"
           checked={checked}
-          className="mr-1.5 accent-sky-500 cursor-pointer"
+          className="mr-1.5 accent-ink cursor-pointer"
           onChange={() => handleToggle(idx, !!checked)}
         />
       )
@@ -247,7 +247,7 @@ function LaTeXMarkdownInner({ content, citationMap, streaming, compact, onConten
   const components = interactiveInput ? { ...baseComponents, ...interactiveInput } : baseComponents
 
   return (
-    <div className={cn("text-sm leading-relaxed", compact ? "markdown-body-compact" : "markdown-body")}>
+    <div className={cn("text-sm leading-relaxed", compact ? "markdown-body-compact" : "markdown-body")} style={{ color: "var(--ink)" }}>
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
         rehypePlugins={rehypePlugins}

@@ -4,8 +4,11 @@ import React, { createContext, useContext, useState } from "react"
 import { cn } from "@/lib/utils"
 
 // Global/local default styling configurations for consistent theme fallbacks
-const DEFAULT_DARK = "var(--color-zinc-950)"
-const DEFAULT_BRIGHT = "var(--color-zinc-900)"
+// Anchored to role tokens so the elevation ladder inverts cleanly between modes:
+//   dark mode  : descends from --paper (warm-tinted near-black) to --surface-elevated
+//   light mode : ascends  from --paper (yellowish broken white)   to --surface-elevated (near-white)
+const DEFAULT_DARK = "var(--paper)"
+const DEFAULT_BRIGHT = "var(--surface-elevated)"
 const DEFAULT_NUM_LEVELS = 3
 
 interface ElevationContextType {
@@ -27,7 +30,7 @@ export interface ElevationProviderProps {
 
 /**
  * Configure global/local base colors and total nesting depth.
- * Defaults to 3 levels spanning from var(--color-zinc-950) to var(--color-zinc-900)
+ * Defaults to 3 levels spanning from var(--paper) to var(--surface-elevated)
  */
 export function ElevationProvider({
   children,
@@ -135,10 +138,10 @@ export const ElevatedContainer = React.forwardRef<any, ElevatedContainerProps>(
             props.onBlur?.(e)
           }}
           className={cn(
-            "relative transition-all duration-200",
-            castShadow && currentLevel === 1 && "shadow-[0_0_8px_rgba(0,0,0,0.25)]",
-            castShadow && currentLevel >= 2 && "shadow-[0_0_12px_rgba(0,0,0,0.35)]",
-            hoverLift && "hover:shadow-[0_0_18px_rgba(0,0,0,0.45)] hover:z-10",
+            "relative transition-all duration-200 text-ink",
+            castShadow && currentLevel === 1 && "shadow-[0_2px_10px_rgba(0,0,0,var(--shadow-strength))]",
+            castShadow && currentLevel >= 2 && "shadow-[0_4px_15px_rgba(0,0,0,var(--shadow-strength))]",
+            hoverLift && "hover:shadow-[0_12px_30px_rgba(0,0,0,var(--shadow-strength))] hover:z-10",
             asButton && "cursor-pointer select-none text-left outline-none",
             className
           )}

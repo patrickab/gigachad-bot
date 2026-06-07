@@ -4,6 +4,7 @@ import "./globals.css"
 export const metadata: Metadata = {
   title: "Gigachad Bot",
   description: "Personal AI chat interface",
+  icons: "/assets/icon.png",
 }
 
 const THEME_SCRIPT = `
@@ -11,9 +12,9 @@ const THEME_SCRIPT = `
     try {
       var stored = localStorage.getItem('theme')
       var theme = stored === 'light' ? 'light' : 'dark'
-      document.documentElement.className = theme
+      document.documentElement.classList.toggle('light', theme === 'light')
     } catch(e) {
-      document.documentElement.className = 'dark'
+      document.documentElement.classList.toggle('light', false)
     }
   })()
 `
@@ -24,7 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>
-      <body className="bg-zinc-950 text-zinc-100 antialiased">{children}</body>
+      <body className="bg-paper text-ink antialiased">{children}</body>
     </html>
   )
 }

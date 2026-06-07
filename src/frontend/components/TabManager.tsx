@@ -192,7 +192,7 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, ref }: Tab
 
   return (
     <div className="flex flex-col h-screen overflow-hidden">
-      <div className="h-8 shrink-0 flex items-center border-b border-zinc-800/50 bg-zinc-950 select-none">
+      <div className="h-8 shrink-0 flex items-center border-b border-divider/50 bg-paper select-none">
         <div className="flex-1 flex items-center h-full min-w-0">
           {tabs.map((tab) => {
             const isActive = tab.id === activeTab
@@ -203,10 +203,10 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, ref }: Tab
               <div
                 key={tab.id}
                 className={cn(
-                  "flex-1 min-w-0 h-full flex items-center justify-between px-3 gap-1 border-r border-zinc-800/50 cursor-pointer transition-colors text-xs whitespace-nowrap",
+                  "flex-1 min-w-0 h-full flex items-center justify-between px-3 gap-1 border-r border-divider/50 cursor-pointer transition-colors text-xs whitespace-nowrap",
                   isActive
-                    ? "bg-zinc-900/50 text-zinc-200"
-                    : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/30"
+                    ? "bg-surface/50 text-ink"
+                    : "text-ink-subtle hover:text-ink hover:bg-surface/30"
                 )}
                 onClick={() => setActiveTab(tab.id)}
                 onContextMenu={(e) => { e.preventDefault(); closeTab(tab.id) }}
@@ -217,7 +217,7 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, ref }: Tab
                     ref={inputRef}
                     autoFocus
                     defaultValue={displayName}
-                    className="flex-1 bg-transparent outline-none text-zinc-200 text-xs min-w-0"
+                    className="flex-1 bg-transparent outline-none text-ink text-xs min-w-0"
                     onBlur={(e) => commitRename(tab.id, e.target.value)}
                     onKeyDown={(e) => handleKeyDown(e, tab.id, (e.target as HTMLInputElement).value)}
                     onClick={(e) => e.stopPropagation()}
@@ -227,7 +227,7 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, ref }: Tab
                 )}
                 {tabs.length > 1 && (
                   <button
-                    className="shrink-0 p-0.5 rounded hover:bg-zinc-700/50 text-zinc-600 hover:text-zinc-300"
+                    className="shrink-0 p-0.5 rounded hover:bg-hover text-ink-faint hover:text-ink"
                     onClick={(e) => {
                       e.stopPropagation()
                       closeTab(tab.id)
@@ -241,7 +241,7 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, ref }: Tab
           })}
         </div>
         <button
-          className="shrink-0 h-full px-2.5 flex items-center justify-center text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/50 transition-colors"
+          className="shrink-0 h-full px-2.5 flex items-center justify-center text-ink-subtle hover:text-ink hover:bg-surface-elevated/50 transition-colors"
           onClick={addTab}
         >
           <Plus className="h-3.5 w-3.5" />

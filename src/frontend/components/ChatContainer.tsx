@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils"
 import { ElevationProvider, ElevatedContainer } from "./ElevatedContainer"
 
 const DEFAULT_EXPANDED_TAIL = 2
-const BOTTOM_GAP_PX = 16 // Gap between last message and chat input, matching my-4 between QA pairs
+const BOTTOM_GAP_PX = 16
 
 interface ChatContainerProps {
   chatId: string
@@ -197,7 +197,6 @@ export function ChatContainer({
     }, 100)
   }
 
-  // Clean up timeouts on unmount
   useEffect(() => {
     return () => {
       if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current)
@@ -254,10 +253,10 @@ export function ChatContainer({
   return (
     <div className={cn("flex h-full relative", className)}>
       <div className="flex-1 min-w-0 flex flex-col relative">
-        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto" style={{ paddingBottom: inputAreaHeight + BOTTOM_GAP_PX }}>
+        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto text-ink" style={{ paddingBottom: inputAreaHeight + BOTTOM_GAP_PX }}>
           <div className="mx-auto" style={{ maxWidth: chatMaxWidth || undefined }}>
 
-          <ElevationProvider darkColor="var(--color-zinc-950)" brightColor="var(--color-zinc-900)" numLevels={3} startLevel={1}>
+          <ElevationProvider darkColor="var(--paper)" brightColor="var(--surface-elevated)" numLevels={3} startLevel={1}>
             <AnimatePresence>
             {pairs.map(({ user, assistant, globalIndex }) => {
               const expanded = isExpanded(globalIndex)
@@ -271,25 +270,25 @@ export function ChatContainer({
                       onMouseEnter={() => handleMouseEnter(globalIndex)}
                       onMouseLeave={handleMouseLeave}
                       onClick={() => togglePair(globalIndex)}
-                      className="mx-3 my-4 rounded-xl border border-zinc-800/40 shadow-sm overflow-hidden cursor-pointer transition-all duration-300"
+                      className="mx-3 my-4 rounded-xl border border-divider/40 shadow-sm overflow-hidden cursor-pointer transition-all duration-300"
                     >
                       <div className="flex gap-3 px-5 py-4 items-start">
                         <div className="mt-0.5 shrink-0">
-                          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-zinc-800">
-                            <User className="h-3.5 w-3.5 text-zinc-400" />
+                          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-surface-elevated">
+                            <User className="h-3.5 w-3.5 text-ink-muted" />
                           </div>
                         </div>
                         <div className="min-w-0 flex-1 flex flex-col">
-                          <div className="mb-0.5 text-xs font-medium text-zinc-500">You</div>
+                          <div className="mb-0.5 text-xs font-medium text-ink-subtle">You</div>
                           {showPreview ? (
-                            <div className="max-h-[15vh] overflow-y-auto">
+                            <div className="max-h-[15vh] overflow-y-auto text-ink">
                               <LaTeXMarkdown content={user.content} compact />
                             </div>
                           ) : (
-                            <span className="text-sm text-zinc-200 truncate">{qLabel}</span>
+                            <span className="text-sm text-ink truncate">{qLabel}</span>
                           )}
                         </div>
-                        <ChevronRight className="h-4 w-4 shrink-0 text-zinc-600 mt-1" />
+                        <ChevronRight className="h-4 w-4 shrink-0 text-ink-faint mt-1" />
                       </div>
                       <div
                         className={cn(
@@ -300,10 +299,10 @@ export function ChatContainer({
                         <div className="overflow-hidden">
                           <div className="px-5 pb-4">
                             {assistant.content && (
-                              <ElevatedContainer className="rounded-lg border border-zinc-800/30 overflow-hidden">
+                              <ElevatedContainer className="rounded-lg border border-divider/30 overflow-hidden">
                                 <div className="px-4 py-3">
-                                  <div className="text-xs font-medium text-zinc-500 mb-1">Assistant</div>
-                        <div className="max-h-[25vh] overflow-y-auto">
+                                  <div className="text-xs font-medium text-ink-subtle mb-1">Assistant</div>
+                        <div className="max-h-[25vh] overflow-y-auto text-ink">
                           <LaTeXMarkdown content={assistant.content} compact />
                         </div>
                                   </div>
@@ -315,7 +314,7 @@ export function ChatContainer({
                     </ElevatedContainer>
                   )}
                   {expanded && (
-                    <ElevatedContainer className="mx-3 my-4 rounded-xl border border-zinc-800/40 overflow-hidden">
+                    <ElevatedContainer className="mx-3 my-4 rounded-xl border border-divider/40 overflow-hidden">
                       <ChatMessage
                         role="user"
                         content={user.content}
@@ -326,7 +325,7 @@ export function ChatContainer({
                         collapsibleUser={!isLast}
                         onCollapse={!isLast ? () => togglePair(globalIndex) : undefined}
                       />
-                      <ElevatedContainer className="mx-5 mb-5 rounded-lg border border-zinc-800/30 overflow-hidden">
+                      <ElevatedContainer className="mx-5 mb-5 rounded-lg border border-divider/30 overflow-hidden">
                         <ChatMessage
                           role="assistant"
                           content={assistant.content}
@@ -350,7 +349,7 @@ export function ChatContainer({
           </div>
         </div>
         <div ref={inputAreaRef} className="absolute bottom-0 left-0 right-0 z-10 pointer-events-none">
-          <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-zinc-950 via-zinc-950/60 to-transparent pointer-events-none" />
+          <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-paper via-paper/60 to-transparent pointer-events-none" />
           <div className="relative pb-6 pointer-events-auto">
             <div className="mx-auto" style={chatMaxWidth ? { maxWidth: chatMaxWidth } : undefined}>
             <ChatInput
@@ -370,7 +369,7 @@ export function ChatContainer({
             onClick={() => setContextOpen((c) => !c)}
             title={contextOpen ? "Collapse sidebar" : "Open sidebar"}
             aria-label={contextOpen ? "Collapse sidebar" : "Open sidebar"}
-            className="absolute right-0 top-3 z-30 flex items-center justify-center h-12 w-4 rounded-l-md border border-r-0 border-zinc-700 bg-zinc-800/80 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100 hover:w-5 transition-all shadow-sm"
+            className="absolute right-0 top-3 z-30 flex items-center justify-center h-12 w-4 rounded-l-md border border-r-0 border-divider-strong bg-surface-elevated/80 text-ink hover:bg-surface-elevated hover:text-ink hover:w-5 transition-all shadow-sm"
           >
             <ChevronLeft className="h-4 w-4" />
           </button>

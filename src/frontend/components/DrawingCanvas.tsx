@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 import { getStroke } from "perfect-freehand"
 import { type StrokeData, getSvgPathFromStroke, renderStrokesToJpeg } from "@/lib/drawing"
 import { uploadFile as apiUploadFile, chatFileUrl } from "@/lib/api"
+import { activeThemeName, readToken } from "@/lib/palette"
 import type { Attachment } from "@/lib/types"
 
 const THIN_WIDTH = 3
@@ -21,16 +22,7 @@ const STROKE_OPTIONS = {
 } as const
 
 function detectTheme(): "dark" | "light" {
-  if (typeof document === "undefined") return "dark"
-  return document.documentElement.classList.contains("light") ? "light" : "dark"
-}
-
-function strokeColor(theme: "dark" | "light"): string {
-  return theme === "dark" ? "#e4e4e7" : "#27272a"
-}
-
-function canvasBg(theme: "dark" | "light"): string {
-  return theme === "dark" ? "bg-zinc-900" : "bg-white"
+  return activeThemeName()
 }
 
 interface DrawingCanvasProps {
@@ -80,8 +72,8 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
   }, [onClose])
 
   const baseWidth = strokeWidth === "thin" ? THIN_WIDTH : THICK_WIDTH
-  const color = strokeColor(theme)
-  const bg = canvasBg(theme)
+  const color = readToken("ink")
+  const bgColor = readToken("surfaceElevated")
 
   const getPointerPos = useCallback(
     (e: React.PointerEvent<SVGSVGElement>) => {
@@ -175,7 +167,7 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
       const width = svg.clientWidth || 600
       const height = svg.clientHeight || 400
 
-      const blob = await renderStrokesToJpeg(strokes, width, height)
+      const blob = await renderStrokesToJpeg(strokes, width, height, bgColor)
       const timestamp = Date.now()
       const file = new File([blob], `drawing-${timestamp}.jpg`, { type: "image/jpeg" })
       const att = await apiUploadFile(chatId, file, slug)
@@ -201,94 +193,93 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: 0.15 }}
-        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-xl"
-      >
-        <motion.div
-          initial={{ opacity: 0, scale: 0.96, y: 8 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.96, y: 8 }}
-          transition={{ duration: 0.2, ease: "easeOut" }}
-          className={cn(
-            "flex flex-col overflow-hidden rounded-xl border border-zinc-700/50 shadow-2xl",
-            isMaximized
-              ? "fixed inset-4 z-[101]"
-              : "w-full max-w-2xl mx-4 h-[70vh]",
-            bg,
-          )}
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-backdrop backdrop-blur-xl"
         >
-          <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-700/50 shrink-0">
-            <div className="flex items-center gap-2 text-xs font-medium text-zinc-400">
-              <Pencil className="h-3.5 w-3.5" />
-              Drawing
-              {isErasing && (
-                <span className="text-zinc-600">(eraser active)</span>
-              )}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.96, y: 8 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            className={cn(
+              "flex flex-col overflow-hidden rounded-xl border border-divider-strong shadow-2xl bg-surface-elevated",
+              isMaximized
+                ? "fixed inset-4 z-[101]"
+                : "w-full max-w-2xl mx-4 h-[70vh]",
+            )}
+          >
+            <div className="flex items-center justify-between px-4 py-2 border-b border-divider-strong shrink-0">
+              <div className="flex items-center gap-2 text-xs font-medium text-ink-muted">
+                <Pencil className="h-3.5 w-3.5" />
+                Drawing
+                {isErasing && (
+                  <span className="text-ink-faint">(eraser active)</span>
+                )}
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={handleUndo}
+                  disabled={strokes.length === 0}
+                  className="rounded p-1.5 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors"
+                  title="Undo (Ctrl+Z)"
+                >
+                  <Undo2 className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={handleClear}
+                  disabled={strokes.length === 0}
+                  className="rounded p-1.5 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors"
+                  title="Clear"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+                <div className="w-px h-4 bg-divider-strong mx-1" />
+                <button
+                  onClick={() => setStrokeWidth((w) => (w === "thin" ? "thick" : "thin"))}
+                  className={cn(
+                    "rounded px-2 py-1 text-[10px] font-medium transition-colors",
+                    strokeWidth === "thick"
+                      ? "text-ink bg-surface"
+                      : "text-ink-subtle hover:text-ink",
+                  )}
+                  title="Toggle stroke width"
+                >
+                  {strokeWidth === "thin" ? "Thin" : "Thick"}
+                </button>
+                <button
+                  onClick={() => setIsMaximized((m) => !m)}
+                  className="rounded p-1.5 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
+                  title={isMaximized ? "Minimize" : "Maximize"}
+                >
+                  {isMaximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+                </button>
+                <div className="w-px h-4 bg-divider-strong mx-1" />
+                <button
+                  onClick={onClose}
+                  className="rounded p-1.5 text-ink-subtle hover:text-danger transition-colors"
+                  title="Close (Esc)"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={handleConfirm}
+                  disabled={strokes.length === 0 || isExporting}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors border",
+                    strokes.length > 0 && !isExporting
+                      ? "text-ink bg-surface-elevated border-divider-strong hover:bg-surface-elevated"
+                      : "text-ink-faint border-divider-strong",
+                  )}
+                  title="Confirm drawing"
+                >
+                  {isExporting ? (
+                    <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-ink-faint border-t-ink" />
+                  ) : (
+                    <Check className="h-3.5 w-3.5" />
+                  )}
+                  {isExporting ? "Saving…" : "Confirm"}
+                </button>
+              </div>
             </div>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={handleUndo}
-                disabled={strokes.length === 0}
-                className="rounded p-1.5 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 disabled:opacity-30 transition-colors"
-                title="Undo (Ctrl+Z)"
-              >
-                <Undo2 className="h-4 w-4" />
-              </button>
-              <button
-                onClick={handleClear}
-                disabled={strokes.length === 0}
-                className="rounded p-1.5 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 disabled:opacity-30 transition-colors"
-                title="Clear"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
-              <div className="w-px h-4 bg-zinc-700 mx-1" />
-              <button
-                onClick={() => setStrokeWidth((w) => (w === "thin" ? "thick" : "thin"))}
-                className={cn(
-                  "rounded px-2 py-1 text-[10px] font-medium transition-colors",
-                  strokeWidth === "thick"
-                    ? "text-zinc-200 bg-zinc-700"
-                    : "text-zinc-500 hover:text-zinc-300",
-                )}
-                title="Toggle stroke width"
-              >
-                {strokeWidth === "thin" ? "Thin" : "Thick"}
-              </button>
-              <button
-                onClick={() => setIsMaximized((m) => !m)}
-                className="rounded p-1.5 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
-                title={isMaximized ? "Minimize" : "Maximize"}
-              >
-                {isMaximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-              </button>
-              <div className="w-px h-4 bg-zinc-700 mx-1" />
-              <button
-                onClick={onClose}
-                className="rounded p-1.5 text-zinc-500 hover:text-red-400 transition-colors"
-                title="Close (Esc)"
-              >
-                <X className="h-4 w-4" />
-              </button>
-              <button
-                onClick={handleConfirm}
-                disabled={strokes.length === 0 || isExporting}
-                className={cn(
-                  "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                  strokes.length > 0 && !isExporting
-                    ? "text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20"
-                    : "text-zinc-600 border border-zinc-700/50",
-                )}
-                title="Confirm drawing"
-              >
-                {isExporting ? (
-                  <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-300" />
-                ) : (
-                  <Check className="h-3.5 w-3.5" />
-                )}
-                {isExporting ? "Saving…" : "Confirm"}
-              </button>
-            </div>
-          </div>
 
           <div
             ref={containerRef}
@@ -303,7 +294,7 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
               onPointerUp={handlePointerUp}
               onPointerLeave={handlePointerUp}
             >
-              <rect width="100%" height="100%" fill={theme === "dark" ? "#18181b" : "#ffffff"} />
+              <rect width="100%" height="100%" fill="var(--surface-elevated)" />
               {strokes.map((stroke, i) => {
                 const outline = getStroke(stroke.points, {
                   ...STROKE_OPTIONS,

@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Plus, Layers, Activity, CheckCircle2, ArrowRight, X } from "lucide-react"
+import { Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useProject } from "@/contexts/ProjectContext"
 import type { KanbanColumnId } from "@/lib/types"
@@ -76,7 +76,7 @@ function AddCardModal({ open, onClose, onAdd, defaultState }: AddCardModalProps)
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.15 }}
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-backdrop backdrop-blur-md"
           onClick={onClose}
         >
           <motion.div
@@ -85,12 +85,12 @@ function AddCardModal({ open, onClose, onAdd, defaultState }: AddCardModalProps)
             exit={{ opacity: 0, scale: 0.96, y: 8 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-sm mx-4 rounded-2xl border border-zinc-700 bg-zinc-900 shadow-[0_8px_30px_rgba(0,0,0,0.08)] overflow-hidden"
+            className="w-full max-w-sm mx-4 rounded-2xl border border-divider-strong bg-surface shadow-[0_8px_30px_rgba(0,0,0,var(--shadow-strength))] overflow-hidden"
           >
             <div className="px-5 pt-5 pb-3">
-              <div className="flex items-center gap-2 text-sm font-medium text-zinc-300">
-                <Plus className="h-4 w-4 text-cyan-400" />
-                Add Card to <span className="text-zinc-400 font-semibold uppercase text-xs">{defaultState}</span>
+              <div className="flex items-center gap-2 text-sm font-medium text-ink">
+                <Plus className="h-4 w-4 text-ink" />
+                Add Card to <span className="text-ink-muted font-semibold uppercase text-xs">{defaultState}</span>
               </div>
             </div>
 
@@ -108,9 +108,8 @@ function AddCardModal({ open, onClose, onAdd, defaultState }: AddCardModalProps)
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 className={cn(
-                  "w-full rounded-lg border border-zinc-700 bg-zinc-800/60 px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-600",
-                  "outline-none transition-all duration-200",
-                  "focus:border-cyan-500/30 focus:shadow-[0_8px_30px_rgba(6,182,212,0.03)]"
+                  "w-full rounded-lg border border-divider-strong bg-surface-elevated/60 px-3 py-2.5 text-sm text-ink placeholder-ink-faint",
+                  "outline-none transition-all duration-200 focus:border-ink-muted"
                 )}
                 placeholder="Title"
                 required
@@ -122,9 +121,8 @@ function AddCardModal({ open, onClose, onAdd, defaultState }: AddCardModalProps)
                 value={desc}
                 onChange={(e) => setDesc(e.target.value)}
                 className={cn(
-                  "w-full rounded-lg border border-zinc-700 bg-zinc-800/60 px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-600",
-                  "outline-none transition-all duration-200",
-                  "focus:border-cyan-500/30 focus:shadow-[0_8px_30px_rgba(6,182,212,0.03)]"
+                  "w-full rounded-lg border border-divider-strong bg-surface-elevated/60 px-3 py-2.5 text-sm text-ink placeholder-ink-faint",
+                  "outline-none transition-all duration-200 focus:border-ink-muted"
                 )}
                 placeholder="Description (optional)"
                 autoComplete="off"
@@ -173,7 +171,7 @@ export function ProjectDashboard() {
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: 0.15 }}
-        className="fixed inset-0 z-[90] flex items-center justify-center bg-black/80 backdrop-blur-sm"
+        className="fixed inset-0 z-[90] flex items-center justify-center bg-backdrop backdrop-blur-sm"
         onClick={() => setDashboardOpen(false)}
       >
         <motion.div
@@ -182,21 +180,21 @@ export function ProjectDashboard() {
           exit={{ opacity: 0, scale: 0.98, y: 10 }}
           transition={{ duration: 0.25, ease: "easeOut" }}
           onClick={(e) => e.stopPropagation()}
-          className="w-11/12 max-w-6xl h-[85vh] max-h-[800px] rounded-3xl border border-zinc-800/50 overflow-hidden flex flex-col shadow-2xl"
+          className="w-11/12 max-w-6xl h-[85vh] max-h-[800px] rounded-3xl border border-divider/50 overflow-hidden flex flex-col shadow-2xl"
         >
-          <ElevationProvider darkColor="var(--color-zinc-950)" brightColor="var(--color-zinc-900)" numLevels={3}>
+          <ElevationProvider darkColor="var(--paper)" brightColor="var(--surface-elevated)" numLevels={3}>
             <ElevatedContainer className="w-full h-full flex flex-col overflow-hidden">
               {/* Board Header */}
-              <div className="pt-6 px-8 flex items-center justify-between border-b border-zinc-800/20 pb-4 select-none">
+              <div className="pt-6 px-8 flex items-center justify-between border-b border-divider/20 pb-4 select-none shrink-0">
                 <div className="flex items-center gap-3">
-                  <h2 className="text-base font-bold text-zinc-100">
+                  <h2 className="text-base font-bold text-ink">
                     {projectData.name || activeProject} Dashboard
                   </h2>
                 </div>
               </div>
 
               {/* Board Canvas */}
-              <div className="flex-1 p-10 pt-8 flex gap-10 overflow-hidden">
+              <div className="flex-1 p-10 pt-8 flex gap-6 overflow-hidden">
                 {COLUMNS.map((col) => {
                   const cards = cardsByColumn(col.id)
                   const isBacklog = col.id === "backlog"
@@ -205,25 +203,26 @@ export function ProjectDashboard() {
                   const isOver = dragOverCol === col.id
 
                   return (
-                    <div key={col.id} className="flex-1 flex flex-col min-w-0 min-h-0">
+                    <ElevatedContainer
+                      key={col.id}
+                      className={cn(
+                        "flex-1 flex flex-col min-w-0 min-h-0 rounded-2xl border overflow-hidden transition-all duration-200",
+                        isOver ? "border-divider-strong" : "border-divider/40",
+                      )}
+                    >
                       {/* Column Header */}
-                      <div className="flex items-center justify-between mb-4 px-2 select-none">
+                      <div className="flex items-center justify-between px-4 pt-4 pb-3 select-none shrink-0">
                         <div className="flex items-center gap-2">
-                          <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-[0.2em]">
+                          <span className="text-[11px] font-bold text-ink-muted uppercase tracking-[0.2em]">
                             {col.label}
                           </span>
-                          <span className={cn(
-                            "text-[10px] font-mono font-bold px-2 py-0.5 rounded-md transition-colors",
-                            isBacklog && "bg-amber-500/10 text-amber-400",
-                            isDoing && "bg-cyan-500/10 text-cyan-400",
-                            isDone && "bg-emerald-500/10 text-emerald-400"
-                          )}>
+                          <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-surface-elevated text-ink">
                             {cards.length}
                           </span>
                         </div>
                         <button
                           onClick={() => setAddModalState(col.id)}
-                          className="p-1 rounded-md text-zinc-500 hover:text-cyan-400 hover:bg-cyan-500/10 transition-all duration-200"
+                          className="p-1 rounded-md text-ink-subtle hover:text-ink hover:bg-hover transition-all duration-200"
                           title={`Add task to ${col.label}`}
                         >
                           <Plus className="h-4 w-4" />
@@ -243,13 +242,7 @@ export function ProjectDashboard() {
                           setDraggedCardId(null)
                           if (cardId) moveCard(cardId, col.id)
                         }}
-                        className={cn(
-                          "flex-1 overflow-y-auto space-y-3 p-[18px] rounded-2xl border border-zinc-800/30 bg-zinc-900/35 border-l-[3px] backdrop-blur-md scrollbar-thin transition-all duration-200",
-                          isBacklog && "border-l-amber-500/35",
-                          isDoing && "border-l-cyan-500/35",
-                          isDone && "border-l-emerald-500/35",
-                          isOver && "bg-zinc-800/15 border-zinc-700/40"
-                        )}
+                        className="flex-1 overflow-y-auto space-y-2.5 px-4 pb-4 scrollbar-thin transition-all duration-200"
                       >
                         <AnimatePresence mode="popLayout" initial={false}>
                           {cards.map((card) => (
@@ -264,9 +257,9 @@ export function ProjectDashboard() {
                               exit={{ opacity: 0, scale: 0.95 }}
                               transition={{ duration: 0.2 }}
                             >
-                              <div
+                              <ElevatedContainer
                                 draggable
-                                onDragStart={(e) => {
+                                onDragStart={(e: any) => {
                                   e.dataTransfer.setData("text/plain", card.id)
                                   setTimeout(() => setDraggedCardId(card.id), 0)
                                 }}
@@ -275,43 +268,44 @@ export function ProjectDashboard() {
                                   setDragOverCol(null)
                                 }}
                                 onClick={() => moveCard(card.id, NEXT_STATE[col.id])}
-                                onContextMenu={(e) => {
+                                onContextMenu={(e: any) => {
                                   e.preventDefault()
                                   moveCard(card.id, PREV_STATE[col.id])
                                 }}
-                                className="group relative w-full p-4 rounded-2xl border border-zinc-600/15 bg-zinc-800 hover:border-cyan-500/25 text-zinc-100 overflow-hidden cursor-pointer transition-all duration-300 shadow-[0_4px_16px_rgba(0,0,0,0.08)] hover:shadow-[0_12px_24px_rgba(0,0,0,0.12)]"
+                                hoverLift
+                                className="group relative w-full rounded-xl border border-divider/40 overflow-hidden cursor-grab active:cursor-grabbing select-none transition-all duration-300 shadow-[0_4px_16px_rgba(0,0,0,var(--shadow-strength))]"
                               >
-                                <div className="flex flex-col gap-1 pr-6">
-                                  <span className="text-sm font-semibold text-zinc-100 group-hover:text-cyan-400 transition-colors duration-200">
+                                <div className="p-4 flex flex-col gap-1 pr-6">
+                                  <span className="text-sm font-semibold text-ink">
                                     {card.title}
                                   </span>
                                   {card.description && (
-                                    <span className="text-xs text-zinc-400 leading-relaxed mt-1 line-clamp-2">
+                                    <span className="text-xs text-ink-muted leading-relaxed mt-1 line-clamp-2">
                                       {card.description}
                                     </span>
                                   )}
                                 </div>
 
                                 <button
-                                  onClick={async (e) => {
+                                  onClick={async (e: any) => {
                                     e.stopPropagation()
                                     await deleteCard(card.id)
                                   }}
-                                  className="absolute top-4 right-3 shrink-0 opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-red-500/10 text-zinc-600 hover:text-red-400 transition-all"
+                                  className="absolute top-3 right-3 shrink-0 opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-danger-soft text-ink-faint hover:text-danger transition-all"
                                 >
                                   <X className="h-3.5 w-3.5" />
                                 </button>
-                              </div>
+                              </ElevatedContainer>
                             </motion.div>
                           ))}
                         </AnimatePresence>
 
                         {/* Skeleton Preview */}
                         {isOver && draggedCardId && (
-                          <div className="w-full p-4 rounded-xl border border-dashed border-zinc-800 bg-zinc-900/40 h-16" />
+                          <div className="w-full p-4 rounded-xl border border-dashed border-divider bg-overlay/60 h-16" />
                         )}
                       </div>
-                    </div>
+                    </ElevatedContainer>
                   )
                 })}
               </div>

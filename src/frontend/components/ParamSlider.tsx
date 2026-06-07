@@ -17,11 +17,11 @@ export function ParamSlider({
   min = 0,
   max = 1,
   step = 0.05,
-  accent = "accent-sky-500",
+  accent = "accent-ink",
 }: ParamSliderProps) {
   return (
     <div className="space-y-1">
-      <div className="flex justify-between text-[10px] text-zinc-600">
+      <div className="flex justify-between text-[10px] text-ink-faint">
         <span>{label}</span>
         <span>{value.toFixed(step < 1 ? 2 : 0)}</span>
       </div>
@@ -32,7 +32,7 @@ export function ParamSlider({
         step={step}
         value={value}
         onChange={(e) => onChange(Number.parseFloat(e.target.value))}
-        className={`w-full h-1 bg-zinc-800 rounded-full appearance-none cursor-pointer ${accent}`}
+        className={`w-full h-1 bg-surface-elevated rounded-full appearance-none cursor-pointer ${accent}`}
       />
     </div>
   )

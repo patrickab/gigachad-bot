@@ -257,7 +257,7 @@ export function VaultTree<T>({
     return (
       <button
         onClick={() => { onExpand?.(); onOpenChange?.(true) }}
-        className="w-full flex items-center justify-center p-2 rounded-md text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200 transition-colors"
+        className="w-full flex items-center justify-center p-2 rounded-md text-ink-muted hover:bg-surface-elevated/50 hover:text-ink transition-colors"
         title={sectionTitle}
       >
         <SectionIcon className="h-4 w-4 shrink-0" />
@@ -285,15 +285,15 @@ export function VaultTree<T>({
     return (
       <TreeCtx.Provider value={ctx as unknown as TreeCtx<unknown>}>
         <div className="space-y-1 w-full">
-          <div className="flex w-full items-center justify-between p-1.5 rounded-md text-zinc-400 hover:bg-zinc-800/20 group">
+          <div className="flex w-full items-center justify-between p-1.5 rounded-md text-ink-muted hover:bg-surface-elevated/20 group">
             <button
               onClick={() => onOpenChange?.(!open)}
-              className="flex-1 flex items-center gap-3 p-1 rounded-md text-left transition-colors hover:text-zinc-200"
+              className="flex-1 flex items-center gap-3 p-1 rounded-md text-left transition-colors hover:text-ink"
             >
-              <SectionIcon className="h-4 w-4 shrink-0 text-zinc-400" />
+              <SectionIcon className="h-4 w-4 shrink-0 text-ink-muted" />
               <span className="text-sm font-medium">{sectionTitle}</span>
               {count != null && count > 0 && (
-                <span className="rounded-full bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500 font-semibold">
+                <span className="rounded-full bg-surface-elevated px-1.5 py-0.5 text-[10px] text-ink-subtle font-semibold">
                   {count}
                 </span>
               )}
@@ -306,7 +306,7 @@ export function VaultTree<T>({
             {(onPlusClick || onAddVault || onAddFolder) && (
               <button
                 onClick={(e) => { e.stopPropagation(); handlePlus() }}
-                className="p-1 rounded text-zinc-500 hover:text-cyan-400 hover:bg-zinc-900 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+                className="p-1 rounded text-ink-subtle hover:text-ink hover:bg-surface transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
                 title={plusTitle}
               >
                 <Plus className="h-4 w-4" />
@@ -349,7 +349,7 @@ function TreeContent<T>({ items, depth }: { items?: VaultTreeItem<T>[]; depth: n
   const isRoot = depth === 0
 
   if (!items || items.length === 0) {
-    return <p className="px-2 py-2 text-[11px] text-zinc-600">Empty</p>
+    return <p className="px-2 py-2 text-[11px] text-ink-faint">Empty</p>
   }
 
   return (
@@ -404,9 +404,9 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
       <div
         className={cn(
           "flex items-center gap-1.5 rounded-md transition-all duration-200 ease-out group",
-          isVault && item.isActive && "bg-cyan-500/10 border border-cyan-500/20",
+          isVault && item.isActive && "bg-surface-elevated border border-divider-strong",
           isVault && !item.isActive && "border border-transparent",
-          dragOverId === item.id && "ring-1 ring-cyan-500/40 bg-cyan-500/5",
+          dragOverId === item.id && "ring-1 ring-ink-muted bg-surface-elevated",
         )}
         onDragOver={(e) => { e.stopPropagation(); onDragOver(e, item.id) }}
           onDragLeave={(e) => { e.stopPropagation(); onDragLeave() }}
@@ -428,29 +428,29 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
           }}
           className={cn(
             "flex items-center gap-1.5 py-1 flex-1 text-left transition-colors",
-            !isVault && "text-zinc-500 hover:text-zinc-300",
+            !isVault && "text-ink-subtle hover:text-ink",
           )}
         >
           <ChevronIcon open={isExpanded} />
           <BranchIcon className={cn(
             "h-3.5 w-3.5 shrink-0",
-            isVault && item.isActive ? "text-cyan-400" : "text-zinc-400",
+            isVault && item.isActive ? "text-ink" : "text-ink-muted",
           )} />
           <span className={cn(
             "text-[11px] font-medium truncate",
-            isVault && item.isActive ? "text-cyan-400 font-semibold" : "text-zinc-400 hover:text-zinc-200",
+            isVault && item.isActive ? "text-ink font-semibold" : "text-ink-muted hover:text-ink",
           )}>
             {item.label}
           </span>
           {item.badge != null && (
-            <span className="text-[10px] text-zinc-600 shrink-0">{item.badge}</span>
+            <span className="text-[10px] text-ink-faint shrink-0">{item.badge}</span>
           )}
         </button>
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
           {isVault && onDashboardClick && (
             <button
               onClick={(e) => { e.stopPropagation(); onDashboardClick(item.id) }}
-              className="p-0.5 rounded text-zinc-600 hover:text-cyan-400 transition-colors"
+              className="p-0.5 rounded text-ink-faint hover:text-ink transition-colors"
               title="Dashboard"
             >
               <LayoutDashboard className="h-3 w-3" />
@@ -464,7 +464,7 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
                 setCreateParentId(item.id)
                 setCreateName("")
               }}
-              className="p-0.5 rounded text-zinc-600 hover:text-cyan-400 transition-colors"
+              className="p-0.5 rounded text-ink-faint hover:text-ink transition-colors"
               title="New folder"
             >
               <Plus className="h-3 w-3" />
@@ -473,7 +473,7 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
           {onVaultDelete && (
             <button
               onClick={(e) => { e.stopPropagation(); onVaultDelete(item.id) }}
-              className="p-0.5 rounded text-zinc-600 hover:text-red-400 transition-colors"
+              className="p-0.5 rounded text-ink-faint hover:text-danger transition-colors"
               title={isVault ? "Delete project" : "Delete folder"}
             >
               <Trash2 className="h-3 w-3" />
@@ -536,16 +536,16 @@ function ElementNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number
         onClick={handleClick}
         className={cn(
           "flex items-center gap-1.5 flex-1 truncate text-left text-[11px] transition-colors",
-          item.isActive ? "text-cyan-400 font-medium" : "text-zinc-400 hover:text-zinc-200",
+          item.isActive ? "text-ink font-medium" : "text-ink-muted hover:text-ink",
         )}
       >
-        {ElementIcon && <ElementIcon className="h-3.5 w-3.5 shrink-0 text-zinc-400" />}
+        {ElementIcon && <ElementIcon className="h-3.5 w-3.5 shrink-0 text-ink-muted" />}
         {item.label}
       </button>
       {!item.isSystem && onElementArchive && (
         <button
           onClick={() => onElementArchive(item)}
-          className="rounded p-0.5 text-zinc-600 hover:text-amber-400 transition-colors shrink-0"
+          className="rounded p-0.5 text-ink-faint hover:text-ink transition-colors shrink-0"
         >
           <Archive className="h-3 w-3" />
         </button>
@@ -553,7 +553,7 @@ function ElementNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number
       {!item.isSystem && onElementDelete && (
         <button
           onClick={() => onElementDelete(item)}
-          className="rounded p-0.5 text-zinc-600 hover:text-red-400 transition-colors shrink-0"
+          className="rounded p-0.5 text-ink-faint hover:text-danger transition-colors shrink-0"
         >
           <Trash2 className="h-3 w-3" />
         </button>
@@ -589,13 +589,13 @@ function InlineCreateForm({
           if (e.key === "Enter") onSubmit()
           if (e.key === "Escape") onCancel()
         }}
-        className="flex-1 bg-transparent border border-zinc-700 rounded px-1.5 py-0.5 text-[11px] text-zinc-200 outline-none focus:border-cyan-500/40"
+        className="flex-1 bg-transparent border border-divider-strong rounded px-1.5 py-0.5 text-[11px] text-ink outline-none focus:border-divider-strong"
         placeholder={placeholder}
       />
-      <button onClick={onSubmit} className="text-[10px] text-cyan-400 hover:text-cyan-300">
+      <button onClick={onSubmit} className="text-[10px] text-ink hover:text-ink">
         Create
       </button>
-      <button onClick={onCancel} className="text-zinc-600 hover:text-zinc-300">
+      <button onClick={onCancel} className="text-ink-faint hover:text-ink">
         <X className="h-3 w-3" />
       </button>
     </div>

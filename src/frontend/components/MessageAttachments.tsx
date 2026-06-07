@@ -10,9 +10,9 @@ interface MessageAttachmentsProps {
 }
 
 function AttachmentIcon({ mime }: { mime: string }) {
-  if (mime.startsWith("image/")) return <ImageIcon className="h-3 w-3 text-emerald-400 shrink-0" />
-  if (mime === "application/pdf") return <FileText className="h-3 w-3 text-blue-400 shrink-0" />
-  return <File className="h-3 w-3 text-zinc-400 shrink-0" />
+  if (mime.startsWith("image/")) return <ImageIcon className="h-3 w-3 text-ink shrink-0" />
+  if (mime === "application/pdf") return <FileText className="h-3 w-3 text-ink shrink-0" />
+  return <File className="h-3 w-3 text-ink-muted shrink-0" />
 }
 
 function MessageAttachmentsInner({ attachments, onClick }: MessageAttachmentsProps) {
@@ -24,7 +24,7 @@ function MessageAttachmentsInner({ attachments, onClick }: MessageAttachmentsPro
         <button
           key={att.name}
           onClick={() => onClick(att)}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700/50 bg-zinc-800/30 px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-700/50 hover:text-zinc-200 transition-colors"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-divider-strong/50 bg-surface-elevated/30 px-2 py-1 text-xs text-ink-muted hover:bg-hover hover:text-ink transition-colors"
         >
           <AttachmentIcon mime={att.mime} />
           <span className="max-w-[140px] truncate">{att.name}</span>

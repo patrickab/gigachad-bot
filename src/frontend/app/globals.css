@@ -1,34 +1,118 @@
 @import "tailwindcss";
 @import "katex/dist/katex.min.css";
 
-@theme {
-  --color-*: initial;
+/* ============================================================
+   THEME TOKENS
+   ------------------------------------------------------------
+   Two layers:
+     1. Role tokens (--ink, --paper, --surface, --accent, ...)
+        — the only colors components should reach for
+     2. Derived tokens (--divider, --accent-soft, --hover-overlay)
+        — computed from role tokens via color-mix
 
-  --color-zinc-50: #fafaf9;
-  --color-zinc-100: #f5f5f4;
-  --color-zinc-200: #e7e5e4;
-  --color-zinc-300: #d6d3d1;
-  --color-zinc-400: #a8a29e;
-  --color-zinc-500: #78716c;
-  --color-zinc-600: #57534e;
-  --color-zinc-700: #44403c;
-  --color-zinc-800: #292524;
-  --color-zinc-900: #1c1917;
-  --color-zinc-950: #0c0a09;
+   Dark mode is the default (:root). Light mode overrides the
+   role tokens in `.light`. Every role token is OKLCH with a
+   warm hue (≈ 85°) and tiny chroma (0.005–0.020), so:
+     • dark mode descends from warm-tinted near-black to slightly
+       lighter warm greys
+     • light mode starts at a yellowish broken white and ascends
+       toward (but never reaches) pure white for elevated containers
+
+   Tailwind utilities (bg-paper, text-ink, border-divider, ...) are
+   generated via @theme referencing these tokens.
+   ============================================================ */
+
+:root {
+  --shadow-strength: 0.35;
+
+  /* --- Text (ink) — high contrast on dark surfaces --- */
+  --ink:        oklch(95% 0.006 85);
+  --ink-muted:  oklch(72% 0.010 85);
+  --ink-subtle: oklch(55% 0.010 85);
+  --ink-faint:  oklch(42% 0.008 85);
+
+  /* --- Surfaces — warm-tinted dark greys (not near-black) --- */
+  --paper:            oklch(19% 0.013 85);
+  --surface:          oklch(24% 0.014 85);
+  --surface-elevated: oklch(30% 0.015 85);
+  --overlay:          oklch(16% 0.013 85);
+
+  /* --- Danger (red, reserved for destructive actions only) --- */
+  --danger:      oklch(68% 0.20 25);
+
+  /* --- Backdrop for modal scrims --- */
+  --backdrop:    oklch(0% 0 0 / 0.65);
+
+  /* --- Derived: dividers (recompute when --ink changes) --- */
+  --divider:         color-mix(in oklab, var(--ink) 8%,  transparent);
+  --divider-strong:  color-mix(in oklab, var(--ink) 18%, transparent);
+
+  /* --- Derived: danger tints --- */
+  --danger-soft:     color-mix(in oklab, var(--danger) 12%, transparent);
+
+  /* --- Derived: hover overlay (sits on the local surface) --- */
+  --hover-overlay:        color-mix(in oklab, var(--ink) 6%,  transparent);
+  --hover-overlay-strong: color-mix(in oklab, var(--ink) 10%, transparent);
 }
 
 .light {
-  --color-zinc-50: #1c1917;
-  --color-zinc-100: #292524;
-  --color-zinc-200: #44403c;
-  --color-zinc-300: #57534e;
-  --color-zinc-400: #78716c;
-  --color-zinc-500: #a8a29e;
-  --color-zinc-600: #c4bfba;
-  --color-zinc-700: #d6d3d1;
-  --color-zinc-800: #e0ddd8;
-  --color-zinc-900: #f5f5f4;
-  --color-zinc-950: #fafaf9;
+  --shadow-strength: 0.08;
+
+  /* --- Text: dark warm-tinted greys ("greyish writing") --- */
+  --ink:        oklch(28% 0.012 85);
+  --ink-muted:  oklch(40% 0.012 85);
+  --ink-subtle: oklch(50% 0.010 85);
+  --ink-faint:  oklch(60% 0.008 85);
+
+  /* --- Surfaces: yellowish broken white, ascending toward (not to) white --- */
+  --paper:            oklch(95%   0.020 85);
+  --surface:          oklch(97.5% 0.012 85);
+  --surface-elevated: oklch(99%   0.006 85);
+  --overlay:          oklch(96%   0.015 85);
+
+  /* --- Danger: darker red for light bg --- */
+  --danger:      oklch(52% 0.22 25);
+
+  /* Backdrop stays the same — a scrim is meant to darken regardless of mode */
+  --backdrop:    oklch(0% 0 0 / 0.55);
+}
+
+/* ============================================================
+   TAILWIND V4 TOKEN MAPPING
+   ------------------------------------------------------------
+   Wipe the default palette (--color-*: initial) so any leftover
+   `text-zinc-400` or `bg-sky-500/10` will compile to no rules —
+   forcing every site to be migrated to a role token.
+   ============================================================ */
+@theme {
+  --color-*: initial;
+
+  /* Surfaces */
+  --color-paper:            var(--paper);
+  --color-surface:          var(--surface);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-overlay:          var(--overlay);
+
+  /* Text */
+  --color-ink:        var(--ink);
+  --color-ink-muted:  var(--ink-muted);
+  --color-ink-subtle: var(--ink-subtle);
+  --color-ink-faint:  var(--ink-faint);
+
+  /* Dividers */
+  --color-divider:        var(--divider);
+  --color-divider-strong: var(--divider-strong);
+
+  /* Danger (red — destructive only) */
+  --color-danger:      var(--danger);
+  --color-danger-soft: var(--danger-soft);
+
+  /* Backdrop */
+  --color-backdrop: var(--backdrop);
+
+  /* Hover overlays */
+  --color-hover:        var(--hover-overlay);
+  --color-hover-strong: var(--hover-overlay-strong);
 }
 
 @keyframes shimmer {
@@ -38,7 +122,7 @@
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--color-zinc-700) transparent;
+  scrollbar-color: var(--divider) transparent;
 }
 
 .katex-display {
@@ -50,6 +134,10 @@ pre {
   overflow-x: auto;
   border-radius: var(--radius-md);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+}
+
+.light pre {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, var(--shadow-strength));
 }
 
 [data-rehype-pretty-code-figure] pre {
@@ -66,16 +154,20 @@ pre {
 }
 
 [data-rehype-pretty-code-figure] [data-highlighted-line] {
-  background: rgba(255, 255, 255, 0.06);
-  border-left-color: var(--color-cyan-400);
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  border-left-color: var(--ink-muted);
+}
+
+.light [data-rehype-pretty-code-figure] [data-highlighted-line] {
+  background: color-mix(in oklab, var(--ink) 4%, transparent);
 }
 
 [data-rehype-pretty-code-title] {
   padding: 0.5rem 1rem;
   font-size: 0.75rem;
-  color: var(--color-zinc-400);
-  background: var(--color-zinc-900);
-  border-bottom: 1px solid var(--color-zinc-800);
+  color: var(--ink-muted);
+  background: var(--surface);
+  border-bottom: 1px solid var(--divider);
   border-radius: var(--radius-md) var(--radius-md) 0 0;
 }
 
@@ -90,7 +182,7 @@ code {
 }
 
 :not(pre) > code {
-  background: var(--color-zinc-800);
+  background: var(--surface-elevated);
   padding: 0.125rem 0.375rem;
   border-radius: var(--radius-sm);
 }
@@ -119,10 +211,10 @@ code {
 }
 
 .markdown-body blockquote {
-  border-left: 3px solid var(--color-zinc-700);
+  border-left: 3px solid var(--divider-strong);
   padding-left: 1rem;
   margin: 0.75em 0;
-  color: var(--color-zinc-400);
+  color: var(--ink-muted);
 }
 
 .markdown-body table {
@@ -133,24 +225,24 @@ code {
 
 .markdown-body th,
 .markdown-body td {
-  border: 1px solid var(--color-zinc-700);
+  border: 1px solid var(--divider);
   padding: 0.5rem 0.75rem;
   text-align: left;
 }
 
 .markdown-body th {
-  background: var(--color-zinc-900);
+  background: var(--surface);
   font-weight: 600;
 }
 
 .markdown-body hr {
   border: none;
-  border-top: 1px solid var(--color-zinc-800);
+  border-top: 1px solid var(--divider);
   margin: 1.5em 0;
 }
 
 .markdown-body a {
-  color: #38bdf8;
+  color: var(--ink);
   text-decoration: underline;
 }
 
@@ -179,10 +271,10 @@ code {
 }
 
 .markdown-body-compact blockquote {
-  border-left: 2px solid var(--color-zinc-700);
+  border-left: 2px solid var(--divider-strong);
   padding-left: 0.75rem;
   margin: 0.4em 0;
-  color: var(--color-zinc-400);
+  color: var(--ink-muted);
 }
 
 .markdown-body-compact table {
@@ -193,7 +285,7 @@ code {
 
 .markdown-body-compact th,
 .markdown-body-compact td {
-  border: 1px solid var(--color-zinc-700);
+  border: 1px solid var(--divider);
   padding: 0.35rem 0.5rem;
   text-align: left;
   font-size: 0.9em;
@@ -201,20 +293,8 @@ code {
 
 .markdown-body-compact hr {
   border: none;
-  border-top: 1px solid var(--color-zinc-800);
+  border-top: 1px solid var(--divider);
   margin: 0.5em 0;
-}
-
-.light pre {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.light [data-rehype-pretty-code-figure] [data-highlighted-line] {
-  background: rgba(0, 0, 0, 0.06);
-}
-
-.light :not(pre) > code {
-  background: var(--color-zinc-200);
 }
 
 .shiki,
@@ -229,8 +309,11 @@ code {
   background-color: var(--shiki-light-bg);
 }
 
+/* Assistant message sits between page bg and full surface — the color-mix signature
+   dynamically adapts: in dark mode it leans toward surface; in light mode it leans
+   toward paper. Both inherit the parent's polarity. */
 .bg-assistant-message {
-  background-color: color-mix(in srgb, var(--color-zinc-950), var(--color-zinc-900) 50%);
+  background-color: color-mix(in oklab, var(--paper), var(--surface) 50%);
 }
 
 .animate-shimmer {

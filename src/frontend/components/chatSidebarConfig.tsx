@@ -11,16 +11,16 @@ import type { ChatSidebarElementConfig } from "@/components/ChatSidebar"
 const PdfViewer = dynamic(() => import("./PdfViewer").then((m) => ({ default: m.PdfViewer })), { ssr: false })
 
 function AttachmentIcon({ mime }: { mime: string }) {
-  if (mime.startsWith("image/")) return <ImageIcon className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-  if (mime === "application/pdf") return <FileText className="h-3.5 w-3.5 text-blue-400 shrink-0" />
-  return <FileText className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
+  if (mime.startsWith("image/")) return <ImageIcon className="h-3.5 w-3.5 text-ink shrink-0" />
+  if (mime === "application/pdf") return <FileText className="h-3.5 w-3.5 text-ink shrink-0" />
+  return <FileText className="h-3.5 w-3.5 text-ink-muted shrink-0" />
 }
 
 function AttachmentViewer({ attachment, chatId, slug, onContentChange }: { attachment: Attachment; chatId: string; slug: string | null; onContentChange?: (newContent: string) => void }) {
   if (attachment.mime.startsWith("image/")) {
     return (
       <div className="p-2">
-        <img src={attachment.url} alt={attachment.name} className="max-w-full rounded border border-zinc-800" />
+        <img src={attachment.url} alt={attachment.name} className="max-w-full rounded border border-divider" />
       </div>
     )
   }
@@ -40,7 +40,7 @@ function AttachmentViewer({ attachment, chatId, slug, onContentChange }: { attac
     )
   }
 
-  return <p className="p-2 text-xs text-zinc-500">No preview available</p>
+  return <p className="p-2 text-xs text-ink-subtle">No preview available</p>
 }
 
 function PdfAttachmentViewer({ url, parsedContent, chatId, slug }: { url: string; parsedContent?: string; chatId: string; slug: string | null }) {
@@ -51,16 +51,16 @@ function PdfAttachmentViewer({ url, parsedContent, chatId, slug }: { url: string
         <PdfViewer url={url} />
       </div>
       {parsedContent && (
-        <div className="border-t border-zinc-800">
+        <div className="border-t border-divider">
           <button
             onClick={() => setMdOpen((o) => !o)}
-            className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/50 transition-colors"
+            className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-ink-subtle hover:text-ink hover:bg-surface/50 transition-colors"
           >
             {mdOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
             Markdown
           </button>
           {mdOpen && (
-            <div className="p-2 max-h-[40vh] overflow-y-auto border-t border-zinc-800">
+            <div className="p-2 max-h-[40vh] overflow-y-auto border-t border-divider">
               <LaTeXMarkdown content={rewriteImages(parsedContent, chatId, slug)} />
             </div>
           )}
@@ -92,7 +92,7 @@ function ContextBody({
 
   if (allAttachments.length === 0) {
     return (
-      <div className="flex items-center justify-center py-6 text-xs text-zinc-600">
+      <div className="flex items-center justify-center py-6 text-xs text-ink-faint">
         No attachments
       </div>
     )
@@ -103,19 +103,19 @@ function ContextBody({
       {allAttachments.map(({ messageIndex: mi, attachment: att }) => {
         const expanded = isExpanded(mi, att.name)
         return (
-          <div key={`${mi}-${att.name}`} className="border-b border-zinc-800/50">
+          <div key={`${mi}-${att.name}`} className="border-b border-divider/50">
             <div
               onClick={() => onToggleAttachment(mi, att.name)}
-              className="w-full flex items-center gap-2 px-3 py-2 hover:bg-zinc-900/50 transition-colors cursor-pointer"
+              className="w-full flex items-center gap-2 px-3 py-2 hover:bg-surface/50 transition-colors cursor-pointer"
             >
               <AttachmentIcon mime={att.mime} />
-              <span className="text-[11px] font-medium text-zinc-300 truncate flex-1 text-left">{att.name}</span>
+              <span className="text-[11px] font-medium text-ink truncate flex-1 text-left">{att.name}</span>
               <button
                 onClick={(e) => {
                   e.stopPropagation()
                   onRemoveAttachment(mi, att.name)
                 }}
-                className="rounded p-0.5 text-zinc-600 hover:text-red-400 hover:bg-zinc-800 transition-colors shrink-0"
+                className="rounded p-0.5 text-ink-faint hover:text-danger hover:bg-surface-elevated transition-colors shrink-0"
                 title="Remove"
               >
                 <X className="h-3 w-3" />
@@ -139,7 +139,7 @@ function SourcesBody({ result }: { result: MorphicSearchResult }) {
   const images = [...new Set(result.images)]
 
   if (sources.length === 0 && images.length === 0) {
-    return <div className="flex items-center justify-center py-6 text-xs text-zinc-600">No sources</div>
+    return <div className="flex items-center justify-center py-6 text-xs text-ink-faint">No sources</div>
   }
 
   return (
@@ -147,8 +147,8 @@ function SourcesBody({ result }: { result: MorphicSearchResult }) {
       {images.length > 0 && (
         <div className="mb-2">
           <div className="flex items-center gap-1.5 mb-1.5">
-            <ImageIcon className="h-3 w-3 text-zinc-500" />
-            <span className="text-[9px] font-medium text-zinc-500 uppercase tracking-wider">Images</span>
+            <ImageIcon className="h-3 w-3 text-ink-subtle" />
+            <span className="text-[9px] font-medium text-ink-subtle uppercase tracking-wider">Images</span>
           </div>
           <div className="grid grid-cols-2 gap-1.5">
             {images.slice(0, 4).map((img, i) => (
@@ -156,7 +156,7 @@ function SourcesBody({ result }: { result: MorphicSearchResult }) {
                 <img
                   src={img}
                   alt=""
-                  className="w-full h-16 object-cover rounded border border-zinc-800 hover:border-zinc-600 transition-colors"
+                  className="w-full h-16 object-cover rounded border border-divider hover:border-ink-muted transition-colors"
                   onError={(e) => {
                     ;(e.target as HTMLImageElement).style.display = "none"
                   }}
@@ -174,14 +174,14 @@ function SourcesBody({ result }: { result: MorphicSearchResult }) {
             href={s.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="block rounded-md border border-zinc-800 bg-zinc-900/40 p-2.5 hover:border-zinc-700 hover:bg-zinc-900/70 transition-colors"
+            className="block rounded-md border border-divider bg-surface/40 p-2.5 hover:border-divider-strong hover:bg-surface/70 transition-colors"
           >
             <div className="flex items-center gap-1.5 mb-0.5">
-              <Globe className="h-2.5 w-2.5 text-sky-400 shrink-0" />
-              <span className="text-[10px] font-medium text-sky-400 truncate">{domain}</span>
+              <Globe className="h-2.5 w-2.5 text-ink shrink-0" />
+              <span className="text-[10px] font-medium text-ink truncate">{domain}</span>
             </div>
-            {s.title && <div className="text-[10px] font-medium text-zinc-300 mb-0.5 line-clamp-2">{s.title}</div>}
-            {s.content && <div className="text-[9px] text-zinc-500 line-clamp-3">{s.content.slice(0, 150)}</div>}
+            {s.title && <div className="text-[10px] font-medium text-ink mb-0.5 line-clamp-2">{s.title}</div>}
+            {s.content && <div className="text-[9px] text-ink-subtle line-clamp-3">{s.content.slice(0, 150)}</div>}
           </a>
         )
       })}

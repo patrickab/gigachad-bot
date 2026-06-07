@@ -74,10 +74,10 @@ export function ChatSidebar({ elements, width, onWidthChange }: ChatSidebarProps
     <motion.aside
       initial={false}
       style={{ width: widthStyle }}
-      className="shrink-0 border-l border-zinc-800 bg-zinc-950 flex flex-col overflow-hidden relative"
+      className="shrink-0 border-l border-divider bg-paper flex flex-col overflow-hidden relative"
     >
       <div
-        className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-zinc-700 active:bg-blue-500/50 transition-colors z-10"
+        className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-surface-elevated active:bg-surface-elevated transition-colors z-10"
         onMouseDown={handleMouseDown}
       />
       <div className="flex-1 overflow-y-auto">

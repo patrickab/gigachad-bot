@@ -14,7 +14,7 @@ export function LLMParams({
 }: LLMParamsProps) {
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2 text-xs font-medium text-zinc-500">
+      <div className="flex items-center gap-2 text-xs font-medium text-ink-subtle">
         <SlidersHorizontal className="h-3.5 w-3.5" />
         Parameters
       </div>

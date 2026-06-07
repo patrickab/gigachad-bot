@@ -50,8 +50,8 @@ export function ChatInput({
       label: "Deep Research",
       shortLabel: "Research",
       icon: Search,
-      color: "text-amber-400",
-      accent: "amber",
+      color: "text-ink",
+      accent: "muted",
       enabled: researchEnabled,
       toggle: toggleResearch,
     },
@@ -60,8 +60,8 @@ export function ChatInput({
       label: "Web Search",
       shortLabel: "Search",
       icon: Globe,
-      color: "text-sky-400",
-      accent: "sky",
+      color: "text-ink",
+      accent: "muted",
       enabled: morphicSearchEnabled,
       toggle: toggleMorphicSearch,
     },
@@ -70,8 +70,8 @@ export function ChatInput({
       label: "LaTeX OCR",
       shortLabel: "LaTeX",
       icon: Sigma,
-      color: "text-emerald-400",
-      accent: "emerald",
+      color: "text-ink",
+      accent: "muted",
       enabled: ocrEnabled,
       toggle: toggleOCR,
     },
@@ -80,8 +80,8 @@ export function ChatInput({
       label: "PDF Study",
       shortLabel: "Study",
       icon: BookOpen,
-      color: "text-sky-400",
-      accent: "sky",
+      color: "text-ink",
+      accent: "muted",
       enabled: studyEnabled,
       toggle: toggleStudy,
     },
@@ -232,18 +232,18 @@ export function ChatInput({
               <motion.div key={att.name} layout className="relative">
                 <div
                   onClick={() => setPreviewAttachment(att)}
-                  className="flex items-center gap-1.5 rounded-xl border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 pr-6 cursor-pointer hover:border-zinc-600 transition-colors"
+                  className="flex items-center gap-1.5 rounded-xl border border-divider-strong bg-surface-elevated px-2.5 py-1.5 pr-6 cursor-pointer hover:border-ink-muted transition-colors"
                 >
                   {uploading ? (
-                    <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-300" />
+                    <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-ink-faint border-t-ink" />
                   ) : (
-                    <Icon className="h-3.5 w-3.5 shrink-0 text-blue-400" />
+                    <Icon className="h-3.5 w-3.5 shrink-0 text-ink" />
                   )}
-                  <span className="max-w-[160px] truncate text-xs text-zinc-300">{att.name}</span>
+                  <span className="max-w-[160px] truncate text-xs text-ink">{att.name}</span>
                 </div>
                 <button
                   onClick={() => removeAttachment(att.name)}
-                  className="absolute -right-1 -top-1 rounded-full bg-zinc-800 p-0.5 text-zinc-400 hover:text-red-400"
+                  className="absolute -right-1 -top-1 rounded-full bg-surface-elevated p-0.5 text-ink-muted hover:text-danger"
                 >
                   <X className="h-3 w-3" />
                 </button>
@@ -253,7 +253,7 @@ export function ChatInput({
         </motion.div>
       )}
 
-      <div className="relative z-20 rounded-3xl border border-zinc-700/25 bg-zinc-900 p-4 transition-all duration-300 shadow-[0_8px_30px_rgba(0,0,0,0.05)] focus-within:shadow-[0_8px_30px_rgba(6,182,212,0.04)] focus-within:border-cyan-500/30">
+      <div className="relative z-20 rounded-3xl border border-divider-strong/25 bg-surface p-4 transition-all duration-300 shadow-[0_8px_30px_rgba(0,0,0,var(--shadow-strength))] focus-within:border-divider-strong">
           <textarea
             ref={textareaRef}
             rows={1}
@@ -263,7 +263,7 @@ export function ChatInput({
             onPaste={handlePaste}
             disabled={disabled && !isStreaming}
             placeholder="Send a Message"
-            className="w-full resize-none bg-transparent text-base text-zinc-100 placeholder:text-zinc-500 outline-none"
+            className="w-full resize-none bg-transparent text-base text-ink placeholder:text-ink-subtle outline-none"
           />
           <div className="mt-3 flex items-center justify-between">
             <div className="flex items-center gap-1">
@@ -273,32 +273,32 @@ export function ChatInput({
                   onClick={() => setShowAttachMenu(!showAttachMenu)}
                   disabled={disabled}
                   className={cn(
-                    "rounded-full p-2 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 transition-colors disabled:opacity-30",
-                    showAttachMenu && "bg-zinc-800 text-zinc-200"
+                    "rounded-full p-2 text-ink-muted hover:bg-surface-elevated hover:text-ink transition-colors disabled:opacity-30",
+                    showAttachMenu && "bg-surface-elevated text-ink"
                   )}
                   title="Add resources"
                 >
                   <Plus className="h-4 w-4" />
                 </button>
                 {showAttachMenu && (
-                  <div className="absolute bottom-full left-0 mb-2 w-48 rounded-xl border border-zinc-800 bg-zinc-950 p-2 shadow-2xl">
+                  <div className="absolute bottom-full left-0 mb-2 w-48 rounded-xl border border-divider bg-paper p-2 shadow-2xl">
                     <button
                       onClick={() => { fileRef.current?.click(); setShowAttachMenu(false) }}
-                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800/50 transition-colors"
+                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-ink hover:bg-surface-elevated/50 transition-colors"
                     >
-                      <FileUp className="h-3.5 w-3.5 text-zinc-400" />Upload File
+                      <FileUp className="h-3.5 w-3.5 text-ink-muted" />Upload File
                     </button>
                     <button
                       onClick={() => { setShowAttachMenu(false); setShowDrawing(true) }}
-                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800/50 transition-colors"
+                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-ink hover:bg-surface-elevated/50 transition-colors"
                     >
-                      <Pencil className="h-3.5 w-3.5 text-zinc-400" />Drawing
+                      <Pencil className="h-3.5 w-3.5 text-ink-muted" />Drawing
                     </button>
                     <button
                       onClick={() => { setShowAttachMenu(false); setDrawingOcrActive(true); setShowDrawing(true) }}
-                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800/50 transition-colors"
+                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-ink hover:bg-surface-elevated/50 transition-colors"
                     >
-                      <Pencil className="h-3.5 w-3.5 text-emerald-400" />Drawing (OCR)
+                      <Pencil className="h-3.5 w-3.5 text-ink" />Drawing (OCR)
                     </button>
                   </div>
                 )}
@@ -321,20 +321,20 @@ export function ChatInput({
                   onClick={() => setShowTools(!showTools)}
                   disabled={disabled}
                   className={cn(
-                    "rounded-full p-2 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 transition-colors disabled:opacity-30",
-                    showTools && "bg-zinc-800 text-zinc-200"
+                    "rounded-full p-2 text-ink-muted hover:bg-surface-elevated hover:text-ink transition-colors disabled:opacity-30",
+                    showTools && "bg-surface-elevated text-ink"
                   )}
                   title="Tools"
                 >
                   <LayoutGrid className="h-4 w-4" />
                 </button>
                 {showTools && (
-                  <div className="absolute bottom-full right-0 mb-2 w-56 rounded-xl border border-zinc-800 bg-zinc-950 p-2 shadow-2xl">
+                  <div className="absolute bottom-full right-0 mb-2 w-56 rounded-xl border border-divider bg-paper p-2 shadow-2xl">
                     {tools.filter(t => !t.enabled).map(t => (
                       <button
                         key={t.id}
                         onClick={() => { t.toggle(); setShowTools(false) }}
-                        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800/50 transition-colors"
+                        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-ink hover:bg-surface-elevated/50 transition-colors"
                       >
                         <t.icon className={cn("h-3.5 w-3.5", t.color)} />{t.label}
                       </button>
@@ -347,7 +347,7 @@ export function ChatInput({
                 disabled={disabled}
                 className={cn(
                   "rounded-full p-2 transition-colors disabled:opacity-30",
-                  isListening ? "bg-red-500/20 text-red-400 hover:bg-red-500/30" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+                  isListening ? "bg-danger-soft text-danger hover:bg-danger-soft" : "text-ink-muted hover:bg-surface-elevated hover:text-ink"
                 )}
                 title="Voice input"
               >
@@ -356,7 +356,7 @@ export function ChatInput({
               {isStreaming ? (
                 <button
                   onClick={onCancel}
-                  className="rounded-full p-2.5 transition-all duration-300 bg-zinc-50 text-zinc-950 hover:bg-zinc-200"                  title="Stop generating"
+                  className="rounded-full p-2.5 transition-all duration-300 bg-ink text-paper hover:opacity-90"                  title="Stop generating"
                 >
                   <Square className="h-4 w-4 fill-current" />
                 </button>
@@ -366,7 +366,7 @@ export function ChatInput({
                   disabled={disabled || !canSend}
                   className={cn(
                     "rounded-full p-2.5 transition-all duration-300",
-                    canSend && !disabled ? "bg-zinc-50 text-zinc-950 hover:bg-zinc-200" : "bg-zinc-800 text-zinc-500"
+                    canSend && !disabled ? "bg-ink text-paper hover:opacity-90" : "bg-surface-elevated text-ink-subtle"
                   )}
                 >
                   <ArrowUp className="h-4 w-4" />

@@ -384,8 +384,8 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         historiesOpen={historiesOpen}
         onHistoriesOpenChange={onHistoriesOpenChange}
       />
-      <main className="flex-1 min-w-0 flex flex-col relative bg-zinc-950">
-        <header className="h-[60px] shrink-0 flex items-center px-4 gap-4 bg-zinc-950 z-40 border-b border-zinc-800/50">
+      <main className="flex-1 min-w-0 flex flex-col relative bg-paper">
+        <header className="h-[60px] shrink-0 flex items-center px-4 gap-4 bg-paper z-40 border-b border-divider/50">
           {researchEnabled ? (
             <ResearchModelsBar
               models={models}
@@ -399,7 +399,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           ) : (
             <div className="flex items-center gap-4">
               <ModelDropdown models={models} selectedModel={settings.selectedModel} onSelect={settings.setSelectedModel} />
-              <div className="w-px h-4 bg-zinc-800" />
+              <div className="w-px h-4 bg-surface-elevated" />
               <ReasoningSelector reasoningEffort={settings.reasoningEffort} onReasoningChange={settings.setReasoningEffort} />
             </div>
           )}

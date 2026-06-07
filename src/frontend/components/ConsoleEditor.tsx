@@ -53,7 +53,7 @@ export function ConsoleEditor({
       />
       <textarea
         ref={textareaRef}
-        className="relative w-full h-full resize-none bg-transparent p-4 text-xs leading-[1.625] outline-none text-transparent caret-zinc-300 placeholder:text-zinc-600"
+        className="relative w-full h-full resize-none bg-transparent p-4 text-xs leading-[1.625] outline-none text-transparent caret-ink placeholder:text-ink-faint"
         style={{ fontFamily: MONO_FONT }}
         value={value}
         onChange={(e) => onChange(e.target.value)}

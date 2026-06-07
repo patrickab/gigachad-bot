@@ -43,7 +43,7 @@ export function ResearchModelsBar({
       models={models}
       selectedModel={selectedModel}
       onSelect={onModelSelect}
-      accent="amber"
+      accent="sky"
       extraTabs={TIERS.map((t) => ({ key: t, label: t }))}
       activeExtraTab={activeTier}
       onExtraTabChange={(key) => setActiveTier(key as Tier)}
@@ -51,10 +51,10 @@ export function ResearchModelsBar({
       {({ onToggle }) => (
         <button
           onClick={onToggle}
-          className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium text-amber-400 hover:text-amber-300 hover:bg-zinc-900 transition-colors"
+          className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium text-ink hover:text-ink hover:bg-surface transition-colors"
         >
           <span>Model</span>
-          <ChevronDown className="h-3 w-3 text-amber-500" />
+          <ChevronDown className="h-3 w-3 text-ink" />
         </button>
       )}
     </ModelDropdown>

@@ -11,7 +11,7 @@ export function StyledSelect({ options, value, onChange }: StyledSelectProps) {
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-300 outline-none focus:border-zinc-700 transition-colors"
+      className="w-full rounded-lg border border-divider bg-surface px-3 py-2 text-xs text-ink outline-none focus:border-divider-strong transition-colors"
     >
       {options.map((o) => (
         <option key={o.value} value={o.value}>{o.label}</option>

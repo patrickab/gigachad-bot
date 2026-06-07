@@ -69,24 +69,24 @@ function ChatMessageInner({ role, content, index, onDelete, morphic_result, rese
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25 }}
       onClick={isUser && collapsibleUser ? onCollapse : undefined}
-      className={`flex gap-3 px-6 py-5 ${isUser && collapsibleUser ? "cursor-pointer" : ""}`}
+      className={`flex gap-3 px-6 py-5 text-ink ${isUser && collapsibleUser ? "cursor-pointer" : ""}`}
     >
       <div className="mt-0.5 shrink-0">
         {isUser ? (
-          <div className={`flex h-7 w-7 items-center justify-center rounded-xl bg-zinc-800 ${isUser && collapsibleUser ? "hover:bg-zinc-700 transition-colors" : ""}`} title={collapsibleUser ? "Click to collapse" : undefined}>
-            <User className="h-3.5 w-3.5 text-zinc-400" />
+          <div className={`flex h-7 w-7 items-center justify-center rounded-xl bg-surface-elevated ${isUser && collapsibleUser ? "hover:bg-surface-elevated transition-colors" : ""}`} title={collapsibleUser ? "Click to collapse" : undefined}>
+            <User className="h-3.5 w-3.5 text-ink-muted" />
           </div>
         ) : (
-          <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-sky-600/20">
-            <Bot className="h-3.5 w-3.5 text-sky-400" />
+          <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-surface-elevated">
+            <Bot className="h-3.5 w-3.5 text-ink" />
           </div>
         )}
       </div>
       <div className="min-w-0 flex-1 flex flex-col">
-        <div className="mb-0.5 text-xs font-medium text-zinc-500">{isUser ? "You" : "Assistant"}</div>
+        <div className="mb-0.5 text-xs font-medium text-ink-subtle">{isUser ? "You" : "Assistant"}</div>
         {isUser ? (
           <>
-            {content && <p className="text-sm whitespace-pre-wrap text-zinc-200">{content}</p>}
+            {content && <p className="text-sm whitespace-pre-wrap text-ink">{content}</p>}
             {attachments && attachments.length > 0 && (
               <MessageAttachments attachments={attachments} onClick={onAttachmentClick ?? (() => {})} />
             )}
@@ -95,51 +95,53 @@ function ChatMessageInner({ role, content, index, onDelete, morphic_result, rese
           morphic_result ? (
             <MorphicSearchResult content={content} morphic_result={morphic_result} />
           ) : (
-            <>
+            <div className="text-ink">
               {thought && (
                 <details className={`group ${THOUGHT_VERTICAL_SPACING} pl-4`}>
-                  <summary className="cursor-pointer select-none list-none flex items-center gap-1.5 text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors marker:text-zinc-600">
+                  <summary className="cursor-pointer select-none list-none flex items-center gap-1.5 text-[10px] text-ink-subtle hover:text-ink transition-colors marker:text-ink-faint">
                     <motion.span
                       animate={isStreaming ? { scale: [1, PULSE_SCALE_PEAK, 1] } : { scale: 1 }}
                       transition={{ repeat: Infinity, duration: PULSE_DURATION_S, ease: "easeInOut" }}
                       className="inline-flex"
                     >
-                      <Brain className="h-3 w-3 text-zinc-400 group-hover:text-sky-400 transition-colors" />
+                      <Brain className="h-3 w-3 text-ink-muted group-hover:text-ink transition-colors" />
                     </motion.span>
-                    <span className="font-medium tracking-wide uppercase group-hover:text-sky-400 transition-colors">Reasoning</span>
+                    <span className="font-medium tracking-wide uppercase group-hover:text-ink transition-colors">Reasoning</span>
                   </summary>
-                  <p className="mt-1 pl-4 border-l-2 border-zinc-800/80 text-xs text-zinc-500 leading-relaxed whitespace-pre-wrap italic">
+                  <p className="mt-1 pl-4 border-l-2 border-divider/80 text-xs text-ink-subtle leading-relaxed whitespace-pre-wrap italic">
                     {thought}
                   </p>
                 </details>
               )}
               <LaTeXMarkdown content={cleanContent} streaming={isStreaming} />
-            </>
+            </div>
           )
         ) : content ? (
-          <span className="inline-flex items-center gap-1 text-zinc-500 text-sm">
-            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-sky-400" />
+          <span className="inline-flex items-center gap-1 text-ink text-sm">
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-ink" />
             {content}
           </span>
         ) : thought ? (
-          <details className={`group ${THOUGHT_VERTICAL_SPACING} pl-4`}>
-            <summary className="cursor-pointer select-none list-none flex items-center gap-1.5 text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors marker:text-zinc-600">
-              <motion.span
-                animate={isStreaming ? { scale: [1, PULSE_SCALE_PEAK, 1] } : { scale: 1 }}
-                transition={{ repeat: Infinity, duration: PULSE_DURATION_S, ease: "easeInOut" }}
-                className="inline-flex"
-              >
-                <Brain className="h-3 w-3 text-zinc-400 group-hover:text-sky-400 transition-colors" />
-              </motion.span>
-              <span className="font-medium tracking-wide uppercase group-hover:text-sky-400 transition-colors">Reasoning</span>
-            </summary>
-            <p className="mt-1 pl-4 border-l-2 border-zinc-800/80 text-xs text-zinc-500 leading-relaxed whitespace-pre-wrap italic">
-              {thought}
-            </p>
-          </details>
+          <div className="text-ink">
+            <details className={`group ${THOUGHT_VERTICAL_SPACING} pl-4`}>
+              <summary className="cursor-pointer select-none list-none flex items-center gap-1.5 text-[10px] text-ink-subtle hover:text-ink transition-colors marker:text-ink-faint">
+                <motion.span
+                  animate={isStreaming ? { scale: [1, PULSE_SCALE_PEAK, 1] } : { scale: 1 }}
+                  transition={{ repeat: Infinity, duration: PULSE_DURATION_S, ease: "easeInOut" }}
+                  className="inline-flex"
+                >
+                  <Brain className="h-3 w-3 text-ink-muted group-hover:text-ink transition-colors" />
+                </motion.span>
+                <span className="font-medium tracking-wide uppercase group-hover:text-ink transition-colors">Reasoning</span>
+              </summary>
+              <p className="mt-1 pl-4 border-l-2 border-divider/80 text-xs text-ink-subtle leading-relaxed whitespace-pre-wrap italic">
+                {thought}
+              </p>
+            </details>
+          </div>
         ) : isStreaming ? (
-          <span className="inline-flex items-center gap-2 text-zinc-500 text-sm">
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-600" />
+          <span className="inline-flex items-center gap-2 text-ink text-sm">
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-ink-faint" />
             <span>Processing…</span>
           </span>
         ) : null}
@@ -156,10 +158,10 @@ function ChatMessageInner({ role, content, index, onDelete, morphic_result, rese
             <div className="relative">
               <button
                 onClick={(e) => { e.stopPropagation(); handleCopy() }}
-                className="rounded p-1 hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300"
+                className="rounded p-1 hover:bg-surface-elevated text-ink-subtle hover:text-ink"
                 title="Copy"
               >
-                {copied ? <Check className="h-3.5 w-3.5 text-cyan-400" /> : <Copy className="h-3.5 w-3.5" />}
+                {copied ? <Check className="h-3.5 w-3.5 text-ink" /> : <Copy className="h-3.5 w-3.5" />}
               </button>
               {copied && (
                 <motion.span
@@ -167,7 +169,7 @@ function ChatMessageInner({ role, content, index, onDelete, morphic_result, rese
                   animate={{ opacity: 1, y: -8 }}
                   exit={{ opacity: 0 }}
                   transition={{ duration: 0.4 }}
-                  className="absolute -top-5 left-1/2 -translate-x-1/2 text-[10px] text-cyan-400 pointer-events-none whitespace-nowrap"
+                  className="absolute -top-5 left-1/2 -translate-x-1/2 text-[10px] text-ink pointer-events-none whitespace-nowrap"
                 >
                   Copied!
                 </motion.span>
@@ -177,7 +179,7 @@ function ChatMessageInner({ role, content, index, onDelete, morphic_result, rese
           {onDelete && (
             <button
               onClick={(e) => { e.stopPropagation(); onDelete(index) }}
-              className="rounded p-1 hover:bg-zinc-800 text-zinc-500 hover:text-red-400"
+              className="rounded p-1 hover:bg-surface-elevated text-ink-subtle hover:text-danger"
               title="Delete pair"
             >
               <Trash2 className="h-3.5 w-3.5" />
