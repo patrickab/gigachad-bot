@@ -1,6 +1,6 @@
 # A chatinterface for personal use.
 
-<img width="400" height="400" alt="image" src="https://github.com/user-attachments/assets/34727936-ddbd-44d7-b191-d57084b30984" />
+<img width="500" height="500" alt="image" src="https://github.com/user-attachments/assets/34727936-ddbd-44d7-b191-d57084b30984" />
 
 ## Core Features
 - Customizable library of system prompts for recurring tasks.
