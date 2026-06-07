@@ -25,6 +25,7 @@ export interface VaultTreeItem<T = unknown> {
   children?: VaultTreeItem<T>[]
   isActive?: boolean
   isSystem?: boolean
+  displayInVault?: boolean
   badge?: string | number
 }
 

@@ -184,9 +184,10 @@ function buildProjectItems(
       {
         id: `${project.slug}/__dashboard__`,
         label: "Dashboard",
-        type: "element",
+        type: "element" as const,
         icon: LayoutDashboard,
         isSystem: true,
+        displayInVault: false,
         data: project.slug,
       },
       ...(project.tabs ?? [])
@@ -198,7 +199,7 @@ function buildProjectItems(
           data: `${project.slug}/${tab.filename}`,
           icon: FileText,
         })),
-    ],
+    ].filter((child: VaultTreeItem<string>) => child.displayInVault !== false),
   }))
 }
 
