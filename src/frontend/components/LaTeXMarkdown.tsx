@@ -19,7 +19,7 @@ const FULL_REHYPE_PLUGINS = [rehypeKatex, rehypeRaw]
 const STREAMING_REMARK_PLUGINS = [remarkGfm, remarkBreaks]
 const STREAMING_REHYPE_PLUGINS = [rehypeRaw]
 
-const streamingComponents: Components = {
+const streamingComponents: Components & { thought?: React.ComponentType<any> } = {
   pre({ children }) {
     return <>{children}</>
   },
@@ -36,6 +36,9 @@ const streamingComponents: Components = {
         <table>{children}</table>
       </div>
     )
+  },
+  thought() {
+    return null
   },
 }
 
@@ -143,7 +146,7 @@ function CitationPill({ node, children, href, title, ...props }: any) {
   )
 }
 
-const sharedComponents: Components = {
+const sharedComponents: Components & { thought?: React.ComponentType<any> } = {
   pre({ children }) {
     return <>{children}</>
   },
@@ -166,6 +169,9 @@ const sharedComponents: Components = {
         <table>{children}</table>
       </div>
     )
+  },
+  thought() {
+    return null
   },
 }
 

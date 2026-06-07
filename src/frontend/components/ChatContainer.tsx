@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence } from "framer-motion"
 import type { Message, Attachment } from "@/lib/types"
-import { ChatMessage } from "./ChatMessage"
+import { ChatMessage, AssistantMessageContent } from "./ChatMessage"
 import { ChatInput } from "./ChatInput"
 import { ChatSidebar } from "./ChatSidebar"
 import { getChatSidebarConfig } from "./chatSidebarConfig"
@@ -401,7 +401,7 @@ export function ChatContainer({
                                 <div className="px-4 py-3">
                                   <div className="text-xs font-medium text-ink-subtle mb-1">Assistant</div>
                         <div className="max-h-[25vh] overflow-y-auto text-ink">
-                          <LaTeXMarkdown content={assistant.content} compact />
+                          <AssistantMessageContent content={assistant.content} compact />
                         </div>
                                   </div>
                               </ElevatedContainer>

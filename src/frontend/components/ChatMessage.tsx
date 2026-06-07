@@ -32,10 +32,19 @@ interface ChatMessageProps {
   onCollapse?: () => void
 }
 
-function ChatMessageInner({ role, content, index, onDelete, morphic_result, research_steps, research_progress, research_trace_id, isStreaming, attachments, onAttachmentClick, collapsibleUser, onCollapse }: ChatMessageProps) {
-  const isUser = role === "user"
-  const [copied, setCopied] = useState(false)
+export interface AssistantMessageContentProps {
+  content: string
+  isStreaming?: boolean
+  compact?: boolean
+  morphic_result?: Message["morphic_result"]
+}
 
+export function AssistantMessageContent({
+  content,
+  isStreaming,
+  compact,
+  morphic_result,
+}: AssistantMessageContentProps) {
   const { thought, cleanContent } = useMemo(() => {
     const startTag = "<thought>\n"
     const endTag = "\n</thought>"
@@ -53,6 +62,38 @@ function ChatMessageInner({ role, content, index, onDelete, morphic_result, rese
     const t = content.slice(startIdx + startTag.length).trim() || null
     return { thought: t, cleanContent: before.trim() }
   }, [content])
+
+  if (morphic_result) {
+    return <MorphicSearchResult content={content} morphic_result={morphic_result} />
+  }
+
+  return (
+    <div className="text-ink">
+      {thought && (
+        <details className={`group ${THOUGHT_VERTICAL_SPACING} pl-4`}>
+          <summary className="cursor-pointer select-none list-none flex items-center gap-1.5 text-[10px] text-ink-subtle hover:text-ink transition-colors marker:text-ink-faint">
+            <motion.span
+              animate={isStreaming ? { scale: [1, PULSE_SCALE_PEAK, 1] } : { scale: 1 }}
+              transition={{ repeat: Infinity, duration: PULSE_DURATION_S, ease: "easeInOut" }}
+              className="inline-flex"
+            >
+              <Brain className="h-3 w-3 text-ink-muted group-hover:text-ink transition-colors" />
+            </motion.span>
+            <span className="font-medium tracking-wide uppercase group-hover:text-ink transition-colors">Reasoning</span>
+          </summary>
+          <p className="mt-1 pl-4 border-l-2 border-divider/80 text-xs text-ink-subtle leading-relaxed whitespace-pre-wrap italic">
+            {thought}
+          </p>
+        </details>
+      )}
+      <LaTeXMarkdown content={cleanContent} streaming={isStreaming} compact={compact} />
+    </div>
+  )
+}
+
+function ChatMessageInner({ role, content, index, onDelete, morphic_result, research_steps, research_progress, research_trace_id, isStreaming, attachments, onAttachmentClick, collapsibleUser, onCollapse }: ChatMessageProps) {
+  const isUser = role === "user"
+  const [copied, setCopied] = useState(false)
 
   function handleCopy() {
     navigator.clipboard.writeText(content).then(() => {
@@ -92,53 +133,16 @@ function ChatMessageInner({ role, content, index, onDelete, morphic_result, rese
             )}
           </>
         ) : content && !isResearchRunning ? (
-          morphic_result ? (
-            <MorphicSearchResult content={content} morphic_result={morphic_result} />
-          ) : (
-            <div className="text-ink">
-              {thought && (
-                <details className={`group ${THOUGHT_VERTICAL_SPACING} pl-4`}>
-                  <summary className="cursor-pointer select-none list-none flex items-center gap-1.5 text-[10px] text-ink-subtle hover:text-ink transition-colors marker:text-ink-faint">
-                    <motion.span
-                      animate={isStreaming ? { scale: [1, PULSE_SCALE_PEAK, 1] } : { scale: 1 }}
-                      transition={{ repeat: Infinity, duration: PULSE_DURATION_S, ease: "easeInOut" }}
-                      className="inline-flex"
-                    >
-                      <Brain className="h-3 w-3 text-ink-muted group-hover:text-ink transition-colors" />
-                    </motion.span>
-                    <span className="font-medium tracking-wide uppercase group-hover:text-ink transition-colors">Reasoning</span>
-                  </summary>
-                  <p className="mt-1 pl-4 border-l-2 border-divider/80 text-xs text-ink-subtle leading-relaxed whitespace-pre-wrap italic">
-                    {thought}
-                  </p>
-                </details>
-              )}
-              <LaTeXMarkdown content={cleanContent} streaming={isStreaming} />
-            </div>
-          )
+          <AssistantMessageContent
+            content={content}
+            isStreaming={isStreaming}
+            morphic_result={morphic_result}
+          />
         ) : content ? (
           <span className="inline-flex items-center gap-1 text-ink text-sm">
             <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-ink" />
             {content}
           </span>
-        ) : thought ? (
-          <div className="text-ink">
-            <details className={`group ${THOUGHT_VERTICAL_SPACING} pl-4`}>
-              <summary className="cursor-pointer select-none list-none flex items-center gap-1.5 text-[10px] text-ink-subtle hover:text-ink transition-colors marker:text-ink-faint">
-                <motion.span
-                  animate={isStreaming ? { scale: [1, PULSE_SCALE_PEAK, 1] } : { scale: 1 }}
-                  transition={{ repeat: Infinity, duration: PULSE_DURATION_S, ease: "easeInOut" }}
-                  className="inline-flex"
-                >
-                  <Brain className="h-3 w-3 text-ink-muted group-hover:text-ink transition-colors" />
-                </motion.span>
-                <span className="font-medium tracking-wide uppercase group-hover:text-ink transition-colors">Reasoning</span>
-              </summary>
-              <p className="mt-1 pl-4 border-l-2 border-divider/80 text-xs text-ink-subtle leading-relaxed whitespace-pre-wrap italic">
-                {thought}
-              </p>
-            </details>
-          </div>
         ) : isStreaming ? (
           <span className="inline-flex items-center gap-2 text-ink text-sm">
             <Loader2 className="h-3.5 w-3.5 animate-spin text-ink-faint" />
