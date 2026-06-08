@@ -96,7 +96,7 @@ export function ModelDropdown({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
             transition={{ duration: 0.15 }}
-            className="absolute left-0 top-full mt-1 w-72 rounded-xl border border-divider bg-surface shadow-2xl flex flex-col overflow-hidden"
+            className="absolute left-0 top-full mt-1 w-72 rounded-xl border border-divider bg-surface shadow-[var(--shadow-lg)] flex flex-col overflow-hidden"
           >
             <div className="p-1.5 border-b border-divider shrink-0 space-y-1.5">
               {extraTabs && extraTabs.length > 0 && (
@@ -108,7 +108,7 @@ export function ModelDropdown({
                       className={cn(
                         "flex-1 rounded-md px-2 py-1.5 text-xs font-medium capitalize transition-colors",
                         tab.key === activeExtraTab
-                          ? "bg-surface-elevated text-ink shadow-sm"
+                          ? "bg-surface-elevated text-ink shadow-[var(--shadow-sm)]"
                           : "text-ink-subtle hover:text-ink"
                       )}
                     >
@@ -125,7 +125,7 @@ export function ModelDropdown({
                     className={cn(
                       "flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
                       p === activeTab
-                        ? "bg-surface-elevated text-ink shadow-sm"
+                        ? "bg-surface-elevated text-ink shadow-[var(--shadow-sm)]"
                         : "text-ink-subtle hover:text-ink"
                     )}
                   >

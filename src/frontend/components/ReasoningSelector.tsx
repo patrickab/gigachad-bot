@@ -15,8 +15,8 @@ export function ReasoningSelector({ reasoningEffort, onReasoningChange }: Reason
           key={level}
           onClick={() => onReasoningChange(level)}
           className={`px-1.5 text-[10px] font-medium rounded-sm transition-colors h-full flex items-center ${
-            level === reasoningEffort 
-              ? "bg-surface-elevated text-ink shadow-sm" 
+            level === reasoningEffort
+              ? "bg-surface-elevated text-ink shadow-[var(--shadow-sm)]"
               : "text-ink-subtle hover:text-ink"
           }`}
         >

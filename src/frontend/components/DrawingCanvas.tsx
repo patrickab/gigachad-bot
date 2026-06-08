@@ -201,7 +201,7 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
             exit={{ opacity: 0, scale: 0.96, y: 8 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
             className={cn(
-              "flex flex-col overflow-hidden rounded-xl border border-divider-strong shadow-2xl bg-surface-elevated",
+              "flex flex-col overflow-hidden rounded-xl border border-divider-strong shadow-[var(--shadow-xl)] bg-surface-elevated",
               isMaximized
                 ? "fixed inset-4 z-[101]"
                 : "w-full max-w-2xl mx-4 h-[70vh]",

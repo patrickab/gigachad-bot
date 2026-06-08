@@ -366,7 +366,7 @@ export function ChatContainer({
                         setKeyboardFocusIdx(null)
                       }}
                       className={cn(
-                        "mx-3 my-4 rounded-xl border border-divider/40 shadow-sm overflow-hidden cursor-pointer transition-all duration-300",
+                        "mx-3 my-4 rounded-xl border border-divider/40 shadow-[var(--shadow-sm)] overflow-hidden cursor-pointer transition-all duration-300",
                         activeFocusedGlobalIndex === globalIndex && "ring-1 ring-ink-muted/50"
                       )}
                     >
@@ -447,7 +447,7 @@ export function ChatContainer({
           </div>
         </div>
         <div ref={inputAreaRef} className="absolute bottom-0 left-0 right-0 z-10 pointer-events-none">
-          <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-paper via-paper/60 to-transparent pointer-events-none" />
+          <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-paper via-paper/20 to-transparent pointer-events-none" />
           <div className="relative pb-6 pointer-events-auto">
             <div className="mx-auto" style={chatMaxWidth ? { maxWidth: chatMaxWidth } : undefined}>
             <ChatInput
@@ -467,7 +467,7 @@ export function ChatContainer({
             onClick={() => setContextOpen((c) => !c)}
             title={contextOpen ? "Collapse sidebar" : "Open sidebar"}
             aria-label={contextOpen ? "Collapse sidebar" : "Open sidebar"}
-            className="absolute right-0 top-3 z-30 flex items-center justify-center h-12 w-4 rounded-l-md border border-r-0 border-divider-strong bg-surface-elevated/80 text-ink hover:bg-surface-elevated hover:text-ink hover:w-5 transition-all shadow-sm"
+            className="absolute right-0 top-3 z-30 flex items-center justify-center h-12 w-4 rounded-l-md border border-r-0 border-divider-strong bg-surface-elevated/80 text-ink hover:bg-surface-elevated hover:text-ink hover:w-5 transition-all shadow-[var(--shadow-sm)]"
           >
             <ChevronLeft className="h-4 w-4" />
           </button>

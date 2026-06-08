@@ -139,9 +139,9 @@ export const ElevatedContainer = React.forwardRef<any, ElevatedContainerProps>(
           }}
           className={cn(
             "relative transition-all duration-200 text-ink",
-            castShadow && currentLevel === 1 && "shadow-[0_2px_10px_rgba(0,0,0,var(--shadow-strength))]",
-            castShadow && currentLevel >= 2 && "shadow-[0_4px_15px_rgba(0,0,0,var(--shadow-strength))]",
-            hoverLift && "hover:shadow-[0_12px_30px_rgba(0,0,0,var(--shadow-strength))] hover:z-10",
+            castShadow && currentLevel === 1 && "shadow-[var(--shadow-sm)]",
+            castShadow && currentLevel >= 2 && "shadow-[var(--shadow-md)]",
+            hoverLift && "hover:shadow-[var(--shadow-xl)] hover:z-10",
             asButton && "cursor-pointer select-none text-left outline-none",
             className
           )}

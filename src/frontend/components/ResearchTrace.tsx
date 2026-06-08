@@ -83,11 +83,11 @@ function ResearchTraceInner({ steps = [], progress, traceId, isLive }: Props) {
         <span className="text-[11px] font-medium text-ink-muted">
           Research Trace
         </span>
-        <span className="text-[10px] text-ink-faint ml-auto">
+        <span className="text-[10px] text-ink-faint ml-auto tabular-nums">
           {steps.length} step{steps.length !== 1 ? "s" : ""}
         </span>
         {progress && (
-          <span className="text-[10px] text-ink">
+          <span className="text-[10px] text-ink tabular-nums">
             {progress.completed_queries}/{progress.total_queries} queries
           </span>
         )}
@@ -95,7 +95,7 @@ function ResearchTraceInner({ steps = [], progress, traceId, isLive }: Props) {
           <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-ink ml-1" />
         )}
         {traceId && (
-          <span className="text-[9px] text-ink-faint font-mono ml-1">#{traceId}</span>
+                    <span className="text-[9px] text-ink-faint font-mono ml-1 tabular-nums">#{traceId}</span>
         )}
       </button>
 
@@ -125,7 +125,7 @@ function ResearchTraceInner({ steps = [], progress, traceId, isLive }: Props) {
                     {hasDetails && (
                       <ChevronDown className={`h-3 w-3 text-ink-faint transition-transform ${isOpen ? "rotate-180" : ""}`} />
                     )}
-                    <span className="text-[9px] text-ink-faint font-mono flex items-center gap-1">
+                      <span className="text-[9px] text-ink-faint font-mono tabular-nums flex items-center gap-1">
                       <Clock className="h-2.5 w-2.5" />
                       {formatTime(step.timestamp)}
                     </span>

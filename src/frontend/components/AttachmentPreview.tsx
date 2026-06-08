@@ -15,7 +15,7 @@ function PreviewContent({ attachment, chatId, slug }: { attachment: Attachment; 
   if (attachment.mime.startsWith("image/")) {
     return (
       <div className="flex items-center justify-center p-6 overflow-auto max-h-[80vh]">
-        <img src={attachment.url} alt={attachment.name} className="max-w-full max-h-[80vh] rounded-lg shadow-2xl object-contain" />
+        <img src={attachment.url} alt={attachment.name} className="max-w-full max-h-[80vh] rounded-lg shadow-[var(--shadow-xl)] object-contain" />
       </div>
     )
   }
@@ -85,7 +85,7 @@ export function AttachmentPreview({ attachment, chatId, slug = null, onClose }: 
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.96, y: 8 }}
           transition={{ duration: 0.2, ease: "easeOut" }}
-          className="flex flex-col w-full max-w-4xl max-h-[85vh] mx-4 rounded-xl border border-divider-strong/50 bg-surface shadow-2xl overflow-hidden"
+          className="flex flex-col w-full max-w-4xl max-h-[85vh] mx-4 rounded-xl border border-divider-strong/50 bg-surface shadow-[var(--shadow-xl)] overflow-hidden"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex items-center justify-between px-4 py-2 border-b border-divider/50 shrink-0">

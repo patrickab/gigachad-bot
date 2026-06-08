@@ -48,7 +48,7 @@ export function SaveChatModal({ open, onClose, onSave }: SaveChatModalProps) {
             exit={{ opacity: 0, scale: 0.96, y: 8 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-sm mx-4 rounded-xl border border-divider bg-paper shadow-2xl overflow-hidden"
+            className="w-full max-w-sm mx-4 rounded-xl border border-divider bg-paper shadow-[var(--shadow-xl)] overflow-hidden"
           >
             <div className="px-5 pt-5 pb-3">
               <div className="flex items-center gap-2 text-sm font-medium text-ink">

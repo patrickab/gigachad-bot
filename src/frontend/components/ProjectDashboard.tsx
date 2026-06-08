@@ -85,7 +85,7 @@ function AddCardModal({ open, onClose, onAdd, defaultState }: AddCardModalProps)
             exit={{ opacity: 0, scale: 0.96, y: 8 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-sm mx-4 rounded-2xl border border-divider-strong bg-surface shadow-[0_8px_30px_rgba(0,0,0,var(--shadow-strength))] overflow-hidden"
+            className="w-full max-w-sm mx-4 rounded-2xl border border-divider-strong bg-surface shadow-[var(--shadow-lg)] overflow-hidden"
           >
             <div className="px-5 pt-5 pb-3">
               <div className="flex items-center gap-2 text-sm font-medium text-ink">
@@ -180,16 +180,16 @@ export function ProjectDashboard() {
           exit={{ opacity: 0, scale: 0.98, y: 10 }}
           transition={{ duration: 0.25, ease: "easeOut" }}
           onClick={(e) => e.stopPropagation()}
-          className="w-11/12 max-w-6xl h-[85vh] max-h-[800px] rounded-3xl border border-divider/50 overflow-hidden flex flex-col shadow-2xl"
+          className="w-11/12 max-w-6xl h-[85vh] max-h-[800px] rounded-3xl border border-divider/50 overflow-hidden flex flex-col shadow-[var(--shadow-xl)]"
         >
           <ElevationProvider darkColor="var(--paper)" brightColor="var(--surface-elevated)" numLevels={3}>
             <ElevatedContainer className="w-full h-full flex flex-col overflow-hidden">
               {/* Board Header */}
               <div className="pt-6 px-8 flex items-center justify-between border-b border-divider/20 pb-4 select-none shrink-0">
                 <div className="flex items-center gap-3">
-                  <h2 className="text-base font-bold text-ink">
-                    {projectData.name || activeProject} Dashboard
-                  </h2>
+                   <h2 className="text-lg font-semibold tracking-tight text-ink">
+                     {projectData.name || activeProject} Dashboard
+                   </h2>
                 </div>
               </div>
 
@@ -213,10 +213,10 @@ export function ProjectDashboard() {
                       {/* Column Header */}
                       <div className="flex items-center justify-between px-4 pt-4 pb-3 select-none shrink-0">
                         <div className="flex items-center gap-2">
-                          <span className="text-[11px] font-bold text-ink-muted uppercase tracking-[0.2em]">
-                            {col.label}
-                          </span>
-                          <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-surface-elevated text-ink">
+                           <span className="text-[11px] font-bold text-ink-muted uppercase tracking-[0.2em] tabular-nums">
+                             {col.label}
+                           </span>
+                           <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-surface-elevated text-ink tabular-nums">
                             {cards.length}
                           </span>
                         </div>
@@ -273,7 +273,7 @@ export function ProjectDashboard() {
                                   moveCard(card.id, PREV_STATE[col.id])
                                 }}
                                 hoverLift
-                                className="group relative w-full rounded-xl border border-divider/40 overflow-hidden cursor-grab active:cursor-grabbing select-none transition-all duration-300 shadow-[0_4px_16px_rgba(0,0,0,var(--shadow-strength))]"
+                                className="group relative w-full rounded-xl border border-divider/40 overflow-hidden cursor-grab active:cursor-grabbing select-none transition-all duration-300 shadow-[var(--shadow-md)]"
                               >
                                 <div className="p-4 flex flex-col gap-1 pr-6">
                                   <span className="text-sm font-semibold text-ink">

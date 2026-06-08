@@ -44,7 +44,7 @@ export function MoreOptionsMenu({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -4, scale: 0.95 }}
             transition={{ duration: 0.15 }}
-            className="absolute right-0 top-full mt-2 w-72 rounded-xl border border-divider bg-paper p-3 shadow-2xl flex flex-col gap-4"
+            className="absolute right-0 top-full mt-2 w-72 rounded-xl border border-divider bg-paper p-3 shadow-[var(--shadow-xl)] flex flex-col gap-4"
           >
             {!researchEnabled && (
               <>

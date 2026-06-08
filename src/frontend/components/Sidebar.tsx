@@ -76,7 +76,7 @@ export function Sidebar({
     >
       <div className="flex items-center justify-between px-2 py-2 border-b border-divider h-[60px]">
         {!collapsed && (
-          <span className="text-sm font-semibold text-ink px-2">GigaChat Bot</span>
+          <span className="text-base font-semibold tracking-tight text-ink px-2">GigaChat Bot</span>
         )}
         <div className={collapsed ? "flex justify-center w-full" : "flex justify-end"}>
           {toggleItem && (

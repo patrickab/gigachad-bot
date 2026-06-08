@@ -126,7 +126,7 @@ function CitationPill({ node, children, href, title, ...props }: any) {
             transition={{ duration: 0.15, ease: "easeOut" }}
             onMouseEnter={handleEnter}
             onMouseLeave={handleLeave}
-            className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 rounded-md border border-divider bg-surface p-2.5 shadow-xl z-50 block"
+            className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 rounded-md border border-divider bg-surface p-2.5 shadow-[var(--shadow-xl)] z-50 block"
           >
             <span className="flex items-center gap-1.5 mb-0.5">
               <Globe className="h-2.5 w-2.5 text-ink shrink-0" />

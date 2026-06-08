@@ -13,7 +13,7 @@ interface ConsoleEditorProps {
   className?: string
 }
 
-const MONO_FONT = `ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace`
+const MONO_FONT = "var(--font-mono), 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace"
 
 export function ConsoleEditor({
   value,

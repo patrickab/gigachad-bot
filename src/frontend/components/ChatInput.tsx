@@ -253,7 +253,7 @@ export function ChatInput({
         </motion.div>
       )}
 
-      <div className="relative z-20 rounded-3xl border border-divider-strong/25 bg-surface p-4 transition-all duration-300 shadow-[0_8px_30px_rgba(0,0,0,var(--shadow-strength))] focus-within:border-divider-strong">
+      <div className="relative z-20 rounded-3xl border border-divider-strong/25 bg-surface p-4 transition-all duration-300 shadow-[var(--shadow-lg)] focus-within:border-divider-strong">
           <textarea
             ref={textareaRef}
             rows={1}
@@ -281,7 +281,7 @@ export function ChatInput({
                   <Plus className="h-4 w-4" />
                 </button>
                 {showAttachMenu && (
-                  <div className="absolute bottom-full left-0 mb-2 w-48 rounded-xl border border-divider bg-paper p-2 shadow-2xl">
+                  <div className="absolute bottom-full left-0 mb-2 w-48 rounded-xl border border-divider bg-paper p-2 shadow-[var(--shadow-xl)]">
                     <button
                       onClick={() => { fileRef.current?.click(); setShowAttachMenu(false) }}
                       className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-ink hover:bg-surface-elevated/50 transition-colors"
@@ -329,7 +329,7 @@ export function ChatInput({
                   <LayoutGrid className="h-4 w-4" />
                 </button>
                 {showTools && (
-                  <div className="absolute bottom-full right-0 mb-2 w-56 rounded-xl border border-divider bg-paper p-2 shadow-2xl">
+                  <div className="absolute bottom-full right-0 mb-2 w-56 rounded-xl border border-divider bg-paper p-2 shadow-[var(--shadow-xl)]">
                     {tools.filter(t => !t.enabled).map(t => (
                       <button
                         key={t.id}
@@ -356,7 +356,7 @@ export function ChatInput({
               {isStreaming ? (
                 <button
                   onClick={onCancel}
-                  className="rounded-full p-2.5 transition-all duration-300 bg-ink text-paper hover:opacity-90"                  title="Stop generating"
+                  className="rounded-full p-2.5 transition-all duration-300 bg-ink text-paper hover:opacity-90 active:scale-[0.96]"                  title="Stop generating"
                 >
                   <Square className="h-4 w-4 fill-current" />
                 </button>
@@ -366,7 +366,7 @@ export function ChatInput({
                   disabled={disabled || !canSend}
                   className={cn(
                     "rounded-full p-2.5 transition-all duration-300",
-                    canSend && !disabled ? "bg-ink text-paper hover:opacity-90" : "bg-surface-elevated text-ink-subtle"
+                    canSend && !disabled ? "bg-ink text-paper hover:opacity-90 active:scale-[0.96]" : "bg-surface-elevated text-ink-subtle"
                   )}
                 >
                   <ArrowUp className="h-4 w-4" />

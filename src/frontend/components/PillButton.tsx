@@ -46,7 +46,7 @@ export function PillButton({ accent = "neutral", active, icon, children, onClick
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+        "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-all duration-150 active:scale-[0.97]",
         active
           ? cn(a.bg, a.border, a.text, "border", a.hoverBg, a.hoverBorder)
           : "bg-surface text-ink-subtle hover:text-ink",
