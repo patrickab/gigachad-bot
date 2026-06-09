@@ -1,13 +1,16 @@
 "use client"
 
+import { useCallback, useMemo } from "react"
 import { motion } from "framer-motion"
 import { VaultTree, type VaultTreeItem } from "./VaultTree"
-import { FileText, FolderKanban, LayoutDashboard, Clock } from "lucide-react"
+import { FolderKanban, LayoutDashboard, Clock } from "lucide-react"
 import { SidebarElement } from "./SidebarElement"
 import { getSidebarConfig } from "@/lib/sidebarConfig"
 import { useProject } from "@/contexts/ProjectContext"
-import type { ProjectListItem, ProjectTab } from "@/lib/types"
-import { archiveChatHistory, createDirectory, moveHistoryItem, Element, Vault } from "@/lib/api"
+import { BranchProvider } from "@/contexts/BranchContext"
+import type { BranchMeta, ProjectListItem } from "@/lib/types"
+import { ChatBranchItem } from "./ChatBranchItem"
+import { createDirectory, moveHistoryItem, Vault } from "@/lib/api"
 
 const COLLAPSED_WIDTH = 50
 const EXPANDED_WIDTH = 280
@@ -18,10 +21,15 @@ interface SidebarProps {
   rootFiles: string[]
   histories: Record<string, string[]>
   historiesLoading?: boolean
-  onHistoryLoad: (filename: string) => void
-  onHistoryRefresh: () => void
+  branchMeta: Record<string, BranchMeta>
+  onOpenChat: (filename: string, qaIndex?: number) => void
+  onRefreshAll: () => Promise<void>
   onSave: () => void
   onReset: () => void
+  onMerge?: (childFile: string) => Promise<void>
+  onCascadeDelete?: (filename: string) => Promise<void>
+  activeFile?: string | null
+  activeQaIndex?: number | null
   projectsOpen: boolean
   onProjectsOpenChange: (open: boolean) => void
   historiesOpen: boolean
@@ -34,10 +42,15 @@ export function Sidebar({
   rootFiles,
   histories,
   historiesLoading,
-  onHistoryLoad,
-  onHistoryRefresh,
+  branchMeta,
+  onOpenChat,
+  onRefreshAll,
   onSave,
   onReset,
+  onMerge,
+  onCascadeDelete,
+  activeFile,
+  activeQaIndex,
   projectsOpen,
   onProjectsOpenChange,
   historiesOpen,
@@ -53,6 +66,10 @@ export function Sidebar({
     setDashboardOpen,
   } = useProject()
 
+  const handleTimelineDelete = useCallback(async (file: string) => {
+    await onCascadeDelete?.(file)
+  }, [onCascadeDelete])
+
   const expandIfCollapsed = () => { if (collapsed) onToggle() }
 
   const sidebarItems = getSidebarConfig({
@@ -67,10 +84,39 @@ export function Sidebar({
     item => item.id !== "toggle-collapse" && item.id !== "save-chat" && item.id !== "reset-chat",
   )
 
+  const sidebarWidth = collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH
+  const animateWidth = useMemo(() => ({ width: sidebarWidth }), [sidebarWidth])
+
+  const projectItems = useMemo(() =>
+    buildProjectItems(projects, activeProject, branchMeta),
+    [projects, activeProject, branchMeta],
+  )
+
+  const historyItems = useMemo(() =>
+    buildHistoryItems(rootFiles, histories, projects),
+    [rootFiles, histories, projects],
+  )
+
+  const renderChatElement = useCallback((item: VaultTreeItem<string>, depth: number) => (
+    <ChatBranchItem
+      file={(item.data as string) ?? item.id}
+      label={item.label}
+      depth={depth}
+    />
+  ), [])
+
   return (
+    <BranchProvider
+      branchMeta={branchMeta}
+      activeFile={activeFile}
+      activeQaIndex={activeQaIndex}
+      onFileClick={onOpenChat}
+      onMerge={onMerge}
+      onDelete={handleTimelineDelete}
+    >
     <motion.aside
       initial={false}
-      animate={{ width: collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH }}
+      animate={animateWidth}
       transition={{ duration: 0.25, ease: "easeInOut" }}
       className="shrink-0 border-r border-divider bg-paper flex flex-col overflow-hidden"
     >
@@ -96,7 +142,7 @@ export function Sidebar({
             sectionTitle="Projects"
             storageKey="expanded_project_folders"
             count={projects.length}
-            items={buildProjectItems(projects, activeProject)}
+            items={projectItems}
             collapsed={collapsed}
             open={projectsOpen}
             onOpenChange={onProjectsOpenChange}
@@ -115,8 +161,9 @@ export function Sidebar({
               setDashboardOpen(true)
             }}
             onElementClick={(item) => {
-              if (item.data && !item.isSystem) onHistoryLoad(item.data)
+              if (item.data && !item.isSystem) onOpenChat(item.data as string)
             }}
+            renderElement={renderChatElement}
           />
         </div>
 
@@ -125,33 +172,29 @@ export function Sidebar({
             sectionIcon={Clock}
             sectionTitle="Histories"
             storageKey="expanded_history_folders"
-            items={buildHistoryItems(rootFiles, histories, projects)}
+            items={historyItems}
+            loading={historiesLoading}
             collapsed={collapsed}
             open={historiesOpen}
             onOpenChange={onHistoriesOpenChange}
             onExpand={expandIfCollapsed}
             plusTitle="New folder"
             onElementClick={(item) => {
-              if (item.data) onHistoryLoad(item.data)
+              if (item.data) onOpenChat(item.data as string)
             }}
-            onElementArchive={(item) => {
-              if (item.data) archiveChatHistory(item.data).then(onHistoryRefresh)
-            }}
-            onElementDelete={(item) => {
-              if (item.data) new Element(item.data).delete().then(onHistoryRefresh)
-            }}
+            renderElement={renderChatElement}
             onAddFolder={async (parentId: string | null, name: string) => {
               await createDirectory(parentId ?? "", name)
-              onHistoryRefresh()
+              await onRefreshAll()
               onHistoriesOpenChange(true)
             }}
             onVaultDelete={async (id: string) => {
               await new Vault(id).delete()
-              onHistoryRefresh()
+              await onRefreshAll()
             }}
             onMoveElement={async (elementId: string, targetId: string | null) => {
               await moveHistoryItem(elementId, targetId ?? "")
-              onHistoryRefresh()
+              await onRefreshAll()
             }}
           />
         </div>
@@ -167,40 +210,49 @@ export function Sidebar({
         </div>
       </div>
     </motion.aside>
+    </BranchProvider>
   )
 }
 
 function buildProjectItems(
   projects: ProjectListItem[],
   activeProject: string | null,
+  branchMeta: Record<string, BranchMeta>,
 ): VaultTreeItem<string>[] {
-  return projects.map((project) => ({
-    id: project.slug,
-    label: project.name,
-    type: "vault",
-    data: project.slug,
-    isActive: activeProject === project.slug,
-    children: [
-      {
-        id: `${project.slug}/__dashboard__`,
-        label: "Dashboard",
-        type: "element" as const,
-        icon: LayoutDashboard,
-        isSystem: true,
-        displayInVault: false,
-        data: project.slug,
-      },
-      ...(project.tabs ?? [])
-        .filter((tab: ProjectTab) => !tab.filename.startsWith("untitled-"))
-        .map((tab: ProjectTab) => ({
-          id: `${project.slug}/${tab.filename}`,
-          label: tab.name ?? tab.title ?? tab.filename.replace(".json", ""),
+  return projects.map((project) => {
+    const dirPrefix = `${project.slug}/`
+    const tabByName = new Map((project.tabs ?? []).map(t => [t.filename, t]))
+
+    const items: VaultTreeItem<string>[] = []
+    for (const [key, meta] of Object.entries(branchMeta)) {
+      if (!key.startsWith(dirPrefix) || key === `${project.slug}/project.json`) continue
+      if (meta.parent_id) continue
+      const filename = key.slice(dirPrefix.length)
+      const tab = tabByName.get(filename)
+      const label = tab ? (tab.name ?? tab.title ?? filename.replace(".json", "")) : filename.replace(".json", "")
+      items.push({ id: key, label, type: "element", data: key })
+    }
+
+    return {
+      id: project.slug,
+      label: project.name,
+      type: "vault",
+      data: project.slug,
+      isActive: activeProject === project.slug,
+      children: [
+        {
+          id: `${project.slug}/__dashboard__`,
+          label: "Dashboard",
           type: "element" as const,
-          data: `${project.slug}/${tab.filename}`,
-          icon: FileText,
-        })),
-    ].filter((child: VaultTreeItem<string>) => child.displayInVault !== false),
-  }))
+          icon: LayoutDashboard,
+          isSystem: true,
+          displayInVault: false,
+          data: project.slug,
+        },
+        ...items,
+      ].filter((child: VaultTreeItem<string>) => child.displayInVault !== false),
+    }
+  })
 }
 
 function buildHistoryItems(
@@ -217,20 +269,27 @@ function buildHistoryItems(
       label: dir,
       type: "folder" as const,
       data: dir,
-      children: files.map((file) => ({
-        id: `${dir}/${file}`,
-        label: file.replace(".json", ""),
-        type: "element" as const,
-        data: `${dir}/${file}`,
-      })),
+      children: files.map((file) => {
+        const key = `${dir}/${file}`
+        return {
+          id: key,
+          label: file.replace(".json", ""),
+          type: "element" as const,
+          data: key,
+          
+        }
+      }),
     }))
 
-  const rootItems = rootFiles.map((file) => ({
-    id: file,
-    label: file.replace(".json", ""),
-    type: "element" as const,
-    data: file,
-  }))
+  const rootItems = rootFiles.map((file) => {
+    return {
+      id: file,
+      label: file.replace(".json", ""),
+      type: "element" as const,
+      data: file,
+      
+    }
+  })
 
   return [...folderItems, ...rootItems]
 }

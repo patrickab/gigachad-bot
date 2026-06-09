@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic"
 import { motion } from "framer-motion"
 import { memo, useMemo, useState } from "react"
-import { Bot, Brain, Check, Copy, Loader2, Trash2, User } from "lucide-react"
+import { Bot, Brain, Check, Copy, GitFork, Loader2, Trash2, User } from "lucide-react"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { ResearchTrace } from "./ResearchTrace"
 import { MessageAttachments } from "./MessageAttachments"
@@ -20,6 +20,7 @@ interface ChatMessageProps {
   content: string
   index: number
   onDelete?: (index: number) => void
+  onBranch?: (index: number) => void
   morphic_result?: Message["morphic_result"]
   research_steps?: Message["research_steps"]
   research_progress?: Message["research_progress"]
@@ -91,7 +92,7 @@ export function AssistantMessageContent({
   )
 }
 
-function ChatMessageInner({ role, content, index, onDelete, morphic_result, research_steps, research_progress, research_trace_id, isStreaming, attachments, onAttachmentClick, collapsibleUser, onCollapse }: ChatMessageProps) {
+function ChatMessageInner({ role, content, index, onDelete, onBranch, morphic_result, research_steps, research_progress, research_trace_id, isStreaming, attachments, onAttachmentClick, collapsibleUser, onCollapse }: ChatMessageProps) {
   const isUser = role === "user"
   const [copied, setCopied] = useState(false)
 
@@ -187,6 +188,15 @@ function ChatMessageInner({ role, content, index, onDelete, morphic_result, rese
               title="Delete pair"
             >
               <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
+          {!isUser && onBranch && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onBranch(index) }}
+              className="rounded p-1 hover:bg-surface-elevated text-ink-subtle hover:text-ink"
+              title="Branch from here"
+            >
+              <GitFork className="h-3.5 w-3.5" />
             </button>
           )}
         </div>

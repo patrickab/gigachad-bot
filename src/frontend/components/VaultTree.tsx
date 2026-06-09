@@ -3,7 +3,6 @@
 import { createContext, useContext, useEffect, useState, type ElementType } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
-  Archive,
   ChevronRight,
   Folder,
   LayoutDashboard,
@@ -49,8 +48,8 @@ interface VaultTreeProps<T> {
   onVaultClick?: (id: string) => void
   onVaultDelete?: (id: string) => void
   onElementClick?: (item: VaultTreeItem<T>) => void
-  onElementArchive?: (item: VaultTreeItem<T>) => void
   onElementDelete?: (item: VaultTreeItem<T>) => void
+  renderElement?: (item: VaultTreeItem<T>, depth: number) => React.ReactNode
   onAddVault?: (name: string) => Promise<void>
   onAddFolder?: (parentId: string | null, name: string) => Promise<void>
   onMoveElement?: (elementId: string, targetId: string | null) => Promise<void>
@@ -74,8 +73,8 @@ interface TreeCtx<T> {
   onVaultClick?: (id: string) => void
   onVaultDelete?: (id: string) => void
   onElementClick?: (item: VaultTreeItem<T>) => void
-  onElementArchive?: (item: VaultTreeItem<T>) => void
   onElementDelete?: (item: VaultTreeItem<T>) => void
+  renderElement?: (item: VaultTreeItem<T>, depth: number) => React.ReactNode
   onAddFolder?: (parentId: string | null, name: string) => Promise<void>
   onDashboardClick?: (vaultId: string) => void
   createMode: "vault" | "folder" | null
@@ -89,7 +88,7 @@ interface TreeCtx<T> {
 
 const TreeCtx = createContext<TreeCtx<unknown> | null>(null)
 
-function useTree<T = unknown>() {
+export function useTree<T = unknown>() {
   const ctx = useContext(TreeCtx)
   if (!ctx) throw new Error("useTree must be inside VaultTree")
   return ctx as TreeCtx<T>
@@ -127,8 +126,8 @@ export function VaultTree<T>({
   onVaultClick,
   onVaultDelete,
   onElementClick,
-  onElementArchive,
   onElementDelete,
+  renderElement,
   onAddVault,
   onAddFolder,
   onMoveElement,
@@ -240,8 +239,8 @@ export function VaultTree<T>({
     onVaultClick,
     onVaultDelete,
     onElementClick,
-    onElementArchive,
     onElementDelete,
+    renderElement,
     onAddFolder,
     onDashboardClick,
     createMode,
@@ -514,9 +513,13 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
 /* ─── element node ─── */
 
 function ElementNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number }) {
-  const { onDragStart, onElementClick, onElementArchive, onElementDelete, onDashboardClick } = useTree<T>()
+  const { onDragStart, onElementClick, onElementDelete, onDashboardClick, renderElement } = useTree<T>()
   const paddingLeft = INDENT_BASE + depth * INDENT_STEP
   const ElementIcon = item.icon
+
+  if (renderElement) {
+    return <>{renderElement(item, depth)}</>
+  }
 
   const handleClick = () => {
     if (item.isSystem && onDashboardClick && item.data) {
@@ -527,38 +530,35 @@ function ElementNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number
   }
 
   return (
-    <div
-      className="flex items-center gap-1 py-0.5"
-      style={{ paddingLeft, paddingRight: 8 }}
-    >
-      <button
-        draggable
-        onDragStart={(e) => onDragStart(e, item.id)}
-        onClick={handleClick}
-        className={cn(
-          "flex items-center gap-1.5 flex-1 truncate text-left text-[11px] transition-colors",
-          item.isActive ? "text-ink font-medium" : "text-ink-muted hover:text-ink",
-        )}
+    <div style={{ paddingLeft }}>
+      <div
+        className="flex items-center gap-1 py-0.5 group"
+        style={{ paddingRight: 8 }}
       >
-        {ElementIcon && <ElementIcon className="h-3.5 w-3.5 shrink-0 text-ink-muted" />}
-        {item.label}
-      </button>
-      {!item.isSystem && onElementArchive && (
         <button
-          onClick={() => onElementArchive(item)}
-          className="rounded p-0.5 text-ink-faint hover:text-ink transition-colors shrink-0"
+          draggable
+          onDragStart={(e) => onDragStart(e, item.id)}
+          onClick={handleClick}
+          className={cn(
+            "flex items-center gap-1.5 flex-1 truncate text-left text-[11px] transition-colors",
+            item.isActive ? "text-ink font-medium" : "text-ink-muted hover:text-ink",
+          )}
         >
-          <Archive className="h-3 w-3" />
+          {ElementIcon && <ElementIcon className="h-3.5 w-3.5 shrink-0 text-ink-muted" />}
+          {item.label}
         </button>
-      )}
-      {!item.isSystem && onElementDelete && (
-        <button
-          onClick={() => onElementDelete(item)}
-          className="rounded p-0.5 text-ink-faint hover:text-danger transition-colors shrink-0"
-        >
-          <Trash2 className="h-3 w-3" />
-        </button>
-      )}
+        {onElementDelete && !item.isSystem && (
+          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              onClick={() => onElementDelete(item)}
+              className="p-0.5 rounded text-ink-faint hover:text-danger transition-colors shrink-0"
+              title="Delete"
+            >
+              <Trash2 className="h-3 w-3" />
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

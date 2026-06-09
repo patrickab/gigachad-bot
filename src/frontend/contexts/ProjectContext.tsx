@@ -172,7 +172,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
 
   const syncTabs = useCallback(async (
     tabs: { id: string; name: string | null; historyFile: string | null; title: string | null; chatId: string }[],
-    updateHistoryFile: (tabId: string, historyFile: string) => void,
+    _updateHistoryFile: (tabId: string, historyFile: string) => void,
   ) => {
     const current = projectDataRef.current
     if (!activeProject || !current) return
@@ -180,15 +180,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     const projectAtCall = activeProject
     const projectTabs: ProjectTab[] = []
     for (const t of tabs) {
-      if (t.historyFile) {
-        const filename = t.historyFile.includes("/") ? t.historyFile.split("/").slice(1).join("/") : t.historyFile
-        projectTabs.push({ filename, name: t.name, title: t.title })
-      } else {
-        const shortId = t.chatId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 12).toLowerCase() || "tab"
-        const filename = `untitled-${shortId}.json`
-        projectTabs.push({ filename, name: t.name, title: t.title })
-        updateHistoryFile(t.id, `${projectAtCall}/${filename}`)
-      }
+      if (!t.historyFile) continue
+      const filename = t.historyFile.includes("/") ? t.historyFile.split("/").slice(1).join("/") : t.historyFile
+      projectTabs.push({ filename, name: t.name, title: t.title })
     }
     const stateUpdate: ProjectStateUpdate = { kanban: current.kanban, tabs: projectTabs }
     const updated = await apiUpdateProjectKanban(projectAtCall, stateUpdate)

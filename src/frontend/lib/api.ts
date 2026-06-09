@@ -1,7 +1,23 @@
-import type { Attachment, ChatHistoriesResponse, ChatRequest, KanbanCard, Message, ModelsResponse, ProjectData, ProjectListItem, ProjectStateUpdate, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage } from "./types"
+import type { Attachment, BranchMeta, ChatHistoriesResponse, ChatRequest, KanbanCard, Message, ModelsResponse, ProjectData, ProjectListItem, ProjectStateUpdate, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { API_BASE, DEFAULT_TEMPERATURE, DEFAULT_DOWNSCALE_IMAGES } from "./config"
+
+export function encodePath(filename: string): string {
+  return filename.split("/").map(encodeURIComponent).join("/")
+}
+
+export function parseHistoryFile(historyFile: string): { slug: string | null; filename: string } {
+  const parts = historyFile.split("/")
+  if (parts.length > 1) {
+    return { slug: parts[0], filename: parts.slice(1).join("/") }
+  }
+  return { slug: null, filename: historyFile }
+}
+
+export function buildHistoryFile(filename: string, slug: string | null): string {
+  return slug ? `${slug}/${filename}` : filename
+}
 
 export async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, options)
@@ -61,15 +77,24 @@ export async function listChatHistories(): Promise<ChatHistoriesResponse> {
   return request<ChatHistoriesResponse>("/chat-histories")
 }
 
-export async function loadChatHistory(filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null; title: string | null; usage: Usage | null }> {
+export async function fetchBranchMeta(dirs?: string[]): Promise<Record<string, BranchMeta>> {
+  const params = dirs && dirs.length > 0 ? `?dir=${dirs.map(encodeURIComponent).join(",")}` : ""
+  return request(`/chat-histories/branch-meta${params}`)
+}
+
+export async function loadChatHistory(filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null; title: string | null; usage: Usage | null; parent_id: string | null; branch_message_idx: number | null; children: BranchMeta["children"] }> {
   return request(`/chat-histories/${filename}`)
 }
 
-export async function saveChatHistory(filename: string, messages: Message[] = [], chatId?: string, title?: string, usage?: Usage): Promise<{ status: string; filename: string }> {
+export async function saveChatHistory(filename: string, messages: Message[] = [], chatId?: string, title?: string, usage?: Usage, parentId?: string | null, branchMessageIdx?: number | null, children?: BranchMeta["children"] | null): Promise<{ status: string; filename: string }> {
+  const body: Record<string, unknown> = { messages, chat_id: chatId ?? null, title: title ?? null, usage: usage ?? null }
+  if (parentId !== undefined) body.parent_id = parentId
+  if (branchMessageIdx !== undefined) body.branch_message_idx = branchMessageIdx
+  if (children !== undefined) body.children = children
   return request(`/chat-histories/${filename}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, chat_id: chatId ?? null, title: title ?? null, usage: usage ?? null }),
+    body: JSON.stringify(body),
   })
 }
 
@@ -85,10 +110,6 @@ export async function renameChatHistory(oldPath: string, newTitle: string): Prom
   })
 }
 
-export async function archiveChatHistory(filename: string): Promise<void> {
-  await request(`/chat-histories/${filename}/archive`, { method: "PUT" })
-}
-
 export async function createDirectory(parentPath: string, name: string): Promise<{ status: string; path: string }> {
   return request("/chat-histories/mkdir", {
     method: "POST",
@@ -102,6 +123,34 @@ export async function moveHistoryItem(filename: string, targetDir: string): Prom
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ filename, target_dir: targetDir }),
+  })
+}
+
+export async function createBranch(parentFile: string, branchMessageIdx: number): Promise<{ status: string; child_file: string; chat_id: string }> {
+  return request("/chat-histories/branch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ parent_file: parentFile, branch_message_idx: branchMessageIdx }),
+  })
+}
+
+export async function mergeBranch(childFile: string): Promise<{ status: string }> {
+  return request(`/chat-histories/merge`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ child_file: childFile }),
+  })
+}
+
+export async function cascadeDelete(filename: string): Promise<{ status: string; deleted: string[] }> {
+  return request(`/chat-histories/cascade/${encodePath(filename)}`, {
+    method: "DELETE",
+  })
+}
+
+export async function orphanChildren(filename: string): Promise<{ status: string; orphaned: string[] }> {
+  return request(`/chat-histories/orphan/${encodePath(filename)}`, {
+    method: "DELETE",
   })
 }
 
@@ -260,7 +309,7 @@ export async function deleteProjectTab(name: string, filename: string): Promise<
   await request(`/projects/${encodeURIComponent(name)}/tabs/${encodeURIComponent(filename)}`, { method: "DELETE" })
 }
 
-export async function loadProjectTab(name: string, filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null; title: string | null; usage: Usage | null }> {
+export async function loadProjectTab(name: string, filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null; title: string | null; usage: Usage | null; parent_id: string | null; branch_message_idx: number | null }> {
   return request(`/chat-histories/${encodeURIComponent(name)}/${encodeURIComponent(filename)}`)
 }
 

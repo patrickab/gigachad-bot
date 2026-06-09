@@ -21,11 +21,7 @@ export interface UseChatReturn {
   morphicSearch: (params: MorphicSearchParams) => Promise<void>
   models: ModelsResponse | null
   prompts: string[]
-  rootFiles: string[]
-  histories: Record<string, string[]>
-  historiesLoading: boolean
-  refreshHistories: () => Promise<void>
-  loadHistory: (filename: string) => Promise<{ messages: Message[]; chat_id: string | null }>
+  loadHistory: (filename: string) => Promise<{ messages: Message[]; chat_id: string | null; parent_id: string | null; branch_message_idx: number | null }>
   deleteMessagePair: (index: number) => void
   addMessagePair: (userContent: string, assistantContent: string) => void
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>
@@ -38,7 +34,7 @@ export function useChat(): UseChatReturn {
   const { messages, isStreaming, send, cancel, deleteMessagePair, addMessagePair, setMessages, totalUsage, setTotalUsage } = useChatStream()
   const { research: doResearch, error: researchError } = useResearch()
   const { morphicSearch: doMorphicSearch, error: morphicError } = useMorphicSearch()
-  const { rootFiles, histories, historiesLoading, refreshHistories, loadHistory: loadHistoryRaw } = useHistory()
+  const { loadHistory: loadHistoryRaw } = useHistory()
 
   const [models, setModels] = useState<ModelsResponse | null>(null)
   const [prompts, setPrompts] = useState<string[]>([])
@@ -48,7 +44,6 @@ export function useChat(): UseChatReturn {
   useEffect(() => {
     fetchModels().then(setModels).catch(console.error)
     fetchPrompts().then(setPrompts).catch(console.error)
-    refreshHistories()
   }, [])
 
   const appendMessage = useCallback((msg: Message) => {
@@ -92,10 +87,6 @@ export function useChat(): UseChatReturn {
     morphicSearch,
     models,
     prompts,
-    rootFiles,
-    histories,
-    historiesLoading,
-    refreshHistories,
     loadHistory,
     deleteMessagePair,
     addMessagePair,

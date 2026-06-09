@@ -1,13 +1,14 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence } from "framer-motion"
 import type { Message, Attachment } from "@/lib/types"
 import { ChatMessage, AssistantMessageContent } from "./ChatMessage"
 import { ChatInput } from "./ChatInput"
 import { ChatSidebar } from "./ChatSidebar"
 import { getChatSidebarConfig } from "./chatSidebarConfig"
-import { ChevronLeft, ChevronRight, User } from "lucide-react"
+
+import { ChevronLeft, ChevronRight, GitFork, User } from "lucide-react"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { cn } from "@/lib/utils"
 import { ElevationProvider, ElevatedContainer } from "./ElevatedContainer"
@@ -22,6 +23,11 @@ interface ChatContainerProps {
   onSend: (text: string, attachments: Attachment[]) => void
   onCancel: () => void
   onDeletePair: (index: number) => void
+  onBranch?: (qaIndex: number) => void
+  focusQaIndex?: number | null
+  focusKey?: number
+  branchMessageIdx?: number | null
+  isActive?: boolean
   className?: string
   slug?: string | null
   chatMaxWidth?: number
@@ -37,6 +43,11 @@ export function ChatContainer({
   onSend,
   onCancel,
   onDeletePair,
+  onBranch,
+  focusQaIndex,
+  focusKey,
+  branchMessageIdx,
+  isActive,
   className,
   slug = null,
   chatMaxWidth,
@@ -114,6 +125,24 @@ export function ChatContainer({
   const [manualOverrides, setManualOverrides] = useState<Map<number, boolean>>(new Map())
 
   useEffect(() => {
+    if (focusQaIndex == null) {
+      setManualOverrides(new Map())
+      return
+    }
+    const gi = focusQaIndex * 2
+    setManualOverrides(new Map([[gi, true]]))
+    requestAnimationFrame(() => {
+      const el = scrollContainerRef.current
+      if (!el) return
+      const anchorGi = gi - 2
+      const target = anchorGi >= 0
+        ? el.querySelector(`[data-qa-index="${anchorGi}"]`)
+        : el.querySelector(`[data-qa-index="${gi}"]`)
+      target?.scrollIntoView({ behavior: "smooth", block: "start" })
+    })
+  }, [focusQaIndex, focusKey])
+
+  useEffect(() => {
     if (messages.length === 0) {
       setManualOverrides(new Map())
       setOpenElements(new Set())
@@ -134,7 +163,6 @@ export function ChatContainer({
     return out
   }, [messages])
 
-  const lastGlobalIndex = pairs.length > 0 ? pairs[pairs.length - 1].globalIndex : -1
   const tailStartGlobalIndex = pairs.length > DEFAULT_EXPANDED_TAIL
     ? pairs[pairs.length - DEFAULT_EXPANDED_TAIL].globalIndex
     : (pairs.length > 0 ? pairs[0].globalIndex : -1)
@@ -177,12 +205,12 @@ export function ChatContainer({
   const collapsedList = useMemo<number[]>(() => {
     const gs: number[] = []
     for (let i = 0; i < messages.length; i += 2) {
-      if (messages[i]?.role === "user" && !isExpandedNormal(i) && i !== lastGlobalIndex) {
+      if (messages[i]?.role === "user" && !isExpandedNormal(i)) {
         gs.push(i)
       }
     }
     return gs
-  }, [messages, lastGlobalIndex, manualOverrides])
+  }, [messages, manualOverrides])
 
   const activeFocusedGlobalIndex =
     keyboardFocusIdx !== null && keyboardFocusIdx >= 0 && keyboardFocusIdx < collapsedList.length
@@ -346,14 +374,15 @@ export function ChatContainer({
 
           <ElevationProvider darkColor="var(--paper)" brightColor="var(--surface-elevated)" numLevels={3} startLevel={1}>
             <AnimatePresence>
-            {pairs.map(({ user, assistant, globalIndex }) => {
+            {pairs.map(({ user, assistant, globalIndex }, qaIndex) => {
               const expanded = isExpanded(globalIndex)
-              const isLast = globalIndex === lastGlobalIndex
               const qLabel = abbreviate(user.content, user)
               const showPreview = hoveredPair === globalIndex || activeFocusedGlobalIndex === globalIndex
+              const showBranchDivider = branchMessageIdx != null && qaIndex === branchMessageIdx
               return (
-                <div key={globalIndex} className="group relative">
-                  {!expanded && !isLast && (
+                <Fragment key={globalIndex}>
+                <div data-qa-index={globalIndex} className="group relative">
+                  {!expanded && (
                     <ElevatedContainer
                       ref={(el) => {
                         if (el) collapsedRefs.current.set(globalIndex, el)
@@ -412,33 +441,45 @@ export function ChatContainer({
                     </ElevatedContainer>
                   )}
                   {expanded && (
-                    <ElevatedContainer className="mx-3 my-4 rounded-xl border border-divider/40 overflow-hidden">
-                      <ChatMessage
-                        role="user"
-                        content={user.content}
-                        attachments={user.attachments}
-                        index={globalIndex}
-                        onAttachmentClick={(att) => handleAttachmentClick(globalIndex, att)}
-                        onDelete={onDeletePair}
-                        collapsibleUser={!isLast}
-                        onCollapse={!isLast ? () => togglePair(globalIndex) : undefined}
-                      />
-                      <ElevatedContainer className="mx-5 mb-5 rounded-lg border border-divider/30 overflow-hidden">
+                    <>
+
+                      <ElevatedContainer className="mx-3 my-4 rounded-xl border border-divider/40 overflow-hidden">
                         <ChatMessage
-                          role="assistant"
-                          content={assistant.content}
-                          morphic_result={assistant.morphic_result}
-                          research_steps={assistant.research_steps}
-                          research_progress={assistant.research_progress}
-                          research_trace_id={assistant.research_trace_id}
-                          isStreaming={isStreaming}
+                          role="user"
+                          content={user.content}
+                          attachments={user.attachments}
                           index={globalIndex}
+                          onAttachmentClick={(att) => handleAttachmentClick(globalIndex, att)}
                           onDelete={onDeletePair}
+                          collapsibleUser
+                          onCollapse={() => togglePair(globalIndex)}
                         />
+                        <ElevatedContainer className="mx-5 mb-5 rounded-lg border border-divider/30 overflow-hidden">
+                          <ChatMessage
+                            role="assistant"
+                            content={assistant.content}
+                            morphic_result={assistant.morphic_result}
+                            research_steps={assistant.research_steps}
+                            research_progress={assistant.research_progress}
+                            research_trace_id={assistant.research_trace_id}
+                            isStreaming={isStreaming}
+                            index={globalIndex}
+                            onDelete={onDeletePair}
+                             onBranch={onBranch ? () => onBranch(qaIndex) : undefined}
+                          />
+                        </ElevatedContainer>
                       </ElevatedContainer>
-                    </ElevatedContainer>
+                    </>
                   )}
                 </div>
+                {showBranchDivider && (
+                  <div className="flex items-center gap-2 mx-3 my-3">
+                    <GitFork className="h-3.5 w-3.5 shrink-0 text-ink-subtle" />
+                    <span className="text-[10px] font-medium text-ink-muted tabular-nums">branched@{branchMessageIdx}</span>
+                    <div className="flex-1 h-px bg-divider-strong" />
+                  </div>
+                )}
+                </Fragment>
               )
             })}
           </AnimatePresence>

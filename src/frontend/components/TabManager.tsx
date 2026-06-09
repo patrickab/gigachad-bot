@@ -24,6 +24,7 @@ export interface TabManagerHandle {
   switchToTab: (tabId: string) => void
   addTabWithName: (name: string | null, historyFile: string | null) => string
   getTabs: () => Tab[]
+  getActiveTabId: () => string
   updateTabHistoryFile: (tabId: string, historyFile: string) => void
   updateTabTitle: (tabId: string, title: string | null) => void
 }
@@ -61,13 +62,14 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, ref }: Tab
       return tab.id
     },
     getTabs: () => tabs,
+    getActiveTabId: () => activeTab,
     updateTabHistoryFile: (tabId: string, historyFile: string) => {
       setTabs((prev) => prev.map((t) => t.id === tabId ? { ...t, historyFile } : t))
     },
     updateTabTitle: (tabId: string, title: string | null) => {
       setTabs((prev) => prev.map((t) => t.id === tabId ? { ...t, title } : t))
     },
-  }), [tabs])
+  }), [tabs, activeTab])
 
   useEffect(() => {
     if (editingTab) inputRef.current?.focus()

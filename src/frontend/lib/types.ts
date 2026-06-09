@@ -51,6 +51,19 @@ export interface ChatHistoriesResponse {
   histories: Record<string, string[]>
 }
 
+export interface BranchMeta {
+  chat_id: string | null
+  parent_id: string | null
+  branch_message_idx: number | null
+  children: BranchChild[]
+  qa_count: number
+}
+
+export interface BranchChild {
+  chat_id: string
+  branch_message_idx: number
+}
+
 export type Provider = "Ollama" | "Gemini" | "OpenAI"
 
 export interface ResearchRequest {

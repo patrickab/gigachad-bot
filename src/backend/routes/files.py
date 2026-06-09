@@ -152,8 +152,6 @@ async def gc_orphan_uploads():
     known_chat_ids: set[tuple[str | None, str]] = set()
     if DIRECTORY_CHAT_HISTORIES.exists():
         for f in DIRECTORY_CHAT_HISTORIES.rglob("*.json"):
-            if "archived" in f.parts:
-                continue
             try:
                 data = json.loads(f.read_text(encoding="utf-8"))
                 if isinstance(data, dict) and data.get("chat_id"):

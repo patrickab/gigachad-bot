@@ -13,6 +13,8 @@ from config import DIRECTORY_CHAT_HISTORIES
 from backend.routes.files import delete_chat_upload_dir
 from backend.routes.histories import SaveRequest, _load_chat_file
 from lib.json_io import safe_read_json
+from lib.payload import _build_payload
+from lib.chat_index import invalidate_chat_id_index
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -221,7 +223,14 @@ async def update_project_state(slug: str, state: ProjectStateModel) -> dict[str,
     project_dir = _resolve_project_dir(slug)
     data = _read_project(project_dir)
     data["kanban"] = [c.model_dump() for c in state.kanban]
-    data["tabs"] = [t.model_dump() for t in state.tabs]
+    seen = set()
+    deduped = []
+    for t in state.tabs:
+        d = t.model_dump()
+        if d.get("filename") not in seen:
+            seen.add(d.get("filename"))
+            deduped.append(d)
+    data["tabs"] = deduped
     _write_project(project_dir, data)
     return {"name": entry["name"], "slug": entry["slug"], "kanban": data["kanban"], "tabs": data["tabs"]}
 
@@ -284,23 +293,17 @@ async def save_project_tab(slug: str, filename: str, data: SaveTabRequest) -> di
 
     # Prevent cross-chat overwrites: if the file exists and has a chat_id,
     # the incoming chat_id must match.
-    if tab_path.exists():
-        existing = _load_chat_file(tab_path)
-        if existing and existing.get("chat_id") and data.chat_id:
-            if existing["chat_id"] != data.chat_id:
-                raise HTTPException(
-                    status_code=409,
-                    detail="Chat ID mismatch: cannot overwrite an existing project tab with a different chat_id",
-                )
+    existing = _load_chat_file(tab_path) if tab_path.exists() else None
+    if existing and existing.get("chat_id") and data.chat_id:
+        if existing["chat_id"] != data.chat_id:
+            raise HTTPException(
+                status_code=409,
+                detail="Chat ID mismatch: cannot overwrite an existing project tab with a different chat_id",
+            )
 
-    payload = {"messages": data.messages}
-    if data.chat_id:
-        payload["chat_id"] = data.chat_id
-    if data.title:
-        payload["title"] = data.title
-    if data.usage:
-        payload["usage"] = data.usage
+    payload = _build_payload(data.model_dump() if data else None, existing)
     tab_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    invalidate_chat_id_index()
     project_data = _read_project(project_dir)
     tabs = project_data.get("tabs", [])
     existing = next((t for t in tabs if t["filename"] == filename), None)
@@ -330,6 +333,7 @@ async def delete_project_tab(slug: str, filename: str) -> dict[str, str]:
         if isinstance(cid, str):
             chat_id_to_clean = cid
         tab_path.unlink()
+    invalidate_chat_id_index()
     if chat_id_to_clean:
         delete_chat_upload_dir(chat_id_to_clean, slug)
     project_data = _read_project(project_dir)
