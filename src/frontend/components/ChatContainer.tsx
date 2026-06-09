@@ -408,7 +408,7 @@ export function ChatContainer({
                         <div className="min-w-0 flex-1 flex flex-col">
                           <div className="mb-0.5 text-xs font-medium text-ink-subtle">You</div>
                           {showPreview ? (
-                            <div className="max-h-[15vh] overflow-y-auto text-ink">
+                            <div className="max-h-[4.5em] overflow-y-auto text-ink">
                               <LaTeXMarkdown content={user.content} compact />
                             </div>
                           ) : (

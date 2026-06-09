@@ -39,5 +39,5 @@ async def get_models() -> dict:
 
 
 @router.get("/prompts")
-async def get_prompts() -> dict[str, list[str]]:
-    return {"prompts": list(PROMPT_MAP.keys())}
+async def get_prompts() -> dict[str, dict[str, str]]:
+    return {"prompts": PROMPT_MAP}

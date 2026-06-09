@@ -66,10 +66,10 @@ function buildLLMMessage(text: string, attachments: Attachment[]): { userMsg: st
   return { userMsg, hiddenContent, imgBase64 }
 }
 
-function defaultSendParams(config: TabConfig, overrides: Record<string, unknown> = {}) {
+function defaultSendParams(config: TabConfig, prompts: Record<string, string>, overrides: Record<string, unknown> = {}) {
   return {
     model: config.selectedModel,
-    system_prompt: config.selectedPrompt ?? "",
+    system_prompt: config.selectedPrompt ? (prompts[config.selectedPrompt] ?? "") : "",
     temperature: config.temperature,
     reasoning_effort: config.reasoningEffort === "none" ? null : config.reasoningEffort,
     downscale_images: config.downscaleImages,
@@ -242,7 +242,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       }
 
       if (studyEnabled && attachments.some(a => a.mime === "application/pdf")) {
-        await handleStudyPdf(text, attachments, chatId, config.selectedModel, setMessages)
+        await handleStudyPdf(text, attachments, chatId, config.selectedModel, setMessages, activeProject)
         toggleStudy()
         return
       }
@@ -254,22 +254,21 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           { role: "assistant" as const, content: "" },
         ])
 
-        const pdfNames = attachments.filter(a => a.mime === "application/pdf").map(a => a.name)
+        const needsParsing = attachments.filter(a => !a.mime.startsWith("image/") && !a.content && !a.parsedMd)
         let enriched = attachments
 
-        if (pdfNames.length > 0) {
+        if (needsParsing.length > 0) {
           try {
-            const parsed = await parseFiles(chatId, pdfNames, activeProject)
+            const parsed = await parseFiles(chatId, needsParsing.map(a => a.name), activeProject)
             enriched = attachments.map(a => {
-              if (a.mime !== "application/pdf") return a
+              if (a.content || a.parsedMd || a.mime.startsWith("image/")) return a
               const p = parsed.find(r => r.name === a.name)
               return { ...a, parsedMd: p?.parsedMd ?? undefined }
             })
-            if (!text.trim()) {
-              updateLastAssistant(setMessages, m => ({ ...m, content: "Documents parsed - how can I help you?" }))
-              return
-            }
-          } catch { }
+          } catch {
+            updateLastAssistant(setMessages, m => ({ ...m, content: "Failed to parse attached documents. You can try again or re-upload the file." }))
+            return
+          }
         }
 
         const { hiddenContent } = buildLLMMessage(text, enriched)
@@ -291,8 +290,9 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           } catch { }
         }
 
-        const llmMsg = hiddenContent ? (text ? `${hiddenContent}\n\n${text}` : hiddenContent) : text
-        send({ ...defaultSendParams(config), user_msg: llmMsg, img_base64: imgBase64, downscale_images: config.downscaleImages }, true)
+        const fallbackPrompt = text.trim() ? text : "Please review the attached document and provide a summary."
+        const llmMsg = hiddenContent ? `${hiddenContent}\n\n${fallbackPrompt}` : fallbackPrompt
+        send({ ...defaultSendParams(config, prompts), user_msg: llmMsg, img_base64: imgBase64, downscale_images: config.downscaleImages }, true)
         return
       }
 
@@ -304,7 +304,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           depth: config.researchDepth, breadth: config.researchBreadth, reasoningEffort: config.researchReasoning, reportType: config.researchReportType,
         })
       } else {
-        send({ ...defaultSendParams(config), user_msg: text })
+        send({ ...defaultSendParams(config, prompts), user_msg: text })
       }
     },
     [morphicSearchEnabled, researchEnabled, studyEnabled, chatId, activeProject, config, send, research, morphicSearch, setMessages, toggleStudy],

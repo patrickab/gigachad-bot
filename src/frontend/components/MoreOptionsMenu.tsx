@@ -14,7 +14,7 @@ import { useModeState } from "@/hooks/useModeState"
 import type { TabConfig } from "@/components/TabManager"
 
 interface MoreOptionsMenuProps {
-  prompts: string[]
+  prompts: Record<string, string>
   config: TabConfig
   onConfigChange: (config: Partial<TabConfig>) => void
   searchDepth: "quick" | "adaptive"
@@ -62,7 +62,7 @@ export function MoreOptionsMenu({
                     System Prompt
                   </div>
                   <StyledSelect
-                    options={prompts.map((p) => ({ value: p, label: p }))}
+                    options={Object.keys(prompts).map((p) => ({ value: p, label: p }))}
                     value={config.selectedPrompt ?? ""}
                     onChange={(v) => onConfigChange({ selectedPrompt: v || null })}
                   />

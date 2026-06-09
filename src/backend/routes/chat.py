@@ -17,6 +17,7 @@ class ChatRequest(BaseModel):
     reasoning_effort: str | None = None
     img_base64: str | None = None
     downscale_images: bool = True
+    messages: list[dict[str, str]] = []
 
 
 def _build_kwargs(req: ChatRequest) -> dict[str, Any]:
@@ -34,7 +35,7 @@ async def chat(req: ChatRequest) -> EventSourceResponse:
         chunks = c.api_query(
             model=req.model,
             user_msg=req.user_msg,
-            user_msg_history=[],
+            user_msg_history=req.messages,
             system_prompt=req.system_prompt,
             img=img,
             stream=True,
@@ -52,7 +53,7 @@ async def chat_nonstream(req: ChatRequest) -> dict[str, Any]:
         response = c.api_query(
             model=req.model,
             user_msg=req.user_msg,
-            user_msg_history=[],
+            user_msg_history=req.messages,
             system_prompt=req.system_prompt,
             img=img,
             stream=False,

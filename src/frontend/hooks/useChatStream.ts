@@ -18,11 +18,25 @@ export interface UseChatStreamReturn {
 
 const FLUSH_MS = 60
 
+function buildHistory(msgs: Message[]): { role: string; content: string }[] {
+  return msgs
+    .filter(m => m.role === "user" || m.role === "assistant")
+    .map(m => {
+      let content = m.content
+      if (m.role === "user" && m.hiddenContent) {
+        content = m.hiddenContent + "\n\n" + content
+      }
+      return { role: m.role, content }
+    })
+}
+
 export function useChatStream(): UseChatStreamReturn {
   const [messages, setMessages] = useState<Message[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   const [totalUsage, setTotalUsage] = useState<Usage>({ prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 })
   const abortRef = useRef<(() => void) | null>(null)
+  const messagesRef = useRef(messages)
+  messagesRef.current = messages
 
   const send = useCallback(
     async (req: ChatRequest, skipAddMessages = false) => {
@@ -64,7 +78,8 @@ export function useChatStream(): UseChatStreamReturn {
       }
 
       try {
-        const stream = createChatStream({ ...req, messages: [] })
+        const history = buildHistory(messagesRef.current)
+        const stream = createChatStream({ ...req, messages: history })
         abortRef.current = stream.abort
 
         for await (const event of stream) {

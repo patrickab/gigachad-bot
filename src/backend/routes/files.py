@@ -1,16 +1,14 @@
 import json
 import logging
-import re
-import shutil
 from pathlib import Path
+import shutil
 import tempfile
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
-from config import DIRECTORY_CHAT_HISTORIES, chat_upload_dir, uploads_dir_for
-
 from backend.routes.mineru import should_cancel
+from config import DIRECTORY_CHAT_HISTORIES, chat_upload_dir, uploads_dir_for
 
 log = logging.getLogger(__name__)
 
@@ -48,12 +46,17 @@ def _dedup_name(dest_dir: Path, filename: str) -> str:
         n += 1
 
 
-def _classify_mime(mime: str) -> str:
+_TEXT_EXTS = {".csv", ".json", ".yaml", ".yml", ".xml", ".toml", ".ini", ".cfg", ".conf", ".log", ".md", ".rst", ".svg"}
+
+
+def _classify_mime(mime: str, filename: str | None = None) -> str:
     if mime == "application/pdf":
         return "pdf"
     if mime.startswith("image/"):
         return "image"
     if mime.startswith("text/"):
+        return "text"
+    if filename and Path(filename).suffix.lower() in _TEXT_EXTS:
         return "text"
     return "other"
 
@@ -76,7 +79,7 @@ async def upload_file(
     dest.write_bytes(content_b)
 
     mime = file.content_type or "application/octet-stream"
-    kind = _classify_mime(mime)
+    kind = _classify_mime(mime, deduped)
 
     result = UploadResult(name=deduped, mime=mime)
 
@@ -110,7 +113,7 @@ async def parse_attachments(
             results.append(ParsedAttachment(name=filename, parsedMd=None))
             continue
 
-        mime = _classify_mime(filename)
+        mime = _classify_mime("", filename)
         if file_path.suffix.lower() == ".pdf":
             mime = "pdf"
 
@@ -126,6 +129,11 @@ async def parse_attachments(
                 except Exception:
                     log.exception("MinerU parse failed for %s", filename)
                     results.append(ParsedAttachment(name=filename, parsedMd=None))
+        elif mime == "text":
+            try:
+                results.append(ParsedAttachment(name=filename, parsedMd=file_path.read_text(encoding="utf-8")))
+            except UnicodeDecodeError:
+                results.append(ParsedAttachment(name=filename, parsedMd=None))
         else:
             results.append(ParsedAttachment(name=filename, parsedMd=None))
 

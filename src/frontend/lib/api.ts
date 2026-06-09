@@ -40,8 +40,8 @@ export async function fetchModels(): Promise<ModelsResponse> {
   return request<ModelsResponse>("/models")
 }
 
-export async function fetchPrompts(): Promise<string[]> {
-  const data = await request<{ prompts: string[] }>("/prompts")
+export async function fetchPrompts(): Promise<Record<string, string>> {
+  const data = await request<{ prompts: Record<string, string> }>("/prompts")
   return data.prompts
 }
 
@@ -60,12 +60,7 @@ export function createChatStream(req: ChatRequest): SSEStreamResult {
     system_prompt: req.system_prompt ?? "",
     temperature: req.temperature ?? DEFAULT_TEMPERATURE,
     downscale_images: req.downscale_images ?? DEFAULT_DOWNSCALE_IMAGES,
-    messages: (req.messages ?? []).map((m: Message) => ({
-      role: m.role,
-      content: m.content,
-      tool_call_id: m.tool_call_id,
-      tool_calls: m.tool_calls,
-    })),
+    messages: req.messages ?? [],
   }
   if (req.reasoning_effort) body.reasoning_effort = req.reasoning_effort
   if (req.img_base64) body.img_base64 = req.img_base64

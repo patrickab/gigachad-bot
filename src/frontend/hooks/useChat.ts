@@ -19,7 +19,7 @@ export interface UseChatReturn {
   research: (params: ResearchParams) => Promise<void>
   morphicSearch: (params: MorphicSearchParams) => Promise<void>
   models: ModelsResponse | null
-  prompts: string[]
+  prompts: Record<string, string>
   loadHistory: (filename: string) => Promise<{ messages: Message[]; chat_id: string | null; parent_id: string | null; branch_message_idx: number | null }>
   deleteMessagePair: (index: number) => void
   addMessagePair: (userContent: string, assistantContent: string) => void
@@ -34,7 +34,7 @@ export function useChat(): UseChatReturn {
   const { research: doResearch, error: researchError } = useResearch()
 
   const [models, setModels] = useState<ModelsResponse | null>(null)
-  const [prompts, setPrompts] = useState<string[]>([])
+  const [prompts, setPrompts] = useState<Record<string, string>>({})
   const [morphicError, setMorphicError] = useState<string | null>(null)
   const morphicAbortRef = useRef<(() => void) | null>(null)
 

@@ -6,8 +6,9 @@ import re
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from .deps import request_client
 from lib.prompts.non_user_prompts import SYS_STUDY_ARTICLE, SYS_STUDY_LEARNING_GOALS, SYS_STUDY_OVERVIEW
+
+from .deps import request_client
 
 log = logging.getLogger(__name__)
 
@@ -97,18 +98,22 @@ def _build_user_msg(markdown: str) -> str:
     )
 
 
+def _sync_llm_call(model: str, system_prompt: str, user_msg: str) -> str:
+    with request_client() as c:
+        response = c.api_query(
+            model=model,
+            user_msg=user_msg,
+            user_msg_history=[],
+            system_prompt=system_prompt,
+            img=None,
+            stream=False,
+        )
+        return response.choices[0].message.content or ""
+
+
 async def _llm_call(model: str, system_prompt: str, user_msg: str) -> str:
     try:
-        with request_client() as c:
-            response = c.api_query(
-                model=model,
-                user_msg=user_msg,
-                user_msg_history=[],
-                system_prompt=system_prompt,
-                img=None,
-                stream=False,
-            )
-            return response.choices[0].message.content or ""
+        return await asyncio.to_thread(_sync_llm_call, model, system_prompt, user_msg)
     except Exception:
         log.exception("LLM call failed (model=%s, sys_prompt_len=%d)", model, len(system_prompt))
         raise HTTPException(status_code=500, detail="LLM call failed")
@@ -143,7 +148,9 @@ async def process_pdf(req: StudyProcessRequest) -> StudyProcessResponse:
         return content.strip()
 
     try:
-        topics, overview, article = await asyncio.gather(run_topics(), run_overview(), run_article())
+        topics = await run_topics()
+        overview = await run_overview()
+        article = await run_article()
     except HTTPException:
         raise
     except Exception:
