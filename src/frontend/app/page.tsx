@@ -11,7 +11,7 @@ import { ResearchModelsBar } from "@/components/ResearchModelsBar"
 import { ThemeToggle } from "@/components/ThemeToggle"
 import { OCRPanel } from "@/components/OCRPanel"
 import { SaveChatModal } from "@/components/SaveChatModal"
-import { TabManager, nextTab } from "@/components/TabManager"
+import { TabManager, nextTab, defaultConfigFromSettings, type TabConfig } from "@/components/TabManager"
 import type { Tab, TabManagerHandle } from "@/components/TabManager"
 import { ProjectDashboard } from "@/components/ProjectDashboard"
 import { TokenCounter } from "@/components/TokenCounter"
@@ -20,6 +20,8 @@ import { useModeState, ModeProvider } from "@/hooks/useModeState"
 import { useSettings, SettingsProvider } from "@/contexts/SettingsContext"
 import { useProject, ProjectProvider } from "@/contexts/ProjectContext"
 import { useBranches } from "@/hooks/useBranches"
+import { BranchProvider } from "@/contexts/BranchContext"
+import { SidebarProvider } from "@/contexts/SidebarContext"
 import { handleStudyPdf, updateLastMsg as updateLastAssistant } from "@/hooks/useStudyHandler"
 import {
   saveChatHistory as apiSaveChatHistory,
@@ -64,34 +66,29 @@ function buildLLMMessage(text: string, attachments: Attachment[]): { userMsg: st
   return { userMsg, hiddenContent, imgBase64 }
 }
 
-function defaultSendParams(settings: ReturnType<typeof useSettings>, overrides: Record<string, unknown> = {}) {
+function defaultSendParams(config: TabConfig, overrides: Record<string, unknown> = {}) {
   return {
-    model: settings.selectedModel,
-    system_prompt: settings.selectedPrompt ?? "",
-    temperature: settings.temperature,
-    reasoning_effort: settings.reasoningEffort === "none" ? null : settings.reasoningEffort,
-    downscale_images: settings.downscaleImages,
+    model: config.selectedModel,
+    system_prompt: config.selectedPrompt ?? "",
+    temperature: config.temperature,
+    reasoning_effort: config.reasoningEffort === "none" ? null : config.reasoningEffort,
+    downscale_images: config.downscaleImages,
     img_base64: null,
     ...overrides,
   }
 }
 
-function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleLoaded, onOpenChat, sidebarCollapsed, onSidebarToggle, projectsOpen, onProjectsOpenChange, historiesOpen, onHistoriesOpenChange, activeProject, focusQaIndex, focusKey }: {
+function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleLoaded, onOpenChat, activeProject, focusQaIndex, focusKey, onConfigChange }: {
   tab: Tab
   isActive: boolean
   onModeLabel: (label: string) => void
   onHistoryFileChanged: (tabId: string, historyFile: string) => void
   onTitleLoaded: (tabId: string, title: string | null) => void
   onOpenChat: (historyFile: string, qaIndex?: number) => void
-  sidebarCollapsed: boolean
-  onSidebarToggle: () => void
-  projectsOpen: boolean
-  onProjectsOpenChange: (open: boolean) => void
-  historiesOpen: boolean
-  onHistoriesOpenChange: (open: boolean) => void
   activeProject: string | null
   focusQaIndex: number | null
   focusKey: number
+  onConfigChange: (config: Partial<TabConfig>) => void
 }) {
   const {
     messages,
@@ -112,15 +109,13 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   } = useChat()
 
   const {
-    branchMeta,
-    visibleRootFiles,
-    visibleHistories,
-    historiesLoading,
     refreshAll,
     createBranch: doCreateBranch,
     mergeBranch: doMergeBranch,
     cascadeDelete: doCascadeDelete,
     orphanChildren: doOrphanChildren,
+    setActiveFile,
+    setActiveQaIndex,
   } = useBranches()
 
   const {
@@ -135,6 +130,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   } = useModeState()
 
   const settings = useSettings()
+  const config = tab.config
   const hasUsage = totalUsage.total_tokens > 0 ? totalUsage : undefined
 
   const [ocrImage, setOCRImage] = useState<string | null>(null)
@@ -151,6 +147,18 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     if (!el) return
     setMeasuredWidth(el.clientWidth)
   }, [isActive])
+
+  useEffect(() => {
+    if (isActive && tab.historyFile) {
+      setActiveFile(tab.historyFile)
+    }
+  }, [isActive, tab.historyFile, setActiveFile])
+
+  useEffect(() => {
+    if (isActive) {
+      setActiveQaIndex(focusQaIndex)
+    }
+  }, [isActive, focusQaIndex, setActiveQaIndex])
 
   const chatMaxWidth = measuredWidth > 0 ? Math.max(0, measuredWidth - MAX_SIDEBAR_WIDTH) : undefined
 
@@ -234,7 +242,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       }
 
       if (studyEnabled && attachments.some(a => a.mime === "application/pdf")) {
-        await handleStudyPdf(text, attachments, chatId, settings.selectedModel, setMessages)
+        await handleStudyPdf(text, attachments, chatId, config.selectedModel, setMessages)
         toggleStudy()
         return
       }
@@ -284,22 +292,22 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         }
 
         const llmMsg = hiddenContent ? (text ? `${hiddenContent}\n\n${text}` : hiddenContent) : text
-        send({ ...defaultSendParams(settings), user_msg: llmMsg, img_base64: imgBase64, downscale_images: settings.downscaleImages }, true)
+        send({ ...defaultSendParams(config), user_msg: llmMsg, img_base64: imgBase64, downscale_images: config.downscaleImages }, true)
         return
       }
 
       if (morphicSearchEnabled) {
-        morphicSearch({ query: text, searchDepth: settings.searchDepth, model: settings.selectedModel || undefined })
+        morphicSearch({ query: text, searchDepth: settings.searchDepth, model: config.selectedModel || undefined })
       } else if (researchEnabled) {
         research({
-          query: text, fastModel: settings.researchFastModel, smartModel: settings.researchSmartModel, strategicModel: settings.researchStrategicModel,
-          depth: settings.researchDepth, breadth: settings.researchBreadth, reasoningEffort: settings.researchReasoning, reportType: settings.researchReportType,
+          query: text, fastModel: config.researchFastModel, smartModel: config.researchSmartModel, strategicModel: config.researchStrategicModel,
+          depth: config.researchDepth, breadth: config.researchBreadth, reasoningEffort: config.researchReasoning, reportType: config.researchReportType,
         })
       } else {
-        send({ ...defaultSendParams(settings), user_msg: text })
+        send({ ...defaultSendParams(config), user_msg: text })
       }
     },
-    [morphicSearchEnabled, researchEnabled, studyEnabled, chatId, activeProject, settings, send, research, morphicSearch, setMessages, toggleStudy],
+    [morphicSearchEnabled, researchEnabled, studyEnabled, chatId, activeProject, config, send, research, morphicSearch, setMessages, toggleStudy],
   )
 
   const handleRemoveAttachment = useCallback((messageIndex: number, attachmentName: string) => {
@@ -347,42 +355,30 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   return (
     <div ref={containerRef} className="flex h-full overflow-hidden">
       <Sidebar
-        collapsed={sidebarCollapsed}
-        onToggle={onSidebarToggle}
-        rootFiles={visibleRootFiles}
-        histories={visibleHistories}
-        historiesLoading={historiesLoading}
-        branchMeta={branchMeta}
         onOpenChat={onOpenChat}
         onRefreshAll={refreshAll}
         onSave={openSaveModal}
         onReset={reset}
         onMerge={(childFile) => doMergeBranch(childFile)}
         onCascadeDelete={handleCascadeDelete}
-        activeFile={tab.historyFile}
-        activeQaIndex={focusQaIndex}
-        projectsOpen={projectsOpen}
-        onProjectsOpenChange={onProjectsOpenChange}
-        historiesOpen={historiesOpen}
-        onHistoriesOpenChange={onHistoriesOpenChange}
       />
       <main className="flex-1 min-w-0 flex flex-col relative bg-paper">
         <header className="h-[60px] shrink-0 flex items-center px-4 gap-4 bg-paper z-40 border-b border-divider/50">
           {researchEnabled ? (
             <ResearchModelsBar
               models={models}
-              fastModel={settings.researchFastModel}
-              smartModel={settings.researchSmartModel}
-              strategicModel={settings.researchStrategicModel}
-              onFastModelChange={settings.setResearchFastModel}
-              onSmartModelChange={settings.setResearchSmartModel}
-              onStrategicModelChange={settings.setResearchStrategicModel}
+              fastModel={config.researchFastModel}
+              smartModel={config.researchSmartModel}
+              strategicModel={config.researchStrategicModel}
+              onFastModelChange={(m) => onConfigChange({ researchFastModel: m })}
+              onSmartModelChange={(m) => onConfigChange({ researchSmartModel: m })}
+              onStrategicModelChange={(m) => onConfigChange({ researchStrategicModel: m })}
             />
           ) : (
             <div className="flex items-center gap-4">
-              <ModelDropdown models={models} selectedModel={settings.selectedModel} onSelect={settings.setSelectedModel} />
+              <ModelDropdown models={models} selectedModel={config.selectedModel} onSelect={(m) => onConfigChange({ selectedModel: m })} />
               <div className="w-px h-4 bg-surface-elevated" />
-              <ReasoningSelector reasoningEffort={settings.reasoningEffort} onReasoningChange={settings.setReasoningEffort} />
+              <ReasoningSelector reasoningEffort={config.reasoningEffort} onReasoningChange={(v) => onConfigChange({ reasoningEffort: v })} />
             </div>
           )}
 
@@ -391,7 +387,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           <div className="flex items-center gap-2">
             <TokenCounter usage={totalUsage} />
             <ThemeToggle />
-            <MoreOptionsMenu prompts={prompts} />
+            <MoreOptionsMenu prompts={prompts} config={config} onConfigChange={onConfigChange} searchDepth={settings.searchDepth} onSearchDepthChange={settings.setSearchDepth} />
           </div>
         </header>
         <div className="flex-1 overflow-hidden relative">
@@ -430,12 +426,10 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
 
 function AppContent() {
   const tabManagerRef = useRef<TabManagerHandle>(null)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
-  const [projectsOpen, setProjectsOpen] = useState(true)
-  const [historiesOpen, setHistoriesOpen] = useState(false)
   const [focusQaIndex, setFocusQaIndex] = useState<number | null>(null)
   const [focusKey, setFocusKey] = useState(0)
   const { activeProject, projectData, dashboardOpen, syncTabs, setDashboardOpen, closeProject } = useProject()
+  const settings = useSettings()
   const pendingHistoryRef = useRef<string | null>(null)
 
   const handleHistoryFileChanged = useCallback((tabId: string, historyFile: string) => {
@@ -497,15 +491,15 @@ function AppContent() {
       if (pending) {
         pendingHistoryRef.current = null
         const label = pending.replace(".json", "")
-        tabManagerRef.current?.initTabs([nextTab(label, pending)])
+        tabManagerRef.current?.initTabs([nextTab(label, pending, null, defaultConfigFromSettings(settings))])
       } else {
-        tabManagerRef.current?.initTabs([nextTab()])
+        tabManagerRef.current?.initTabs([nextTab(null, null, null, defaultConfigFromSettings(settings))])
       }
     } else {
       const newTabs: Tab[] = projectData.tabs.map((t) =>
-        nextTab(t.name, `${activeProject}/${t.filename}`, t.title)
+        nextTab(t.name, `${activeProject}/${t.filename}`, t.title, defaultConfigFromSettings(settings))
       )
-      if (newTabs.length === 0) newTabs.push(nextTab())
+      if (newTabs.length === 0) newTabs.push(nextTab(null, null, null, defaultConfigFromSettings(settings)))
       tabManagerRef.current?.initTabs(newTabs)
     }
   }, [activeProject, projectData])
@@ -519,33 +513,33 @@ function AppContent() {
   }, [setDashboardOpen, dashboardOpen])
 
   return (
-    <ModeProvider>
-      <TabManager
+    <BranchProvider>
+      <SidebarProvider>
+        <TabManager
         ref={tabManagerRef}
         onCloseTab={handleTabClose}
         onTabsChange={handleTabsChange}
-        renderContent={(tab, onModeLabel, isActive) => (
-          <TabContent
-            tab={tab}
-            isActive={isActive}
-            onModeLabel={onModeLabel}
-            onHistoryFileChanged={handleHistoryFileChanged}
-            onTitleLoaded={handleTitleLoaded}
-            onOpenChat={handleOpenChat}
-            sidebarCollapsed={sidebarCollapsed}
-            onSidebarToggle={() => setSidebarCollapsed((c) => !c)}
-            projectsOpen={projectsOpen}
-            onProjectsOpenChange={setProjectsOpen}
-            historiesOpen={historiesOpen}
-            onHistoriesOpenChange={setHistoriesOpen}
-            activeProject={activeProject}
-            focusQaIndex={focusQaIndex}
-            focusKey={focusKey}
-          />
+        defaultConfig={defaultConfigFromSettings(settings)}
+        renderContent={(tab, onModeLabel, isActive, onConfigChange) => (
+          <ModeProvider>
+            <TabContent
+              tab={tab}
+              isActive={isActive}
+              onModeLabel={onModeLabel}
+              onHistoryFileChanged={handleHistoryFileChanged}
+              onTitleLoaded={handleTitleLoaded}
+              onOpenChat={handleOpenChat}
+              activeProject={activeProject}
+              focusQaIndex={focusQaIndex}
+              focusKey={focusKey}
+              onConfigChange={onConfigChange}
+            />
+          </ModeProvider>
         )}
       />
-      {dashboardOpen && <ProjectDashboard />}
-    </ModeProvider>
+        {dashboardOpen && <ProjectDashboard />}
+      </SidebarProvider>
+    </BranchProvider>
   )
 }
 

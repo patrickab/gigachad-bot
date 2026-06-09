@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+import tempfile
 from typing import Any
 
 
@@ -20,3 +21,20 @@ def safe_read_json(path: Path, default: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(data, dict):
         return default
     return data
+
+
+def safe_write_json(path: Path, data: dict[str, Any]) -> None:
+    """Write `data` as JSON to `path`, creating parent directories if needed.
+
+    Uses atomic write (write to temp file, then rename) for robustness.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    content = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    try:
+        fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+        with open(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        tmp_path = Path(tmp)
+        tmp_path.replace(path)
+    except OSError:
+        path.write_text(content, encoding="utf-8")

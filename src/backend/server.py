@@ -1,6 +1,5 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
-import os
 import signal
 import sys
 
@@ -18,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from backend.routes.chat import router as chat_router
-from backend.routes.deps import get_client, shutdown_client
+from backend.routes.deps import get_client, get_chat_store, shutdown_client
 from backend.routes.files import router as files_router
 from backend.routes.histories import router as histories_router
 from backend.routes.mineru import kill_all_mineru_servers, reset_cancel
@@ -46,6 +45,7 @@ signal.signal(signal.SIGINT, _signal_handler)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     get_client()
+    get_chat_store()
     reset_cancel()
     yield
     shutdown_client()

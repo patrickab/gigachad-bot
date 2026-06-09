@@ -7,10 +7,13 @@ from typing import Any, Iterator
 
 from sse_starlette.sse import EventSourceResponse
 
+from config import DIRECTORY_CHAT_HISTORIES
+from lib.chat_store import ChatStore
 from llm_client import LLMClient
 from llm_config import MODEL_CONFIGS
 
 _client: LLMClient | None = None
+_chat_store: ChatStore | None = None
 
 
 def get_client() -> LLMClient:
@@ -18,6 +21,13 @@ def get_client() -> LLMClient:
     if _client is None:
         _client = LLMClient(model_configs=MODEL_CONFIGS)
     return _client
+
+
+def get_chat_store() -> ChatStore:
+    global _chat_store
+    if _chat_store is None:
+        _chat_store = ChatStore(DIRECTORY_CHAT_HISTORIES)
+    return _chat_store
 
 
 def shutdown_client() -> None:

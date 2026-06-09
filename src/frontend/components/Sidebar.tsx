@@ -1,13 +1,14 @@
 "use client"
 
-import { useCallback, useMemo } from "react"
+import { useCallback, useEffect, useMemo } from "react"
 import { motion } from "framer-motion"
 import { VaultTree, type VaultTreeItem } from "./VaultTree"
 import { FolderKanban, LayoutDashboard, Clock } from "lucide-react"
 import { SidebarElement } from "./SidebarElement"
 import { getSidebarConfig } from "@/lib/sidebarConfig"
 import { useProject } from "@/contexts/ProjectContext"
-import { BranchProvider } from "@/contexts/BranchContext"
+import { useBranches } from "@/hooks/useBranches"
+import { useSidebar } from "@/contexts/SidebarContext"
 import type { BranchMeta, ProjectListItem } from "@/lib/types"
 import { ChatBranchItem } from "./ChatBranchItem"
 import { createDirectory, moveHistoryItem, Vault } from "@/lib/api"
@@ -16,46 +17,41 @@ const COLLAPSED_WIDTH = 50
 const EXPANDED_WIDTH = 280
 
 interface SidebarProps {
-  collapsed: boolean
-  onToggle: () => void
-  rootFiles: string[]
-  histories: Record<string, string[]>
-  historiesLoading?: boolean
-  branchMeta: Record<string, BranchMeta>
   onOpenChat: (filename: string, qaIndex?: number) => void
   onRefreshAll: () => Promise<void>
   onSave: () => void
   onReset: () => void
   onMerge?: (childFile: string) => Promise<void>
   onCascadeDelete?: (filename: string) => Promise<void>
-  activeFile?: string | null
-  activeQaIndex?: number | null
-  projectsOpen: boolean
-  onProjectsOpenChange: (open: boolean) => void
-  historiesOpen: boolean
-  onHistoriesOpenChange: (open: boolean) => void
 }
 
 export function Sidebar({
-  collapsed,
-  onToggle,
-  rootFiles,
-  histories,
-  historiesLoading,
-  branchMeta,
   onOpenChat,
   onRefreshAll,
   onSave,
   onReset,
   onMerge,
   onCascadeDelete,
-  activeFile,
-  activeQaIndex,
-  projectsOpen,
-  onProjectsOpenChange,
-  historiesOpen,
-  onHistoriesOpenChange,
 }: SidebarProps) {
+  const {
+    collapsed,
+    toggleCollapsed,
+    projectsOpen,
+    setProjectsOpen,
+    historiesOpen,
+    setHistoriesOpen,
+  } = useSidebar()
+
+  const {
+    branchMeta,
+    visibleRootFiles: rootFiles,
+    visibleHistories: histories,
+    historiesLoading,
+    registerOnFileClick,
+    registerOnMerge,
+    registerOnDelete,
+  } = useBranches()
+
   const {
     projects,
     activeProject,
@@ -70,10 +66,10 @@ export function Sidebar({
     await onCascadeDelete?.(file)
   }, [onCascadeDelete])
 
-  const expandIfCollapsed = () => { if (collapsed) onToggle() }
+  const expandIfCollapsed = () => { if (collapsed) toggleCollapsed() }
 
   const sidebarItems = getSidebarConfig({
-    onToggleCollapse: onToggle,
+    onToggleCollapse: toggleCollapsed,
     onSave,
     onReset,
     collapsed,
@@ -86,6 +82,7 @@ export function Sidebar({
 
   const sidebarWidth = collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH
   const animateWidth = useMemo(() => ({ width: sidebarWidth }), [sidebarWidth])
+
 
   const projectItems = useMemo(() =>
     buildProjectItems(projects, activeProject, branchMeta),
@@ -105,15 +102,11 @@ export function Sidebar({
     />
   ), [])
 
+  useEffect(() => { registerOnFileClick(onOpenChat) }, [onOpenChat, registerOnFileClick])
+  useEffect(() => { if (onMerge) registerOnMerge(onMerge) }, [onMerge, registerOnMerge])
+  useEffect(() => { if (onCascadeDelete) registerOnDelete(onCascadeDelete) }, [onCascadeDelete, registerOnDelete])
+
   return (
-    <BranchProvider
-      branchMeta={branchMeta}
-      activeFile={activeFile}
-      activeQaIndex={activeQaIndex}
-      onFileClick={onOpenChat}
-      onMerge={onMerge}
-      onDelete={handleTimelineDelete}
-    >
     <motion.aside
       initial={false}
       animate={animateWidth}
@@ -145,7 +138,7 @@ export function Sidebar({
             items={projectItems}
             collapsed={collapsed}
             open={projectsOpen}
-            onOpenChange={onProjectsOpenChange}
+            onOpenChange={setProjectsOpen}
             onExpand={expandIfCollapsed}
             onVaultClick={(id) => {
               if (activeProject === id) {
@@ -176,7 +169,7 @@ export function Sidebar({
             loading={historiesLoading}
             collapsed={collapsed}
             open={historiesOpen}
-            onOpenChange={onHistoriesOpenChange}
+            onOpenChange={setHistoriesOpen}
             onExpand={expandIfCollapsed}
             plusTitle="New folder"
             onElementClick={(item) => {
@@ -186,7 +179,7 @@ export function Sidebar({
             onAddFolder={async (parentId: string | null, name: string) => {
               await createDirectory(parentId ?? "", name)
               await onRefreshAll()
-              onHistoriesOpenChange(true)
+              setHistoriesOpen(true)
             }}
             onVaultDelete={async (id: string) => {
               await new Vault(id).delete()
@@ -210,7 +203,6 @@ export function Sidebar({
         </div>
       </div>
     </motion.aside>
-    </BranchProvider>
   )
 }
 

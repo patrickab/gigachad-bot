@@ -3,6 +3,58 @@
 import { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react"
 import { Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { DEFAULT_MODEL, DEFAULT_TEMPERATURE } from "@/lib/config"
+import { useSettings } from "@/contexts/SettingsContext"
+
+export interface TabConfig {
+  selectedModel: string
+  selectedPrompt: string | null
+  temperature: number
+  reasoningEffort: string
+  downscaleImages: boolean
+  researchFastModel: string
+  researchSmartModel: string
+  researchStrategicModel: string
+  researchDepth: number
+  researchBreadth: number
+  researchReasoning: string
+  researchReportType: string
+  searchDepth: "quick" | "adaptive"
+}
+
+const DEFAULT_CONFIG: TabConfig = {
+  selectedModel: DEFAULT_MODEL,
+  selectedPrompt: null,
+  temperature: DEFAULT_TEMPERATURE,
+  reasoningEffort: "none",
+  downscaleImages: true,
+  researchFastModel: "",
+  researchSmartModel: "",
+  researchStrategicModel: "",
+  researchDepth: 2,
+  researchBreadth: 4,
+  researchReasoning: "medium",
+  researchReportType: "deep",
+  searchDepth: "adaptive",
+}
+
+export function defaultConfigFromSettings(settings: ReturnType<typeof useSettings>): TabConfig {
+  return {
+    selectedModel: settings.selectedModel,
+    selectedPrompt: settings.selectedPrompt,
+    temperature: settings.temperature,
+    reasoningEffort: settings.reasoningEffort,
+    downscaleImages: settings.downscaleImages,
+    researchFastModel: settings.researchFastModel,
+    researchSmartModel: settings.researchSmartModel,
+    researchStrategicModel: settings.researchStrategicModel,
+    researchDepth: settings.researchDepth,
+    researchBreadth: settings.researchBreadth,
+    researchReasoning: settings.researchReasoning,
+    researchReportType: settings.researchReportType,
+    searchDepth: settings.searchDepth,
+  }
+}
 
 export interface Tab {
   id: string
@@ -10,12 +62,14 @@ export interface Tab {
   chatId: string
   historyFile: string | null
   title: string | null
+  config: TabConfig
 }
 
 interface TabManagerProps {
-  renderContent: (tab: Tab, onModeLabel: (label: string) => void, isActive: boolean) => React.ReactNode
+  renderContent: (tab: Tab, onModeLabel: (label: string) => void, isActive: boolean, onConfigChange: (config: Partial<TabConfig>) => void) => React.ReactNode
   onCloseTab?: (tab: Tab) => void
   onTabsChange?: (tabs: Tab[]) => void
+  defaultConfig?: TabConfig
   ref?: React.Ref<TabManagerHandle>
 }
 
@@ -27,17 +81,19 @@ export interface TabManagerHandle {
   getActiveTabId: () => string
   updateTabHistoryFile: (tabId: string, historyFile: string) => void
   updateTabTitle: (tabId: string, title: string | null) => void
+  updateTabConfig: (tabId: string, config: Partial<TabConfig>) => void
 }
 
 let tabIdCounter = 0
 
-export function nextTab(name: string | null = null, historyFile: string | null = null, title: string | null = null): Tab {
-  return { id: `tab-${++tabIdCounter}`, name, chatId: crypto.randomUUID(), historyFile, title }
+export function nextTab(name: string | null = null, historyFile: string | null = null, title: string | null = null, config?: Partial<TabConfig>): Tab {
+  return { id: `tab-${++tabIdCounter}`, name, chatId: crypto.randomUUID(), historyFile, title, config: { ...DEFAULT_CONFIG, ...config } }
 }
 
 const INITIAL_TAB: Tab = nextTab()
+const INITIAL_CONFIG: TabConfig = { ...DEFAULT_CONFIG }
 
-export function TabManager({ renderContent, onCloseTab, onTabsChange, ref }: TabManagerProps) {
+export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultConfig = INITIAL_CONFIG, ref }: TabManagerProps) {
   const [tabs, setTabs] = useState<Tab[]>([INITIAL_TAB])
   const [activeTab, setActiveTab] = useState(INITIAL_TAB.id)
   const [editingTab, setEditingTab] = useState<string | null>(null)
@@ -69,6 +125,9 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, ref }: Tab
     updateTabTitle: (tabId: string, title: string | null) => {
       setTabs((prev) => prev.map((t) => t.id === tabId ? { ...t, title } : t))
     },
+    updateTabConfig: (tabId: string, config: Partial<TabConfig>) => {
+      setTabs((prev) => prev.map((t) => t.id === tabId ? { ...t, config: { ...t.config, ...config } } : t))
+    },
   }), [tabs, activeTab])
 
   useEffect(() => {
@@ -84,10 +143,10 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, ref }: Tab
   }, [tabs])
 
   const addTab = useCallback(() => {
-    const tab = nextTab()
+    const tab = nextTab(null, null, null, defaultConfig)
     setTabs((prev) => [...prev, tab])
     setActiveTab(tab.id)
-  }, [])
+  }, [defaultConfig])
 
   const closeTab = useCallback((id: string) => {
     setTabs((prev) => {
@@ -259,7 +318,9 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, ref }: Tab
               className="h-full"
               style={{ display: isActive ? undefined : "none" }}
             >
-              {renderContent(tab, hook, isActive)}
+              {renderContent(tab, hook, isActive, (config) => {
+                setTabs((prev) => prev.map((t) => t.id === tab.id ? { ...t, config: { ...t.config, ...config } } : t))
+              })}
             </div>
           )
         })}

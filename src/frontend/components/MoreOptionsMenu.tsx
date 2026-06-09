@@ -10,17 +10,24 @@ import { StyledSelect } from "./StyledSelect"
 import { cn } from "@/lib/utils"
 import { REASONING_LEVELS } from "@/lib/config"
 import { useClickOutside } from "@/hooks/useClickOutside"
-import { useSettings } from "@/contexts/SettingsContext"
 import { useModeState } from "@/hooks/useModeState"
+import type { TabConfig } from "@/components/TabManager"
 
 interface MoreOptionsMenuProps {
   prompts: string[]
+  config: TabConfig
+  onConfigChange: (config: Partial<TabConfig>) => void
+  searchDepth: "quick" | "adaptive"
+  onSearchDepthChange: (v: "quick" | "adaptive") => void
 }
 
 export function MoreOptionsMenu({
   prompts,
+  config,
+  onConfigChange,
+  searchDepth,
+  onSearchDepthChange,
 }: MoreOptionsMenuProps) {
-  const settings = useSettings()
   const { researchEnabled, morphicSearchEnabled } = useModeState()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -56,16 +63,16 @@ export function MoreOptionsMenu({
                   </div>
                   <StyledSelect
                     options={prompts.map((p) => ({ value: p, label: p }))}
-                    value={settings.selectedPrompt ?? ""}
-                    onChange={settings.setSelectedPrompt}
+                    value={config.selectedPrompt ?? ""}
+                    onChange={(v) => onConfigChange({ selectedPrompt: v || null })}
                   />
                 </div>
 
                 {/* LLM Parameters */}
                 <div className="pt-2 border-t border-divider/50">
                   <LLMParams
-                    temperature={settings.temperature}
-                    onTemperatureChange={settings.setTemperature}
+                    temperature={config.temperature}
+                    onTemperatureChange={(v) => onConfigChange({ temperature: v })}
                   />
                 </div>
 
@@ -75,16 +82,16 @@ export function MoreOptionsMenu({
                     <span className="text-xs text-ink-subtle">Downscale images</span>
                     <button
                       role="switch"
-                      aria-checked={settings.downscaleImages}
-                      onClick={() => settings.setDownscaleImages(!settings.downscaleImages)}
+                      aria-checked={config.downscaleImages}
+                      onClick={() => onConfigChange({ downscaleImages: !config.downscaleImages })}
                       className={cn(
                         "relative h-5 w-9 rounded-full transition-colors",
-                        settings.downscaleImages ? "bg-ink-muted" : "bg-surface-elevated"
+                        config.downscaleImages ? "bg-ink-muted" : "bg-surface-elevated"
                       )}
                     >
                       <span className={cn(
                         "absolute top-0.5 h-4 w-4 rounded-full bg-ink transition-transform",
-                        settings.downscaleImages ? "left-[18px]" : "left-0.5"
+                        config.downscaleImages ? "left-[18px]" : "left-0.5"
                       )} />
                     </button>
                   </label>
@@ -92,24 +99,24 @@ export function MoreOptionsMenu({
               </>
             )}
 
-            {morphicSearchEnabled && settings.searchDepth !== undefined && (
+            {morphicSearchEnabled && searchDepth !== undefined && (
               <div className="pt-2 border-t border-divider/50 space-y-2">
                 <div className="flex items-center gap-2 text-xs font-medium text-ink">
                   <span className="h-1.5 w-1.5 rounded-full bg-ink" />
                   Search Depth
                 </div>
                 <div className="flex gap-1">
-                  <PillButton accent="muted" active={settings.searchDepth === "quick"} onClick={() => settings.setSearchDepth("quick")}>
+                  <PillButton accent="muted" active={searchDepth === "quick"} onClick={() => onSearchDepthChange("quick")}>
                     Quick
                   </PillButton>
-                  <PillButton accent="muted" active={settings.searchDepth === "adaptive"} onClick={() => settings.setSearchDepth("adaptive")}>
+                  <PillButton accent="muted" active={searchDepth === "adaptive"} onClick={() => onSearchDepthChange("adaptive")}>
                     Adaptive
                   </PillButton>
                 </div>
               </div>
             )}
 
-            {researchEnabled && settings.researchDepth !== undefined && (
+            {researchEnabled && config.researchDepth !== undefined && (
               <div className="pt-2 border-t border-divider/50 space-y-3">
                 <div className="flex items-center gap-2 text-xs font-medium text-ink">
                   <span className="h-1.5 w-1.5 rounded-full bg-ink" />
@@ -117,8 +124,8 @@ export function MoreOptionsMenu({
                 </div>
                 <ParamSlider
                   label="Depth"
-                  value={settings.researchDepth}
-                  onChange={settings.setResearchDepth}
+                  value={config.researchDepth}
+                  onChange={(v) => onConfigChange({ researchDepth: v })}
                   min={1}
                   max={4}
                   step={1}
@@ -126,8 +133,8 @@ export function MoreOptionsMenu({
                 />
                 <ParamSlider
                   label="Breadth"
-                  value={settings.researchBreadth}
-                  onChange={settings.setResearchBreadth}
+                  value={config.researchBreadth}
+                  onChange={(v) => onConfigChange({ researchBreadth: v })}
                   min={2}
                   max={6}
                   step={1}
@@ -140,8 +147,8 @@ export function MoreOptionsMenu({
                       value: l,
                       label: l === "none" ? "None" : l.charAt(0).toUpperCase() + l.slice(1),
                     }))}
-                    value={settings.researchReasoning}
-                    onChange={settings.setResearchReasoning}
+                    value={config.researchReasoning}
+                    onChange={(v) => onConfigChange({ researchReasoning: v })}
                   />
                 </div>
                 <div className="space-y-1">
@@ -151,8 +158,8 @@ export function MoreOptionsMenu({
                       { value: "deep", label: "Deep (recursive)" },
                       { value: "research_report", label: "Standard (single-pass)" },
                     ]}
-                    value={settings.researchReportType}
-                    onChange={settings.setResearchReportType}
+                    value={config.researchReportType}
+                    onChange={(v) => onConfigChange({ researchReportType: v })}
                   />
                 </div>
               </div>

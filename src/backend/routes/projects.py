@@ -1,25 +1,20 @@
-import json
-import re
-import shutil
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+import re
+import shutil
 from typing import Any
+import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from config import DIRECTORY_CHAT_HISTORIES
+from backend.routes.deps import get_chat_store
 from backend.routes.files import delete_chat_upload_dir
-from backend.routes.histories import SaveRequest, _load_chat_file
-from lib.json_io import safe_read_json
-from lib.payload import _build_payload
-from lib.chat_index import invalidate_chat_id_index
+from config import DIRECTORY_CHAT_HISTORIES
+from lib.chat_store import META_JSON, PROJECT_JSON, ChatStore
+from lib.json_io import safe_read_json, safe_write_json
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
-
-PROJECT_JSON = "project.json"
-META_JSON = "projects-meta.json"
 
 
 def _slugify(name: str) -> str:
@@ -39,7 +34,7 @@ def _read_meta() -> dict[str, Any]:
 
 def _write_meta(meta: dict[str, Any]) -> None:
     DIRECTORY_CHAT_HISTORIES.mkdir(parents=True, exist_ok=True)
-    _meta_path().write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_write_json(_meta_path(), meta)
 
 
 def _now_iso() -> str:
@@ -79,7 +74,7 @@ def _read_project(project_dir: Path) -> dict[str, Any]:
 
 def _write_project(project_dir: Path, data: dict[str, Any]) -> None:
     project_dir.mkdir(parents=True, exist_ok=True)
-    (project_dir / PROJECT_JSON).write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_write_json(project_dir / PROJECT_JSON, data)
 
 
 class KanbanCardModel(BaseModel):
@@ -120,7 +115,14 @@ class UpdateCardRequest(BaseModel):
     description: str | None = None
 
 
-class SaveTabRequest(SaveRequest):
+class SaveTabRequest(BaseModel):
+    messages: list[dict[str, Any]] = []
+    chat_id: str | None = None
+    title: str | None = None
+    usage: dict[str, int] | None = None
+    parent_id: str | None = None
+    branch_message_idx: int | None = None
+    children: list[dict[str, Any]] | None = None
     filename: str
     tab_name: str | None = None
 
@@ -283,27 +285,24 @@ async def delete_card(slug: str, card_id: str) -> dict[str, str]:
 
 
 @router.put("/{slug}/tabs/{filename:path}")
-async def save_project_tab(slug: str, filename: str, data: SaveTabRequest) -> dict[str, str]:
+async def save_project_tab(
+    slug: str,
+    filename: str,
+    data: SaveTabRequest,
+    store: ChatStore = Depends(get_chat_store),
+) -> dict[str, str]:
     meta = _read_meta()
     if not _find_entry(meta, slug):
         raise HTTPException(status_code=404, detail="Project not found")
+
     project_dir = _resolve_project_dir(slug)
-    tab_path = project_dir / filename
-    tab_path.parent.mkdir(parents=True, exist_ok=True)
+    full_filename = f"{slug}/{filename}"
 
-    # Prevent cross-chat overwrites: if the file exists and has a chat_id,
-    # the incoming chat_id must match.
-    existing = _load_chat_file(tab_path) if tab_path.exists() else None
-    if existing and existing.get("chat_id") and data.chat_id:
-        if existing["chat_id"] != data.chat_id:
-            raise HTTPException(
-                status_code=409,
-                detail="Chat ID mismatch: cannot overwrite an existing project tab with a different chat_id",
-            )
+    try:
+        store.save(full_filename, data.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
-    payload = _build_payload(data.model_dump() if data else None, existing)
-    tab_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    invalidate_chat_id_index()
     project_data = _read_project(project_dir)
     tabs = project_data.get("tabs", [])
     existing = next((t for t in tabs if t["filename"] == filename), None)
@@ -320,10 +319,11 @@ async def save_project_tab(slug: str, filename: str, data: SaveTabRequest) -> di
 
 
 @router.delete("/{slug}/tabs/{filename:path}")
-async def delete_project_tab(slug: str, filename: str) -> dict[str, str]:
+async def delete_project_tab(slug: str, filename: str, store: ChatStore = Depends(get_chat_store)) -> dict[str, str]:
     meta = _read_meta()
     if not _find_entry(meta, slug):
         raise HTTPException(status_code=404, detail="Project not found")
+
     project_dir = _resolve_project_dir(slug)
     tab_path = project_dir / filename
     chat_id_to_clean: str | None = None
@@ -333,7 +333,7 @@ async def delete_project_tab(slug: str, filename: str) -> dict[str, str]:
         if isinstance(cid, str):
             chat_id_to_clean = cid
         tab_path.unlink()
-    invalidate_chat_id_index()
+    store.invalidate_index()
     if chat_id_to_clean:
         delete_chat_upload_dir(chat_id_to_clean, slug)
     project_data = _read_project(project_dir)
