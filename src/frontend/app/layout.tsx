@@ -18,9 +18,14 @@ const jetbrainsMono = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  title: "Gigachad Bot",
-  description: "Personal AI chat interface",
+  title: "GigaChat Bot",
+  description: "Personal AI chat interface with branching, deep research, and multi-model support",
   icons: "/assets/icon.png",
+  openGraph: {
+    title: "GigaChat Bot",
+    description: "Personal AI chat interface",
+    type: "website",
+  },
 }
 
 const THEME_SCRIPT = `
@@ -41,7 +46,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>
-      <body className="bg-paper text-ink antialiased">{children}</body>
+      <body className="bg-paper text-ink antialiased">
+        <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[200] focus:rounded-md focus:bg-surface focus:px-3 focus:py-1 focus:text-ink focus:text-sm">Skip to content</a>
+        {children}
+      </body>
     </html>
   )
 }

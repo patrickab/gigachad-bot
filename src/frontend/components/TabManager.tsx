@@ -4,7 +4,7 @@ import { useCallback, useEffect, useImperativeHandle, useRef, useState } from "r
 import { Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { DEFAULT_MODEL, DEFAULT_TEMPERATURE } from "@/lib/config"
-import { useSettings } from "@/contexts/SettingsContext"
+import type { SettingsState } from "@/contexts/SettingsContext"
 
 export interface TabConfig {
   selectedModel: string
@@ -22,6 +22,12 @@ export interface TabConfig {
   searchDepth: "quick" | "adaptive"
 }
 
+const TAB_CONFIG_KEYS: (keyof TabConfig)[] = [
+  "selectedModel", "selectedPrompt", "temperature", "reasoningEffort",
+  "downscaleImages", "researchFastModel", "researchSmartModel", "researchStrategicModel",
+  "researchDepth", "researchBreadth", "researchReasoning", "researchReportType", "searchDepth",
+]
+
 const DEFAULT_CONFIG: TabConfig = {
   selectedModel: DEFAULT_MODEL,
   selectedPrompt: null,
@@ -38,22 +44,14 @@ const DEFAULT_CONFIG: TabConfig = {
   searchDepth: "adaptive",
 }
 
-export function defaultConfigFromSettings(settings: ReturnType<typeof useSettings>): TabConfig {
-  return {
-    selectedModel: settings.selectedModel,
-    selectedPrompt: settings.selectedPrompt,
-    temperature: settings.temperature,
-    reasoningEffort: settings.reasoningEffort,
-    downscaleImages: settings.downscaleImages,
-    researchFastModel: settings.researchFastModel,
-    researchSmartModel: settings.researchSmartModel,
-    researchStrategicModel: settings.researchStrategicModel,
-    researchDepth: settings.researchDepth,
-    researchBreadth: settings.researchBreadth,
-    researchReasoning: settings.researchReasoning,
-    researchReportType: settings.researchReportType,
-    searchDepth: settings.searchDepth,
+export function settingsToTabConfig(settings: SettingsState): TabConfig {
+  const config: Partial<TabConfig> = {}
+  for (const key of TAB_CONFIG_KEYS) {
+    if (key in settings) {
+      (config as Record<string, unknown>)[key] = settings[key as keyof SettingsState]
+    }
   }
+  return { ...DEFAULT_CONFIG, ...config }
 }
 
 export interface Tab {

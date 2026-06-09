@@ -140,13 +140,13 @@ function ChatMessageInner({ role, content, index, onDelete, onBranch, morphic_re
             morphic_result={morphic_result}
           />
         ) : content ? (
-          <span className="inline-flex items-center gap-1 text-ink text-sm">
-            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-ink" />
+          <span role="status" className="inline-flex items-center gap-1 text-ink text-sm">
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-ink" aria-hidden="true" />
             {content}
           </span>
         ) : isStreaming ? (
-          <span className="inline-flex items-center gap-2 text-ink text-sm">
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-ink-faint" />
+          <span role="status" className="inline-flex items-center gap-2 text-ink text-sm">
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-ink-faint" aria-hidden="true" />
             <span>Processing…</span>
           </span>
         ) : null}
@@ -158,13 +158,13 @@ function ChatMessageInner({ role, content, index, onDelete, onBranch, morphic_re
             isLive={isStreaming}
           />
         )}
-        <div className="flex items-center justify-end gap-1 mt-1 opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="flex items-center justify-end gap-1 mt-1 opacity-0 transition-opacity group-hover:opacity-100" role="group" aria-label="Message actions">
           {content && !isResearchRunning && (
             <div className="relative">
               <button
                 onClick={(e) => { e.stopPropagation(); handleCopy() }}
-                className="rounded p-1 hover:bg-surface-elevated text-ink-subtle hover:text-ink"
-                title="Copy"
+              className="rounded p-1 hover:bg-surface-elevated text-ink-subtle hover:text-ink"
+              aria-label="Copy message"
               >
                 {copied ? <Check className="h-3.5 w-3.5 text-ink" /> : <Copy className="h-3.5 w-3.5" />}
               </button>
@@ -185,7 +185,7 @@ function ChatMessageInner({ role, content, index, onDelete, onBranch, morphic_re
             <button
               onClick={(e) => { e.stopPropagation(); onDelete(index) }}
               className="rounded p-1 hover:bg-surface-elevated text-ink-subtle hover:text-danger"
-              title="Delete pair"
+              aria-label="Delete message pair"
             >
               <Trash2 className="h-3.5 w-3.5" />
             </button>
@@ -194,7 +194,7 @@ function ChatMessageInner({ role, content, index, onDelete, onBranch, morphic_re
             <button
               onClick={(e) => { e.stopPropagation(); onBranch(index) }}
               className="rounded p-1 hover:bg-surface-elevated text-ink-subtle hover:text-ink"
-              title="Branch from here"
+              aria-label="Branch conversation from this point"
             >
               <GitFork className="h-3.5 w-3.5" />
             </button>

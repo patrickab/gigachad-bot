@@ -259,6 +259,7 @@ export function VaultTree<T>({
         onClick={() => { onExpand?.(); onOpenChange?.(true) }}
         className="w-full flex items-center justify-center p-2 rounded-md text-ink-muted hover:bg-surface-elevated/50 hover:text-ink transition-colors"
         title={sectionTitle}
+        aria-label={collapsed ? `Expand ${sectionTitle ?? "section"}` : undefined}
       >
         <SectionIcon className="h-4 w-4 shrink-0" />
       </button>
@@ -590,7 +591,7 @@ function InlineCreateForm({
           if (e.key === "Enter") onSubmit()
           if (e.key === "Escape") onCancel()
         }}
-        className="flex-1 bg-transparent border border-divider-strong rounded px-1.5 py-0.5 text-[11px] text-ink outline-none focus:border-divider-strong"
+        className="flex-1 bg-surface/50 rounded px-1.5 py-0.5 text-[11px] text-ink outline-none focus:border-ink-muted transition-colors"
         placeholder={placeholder}
       />
       <button onClick={onSubmit} className="text-[10px] text-ink hover:text-ink">

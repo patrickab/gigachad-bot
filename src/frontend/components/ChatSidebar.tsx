@@ -77,7 +77,10 @@ export function ChatSidebar({ elements, width, onWidthChange }: ChatSidebarProps
       className="shrink-0 border-l border-divider bg-paper flex flex-col overflow-hidden relative"
     >
       <div
-        className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-surface-elevated active:bg-surface-elevated transition-colors z-10"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize sidebar"
+        className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-surface-elevated active:bg-surface-elevated focus-visible:bg-surface-elevated transition-colors z-10"
         onMouseDown={handleMouseDown}
       />
       <div className="flex-1 overflow-y-auto">

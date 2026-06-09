@@ -22,68 +22,74 @@
    generated via @theme referencing these tokens.
    ============================================================ */
 
-:root {
-  --shadow-strength: 0.35;
-  --shadow-color: oklch(20% 0.01 85);
+ :root {
+   --shadow-strength: 0.35;
+   --shadow-color: oklch(20% 0.01 85);
+ 
+   /* --- Text (ink) — high contrast on dark surfaces --- */
+   --ink:        oklch(95% 0.006 85);
+   --ink-muted:  oklch(72% 0.010 85);
+   --ink-subtle: oklch(55% 0.010 85);
+   --ink-faint:  oklch(42% 0.008 85);
+ 
+   /* --- Surfaces — warm-tinted dark greys (not near-black) --- */
+   --paper:            oklch(19% 0.013 85);
+   --surface:          oklch(24% 0.014 85);
+   --surface-elevated: oklch(30% 0.015 85);
+   --overlay:          oklch(16% 0.013 85);
+ 
+   /* --- Danger (red, reserved for destructive actions only) --- */
+   --danger:      oklch(68% 0.20 25);
+ 
+   /* --- Backdrop for modal scrims --- */
+   --backdrop:    oklch(0% 0 0 / 0.65);
+ 
+   /* --- Derived: dividers (recompute when --ink changes) --- */
+   --divider:         color-mix(in oklab, var(--ink) 8%,  transparent);
+   --divider-strong:  color-mix(in oklab, var(--ink) 18%, transparent);
+ 
+   /* --- Derived: danger tints --- */
+   --danger-soft:     color-mix(in oklab, var(--danger) 12%, transparent);
+ 
+   /* --- Derived: hover overlay (sits on the local surface) --- */
+   --hover-overlay:        color-mix(in oklab, var(--ink) 6%,  transparent);
+   --hover-overlay-strong: color-mix(in oklab, var(--ink) 10%, transparent);
+ 
+   /* --- Shadows (dark mode — stronger, warm-tinted) --- */
+   --shadow-sm:  0 2px 10px color-mix(in oklab, var(--shadow-color) 35%, transparent);
+   --shadow-md:  0 4px 15px color-mix(in oklab, var(--shadow-color) 35%, transparent);
+   --shadow-lg:  0 8px 30px color-mix(in oklab, var(--shadow-color) 35%, transparent);
+   --shadow-xl:  0 12px 30px color-mix(in oklab, var(--shadow-color) 35%, transparent);
+ }
 
-  /* --- Text (ink) — high contrast on dark surfaces --- */
-  --ink:        oklch(95% 0.006 85);
-  --ink-muted:  oklch(72% 0.010 85);
-  --ink-subtle: oklch(55% 0.010 85);
-  --ink-faint:  oklch(42% 0.008 85);
-
-  /* --- Surfaces — warm-tinted dark greys (not near-black) --- */
-  --paper:            oklch(19% 0.013 85);
-  --surface:          oklch(24% 0.014 85);
-  --surface-elevated: oklch(30% 0.015 85);
-  --overlay:          oklch(16% 0.013 85);
-
-  /* --- Danger (red, reserved for destructive actions only) --- */
-  --danger:      oklch(68% 0.20 25);
-
-  /* --- Backdrop for modal scrims --- */
-  --backdrop:    oklch(0% 0 0 / 0.65);
-
-  /* --- Derived: dividers (recompute when --ink changes) --- */
-  --divider:         color-mix(in oklab, var(--ink) 8%,  transparent);
-  --divider-strong:  color-mix(in oklab, var(--ink) 18%, transparent);
-
-  /* --- Derived: danger tints --- */
-  --danger-soft:     color-mix(in oklab, var(--danger) 12%, transparent);
-
-  /* --- Derived: hover overlay (sits on the local surface) --- */
-  --hover-overlay:        color-mix(in oklab, var(--ink) 6%,  transparent);
-  --hover-overlay-strong: color-mix(in oklab, var(--ink) 10%, transparent);
-}
-
-.light {
-  --shadow-strength: 0.08;
-  --shadow-color: oklch(35% 0.01 85);
-
-  /* --- Text: dark warm-tinted greys ("greyish writing") --- */
-  --ink:        oklch(28% 0.012 85);
-  --ink-muted:  oklch(40% 0.012 85);
-  --ink-subtle: oklch(50% 0.010 85);
-  --ink-faint:  oklch(60% 0.008 85);
-
-  /* --- Surfaces: yellowish broken white, ascending toward (not to) white --- */
-  --paper:            oklch(95%   0.020 85);
-  --surface:          oklch(97.5% 0.012 85);
-  --surface-elevated: oklch(99%   0.006 85);
-  --overlay:          oklch(96%   0.015 85);
-
-  /* --- Danger: darker red for light bg --- */
-  --danger:      oklch(52% 0.22 25);
-
-  /* Backdrop stays the same — a scrim is meant to darken regardless of mode */
-  --backdrop:    oklch(0% 0 0 / 0.55);
-
-  /* --- Derived: shadows (warm-tinted, pre-computed per mode) --- */
-  --shadow-sm:  0 2px 10px color-mix(in oklab, var(--shadow-color) 8%, transparent);
-  --shadow-md:  0 4px 15px color-mix(in oklab, var(--shadow-color) 8%, transparent);
-  --shadow-lg:  0 8px 30px color-mix(in oklab, var(--shadow-color) 8%, transparent);
-  --shadow-xl:  0 12px 30px color-mix(in oklab, var(--shadow-color) 8%, transparent);
-}
+ .light {
+   --shadow-strength: 0.08;
+   --shadow-color: oklch(35% 0.01 85);
+ 
+   /* --- Text: dark warm-tinted greys ("greyish writing") --- */
+   --ink:        oklch(28% 0.012 85);
+   --ink-muted:  oklch(40% 0.012 85);
+   --ink-subtle: oklch(50% 0.010 85);
+   --ink-faint:  oklch(60% 0.008 85);
+ 
+   /* --- Surfaces: yellowish broken white, ascending toward (not to) white --- */
+   --paper:            oklch(95%   0.020 85);
+   --surface:          oklch(97.5% 0.012 85);
+   --surface-elevated: oklch(99%   0.006 85);
+   --overlay:          oklch(96%   0.015 85);
+ 
+   /* --- Danger: darker red for light bg --- */
+   --danger:      oklch(52% 0.22 25);
+ 
+   /* Backdrop stays the same — a scrim is meant to darken regardless of mode */
+   --backdrop:    oklch(0% 0 0 / 0.55);
+ 
+   /* --- Shadows (light mode — softer, warm-tinted) --- */
+   --shadow-sm:  0 2px 10px color-mix(in oklab, var(--shadow-color) 8%, transparent);
+   --shadow-md:  0 4px 15px color-mix(in oklab, var(--shadow-color) 8%, transparent);
+   --shadow-lg:  0 8px 30px color-mix(in oklab, var(--shadow-color) 8%, transparent);
+   --shadow-xl:  0 12px 30px color-mix(in oklab, var(--shadow-color) 8%, transparent);
+ }
 
 /* ============================================================
    TAILWIND V4 TOKEN MAPPING
@@ -132,11 +138,7 @@
   --radius-lg: 0.5rem;
   --radius-xl: 0.75rem;
 
-  /* Shadows (warm-tinted, responsive to theme mode) */
-  --shadow-sm:  0 2px 10px color-mix(in oklab, var(--shadow-color) 35%, transparent);
-  --shadow-md:  0 4px 15px color-mix(in oklab, var(--shadow-color) 35%, transparent);
-  --shadow-lg:  0 8px 30px color-mix(in oklab, var(--shadow-color) 35%, transparent);
-  --shadow-xl:  0 12px 30px color-mix(in oklab, var(--shadow-color) 35%, transparent);
+  /* Shadows use mode-specific definitions from :root / .light */
 }
 
 @keyframes shimmer {
@@ -146,10 +148,28 @@
 
 html {
   scroll-behavior: smooth;
+  min-height: 100dvh;
 }
 
 body {
   font-family: var(--font-sans), Outfit, system-ui, -apple-system, sans-serif;
+  min-height: 100dvh;
+}
+
+
+h1, h2, h3 {
+  text-wrap: balance;
+  letter-spacing: -0.01em;
+}
+
+p, li {
+  text-wrap: pretty;
+}
+
+@media (max-width: 640px) {
+  h1, h2, h3 {
+    letter-spacing: -0.005em;
+  }
 }
 
 code, pre, .font-mono {
@@ -172,11 +192,15 @@ body::after {
   inset: 0;
   pointer-events: none;
   z-index: 9999;
-  opacity: 0.012;
+  opacity: 0.018;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   background-repeat: repeat;
   background-size: 256px 256px;
   mix-blend-mode: overlay;
+}
+
+.light body::after {
+  opacity: 0.015;
 }
 
 .light .markdown-body,
@@ -389,6 +413,6 @@ code {
   *,
   *::before,
   *::after {
-    transition: background-color 1.5s ease, color 1.5s ease, border-color 1.5s ease, box-shadow 1.5s ease;
+    transition: background-color 3s ease, color 3s ease, border-color 3s ease, box-shadow 3s ease;
   }
 }

@@ -9,11 +9,13 @@ from sse_starlette.sse import EventSourceResponse
 
 from config import DIRECTORY_CHAT_HISTORIES
 from lib.chat_store import ChatStore
+from lib.project_store import ProjectStore
 from llm_client import LLMClient
 from llm_config import MODEL_CONFIGS
 
 _client: LLMClient | None = None
 _chat_store: ChatStore | None = None
+_project_store: ProjectStore | None = None
 
 
 def get_client() -> LLMClient:
@@ -28,6 +30,13 @@ def get_chat_store() -> ChatStore:
     if _chat_store is None:
         _chat_store = ChatStore(DIRECTORY_CHAT_HISTORIES)
     return _chat_store
+
+
+def get_project_store() -> ProjectStore:
+    global _project_store
+    if _project_store is None:
+        _project_store = ProjectStore(DIRECTORY_CHAT_HISTORIES, chat_store=get_chat_store())
+    return _project_store
 
 
 def shutdown_client() -> None:

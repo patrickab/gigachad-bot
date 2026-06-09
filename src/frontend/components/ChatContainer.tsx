@@ -473,8 +473,8 @@ export function ChatContainer({
                   )}
                 </div>
                 {showBranchDivider && (
-                  <div className="flex items-center gap-2 mx-3 my-3">
-                    <GitFork className="h-3.5 w-3.5 shrink-0 text-ink-subtle" />
+                  <div role="separator" className="flex items-center gap-2 mx-3 my-3">
+                    <GitFork className="h-3.5 w-3.5 shrink-0 text-ink-subtle" aria-hidden="true" />
                     <span className="text-[10px] font-medium text-ink-muted tabular-nums">branched@{branchMessageIdx}</span>
                     <div className="flex-1 h-px bg-divider-strong" />
                   </div>
@@ -508,6 +508,7 @@ export function ChatContainer({
             onClick={() => setContextOpen((c) => !c)}
             title={contextOpen ? "Collapse sidebar" : "Open sidebar"}
             aria-label={contextOpen ? "Collapse sidebar" : "Open sidebar"}
+            aria-expanded={contextOpen}
             className="absolute right-0 top-3 z-30 flex items-center justify-center h-12 w-4 rounded-l-md border border-r-0 border-divider-strong bg-surface-elevated/80 text-ink hover:bg-surface-elevated hover:text-ink hover:w-5 transition-all shadow-[var(--shadow-sm)]"
           >
             <ChevronLeft className="h-4 w-4" />

@@ -31,7 +31,8 @@ export function ExpandableSidebarElement({ icon: Icon, title, badge, open, onOpe
     <div className="border-b border-divider/50">
       <button
         onClick={() => onOpenChange(!open)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-ink hover:bg-surface/50 transition-colors"
+        aria-expanded={open}
+        className="w-full flex items-center gap-2 px-3 py-2 text-ink hover:bg-surface/50 transition-colors rounded"
       >
         {open ? (
           <ChevronDown className="h-3 w-3 text-ink-subtle shrink-0" />

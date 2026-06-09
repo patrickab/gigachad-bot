@@ -72,7 +72,7 @@ export function SaveChatModal({ open, onClose, onSave }: SaveChatModalProps) {
                 className={cn(
                   "w-full rounded-lg border border-divider bg-surface/60 px-3 py-2.5 text-sm text-ink placeholder-ink-faint",
                   "outline-none transition-all duration-200",
-                  "focus:border-divider-strong"
+                  "focus:border-ink-muted"
                 )}
                 autoComplete="off"
                 spellCheck={false}

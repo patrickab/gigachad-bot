@@ -109,20 +109,20 @@ function AddCardModal({ open, onClose, onAdd, defaultState }: AddCardModalProps)
                 onChange={(e) => setTitle(e.target.value)}
                 className={cn(
                   "w-full rounded-lg border border-divider-strong bg-surface-elevated/60 px-3 py-2.5 text-sm text-ink placeholder-ink-faint",
-                  "outline-none transition-all duration-200 focus:border-ink-muted"
-                )}
-                placeholder="Title"
-                required
-                autoComplete="off"
-                spellCheck={false}
-              />
-              <input
-                type="text"
-                value={desc}
-                onChange={(e) => setDesc(e.target.value)}
-                className={cn(
-                  "w-full rounded-lg border border-divider-strong bg-surface-elevated/60 px-3 py-2.5 text-sm text-ink placeholder-ink-faint",
-                  "outline-none transition-all duration-200 focus:border-ink-muted"
+                   "outline-none transition-all duration-200 focus:border-ink-muted"
+                 )}
+                 placeholder="Title"
+                 required
+                 autoComplete="off"
+                 spellCheck={false}
+               />
+               <input
+                 type="text"
+                 value={desc}
+                 onChange={(e) => setDesc(e.target.value)}
+                 className={cn(
+                   "w-full rounded-lg border border-divider-strong bg-surface-elevated/60 px-3 py-2.5 text-sm text-ink placeholder-ink-faint",
+                   "outline-none transition-all duration-200 focus:border-ink-muted"
                 )}
                 placeholder="Description (optional)"
                 autoComplete="off"

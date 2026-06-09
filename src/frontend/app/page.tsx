@@ -11,7 +11,7 @@ import { ResearchModelsBar } from "@/components/ResearchModelsBar"
 import { ThemeToggle } from "@/components/ThemeToggle"
 import { OCRPanel } from "@/components/OCRPanel"
 import { SaveChatModal } from "@/components/SaveChatModal"
-import { TabManager, nextTab, defaultConfigFromSettings, type TabConfig } from "@/components/TabManager"
+import { TabManager, nextTab, settingsToTabConfig, type TabConfig } from "@/components/TabManager"
 import type { Tab, TabManagerHandle } from "@/components/TabManager"
 import { ProjectDashboard } from "@/components/ProjectDashboard"
 import { TokenCounter } from "@/components/TokenCounter"
@@ -491,15 +491,15 @@ function AppContent() {
       if (pending) {
         pendingHistoryRef.current = null
         const label = pending.replace(".json", "")
-        tabManagerRef.current?.initTabs([nextTab(label, pending, null, defaultConfigFromSettings(settings))])
+        tabManagerRef.current?.initTabs([nextTab(label, pending, null, settingsToTabConfig(settings))])
       } else {
-        tabManagerRef.current?.initTabs([nextTab(null, null, null, defaultConfigFromSettings(settings))])
+        tabManagerRef.current?.initTabs([nextTab(null, null, null, settingsToTabConfig(settings))])
       }
     } else {
       const newTabs: Tab[] = projectData.tabs.map((t) =>
-        nextTab(t.name, `${activeProject}/${t.filename}`, t.title, defaultConfigFromSettings(settings))
+        nextTab(t.name, `${activeProject}/${t.filename}`, t.title, settingsToTabConfig(settings))
       )
-      if (newTabs.length === 0) newTabs.push(nextTab(null, null, null, defaultConfigFromSettings(settings)))
+      if (newTabs.length === 0) newTabs.push(nextTab(null, null, null, settingsToTabConfig(settings)))
       tabManagerRef.current?.initTabs(newTabs)
     }
   }, [activeProject, projectData])
@@ -519,7 +519,7 @@ function AppContent() {
         ref={tabManagerRef}
         onCloseTab={handleTabClose}
         onTabsChange={handleTabsChange}
-        defaultConfig={defaultConfigFromSettings(settings)}
+        defaultConfig={settingsToTabConfig(settings)}
         renderContent={(tab, onModeLabel, isActive, onConfigChange) => (
           <ModeProvider>
             <TabContent
@@ -547,7 +547,9 @@ export default function Home() {
   return (
     <SettingsProvider>
       <ProjectProvider>
-        <AppContent />
+        <div id="main-content" className="h-dvh">
+          <AppContent />
+        </div>
       </ProjectProvider>
     </SettingsProvider>
   )

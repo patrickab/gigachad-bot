@@ -1,80 +1,13 @@
-from datetime import datetime, timezone
-from pathlib import Path
-import re
-import shutil
 from typing import Any
-import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from backend.routes.deps import get_chat_store
+from backend.routes.deps import get_project_store
 from backend.routes.files import delete_chat_upload_dir
-from config import DIRECTORY_CHAT_HISTORIES
-from lib.chat_store import META_JSON, PROJECT_JSON, ChatStore
-from lib.json_io import safe_read_json, safe_write_json
+from lib.project_store import ProjectStore
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
-
-
-def _slugify(name: str) -> str:
-    slug = name.strip().lower()
-    slug = re.sub(r"[^a-z0-9]+", "-", slug)
-    slug = slug.strip("-") or "project"
-    return slug[:64]
-
-
-def _meta_path() -> Path:
-    return DIRECTORY_CHAT_HISTORIES / META_JSON
-
-
-def _read_meta() -> dict[str, Any]:
-    return safe_read_json(_meta_path(), {"projects": []})
-
-
-def _write_meta(meta: dict[str, Any]) -> None:
-    DIRECTORY_CHAT_HISTORIES.mkdir(parents=True, exist_ok=True)
-    safe_write_json(_meta_path(), meta)
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _find_entry(meta: dict[str, Any], slug: str) -> dict[str, Any] | None:
-    for p in meta.get("projects", []):
-        if p.get("slug") == slug:
-            return p
-    return None
-
-
-def _unique_slug(meta: dict[str, Any], base: str) -> str:
-    existing = {p.get("slug") for p in meta.get("projects", [])}
-    slug = base
-    i = 2
-    while slug in existing:
-        slug = f"{base}-{i}"
-        i += 1
-    return slug
-
-
-def _resolve_project_dir(slug: str) -> Path:
-    project_dir = (DIRECTORY_CHAT_HISTORIES / slug).resolve()
-    if not str(project_dir).startswith(str(DIRECTORY_CHAT_HISTORIES.resolve())):
-        raise HTTPException(status_code=400, detail="Invalid project slug")
-    return project_dir
-
-
-def _read_project(project_dir: Path) -> dict[str, Any]:
-    return safe_read_json(
-        project_dir / PROJECT_JSON,
-        {"name": project_dir.name, "kanban": [], "tabs": []},
-    )
-
-
-def _write_project(project_dir: Path, data: dict[str, Any]) -> None:
-    project_dir.mkdir(parents=True, exist_ok=True)
-    safe_write_json(project_dir / PROJECT_JSON, data)
 
 
 class KanbanCardModel(BaseModel):
@@ -136,152 +69,109 @@ class ProjectStateModel(BaseModel):
     tabs: list[ProjectTabModel] = []
 
 
+def _not_found(detail: str = "Project not found") -> HTTPException:
+    return HTTPException(status_code=404, detail=detail)
+
+
+def _bad_request(detail: str) -> HTTPException:
+    return HTTPException(status_code=400, detail=detail)
+
+
+def _conflict(detail: str) -> HTTPException:
+    return HTTPException(status_code=409, detail=detail)
+
+
 @router.get("")
-async def list_projects() -> dict[str, Any]:
-    meta = _read_meta()
-    projects: list[dict[str, Any]] = []
-    for p in meta.get("projects", []):
-        project_dir = _resolve_project_dir(p["slug"])
-        data = _read_project(project_dir)
-        projects.append(
-            {
-                "name": p["name"],
-                "slug": p["slug"],
-                "tabs": data.get("tabs", []),
-            }
-        )
-    return {"projects": projects}
+async def list_projects(store: ProjectStore = Depends(get_project_store)) -> dict[str, Any]:
+    return {"projects": store.list_projects()}
 
 
 @router.get("/{slug}")
-async def get_project(slug: str) -> dict[str, Any]:
-    meta = _read_meta()
-    entry = _find_entry(meta, slug)
-    if not entry:
-        raise HTTPException(status_code=404, detail="Project not found")
-    project_dir = _resolve_project_dir(slug)
-    data = _read_project(project_dir)
-    return {"name": entry["name"], "slug": entry["slug"], "kanban": data.get("kanban", []), "tabs": data.get("tabs", [])}
+async def get_project(slug: str, store: ProjectStore = Depends(get_project_store)) -> dict[str, Any]:
+    try:
+        return store.get_project(slug)
+    except FileNotFoundError:
+        raise _not_found()
 
 
 @router.post("")
-async def create_project(req: CreateProjectRequest) -> dict[str, Any]:
-    name = req.name.strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="Project name required")
-    meta = _read_meta()
-    slug = _unique_slug(meta, _slugify(name))
-    project_dir = _resolve_project_dir(slug)
-    if project_dir.exists():
-        raise HTTPException(status_code=409, detail="Project already exists")
-    now = _now_iso()
-    entry = {"name": name, "slug": slug, "createdAt": now, "updatedAt": now}
-    meta.setdefault("projects", []).append(entry)
-    _write_meta(meta)
-    _write_project(project_dir, {"name": name, "kanban": [], "tabs": []})
-    return {"name": name, "slug": slug, "kanban": [], "tabs": []}
+async def create_project(req: CreateProjectRequest, store: ProjectStore = Depends(get_project_store)) -> dict[str, Any]:
+    try:
+        return store.create_project(req.name)
+    except ValueError as e:
+        if "already exists" in str(e):
+            raise _conflict(str(e))
+        raise _bad_request(str(e))
 
 
 @router.patch("/{slug}")
-async def update_project(slug: str, req: UpdateProjectRequest) -> dict[str, Any]:
-    meta = _read_meta()
-    entry = _find_entry(meta, slug)
-    if not entry:
-        raise HTTPException(status_code=404, detail="Project not found")
-    if req.name is not None:
-        name = req.name.strip()
-        if not name:
-            raise HTTPException(status_code=400, detail="Project name required")
-        entry["name"] = name
-        entry["updatedAt"] = _now_iso()
-        project_dir = _resolve_project_dir(slug)
-        data = _read_project(project_dir)
-        data["name"] = name
-        _write_project(project_dir, data)
-    _write_meta(meta)
-    return {"name": entry["name"], "slug": entry["slug"]}
+async def update_project(slug: str, req: UpdateProjectRequest, store: ProjectStore = Depends(get_project_store)) -> dict[str, Any]:
+    try:
+        return store.update_project(slug, name=req.name)
+    except FileNotFoundError:
+        raise _not_found()
+    except ValueError as e:
+        raise _bad_request(str(e))
 
 
 @router.delete("/{slug}")
-async def delete_project(slug: str) -> dict[str, str]:
-    meta = _read_meta()
-    entry = _find_entry(meta, slug)
-    if not entry:
-        raise HTTPException(status_code=404, detail="Project not found")
-    project_dir = _resolve_project_dir(slug)
-    if project_dir.exists():
-        shutil.rmtree(project_dir)
-    meta["projects"] = [p for p in meta.get("projects", []) if p.get("slug") != slug]
-    _write_meta(meta)
-    return {"status": "ok"}
+async def delete_project(slug: str, store: ProjectStore = Depends(get_project_store)) -> dict[str, str]:
+    try:
+        return store.delete_project(slug)
+    except FileNotFoundError:
+        raise _not_found()
 
 
 @router.put("/{slug}/state")
-async def update_project_state(slug: str, state: ProjectStateModel) -> dict[str, Any]:
-    meta = _read_meta()
-    entry = _find_entry(meta, slug)
-    if not entry:
-        raise HTTPException(status_code=404, detail="Project not found")
-    project_dir = _resolve_project_dir(slug)
-    data = _read_project(project_dir)
-    data["kanban"] = [c.model_dump() for c in state.kanban]
-    seen = set()
-    deduped = []
-    for t in state.tabs:
-        d = t.model_dump()
-        if d.get("filename") not in seen:
-            seen.add(d.get("filename"))
-            deduped.append(d)
-    data["tabs"] = deduped
-    _write_project(project_dir, data)
-    return {"name": entry["name"], "slug": entry["slug"], "kanban": data["kanban"], "tabs": data["tabs"]}
+async def update_project_state(
+    slug: str,
+    state: ProjectStateModel,
+    store: ProjectStore = Depends(get_project_store),
+) -> dict[str, Any]:
+    try:
+        return store.update_project_state(slug, [c.model_dump() for c in state.kanban], [t.model_dump() for t in state.tabs])
+    except FileNotFoundError:
+        raise _not_found()
 
 
 @router.post("/{slug}/cards")
-async def add_card(slug: str, req: AddCardRequest) -> dict[str, Any]:
-    meta = _read_meta()
-    if not _find_entry(meta, slug):
-        raise HTTPException(status_code=404, detail="Project not found")
-    project_dir = _resolve_project_dir(slug)
-    data = _read_project(project_dir)
-    card = {"id": str(uuid.uuid4()), "title": req.title, "description": req.description, "state": req.state}
-    data.setdefault("kanban", []).append(card)
-    _write_project(project_dir, data)
-    return card
+async def add_card(
+    slug: str, req: AddCardRequest, store: ProjectStore = Depends(get_project_store)
+) -> dict[str, Any]:
+    try:
+        return store.add_card(slug, req.title, req.description, req.state)
+    except FileNotFoundError:
+        raise _not_found()
 
 
 @router.patch("/{slug}/cards/{card_id}")
-async def move_card(slug: str, card_id: str, req: MoveCardRequest | UpdateCardRequest | None = None) -> dict[str, Any]:
-    meta = _read_meta()
-    if not _find_entry(meta, slug):
-        raise HTTPException(status_code=404, detail="Project not found")
-    project_dir = _resolve_project_dir(slug)
-    data = _read_project(project_dir)
-    for card in data.get("kanban", []):
-        if card["id"] == card_id:
-            if req is not None:
-                if isinstance(req, MoveCardRequest):
-                    card["state"] = req.state
-                elif isinstance(req, UpdateCardRequest):
-                    if req.title is not None:
-                        card["title"] = req.title
-                    if req.description is not None:
-                        card["description"] = req.description
-            _write_project(project_dir, data)
-            return card
-    raise HTTPException(status_code=404, detail="Card not found")
+async def move_card(
+    slug: str,
+    card_id: str,
+    req: MoveCardRequest | UpdateCardRequest | None = None,
+    store: ProjectStore = Depends(get_project_store),
+) -> dict[str, Any]:
+    try:
+        updates: dict[str, Any] = {}
+        if req is not None:
+            if isinstance(req, MoveCardRequest):
+                updates["state"] = req.state
+            elif isinstance(req, UpdateCardRequest):
+                if req.title is not None:
+                    updates["title"] = req.title
+                if req.description is not None:
+                    updates["description"] = req.description
+        return store.update_card(slug, card_id, updates)
+    except FileNotFoundError as e:
+        raise _not_found(str(e))
 
 
 @router.delete("/{slug}/cards/{card_id}")
-async def delete_card(slug: str, card_id: str) -> dict[str, str]:
-    meta = _read_meta()
-    if not _find_entry(meta, slug):
-        raise HTTPException(status_code=404, detail="Project not found")
-    project_dir = _resolve_project_dir(slug)
-    data = _read_project(project_dir)
-    data["kanban"] = [c for c in data.get("kanban", []) if c["id"] != card_id]
-    _write_project(project_dir, data)
-    return {"status": "ok"}
+async def delete_card(slug: str, card_id: str, store: ProjectStore = Depends(get_project_store)) -> dict[str, str]:
+    try:
+        return store.delete_card(slug, card_id)
+    except FileNotFoundError:
+        raise _not_found()
 
 
 @router.put("/{slug}/tabs/{filename:path}")
@@ -289,54 +179,19 @@ async def save_project_tab(
     slug: str,
     filename: str,
     data: SaveTabRequest,
-    store: ChatStore = Depends(get_chat_store),
+    store: ProjectStore = Depends(get_project_store),
 ) -> dict[str, str]:
-    meta = _read_meta()
-    if not _find_entry(meta, slug):
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    project_dir = _resolve_project_dir(slug)
-    full_filename = f"{slug}/{filename}"
-
     try:
-        store.save(full_filename, data.model_dump())
+        return store.save_tab(slug, filename, data.model_dump())
+    except FileNotFoundError:
+        raise _not_found()
     except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-
-    project_data = _read_project(project_dir)
-    tabs = project_data.get("tabs", [])
-    existing = next((t for t in tabs if t["filename"] == filename), None)
-    if existing:
-        if data.tab_name is not None:
-            existing["name"] = data.tab_name
-        if data.title is not None:
-            existing["title"] = data.title
-    else:
-        tabs.append({"filename": filename, "name": data.tab_name, "title": data.title})
-        project_data["tabs"] = tabs
-    _write_project(project_dir, project_data)
-    return {"status": "ok"}
+        raise _conflict(str(e))
 
 
 @router.delete("/{slug}/tabs/{filename:path}")
-async def delete_project_tab(slug: str, filename: str, store: ChatStore = Depends(get_chat_store)) -> dict[str, str]:
-    meta = _read_meta()
-    if not _find_entry(meta, slug):
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    project_dir = _resolve_project_dir(slug)
-    tab_path = project_dir / filename
-    chat_id_to_clean: str | None = None
-    if tab_path.exists():
-        raw = safe_read_json(tab_path, {})
-        cid = raw.get("chat_id")
-        if isinstance(cid, str):
-            chat_id_to_clean = cid
-        tab_path.unlink()
-    store.invalidate_index()
-    if chat_id_to_clean:
-        delete_chat_upload_dir(chat_id_to_clean, slug)
-    project_data = _read_project(project_dir)
-    project_data["tabs"] = [t for t in project_data.get("tabs", []) if t["filename"] != filename]
-    _write_project(project_dir, project_data)
-    return {"status": "ok"}
+async def delete_project_tab(slug: str, filename: str, store: ProjectStore = Depends(get_project_store)) -> dict[str, str]:
+    try:
+        return store.delete_tab(slug, filename, cleanup_uploads_fn=delete_chat_upload_dir)
+    except FileNotFoundError:
+        raise _not_found()

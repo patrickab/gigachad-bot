@@ -1,13 +1,12 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import type React from "react"
-import { fetchModels, fetchPrompts } from "@/lib/api"
+import { fetchModels, fetchPrompts, loadChatHistory as apiLoadChatHistory } from "@/lib/api"
 import type { ChatRequest, Message, ModelsResponse, MorphicSearchParams, Usage } from "@/lib/types"
 import { useChatStream } from "./useChatStream"
 import { useResearch, type ResearchParams } from "./useResearch"
-import { useMorphicSearch } from "./useMorphicSearch"
-import { useHistory } from "./useHistory"
+import { morphicFetch, parseMorphicStream } from "@/lib/morphic"
 
 export type { ResearchParams }
 
@@ -33,11 +32,11 @@ export interface UseChatReturn {
 export function useChat(): UseChatReturn {
   const { messages, isStreaming, send, cancel, deleteMessagePair, addMessagePair, setMessages, totalUsage, setTotalUsage } = useChatStream()
   const { research: doResearch, error: researchError } = useResearch()
-  const { morphicSearch: doMorphicSearch, error: morphicError } = useMorphicSearch()
-  const { loadHistory: loadHistoryRaw } = useHistory()
 
   const [models, setModels] = useState<ModelsResponse | null>(null)
   const [prompts, setPrompts] = useState<string[]>([])
+  const [morphicError, setMorphicError] = useState<string | null>(null)
+  const morphicAbortRef = useRef<(() => void) | null>(null)
 
   const error = researchError || morphicError
 
@@ -63,8 +62,48 @@ export function useChat(): UseChatReturn {
   }, [doResearch, appendMessage, updateLast])
 
   const morphicSearch = useCallback(async (params: MorphicSearchParams) => {
-    await doMorphicSearch(params, appendMessage, updateLast)
-  }, [doMorphicSearch, appendMessage, updateLast])
+    setMorphicError(null)
+
+    const userMsg: Message = { role: "user", content: params.query }
+    const assistantMsg: Message = { role: "assistant", content: "" }
+
+    appendMessage(userMsg)
+    appendMessage(assistantMsg)
+
+    try {
+      const { promise, abort } = morphicFetch(params)
+      morphicAbortRef.current = abort
+
+      const acc = { text: "", sources: [] as { title: string; url: string; content: string }[], images: [] as string[], query: params.query, citationMap: undefined as Record<string, { title: string; url: string; content: string }> | undefined }
+
+      const res = await promise
+
+      for await (const event of parseMorphicStream(res)) {
+        if (event.type === "text" && event.text) {
+          acc.text += event.text
+          assistantMsg.content = acc.text
+          updateLast(assistantMsg)
+        } else if (event.type === "source") {
+          if (event.sources) acc.sources = [...acc.sources, ...event.sources]
+          if (event.images) acc.images = [...new Set([...acc.images, ...event.images])]
+          if (event.query) acc.query = event.query
+          if (event.citationMap) acc.citationMap = event.citationMap
+          assistantMsg.morphic_result = { query: acc.query, sources: acc.sources, images: acc.images, citationMap: acc.citationMap }
+          updateLast(assistantMsg)
+        } else if (event.type === "error") {
+          throw new Error(event.text || "Morphic search error")
+        }
+      }
+    } catch (e) {
+      if ((e as Error).name === "AbortError") return
+      const msg = (e as Error)?.message ?? "Search failed"
+      setMorphicError(msg)
+      assistantMsg.content = assistantMsg.content || `Search error: ${msg}`
+      updateLast(assistantMsg)
+    } finally {
+      morphicAbortRef.current = null
+    }
+  }, [appendMessage, updateLast])
 
   const reset = useCallback(async () => {
     setMessages([])
@@ -72,10 +111,13 @@ export function useChat(): UseChatReturn {
   }, [setMessages, setTotalUsage])
 
   const loadHistory = useCallback(async (filename: string) => {
-    const result = await loadHistoryRaw(filename)
-    if (result.messages.length > 0) setMessages(result.messages)
-    return result
-  }, [loadHistoryRaw, setMessages])
+    try {
+      const data = await apiLoadChatHistory(filename)
+      return { messages: data.messages ?? [], chat_id: data.chat_id ?? null, parent_id: data.parent_id ?? null, branch_message_idx: data.branch_message_idx ?? null }
+    } catch {
+      return { messages: [] as Message[], chat_id: null as string | null, parent_id: null as string | null, branch_message_idx: null as number | null }
+    }
+  }, [])
 
   return {
     messages,

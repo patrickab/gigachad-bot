@@ -276,7 +276,7 @@ export function ChatInput({
                     "rounded-full p-2 text-ink-muted hover:bg-surface-elevated hover:text-ink transition-colors disabled:opacity-30",
                     showAttachMenu && "bg-surface-elevated text-ink"
                   )}
-                  title="Add resources"
+
                 >
                   <Plus className="h-4 w-4" />
                 </button>
@@ -324,7 +324,7 @@ export function ChatInput({
                     "rounded-full p-2 text-ink-muted hover:bg-surface-elevated hover:text-ink transition-colors disabled:opacity-30",
                     showTools && "bg-surface-elevated text-ink"
                   )}
-                  title="Tools"
+
                 >
                   <LayoutGrid className="h-4 w-4" />
                 </button>
@@ -349,14 +349,15 @@ export function ChatInput({
                   "rounded-full p-2 transition-colors disabled:opacity-30",
                   isListening ? "bg-danger-soft text-danger hover:bg-danger-soft" : "text-ink-muted hover:bg-surface-elevated hover:text-ink"
                 )}
-                title="Voice input"
+
               >
                 <Mic className={cn("h-4 w-4", isListening && "animate-pulse")} />
               </button>
               {isStreaming ? (
                 <button
                   onClick={onCancel}
-                  className="rounded-full p-2.5 transition-all duration-300 bg-ink text-paper hover:opacity-90 active:scale-[0.96]"                  title="Stop generating"
+                  className="rounded-full p-2.5 transition-all duration-300 bg-ink text-paper hover:opacity-90 active:scale-[0.96]"
+                  aria-label="Stop generating"
                 >
                   <Square className="h-4 w-4 fill-current" />
                 </button>
