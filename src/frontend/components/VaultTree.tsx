@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState, type ElementType } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
+  Check,
   ChevronRight,
   Folder,
   LayoutDashboard,
@@ -307,7 +308,7 @@ export function VaultTree<T>({
             {(onPlusClick || onAddVault || onAddFolder) && (
               <button
                 onClick={(e) => { e.stopPropagation(); handlePlus() }}
-                className="p-1 rounded text-ink-subtle hover:text-ink hover:bg-surface transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+                className="p-1 rounded text-ink-subtle hover:text-ink hover:bg-surface transition-colors"
                 title={plusTitle}
               >
                 <Plus className="h-4 w-4" />
@@ -317,16 +318,19 @@ export function VaultTree<T>({
 
           {open && (
             <>
-              {(createMode === "vault" || createMode === "folder") && (
-                <InlineCreateForm
-                  depth={0}
-                  value={createName}
-                  onChange={setCreateName}
-                  onSubmit={handleCreateSubmit}
-                  onCancel={() => { setCreateMode(null); setCreateName("") }}
-                  placeholder={createMode === "vault" ? "Project name" : "Folder name"}
-                />
-              )}
+              <AnimatePresence>
+                {(createMode === "vault" || createMode === "folder") && (
+                  <InlineCreateForm
+                    key="root-create"
+                    depth={0}
+                    value={createName}
+                    onChange={setCreateName}
+                    onSubmit={handleCreateSubmit}
+                    onCancel={() => { setCreateMode(null); setCreateName("") }}
+                    placeholder={createMode === "vault" ? "Project name" : "Folder name"}
+                  />
+                )}
+              </AnimatePresence>
               {content}
             </>
           )}
@@ -497,16 +501,19 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
         )}
       </AnimatePresence>
 
-      {createMode === "folder" && createParentId === item.id && (
-        <InlineCreateForm
-          depth={depth + 1}
-          value={createName}
-          onChange={setCreateName}
-          onSubmit={handleCreateSubmit}
-          onCancel={() => { setCreateMode(null); setCreateName("") }}
-          placeholder="Folder name"
-        />
-      )}
+      <AnimatePresence>
+        {createMode === "folder" && createParentId === item.id && (
+          <InlineCreateForm
+            key="folder-create"
+            depth={depth + 1}
+            value={createName}
+            onChange={setCreateName}
+            onSubmit={handleCreateSubmit}
+            onCancel={() => { setCreateMode(null); setCreateName("") }}
+            placeholder="Folder name"
+          />
+        )}
+      </AnimatePresence>
     </div>
   )
 }
@@ -582,7 +589,16 @@ function InlineCreateForm({
   placeholder: string
 }) {
   return (
-    <div className="flex items-center gap-1 py-1" style={{ paddingLeft: INDENT_BASE + depth * INDENT_STEP }}>
+    <motion.div
+      initial={{ opacity: 0, y: -4 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -4 }}
+      transition={{ duration: 0.15, ease: "easeOut" }}
+      className="flex items-center gap-1.5 py-1"
+      style={{ paddingLeft: INDENT_BASE + depth * INDENT_STEP }}
+    >
+      <ChevronRight className="h-3 w-3 shrink-0 text-ink-muted" />
+      <Folder className="h-3.5 w-3.5 shrink-0 text-ink-muted" />
       <input
         autoFocus
         value={value}
@@ -591,15 +607,9 @@ function InlineCreateForm({
           if (e.key === "Enter") onSubmit()
           if (e.key === "Escape") onCancel()
         }}
-        className="flex-1 bg-surface/50 rounded px-1.5 py-0.5 text-[11px] text-ink outline-none focus:border-ink-muted transition-colors"
+        className="flex-1 bg-transparent text-[11px] font-medium text-ink placeholder:text-ink-faint/50 outline-none"
         placeholder={placeholder}
       />
-      <button onClick={onSubmit} className="text-[10px] text-ink hover:text-ink">
-        Create
-      </button>
-      <button onClick={onCancel} className="text-ink-faint hover:text-ink">
-        <X className="h-3 w-3" />
-      </button>
-    </div>
+    </motion.div>
   )
 }

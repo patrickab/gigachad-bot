@@ -39,19 +39,27 @@ import type { Attachment, Message, Usage } from "@/lib/types"
 
 
 
+function buildHiddenContent(attachments: Attachment[]): string {
+  const textParts: string[] = []
+  for (const a of attachments) {
+    if (a.mime.startsWith("image/")) continue
+    const content = a.parsedMd ?? a.content
+    if (content) textParts.push(`### ${a.name}\n\n${content}`)
+  }
+  return textParts.length > 0
+    ? "**Attached files:**\n\n" + textParts.join("\n\n") + "\n\n## END"
+    : ""
+}
+
 function buildLLMMessage(text: string, attachments: Attachment[]): { userMsg: string; hiddenContent: string; imgBase64: string | null } {
   let userMsg = text
   let imgBase64: string | null = null
 
-  const textParts: string[] = []
   const imgAtts: Attachment[] = []
 
   for (const a of attachments) {
     if (a.mime.startsWith("image/")) {
       imgAtts.push(a)
-    } else {
-      const content = a.parsedMd ?? a.content
-      if (content) textParts.push(`### ${a.name}\n\n${content}`)
     }
   }
 
@@ -59,9 +67,7 @@ function buildLLMMessage(text: string, attachments: Attachment[]): { userMsg: st
     imgBase64 = "pending"
   }
 
-  const hiddenContent = textParts.length > 0
-    ? "**Attached files:**\n\n" + textParts.join("\n\n") + "\n\n## END"
-    : ""
+  const hiddenContent = buildHiddenContent(attachments)
 
   return { userMsg, hiddenContent, imgBase64 }
 }
@@ -313,10 +319,13 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   const handleRemoveAttachment = useCallback((messageIndex: number, attachmentName: string) => {
     setMessages(prev => {
       const copy = [...prev]
-      if (copy[messageIndex] && copy[messageIndex].attachments) {
-        const att = copy[messageIndex].attachments!.find(a => a.name === attachmentName)
+      const msg = copy[messageIndex]
+      if (msg?.attachments) {
+        const att = msg.attachments.find(a => a.name === attachmentName)
         if (att) deleteAttachment(chatId, attachmentName, activeProject).catch(() => { })
-        copy[messageIndex] = { ...copy[messageIndex], attachments: copy[messageIndex].attachments!.filter(a => a.name !== attachmentName) }
+        const remaining = msg.attachments.filter(a => a.name !== attachmentName)
+        const hiddenContent = buildHiddenContent(remaining) || undefined
+        copy[messageIndex] = { ...msg, attachments: remaining, hiddenContent }
       }
       return copy
     })

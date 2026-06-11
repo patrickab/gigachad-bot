@@ -110,10 +110,12 @@ function ChatMessageInner({ role, content, index, onDelete, onBranch, morphic_re
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25 }}
-      onClick={isUser && collapsibleUser ? onCollapse : undefined}
-      className={`flex gap-3 px-6 py-5 text-ink ${isUser && collapsibleUser ? "cursor-pointer" : ""}`}
+      className="flex gap-3 px-6 py-5 text-ink"
     >
-      <div className="mt-0.5 shrink-0">
+      <div
+        className={`mt-0.5 shrink-0 ${isUser && collapsibleUser ? "cursor-pointer" : ""}`}
+        onClick={isUser && collapsibleUser ? onCollapse : undefined}
+      >
         {isUser ? (
           <div className={`flex h-7 w-7 items-center justify-center rounded-xl bg-surface-elevated ${isUser && collapsibleUser ? "hover:bg-surface-elevated transition-colors" : ""}`} title={collapsibleUser ? "Click to collapse" : undefined}>
             <User className="h-3.5 w-3.5 text-ink-muted" />

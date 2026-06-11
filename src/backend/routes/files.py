@@ -152,6 +152,9 @@ async def delete_single_file(chat_id: str, filename: str, slug: str | None = Que
     if not path.exists():
         raise HTTPException(status_code=404, detail="File not found")
     path.unlink()
+    md_path = path.with_name(path.stem + ".md")
+    if md_path.exists():
+        md_path.unlink()
     return {"status": "ok"}
 
 
