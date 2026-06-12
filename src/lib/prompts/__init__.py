@@ -1,6 +1,10 @@
 from .internal import (
     SYS_OCR_TEXT_EXTRACTION,
 )
+from .memory import (
+    MEM0_GLOBAL_PROMPT,
+    MEM0_PROJECT_PROMPT,
+)
 from .user import (
     SYS_ADVISOR,
     SYS_ARTICLE,
@@ -12,6 +16,8 @@ from .user import (
 )
 
 __all__ = [
+    "MEM0_GLOBAL_PROMPT",
+    "MEM0_PROJECT_PROMPT",
     "SYS_ADVISOR",
     "SYS_ARTICLE",
     "SYS_CONCEPTUAL_OVERVIEW",

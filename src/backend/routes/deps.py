@@ -9,6 +9,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from config import DIRECTORY_CHAT_HISTORIES
 from lib.chat_store import ChatStore
+from lib.memory_store import MemoryStore
 from lib.project_store import ProjectStore
 from llm_client import LLMClient
 from llm_config import MODEL_CONFIGS
@@ -16,6 +17,7 @@ from llm_config import MODEL_CONFIGS
 _client: LLMClient | None = None
 _chat_store: ChatStore | None = None
 _project_store: ProjectStore | None = None
+_memory_store: MemoryStore | None = None
 
 
 def get_client() -> LLMClient:
@@ -37,6 +39,13 @@ def get_project_store() -> ProjectStore:
     if _project_store is None:
         _project_store = ProjectStore(DIRECTORY_CHAT_HISTORIES, chat_store=get_chat_store())
     return _project_store
+
+
+def get_memory_store() -> MemoryStore:
+    global _memory_store
+    if _memory_store is None:
+        _memory_store = MemoryStore()
+    return _memory_store
 
 
 def shutdown_client() -> None:

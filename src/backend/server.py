@@ -20,6 +20,7 @@ from backend.routes.chat import router as chat_router
 from backend.routes.deps import get_client, get_chat_store, get_project_store, shutdown_client
 from backend.routes.files import router as files_router
 from backend.routes.histories import router as histories_router
+from backend.routes.memory import router as memory_router
 from backend.routes.mineru import kill_all_mineru_servers, reset_cancel
 from backend.routes.mineru import router as mineru_router
 from backend.routes.models import router as models_router
@@ -66,6 +67,7 @@ app.add_middleware(
 app.include_router(chat_router)
 app.include_router(files_router)
 app.include_router(histories_router)
+app.include_router(memory_router)
 app.include_router(models_router)
 app.include_router(morphic_router)
 app.include_router(mineru_router)

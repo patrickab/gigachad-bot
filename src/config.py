@@ -22,7 +22,7 @@ DIRECTORY_CHAT_UPLOADS = DIRECTORY_CHAT_HISTORIES / "_uploads"
 # --- Application-wide small/fast model defaults ---
 # Used for lightweight tasks like query expansion, where speed matters more than raw capability.
 # Should point to a small local model or a fast cloud model.
-SMALL_MODEL = "ollama/gemma4:31b-cloud"
+SMALL_MODEL = "gemma3:4b"
 
 # --- MinerU PDF parsing config ---
 DIRECTORY_OUTPUT_MINERU = DIRECTORY_CLOUD / "Documents" / "Mineru"
@@ -31,6 +31,11 @@ DIRECTORY_OUTPUT_PDF = DIRECTORY_CLOUD / "Documents" / "PDFs"
 MORPHIC_URL = os.environ.get("MORPHIC_URL", "http://localhost:3001")
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 SEARX_URL = os.environ.get("SEARX_URL", "http://localhost:8888")
+
+# --- Mem0 memory system config ---
+MEM0_EMBEDDING_MODEL = "bge-m3"
+MEM0_USER_ID = "gigachad"
+MEM0_DATA_DIR = DIRECTORY_CHAT_HISTORIES / ".mem0"
 
 
 def uploads_dir_for(slug: str | None) -> Path:
@@ -54,6 +59,7 @@ def ensure_directories() -> None:
         DIRECTORY_OUTPUT_MINERU / "images",
         DIRECTORY_OUTPUT_PDF,
         DIRECTORY_CHAT_UPLOADS,
+        MEM0_DATA_DIR,
     ]
     for d in _dirs:
         d.mkdir(parents=True, exist_ok=True)

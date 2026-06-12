@@ -115,21 +115,19 @@ function BranchRow({ node }: { node: Node }) {
           {node.label}
           {hasKids && node.qaCount > 0 && <span className="text-ink-muted ml-0.5 text-[10px]">@{node.qaCount - 1}</span>}
         </button>
-        {onMerge && !mergeBlocked && (
+        {!mergeBlocked && (
           <button onClick={() => onMerge(node.file)} className="p-0.5 rounded text-ink-faint hover:text-ink transition-colors opacity-0 group-hover:opacity-100 shrink-0" title="Merge">
             <GitMerge className="h-3 w-3" />
           </button>
         )}
-        {onMerge && mergeBlocked && (
+        {mergeBlocked && (
           <span className="p-0.5 rounded text-ink-faint/40 shrink-0 cursor-not-allowed opacity-0 group-hover:opacity-100 transition-colors" title="Parent has diverged past this branch point">
             <GitMerge className="h-3 w-3" />
           </span>
         )}
-        {onDelete && (
-          <button onClick={() => onDelete(node.file)} className="p-0.5 rounded text-ink-faint hover:text-danger transition-colors opacity-0 group-hover:opacity-100 shrink-0" title="Delete">
-            <Trash2 className="h-3 w-3" />
-          </button>
-        )}
+        <button onClick={() => onDelete(node.file)} className="p-0.5 rounded text-ink-faint hover:text-danger transition-colors opacity-0 group-hover:opacity-100 shrink-0" title="Delete">
+          <Trash2 className="h-3 w-3" />
+        </button>
       </div>
 
       {hasKids && (

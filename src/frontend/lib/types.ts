@@ -163,3 +163,15 @@ export interface ProjectListItem {
   slug: string
   tabs?: ProjectTab[]
 }
+
+export interface ProposedMemory {
+  id: string
+  memory: string
+  categories?: string[]
+}
+
+export interface MemoryExtractResponse {
+  review_id: string
+  global: ProposedMemory[]
+  project: ProposedMemory[] | null
+}

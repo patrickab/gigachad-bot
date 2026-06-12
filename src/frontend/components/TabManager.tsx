@@ -90,6 +90,19 @@ export function nextTab(name: string | null = null, historyFile: string | null =
 
 const INITIAL_TAB: Tab = nextTab()
 const INITIAL_CONFIG: TabConfig = { ...DEFAULT_CONFIG }
+const EXTRACTING_MEMORY_LABEL = "__command_extracting_memories__"
+
+function TabLabel({ label }: { label: string }) {
+  if (label === EXTRACTING_MEMORY_LABEL) {
+    return (
+      <span className="flex min-w-0 items-center gap-2 truncate">
+        <span className="h-3 w-3 shrink-0 animate-spin rounded-full border border-ink-faint border-t-ink-muted" />
+        <span className="truncate">Extracting memories...</span>
+      </span>
+    )
+  }
+  return <span className="truncate">{label}</span>
+}
 
 export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultConfig = INITIAL_CONFIG, ref }: TabManagerProps) {
   const [tabs, setTabs] = useState<Tab[]>([INITIAL_TAB])
@@ -251,7 +264,7 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
 
   return (
     <div className="flex flex-col h-screen overflow-hidden">
-      <div className="h-8 shrink-0 flex items-center border-b border-divider/50 bg-paper select-none">
+      <div className="relative z-[90] h-8 shrink-0 flex items-center border-b border-divider/50 bg-paper select-none">
         <div className="flex-1 flex items-center h-full min-w-0">
           {tabs.map((tab) => {
             const isActive = tab.id === activeTab
@@ -271,19 +284,22 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
                 onContextMenu={(e) => { e.preventDefault(); closeTab(tab.id) }}
                 onDoubleClick={() => startRename(tab.id)}
               >
-                {isEditing ? (
-                  <input
-                    ref={inputRef}
-                    autoFocus
-                    defaultValue={displayName}
-                    className="flex-1 bg-transparent outline-none text-ink text-xs min-w-0"
-                    onBlur={(e) => commitRename(tab.id, e.target.value)}
-                    onKeyDown={(e) => handleKeyDown(e, tab.id, (e.target as HTMLInputElement).value)}
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                ) : (
-                  <span className="truncate">{displayName}</span>
-                )}
+                <div className="relative flex-1 min-w-0 h-full flex items-center">
+                  <span id={`tab-command-menu-${tab.id}`} className="absolute left-0 right-0 top-full" />
+                  {isEditing ? (
+                    <input
+                      ref={inputRef}
+                      autoFocus
+                      defaultValue={displayName}
+                      className="flex-1 bg-transparent outline-none text-ink text-xs min-w-0"
+                      onBlur={(e) => commitRename(tab.id, e.target.value)}
+                      onKeyDown={(e) => handleKeyDown(e, tab.id, (e.target as HTMLInputElement).value)}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  ) : (
+                    <TabLabel label={displayName} />
+                  )}
+                </div>
                 {tabs.length > 1 && (
                   <button
                     className="shrink-0 p-0.5 rounded hover:bg-hover text-ink-faint hover:text-ink"

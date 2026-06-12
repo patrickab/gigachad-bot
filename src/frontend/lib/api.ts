@@ -1,4 +1,4 @@
-import type { Attachment, BranchMeta, ChatHistoriesResponse, ChatRequest, KanbanCard, Message, ModelsResponse, ProjectData, ProjectListItem, ProjectStateUpdate, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage } from "./types"
+import type { Attachment, BranchMeta, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, Message, ModelsResponse, ProjectData, ProjectListItem, ProjectStateUpdate, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { API_BASE, DEFAULT_TEMPERATURE, DEFAULT_DOWNSCALE_IMAGES } from "./config"
@@ -331,4 +331,37 @@ export class Project extends Vault {
   async delete(): Promise<void> {
     await request(`/projects/${encodeURIComponent(this.id)}`, { method: "DELETE" })
   }
+}
+
+// --- Memory API ---
+
+function memoryRequest<T>(path: string, body: Record<string, unknown>): Promise<T> {
+  return request<T>(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+}
+
+export async function extractMemories(
+  messages: { role: string; content: string }[],
+  projectSlug?: string | null,
+): Promise<MemoryExtractResponse> {
+  return memoryRequest<MemoryExtractResponse>("/memory/extract", { messages, project_slug: projectSlug ?? null })
+}
+
+export async function acceptMemories(reviewId: string, projectSlug?: string | null): Promise<void> {
+  await memoryRequest("/memory/accept", { review_id: reviewId, project_slug: projectSlug ?? null })
+}
+
+export async function acceptMemory(reviewId: string, memoryId: string): Promise<void> {
+  await memoryRequest("/memory/accept-one", { review_id: reviewId, memory_id: memoryId })
+}
+
+export async function cancelMemories(reviewId: string, projectSlug?: string | null): Promise<void> {
+  await memoryRequest("/memory/cancel", { review_id: reviewId, project_slug: projectSlug ?? null })
+}
+
+export async function cancelMemory(reviewId: string, memoryId: string): Promise<void> {
+  await memoryRequest("/memory/cancel-one", { review_id: reviewId, memory_id: memoryId })
 }

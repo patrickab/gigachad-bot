@@ -1,6 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
+import type { KeyboardEvent as ReactKeyboardEvent } from "react"
+import { createPortal } from "react-dom"
 import { Sidebar } from "@/components/Sidebar"
 import { ChatContainer } from "@/components/ChatContainer"
 import { MAX_SIDEBAR_WIDTH } from "@/components/ChatSidebar"
@@ -11,6 +13,8 @@ import { ResearchModelsBar } from "@/components/ResearchModelsBar"
 import { ThemeToggle } from "@/components/ThemeToggle"
 import { OCRPanel } from "@/components/OCRPanel"
 import { SaveChatModal } from "@/components/SaveChatModal"
+import { MemoryDiffWindow } from "@/components/MemoryDiffWindow"
+import { useCommandBar } from "@/hooks/useCommandBar"
 import { TabManager, nextTab, settingsToTabConfig, type TabConfig } from "@/components/TabManager"
 import type { Tab, TabManagerHandle } from "@/components/TabManager"
 import { ProjectDashboard } from "@/components/ProjectDashboard"
@@ -84,6 +88,22 @@ function defaultSendParams(config: TabConfig, prompts: Record<string, string>, o
   }
 }
 
+const COMMANDS = [
+  { command: "/memorize", shortcut: "Alt+M" },
+]
+
+function fuzzyMatch(value: string, query: string): boolean {
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  let i = 0
+  const haystack = value.toLowerCase()
+  for (const ch of haystack) {
+    if (ch === q[i]) i += 1
+    if (i === q.length) return true
+  }
+  return false
+}
+
 function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleLoaded, onOpenChat, activeProject, focusQaIndex, focusKey, onConfigChange }: {
   tab: Tab
   isActive: boolean
@@ -139,6 +159,9 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   const config = tab.config
   const hasUsage = totalUsage.total_tokens > 0 ? totalUsage : undefined
 
+  const commandBar = useCommandBar()
+  const commandInputRef = useRef<HTMLInputElement>(null)
+  const [commandMenuSlot, setCommandMenuSlot] = useState<HTMLElement | null>(null)
   const [ocrImage, setOCRImage] = useState<string | null>(null)
   const [chatId, setChatId] = useState(() => tab.chatId)
   const [branchMessageIdx, setBranchMessageIdx] = useState<number | null>(null)
@@ -153,6 +176,29 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     if (!el) return
     setMeasuredWidth(el.clientWidth)
   }, [isActive])
+
+  useLayoutEffect(() => {
+    setCommandMenuSlot(document.getElementById(`tab-command-menu-${tab.id}`))
+  }, [tab.id])
+
+  useEffect(() => {
+    if (isActive && commandBar.state.phase === "input") {
+      commandInputRef.current?.focus()
+    }
+  }, [isActive, commandBar.state.phase])
+
+  useEffect(() => {
+    if (!isActive || commandBar.state.phase !== "input") return
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return
+      e.preventDefault()
+      e.stopPropagation()
+      e.stopImmediatePropagation()
+      commandBar.close()
+    }
+    document.addEventListener("keydown", handler, true)
+    return () => document.removeEventListener("keydown", handler, true)
+  }, [isActive, commandBar.close, commandBar.state.phase])
 
   useEffect(() => {
     if (isActive && tab.historyFile) {
@@ -189,12 +235,17 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   }, [tab.historyFile, activeProject, setMessages, onTitleLoaded, setTotalUsage])
 
   useEffect(() => {
-    if (researchEnabled) onModeLabel("Deep Research")
+    const memoryCount = commandBar.state.globalMemories.length + (commandBar.state.projectMemories?.length ?? 0)
+    if (commandBar.state.phase === "input") onModeLabel(commandBar.state.input.trim() ? `> ${commandBar.state.input}` : "> /memorize")
+    else if (commandBar.state.phase === "extracting") onModeLabel("__command_extracting_memories__")
+    else if (commandBar.state.phase === "review") onModeLabel(`${memoryCount} ${memoryCount === 1 ? "memory" : "memories"} proposed`)
+    else if (commandBar.state.phase === "error") onModeLabel("Memory error")
+    else if (researchEnabled) onModeLabel("Deep Research")
     else if (morphicSearchEnabled) onModeLabel("Search")
     else if (ocrEnabled) onModeLabel("LaTeX OCR")
     else if (studyEnabled) onModeLabel("PDF Study")
     else onModeLabel("Chat")
-  }, [researchEnabled, morphicSearchEnabled, ocrEnabled, studyEnabled, onModeLabel])
+  }, [commandBar.state.phase, commandBar.state.input, commandBar.state.globalMemories.length, commandBar.state.projectMemories, researchEnabled, morphicSearchEnabled, ocrEnabled, studyEnabled, onModeLabel])
 
   const isTitled = !!tab.historyFile
 
@@ -233,16 +284,86 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   }, [messages, chatId, tab.id, tab.name, activeProject, hasUsage, onHistoryFileChanged, refreshAll])
 
   useEffect(() => {
+    if (!isActive) return
+
     function handler(e: KeyboardEvent) {
       if (e.altKey && e.key === "s") { e.preventDefault(); isTitled ? handleQuickSave() : openSaveModal() }
       if (e.altKey && e.key === "r") { e.preventDefault(); reset() }
+      if (e.altKey && e.key.toLowerCase() === "m") {
+        e.preventDefault()
+        if (commandBar.state.phase === "idle") {
+          commandBar.submitCommand(
+            messages.map((m) => ({ role: m.role, content: m.content })),
+            activeProject,
+            "/memorize",
+          )
+        }
+        return
+      }
+
+      const isSlash = e.key === "/" && !e.altKey && !e.ctrlKey && !e.metaKey
+      const isCtrlK = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k"
+
+      if (isSlash || isCtrlK) {
+        const tag = (e.target as HTMLElement).tagName
+        if (isSlash && (tag === "TEXTAREA" || tag === "INPUT" || (e.target as HTMLElement).isContentEditable)) return
+        e.preventDefault()
+        e.stopPropagation()
+        e.stopImmediatePropagation()
+        if (commandBar.state.phase === "idle") { commandBar.open() }
+      }
     }
-    document.addEventListener("keydown", handler)
-    return () => document.removeEventListener("keydown", handler)
-  }, [isTitled, handleQuickSave, openSaveModal, reset])
+    window.addEventListener("keydown", handler, true)
+    return () => {
+      window.removeEventListener("keydown", handler, true)
+    }
+  }, [isActive, isTitled, handleQuickSave, openSaveModal, reset, commandBar.open, commandBar.submitCommand, commandBar.state.phase, messages, activeProject])
+
+  const runCommand = useCallback((command: string) => {
+    commandBar.submitCommand(
+      messages.map((m) => ({ role: m.role, content: m.content })),
+      activeProject,
+      command,
+    )
+  }, [commandBar.submitCommand, messages, activeProject])
+
+  const filteredCommands = COMMANDS.filter((cmd) => fuzzyMatch(cmd.command, commandBar.state.input))
+  const firstCommand = filteredCommands[0]?.command
+
+  const handleCommandInputKeyDown = useCallback((e: ReactKeyboardEvent<HTMLInputElement>) => {
+    e.stopPropagation()
+    e.nativeEvent.stopImmediatePropagation()
+    if (e.key === "Escape") {
+      e.preventDefault()
+      commandBar.close()
+      return
+    }
+    if (e.key === "Enter") {
+      e.preventDefault()
+      runCommand(firstCommand ?? commandBar.state.input)
+    }
+  }, [commandBar.close, commandBar.state.input, firstCommand, runCommand])
+
+  const handleCommandAccept = useCallback(() => {
+    commandBar.accept(activeProject)
+  }, [commandBar.accept, activeProject])
+
+  const handleCommandCancel = useCallback(() => {
+    commandBar.cancel(activeProject)
+  }, [commandBar.cancel, activeProject])
 
   const handleSend = useCallback(
     async (text: string, attachments: Attachment[]) => {
+      const trimmed = text.trim()
+      if (trimmed === "/memorize" || trimmed.startsWith("/memorize ")) {
+        await commandBar.submitCommand(
+          messages.map((m) => ({ role: m.role, content: m.content })),
+          activeProject,
+          trimmed
+        )
+        return
+      }
+
       if (morphicSearchEnabled || researchEnabled) {
         if (attachments.length > 0) return
       }
@@ -313,7 +434,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         send({ ...defaultSendParams(config, prompts), user_msg: text })
       }
     },
-    [morphicSearchEnabled, researchEnabled, studyEnabled, chatId, activeProject, config, send, research, morphicSearch, setMessages, toggleStudy],
+    [morphicSearchEnabled, researchEnabled, studyEnabled, chatId, activeProject, config, send, research, morphicSearch, setMessages, toggleStudy, commandBar.submitCommand, messages],
   )
 
   const handleRemoveAttachment = useCallback((messageIndex: number, attachmentName: string) => {
@@ -362,7 +483,41 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   }, [tab.historyFile, doCreateBranch, onOpenChat])
 
   return (
-    <div ref={containerRef} className="flex h-full overflow-hidden">
+    <div ref={containerRef} className="relative flex h-full overflow-hidden">
+      {isActive && commandBar.state.phase === "input" && (
+        <input
+          ref={commandInputRef}
+          value={commandBar.state.input}
+          onChange={(e) => commandBar.setInput(e.target.value)}
+          onKeyDown={handleCommandInputKeyDown}
+          className="fixed -left-[9999px] top-0 h-px w-px opacity-0"
+          autoComplete="off"
+          spellCheck={false}
+        />
+      )}
+      {isActive && commandMenuSlot && commandBar.state.phase === "input" && createPortal(
+        <div className="absolute left-0 top-0 z-[100] w-[min(420px,calc(100vw-2rem))] rounded-b-lg border border-divider bg-paper shadow-[var(--shadow-lg)]">
+          {filteredCommands.map((cmd) => (
+            <button
+              key={cmd.command}
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={(e) => {
+                e.stopPropagation()
+                runCommand(cmd.command)
+              }}
+              className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-surface-elevated transition-colors"
+            >
+              <span className="font-mono text-xs text-ink">{cmd.command}</span>
+              <span className="ml-auto shrink-0 rounded border border-divider px-1.5 py-0.5 text-[10px] text-ink-faint">{cmd.shortcut}</span>
+            </button>
+          ))}
+          {filteredCommands.length === 0 && (
+            <div className="px-3 py-2 text-[11px] text-ink-faint">No commands</div>
+          )}
+        </div>,
+        commandMenuSlot,
+      )}
       <Sidebar
         onOpenChat={onOpenChat}
         onRefreshAll={refreshAll}
@@ -399,7 +554,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
             <MoreOptionsMenu prompts={prompts} config={config} onConfigChange={onConfigChange} searchDepth={settings.searchDepth} onSearchDepthChange={settings.setSearchDepth} />
           </div>
         </header>
-        <div className="flex-1 overflow-hidden relative">
+        <div className="flex-1 overflow-hidden relative transition-opacity duration-200">
           <ChatContainer
             chatId={chatId}
             messages={messages}
@@ -429,6 +584,22 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         </div>
       </main>
       <SaveChatModal open={saveModalOpen} onClose={() => setSaveModalOpen(false)} onSave={handleSaveSubmit} />
+      {commandBar.state.phase !== "idle" && commandBar.state.phase !== "review" && (
+        <div
+          className="absolute inset-0 z-[70]"
+          onClick={commandBar.state.phase === "extracting" ? undefined : commandBar.close}
+        />
+      )}
+      {commandBar.state.phase === "review" && (
+        <MemoryDiffWindow
+          globalMemories={commandBar.state.globalMemories}
+          projectMemories={commandBar.state.projectMemories}
+          onAcceptRemaining={handleCommandAccept}
+          onCancelRemaining={handleCommandCancel}
+          onAcceptMemory={commandBar.acceptOne}
+          onCancelMemory={commandBar.cancelOne}
+        />
+      )}
     </div>
   )
 }
