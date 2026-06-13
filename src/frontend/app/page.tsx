@@ -13,7 +13,7 @@ import { ResearchModelsBar } from "@/components/ResearchModelsBar"
 import { ThemeToggle } from "@/components/ThemeToggle"
 import { OCRPanel } from "@/components/OCRPanel"
 import { SaveChatModal } from "@/components/SaveChatModal"
-import { MemoryDiffWindow } from "@/components/MemoryDiffWindow"
+import { MemoryPanel } from "@/components/MemoryPanel"
 import { useCommandBar } from "@/hooks/useCommandBar"
 import { TabManager, nextTab, settingsToTabConfig, type TabConfig } from "@/components/TabManager"
 import type { Tab, TabManagerHandle } from "@/components/TabManager"
@@ -160,6 +160,11 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   const hasUsage = totalUsage.total_tokens > 0 ? totalUsage : undefined
 
   const commandBar = useCommandBar()
+  const commandInput = commandBar.state.phase === "input" ? commandBar.state.input : ""
+  const commandMemoryCount = commandBar.state.phase === "review" || commandBar.state.phase === "composing"
+    ? commandBar.state.globalMemories.length + (commandBar.state.projectMemories?.length ?? 0)
+    : 0
+  const memoryActions = commandBar.bindProject(activeProject)
   const commandInputRef = useRef<HTMLInputElement>(null)
   const [commandMenuSlot, setCommandMenuSlot] = useState<HTMLElement | null>(null)
   const [ocrImage, setOCRImage] = useState<string | null>(null)
@@ -235,17 +240,18 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   }, [tab.historyFile, activeProject, setMessages, onTitleLoaded, setTotalUsage])
 
   useEffect(() => {
-    const memoryCount = commandBar.state.globalMemories.length + (commandBar.state.projectMemories?.length ?? 0)
-    if (commandBar.state.phase === "input") onModeLabel(commandBar.state.input.trim() ? `> ${commandBar.state.input}` : "> /memorize")
-    else if (commandBar.state.phase === "extracting") onModeLabel("__command_extracting_memories__")
-    else if (commandBar.state.phase === "review") onModeLabel(`${memoryCount} ${memoryCount === 1 ? "memory" : "memories"} proposed`)
+    if (commandBar.state.phase === "input") onModeLabel(commandInput.trim() ? `> ${commandInput}` : "> /memorize")
+    else if (commandBar.state.phase === "extracting") onModeLabel("Memory Management")
+    else if (commandBar.state.phase === "review") onModeLabel(`${commandMemoryCount} ${commandMemoryCount === 1 ? "memory" : "memories"} proposed`)
+    else if (commandBar.state.phase === "composing") onModeLabel("Updating memory docs")
+    else if (commandBar.state.phase === "doc-review") onModeLabel("Review memory docs")
     else if (commandBar.state.phase === "error") onModeLabel("Memory error")
     else if (researchEnabled) onModeLabel("Deep Research")
     else if (morphicSearchEnabled) onModeLabel("Search")
     else if (ocrEnabled) onModeLabel("LaTeX OCR")
     else if (studyEnabled) onModeLabel("PDF Study")
     else onModeLabel("Chat")
-  }, [commandBar.state.phase, commandBar.state.input, commandBar.state.globalMemories.length, commandBar.state.projectMemories, researchEnabled, morphicSearchEnabled, ocrEnabled, studyEnabled, onModeLabel])
+  }, [commandBar.state.phase, commandInput, commandMemoryCount, researchEnabled, morphicSearchEnabled, ocrEnabled, studyEnabled, onModeLabel])
 
   const isTitled = !!tab.historyFile
 
@@ -327,7 +333,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     )
   }, [commandBar.submitCommand, messages, activeProject])
 
-  const filteredCommands = COMMANDS.filter((cmd) => fuzzyMatch(cmd.command, commandBar.state.input))
+  const filteredCommands = COMMANDS.filter((cmd) => fuzzyMatch(cmd.command, commandInput))
   const firstCommand = filteredCommands[0]?.command
 
   const handleCommandInputKeyDown = useCallback((e: ReactKeyboardEvent<HTMLInputElement>) => {
@@ -340,17 +346,9 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     }
     if (e.key === "Enter") {
       e.preventDefault()
-      runCommand(firstCommand ?? commandBar.state.input)
+      runCommand(firstCommand ?? commandInput)
     }
-  }, [commandBar.close, commandBar.state.input, firstCommand, runCommand])
-
-  const handleCommandAccept = useCallback(() => {
-    commandBar.accept(activeProject)
-  }, [commandBar.accept, activeProject])
-
-  const handleCommandCancel = useCallback(() => {
-    commandBar.cancel(activeProject)
-  }, [commandBar.cancel, activeProject])
+  }, [commandBar.close, commandInput, firstCommand, runCommand])
 
   const handleSend = useCallback(
     async (text: string, attachments: Attachment[]) => {
@@ -419,7 +417,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
 
         const fallbackPrompt = text.trim() ? text : "Please review the attached document and provide a summary."
         const llmMsg = hiddenContent ? `${hiddenContent}\n\n${fallbackPrompt}` : fallbackPrompt
-        send({ ...defaultSendParams(config, prompts), user_msg: llmMsg, img_base64: imgBase64, downscale_images: config.downscaleImages }, true)
+        send({ ...defaultSendParams(config, prompts), user_msg: llmMsg, img_base64: imgBase64, downscale_images: config.downscaleImages, project_slug: activeProject }, true)
         return
       }
 
@@ -431,7 +429,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           depth: config.researchDepth, breadth: config.researchBreadth, reasoningEffort: config.researchReasoning, reportType: config.researchReportType,
         })
       } else {
-        send({ ...defaultSendParams(config, prompts), user_msg: text })
+        send({ ...defaultSendParams(config, prompts), user_msg: text, project_slug: activeProject })
       }
     },
     [morphicSearchEnabled, researchEnabled, studyEnabled, chatId, activeProject, config, send, research, morphicSearch, setMessages, toggleStudy, commandBar.submitCommand, messages],
@@ -487,7 +485,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       {isActive && commandBar.state.phase === "input" && (
         <input
           ref={commandInputRef}
-          value={commandBar.state.input}
+          value={commandInput}
           onChange={(e) => commandBar.setInput(e.target.value)}
           onKeyDown={handleCommandInputKeyDown}
           className="fixed -left-[9999px] top-0 h-px w-px opacity-0"
@@ -584,20 +582,17 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         </div>
       </main>
       <SaveChatModal open={saveModalOpen} onClose={() => setSaveModalOpen(false)} onSave={handleSaveSubmit} />
-      {commandBar.state.phase !== "idle" && commandBar.state.phase !== "review" && (
+      {commandBar.state.phase === "input" && (
         <div
           className="absolute inset-0 z-[70]"
-          onClick={commandBar.state.phase === "extracting" ? undefined : commandBar.close}
+          onClick={commandBar.close}
         />
       )}
-      {commandBar.state.phase === "review" && (
-        <MemoryDiffWindow
-          globalMemories={commandBar.state.globalMemories}
-          projectMemories={commandBar.state.projectMemories}
-          onAcceptRemaining={handleCommandAccept}
-          onCancelRemaining={handleCommandCancel}
-          onAcceptMemory={commandBar.acceptOne}
-          onCancelMemory={commandBar.cancelOne}
+      {commandBar.state.phase !== "idle" && commandBar.state.phase !== "input" && (
+        <MemoryPanel
+          state={commandBar.state}
+          projectEnabled={!!activeProject}
+          actions={memoryActions}
         />
       )}
     </div>

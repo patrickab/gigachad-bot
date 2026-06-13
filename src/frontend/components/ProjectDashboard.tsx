@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils"
 import { useProject } from "@/contexts/ProjectContext"
 import type { KanbanColumnId } from "@/lib/types"
 import { ElevationProvider, ElevatedContainer } from "./ElevatedContainer"
+import { FloatingWindow } from "./FloatingWindow"
 
 const COLUMNS: { id: KanbanColumnId; label: string }[] = [
   { id: "backlog", label: "Backlog" },
@@ -166,22 +167,7 @@ export function ProjectDashboard() {
         defaultState={addModalState ?? "backlog"}
       />
 
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.15 }}
-        className="fixed inset-0 z-[90] flex items-center justify-center bg-backdrop backdrop-blur-sm"
-        onClick={() => setDashboardOpen(false)}
-      >
-        <motion.div
-          initial={{ opacity: 0, scale: 0.98, y: 10 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.98, y: 10 }}
-          transition={{ duration: 0.25, ease: "easeOut" }}
-          onClick={(e) => e.stopPropagation()}
-          className="w-11/12 max-w-6xl h-[85vh] max-h-[800px] rounded-3xl border border-divider/50 overflow-hidden flex flex-col shadow-[var(--shadow-xl)]"
-        >
+      <FloatingWindow onClose={() => setDashboardOpen(false)} panelClassName="w-11/12 bg-transparent backdrop-blur-none">
           <ElevationProvider darkColor="var(--paper)" brightColor="var(--surface-elevated)" numLevels={3}>
             <ElevatedContainer className="w-full h-full flex flex-col overflow-hidden">
               {/* Board Header */}
@@ -311,8 +297,7 @@ export function ProjectDashboard() {
               </div>
             </ElevatedContainer>
           </ElevationProvider>
-        </motion.div>
-      </motion.div>
+      </FloatingWindow>
     </>
   )
 }

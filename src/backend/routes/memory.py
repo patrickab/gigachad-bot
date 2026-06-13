@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 
-from backend.routes.deps import get_memory_store
+from backend.routes.deps import get_memory_store, request_client
 from lib.memory_store import MemoryStore
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
@@ -23,9 +23,27 @@ class MemoryReviewRequest(BaseModel):
     project_slug: str | None = None
 
 
-class MemoryItemReviewRequest(BaseModel):
+class ManualMemory(BaseModel):
+    id: str
+    memory: str
+    scope: str
+    kind: str | None = None
+    reason: str | None = None
+    categories: list[str] | None = None
+
+
+class MemoryComposeRequest(BaseModel):
     review_id: str
-    memory_id: str
+    accepted_ids: list[str]
+    manual_memories: list[ManualMemory] = Field(default_factory=list)
+    project_slug: str | None = None
+
+
+class MemoryCommitRequest(BaseModel):
+    review_id: str
+    global_document: str | None = None
+    project_document: str | None = None
+    project_slug: str | None = None
 
 
 @router.post("/extract")
@@ -33,36 +51,64 @@ async def extract_memories(
     req: MemoryExtractRequest,
     store: MemoryStoreDep,
 ) -> dict:
-    result = await store.extract(req.messages, project_slug=req.project_slug)
+    try:
+        with request_client() as client:
+            result = await store.extract(client, req.messages, project_slug=req.project_slug)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
     return {
         "review_id": result.review_id,
         "global": [
-            {"id": m.id, "memory": m.memory, "categories": m.categories}
+            {"id": m.id, "memory": m.memory, "scope": m.scope, "kind": m.kind, "reason": m.reason, "categories": m.categories}
             for m in result.global_memories
         ],
         "project": [
-            {"id": m.id, "memory": m.memory, "categories": m.categories}
+            {"id": m.id, "memory": m.memory, "scope": m.scope, "kind": m.kind, "reason": m.reason, "categories": m.categories}
             for m in result.project_memories
         ] if result.project_memories else None,
     }
 
 
-@router.post("/accept")
-async def accept_memories(
-    req: MemoryReviewRequest,
+@router.post("/compose")
+async def compose_memory_docs(
+    req: MemoryComposeRequest,
     store: MemoryStoreDep,
 ) -> dict:
-    await store.accept(review_id=req.review_id, project_slug=req.project_slug)
-    return {"status": "accepted"}
+    try:
+        with request_client() as client:
+            result = await store.compose(
+                client,
+                review_id=req.review_id,
+                accepted_ids=req.accepted_ids,
+                project_slug=req.project_slug,
+                manual_memories=[m.model_dump() for m in req.manual_memories],
+            )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return {
+        "review_id": result.review_id,
+        "global_document": result.global_document,
+        "project_document": result.project_document,
+        "global_diff": result.global_diff,
+        "project_diff": result.project_diff,
+    }
 
 
-@router.post("/accept-one")
-async def accept_one_memory(
-    req: MemoryItemReviewRequest,
+@router.post("/commit")
+async def commit_memory_docs(
+    req: MemoryCommitRequest,
     store: MemoryStoreDep,
 ) -> dict:
-    await store.accept_one(review_id=req.review_id, memory_id=req.memory_id)
-    return {"status": "accepted"}
+    try:
+        await store.commit_async(
+            review_id=req.review_id,
+            global_document=req.global_document,
+            project_document=req.project_document,
+            project_slug=req.project_slug,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return {"status": "committed"}
 
 
 @router.post("/cancel")
@@ -70,14 +116,8 @@ async def cancel_memories(
     req: MemoryReviewRequest,
     store: MemoryStoreDep,
 ) -> dict:
-    await store.cancel(review_id=req.review_id, project_slug=req.project_slug)
-    return {"status": "cancelled"}
-
-
-@router.post("/cancel-one")
-async def cancel_one_memory(
-    req: MemoryItemReviewRequest,
-    store: MemoryStoreDep,
-) -> dict:
-    await store.cancel_one(review_id=req.review_id, memory_id=req.memory_id)
+    try:
+        await store.cancel_async(review_id=req.review_id, project_slug=req.project_slug)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
     return {"status": "cancelled"}

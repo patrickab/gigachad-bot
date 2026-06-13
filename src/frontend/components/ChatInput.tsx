@@ -253,7 +253,7 @@ export function ChatInput({
         </motion.div>
       )}
 
-      <div className="relative z-20 rounded-3xl border border-divider-strong/25 bg-surface p-4 transition-all duration-300 shadow-[var(--shadow-lg)] focus-within:border-divider-strong">
+      <div className="relative z-20 rounded-3xl border border-divider-strong/35 p-4 transition-all duration-300 [background:color-mix(in_oklab,var(--surface-elevated),white_6%)] shadow-[var(--shadow-lg)] focus-within:border-divider-strong">
           <textarea
             ref={textareaRef}
             rows={1}

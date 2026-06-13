@@ -1,4 +1,4 @@
-import type { Attachment, BranchMeta, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, Message, ModelsResponse, ProjectData, ProjectListItem, ProjectStateUpdate, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage } from "./types"
+import type { Attachment, BranchMeta, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryComposeResponse, MemoryExtractResponse, Message, ModelsResponse, ProjectData, ProjectListItem, ProjectStateUpdate, ProposedMemory, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { API_BASE, DEFAULT_TEMPERATURE, DEFAULT_DOWNSCALE_IMAGES } from "./config"
@@ -61,6 +61,7 @@ export function createChatStream(req: ChatRequest): SSEStreamResult {
     temperature: req.temperature ?? DEFAULT_TEMPERATURE,
     downscale_images: req.downscale_images ?? DEFAULT_DOWNSCALE_IMAGES,
     messages: req.messages ?? [],
+    project_slug: req.project_slug ?? null,
   }
   if (req.reasoning_effort) body.reasoning_effort = req.reasoning_effort
   if (req.img_base64) body.img_base64 = req.img_base64
@@ -350,18 +351,33 @@ export async function extractMemories(
   return memoryRequest<MemoryExtractResponse>("/memory/extract", { messages, project_slug: projectSlug ?? null })
 }
 
-export async function acceptMemories(reviewId: string, projectSlug?: string | null): Promise<void> {
-  await memoryRequest("/memory/accept", { review_id: reviewId, project_slug: projectSlug ?? null })
-}
-
-export async function acceptMemory(reviewId: string, memoryId: string): Promise<void> {
-  await memoryRequest("/memory/accept-one", { review_id: reviewId, memory_id: memoryId })
+export async function composeMemoryDocs(
+  reviewId: string,
+  acceptedMemories: ProposedMemory[],
+  projectSlug?: string | null,
+): Promise<MemoryComposeResponse> {
+  return memoryRequest<MemoryComposeResponse>("/memory/compose", {
+    review_id: reviewId,
+    accepted_ids: acceptedMemories.map((m) => m.id),
+    manual_memories: acceptedMemories.filter((m) => m.id.startsWith("manual-")),
+    project_slug: projectSlug ?? null,
+  })
 }
 
 export async function cancelMemories(reviewId: string, projectSlug?: string | null): Promise<void> {
   await memoryRequest("/memory/cancel", { review_id: reviewId, project_slug: projectSlug ?? null })
 }
 
-export async function cancelMemory(reviewId: string, memoryId: string): Promise<void> {
-  await memoryRequest("/memory/cancel-one", { review_id: reviewId, memory_id: memoryId })
+export async function commitMemoryDocs(
+  reviewId: string,
+  globalDocument?: string | null,
+  projectDocument?: string | null,
+  projectSlug?: string | null,
+): Promise<void> {
+  await memoryRequest("/memory/commit", {
+    review_id: reviewId,
+    global_document: globalDocument ?? null,
+    project_document: projectDocument ?? null,
+    project_slug: projectSlug ?? null,
+  })
 }

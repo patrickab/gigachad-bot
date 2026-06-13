@@ -37,6 +37,7 @@ export interface ChatRequest {
   img_base64?: string | null
   downscale_images?: boolean
   messages?: { role: string; content: string }[]
+  project_slug?: string | null
 }
 
 export interface ModelsResponse {
@@ -167,6 +168,9 @@ export interface ProjectListItem {
 export interface ProposedMemory {
   id: string
   memory: string
+  scope: "global" | "project"
+  kind?: string
+  reason?: string
   categories?: string[]
 }
 
@@ -174,4 +178,12 @@ export interface MemoryExtractResponse {
   review_id: string
   global: ProposedMemory[]
   project: ProposedMemory[] | null
+}
+
+export interface MemoryComposeResponse {
+  review_id: string
+  global_document: string | null
+  project_document: string | null
+  global_diff: string | null
+  project_diff: string | null
 }

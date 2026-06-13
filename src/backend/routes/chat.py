@@ -1,12 +1,16 @@
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
-from .deps import decode_image, request_client, sse_event_stream
+from lib.memory_store import MemoryStore
+
+from .deps import decode_image, get_memory_store, request_client, sse_event_stream
 
 router = APIRouter(prefix="/api", tags=["chat"])
+
+MemoryStoreDep = Annotated[MemoryStore, Depends(get_memory_store)]
 
 
 class ChatRequest(BaseModel):
@@ -18,6 +22,7 @@ class ChatRequest(BaseModel):
     img_base64: str | None = None
     downscale_images: bool = True
     messages: list[dict[str, str]] = []
+    project_slug: str | None = None
 
 
 def _build_kwargs(req: ChatRequest) -> dict[str, Any]:
@@ -28,15 +33,16 @@ def _build_kwargs(req: ChatRequest) -> dict[str, Any]:
 
 
 @router.post("/chat")
-async def chat(req: ChatRequest) -> EventSourceResponse:
+async def chat(req: ChatRequest, memory_store: MemoryStoreDep) -> EventSourceResponse:
     with request_client() as c:
         kwargs = _build_kwargs(req)
         img = decode_image(req.img_base64)
+        system_prompt = memory_store.augment_system_prompt(req.system_prompt, req.project_slug)
         chunks = c.api_query(
             model=req.model,
             user_msg=req.user_msg,
             user_msg_history=req.messages,
-            system_prompt=req.system_prompt,
+            system_prompt=system_prompt,
             img=img,
             stream=True,
             return_usage=True,
@@ -46,15 +52,16 @@ async def chat(req: ChatRequest) -> EventSourceResponse:
 
 
 @router.post("/chat/nonstream")
-async def chat_nonstream(req: ChatRequest) -> dict[str, Any]:
+async def chat_nonstream(req: ChatRequest, memory_store: MemoryStoreDep) -> dict[str, Any]:
     with request_client() as c:
         kwargs = _build_kwargs(req)
         img = decode_image(req.img_base64)
+        system_prompt = memory_store.augment_system_prompt(req.system_prompt, req.project_slug)
         response = c.api_query(
             model=req.model,
             user_msg=req.user_msg,
             user_msg_history=req.messages,
-            system_prompt=req.system_prompt,
+            system_prompt=system_prompt,
             img=img,
             stream=False,
             **kwargs,
