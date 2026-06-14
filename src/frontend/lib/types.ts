@@ -170,8 +170,6 @@ export interface ProposedMemory {
   memory: string
   scope: "global" | "project"
   kind?: string
-  reason?: string
-  categories?: string[]
 }
 
 export interface MemoryExtractResponse {
@@ -181,9 +179,13 @@ export interface MemoryExtractResponse {
 }
 
 export interface MemoryComposeResponse {
-  review_id: string
-  global_document: string | null
-  project_document: string | null
-  global_diff: string | null
-  project_diff: string | null
+  revised_content: string
+}
+
+export interface MemoryProfileMeta {
+  filepath: string
+  id: string
+  parent_id: string | null
+  title: string
+  updated_at: string
 }

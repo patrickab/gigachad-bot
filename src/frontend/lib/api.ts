@@ -1,4 +1,4 @@
-import type { Attachment, BranchMeta, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryComposeResponse, MemoryExtractResponse, Message, ModelsResponse, ProjectData, ProjectListItem, ProjectStateUpdate, ProposedMemory, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage } from "./types"
+import type { Attachment, BranchMeta, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryComposeResponse, MemoryExtractResponse, MemoryProfileMeta, Message, ModelsResponse, ProjectData, ProjectListItem, ProjectStateUpdate, ProposedMemory, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { API_BASE, DEFAULT_TEMPERATURE, DEFAULT_DOWNSCALE_IMAGES } from "./config"
@@ -348,19 +348,23 @@ export async function extractMemories(
   messages: { role: string; content: string }[],
   projectSlug?: string | null,
 ): Promise<MemoryExtractResponse> {
-  return memoryRequest<MemoryExtractResponse>("/memory/extract", { messages, project_slug: projectSlug ?? null })
+  return memoryRequest<MemoryExtractResponse>("/memory/extract", {
+    messages,
+    project_slug: projectSlug ?? null,
+  })
 }
 
-export async function composeMemoryDocs(
-  reviewId: string,
+export async function composeMemoryDoc(
+  baseContent: string,
   acceptedMemories: ProposedMemory[],
-  projectSlug?: string | null,
+  template: string,
+  docName: string
 ): Promise<MemoryComposeResponse> {
   return memoryRequest<MemoryComposeResponse>("/memory/compose", {
-    review_id: reviewId,
-    accepted_ids: acceptedMemories.map((m) => m.id),
-    manual_memories: acceptedMemories.filter((m) => m.id.startsWith("manual-")),
-    project_slug: projectSlug ?? null,
+    base_content: baseContent,
+    accepted_memories: acceptedMemories,
+    template,
+    doc_name: docName,
   })
 }
 
@@ -368,16 +372,27 @@ export async function cancelMemories(reviewId: string, projectSlug?: string | nu
   await memoryRequest("/memory/cancel", { review_id: reviewId, project_slug: projectSlug ?? null })
 }
 
-export async function commitMemoryDocs(
-  reviewId: string,
-  globalDocument?: string | null,
-  projectDocument?: string | null,
-  projectSlug?: string | null,
+export async function commitMemoryDoc(
+  filepath: string,
+  content: string,
+  reviewId: string | null,
+  acceptedMemories: ProposedMemory[] | null,
+  rejectedMemories: ProposedMemory[] | null,
 ): Promise<void> {
   await memoryRequest("/memory/commit", {
+    filepath,
+    content,
     review_id: reviewId,
-    global_document: globalDocument ?? null,
-    project_document: projectDocument ?? null,
-    project_slug: projectSlug ?? null,
+    accepted_memories: acceptedMemories,
+    rejected_memories: rejectedMemories,
   })
+}
+
+export async function listMemoryProfiles(projectSlug?: string | null): Promise<{ profiles: MemoryProfileMeta[] }> {
+  const params = projectSlug ? `?project_slug=${encodeURIComponent(projectSlug)}` : ""
+  return request<{ profiles: MemoryProfileMeta[] }>(`/memory/profiles${params}`)
+}
+
+export async function getMemoryProfileContent(filepath: string): Promise<{ content: string; filepath: string }> {
+  return request(`/memory/content?filepath=${encodeURIComponent(filepath)}`)
 }

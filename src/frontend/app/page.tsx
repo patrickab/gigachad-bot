@@ -357,7 +357,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         await commandBar.submitCommand(
           messages.map((m) => ({ role: m.role, content: m.content })),
           activeProject,
-          trimmed
+          trimmed,
         )
         return
       }
@@ -592,6 +592,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         <MemoryPanel
           state={commandBar.state}
           projectEnabled={!!activeProject}
+          projectSlug={activeProject}
           actions={memoryActions}
         />
       )}

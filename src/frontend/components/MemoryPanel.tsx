@@ -6,12 +6,14 @@ import { Check, FolderOpen, GitCompare, Globe, Loader2, Plus, X } from "lucide-r
 import { ConsoleEditor } from "@/components/ConsoleEditor"
 import { FloatingWindow } from "@/components/FloatingWindow"
 import { LaTeXMarkdown } from "@/components/LaTeXMarkdown"
+import { computeLineDiff } from "@/lib/diff"
 import type { BoundMemoryActions, MemoryPanelState } from "@/hooks/useCommandBar"
-import type { ProposedMemory } from "@/lib/types"
+import type { MemoryProfileMeta, ProposedMemory } from "@/lib/types"
 
 interface MemoryPanelProps {
   state: MemoryPanelState
   projectEnabled: boolean
+  projectSlug?: string | null
   actions: BoundMemoryActions
 }
 
@@ -155,7 +157,6 @@ function MemoryCard({ memory, scope, disabled, onAccept, onCancel }: {
       <div className="text-sm text-ink">
         <LaTeXMarkdown content={memory.memory} compact />
       </div>
-      {memory.reason && <div className="mt-2 text-xs text-ink-subtle">{memory.reason}</div>}
       <div className="mt-3 flex justify-end gap-2">
         <button
           onClick={() => onCancel(memory.id)}
@@ -309,14 +310,40 @@ interface MemoryDocument {
   onChange: (value: string) => void
 }
 
-function DocumentWorkspace({ documents, acceptedCount, onCommitDocuments, onCancelRemaining }: {
+function DocumentWorkspace({
+  documents,
+  acceptedCount,
+  onCommitDocuments,
+  onCancelRemaining,
+  projectSlug,
+  actions,
+}: {
   documents: MemoryDocument[]
   acceptedCount: number
   onCommitDocuments: () => void
   onCancelRemaining: () => void
+  projectSlug?: string | null
+  actions: BoundMemoryActions
 }) {
   const [activeId, setActiveId] = useState<DocumentId>(documents[0]?.id ?? "global")
   const active = documents.find((doc) => doc.id === activeId) ?? documents[0]
+  const [profiles, setProfiles] = useState<MemoryProfileMeta[]>([])
+
+  useEffect(() => {
+    import("@/lib/api").then(({ listMemoryProfiles }) => {
+      listMemoryProfiles(projectSlug).then((res) => {
+        setProfiles(res.profiles)
+      }).catch(() => {})
+    })
+  }, [projectSlug, activeId])
+
+  const activeScopeProfiles = profiles.filter((p) => {
+    if (activeId === "global") {
+      return p.filepath.startsWith("memory/global-profile")
+    } else {
+      return projectSlug ? p.filepath.startsWith(`${projectSlug}/memory/memory`) : false
+    }
+  })
 
   if (!active) return null
   const ActiveIcon = active.icon
@@ -372,10 +399,25 @@ function DocumentWorkspace({ documents, acceptedCount, onCommitDocuments, onCanc
 
       <div className="flex-1 flex min-h-0">
         <div className="w-1/2 min-w-0 border-r border-divider/50 flex flex-col">
-          <div className="flex items-center justify-between border-b border-divider/30 px-3 py-1.5">
-            <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider text-ink-faint">
-              <ActiveIcon className="h-3 w-3" />
-              Edit {active.title}
+          <div className="flex items-center justify-between border-b border-divider/30 px-3 py-1.5 min-h-[37px]">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-ink-faint">
+                <ActiveIcon className="h-3 w-3" />
+                Edit
+              </div>
+              {activeScopeProfiles.length > 0 && (
+                <select
+                  value={activeScopeProfiles.find(p => p.filepath.endsWith(activeId === "global" ? "global-profile.md" : "memory.md"))?.filepath || activeScopeProfiles[0]?.filepath}
+                  onChange={(e) => actions.loadProfile(e.target.value, activeId)}
+                  className="bg-transparent border border-divider/50 rounded px-1.5 py-0.5 text-[10px] text-ink outline-none"
+                >
+                  {activeScopeProfiles.map((p) => (
+                    <option key={p.filepath} value={p.filepath} className="bg-paper text-ink">
+                      {p.title}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
             <span className="text-[10px] text-ink-faint">{active.subtitle}</span>
           </div>
@@ -409,6 +451,7 @@ function DocumentWorkspace({ documents, acceptedCount, onCommitDocuments, onCanc
 export function MemoryPanel({
   state,
   projectEnabled,
+  projectSlug,
   actions,
 }: MemoryPanelProps) {
   const documentsMode = state.phase === "doc-review"
@@ -422,8 +465,12 @@ export function MemoryPanel({
   const projectMemories = candidatesMode ? state.projectMemories : null
   const globalDocument = documentsMode ? state.globalDocument : null
   const projectDocument = documentsMode ? state.projectDocument : null
-  const globalDiff = documentsMode ? state.globalDiff : null
-  const projectDiff = documentsMode ? state.projectDiff : null
+  const globalDiff = documentsMode && state.globalDocument && state.originalGlobalDocument
+    ? computeLineDiff(state.originalGlobalDocument, state.globalDocument)
+    : null
+  const projectDiff = documentsMode && state.projectDocument && state.originalProjectDocument
+    ? computeLineDiff(state.originalProjectDocument, state.projectDocument)
+    : null
   const error = errorMode ? state.error : null
   const documents: MemoryDocument[] = [
     ...(globalDocument !== null ? [{
@@ -479,6 +526,8 @@ export function MemoryPanel({
             acceptedCount={acceptedCount}
             onCommitDocuments={actions.commitDocuments}
             onCancelRemaining={actions.cancelRemaining}
+            projectSlug={projectSlug}
+            actions={actions}
           />
         ) : (
           <CandidateWorkspace

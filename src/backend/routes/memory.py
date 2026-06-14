@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from backend.routes.deps import get_memory_store, request_client
 from lib.memory_store import MemoryStore
@@ -23,27 +23,26 @@ class MemoryReviewRequest(BaseModel):
     project_slug: str | None = None
 
 
-class ManualMemory(BaseModel):
+class ProposedMemoryModel(BaseModel):
     id: str
     memory: str
     scope: str
     kind: str | None = None
-    reason: str | None = None
-    categories: list[str] | None = None
 
 
 class MemoryComposeRequest(BaseModel):
-    review_id: str
-    accepted_ids: list[str]
-    manual_memories: list[ManualMemory] = Field(default_factory=list)
-    project_slug: str | None = None
+    base_content: str
+    accepted_memories: list[ProposedMemoryModel]
+    template: str
+    doc_name: str
 
 
 class MemoryCommitRequest(BaseModel):
-    review_id: str
-    global_document: str | None = None
-    project_document: str | None = None
-    project_slug: str | None = None
+    filepath: str
+    content: str
+    review_id: str | None = None
+    accepted_memories: list[ProposedMemoryModel] | None = None
+    rejected_memories: list[ProposedMemoryModel] | None = None
 
 
 @router.post("/extract")
@@ -59,11 +58,11 @@ async def extract_memories(
     return {
         "review_id": result.review_id,
         "global": [
-            {"id": m.id, "memory": m.memory, "scope": m.scope, "kind": m.kind, "reason": m.reason, "categories": m.categories}
+            {"id": m.id, "memory": m.memory, "scope": m.scope, "kind": m.kind}
             for m in result.global_memories
         ],
         "project": [
-            {"id": m.id, "memory": m.memory, "scope": m.scope, "kind": m.kind, "reason": m.reason, "categories": m.categories}
+            {"id": m.id, "memory": m.memory, "scope": m.scope, "kind": m.kind}
             for m in result.project_memories
         ] if result.project_memories else None,
     }
@@ -76,21 +75,17 @@ async def compose_memory_docs(
 ) -> dict:
     try:
         with request_client() as client:
-            result = await store.compose(
+            revised = await store.compose_stateless(
                 client,
-                review_id=req.review_id,
-                accepted_ids=req.accepted_ids,
-                project_slug=req.project_slug,
-                manual_memories=[m.model_dump() for m in req.manual_memories],
+                base_content=req.base_content,
+                accepted_memories=[m.model_dump() for m in req.accepted_memories],
+                template=req.template,
+                doc_name=req.doc_name,
             )
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     return {
-        "review_id": result.review_id,
-        "global_document": result.global_document,
-        "project_document": result.project_document,
-        "global_diff": result.global_diff,
-        "project_diff": result.project_diff,
+        "revised_content": revised,
     }
 
 
@@ -101,14 +96,15 @@ async def commit_memory_docs(
 ) -> dict:
     try:
         await store.commit_async(
+            filepath=req.filepath,
+            content=req.content,
             review_id=req.review_id,
-            global_document=req.global_document,
-            project_document=req.project_document,
-            project_slug=req.project_slug,
+            accepted_memories=[m.model_dump() for m in req.accepted_memories] if req.accepted_memories is not None else None,
+            rejected_memories=[m.model_dump() for m in req.rejected_memories] if req.rejected_memories is not None else None,
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
-    return {"status": "committed"}
+    return {"status": "committed", "filepath": req.filepath}
 
 
 @router.post("/cancel")
@@ -121,3 +117,27 @@ async def cancel_memories(
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     return {"status": "cancelled"}
+
+
+@router.get("/profiles")
+def list_memory_profiles(
+    store: MemoryStoreDep,
+    project_slug: str | None = Query(None, alias="project_slug"),
+) -> dict:
+    try:
+        profiles = store.list_profiles(project_slug=project_slug)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return {"profiles": profiles}
+
+
+@router.get("/content")
+def get_memory_profile_content(
+    store: MemoryStoreDep,
+    filepath: str = Query(..., alias="filepath"),
+) -> dict:
+    try:
+        content = store.get_profile_content(filepath=filepath)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return {"content": content, "filepath": filepath}
