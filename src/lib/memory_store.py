@@ -542,6 +542,11 @@ Return JSON with this exact shape:
     # Profile management & versioning
     # ------------------------------------------------------------------
 
+    def list_memories(self, scope: str, project_slug: str | None = None) -> list[dict[str, Any]]:
+        """Return the canonical stored memories for *scope* as plain dicts."""
+        json_path, _, _ = self._scope_paths(scope, project_slug)
+        return [vars(m) for m in self._read_stored_memories(json_path)]
+
     def list_profiles(self, project_slug: str | None = None) -> list[dict[str, Any]]:
         """List all memory profile files (current and backups) under memory/ or <project_slug>/memory/."""
         dir_path = self._project_dir(project_slug) / "memory" if project_slug else self.memory_root

@@ -17,7 +17,7 @@ const STATUS_STYLES: Record<MemoryStatus, string> = {
 
 // Mirrors the backend `render_memories_as_markdown` so live edits/removals in the
 // review panel update the diff without another round-trip.
-function renderMemoriesMarkdown(memories: PreviewMemory[], title: string): string {
+export function renderMemoriesMarkdown(memories: PreviewMemory[], title: string): string {
   const groups = new Map<string, string[]>()
   for (const m of memories) {
     const arr = groups.get(m.kind) ?? []
@@ -67,7 +67,7 @@ function LoadingWorkspace({ message }: { message: string }) {
   )
 }
 
-function AddMemoryCard({ scope, disabled, onAddMemory, onCancel }: {
+export function AddMemoryCard({ scope, disabled, onAddMemory, onCancel }: {
   scope: "global" | "project"
   disabled: boolean
   onAddMemory: (scope: "global" | "project", memory: string) => void
@@ -155,7 +155,7 @@ interface MemoryCardProps {
   onRemove?: (memoryId: string) => void
 }
 
-function MemoryCard({
+export function MemoryCard({
   memory, scope, disabled = false, mode = "review",
   onChange, onAccept, onCancel, onRemove,
 }: MemoryCardProps) {

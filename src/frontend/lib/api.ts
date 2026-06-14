@@ -395,6 +395,12 @@ export async function previewMemoryDoc(
   })
 }
 
+export async function getMemories(scope: "global" | "project", projectSlug?: string | null): Promise<{ memories: PreviewMemory[] }> {
+  const params = new URLSearchParams({ scope })
+  if (projectSlug) params.set("project_slug", projectSlug)
+  return request<{ memories: PreviewMemory[] }>(`/memory/memories?${params.toString()}`)
+}
+
 export async function listMemoryProfiles(projectSlug?: string | null): Promise<{ profiles: MemoryProfileMeta[] }> {
   const params = projectSlug ? `?project_slug=${encodeURIComponent(projectSlug)}` : ""
   return request<{ profiles: MemoryProfileMeta[] }>(`/memory/profiles${params}`)

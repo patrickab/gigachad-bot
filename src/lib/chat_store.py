@@ -11,6 +11,7 @@ from lib.json_io import safe_read_json, safe_write_json
 
 PROJECT_JSON = "project.json"
 META_JSON = "projects-meta.json"
+MEMORY_DIR = "memory"
 
 
 class ChatStore:
@@ -440,6 +441,8 @@ class ChatStore:
                     continue
                 if f.is_dir() and f.name.startswith("_"):
                     continue
+                if f.name == MEMORY_DIR:
+                    continue
                 if f.is_file() and f.suffix == ".json":
                     root_files.append(f.name)
                 elif f.is_dir() and not (f / PROJECT_JSON).exists():
@@ -476,7 +479,7 @@ class ChatStore:
             if f.is_file() and f.suffix == ".json":
                 key = f"{rel_prefix}{f.name}" if rel_prefix else f.name
                 result[key] = self._extract_meta(f)
-            elif f.is_dir() and f.name != "_uploads":
+            elif f.is_dir() and f.name not in ("_uploads", MEMORY_DIR):
                 sub_prefix = f"{f.name}/" if not rel_prefix else f"{rel_prefix}{f.name}/"
                 result.update(self._scan_dir_for_meta(f, sub_prefix))
         return result

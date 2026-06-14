@@ -127,6 +127,19 @@ async def cancel_memories(
     return {"status": "cancelled"}
 
 
+@router.get("/memories")
+def list_memories(
+    store: MemoryStoreDep,
+    scope: str = Query(...),
+    project_slug: str | None = Query(None, alias="project_slug"),
+) -> dict:
+    try:
+        memories = store.list_memories(scope=scope, project_slug=project_slug)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return {"memories": memories}
+
+
 @router.get("/profiles")
 def list_memory_profiles(
     store: MemoryStoreDep,

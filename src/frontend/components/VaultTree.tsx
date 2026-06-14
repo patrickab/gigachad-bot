@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState, type ElementType } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
+  Brain,
   Check,
   ChevronRight,
   Folder,
@@ -55,6 +56,7 @@ interface VaultTreeProps<T> {
   onAddFolder?: (parentId: string | null, name: string) => Promise<void>
   onMoveElement?: (elementId: string, targetId: string | null) => Promise<void>
   onDashboardClick?: (vaultId: string) => void
+  onMemoryClick?: (vaultId: string) => void
   storageKey?: string
 }
 
@@ -78,6 +80,7 @@ interface TreeCtx<T> {
   renderElement?: (item: VaultTreeItem<T>, depth: number) => React.ReactNode
   onAddFolder?: (parentId: string | null, name: string) => Promise<void>
   onDashboardClick?: (vaultId: string) => void
+  onMemoryClick?: (vaultId: string) => void
   createMode: "vault" | "folder" | null
   createParentId: string | null
   createName: string
@@ -133,6 +136,7 @@ export function VaultTree<T>({
   onAddFolder,
   onMoveElement,
   onDashboardClick,
+  onMemoryClick,
   storageKey,
 }: VaultTreeProps<T>) {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
@@ -244,6 +248,7 @@ export function VaultTree<T>({
     renderElement,
     onAddFolder,
     onDashboardClick,
+    onMemoryClick,
     createMode,
     createParentId,
     createName,
@@ -389,6 +394,7 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
     onVaultDelete,
     onAddFolder,
     onDashboardClick,
+    onMemoryClick,
     createMode,
     createParentId,
     createName,
@@ -459,6 +465,15 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
               title="Dashboard"
             >
               <LayoutDashboard className="h-3 w-3" />
+            </button>
+          )}
+          {isVault && onMemoryClick && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onMemoryClick(item.id) }}
+              className="p-0.5 rounded text-ink-faint hover:text-ink transition-colors"
+              title="Memory"
+            >
+              <Brain className="h-3 w-3" />
             </button>
           )}
           {onAddFolder && (

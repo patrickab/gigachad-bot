@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo } from "react"
 import { motion } from "framer-motion"
 import { VaultTree, type VaultTreeItem } from "./VaultTree"
-import { FolderKanban, LayoutDashboard, Clock } from "lucide-react"
+import { Brain, FolderKanban, LayoutDashboard, Clock } from "lucide-react"
+import { useMemoryViewer } from "@/contexts/MemoryViewerContext"
 import { SidebarElement } from "./SidebarElement"
 import { getSidebarConfig } from "@/lib/sidebarConfig"
 import { useProject } from "@/contexts/ProjectContext"
@@ -62,6 +63,8 @@ export function Sidebar({
     setDashboardOpen,
   } = useProject()
 
+  const { openMemoryViewer } = useMemoryViewer()
+
   const handleTimelineDelete = useCallback(async (file: string) => {
     await onCascadeDelete?.(file)
   }, [onCascadeDelete])
@@ -113,9 +116,19 @@ export function Sidebar({
       transition={{ duration: 0.25, ease: "easeInOut" }}
       className="shrink-0 border-r border-divider bg-paper flex flex-col overflow-hidden"
     >
-      <div className="flex items-center justify-between px-2 py-2 border-b border-divider h-[60px]">
+      <div className="group flex items-center justify-between px-2 py-2 border-b border-divider h-[60px]">
         {!collapsed && (
-          <span className="text-base font-semibold tracking-tight text-ink px-2">GigaChat Bot</span>
+          <div className="flex items-center gap-1.5 px-2 min-w-0">
+            <span className="text-base font-semibold tracking-tight text-ink truncate">GigaChat Bot</span>
+            <button
+              onClick={() => openMemoryViewer({ scope: "global" })}
+              title="Global memory profile"
+              aria-label="Open global memory profile"
+              className="shrink-0 rounded-md p-1 text-ink-subtle opacity-0 group-hover:opacity-100 hover:bg-surface hover:text-ink transition-all"
+            >
+              <Brain className="h-4 w-4" />
+            </button>
+          </div>
         )}
         <div className={collapsed ? "flex justify-center w-full" : "flex justify-end"}>
           {toggleItem && (
@@ -153,6 +166,7 @@ export function Sidebar({
               openProject(vaultId)
               setDashboardOpen(true)
             }}
+            onMemoryClick={(vaultId) => openMemoryViewer({ scope: "project", projectSlug: vaultId })}
             onElementClick={(item) => {
               if (item.data && !item.isSystem) onOpenChat(item.data as string)
             }}
@@ -220,6 +234,7 @@ function buildProjectItems(
       if (!key.startsWith(dirPrefix) || key === `${project.slug}/project.json`) continue
       if (meta.parent_id) continue
       const filename = key.slice(dirPrefix.length)
+      if (filename.startsWith("memory/")) continue
       const tab = tabByName.get(filename)
       const label = tab ? (tab.name ?? tab.title ?? filename.replace(".json", "")) : filename.replace(".json", "")
       items.push({ id: key, label, type: "element", data: key })

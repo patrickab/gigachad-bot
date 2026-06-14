@@ -26,6 +26,8 @@ import { useProject, ProjectProvider } from "@/contexts/ProjectContext"
 import { useBranches } from "@/hooks/useBranches"
 import { BranchProvider } from "@/contexts/BranchContext"
 import { SidebarProvider } from "@/contexts/SidebarContext"
+import { MemoryViewerProvider } from "@/contexts/MemoryViewerContext"
+import { MemoryViewer } from "@/components/MemoryViewer"
 import { handleStudyPdf, updateLastMsg as updateLastAssistant } from "@/hooks/useStudyHandler"
 import {
   saveChatHistory as apiSaveChatHistory,
@@ -692,6 +694,7 @@ function AppContent() {
   return (
     <BranchProvider>
       <SidebarProvider>
+        <MemoryViewerProvider>
         <TabManager
         ref={tabManagerRef}
         onCloseTab={handleTabClose}
@@ -715,6 +718,8 @@ function AppContent() {
         )}
       />
         {dashboardOpen && <ProjectDashboard />}
+        <MemoryViewer />
+        </MemoryViewerProvider>
       </SidebarProvider>
     </BranchProvider>
   )
