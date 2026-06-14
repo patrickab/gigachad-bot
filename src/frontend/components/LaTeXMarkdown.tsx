@@ -79,6 +79,50 @@ function CodeBlock({ codeString, language }: { codeString: string; language: str
   )
 }
 
+function MermaidDiagram({ code }: { code: string }) {
+  const [svg, setSvg] = useState("")
+  const [failed, setFailed] = useState(false)
+  const idRef = useRef(`mmd-${Math.random().toString(36).slice(2)}`)
+
+  useEffect(() => {
+    let cancelled = false
+    setFailed(false)
+    setSvg("")
+    void (async () => {
+      try {
+        const mermaid = (await import("mermaid")).default
+        const isLight =
+          typeof document !== "undefined" && document.documentElement.classList.contains("light")
+        mermaid.initialize({
+          startOnLoad: false,
+          theme: isLight ? "neutral" : "dark",
+          securityLevel: "strict",
+          fontFamily: "var(--font-sans), system-ui, sans-serif",
+          logLevel: "fatal",
+        })
+        // parse() throws on invalid/incomplete source (e.g. mid-stream), so we
+        // fall back to showing the raw source until the diagram is complete.
+        await mermaid.parse(code)
+        const { svg: rendered } = await mermaid.render(idRef.current, code)
+        if (!cancelled) setSvg(rendered)
+      } catch {
+        if (!cancelled) setFailed(true)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [code])
+
+  if (failed) return <CodeBlock codeString={code} language="mermaid" />
+  if (!svg) return <div className="my-3 text-xs text-ink-subtle">Rendering diagram…</div>
+
+  return (
+    <div
+      className="my-3 flex justify-center overflow-x-auto [&_svg]:max-w-full [&_svg]:h-auto"
+      dangerouslySetInnerHTML={{ __html: svg }}
+    />
+  )
+}
+
 // Prose elements are rendered as bare intrinsic tags so they shed Streamdown's
 // built-in Tailwind classes and inherit the app's .markdown-body token theme.
 const PROSE_COMPONENTS: Components = {
@@ -119,6 +163,9 @@ const PROSE_COMPONENTS: Components = {
       )
     }
     const codeString = String(children).replace(/\n$/, "")
+    if (match[1] === "mermaid") {
+      return <MermaidDiagram code={codeString} />
+    }
     return <CodeBlock codeString={codeString} language={match[1]} />
   },
 }
