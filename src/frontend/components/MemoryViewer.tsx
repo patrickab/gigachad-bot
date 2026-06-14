@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { motion } from "framer-motion"
-import { ArrowUpCircle, Check, ChevronDown, ChevronRight, FolderOpen, Globe, Loader2, Plus, X } from "lucide-react"
+import { ArrowUpCircle, Check, ChevronDown, ChevronRight, FolderOpen, Globe, GripVertical, Loader2, Plus, X } from "lucide-react"
 import { FloatingWindow } from "@/components/FloatingWindow"
 import { LaTeXMarkdown } from "@/components/LaTeXMarkdown"
 import { AddMemoryCard, MemoryCard, renderMemoriesMarkdown } from "@/components/MemoryPanel"
@@ -28,14 +28,39 @@ function sortByUpdated(mems: PreviewMemory[]): PreviewMemory[] {
   })
 }
 
-function groupByCategory(mems: PreviewMemory[]): Map<string, PreviewMemory[]> {
+/** Group memories by category, preserving the order defined in categoryOrder. */
+function groupByCategory(mems: PreviewMemory[], categoryOrder: CategoryDef[]): [string, PreviewMemory[]][] {
   const map = new Map<string, PreviewMemory[]>()
   for (const m of mems) {
     const arr = map.get(m.kind) ?? []
     arr.push(m)
     map.set(m.kind, arr)
   }
-  return map
+  const result: [string, PreviewMemory[]][] = []
+  // Emit in category definition order first.
+  for (const cat of categoryOrder) {
+    const group = map.get(cat.name)
+    if (group) result.push([cat.name, group])
+  }
+  // Append any kinds not in the category list (shouldn't normally happen).
+  for (const [kind, group] of map) {
+    if (!categoryOrder.some((c) => c.name === kind)) result.push([kind, group])
+  }
+  return result
+}
+
+/** Sort memories array so they appear in category definition order, newest-first within each group. */
+function sortMemoriesByCategoryOrder(mems: PreviewMemory[], categoryOrder: CategoryDef[]): PreviewMemory[] {
+  const catIdx = new Map(categoryOrder.map((c, i) => [c.name, i]))
+  const sorted = [...mems].sort((a, b) => {
+    const ia = catIdx.get(a.kind) ?? 9999
+    const ib = catIdx.get(b.kind) ?? 9999
+    if (ia !== ib) return ia - ib
+    const ta = a.updated_at ?? a.created_at ?? ""
+    const tb = b.updated_at ?? b.created_at ?? ""
+    return tb.localeCompare(ta)
+  })
+  return sorted
 }
 
 function formatAge(iso: string | undefined): string {
@@ -45,8 +70,7 @@ function formatAge(iso: string | undefined): string {
   if (mins < 60) return `${mins}m ago`
   const hrs = Math.floor(mins / 60)
   if (hrs < 24) return `${hrs}h ago`
-  const days = Math.floor(hrs / 24)
-  return `${days}d ago`
+  return `${Math.floor(hrs / 24)}d ago`
 }
 
 // ---------------------------------------------------------------------------
@@ -54,19 +78,10 @@ function formatAge(iso: string | undefined): string {
 // ---------------------------------------------------------------------------
 
 function DeleteCategoryPopup({
-  category,
-  memoryCount,
-  remapping,
-  onRemap,
-  onDrop,
-  onCancel,
+  category, memoryCount, remapping, onRemap, onDrop, onCancel,
 }: {
-  category: CategoryDef
-  memoryCount: number
-  remapping: boolean
-  onRemap: () => void
-  onDrop: () => void
-  onCancel: () => void
+  category: CategoryDef; memoryCount: number; remapping: boolean
+  onRemap: () => void; onDrop: () => void; onCancel: () => void
 }) {
   return (
     <div className="absolute inset-x-0 top-0 z-10 mx-3 mt-2 rounded-lg border border-divider bg-surface-elevated p-3 shadow-lg">
@@ -76,9 +91,7 @@ function DeleteCategoryPopup({
       <div className="mt-0.5 text-[11px] text-ink-muted">Remap to remaining categories via LLM?</div>
       <div className="mt-2.5 flex items-center justify-end gap-2">
         <button onClick={onCancel} disabled={remapping}
-          className="text-[11px] text-ink-muted hover:text-ink disabled:opacity-40 transition-colors">
-          Cancel
-        </button>
+          className="text-[11px] text-ink-muted hover:text-ink disabled:opacity-40 transition-colors">Cancel</button>
         <button onClick={onDrop} disabled={remapping}
           className="rounded-md border border-divider px-2.5 py-1 text-[11px] text-ink-muted hover:bg-hover hover:text-ink disabled:opacity-40 transition-colors">
           Delete memories
@@ -97,19 +110,12 @@ function DeleteCategoryPopup({
 // Add-category inline form
 // ---------------------------------------------------------------------------
 
-function AddCategoryForm({
-  existingNames,
-  onAdd,
-  onCancel,
-}: {
-  existingNames: Set<string>
-  onAdd: (cat: CategoryDef) => void
-  onCancel: () => void
+function AddCategoryForm({ existingNames, onAdd, onCancel }: {
+  existingNames: Set<string>; onAdd: (cat: CategoryDef) => void; onCancel: () => void
 }) {
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
   const nameRef = useRef<HTMLInputElement>(null)
-
   useEffect(() => { nameRef.current?.focus() }, [])
 
   const nameKey = name.trim().toLowerCase().replace(/\s+/g, "_")
@@ -144,25 +150,32 @@ function AddCategoryForm({
 }
 
 // ---------------------------------------------------------------------------
-// Categories panel (collapsible pill list + add form)
+// Categories panel — collapsible pill list with drag-to-reorder
 // ---------------------------------------------------------------------------
 
 function CategoriesPanel({
-  categories,
-  memories,
-  disabled,
-  onDeleteCategory,
-  onAddCategory,
+  categories, memories, disabled, onReorder, onDeleteCategory, onAddCategory,
 }: {
-  categories: CategoryDef[]
-  memories: PreviewMemory[]
-  disabled: boolean
+  categories: CategoryDef[]; memories: PreviewMemory[]; disabled: boolean
+  onReorder: (cats: CategoryDef[]) => void
   onDeleteCategory: (cat: CategoryDef) => void
   onAddCategory: (cat: CategoryDef) => void
 }) {
   const [expanded, setExpanded] = useState(false)
   const [addingCat, setAddingCat] = useState(false)
+  const [dragIdx, setDragIdx] = useState<number | null>(null)
+  const [overIdx, setOverIdx] = useState<number | null>(null)
   const existingNames = new Set(categories.map((c) => c.name))
+
+  function handleDrop(targetIdx: number) {
+    if (dragIdx === null || dragIdx === targetIdx) return
+    const next = [...categories]
+    const [moved] = next.splice(dragIdx, 1)
+    next.splice(targetIdx, 0, moved)
+    onReorder(next)
+    setDragIdx(null)
+    setOverIdx(null)
+  }
 
   return (
     <div className="border-b border-divider/30 shrink-0">
@@ -180,9 +193,26 @@ function CategoriesPanel({
       {expanded && (
         <div className="px-3 pb-2 space-y-1.5">
           <div className="flex flex-wrap gap-1.5">
-            {categories.map((cat) => (
-              <span key={cat.name} title={cat.description}
-                className="inline-flex items-center gap-1 rounded-full border border-divider bg-surface px-2 py-0.5 text-[10px] text-ink-muted">
+            {categories.map((cat, idx) => (
+              <span
+                key={cat.name}
+                title={cat.description}
+                draggable={!disabled}
+                onDragStart={() => { setDragIdx(idx) }}
+                onDragOver={(e) => { e.preventDefault(); setOverIdx(idx) }}
+                onDragLeave={() => setOverIdx(null)}
+                onDrop={(e) => { e.preventDefault(); handleDrop(idx) }}
+                onDragEnd={() => { setDragIdx(null); setOverIdx(null) }}
+                className={[
+                  "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] text-ink-muted transition-all",
+                  overIdx === idx && dragIdx !== idx
+                    ? "border-divider-strong bg-hover scale-105"
+                    : dragIdx === idx
+                    ? "border-divider opacity-40"
+                    : "border-divider bg-surface",
+                ].join(" ")}
+              >
+                {!disabled && <GripVertical className="h-2.5 w-2.5 text-ink-faint cursor-grab" />}
                 {cat.name.replace(/_/g, " ")}
                 {!disabled && (
                   <button onClick={() => onDeleteCategory(cat)}
@@ -209,38 +239,24 @@ function CategoriesPanel({
 }
 
 // ---------------------------------------------------------------------------
-// Memory list grouped by category, sorted newest-first within each group
+// Memory list — grouped by category order, sorted newest-first within each group
 // ---------------------------------------------------------------------------
 
 function GroupedMemoryList({
-  memories,
-  scope,
-  disabled,
-  showPromoteButton,
-  promotingId,
-  onChange,
-  onRemove,
-  onPromote,
+  memories, categoryOrder, scope, disabled, showPromoteButton, promotingId, onChange, onRemove, onPromote,
 }: {
-  memories: PreviewMemory[]
-  scope: "global" | "project"
-  disabled: boolean
-  showPromoteButton: boolean
-  promotingId: string | null
+  memories: PreviewMemory[]; categoryOrder: CategoryDef[]
+  scope: "global" | "project"; disabled: boolean
+  showPromoteButton: boolean; promotingId: string | null
   onChange: (id: string, text: string) => void
   onRemove: (id: string) => void
   onPromote: (mem: PreviewMemory) => void
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-
-  const grouped = groupByCategory(memories)
+  const groups = groupByCategory(memories, categoryOrder)
 
   function toggle(kind: string) {
-    setCollapsed((prev) => {
-      const next = new Set(prev)
-      next.has(kind) ? next.delete(kind) : next.add(kind)
-      return next
-    })
+    setCollapsed((prev) => { const next = new Set(prev); next.has(kind) ? next.delete(kind) : next.add(kind); return next })
   }
 
   if (memories.length === 0) {
@@ -249,7 +265,7 @@ function GroupedMemoryList({
 
   return (
     <div className="space-y-4">
-      {[...grouped.entries()].map(([kind, mems]) => {
+      {groups.map(([kind, mems]) => {
         const sorted = sortByUpdated(mems)
         const isCollapsed = collapsed.has(kind)
         return (
@@ -263,20 +279,17 @@ function GroupedMemoryList({
             {!isCollapsed && (
               <div className="space-y-2 pl-1">
                 {sorted.map((m) => (
-                  <div key={m.id} className="group/memrow relative">
+                  <div key={m.id}>
                     <MemoryCard memory={m} scope={scope} mode="display" disabled={disabled}
                       onChange={onChange} onRemove={onRemove} />
-                    <div className="flex items-center gap-2 px-1 pt-0.5">
+                    <div className="flex items-center gap-3 px-1 pt-0.5">
                       {m.updated_at && (
                         <span className="text-[10px] text-ink-faint">{formatAge(m.updated_at)}</span>
                       )}
                       {showPromoteButton && (
-                        <button
-                          onClick={() => onPromote(m)}
-                          disabled={disabled || promotingId === m.id}
+                        <button onClick={() => onPromote(m)} disabled={disabled || promotingId === m.id}
                           title="Promote to global profile"
-                          className="flex items-center gap-1 text-[10px] text-ink-faint hover:text-ink-subtle disabled:opacity-40 transition-colors"
-                        >
+                          className="flex items-center gap-1 text-[10px] text-ink-faint hover:text-ink-subtle disabled:opacity-40 transition-colors">
                           {promotingId === m.id
                             ? <Loader2 className="h-3 w-3 animate-spin" />
                             : <ArrowUpCircle className="h-3 w-3" />}
@@ -300,8 +313,7 @@ function GroupedMemoryList({
 // ---------------------------------------------------------------------------
 
 function MemoryViewerInner({
-  target,
-  onClose,
+  target, onClose,
 }: {
   target: { scope: "global" | "project"; projectSlug?: string | null }
   onClose: () => void
@@ -317,30 +329,20 @@ function MemoryViewerInner({
   const [error, setError] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
   const [promotingId, setPromotingId] = useState<string | null>(null)
-
-  // Category deletion flow
   const [pendingDeleteCat, setPendingDeleteCat] = useState<CategoryDef | null>(null)
   const [remapping, setRemapping] = useState(false)
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
-    setError(null)
-    Promise.all([
-      getMemories(scope, projectSlug ?? null),
-      getCategories(scope, projectSlug ?? null),
-    ])
+    setLoading(true); setError(null)
+    Promise.all([getMemories(scope, projectSlug ?? null), getCategories(scope, projectSlug ?? null)])
       .then(([memRes, catRes]) => {
         if (cancelled) return
         setMemories(memRes.memories)
         setCategories(catRes.categories)
       })
-      .catch((e) => {
-        if (!cancelled) setError((e as Error)?.message || "Failed to load memories")
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
+      .catch((e) => { if (!cancelled) setError((e as Error)?.message || "Failed to load memories") })
+      .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [scope, projectSlug])
 
@@ -356,26 +358,23 @@ function MemoryViewerInner({
     const trimmed = text.trim()
     if (!trimmed) return
     const now = new Date().toISOString()
-    setMemories((prev) => [
-      ...prev,
-      {
-        id: `manual-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        text: trimmed,
-        kind: categories[0]?.name ?? "note",
-        scope: s,
-        created_at: now,
-        updated_at: now,
-      },
-    ])
+    setMemories((prev) => [...prev, {
+      id: `manual-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      text: trimmed, kind: categories[0]?.name ?? "note", scope: s,
+      created_at: now, updated_at: now,
+    }])
   }, [categories])
 
   const handleAddCategory = useCallback((cat: CategoryDef) => {
     setCategories((prev) => [...prev, cat])
   }, [])
 
+  const handleReorderCategories = useCallback((next: CategoryDef[]) => {
+    setCategories(next)
+  }, [])
+
   const handleDeleteCategory = useCallback((cat: CategoryDef) => {
-    const hasMemories = memories.some((m) => m.kind === cat.name)
-    if (hasMemories) {
+    if (memories.some((m) => m.kind === cat.name)) {
       setPendingDeleteCat(cat)
     } else {
       setCategories((prev) => prev.filter((c) => c.name !== cat.name))
@@ -388,9 +387,7 @@ function MemoryViewerInner({
     const remaining = categories.filter((c) => c.name !== pendingDeleteCat.name)
     if (remaining.length === 0) {
       setMemories((prev) => prev.filter((m) => m.kind !== pendingDeleteCat.name))
-      setCategories(remaining)
-      setPendingDeleteCat(null)
-      return
+      setCategories(remaining); setPendingDeleteCat(null); return
     }
     setRemapping(true)
     try {
@@ -399,13 +396,10 @@ function MemoryViewerInner({
       setMemories((prev) =>
         prev.map((m) => remappedById.get(m.id) ?? m).filter((m) => m.kind !== pendingDeleteCat.name)
       )
-      setCategories(remaining)
-      setPendingDeleteCat(null)
+      setCategories(remaining); setPendingDeleteCat(null)
     } catch (e) {
       setError((e as Error)?.message || "Remap failed")
-    } finally {
-      setRemapping(false)
-    }
+    } finally { setRemapping(false) }
   }, [pendingDeleteCat, memories, categories, scope, projectSlug])
 
   const handleConfirmDrop = useCallback(() => {
@@ -423,23 +417,22 @@ function MemoryViewerInner({
       setMemories((prev) => prev.filter((m) => m.id !== mem.id))
     } catch (e) {
       setError((e as Error)?.message || "Promote failed")
-    } finally {
-      setPromotingId(null)
-    }
+    } finally { setPromotingId(null) }
   }, [scope, projectSlug])
 
   const handleSave = useCallback(async () => {
     if (loading || saving) return
     setSaving(true)
     try {
+      // Reorder memories to match category order before committing so both the
+      // stored JSON and the rendered markdown reflect the current category sequence.
+      const ordered = sortMemoriesByCategoryOrder(memories, categories)
       await saveCategories(scope, categories, projectSlug ?? null)
-      await commitMemoryDoc(scope, [], projectSlug ?? null, null, null, memories)
+      await commitMemoryDoc(scope, [], projectSlug ?? null, null, null, ordered)
       onClose()
     } catch (e) {
       setError((e as Error)?.message || "Failed to save memories")
-    } finally {
-      setSaving(false)
-    }
+    } finally { setSaving(false) }
   }, [loading, saving, scope, projectSlug, memories, categories, onClose])
 
   useEffect(() => {
@@ -450,15 +443,15 @@ function MemoryViewerInner({
         if (pendingDeleteCat) { setPendingDeleteCat(null); return }
         e.preventDefault(); onClose(); return
       }
-      if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !editable) {
-        e.preventDefault(); handleSave()
-      }
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !editable) { e.preventDefault(); handleSave() }
     }
     document.addEventListener("keydown", onKey)
     return () => document.removeEventListener("keydown", onKey)
   }, [onClose, handleSave, pendingDeleteCat])
 
-  const previewMarkdown = renderMemoriesMarkdown(memories, title).trimEnd() + "\n"
+  // Preview always reflects current category order.
+  const orderedMemories = sortMemoriesByCategoryOrder(memories, categories)
+  const previewMarkdown = renderMemoriesMarkdown(orderedMemories, title).trimEnd() + "\n"
   const isLocked = loading || saving || remapping
 
   return (
@@ -512,10 +505,13 @@ function MemoryViewerInner({
                 />
               )}
 
-              <CategoriesPanel categories={categories} memories={memories} disabled={isLocked}
-                onDeleteCategory={handleDeleteCategory} onAddCategory={handleAddCategory} />
+              <CategoriesPanel
+                categories={categories} memories={memories} disabled={isLocked}
+                onReorder={handleReorderCategories}
+                onDeleteCategory={handleDeleteCategory}
+                onAddCategory={handleAddCategory}
+              />
 
-              {/* Memories header */}
               <div className="flex items-center justify-between border-b border-divider/30 px-3 py-1.5 shrink-0">
                 <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider text-ink-faint">
                   <ScopeIcon className="h-3 w-3" />Memories
@@ -531,14 +527,10 @@ function MemoryViewerInner({
                   <AddMemoryCard scope={scope} disabled={isLocked} onAddMemory={handleAdd} onCancel={() => setAdding(false)} />
                 )}
                 <GroupedMemoryList
-                  memories={memories}
-                  scope={scope}
-                  disabled={isLocked}
-                  showPromoteButton={scope === "project"}
+                  memories={memories} categoryOrder={categories} scope={scope}
+                  disabled={isLocked} showPromoteButton={scope === "project"}
                   promotingId={promotingId}
-                  onChange={handleEdit}
-                  onRemove={handleRemove}
-                  onPromote={handlePromote}
+                  onChange={handleEdit} onRemove={handleRemove} onPromote={handlePromote}
                 />
               </div>
             </div>

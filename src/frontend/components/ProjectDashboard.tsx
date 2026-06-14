@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -143,6 +143,8 @@ export function ProjectDashboard() {
   const [addModalState, setAddModalState] = useState<KanbanColumnId | null>(null)
   const [draggedCardId, setDraggedCardId] = useState<string | null>(null)
   const [dragOverCol, setDragOverCol] = useState<KanbanColumnId | null>(null)
+  // Per-column drag-enter counter to avoid false dragLeave on child elements.
+  const dragCounters = useRef<Record<string, number>>({ backlog: 0, doing: 0, done: 0 })
 
   useEffect(() => {
     if (addModalState !== null) return
@@ -217,13 +219,19 @@ export function ProjectDashboard() {
 
                       {/* Drop Zone / Cards List */}
                       <div
-                        onDragOver={(e) => {
+                        onDragOver={(e) => { e.preventDefault() }}
+                        onDragEnter={(e) => {
                           e.preventDefault()
+                          dragCounters.current[col.id] = (dragCounters.current[col.id] ?? 0) + 1
                           setDragOverCol(col.id)
                         }}
-                        onDragLeave={() => setDragOverCol(null)}
+                        onDragLeave={() => {
+                          dragCounters.current[col.id] = Math.max(0, (dragCounters.current[col.id] ?? 1) - 1)
+                          if (dragCounters.current[col.id] === 0) setDragOverCol(null)
+                        }}
                         onDrop={(e) => {
                           const cardId = e.dataTransfer.getData("text/plain")
+                          dragCounters.current[col.id] = 0
                           setDragOverCol(null)
                           setDraggedCardId(null)
                           if (cardId) moveCard(cardId, col.id)
@@ -250,6 +258,7 @@ export function ProjectDashboard() {
                                   setTimeout(() => setDraggedCardId(card.id), 0)
                                 }}
                                 onDragEnd={() => {
+                                  dragCounters.current = { backlog: 0, doing: 0, done: 0 }
                                   setDraggedCardId(null)
                                   setDragOverCol(null)
                                 }}
