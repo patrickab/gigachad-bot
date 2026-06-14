@@ -424,6 +424,26 @@ export async function saveCategories(scope: "global" | "project", categories: Ca
   })
 }
 
+export async function moveMemory(
+  memoryId: string,
+  fromScope: "global" | "project",
+  toScope: "global" | "project",
+  fromProjectSlug?: string | null,
+  toProjectSlug?: string | null,
+): Promise<void> {
+  await request("/memory/move", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      memory_id: memoryId,
+      from_scope: fromScope,
+      to_scope: toScope,
+      from_project_slug: fromProjectSlug ?? null,
+      to_project_slug: toProjectSlug ?? null,
+    }),
+  })
+}
+
 export async function remapOrphanedCategory(
   scope: "global" | "project",
   orphanedMemories: PreviewMemory[],

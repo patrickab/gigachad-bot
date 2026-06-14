@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 import json
 import logging
 import os
@@ -34,6 +35,10 @@ if TYPE_CHECKING:
 
 class MemoryLLM(Protocol):
     def api_query(self, **kwargs: object) -> object: ...
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 MEMORY_ROOT = DIRECTORY_CHAT_HISTORIES / "memory"
@@ -135,6 +140,8 @@ class StoredMemory:
     text: str
     kind: str  # category name
     scope: str  # "global" | "project"
+    created_at: str = field(default_factory=_now_iso)
+    updated_at: str = field(default_factory=_now_iso)
 
 
 def _memory_extraction_model() -> str:
@@ -232,12 +239,18 @@ class MemoryStore:
         project_block = self._format_categories(project_cats)
 
         system_prompt = (
-            "You extract atomic, durable candidate memories from a conversation for a "
-            "user-reviewed learning system. Output valid JSON only, no prose. "
-            "Each memory must be a single, self-contained fact or preference, tagged with "
-            "exactly one of the allowed categories. Do not emit two memories that express "
-            "the same idea; keep the more specific one. Empty lists are valid when there is "
-            "nothing durable to remember."
+            "You extract durable candidate memories from a conversation for a "
+            "user-reviewed learning system. Output valid JSON only, no prose.\n\n"
+            "Rules:\n"
+            "- Capture everything relevant to future conversations in this scope: facts, preferences, "
+            "decisions, concepts, constraints, open questions, and context.\n"
+            "- Prefer atomic memories — each entry should carry as much information as possible in as "
+            "few words as possible. When compressing a memory would dilute its meaning, a longer "
+            "verbose form is acceptable.\n"
+            "- Tag each memory with exactly one of the allowed categories.\n"
+            "- Do not emit two memories that express the same idea; keep the more informative one.\n"
+            "- Omit anything session-transient or that cannot benefit future conversations.\n"
+            "- Empty lists are valid when there is nothing durable to remember."
         )
 
         project_section = ""
@@ -269,8 +282,7 @@ Rules:
 - "category" MUST be one of the allowed names listed above for that list.
 - Global = stable user identity, preferences, and cross-project working style.
 - Project = this project's/subject's purpose, concepts, decisions, constraints, resources, and open questions.{no_project_rule}
-- Prefer a few high-value memories over many trivial ones.
-- Never output two memories that say the same thing with different wording.
+- Never output two memories that say the same thing with different wording; keep the more informative one.
 """.strip()
 
         data = await self._generate_json(_llm, system_prompt, user_prompt, timeout=EXTRACT_TIMEOUT)
@@ -305,8 +317,13 @@ Rules:
         if revised_memories is not None:
             # Revised memories come from a preview and may carry an extra "status"
             # field for the UI — keep only the canonical StoredMemory fields.
+            now = _now_iso()
             updated = [
-                StoredMemory(id=m["id"], text=m["text"], kind=m["kind"], scope=m["scope"])
+                StoredMemory(
+                    id=m["id"], text=m["text"], kind=m["kind"], scope=m["scope"],
+                    created_at=str(m.get("created_at") or now),
+                    updated_at=str(m.get("updated_at") or now),
+                )
                 for m in revised_memories
             ]
         else:
@@ -486,22 +503,39 @@ Return JSON with this exact shape:
         existing_texts: list[str],
         candidate_texts: list[str],
     ) -> list[tuple[StoredMemory, str]]:
-        """Build (StoredMemory, status) pairs, reusing existing ids for unchanged text."""
+        """Build (StoredMemory, status) pairs, reusing existing ids and timestamps for unchanged text."""
         by_text = {m.text.strip(): m for m in existing}
         existing_set = {t.lower() for t in existing_texts}
         candidate_set = {t.lower() for t in candidate_texts}
+        now = _now_iso()
         out: list[tuple[StoredMemory, str]] = []
         for text in texts:
             prev = by_text.get(text)
-            mem_id = prev.id if prev else str(uuid.uuid4())
             key = text.lower()
-            if key in existing_set:
+            if key in existing_set and prev:
+                # Unchanged — preserve id and both timestamps.
                 status = "pre-existing"
+                mem = StoredMemory(
+                    id=prev.id, text=text, kind=category, scope=scope,
+                    created_at=prev.created_at, updated_at=prev.updated_at,
+                )
             elif key in candidate_set:
+                # Brand-new memory from this extraction.
                 status = "new"
+                mem = StoredMemory(
+                    id=str(uuid.uuid4()), text=text, kind=category, scope=scope,
+                    created_at=now, updated_at=now,
+                )
             else:
+                # LLM synthesised a combined/updated form — preserve created_at if we can find it.
                 status = "combined"
-            out.append((StoredMemory(id=mem_id, text=text, kind=category, scope=scope), status))
+                created_at = prev.created_at if prev else now
+                mem = StoredMemory(
+                    id=prev.id if prev else str(uuid.uuid4()),
+                    text=text, kind=category, scope=scope,
+                    created_at=created_at, updated_at=now,
+                )
+            out.append((mem, status))
         return out
 
     @staticmethod
@@ -636,6 +670,53 @@ Rules:
         json_path, _, _ = self._scope_paths(scope, project_slug)
         return [vars(m) for m in self._read_stored_memories(json_path)]
 
+    def move_memory(
+        self,
+        memory_id: str,
+        from_scope: str,
+        to_scope: str,
+        from_project_slug: str | None = None,
+        to_project_slug: str | None = None,
+    ) -> None:
+        """Move a single memory from one scope to another, committing both sides immediately.
+
+        If the memory's category does not exist in the destination scope's category list,
+        it is reassigned to ``FALLBACK_CATEGORY`` so it remains visible.
+        """
+        from_json, from_md, from_title = self._scope_paths(from_scope, from_project_slug)
+        to_json, to_md, to_title = self._scope_paths(to_scope, to_project_slug)
+
+        from_mems = self._read_stored_memories(from_json)
+        target = next((m for m in from_mems if m.id == memory_id), None)
+        if target is None:
+            raise ValueError(f"Memory {memory_id!r} not found in {from_scope}")
+
+        dest_cat_names = {c["name"] for c in self.get_categories(to_scope, to_project_slug)}
+        dest_kind = target.kind if target.kind in dest_cat_names else FALLBACK_CATEGORY
+
+        now = _now_iso()
+        moved = StoredMemory(
+            id=target.id,
+            text=target.text,
+            kind=dest_kind,
+            scope=to_scope,
+            created_at=target.created_at,
+            updated_at=now,
+        )
+
+        to_mems = self._read_stored_memories(to_json)
+        # Idempotent: remove any existing entry with same id from destination.
+        to_mems_updated = [m for m in to_mems if m.id != memory_id] + [moved]
+        from_mems_updated = [m for m in from_mems if m.id != memory_id]
+
+        self._backup_existing_profile(from_json)
+        self._write_stored_memories(from_json, from_mems_updated)
+        self._write_doc(from_md, self.render_memories_as_markdown(from_mems_updated, from_title))
+
+        self._backup_existing_profile(to_json)
+        self._write_stored_memories(to_json, to_mems_updated)
+        self._write_doc(to_md, self.render_memories_as_markdown(to_mems_updated, to_title))
+
     def list_profiles(self, project_slug: str | None = None) -> list[dict[str, Any]]:
         """List all memory profile files (current and backups) under memory/ or <project_slug>/memory/."""
         dir_path = self._project_dir(project_slug) / "memory" if project_slug else self.memory_root
@@ -703,10 +784,11 @@ Rules:
     # Canonical storage I/O & rendering
     # ------------------------------------------------------------------
 
-    def _read_stored_memories(self, path: Path) -> list[StoredMemory]:
+    def _read_stored_memories(self, path: "Path") -> list[StoredMemory]:
         if not path.exists():
             return []
         raw = json.loads(path.read_text(encoding="utf-8"))
+        now = _now_iso()
         out: list[StoredMemory] = []
         for m in raw:
             try:
@@ -715,6 +797,8 @@ Rules:
                     text=str(m.get("text", "")),
                     kind=str(m.get("kind") or FALLBACK_CATEGORY),
                     scope=str(m.get("scope") or "global"),
+                    created_at=str(m.get("created_at") or now),
+                    updated_at=str(m.get("updated_at") or now),
                 ))
             except AttributeError:
                 continue

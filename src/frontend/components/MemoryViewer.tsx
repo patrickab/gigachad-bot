@@ -2,11 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { motion } from "framer-motion"
-import { Check, ChevronDown, ChevronRight, FolderOpen, Globe, Loader2, Plus, X } from "lucide-react"
+import { ArrowUpCircle, Check, ChevronDown, ChevronRight, FolderOpen, Globe, Loader2, Plus, X } from "lucide-react"
 import { FloatingWindow } from "@/components/FloatingWindow"
 import { LaTeXMarkdown } from "@/components/LaTeXMarkdown"
 import { AddMemoryCard, MemoryCard, renderMemoriesMarkdown } from "@/components/MemoryPanel"
-import { commitMemoryDoc, getCategories, getMemories, remapOrphanedCategory, saveCategories } from "@/lib/api"
+import { commitMemoryDoc, getCategories, getMemories, moveMemory, remapOrphanedCategory, saveCategories } from "@/lib/api"
 import { useMemoryViewer } from "@/contexts/MemoryViewerContext"
 import type { CategoryDef, PreviewMemory } from "@/lib/types"
 
@@ -17,7 +17,40 @@ export function MemoryViewer() {
 }
 
 // ---------------------------------------------------------------------------
-// Confirmation popup shown when deleting a category that has memories
+// Helpers
+// ---------------------------------------------------------------------------
+
+function sortByUpdated(mems: PreviewMemory[]): PreviewMemory[] {
+  return [...mems].sort((a, b) => {
+    const ta = a.updated_at ?? a.created_at ?? ""
+    const tb = b.updated_at ?? b.created_at ?? ""
+    return tb.localeCompare(ta)
+  })
+}
+
+function groupByCategory(mems: PreviewMemory[]): Map<string, PreviewMemory[]> {
+  const map = new Map<string, PreviewMemory[]>()
+  for (const m of mems) {
+    const arr = map.get(m.kind) ?? []
+    arr.push(m)
+    map.set(m.kind, arr)
+  }
+  return map
+}
+
+function formatAge(iso: string | undefined): string {
+  if (!iso) return ""
+  const diff = Date.now() - new Date(iso).getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  const days = Math.floor(hrs / 24)
+  return `${days}d ago`
+}
+
+// ---------------------------------------------------------------------------
+// Confirmation popup for category deletion with memories
 // ---------------------------------------------------------------------------
 
 function DeleteCategoryPopup({
@@ -42,26 +75,17 @@ function DeleteCategoryPopup({
       </div>
       <div className="mt-0.5 text-[11px] text-ink-muted">Remap to remaining categories via LLM?</div>
       <div className="mt-2.5 flex items-center justify-end gap-2">
-        <button
-          onClick={onCancel}
-          disabled={remapping}
-          className="text-[11px] text-ink-muted hover:text-ink disabled:opacity-40 transition-colors"
-        >
+        <button onClick={onCancel} disabled={remapping}
+          className="text-[11px] text-ink-muted hover:text-ink disabled:opacity-40 transition-colors">
           Cancel
         </button>
-        <button
-          onClick={onDrop}
-          disabled={remapping}
-          className="rounded-md border border-divider px-2.5 py-1 text-[11px] text-ink-muted hover:bg-hover hover:text-ink disabled:opacity-40 transition-colors"
-        >
+        <button onClick={onDrop} disabled={remapping}
+          className="rounded-md border border-divider px-2.5 py-1 text-[11px] text-ink-muted hover:bg-hover hover:text-ink disabled:opacity-40 transition-colors">
           Delete memories
         </button>
-        <button
-          onClick={onRemap}
-          disabled={remapping}
-          className="flex items-center gap-1 rounded-md border border-divider-strong bg-surface px-2.5 py-1 text-[11px] font-medium text-ink hover:bg-hover disabled:opacity-40 transition-colors"
-        >
-          {remapping ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+        <button onClick={onRemap} disabled={remapping}
+          className="flex items-center gap-1 rounded-md border border-divider-strong bg-surface px-2.5 py-1 text-[11px] font-medium text-ink hover:bg-hover disabled:opacity-40 transition-colors">
+          {remapping && <Loader2 className="h-3 w-3 animate-spin" />}
           Remap
         </button>
       </div>
@@ -86,9 +110,7 @@ function AddCategoryForm({
   const [description, setDescription] = useState("")
   const nameRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
-    nameRef.current?.focus()
-  }, [])
+  useEffect(() => { nameRef.current?.focus() }, [])
 
   const nameKey = name.trim().toLowerCase().replace(/\s+/g, "_")
   const isDuplicate = existingNames.has(nameKey)
@@ -97,41 +119,23 @@ function AddCategoryForm({
   function handleSave() {
     if (!canSave) return
     onAdd({ name: nameKey, description: description.trim() })
-    setName("")
-    setDescription("")
   }
 
   return (
-    <div className="rounded-lg border border-divider bg-surface p-2.5 space-y-1.5 text-[11px]">
-      <input
-        ref={nameRef}
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") handleSave()
-          if (e.key === "Escape") onCancel()
-        }}
+    <div className="rounded-lg border border-divider bg-surface p-2.5 space-y-1.5">
+      <input ref={nameRef} value={name} onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") handleSave(); if (e.key === "Escape") onCancel() }}
         placeholder="category_name"
-        className="w-full rounded border border-divider bg-transparent px-2 py-1 text-xs text-ink placeholder:text-ink-faint outline-none focus:border-divider-strong"
-      />
+        className="w-full rounded border border-divider bg-transparent px-2 py-1 text-xs text-ink placeholder:text-ink-faint outline-none focus:border-divider-strong" />
       {isDuplicate && <div className="text-[10px] text-red-400">Name already exists</div>}
-      <input
-        value={description}
-        onChange={(e) => setDescription(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") handleSave()
-          if (e.key === "Escape") onCancel()
-        }}
+      <input value={description} onChange={(e) => setDescription(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") handleSave(); if (e.key === "Escape") onCancel() }}
         placeholder="Short description (optional)"
-        className="w-full rounded border border-divider bg-transparent px-2 py-1 text-xs text-ink placeholder:text-ink-faint outline-none focus:border-divider-strong"
-      />
+        className="w-full rounded border border-divider bg-transparent px-2 py-1 text-xs text-ink placeholder:text-ink-faint outline-none focus:border-divider-strong" />
       <div className="flex items-center justify-end gap-2 pt-0.5">
         <button onClick={onCancel} className="text-[11px] text-ink-muted hover:text-ink transition-colors">Cancel</button>
-        <button
-          onClick={handleSave}
-          disabled={!canSave}
-          className="rounded-md border border-divider-strong bg-surface-elevated px-2.5 py-1 text-[11px] font-medium text-ink hover:bg-hover disabled:opacity-40 transition-colors"
-        >
+        <button onClick={handleSave} disabled={!canSave}
+          className="rounded-md border border-divider-strong bg-surface-elevated px-2.5 py-1 text-[11px] font-medium text-ink hover:bg-hover disabled:opacity-40 transition-colors">
           Add
         </button>
       </div>
@@ -140,7 +144,7 @@ function AddCategoryForm({
 }
 
 // ---------------------------------------------------------------------------
-// Categories panel
+// Categories panel (collapsible pill list + add form)
 // ---------------------------------------------------------------------------
 
 function CategoriesPanel({
@@ -163,19 +167,13 @@ function CategoriesPanel({
   return (
     <div className="border-b border-divider/30 shrink-0">
       <div className="flex items-center justify-between px-3 py-1.5">
-        <button
-          onClick={() => setExpanded((v) => !v)}
-          className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-ink-faint hover:text-ink-subtle transition-colors"
-        >
+        <button onClick={() => setExpanded((v) => !v)}
+          className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-ink-faint hover:text-ink-subtle transition-colors">
           {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
           Categories ({categories.length})
         </button>
-        <button
-          onClick={() => { setExpanded(true); setAddingCat(true) }}
-          disabled={disabled}
-          className="rounded-md p-1 text-ink-subtle hover:bg-hover hover:text-ink disabled:opacity-40 transition-colors"
-          title="Add category"
-        >
+        <button onClick={() => { setExpanded(true); setAddingCat(true) }} disabled={disabled}
+          className="rounded-md p-1 text-ink-subtle hover:bg-hover hover:text-ink disabled:opacity-40 transition-colors" title="Add category">
           <Plus className="h-3.5 w-3.5" />
         </button>
       </div>
@@ -183,36 +181,116 @@ function CategoriesPanel({
         <div className="px-3 pb-2 space-y-1.5">
           <div className="flex flex-wrap gap-1.5">
             {categories.map((cat) => (
-              <span
-                key={cat.name}
-                title={cat.description}
-                className="inline-flex items-center gap-1 rounded-full border border-divider bg-surface px-2 py-0.5 text-[10px] text-ink-muted"
-              >
+              <span key={cat.name} title={cat.description}
+                className="inline-flex items-center gap-1 rounded-full border border-divider bg-surface px-2 py-0.5 text-[10px] text-ink-muted">
                 {cat.name.replace(/_/g, " ")}
                 {!disabled && (
-                  <button
-                    onClick={() => onDeleteCategory(cat)}
+                  <button onClick={() => onDeleteCategory(cat)}
                     className="ml-0.5 rounded-full p-0.5 text-ink-faint hover:text-ink-muted transition-colors"
-                    aria-label={`Remove category ${cat.name}`}
-                  >
+                    aria-label={`Remove category ${cat.name}`}>
                     <X className="h-2.5 w-2.5" />
                   </button>
                 )}
               </span>
             ))}
             {categories.length === 0 && (
-              <span className="text-[10px] italic text-ink-faint">No categories — add one above.</span>
+              <span className="text-[10px] italic text-ink-faint">No categories.</span>
             )}
           </div>
           {addingCat && (
-            <AddCategoryForm
-              existingNames={existingNames}
+            <AddCategoryForm existingNames={existingNames}
               onAdd={(cat) => { onAddCategory(cat); setAddingCat(false) }}
-              onCancel={() => setAddingCat(false)}
-            />
+              onCancel={() => setAddingCat(false)} />
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Memory list grouped by category, sorted newest-first within each group
+// ---------------------------------------------------------------------------
+
+function GroupedMemoryList({
+  memories,
+  scope,
+  disabled,
+  showPromoteButton,
+  promotingId,
+  onChange,
+  onRemove,
+  onPromote,
+}: {
+  memories: PreviewMemory[]
+  scope: "global" | "project"
+  disabled: boolean
+  showPromoteButton: boolean
+  promotingId: string | null
+  onChange: (id: string, text: string) => void
+  onRemove: (id: string) => void
+  onPromote: (mem: PreviewMemory) => void
+}) {
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+
+  const grouped = groupByCategory(memories)
+
+  function toggle(kind: string) {
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      next.has(kind) ? next.delete(kind) : next.add(kind)
+      return next
+    })
+  }
+
+  if (memories.length === 0) {
+    return <div className="text-xs italic text-ink-faint">No memories in this profile.</div>
+  }
+
+  return (
+    <div className="space-y-4">
+      {[...grouped.entries()].map(([kind, mems]) => {
+        const sorted = sortByUpdated(mems)
+        const isCollapsed = collapsed.has(kind)
+        return (
+          <div key={kind}>
+            <button onClick={() => toggle(kind)}
+              className="flex w-full items-center gap-1.5 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-faint hover:text-ink-subtle transition-colors">
+              {isCollapsed ? <ChevronRight className="h-3 w-3 shrink-0" /> : <ChevronDown className="h-3 w-3 shrink-0" />}
+              <span>{kind.replace(/_/g, " ")}</span>
+              <span className="ml-auto font-normal normal-case tracking-normal">{sorted.length}</span>
+            </button>
+            {!isCollapsed && (
+              <div className="space-y-2 pl-1">
+                {sorted.map((m) => (
+                  <div key={m.id} className="group/memrow relative">
+                    <MemoryCard memory={m} scope={scope} mode="display" disabled={disabled}
+                      onChange={onChange} onRemove={onRemove} />
+                    <div className="flex items-center gap-2 px-1 pt-0.5">
+                      {m.updated_at && (
+                        <span className="text-[10px] text-ink-faint">{formatAge(m.updated_at)}</span>
+                      )}
+                      {showPromoteButton && (
+                        <button
+                          onClick={() => onPromote(m)}
+                          disabled={disabled || promotingId === m.id}
+                          title="Promote to global profile"
+                          className="flex items-center gap-1 text-[10px] text-ink-faint hover:text-ink-subtle disabled:opacity-40 transition-colors"
+                        >
+                          {promotingId === m.id
+                            ? <Loader2 className="h-3 w-3 animate-spin" />
+                            : <ArrowUpCircle className="h-3 w-3" />}
+                          Global
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -238,6 +316,7 @@ function MemoryViewerInner({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
+  const [promotingId, setPromotingId] = useState<string | null>(null)
 
   // Category deletion flow
   const [pendingDeleteCat, setPendingDeleteCat] = useState<CategoryDef | null>(null)
@@ -266,7 +345,7 @@ function MemoryViewerInner({
   }, [scope, projectSlug])
 
   const handleEdit = useCallback((id: string, text: string) => {
-    setMemories((prev) => prev.map((m) => (m.id === id ? { ...m, text } : m)))
+    setMemories((prev) => prev.map((m) => m.id === id ? { ...m, text, updated_at: new Date().toISOString() } : m))
   }, [])
 
   const handleRemove = useCallback((id: string) => {
@@ -276,6 +355,7 @@ function MemoryViewerInner({
   const handleAdd = useCallback((s: "global" | "project", text: string) => {
     const trimmed = text.trim()
     if (!trimmed) return
+    const now = new Date().toISOString()
     setMemories((prev) => [
       ...prev,
       {
@@ -283,6 +363,8 @@ function MemoryViewerInner({
         text: trimmed,
         kind: categories[0]?.name ?? "note",
         scope: s,
+        created_at: now,
+        updated_at: now,
       },
     ])
   }, [categories])
@@ -305,7 +387,6 @@ function MemoryViewerInner({
     const orphaned = memories.filter((m) => m.kind === pendingDeleteCat.name)
     const remaining = categories.filter((c) => c.name !== pendingDeleteCat.name)
     if (remaining.length === 0) {
-      // No remaining categories — just drop the memories
       setMemories((prev) => prev.filter((m) => m.kind !== pendingDeleteCat.name))
       setCategories(remaining)
       setPendingDeleteCat(null)
@@ -334,6 +415,19 @@ function MemoryViewerInner({
     setPendingDeleteCat(null)
   }, [pendingDeleteCat])
 
+  const handlePromote = useCallback(async (mem: PreviewMemory) => {
+    if (scope !== "project" || !projectSlug) return
+    setPromotingId(mem.id)
+    try {
+      await moveMemory(mem.id, "project", "global", projectSlug, null)
+      setMemories((prev) => prev.filter((m) => m.id !== mem.id))
+    } catch (e) {
+      setError((e as Error)?.message || "Promote failed")
+    } finally {
+      setPromotingId(null)
+    }
+  }, [scope, projectSlug])
+
   const handleSave = useCallback(async () => {
     if (loading || saving) return
     setSaving(true)
@@ -354,13 +448,10 @@ function MemoryViewerInner({
       const editable = !!tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.isContentEditable)
       if (e.key === "Escape") {
         if (pendingDeleteCat) { setPendingDeleteCat(null); return }
-        e.preventDefault()
-        onClose()
-        return
+        e.preventDefault(); onClose(); return
       }
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !editable) {
-        e.preventDefault()
-        handleSave()
+        e.preventDefault(); handleSave()
       }
     }
     document.addEventListener("keydown", onKey)
@@ -379,6 +470,7 @@ function MemoryViewerInner({
           <div className="flex items-center gap-2">
             {isLocked ? <Loader2 className="h-3.5 w-3.5 animate-spin text-ink-muted" /> : <ScopeIcon className="h-3.5 w-3.5 text-ink-muted" />}
             <span className="text-xs font-medium text-ink-muted">{title}</span>
+            <span className="text-[10px] text-ink-faint">{memories.length} entries</span>
           </div>
           <div className="flex items-center gap-2">
             <button onClick={onClose} disabled={saving || remapping}
@@ -409,7 +501,6 @@ function MemoryViewerInner({
           <div className="flex-1 flex min-h-0">
             {/* Left pane */}
             <div className="w-1/2 min-w-0 border-r border-divider/50 flex flex-col relative">
-              {/* Deletion confirmation popup */}
               {pendingDeleteCat && (
                 <DeleteCategoryPopup
                   category={pendingDeleteCat}
@@ -421,38 +512,34 @@ function MemoryViewerInner({
                 />
               )}
 
-              {/* Categories section */}
-              <CategoriesPanel
-                categories={categories}
-                memories={memories}
-                disabled={isLocked}
-                onDeleteCategory={handleDeleteCategory}
-                onAddCategory={handleAddCategory}
-              />
+              <CategoriesPanel categories={categories} memories={memories} disabled={isLocked}
+                onDeleteCategory={handleDeleteCategory} onAddCategory={handleAddCategory} />
 
               {/* Memories header */}
               <div className="flex items-center justify-between border-b border-divider/30 px-3 py-1.5 shrink-0">
                 <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider text-ink-faint">
                   <ScopeIcon className="h-3 w-3" />Memories
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-ink-faint">{memories.length} entries</span>
-                  <button onClick={() => setAdding((v) => !v)} disabled={isLocked}
-                    className="rounded-md p-1 text-ink-subtle hover:bg-hover hover:text-ink disabled:opacity-40 transition-colors" title="Add memory">
-                    <Plus className="h-3.5 w-3.5" />
-                  </button>
-                </div>
+                <button onClick={() => setAdding((v) => !v)} disabled={isLocked}
+                  className="rounded-md p-1 text-ink-subtle hover:bg-hover hover:text-ink disabled:opacity-40 transition-colors" title="Add memory">
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
               </div>
 
-              {/* Memories list */}
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
                 {adding && (
                   <AddMemoryCard scope={scope} disabled={isLocked} onAddMemory={handleAdd} onCancel={() => setAdding(false)} />
                 )}
-                {memories.length > 0 ? memories.map((m) => (
-                  <MemoryCard key={m.id} memory={m} scope={scope} mode="display" disabled={isLocked}
-                    onChange={handleEdit} onRemove={handleRemove} />
-                )) : <div className="text-xs italic text-ink-faint">No memories in this profile.</div>}
+                <GroupedMemoryList
+                  memories={memories}
+                  scope={scope}
+                  disabled={isLocked}
+                  showPromoteButton={scope === "project"}
+                  promotingId={promotingId}
+                  onChange={handleEdit}
+                  onRemove={handleRemove}
+                  onPromote={handlePromote}
+                />
               </div>
             </div>
 

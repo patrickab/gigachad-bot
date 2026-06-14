@@ -190,6 +190,31 @@ async def remap_category(req: RemapRequest, store: MemoryStoreDep) -> dict:
     return {"memories": remapped}
 
 
+class MemoryMoveRequest(BaseModel):
+    memory_id: str
+    from_scope: str
+    to_scope: str
+    from_project_slug: str | None = None
+    to_project_slug: str | None = None
+
+
+@router.post("/move")
+def move_memory(req: MemoryMoveRequest, store: MemoryStoreDep) -> dict:
+    try:
+        store.move_memory(
+            memory_id=req.memory_id,
+            from_scope=req.from_scope,
+            to_scope=req.to_scope,
+            from_project_slug=req.from_project_slug,
+            to_project_slug=req.to_project_slug,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return {"status": "moved"}
+
+
 @router.get("/profiles")
 def list_memory_profiles(
     store: MemoryStoreDep,

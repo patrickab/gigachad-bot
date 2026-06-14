@@ -180,6 +180,8 @@ export interface PreviewMemory {
   kind: string
   scope: "global" | "project"
   status?: MemoryStatus
+  created_at?: string
+  updated_at?: string
 }
 
 export interface MemoryExtractResponse {
