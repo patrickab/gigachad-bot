@@ -199,3 +199,8 @@ export interface MemoryProfileMeta {
   filepath: string
   title: string
 }
+
+export interface CategoryDef {
+  name: string
+  description: string
+}

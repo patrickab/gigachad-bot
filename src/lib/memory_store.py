@@ -226,8 +226,10 @@ class MemoryStore:
         review_id = str(uuid.uuid4())
 
         conversation = self._get_transcript(messages)
-        global_block = self._format_categories(DEFAULT_GLOBAL_CATEGORIES)
-        project_block = self._format_categories(DEFAULT_PROJECT_CATEGORIES)
+        global_cats = self.get_categories("global")
+        project_cats = self.get_categories("project", project_slug) if project_slug else DEFAULT_PROJECT_CATEGORIES
+        global_block = self._format_categories(global_cats)
+        project_block = self._format_categories(project_cats)
 
         system_prompt = (
             "You extract atomic, durable candidate memories from a conversation for a "
@@ -273,9 +275,9 @@ Rules:
 
         data = await self._generate_json(_llm, system_prompt, user_prompt, timeout=EXTRACT_TIMEOUT)
 
-        global_memories = self._build_candidates(data.get("global", []), "global", DEFAULT_GLOBAL_CATEGORIES)
+        global_memories = self._build_candidates(data.get("global", []), "global", global_cats)
         project_memories = (
-            self._build_candidates(data.get("project", []), "project", DEFAULT_PROJECT_CATEGORIES)
+            self._build_candidates(data.get("project", []), "project", project_cats)
             if project_slug else []
         )
 
@@ -537,6 +539,93 @@ Return JSON with this exact shape:
             self._pending_path(review_id).unlink(missing_ok=True)
         except OSError as e:
             log.warning("Failed to delete pending buffer %s: %s", review_id, e)
+
+    # ------------------------------------------------------------------
+    # Category management
+    # ------------------------------------------------------------------
+
+    def _categories_path(self, scope: str, project_slug: str | None) -> "Path":
+        if scope == "global":
+            return self.memory_root / "global-categories.json"
+        return self._project_dir(project_slug) / "memory/categories.json"
+
+    def get_categories(self, scope: str, project_slug: str | None = None) -> list[dict[str, str]]:
+        """Return the active category list for *scope*, falling back to defaults."""
+        path = self._categories_path(scope, project_slug)
+        if not path.exists():
+            return DEFAULT_GLOBAL_CATEGORIES if scope == "global" else DEFAULT_PROJECT_CATEGORIES
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            cats = [c for c in raw if isinstance(c, dict) and "name" in c and "description" in c]
+            return cats or (DEFAULT_GLOBAL_CATEGORIES if scope == "global" else DEFAULT_PROJECT_CATEGORIES)
+        except Exception as e:
+            log.error("Failed to read categories for %r: %s", scope, e)
+            return DEFAULT_GLOBAL_CATEGORIES if scope == "global" else DEFAULT_PROJECT_CATEGORIES
+
+    def set_categories(self, scope: str, categories: list[dict[str, str]], project_slug: str | None = None) -> None:
+        """Persist *categories* for *scope*."""
+        path = self._categories_path(scope, project_slug)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(categories, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    async def remap_orphaned(
+        self,
+        llm: MemoryLLM,
+        orphaned_memories: list[dict[str, Any]],
+        remaining_categories: list[dict[str, str]],
+        scope: str,
+    ) -> list[dict[str, Any]]:
+        """Reassign *orphaned_memories* to *remaining_categories* via LLM.
+
+        Falls back to the first remaining category on any failure so that
+        memories are never silently lost.
+        """
+        if not orphaned_memories:
+            return []
+        if not remaining_categories:
+            return []
+
+        fallback_cat = remaining_categories[0]["name"]
+
+        categories_block = self._format_categories(remaining_categories)
+        system_prompt = (
+            "You reassign memory items to the best-fitting category from a given list. "
+            "Output valid JSON only, no prose."
+        )
+        user_prompt = f"""
+Memories to reassign:
+{json.dumps([m["text"] for m in orphaned_memories], indent=2, ensure_ascii=False)}
+
+Available categories:
+{categories_block}
+
+Return JSON with this exact shape:
+{{"assignments": [{{"memory": "...", "category": "<one category name>"}}]}}
+
+Rules:
+- "category" MUST be one of the listed category names.
+- Keep the memory text unchanged.
+- One entry per input memory, in the same order.
+""".strip()
+
+        try:
+            data = await self._generate_json(llm, system_prompt, user_prompt, timeout=EXTRACT_TIMEOUT)
+        except Exception as e:
+            log.error("remap_orphaned LLM call failed: %s — using fallback category %r", e, fallback_cat)
+            return [{**m, "kind": fallback_cat} for m in orphaned_memories]
+
+        assignments = data.get("assignments", [])
+        allowed = {c["name"] for c in remaining_categories}
+        result: list[dict[str, Any]] = []
+        for idx, m in enumerate(orphaned_memories):
+            if idx < len(assignments):
+                cat = str(assignments[idx].get("category", "")).strip()
+                if cat not in allowed:
+                    cat = fallback_cat
+            else:
+                cat = fallback_cat
+            result.append({**m, "kind": cat})
+        return result
 
     # ------------------------------------------------------------------
     # Profile management & versioning

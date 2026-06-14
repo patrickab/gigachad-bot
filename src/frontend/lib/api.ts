@@ -1,4 +1,4 @@
-import type { Attachment, BranchMeta, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, MemoryProfileMeta, Message, ModelsResponse, PreviewMemory, ProjectData, ProjectListItem, ProjectStateUpdate, ProposedMemory, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage } from "./types"
+import type { Attachment, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, MemoryProfileMeta, Message, ModelsResponse, PreviewMemory, ProjectData, ProjectListItem, ProjectStateUpdate, ProposedMemory, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { API_BASE, DEFAULT_TEMPERATURE, DEFAULT_DOWNSCALE_IMAGES } from "./config"
@@ -408,4 +408,36 @@ export async function listMemoryProfiles(projectSlug?: string | null): Promise<{
 
 export async function getMemoryProfileContent(filepath: string): Promise<{ content: string; filepath: string }> {
   return request(`/memory/content?filepath=${encodeURIComponent(filepath)}`)
+}
+
+export async function getCategories(scope: "global" | "project", projectSlug?: string | null): Promise<{ categories: CategoryDef[] }> {
+  const params = new URLSearchParams({ scope })
+  if (projectSlug) params.set("project_slug", projectSlug)
+  return request<{ categories: CategoryDef[] }>(`/memory/categories?${params.toString()}`)
+}
+
+export async function saveCategories(scope: "global" | "project", categories: CategoryDef[], projectSlug?: string | null): Promise<void> {
+  await request("/memory/categories", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ scope, categories, project_slug: projectSlug ?? null }),
+  })
+}
+
+export async function remapOrphanedCategory(
+  scope: "global" | "project",
+  orphanedMemories: PreviewMemory[],
+  remainingCategories: CategoryDef[],
+  projectSlug?: string | null,
+): Promise<{ memories: PreviewMemory[] }> {
+  return request("/memory/remap-category", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      scope,
+      orphaned_memories: orphanedMemories,
+      remaining_categories: remainingCategories,
+      project_slug: projectSlug ?? null,
+    }),
+  })
 }

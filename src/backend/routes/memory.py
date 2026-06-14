@@ -140,6 +140,56 @@ def list_memories(
     return {"memories": memories}
 
 
+@router.get("/categories")
+def get_categories(
+    store: MemoryStoreDep,
+    scope: str = Query(...),
+    project_slug: str | None = Query(None, alias="project_slug"),
+) -> dict:
+    try:
+        categories = store.get_categories(scope=scope, project_slug=project_slug)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return {"categories": categories}
+
+
+class CategorySetRequest(BaseModel):
+    scope: str
+    categories: list[dict]
+    project_slug: str | None = None
+
+
+@router.put("/categories")
+def set_categories(req: CategorySetRequest, store: MemoryStoreDep) -> dict:
+    try:
+        store.set_categories(scope=req.scope, categories=req.categories, project_slug=req.project_slug)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return {"status": "saved"}
+
+
+class RemapRequest(BaseModel):
+    scope: str
+    orphaned_memories: list[dict]
+    remaining_categories: list[dict]
+    project_slug: str | None = None
+
+
+@router.post("/remap-category")
+async def remap_category(req: RemapRequest, store: MemoryStoreDep) -> dict:
+    try:
+        with request_client() as client:
+            remapped = await store.remap_orphaned(
+                llm=client,
+                orphaned_memories=req.orphaned_memories,
+                remaining_categories=req.remaining_categories,
+                scope=req.scope,
+            )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return {"memories": remapped}
+
+
 @router.get("/profiles")
 def list_memory_profiles(
     store: MemoryStoreDep,
