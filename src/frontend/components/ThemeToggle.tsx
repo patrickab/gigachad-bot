@@ -18,7 +18,10 @@ export function ThemeToggle() {
     const next = theme === "dark" ? "light" : "dark"
     setTheme(next)
     try { localStorage.setItem(STORAGE_KEY_THEME, next) } catch {}
-    document.documentElement.classList.toggle("light", next === "light")
+    const root = document.documentElement
+    root.classList.add("theme-transition")
+    root.classList.toggle("light", next === "light")
+    window.setTimeout(() => root.classList.remove("theme-transition"), 3000)
   }
 
   return (

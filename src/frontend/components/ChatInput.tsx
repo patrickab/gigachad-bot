@@ -253,7 +253,7 @@ export function ChatInput({
         </motion.div>
       )}
 
-      <div className="relative z-20 rounded-3xl border border-divider-strong/35 p-4 transition-all duration-300 [background:color-mix(in_oklab,var(--surface-elevated),white_6%)] shadow-[var(--shadow-lg)] focus-within:border-divider-strong">
+      <div className="relative z-20 rounded-2xl border border-divider-strong/60 p-4 transition-all duration-300 [background:color-mix(in_oklab,var(--surface-elevated),var(--ink)_4%)] shadow-[var(--shadow-lg)] focus-within:border-divider-strong focus-within:ring-1 focus-within:ring-ink/15">
           <textarea
             ref={textareaRef}
             rows={1}
@@ -263,7 +263,7 @@ export function ChatInput({
             onPaste={handlePaste}
             disabled={disabled && !isStreaming}
             placeholder="Send a Message"
-            className="w-full resize-none bg-transparent text-base text-ink placeholder:text-ink-subtle outline-none"
+            className="w-full resize-none bg-transparent text-sm text-ink placeholder:text-ink-subtle outline-none"
           />
           <div className="mt-3 flex items-center justify-between">
             <div className="flex items-center gap-1">

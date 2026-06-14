@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic"
 import { motion } from "framer-motion"
 import { memo, useMemo, useState } from "react"
-import { Bot, Brain, Check, Copy, GitFork, Loader2, Trash2, User } from "lucide-react"
+import { Bot, Brain, Check, ChevronDown, Copy, GitFork, Loader2, Trash2, User } from "lucide-react"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { ResearchTrace } from "./ResearchTrace"
 import { MessageAttachments } from "./MessageAttachments"
@@ -130,7 +130,11 @@ function ChatMessageInner({ role, content, index, onDelete, onBranch, morphic_re
         <div className="mb-0.5 text-xs font-medium text-ink-subtle">{isUser ? "You" : "Assistant"}</div>
         {isUser ? (
           <>
-            {content && <p className="text-sm whitespace-pre-wrap text-ink">{content}</p>}
+            {content && (
+              <div className="text-ink">
+                <LaTeXMarkdown content={content} />
+              </div>
+            )}
             {attachments && attachments.length > 0 && (
               <MessageAttachments attachments={attachments} onClick={onAttachmentClick ?? (() => {})} />
             )}
@@ -203,6 +207,16 @@ function ChatMessageInner({ role, content, index, onDelete, onBranch, morphic_re
           )}
         </div>
       </div>
+      {isUser && collapsibleUser && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onCollapse?.() }}
+          className="mt-1 shrink-0 self-start rounded p-0.5 text-ink-faint hover:text-ink transition-colors"
+          aria-label="Collapse message pair"
+          title="Collapse"
+        >
+          <ChevronDown className="h-4 w-4" />
+        </button>
+      )}
     </motion.div>
   )
 }

@@ -1,12 +1,8 @@
 "use client"
 
-import ReactMarkdown from "react-markdown"
-import remarkGfm from "remark-gfm"
-import remarkMath from "remark-math"
+import { Streamdown, type Components } from "streamdown"
+import { createMathPlugin } from "@streamdown/math"
 import remarkBreaks from "remark-breaks"
-import rehypeKatex from "rehype-katex"
-import rehypeRaw from "rehype-raw"
-import type { Components } from "react-markdown"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import { highlightCode } from "@/lib/markdown-syntax-highlighting"
@@ -14,32 +10,33 @@ import { motion, AnimatePresence } from "framer-motion"
 import { Check, Copy, Globe } from "lucide-react"
 import "katex/dist/katex.min.css"
 
-const FULL_REMARK_PLUGINS = [remarkGfm, remarkMath, remarkBreaks]
-const FULL_REHYPE_PLUGINS = [rehypeKatex, rehypeRaw]
-const STREAMING_REMARK_PLUGINS = [remarkGfm, remarkBreaks]
-const STREAMING_REHYPE_PLUGINS = [rehypeRaw]
+// Streamdown plugins are stateful singletons (they lazily wire up KaTeX), so
+// create once at module scope. Code blocks are rendered by our own minimal
+// CodeBlock (below) instead of @streamdown/code: it keeps the bare,
+// chrome-free look of the rest of the app and, unlike the tokenized streamdown
+// renderer, preserves newlines so multi-line ASCII diagrams render correctly.
+const mathPlugin = createMathPlugin({ singleDollarTextMath: false })
+const PLUGINS = { math: mathPlugin }
 
-const streamingComponents: Components & { thought?: React.ComponentType<any> } = {
-  pre({ children }) {
-    return <>{children}</>
-  },
-  code({ className, children, ...props }) {
-    return (
-      <code className={className} {...props}>
-        {children}
-      </code>
-    )
-  },
-  table({ children }) {
-    return (
-      <div className="overflow-x-auto">
-        <table>{children}</table>
-      </div>
-    )
-  },
-  thought() {
-    return null
-  },
+const REMARK_PLUGINS = [remarkBreaks]
+const LINK_SAFETY_OFF = { enabled: false }
+
+// remark-math (used by @streamdown/math) only understands $...$ / $$...$$.
+// LLMs frequently emit \(...\) and \[...\], so normalize those to dollars.
+// Fenced and inline code segments are skipped so code samples aren't mangled.
+function normalizeMathDelimiters(input: string): string {
+  if (input.indexOf("\\(") === -1 && input.indexOf("\\[") === -1) return input
+  const segments = input.split(/(```[\s\S]*?```|`[^`]*`)/g)
+  return segments
+    .map((seg, i) => {
+      if (i % 2 === 1) return seg // code segment, leave untouched
+      return seg
+        .replace(/\\\[/g, () => "$$")
+        .replace(/\\\]/g, () => "$$")
+        .replace(/\\\(/g, () => "$")
+        .replace(/\\\)/g, () => "$")
+    })
+    .join("")
 }
 
 function CodeBlock({ codeString, language }: { codeString: string; language: string }) {
@@ -82,7 +79,51 @@ function CodeBlock({ codeString, language }: { codeString: string; language: str
   )
 }
 
-function CitationPill({ node, children, href, title, ...props }: any) {
+// Prose elements are rendered as bare intrinsic tags so they shed Streamdown's
+// built-in Tailwind classes and inherit the app's .markdown-body token theme.
+const PROSE_COMPONENTS: Components = {
+  h1: "h1",
+  h2: "h2",
+  h3: "h3",
+  h4: "h4",
+  h5: "h5",
+  h6: "h6",
+  p: "p",
+  ul: "ul",
+  ol: "ol",
+  li: "li",
+  blockquote: "blockquote",
+  hr: "hr",
+  strong: "strong",
+  em: "em",
+  del: "del",
+  thead: "thead",
+  tbody: "tbody",
+  tr: "tr",
+  th: "th",
+  td: "td",
+  img: "img",
+  table: ({ children }: any) => (
+    <div className="overflow-x-auto">
+      <table>{children}</table>
+    </div>
+  ),
+  pre: ({ children }: any) => <>{children}</>,
+  code: ({ className, children, ...props }: any) => {
+    const match = /language-(\w+)/.exec(className || "")
+    if (!match) {
+      return (
+        <code className={className} {...props}>
+          {children}
+        </code>
+      )
+    }
+    const codeString = String(children).replace(/\n$/, "")
+    return <CodeBlock codeString={codeString} language={match[1]} />
+  },
+}
+
+function CitationPill({ children, href, title, ...props }: any) {
   const [show, setShow] = useState(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -146,36 +187,21 @@ function CitationPill({ node, children, href, title, ...props }: any) {
   )
 }
 
-const sharedComponents: Components & { thought?: React.ComponentType<any> } = {
-  pre({ children }) {
-    return <>{children}</>
-  },
-  code({ className, children, node, ...props }) {
-    const match = /language-(\w+)/.exec(className || "")
-    if (!match && !className) {
-      return (
-        <code className={className} {...props}>
-          {children}
-        </code>
-      )
-    }
-    const language = match ? match[1] : "text"
-    const codeString = String(children).replace(/\n$/, "")
-    return <CodeBlock codeString={codeString} language={language} />
-  },
-  table({ children }) {
-    return (
-      <div className="overflow-x-auto">
-        <table>{children}</table>
-      </div>
-    )
-  },
-  thought() {
-    return null
-  },
-}
+function LaTeXMarkdownInner({
+  content,
+  citationMap,
+  streaming,
+  compact,
+  onContentChange,
+}: {
+  content: string
+  citationMap?: Record<string, { title: string; url: string; content: string }>
+  streaming?: boolean
+  compact?: boolean
+  onContentChange?: (newContent: string) => void
+}) {
+  const processed = useMemo(() => normalizeMathDelimiters(content), [content])
 
-function LaTeXMarkdownInner({ content, citationMap, streaming, compact, onContentChange }: { content: string; citationMap?: Record<string, { title: string; url: string; content: string }>; streaming?: boolean; compact?: boolean; onContentChange?: (newContent: string) => void }) {
   const checkboxLines = useMemo(() => {
     if (!onContentChange) return []
     const lines = content.split("\n")
@@ -198,69 +224,70 @@ function LaTeXMarkdownInner({ content, citationMap, streaming, compact, onConten
   }, [content, checkboxLines, onContentChange])
 
   const checkboxIdx = useRef(0)
-  if (onContentChange) checkboxIdx.current = 0
+  checkboxIdx.current = 0
 
-  const allComponents = useMemo<Components>(() => ({
-    ...sharedComponents,
-    a({ node, children, href, title, ...props }: any) {
-      const num = String(children)
-      const info = citationMap?.[num]
-      if (info && /^\d+$/.test(num)) {
+  const components = useMemo<Components>(() => {
+    const base: Components = {
+      ...PROSE_COMPONENTS,
+      a({ children, href, title, ...props }: any) {
+        const num = String(children)
+        const info = citationMap?.[num]
+        if (info && /^\d+$/.test(num)) {
+          return (
+            <CitationPill
+              href={info.url}
+              title={info.title}
+              data-title={info.title}
+              data-content={info.content}
+            >
+              {children}
+            </CitationPill>
+          )
+        }
         return (
-          <CitationPill
-            node={node}
-            href={info.url}
-            title={info.title}
-            data-title={info.title}
-            data-content={info.content}
+          <a
+            href={href}
+            title={title}
+            className="text-ink-muted hover:text-ink underline underline-offset-2 decoration-divider-strong hover:decoration-ink-muted transition-colors"
+            {...props}
           >
             {children}
-          </CitationPill>
+          </a>
+        )
+      },
+    }
+    if (onContentChange) {
+      base.input = ({ checked, type, ...rest }: any) => {
+        if (type !== "checkbox") return <input type={type} checked={checked} {...rest} />
+        const idx = checkboxIdx.current++
+        return (
+          <input
+            type="checkbox"
+            checked={checked}
+            className="mr-1.5 accent-ink cursor-pointer"
+            onChange={() => handleToggle(idx, !!checked)}
+          />
         )
       }
-      return (
-        <a href={href} title={title} className="text-ink hover:text-ink underline underline-offset-2" {...props}>
-          {children}
-        </a>
-      )
-    },
-  }), [citationMap])
-
-  const interactiveInput = onContentChange ? {
-    input({ checked, type, ...rest }: any) {
-      if (type !== "checkbox") return <input type={type} checked={checked} {...rest} />
-      const idx = checkboxIdx.current++
-      return (
-        <input
-          type="checkbox"
-          checked={checked}
-          className="mr-1.5 accent-ink cursor-pointer"
-          onChange={() => handleToggle(idx, !!checked)}
-        />
-      )
-    },
-  } : null
-
-  const remarkPlugins = streaming
-    ? STREAMING_REMARK_PLUGINS
-    : FULL_REMARK_PLUGINS
-
-  const rehypePlugins = streaming
-    ? STREAMING_REHYPE_PLUGINS
-    : FULL_REHYPE_PLUGINS
-
-  const baseComponents = streaming ? streamingComponents : allComponents
-  const components = interactiveInput ? { ...baseComponents, ...interactiveInput } : baseComponents
+    }
+    return base
+  }, [citationMap, onContentChange, handleToggle])
 
   return (
-    <div className={cn("text-sm leading-relaxed", compact ? "markdown-body-compact" : "markdown-body")} style={{ color: "var(--ink)" }}>
-      <ReactMarkdown
-        remarkPlugins={remarkPlugins}
-        rehypePlugins={rehypePlugins}
+    <div
+      className={cn("text-sm leading-relaxed", compact ? "markdown-body-compact" : "markdown-body")}
+      style={{ color: "var(--ink)" }}
+    >
+      <Streamdown
+        mode={streaming ? "streaming" : "static"}
+        isAnimating={!!streaming}
+        plugins={PLUGINS}
+        remarkPlugins={REMARK_PLUGINS}
+        linkSafety={LINK_SAFETY_OFF}
         components={components}
       >
-        {content}
-      </ReactMarkdown>
+        {processed}
+      </Streamdown>
     </div>
   )
 }
