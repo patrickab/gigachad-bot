@@ -1,10 +1,22 @@
-"""Document-backed memory store for user profile and project memory."""
+"""Document-backed memory store for user profile and project memory.
+
+Pipeline (all local-friendly, no vector DB):
+
+1. ``extract``  – one JSON call to a small model produces atomic candidate
+   memories, each tagged with a category from ``DEFAULT_GLOBAL_CATEGORIES`` or
+   ``DEFAULT_PROJECT_CATEGORIES``. Candidates are buffered to
+   ``memory/pending/<review_id>.json``.
+2. user review  – the frontend gates which candidates are accepted.
+3. ``reconcile`` – accepted candidates are merged into the canonical store
+   *per category* (1-to-n within a single category bucket), so only memories of
+   the same category are ever compared. Unaffected categories are left untouched.
+4. ``commit``   – the canonical JSON + rendered markdown are written.
+"""
 
 from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 import json
 import logging
 import os
@@ -13,7 +25,6 @@ from typing import TYPE_CHECKING, Any, Protocol
 import uuid
 
 from config import DIRECTORY_CHAT_HISTORIES, SMALL_MODEL
-from lib.legacy.mem0_memory_store import LegacyMem0MemoryStore
 
 log = logging.getLogger(__name__)
 
@@ -29,8 +40,48 @@ MEMORY_ROOT = DIRECTORY_CHAT_HISTORIES / "memory"
 PENDING_DIR = MEMORY_ROOT / "pending"
 GLOBAL_PROFILE = MEMORY_ROOT / "global-profile.md"
 PROJECT_MEMORY = "memory/memory.md"
-MEMORY_LLM_TIMEOUT = 120
 EXTRACT_TIMEOUT = 60
+FALLBACK_CATEGORY = "note"
+
+
+# Categories define which *types* of memory are extracted. Tuned to be useful
+# for both studying lectures and hobby programming. Add entries here to teach the
+# extractor new buckets — extraction and per-category dedup pick them up
+# automatically.
+DEFAULT_GLOBAL_CATEGORIES: list[dict[str, str]] = [
+    {"name": "identity",
+     "description": "Stable facts about who the user is: name, role, field of study, spoken/programming languages, background."},
+    {"name": "communication_preference",
+     "description": "How the user wants the assistant to respond: tone, verbosity, language, formatting."},
+    {"name": "learning_preference",
+     "description": "How the user likes to study and learn: preferred explanations, examples, pace, analogies, formats."},
+    {"name": "engineering_preference",
+     "description": "General coding and tooling preferences across projects: languages, frameworks, libraries, code style."},
+    {"name": "environment",
+     "description": "The user's tools and setup: OS, editor, hardware, shell, recurring environment details."},
+    {"name": "interest",
+     "description": "Recurring topics, subjects, or hobbies the user cares about beyond a single project."},
+    {"name": "goal",
+     "description": "Longer-term personal, academic, or career goals the user is working toward."},
+]
+
+DEFAULT_PROJECT_CATEGORIES: list[dict[str, str]] = [
+    {"name": "purpose",
+     "description": "What this project or course/subject is about and what it aims to achieve."},
+    {"name": "current_focus",
+     "description": "What is being worked on or studied right now."},
+    {"name": "key_concept",
+     "description": "Important concepts, definitions, formulas, or facts worth retaining (e.g. from lectures)."},
+    {"name": "decision",
+     "description": "Design, architecture, or technical decisions that were made, with their rationale."},
+    {"name": "constraint",
+     "description": "Requirements, limitations, deadlines, or rules that apply to the project."},
+    {"name": "resource",
+     "description": "Useful references, files, links, datasets, tools, or commands tied to this project."},
+    {"name": "open_question",
+     "description": "Unresolved questions, blockers, or pending tasks to follow up on."},
+]
+
 
 GLOBAL_TEMPLATE = """# User Profile
 
@@ -68,7 +119,7 @@ class ProposedMemory:
     id: str
     memory: str
     scope: str
-    kind: str = "note"
+    kind: str = FALLBACK_CATEGORY  # holds the category name
 
 
 @dataclass
@@ -76,6 +127,14 @@ class ExtractResult:
     review_id: str
     global_memories: list[ProposedMemory] = field(default_factory=list)
     project_memories: list[ProposedMemory] = field(default_factory=list)
+
+
+@dataclass
+class StoredMemory:
+    id: str
+    text: str
+    kind: str  # category name
+    scope: str  # "global" | "project"
 
 
 def _memory_extraction_model() -> str:
@@ -102,19 +161,12 @@ def _json_from_response(text: str) -> dict[str, Any]:
 
 
 class MemoryStore:
-    """Owns memory extraction, canonical document updates, and memory logs."""
+    """Owns memory extraction, canonical document updates, and the pending buffer."""
 
     def __init__(self, base_dir: Path = DIRECTORY_CHAT_HISTORIES) -> None:
         self.base_dir = base_dir.resolve()
         self.memory_root = self.base_dir / "memory"
         self.pending_dir = self.memory_root / "pending"
-        self._mem0: LegacyMem0MemoryStore | None = None
-
-    @property
-    def mem0(self) -> LegacyMem0MemoryStore:
-        if self._mem0 is None:
-            self._mem0 = LegacyMem0MemoryStore()
-        return self._mem0
 
     # ------------------------------------------------------------------
     # Public document helpers
@@ -160,7 +212,7 @@ class MemoryStore:
         return f"{system_prompt.rstrip()}\n\n# Persistent Memory Context\n\n{memory_context}"
 
     # ------------------------------------------------------------------
-    # Extract candidate memories (Stateless)
+    # Extract candidate memories (stateless; buffered to pending/<review_id>.json)
     # ------------------------------------------------------------------
 
     async def extract(
@@ -169,117 +221,325 @@ class MemoryStore:
         messages: list[dict[str, str]],
         project_slug: str | None = None,
     ) -> ExtractResult:
-        """Extract candidates with the configured small model and persist pending facts in Mem0."""
+        """Extract categorized candidate memories with the configured small model."""
         self._ensure_dirs()
         review_id = str(uuid.uuid4())
-        raw_global: list[object] = []
-        raw_project: list[object] = []
+
+        conversation = self._get_transcript(messages)
+        global_block = self._format_categories(DEFAULT_GLOBAL_CATEGORIES)
+        project_block = self._format_categories(DEFAULT_PROJECT_CATEGORIES)
 
         system_prompt = (
-            "You extract atomic candidate memories for a user-reviewed learning system. "
-            "Only propose concise durable memory points. Output valid JSON only. "
-            "When a project is active, technical/product/design decisions belong to project, not global."
+            "You extract atomic, durable candidate memories from a conversation for a "
+            "user-reviewed learning system. Output valid JSON only, no prose. "
+            "Each memory must be a single, self-contained fact or preference, tagged with "
+            "exactly one of the allowed categories. Do not emit two memories that express "
+            "the same idea; keep the more specific one. Empty lists are valid when there is "
+            "nothing durable to remember."
         )
-        conversation = self._get_transcript(messages)
+
+        project_section = ""
+        if project_slug:
+            project_section = (
+                "\nProject categories (facts about the active project/subject):\n"
+                f"{project_block}\n"
+            )
+        no_project_rule = (
+            "" if project_slug else '\n- No project is active: return an empty "project" list.'
+        )
+
         user_prompt = f"""
 Conversation:
 {conversation}
 
+Extract durable memories and assign each to one allowed category.
+
+Global categories (facts about the user, valid across all projects):
+{global_block}
+{project_section}
 Return JSON with this exact shape:
 {{
-  "global": [
-    {{"memory": "...", "kind": "preference|identity|working_style|ui_preference|engineering_preference|note"}}
-  ],
-  "project": [
-    {{"memory": "...", "kind": "purpose|current_focus|design_decision|architecture_decision|constraint|discovery|open_question|note"}}
-  ]
+  "global": [{{"memory": "...", "category": "<one global category name>"}}],
+  "project": [{{"memory": "...", "category": "<one project category name>"}}]
 }}
 
 Rules:
-- Global memories are only stable user preferences, identity, and cross-project working style.
-- Project memories are active project purpose, technical decisions, design decisions, constraints, discoveries, and current focus.
-- If a memory is about this app, this repo, the memory layer, architecture, implementation, UI, routes,
-  APIs, storage, or prompts, classify it as project.
-- Do not put project-specific architecture or product strategy into global.
-- Prefer high-value candidates only. Empty lists are valid.
+- "category" MUST be one of the allowed names listed above for that list.
+- Global = stable user identity, preferences, and cross-project working style.
+- Project = this project's/subject's purpose, concepts, decisions, constraints, resources, and open questions.{no_project_rule}
+- Prefer a few high-value memories over many trivial ones.
+- Never output two memories that say the same thing with different wording.
 """.strip()
-        data = await self._generate_json(
-            _llm,
-            system_prompt,
-            user_prompt,
-            timeout=EXTRACT_TIMEOUT,
-        )
-        raw_global.extend(data.get("global", []))
-        if project_slug:
-            raw_project.extend(data.get("project", []))
 
-        pre_global = self._build_candidates(raw_global, "global")
-        pre_project = self._build_candidates(raw_project, "project") if project_slug else []
-        legacy_result = await self.mem0.store_pending(
-            [m.memory for m in pre_global],
-            [m.memory for m in pre_project],
-            review_id,
-            project_slug=project_slug,
-        )
-        global_memories = [self._from_mem0_memory(m, "global") for m in legacy_result.global_memories]
-        project_memories = [self._from_mem0_memory(m, "project") for m in legacy_result.project_memories]
+        data = await self._generate_json(_llm, system_prompt, user_prompt, timeout=EXTRACT_TIMEOUT)
 
+        global_memories = self._build_candidates(data.get("global", []), "global", DEFAULT_GLOBAL_CATEGORIES)
+        project_memories = (
+            self._build_candidates(data.get("project", []), "project", DEFAULT_PROJECT_CATEGORIES)
+            if project_slug else []
+        )
+
+        self._write_pending(review_id, global_memories + project_memories)
         return ExtractResult(review_id=review_id, global_memories=global_memories, project_memories=project_memories)
 
     # ------------------------------------------------------------------
-    # Compose canonical document proposals (Stateless)
-    # ------------------------------------------------------------------
-
-    async def compose_stateless(
-        self,
-        llm: MemoryLLM,
-        base_content: str,
-        accepted_memories: list[dict[str, Any]],
-        template: str,
-        doc_name: str,
-    ) -> str:
-        """Compose revised markdown document body."""
-        return await self._compose_document(llm, doc_name, base_content, accepted_memories, template)
-
-    # ------------------------------------------------------------------
-    # Commit / Cancel (Stateless & Idempotent)
+    # Commit / Cancel (stateless & idempotent)
     # ------------------------------------------------------------------
 
     async def commit_async(
         self,
-        filepath: str,
-        content: str,
+        llm: MemoryLLM,
+        scope: str,  # "global" | "project"
+        accepted_memories: list[ProposedMemory],
+        project_slug: str | None = None,
         review_id: str | None = None,
-        accepted_memories: list[dict[str, Any]] | None = None,
         rejected_memories: list[dict[str, Any]] | None = None,
+        revised_memories: list[dict[str, Any]] | None = None,
     ) -> None:
-        """Write final memory document, back up previous version, and sync with Mem0."""
-        path = self.resolve_path(filepath)
+        json_path, md_path, title = self._scope_paths(scope, project_slug)
 
-        # Back up existing version if it exists
-        self._backup_existing_profile(path)
+        self._backup_existing_profile(json_path)
 
-        # Write clean markdown content directly
-        self._write_doc(path, content)
+        if revised_memories is not None:
+            # Revised memories come from a preview and may carry an extra "status"
+            # field for the UI — keep only the canonical StoredMemory fields.
+            updated = [
+                StoredMemory(id=m["id"], text=m["text"], kind=m["kind"], scope=m["scope"])
+                for m in revised_memories
+            ]
+        else:
+            existing = self._read_stored_memories(json_path)
+            updated = await self.reconcile(llm, accepted_memories, existing, scope=scope)
+
+        self._write_stored_memories(json_path, updated)
+        md_content = self.render_memories_as_markdown(updated, title)
+        self._write_doc(md_path, md_content)
 
         if review_id:
-            if accepted_memories:
-                for candidate in accepted_memories:
-                    memory_id = str(candidate.get("id", ""))
-                    if memory_id:
-                        await self.mem0.accept_one(review_id, memory_id)
-            if rejected_memories:
-                for candidate in rejected_memories:
-                    memory_id = str(candidate.get("id", ""))
-                    if memory_id:
-                        await self.mem0.cancel_one(review_id, memory_id)
+            self._delete_pending(review_id)
 
     async def cancel_async(self, review_id: str, project_slug: str | None = None) -> None:
-        """Cancel the outstanding candidates session in Mem0."""
-        await self.mem0.cancel(review_id, project_slug=project_slug)
+        """Discard the outstanding candidates buffer for *review_id*."""
+        self._delete_pending(review_id)
 
     # ------------------------------------------------------------------
-    # Tree branching & profile management
+    # Preview: reconcile without writing (for diff display)
+    # ------------------------------------------------------------------
+
+    async def preview(
+        self,
+        llm: MemoryLLM,
+        scope: str,
+        accepted_memories: list[ProposedMemory],
+        project_slug: str | None = None,
+    ) -> dict[str, object]:
+        """Run reconcile + render and return existing vs proposed memory lists and markdown."""
+        json_path, md_path, title = self._scope_paths(scope, project_slug)
+
+        existing_stored = self._read_stored_memories(json_path)
+        existing_md = self._read_existing_doc(md_path)
+
+        updated_pairs = await self._reconcile_with_status(llm, accepted_memories, existing_stored, scope=scope)
+        updated = [m for m, _ in updated_pairs]
+        proposed_md = self.render_memories_as_markdown(updated, title)
+
+        return {
+            "existing_markdown": existing_md,
+            "revised_markdown": proposed_md.rstrip() + "\n",
+            "existing_memories": [vars(m) for m in existing_stored],
+            "revised_memories": [{**vars(m), "status": status} for m, status in updated_pairs],
+        }
+
+    # ------------------------------------------------------------------
+    # Per-category reconciliation (1-to-n within a single category bucket)
+    # ------------------------------------------------------------------
+
+    async def reconcile(
+        self,
+        llm: MemoryLLM,
+        candidates: list[ProposedMemory],
+        existing: list[StoredMemory],
+        scope: str = "global",
+    ) -> list[StoredMemory]:
+        """Merge accepted *candidates* into *existing*, comparing only within a category."""
+        pairs = await self._reconcile_with_status(llm, candidates, existing, scope)
+        return [m for m, _ in pairs]
+
+    async def _reconcile_with_status(
+        self,
+        llm: MemoryLLM,
+        candidates: list[ProposedMemory],
+        existing: list[StoredMemory],
+        scope: str = "global",
+    ) -> list[tuple[StoredMemory, str]]:
+        """Reconcile and tag each resulting memory with its origin.
+
+        Status is one of ``pre-existing`` (unchanged), ``new`` (a candidate kept
+        verbatim), or ``combined`` (a model-synthesized merge of old and/or new).
+        Categories with no new candidates are passed through untouched. For each
+        touched category the model receives just that category's existing + new
+        memories and returns the merged canonical list for it.
+        """
+        if not candidates:
+            return [(m, "pre-existing") for m in existing]
+
+        existing_by_cat: dict[str, list[StoredMemory]] = {}
+        for m in existing:
+            existing_by_cat.setdefault(m.kind, []).append(m)
+
+        candidates_by_cat: dict[str, list[ProposedMemory]] = {}
+        for c in candidates:
+            candidates_by_cat.setdefault(c.kind, []).append(c)
+
+        result: list[tuple[StoredMemory, str]] = []
+
+        # Untouched categories pass through verbatim.
+        for cat, mems in existing_by_cat.items():
+            if cat not in candidates_by_cat:
+                result.extend((m, "pre-existing") for m in mems)
+
+        # Touched categories get reconciled.
+        for cat, cands in candidates_by_cat.items():
+            cat_existing = existing_by_cat.get(cat, [])
+            result.extend(await self._reconcile_category(llm, scope, cat, cat_existing, cands))
+
+        return result
+
+    async def _reconcile_category(
+        self,
+        llm: MemoryLLM,
+        scope: str,
+        category: str,
+        existing: list[StoredMemory],
+        candidates: list[ProposedMemory],
+    ) -> list[tuple[StoredMemory, str]]:
+        existing_texts = [m.text.strip() for m in existing if m.text.strip()]
+        candidate_texts = [c.memory.strip() for c in candidates if c.memory.strip()]
+
+        # Nothing to merge against — accept candidates as-is (deduped against existing).
+        if not existing_texts:
+            final_texts = self._dedup_keep_order(candidate_texts)
+        else:
+            final_texts = await self._merge_category_with_llm(
+                llm, category, existing_texts, candidate_texts
+            )
+
+        return self._classify_texts(final_texts, category, scope, existing, existing_texts, candidate_texts)
+
+    async def _merge_category_with_llm(
+        self,
+        llm: MemoryLLM,
+        category: str,
+        existing_texts: list[str],
+        candidate_texts: list[str],
+    ) -> list[str]:
+        system_prompt = (
+            "You maintain a deduplicated list of memories within a single category. "
+            "You are given the current memories and some new candidate memories. "
+            "Return the updated canonical list for this category as JSON only. "
+            "Merge overlapping old and new memories into a single clear statement. "
+            "When a new memory updates or contradicts an old one, keep the new information "
+            "and drop the stale one. Keep genuinely distinct memories separate. "
+            "Do not invent facts that are not present in the inputs. "
+            "Keep each memory atomic and concise."
+        )
+        user_prompt = f"""
+Category: {category}
+
+Current memories:
+{json.dumps(existing_texts, indent=2, ensure_ascii=False)}
+
+New candidate memories:
+{json.dumps(candidate_texts, indent=2, ensure_ascii=False)}
+
+Return JSON with this exact shape:
+{{"memories": ["...", "..."]}}
+""".strip()
+
+        fallback = self._dedup_keep_order(existing_texts + candidate_texts)
+        try:
+            data = await self._generate_json(llm, system_prompt, user_prompt, timeout=EXTRACT_TIMEOUT)
+        except Exception as e:
+            log.error("Category reconcile failed for %r — keeping existing + new: %s", category, e)
+            return fallback
+
+        raw = data.get("memories")
+        if not isinstance(raw, list):
+            log.error("Category reconcile for %r returned non-list — keeping existing + new", category)
+            return fallback
+
+        final = self._dedup_keep_order(str(t).strip() for t in raw if str(t).strip())
+        # Guard against a model that wipes a populated category.
+        if not final and (existing_texts or candidate_texts):
+            log.error("Category reconcile for %r returned empty — keeping existing + new", category)
+            return fallback
+        return final
+
+    def _classify_texts(
+        self,
+        texts: list[str],
+        category: str,
+        scope: str,
+        existing: list[StoredMemory],
+        existing_texts: list[str],
+        candidate_texts: list[str],
+    ) -> list[tuple[StoredMemory, str]]:
+        """Build (StoredMemory, status) pairs, reusing existing ids for unchanged text."""
+        by_text = {m.text.strip(): m for m in existing}
+        existing_set = {t.lower() for t in existing_texts}
+        candidate_set = {t.lower() for t in candidate_texts}
+        out: list[tuple[StoredMemory, str]] = []
+        for text in texts:
+            prev = by_text.get(text)
+            mem_id = prev.id if prev else str(uuid.uuid4())
+            key = text.lower()
+            if key in existing_set:
+                status = "pre-existing"
+            elif key in candidate_set:
+                status = "new"
+            else:
+                status = "combined"
+            out.append((StoredMemory(id=mem_id, text=text, kind=category, scope=scope), status))
+        return out
+
+    @staticmethod
+    def _dedup_keep_order(items: Any) -> list[str]:
+        seen: set[str] = set()
+        out: list[str] = []
+        for item in items:
+            text = item.strip()
+            key = text.lower()
+            if text and key not in seen:
+                seen.add(key)
+                out.append(text)
+        return out
+
+    # ------------------------------------------------------------------
+    # Pending buffer (replaces the old vector-store staging)
+    # ------------------------------------------------------------------
+
+    def _pending_path(self, review_id: str) -> Path:
+        safe = re.sub(r"[^A-Za-z0-9_-]", "", review_id)
+        return self.pending_dir / f"{safe}.json"
+
+    def _write_pending(self, review_id: str, candidates: list[ProposedMemory]) -> None:
+        if not candidates:
+            return
+        self._ensure_dirs()
+        path = self._pending_path(review_id)
+        path.write_text(
+            json.dumps([vars(c) for c in candidates], indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+
+    def _delete_pending(self, review_id: str) -> None:
+        try:
+            self._pending_path(review_id).unlink(missing_ok=True)
+        except OSError as e:
+            log.warning("Failed to delete pending buffer %s: %s", review_id, e)
+
+    # ------------------------------------------------------------------
+    # Profile management & versioning
     # ------------------------------------------------------------------
 
     def list_profiles(self, project_slug: str | None = None) -> list[dict[str, Any]]:
@@ -292,34 +552,22 @@ Rules:
         profiles = []
         stem_name = "memory" if project_slug else "global-profile"
 
-        # 1. Add current active version
         active_file = dir_path / f"{stem_name}.md"
         if active_file.exists():
-            rel_path = self._relative_base_path(active_file)
-            profiles.append(
-                {
-                    "filepath": rel_path,
-                    "id": "current",
-                    "title": "Current Active",
-                    "updated_at": datetime.fromtimestamp(active_file.stat().st_mtime, tz=timezone.utc).isoformat(),
-                }
-            )
+            profiles.append({
+                "filepath": self._relative_base_path(active_file),
+                "title": "Current",
+            })
 
-        # 2. Add sequential backup files
         backups = sorted(dir_path.glob(f"{stem_name}_*.md"))
         for file in backups:
             try:
-                rel_path = self._relative_base_path(file)
                 match = re.search(r"_(\d+)\.md$", file.name)
                 idx_str = match.group(1) if match else "00"
-                profiles.append(
-                    {
-                        "filepath": rel_path,
-                        "id": f"v{idx_str}",
-                        "title": f"Previous Version {idx_str}",
-                        "updated_at": datetime.fromtimestamp(file.stat().st_mtime, tz=timezone.utc).isoformat(),
-                    }
-                )
+                profiles.append({
+                    "filepath": self._relative_base_path(file),
+                    "title": f"Version {idx_str}",
+                })
             except Exception as e:
                 log.error("Failed to parse backup version %s: %s", file, e)
 
@@ -331,8 +579,7 @@ Rules:
         if not path.exists():
             if filepath == "memory/global-profile.md" or filepath.endswith("global-profile.md"):
                 return GLOBAL_TEMPLATE
-            else:
-                return PROJECT_TEMPLATE
+            return PROJECT_TEMPLATE
         return path.read_text(encoding="utf-8")
 
     def _backup_existing_profile(self, path: Path) -> Path | None:
@@ -340,10 +587,9 @@ Rules:
         if not path.exists():
             return None
         parent_dir = path.parent
-        stem = path.stem  # e.g., "memory" or "global-profile"
-        suffix = path.suffix  # e.g., ".md"
+        stem = path.stem
+        suffix = path.suffix
 
-        # Find next available idx
         pattern = re.compile(rf"^{re.escape(stem)}_(\d+){re.escape(suffix)}$")
         max_idx = -1
         if parent_dir.exists():
@@ -360,8 +606,60 @@ Rules:
         return backup_path
 
     # ------------------------------------------------------------------
-    # Internal I/O
+    # Canonical storage I/O & rendering
     # ------------------------------------------------------------------
+
+    def _read_stored_memories(self, path: Path) -> list[StoredMemory]:
+        if not path.exists():
+            return []
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        out: list[StoredMemory] = []
+        for m in raw:
+            try:
+                out.append(StoredMemory(
+                    id=str(m.get("id") or uuid.uuid4()),
+                    text=str(m.get("text", "")),
+                    kind=str(m.get("kind") or FALLBACK_CATEGORY),
+                    scope=str(m.get("scope") or "global"),
+                ))
+            except AttributeError:
+                continue
+        return out
+
+    def _write_stored_memories(self, path: Path, memories: list[StoredMemory]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps([vars(m) for m in memories], indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+
+    def render_memories_as_markdown(self, memories: list[StoredMemory], title: str) -> str:
+        from collections import defaultdict
+        groups: dict[str, list[str]] = defaultdict(list)
+        for m in memories:
+            groups[m.kind].append(m.text)
+        parts = [f"# {title}"]
+        for kind, items in groups.items():
+            parts.append(f"\n## {kind.replace('_', ' ').title()}")
+            parts.extend(f"- {item}" for item in items)
+        return "\n".join(parts)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _scope_paths(self, scope: str, project_slug: str | None) -> tuple[Path, Path, str]:
+        if scope == "global":
+            return self.memory_root / "global-profile.json", self._global_profile_path(), "Global Profile"
+        return (
+            self._project_dir(project_slug) / "memory/memory.json",
+            self._project_memory_path(project_slug),
+            "Project Memory",
+        )
+
+    @staticmethod
+    def _format_categories(categories: list[dict[str, str]]) -> str:
+        return "\n".join(f'  - "{c["name"]}": {c["description"]}' for c in categories)
 
     def resolve_path(self, filepath: str) -> Path:
         """Resolve *filepath* under the base directory, rejecting traversal."""
@@ -377,7 +675,9 @@ Rules:
     def _global_profile_path(self) -> Path:
         return self.memory_root / "global-profile.md"
 
-    def _project_dir(self, project_slug: str) -> Path:
+    def _project_dir(self, project_slug: str | None) -> Path:
+        if not project_slug:
+            raise ValueError("Project slug is required")
         path = (self.base_dir / project_slug).resolve()
         try:
             path.relative_to(self.base_dir)
@@ -386,8 +686,6 @@ Rules:
         return path
 
     def _project_memory_path(self, project_slug: str | None) -> Path:
-        if not project_slug:
-            raise ValueError("Project slug is required")
         return self._project_dir(project_slug) / PROJECT_MEMORY
 
     def _relative_base_path(self, path: Path) -> str:
@@ -402,9 +700,15 @@ Rules:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content.rstrip() + "\n", encoding="utf-8")
 
-    def _build_candidates(self, raw_items: object, scope: str) -> list[ProposedMemory]:
+    def _build_candidates(
+        self,
+        raw_items: object,
+        scope: str,
+        categories: list[dict[str, str]],
+    ) -> list[ProposedMemory]:
         if not isinstance(raw_items, list):
             return []
+        allowed = {c["name"] for c in categories}
         candidates: list[ProposedMemory] = []
         seen: set[str] = set()
         for item in raw_items:
@@ -417,16 +721,11 @@ Rules:
             if key in seen:
                 continue
             seen.add(key)
-            kind = str(item.get("kind", "note")).strip() or "note"
-            candidates.append(ProposedMemory(id=str(uuid.uuid4()), memory=memory, scope=scope, kind=kind))
+            category = str(item.get("category") or item.get("kind") or "").strip()
+            if category not in allowed:
+                category = FALLBACK_CATEGORY
+            candidates.append(ProposedMemory(id=str(uuid.uuid4()), memory=memory, scope=scope, kind=category))
         return candidates
-
-    def _from_mem0_memory(self, memory: object, scope: str) -> ProposedMemory:
-        memory_id = str(getattr(memory, "id", ""))
-        text = str(getattr(memory, "memory", ""))
-        categories = list(getattr(memory, "categories", []) or [])
-        kind = categories[0] if categories else "note"
-        return ProposedMemory(id=memory_id, memory=text, scope=scope, kind=kind)
 
     def _get_transcript(self, messages: list[dict[str, str]]) -> str:
         blocks: list[str] = []
@@ -437,65 +736,39 @@ Rules:
         transcript = "\n\n".join(blocks)
         return transcript or "No conversation content."
 
-    async def _compose_document(
-        self,
-        llm: MemoryLLM,
-        doc_name: str,
-        current_doc: str,
-        candidates: list[dict[str, Any]],
-        template: str,
-    ) -> str:
-        system_prompt = (
-            "You maintain concise canonical markdown memory documents."
-            "Your main duty is to incorporate new accepted atomic memories into the current document "
-            "Replace outdated or conflicting statements. For example <...>\n"
-            "Rules for merging:\n"
-            "1. Preserve existing items, sections, and statements that are not directly contradicted or made obsolete by new accepted memories.\n"
-            "2. DO NOT delete, summarize away, omit, or clean up existing unrelated information.\n"
-            "3. If a new memory conflicts with or updates an existing item, replace or edit that specific item.\n"
-            "4. If a conflict is ambiguous, preserve the current statement and add a short item under Open Questions.\n"
-            "5. Output valid JSON only."
-        )
-        user_prompt = f"""
-            Document type: {doc_name}
-
-            Current markdown document:
-            {current_doc or template}
-
-            Accepted atomic memories:
-            {json.dumps(candidates, indent=2)}
-
-            Return JSON with exactly this shape:
-            {{"document": "# ... revised full markdown document ..."}}
-
-            Rules:
-            - Preserve existing statements & sections in the 'Current markdown document'. Do NOT delete any unless directly contradicted by 'Accepted atomic memories'.
-            - Keep the document sectioned and easy to scan.
-            - Do not include provenance chatter or mention this prompt.
-            - The returned document must be the complete, updated markdown document containing both the preserved existing information and the newly added memories. It must not be a patch or a partial document.
-            """.strip()
-        data = await self._generate_json(llm, system_prompt, user_prompt)
-        return str(data.get("document", ""))
-
     async def _generate_json(
         self,
         llm: MemoryLLM,
         system_prompt: str,
         user_prompt: str,
-        timeout: int = MEMORY_LLM_TIMEOUT,
+        timeout: int = EXTRACT_TIMEOUT,
     ) -> dict[str, Any]:
-        def call() -> str:
-            response = llm.api_query(
+        """Call the small model and parse JSON, retrying once without response_format.
+
+        Small models occasionally reject ``response_format`` or wrap JSON in prose;
+        the two-pass strategy plus ``_json_from_response`` salvaging keeps extraction
+        from hard-failing.
+        """
+        def call(force_json: bool) -> str:
+            kwargs: dict[str, Any] = dict(
                 model=_memory_extraction_model(),
                 user_msg=user_prompt,
                 user_msg_history=[],
                 system_prompt=system_prompt,
                 stream=False,
             )
+            if force_json:
+                kwargs["response_format"] = {"type": "json_object"}
+            response = llm.api_query(**kwargs)
             return response.choices[0].message.content or "{}"
 
-        try:
-            return _json_from_response(await asyncio.wait_for(asyncio.to_thread(call), timeout=timeout))
-        except Exception as e:
-            log.error("Memory LLM JSON call failed: %s", e)
-            raise RuntimeError(f"Memory model did not return valid JSON: {e}") from e
+        last_err: Exception | None = None
+        for force_json in (True, False):
+            try:
+                text = await asyncio.wait_for(asyncio.to_thread(call, force_json), timeout=timeout)
+                return _json_from_response(text)
+            except Exception as e:  # noqa: BLE001 - retry both transport and parse failures
+                last_err = e
+                log.warning("Memory JSON call failed (response_format=%s): %s", force_json, e)
+
+        raise RuntimeError(f"Memory model did not return valid JSON: {last_err}") from last_err

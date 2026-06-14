@@ -107,7 +107,7 @@ function fuzzyMatch(value: string, query: string): boolean {
 function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleLoaded, onOpenChat, activeProject, focusQaIndex, focusKey, onConfigChange }: {
   tab: Tab
   isActive: boolean
-  onModeLabel: (label: string) => void
+  onModeLabel: (label: string, loading?: boolean) => void
   onHistoryFileChanged: (tabId: string, historyFile: string) => void
   onTitleLoaded: (tabId: string, title: string | null) => void
   onOpenChat: (historyFile: string, qaIndex?: number) => void
@@ -239,19 +239,20 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     }).catch(() => { })
   }, [tab.historyFile, activeProject, setMessages, onTitleLoaded, setTotalUsage])
 
+  const docReviewLoading = commandBar.state.phase === "doc-review" && commandBar.state.loadingScopes.length > 0
   useEffect(() => {
     if (commandBar.state.phase === "input") onModeLabel(commandInput.trim() ? `> ${commandInput}` : "> /memorize")
-    else if (commandBar.state.phase === "extracting") onModeLabel("Memory Management")
+    else if (commandBar.state.phase === "extracting") onModeLabel("Memory Management", true)
     else if (commandBar.state.phase === "review") onModeLabel(`${commandMemoryCount} ${commandMemoryCount === 1 ? "memory" : "memories"} proposed`)
-    else if (commandBar.state.phase === "composing") onModeLabel("Updating memory docs")
-    else if (commandBar.state.phase === "doc-review") onModeLabel("Review memory docs")
+    else if (commandBar.state.phase === "composing") onModeLabel("Updating memory docs", true)
+    else if (commandBar.state.phase === "doc-review") onModeLabel("Review memory docs", docReviewLoading)
     else if (commandBar.state.phase === "error") onModeLabel("Memory error")
     else if (researchEnabled) onModeLabel("Deep Research")
     else if (morphicSearchEnabled) onModeLabel("Search")
     else if (ocrEnabled) onModeLabel("LaTeX OCR")
     else if (studyEnabled) onModeLabel("PDF Study")
     else onModeLabel("Chat")
-  }, [commandBar.state.phase, commandInput, commandMemoryCount, researchEnabled, morphicSearchEnabled, ocrEnabled, studyEnabled, onModeLabel])
+  }, [commandBar.state.phase, docReviewLoading, commandInput, commandMemoryCount, researchEnabled, morphicSearchEnabled, ocrEnabled, studyEnabled, onModeLabel])
 
   const isTitled = !!tab.historyFile
 
@@ -588,7 +589,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           onClick={commandBar.close}
         />
       )}
-      {commandBar.state.phase !== "idle" && commandBar.state.phase !== "input" && (
+      {isActive && commandBar.state.phase !== "idle" && commandBar.state.phase !== "input" && (
         <MemoryPanel
           state={commandBar.state}
           projectEnabled={!!activeProject}

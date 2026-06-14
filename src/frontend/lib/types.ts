@@ -172,20 +172,30 @@ export interface ProposedMemory {
   kind?: string
 }
 
+export type MemoryStatus = "pre-existing" | "combined" | "new"
+
+export interface PreviewMemory {
+  id: string
+  text: string
+  kind: string
+  scope: "global" | "project"
+  status?: MemoryStatus
+}
+
 export interface MemoryExtractResponse {
   review_id: string
   global: ProposedMemory[]
   project: ProposedMemory[] | null
 }
 
-export interface MemoryComposeResponse {
-  revised_content: string
+export interface MemoryPreviewResponse {
+  existing_markdown: string
+  revised_markdown: string
+  existing_memories: PreviewMemory[]
+  revised_memories: PreviewMemory[]
 }
 
 export interface MemoryProfileMeta {
   filepath: string
-  id: string
-  parent_id: string | null
   title: string
-  updated_at: string
 }

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from backend.routes.deps import get_memory_store, request_client
-from lib.memory_store import MemoryStore
+from lib.memory_store import MemoryStore, ProposedMemory as MemoryProposedMemory
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 
@@ -30,19 +30,19 @@ class ProposedMemoryModel(BaseModel):
     kind: str | None = None
 
 
-class MemoryComposeRequest(BaseModel):
-    base_content: str
-    accepted_memories: list[ProposedMemoryModel]
-    template: str
-    doc_name: str
-
-
 class MemoryCommitRequest(BaseModel):
-    filepath: str
-    content: str
+    scope: str  # "global" | "project"
+    accepted_memories: list[ProposedMemoryModel]
+    project_slug: str | None = None
     review_id: str | None = None
-    accepted_memories: list[ProposedMemoryModel] | None = None
     rejected_memories: list[ProposedMemoryModel] | None = None
+    revised_memories: list[dict] | None = None
+
+
+class MemoryPreviewRequest(BaseModel):
+    scope: str
+    accepted_memories: list[ProposedMemoryModel]
+    project_slug: str | None = None
 
 
 @router.post("/extract")
@@ -68,43 +68,51 @@ async def extract_memories(
     }
 
 
-@router.post("/compose")
-async def compose_memory_docs(
-    req: MemoryComposeRequest,
-    store: MemoryStoreDep,
-) -> dict:
-    try:
-        with request_client() as client:
-            revised = await store.compose_stateless(
-                client,
-                base_content=req.base_content,
-                accepted_memories=[m.model_dump() for m in req.accepted_memories],
-                template=req.template,
-                doc_name=req.doc_name,
-            )
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
-    return {
-        "revised_content": revised,
-    }
-
-
 @router.post("/commit")
 async def commit_memory_docs(
     req: MemoryCommitRequest,
     store: MemoryStoreDep,
 ) -> dict:
     try:
-        await store.commit_async(
-            filepath=req.filepath,
-            content=req.content,
-            review_id=req.review_id,
-            accepted_memories=[m.model_dump() for m in req.accepted_memories] if req.accepted_memories is not None else None,
-            rejected_memories=[m.model_dump() for m in req.rejected_memories] if req.rejected_memories is not None else None,
-        )
+        with request_client() as client:
+            accepted = [
+                MemoryProposedMemory(m.id, m.memory, m.scope, m.kind or "note")
+                for m in req.accepted_memories
+            ]
+            await store.commit_async(
+                llm=client,
+                scope=req.scope,
+                accepted_memories=accepted,
+                project_slug=req.project_slug,
+                review_id=req.review_id,
+                rejected_memories=[m.model_dump() for m in req.rejected_memories] if req.rejected_memories else None,
+                revised_memories=req.revised_memories,
+            )
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
-    return {"status": "committed", "filepath": req.filepath}
+    return {"status": "committed"}
+
+
+@router.post("/preview")
+async def preview_memory_docs(
+    req: MemoryPreviewRequest,
+    store: MemoryStoreDep,
+) -> dict:
+    try:
+        with request_client() as client:
+            accepted = [
+                MemoryProposedMemory(m.id, m.memory, m.scope, m.kind or "note")
+                for m in req.accepted_memories
+            ]
+            result = await store.preview(
+                llm=client,
+                scope=req.scope,
+                accepted_memories=accepted,
+                project_slug=req.project_slug,
+            )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return result
 
 
 @router.post("/cancel")

@@ -64,7 +64,7 @@ export interface Tab {
 }
 
 interface TabManagerProps {
-  renderContent: (tab: Tab, onModeLabel: (label: string) => void, isActive: boolean, onConfigChange: (config: Partial<TabConfig>) => void) => React.ReactNode
+  renderContent: (tab: Tab, onModeLabel: (label: string, loading?: boolean) => void, isActive: boolean, onConfigChange: (config: Partial<TabConfig>) => void) => React.ReactNode
   onCloseTab?: (tab: Tab) => void
   onTabsChange?: (tabs: Tab[]) => void
   defaultConfig?: TabConfig
@@ -90,14 +90,13 @@ export function nextTab(name: string | null = null, historyFile: string | null =
 
 const INITIAL_TAB: Tab = nextTab()
 const INITIAL_CONFIG: TabConfig = { ...DEFAULT_CONFIG }
-const EXTRACTING_MEMORY_LABEL = "__command_extracting_memories__"
 
-function TabLabel({ label }: { label: string }) {
-  if (label === EXTRACTING_MEMORY_LABEL) {
+function TabLabel({ label, loading }: { label: string; loading?: boolean }) {
+  if (loading) {
     return (
       <span className="flex min-w-0 items-center gap-2 truncate">
         <span className="h-3 w-3 shrink-0 animate-spin rounded-full border border-ink-faint border-t-ink-muted" />
-        <span className="truncate">Extracting memories...</span>
+        <span className="truncate">{label}</span>
       </span>
     )
   }
@@ -109,6 +108,7 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
   const [activeTab, setActiveTab] = useState(INITIAL_TAB.id)
   const [editingTab, setEditingTab] = useState<string | null>(null)
   const [modeLabels, setModeLabels] = useState<Record<string, string>>({})
+  const [modeLoading, setModeLoading] = useState<Record<string, boolean>>({})
   const [customNames, setCustomNames] = useState<Record<string, string | null>>({})
   const inputRef = useRef<HTMLInputElement>(null)
   const initInProgressRef = useRef(false)
@@ -244,8 +244,9 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
     )
   }, [])
 
-  const updateModeLabel = useCallback((id: string, label: string) => {
+  const updateModeLabel = useCallback((id: string, label: string, loading = false) => {
     setModeLabels((prev) => (prev[id] === label ? prev : { ...prev, [id]: label }))
+    setModeLoading((prev) => (prev[id] === loading ? prev : { ...prev, [id]: loading }))
   }, [])
 
   const handleKeyDown = useCallback(
@@ -270,6 +271,7 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
             const isActive = tab.id === activeTab
             const isEditing = tab.id === editingTab
             const displayName = getTabDisplayName(tab)
+            const showSpinner = customNames[tab.id] == null && (modeLoading[tab.id] ?? false)
 
             return (
               <div
@@ -297,7 +299,7 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
                       onClick={(e) => e.stopPropagation()}
                     />
                   ) : (
-                    <TabLabel label={displayName} />
+                    <TabLabel label={displayName} loading={showSpinner} />
                   )}
                 </div>
                 {tabs.length > 1 && (
@@ -325,7 +327,7 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
       <div className="flex-1 min-h-0 overflow-hidden relative">
         {tabs.map((tab) => {
           const isActive = tab.id === activeTab
-          const hook = (label: string) => updateModeLabel(tab.id, label)
+          const hook = (label: string, loading?: boolean) => updateModeLabel(tab.id, label, loading)
           return (
             <div
               key={tab.id}

@@ -13,7 +13,6 @@ dependencies = [
     "langchain-ollama>=1.1.0",
     "litellm>=1.87.0",
     "llm-baseclient @ git+https://github.com/patrickab/llm-baseclient.git@main",
-    "mem0ai>=2.0.5",
     "mineru[all]>=3.2.2",
     "nodeenv>=1.10.0",
     "python-multipart>=0.0.18",

@@ -1,4 +1,4 @@
-import type { Attachment, BranchMeta, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryComposeResponse, MemoryExtractResponse, MemoryProfileMeta, Message, ModelsResponse, ProjectData, ProjectListItem, ProjectStateUpdate, ProposedMemory, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage } from "./types"
+import type { Attachment, BranchMeta, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, MemoryProfileMeta, Message, ModelsResponse, PreviewMemory, ProjectData, ProjectListItem, ProjectStateUpdate, ProposedMemory, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { API_BASE, DEFAULT_TEMPERATURE, DEFAULT_DOWNSCALE_IMAGES } from "./config"
@@ -26,7 +26,14 @@ export async function request<T>(path: string, options?: RequestInit): Promise<T
     try {
       const body = await res.json()
       if (body && typeof body === "object" && "detail" in body) {
-        message = String(body.detail)
+        const detail = body.detail
+        if (Array.isArray(detail)) {
+          message = detail.map((d: any) => d.msg || String(d)).join("; ")
+        } else if (typeof detail === "string") {
+          message = detail
+        } else {
+          message = String(detail)
+        }
       }
     } catch {
       // not json, use status text
@@ -354,37 +361,37 @@ export async function extractMemories(
   })
 }
 
-export async function composeMemoryDoc(
-  baseContent: string,
-  acceptedMemories: ProposedMemory[],
-  template: string,
-  docName: string
-): Promise<MemoryComposeResponse> {
-  return memoryRequest<MemoryComposeResponse>("/memory/compose", {
-    base_content: baseContent,
-    accepted_memories: acceptedMemories,
-    template,
-    doc_name: docName,
-  })
-}
-
 export async function cancelMemories(reviewId: string, projectSlug?: string | null): Promise<void> {
   await memoryRequest("/memory/cancel", { review_id: reviewId, project_slug: projectSlug ?? null })
 }
 
 export async function commitMemoryDoc(
-  filepath: string,
-  content: string,
+  scope: string,
+  acceptedMemories: ProposedMemory[],
+  projectSlug: string | null,
   reviewId: string | null,
-  acceptedMemories: ProposedMemory[] | null,
   rejectedMemories: ProposedMemory[] | null,
+  revisedMemories?: PreviewMemory[] | null,
 ): Promise<void> {
   await memoryRequest("/memory/commit", {
-    filepath,
-    content,
-    review_id: reviewId,
+    scope,
     accepted_memories: acceptedMemories,
+    project_slug: projectSlug,
+    review_id: reviewId,
     rejected_memories: rejectedMemories,
+    ...(revisedMemories ? { revised_memories: revisedMemories } : {}),
+  })
+}
+
+export async function previewMemoryDoc(
+  scope: string,
+  acceptedMemories: ProposedMemory[],
+  projectSlug: string | null,
+): Promise<MemoryPreviewResponse> {
+  return memoryRequest("/memory/preview", {
+    scope,
+    accepted_memories: acceptedMemories,
+    project_slug: projectSlug,
   })
 }
 

@@ -4,11 +4,10 @@ import { useCallback, useRef, useState } from "react"
 import {
   cancelMemories,
   commitMemoryDoc,
-  composeMemoryDoc,
   extractMemories,
-  getMemoryProfileContent,
+  previewMemoryDoc,
 } from "@/lib/api"
-import type { MemoryExtractResponse, ProposedMemory } from "@/lib/types"
+import type { MemoryExtractResponse, PreviewMemory, ProposedMemory } from "@/lib/types"
 
 export type CommandBarPhase = "idle" | "input" | "extracting" | "review" | "composing" | "doc-review" | "error"
 
@@ -20,19 +19,15 @@ interface ReviewState {
   rejectedMemories: ProposedMemory[]
 }
 
+type DocPreview = { existing_markdown: string; revised_markdown: string; existing_memories: PreviewMemory[]; revised_memories: PreviewMemory[] }
+
 interface DocumentReviewState {
   reviewId: string
-  acceptedCount: number
-  rejectedMemories: ProposedMemory[]
   acceptedMemories: ProposedMemory[]
-  
-  // Current edited documents
-  globalDocument: string | null
-  projectDocument: string | null
-  
-  // Original baselines for diff calculation
-  originalGlobalDocument: string | null
-  originalProjectDocument: string | null
+  rejectedMemories: ProposedMemory[]
+  globalPreview: DocPreview | null
+  projectPreview: DocPreview | null
+  loadingScopes: ("global" | "project")[]
 }
 
 export type CommandBarState =
@@ -52,10 +47,10 @@ export interface BoundMemoryActions {
   acceptMemory: (memoryId: string) => Promise<void>
   cancelMemory: (memoryId: string) => Promise<void>
   addMemory: (scope: "global" | "project", memory: string) => void
-  setGlobalDocument: (value: string) => void
-  setProjectDocument: (value: string) => void
+  editMemory: (memoryId: string, text: string) => void
+  editRevisedMemory: (scope: "global" | "project", memoryId: string, text: string) => void
+  removeRevisedMemory: (scope: "global" | "project", memoryId: string) => void
   commitDocuments: () => Promise<void>
-  loadProfile: (filepath: string, scope: "global" | "project") => Promise<void>
 }
 
 export interface CommandInputState {
@@ -115,69 +110,56 @@ export function useCommandBar(): UseCommandBarReturn {
     setState((prev) => prev.phase === "input" ? { ...prev, input: v } : prev)
   }, [])
 
-  const setGlobalDocument = useCallback((v: string) => {
-    setState((prev) => prev.phase === "doc-review" ? { ...prev, globalDocument: v } : prev)
-  }, [])
-
-  const setProjectDocument = useCallback((v: string) => {
-    setState((prev) => prev.phase === "doc-review" ? { ...prev, projectDocument: v } : prev)
-  }, [])
-
-  const composeAccepted = useCallback(async (nextState: ReviewState, projectSlug?: string | null, displayState: ReviewState = nextState) => {
+  const previewAndReview = useCallback(async (nextState: ReviewState, projectSlug?: string | null) => {
     const acceptedMemories = acceptedMemoriesRef.current
-    if (acceptedMemories.length === 0) {
-      await cancelMemories(nextState.reviewId, projectSlug)
+    const rejectedMemories = nextState.rejectedMemories
+
+    if (acceptedMemories.length === 0 && rejectedMemories.length === 0) {
+      await cancelMemories(nextState.reviewId, projectSlug).catch(() => {})
       reset()
       return
     }
 
-    setState({ ...displayState, acceptedCount: acceptedMemories.length, phase: "composing" })
-    try {
-      const globalCandidates = acceptedMemories.filter(m => m.scope === "global")
-      const projectCandidates = acceptedMemories.filter(m => m.scope === "project")
+    const globalAccepted = acceptedMemories.filter(m => m.scope === "global")
+    const projectAccepted = acceptedMemories.filter(m => m.scope === "project")
+    const loadingScopes: ("global" | "project")[] = []
+    if (globalAccepted.length > 0) loadingScopes.push("global")
+    if (projectAccepted.length > 0 && projectSlug) loadingScopes.push("project")
 
-      let globalDocContent = ""
-      let originalGlobalContent = ""
-      if (globalCandidates.length > 0) {
-        const globalRes = await getMemoryProfileContent("memory/global-profile.md")
-        originalGlobalContent = globalRes.content
-        const res = await composeMemoryDoc(
-          originalGlobalContent,
-          globalCandidates,
-          "GLOBAL_TEMPLATE",
-          "global user profile"
+    setState({
+      phase: "doc-review",
+      reviewId: nextState.reviewId,
+      acceptedMemories,
+      rejectedMemories,
+      globalPreview: null,
+      projectPreview: null,
+      loadingScopes,
+    })
+
+    const loadPreview = async (scope: "global" | "project", accepted: ProposedMemory[], slug: string | null) => {
+      try {
+        const preview = await previewMemoryDoc(scope, accepted, slug)
+        setState((prev) => {
+          if (prev.phase !== "doc-review") return prev
+          return {
+            ...prev,
+            [scope === "global" ? "globalPreview" : "projectPreview"]: preview,
+            loadingScopes: prev.loadingScopes.filter((s) => s !== scope),
+          }
+        })
+      } catch (e) {
+        setState((prev) =>
+          prev.phase === "doc-review" && prev.reviewId === nextState.reviewId
+            ? { phase: "error", error: (e as Error)?.message || "Preview failed", reviewId: nextState.reviewId }
+            : prev,
         )
-        globalDocContent = res.revised_content
       }
-
-      let projectDocContent = ""
-      let originalProjectContent = ""
-      if (projectCandidates.length > 0 && projectSlug) {
-        const projectRes = await getMemoryProfileContent(`${projectSlug}/memory/memory.md`)
-        originalProjectContent = projectRes.content
-        const res = await composeMemoryDoc(
-          originalProjectContent,
-          projectCandidates,
-          "PROJECT_TEMPLATE",
-          "project memory"
-        )
-        projectDocContent = res.revised_content
-      }
-
-      setState({
-        phase: "doc-review",
-        reviewId: nextState.reviewId,
-        acceptedCount: acceptedMemories.length,
-        rejectedMemories: nextState.rejectedMemories,
-        acceptedMemories,
-        globalDocument: globalCandidates.length > 0 ? globalDocContent : null,
-        projectDocument: projectCandidates.length > 0 && projectSlug ? projectDocContent : null,
-        originalGlobalDocument: globalCandidates.length > 0 ? originalGlobalContent : null,
-        originalProjectDocument: projectCandidates.length > 0 && projectSlug ? originalProjectContent : null,
-      })
-    } catch (e) {
-      setState({ phase: "error", error: (e as Error)?.message || "Document composition failed", reviewId: nextState.reviewId })
     }
+
+    await Promise.all([
+      loadingScopes.includes("global") ? loadPreview("global", globalAccepted, null) : Promise.resolve(),
+      loadingScopes.includes("project") ? loadPreview("project", projectAccepted, projectSlug ?? null) : Promise.resolve(),
+    ])
   }, [reset])
 
   const submitCommand = useCallback(
@@ -217,11 +199,7 @@ export function useCommandBar(): UseCommandBarReturn {
     async (projectSlug?: string | null) => {
       if (state.phase === "error") {
         if (state.reviewId) {
-          try {
-            await cancelMemories(state.reviewId, projectSlug)
-          } catch {
-            // ignore
-          }
+          await cancelMemories(state.reviewId, projectSlug).catch(() => {})
         }
         reset()
         return
@@ -229,47 +207,30 @@ export function useCommandBar(): UseCommandBarReturn {
       if (!isReviewState(state)) return
       acceptedMemoriesRef.current = [...acceptedMemoriesRef.current, ...remainingMemories(state)]
       const nextState = { ...state, acceptedCount: acceptedMemoriesRef.current.length, globalMemories: [], projectMemories: null }
-      await composeAccepted(nextState, projectSlug, state)
+      await previewAndReview(nextState, projectSlug)
     },
-    [composeAccepted, reset, state],
+    [previewAndReview, reset, state],
   )
 
   const cancel = useCallback(
     async (projectSlug?: string | null) => {
       if (state.phase === "error") {
         if (state.reviewId) {
-          try {
-            await cancelMemories(state.reviewId, projectSlug)
-          } catch {
-            // ignore
-          }
+          await cancelMemories(state.reviewId, projectSlug).catch(() => {})
         }
         reset()
         return
       }
       if (state.phase === "doc-review") {
-        try {
-          await cancelMemories(state.reviewId, projectSlug)
-        } catch {
-          // ignore
-        }
+        await cancelMemories(state.reviewId, projectSlug).catch(() => {})
         reset()
         return
       }
       if (!isReviewState(state)) return
-      if (acceptedMemoriesRef.current.length === 0) {
-        try {
-          await cancelMemories(state.reviewId, projectSlug)
-        } catch {
-          // ignore
-        }
-        reset()
-        return
-      }
-      const nextState = { ...state, globalMemories: [], projectMemories: null }
-      await composeAccepted(nextState, projectSlug, state)
+      await cancelMemories(state.reviewId, projectSlug).catch(() => {})
+      reset()
     },
-    [composeAccepted, reset, state],
+    [reset, state],
   )
 
   const acceptOne = useCallback(
@@ -279,48 +240,41 @@ export function useCommandBar(): UseCommandBarReturn {
       if (!memory) return
       acceptedMemoriesRef.current = [...acceptedMemoriesRef.current, memory]
       const nextState = removeMemory({ ...state, acceptedCount: acceptedMemoriesRef.current.length }, memoryId)
-      if (remainingMemories(nextState).length === 0) await composeAccepted(nextState, projectSlug, state)
+      if (remainingMemories(nextState).length === 0) await previewAndReview(nextState, projectSlug)
       else setState(nextState)
     },
-    [composeAccepted, state],
+    [previewAndReview, state],
   )
 
   const cancelOne = useCallback(
     async (memoryId: string, projectSlug?: string | null) => {
       if (!isReviewState(state)) return
       const memory = memoryById(state, memoryId)
-      const rejectedMemories = state.rejectedMemories
-      if (memory) {
-        rejectedMemories.push(memory)
-      }
+      if (!memory) return
+      const rejectedMemories = [...state.rejectedMemories, memory]
       const nextState = removeMemory({ ...state, rejectedMemories }, memoryId)
-      if (remainingMemories(nextState).length === 0) await composeAccepted(nextState, projectSlug, state)
+      if (remainingMemories(nextState).length === 0) await previewAndReview(nextState, projectSlug)
       else setState(nextState)
     },
-    [composeAccepted, state],
+    [previewAndReview, state],
   )
 
   const commitDocs = useCallback(
     async (projectSlug?: string | null) => {
       if (state.phase !== "doc-review") return
       try {
-        if (state.globalDocument !== null) {
-          await commitMemoryDoc(
-            "memory/global-profile.md",
-            state.globalDocument,
-            state.reviewId,
-            state.acceptedMemories.filter(m => m.scope === "global"),
-            state.rejectedMemories.filter(m => m.scope === "global"),
-          )
+        const globalAccepted = state.acceptedMemories.filter(m => m.scope === "global")
+        const globalRejected = state.rejectedMemories.filter(m => m.scope === "global")
+        const projectAccepted = state.acceptedMemories.filter(m => m.scope === "project")
+        const projectRejected = state.rejectedMemories.filter(m => m.scope === "project")
+
+        if (globalAccepted.length > 0 || globalRejected.length > 0) {
+          await commitMemoryDoc("global", globalAccepted, null, state.reviewId, globalRejected,
+            state.globalPreview?.revised_memories)
         }
-        if (state.projectDocument !== null && projectSlug) {
-          await commitMemoryDoc(
-            `${projectSlug}/memory/memory.md`,
-            state.projectDocument,
-            state.reviewId,
-            state.acceptedMemories.filter(m => m.scope === "project"),
-            state.rejectedMemories.filter(m => m.scope === "project"),
-          )
+        if ((projectAccepted.length > 0 || projectRejected.length > 0) && projectSlug) {
+          await commitMemoryDoc("project", projectAccepted, projectSlug, state.reviewId, projectRejected,
+            state.projectPreview?.revised_memories)
         }
         reset()
       } catch (e) {
@@ -349,27 +303,39 @@ export function useCommandBar(): UseCommandBarReturn {
     })
   }, [])
 
-  const loadProfile = useCallback(async (filepath: string, scope: "global" | "project") => {
-    try {
-      const res = await getMemoryProfileContent(filepath)
+  const editMemory = useCallback((memoryId: string, text: string) => {
+    setState((prev) => {
+      if (!isReviewState(prev)) return prev
+      const updateList = (list: ProposedMemory[]) =>
+        list.map((m) => m.id === memoryId ? { ...m, memory: text } : m)
+      return {
+        ...prev,
+        globalMemories: updateList(prev.globalMemories),
+        projectMemories: prev.projectMemories ? updateList(prev.projectMemories) : null,
+      }
+    })
+  }, [])
+
+  const updateRevisedMemories = useCallback(
+    (scope: "global" | "project", updater: (list: PreviewMemory[]) => PreviewMemory[]) => {
       setState((prev) => {
         if (prev.phase !== "doc-review") return prev
-        if (scope === "global") {
-          return {
-            ...prev,
-            globalDocument: res.content,
-            originalGlobalDocument: res.content,
-          }
-        } else {
-          return {
-            ...prev,
-            projectDocument: res.content,
-            originalProjectDocument: res.content,
-          }
-        }
+        const key = scope === "global" ? "globalPreview" : "projectPreview"
+        const preview = prev[key]
+        if (!preview) return prev
+        return { ...prev, [key]: { ...preview, revised_memories: updater(preview.revised_memories) } }
       })
-    } catch {}
-  }, [])
+    },
+    [],
+  )
+
+  const editRevisedMemory = useCallback((scope: "global" | "project", memoryId: string, text: string) => {
+    updateRevisedMemories(scope, (list) => list.map((m) => m.id === memoryId ? { ...m, text } : m))
+  }, [updateRevisedMemories])
+
+  const removeRevisedMemory = useCallback((scope: "global" | "project", memoryId: string) => {
+    updateRevisedMemories(scope, (list) => list.filter((m) => m.id !== memoryId))
+  }, [updateRevisedMemories])
 
   const bindProject = useCallback((projectSlug?: string | null): BoundMemoryActions => ({
     acceptRemaining: () => accept(projectSlug),
@@ -377,11 +343,11 @@ export function useCommandBar(): UseCommandBarReturn {
     acceptMemory: (memoryId: string) => acceptOne(memoryId, projectSlug),
     cancelMemory: (memoryId: string) => cancelOne(memoryId, projectSlug),
     addMemory,
-    setGlobalDocument,
-    setProjectDocument,
+    editMemory,
+    editRevisedMemory,
+    removeRevisedMemory,
     commitDocuments: () => commitDocs(projectSlug),
-    loadProfile,
-  }), [accept, acceptOne, addMemory, cancel, cancelOne, commitDocs, setGlobalDocument, setProjectDocument, loadProfile])
+  }), [accept, acceptOne, addMemory, cancel, cancelOne, commitDocs, editMemory, editRevisedMemory, removeRevisedMemory])
 
   return {
     state,
