@@ -2,12 +2,15 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Check, FolderOpen, GitCompare, Globe, Loader2, Plus, X } from "lucide-react"
+import { Check, FolderOpen, GitCompare, Globe, Loader2, Plus, Trash2, X } from "lucide-react"
 import { FloatingWindow } from "@/components/FloatingWindow"
 import { LaTeXMarkdown } from "@/components/LaTeXMarkdown"
+import { MemoryBoard } from "@/components/MemoryBoard"
 import { computeLineDiff } from "@/lib/diff"
 import type { BoundMemoryActions, MemoryPanelState } from "@/hooks/useCommandBar"
-import type { MemoryStatus, PreviewMemory, ProposedMemory } from "@/lib/types"
+import type { CategoryDef, MemoryStatus, PreviewMemory, ProposedMemory } from "@/lib/types"
+import { buildBoardSections, formatCategoryHeading } from "@/lib/memoryUtils"
+import { cn } from "@/lib/utils"
 
 const STATUS_STYLES: Record<MemoryStatus, string> = {
   "new": "bg-emerald-500/15 text-emerald-400",
@@ -17,26 +20,28 @@ const STATUS_STYLES: Record<MemoryStatus, string> = {
 
 // Mirrors the backend `render_memories_as_markdown` so live edits/removals in the
 // review panel update the diff without another round-trip.
-export function renderMemoriesMarkdown(memories: PreviewMemory[], title: string): string {
-  const groups = new Map<string, string[]>()
-  for (const m of memories) {
-    const arr = groups.get(m.kind) ?? []
-    arr.push(m.text)
-    groups.set(m.kind, arr)
-  }
+export function renderMemoriesMarkdown(
+  memories: PreviewMemory[],
+  title: string,
+  categoryOrder?: CategoryDef[],
+): string {
+  const sections = buildBoardSections(categoryOrder ?? [], memories)
   const parts = [`# ${title}`]
-  for (const [kind, items] of groups) {
-    parts.push(`\n## ${kind.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}`)
-    for (const item of items) parts.push(`- ${item}`)
+  for (const { category, items } of sections) {
+    if (items.length === 0) continue
+    parts.push(`\n## ${formatCategoryHeading(category.name)}`)
+    for (const m of items) parts.push(`- ${m.text}`)
   }
   return parts.join("\n")
 }
 
-interface MemoryPanelProps {
+export interface MemoryPanelProps {
   state: MemoryPanelState
   projectEnabled: boolean
   projectSlug?: string | null
   actions: BoundMemoryActions
+  globalCategories: CategoryDef[]
+  projectCategories: CategoryDef[]
 }
 
 // ---------------------------------------------------------------------------
@@ -149,6 +154,7 @@ interface MemoryCardProps {
   scope: "global" | "project"
   disabled?: boolean
   mode?: "review" | "display"
+  embedded?: boolean
   onChange?: (memoryId: string, text: string) => void
   onAccept?: (memoryId: string) => void
   onCancel?: (memoryId: string) => void
@@ -157,19 +163,20 @@ interface MemoryCardProps {
 
 export function MemoryCard({
   memory, scope, disabled = false, mode = "review",
+  embedded = false,
   onChange, onAccept, onCancel, onRemove,
 }: MemoryCardProps) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState("")
   const ScopeIcon = scope === "global" ? Globe : FolderOpen
   const scopeLabel = scope === "global" ? "Global" : "Project"
-  const mKind = "kind" in memory ? (memory.kind || "note") : memory.kind
   const status: MemoryStatus | undefined = "status" in memory ? memory.status : undefined
 
   const handleEdit = useCallback(() => {
+    if (disabled) return
     setDraft(memoryText(memory))
     setEditing(true)
-  }, [memory])
+  }, [memory, disabled])
 
   const handleSave = useCallback(() => {
     const trimmed = draft.trim()
@@ -180,35 +187,28 @@ export function MemoryCard({
   }, [draft, memory, onChange])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === "Escape") {
-      setEditing(false)
-    }
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-      e.preventDefault()
-      handleSave()
-    }
+    if (e.key === "Escape") { setEditing(false); return }
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); handleSave() }
   }, [handleSave])
 
   return (
-    <div className="rounded-lg border border-divider bg-surface p-4 group/card">
-      <div className="flex items-center gap-2 mb-3">
-        <ScopeIcon className="h-3.5 w-3.5 text-ink-muted" />
-        <span className="text-xs font-medium text-ink-muted">{scopeLabel}</span>
-        <span className="rounded-full bg-surface-elevated px-2 py-0.5 text-[10px] text-ink-subtle">{mKind}</span>
-        {mode === "display" && (
-          <div className="ml-auto flex items-center gap-1.5">
-            {status && (
-              <span className={`rounded-full px-2 py-0.5 text-[10px] ${STATUS_STYLES[status]}`}>{status}</span>
-            )}
-            {onRemove && (
-              <button onClick={() => onRemove(memory.id)} disabled={disabled} title="Remove memory"
-                className="rounded-md p-0.5 text-ink-subtle hover:bg-hover hover:text-ink disabled:opacity-40 transition-colors">
-                <X className="h-3 w-3" />
-              </button>
-            )}
-          </div>
-        )}
-      </div>
+    <div className={cn(
+      embedded ? "p-3" : "rounded-lg border border-divider bg-surface p-4",
+      "group/card relative",
+    )}>
+      {mode === "review" && (
+        <div className="flex items-center gap-2 mb-2">
+          {!embedded && (
+            <>
+              <ScopeIcon className="h-3.5 w-3.5 text-ink-muted shrink-0" />
+              <span className="text-xs font-medium text-ink-muted">{scopeLabel}</span>
+            </>
+          )}
+          {status && (
+            <span className={`rounded-full px-2 py-0.5 text-[10px] ${STATUS_STYLES[status]}`}>{status}</span>
+          )}
+        </div>
+      )}
 
       {editing ? (
         <textarea
@@ -219,16 +219,26 @@ export function MemoryCard({
           rows={Math.max(2, draft.split("\n").length)}
           autoFocus
           disabled={disabled}
-          className="w-full resize-none bg-transparent text-sm leading-6 text-ink outline-none placeholder:text-ink-faint disabled:opacity-50"
+          className="w-full resize-none bg-transparent text-sm leading-6 text-ink outline-none placeholder:text-ink-faint disabled:opacity-50 cursor-text"
         />
       ) : (
         <div
           onClick={handleEdit}
-          className="cursor-text text-sm leading-6 text-ink whitespace-pre-wrap select-none"
-          title="Click to edit"
+          onMouseDown={embedded ? (e) => e.stopPropagation() : undefined}
+          className="text-sm leading-6 text-ink whitespace-pre-wrap select-text cursor-text"
         >
           {memoryText(memory)}
         </div>
+      )}
+
+      {mode === "display" && onRemove && !editing && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onRemove(memory.id) }}
+          disabled={disabled}
+          className="absolute bottom-1.5 right-1.5 rounded p-0.5 text-ink-faint hover:text-danger opacity-0 group-hover/card:opacity-100 transition-opacity disabled:opacity-40 cursor-pointer"
+        >
+          <Trash2 className="h-3 w-3" />
+        </button>
       )}
 
       {mode === "review" && onAccept && onCancel && (
@@ -255,22 +265,28 @@ function CandidateWorkspace({
   globalMemories,
   projectMemories,
   projectEnabled,
+  globalCategories,
+  projectCategories,
   onAcceptRemaining,
   onCancelRemaining,
   onAcceptMemory,
   onCancelMemory,
   onAddMemory,
   onEditMemory,
+  onEditCategory,
 }: {
   globalMemories: ProposedMemory[]
   projectMemories: ProposedMemory[] | null
   projectEnabled: boolean
+  globalCategories: CategoryDef[]
+  projectCategories: CategoryDef[]
   onAcceptRemaining: () => void
   onCancelRemaining: () => void
   onAcceptMemory: (memoryId: string) => void
   onCancelMemory: (memoryId: string) => void
   onAddMemory: (scope: "global" | "project", memory: string) => void
   onEditMemory: (memoryId: string, text: string) => void
+  onEditCategory: (memoryId: string, category: string) => void
 }) {
   const total = globalMemories.length + (projectMemories?.length ?? 0)
   const [addingScope, setAddingScope] = useState<"global" | "project" | null>(null)
@@ -310,10 +326,20 @@ function CandidateWorkspace({
             {addingScope === "global" && (
               <AddMemoryCard scope="global" disabled={false} onAddMemory={onAddMemory} onCancel={() => setAddingScope(null)} />
             )}
-            {globalMemories.length > 0 ? globalMemories.map((m) => (
-              <MemoryCard key={m.id} memory={m} scope="global" mode="review"
-                onChange={onEditMemory} onAccept={onAcceptMemory} onCancel={onCancelMemory} />
-            )) : <div className="text-xs italic text-ink-faint">No global candidates.</div>}
+            {globalMemories.length > 0 || globalCategories.length > 0 ? (
+              <MemoryBoard
+                memories={globalMemories}
+                categoryOrder={globalCategories}
+                scope="global"
+                mode="review"
+                onChange={onEditMemory}
+                onChangeCategory={onEditCategory}
+                onAccept={onAcceptMemory}
+                onCancel={onCancelMemory}
+              />
+            ) : (
+              <div className="text-xs italic text-ink-faint">No global candidates.</div>
+            )}
           </div>
         </div>
         <div className="w-1/2 min-w-0 flex flex-col">
@@ -332,10 +358,20 @@ function CandidateWorkspace({
             {addingScope === "project" && projectEnabled && (
               <AddMemoryCard scope="project" disabled={false} onAddMemory={onAddMemory} onCancel={() => setAddingScope(null)} />
             )}
-            {projectMemories && projectMemories.length > 0 ? projectMemories.map((m) => (
-              <MemoryCard key={m.id} memory={m} scope="project" mode="review"
-                onChange={onEditMemory} onAccept={onAcceptMemory} onCancel={onCancelMemory} />
-            )) : <div className="text-xs italic text-ink-faint">No project candidates.</div>}
+            {projectEnabled && (projectMemories && projectMemories.length > 0 || projectCategories.length > 0) ? (
+              <MemoryBoard
+                memories={projectMemories ?? []}
+                categoryOrder={projectCategories}
+                scope="project"
+                mode="review"
+                onChange={onEditMemory}
+                onChangeCategory={onEditCategory}
+                onAccept={onAcceptMemory}
+                onCancel={onCancelMemory}
+              />
+            ) : (
+              <div className="text-xs italic text-ink-faint">No project candidates.</div>
+            )}
           </div>
         </div>
       </div>
@@ -360,15 +396,21 @@ interface PreviewTab {
 
 function DocumentWorkspace({
   previews,
+  globalCategories,
+  projectCategories,
   onCommitDocuments,
   onCancelRemaining,
   onEditMemory,
+  onEditCategory,
   onRemoveMemory,
 }: {
   previews: PreviewTab[]
+  globalCategories: CategoryDef[]
+  projectCategories: CategoryDef[]
   onCommitDocuments: () => Promise<void>
   onCancelRemaining: () => void
   onEditMemory: (scope: "global" | "project", memoryId: string, text: string) => void
+  onEditCategory: (scope: "global" | "project", memoryId: string, category: string) => void
   onRemoveMemory: (scope: "global" | "project", memoryId: string) => void
 }) {
   const [activeIdx, setActiveIdx] = useState(0)
@@ -385,8 +427,9 @@ function DocumentWorkspace({
   const anyLoading = previews.some((p) => p.loading)
   const ActiveIcon = active.icon
   const memories = active.revised_memories
-  const revisedMarkdown = renderMemoriesMarkdown(memories, active.title).trimEnd() + "\n"
+  const revisedMarkdown = renderMemoriesMarkdown(memories, active.title, activeCategories).trimEnd() + "\n"
   const diff = active.loading ? "" : computeLineDiff(active.existing_markdown || "", revisedMarkdown)
+  const activeCategories = active.scope === "global" ? globalCategories : projectCategories
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -436,12 +479,16 @@ function DocumentWorkspace({
               </div>
               <span className="text-[10px] text-ink-faint">{memories.length} entries</span>
             </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {memories.length > 0 ? memories.map((m) => (
-                <MemoryCard key={m.id} memory={m} scope={active.scope} mode="display"
-                  onChange={(id, text) => onEditMemory(active.scope, id, text)}
-                  onRemove={(id) => onRemoveMemory(active.scope, id)} />
-              )) : <div className="text-xs italic text-ink-faint">No memories in this profile.</div>}
+            <div className="flex-1 overflow-y-auto p-4">
+              <MemoryBoard
+                memories={memories}
+                categoryOrder={activeCategories}
+                scope={active.scope}
+                mode="display"
+                onChange={(id, text) => onEditMemory(active.scope, id, text)}
+                onChangeCategory={(id, cat) => onEditCategory(active.scope, id, cat)}
+                onRemove={(id) => onRemoveMemory(active.scope, id)}
+              />
             </div>
           </div>
           <div className="w-1/2 min-w-0 flex flex-col">
@@ -467,7 +514,7 @@ function DocumentWorkspace({
 // ---------------------------------------------------------------------------
 
 export function MemoryPanel({
-  state, projectEnabled, projectSlug, actions,
+  state, projectEnabled, projectSlug, actions, globalCategories, projectCategories,
 }: MemoryPanelProps) {
   const extractingMode = state.phase === "extracting"
   const composingMode = state.phase === "composing"
@@ -545,9 +592,12 @@ export function MemoryPanel({
         ) : documentsMode ? (
           <DocumentWorkspace
             previews={previews}
+            globalCategories={globalCategories}
+            projectCategories={projectEnabled ? projectCategories : []}
             onCommitDocuments={actions.commitDocuments}
             onCancelRemaining={actions.cancelRemaining}
             onEditMemory={actions.editRevisedMemory}
+            onEditCategory={actions.editRevisedMemoryCategory}
             onRemoveMemory={actions.removeRevisedMemory}
           />
         ) : (
@@ -555,12 +605,15 @@ export function MemoryPanel({
             globalMemories={globalMemories}
             projectMemories={projectMemories}
             projectEnabled={projectEnabled}
+            globalCategories={globalCategories}
+            projectCategories={projectEnabled ? projectCategories : []}
             onAcceptRemaining={actions.acceptRemaining}
             onCancelRemaining={actions.cancelRemaining}
             onAcceptMemory={actions.acceptMemory}
             onCancelMemory={actions.cancelMemory}
             onAddMemory={actions.addMemory}
             onEditMemory={actions.editMemory}
+            onEditCategory={actions.editMemoryCategory}
           />
         )}
       </FloatingWindow>

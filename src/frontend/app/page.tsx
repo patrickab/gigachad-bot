@@ -15,6 +15,7 @@ import { OCRPanel } from "@/components/OCRPanel"
 import { SaveChatModal } from "@/components/SaveChatModal"
 import { MemoryPanel } from "@/components/MemoryPanel"
 import { useCommandBar } from "@/hooks/useCommandBar"
+import { useMemoryCategories } from "@/hooks/useMemoryCategories"
 import { TabManager, nextTab, settingsToTabConfig, type TabConfig } from "@/components/TabManager"
 import type { Tab, TabManagerHandle } from "@/components/TabManager"
 import { ProjectDashboard } from "@/components/ProjectDashboard"
@@ -161,6 +162,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   const hasUsage = totalUsage.total_tokens > 0 ? totalUsage : undefined
 
   const commandBar = useCommandBar()
+  const { globalCategories, projectCategories } = useMemoryCategories(activeProject)
   const commandInput = commandBar.state.phase === "input" ? commandBar.state.input : ""
   const commandMemoryCount = commandBar.state.phase === "review" || commandBar.state.phase === "composing"
     ? commandBar.state.globalMemories.length + (commandBar.state.projectMemories?.length ?? 0)
@@ -592,6 +594,8 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           projectEnabled={!!activeProject}
           projectSlug={activeProject}
           actions={memoryActions}
+          globalCategories={globalCategories}
+          projectCategories={projectCategories}
         />
       )}
     </div>

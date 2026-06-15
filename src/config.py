@@ -22,7 +22,7 @@ DIRECTORY_CHAT_UPLOADS = DIRECTORY_CHAT_HISTORIES / "_uploads"
 # --- Application-wide small/fast model defaults ---
 # Used for lightweight tasks like query expansion, where speed matters more than raw capability.
 # Provider-prefixed models route through LiteLLM; unprefixed models are treated as Ollama by callers.
-SMALL_MODEL = "gemini/gemini-3.1-flash-lite"
+SMALL_MODEL = "ollama/gemma4:31b-cloud"
 
 # --- MinerU PDF parsing config ---
 DIRECTORY_OUTPUT_MINERU = DIRECTORY_CLOUD / "Documents" / "Mineru"

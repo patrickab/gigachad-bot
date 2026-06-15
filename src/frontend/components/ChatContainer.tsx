@@ -8,7 +8,7 @@ import { ChatInput } from "./ChatInput"
 import { ChatSidebar } from "./ChatSidebar"
 import { getChatSidebarConfig } from "./chatSidebarConfig"
 
-import { ChevronLeft, ChevronRight, GitFork, User } from "lucide-react"
+import { ChevronLeft, ChevronRight, ChevronsLeftRight, ChevronsRightLeft, GitFork, User } from "lucide-react"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { cn } from "@/lib/utils"
 import { ElevationProvider, ElevatedContainer } from "./ElevatedContainer"
@@ -86,6 +86,7 @@ export function ChatContainer({
   const [expandedEntries, setExpandedEntries] = useState<{ messageIndex: number; attachmentName: string }[]>([])
   const [sidebarWidth, setSidebarWidth] = useState(320)
   const [openElements, setOpenElements] = useState<Set<string>>(new Set())
+  const [isWideMode, setIsWideMode] = useState(false)
 
   const handleAttachmentClick = useCallback((messageIndex: number, attachment: Attachment) => {
     setContextOpen(true)
@@ -361,6 +362,9 @@ export function ChatContainer({
     }
   }, [hasSidebarContent])
 
+  const effectiveMaxWidth = isWideMode ? undefined : (chatMaxWidth || undefined)
+  const toggleWideMode = useCallback(() => setIsWideMode((w) => !w), [])
+
   return (
     <div className={cn("flex h-full relative", className)}>
       <div className="flex-1 min-w-0 flex flex-col relative">
@@ -370,8 +374,14 @@ export function ChatContainer({
           className="flex-1 overflow-y-auto text-ink outline-none"
           style={{ paddingBottom: inputAreaHeight + BOTTOM_GAP_PX }}
         >
-          <div className="mx-auto" style={{ maxWidth: chatMaxWidth || undefined }}>
-
+          <div className="mx-auto" style={{ maxWidth: effectiveMaxWidth }}>
+          <button
+            onClick={toggleWideMode}
+            aria-label={isWideMode ? "Exit wide mode" : "Enter wide mode"}
+            className="absolute left-2 top-2 z-30 p-1 text-ink-faint opacity-0 hover:opacity-100 focus-visible:opacity-100 hover:text-ink-muted transition-opacity duration-200 cursor-pointer"
+          >
+            {isWideMode ? <ChevronsRightLeft className="h-4 w-4" /> : <ChevronsLeftRight className="h-4 w-4" />}
+          </button>
           <ElevationProvider darkColor="var(--paper)" brightColor="var(--surface-elevated)" numLevels={3} startLevel={1}>
             <AnimatePresence>
             {pairs.map(({ user, assistant, globalIndex }, qaIndex) => {
@@ -490,7 +500,7 @@ export function ChatContainer({
         <div ref={inputAreaRef} className="absolute bottom-0 left-0 right-0 z-10 pointer-events-none">
           <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-paper via-paper/20 to-transparent pointer-events-none" />
           <div className="relative pb-6 pointer-events-auto">
-            <div className="mx-auto" style={chatMaxWidth ? { maxWidth: chatMaxWidth } : undefined}>
+            <div className="mx-auto" style={chatMaxWidth && !isWideMode ? { maxWidth: chatMaxWidth } : undefined}>
             <ChatInput
               chatId={chatId}
               onSend={handleSend}

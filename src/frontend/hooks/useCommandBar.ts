@@ -48,7 +48,9 @@ export interface BoundMemoryActions {
   cancelMemory: (memoryId: string) => Promise<void>
   addMemory: (scope: "global" | "project", memory: string) => void
   editMemory: (memoryId: string, text: string) => void
+  editMemoryCategory: (memoryId: string, category: string) => void
   editRevisedMemory: (scope: "global" | "project", memoryId: string, text: string) => void
+  editRevisedMemoryCategory: (scope: "global" | "project", memoryId: string, category: string) => void
   removeRevisedMemory: (scope: "global" | "project", memoryId: string) => void
   commitDocuments: () => Promise<void>
 }
@@ -291,7 +293,7 @@ export function useCommandBar(): UseCommandBarReturn {
       id: `manual-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       memory: trimmed,
       scope,
-      kind: "manual",
+      category: "manual",
     }
     setState((prev) => {
       if (!isReviewState(prev)) return prev
@@ -308,6 +310,19 @@ export function useCommandBar(): UseCommandBarReturn {
       if (!isReviewState(prev)) return prev
       const updateList = (list: ProposedMemory[]) =>
         list.map((m) => m.id === memoryId ? { ...m, memory: text } : m)
+      return {
+        ...prev,
+        globalMemories: updateList(prev.globalMemories),
+        projectMemories: prev.projectMemories ? updateList(prev.projectMemories) : null,
+      }
+    })
+  }, [])
+
+  const editMemoryCategory = useCallback((memoryId: string, category: string) => {
+    setState((prev) => {
+      if (!isReviewState(prev)) return prev
+      const updateList = (list: ProposedMemory[]) =>
+        list.map((m) => m.id === memoryId ? { ...m, category } : m)
       return {
         ...prev,
         globalMemories: updateList(prev.globalMemories),
@@ -333,6 +348,10 @@ export function useCommandBar(): UseCommandBarReturn {
     updateRevisedMemories(scope, (list) => list.map((m) => m.id === memoryId ? { ...m, text } : m))
   }, [updateRevisedMemories])
 
+  const editRevisedMemoryCategory = useCallback((scope: "global" | "project", memoryId: string, category: string) => {
+    updateRevisedMemories(scope, (list) => list.map((m) => m.id === memoryId ? { ...m, category } : m))
+  }, [updateRevisedMemories])
+
   const removeRevisedMemory = useCallback((scope: "global" | "project", memoryId: string) => {
     updateRevisedMemories(scope, (list) => list.filter((m) => m.id !== memoryId))
   }, [updateRevisedMemories])
@@ -344,10 +363,12 @@ export function useCommandBar(): UseCommandBarReturn {
     cancelMemory: (memoryId: string) => cancelOne(memoryId, projectSlug),
     addMemory,
     editMemory,
+    editMemoryCategory,
     editRevisedMemory,
+    editRevisedMemoryCategory,
     removeRevisedMemory,
     commitDocuments: () => commitDocs(projectSlug),
-  }), [accept, acceptOne, addMemory, cancel, cancelOne, commitDocs, editMemory, editRevisedMemory, removeRevisedMemory])
+  }), [accept, acceptOne, addMemory, cancel, cancelOne, commitDocs, editMemory, editMemoryCategory, editRevisedMemory, editRevisedMemoryCategory, removeRevisedMemory])
 
   return {
     state,

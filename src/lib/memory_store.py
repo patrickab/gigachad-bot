@@ -70,9 +70,7 @@ DEFAULT_GLOBAL_CATEGORIES: list[dict[str, str]] = [
         "name": "engineering_preference",
         "description": "General coding and tooling preferences across projects: languages, frameworks, libraries, code style.",
     },
-    {"name": "environment", "description": "The user's tools and setup: OS, editor, hardware, shell, recurring environment details."},
-    {"name": "interest", "description": "Recurring topics, subjects, or hobbies the user cares about beyond a single project."},
-    {"name": "goal", "description": "Longer-term personal, academic, or career goals the user is working toward."},
+    {"name": "goals", "description": "Longer-term personal, academic, or career goals the user is working toward."},
 ]
 
 DEFAULT_PROJECT_CATEGORIES: list[dict[str, str]] = [
@@ -82,10 +80,10 @@ DEFAULT_PROJECT_CATEGORIES: list[dict[str, str]] = [
         "name": "key_concept",
         "description": "Important concepts, definitions, formulas, or facts worth retaining (e.g. from lectures).",
     },
-    {"name": "decision", "description": "Design, architecture, or technical decisions that were made, with their rationale."},
+    {"name": "Decisions", "description": "Design, architecture, or technical decisions that were made, with their rationale."},
     {"name": "constraint", "description": "Requirements, limitations, deadlines, or rules that apply to the project."},
     {"name": "resource", "description": "Useful references, files, links, datasets, tools, or commands tied to this project."},
-    {"name": "open_question", "description": "Unresolved questions, blockers, or pending tasks to follow up on."},
+    {"name": "open_questions", "description": "Unresolved questions, blockers, or pending tasks to follow up on."},
 ]
 
 
@@ -125,7 +123,7 @@ class ProposedMemory:
     id: str
     memory: str
     scope: str
-    kind: str = FALLBACK_CATEGORY  # holds the category name
+    category: str = FALLBACK_CATEGORY
 
 
 @dataclass
@@ -139,7 +137,7 @@ class ExtractResult:
 class StoredMemory:
     id: str
     text: str
-    kind: str  # category name
+    category: str
     scope: str  # "global" | "project"
     created_at: str = field(default_factory=_now_iso)
     updated_at: str = field(default_factory=_now_iso)
@@ -315,7 +313,7 @@ Rules:
                 StoredMemory(
                     id=m["id"],
                     text=m["text"],
-                    kind=m["kind"],
+                    category=m["category"],
                     scope=m["scope"],
                     created_at=str(m.get("created_at") or now),
                     updated_at=str(m.get("updated_at") or now),
@@ -327,7 +325,7 @@ Rules:
             updated = await self.reconcile(llm, accepted_memories, existing, scope=scope)
 
         self._write_stored_memories(json_path, updated)
-        md_content = self.render_memories_as_markdown(updated, title)
+        md_content = self.render_memories_as_markdown(updated, title, scope=scope, project_slug=project_slug)
         self._write_doc(md_path, md_content)
 
         if review_id:
@@ -356,13 +354,13 @@ Rules:
 
         updated_pairs = await self._reconcile_with_status(llm, accepted_memories, existing_stored, scope=scope)
         updated = [m for m, _ in updated_pairs]
-        proposed_md = self.render_memories_as_markdown(updated, title)
+        proposed_md = self.render_memories_as_markdown(updated, title, scope=scope, project_slug=project_slug)
 
         return {
             "existing_markdown": existing_md,
             "revised_markdown": proposed_md.rstrip() + "\n",
-            "existing_memories": [vars(m) for m in existing_stored],
-            "revised_memories": [{**vars(m), "status": status} for m, status in updated_pairs],
+            "existing_memories": [self._memory_to_dict(m) for m in existing_stored],
+            "revised_memories": [{**self._memory_to_dict(m), "status": status} for m, status in updated_pairs],
         }
 
     # ------------------------------------------------------------------
@@ -400,11 +398,11 @@ Rules:
 
         existing_by_cat: dict[str, list[StoredMemory]] = {}
         for m in existing:
-            existing_by_cat.setdefault(m.kind, []).append(m)
+            existing_by_cat.setdefault(m.category, []).append(m)
 
         candidates_by_cat: dict[str, list[ProposedMemory]] = {}
         for c in candidates:
-            candidates_by_cat.setdefault(c.kind, []).append(c)
+            candidates_by_cat.setdefault(c.category, []).append(c)
 
         result: list[tuple[StoredMemory, str]] = []
 
@@ -512,7 +510,7 @@ Return JSON with this exact shape:
                 mem = StoredMemory(
                     id=prev.id,
                     text=text,
-                    kind=category,
+                    category=category,
                     scope=scope,
                     created_at=prev.created_at,
                     updated_at=prev.updated_at,
@@ -523,7 +521,7 @@ Return JSON with this exact shape:
                 mem = StoredMemory(
                     id=str(uuid.uuid4()),
                     text=text,
-                    kind=category,
+                    category=category,
                     scope=scope,
                     created_at=now,
                     updated_at=now,
@@ -535,7 +533,7 @@ Return JSON with this exact shape:
                 mem = StoredMemory(
                     id=prev.id if prev else str(uuid.uuid4()),
                     text=text,
-                    kind=category,
+                    category=category,
                     scope=scope,
                     created_at=created_at,
                     updated_at=now,
@@ -648,7 +646,7 @@ Rules:
             data = await self._generate_json(llm, system_prompt, user_prompt, timeout=EXTRACT_TIMEOUT)
         except Exception as e:
             log.error("remap_orphaned LLM call failed: %s — using fallback category %r", e, fallback_cat)
-            return [{**m, "kind": fallback_cat} for m in orphaned_memories]
+            return [{**m, "category": fallback_cat} for m in orphaned_memories]
 
         assignments = data.get("assignments", [])
         allowed = {c["name"] for c in remaining_categories}
@@ -660,7 +658,7 @@ Rules:
                     cat = fallback_cat
             else:
                 cat = fallback_cat
-            result.append({**m, "kind": cat})
+            result.append({**m, "category": cat})
         return result
 
     # ------------------------------------------------------------------
@@ -670,7 +668,7 @@ Rules:
     def list_memories(self, scope: str, project_slug: str | None = None) -> list[dict[str, Any]]:
         """Return the canonical stored memories for *scope* as plain dicts."""
         json_path, _, _ = self._scope_paths(scope, project_slug)
-        return [vars(m) for m in self._read_stored_memories(json_path)]
+        return [self._memory_to_dict(m) for m in self._read_stored_memories(json_path)]
 
     def move_memory(
         self,
@@ -694,13 +692,13 @@ Rules:
             raise ValueError(f"Memory {memory_id!r} not found in {from_scope}")
 
         dest_cat_names = {c["name"] for c in self.get_categories(to_scope, to_project_slug)}
-        dest_kind = target.kind if target.kind in dest_cat_names else FALLBACK_CATEGORY
+        dest_category = target.category if target.category in dest_cat_names else FALLBACK_CATEGORY
 
         now = _now_iso()
         moved = StoredMemory(
             id=target.id,
             text=target.text,
-            kind=dest_kind,
+            category=dest_category,
             scope=to_scope,
             created_at=target.created_at,
             updated_at=now,
@@ -713,11 +711,15 @@ Rules:
 
         self._backup_existing_profile(from_json)
         self._write_stored_memories(from_json, from_mems_updated)
-        self._write_doc(from_md, self.render_memories_as_markdown(from_mems_updated, from_title))
+        self._write_doc(
+            from_md, self.render_memories_as_markdown(from_mems_updated, from_title, scope=from_scope, project_slug=from_project_slug)
+        )
 
         self._backup_existing_profile(to_json)
         self._write_stored_memories(to_json, to_mems_updated)
-        self._write_doc(to_md, self.render_memories_as_markdown(to_mems_updated, to_title))
+        self._write_doc(
+            to_md, self.render_memories_as_markdown(to_mems_updated, to_title, scope=to_scope, project_slug=to_project_slug)
+        )
 
     def list_profiles(self, project_slug: str | None = None) -> list[dict[str, Any]]:
         """List all memory profile files (current and backups) under memory/ or <project_slug>/memory/."""
@@ -802,7 +804,7 @@ Rules:
                     StoredMemory(
                         id=str(m.get("id") or uuid.uuid4()),
                         text=str(m.get("text", "")),
-                        kind=str(m.get("kind") or FALLBACK_CATEGORY),
+                        category=str(m.get("category") or FALLBACK_CATEGORY),
                         scope=str(m.get("scope") or "global"),
                         created_at=str(m.get("created_at") or now),
                         updated_at=str(m.get("updated_at") or now),
@@ -812,6 +814,12 @@ Rules:
                 continue
         return out
 
+    @staticmethod
+    def _memory_to_dict(m: StoredMemory) -> dict[str, Any]:
+        d = vars(m)
+        d["category"] = m.category
+        return d
+
     def _write_stored_memories(self, path: Path, memories: list[StoredMemory]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
@@ -819,15 +827,31 @@ Rules:
             encoding="utf-8",
         )
 
-    def render_memories_as_markdown(self, memories: list[StoredMemory], title: str) -> str:
+    def render_memories_as_markdown(
+        self,
+        memories: list[StoredMemory],
+        title: str,
+        *,
+        scope: str | None = None,
+        project_slug: str | None = None,
+    ) -> str:
         from collections import defaultdict
 
         groups: dict[str, list[str]] = defaultdict(list)
         for m in memories:
-            groups[m.kind].append(m.text)
+            groups[m.category].append(m.text)
+
+        if scope is not None:
+            category_names = [c["name"] for c in self.get_categories(scope, project_slug)]
+            ordered = [name for name in category_names if name in groups]
+            ordered.extend(name for name in groups if name not in category_names)
+        else:
+            ordered = list(groups.keys())
+
         parts = [f"# {title}"]
-        for kind, items in groups.items():
-            parts.append(f"\n## {kind.replace('_', ' ').title()}")
+        for category in ordered:
+            items = groups[category]
+            parts.append(f"\n## {category.replace('_', ' ').title()}")
             parts.extend(f"- {item}" for item in items)
         return "\n".join(parts)
 
@@ -908,10 +932,10 @@ Rules:
             if key in seen:
                 continue
             seen.add(key)
-            category = str(item.get("category") or item.get("kind") or "").strip()
+            category = str(item.get("category") or "").strip()
             if category not in allowed:
                 category = FALLBACK_CATEGORY
-            candidates.append(ProposedMemory(id=str(uuid.uuid4()), memory=memory, scope=scope, kind=category))
+            candidates.append(ProposedMemory(id=str(uuid.uuid4()), memory=memory, scope=scope, category=category))
         return candidates
 
     def _get_transcript(self, messages: list[dict[str, str]]) -> str:

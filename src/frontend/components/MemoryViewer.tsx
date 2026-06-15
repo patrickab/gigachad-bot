@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { motion } from "framer-motion"
-import { ArrowUpCircle, Check, ChevronDown, ChevronRight, FolderOpen, Globe, GripVertical, Loader2, Plus, X } from "lucide-react"
+import { Check, ChevronDown, ChevronRight, FolderOpen, Globe, GripVertical, Loader2, Plus, X } from "lucide-react"
 import { FloatingWindow } from "@/components/FloatingWindow"
 import { LaTeXMarkdown } from "@/components/LaTeXMarkdown"
-import { AddMemoryCard, MemoryCard, renderMemoriesMarkdown } from "@/components/MemoryPanel"
-import { commitMemoryDoc, getCategories, getMemories, moveMemory, remapOrphanedCategory, saveCategories } from "@/lib/api"
+import { MemoryBoard } from "@/components/MemoryBoard"
+import { AddMemoryCard, renderMemoriesMarkdown } from "@/components/MemoryPanel"
+import { commitMemoryDoc, getCategories, getMemories, remapOrphanedCategory, saveCategories } from "@/lib/api"
+import { sortMemoriesByCategoryOrder } from "@/lib/memoryUtils"
 import { useMemoryViewer } from "@/contexts/MemoryViewerContext"
 import type { CategoryDef, PreviewMemory } from "@/lib/types"
 
@@ -14,63 +16,6 @@ export function MemoryViewer() {
   const { target, closeMemoryViewer } = useMemoryViewer()
   if (!target) return null
   return <MemoryViewerInner key={`${target.scope}:${target.projectSlug ?? ""}`} onClose={closeMemoryViewer} target={target} />
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function sortByUpdated(mems: PreviewMemory[]): PreviewMemory[] {
-  return [...mems].sort((a, b) => {
-    const ta = a.updated_at ?? a.created_at ?? ""
-    const tb = b.updated_at ?? b.created_at ?? ""
-    return tb.localeCompare(ta)
-  })
-}
-
-/** Group memories by category, preserving the order defined in categoryOrder. */
-function groupByCategory(mems: PreviewMemory[], categoryOrder: CategoryDef[]): [string, PreviewMemory[]][] {
-  const map = new Map<string, PreviewMemory[]>()
-  for (const m of mems) {
-    const arr = map.get(m.kind) ?? []
-    arr.push(m)
-    map.set(m.kind, arr)
-  }
-  const result: [string, PreviewMemory[]][] = []
-  // Emit in category definition order first.
-  for (const cat of categoryOrder) {
-    const group = map.get(cat.name)
-    if (group) result.push([cat.name, group])
-  }
-  // Append any kinds not in the category list (shouldn't normally happen).
-  for (const [kind, group] of map) {
-    if (!categoryOrder.some((c) => c.name === kind)) result.push([kind, group])
-  }
-  return result
-}
-
-/** Sort memories array so they appear in category definition order, newest-first within each group. */
-function sortMemoriesByCategoryOrder(mems: PreviewMemory[], categoryOrder: CategoryDef[]): PreviewMemory[] {
-  const catIdx = new Map(categoryOrder.map((c, i) => [c.name, i]))
-  const sorted = [...mems].sort((a, b) => {
-    const ia = catIdx.get(a.kind) ?? 9999
-    const ib = catIdx.get(b.kind) ?? 9999
-    if (ia !== ib) return ia - ib
-    const ta = a.updated_at ?? a.created_at ?? ""
-    const tb = b.updated_at ?? b.created_at ?? ""
-    return tb.localeCompare(ta)
-  })
-  return sorted
-}
-
-function formatAge(iso: string | undefined): string {
-  if (!iso) return ""
-  const diff = Date.now() - new Date(iso).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  return `${Math.floor(hrs / 24)}d ago`
 }
 
 // ---------------------------------------------------------------------------
@@ -196,7 +141,6 @@ function CategoriesPanel({
             {categories.map((cat, idx) => (
               <span
                 key={cat.name}
-                title={cat.description}
                 draggable={!disabled}
                 onDragStart={() => { setDragIdx(idx) }}
                 onDragOver={(e) => { e.preventDefault(); setOverIdx(idx) }}
@@ -239,76 +183,6 @@ function CategoriesPanel({
 }
 
 // ---------------------------------------------------------------------------
-// Memory list — grouped by category order, sorted newest-first within each group
-// ---------------------------------------------------------------------------
-
-function GroupedMemoryList({
-  memories, categoryOrder, scope, disabled, showPromoteButton, promotingId, onChange, onRemove, onPromote,
-}: {
-  memories: PreviewMemory[]; categoryOrder: CategoryDef[]
-  scope: "global" | "project"; disabled: boolean
-  showPromoteButton: boolean; promotingId: string | null
-  onChange: (id: string, text: string) => void
-  onRemove: (id: string) => void
-  onPromote: (mem: PreviewMemory) => void
-}) {
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-  const groups = groupByCategory(memories, categoryOrder)
-
-  function toggle(kind: string) {
-    setCollapsed((prev) => { const next = new Set(prev); next.has(kind) ? next.delete(kind) : next.add(kind); return next })
-  }
-
-  if (memories.length === 0) {
-    return <div className="text-xs italic text-ink-faint">No memories in this profile.</div>
-  }
-
-  return (
-    <div className="space-y-4">
-      {groups.map(([kind, mems]) => {
-        const sorted = sortByUpdated(mems)
-        const isCollapsed = collapsed.has(kind)
-        return (
-          <div key={kind}>
-            <button onClick={() => toggle(kind)}
-              className="flex w-full items-center gap-1.5 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-faint hover:text-ink-subtle transition-colors">
-              {isCollapsed ? <ChevronRight className="h-3 w-3 shrink-0" /> : <ChevronDown className="h-3 w-3 shrink-0" />}
-              <span>{kind.replace(/_/g, " ")}</span>
-              <span className="ml-auto font-normal normal-case tracking-normal">{sorted.length}</span>
-            </button>
-            {!isCollapsed && (
-              <div className="space-y-2 pl-1">
-                {sorted.map((m) => (
-                  <div key={m.id}>
-                    <MemoryCard memory={m} scope={scope} mode="display" disabled={disabled}
-                      onChange={onChange} onRemove={onRemove} />
-                    <div className="flex items-center gap-3 px-1 pt-0.5">
-                      {m.updated_at && (
-                        <span className="text-[10px] text-ink-faint">{formatAge(m.updated_at)}</span>
-                      )}
-                      {showPromoteButton && (
-                        <button onClick={() => onPromote(m)} disabled={disabled || promotingId === m.id}
-                          title="Promote to global profile"
-                          className="flex items-center gap-1 text-[10px] text-ink-faint hover:text-ink-subtle disabled:opacity-40 transition-colors">
-                          {promotingId === m.id
-                            ? <Loader2 className="h-3 w-3 animate-spin" />
-                            : <ArrowUpCircle className="h-3 w-3" />}
-                          Global
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
 // Main viewer
 // ---------------------------------------------------------------------------
 
@@ -328,7 +202,6 @@ function MemoryViewerInner({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
-  const [promotingId, setPromotingId] = useState<string | null>(null)
   const [pendingDeleteCat, setPendingDeleteCat] = useState<CategoryDef | null>(null)
   const [remapping, setRemapping] = useState(false)
 
@@ -350,6 +223,10 @@ function MemoryViewerInner({
     setMemories((prev) => prev.map((m) => m.id === id ? { ...m, text, updated_at: new Date().toISOString() } : m))
   }, [])
 
+  const handleEditCategory = useCallback((id: string, category: string) => {
+    setMemories((prev) => prev.map((m) => m.id === id ? { ...m, category, updated_at: new Date().toISOString() } : m))
+  }, [])
+
   const handleRemove = useCallback((id: string) => {
     setMemories((prev) => prev.filter((m) => m.id !== id))
   }, [])
@@ -360,7 +237,7 @@ function MemoryViewerInner({
     const now = new Date().toISOString()
     setMemories((prev) => [...prev, {
       id: `manual-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      text: trimmed, kind: categories[0]?.name ?? "note", scope: s,
+      text: trimmed, category: categories[0]?.name ?? "note", scope: s,
       created_at: now, updated_at: now,
     }])
   }, [categories])
@@ -374,7 +251,7 @@ function MemoryViewerInner({
   }, [])
 
   const handleDeleteCategory = useCallback((cat: CategoryDef) => {
-    if (memories.some((m) => m.kind === cat.name)) {
+    if (memories.some((m) => m.category === cat.name)) {
       setPendingDeleteCat(cat)
     } else {
       setCategories((prev) => prev.filter((c) => c.name !== cat.name))
@@ -383,10 +260,10 @@ function MemoryViewerInner({
 
   const handleConfirmRemap = useCallback(async () => {
     if (!pendingDeleteCat) return
-    const orphaned = memories.filter((m) => m.kind === pendingDeleteCat.name)
+    const orphaned = memories.filter((m) => m.category === pendingDeleteCat.name)
     const remaining = categories.filter((c) => c.name !== pendingDeleteCat.name)
     if (remaining.length === 0) {
-      setMemories((prev) => prev.filter((m) => m.kind !== pendingDeleteCat.name))
+      setMemories((prev) => prev.filter((m) => m.category !== pendingDeleteCat.name))
       setCategories(remaining); setPendingDeleteCat(null); return
     }
     setRemapping(true)
@@ -394,7 +271,7 @@ function MemoryViewerInner({
       const res = await remapOrphanedCategory(scope, orphaned, remaining, projectSlug ?? null)
       const remappedById = new Map(res.memories.map((m) => [m.id, m]))
       setMemories((prev) =>
-        prev.map((m) => remappedById.get(m.id) ?? m).filter((m) => m.kind !== pendingDeleteCat.name)
+        prev.map((m) => remappedById.get(m.id) ?? m).filter((m) => m.category !== pendingDeleteCat.name)
       )
       setCategories(remaining); setPendingDeleteCat(null)
     } catch (e) {
@@ -404,21 +281,10 @@ function MemoryViewerInner({
 
   const handleConfirmDrop = useCallback(() => {
     if (!pendingDeleteCat) return
-    setMemories((prev) => prev.filter((m) => m.kind !== pendingDeleteCat.name))
+    setMemories((prev) => prev.filter((m) => m.category !== pendingDeleteCat.name))
     setCategories((prev) => prev.filter((c) => c.name !== pendingDeleteCat.name))
     setPendingDeleteCat(null)
   }, [pendingDeleteCat])
-
-  const handlePromote = useCallback(async (mem: PreviewMemory) => {
-    if (scope !== "project" || !projectSlug) return
-    setPromotingId(mem.id)
-    try {
-      await moveMemory(mem.id, "project", "global", projectSlug, null)
-      setMemories((prev) => prev.filter((m) => m.id !== mem.id))
-    } catch (e) {
-      setError((e as Error)?.message || "Promote failed")
-    } finally { setPromotingId(null) }
-  }, [scope, projectSlug])
 
   const handleSave = useCallback(async () => {
     if (loading || saving) return
@@ -450,8 +316,7 @@ function MemoryViewerInner({
   }, [onClose, handleSave, pendingDeleteCat])
 
   // Preview always reflects current category order.
-  const orderedMemories = sortMemoriesByCategoryOrder(memories, categories)
-  const previewMarkdown = renderMemoriesMarkdown(orderedMemories, title).trimEnd() + "\n"
+  const previewMarkdown = renderMemoriesMarkdown(memories, title, categories).trimEnd() + "\n"
   const isLocked = loading || saving || remapping
 
   return (
@@ -497,7 +362,7 @@ function MemoryViewerInner({
               {pendingDeleteCat && (
                 <DeleteCategoryPopup
                   category={pendingDeleteCat}
-                  memoryCount={memories.filter((m) => m.kind === pendingDeleteCat.name).length}
+                  memoryCount={memories.filter((m) => m.category === pendingDeleteCat.name).length}
                   remapping={remapping}
                   onRemap={handleConfirmRemap}
                   onDrop={handleConfirmDrop}
@@ -522,15 +387,21 @@ function MemoryViewerInner({
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              <div className="flex-1 overflow-y-auto p-4">
                 {adding && (
-                  <AddMemoryCard scope={scope} disabled={isLocked} onAddMemory={handleAdd} onCancel={() => setAdding(false)} />
+                  <div className="mb-3">
+                    <AddMemoryCard scope={scope} disabled={isLocked} onAddMemory={handleAdd} onCancel={() => setAdding(false)} />
+                  </div>
                 )}
-                <GroupedMemoryList
-                  memories={memories} categoryOrder={categories} scope={scope}
-                  disabled={isLocked} showPromoteButton={scope === "project"}
-                  promotingId={promotingId}
-                  onChange={handleEdit} onRemove={handleRemove} onPromote={handlePromote}
+                <MemoryBoard
+                  memories={memories}
+                  categoryOrder={categories}
+                  scope={scope}
+                  disabled={isLocked}
+                  mode="display"
+                  onChange={handleEdit}
+                  onChangeCategory={handleEditCategory}
+                  onRemove={handleRemove}
                 />
               </div>
             </div>

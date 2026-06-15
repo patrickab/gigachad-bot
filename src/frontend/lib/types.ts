@@ -169,7 +169,7 @@ export interface ProposedMemory {
   id: string
   memory: string
   scope: "global" | "project"
-  kind?: string
+  category?: string
 }
 
 export type MemoryStatus = "pre-existing" | "combined" | "new"
@@ -177,7 +177,7 @@ export type MemoryStatus = "pre-existing" | "combined" | "new"
 export interface PreviewMemory {
   id: string
   text: string
-  kind: string
+  category: string
   scope: "global" | "project"
   status?: MemoryStatus
   created_at?: string

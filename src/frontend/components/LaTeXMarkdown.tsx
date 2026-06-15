@@ -3,7 +3,7 @@
 import { Streamdown, defaultRemarkPlugins, type Components } from "streamdown"
 import { createMathPlugin } from "@streamdown/math"
 import remarkBreaks from "remark-breaks"
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { cloneElement, isValidElement, memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import { highlightCode } from "@/lib/markdown-syntax-highlighting"
 import { motion, AnimatePresence } from "framer-motion"
@@ -39,6 +39,44 @@ function normalizeMathDelimiters(input: string): string {
         .replace(/\\\)/g, () => "$")
     })
     .join("")
+}
+
+// Render blocks that contain box-drawing characters as a preformatted ASCII
+// diagram instead of a generic code block, so these diagrams work even when
+// the LLM omits a language tag.
+function AsciiDiagram({ codeString }: { codeString: string }) {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(codeString).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }, [codeString])
+
+  return (
+    <div className="group/code relative my-3">
+      <pre className="rounded-md p-4 m-0 text-[0.75rem] leading-[1.6] bg-surface text-ink overflow-x-auto whitespace-pre">
+        <code>{codeString}</code>
+      </pre>
+      <button
+        onClick={handleCopy}
+        className="absolute top-2 right-2 rounded p-1 opacity-0 transition-opacity group-hover/code:opacity-100 hover:bg-surface-elevated/60 text-ink-subtle hover:text-ink"
+        title="Copy code"
+      >
+        {copied ? <Check className="h-3.5 w-3.5 text-ink" /> : <Copy className="h-3.5 w-3.5" />}
+      </button>
+    </div>
+  )
+}
+
+function containsBoxDrawing(code: string): boolean {
+  return /[\u2500-\u257F\u2580-\u259F]/.test(code)
+}
+
+function containsAsciiTableArt(code: string): boolean {
+  const boxChars = (code.match(/[\u2500-\u257F\u2580-\u259F]/g) || []).length
+  const lines = code.split("\n").length
+  return boxChars >= 8 && lines >= 3
 }
 
 function CodeBlock({ codeString, language }: { codeString: string; language: string }) {
@@ -78,6 +116,21 @@ function CodeBlock({ codeString, language }: { codeString: string; language: str
         {copied ? <Check className="h-3.5 w-3.5 text-ink" /> : <Copy className="h-3.5 w-3.5" />}
       </button>
     </div>
+  )
+}
+
+// Detect diagrams even when the LLM forgets the `mermaid` language tag on the
+// code fence. This keeps diagrams working out of the box for both:
+//   ```mermaid
+//   graph TD; ...
+//   ```
+// and:
+//   ```
+//   graph TD; ...
+//   ```
+function isMermaidCode(code: string): boolean {
+  return /^\s*(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitGraph|journey|requirementDiagram|mindmap|timeline|sankey|xychart|block-beta|packet-beta|architecture-beta)\b/i.test(
+    code,
   )
 }
 
@@ -150,21 +203,27 @@ const PROSE_COMPONENTS: Components = {
   tr: "tr",
   th: "th",
   td: "td",
-  pre: ({ children }: any) => <>{children}</>,
+  pre: ({ children }: any) =>
+    isValidElement(children)
+      ? cloneElement(children, { "data-block": "true" } as Record<string, string>)
+      : <>{children}</>,
   code: ({ className, children, ...props }: any) => {
-    const match = /language-(\w+)/.exec(className || "")
-    if (!match) {
+    if (!("data-block" in props)) {
       return (
         <code className={className} {...props}>
           {children}
         </code>
       )
     }
+    const match = /language-(\w+)/.exec(className || "")
     const codeString = String(children).replace(/\n$/, "")
-    if (match[1] === "mermaid") {
+    if (match?.[1] === "mermaid" || isMermaidCode(codeString)) {
       return <MermaidDiagram code={codeString} />
     }
-    return <CodeBlock codeString={codeString} language={match[1]} />
+    if (!match && containsAsciiTableArt(codeString)) {
+      return <AsciiDiagram codeString={codeString} />
+    }
+    return <CodeBlock codeString={codeString} language={match?.[1] || "text"} />
   },
 }
 
