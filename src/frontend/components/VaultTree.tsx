@@ -462,7 +462,6 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
             <button
               onClick={(e) => { e.stopPropagation(); onDashboardClick(item.id) }}
               className="p-0.5 rounded text-ink-faint hover:text-ink transition-colors"
-              title="Dashboard"
             >
               <LayoutDashboard className="h-3 w-3" />
             </button>
@@ -471,7 +470,6 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
             <button
               onClick={(e) => { e.stopPropagation(); onMemoryClick(item.id) }}
               className="p-0.5 rounded text-ink-faint hover:text-ink transition-colors"
-              title="Memory"
             >
               <Brain className="h-3 w-3" />
             </button>
@@ -485,7 +483,6 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
                 setCreateName("")
               }}
               className="p-0.5 rounded text-ink-faint hover:text-ink transition-colors"
-              title="New folder"
             >
               <Plus className="h-3 w-3" />
             </button>
@@ -494,7 +491,6 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
             <button
               onClick={(e) => { e.stopPropagation(); onVaultDelete(item.id) }}
               className="p-0.5 rounded text-ink-faint hover:text-danger transition-colors"
-              title={isVault ? "Delete project" : "Delete folder"}
             >
               <Trash2 className="h-3 w-3" />
             </button>
@@ -570,12 +566,11 @@ function ElementNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number
           {ElementIcon && <ElementIcon className="h-3.5 w-3.5 shrink-0 text-ink-muted" />}
           {item.label}
         </button>
-        {onElementDelete && !item.isSystem && (
+          {onElementDelete && !item.isSystem && (
           <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
             <button
               onClick={() => onElementDelete(item)}
               className="p-0.5 rounded text-ink-faint hover:text-danger transition-colors shrink-0"
-              title="Delete"
             >
               <Trash2 className="h-3 w-3" />
             </button>
