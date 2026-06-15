@@ -32,6 +32,7 @@ MORPHIC_URL = os.environ.get("MORPHIC_URL", "http://localhost:3001")
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 SEARX_URL = os.environ.get("SEARX_URL", "http://localhost:8888")
 
+
 def uploads_dir_for(slug: str | None) -> Path:
     """Resolve the uploads directory for a given project slug (or None for non-project)."""
     if slug:

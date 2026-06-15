@@ -37,11 +37,11 @@
    --shadow-strength: 0.35;
    --shadow-color: oklch(20% 0.01 85);
  
-   /* --- Text (ink) — high contrast on dark surfaces --- */
-   --ink:        oklch(95% 0.006 85);
-   --ink-muted:  oklch(72% 0.010 85);
-   --ink-subtle: oklch(55% 0.010 85);
-   --ink-faint:  oklch(42% 0.008 85);
+    /* --- Text (ink) — slightly muted high contrast on dark surfaces --- */
+    --ink:        oklch(90% 0.006 85);
+    --ink-muted:  oklch(68% 0.010 85);
+    --ink-subtle: oklch(52% 0.010 85);
+    --ink-faint:  oklch(40% 0.008 85);
  
    /* --- Surfaces — warm-tinted dark greys (not near-black) --- */
    --paper:            oklch(19% 0.013 85);
@@ -55,9 +55,9 @@
    /* --- Backdrop for modal scrims --- */
    --backdrop:    oklch(0% 0 0 / 0.65);
  
-   /* --- Derived: dividers (recompute when --ink changes) --- */
-   --divider:         color-mix(in oklab, var(--ink) 8%,  transparent);
-   --divider-strong:  color-mix(in oklab, var(--ink) 18%, transparent);
+    /* --- Derived: dividers (recompute when --ink changes) --- */
+    --divider:         color-mix(in oklab, var(--ink) 20%, transparent);
+    --divider-strong:  color-mix(in oklab, var(--ink) 36%, transparent);
  
    /* --- Derived: danger tints --- */
    --danger-soft:     color-mix(in oklab, var(--danger) 12%, transparent);
@@ -73,34 +73,38 @@
    --shadow-xl:  0 12px 30px color-mix(in oklab, var(--shadow-color) 35%, transparent);
  }
 
- .light {
-   --shadow-strength: 0.08;
-   --shadow-color: oklch(35% 0.01 85);
- 
-   /* --- Text: dark warm-tinted greys ("greyish writing") --- */
-   --ink:        oklch(28% 0.012 85);
-   --ink-muted:  oklch(40% 0.012 85);
-   --ink-subtle: oklch(50% 0.010 85);
-   --ink-faint:  oklch(60% 0.008 85);
- 
-   /* --- Surfaces: yellowish broken white, ascending toward (not to) white --- */
-   --paper:            oklch(95%   0.020 85);
-   --surface:          oklch(97.5% 0.012 85);
-   --surface-elevated: oklch(99%   0.006 85);
-   --overlay:          oklch(96%   0.015 85);
- 
-   /* --- Danger: darker red for light bg --- */
-   --danger:      oklch(52% 0.22 25);
- 
-   /* Backdrop stays the same — a scrim is meant to darken regardless of mode */
-   --backdrop:    oklch(0% 0 0 / 0.55);
- 
-   /* --- Shadows (light mode — softer, warm-tinted) --- */
-   --shadow-sm:  0 2px 10px color-mix(in oklab, var(--shadow-color) 8%, transparent);
-   --shadow-md:  0 4px 15px color-mix(in oklab, var(--shadow-color) 8%, transparent);
-   --shadow-lg:  0 8px 30px color-mix(in oklab, var(--shadow-color) 8%, transparent);
-   --shadow-xl:  0 12px 30px color-mix(in oklab, var(--shadow-color) 8%, transparent);
- }
+  .light {
+    --shadow-strength: 0.08;
+    --shadow-color: oklch(35% 0.01 85);
+  
+    /* --- Text: medium warm-tinted greys (not black) --- */
+    --ink:        oklch(42% 0.012 85);
+    --ink-muted:  oklch(52% 0.012 85);
+    --ink-subtle: oklch(62% 0.010 85);
+    --ink-faint:  oklch(72% 0.008 85);
+  
+    /* --- Surfaces: yellowish broken white, ascending toward (not to) white --- */
+    --paper:            oklch(95%   0.020 85);
+    --surface:          oklch(97.5% 0.012 85);
+    --surface-elevated: oklch(99%   0.006 85);
+    --overlay:          oklch(96%   0.015 85);
+  
+    /* --- Danger: darker red for light bg --- */
+    --danger:      oklch(52% 0.22 25);
+  
+    /* Backdrop stays the same — a scrim is meant to darken regardless of mode */
+    --backdrop:    oklch(0% 0 0 / 0.55);
+  
+    /* --- Dividers: stronger on light surfaces --- */
+    --divider:        color-mix(in oklab, var(--ink) 24%, transparent);
+    --divider-strong: color-mix(in oklab, var(--ink) 42%, transparent);
+  
+    /* --- Shadows (light mode — softer, warm-tinted) --- */
+    --shadow-sm:  0 2px 10px color-mix(in oklab, var(--shadow-color) 8%, transparent);
+    --shadow-md:  0 4px 15px color-mix(in oklab, var(--shadow-color) 8%, transparent);
+    --shadow-lg:  0 8px 30px color-mix(in oklab, var(--shadow-color) 8%, transparent);
+    --shadow-xl:  0 12px 30px color-mix(in oklab, var(--shadow-color) 8%, transparent);
+  }
 
 /* ============================================================
    TAILWIND V4 TOKEN MAPPING

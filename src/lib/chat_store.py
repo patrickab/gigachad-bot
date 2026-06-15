@@ -145,6 +145,7 @@ class ChatStore:
                     self._remove_child_from_parent(parent_file, data["chat_id"])
         if path.is_dir():
             import shutil
+
             shutil.rmtree(str(path))
         else:
             path.unlink()
@@ -156,9 +157,7 @@ class ChatStore:
         parent_path = self.resolve_path(parent_file)
         parent_data = self._load_path(parent_path)
         if parent_data:
-            parent_data["children"] = [
-                c for c in parent_data.get("children", []) if c.get("chat_id") != child_chat_id
-            ]
+            parent_data["children"] = [c for c in parent_data.get("children", []) if c.get("chat_id") != child_chat_id]
             safe_write_json(parent_path, parent_data)
 
     def _remove_from_project(self, project_dir: Path | None, filename: str) -> None:
@@ -397,7 +396,7 @@ class ChatStore:
         if len(parent_message_pairs) > branch_idx + 1:
             raise ValueError("Parent has diverged past the branch point")
         child_messages = child_data.get("messages", [])
-        new_messages = child_messages[branch_idx * 2:] if branch_idx * 2 < len(child_messages) else []
+        new_messages = child_messages[branch_idx * 2 :] if branch_idx * 2 < len(child_messages) else []
         parent_data["messages"] = parent_data.get("messages", []) + new_messages
         parent_children = parent_data.get("children", [])
         child_chat_id = child_data.get("chat_id")
@@ -521,6 +520,7 @@ class ChatStore:
 # ------------------------------------------------------------------
 # Pure helpers (module-level, no state)
 # ------------------------------------------------------------------
+
 
 def _sanitize_title(title: str) -> str:
     sanitized = re.sub(r"[^A-Za-z0-9._\- ]+", "_", title).strip()

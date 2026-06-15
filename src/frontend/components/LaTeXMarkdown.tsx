@@ -322,7 +322,7 @@ function LaTeXMarkdownInner({
 
   return (
     <div
-      className={cn("text-sm leading-relaxed", compact ? "markdown-body-compact" : "markdown-body")}
+      className={cn("text-[13px] leading-relaxed", compact ? "markdown-body-compact" : "markdown-body")}
       style={{ color: "var(--ink)" }}
     >
       <Streamdown

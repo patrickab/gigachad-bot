@@ -135,9 +135,7 @@ async def update_project_state(
 
 
 @router.post("/{slug}/cards")
-async def add_card(
-    slug: str, req: AddCardRequest, store: ProjectStore = Depends(get_project_store)
-) -> dict[str, Any]:
+async def add_card(slug: str, req: AddCardRequest, store: ProjectStore = Depends(get_project_store)) -> dict[str, Any]:
     try:
         return store.add_card(slug, req.title, req.description, req.state)
     except FileNotFoundError:

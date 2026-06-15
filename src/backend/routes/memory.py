@@ -57,14 +57,10 @@ async def extract_memories(
         raise HTTPException(status_code=502, detail=str(e)) from e
     return {
         "review_id": result.review_id,
-        "global": [
-            {"id": m.id, "memory": m.memory, "scope": m.scope, "kind": m.kind}
-            for m in result.global_memories
-        ],
-        "project": [
-            {"id": m.id, "memory": m.memory, "scope": m.scope, "kind": m.kind}
-            for m in result.project_memories
-        ] if result.project_memories else None,
+        "global": [{"id": m.id, "memory": m.memory, "scope": m.scope, "kind": m.kind} for m in result.global_memories],
+        "project": [{"id": m.id, "memory": m.memory, "scope": m.scope, "kind": m.kind} for m in result.project_memories]
+        if result.project_memories
+        else None,
     }
 
 
@@ -75,10 +71,7 @@ async def commit_memory_docs(
 ) -> dict:
     try:
         with request_client() as client:
-            accepted = [
-                MemoryProposedMemory(m.id, m.memory, m.scope, m.kind or "note")
-                for m in req.accepted_memories
-            ]
+            accepted = [MemoryProposedMemory(m.id, m.memory, m.scope, m.kind or "note") for m in req.accepted_memories]
             await store.commit_async(
                 llm=client,
                 scope=req.scope,
@@ -100,10 +93,7 @@ async def preview_memory_docs(
 ) -> dict:
     try:
         with request_client() as client:
-            accepted = [
-                MemoryProposedMemory(m.id, m.memory, m.scope, m.kind or "note")
-                for m in req.accepted_memories
-            ]
+            accepted = [MemoryProposedMemory(m.id, m.memory, m.scope, m.kind or "note") for m in req.accepted_memories]
             result = await store.preview(
                 llm=client,
                 scope=req.scope,

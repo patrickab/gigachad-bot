@@ -184,6 +184,7 @@ class ProjectStore:
         if not self._find_entry(meta, slug):
             raise FileNotFoundError(f"Project not found: {slug}")
         import uuid
+
         project_dir = self._resolve_project_dir(slug)
         data = self._read_project(project_dir)
         card = {"id": str(uuid.uuid4()), "title": title, "description": description, "state": state}

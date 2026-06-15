@@ -54,37 +54,38 @@ FALLBACK_CATEGORY = "note"
 # extractor new buckets — extraction and per-category dedup pick them up
 # automatically.
 DEFAULT_GLOBAL_CATEGORIES: list[dict[str, str]] = [
-    {"name": "identity",
-     "description": "Stable facts about who the user is: name, role, field of study, spoken/programming languages, background."},
-    {"name": "communication_preference",
-     "description": "How the user wants the assistant to respond: tone, verbosity, language, formatting."},
-    {"name": "learning_preference",
-     "description": "How the user likes to study and learn: preferred explanations, examples, pace, analogies, formats."},
-    {"name": "engineering_preference",
-     "description": "General coding and tooling preferences across projects: languages, frameworks, libraries, code style."},
-    {"name": "environment",
-     "description": "The user's tools and setup: OS, editor, hardware, shell, recurring environment details."},
-    {"name": "interest",
-     "description": "Recurring topics, subjects, or hobbies the user cares about beyond a single project."},
-    {"name": "goal",
-     "description": "Longer-term personal, academic, or career goals the user is working toward."},
+    {
+        "name": "identity",
+        "description": "Stable facts about who the user is: name, role, field of study, spoken/programming languages, background.",
+    },
+    {
+        "name": "communication_preference",
+        "description": "How the user wants the assistant to respond: tone, verbosity, language, formatting.",
+    },
+    {
+        "name": "learning_preference",
+        "description": "How the user likes to study and learn: preferred explanations, examples, pace, analogies, formats.",
+    },
+    {
+        "name": "engineering_preference",
+        "description": "General coding and tooling preferences across projects: languages, frameworks, libraries, code style.",
+    },
+    {"name": "environment", "description": "The user's tools and setup: OS, editor, hardware, shell, recurring environment details."},
+    {"name": "interest", "description": "Recurring topics, subjects, or hobbies the user cares about beyond a single project."},
+    {"name": "goal", "description": "Longer-term personal, academic, or career goals the user is working toward."},
 ]
 
 DEFAULT_PROJECT_CATEGORIES: list[dict[str, str]] = [
-    {"name": "purpose",
-     "description": "What this project or course/subject is about and what it aims to achieve."},
-    {"name": "current_focus",
-     "description": "What is being worked on or studied right now."},
-    {"name": "key_concept",
-     "description": "Important concepts, definitions, formulas, or facts worth retaining (e.g. from lectures)."},
-    {"name": "decision",
-     "description": "Design, architecture, or technical decisions that were made, with their rationale."},
-    {"name": "constraint",
-     "description": "Requirements, limitations, deadlines, or rules that apply to the project."},
-    {"name": "resource",
-     "description": "Useful references, files, links, datasets, tools, or commands tied to this project."},
-    {"name": "open_question",
-     "description": "Unresolved questions, blockers, or pending tasks to follow up on."},
+    {"name": "purpose", "description": "What this project or course/subject is about and what it aims to achieve."},
+    {"name": "current_focus", "description": "What is being worked on or studied right now."},
+    {
+        "name": "key_concept",
+        "description": "Important concepts, definitions, formulas, or facts worth retaining (e.g. from lectures).",
+    },
+    {"name": "decision", "description": "Design, architecture, or technical decisions that were made, with their rationale."},
+    {"name": "constraint", "description": "Requirements, limitations, deadlines, or rules that apply to the project."},
+    {"name": "resource", "description": "Useful references, files, links, datasets, tools, or commands tied to this project."},
+    {"name": "open_question", "description": "Unresolved questions, blockers, or pending tasks to follow up on."},
 ]
 
 
@@ -255,13 +256,8 @@ class MemoryStore:
 
         project_section = ""
         if project_slug:
-            project_section = (
-                "\nProject categories (facts about the active project/subject):\n"
-                f"{project_block}\n"
-            )
-        no_project_rule = (
-            "" if project_slug else '\n- No project is active: return an empty "project" list.'
-        )
+            project_section = f"\nProject categories (facts about the active project/subject):\n{project_block}\n"
+        no_project_rule = "" if project_slug else '\n- No project is active: return an empty "project" list.'
 
         user_prompt = f"""
 Conversation:
@@ -288,10 +284,7 @@ Rules:
         data = await self._generate_json(_llm, system_prompt, user_prompt, timeout=EXTRACT_TIMEOUT)
 
         global_memories = self._build_candidates(data.get("global", []), "global", global_cats)
-        project_memories = (
-            self._build_candidates(data.get("project", []), "project", project_cats)
-            if project_slug else []
-        )
+        project_memories = self._build_candidates(data.get("project", []), "project", project_cats) if project_slug else []
 
         self._write_pending(review_id, global_memories + project_memories)
         return ExtractResult(review_id=review_id, global_memories=global_memories, project_memories=project_memories)
@@ -320,7 +313,10 @@ Rules:
             now = _now_iso()
             updated = [
                 StoredMemory(
-                    id=m["id"], text=m["text"], kind=m["kind"], scope=m["scope"],
+                    id=m["id"],
+                    text=m["text"],
+                    kind=m["kind"],
+                    scope=m["scope"],
                     created_at=str(m.get("created_at") or now),
                     updated_at=str(m.get("updated_at") or now),
                 )
@@ -439,9 +435,7 @@ Rules:
         if not existing_texts:
             final_texts = self._dedup_keep_order(candidate_texts)
         else:
-            final_texts = await self._merge_category_with_llm(
-                llm, category, existing_texts, candidate_texts
-            )
+            final_texts = await self._merge_category_with_llm(llm, category, existing_texts, candidate_texts)
 
         return self._classify_texts(final_texts, category, scope, existing, existing_texts, candidate_texts)
 
@@ -516,15 +510,23 @@ Return JSON with this exact shape:
                 # Unchanged — preserve id and both timestamps.
                 status = "pre-existing"
                 mem = StoredMemory(
-                    id=prev.id, text=text, kind=category, scope=scope,
-                    created_at=prev.created_at, updated_at=prev.updated_at,
+                    id=prev.id,
+                    text=text,
+                    kind=category,
+                    scope=scope,
+                    created_at=prev.created_at,
+                    updated_at=prev.updated_at,
                 )
             elif key in candidate_set:
                 # Brand-new memory from this extraction.
                 status = "new"
                 mem = StoredMemory(
-                    id=str(uuid.uuid4()), text=text, kind=category, scope=scope,
-                    created_at=now, updated_at=now,
+                    id=str(uuid.uuid4()),
+                    text=text,
+                    kind=category,
+                    scope=scope,
+                    created_at=now,
+                    updated_at=now,
                 )
             else:
                 # LLM synthesised a combined/updated form — preserve created_at if we can find it.
@@ -532,8 +534,11 @@ Return JSON with this exact shape:
                 created_at = prev.created_at if prev else now
                 mem = StoredMemory(
                     id=prev.id if prev else str(uuid.uuid4()),
-                    text=text, kind=category, scope=scope,
-                    created_at=created_at, updated_at=now,
+                    text=text,
+                    kind=category,
+                    scope=scope,
+                    created_at=created_at,
+                    updated_at=now,
                 )
             out.append((mem, status))
         return out
@@ -622,10 +627,7 @@ Return JSON with this exact shape:
         fallback_cat = remaining_categories[0]["name"]
 
         categories_block = self._format_categories(remaining_categories)
-        system_prompt = (
-            "You reassign memory items to the best-fitting category from a given list. "
-            "Output valid JSON only, no prose."
-        )
+        system_prompt = "You reassign memory items to the best-fitting category from a given list. Output valid JSON only, no prose."
         user_prompt = f"""
 Memories to reassign:
 {json.dumps([m["text"] for m in orphaned_memories], indent=2, ensure_ascii=False)}
@@ -729,20 +731,24 @@ Rules:
 
         active_file = dir_path / f"{stem_name}.md"
         if active_file.exists():
-            profiles.append({
-                "filepath": self._relative_base_path(active_file),
-                "title": "Current",
-            })
+            profiles.append(
+                {
+                    "filepath": self._relative_base_path(active_file),
+                    "title": "Current",
+                }
+            )
 
         backups = sorted(dir_path.glob(f"{stem_name}_*.md"))
         for file in backups:
             try:
                 match = re.search(r"_(\d+)\.md$", file.name)
                 idx_str = match.group(1) if match else "00"
-                profiles.append({
-                    "filepath": self._relative_base_path(file),
-                    "title": f"Version {idx_str}",
-                })
+                profiles.append(
+                    {
+                        "filepath": self._relative_base_path(file),
+                        "title": f"Version {idx_str}",
+                    }
+                )
             except Exception as e:
                 log.error("Failed to parse backup version %s: %s", file, e)
 
@@ -792,14 +798,16 @@ Rules:
         out: list[StoredMemory] = []
         for m in raw:
             try:
-                out.append(StoredMemory(
-                    id=str(m.get("id") or uuid.uuid4()),
-                    text=str(m.get("text", "")),
-                    kind=str(m.get("kind") or FALLBACK_CATEGORY),
-                    scope=str(m.get("scope") or "global"),
-                    created_at=str(m.get("created_at") or now),
-                    updated_at=str(m.get("updated_at") or now),
-                ))
+                out.append(
+                    StoredMemory(
+                        id=str(m.get("id") or uuid.uuid4()),
+                        text=str(m.get("text", "")),
+                        kind=str(m.get("kind") or FALLBACK_CATEGORY),
+                        scope=str(m.get("scope") or "global"),
+                        created_at=str(m.get("created_at") or now),
+                        updated_at=str(m.get("updated_at") or now),
+                    )
+                )
             except AttributeError:
                 continue
         return out
@@ -813,6 +821,7 @@ Rules:
 
     def render_memories_as_markdown(self, memories: list[StoredMemory], title: str) -> str:
         from collections import defaultdict
+
         groups: dict[str, list[str]] = defaultdict(list)
         for m in memories:
             groups[m.kind].append(m.text)
@@ -927,6 +936,7 @@ Rules:
         the two-pass strategy plus ``_json_from_response`` salvaging keeps extraction
         from hard-failing.
         """
+
         def call(force_json: bool) -> str:
             kwargs: dict[str, Any] = dict(
                 model=_memory_extraction_model(),
