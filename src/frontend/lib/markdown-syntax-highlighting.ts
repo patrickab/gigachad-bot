@@ -1,7 +1,7 @@
 import { createHighlighterCore, type HighlighterCore } from "shiki/core"
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript"
-import darkPlus from "@shikijs/themes/dark-plus"
-import lightPlus from "@shikijs/themes/light-plus"
+import slackDark from "@shikijs/themes/slack-dark"
+import snazzyLight from "@shikijs/themes/snazzy-light"
 import javascript from "@shikijs/langs/javascript"
 import typescript from "@shikijs/langs/typescript"
 import python from "@shikijs/langs/python"
@@ -37,7 +37,7 @@ let highlighterPromise: Promise<HighlighterCore> | null = null
 export function getHighlighter(): Promise<HighlighterCore> {
   if (!highlighterPromise) {
     highlighterPromise = createHighlighterCore({
-      themes: [darkPlus, lightPlus],
+      themes: [slackDark, snazzyLight],
       langs: [
         javascript,
         typescript,
@@ -96,8 +96,8 @@ export async function highlightCode(code: string, lang: string): Promise<string>
     return hl.codeToHtml(code, {
       lang: safeLang,
       themes: {
-        dark: "dark-plus",
-        light: "light-plus",
+        dark: "slack-dark",
+        light: "snazzy-light",
       },
       defaultColor: false,
     })
@@ -106,8 +106,8 @@ export async function highlightCode(code: string, lang: string): Promise<string>
       return hl.codeToHtml(code, {
         lang: "text",
         themes: {
-          dark: "dark-plus",
-          light: "light-plus",
+          dark: "slack-dark",
+          light: "snazzy-light",
         },
         defaultColor: false,
       })
