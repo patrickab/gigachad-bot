@@ -5,6 +5,7 @@
 /* Streamdown emits arbitrary-value utilities (e.g. dark:text-[var(--shiki-dark,...)])
    from its compiled output, so Tailwind must scan its dist to generate them. */
 @source "../node_modules/streamdown/dist";
+@source "../node_modules/@streamdown/math/dist";
 
 /* This app is dark-by-default and opts into light via a `.light` class on <html>.
    Streamdown switches code-block theming through Tailwind's `dark:` variant, so we

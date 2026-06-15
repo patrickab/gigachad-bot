@@ -107,7 +107,7 @@ export function Sidebar({
 
   useEffect(() => { registerOnFileClick(onOpenChat) }, [onOpenChat, registerOnFileClick])
   useEffect(() => { if (onMerge) registerOnMerge(onMerge) }, [onMerge, registerOnMerge])
-  useEffect(() => { if (onCascadeDelete) registerOnDelete(onCascadeDelete) }, [onCascadeDelete, registerOnDelete])
+  useEffect(() => { registerOnDelete(handleTimelineDelete) }, [handleTimelineDelete, registerOnDelete])
 
   return (
     <motion.aside

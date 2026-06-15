@@ -35,7 +35,7 @@ export interface BranchContextValue {
   setActiveQaIndex: (idx: number | null) => void
   registerOnFileClick: (fn: (file: string, qaIndex?: number) => void) => void
   registerOnMerge: (fn: (childFile: string) => Promise<void>) => void
-  registerOnDelete: (fn: (file: string) => void) => void
+  registerOnDelete: (fn: (file: string) => Promise<void>) => void
 }
 
 const BranchContext = createContext<BranchContextValue | null>(null)
@@ -50,7 +50,7 @@ export function BranchProvider({ children }: { children: ReactNode }) {
 
   const onFileClickRef = useRef<(file: string, qaIndex?: number) => void>(() => {})
   const onMergeRef = useRef<(childFile: string) => Promise<void>>(async () => {})
-  const onDeleteRef = useRef<(file: string) => void>(() => {})
+  const onDeleteRef = useRef<(file: string) => Promise<void>>(async () => {})
 
   const registerOnFileClick = useCallback((fn: (file: string, qaIndex?: number) => void) => {
     onFileClickRef.current = fn
@@ -60,7 +60,7 @@ export function BranchProvider({ children }: { children: ReactNode }) {
     onMergeRef.current = fn
   }, [])
 
-  const registerOnDelete = useCallback((fn: (file: string) => void) => {
+  const registerOnDelete = useCallback((fn: (file: string) => Promise<void>) => {
     onDeleteRef.current = fn
   }, [])
 
@@ -73,7 +73,7 @@ export function BranchProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const onDelete = useCallback((file: string) => {
-    onDeleteRef.current(file)
+    void onDeleteRef.current(file)
   }, [])
 
   const refreshAll = useCallback(async () => {

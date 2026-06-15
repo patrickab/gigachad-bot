@@ -129,7 +129,7 @@ class ChatStore:
     # ------------------------------------------------------------------
 
     def delete(self, filename: str, *, cleanup_uploads_fn: Callable[[str, str | None], None] | None = None) -> dict[str, str]:
-        """Delete a single chat file. Updates parent children array if applicable."""
+        """Delete a single chat file. Updates parent children array and project tab registry if applicable."""
         path = self.resolve_path(filename)
         if not path.exists():
             raise FileNotFoundError(filename)

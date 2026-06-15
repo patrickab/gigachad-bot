@@ -35,7 +35,6 @@ import {
   parseFiles,
   deleteAttachment,
   saveProjectTab,
-  deleteProjectTab,
   loadProjectTab,
   parseHistoryFile,
   buildHistoryFile,
@@ -469,10 +468,6 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
 
   const handleCascadeDelete = useCallback(async (filename: string) => {
     await doCascadeDelete(filename)
-    const { slug, filename: fn } = parseHistoryFile(filename)
-    if (slug) {
-      await deleteProjectTab(slug, fn).catch(() => {})
-    }
     await refreshAll()
   }, [doCascadeDelete, refreshAll])
 

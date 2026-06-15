@@ -1,6 +1,6 @@
 "use client"
 
-import { Streamdown, type Components } from "streamdown"
+import { Streamdown, defaultRemarkPlugins, type Components } from "streamdown"
 import { createMathPlugin } from "@streamdown/math"
 import remarkBreaks from "remark-breaks"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -18,7 +18,9 @@ import "katex/dist/katex.min.css"
 const mathPlugin = createMathPlugin({ singleDollarTextMath: false })
 const PLUGINS = { math: mathPlugin }
 
-const REMARK_PLUGINS = [remarkBreaks]
+// Passing remarkPlugins replaces Streamdown's defaults (which include remark-gfm).
+// Keep defaults so GFM tables/task lists parse, then add soft line breaks.
+const REMARK_PLUGINS = [...Object.values(defaultRemarkPlugins), remarkBreaks]
 const LINK_SAFETY_OFF = { enabled: false }
 
 // remark-math (used by @streamdown/math) only understands $...$ / $$...$$.
@@ -141,17 +143,13 @@ const PROSE_COMPONENTS: Components = {
   strong: "strong",
   em: "em",
   del: "del",
+  img: "img",
+  table: "table",
   thead: "thead",
   tbody: "tbody",
   tr: "tr",
   th: "th",
   td: "td",
-  img: "img",
-  table: ({ children }: any) => (
-    <div className="overflow-x-auto">
-      <table>{children}</table>
-    </div>
-  ),
   pre: ({ children }: any) => <>{children}</>,
   code: ({ className, children, ...props }: any) => {
     const match = /language-(\w+)/.exec(className || "")
