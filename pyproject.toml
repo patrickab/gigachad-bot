@@ -11,7 +11,7 @@ dependencies = [
     "gpt-researcher>=0.15.1",
     "langchain-litellm>=0.6.6",
     "langchain-ollama>=1.1.0",
-    "litellm>=1.89.0",
+    "litellm>=1.89.2",
     "llm-baseclient @ git+https://github.com/patrickab/llm-baseclient.git@main",
     "mineru[all]>=3.2.3",
     "nodeenv>=1.10.0",
