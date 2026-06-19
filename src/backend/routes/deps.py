@@ -12,7 +12,6 @@ from lib.chat_store import ChatStore
 from lib.memory_store import MemoryStore
 from lib.project_store import ProjectStore
 from llm_client import LLMClient
-from llm_config import MODEL_CONFIGS
 
 _client: LLMClient | None = None
 _chat_store: ChatStore | None = None
@@ -23,7 +22,7 @@ _memory_store: MemoryStore | None = None
 def get_client() -> LLMClient:
     global _client
     if _client is None:
-        _client = LLMClient(model_configs=MODEL_CONFIGS)
+        _client = LLMClient()
     return _client
 
 

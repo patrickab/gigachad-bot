@@ -29,7 +29,7 @@ A minimalist, local-first LLM web interface. Designed for focus and custom workf
 ## Setup
 
 - Clone the repository.
-- Store your `OPENAI_API_KEY` or `GEMINI_API_KEY` in environment variables.
+- Store your `OPENAI_API_KEY`, `GEMINI_API_KEY`, or `DEEPSEEK_API_KEY` in environment variables.
 - Run `uv sync` to install Python dependencies.
 - Run `uv run gigachad-install` to install Node.js into the venv and frontend dependencies.
 - Execute `./run.sh` to start the app (backend on `:8001`, frontend on `:2999`).

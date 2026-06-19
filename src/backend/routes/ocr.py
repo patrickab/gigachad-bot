@@ -2,8 +2,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
+from config import VISION_MODEL
 from lib.prompts import SYS_OCR_TEXT_EXTRACTION
-from llm_config import DEFAULT_VISION_MODEL
 
 from .deps import decode_image, request_client, sse_event_stream
 
@@ -23,7 +23,7 @@ class DownscaleRequest(BaseModel):
 @router.post("/ocr")
 async def ocr(req: OCRRequest) -> EventSourceResponse:
     with request_client() as c:
-        model = req.model or DEFAULT_VISION_MODEL
+        model = req.model or VISION_MODEL
         img = decode_image(req.img_base64)
         chunks = c.api_query(
             model=model,

@@ -1,4 +1,11 @@
 from fastapi import APIRouter
+from llm_baseclient.config import (
+    AVAILABLE_MODELS,
+    MODELS_DEEPSEEK,
+    MODELS_GEMINI,
+    MODELS_OLLAMA,
+    # MODELS_OPENAI
+)
 
 from lib.prompts import (
     SYS_ADVISOR,
@@ -9,11 +16,6 @@ from lib.prompts import (
     SYS_QUICK_OVERVIEW,
     SYS_TUTOR,
 )
-
-try:
-    from llm_baseclient.config import AVAILABLE_MODELS, MODELS_GEMINI, MODELS_OLLAMA, MODELS_OPENAI
-except ImportError:
-    AVAILABLE_MODELS = MODELS_GEMINI = MODELS_OLLAMA = MODELS_OPENAI = []
 
 PROMPT_MAP: dict[str, str] = {
     "Quick Overview": SYS_QUICK_OVERVIEW,
@@ -34,7 +36,8 @@ async def get_models() -> dict:
         "all": AVAILABLE_MODELS,
         "ollama": MODELS_OLLAMA,
         "gemini": MODELS_GEMINI,
-        "openai": MODELS_OPENAI,
+        "deepseek": MODELS_DEEPSEEK,
+        # "openai": MODELS_OPENAI
     }
 
 

@@ -3,7 +3,7 @@ import type { Provider } from "./types"
 export const PROVIDER_PREFIXES: Record<Provider, string> = {
   Ollama: "ollama/",
   Gemini: "gemini/",
-  OpenAI: "openai/",
+  DeepSeek: "deepseek/",
 }
 
 export function displayName(m: string): string {
@@ -14,13 +14,13 @@ export function displayName(m: string): string {
 }
 
 export function groupByProvider(
-  models: { ollama: string[]; gemini: string[]; openai: string[] } | null
+  models: { ollama: string[]; gemini: string[]; deepseek: string[] } | null
 ): Record<Provider, string[]> {
-  if (!models) return { Ollama: [], Gemini: [], OpenAI: [] }
+  if (!models) return { Ollama: [], Gemini: [], DeepSeek: [] }
   return {
     Ollama: models.ollama ?? [],
     Gemini: models.gemini ?? [],
-    OpenAI: models.openai ?? [],
+    DeepSeek: models.deepseek ?? [],
   }
 }
 

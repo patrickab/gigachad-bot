@@ -4,8 +4,6 @@ from litellm.types.utils import ModelResponse
 from llm_baseclient.client import LLMClient
 from openai.types.chat import ChatCompletion
 
-from llm_config import MODEL_CONFIGS
-
 
 class LLMClient(LLMClient):
     """
@@ -37,7 +35,7 @@ class LLMClient(LLMClient):
     """
 
     def __init__(self, model_configs: Dict[str, Any] | None = None) -> None:
-        super().__init__(model_configs=model_configs or MODEL_CONFIGS)
+        super().__init__(model_configs=model_configs)
 
     def chat(self, model: str, **kwargs: Dict[str, Any]) -> Iterator[str] | ChatCompletion:
         return super().chat(model=model, **kwargs)
