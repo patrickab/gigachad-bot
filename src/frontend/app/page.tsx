@@ -1,9 +1,9 @@
 "use client"
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
-import type { KeyboardEvent as ReactKeyboardEvent } from "react"
 import { createPortal } from "react-dom"
 import { Sidebar } from "@/components/Sidebar"
+import { CommandMenu, type CommandMenuItem } from "@/components/CommandMenu"
 import { ChatContainer } from "@/components/ChatContainer"
 import { MAX_SIDEBAR_WIDTH } from "@/components/ChatSidebar"
 import { ModelDropdown } from "@/components/ModelDropdown"
@@ -14,6 +14,7 @@ import { ThemeToggle } from "@/components/ThemeToggle"
 import { OCRPanel } from "@/components/OCRPanel"
 import { SaveChatModal } from "@/components/SaveChatModal"
 import { MemoryPanel } from "@/components/MemoryPanel"
+import { ObsidianPicker } from "@/components/ObsidianPicker"
 import { useCommandBar } from "@/hooks/useCommandBar"
 import { useMemoryCategories } from "@/hooks/useMemoryCategories"
 import { TabManager, nextTab, settingsToTabConfig, type TabConfig } from "@/components/TabManager"
@@ -39,9 +40,11 @@ import {
   loadProjectTab,
   parseHistoryFile,
   buildHistoryFile,
+  listObsidianFiles,
+  attachObsidianFile,
 } from "@/lib/api"
 import { DEFAULT_VISION_MODEL } from "@/lib/config"
-import type { Attachment, Message, Usage } from "@/lib/types"
+import type { Attachment, Message, ObsidianFile, Usage } from "@/lib/types"
 import {
   buildHiddenContent,
   collectActiveImagePaths,
@@ -61,21 +64,10 @@ function defaultSendParams(config: TabConfig, prompts: Record<string, string>, o
   }
 }
 
-const COMMANDS = [
-  { command: "/memorize", shortcut: "Alt+M" },
+const COMMANDS: CommandMenuItem[] = [
+  { command: "/memorize" },
+  { command: "/obsidian-load" },
 ]
-
-function fuzzyMatch(value: string, query: string): boolean {
-  const q = query.trim().toLowerCase()
-  if (!q) return true
-  let i = 0
-  const haystack = value.toLowerCase()
-  for (const ch of haystack) {
-    if (ch === q[i]) i += 1
-    if (i === q.length) return true
-  }
-  return false
-}
 
 function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleLoaded, onOpenChat, activeProject, focusQaIndex, focusKey, onConfigChange }: {
   tab: Tab
@@ -135,15 +127,62 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
 
   const commandBar = useCommandBar()
   const { globalCategories, projectCategories } = useMemoryCategories(activeProject)
-  const commandInput = commandBar.state.phase === "input" ? commandBar.state.input : ""
+  const [obsidianEnabled, setObsidianEnabled] = useState(false)
+  const [obsidianFiles, setObsidianFiles] = useState<ObsidianFile[]>([])
+  const [obsidianOpen, setObsidianOpen] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    listObsidianFiles()
+      .then((r) => { if (!cancelled) { setObsidianEnabled(r.enabled); setObsidianFiles(r.files) } })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
+  const openObsidian = useCallback(() => {
+    setObsidianOpen(true)
+    // Refresh the listing on open so vault changes are reflected.
+    listObsidianFiles()
+      .then((r) => { setObsidianEnabled(r.enabled); setObsidianFiles(r.files) })
+      .catch(() => {})
+  }, [])
   const commandMemoryCount = commandBar.state.phase === "review" || commandBar.state.phase === "composing"
     ? commandBar.state.globalMemories.length + (commandBar.state.projectMemories?.length ?? 0)
     : 0
   const memoryActions = commandBar.bindProject(activeProject)
-  const commandInputRef = useRef<HTMLInputElement>(null)
   const [commandMenuSlot, setCommandMenuSlot] = useState<HTMLElement | null>(null)
+  const [tabLabelSlot, setTabLabelSlot] = useState<HTMLElement | null>(null)
+  const [commandQuery, setCommandQuery] = useState("")
+  const commandInputRef = useRef<HTMLInputElement>(null)
   const [ocrImage, setOCRImage] = useState<string | null>(null)
   const [chatId, setChatId] = useState(() => tab.chatId)
+
+  const handleObsidianSelect = useCallback(async (path: string) => {
+    setObsidianOpen(false)
+    try {
+      const att = await attachObsidianFile(chatId, path, activeProject)
+      setMessages((prev) => {
+        const copy = [...prev]
+        let idx = -1
+        for (let i = copy.length - 1; i >= 0; i--) {
+          if (copy[i].role === "user") { idx = i; break }
+        }
+        if (idx === -1) {
+          // Empty chat: seed a complete pair so display stays strictly alternating.
+          const attachments = [att]
+          return [
+            { role: "user" as const, content: "", attachments, hiddenContent: buildHiddenContent(attachments) || undefined },
+            { role: "assistant" as const, content: "" },
+          ]
+        }
+        const msg = copy[idx]
+        const attachments = [...(msg.attachments ?? []), att]
+        copy[idx] = { ...msg, attachments, hiddenContent: buildHiddenContent(attachments) || undefined }
+        return copy
+      })
+    } catch { }
+  }, [chatId, activeProject, setMessages])
+
   const [branchMessageIdx, setBranchMessageIdx] = useState<number | null>(null)
   const [saveModalOpen, setSaveModalOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -159,26 +198,8 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
 
   useLayoutEffect(() => {
     setCommandMenuSlot(document.getElementById(`tab-command-menu-${tab.id}`))
+    setTabLabelSlot(document.getElementById(`tab-label-${tab.id}`))
   }, [tab.id])
-
-  useEffect(() => {
-    if (isActive && commandBar.state.phase === "input") {
-      commandInputRef.current?.focus()
-    }
-  }, [isActive, commandBar.state.phase])
-
-  useEffect(() => {
-    if (!isActive || commandBar.state.phase !== "input") return
-    const handler = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return
-      e.preventDefault()
-      e.stopPropagation()
-      e.stopImmediatePropagation()
-      commandBar.close()
-    }
-    document.addEventListener("keydown", handler, true)
-    return () => document.removeEventListener("keydown", handler, true)
-  }, [isActive, commandBar.close, commandBar.state.phase])
 
   useEffect(() => {
     if (isActive && tab.historyFile) {
@@ -216,9 +237,16 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     }).catch(() => { })
   }, [tab.historyFile, activeProject, setMessages, onTitleLoaded, setTotalUsage])
 
+  useEffect(() => {
+    if (commandBar.state.phase === "input") {
+      setCommandQuery("")
+      setTimeout(() => commandInputRef.current?.focus(), 0)
+    }
+  }, [commandBar.state.phase])
+
   const docReviewLoading = commandBar.state.phase === "doc-review" && commandBar.state.loadingScopes.length > 0
   useEffect(() => {
-    if (commandBar.state.phase === "input") onModeLabel(commandInput.trim() ? `> ${commandInput}` : "> /memorize")
+    if (commandBar.state.phase === "input") onModeLabel("\0")
     else if (commandBar.state.phase === "extracting") onModeLabel("Memory Management", true)
     else if (commandBar.state.phase === "review") onModeLabel(`${commandMemoryCount} ${commandMemoryCount === 1 ? "memory" : "memories"} proposed`)
     else if (commandBar.state.phase === "composing") onModeLabel("Updating memory docs", true)
@@ -229,7 +257,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     else if (ocrEnabled) onModeLabel("LaTeX OCR")
     else if (studyEnabled) onModeLabel("PDF Study")
     else onModeLabel("Chat")
-  }, [commandBar.state.phase, docReviewLoading, commandInput, commandMemoryCount, researchEnabled, morphicSearchEnabled, ocrEnabled, studyEnabled, onModeLabel])
+  }, [commandBar.state.phase, docReviewLoading, commandMemoryCount, researchEnabled, morphicSearchEnabled, ocrEnabled, studyEnabled, onModeLabel])
 
   const isTitled = !!tab.historyFile
 
@@ -284,6 +312,11 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         }
         return
       }
+      if (e.altKey && e.key.toLowerCase() === "o") {
+        e.preventDefault()
+        if (obsidianEnabled) openObsidian()
+        return
+      }
 
       const isSlash = e.key === "/" && !e.altKey && !e.ctrlKey && !e.metaKey
       const isCtrlK = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k"
@@ -301,36 +334,30 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     return () => {
       window.removeEventListener("keydown", handler, true)
     }
-  }, [isActive, isTitled, handleQuickSave, openSaveModal, reset, commandBar.open, commandBar.submitCommand, commandBar.state.phase, messages, activeProject])
+  }, [isActive, isTitled, handleQuickSave, openSaveModal, reset, commandBar.open, commandBar.submitCommand, commandBar.state.phase, messages, activeProject, obsidianEnabled, openObsidian])
 
   const runCommand = useCallback((command: string) => {
+    if (command === "/obsidian-load") {
+      commandBar.close()
+      openObsidian()
+      return
+    }
     commandBar.submitCommand(
       messages.map((m) => ({ role: m.role, content: m.content })),
       activeProject,
       command,
     )
-  }, [commandBar.submitCommand, messages, activeProject])
+  }, [commandBar.submitCommand, commandBar.close, messages, activeProject, openObsidian])
 
-  const filteredCommands = COMMANDS.filter((cmd) => fuzzyMatch(cmd.command, commandInput))
-  const firstCommand = filteredCommands[0]?.command
-
-  const handleCommandInputKeyDown = useCallback((e: ReactKeyboardEvent<HTMLInputElement>) => {
-    e.stopPropagation()
-    e.nativeEvent.stopImmediatePropagation()
-    if (e.key === "Escape") {
-      e.preventDefault()
-      commandBar.close()
-      return
-    }
-    if (e.key === "Enter") {
-      e.preventDefault()
-      runCommand(firstCommand ?? commandInput)
-    }
-  }, [commandBar.close, commandInput, firstCommand, runCommand])
+  const commandItems = COMMANDS.filter((cmd) => cmd.command !== "/obsidian-load" || obsidianEnabled)
 
   const handleSend = useCallback(
     async (text: string, attachments: Attachment[]) => {
       const trimmed = text.trim()
+      if (trimmed === "/obsidian-load") {
+        openObsidian()
+        return
+      }
       if (trimmed === "/memorize" || trimmed.startsWith("/memorize ")) {
         await commandBar.submitCommand(
           messages.map((m) => ({ role: m.role, content: m.content })),
@@ -416,7 +443,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         })
       }
     },
-    [morphicSearchEnabled, researchEnabled, studyEnabled, chatId, activeProject, config, send, research, morphicSearch, setMessages, toggleStudy, commandBar.submitCommand, messages],
+    [morphicSearchEnabled, researchEnabled, studyEnabled, chatId, activeProject, config, send, research, morphicSearch, setMessages, toggleStudy, commandBar.submitCommand, messages, openObsidian],
   )
 
   const handleRegenerate = useCallback(
@@ -511,40 +538,29 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
 
   return (
     <div ref={containerRef} className="relative flex h-full overflow-hidden">
-      {isActive && commandBar.state.phase === "input" && (
+      {isActive && commandBar.state.phase === "input" && tabLabelSlot && createPortal(
         <input
           ref={commandInputRef}
-          value={commandInput}
-          onChange={(e) => commandBar.setInput(e.target.value)}
-          onKeyDown={handleCommandInputKeyDown}
-          className="fixed -left-[9999px] top-0 h-px w-px opacity-0"
-          autoComplete="off"
+          autoFocus
+          value={commandQuery}
+          onChange={(e) => setCommandQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") { e.preventDefault(); commandBar.close() }
+          }}
+          onClick={(e) => e.stopPropagation()}
           spellCheck={false}
-        />
+          className="flex-1 min-w-0 bg-transparent font-mono text-xs text-ink outline-none"
+        />,
+        tabLabelSlot,
       )}
-      {isActive && commandMenuSlot && commandBar.state.phase === "input" && createPortal(
-        <div className="absolute left-0 top-0 z-[100] w-[min(420px,calc(100vw-2rem))] rounded-b-lg border border-divider bg-paper shadow-[var(--shadow-lg)]">
-          {filteredCommands.map((cmd) => (
-            <button
-              key={cmd.command}
-              type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={(e) => {
-                e.stopPropagation()
-                runCommand(cmd.command)
-              }}
-              className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-surface-elevated transition-colors"
-            >
-              <span className="font-mono text-xs text-ink">{cmd.command}</span>
-              <span className="ml-auto shrink-0 rounded border border-divider px-1.5 py-0.5 text-[10px] text-ink-faint">{cmd.shortcut}</span>
-            </button>
-          ))}
-          {filteredCommands.length === 0 && (
-            <div className="px-3 py-2 text-[11px] text-ink-faint">No commands</div>
-          )}
-        </div>,
-        commandMenuSlot,
-      )}
+      <CommandMenu
+        open={isActive && commandBar.state.phase === "input"}
+        items={commandItems}
+        query={commandQuery}
+        onRun={runCommand}
+        onClose={commandBar.close}
+        container={commandMenuSlot}
+      />
       <Sidebar
         onOpenChat={onOpenChat}
         onRefreshAll={refreshAll}
@@ -599,6 +615,8 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
             onRemoveAttachment={handleRemoveAttachment}
             onToggleAttachmentActive={handleToggleAttachmentActive}
             onAttachmentContentChange={handleAttachmentContentChange}
+            obsidianEnabled={obsidianEnabled}
+            onOpenObsidian={openObsidian}
             slug={activeProject}
             chatMaxWidth={chatMaxWidth}
           />
@@ -613,6 +631,9 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         </div>
       </main>
       <SaveChatModal open={saveModalOpen} onClose={() => setSaveModalOpen(false)} onSave={handleSaveSubmit} />
+      {isActive && obsidianOpen && obsidianEnabled && (
+        <ObsidianPicker files={obsidianFiles} onSelect={handleObsidianSelect} onClose={() => setObsidianOpen(false)} />
+      )}
       {commandBar.state.phase === "input" && (
         <div
           className="absolute inset-0 z-[70]"

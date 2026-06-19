@@ -15,6 +15,11 @@ export interface Attachment {
   active: boolean
 }
 
+export interface ObsidianFile {
+  path: string
+  name: string
+}
+
 export interface Message {
   role: "user" | "assistant" | "system" | "tool"
   content: string

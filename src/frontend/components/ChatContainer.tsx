@@ -36,6 +36,8 @@ interface ChatContainerProps {
   onRemoveAttachment?: (messageIndex: number, attachmentName: string) => void
   onToggleAttachmentActive?: (messageIndex: number, attachmentName: string) => void
   onAttachmentContentChange?: (messageIndex: number, attachmentName: string, newContent: string) => void
+  obsidianEnabled?: boolean
+  onOpenObsidian?: () => void
 }
 
 export function ChatContainer({
@@ -58,6 +60,8 @@ export function ChatContainer({
   onRemoveAttachment,
   onToggleAttachmentActive,
   onAttachmentContentChange,
+  obsidianEnabled,
+  onOpenObsidian,
 }: ChatContainerProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -332,6 +336,8 @@ export function ChatContainer({
         onRemoveAttachment: handleRemoveAttachment,
         onAttachmentContentChange,
         lastMorphicResult,
+        obsidianEnabled,
+        onOpenObsidian,
         isElementOpen: (id) => openElements.has(id),
         onElementOpenChange: (id, open) => {
           setOpenElements((prev) => {
@@ -342,7 +348,7 @@ export function ChatContainer({
           })
         },
       }),
-    [chatId, slug, allAttachments, expandedEntries, handleToggleExpand, onToggleAttachmentActive, handleRemoveAttachment, onAttachmentContentChange, lastMorphicResult, openElements]
+    [chatId, slug, allAttachments, expandedEntries, handleToggleExpand, onToggleAttachmentActive, handleRemoveAttachment, onAttachmentContentChange, lastMorphicResult, obsidianEnabled, onOpenObsidian, openElements]
   )
 
   const hasSidebarContent = sidebarElements.length > 0

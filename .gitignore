@@ -8,6 +8,7 @@ embeddings
 src/archive
 .aider*
 .gpt-researcher-config.json
+.docs
 
 # Python virtualenv / linter cache
 .venv

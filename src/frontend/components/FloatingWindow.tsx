@@ -1,6 +1,6 @@
 "use client"
 
-import type { ReactNode } from "react"
+import { useEffect, type ReactNode } from "react"
 import { motion } from "framer-motion"
 import { cn } from "@/lib/utils"
 
@@ -12,6 +12,15 @@ interface FloatingWindowProps {
 }
 
 export function FloatingWindow({ children, onClose, overlayClassName, panelClassName }: FloatingWindowProps) {
+  useEffect(() => {
+    if (!onClose) return
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); onClose() }
+    }
+    window.addEventListener("keydown", handler, true)
+    return () => window.removeEventListener("keydown", handler, true)
+  }, [onClose])
+
   return (
     <motion.div
       initial={{ opacity: 0 }}

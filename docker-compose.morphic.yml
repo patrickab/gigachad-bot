@@ -16,6 +16,8 @@ services:
       ANONYMOUS_USER_ID: gigachad-user
       MORPHIC_CLOUD_DEPLOYMENT: "false"
       OLLAMA_BASE_URL: http://host.docker.internal:11434
+      GOOGLE_GENERATIVE_AI_API_KEY: ${GEMINI_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

@@ -77,6 +77,7 @@ export interface TabManagerHandle {
   addTabWithName: (name: string | null, historyFile: string | null) => string
   getTabs: () => Tab[]
   getActiveTabId: () => string
+  getTabBarWidth: () => number
   updateTabHistoryFile: (tabId: string, historyFile: string) => void
   updateTabTitle: (tabId: string, title: string | null) => void
   updateTabConfig: (tabId: string, config: Partial<TabConfig>) => void
@@ -111,6 +112,7 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
   const [modeLoading, setModeLoading] = useState<Record<string, boolean>>({})
   const [customNames, setCustomNames] = useState<Record<string, string | null>>({})
   const inputRef = useRef<HTMLInputElement>(null)
+  const tabBarRef = useRef<HTMLDivElement>(null)
   const initInProgressRef = useRef(false)
   const onTabsChangeRef = useRef(onTabsChange)
   useEffect(() => { onTabsChangeRef.current = onTabsChange }, [onTabsChange])
@@ -130,6 +132,7 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
     },
     getTabs: () => tabs,
     getActiveTabId: () => activeTab,
+    getTabBarWidth: () => tabBarRef.current?.clientWidth ?? 0,
     updateTabHistoryFile: (tabId: string, historyFile: string) => {
       setTabs((prev) => prev.map((t) => t.id === tabId ? { ...t, historyFile } : t))
     },
@@ -257,16 +260,18 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
     [commitRename]
   )
 
-  function getTabDisplayName(tab: Tab): string {
+  function getTabDisplayName(tab: Tab): string | null {
+    const label = modeLabels[tab.id]
+    if (label === "\0") return null
     const custom = customNames[tab.id]
     if (custom !== undefined && custom !== null) return custom
-    return modeLabels[tab.id] || "Chat"
+    return label || "Chat"
   }
 
   return (
     <div className="flex flex-col h-screen overflow-hidden">
       <div className="relative z-[90] h-8 shrink-0 flex items-center border-b border-divider/50 bg-paper select-none">
-        <div className="flex-1 flex items-center h-full min-w-0">
+        <div ref={tabBarRef} data-tabbar className="flex-1 flex items-center h-full min-w-0">
           {tabs.map((tab) => {
             const isActive = tab.id === activeTab
             const isEditing = tab.id === editingTab
@@ -286,9 +291,9 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
                 onContextMenu={(e) => { e.preventDefault(); closeTab(tab.id) }}
                 onDoubleClick={() => startRename(tab.id)}
               >
-                <div className="relative flex-1 min-w-0 h-full flex items-center">
+                <div id={`tab-label-${tab.id}`} className="relative flex-1 min-w-0 h-full flex items-center">
                   <span id={`tab-command-menu-${tab.id}`} className="absolute left-0 right-0 top-full" />
-                  {isEditing ? (
+                  {displayName === null ? null : isEditing ? (
                     <input
                       ref={inputRef}
                       autoFocus

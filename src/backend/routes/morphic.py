@@ -145,6 +145,8 @@ async def morphic_search(req: MorphicSearchRequest) -> StreamingResponse:
         "isNewChat": True,
     }
 
+    _PROVIDER_MAP = {"gemini": "google", "deepseek": "deepseek", "ollama": "ollama"}
+
     cookies: dict[str, str] = {"searchMode": req.search_depth}
     if req.model:
         provider_id = "ollama"
@@ -153,6 +155,7 @@ async def morphic_search(req: MorphicSearchRequest) -> StreamingResponse:
             model_id = model_id[len("ollama/") :]
         elif "/" in model_id:
             provider_id, model_id = model_id.split("/", 1)
+        provider_id = _PROVIDER_MAP.get(provider_id, provider_id)
         cookies["selectedModel"] = f"{provider_id}:{model_id}"
 
     async def event_stream():

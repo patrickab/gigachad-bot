@@ -11,6 +11,17 @@ import { cn } from "@/lib/utils"
 
 const PdfViewer = dynamic(() => import("./PdfViewer").then((m) => ({ default: m.PdfViewer })), { ssr: false })
 
+function ObsidianGlyph({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="M12 2 L20 8 L15 22 L6.5 20 L4 9 Z" />
+      <path d="M12 2 L11 13 L15 22" />
+      <path d="M11 13 L4 9" />
+      <path d="M11 13 L6.5 20" />
+    </svg>
+  )
+}
+
 function AttachmentIcon({ mime }: { mime: string }) {
   if (mime.startsWith("image/")) return <ImageIcon className="h-3.5 w-3.5 text-ink shrink-0" />
   if (mime === "application/pdf") return <FileText className="h-3.5 w-3.5 text-ink shrink-0" />
@@ -216,6 +227,8 @@ export interface ChatSidebarConfig {
   onRemoveAttachment: (messageIndex: number, attachmentName: string) => void
   onAttachmentContentChange?: (messageIndex: number, attachmentName: string, newContent: string) => void
   lastMorphicResult?: MorphicSearchResult
+  obsidianEnabled?: boolean
+  onOpenObsidian?: () => void
   isElementOpen: (id: string) => boolean
   onElementOpenChange: (id: string, open: boolean) => void
 }
@@ -230,17 +243,30 @@ export const getChatSidebarConfig = ({
   onRemoveAttachment,
   onAttachmentContentChange,
   lastMorphicResult,
+  obsidianEnabled,
+  onOpenObsidian,
   isElementOpen,
   onElementOpenChange,
 }: ChatSidebarConfig): ChatSidebarElementConfig[] => {
   const elements: ChatSidebarElementConfig[] = []
 
-  if (allAttachments.length > 0) {
+  if (allAttachments.length > 0 || obsidianEnabled) {
     elements.push({
       id: "context",
       icon: FileText,
       title: "Context",
-      badge: allAttachments.length,
+      badge: allAttachments.length > 0 ? allAttachments.length : undefined,
+      action: obsidianEnabled ? (
+        <button
+          type="button"
+          onClick={onOpenObsidian}
+          title="Load Obsidian note"
+          aria-label="Load Obsidian note"
+          className="rounded p-1 text-ink-faint hover:text-ink hover:bg-surface-elevated transition-colors"
+        >
+          <ObsidianGlyph className="h-3.5 w-3.5" />
+        </button>
+      ) : undefined,
       open: isElementOpen("context"),
       onOpenChange: (o) => onElementOpenChange("context", o),
         body: (

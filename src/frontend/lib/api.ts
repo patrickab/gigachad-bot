@@ -1,4 +1,4 @@
-import type { Attachment, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, MemoryProfileMeta, Message, ModelsResponse, PreviewMemory, ProjectData, ProjectListItem, ProjectStateUpdate, ProposedMemory, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage } from "./types"
+import type { Attachment, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, MemoryProfileMeta, Message, ModelsResponse, ObsidianFile, PreviewMemory, ProjectData, ProjectListItem, ProjectStateUpdate, ProposedMemory, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { API_BASE, DEFAULT_TEMPERATURE, DEFAULT_DOWNSCALE_IMAGES } from "./config"
@@ -229,6 +229,23 @@ export async function parseFiles(chatId: string, filenames: string[], slug: stri
 export async function deleteAttachment(chatId: string, filename: string, slug: string | null = null): Promise<void> {
   const params = slug ? `?slug=${encodeURIComponent(slug)}` : ""
   await request(`/files/chat/${chatId}/att/${encodeURIComponent(filename)}${params}`, { method: "DELETE" })
+}
+
+export async function listObsidianFiles(): Promise<{ enabled: boolean; files: ObsidianFile[] }> {
+  return request("/obsidian/files")
+}
+
+export async function readObsidianFile(path: string): Promise<{ path: string; content: string }> {
+  return request(`/obsidian/file?path=${encodeURIComponent(path)}`)
+}
+
+export async function attachObsidianFile(chatId: string, path: string, slug: string | null = null): Promise<Attachment> {
+  const params = new URLSearchParams({ path, chat_id: chatId })
+  if (slug) params.set("slug", slug)
+  const res = await fetch(`${API_BASE}/obsidian/attach?${params}`, { method: "POST" })
+  if (!res.ok) throw new Error(await res.text())
+  const data = await res.json()
+  return { ...data, active: true, url: chatFileUrl(chatId, data.name, slug) }
 }
 
 export async function deleteChatUploads(chatId: string, slug: string | null = null): Promise<void> {

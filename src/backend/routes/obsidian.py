@@ -1,0 +1,84 @@
+"""Obsidian vault routes — the API owns every filesystem access.
+
+The UI never touches the vault directly: it lists notes (`/files`), previews a
+note (`/file`), and materialises a chosen note into the chat's upload directory
+(`/attach`) so it behaves exactly like any other text attachment.
+"""
+
+import logging
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+
+from backend.routes.deps import get_obsidian_vault
+from config import chat_upload_dir
+from lib.obsidian_vault import ObsidianVault
+
+log = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/obsidian", tags=["obsidian"])
+
+
+class ObsidianFile(BaseModel):
+    path: str
+    name: str
+
+
+class ObsidianListResponse(BaseModel):
+    enabled: bool
+    files: list[ObsidianFile]
+
+
+class ObsidianFileContent(BaseModel):
+    path: str
+    content: str
+
+
+class AttachResult(BaseModel):
+    name: str
+    mime: str
+    content: str
+
+
+def _dedup_name(dest_dir: Path, filename: str) -> str:
+    stem, suffix = Path(filename).stem, Path(filename).suffix
+    if not (dest_dir / filename).exists():
+        return filename
+    n = 1
+    while (dest_dir / f"{stem} ({n}){suffix}").exists():
+        n += 1
+    return f"{stem} ({n}){suffix}"
+
+
+@router.get("/files", response_model=ObsidianListResponse)
+async def list_files(vault: ObsidianVault = Depends(get_obsidian_vault)):
+    return ObsidianListResponse(enabled=vault.enabled, files=vault.list_markdown())
+
+
+@router.get("/file", response_model=ObsidianFileContent)
+async def read_file(path: str = Query(...), vault: ObsidianVault = Depends(get_obsidian_vault)):
+    try:
+        return ObsidianFileContent(path=path, content=vault.read(path))
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/attach", response_model=AttachResult)
+async def attach_file(
+    path: str = Query(...),
+    chat_id: str = Query(...),
+    slug: str | None = Query(default=None),
+    vault: ObsidianVault = Depends(get_obsidian_vault),
+):
+    try:
+        content = vault.read(path)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    chat_dir = chat_upload_dir(chat_id, slug)
+    chat_dir.mkdir(parents=True, exist_ok=True)
+    name = _dedup_name(chat_dir, Path(path).name)
+    (chat_dir / name).write_text(content, encoding="utf-8")
+
+    return AttachResult(name=name, mime="text/markdown", content=content)

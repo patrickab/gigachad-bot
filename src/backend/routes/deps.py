@@ -10,6 +10,7 @@ from sse_starlette.sse import EventSourceResponse
 from config import DIRECTORY_CHAT_HISTORIES
 from lib.chat_store import ChatStore
 from lib.memory_store import MemoryStore
+from lib.obsidian_vault import ObsidianVault
 from lib.project_store import ProjectStore
 from llm_client import LLMClient
 
@@ -17,6 +18,7 @@ _client: LLMClient | None = None
 _chat_store: ChatStore | None = None
 _project_store: ProjectStore | None = None
 _memory_store: MemoryStore | None = None
+_obsidian_vault: ObsidianVault | None = None
 
 
 def get_client() -> LLMClient:
@@ -45,6 +47,13 @@ def get_memory_store() -> MemoryStore:
     if _memory_store is None:
         _memory_store = MemoryStore()
     return _memory_store
+
+
+def get_obsidian_vault() -> ObsidianVault:
+    global _obsidian_vault
+    if _obsidian_vault is None:
+        _obsidian_vault = ObsidianVault()
+    return _obsidian_vault
 
 
 def shutdown_client() -> None:

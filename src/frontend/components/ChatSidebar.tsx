@@ -12,6 +12,7 @@ export interface ChatSidebarElementConfig {
   icon: React.ElementType
   title: string
   badge?: React.ReactNode
+  action?: React.ReactNode
   open: boolean
   onOpenChange: (open: boolean) => void
   body: React.ReactNode
@@ -90,6 +91,7 @@ export function ChatSidebar({ elements, width, onWidthChange }: ChatSidebarProps
             icon={el.icon}
             title={el.title}
             badge={el.badge}
+            action={el.action}
             open={el.open}
             onOpenChange={el.onOpenChange}
           >
