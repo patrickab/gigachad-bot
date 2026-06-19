@@ -29,9 +29,10 @@ function buildTree(root: string, meta: Record<string, BranchMeta>, chatIdMap: Ma
       label: file.split("/").pop()!.replace(".json", ""),
       qaCount: qa,
       parentQaCount,
-      children: (m?.children ?? []).map((c: BranchChild) => {
-        const cf = chatIdMap.get(c.chat_id) ?? c.chat_id
-        return { ...walk(cf, qa), branchIdx: c.branch_message_idx }
+      children: (m?.children ?? []).flatMap((c: BranchChild) => {
+        const cf = chatIdMap.get(c.chat_id)
+        if (!cf || !meta[cf]) return []
+        return [{ ...walk(cf, qa), branchIdx: c.branch_message_idx }]
       }),
       branchIdx: null,
     }
@@ -42,9 +43,10 @@ function buildTree(root: string, meta: Record<string, BranchMeta>, chatIdMap: Ma
     label: root.split("/").pop()!.replace(".json", ""),
     qaCount: qa,
     parentQaCount: 0,
-    children: (rootMeta?.children ?? []).map((c: BranchChild) => {
-      const cf = chatIdMap.get(c.chat_id) ?? c.chat_id
-      return { ...walk(cf, qa), branchIdx: c.branch_message_idx }
+    children: (rootMeta?.children ?? []).flatMap((c: BranchChild) => {
+      const cf = chatIdMap.get(c.chat_id)
+      if (!cf || !meta[cf]) return []
+      return [{ ...walk(cf, qa), branchIdx: c.branch_message_idx }]
     }),
     branchIdx: null,
   }

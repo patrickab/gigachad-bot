@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from backend.routes.mineru import should_cancel
 from config import DIRECTORY_CHAT_HISTORIES, chat_upload_dir, uploads_dir_for
+from lib.image_paths import delete_downscaled
 
 log = logging.getLogger(__name__)
 
@@ -152,6 +153,7 @@ async def delete_single_file(chat_id: str, filename: str, slug: str | None = Que
     if not path.exists():
         raise HTTPException(status_code=404, detail="File not found")
     path.unlink()
+    delete_downscaled(chat_upload_dir(chat_id, slug), filename)
     md_path = path.with_name(path.stem + ".md")
     if md_path.exists():
         md_path.unlink()

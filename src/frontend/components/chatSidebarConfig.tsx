@@ -7,6 +7,7 @@ import type { Attachment, MorphicSearchResult } from "@/lib/types"
 import { rewriteImages } from "@/lib/api"
 import { LaTeXMarkdown } from "@/components/LaTeXMarkdown"
 import type { ChatSidebarElementConfig } from "@/components/ChatSidebar"
+import { cn } from "@/lib/utils"
 
 const PdfViewer = dynamic(() => import("./PdfViewer").then((m) => ({ default: m.PdfViewer })), { ssr: false })
 
@@ -75,7 +76,8 @@ function ContextBody({
   slug,
   allAttachments,
   expandedEntries,
-  onToggleAttachment,
+  onToggleExpand,
+  onToggleActive,
   onRemoveAttachment,
   onAttachmentContentChange,
 }: {
@@ -83,7 +85,8 @@ function ContextBody({
   slug: string | null
   allAttachments: { messageIndex: number; attachment: Attachment }[]
   expandedEntries: { messageIndex: number; attachmentName: string }[]
-  onToggleAttachment: (messageIndex: number, attachmentName: string) => void
+  onToggleExpand: (messageIndex: number, attachmentName: string) => void
+  onToggleActive?: (messageIndex: number, attachmentName: string) => void
   onRemoveAttachment: (messageIndex: number, attachmentName: string) => void
   onAttachmentContentChange?: (messageIndex: number, attachmentName: string, newContent: string) => void
 }) {
@@ -104,19 +107,33 @@ function ContextBody({
         const expanded = isExpanded(mi, att.name)
         return (
           <div key={`${mi}-${att.name}`} className="border-b border-divider/50">
-            <div
-              onClick={() => onToggleAttachment(mi, att.name)}
-              className="w-full flex items-center gap-2 px-3 py-2 hover:bg-surface/50 transition-colors cursor-pointer"
-            >
-              <AttachmentIcon mime={att.mime} />
-              <span className="text-[11px] font-medium text-ink truncate flex-1 text-left">{att.name}</span>
+            <div className="flex items-center gap-1 px-2 py-2 hover:bg-surface/50 transition-colors">
               <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onRemoveAttachment(mi, att.name)
-                }}
+                type="button"
+                onClick={() => onToggleExpand(mi, att.name)}
+                className="rounded p-0.5 text-ink-faint hover:text-ink hover:bg-surface-elevated transition-colors shrink-0"
+                aria-label={expanded ? "Collapse preview" : "Expand preview"}
+              >
+                {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+              </button>
+              <button
+                type="button"
+                onClick={() => onToggleActive?.(mi, att.name)}
+                className={cn(
+                  "flex min-w-0 flex-1 items-center gap-2 text-left transition-colors",
+                  att.active ? "text-ink" : "text-ink-faint",
+                )}
+                title={att.active ? "Active in context — click to deactivate" : "Inactive — click to activate"}
+              >
+                <AttachmentIcon mime={att.mime} />
+                <span className="text-[11px] font-medium truncate">{att.name}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onRemoveAttachment(mi, att.name)}
                 className="rounded p-0.5 text-ink-faint hover:text-danger hover:bg-surface-elevated transition-colors shrink-0"
                 title="Remove"
+                aria-label="Remove attachment"
               >
                 <X className="h-3 w-3" />
               </button>
@@ -194,7 +211,8 @@ export interface ChatSidebarConfig {
   slug: string | null
   allAttachments: { messageIndex: number; attachment: Attachment }[]
   expandedEntries: { messageIndex: number; attachmentName: string }[]
-  onToggleAttachment: (messageIndex: number, attachmentName: string) => void
+  onToggleExpand: (messageIndex: number, attachmentName: string) => void
+  onToggleAttachmentActive: (messageIndex: number, attachmentName: string) => void
   onRemoveAttachment: (messageIndex: number, attachmentName: string) => void
   onAttachmentContentChange?: (messageIndex: number, attachmentName: string, newContent: string) => void
   lastMorphicResult?: MorphicSearchResult
@@ -207,7 +225,8 @@ export const getChatSidebarConfig = ({
   slug,
   allAttachments,
   expandedEntries,
-  onToggleAttachment,
+  onToggleExpand,
+  onToggleAttachmentActive,
   onRemoveAttachment,
   onAttachmentContentChange,
   lastMorphicResult,
@@ -230,7 +249,8 @@ export const getChatSidebarConfig = ({
             slug={slug}
             allAttachments={allAttachments}
             expandedEntries={expandedEntries}
-            onToggleAttachment={onToggleAttachment}
+            onToggleExpand={onToggleExpand}
+            onToggleActive={onToggleAttachmentActive}
             onRemoveAttachment={onRemoveAttachment}
             onAttachmentContentChange={onAttachmentContentChange}
           />

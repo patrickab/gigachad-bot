@@ -63,15 +63,16 @@ export async function resetHistory(): Promise<void> {
 export function createChatStream(req: ChatRequest): SSEStreamResult {
   const body: Record<string, unknown> = {
     model: req.model,
+    chat_id: req.chat_id,
     user_msg: req.user_msg,
     system_prompt: req.system_prompt ?? "",
     temperature: req.temperature ?? DEFAULT_TEMPERATURE,
     downscale_images: req.downscale_images ?? DEFAULT_DOWNSCALE_IMAGES,
+    img_paths: req.img_paths ?? [],
     messages: req.messages ?? [],
     project_slug: req.project_slug ?? null,
   }
   if (req.reasoning_effort) body.reasoning_effort = req.reasoning_effort
-  if (req.img_base64) body.img_base64 = req.img_base64
 
   return createSSEStream("/chat", body)
 }
@@ -208,7 +209,7 @@ export async function uploadFile(chatId: string, file: File, slug: string | null
   const res = await fetch(`${API_BASE}/files/upload?${params}`, { method: "POST", body: form })
   if (!res.ok) throw new Error(await res.text())
   const data = await res.json()
-  return { ...data, url: chatFileUrl(chatId, data.name, slug) }
+  return { ...data, active: true, url: chatFileUrl(chatId, data.name, slug) }
 }
 
 export interface ParsedAttachment {

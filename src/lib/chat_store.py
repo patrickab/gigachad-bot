@@ -153,6 +153,17 @@ class ChatStore:
         self._remove_from_project(project_dir, path.name)
         return {"status": "ok"}
 
+    def _prune_children_list(self, children: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        pruned: list[dict[str, Any]] = []
+        for child in children:
+            chat_id = child.get("chat_id", "")
+            if not chat_id:
+                continue
+            child_file = self.find_by_chat_id(chat_id)
+            if child_file and self.resolve_path(child_file).exists():
+                pruned.append(child)
+        return pruned
+
     def _remove_child_from_parent(self, parent_file: str, child_chat_id: str) -> None:
         parent_path = self.resolve_path(parent_file)
         parent_data = self._load_path(parent_path)
@@ -199,10 +210,16 @@ class ChatStore:
                 slug = self.slug_for(path)
                 if cleanup_uploads_fn:
                     cleanup_uploads_fn(data["chat_id"], slug)
+                if data.get("parent_id"):
+                    parent_file = self.find_by_chat_id(data["parent_id"])
+                    if parent_file:
+                        self._remove_child_from_parent(parent_file, data["chat_id"])
             rel = str(path.resolve().relative_to(self._base))
             deleted.append(rel)
+            project_dir = self.project_dir_for(path)
             if path.exists():
                 path.unlink()
+            self._remove_from_project(project_dir, path.name)
         self.invalidate_index()
         return {"status": "ok", "deleted": deleted}
 
@@ -487,13 +504,17 @@ class ChatStore:
         data = self._load_path(path)
         if data is None:
             return {}
+        children = self._prune_children_list(data.get("children", []))
+        if children != data.get("children", []):
+            data["children"] = children
+            safe_write_json(path, data)
         messages = data.get("messages", [])
         qa_count = sum(1 for m in messages if m.get("role") == "user")
         return {
             "chat_id": data.get("chat_id"),
             "parent_id": data.get("parent_id"),
             "branch_message_idx": data.get("branch_message_idx"),
-            "children": data.get("children", []),
+            "children": children,
             "qa_count": qa_count,
         }
 

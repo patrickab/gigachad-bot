@@ -12,7 +12,7 @@ export interface Attachment {
   url: string
   content?: string
   parsedMd?: string
-
+  active: boolean
 }
 
 export interface Message {
@@ -30,11 +30,12 @@ export interface Message {
 
 export interface ChatRequest {
   model: string
+  chat_id: string
   user_msg: string
   system_prompt?: string
   temperature?: number
   reasoning_effort?: string | null
-  img_base64?: string | null
+  img_paths: string[]
   downscale_images?: boolean
   messages?: { role: string; content: string }[]
   project_slug?: string | null

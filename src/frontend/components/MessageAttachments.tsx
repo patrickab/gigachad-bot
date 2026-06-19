@@ -2,6 +2,7 @@
 
 import { memo } from "react"
 import { FileText, Image as ImageIcon, File } from "lucide-react"
+import { cn } from "@/lib/utils"
 import type { Attachment } from "@/lib/types"
 
 interface MessageAttachmentsProps {
@@ -24,7 +25,12 @@ function MessageAttachmentsInner({ attachments, onClick }: MessageAttachmentsPro
         <button
           key={att.name}
           onClick={() => onClick(att)}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-divider-strong/50 bg-surface-elevated/30 px-2 py-1 text-xs text-ink-muted hover:bg-hover hover:text-ink transition-colors"
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs transition-colors",
+            att.active
+              ? "border-divider-strong/50 bg-surface-elevated/30 text-ink-muted hover:bg-hover hover:text-ink"
+              : "border-divider/40 bg-surface-elevated/15 text-ink-faint hover:bg-hover hover:text-ink-subtle",
+          )}
         >
           <AttachmentIcon mime={att.mime} />
           <span className="max-w-[140px] truncate">{att.name}</span>

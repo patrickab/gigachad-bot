@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from "react"
 import { createChatStream } from "@/lib/api"
+import { deactivateSentImages } from "@/lib/attachments"
 import type { ChatRequest, Message, Usage } from "@/lib/types"
 
 export interface UseChatStreamReturn {
@@ -97,7 +98,7 @@ export function useChatStream(): UseChatStreamReturn {
         setMessages((prev) => {
           const copy = [...prev]
           copy[copy.length - 1] = { ...assistantMsg }
-          return copy
+          return deactivateSentImages(copy, req.img_paths)
         })
         setIsStreaming(false)
         abortRef.current = null

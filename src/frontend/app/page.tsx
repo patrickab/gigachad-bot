@@ -42,41 +42,12 @@ import {
 } from "@/lib/api"
 import { DEFAULT_VISION_MODEL } from "@/lib/config"
 import type { Attachment, Message, Usage } from "@/lib/types"
-
-
-
-function buildHiddenContent(attachments: Attachment[]): string {
-  const textParts: string[] = []
-  for (const a of attachments) {
-    if (a.mime.startsWith("image/")) continue
-    const content = a.parsedMd ?? a.content
-    if (content) textParts.push(`### ${a.name}\n\n${content}`)
-  }
-  return textParts.length > 0
-    ? "**Attached files:**\n\n" + textParts.join("\n\n") + "\n\n## END"
-    : ""
-}
-
-function buildLLMMessage(text: string, attachments: Attachment[]): { userMsg: string; hiddenContent: string; imgBase64: string | null } {
-  let userMsg = text
-  let imgBase64: string | null = null
-
-  const imgAtts: Attachment[] = []
-
-  for (const a of attachments) {
-    if (a.mime.startsWith("image/")) {
-      imgAtts.push(a)
-    }
-  }
-
-  if (imgAtts.length > 0) {
-    imgBase64 = "pending"
-  }
-
-  const hiddenContent = buildHiddenContent(attachments)
-
-  return { userMsg, hiddenContent, imgBase64 }
-}
+import {
+  buildHiddenContent,
+  collectActiveImagePaths,
+  isImageAttachment,
+  normalizeMessageAttachments,
+} from "@/lib/attachments"
 
 function defaultSendParams(config: TabConfig, prompts: Record<string, string>, overrides: Record<string, unknown> = {}) {
   return {
@@ -85,7 +56,7 @@ function defaultSendParams(config: TabConfig, prompts: Record<string, string>, o
     temperature: config.temperature,
     reasoning_effort: config.reasoningEffort === "none" ? null : config.reasoningEffort,
     downscale_images: config.downscaleImages,
-    img_base64: null,
+    img_paths: [] as string[],
     ...overrides,
   }
 }
@@ -235,7 +206,9 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       : apiLoadChatHistory(tab.historyFile)
     loader.then((data) => {
       if (loadIdRef.current !== loadId) return
-      if (data.messages.length > 0) setMessages(data.messages)
+      if (data.messages.length > 0) {
+        setMessages(data.messages.map(normalizeMessageAttachments))
+      }
       if (data.chat_id) setChatId(data.chat_id)
       if (data.title) onTitleLoaded(tab.id, data.title)
       if (data.usage) setTotalUsage(data.usage)
@@ -378,19 +351,20 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       }
 
       if (attachments.length > 0) {
+        const activeAttachments = attachments.map((a) => ({ ...a, active: true }))
         setMessages(prev => [
           ...prev,
-          { role: "user" as const, content: text, attachments },
+          { role: "user" as const, content: text, attachments: activeAttachments },
           { role: "assistant" as const, content: "" },
         ])
 
-        const needsParsing = attachments.filter(a => !a.mime.startsWith("image/") && !a.content && !a.parsedMd)
-        let enriched = attachments
+        const needsParsing = activeAttachments.filter(a => !a.mime.startsWith("image/") && !a.content && !a.parsedMd)
+        let enriched = activeAttachments
 
         if (needsParsing.length > 0) {
           try {
             const parsed = await parseFiles(chatId, needsParsing.map(a => a.name), activeProject)
-            enriched = attachments.map(a => {
+            enriched = activeAttachments.map(a => {
               if (a.content || a.parsedMd || a.mime.startsWith("image/")) return a
               const p = parsed.find(r => r.name === a.name)
               return { ...a, parsedMd: p?.parsedMd ?? undefined }
@@ -401,7 +375,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           }
         }
 
-        const { hiddenContent } = buildLLMMessage(text, enriched)
+        const hiddenContent = buildHiddenContent(enriched) || undefined
 
         setMessages(prev => {
           const copy = [...prev]
@@ -410,19 +384,18 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           return copy
         })
 
-        const imgAtt = enriched.find(a => a.mime.startsWith("image/"))
-        let imgBase64: string | null = null
-        if (imgAtt) {
-          try {
-            const resp = await fetch(imgAtt.url)
-            const blob = await resp.blob()
-            imgBase64 = await new Promise<string>(resolve => { const r = new FileReader(); r.onload = () => resolve(r.result as string); r.readAsDataURL(blob) })
-          } catch { }
-        }
-
+        const priorImgPaths = collectActiveImagePaths(messages)
+        const newImgPaths = enriched.filter((a) => a.active && isImageAttachment(a)).map((a) => a.name)
         const fallbackPrompt = text.trim() ? text : "Please review the attached document and provide a summary."
         const llmMsg = hiddenContent ? `${hiddenContent}\n\n${fallbackPrompt}` : fallbackPrompt
-        send({ ...defaultSendParams(config, prompts), user_msg: llmMsg, img_base64: imgBase64, downscale_images: config.downscaleImages, project_slug: activeProject }, true)
+        send({
+          ...defaultSendParams(config, prompts),
+          chat_id: chatId,
+          user_msg: llmMsg,
+          img_paths: [...priorImgPaths, ...newImgPaths],
+          downscale_images: config.downscaleImages,
+          project_slug: activeProject,
+        }, true)
         return
       }
 
@@ -434,7 +407,13 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           depth: config.researchDepth, breadth: config.researchBreadth, reasoningEffort: config.researchReasoning, reportType: config.researchReportType,
         })
       } else {
-        send({ ...defaultSendParams(config, prompts), user_msg: text, project_slug: activeProject })
+        send({
+          ...defaultSendParams(config, prompts),
+          chat_id: chatId,
+          user_msg: text,
+          img_paths: collectActiveImagePaths(messages),
+          project_slug: activeProject,
+        })
       }
     },
     [morphicSearchEnabled, researchEnabled, studyEnabled, chatId, activeProject, config, send, research, morphicSearch, setMessages, toggleStudy, commandBar.submitCommand, messages],
@@ -451,25 +430,43 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       const attachments = userMsg.attachments ?? []
       if (attachments.length > 0) {
         const hidden = userMsg.hiddenContent ?? buildHiddenContent(attachments)
-        let imgBase64: string | null = null
-        const imgAtt = attachments.find(a => a.mime.startsWith("image/"))
-        if (imgAtt) {
-          try {
-            const resp = await fetch(imgAtt.url)
-            const blob = await resp.blob()
-            imgBase64 = await new Promise<string>(resolve => { const r = new FileReader(); r.onload = () => resolve(r.result as string); r.readAsDataURL(blob) })
-          } catch { }
-        }
         const fallbackPrompt = userMsg.content.trim() ? userMsg.content : "Please review the attached document and provide a summary."
         const llmMsg = hidden ? `${hidden}\n\n${fallbackPrompt}` : fallbackPrompt
-        await regenerateAt(globalIndex, { ...defaultSendParams(config, prompts), user_msg: llmMsg, img_base64: imgBase64, downscale_images: config.downscaleImages, project_slug: activeProject })
+        await regenerateAt(globalIndex, {
+          ...defaultSendParams(config, prompts),
+          chat_id: chatId,
+          user_msg: llmMsg,
+          img_paths: collectActiveImagePaths(messages, { userIndex: globalIndex }),
+          downscale_images: config.downscaleImages,
+          project_slug: activeProject,
+        })
         return
       }
 
-      await regenerateAt(globalIndex, { ...defaultSendParams(config, prompts), user_msg: userMsg.content, project_slug: activeProject })
+      await regenerateAt(globalIndex, {
+        ...defaultSendParams(config, prompts),
+        chat_id: chatId,
+        user_msg: userMsg.content,
+        img_paths: collectActiveImagePaths(messages, { userIndex: globalIndex }),
+        project_slug: activeProject,
+      })
     },
-    [isStreaming, messages, regenerateAt, config, prompts, activeProject],
+    [isStreaming, messages, regenerateAt, config, prompts, activeProject, chatId],
   )
+
+  const handleToggleAttachmentActive = useCallback((messageIndex: number, attachmentName: string) => {
+    setMessages(prev => {
+      const copy = [...prev]
+      const msg = copy[messageIndex]
+      if (!msg?.attachments) return prev
+      const attachments = msg.attachments.map(a =>
+        a.name === attachmentName ? { ...a, active: !a.active } : a
+      )
+      const hiddenContent = buildHiddenContent(attachments) || undefined
+      copy[messageIndex] = { ...msg, attachments, hiddenContent }
+      return copy
+    })
+  }, [setMessages])
 
   const handleRemoveAttachment = useCallback((messageIndex: number, attachmentName: string) => {
     setMessages(prev => {
@@ -600,6 +597,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
             branchMessageIdx={branchMessageIdx}
             onOCRRequest={setOCRImage}
             onRemoveAttachment={handleRemoveAttachment}
+            onToggleAttachmentActive={handleToggleAttachmentActive}
             onAttachmentContentChange={handleAttachmentContentChange}
             slug={activeProject}
             chatMaxWidth={chatMaxWidth}

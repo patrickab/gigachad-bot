@@ -263,6 +263,12 @@ export function ChatInput({
             onPaste={handlePaste}
             disabled={disabled && !isStreaming}
             placeholder="Send a Message"
+            spellCheck={false}
+            autoCorrect="off"
+            autoCapitalize="off"
+            data-gramm="false"
+            data-gramm_editor="false"
+            data-enable-grammarly="false"
             className="w-full resize-none bg-transparent text-sm text-ink placeholder:text-ink-subtle outline-none"
           />
           <div className="mt-3 flex items-center justify-between">

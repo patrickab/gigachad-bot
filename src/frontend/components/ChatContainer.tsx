@@ -34,6 +34,7 @@ interface ChatContainerProps {
   chatMaxWidth?: number
   onOCRRequest?: (image: string) => void
   onRemoveAttachment?: (messageIndex: number, attachmentName: string) => void
+  onToggleAttachmentActive?: (messageIndex: number, attachmentName: string) => void
   onAttachmentContentChange?: (messageIndex: number, attachmentName: string, newContent: string) => void
 }
 
@@ -55,6 +56,7 @@ export function ChatContainer({
   chatMaxWidth,
   onOCRRequest,
   onRemoveAttachment,
+  onToggleAttachmentActive,
   onAttachmentContentChange,
 }: ChatContainerProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -325,7 +327,8 @@ export function ChatContainer({
         slug,
         allAttachments,
         expandedEntries,
-        onToggleAttachment: handleToggleExpand,
+        onToggleExpand: handleToggleExpand,
+        onToggleAttachmentActive,
         onRemoveAttachment: handleRemoveAttachment,
         onAttachmentContentChange,
         lastMorphicResult,
@@ -339,7 +342,7 @@ export function ChatContainer({
           })
         },
       }),
-    [chatId, slug, allAttachments, expandedEntries, handleToggleExpand, handleRemoveAttachment, onAttachmentContentChange, lastMorphicResult, openElements]
+    [chatId, slug, allAttachments, expandedEntries, handleToggleExpand, onToggleAttachmentActive, handleRemoveAttachment, onAttachmentContentChange, lastMorphicResult, openElements]
   )
 
   const hasSidebarContent = sidebarElements.length > 0

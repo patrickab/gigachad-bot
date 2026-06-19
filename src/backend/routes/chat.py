@@ -4,9 +4,10 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
+from lib.image_paths import resolve_chat_image_paths
 from lib.memory_store import MemoryStore
 
-from .deps import decode_image, get_memory_store, request_client, sse_event_stream
+from .deps import get_memory_store, request_client, sse_event_stream
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -15,11 +16,12 @@ MemoryStoreDep = Annotated[MemoryStore, Depends(get_memory_store)]
 
 class ChatRequest(BaseModel):
     model: str
+    chat_id: str
     user_msg: str
     system_prompt: str = ""
     temperature: float = Field(default=0.2, ge=0, le=2)
     reasoning_effort: str | None = None
-    img_base64: str | None = None
+    img_paths: list[str] = []
     downscale_images: bool = True
     messages: list[dict[str, str]] = []
     project_slug: str | None = None
@@ -32,11 +34,24 @@ def _build_kwargs(req: ChatRequest) -> dict[str, Any]:
     return kwargs
 
 
+def _resolve_images(c, req: ChatRequest) -> list | None:
+    paths = resolve_chat_image_paths(
+        c,
+        req.chat_id,
+        req.project_slug,
+        req.img_paths,
+        req.downscale_images,
+    )
+    if not paths:
+        return None
+    return paths if len(paths) > 1 else paths[0]
+
+
 @router.post("/chat")
 async def chat(req: ChatRequest, memory_store: MemoryStoreDep) -> EventSourceResponse:
     with request_client() as c:
         kwargs = _build_kwargs(req)
-        img = decode_image(req.img_base64)
+        img = _resolve_images(c, req)
         system_prompt = memory_store.augment_system_prompt(req.system_prompt, req.project_slug)
         chunks = c.api_query(
             model=req.model,
@@ -55,7 +70,7 @@ async def chat(req: ChatRequest, memory_store: MemoryStoreDep) -> EventSourceRes
 async def chat_nonstream(req: ChatRequest, memory_store: MemoryStoreDep) -> dict[str, Any]:
     with request_client() as c:
         kwargs = _build_kwargs(req)
-        img = decode_image(req.img_base64)
+        img = _resolve_images(c, req)
         system_prompt = memory_store.augment_system_prompt(req.system_prompt, req.project_slug)
         response = c.api_query(
             model=req.model,

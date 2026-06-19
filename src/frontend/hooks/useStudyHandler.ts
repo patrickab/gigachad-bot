@@ -26,7 +26,7 @@ export async function handleStudyPdf(
 
   setMessages(prev => [
     ...prev,
-    { role: "user" as const, content: text || `Study: ${pdfNames.join(", ")}`, attachments },
+    { role: "user" as const, content: text || `Study: ${pdfNames.join(", ")}`, attachments: attachments.map((a) => ({ ...a, active: true })) },
     { role: "assistant" as const, content: "Extracting document content…" },
   ])
 
@@ -65,7 +65,7 @@ export async function handleStudyPdf(
     updateLastMsg(setMessages, m => ({
       ...m,
       content: result.overview + "\n\n" + result.article,
-      attachments: [{ name: "Learning Goals", mime: "text/markdown", url: "", content: goalsMd }],
+      attachments: [{ name: "Learning Goals", mime: "text/markdown", url: "", content: goalsMd, active: true }],
     }))
   } catch (e) {
     updateLastMsg(setMessages, m => ({ ...m, content: `Error: ${(e as Error).message || "Study processing failed"}` }))
