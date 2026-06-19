@@ -15,7 +15,7 @@ import "katex/dist/katex.min.css"
 // CodeBlock (below) instead of @streamdown/code: it keeps the bare,
 // chrome-free look of the rest of the app and, unlike the tokenized streamdown
 // renderer, preserves newlines so multi-line ASCII diagrams render correctly.
-const mathPlugin = createMathPlugin({ singleDollarTextMath: false })
+const mathPlugin = createMathPlugin({ singleDollarTextMath: true })
 const PLUGINS = { math: mathPlugin }
 
 // Passing remarkPlugins replaces Streamdown's defaults (which include remark-gfm).

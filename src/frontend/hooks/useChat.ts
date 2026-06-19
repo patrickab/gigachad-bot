@@ -14,6 +14,7 @@ export interface UseChatReturn {
   messages: Message[]
   isStreaming: boolean
   send: (req: ChatRequest, skipAddMessages?: boolean) => Promise<void>
+  regenerateAt: (userIndex: number, req: ChatRequest) => Promise<void>
   cancel: () => void
   reset: () => Promise<void>
   research: (params: ResearchParams) => Promise<void>
@@ -30,7 +31,7 @@ export interface UseChatReturn {
 }
 
 export function useChat(): UseChatReturn {
-  const { messages, isStreaming, send, cancel, deleteMessagePair, addMessagePair, setMessages, totalUsage, setTotalUsage } = useChatStream()
+  const { messages, isStreaming, send, regenerateAt, cancel, deleteMessagePair, addMessagePair, setMessages, totalUsage, setTotalUsage } = useChatStream()
   const { research: doResearch, error: researchError } = useResearch()
 
   const [models, setModels] = useState<ModelsResponse | null>(null)
@@ -123,6 +124,7 @@ export function useChat(): UseChatReturn {
     messages,
     isStreaming,
     send,
+    regenerateAt,
     cancel,
     reset,
     research,

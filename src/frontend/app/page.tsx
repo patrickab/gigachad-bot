@@ -122,6 +122,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     messages,
     isStreaming,
     send,
+    regenerateAt,
     cancel,
     research,
     morphicSearch,
@@ -439,6 +440,37 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     [morphicSearchEnabled, researchEnabled, studyEnabled, chatId, activeProject, config, send, research, morphicSearch, setMessages, toggleStudy, commandBar.submitCommand, messages],
   )
 
+  const handleRegenerate = useCallback(
+    async (globalIndex: number) => {
+      if (isStreaming) return
+      const userMsg = messages[globalIndex]
+      if (!userMsg || userMsg.role !== "user") return
+      const assistantMsg = messages[globalIndex + 1]
+      if (assistantMsg?.morphic_result || assistantMsg?.research_steps?.length) return
+
+      const attachments = userMsg.attachments ?? []
+      if (attachments.length > 0) {
+        const hidden = userMsg.hiddenContent ?? buildHiddenContent(attachments)
+        let imgBase64: string | null = null
+        const imgAtt = attachments.find(a => a.mime.startsWith("image/"))
+        if (imgAtt) {
+          try {
+            const resp = await fetch(imgAtt.url)
+            const blob = await resp.blob()
+            imgBase64 = await new Promise<string>(resolve => { const r = new FileReader(); r.onload = () => resolve(r.result as string); r.readAsDataURL(blob) })
+          } catch { }
+        }
+        const fallbackPrompt = userMsg.content.trim() ? userMsg.content : "Please review the attached document and provide a summary."
+        const llmMsg = hidden ? `${hidden}\n\n${fallbackPrompt}` : fallbackPrompt
+        await regenerateAt(globalIndex, { ...defaultSendParams(config, prompts), user_msg: llmMsg, img_base64: imgBase64, downscale_images: config.downscaleImages, project_slug: activeProject })
+        return
+      }
+
+      await regenerateAt(globalIndex, { ...defaultSendParams(config, prompts), user_msg: userMsg.content, project_slug: activeProject })
+    },
+    [isStreaming, messages, regenerateAt, config, prompts, activeProject],
+  )
+
   const handleRemoveAttachment = useCallback((messageIndex: number, attachmentName: string) => {
     setMessages(prev => {
       const copy = [...prev]
@@ -560,6 +592,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
             onSend={handleSend}
             onCancel={cancel}
             onDeletePair={deleteMessagePair}
+            onRegenerate={handleRegenerate}
             onBranch={tab.historyFile ? handleBranch : undefined}
             focusQaIndex={focusQaIndex}
             focusKey={focusKey}

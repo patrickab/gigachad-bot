@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic"
 import { motion } from "framer-motion"
 import { memo, useMemo, useState } from "react"
-import { Bot, Brain, Check, ChevronDown, Copy, GitFork, Loader2, Trash2, User } from "lucide-react"
+import { Bot, Brain, Check, ChevronDown, Copy, GitFork, Loader2, RotateCcw, Trash2, User } from "lucide-react"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { ResearchTrace } from "./ResearchTrace"
 import { MessageAttachments } from "./MessageAttachments"
@@ -20,6 +20,7 @@ interface ChatMessageProps {
   content: string
   index: number
   onDelete?: (index: number) => void
+  onRegenerate?: (index: number) => void
   onBranch?: (index: number) => void
   morphic_result?: Message["morphic_result"]
   research_steps?: Message["research_steps"]
@@ -92,7 +93,7 @@ export function AssistantMessageContent({
   )
 }
 
-function ChatMessageInner({ role, content, index, onDelete, onBranch, morphic_result, research_steps, research_progress, research_trace_id, isStreaming, attachments, onAttachmentClick, collapsibleUser, onCollapse }: ChatMessageProps) {
+function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBranch, morphic_result, research_steps, research_progress, research_trace_id, isStreaming, attachments, onAttachmentClick, collapsibleUser, onCollapse }: ChatMessageProps) {
   const isUser = role === "user"
   const [copied, setCopied] = useState(false)
 
@@ -104,6 +105,7 @@ function ChatMessageInner({ role, content, index, onDelete, onBranch, morphic_re
   }
 
   const isResearchRunning = !isUser && isStreaming && research_steps && research_steps.length > 0
+  const canRegenerate = !isUser && onRegenerate && !isStreaming && !morphic_result && !(research_steps && research_steps.length > 0)
 
   return (
     <motion.div
@@ -187,13 +189,13 @@ function ChatMessageInner({ role, content, index, onDelete, onBranch, morphic_re
               )}
             </div>
           )}
-          {onDelete && (
+          {canRegenerate && (
             <button
-              onClick={(e) => { e.stopPropagation(); onDelete(index) }}
-              className="rounded p-1 hover:bg-surface-elevated text-ink-subtle hover:text-danger"
-              aria-label="Delete message pair"
+              onClick={(e) => { e.stopPropagation(); onRegenerate(index) }}
+              className="rounded p-1 hover:bg-surface-elevated text-ink-subtle hover:text-ink"
+              aria-label="Regenerate response"
             >
-              <Trash2 className="h-3.5 w-3.5" />
+              <RotateCcw className="h-3.5 w-3.5" />
             </button>
           )}
           {!isUser && onBranch && (
@@ -203,6 +205,15 @@ function ChatMessageInner({ role, content, index, onDelete, onBranch, morphic_re
               aria-label="Branch conversation from this point"
             >
               <GitFork className="h-3.5 w-3.5" />
+            </button>
+          )}
+          {onDelete && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onDelete(index) }}
+              className="rounded p-1 hover:bg-surface-elevated text-ink-subtle hover:text-danger"
+              aria-label="Delete message pair"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
             </button>
           )}
         </div>

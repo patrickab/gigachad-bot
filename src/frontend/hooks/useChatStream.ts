@@ -8,6 +8,7 @@ export interface UseChatStreamReturn {
   messages: Message[]
   isStreaming: boolean
   send: (req: ChatRequest, skipAddMessages?: boolean) => Promise<void>
+  regenerateAt: (userIndex: number, req: ChatRequest) => Promise<void>
   cancel: () => void
   deleteMessagePair: (index: number) => void
   addMessagePair: (userContent: string, assistantContent: string) => void
@@ -38,19 +39,9 @@ export function useChatStream(): UseChatStreamReturn {
   const messagesRef = useRef(messages)
   messagesRef.current = messages
 
-  const send = useCallback(
-    async (req: ChatRequest, skipAddMessages = false) => {
+  const streamAssistantReply = useCallback(
+    async (req: ChatRequest, history: { role: string; content: string }[], assistantMsg: Message) => {
       setIsStreaming(true)
-
-      const assistantMsg: Message = { role: "assistant", content: "" }
-
-      if (!skipAddMessages) {
-        setMessages((prev) => [
-          ...prev,
-          { role: "user", content: req.user_msg },
-          assistantMsg,
-        ])
-      }
 
       let lastFlush = 0
       let pending = false
@@ -78,7 +69,6 @@ export function useChatStream(): UseChatStreamReturn {
       }
 
       try {
-        const history = buildHistory(messagesRef.current)
         const stream = createChatStream({ ...req, messages: history })
         abortRef.current = stream.abort
 
@@ -116,6 +106,44 @@ export function useChatStream(): UseChatStreamReturn {
     []
   )
 
+  const send = useCallback(
+    async (req: ChatRequest, skipAddMessages = false) => {
+      const assistantMsg: Message = { role: "assistant", content: "" }
+
+      if (!skipAddMessages) {
+        const next = [
+          ...messagesRef.current,
+          { role: "user" as const, content: req.user_msg },
+          assistantMsg,
+        ]
+        messagesRef.current = next
+        setMessages(next)
+      }
+
+      const history = buildHistory(messagesRef.current.slice(0, -1))
+      await streamAssistantReply(req, history, assistantMsg)
+    },
+    [streamAssistantReply]
+  )
+
+  const regenerateAt = useCallback(
+    async (userIndex: number, req: ChatRequest) => {
+      const current = messagesRef.current
+      const userMsg = current[userIndex]
+      if (!userMsg || userMsg.role !== "user") return
+
+      const assistantMsg: Message = { role: "assistant", content: "" }
+      const truncated = current.slice(0, userIndex + 1)
+      const next = [...truncated, assistantMsg]
+      messagesRef.current = next
+      setMessages(next)
+
+      const history = buildHistory(truncated)
+      await streamAssistantReply(req, history, assistantMsg)
+    },
+    [streamAssistantReply]
+  )
+
   const cancel = useCallback(() => {
     abortRef.current?.()
     setIsStreaming(false)
@@ -137,5 +165,5 @@ export function useChatStream(): UseChatStreamReturn {
     ])
   }, [])
 
-  return { messages, isStreaming, send, cancel, deleteMessagePair, addMessagePair, setMessages, totalUsage, setTotalUsage }
+  return { messages, isStreaming, send, regenerateAt, cancel, deleteMessagePair, addMessagePair, setMessages, totalUsage, setTotalUsage }
 }

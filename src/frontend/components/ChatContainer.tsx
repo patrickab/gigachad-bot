@@ -23,6 +23,7 @@ interface ChatContainerProps {
   onSend: (text: string, attachments: Attachment[]) => void
   onCancel: () => void
   onDeletePair: (index: number) => void
+  onRegenerate?: (index: number) => void
   onBranch?: (qaIndex: number) => void
   focusQaIndex?: number | null
   focusKey?: number
@@ -43,6 +44,7 @@ export function ChatContainer({
   onSend,
   onCancel,
   onDeletePair,
+  onRegenerate,
   onBranch,
   focusQaIndex,
   focusKey,
@@ -475,6 +477,7 @@ export function ChatContainer({
                             isStreaming={isStreaming}
                             index={globalIndex}
                             onDelete={onDeletePair}
+                            onRegenerate={onRegenerate}
                              onBranch={onBranch ? () => onBranch(qaIndex) : undefined}
                           />
                         </ElevatedContainer>

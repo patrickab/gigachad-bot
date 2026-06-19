@@ -218,7 +218,7 @@ export function ChatInput({
   const canSend = text.trim().length > 0 || attachments.length > 0
 
   return (
-    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mx-auto w-full max-w-3xl">
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mx-auto w-full max-w-2xl">
       {attachments.length > 0 && (
         <motion.div
           initial={{ opacity: 0, scale: 0.96 }}
