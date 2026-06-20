@@ -563,7 +563,11 @@ export function MemoryPanel({
         return
       }
       if (candidatesMode) {
-        const nextId = (globalMemories[0] ?? projectMemories?.[0])?.id
+        const globalSections = buildBoardSections(globalCategories, globalMemories)
+        const projectSections = buildBoardSections(projectCategories, projectMemories ?? [])
+        const firstGlobal = globalSections.find(s => s.items.length > 0)?.items[0]
+        const firstProject = projectSections.find(s => s.items.length > 0)?.items[0]
+        const nextId = (firstGlobal ?? firstProject)?.id
         if (!nextId) return
         if (e.key === "+" || e.key === "=") {
           e.preventDefault()

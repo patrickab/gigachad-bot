@@ -6,7 +6,6 @@ import remarkBreaks from "remark-breaks"
 import { cloneElement, isValidElement, memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import { highlightCode } from "@/lib/markdown-syntax-highlighting"
-import { mermaidPlugin } from "@/lib/streamdown-mermaid"
 import {
   useFloating,
   useHover,
@@ -21,11 +20,11 @@ import {
   FloatingPortal,
   useTransitionStyles,
 } from "@floating-ui/react"
-import { Check, Copy, Download, Globe, Maximize2, X } from "lucide-react"
+import { Check, Copy, Globe } from "lucide-react"
 import "katex/dist/katex.min.css"
 
 const mathPlugin = createMathPlugin({ singleDollarTextMath: true })
-const PLUGINS = { math: mathPlugin, mermaid: mermaidPlugin }
+const PLUGINS = { math: mathPlugin }
 
 function isMermaidCode(code: string): boolean {
   return /^\s*(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitGraph|journey|requirementDiagram|mindmap|timeline|sankey|xychart|block-beta|packet-beta|architecture-beta)\b/i.test(code)
@@ -34,7 +33,6 @@ function isMermaidCode(code: string): boolean {
 function MermaidDiagram({ code }: { code: string }) {
   const [svg, setSvg] = useState("")
   const [failed, setFailed] = useState(false)
-  const [fullscreen, setFullscreen] = useState(false)
   const idRef = useRef(`mmd-${Math.random().toString(36).slice(2)}`)
 
   useEffect(() => {
@@ -43,16 +41,18 @@ function MermaidDiagram({ code }: { code: string }) {
     setSvg("")
     void (async () => {
       try {
-        const m = mermaidPlugin.getMermaid()
+        const mermaid = (await import("mermaid")).default
         const isLight =
           typeof document !== "undefined" && document.documentElement.classList.contains("light")
-        m.initialize({
+        mermaid.initialize({
           startOnLoad: false,
           theme: isLight ? "neutral" : "dark",
           securityLevel: "strict",
           fontFamily: "var(--font-sans), system-ui, sans-serif",
+          logLevel: "fatal",
         })
-        const { svg: rendered } = await m.render(idRef.current, code)
+        await mermaid.parse(code)
+        const { svg: rendered } = await mermaid.render(idRef.current, code)
         if (!cancelled) setSvg(rendered)
       } catch {
         if (!cancelled) setFailed(true)
@@ -61,67 +61,14 @@ function MermaidDiagram({ code }: { code: string }) {
     return () => { cancelled = true }
   }, [code])
 
-  useEffect(() => {
-    if (!fullscreen) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setFullscreen(false) }
-    document.addEventListener("keydown", onKey)
-    return () => document.removeEventListener("keydown", onKey)
-  }, [fullscreen])
-
-  const handleDownloadSvg = useCallback(() => {
-    if (!svg) return
-    const blob = new Blob([svg], { type: "image/svg+xml" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = "diagram.svg"
-    a.click()
-    URL.revokeObjectURL(url)
-  }, [svg])
-
   if (failed) return <CodeBlock codeString={code} language="mermaid" />
-  if (!svg) return <div className="my-3 text-xs text-ink-subtle">Rendering diagram...</div>
-
-  if (fullscreen) {
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-backdrop" onClick={() => setFullscreen(false)}>
-        <div className="relative max-h-[90vh] max-w-[90vw] overflow-auto rounded-lg bg-surface p-6" onClick={(e) => e.stopPropagation()}>
-          <button
-            onClick={() => setFullscreen(false)}
-            className="absolute top-3 right-3 rounded p-1 hover:bg-hover text-ink-subtle hover:text-ink"
-            title="Close"
-          >
-            <X className="h-4 w-4" />
-          </button>
-          <div className="[&_svg]:max-w-full [&_svg]:h-auto" dangerouslySetInnerHTML={{ __html: svg }} />
-        </div>
-      </div>
-    )
-  }
+  if (!svg) return <div className="my-3 text-xs text-ink-subtle">Rendering diagram…</div>
 
   return (
-    <div className="group/mermaid relative my-3">
-      <div
-        className="flex justify-center overflow-x-auto [&_svg]:max-w-full [&_svg]:h-auto"
-        dangerouslySetInnerHTML={{ __html: svg }}
-      />
-      <div className="absolute top-2 right-2 flex gap-1 opacity-0 transition-opacity group-hover/mermaid:opacity-100">
-        <button
-          onClick={handleDownloadSvg}
-          className="rounded p-1 hover:bg-surface-elevated/60 text-ink-subtle hover:text-ink"
-          title="Download SVG"
-        >
-          <Download className="h-3.5 w-3.5" />
-        </button>
-        <button
-          onClick={() => setFullscreen(true)}
-          className="rounded p-1 hover:bg-surface-elevated/60 text-ink-subtle hover:text-ink"
-          title="Fullscreen"
-        >
-          <Maximize2 className="h-3.5 w-3.5" />
-        </button>
-      </div>
-    </div>
+    <div
+      className="my-3 flex justify-center overflow-x-auto [&_svg]:max-w-full [&_svg]:h-auto"
+      dangerouslySetInnerHTML={{ __html: svg }}
+    />
   )
 }
 

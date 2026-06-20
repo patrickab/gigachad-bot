@@ -20,7 +20,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
 import logging
-import os
 import re
 from typing import TYPE_CHECKING, Any, Protocol
 import uuid
@@ -43,9 +42,6 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-MEMORY_ROOT = DIRECTORY_CHAT_HISTORIES / "memory"
-PENDING_DIR = MEMORY_ROOT / "pending"
-GLOBAL_PROFILE = MEMORY_ROOT / "global-profile.md"
 PROJECT_MEMORY = "memory/memory.md"
 EXTRACT_TIMEOUT = 60
 FALLBACK_CATEGORY = "note"
@@ -82,42 +78,11 @@ DEFAULT_PROJECT_CATEGORIES: list[dict[str, str]] = [
         "name": "key_concept",
         "description": "Important concepts, definitions, formulas, or facts worth retaining (e.g. from lectures).",
     },
-    {"name": "Decisions", "description": "Design, architecture, or technical decisions that were made, with their rationale."},
+    {"name": "decisions", "description": "Design, architecture, or technical decisions that were made, with their rationale."},
     {"name": "constraint", "description": "Requirements, limitations, deadlines, or rules that apply to the project."},
     {"name": "resource", "description": "Useful references, files, links, datasets, tools, or commands tied to this project."},
     {"name": "open_questions", "description": "Unresolved questions, blockers, or pending tasks to follow up on."},
 ]
-
-
-GLOBAL_TEMPLATE = """# User Profile
-
-## Communication Preferences
-
-## Engineering Preferences
-
-## UI Preferences
-
-## Stable Personal Context
-
-## Open Questions
-"""
-
-PROJECT_TEMPLATE = """# Project Memory
-
-## Purpose
-
-## Current Focus
-
-## Architecture Decisions
-
-## Design Decisions
-
-## Constraints
-
-## Important Discoveries
-
-## Open Questions
-"""
 
 
 @dataclass
@@ -145,10 +110,6 @@ class StoredMemory:
     updated_at: str = field(default_factory=_now_iso)
 
 
-def _memory_extraction_model() -> str:
-    return MEMORY_MODEL
-
-
 def _json_from_response(text: str) -> dict[str, Any]:
     from lib.llm_json import extract_json_from_llm
 
@@ -167,21 +128,10 @@ class MemoryStore:
     # Public document helpers
     # ------------------------------------------------------------------
 
-    def chat_context(
-        self,
-        project_slug: str | None = None,
-        global_filepath: str | None = None,
-        project_filepath: str | None = None,
-    ) -> str:
+    def chat_context(self, project_slug: str | None = None) -> str:
         """Return canonical memory context for runtime chat injection."""
-        global_path = self.resolve_path(global_filepath) if global_filepath else self._global_profile_path()
-
-        if project_filepath:
-            project_path = self.resolve_path(project_filepath)
-        elif project_slug:
-            project_path = self._project_memory_path(project_slug)
-        else:
-            project_path = None
+        global_path = self._global_profile_path()
+        project_path = self._project_memory_path(project_slug) if project_slug else None
 
         global_profile = self._read_existing_doc(global_path).strip()
 
@@ -292,8 +242,6 @@ Rules:
     ) -> None:
         json_path, md_path, title = self._scope_paths(scope, project_slug)
 
-        self._backup_existing_profile(json_path)
-
         if revised_memories is not None:
             # Revised memories come from a preview and may carry an extra "status"
             # field for the UI — keep only the canonical StoredMemory fields.
@@ -400,10 +348,13 @@ Rules:
             if cat not in candidates_by_cat:
                 result.extend((m, "pre-existing") for m in mems)
 
-        # Touched categories get reconciled.
-        for cat, cands in candidates_by_cat.items():
-            cat_existing = existing_by_cat.get(cat, [])
-            result.extend(await self._reconcile_category(llm, scope, cat, cat_existing, cands))
+        # Touched categories get reconciled — independent per category, so run concurrently.
+        touched = list(candidates_by_cat.items())
+        reconciled = await asyncio.gather(
+            *(self._reconcile_category(llm, scope, cat, existing_by_cat.get(cat, []), cands) for cat, cands in touched)
+        )
+        for cat_result in reconciled:
+            result.extend(cat_result)
 
         return result
 
@@ -645,7 +596,7 @@ Rules:
         return result
 
     # ------------------------------------------------------------------
-    # Profile management & versioning
+    # Profile management
     # ------------------------------------------------------------------
 
     def list_memories(self, scope: str, project_slug: str | None = None) -> list[dict[str, Any]]:
@@ -692,84 +643,15 @@ Rules:
         to_mems_updated = [m for m in to_mems if m.id != memory_id] + [moved]
         from_mems_updated = [m for m in from_mems if m.id != memory_id]
 
-        self._backup_existing_profile(from_json)
         self._write_stored_memories(from_json, from_mems_updated)
         self._write_doc(
             from_md, self.render_memories_as_markdown(from_mems_updated, from_title, scope=from_scope, project_slug=from_project_slug)
         )
 
-        self._backup_existing_profile(to_json)
         self._write_stored_memories(to_json, to_mems_updated)
         self._write_doc(
             to_md, self.render_memories_as_markdown(to_mems_updated, to_title, scope=to_scope, project_slug=to_project_slug)
         )
-
-    def list_profiles(self, project_slug: str | None = None) -> list[dict[str, Any]]:
-        """List all memory profile files (current and backups) under memory/ or <project_slug>/memory/."""
-        dir_path = self._project_dir(project_slug) / "memory" if project_slug else self.memory_root
-
-        if not dir_path.exists():
-            return []
-
-        profiles = []
-        stem_name = "memory" if project_slug else "global-profile"
-
-        active_file = dir_path / f"{stem_name}.md"
-        if active_file.exists():
-            profiles.append(
-                {
-                    "filepath": self._relative_base_path(active_file),
-                    "title": "Current",
-                }
-            )
-
-        backups = sorted(dir_path.glob(f"{stem_name}_*.md"))
-        for file in backups:
-            try:
-                match = re.search(r"_(\d+)\.md$", file.name)
-                idx_str = match.group(1) if match else "00"
-                profiles.append(
-                    {
-                        "filepath": self._relative_base_path(file),
-                        "title": f"Version {idx_str}",
-                    }
-                )
-            except Exception as e:
-                log.error("Failed to parse backup version %s: %s", file, e)
-
-        return profiles
-
-    def get_profile_content(self, filepath: str) -> str:
-        """Retrieve complete content of the profile at filepath, creating it from template if missing."""
-        path = self.resolve_path(filepath)
-        if not path.exists():
-            if filepath == "memory/global-profile.md" or filepath.endswith("global-profile.md"):
-                return GLOBAL_TEMPLATE
-            return PROJECT_TEMPLATE
-        return path.read_text(encoding="utf-8")
-
-    def _backup_existing_profile(self, path: Path) -> Path | None:
-        """Back up current file to next available sequential backup name (e.g. memory_00.md) before overwrite."""
-        if not path.exists():
-            return None
-        parent_dir = path.parent
-        stem = path.stem
-        suffix = path.suffix
-
-        pattern = re.compile(rf"^{re.escape(stem)}_(\d+){re.escape(suffix)}$")
-        max_idx = -1
-        if parent_dir.exists():
-            for f in parent_dir.glob(f"{stem}_*{suffix}"):
-                match = pattern.match(f.name)
-                if match:
-                    max_idx = max(max_idx, int(match.group(1)))
-
-        next_idx = max_idx + 1
-        backup_name = f"{stem}_{next_idx:02d}{suffix}"
-        backup_path = parent_dir / backup_name
-
-        backup_path.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
-        return backup_path
 
     # ------------------------------------------------------------------
     # Canonical storage I/O & rendering
@@ -778,7 +660,13 @@ Rules:
     def _read_stored_memories(self, path: "Path") -> list[StoredMemory]:
         if not path.exists():
             return []
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            log.error("Failed to read stored memories from %s: %s", path, e)
+            return []
+        if not isinstance(raw, list):
+            return []
         now = _now_iso()
         out: list[StoredMemory] = []
         for m in raw:
@@ -851,10 +739,6 @@ Rules:
     def _format_categories(categories: list[dict[str, str]]) -> str:
         return "\n".join(f'  - "{c["name"]}": {c["description"]}' for c in categories)
 
-    def resolve_path(self, filepath: str) -> Path:
-        """Resolve *filepath* under the base directory, rejecting traversal."""
-        return safe_resolve(self.base_dir, filepath)
-
     def _ensure_dirs(self) -> None:
         self.memory_root.mkdir(parents=True, exist_ok=True)
         self.pending_dir.mkdir(parents=True, exist_ok=True)
@@ -869,9 +753,6 @@ Rules:
 
     def _project_memory_path(self, project_slug: str | None) -> Path:
         return self._project_dir(project_slug) / PROJECT_MEMORY
-
-    def _relative_base_path(self, path: Path) -> str:
-        return str(path.resolve().relative_to(self.base_dir))
 
     def _read_existing_doc(self, path: Path) -> str:
         if not path.exists():
@@ -934,7 +815,7 @@ Rules:
 
         def call(force_json: bool) -> str:
             kwargs: dict[str, Any] = dict(
-                model=_memory_extraction_model(),
+                model=MEMORY_MODEL,
                 user_msg=user_prompt,
                 user_msg_history=[],
                 system_prompt=system_prompt,

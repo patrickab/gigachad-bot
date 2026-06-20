@@ -203,27 +203,3 @@ def move_memory(req: MemoryMoveRequest, store: MemoryStoreDep) -> dict:
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     return {"status": "moved"}
-
-
-@router.get("/profiles")
-def list_memory_profiles(
-    store: MemoryStoreDep,
-    project_slug: str | None = Query(None, alias="project_slug"),
-) -> dict:
-    try:
-        profiles = store.list_profiles(project_slug=project_slug)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
-    return {"profiles": profiles}
-
-
-@router.get("/content")
-def get_memory_profile_content(
-    store: MemoryStoreDep,
-    filepath: str = Query(..., alias="filepath"),
-) -> dict:
-    try:
-        content = store.get_profile_content(filepath=filepath)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
-    return {"content": content, "filepath": filepath}

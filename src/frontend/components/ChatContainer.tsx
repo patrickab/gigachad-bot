@@ -199,7 +199,7 @@ export function ChatContainer({
   function togglePair(idx: number) {
     setManualOverrides(prev => {
       const next = new Map(prev)
-      const current = isExpanded(idx)
+      const current = isExpandedNormal(idx)
       next.set(idx, !current)
       return next
     })
@@ -211,27 +211,20 @@ export function ChatContainer({
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const leaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const collapsedList = useMemo<number[]>(() => {
+  const allPairsList = useMemo<number[]>(() => {
     const gs: number[] = []
     for (let i = 0; i < messages.length; i += 2) {
-      if (messages[i]?.role === "user" && !isExpandedNormal(i)) {
+      if (messages[i]?.role === "user") {
         gs.push(i)
       }
     }
     return gs
-  }, [messages, manualOverrides])
+  }, [messages])
 
   const activeFocusedGlobalIndex =
-    keyboardFocusIdx !== null && keyboardFocusIdx >= 0 && keyboardFocusIdx < collapsedList.length
-      ? collapsedList[keyboardFocusIdx]
+    keyboardFocusIdx !== null && keyboardFocusIdx >= 0 && keyboardFocusIdx < allPairsList.length
+      ? allPairsList[keyboardFocusIdx]
       : null
-
-  function isExpanded(idx: number): boolean {
-    if (activeFocusedGlobalIndex !== null) {
-      if (idx === activeFocusedGlobalIndex - 2 || idx === activeFocusedGlobalIndex - 4) return false
-    }
-    return isExpandedNormal(idx)
-  }
 
   const handleSend = useCallback((text: string, attachments: Attachment[]) => {
     isPinnedToBottomRef.current = true
@@ -266,21 +259,21 @@ export function ChatContainer({
   }, [])
 
   const navigateFocus = useCallback((key: "ArrowUp" | "ArrowDown") => {
-    if (collapsedList.length === 0) {
+    if (allPairsList.length === 0) {
       setKeyboardFocusIdx(null)
       return
     }
     setKeyboardFocusIdx((cur) => {
-      const start = cur ?? (key === "ArrowDown" ? -1 : collapsedList.length)
-      return Math.max(0, Math.min(start + (key === "ArrowDown" ? 1 : -1), collapsedList.length - 1))
+      const start = cur ?? (key === "ArrowDown" ? -1 : allPairsList.length)
+      return Math.max(0, Math.min(start + (key === "ArrowDown" ? 1 : -1), allPairsList.length - 1))
     })
-  }, [collapsedList])
+  }, [allPairsList])
 
   const confirmFocus = useCallback(() => {
-    if (keyboardFocusIdx === null || keyboardFocusIdx < 0 || keyboardFocusIdx >= collapsedList.length) return
-    togglePair(collapsedList[keyboardFocusIdx])
+    if (keyboardFocusIdx === null || keyboardFocusIdx < 0 || keyboardFocusIdx >= allPairsList.length) return
+    togglePair(allPairsList[keyboardFocusIdx])
     setKeyboardFocusIdx(null)
-  }, [keyboardFocusIdx, collapsedList, togglePair])
+  }, [keyboardFocusIdx, allPairsList, togglePair])
 
   useEffect(() => {
     const eat = (e: KeyboardEvent) => { e.preventDefault(); e.stopPropagation() }
@@ -309,7 +302,7 @@ export function ChatContainer({
 
     const atTop = keyboardFocusIdx < 3
     const targetIdx = atTop ? 0 : keyboardFocusIdx - 3
-    const targetGlobalIdx = collapsedList[targetIdx]
+    const targetGlobalIdx = allPairsList[targetIdx]
     if (targetGlobalIdx === undefined) return
     const el = collapsedRefs.current.get(targetGlobalIdx)
     if (!el) return
@@ -322,7 +315,7 @@ export function ChatContainer({
       top: container.scrollTop + offset,
       behavior: "smooth"
     })
-  }, [keyboardFocusIdx, collapsedList])
+  }, [keyboardFocusIdx, allPairsList])
 
   const sidebarElements = useMemo(
     () =>
@@ -396,7 +389,7 @@ export function ChatContainer({
           <ElevationProvider darkColor="var(--paper)" brightColor="var(--surface-elevated)" numLevels={3} startLevel={1}>
             <AnimatePresence>
             {pairs.map(({ user, assistant, globalIndex }, qaIndex) => {
-              const expanded = isExpanded(globalIndex)
+              const expanded = isExpandedNormal(globalIndex)
               const qLabel = abbreviate(user.content, user)
               const showPreview = hoveredPair === globalIndex || activeFocusedGlobalIndex === globalIndex
               const showBranchDivider = branchMessageIdx != null && qaIndex === branchMessageIdx
@@ -429,11 +422,11 @@ export function ChatContainer({
                         <div className="min-w-0 flex-1 flex flex-col">
                           <div className="mb-0.5 text-xs font-medium text-ink-subtle">You</div>
                           {showPreview ? (
-                            <div className="max-h-[12.5vh] overflow-y-auto text-ink">
+                            <div className="max-h-[12.5vh] overflow-y-auto text-ink-muted">
                               <LaTeXMarkdown content={user.content} compact />
                             </div>
                           ) : (
-                            <span className="text-sm text-ink truncate">{qLabel}</span>
+                            <span className="text-sm text-ink-muted truncate">{qLabel}</span>
                           )}
                         </div>
                         <ChevronRight className="h-4 w-4 shrink-0 text-ink-faint mt-1" />
@@ -450,7 +443,7 @@ export function ChatContainer({
                               <ElevatedContainer className="rounded-lg border border-divider/30 overflow-hidden">
                                 <div className="px-4 py-3">
                                   <div className="text-xs font-medium text-ink-subtle mb-1">Assistant</div>
-                        <div className="max-h-[25vh] overflow-y-auto text-ink">
+                        <div className="max-h-[25vh] overflow-y-auto text-ink-muted">
                           <AssistantMessageContent content={assistant.content} compact />
                         </div>
                                   </div>
@@ -464,7 +457,7 @@ export function ChatContainer({
                   {expanded && (
                     <>
 
-                      <ElevatedContainer className="mx-3 my-4 rounded-xl border border-divider/40 overflow-hidden">
+                      <ElevatedContainer className={cn("mx-3 my-4 rounded-xl border border-divider/40 overflow-hidden transition-all duration-300", activeFocusedGlobalIndex === globalIndex && "ring-1 ring-ink-muted/50")}>
                         <ChatMessage
                           role="user"
                           content={user.content}
