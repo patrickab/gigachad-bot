@@ -23,7 +23,7 @@ def safe_read_json(path: Path, default: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
-def safe_write_json(path: Path, data: dict[str, Any]) -> None:
+def safe_write_json(path: Path, data: dict[str, Any] | list[Any]) -> None:
     """Write `data` as JSON to `path`, creating parent directories if needed.
 
     Uses atomic write (write to temp file, then rename) for robustness.

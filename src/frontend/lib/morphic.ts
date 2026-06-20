@@ -1,5 +1,6 @@
 import type { MorphicSearchParams } from "./types"
 import { API_BASE } from "./config"
+import { readLines } from "./sse"
 
 export interface MorphicResultItem {
   title: string
@@ -38,44 +39,33 @@ export async function* parseMorphicStream(
     yield { type: "error", text: await res.text() }
     return
   }
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
-  let buf = ""
   try {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) { yield { type: "done" }; break }
-      buf += decoder.decode(value, { stream: true })
-      const lines = buf.split("\n")
-      buf = lines.pop() ?? ""
-      for (const line of lines) {
-        const t = line.trim()
-        if (!t.startsWith("data:")) continue
-        const json = t.startsWith("data: ") ? t.slice(6) : t.slice(5)
-        if (json === "[DONE]") { yield { type: "done" }; continue }
-        try {
-          const p = JSON.parse(json)
-          if (p.type === "text-delta" && typeof p.delta === "string") {
-            yield { type: "text", text: p.delta }
-          } else if (p.type === "tool-output-available" && p.output?.state === "complete" && p.output.results) {
-            const o = p.output
-            yield {
-              type: "source",
-              sources: o.results.map((r: MorphicResultItem) => ({ title: r.title ?? "", url: r.url ?? "", content: r.content ?? "" })),
-              images: o.images ?? [],
-              query: o.query ?? "",
-              citationMap: o.citationMap,
-            }
-          } else if (p.type === "error") {
-            yield { type: "error", text: p.errorText ?? "Unknown error" }
+    for await (const line of readLines(res)) {
+      const t = line.trim()
+      if (!t.startsWith("data:")) continue
+      const json = t.startsWith("data: ") ? t.slice(6) : t.slice(5)
+      if (json === "[DONE]") { yield { type: "done" }; continue }
+      try {
+        const p = JSON.parse(json)
+        if (p.type === "text-delta" && typeof p.delta === "string") {
+          yield { type: "text", text: p.delta }
+        } else if (p.type === "tool-output-available" && p.output?.state === "complete" && p.output.results) {
+          const o = p.output
+          yield {
+            type: "source",
+            sources: o.results.map((r: MorphicResultItem) => ({ title: r.title ?? "", url: r.url ?? "", content: r.content ?? "" })),
+            images: o.images ?? [],
+            query: o.query ?? "",
+            citationMap: o.citationMap,
           }
-        } catch { /* skip */ }
-      }
+        } else if (p.type === "error") {
+          yield { type: "error", text: p.errorText ?? "Unknown error" }
+        }
+      } catch { /* skip */ }
     }
+    yield { type: "done" }
   } catch (e) {
     if (e instanceof Error && e.name === "AbortError") return
     yield { type: "error", text: e instanceof Error ? e.message : String(e) }
-  } finally {
-    reader.releaseLock()
   }
 }

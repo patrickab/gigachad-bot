@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from backend.routes.mineru import should_cancel
 from config import DIRECTORY_CHAT_HISTORIES, chat_upload_dir, uploads_dir_for
 from lib.image_paths import delete_downscaled
+from lib.naming import dedup_filename
 
 log = logging.getLogger(__name__)
 
@@ -31,20 +32,6 @@ def delete_chat_upload_dir(chat_id: str, slug: str | None = None) -> None:
     path = chat_upload_dir(chat_id, slug)
     if path.exists():
         shutil.rmtree(path)
-
-
-def _dedup_name(dest_dir: Path, filename: str) -> str:
-    stem = Path(filename).stem
-    suffix = Path(filename).suffix
-    target = dest_dir / filename
-    if not target.exists():
-        return filename
-    n = 1
-    while True:
-        candidate = f"{stem} ({n}){suffix}"
-        if not (dest_dir / candidate).exists():
-            return candidate
-        n += 1
 
 
 _TEXT_EXTS = {".csv", ".json", ".yaml", ".yml", ".xml", ".toml", ".ini", ".cfg", ".conf", ".log", ".md", ".rst", ".svg"}
@@ -74,7 +61,7 @@ async def upload_file(
     chat_dir = chat_upload_dir(chat_id, slug)
     chat_dir.mkdir(parents=True, exist_ok=True)
 
-    deduped = _dedup_name(chat_dir, file.filename)
+    deduped = dedup_filename(chat_dir, file.filename)
     dest = chat_dir / deduped
     content_b = await file.read()
     dest.write_bytes(content_b)

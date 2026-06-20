@@ -13,6 +13,7 @@ the sidebar projects/histories tree (``VaultTree``) elsewhere in the codebase.
 from pathlib import Path
 
 from config import DIRECTORY_OBSIDIAN_VAULT
+from lib.safe_path import safe_resolve
 
 # Directories that hold Obsidian internals or noise rather than notes.
 _SKIP_DIRS = {".obsidian", ".trash", ".git", "node_modules"}
@@ -33,10 +34,7 @@ class ObsidianVault:
         """Resolve *rel_path* under the vault, rejecting traversal."""
         if self._base is None:
             raise ValueError("Obsidian vault is not configured")
-        resolved = (self._base / rel_path).resolve()
-        if not str(resolved).startswith(str(self._base)):
-            raise ValueError(f"Invalid path: {rel_path}")
-        return resolved
+        return safe_resolve(self._base, rel_path)
 
     def list_markdown(self) -> list[dict[str, str]]:
         """Return every markdown note as ``{path, name}`` with posix-relative paths.

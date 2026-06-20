@@ -6,32 +6,134 @@ import remarkBreaks from "remark-breaks"
 import { cloneElement, isValidElement, memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import { highlightCode } from "@/lib/markdown-syntax-highlighting"
-import { motion, AnimatePresence } from "framer-motion"
-import { Check, Copy, Globe } from "lucide-react"
+import { mermaidPlugin } from "@/lib/streamdown-mermaid"
+import {
+  useFloating,
+  useHover,
+  useDismiss,
+  useInteractions,
+  offset,
+  flip,
+  shift,
+  arrow,
+  autoUpdate,
+  FloatingArrow,
+  FloatingPortal,
+  useTransitionStyles,
+} from "@floating-ui/react"
+import { Check, Copy, Download, Globe, Maximize2, X } from "lucide-react"
 import "katex/dist/katex.min.css"
 
-// Streamdown plugins are stateful singletons (they lazily wire up KaTeX), so
-// create once at module scope. Code blocks are rendered by our own minimal
-// CodeBlock (below) instead of @streamdown/code: it keeps the bare,
-// chrome-free look of the rest of the app and, unlike the tokenized streamdown
-// renderer, preserves newlines so multi-line ASCII diagrams render correctly.
 const mathPlugin = createMathPlugin({ singleDollarTextMath: true })
-const PLUGINS = { math: mathPlugin }
+const PLUGINS = { math: mathPlugin, mermaid: mermaidPlugin }
 
-// Passing remarkPlugins replaces Streamdown's defaults (which include remark-gfm).
-// Keep defaults so GFM tables/task lists parse, then add soft line breaks.
+function isMermaidCode(code: string): boolean {
+  return /^\s*(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitGraph|journey|requirementDiagram|mindmap|timeline|sankey|xychart|block-beta|packet-beta|architecture-beta)\b/i.test(code)
+}
+
+function MermaidDiagram({ code }: { code: string }) {
+  const [svg, setSvg] = useState("")
+  const [failed, setFailed] = useState(false)
+  const [fullscreen, setFullscreen] = useState(false)
+  const idRef = useRef(`mmd-${Math.random().toString(36).slice(2)}`)
+
+  useEffect(() => {
+    let cancelled = false
+    setFailed(false)
+    setSvg("")
+    void (async () => {
+      try {
+        const m = mermaidPlugin.getMermaid()
+        const isLight =
+          typeof document !== "undefined" && document.documentElement.classList.contains("light")
+        m.initialize({
+          startOnLoad: false,
+          theme: isLight ? "neutral" : "dark",
+          securityLevel: "strict",
+          fontFamily: "var(--font-sans), system-ui, sans-serif",
+        })
+        const { svg: rendered } = await m.render(idRef.current, code)
+        if (!cancelled) setSvg(rendered)
+      } catch {
+        if (!cancelled) setFailed(true)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [code])
+
+  useEffect(() => {
+    if (!fullscreen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setFullscreen(false) }
+    document.addEventListener("keydown", onKey)
+    return () => document.removeEventListener("keydown", onKey)
+  }, [fullscreen])
+
+  const handleDownloadSvg = useCallback(() => {
+    if (!svg) return
+    const blob = new Blob([svg], { type: "image/svg+xml" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = "diagram.svg"
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [svg])
+
+  if (failed) return <CodeBlock codeString={code} language="mermaid" />
+  if (!svg) return <div className="my-3 text-xs text-ink-subtle">Rendering diagram...</div>
+
+  if (fullscreen) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-backdrop" onClick={() => setFullscreen(false)}>
+        <div className="relative max-h-[90vh] max-w-[90vw] overflow-auto rounded-lg bg-surface p-6" onClick={(e) => e.stopPropagation()}>
+          <button
+            onClick={() => setFullscreen(false)}
+            className="absolute top-3 right-3 rounded p-1 hover:bg-hover text-ink-subtle hover:text-ink"
+            title="Close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+          <div className="[&_svg]:max-w-full [&_svg]:h-auto" dangerouslySetInnerHTML={{ __html: svg }} />
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="group/mermaid relative my-3">
+      <div
+        className="flex justify-center overflow-x-auto [&_svg]:max-w-full [&_svg]:h-auto"
+        dangerouslySetInnerHTML={{ __html: svg }}
+      />
+      <div className="absolute top-2 right-2 flex gap-1 opacity-0 transition-opacity group-hover/mermaid:opacity-100">
+        <button
+          onClick={handleDownloadSvg}
+          className="rounded p-1 hover:bg-surface-elevated/60 text-ink-subtle hover:text-ink"
+          title="Download SVG"
+        >
+          <Download className="h-3.5 w-3.5" />
+        </button>
+        <button
+          onClick={() => setFullscreen(true)}
+          className="rounded p-1 hover:bg-surface-elevated/60 text-ink-subtle hover:text-ink"
+          title="Fullscreen"
+        >
+          <Maximize2 className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </div>
+  )
+}
+
 const REMARK_PLUGINS = [...Object.values(defaultRemarkPlugins), remarkBreaks]
 const LINK_SAFETY_OFF = { enabled: false }
 
-// remark-math (used by @streamdown/math) only understands $...$ / $$...$$.
-// LLMs frequently emit \(...\) and \[...\], so normalize those to dollars.
-// Fenced and inline code segments are skipped so code samples aren't mangled.
 function normalizeMathDelimiters(input: string): string {
   if (input.indexOf("\\(") === -1 && input.indexOf("\\[") === -1) return input
   const segments = input.split(/(```[\s\S]*?```|`[^`]*`)/g)
   return segments
     .map((seg, i) => {
-      if (i % 2 === 1) return seg // code segment, leave untouched
+      if (i % 2 === 1) return seg
       return seg
         .replace(/\\\[/g, () => "$$")
         .replace(/\\\]/g, () => "$$")
@@ -41,9 +143,6 @@ function normalizeMathDelimiters(input: string): string {
     .join("")
 }
 
-// Render blocks that contain box-drawing characters as a preformatted ASCII
-// diagram instead of a generic code block, so these diagrams work even when
-// the LLM omits a language tag.
 function AsciiDiagram({ codeString }: { codeString: string }) {
   const [copied, setCopied] = useState(false)
   const handleCopy = useCallback(() => {
@@ -69,12 +168,8 @@ function AsciiDiagram({ codeString }: { codeString: string }) {
   )
 }
 
-function containsBoxDrawing(code: string): boolean {
-  return /[\u2500-\u257F\u2580-\u259F]/.test(code)
-}
-
 function containsAsciiTableArt(code: string): boolean {
-  const boxChars = (code.match(/[\u2500-\u257F\u2580-\u259F]/g) || []).length
+  const boxChars = (code.match(/[─-╿▀-▟]/g) || []).length
   const lines = code.split("\n").length
   return boxChars >= 8 && lines >= 3
 }
@@ -119,67 +214,6 @@ function CodeBlock({ codeString, language }: { codeString: string; language: str
   )
 }
 
-// Detect diagrams even when the LLM forgets the `mermaid` language tag on the
-// code fence. This keeps diagrams working out of the box for both:
-//   ```mermaid
-//   graph TD; ...
-//   ```
-// and:
-//   ```
-//   graph TD; ...
-//   ```
-function isMermaidCode(code: string): boolean {
-  return /^\s*(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitGraph|journey|requirementDiagram|mindmap|timeline|sankey|xychart|block-beta|packet-beta|architecture-beta)\b/i.test(
-    code,
-  )
-}
-
-function MermaidDiagram({ code }: { code: string }) {
-  const [svg, setSvg] = useState("")
-  const [failed, setFailed] = useState(false)
-  const idRef = useRef(`mmd-${Math.random().toString(36).slice(2)}`)
-
-  useEffect(() => {
-    let cancelled = false
-    setFailed(false)
-    setSvg("")
-    void (async () => {
-      try {
-        const mermaid = (await import("mermaid")).default
-        const isLight =
-          typeof document !== "undefined" && document.documentElement.classList.contains("light")
-        mermaid.initialize({
-          startOnLoad: false,
-          theme: isLight ? "neutral" : "dark",
-          securityLevel: "strict",
-          fontFamily: "var(--font-sans), system-ui, sans-serif",
-          logLevel: "fatal",
-        })
-        // parse() throws on invalid/incomplete source (e.g. mid-stream), so we
-        // fall back to showing the raw source until the diagram is complete.
-        await mermaid.parse(code)
-        const { svg: rendered } = await mermaid.render(idRef.current, code)
-        if (!cancelled) setSvg(rendered)
-      } catch {
-        if (!cancelled) setFailed(true)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [code])
-
-  if (failed) return <CodeBlock codeString={code} language="mermaid" />
-  if (!svg) return <div className="my-3 text-xs text-ink-subtle">Rendering diagram…</div>
-
-  return (
-    <div
-      className="my-3 flex justify-center overflow-x-auto [&_svg]:max-w-full [&_svg]:h-auto"
-      dangerouslySetInnerHTML={{ __html: svg }}
-    />
-  )
-}
-
-// Prose elements are rendered as bare intrinsic tags so they shed Streamdown's
-// built-in Tailwind classes and inherit the app's .markdown-body token theme.
 const PROSE_COMPONENTS: Components = {
   h1: "h1",
   h2: "h2",
@@ -228,50 +262,48 @@ const PROSE_COMPONENTS: Components = {
 }
 
 function CitationPill({ children, href, title, ...props }: any) {
-  const [show, setShow] = useState(false)
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [open, setOpen] = useState(false)
+  const arrowRef = useRef(null)
 
-  const handleEnter = useCallback(() => {
-    if (timerRef.current) clearTimeout(timerRef.current)
-    timerRef.current = setTimeout(() => setShow(true), 80)
-  }, [])
+  const { refs, floatingStyles, context } = useFloating({
+    open,
+    onOpenChange: setOpen,
+    placement: "top",
+    middleware: [offset(8), flip(), shift({ padding: 8 }), arrow({ element: arrowRef })],
+    whileElementsMounted: autoUpdate,
+  })
 
-  const handleLeave = useCallback(() => {
-    if (timerRef.current) clearTimeout(timerRef.current)
-    timerRef.current = setTimeout(() => setShow(false), 150)
-  }, [])
+  const hover = useHover(context, { move: false, delay: { open: 80, close: 150 } })
+  const dismiss = useDismiss(context)
+  const { getReferenceProps, getFloatingProps } = useInteractions([hover, dismiss])
 
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current)
-    }
-  }, [])
+  const { isMounted, styles: transitionStyles } = useTransitionStyles(context, {
+    duration: 150,
+    initial: { opacity: 0, transform: "scale(0.95)" },
+  })
 
   const popupTitle = (props["data-title"] as string) || title || ""
   const popupContent = (props["data-content"] as string) || ""
 
   return (
-    <span className="relative inline-flex items-center align-middle">
+    <>
       <a
+        ref={refs.setReference}
         href={href}
         target="_blank"
         rel="noopener noreferrer"
-        onMouseEnter={handleEnter}
-        onMouseLeave={handleLeave}
-        className="inline-flex items-center rounded-full bg-surface-elevated/40 border border-divider-strong/40 px-1.5 py-0 text-[10px] text-ink-muted hover:bg-hover hover:border-divider-strong transition-colors no-underline"
+        className="inline-flex items-center align-middle rounded-full bg-surface-elevated/40 border border-divider-strong/40 px-1.5 py-0 text-[10px] text-ink-muted hover:bg-hover hover:border-divider-strong transition-colors no-underline"
+        {...getReferenceProps()}
       >
         {children}
       </a>
-      <AnimatePresence>
-        {show && (
-          <motion.span
-            initial={{ scale: 0.9, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.9, opacity: 0 }}
-            transition={{ duration: 0.15, ease: "easeOut" }}
-            onMouseEnter={handleEnter}
-            onMouseLeave={handleLeave}
-            className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 rounded-md border border-divider bg-surface p-2.5 shadow-[var(--shadow-xl)] z-50 block"
+      {isMounted && (
+        <FloatingPortal>
+          <div
+            ref={refs.setFloating}
+            style={{ ...floatingStyles, ...transitionStyles }}
+            className="w-64 rounded-md border border-divider bg-surface p-2.5 shadow-[var(--shadow-xl)] z-50"
+            {...getFloatingProps()}
           >
             <span className="flex items-center gap-1.5 mb-0.5">
               <Globe className="h-2.5 w-2.5 text-ink shrink-0" />
@@ -283,11 +315,17 @@ function CitationPill({ children, href, title, ...props }: any) {
             {popupContent && (
               <span className="text-[9px] text-ink-subtle line-clamp-3 block">{popupContent}</span>
             )}
-            <span className="absolute left-1/2 -translate-x-1/2 -bottom-1 w-2 h-2 rotate-45 bg-surface border-r border-b border-divider block" />
-          </motion.span>
-        )}
-      </AnimatePresence>
-    </span>
+            <FloatingArrow
+              ref={arrowRef}
+              context={context}
+              className="fill-surface [&>path:first-of-type]:stroke-divider"
+              width={10}
+              height={5}
+            />
+          </div>
+        </FloatingPortal>
+      )}
+    </>
   )
 }
 
@@ -378,10 +416,7 @@ function LaTeXMarkdownInner({
   }, [citationMap, onContentChange, handleToggle])
 
   return (
-    <div
-      className={cn("text-[13px] leading-relaxed", compact ? "markdown-body-compact" : "markdown-body")}
-      style={{ color: "var(--ink)" }}
-    >
+    <div className={cn("text-[13px] leading-relaxed", compact ? "markdown-body-compact" : "markdown-body")}>
       <Streamdown
         mode={streaming ? "streaming" : "static"}
         isAnimating={!!streaming}

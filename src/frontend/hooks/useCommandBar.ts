@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useReducer } from "react"
 import {
   cancelMemories,
   commitMemoryDoc,
@@ -15,7 +15,7 @@ interface ReviewState {
   reviewId: string
   globalMemories: ProposedMemory[]
   projectMemories: ProposedMemory[] | null
-  acceptedCount: number
+  acceptedMemories: ProposedMemory[]
   rejectedMemories: ProposedMemory[]
 }
 
@@ -55,10 +55,6 @@ export interface BoundMemoryActions {
   commitDocuments: () => Promise<void>
 }
 
-export interface CommandInputState {
-  input: string
-}
-
 export interface UseCommandBarReturn {
   state: CommandBarState
   open: () => void
@@ -68,130 +64,160 @@ export interface UseCommandBarReturn {
   bindProject: (projectSlug?: string | null) => BoundMemoryActions
 }
 
-const INITIAL_STATE: CommandBarState = { phase: "idle" }
+const INITIAL: CommandBarState = { phase: "idle" }
 
 function isReviewState(state: CommandBarState): state is Extract<CommandBarState, { phase: "review" | "composing" }> {
   return state.phase === "review" || state.phase === "composing"
 }
 
-function remainingMemories(state: ReviewState): ProposedMemory[] {
+function remaining(state: ReviewState): ProposedMemory[] {
   return [...state.globalMemories, ...(state.projectMemories ?? [])]
 }
 
-function removeMemory<T extends ReviewState>(state: T, memoryId: string): T {
-  return {
-    ...state,
-    globalMemories: state.globalMemories.filter((m) => m.id !== memoryId),
-    projectMemories: state.projectMemories?.filter((m) => m.id !== memoryId) ?? null,
+function findMemory(state: ReviewState, id: string): ProposedMemory | undefined {
+  return remaining(state).find((m) => m.id === id)
+}
+
+type Action =
+  | { type: "OPEN" }
+  | { type: "RESET" }
+  | { type: "SET_INPUT"; input: string }
+  | { type: "START_EXTRACT" }
+  | { type: "EXTRACT_OK"; reviewId: string; global: ProposedMemory[]; project: ProposedMemory[] | null }
+  | { type: "FAIL"; error: string; reviewId?: string }
+  | { type: "DECIDE_ONE"; memoryId: string; accept: boolean }
+  | { type: "ACCEPT_ALL" }
+  | { type: "ADD_MEMORY"; scope: "global" | "project"; memory: ProposedMemory }
+  | { type: "UPDATE_MEMORY"; memoryId: string; updates: Partial<Pick<ProposedMemory, "memory" | "category">> }
+  | { type: "BEGIN_PREVIEW"; reviewId: string; acceptedMemories: ProposedMemory[]; rejectedMemories: ProposedMemory[]; loadingScopes: ("global" | "project")[] }
+  | { type: "PREVIEW_OK"; scope: "global" | "project"; preview: DocPreview; reviewId: string }
+  | { type: "UPDATE_REVISED"; scope: "global" | "project"; memoryId: string; updates: Partial<Pick<PreviewMemory, "text" | "category">> }
+  | { type: "REMOVE_REVISED"; scope: "global" | "project"; memoryId: string }
+
+function revisedPreview(state: Extract<CommandBarState, { phase: "doc-review" }>, scope: "global" | "project", fn: (ms: PreviewMemory[]) => PreviewMemory[]): CommandBarState {
+  const key = scope === "global" ? "globalPreview" as const : "projectPreview" as const
+  const preview = state[key]
+  if (!preview) return state
+  return { ...state, [key]: { ...preview, revised_memories: fn(preview.revised_memories) } }
+}
+
+function reducer(state: CommandBarState, action: Action): CommandBarState {
+  switch (action.type) {
+    case "OPEN": return { phase: "input", input: "" }
+    case "RESET": return INITIAL
+    case "SET_INPUT": return state.phase === "input" ? { ...state, input: action.input } : state
+    case "START_EXTRACT": return { phase: "extracting" }
+    case "EXTRACT_OK": return {
+      phase: "review", reviewId: action.reviewId,
+      globalMemories: action.global, projectMemories: action.project,
+      acceptedMemories: [], rejectedMemories: [],
+    }
+    case "FAIL": {
+      if (state.phase === "doc-review" && action.reviewId && state.reviewId !== action.reviewId) return state
+      return { phase: "error", error: action.error, reviewId: action.reviewId }
+    }
+    case "DECIDE_ONE": {
+      if (!isReviewState(state)) return state
+      const m = findMemory(state, action.memoryId)
+      if (!m) return state
+      const id = action.memoryId
+      return {
+        ...state,
+        globalMemories: state.globalMemories.filter(x => x.id !== id),
+        projectMemories: state.projectMemories?.filter(x => x.id !== id) ?? null,
+        ...(action.accept
+          ? { acceptedMemories: [...state.acceptedMemories, m] }
+          : { rejectedMemories: [...state.rejectedMemories, m] }),
+      }
+    }
+    case "ACCEPT_ALL": {
+      if (!isReviewState(state)) return state
+      return { ...state, acceptedMemories: [...state.acceptedMemories, ...remaining(state)], globalMemories: [], projectMemories: null }
+    }
+    case "ADD_MEMORY": {
+      if (!isReviewState(state)) return state
+      return {
+        ...state,
+        globalMemories: action.scope === "global" ? [...state.globalMemories, action.memory] : state.globalMemories,
+        projectMemories: action.scope === "project" ? [...(state.projectMemories ?? []), action.memory] : state.projectMemories,
+      }
+    }
+    case "UPDATE_MEMORY": {
+      if (!isReviewState(state)) return state
+      const up = (list: ProposedMemory[]) => list.map(m => m.id === action.memoryId ? { ...m, ...action.updates } : m)
+      return { ...state, globalMemories: up(state.globalMemories), projectMemories: state.projectMemories ? up(state.projectMemories) : null }
+    }
+    case "BEGIN_PREVIEW": return {
+      phase: "doc-review", reviewId: action.reviewId,
+      acceptedMemories: action.acceptedMemories, rejectedMemories: action.rejectedMemories,
+      globalPreview: null, projectPreview: null, loadingScopes: action.loadingScopes,
+    }
+    case "PREVIEW_OK": {
+      if (state.phase !== "doc-review") return state
+      if (action.scope === "global") return { ...state, globalPreview: action.preview, loadingScopes: state.loadingScopes.filter(s => s !== "global") }
+      return { ...state, projectPreview: action.preview, loadingScopes: state.loadingScopes.filter(s => s !== "project") }
+    }
+    case "UPDATE_REVISED": {
+      if (state.phase !== "doc-review") return state
+      return revisedPreview(state, action.scope, list => list.map(m => m.id === action.memoryId ? { ...m, ...action.updates } : m))
+    }
+    case "REMOVE_REVISED": {
+      if (state.phase !== "doc-review") return state
+      return revisedPreview(state, action.scope, list => list.filter(m => m.id !== action.memoryId))
+    }
   }
 }
 
-function memoryById(state: ReviewState, memoryId: string): ProposedMemory | undefined {
-  return remainingMemories(state).find((m) => m.id === memoryId)
-}
-
 export function useCommandBar(): UseCommandBarReturn {
-  const [state, setState] = useState<CommandBarState>(INITIAL_STATE)
-  const acceptedMemoriesRef = useRef<ProposedMemory[]>([])
+  const [state, dispatch] = useReducer(reducer, INITIAL)
 
-  const reset = useCallback(() => {
-    acceptedMemoriesRef.current = []
-    setState(INITIAL_STATE)
-  }, [])
+  const open = useCallback(() => dispatch({ type: "OPEN" }), [])
+  const close = useCallback(() => dispatch({ type: "RESET" }), [])
+  const setInput = useCallback((v: string) => dispatch({ type: "SET_INPUT", input: v }), [])
 
-  const open = useCallback(() => {
-    acceptedMemoriesRef.current = []
-    setState({ phase: "input", input: "" })
-  }, [])
-
-  const close = useCallback(() => {
-    reset()
-  }, [reset])
-
-  const setInput = useCallback((v: string) => {
-    setState((prev) => prev.phase === "input" ? { ...prev, input: v } : prev)
-  }, [])
-
-  const previewAndReview = useCallback(async (nextState: ReviewState, projectSlug?: string | null) => {
-    const acceptedMemories = acceptedMemoriesRef.current
-    const rejectedMemories = nextState.rejectedMemories
-
-    if (acceptedMemories.length === 0 && rejectedMemories.length === 0) {
-      await cancelMemories(nextState.reviewId, projectSlug).catch(() => {})
-      reset()
-      return
-    }
-
-    const globalAccepted = acceptedMemories.filter(m => m.scope === "global")
-    const projectAccepted = acceptedMemories.filter(m => m.scope === "project")
-    const loadingScopes: ("global" | "project")[] = []
-    if (globalAccepted.length > 0) loadingScopes.push("global")
-    if (projectAccepted.length > 0 && projectSlug) loadingScopes.push("project")
-
-    setState({
-      phase: "doc-review",
-      reviewId: nextState.reviewId,
-      acceptedMemories,
-      rejectedMemories,
-      globalPreview: null,
-      projectPreview: null,
-      loadingScopes,
-    })
-
-    const loadPreview = async (scope: "global" | "project", accepted: ProposedMemory[], slug: string | null) => {
-      try {
-        const preview = await previewMemoryDoc(scope, accepted, slug)
-        setState((prev) => {
-          if (prev.phase !== "doc-review") return prev
-          return {
-            ...prev,
-            [scope === "global" ? "globalPreview" : "projectPreview"]: preview,
-            loadingScopes: prev.loadingScopes.filter((s) => s !== scope),
-          }
-        })
-      } catch (e) {
-        setState((prev) =>
-          prev.phase === "doc-review" && prev.reviewId === nextState.reviewId
-            ? { phase: "error", error: (e as Error)?.message || "Preview failed", reviewId: nextState.reviewId }
-            : prev,
-        )
+  const startPreview = useCallback(
+    async (accepted: ProposedMemory[], rejected: ProposedMemory[], reviewId: string, projectSlug?: string | null) => {
+      if (accepted.length === 0 && rejected.length === 0) {
+        await cancelMemories(reviewId, projectSlug).catch(() => {})
+        dispatch({ type: "RESET" })
+        return
       }
-    }
-
-    await Promise.all([
-      loadingScopes.includes("global") ? loadPreview("global", globalAccepted, null) : Promise.resolve(),
-      loadingScopes.includes("project") ? loadPreview("project", projectAccepted, projectSlug ?? null) : Promise.resolve(),
-    ])
-  }, [reset])
+      const byScope = (s: string) => accepted.filter(m => m.scope === s)
+      const scopes = [
+        ...(byScope("global").length ? ["global" as const] : []),
+        ...(byScope("project").length && projectSlug ? ["project" as const] : []),
+      ]
+      dispatch({ type: "BEGIN_PREVIEW", reviewId, acceptedMemories: accepted, rejectedMemories: rejected, loadingScopes: scopes })
+      await Promise.all(scopes.map(async s => {
+        try {
+          dispatch({ type: "PREVIEW_OK", scope: s, reviewId, preview: await previewMemoryDoc(s, byScope(s), s === "global" ? null : projectSlug ?? null) })
+        } catch (e) {
+          dispatch({ type: "FAIL", reviewId, error: (e as Error)?.message || "Preview failed" })
+        }
+      }))
+    },
+    [],
+  )
 
   const submitCommand = useCallback(
     async (messages: { role: string; content: string }[], projectSlug?: string | null, customInput?: string) => {
       const rawCmd = customInput !== undefined ? customInput : state.phase === "input" ? state.input : ""
       const cmd = rawCmd.trim()
       if (!cmd) return
-
-      acceptedMemoriesRef.current = []
-      setState({ phase: "extracting" })
+      dispatch({ type: "START_EXTRACT" })
       if (cmd === "/memorize" || cmd.startsWith("/memorize ")) {
         try {
           const res: MemoryExtractResponse = await extractMemories(messages, projectSlug)
           if (res.global.length === 0 && (!res.project || res.project.length === 0)) {
-            setState({ phase: "error", error: "No new memories extracted from this conversation.", reviewId: res.review_id })
-            return
+            dispatch({ type: "FAIL", error: "No new memories extracted from this conversation.", reviewId: res.review_id })
+          } else {
+            dispatch({ type: "EXTRACT_OK", reviewId: res.review_id, global: res.global, project: res.project })
           }
-          setState({
-            phase: "review",
-            reviewId: res.review_id,
-            globalMemories: res.global,
-            projectMemories: res.project,
-            acceptedCount: 0,
-            rejectedMemories: [],
-          })
         } catch (e) {
-          setState({ phase: "error", error: (e as Error)?.message || "Extraction failed" })
+          dispatch({ type: "FAIL", error: (e as Error)?.message || "Extraction failed" })
         }
       } else {
-        setState({ phase: "error", error: `Unknown command: ${cmd}` })
+        dispatch({ type: "FAIL", error: `Unknown command: ${cmd}` })
       }
     },
     [state],
@@ -200,182 +226,101 @@ export function useCommandBar(): UseCommandBarReturn {
   const accept = useCallback(
     async (projectSlug?: string | null) => {
       if (state.phase === "error") {
-        if (state.reviewId) {
-          await cancelMemories(state.reviewId, projectSlug).catch(() => {})
-        }
-        reset()
+        if (state.reviewId) await cancelMemories(state.reviewId, projectSlug).catch(() => {})
+        dispatch({ type: "RESET" })
         return
       }
       if (!isReviewState(state)) return
-      acceptedMemoriesRef.current = [...acceptedMemoriesRef.current, ...remainingMemories(state)]
-      const nextState = { ...state, acceptedCount: acceptedMemoriesRef.current.length, globalMemories: [], projectMemories: null }
-      await previewAndReview(nextState, projectSlug)
+      dispatch({ type: "ACCEPT_ALL" })
+      await startPreview([...state.acceptedMemories, ...remaining(state)], state.rejectedMemories, state.reviewId, projectSlug)
     },
-    [previewAndReview, reset, state],
+    [startPreview, state],
   )
 
   const cancel = useCallback(
     async (projectSlug?: string | null) => {
-      if (state.phase === "error") {
-        if (state.reviewId) {
-          await cancelMemories(state.reviewId, projectSlug).catch(() => {})
-        }
-        reset()
-        return
-      }
-      if (state.phase === "doc-review") {
+      if (state.phase === "idle" || state.phase === "input" || state.phase === "extracting") return
+      if ("reviewId" in state && state.reviewId) {
         await cancelMemories(state.reviewId, projectSlug).catch(() => {})
-        reset()
-        return
       }
-      if (!isReviewState(state)) return
-      await cancelMemories(state.reviewId, projectSlug).catch(() => {})
-      reset()
+      dispatch({ type: "RESET" })
     },
-    [reset, state],
+    [state],
   )
 
-  const acceptOne = useCallback(
-    async (memoryId: string, projectSlug?: string | null) => {
+  const decideOne = useCallback(
+    async (memoryId: string, doAccept: boolean, projectSlug?: string | null) => {
       if (!isReviewState(state)) return
-      const memory = memoryById(state, memoryId)
+      const memory = findMemory(state, memoryId)
       if (!memory) return
-      acceptedMemoriesRef.current = [...acceptedMemoriesRef.current, memory]
-      const nextState = removeMemory({ ...state, acceptedCount: acceptedMemoriesRef.current.length }, memoryId)
-      if (remainingMemories(nextState).length === 0) await previewAndReview(nextState, projectSlug)
-      else setState(nextState)
+      dispatch({ type: "DECIDE_ONE", memoryId, accept: doAccept })
+      if (remaining(state).filter(m => m.id !== memoryId).length === 0) {
+        const acc = doAccept ? [...state.acceptedMemories, memory] : state.acceptedMemories
+        const rej = doAccept ? state.rejectedMemories : [...state.rejectedMemories, memory]
+        await startPreview(acc, rej, state.reviewId, projectSlug)
+      }
     },
-    [previewAndReview, state],
-  )
-
-  const cancelOne = useCallback(
-    async (memoryId: string, projectSlug?: string | null) => {
-      if (!isReviewState(state)) return
-      const memory = memoryById(state, memoryId)
-      if (!memory) return
-      const rejectedMemories = [...state.rejectedMemories, memory]
-      const nextState = removeMemory({ ...state, rejectedMemories }, memoryId)
-      if (remainingMemories(nextState).length === 0) await previewAndReview(nextState, projectSlug)
-      else setState(nextState)
-    },
-    [previewAndReview, state],
+    [startPreview, state],
   )
 
   const commitDocs = useCallback(
     async (projectSlug?: string | null) => {
       if (state.phase !== "doc-review") return
       try {
-        const globalAccepted = state.acceptedMemories.filter(m => m.scope === "global")
-        const globalRejected = state.rejectedMemories.filter(m => m.scope === "global")
-        const projectAccepted = state.acceptedMemories.filter(m => m.scope === "project")
-        const projectRejected = state.rejectedMemories.filter(m => m.scope === "project")
-
-        if (globalAccepted.length > 0 || globalRejected.length > 0) {
-          await commitMemoryDoc("global", globalAccepted, null, state.reviewId, globalRejected,
-            state.globalPreview?.revised_memories)
+        const gA = state.acceptedMemories.filter(m => m.scope === "global")
+        const gR = state.rejectedMemories.filter(m => m.scope === "global")
+        const pA = state.acceptedMemories.filter(m => m.scope === "project")
+        const pR = state.rejectedMemories.filter(m => m.scope === "project")
+        if (gA.length > 0 || gR.length > 0) {
+          await commitMemoryDoc("global", gA, null, state.reviewId, gR, state.globalPreview?.revised_memories)
         }
-        if ((projectAccepted.length > 0 || projectRejected.length > 0) && projectSlug) {
-          await commitMemoryDoc("project", projectAccepted, projectSlug, state.reviewId, projectRejected,
-            state.projectPreview?.revised_memories)
+        if ((pA.length > 0 || pR.length > 0) && projectSlug) {
+          await commitMemoryDoc("project", pA, projectSlug, state.reviewId, pR, state.projectPreview?.revised_memories)
         }
-        reset()
+        dispatch({ type: "RESET" })
       } catch (e) {
-        setState({ phase: "error", error: (e as Error)?.message || "Commit failed", reviewId: state.reviewId })
+        dispatch({ type: "FAIL", reviewId: state.reviewId, error: (e as Error)?.message || "Commit failed" })
       }
     },
-    [reset, state],
+    [state],
   )
 
   const addMemory = useCallback((scope: "global" | "project", memory: string) => {
     const trimmed = memory.trim()
     if (!trimmed) return
-    const candidate: ProposedMemory = {
-      id: `manual-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      memory: trimmed,
-      scope,
-      category: "manual",
-    }
-    setState((prev) => {
-      if (!isReviewState(prev)) return prev
-      return {
-        ...prev,
-        globalMemories: scope === "global" ? [...prev.globalMemories, candidate] : prev.globalMemories,
-        projectMemories: scope === "project" ? [...(prev.projectMemories ?? []), candidate] : prev.projectMemories,
-      }
+    dispatch({
+      type: "ADD_MEMORY", scope,
+      memory: { id: `manual-${Date.now()}-${Math.random().toString(36).slice(2)}`, memory: trimmed, scope, category: "manual" },
     })
   }, [])
 
-  const editMemory = useCallback((memoryId: string, text: string) => {
-    setState((prev) => {
-      if (!isReviewState(prev)) return prev
-      const updateList = (list: ProposedMemory[]) =>
-        list.map((m) => m.id === memoryId ? { ...m, memory: text } : m)
-      return {
-        ...prev,
-        globalMemories: updateList(prev.globalMemories),
-        projectMemories: prev.projectMemories ? updateList(prev.projectMemories) : null,
-      }
-    })
-  }, [])
+  const editMemory = useCallback((memoryId: string, text: string) =>
+    dispatch({ type: "UPDATE_MEMORY", memoryId, updates: { memory: text } }), [])
 
-  const editMemoryCategory = useCallback((memoryId: string, category: string) => {
-    setState((prev) => {
-      if (!isReviewState(prev)) return prev
-      const updateList = (list: ProposedMemory[]) =>
-        list.map((m) => m.id === memoryId ? { ...m, category } : m)
-      return {
-        ...prev,
-        globalMemories: updateList(prev.globalMemories),
-        projectMemories: prev.projectMemories ? updateList(prev.projectMemories) : null,
-      }
-    })
-  }, [])
+  const editMemoryCategory = useCallback((memoryId: string, category: string) =>
+    dispatch({ type: "UPDATE_MEMORY", memoryId, updates: { category } }), [])
 
-  const updateRevisedMemories = useCallback(
-    (scope: "global" | "project", updater: (list: PreviewMemory[]) => PreviewMemory[]) => {
-      setState((prev) => {
-        if (prev.phase !== "doc-review") return prev
-        const key = scope === "global" ? "globalPreview" : "projectPreview"
-        const preview = prev[key]
-        if (!preview) return prev
-        return { ...prev, [key]: { ...preview, revised_memories: updater(preview.revised_memories) } }
-      })
-    },
-    [],
+  const editRevisedMemory = useCallback((scope: "global" | "project", memoryId: string, text: string) =>
+    dispatch({ type: "UPDATE_REVISED", scope, memoryId, updates: { text } }), [])
+
+  const editRevisedMemoryCategory = useCallback((scope: "global" | "project", memoryId: string, category: string) =>
+    dispatch({ type: "UPDATE_REVISED", scope, memoryId, updates: { category } }), [])
+
+  const removeRevisedMemory = useCallback((scope: "global" | "project", memoryId: string) =>
+    dispatch({ type: "REMOVE_REVISED", scope, memoryId }), [])
+
+  const bindProject = useCallback(
+    (projectSlug?: string | null): BoundMemoryActions => ({
+      acceptRemaining: () => accept(projectSlug),
+      cancelRemaining: () => cancel(projectSlug),
+      acceptMemory: (id: string) => decideOne(id, true, projectSlug),
+      cancelMemory: (id: string) => decideOne(id, false, projectSlug),
+      addMemory, editMemory, editMemoryCategory,
+      editRevisedMemory, editRevisedMemoryCategory, removeRevisedMemory,
+      commitDocuments: () => commitDocs(projectSlug),
+    }),
+    [accept, addMemory, cancel, commitDocs, decideOne, editMemory, editMemoryCategory, editRevisedMemory, editRevisedMemoryCategory, removeRevisedMemory],
   )
 
-  const editRevisedMemory = useCallback((scope: "global" | "project", memoryId: string, text: string) => {
-    updateRevisedMemories(scope, (list) => list.map((m) => m.id === memoryId ? { ...m, text } : m))
-  }, [updateRevisedMemories])
-
-  const editRevisedMemoryCategory = useCallback((scope: "global" | "project", memoryId: string, category: string) => {
-    updateRevisedMemories(scope, (list) => list.map((m) => m.id === memoryId ? { ...m, category } : m))
-  }, [updateRevisedMemories])
-
-  const removeRevisedMemory = useCallback((scope: "global" | "project", memoryId: string) => {
-    updateRevisedMemories(scope, (list) => list.filter((m) => m.id !== memoryId))
-  }, [updateRevisedMemories])
-
-  const bindProject = useCallback((projectSlug?: string | null): BoundMemoryActions => ({
-    acceptRemaining: () => accept(projectSlug),
-    cancelRemaining: () => cancel(projectSlug),
-    acceptMemory: (memoryId: string) => acceptOne(memoryId, projectSlug),
-    cancelMemory: (memoryId: string) => cancelOne(memoryId, projectSlug),
-    addMemory,
-    editMemory,
-    editMemoryCategory,
-    editRevisedMemory,
-    editRevisedMemoryCategory,
-    removeRevisedMemory,
-    commitDocuments: () => commitDocs(projectSlug),
-  }), [accept, acceptOne, addMemory, cancel, cancelOne, commitDocs, editMemory, editMemoryCategory, editRevisedMemory, editRevisedMemoryCategory, removeRevisedMemory])
-
-  return {
-    state,
-    open,
-    close,
-    setInput,
-    submitCommand,
-    bindProject,
-  }
+  return { state, open, close, setInput, submitCommand, bindProject }
 }

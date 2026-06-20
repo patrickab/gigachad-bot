@@ -8,6 +8,7 @@ import uuid
 
 from config import DIRECTORY_CHAT_HISTORIES
 from lib.json_io import safe_read_json, safe_write_json
+from lib.safe_path import safe_resolve
 
 PROJECT_JSON = "project.json"
 META_JSON = "projects-meta.json"
@@ -27,10 +28,7 @@ class ChatStore:
 
     def resolve_path(self, filename: str) -> Path:
         """Resolve *filename* under the base directory, rejecting traversal."""
-        resolved = (self._base / filename).resolve()
-        if not str(resolved).startswith(str(self._base)):
-            raise ValueError(f"Invalid path: {filename}")
-        return resolved
+        return safe_resolve(self._base, filename)
 
     def project_dir_for(self, path: Path) -> Path | None:
         """Return the project directory containing *path*, or None if at root."""

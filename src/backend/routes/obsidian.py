@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from backend.routes.deps import get_obsidian_vault
 from config import chat_upload_dir
+from lib.naming import dedup_filename
 from lib.obsidian_vault import ObsidianVault
 
 log = logging.getLogger(__name__)
@@ -39,16 +40,6 @@ class AttachResult(BaseModel):
     name: str
     mime: str
     content: str
-
-
-def _dedup_name(dest_dir: Path, filename: str) -> str:
-    stem, suffix = Path(filename).stem, Path(filename).suffix
-    if not (dest_dir / filename).exists():
-        return filename
-    n = 1
-    while (dest_dir / f"{stem} ({n}){suffix}").exists():
-        n += 1
-    return f"{stem} ({n}){suffix}"
 
 
 @router.get("/files", response_model=ObsidianListResponse)
@@ -78,7 +69,7 @@ async def attach_file(
 
     chat_dir = chat_upload_dir(chat_id, slug)
     chat_dir.mkdir(parents=True, exist_ok=True)
-    name = _dedup_name(chat_dir, Path(path).name)
+    name = dedup_filename(chat_dir, Path(path).name)
     (chat_dir / name).write_text(content, encoding="utf-8")
 
     return AttachResult(name=name, mime="text/markdown", content=content)

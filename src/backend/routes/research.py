@@ -1,11 +1,12 @@
 import asyncio
+from collections.abc import AsyncGenerator, Iterator
+import contextlib
 import json
 import os
-import time
-import uuid
-from collections.abc import AsyncGenerator
 from pathlib import Path
+import time
 from typing import Any
+import uuid
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -14,6 +15,23 @@ from sse_starlette.sse import EventSourceResponse
 from config import OLLAMA_BASE_URL, SEARX_URL
 from lib.research_config import build_research_config, write_research_config
 from lib.research_trace import ResearchTrace
+
+
+@contextlib.contextmanager
+def _temp_environ(**vals: str | None) -> Iterator[None]:
+    """Set env vars for the block, restore originals on exit."""
+    old = {k: os.environ.get(k) for k in vals}
+    for k, v in vals.items():
+        if v is not None:
+            os.environ[k] = v
+    try:
+        yield
+    finally:
+        for k, v in old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
 TRACES_DIR = Path(
     os.environ.get(
@@ -152,42 +170,31 @@ async def research(req: ResearchRequest):
                 _log.info("[research] Waiting for _env_lock...")
                 async with _env_lock:
                     _log.info("[research] _env_lock acquired")
-                    saved_env: dict[str, str | None] = {}
-                    env_keys = ["OLLAMA_API_BASE", "OLLAMA_BASE_URL", "REASONING_EFFORT", "SEARX_URL"]
-                    for key in env_keys:
-                        saved_env[key] = os.environ.get(key)
-
+                    reasoning = req.reasoning_effort if req.reasoning_effort and req.reasoning_effort != "none" else None
                     try:
-                        os.environ["OLLAMA_API_BASE"] = OLLAMA_BASE_URL
-                        os.environ["OLLAMA_BASE_URL"] = OLLAMA_BASE_URL
-                        os.environ["SEARX_URL"] = SEARX_URL
-                        if req.reasoning_effort and req.reasoning_effort != "none":
-                            os.environ["REASONING_EFFORT"] = req.reasoning_effort
-
-                        _log.info("[research] Creating GPTResearcher...")
-                        researcher = GPTResearcher(
-                            query=req.query,
-                            report_type=req.report_type,
-                            config_path=config_path,
-                            log_handler=log_handler,
-                        )
-                        _log.info("[research] Starting conduct_research...")
-                        on_progress = on_progress_factory(writer, trace)
-                        await writer.send_step("start", "research", {"query": req.query, "report_type": req.report_type})
-                        await researcher.conduct_research(on_progress=on_progress)
-                        _log.info("[research] conduct_research done, writing report...")
-                        report = await researcher.write_report()
-                        sources = researcher.get_source_urls()
-                        costs = researcher.get_costs()
-                        _log.info(f"[research] Report written, {len(sources)} sources, cost=${costs:.4f}")
+                        with _temp_environ(
+                            OLLAMA_API_BASE=OLLAMA_BASE_URL,
+                            OLLAMA_BASE_URL=OLLAMA_BASE_URL,
+                            SEARX_URL=SEARX_URL,
+                            REASONING_EFFORT=reasoning,
+                        ):
+                            _log.info("[research] Creating GPTResearcher...")
+                            researcher = GPTResearcher(
+                                query=req.query,
+                                report_type=req.report_type,
+                                config_path=config_path,
+                                log_handler=log_handler,
+                            )
+                            _log.info("[research] Starting conduct_research...")
+                            on_progress = on_progress_factory(writer, trace)
+                            await writer.send_step("start", "research", {"query": req.query, "report_type": req.report_type})
+                            await researcher.conduct_research(on_progress=on_progress)
+                            _log.info("[research] conduct_research done, writing report...")
+                            report = await researcher.write_report()
+                            sources = researcher.get_source_urls()
+                            costs = researcher.get_costs()
+                            _log.info(f"[research] Report written, {len(sources)} sources, cost=${costs:.4f}")
                     finally:
-                        for key, val in saved_env.items():
-                            if val is None:
-                                os.environ.pop(key, None)
-                            else:
-                                os.environ[key] = val
-                        import contextlib
-
                         with contextlib.suppress(OSError):
                             os.unlink(config_path)
 

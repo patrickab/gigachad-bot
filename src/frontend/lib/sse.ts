@@ -10,6 +10,28 @@ export interface SSEStreamResult {
   [Symbol.asyncIterator]: () => AsyncIterator<SSEEvent>
 }
 
+export async function* readLines(res: Response): AsyncGenerator<string> {
+  if (!res.body) throw new Error("No response body")
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) {
+        if (buffer) yield buffer
+        break
+      }
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split("\n")
+      buffer = lines.pop() ?? ""
+      for (const line of lines) yield line.endsWith("\r") ? line.slice(0, -1) : line
+    }
+  } finally {
+    reader.releaseLock()
+  }
+}
+
 export function createSSEStream(
   path: string,
   body: Record<string, unknown>,
@@ -30,52 +52,30 @@ export function createSSEStream(
       const text = await res.text()
       throw new Error(text || `HTTP ${res.status}`)
     }
-    if (!res.body) {
-      throw new Error("No response body")
-    }
 
-    const reader = res.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ""
     let currentEvent = "message"
     let eventData: string[] = []
 
-    try {
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) {
-          if (eventData.length > 0) {
-            yield { event: currentEvent, data: eventData.join("\n") }
-          }
-          break
+    for await (const line of readLines(res)) {
+      if (!line) {
+        if (eventData.length > 0) {
+          yield { event: currentEvent, data: eventData.join("\n") }
+          eventData = []
+          currentEvent = "message"
         }
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split("\n")
-        buffer = lines.pop() ?? ""
-
-        for (let line of lines) {
-          if (line.endsWith("\r")) line = line.slice(0, -1)
-
-          if (!line) {
-            if (eventData.length > 0) {
-              yield { event: currentEvent, data: eventData.join("\n") }
-              eventData = []
-              currentEvent = "message"
-            }
-            continue
-          }
-          if (line.startsWith("event:")) {
-            currentEvent = line.slice(6).trim()
-            continue
-          }
-          if (line.startsWith("data:")) {
-            const d = line.startsWith("data: ") ? line.slice(6) : line.slice(5)
-            eventData.push(d)
-          }
-        }
+        continue
       }
-    } finally {
-      reader.releaseLock()
+      if (line.startsWith("event:")) {
+        currentEvent = line.slice(6).trim()
+        continue
+      }
+      if (line.startsWith("data:")) {
+        const d = line.startsWith("data: ") ? line.slice(6) : line.slice(5)
+        eventData.push(d)
+      }
+    }
+    if (eventData.length > 0) {
+      yield { event: currentEvent, data: eventData.join("\n") }
     }
   }
 

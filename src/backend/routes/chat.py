@@ -81,5 +81,7 @@ async def chat_nonstream(req: ChatRequest, memory_store: MemoryStoreDep) -> dict
             stream=False,
             **kwargs,
         )
+        if isinstance(response, Exception):
+            raise response
         content = response.choices[0].message.content or ""
         return {"content": content}

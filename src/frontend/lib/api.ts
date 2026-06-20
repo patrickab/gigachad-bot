@@ -19,8 +19,7 @@ export function buildHistoryFile(filename: string, slug: string | null): string 
   return slug ? `${slug}/${filename}` : filename
 }
 
-export async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, options)
+async function ensureOk(res: Response): Promise<Response> {
   if (!res.ok) {
     let message = res.statusText
     try {
@@ -40,6 +39,11 @@ export async function request<T>(path: string, options?: RequestInit): Promise<T
     }
     throw new Error(message)
   }
+  return res
+}
+
+export async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await ensureOk(await fetch(`${API_BASE}${path}`, options))
   return res.json()
 }
 
@@ -186,8 +190,7 @@ export async function uploadFile(chatId: string, file: File, slug: string | null
   form.append("file", file)
   const params = new URLSearchParams({ chat_id: chatId })
   if (slug) params.set("slug", slug)
-  const res = await fetch(`${API_BASE}/files/upload?${params}`, { method: "POST", body: form })
-  if (!res.ok) throw new Error(await res.text())
+  const res = await ensureOk(await fetch(`${API_BASE}/files/upload?${params}`, { method: "POST", body: form }))
   const data = await res.json()
   return { ...data, active: true, url: chatFileUrl(chatId, data.name, slug) }
 }
@@ -201,8 +204,7 @@ export async function parseFiles(chatId: string, filenames: string[], slug: stri
   const params = new URLSearchParams({ chat_id: chatId })
   for (const f of filenames) params.append("filenames", f)
   if (slug) params.set("slug", slug)
-  const res = await fetch(`${API_BASE}/files/parse?${params}`, { method: "POST" })
-  if (!res.ok) throw new Error(await res.text())
+  const res = await ensureOk(await fetch(`${API_BASE}/files/parse?${params}`, { method: "POST" }))
   return res.json()
 }
 
@@ -222,8 +224,7 @@ export async function readObsidianFile(path: string): Promise<{ path: string; co
 export async function attachObsidianFile(chatId: string, path: string, slug: string | null = null): Promise<Attachment> {
   const params = new URLSearchParams({ path, chat_id: chatId })
   if (slug) params.set("slug", slug)
-  const res = await fetch(`${API_BASE}/obsidian/attach?${params}`, { method: "POST" })
-  if (!res.ok) throw new Error(await res.text())
+  const res = await ensureOk(await fetch(`${API_BASE}/obsidian/attach?${params}`, { method: "POST" }))
   const data = await res.json()
   return { ...data, active: true, url: chatFileUrl(chatId, data.name, slug) }
 }

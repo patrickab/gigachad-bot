@@ -251,6 +251,8 @@ async def parse_single_pdf(
                     img=None,
                     stream=False,
                 )
+                if isinstance(response, Exception):
+                    raise response
                 result.answer = response.choices[0].message.content or ""
         except Exception:
             log.exception("LLM query failed for %s", file.filename)
@@ -303,6 +305,8 @@ async def parse_batch_pdfs(
                     img=None,
                     stream=False,
                 )
+                if isinstance(response, Exception):
+                    raise response
                 answer = response.choices[0].message.content or ""
         except Exception:
             log.exception("LLM query failed for batch")

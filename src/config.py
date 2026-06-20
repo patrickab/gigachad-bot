@@ -23,6 +23,7 @@ DIRECTORY_CHAT_UPLOADS = DIRECTORY_CHAT_HISTORIES / "_uploads"
 # Used for lightweight tasks like query expansion, where speed matters more than raw capability.
 # Provider-prefixed models route through LiteLLM; unprefixed models are treated as Ollama by callers.
 SMALL_MODEL = "ollama/gemma4:31b-cloud"
+MEMORY_MODEL = "gemini/gemini-3.1-flash-lite"
 VISION_MODEL = "ollama/qwen3-vl:235b-instruct-cloud"
 
 # --- MinerU PDF parsing config ---

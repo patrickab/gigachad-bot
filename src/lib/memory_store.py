@@ -25,7 +25,9 @@ import re
 from typing import TYPE_CHECKING, Any, Protocol
 import uuid
 
-from config import DIRECTORY_CHAT_HISTORIES, SMALL_MODEL
+from config import DIRECTORY_CHAT_HISTORIES, MEMORY_MODEL
+from lib.json_io import safe_write_json
+from lib.safe_path import safe_resolve
 
 log = logging.getLogger(__name__)
 
@@ -144,26 +146,13 @@ class StoredMemory:
 
 
 def _memory_extraction_model() -> str:
-    model = os.environ.get("MEMORY_EXTRACTION_MODEL") or SMALL_MODEL
-    if "/" in model:
-        return model
-    return f"ollama/{model}"
+    return MEMORY_MODEL
 
 
 def _json_from_response(text: str) -> dict[str, Any]:
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        lines = stripped.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        stripped = "\n".join(lines).strip()
-    start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start >= 0 and end >= start:
-        stripped = stripped[start : end + 1]
-    return json.loads(stripped)
+    from lib.llm_json import extract_json_from_llm
+
+    return extract_json_from_llm(text)
 
 
 class MemoryStore:
@@ -565,11 +554,7 @@ Return JSON with this exact shape:
         if not candidates:
             return
         self._ensure_dirs()
-        path = self._pending_path(review_id)
-        path.write_text(
-            json.dumps([vars(c) for c in candidates], indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
+        safe_write_json(self._pending_path(review_id), [vars(c) for c in candidates])
 
     def _delete_pending(self, review_id: str) -> None:
         try:
@@ -601,9 +586,7 @@ Return JSON with this exact shape:
 
     def set_categories(self, scope: str, categories: list[dict[str, str]], project_slug: str | None = None) -> None:
         """Persist *categories* for *scope*."""
-        path = self._categories_path(scope, project_slug)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(categories, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        safe_write_json(self._categories_path(scope, project_slug), categories)
 
     async def remap_orphaned(
         self,
@@ -821,11 +804,7 @@ Rules:
         return d
 
     def _write_stored_memories(self, path: Path, memories: list[StoredMemory]) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps([vars(m) for m in memories], indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
+        safe_write_json(path, [vars(m) for m in memories])
 
     def render_memories_as_markdown(
         self,
@@ -874,10 +853,7 @@ Rules:
 
     def resolve_path(self, filepath: str) -> Path:
         """Resolve *filepath* under the base directory, rejecting traversal."""
-        resolved = (self.base_dir / filepath).resolve()
-        if not str(resolved).startswith(str(self.base_dir)):
-            raise ValueError(f"Invalid path: {filepath}")
-        return resolved
+        return safe_resolve(self.base_dir, filepath)
 
     def _ensure_dirs(self) -> None:
         self.memory_root.mkdir(parents=True, exist_ok=True)
@@ -889,12 +865,7 @@ Rules:
     def _project_dir(self, project_slug: str | None) -> Path:
         if not project_slug:
             raise ValueError("Project slug is required")
-        path = (self.base_dir / project_slug).resolve()
-        try:
-            path.relative_to(self.base_dir)
-        except ValueError as e:
-            raise ValueError("Invalid project slug") from e
-        return path
+        return safe_resolve(self.base_dir, project_slug)
 
     def _project_memory_path(self, project_slug: str | None) -> Path:
         return self._project_dir(project_slug) / PROJECT_MEMORY
@@ -972,6 +943,8 @@ Rules:
             if force_json:
                 kwargs["response_format"] = {"type": "json_object"}
             response = llm.api_query(**kwargs)
+            if isinstance(response, Exception):
+                raise response
             return response.choices[0].message.content or "{}"
 
         last_err: Exception | None = None

@@ -2,20 +2,14 @@
 
 from datetime import datetime, timezone
 from pathlib import Path
-import re
 import shutil
 from typing import Any, Callable
 
 from config import DIRECTORY_CHAT_HISTORIES
 from lib.chat_store import META_JSON, PROJECT_JSON, ChatStore
 from lib.json_io import safe_read_json, safe_write_json
-
-
-def _slugify(name: str) -> str:
-    slug = name.strip().lower()
-    slug = re.sub(r"[^a-z0-9]+", "-", slug)
-    slug = slug.strip("-") or "project"
-    return slug[:64]
+from lib.naming import slugify
+from lib.safe_path import safe_resolve
 
 
 def _now_iso() -> str:
@@ -37,10 +31,7 @@ class ProjectStore:
         return self._base / META_JSON
 
     def _resolve_project_dir(self, slug: str) -> Path:
-        project_dir = (self._base / slug).resolve()
-        if not str(project_dir).startswith(str(self._base)):
-            raise ValueError(f"Invalid project slug: {slug}")
-        return project_dir
+        return safe_resolve(self._base, slug)
 
     # ------------------------------------------------------------------
     # Catalog (projects-meta.json)
@@ -115,7 +106,7 @@ class ProjectStore:
         if not name:
             raise ValueError("Project name required")
         meta = self._read_meta()
-        slug = self._unique_slug(meta, _slugify(name))
+        slug = self._unique_slug(meta, slugify(name, fallback="project"))
         project_dir = self._resolve_project_dir(slug)
         if project_dir.exists():
             raise ValueError(f"Project already exists: {slug}")

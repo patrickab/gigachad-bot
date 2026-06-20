@@ -1,11 +1,11 @@
 import asyncio
-import json
 import logging
-import re
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from lib.llm_json import extract_json_from_llm
+from lib.naming import slugify
 from lib.prompts.non_user_prompts import SYS_STUDY_ARTICLE, SYS_STUDY_LEARNING_GOALS, SYS_STUDY_OVERVIEW
 
 from .deps import request_client
@@ -34,40 +34,6 @@ class StudyProcessResponse(BaseModel):
     article: str
 
 
-def _slugify(text: str) -> str:
-    s = re.sub(r"[^\w\s-]", "", text.lower()).strip()
-    s = re.sub(r"[-\s]+", "-", s)
-    return s or "topic"
-
-
-def _balanced_json_slice(text: str) -> str | None:
-    start = text.find("{")
-    if start < 0:
-        return None
-    depth = 0
-    in_str = False
-    escape = False
-    for i in range(start, len(text)):
-        c = text[i]
-        if in_str:
-            if escape:
-                escape = False
-            elif c == "\\":
-                escape = True
-            elif c == '"':
-                in_str = False
-            continue
-        if c == '"':
-            in_str = True
-        elif c == "{":
-            depth += 1
-        elif c == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start : i + 1]
-    return None
-
-
 def _coerce_topics(raw: object) -> list[StudyTopic]:
     if not isinstance(raw, list):
         return []
@@ -80,7 +46,7 @@ def _coerce_topics(raw: object) -> list[StudyTopic]:
         anchor = str(item.get("anchor", "")).strip() or label
         if not label:
             continue
-        base_id = _slugify(str(item.get("id", "") or label))
+        base_id = slugify(str(item.get("id", "") or label), fallback="topic")
         cand = base_id
         n = 2
         while cand in seen_ids:
@@ -108,6 +74,8 @@ def _sync_llm_call(model: str, system_prompt: str, user_msg: str) -> str:
             img=None,
             stream=False,
         )
+        if isinstance(response, Exception):
+            raise response
         return response.choices[0].message.content or ""
 
 
@@ -126,16 +94,10 @@ async def process_pdf(req: StudyProcessRequest) -> StudyProcessResponse:
 
     async def run_topics() -> list[StudyTopic]:
         content = await _llm_call(req.model, SYS_STUDY_LEARNING_GOALS, user_msg)
-        sliced = _balanced_json_slice(content)
-        if sliced is None:
-            log.warning("learning_goals: no JSON in output, raw=%r", content[:300])
-            return []
         try:
-            data = json.loads(sliced)
-        except json.JSONDecodeError as e:
-            log.warning("learning_goals: JSON decode error: %s", e)
-            return []
-        if not isinstance(data, dict):
+            data = extract_json_from_llm(content)
+        except (ValueError, Exception) as e:
+            log.warning("learning_goals: JSON extraction failed: %s (raw=%r)", e, content[:300])
             return []
         return _coerce_topics(data.get("topics"))
 
