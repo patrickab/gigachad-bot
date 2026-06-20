@@ -3,12 +3,11 @@
 import { useCallback, useEffect, useMemo } from "react"
 import { motion } from "framer-motion"
 import { VaultTree, type VaultTreeItem } from "./VaultTree"
-import { Brain, FolderKanban, LayoutDashboard, Clock } from "lucide-react"
+import { Brain, FolderKanban, LayoutDashboard, Clock, PanelLeftClose, PanelLeft, Save, RotateCcw } from "lucide-react"
 import { useMemoryViewer } from "@/contexts/MemoryViewerContext"
 import { SidebarElement } from "./SidebarElement"
-import { getSidebarConfig } from "@/lib/sidebarConfig"
 import { useProject } from "@/contexts/ProjectContext"
-import { useBranches } from "@/hooks/useBranches"
+import { useBranches } from "@/contexts/BranchContext"
 import { useSidebar } from "@/contexts/SidebarContext"
 import type { BranchMeta, ProjectListItem } from "@/lib/types"
 import { ChatBranchItem } from "./ChatBranchItem"
@@ -71,12 +70,11 @@ export function Sidebar({
 
   const expandIfCollapsed = () => { if (collapsed) toggleCollapsed() }
 
-  const sidebarItems = getSidebarConfig({
-    onToggleCollapse: toggleCollapsed,
-    onSave,
-    onReset,
-    collapsed,
-  })
+  const sidebarItems = [
+    { id: "toggle-collapse", icon: collapsed ? PanelLeft : PanelLeftClose, onClick: toggleCollapsed },
+    { id: "save-chat", icon: Save, title: "Save Chat", onClick: onSave },
+    { id: "reset-chat", icon: RotateCcw, title: "Reset History", onClick: onReset },
+  ]
 
   const toggleItem = sidebarItems.find(item => item.id === "toggle-collapse")
   const mainItems = sidebarItems.filter(

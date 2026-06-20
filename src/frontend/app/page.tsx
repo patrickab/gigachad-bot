@@ -25,7 +25,7 @@ import { useChat } from "@/hooks/useChat"
 import { useModeState, ModeProvider } from "@/hooks/useModeState"
 import { useSettings, SettingsProvider } from "@/contexts/SettingsContext"
 import { useProject, ProjectProvider } from "@/contexts/ProjectContext"
-import { useBranches } from "@/hooks/useBranches"
+import { useBranches } from "@/contexts/BranchContext"
 import { BranchProvider } from "@/contexts/BranchContext"
 import { SidebarProvider } from "@/contexts/SidebarContext"
 import { MemoryViewerProvider } from "@/contexts/MemoryViewerContext"
@@ -697,9 +697,6 @@ function AppContent() {
     }
   }, [activeProject, closeProject])
 
-  const handleTabClose = useCallback((_tab: Tab) => {
-  }, [])
-
   const handleTabsChange = useCallback((tabs: Tab[]) => {
     if (!activeProject) return
     syncTabs(
@@ -748,7 +745,6 @@ function AppContent() {
         <MemoryViewerProvider>
         <TabManager
         ref={tabManagerRef}
-        onCloseTab={handleTabClose}
         onTabsChange={handleTabsChange}
         defaultConfig={settingsToTabConfig(settings)}
         renderContent={(tab, onModeLabel, isActive, onConfigChange) => (

@@ -148,9 +148,9 @@ async def process_pdf(req: StudyProcessRequest) -> StudyProcessResponse:
         return content.strip()
 
     try:
-        topics = await run_topics()
-        overview = await run_overview()
-        article = await run_article()
+        topics, overview, article = await asyncio.gather(
+            run_topics(), run_overview(), run_article(),
+        )
     except HTTPException:
         raise
     except Exception:

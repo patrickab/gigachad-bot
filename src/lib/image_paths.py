@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 
 from config import chat_upload_dir
-from llm_client import LLMClient
+from llm_baseclient.client import LLMClient
 
 DOWNSCALED_SUBDIR = "_downscaled"
 _DEFAULT_MAX_TOKENS = 2048

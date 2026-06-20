@@ -19,7 +19,7 @@ from streamlit_helper import (
     paste_img_button,
     render_messages,
 )
-from llm_client import LLMClient
+from llm_baseclient.client import LLMClient
 
 EMPTY_PASTE_RESULT = PasteResult(image_data=None)
 

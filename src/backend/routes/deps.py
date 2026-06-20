@@ -12,7 +12,7 @@ from lib.chat_store import ChatStore
 from lib.memory_store import MemoryStore
 from lib.obsidian_vault import ObsidianVault
 from lib.project_store import ProjectStore
-from llm_client import LLMClient
+from llm_baseclient.client import LLMClient
 
 _client: LLMClient | None = None
 _chat_store: ChatStore | None = None

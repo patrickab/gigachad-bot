@@ -14,7 +14,7 @@ from streamlit_helper import (
     options_message,
     paste_img_button,
 )
-from llm_client import LLMClient
+from llm_baseclient.client import LLMClient
 from llm_config import DEFAULT_VISION_MODEL
 
 

@@ -30,7 +30,7 @@ from lib.prompts import (
     SYS_QUICK_OVERVIEW,
     SYS_TUTOR,
 )
-from llm_client import LLMClient
+from llm_baseclient.client import LLMClient
 from llm_config import MODEL_CONFIGS, NANOTASK_MODEL
 
 EMPTY_PASTE_RESULT = PasteResult(image_data=None)

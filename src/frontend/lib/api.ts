@@ -1,9 +1,9 @@
-import type { Attachment, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, MemoryProfileMeta, Message, ModelsResponse, ObsidianFile, PreviewMemory, ProjectData, ProjectListItem, ProjectStateUpdate, ProposedMemory, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage } from "./types"
+import type { Attachment, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelsResponse, ObsidianFile, PreviewMemory, ProjectData, ProjectListItem, ProjectStateUpdate, ProposedMemory, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { API_BASE, DEFAULT_TEMPERATURE, DEFAULT_DOWNSCALE_IMAGES } from "./config"
 
-export function encodePath(filename: string): string {
+function encodePath(filename: string): string {
   return filename.split("/").map(encodeURIComponent).join("/")
 }
 
@@ -52,14 +52,6 @@ export async function fetchPrompts(): Promise<Record<string, string>> {
   return data.prompts
 }
 
-export async function fetchHistory(): Promise<{ messages: Message[] }> {
-  return request("/history")
-}
-
-export async function resetHistory(): Promise<void> {
-  await request("/history", { method: "DELETE" })
-}
-
 export function createChatStream(req: ChatRequest): SSEStreamResult {
   const body: Record<string, unknown> = {
     model: req.model,
@@ -99,18 +91,6 @@ export async function saveChatHistory(filename: string, messages: Message[] = []
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-  })
-}
-
-export async function deleteChatHistory(filename: string): Promise<void> {
-  await request(`/chat-histories/${filename}`, { method: "DELETE" })
-}
-
-export async function renameChatHistory(oldPath: string, newTitle: string): Promise<{ status: string; new_path: string; filename: string }> {
-  return request(`/chat-histories/rename`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ old_path: oldPath, new_title: newTitle }),
   })
 }
 
@@ -189,7 +169,7 @@ function _uploadsPath(chatId: string, slug: string | null): string {
   return `/chat-uploads/${safe}`
 }
 
-export function uploadsBase(chatId: string, slug: string | null): string {
+function uploadsBase(chatId: string, slug: string | null): string {
   return `${_apiOrigin()}${_uploadsPath(chatId, slug)}`
 }
 
@@ -248,11 +228,6 @@ export async function attachObsidianFile(chatId: string, path: string, slug: str
   return { ...data, active: true, url: chatFileUrl(chatId, data.name, slug) }
 }
 
-export async function deleteChatUploads(chatId: string, slug: string | null = null): Promise<void> {
-  const params = slug ? `?slug=${encodeURIComponent(slug)}` : ""
-  await request(`/files/chat/${chatId}${params}`, { method: "DELETE" })
-}
-
 export async function processStudyPdf(req: StudyProcessRequest): Promise<StudyProcessResponse> {
   return request<StudyProcessResponse>("/study/process", {
     method: "POST",
@@ -306,14 +281,6 @@ export async function moveProjectCard(name: string, cardId: string, state: strin
   })
 }
 
-export async function updateProjectCard(name: string, cardId: string, title?: string, description?: string): Promise<KanbanCard> {
-  return request<KanbanCard>(`/projects/${encodeURIComponent(name)}/cards/${cardId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title, ...(description !== undefined ? { description } : {}) }),
-  })
-}
-
 export async function deleteProjectCard(name: string, cardId: string): Promise<void> {
   await request(`/projects/${encodeURIComponent(name)}/cards/${cardId}`, { method: "DELETE" })
 }
@@ -326,36 +293,14 @@ export async function saveProjectTab(name: string, filename: string, messages: M
   })
 }
 
-export async function deleteProjectTab(name: string, filename: string): Promise<void> {
-  await request(`/projects/${encodeURIComponent(name)}/tabs/${encodeURIComponent(filename)}`, { method: "DELETE" })
-}
-
 export async function loadProjectTab(name: string, filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null; title: string | null; usage: Usage | null; parent_id: string | null; branch_message_idx: number | null }> {
   return request(`/chat-histories/${encodeURIComponent(name)}/${encodeURIComponent(filename)}`)
 }
 
-export abstract class Entry {
+export class Vault {
   constructor(public readonly id: string) {}
-  abstract delete(): Promise<void>
-}
-
-export class Element extends Entry {
   async delete(): Promise<void> {
     await request(`/chat-histories/${this.id}`, { method: "DELETE" })
-  }
-}
-
-export class Vault extends Entry {
-  async delete(): Promise<void> {
-    await request(`/chat-histories/${this.id}`, { method: "DELETE" })
-  }
-}
-
-export class Directory extends Vault {}
-
-export class Project extends Vault {
-  async delete(): Promise<void> {
-    await request(`/projects/${encodeURIComponent(this.id)}`, { method: "DELETE" })
   }
 }
 
@@ -417,15 +362,6 @@ export async function getMemories(scope: "global" | "project", projectSlug?: str
   const params = new URLSearchParams({ scope })
   if (projectSlug) params.set("project_slug", projectSlug)
   return request<{ memories: PreviewMemory[] }>(`/memory/memories?${params.toString()}`)
-}
-
-export async function listMemoryProfiles(projectSlug?: string | null): Promise<{ profiles: MemoryProfileMeta[] }> {
-  const params = projectSlug ? `?project_slug=${encodeURIComponent(projectSlug)}` : ""
-  return request<{ profiles: MemoryProfileMeta[] }>(`/memory/profiles${params}`)
-}
-
-export async function getMemoryProfileContent(filepath: string): Promise<{ content: string; filepath: string }> {
-  return request(`/memory/content?filepath=${encodeURIComponent(filepath)}`)
 }
 
 export async function getCategories(scope: "global" | "project", projectSlug?: string | null): Promise<{ categories: CategoryDef[] }> {
