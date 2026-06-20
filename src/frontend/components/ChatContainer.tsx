@@ -2,7 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence } from "framer-motion"
-import type { Message, Attachment } from "@/lib/types"
+import type { Message, Attachment, ProjectDocument } from "@/lib/types"
 import { ChatMessage, AssistantMessageContent } from "./ChatMessage"
 import { ChatInput } from "./ChatInput"
 import { ChatSidebar } from "./ChatSidebar"
@@ -38,6 +38,9 @@ interface ChatContainerProps {
   onAttachmentContentChange?: (messageIndex: number, attachmentName: string, newContent: string) => void
   obsidianEnabled?: boolean
   onOpenObsidian?: () => void
+  documents?: ProjectDocument[]
+  onSelectDocument?: (path: string) => void
+  onOpenDocuments?: () => void
 }
 
 export function ChatContainer({
@@ -62,6 +65,9 @@ export function ChatContainer({
   onAttachmentContentChange,
   obsidianEnabled,
   onOpenObsidian,
+  documents,
+  onSelectDocument,
+  onOpenDocuments,
 }: ChatContainerProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -347,6 +353,9 @@ export function ChatContainer({
         lastMorphicResult,
         obsidianEnabled,
         onOpenObsidian,
+        documents,
+        onSelectDocument,
+        onOpenDocuments,
         isElementOpen: (id) => openElements.has(id),
         onElementOpenChange: (id, open) => {
           setOpenElements((prev) => {
@@ -359,7 +368,7 @@ export function ChatContainer({
         pdfWide,
         onTogglePdfWide: togglePdfWide,
       }),
-    [chatId, slug, allAttachments, expandedEntries, handleToggleExpand, onToggleAttachmentActive, handleRemoveAttachment, onAttachmentContentChange, lastMorphicResult, obsidianEnabled, onOpenObsidian, openElements, pdfWide, togglePdfWide]
+    [chatId, slug, allAttachments, expandedEntries, handleToggleExpand, onToggleAttachmentActive, handleRemoveAttachment, onAttachmentContentChange, lastMorphicResult, obsidianEnabled, onOpenObsidian, documents, onSelectDocument, onOpenDocuments, openElements, pdfWide, togglePdfWide]
   )
 
   const hasSidebarContent = sidebarElements.length > 0

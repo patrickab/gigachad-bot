@@ -14,7 +14,8 @@ import { ThemeToggle } from "@/components/ThemeToggle"
 import { OCRPanel } from "@/components/OCRPanel"
 import { SaveChatModal } from "@/components/SaveChatModal"
 import { MemoryPanel } from "@/components/MemoryPanel"
-import { ObsidianPicker } from "@/components/ObsidianPicker"
+import { FileViewer } from "@/components/FileViewer"
+import { DocumentPicker } from "@/components/DocumentPicker"
 import { useCommandBar } from "@/hooks/useCommandBar"
 import { useMemoryCategories } from "@/hooks/useMemoryCategories"
 import { TabManager, nextTab, settingsToTabConfig, type TabConfig } from "@/components/TabManager"
@@ -42,9 +43,14 @@ import {
   buildHistoryFile,
   listObsidianFiles,
   attachObsidianFile,
+  listProjectDocuments,
+  listAllDocuments,
+  uploadDocument,
+  addDocument,
+  attachDocument,
 } from "@/lib/api"
 import { DEFAULT_VISION_MODEL } from "@/lib/config"
-import type { Attachment, Message, ObsidianFile, Usage } from "@/lib/types"
+import type { Attachment, Message, ObsidianFile, ProjectDocument, Usage } from "@/lib/types"
 import {
   buildHiddenContent,
   collectActiveImagePaths,
@@ -132,6 +138,9 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   const [obsidianEnabled, setObsidianEnabled] = useState(false)
   const [obsidianFiles, setObsidianFiles] = useState<ObsidianFile[]>([])
   const [obsidianOpen, setObsidianOpen] = useState(false)
+  const [documentOpen, setDocumentOpen] = useState(false)
+  const [projectDocuments, setProjectDocuments] = useState<ProjectDocument[]>([])
+  const [allDocuments, setAllDocuments] = useState<ProjectDocument[]>([])
 
   useEffect(() => {
     let cancelled = false
@@ -159,31 +168,95 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   const [ocrImage, setOCRImage] = useState<string | null>(null)
   const [chatId, setChatId] = useState(() => tab.chatId)
 
-  const handleObsidianSelect = useCallback(async (path: string) => {
+  const appendAttachment = useCallback((att: Attachment) => {
+    setMessages((prev) => {
+      const copy = [...prev]
+      let idx = -1
+      for (let i = copy.length - 1; i >= 0; i--) {
+        if (copy[i].role === "user") { idx = i; break }
+      }
+      if (idx === -1) {
+        // Empty chat: seed a complete pair so display stays strictly alternating.
+        const attachments = [att]
+        return [
+          { role: "user" as const, content: "", attachments, hiddenContent: buildHiddenContent(attachments) || undefined },
+          { role: "assistant" as const, content: "" },
+        ]
+      }
+      const msg = copy[idx]
+      const attachments = [...(msg.attachments ?? []), att]
+      copy[idx] = { ...msg, attachments, hiddenContent: buildHiddenContent(attachments) || undefined }
+      return copy
+    })
+  }, [setMessages])
+
+  const attachToChat = useCallback(
+    async (attach: (chatId: string, path: string, slug: string | null) => Promise<Attachment>, path: string) => {
+      try { appendAttachment(await attach(chatId, path, activeProject)) } catch { }
+    },
+    [chatId, activeProject, appendAttachment],
+  )
+
+  const handleObsidianSelect = useCallback((path: string) => {
     setObsidianOpen(false)
+    attachToChat(attachObsidianFile, path)
+  }, [attachToChat])
+
+  const handleDocumentSelect = useCallback((path: string) => {
+    setDocumentOpen(false)
+    attachToChat(attachDocument, path)
+  }, [attachToChat])
+
+  const loadProjectDocs = useCallback(() => {
+    if (activeProject) listProjectDocuments(activeProject).then(setProjectDocuments).catch(() => {})
+    else setProjectDocuments([])
+  }, [activeProject])
+
+  const refreshDocuments = useCallback(() => {
+    loadProjectDocs()
+    listAllDocuments().then(setAllDocuments).catch(() => {})
+  }, [loadProjectDocs])
+
+  useEffect(() => { loadProjectDocs() }, [loadProjectDocs])
+
+  const openDocuments = useCallback(() => {
+    refreshDocuments()
+    setDocumentOpen(true)
+  }, [refreshDocuments])
+
+  const handleDocumentUpload = useCallback(async (files: File[]) => {
+    if (!activeProject) return
+    // Sequential: each PDF spawns a MinerU server, so avoid parallel contention.
+    for (const file of files) {
+      try {
+        await uploadDocument(activeProject, file)
+      } catch { }
+    }
+    refreshDocuments()
+  }, [activeProject, refreshDocuments])
+
+  const handleAddDocToProject = useCallback(async (path: string) => {
+    if (!activeProject) return
     try {
-      const att = await attachObsidianFile(chatId, path, activeProject)
-      setMessages((prev) => {
-        const copy = [...prev]
-        let idx = -1
-        for (let i = copy.length - 1; i >= 0; i--) {
-          if (copy[i].role === "user") { idx = i; break }
-        }
-        if (idx === -1) {
-          // Empty chat: seed a complete pair so display stays strictly alternating.
-          const attachments = [att]
-          return [
-            { role: "user" as const, content: "", attachments, hiddenContent: buildHiddenContent(attachments) || undefined },
-            { role: "assistant" as const, content: "" },
-          ]
-        }
-        const msg = copy[idx]
-        const attachments = [...(msg.attachments ?? []), att]
-        copy[idx] = { ...msg, attachments, hiddenContent: buildHiddenContent(attachments) || undefined }
-        return copy
-      })
+      await addDocument(activeProject, path)
+      refreshDocuments()
     } catch { }
-  }, [chatId, activeProject, setMessages])
+  }, [activeProject, refreshDocuments])
+
+  useEffect(() => {
+    if (!isActive) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.altKey && (e.key === "x" || e.key === "X")) {
+        e.preventDefault()
+        setDocumentOpen((open) => {
+          if (!open) refreshDocuments()
+          return !open
+        })
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [isActive, refreshDocuments])
 
   const [branchMessageIdx, setBranchMessageIdx] = useState<number | null>(null)
   const [saveModalOpen, setSaveModalOpen] = useState(false)
@@ -634,6 +707,9 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
             onAttachmentContentChange={handleAttachmentContentChange}
             obsidianEnabled={obsidianEnabled}
             onOpenObsidian={openObsidian}
+            documents={projectDocuments}
+            onSelectDocument={handleDocumentSelect}
+            onOpenDocuments={activeProject ? openDocuments : undefined}
             slug={activeProject}
             chatMaxWidth={chatMaxWidth}
           />
@@ -649,7 +725,24 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       </main>
       <SaveChatModal open={saveModalOpen} onClose={() => setSaveModalOpen(false)} onSave={handleSaveSubmit} />
       {isActive && obsidianOpen && obsidianEnabled && (
-        <ObsidianPicker files={obsidianFiles} onSelect={handleObsidianSelect} onClose={() => setObsidianOpen(false)} />
+        <FileViewer
+          files={obsidianFiles.map((f) => f.path)}
+          onSelect={handleObsidianSelect}
+          onClose={() => setObsidianOpen(false)}
+          placeholder="Search vault…"
+          emptyLabel="No notes"
+        />
+      )}
+      {isActive && documentOpen && (
+        <DocumentPicker
+          projectSlug={activeProject}
+          projectDocuments={projectDocuments}
+          allDocuments={allDocuments}
+          onAttach={handleDocumentSelect}
+          onAddToProject={handleAddDocToProject}
+          onUpload={handleDocumentUpload}
+          onClose={() => setDocumentOpen(false)}
+        />
       )}
       {commandBar.state.phase === "input" && (
         <div

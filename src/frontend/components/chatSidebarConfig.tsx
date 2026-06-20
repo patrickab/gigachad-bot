@@ -1,9 +1,9 @@
 "use client"
 
 import { useState } from "react"
-import { FileText, Image as ImageIcon, Globe, X, ChevronDown, ChevronRight } from "lucide-react"
+import { FileText, FileType, Image as ImageIcon, Globe, X, ChevronDown, ChevronRight, Plus, Library } from "lucide-react"
 import dynamic from "next/dynamic"
-import type { Attachment, MorphicSearchResult } from "@/lib/types"
+import type { Attachment, MorphicSearchResult, ProjectDocument } from "@/lib/types"
 import { rewriteImages } from "@/lib/api"
 import { LaTeXMarkdown } from "@/components/LaTeXMarkdown"
 import type { ChatSidebarElementConfig } from "@/components/ChatSidebar"
@@ -165,6 +165,35 @@ function ContextBody({
   )
 }
 
+function DocumentsBody({ documents, onSelect }: { documents: ProjectDocument[]; onSelect?: (path: string) => void }) {
+  if (documents.length === 0) {
+    return (
+      <div className="flex items-center justify-center py-6 text-xs text-ink-faint">
+        No documents
+      </div>
+    )
+  }
+  return (
+    <div>
+      {documents.map((doc) => {
+        const Icon = doc.mime === "application/pdf" ? FileType : FileText
+        return (
+          <button
+            key={doc.path}
+            type="button"
+            onClick={() => onSelect?.(doc.path)}
+            title="Attach to current chat"
+            className="flex w-full items-center gap-2 border-b border-divider/50 px-2 py-2 text-left text-ink-muted hover:bg-surface/50 hover:text-ink transition-colors"
+          >
+            <Icon className="h-3.5 w-3.5 shrink-0 text-ink-faint" />
+            <span className="min-w-0 flex-1 truncate text-[11px] font-medium">{doc.name}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 function SourcesBody({ result }: { result: MorphicSearchResult }) {
   const seen = new Set<string>()
   const sources = result.sources.filter((s) => !seen.has(s.url) && seen.add(s.url))
@@ -233,6 +262,9 @@ export interface ChatSidebarConfig {
   lastMorphicResult?: MorphicSearchResult
   obsidianEnabled?: boolean
   onOpenObsidian?: () => void
+  documents?: ProjectDocument[]
+  onSelectDocument?: (path: string) => void
+  onOpenDocuments?: () => void
   isElementOpen: (id: string) => boolean
   onElementOpenChange: (id: string, open: boolean) => void
   pdfWide?: boolean
@@ -251,6 +283,9 @@ export const getChatSidebarConfig = ({
   lastMorphicResult,
   obsidianEnabled,
   onOpenObsidian,
+  documents,
+  onSelectDocument,
+  onOpenDocuments,
   isElementOpen,
   onElementOpenChange,
   pdfWide,
@@ -291,6 +326,30 @@ export const getChatSidebarConfig = ({
             onTogglePdfWide={onTogglePdfWide}
           />
         ),
+    })
+  }
+
+  if (onOpenDocuments) {
+    const docs = documents ?? []
+    elements.push({
+      id: "documents",
+      icon: Library,
+      title: "Documents",
+      badge: docs.length > 0 ? docs.length : undefined,
+      action: (
+        <button
+          type="button"
+          onClick={onOpenDocuments}
+          title="Browse documents (Alt+X)"
+          aria-label="Browse documents"
+          className="rounded p-1 text-ink-faint hover:text-ink hover:bg-surface-elevated transition-colors"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </button>
+      ),
+      open: isElementOpen("documents"),
+      onOpenChange: (o) => onElementOpenChange("documents", o),
+      body: <DocumentsBody documents={docs} onSelect={onSelectDocument} />,
     })
   }
 

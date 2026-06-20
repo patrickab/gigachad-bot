@@ -66,7 +66,7 @@ class ProjectStore:
     def _read_project(self, project_dir: Path) -> dict[str, Any]:
         return safe_read_json(
             project_dir / PROJECT_JSON,
-            {"name": project_dir.name, "kanban": [], "tabs": []},
+            {"name": project_dir.name, "kanban": [], "tabs": [], "files": []},
         )
 
     def _write_project(self, project_dir: Path, data: dict[str, Any]) -> None:
@@ -258,3 +258,45 @@ class ProjectStore:
         project_data["tabs"] = [t for t in project_data.get("tabs", []) if t.get("filename") != filename]
         self._write_project(project_dir, project_data)
         return {"status": "ok"}
+
+    # ------------------------------------------------------------------
+    # Documents (project.json "files" — arbitrary absolute paths)
+    # ------------------------------------------------------------------
+
+    def list_files(self, slug: str) -> list[str]:
+        return self._mutate_files(slug, lambda files: files)
+
+    def add_file(self, slug: str, path: str) -> list[str]:
+        return self._mutate_files(slug, lambda files: files if path in files else [*files, path])
+
+    def remove_file(self, slug: str, path: str) -> list[str]:
+        return self._mutate_files(slug, lambda files: [f for f in files if f != path])
+
+    def _mutate_files(self, slug: str, transform: Callable[[list[str]], list[str]]) -> list[str]:
+        """Read, transform, and (when changed) persist a project's document list."""
+        meta = self._read_meta()
+        if not self._find_entry(meta, slug):
+            raise FileNotFoundError(f"Project not found: {slug}")
+        project_dir = self._resolve_project_dir(slug)
+        data = self._read_project(project_dir)
+        current = [str(p) for p in data.get("files", [])]
+        updated = transform(current)
+        if updated != current:
+            data["files"] = updated
+            self._write_project(project_dir, data)
+        return updated
+
+    def list_all_files(self) -> list[str]:
+        """Union of every project's documents — the global document pool."""
+        meta = self._read_meta()
+        seen: set[str] = set()
+        out: list[str] = []
+        for p in meta.get("projects", []):
+            data = self._read_project(self._resolve_project_dir(p["slug"]))
+            for f in data.get("files", []):
+                f = str(f)
+                if f not in seen:
+                    seen.add(f)
+                    out.append(f)
+        out.sort(key=lambda f: Path(f).name.lower())
+        return out

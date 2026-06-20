@@ -1,4 +1,4 @@
-import type { Attachment, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelsResponse, ObsidianFile, PreviewMemory, ProjectData, ProjectListItem, ProjectStateUpdate, ProposedMemory, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage } from "./types"
+import type { Attachment, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelsResponse, ObsidianFile, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { API_BASE, DEFAULT_TEMPERATURE, DEFAULT_DOWNSCALE_IMAGES } from "./config"
@@ -217,16 +217,62 @@ export async function listObsidianFiles(): Promise<{ enabled: boolean; files: Ob
   return request("/obsidian/files")
 }
 
-export async function readObsidianFile(path: string): Promise<{ path: string; content: string }> {
-  return request(`/obsidian/file?path=${encodeURIComponent(path)}`)
+/** Direct URL to a file's raw bytes (images, PDFs) — usable as an `<img>`/PDF src. */
+export function fileViewerRawUrl(path: string): string {
+  return `${API_BASE}/fileviewer/raw?path=${encodeURIComponent(path)}`
 }
 
-export async function attachObsidianFile(chatId: string, path: string, slug: string | null = null): Promise<Attachment> {
+/** Read a file's text content (markdown / unknown-treated-as-text). */
+export async function loadFileViewerText(path: string): Promise<string> {
+  const data = await request<{ path: string; content: string }>(`/fileviewer/text?path=${encodeURIComponent(path)}`)
+  return data.content
+}
+
+/** Materialise a file at *path* into the chat's upload dir as an Attachment. */
+async function attachFileByPath(endpoint: string, chatId: string, path: string, slug: string | null): Promise<Attachment> {
   const params = new URLSearchParams({ path, chat_id: chatId })
   if (slug) params.set("slug", slug)
-  const res = await ensureOk(await fetch(`${API_BASE}/obsidian/attach?${params}`, { method: "POST" }))
+  const res = await ensureOk(await fetch(`${API_BASE}/${endpoint}/attach?${params}`, { method: "POST" }))
   const data = await res.json()
   return { ...data, active: true, url: chatFileUrl(chatId, data.name, slug) }
+}
+
+export function attachObsidianFile(chatId: string, path: string, slug: string | null = null): Promise<Attachment> {
+  return attachFileByPath("obsidian", chatId, path, slug)
+}
+
+export async function listProjectDocuments(slug: string): Promise<ProjectDocument[]> {
+  const data = await request<{ documents: ProjectDocument[] }>(`/documents?slug=${encodeURIComponent(slug)}`)
+  return data.documents
+}
+
+export async function listAllDocuments(): Promise<ProjectDocument[]> {
+  const data = await request<{ documents: ProjectDocument[] }>("/documents/all")
+  return data.documents
+}
+
+export async function uploadDocument(slug: string, file: File): Promise<ProjectDocument> {
+  const form = new FormData()
+  form.append("file", file)
+  const res = await ensureOk(await fetch(`${API_BASE}/documents/upload?slug=${encodeURIComponent(slug)}`, { method: "POST", body: form }))
+  return res.json()
+}
+
+export async function addDocument(slug: string, path: string): Promise<ProjectDocument> {
+  return request<ProjectDocument>(`/documents/add?slug=${encodeURIComponent(slug)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  })
+}
+
+export async function removeDocument(slug: string, path: string): Promise<void> {
+  const params = new URLSearchParams({ slug, path })
+  await request(`/documents?${params}`, { method: "DELETE" })
+}
+
+export function attachDocument(chatId: string, path: string, slug: string | null = null): Promise<Attachment> {
+  return attachFileByPath("documents", chatId, path, slug)
 }
 
 export async function processStudyPdf(req: StudyProcessRequest): Promise<StudyProcessResponse> {

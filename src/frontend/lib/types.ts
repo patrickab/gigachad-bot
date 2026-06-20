@@ -20,6 +20,12 @@ export interface ObsidianFile {
   name: string
 }
 
+export interface ProjectDocument {
+  path: string
+  name: string
+  mime: string
+}
+
 export interface Message {
   role: "user" | "assistant" | "system" | "tool"
   content: string

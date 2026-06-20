@@ -36,11 +36,21 @@ class ObsidianVault:
             raise ValueError("Obsidian vault is not configured")
         return safe_resolve(self._base, rel_path)
 
-    def list_markdown(self) -> list[dict[str, str]]:
-        """Return every markdown note as ``{path, name}`` with posix-relative paths.
+    def contains(self, abs_path: Path) -> bool:
+        """True if *abs_path* lives inside the vault (after resolution)."""
+        if self._base is None:
+            return False
+        try:
+            abs_path.resolve().relative_to(self._base)
+            return True
+        except ValueError:
+            return False
 
-        Sorted by path so directories group naturally, letting the frontend
-        reconstruct the folder tree and fuzzy-search across the flat list.
+    def list_markdown(self) -> list[dict[str, str]]:
+        """Return every markdown note as ``{path, name}`` with absolute paths.
+
+        Absolute paths let the generic ``FileViewer`` preview/attach pipeline
+        treat vault notes uniformly with documents (which are also absolute).
         """
         if not self.enabled or self._base is None:
             return []
@@ -51,7 +61,7 @@ class ObsidianVault:
             rel = path.relative_to(self._base)
             if any(part in _SKIP_DIRS for part in rel.parts):
                 continue
-            files.append({"path": rel.as_posix(), "name": path.name})
+            files.append({"path": str(path), "name": path.name})
         files.sort(key=lambda f: f["path"].lower())
         return files
 

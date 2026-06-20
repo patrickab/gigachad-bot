@@ -113,6 +113,14 @@ async def parse_attachments(
                 tmp_path.write_bytes(file_path.read_bytes())
                 try:
                     md_path, _images_dir = await _parse_pdf(tmp_path, chat_dir)
+                    # Tidy the raw PDF into the central document library now that
+                    # parsing succeeded (its <stem>.md is guaranteed to exist).
+                    from lib.document_library import organize_file
+
+                    try:
+                        organize_file(file_path)
+                    except Exception:
+                        log.exception("Failed to organize %s into document library", filename)
                     results.append(ParsedAttachment(name=filename, parsedMd=md_path.read_text(encoding="utf-8")))
                 except Exception:
                     log.exception("MinerU parse failed for %s", filename)

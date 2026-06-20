@@ -18,7 +18,9 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.routes.chat import router as chat_router
 from backend.routes.deps import get_client, get_chat_store, get_project_store, shutdown_client
+from backend.routes.documents import router as documents_router
 from backend.routes.files import router as files_router
+from backend.routes.fileviewer import router as fileviewer_router
 from backend.routes.histories import router as histories_router
 from backend.routes.memory import router as memory_router
 from backend.routes.mineru import kill_all_mineru_servers, reset_cancel
@@ -50,6 +52,9 @@ async def lifespan(app: FastAPI):
     get_chat_store()
     get_project_store()
     reset_cancel()
+    from lib.document_library import backfill_pdf_library
+
+    backfill_pdf_library()
     yield
     shutdown_client()
     kill_all_mineru_servers()
@@ -66,7 +71,9 @@ app.add_middleware(
 )
 
 app.include_router(chat_router)
+app.include_router(documents_router)
 app.include_router(files_router)
+app.include_router(fileviewer_router)
 app.include_router(histories_router)
 app.include_router(memory_router)
 app.include_router(models_router)
