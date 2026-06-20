@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { Document, Page, pdfjs } from "react-pdf"
-import { Maximize2, Minimize2, Minus, Plus } from "lucide-react"
+import { ChevronsLeftRight, ChevronsRightLeft, Maximize2, Minimize2, Minus, Plus } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import "react-pdf/dist/esm/Page/AnnotationLayer.css"
 import "react-pdf/dist/esm/Page/TextLayer.css"
@@ -29,10 +29,14 @@ function PdfViewerInner({
   url,
   isFullscreen,
   onToggleFullscreen,
+  isWide,
+  onToggleWide,
 }: {
   url: string
   isFullscreen: boolean
   onToggleFullscreen: () => void
+  isWide?: boolean
+  onToggleWide?: () => void
 }) {
   const [numPages, setNumPages] = useState<number | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -49,6 +53,8 @@ function PdfViewerInner({
     const el = scrollRef.current
     if (!el) return
 
+    let timer: ReturnType<typeof setTimeout> | null = null
+
     const update = () => {
       const w = el.clientWidth
       if (w > 0) setContainerWidth(w)
@@ -56,9 +62,15 @@ function PdfViewerInner({
 
     update()
 
-    const ro = new ResizeObserver(update)
+    const ro = new ResizeObserver(() => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(update, 150)
+    })
     ro.observe(el)
-    return () => ro.disconnect()
+    return () => {
+      ro.disconnect()
+      if (timer) clearTimeout(timer)
+    }
   }, [])
 
   useEffect(() => {
@@ -213,6 +225,18 @@ function PdfViewerInner({
         >
           <Plus className="h-3.5 w-3.5" strokeWidth={2} />
         </button>
+        {onToggleWide && (
+          <>
+            <div className="w-px h-4 bg-divider" />
+            <button
+              onClick={onToggleWide}
+              className="p-1.5 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
+              title={isWide ? "Narrow sidebar" : "Widen sidebar"}
+            >
+              {isWide ? <ChevronsRightLeft className="h-3.5 w-3.5" /> : <ChevronsLeftRight className="h-3.5 w-3.5" />}
+            </button>
+          </>
+        )}
         <div className="w-px h-4 bg-divider" />
         <button
           onClick={onToggleFullscreen}
@@ -225,7 +249,7 @@ function PdfViewerInner({
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-auto">
         <Document file={url} onLoadSuccess={onDocumentLoadSuccess}>
           {baseScale != null && numPages != null && (
-            <div style={{ width: renderWidth * zoom }}>
+            <div style={{ width: renderWidth * zoom }} className={isFullscreen ? "mx-auto" : undefined}>
               <div style={{ transform: `scale(${zoom})`, transformOrigin: "0 0" }}>
                 {Array.from({ length: numPages }, (_, i) => (
                   <div key={i} style={{ marginBottom: PAGE_GAP }}>
@@ -241,7 +265,7 @@ function PdfViewerInner({
   )
 }
 
-export function PdfViewer({ url }: { url: string }) {
+export function PdfViewer({ url, isWide, onToggleWide }: { url: string; isWide?: boolean; onToggleWide?: () => void }) {
   const [isFullscreen, setIsFullscreen] = useState(false)
 
   useEffect(() => {
@@ -259,7 +283,7 @@ export function PdfViewer({ url }: { url: string }) {
   const toggleFullscreen = useCallback(() => setIsFullscreen((f) => !f), [])
 
   if (!isFullscreen) {
-    return <PdfViewerInner url={url} isFullscreen={false} onToggleFullscreen={toggleFullscreen} />
+    return <PdfViewerInner url={url} isFullscreen={false} onToggleFullscreen={toggleFullscreen} isWide={isWide} onToggleWide={onToggleWide} />
   }
 
   return createPortal(
@@ -270,17 +294,9 @@ export function PdfViewer({ url }: { url: string }) {
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: 0.15 }}
-        className="fixed inset-0 z-[100] flex items-center justify-center bg-backdrop backdrop-blur-xl"
+        className="fixed inset-0 z-[100] bg-backdrop backdrop-blur-xl"
       >
-        <motion.div
-          initial={{ opacity: 0, scale: 0.96, y: 8 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.96, y: 8 }}
-          transition={{ duration: 0.2, ease: "easeOut" }}
-          className="flex flex-col w-full h-full bg-paper rounded-lg overflow-hidden"
-        >
-          <PdfViewerInner url={url} isFullscreen={true} onToggleFullscreen={toggleFullscreen} />
-        </motion.div>
+        <PdfViewerInner url={url} isFullscreen={true} onToggleFullscreen={toggleFullscreen} />
       </motion.div>
     </AnimatePresence>,
     document.body,

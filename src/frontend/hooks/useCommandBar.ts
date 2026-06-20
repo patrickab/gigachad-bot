@@ -60,11 +60,19 @@ export interface UseCommandBarReturn {
   open: () => void
   close: () => void
   setInput: (v: string) => void
-  submitCommand: (messages: { role: string; content: string }[], projectSlug?: string | null, customInput?: string) => Promise<void>
+  submitCommand: (messages: { role: string; content: string }[], projectSlug?: string | null, chatId?: string | null, customInput?: string) => Promise<void>
   bindProject: (projectSlug?: string | null) => BoundMemoryActions
 }
 
 const INITIAL: CommandBarState = { phase: "idle" }
+
+/** Map a /memorize command variant to the scope it targets, or null if it isn't a memorize command. */
+function parseMemorizeScope(cmd: string): "global" | "project" | null | undefined {
+  if (cmd === "/memorize-global" || cmd.startsWith("/memorize-global ")) return "global"
+  if (cmd === "/memorize-project" || cmd.startsWith("/memorize-project ")) return "project"
+  if (cmd === "/memorize" || cmd.startsWith("/memorize ")) return null // both scopes
+  return undefined // not a memorize command
+}
 
 function isReviewState(state: CommandBarState): state is Extract<CommandBarState, { phase: "review" | "composing" }> {
   return state.phase === "review" || state.phase === "composing"
@@ -200,24 +208,26 @@ export function useCommandBar(): UseCommandBarReturn {
   )
 
   const submitCommand = useCallback(
-    async (messages: { role: string; content: string }[], projectSlug?: string | null, customInput?: string) => {
+    async (messages: { role: string; content: string }[], projectSlug?: string | null, chatId?: string | null, customInput?: string) => {
       const rawCmd = customInput !== undefined ? customInput : state.phase === "input" ? state.input : ""
       const cmd = rawCmd.trim()
       if (!cmd) return
-      dispatch({ type: "START_EXTRACT" })
-      if (cmd === "/memorize" || cmd.startsWith("/memorize ")) {
-        try {
-          const res: MemoryExtractResponse = await extractMemories(messages, projectSlug)
-          if (res.global.length === 0 && (!res.project || res.project.length === 0)) {
-            dispatch({ type: "FAIL", error: "No new memories extracted from this conversation.", reviewId: res.review_id })
-          } else {
-            dispatch({ type: "EXTRACT_OK", reviewId: res.review_id, global: res.global, project: res.project })
-          }
-        } catch (e) {
-          dispatch({ type: "FAIL", error: (e as Error)?.message || "Extraction failed" })
-        }
-      } else {
+      const scope = parseMemorizeScope(cmd)
+      if (scope === undefined) {
+        dispatch({ type: "START_EXTRACT" })
         dispatch({ type: "FAIL", error: `Unknown command: ${cmd}` })
+        return
+      }
+      dispatch({ type: "START_EXTRACT" })
+      try {
+        const res: MemoryExtractResponse = await extractMemories(messages, projectSlug, chatId, scope)
+        if (res.global.length === 0 && (!res.project || res.project.length === 0)) {
+          dispatch({ type: "FAIL", error: "No new memories extracted from this conversation.", reviewId: res.review_id })
+        } else {
+          dispatch({ type: "EXTRACT_OK", reviewId: res.review_id, global: res.global, project: res.project })
+        }
+      } catch (e) {
+        dispatch({ type: "FAIL", error: (e as Error)?.message || "Extraction failed" })
       }
     },
     [state],

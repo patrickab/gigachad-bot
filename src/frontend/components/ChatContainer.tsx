@@ -95,6 +95,22 @@ export function ChatContainer({
   const [sidebarWidth, setSidebarWidth] = useState(320)
   const [openElements, setOpenElements] = useState<Set<string>>(new Set())
   const [isWideMode, setIsWideMode] = useState(false)
+  const [pdfWide, setPdfWide] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const savedSidebarWidth = useRef(320)
+
+  const togglePdfWide = useCallback(() => {
+    setPdfWide((prev) => {
+      if (!prev) {
+        savedSidebarWidth.current = sidebarWidth
+        const total = containerRef.current?.clientWidth ?? 0
+        if (total > 0) setSidebarWidth(Math.round(total / 2))
+      } else {
+        setSidebarWidth(savedSidebarWidth.current)
+      }
+      return !prev
+    })
+  }, [sidebarWidth])
 
   const handleAttachmentClick = useCallback((messageIndex: number, attachment: Attachment) => {
     setContextOpen(true)
@@ -340,8 +356,10 @@ export function ChatContainer({
             return next
           })
         },
+        pdfWide,
+        onTogglePdfWide: togglePdfWide,
       }),
-    [chatId, slug, allAttachments, expandedEntries, handleToggleExpand, onToggleAttachmentActive, handleRemoveAttachment, onAttachmentContentChange, lastMorphicResult, obsidianEnabled, onOpenObsidian, openElements]
+    [chatId, slug, allAttachments, expandedEntries, handleToggleExpand, onToggleAttachmentActive, handleRemoveAttachment, onAttachmentContentChange, lastMorphicResult, obsidianEnabled, onOpenObsidian, openElements, pdfWide, togglePdfWide]
   )
 
   const hasSidebarContent = sidebarElements.length > 0
@@ -366,11 +384,15 @@ export function ChatContainer({
     }
   }, [hasSidebarContent])
 
+  useEffect(() => {
+    if (!contextOpen) setPdfWide(false)
+  }, [contextOpen])
+
   const effectiveMaxWidth = isWideMode ? undefined : (chatMaxWidth || undefined)
   const toggleWideMode = useCallback(() => setIsWideMode((w) => !w), [])
 
   return (
-    <div className={cn("flex h-full relative", className)}>
+    <div ref={containerRef} className={cn("flex h-full relative", className)}>
       <div className="flex-1 min-w-0 flex flex-col relative">
         <div
           ref={scrollContainerRef}
@@ -531,7 +553,7 @@ export function ChatContainer({
         )}
       </div>
       {hasSidebarContent && contextOpen && chatId && (
-        <ChatSidebar elements={sidebarElements} width={sidebarWidth} onWidthChange={setSidebarWidth} />
+        <ChatSidebar elements={sidebarElements} width={sidebarWidth} onWidthChange={setSidebarWidth} maxWidth={pdfWide ? sidebarWidth : undefined} />
       )}
     </div>
   )

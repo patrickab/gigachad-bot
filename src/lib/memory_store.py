@@ -46,6 +46,12 @@ PROJECT_MEMORY = "memory/memory.md"
 EXTRACT_TIMEOUT = 60
 FALLBACK_CATEGORY = "note"
 
+# Per-scope framing fed into the extraction prompt (fills "You extract durable ___").
+GLOBAL_SCOPE_GUIDANCE = "facts about the user, valid across all projects (identity, preferences, working style, goals)"
+PROJECT_SCOPE_GUIDANCE = (
+    "facts about the active project or subject (purpose, concepts, decisions, constraints, resources, open questions)"
+)
+
 
 # Categories define which *types* of memory are extracted. Tuned to be useful
 # for both studying lectures and hobby programming. Add entries here to teach the
@@ -162,69 +168,103 @@ class MemoryStore:
 
     async def extract(
         self,
-        _llm: MemoryLLM,
+        llm: MemoryLLM,
         messages: list[dict[str, str]],
         project_slug: str | None = None,
+        chat_id: str | None = None,
+        scope: str | None = None,
     ) -> ExtractResult:
-        """Extract categorized candidate memories with the configured small model."""
+        """Extract candidate memories from messages since this conversation's last memorization.
+
+        *scope* targets which scope to extract: ``"global"``, ``"project"``, or ``None`` for both.
+        Requested scopes are extracted in parallel; each prompt carries only its own categories
+        plus the memories already on record, so the model emits *deltas* (new or corrected facts)
+        instead of re-proposing known ones. Watermarks are tracked **per (chat_id, scope)** and
+        advance only when that scope's review is committed — so a scope-targeted ``/memorize-global``
+        does not starve a later ``/memorize-project`` on the same conversation, and cancelling
+        leaves the messages eligible next time.
+        """
         self._ensure_dirs()
         review_id = str(uuid.uuid4())
+        target = len(messages)
 
-        conversation = self._get_transcript(messages)
-        global_cats = self.get_categories("global")
-        project_cats = self.get_categories("project", project_slug) if project_slug else DEFAULT_PROJECT_CATEGORIES
-        global_block = self._format_categories(global_cats)
-        project_block = self._format_categories(project_cats)
+        do_global = scope in (None, "global")
+        do_project = scope in (None, "project") and bool(project_slug)
+
+        async def run_scope(scope_name: str, guidance: str, categories: list[dict[str, str]], json_path: Path) -> list[ProposedMemory]:
+            start = self._watermark_for(chat_id, scope_name) if chat_id else 0
+            tail = messages[start:]
+            if not tail:
+                return []
+            return await self._extract_scope(
+                llm, scope_name, guidance, self._get_transcript(tail), categories, self._read_stored_memories(json_path)
+            )
+
+        tasks: list[Any] = []
+        if do_global:
+            global_json, _, _ = self._scope_paths("global", None)
+            tasks.append(("global", run_scope("global", GLOBAL_SCOPE_GUIDANCE, self.get_categories("global"), global_json)))
+        if do_project:
+            project_json, _, _ = self._scope_paths("project", project_slug)
+            tasks.append(
+                ("project", run_scope("project", PROJECT_SCOPE_GUIDANCE, self.get_categories("project", project_slug), project_json))
+            )
+
+        results = await asyncio.gather(*(coro for _, coro in tasks))
+        by_scope = dict(zip((name for name, _ in tasks), results))
+        global_memories = by_scope.get("global", [])
+        project_memories = by_scope.get("project", [])
+
+        committable = [name for name, mems in (("global", global_memories), ("project", project_memories)) if mems]
+        if committable:
+            self._write_pending(review_id, chat_id, target, committable, global_memories + project_memories)
+        return ExtractResult(review_id=review_id, global_memories=global_memories, project_memories=project_memories)
+
+    async def _extract_scope(
+        self,
+        llm: MemoryLLM,
+        scope: str,
+        scope_guidance: str,
+        transcript: str,
+        categories: list[dict[str, str]],
+        existing: list[StoredMemory],
+    ) -> list[ProposedMemory]:
+        """One scope's extraction call: emit only new/corrected memories given what's on record."""
+        cats_block = self._format_categories(categories)
+        existing_block = self._format_existing(existing) or "(nothing on record yet)"
 
         system_prompt = (
-            "You extract durable candidate memories from a conversation for a "
-            "user-reviewed learning system. Output valid JSON only, no prose.\n\n"
+            f"You extract durable {scope_guidance} from a conversation for a user-reviewed "
+            "learning system. Output valid JSON only, no prose.\n\n"
+            "You are given the allowed categories and the memories already on record. Output only "
+            "NEW information as a delta:\n"
+            "- SKIP anything the conversation merely repeats — never re-output a fact already on record.\n"
+            "- When the conversation refines or CONTRADICTS a recorded memory, output the corrected "
+            "statement as a new memory; a later step replaces the stale one.\n"
+            "- Output genuinely new durable facts not yet on record.\n\n"
             "Rules:\n"
-            "- Capture everything relevant to future conversations in this scope: facts, preferences, "
-            "decisions, concepts, constraints, open questions, and context.\n"
-            "- Prefer atomic memories — each entry should carry as much information as possible in as "
-            "few words as possible. When compressing a memory would dilute its meaning, a longer "
-            "verbose form is acceptable.\n"
-            "- Tag each memory with exactly one of the allowed categories.\n"
-            "- Do not emit two memories that express the same idea; keep the more informative one.\n"
-            "- Omit anything session-transient or that cannot benefit future conversations.\n"
-            "- Empty lists are valid when there is nothing durable to remember."
+            "- Tag each memory with exactly one allowed category.\n"
+            "- Prefer atomic memories: maximal information in minimal words; a longer form is "
+            "acceptable only when compressing would lose meaning.\n"
+            "- Omit session-transient details.\n"
+            "- An empty list is valid when there is nothing new to record."
         )
-
-        project_section = ""
-        if project_slug:
-            project_section = f"\nProject categories (facts about the active project/subject):\n{project_block}\n"
-        no_project_rule = "" if project_slug else '\n- No project is active: return an empty "project" list.'
-
         user_prompt = f"""
 Conversation:
-{conversation}
+{transcript}
 
-Extract durable memories and assign each to one allowed category.
+Allowed categories:
+{cats_block}
 
-Global categories (facts about the user, valid across all projects):
-{global_block}
-{project_section}
+Already on record (current knowledge, may be outdated):
+{existing_block}
+
 Return JSON with this exact shape:
-{{
-  "global": [{{"memory": "...", "category": "<one global category name>"}}],
-  "project": [{{"memory": "...", "category": "<one project category name>"}}]
-}}
-
-Rules:
-- "category" MUST be one of the allowed names listed above for that list.
-- Global = stable user identity, preferences, and cross-project working style.
-- Project = this project's/subject's purpose, concepts, decisions, constraints, resources, and open questions.{no_project_rule}
-- Never output two memories that say the same thing with different wording; keep the more informative one.
+{{"memories": [{{"memory": "...", "category": "<one allowed category name>"}}]}}
 """.strip()
 
-        data = await self._generate_json(_llm, system_prompt, user_prompt, timeout=EXTRACT_TIMEOUT)
-
-        global_memories = self._build_candidates(data.get("global", []), "global", global_cats)
-        project_memories = self._build_candidates(data.get("project", []), "project", project_cats) if project_slug else []
-
-        self._write_pending(review_id, global_memories + project_memories)
-        return ExtractResult(review_id=review_id, global_memories=global_memories, project_memories=project_memories)
+        data = await self._generate_json(llm, system_prompt, user_prompt, timeout=EXTRACT_TIMEOUT)
+        return self._build_candidates(data.get("memories", []), scope, categories)
 
     # ------------------------------------------------------------------
     # Commit / Cancel (stateless & idempotent)
@@ -266,9 +306,9 @@ Rules:
         self._write_doc(md_path, md_content)
 
         if review_id:
-            self._delete_pending(review_id)
+            self._consume_pending_scope(review_id, scope)
 
-    async def cancel_async(self, review_id: str, project_slug: str | None = None) -> None:
+    async def cancel_async(self, review_id: str) -> None:
         """Discard the outstanding candidates buffer for *review_id*."""
         self._delete_pending(review_id)
 
@@ -501,17 +541,95 @@ Return JSON with this exact shape:
         safe = re.sub(r"[^A-Za-z0-9_-]", "", review_id)
         return self.pending_dir / f"{safe}.json"
 
-    def _write_pending(self, review_id: str, candidates: list[ProposedMemory]) -> None:
-        if not candidates:
-            return
+    def _write_pending(
+        self, review_id: str, chat_id: str | None, target_index: int, scopes: list[str], candidates: list[ProposedMemory]
+    ) -> None:
+        """Buffer the candidates plus the per-scope watermark target the commit step advances to.
+
+        *scopes* are the scopes that produced candidates (and so will be committed); each is
+        removed as its scope commits, and the buffer is deleted once all have been consumed.
+        """
         self._ensure_dirs()
-        safe_write_json(self._pending_path(review_id), [vars(c) for c in candidates])
+        safe_write_json(
+            self._pending_path(review_id),
+            {"chat_id": chat_id, "target_index": target_index, "scopes": scopes, "candidates": [vars(c) for c in candidates]},
+        )
 
     def _delete_pending(self, review_id: str) -> None:
         try:
             self._pending_path(review_id).unlink(missing_ok=True)
         except OSError as e:
             log.warning("Failed to delete pending buffer %s: %s", review_id, e)
+
+    def _consume_pending_scope(self, review_id: str, scope: str) -> None:
+        """Advance ``(chat_id, scope)``'s watermark from the pending buffer for the committed scope.
+
+        Removes *scope* from the buffer's pending scopes; deletes the buffer once all extracted
+        scopes have committed. Idempotent and order-independent across per-scope commits; cancelling
+        deletes without advancing.
+        """
+        path = self._pending_path(review_id)
+        if not path.exists():
+            return
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            log.warning("Failed to read pending buffer %s: %s", review_id, e)
+            self._delete_pending(review_id)
+            return
+        if not isinstance(data, dict):
+            self._delete_pending(review_id)
+            return
+
+        chat_id = data.get("chat_id")
+        target = data.get("target_index")
+        scopes = [s for s in (data.get("scopes") or []) if s != scope]
+        if scope in (data.get("scopes") or []) and chat_id and isinstance(target, int):
+            self._advance_watermark(str(chat_id), scope, target)
+
+        if scopes:
+            data["scopes"] = scopes
+            safe_write_json(path, data)
+        else:
+            self._delete_pending(review_id)
+
+    # ------------------------------------------------------------------
+    # Conversation watermarks (messages already memorized, by chat id + scope)
+    # ------------------------------------------------------------------
+
+    def _watermarks_path(self) -> Path:
+        return self.memory_root / "watermarks.json"
+
+    def _read_watermarks(self) -> dict[str, dict[str, int]]:
+        path = self._watermarks_path()
+        if not path.exists():
+            return {}
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            log.error("Failed to read watermarks: %s", e)
+            return {}
+        if not isinstance(raw, dict):
+            return {}
+        out: dict[str, dict[str, int]] = {}
+        for chat_id, scopes in raw.items():
+            if isinstance(scopes, dict):
+                out[str(chat_id)] = {str(s): int(i) for s, i in scopes.items() if isinstance(i, int)}
+        return out
+
+    def _watermark_for(self, chat_id: str | None, scope: str) -> int:
+        if not chat_id:
+            return 0
+        return self._read_watermarks().get(chat_id, {}).get(scope, 0)
+
+    def _advance_watermark(self, chat_id: str, scope: str, index: int) -> None:
+        """Move ``(chat_id, scope)``'s watermark forward to *index* (monotonic — never backwards)."""
+        marks = self._read_watermarks()
+        scopes = marks.setdefault(chat_id, {})
+        if index <= scopes.get(scope, 0):
+            return
+        scopes[scope] = index
+        safe_write_json(self._watermarks_path(), marks)
 
     # ------------------------------------------------------------------
     # Category management
@@ -687,9 +805,7 @@ Rules:
 
     @staticmethod
     def _memory_to_dict(m: StoredMemory) -> dict[str, Any]:
-        d = vars(m)
-        d["category"] = m.category
-        return d
+        return dict(vars(m))
 
     def _write_stored_memories(self, path: Path, memories: list[StoredMemory]) -> None:
         safe_write_json(path, [vars(m) for m in memories])
@@ -738,6 +854,20 @@ Rules:
     @staticmethod
     def _format_categories(categories: list[dict[str, str]]) -> str:
         return "\n".join(f'  - "{c["name"]}": {c["description"]}' for c in categories)
+
+    @staticmethod
+    def _format_existing(memories: list[StoredMemory]) -> str:
+        """Render stored memories grouped by category, for injection into the extraction prompt."""
+        groups: dict[str, list[str]] = {}
+        for m in memories:
+            text = m.text.strip()
+            if text:
+                groups.setdefault(m.category, []).append(text)
+        lines: list[str] = []
+        for cat, texts in groups.items():
+            lines.append(f"{cat}:")
+            lines.extend(f"  - {t}" for t in texts)
+        return "\n".join(lines)
 
     def _ensure_dirs(self) -> None:
         self.memory_root.mkdir(parents=True, exist_ok=True)

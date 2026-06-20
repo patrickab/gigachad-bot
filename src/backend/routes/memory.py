@@ -16,6 +16,8 @@ MemoryStoreDep = Annotated[MemoryStore, Depends(get_memory_store)]
 class MemoryExtractRequest(BaseModel):
     messages: list[dict[str, str]]
     project_slug: str | None = None
+    chat_id: str | None = None
+    scope: str | None = None  # "global" | "project" | None (both)
 
 
 class MemoryReviewRequest(BaseModel):
@@ -52,7 +54,9 @@ async def extract_memories(
 ) -> dict:
     try:
         with request_client() as client:
-            result = await store.extract(client, req.messages, project_slug=req.project_slug)
+            result = await store.extract(
+                client, req.messages, project_slug=req.project_slug, chat_id=req.chat_id, scope=req.scope
+            )
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     return {
@@ -111,7 +115,7 @@ async def cancel_memories(
     store: MemoryStoreDep,
 ) -> dict:
     try:
-        await store.cancel_async(review_id=req.review_id, project_slug=req.project_slug)
+        await store.cancel_async(review_id=req.review_id)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     return {"status": "cancelled"}

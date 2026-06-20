@@ -28,7 +28,7 @@ function AttachmentIcon({ mime }: { mime: string }) {
   return <FileText className="h-3.5 w-3.5 text-ink-muted shrink-0" />
 }
 
-function AttachmentViewer({ attachment, chatId, slug, onContentChange }: { attachment: Attachment; chatId: string; slug: string | null; onContentChange?: (newContent: string) => void }) {
+function AttachmentViewer({ attachment, chatId, slug, onContentChange, pdfWide, onTogglePdfWide }: { attachment: Attachment; chatId: string; slug: string | null; onContentChange?: (newContent: string) => void; pdfWide?: boolean; onTogglePdfWide?: () => void }) {
   if (attachment.mime.startsWith("image/")) {
     return (
       <div className="p-2">
@@ -39,7 +39,7 @@ function AttachmentViewer({ attachment, chatId, slug, onContentChange }: { attac
 
   if (attachment.mime === "application/pdf") {
     const parsedContent = attachment.parsedMd
-    return <PdfAttachmentViewer url={attachment.url} parsedContent={parsedContent} chatId={chatId} slug={slug} />
+    return <PdfAttachmentViewer url={attachment.url} parsedContent={parsedContent} chatId={chatId} slug={slug} pdfWide={pdfWide} onTogglePdfWide={onTogglePdfWide} />
   }
 
   const content = attachment.parsedMd ?? attachment.content
@@ -55,12 +55,12 @@ function AttachmentViewer({ attachment, chatId, slug, onContentChange }: { attac
   return <p className="p-2 text-xs text-ink-subtle">No preview available</p>
 }
 
-function PdfAttachmentViewer({ url, parsedContent, chatId, slug }: { url: string; parsedContent?: string; chatId: string; slug: string | null }) {
+function PdfAttachmentViewer({ url, parsedContent, chatId, slug, pdfWide, onTogglePdfWide }: { url: string; parsedContent?: string; chatId: string; slug: string | null; pdfWide?: boolean; onTogglePdfWide?: () => void }) {
   const [mdOpen, setMdOpen] = useState(false)
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 min-h-0">
-        <PdfViewer url={url} />
+        <PdfViewer url={url} isWide={pdfWide} onToggleWide={onTogglePdfWide} />
       </div>
       {parsedContent && (
         <div className="border-t border-divider">
@@ -91,6 +91,8 @@ function ContextBody({
   onToggleActive,
   onRemoveAttachment,
   onAttachmentContentChange,
+  pdfWide,
+  onTogglePdfWide,
 }: {
   chatId: string
   slug: string | null
@@ -100,6 +102,8 @@ function ContextBody({
   onToggleActive?: (messageIndex: number, attachmentName: string) => void
   onRemoveAttachment: (messageIndex: number, attachmentName: string) => void
   onAttachmentContentChange?: (messageIndex: number, attachmentName: string, newContent: string) => void
+  pdfWide?: boolean
+  onTogglePdfWide?: () => void
 }) {
   const isExpanded = (mi: number, name: string) =>
     expandedEntries.some((e) => e.messageIndex === mi && e.attachmentName === name)
@@ -150,8 +154,8 @@ function ContextBody({
               </button>
             </div>
             {expanded && (
-              <div className="max-h-[60vh] overflow-y-auto">
-                <AttachmentViewer attachment={att} chatId={chatId} slug={slug} onContentChange={onAttachmentContentChange ? (nc: string) => onAttachmentContentChange(mi, att.name, nc) : undefined} />
+              <div className={att.mime === "application/pdf" ? "h-[60vh]" : "max-h-[60vh] overflow-y-auto"}>
+                <AttachmentViewer attachment={att} chatId={chatId} slug={slug} onContentChange={onAttachmentContentChange ? (nc: string) => onAttachmentContentChange(mi, att.name, nc) : undefined} pdfWide={pdfWide} onTogglePdfWide={onTogglePdfWide} />
               </div>
             )}
           </div>
@@ -231,6 +235,8 @@ export interface ChatSidebarConfig {
   onOpenObsidian?: () => void
   isElementOpen: (id: string) => boolean
   onElementOpenChange: (id: string, open: boolean) => void
+  pdfWide?: boolean
+  onTogglePdfWide?: () => void
 }
 
 export const getChatSidebarConfig = ({
@@ -247,6 +253,8 @@ export const getChatSidebarConfig = ({
   onOpenObsidian,
   isElementOpen,
   onElementOpenChange,
+  pdfWide,
+  onTogglePdfWide,
 }: ChatSidebarConfig): ChatSidebarElementConfig[] => {
   const elements: ChatSidebarElementConfig[] = []
 
@@ -279,6 +287,8 @@ export const getChatSidebarConfig = ({
             onToggleActive={onToggleAttachmentActive}
             onRemoveAttachment={onRemoveAttachment}
             onAttachmentContentChange={onAttachmentContentChange}
+            pdfWide={pdfWide}
+            onTogglePdfWide={onTogglePdfWide}
           />
         ),
     })

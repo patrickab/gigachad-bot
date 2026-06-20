@@ -49,7 +49,7 @@ export async function* parseMorphicStream(
         const p = JSON.parse(json)
         if (p.type === "text-delta" && typeof p.delta === "string") {
           yield { type: "text", text: p.delta }
-        } else if (p.type === "tool-output-available" && p.output?.state === "complete" && p.output.results) {
+        } else if (p.type === "tool-output-available" && p.output?.state === "complete" && p.output.results && !p.preliminary) {
           const o = p.output
           yield {
             type: "source",
@@ -58,6 +58,8 @@ export async function* parseMorphicStream(
             query: o.query ?? "",
             citationMap: o.citationMap,
           }
+        } else if (p.type === "text" && typeof p.text === "string") {
+          yield { type: "text", text: p.text }
         } else if (p.type === "error") {
           yield { type: "error", text: p.errorText ?? "Unknown error" }
         }

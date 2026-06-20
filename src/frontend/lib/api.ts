@@ -318,10 +318,14 @@ function memoryRequest<T>(path: string, body: Record<string, unknown>): Promise<
 export async function extractMemories(
   messages: { role: string; content: string }[],
   projectSlug?: string | null,
+  chatId?: string | null,
+  scope?: "global" | "project" | null,
 ): Promise<MemoryExtractResponse> {
   return memoryRequest<MemoryExtractResponse>("/memory/extract", {
     messages,
     project_slug: projectSlug ?? null,
+    chat_id: chatId ?? null,
+    scope: scope ?? null,
   })
 }
 

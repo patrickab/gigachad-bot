@@ -145,7 +145,7 @@ async def morphic_search(req: MorphicSearchRequest) -> StreamingResponse:
         "isNewChat": True,
     }
 
-    _PROVIDER_MAP = {"gemini": "google", "deepseek": "deepseek", "ollama": "ollama"}
+    _PROVIDER_MAP = {"gemini": "google", "deepseek": "openai-compatible", "ollama": "ollama"}
 
     cookies: dict[str, str] = {"searchMode": req.search_depth}
     if req.model:
@@ -172,8 +172,10 @@ async def morphic_search(req: MorphicSearchRequest) -> StreamingResponse:
             ) as response,
         ):
             if response.status_code != 200:
+                import json as _json
+
                 error_body = await response.aread()
-                yield f"event: error\ndata: {error_body.decode(errors='replace')}\n\n"
+                yield f"data: {_json.dumps({'type': 'error', 'errorText': error_body.decode(errors='replace')})}\n"
                 return
             async for line in response.aiter_lines():
                 if line.strip():

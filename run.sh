@@ -6,7 +6,7 @@ export PATH="$(pwd)/.venv/bin:$PATH"
 
 echo "Starting backend on http://127.0.0.1:8001"
 source .venv/bin/activate
-uvicorn src.backend.server:app --host 127.0.0.1 --port 8001 &
+uvicorn src.backend.server:app --host 127.0.0.1 --port 8001 --reload --reload-dir src &
 BACKEND_PID=$!
 
 echo "Starting frontend on http://127.0.0.1:2999"

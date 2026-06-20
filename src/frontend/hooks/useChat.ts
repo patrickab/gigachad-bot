@@ -8,6 +8,8 @@ import { useChatStream } from "./useChatStream"
 import { useResearch, type ResearchParams } from "./useResearch"
 import { morphicFetch, parseMorphicStream } from "@/lib/morphic"
 
+const MORPHIC_FLUSH_MS = 60
+
 export type { ResearchParams }
 
 export interface UseChatReturn {
@@ -31,12 +33,13 @@ export interface UseChatReturn {
 }
 
 export function useChat(): UseChatReturn {
-  const { messages, isStreaming, send, regenerateAt, cancel, deleteMessagePair, addMessagePair, setMessages, totalUsage, setTotalUsage } = useChatStream()
+  const { messages, isStreaming, send, regenerateAt, cancel: cancelStream, deleteMessagePair, addMessagePair, setMessages, totalUsage, setTotalUsage } = useChatStream()
   const { research: doResearch, error: researchError } = useResearch()
 
   const [models, setModels] = useState<ModelsResponse | null>(null)
   const [prompts, setPrompts] = useState<Record<string, string>>({})
   const [morphicError, setMorphicError] = useState<string | null>(null)
+  const [morphicSearching, setMorphicSearching] = useState(false)
   const morphicAbortRef = useRef<(() => void) | null>(null)
 
   const error = researchError || morphicError
@@ -52,6 +55,8 @@ export function useChat(): UseChatReturn {
 
   const updateLast = useCallback((msg: Message) => {
     setMessages((prev) => {
+      const last = prev[prev.length - 1]
+      if (!last || last.role !== "assistant") return prev
       const copy = [...prev]
       copy[copy.length - 1] = { ...msg }
       return copy
@@ -64,6 +69,7 @@ export function useChat(): UseChatReturn {
 
   const morphicSearch = useCallback(async (params: MorphicSearchParams) => {
     setMorphicError(null)
+    setMorphicSearching(true)
 
     const userMsg: Message = { role: "user", content: params.query }
     const assistantMsg: Message = { role: "assistant", content: "" }
@@ -71,26 +77,64 @@ export function useChat(): UseChatReturn {
     appendMessage(userMsg)
     appendMessage(assistantMsg)
 
+    let lastFlush = 0
+    let pending = false
+    let flushTimer: ReturnType<typeof setTimeout> | null = null
+
+    const flush = () => {
+      pending = false
+      lastFlush = performance.now()
+      setMessages((prev) => {
+        const last = prev[prev.length - 1]
+        if (!last || last.role !== "assistant") return prev
+        const copy = [...prev]
+        copy[copy.length - 1] = {
+          role: "assistant",
+          content: assistantMsg.content,
+          morphic_result: assistantMsg.morphic_result
+            ? {
+                query: assistantMsg.morphic_result.query,
+                sources: assistantMsg.morphic_result.sources,
+                images: assistantMsg.morphic_result.images,
+                citationMap: assistantMsg.morphic_result.citationMap,
+              }
+            : undefined,
+        }
+        return copy
+      })
+    }
+
+    const scheduleFlush = () => {
+      if (pending) return
+      const now = performance.now()
+      const delay = Math.max(0, MORPHIC_FLUSH_MS - (now - lastFlush))
+      if (delay <= 0) {
+        flush()
+      } else {
+        pending = true
+        flushTimer = setTimeout(flush, delay)
+      }
+    }
+
     try {
       const { promise, abort } = morphicFetch(params)
       morphicAbortRef.current = abort
-
-      const acc = { text: "", sources: [] as { title: string; url: string; content: string }[], images: [] as string[], query: params.query, citationMap: undefined as Record<string, { title: string; url: string; content: string }> | undefined }
 
       const res = await promise
 
       for await (const event of parseMorphicStream(res)) {
         if (event.type === "text" && event.text) {
-          acc.text += event.text
-          assistantMsg.content = acc.text
-          updateLast(assistantMsg)
+          assistantMsg.content += event.text
+          scheduleFlush()
         } else if (event.type === "source") {
-          if (event.sources) acc.sources = [...acc.sources, ...event.sources]
-          if (event.images) acc.images = [...new Set([...acc.images, ...event.images])]
-          if (event.query) acc.query = event.query
-          if (event.citationMap) acc.citationMap = event.citationMap
-          assistantMsg.morphic_result = { query: acc.query, sources: acc.sources, images: acc.images, citationMap: acc.citationMap }
-          updateLast(assistantMsg)
+          const prev = assistantMsg.morphic_result
+          assistantMsg.morphic_result = {
+            query: event.query ?? prev?.query ?? params.query,
+            sources: event.sources ? [...(prev?.sources ?? []), ...event.sources] : (prev?.sources ?? []),
+            images: event.images ? [...new Set([...(prev?.images ?? []), ...event.images])] : (prev?.images ?? []),
+            citationMap: event.citationMap ?? prev?.citationMap,
+          }
+          scheduleFlush()
         } else if (event.type === "error") {
           throw new Error(event.text || "Morphic search error")
         }
@@ -100,13 +144,23 @@ export function useChat(): UseChatReturn {
       const msg = (e as Error)?.message ?? "Search failed"
       setMorphicError(msg)
       assistantMsg.content = assistantMsg.content || `Search error: ${msg}`
-      updateLast(assistantMsg)
+      if (flushTimer) clearTimeout(flushTimer)
+      flush()
     } finally {
+      if (flushTimer) clearTimeout(flushTimer)
+      flush()
       morphicAbortRef.current = null
+      setMorphicSearching(false)
     }
-  }, [appendMessage, updateLast])
+  }, [appendMessage, setMessages])
+
+  const cancel = useCallback(() => {
+    cancelStream()
+    morphicAbortRef.current?.()
+  }, [cancelStream])
 
   const reset = useCallback(async () => {
+    morphicAbortRef.current?.()
     setMessages([])
     setTotalUsage({ prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 })
   }, [setMessages, setTotalUsage])
@@ -122,7 +176,7 @@ export function useChat(): UseChatReturn {
 
   return {
     messages,
-    isStreaming,
+    isStreaming: isStreaming || morphicSearching,
     send,
     regenerateAt,
     cancel,

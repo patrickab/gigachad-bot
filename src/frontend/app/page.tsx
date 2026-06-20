@@ -65,7 +65,9 @@ function defaultSendParams(config: TabConfig, prompts: Record<string, string>, o
 }
 
 const COMMANDS: CommandMenuItem[] = [
-  { command: "/memorize" },
+  { command: "/memorize", keywords: ["memory", "both"] },
+  { command: "/memorize-global", keywords: ["memory", "global", "profile"] },
+  { command: "/memorize-project", keywords: ["memory", "project"] },
   { command: "/obsidian-load" },
 ]
 
@@ -303,10 +305,12 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       if (e.altKey && e.key === "r") { e.preventDefault(); reset() }
       if (e.altKey && e.key.toLowerCase() === "m") {
         e.preventDefault()
-        if (commandBar.state.phase === "idle") {
+        // Memory is extracted from the main branch only — branches don't influence memories.
+        if (commandBar.state.phase === "idle" && branchMessageIdx == null) {
           commandBar.submitCommand(
             messages.map((m) => ({ role: m.role, content: m.content })),
             activeProject,
+            chatId,
             "/memorize",
           )
         }
@@ -334,7 +338,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     return () => {
       window.removeEventListener("keydown", handler, true)
     }
-  }, [isActive, isTitled, handleQuickSave, openSaveModal, reset, commandBar.open, commandBar.submitCommand, commandBar.state.phase, messages, activeProject, obsidianEnabled, openObsidian])
+  }, [isActive, isTitled, handleQuickSave, openSaveModal, reset, commandBar.open, commandBar.submitCommand, commandBar.state.phase, messages, activeProject, chatId, branchMessageIdx, obsidianEnabled, openObsidian])
 
   const runCommand = useCallback((command: string) => {
     if (command === "/obsidian-load") {
@@ -342,14 +346,23 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       openObsidian()
       return
     }
+    // Memory is extracted from the main branch only — branches don't influence memories.
+    if (command.startsWith("/memorize") && branchMessageIdx != null) {
+      commandBar.close()
+      return
+    }
     commandBar.submitCommand(
       messages.map((m) => ({ role: m.role, content: m.content })),
       activeProject,
+      chatId,
       command,
     )
-  }, [commandBar.submitCommand, commandBar.close, messages, activeProject, openObsidian])
+  }, [commandBar.submitCommand, commandBar.close, messages, activeProject, chatId, branchMessageIdx, openObsidian])
 
-  const commandItems = COMMANDS.filter((cmd) => cmd.command !== "/obsidian-load" || obsidianEnabled)
+  const commandItems = COMMANDS.filter((cmd) =>
+    (cmd.command !== "/obsidian-load" || obsidianEnabled) &&
+    (cmd.command !== "/memorize-project" || activeProject != null)
+  )
 
   const handleSend = useCallback(
     async (text: string, attachments: Attachment[]) => {
@@ -358,12 +371,16 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         openObsidian()
         return
       }
-      if (trimmed === "/memorize" || trimmed.startsWith("/memorize ")) {
-        await commandBar.submitCommand(
-          messages.map((m) => ({ role: m.role, content: m.content })),
-          activeProject,
-          trimmed,
-        )
+      if (trimmed === "/memorize" || trimmed.startsWith("/memorize ") || trimmed.startsWith("/memorize-")) {
+        // Memory is extracted from the main branch only — branches don't influence memories.
+        if (branchMessageIdx == null) {
+          await commandBar.submitCommand(
+            messages.map((m) => ({ role: m.role, content: m.content })),
+            activeProject,
+            chatId,
+            trimmed,
+          )
+        }
         return
       }
 
@@ -443,7 +460,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         })
       }
     },
-    [morphicSearchEnabled, researchEnabled, studyEnabled, chatId, activeProject, config, send, research, morphicSearch, setMessages, toggleStudy, commandBar.submitCommand, messages, openObsidian],
+    [morphicSearchEnabled, researchEnabled, studyEnabled, chatId, branchMessageIdx, activeProject, config, send, research, morphicSearch, setMessages, toggleStudy, commandBar.submitCommand, messages, openObsidian],
   )
 
   const handleRegenerate = useCallback(

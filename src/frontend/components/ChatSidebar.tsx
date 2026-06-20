@@ -22,13 +22,16 @@ interface ChatSidebarProps {
   elements: ChatSidebarElementConfig[]
   width: number
   onWidthChange: (w: number) => void
+  maxWidth?: number
 }
 
-export function ChatSidebar({ elements, width, onWidthChange }: ChatSidebarProps) {
+export function ChatSidebar({ elements, width, onWidthChange, maxWidth: maxWidthProp }: ChatSidebarProps) {
+  const effectiveMax = maxWidthProp ?? MAX_SIDEBAR_WIDTH
   const dragging = useRef(false)
   const motionWidth = useMotionValue(width)
 
   useEffect(() => {
+    if (dragging.current) return
     const controls = animate(motionWidth, width, {
       type: "spring",
       stiffness: 400,
@@ -50,7 +53,7 @@ export function ChatSidebar({ elements, width, onWidthChange }: ChatSidebarProps
       const onMouseMove = (ev: MouseEvent) => {
         if (!dragging.current) return
         const newPx = startWidth + (startX - ev.clientX)
-        const clamped = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, newPx))
+        const clamped = Math.min(effectiveMax, Math.max(MIN_SIDEBAR_WIDTH, newPx))
         motionWidth.set(clamped)
       }
 
@@ -58,7 +61,7 @@ export function ChatSidebar({ elements, width, onWidthChange }: ChatSidebarProps
         if (!dragging.current) return
         dragging.current = false
         const finalWidth = motionWidth.get()
-        const clamped = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, finalWidth))
+        const clamped = Math.min(effectiveMax, Math.max(MIN_SIDEBAR_WIDTH, finalWidth))
         motionWidth.set(clamped)
         onWidthChange(clamped)
         document.removeEventListener("mousemove", onMouseMove)
@@ -68,7 +71,7 @@ export function ChatSidebar({ elements, width, onWidthChange }: ChatSidebarProps
       document.addEventListener("mousemove", onMouseMove)
       document.addEventListener("mouseup", onMouseUp)
     },
-    [motionWidth, onWidthChange]
+    [motionWidth, onWidthChange, effectiveMax]
   )
 
   return (

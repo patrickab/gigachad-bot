@@ -6,20 +6,7 @@ import remarkBreaks from "remark-breaks"
 import { cloneElement, isValidElement, memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import { highlightCode } from "@/lib/markdown-syntax-highlighting"
-import {
-  useFloating,
-  useHover,
-  useDismiss,
-  useInteractions,
-  offset,
-  flip,
-  shift,
-  arrow,
-  autoUpdate,
-  FloatingArrow,
-  FloatingPortal,
-  useTransitionStyles,
-} from "@floating-ui/react"
+import { createPortal } from "react-dom"
 import { Check, Copy, Globe } from "lucide-react"
 import "katex/dist/katex.min.css"
 
@@ -209,68 +196,57 @@ const PROSE_COMPONENTS: Components = {
 }
 
 function CitationPill({ children, href, title, ...props }: any) {
-  const [open, setOpen] = useState(false)
-  const arrowRef = useRef(null)
-
-  const { refs, floatingStyles, context } = useFloating({
-    open,
-    onOpenChange: setOpen,
-    placement: "top",
-    middleware: [offset(8), flip(), shift({ padding: 8 }), arrow({ element: arrowRef })],
-    whileElementsMounted: autoUpdate,
-  })
-
-  const hover = useHover(context, { move: false, delay: { open: 80, close: 150 } })
-  const dismiss = useDismiss(context)
-  const { getReferenceProps, getFloatingProps } = useInteractions([hover, dismiss])
-
-  const { isMounted, styles: transitionStyles } = useTransitionStyles(context, {
-    duration: 150,
-    initial: { opacity: 0, transform: "scale(0.95)" },
-  })
+  const pillRef = useRef<HTMLAnchorElement>(null)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  const hideTimer = useRef<ReturnType<typeof setTimeout>>(null)
 
   const popupTitle = (props["data-title"] as string) || title || ""
   const popupContent = (props["data-content"] as string) || ""
 
+  const show = useCallback(() => {
+    if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = null }
+    const el = pillRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    setPos({ top: r.top - 8, left: r.left + r.width / 2 })
+  }, [])
+
+  const hide = useCallback(() => {
+    hideTimer.current = setTimeout(() => setPos(null), 150)
+  }, [])
+
   return (
     <>
       <a
-        ref={refs.setReference}
+        ref={pillRef}
         href={href}
         target="_blank"
         rel="noopener noreferrer"
         className="inline-flex items-center align-middle rounded-full bg-surface-elevated/40 border border-divider-strong/40 px-1.5 py-0 text-[10px] text-ink-muted hover:bg-hover hover:border-divider-strong transition-colors no-underline"
-        {...getReferenceProps()}
+        onMouseEnter={show}
+        onMouseLeave={hide}
       >
         {children}
       </a>
-      {isMounted && (
-        <FloatingPortal>
-          <div
-            ref={refs.setFloating}
-            style={{ ...floatingStyles, ...transitionStyles }}
-            className="w-64 rounded-md border border-divider bg-surface p-2.5 shadow-[var(--shadow-xl)] z-50"
-            {...getFloatingProps()}
-          >
-            <span className="flex items-center gap-1.5 mb-0.5">
-              <Globe className="h-2.5 w-2.5 text-ink shrink-0" />
-              <span className="text-[10px] font-medium text-ink truncate">{children}</span>
-            </span>
-            {popupTitle && (
-              <span className="text-[10px] font-medium text-ink mb-0.5 line-clamp-2 block">{popupTitle}</span>
-            )}
-            {popupContent && (
-              <span className="text-[9px] text-ink-subtle line-clamp-3 block">{popupContent}</span>
-            )}
-            <FloatingArrow
-              ref={arrowRef}
-              context={context}
-              className="fill-surface [&>path:first-of-type]:stroke-divider"
-              width={10}
-              height={5}
-            />
-          </div>
-        </FloatingPortal>
+      {pos && createPortal(
+        <div
+          style={{ position: "fixed", top: pos.top, left: pos.left, transform: "translate(-50%, -100%)", zIndex: 9999 }}
+          className="w-64 rounded-md border border-divider bg-surface p-2.5 shadow-[var(--shadow-xl)]"
+          onMouseEnter={show}
+          onMouseLeave={hide}
+        >
+          <span className="flex items-center gap-1.5 mb-0.5">
+            <Globe className="h-2.5 w-2.5 text-ink shrink-0" />
+            <span className="text-[10px] font-medium text-ink truncate">{children}</span>
+          </span>
+          {popupTitle && (
+            <span className="text-[10px] font-medium text-ink mb-0.5 line-clamp-2 block">{popupTitle}</span>
+          )}
+          {popupContent && (
+            <span className="text-[9px] text-ink-subtle line-clamp-3 block">{popupContent}</span>
+          )}
+        </div>,
+        document.body
       )}
     </>
   )

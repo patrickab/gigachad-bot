@@ -30,7 +30,7 @@ export function renderMemoriesMarkdown(
   for (const { category, items } of sections) {
     if (items.length === 0) continue
     parts.push(`\n## ${formatCategoryHeading(category.name)}`)
-    for (const m of items) parts.push(`- ${m.text}`)
+    for (const m of items) parts.push(`- ${"text" in m ? m.text : m.memory}`)
   }
   return parts.join("\n")
 }
@@ -427,9 +427,9 @@ function DocumentWorkspace({
   const anyLoading = previews.some((p) => p.loading)
   const ActiveIcon = active.icon
   const memories = active.revised_memories
+  const activeCategories = active.scope === "global" ? globalCategories : projectCategories
   const revisedMarkdown = renderMemoriesMarkdown(memories, active.title, activeCategories).trimEnd() + "\n"
   const diff = active.loading ? "" : computeLineDiff(active.existing_markdown || "", revisedMarkdown)
-  const activeCategories = active.scope === "global" ? globalCategories : projectCategories
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}

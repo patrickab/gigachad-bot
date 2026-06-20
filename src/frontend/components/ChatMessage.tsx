@@ -66,6 +66,14 @@ export function AssistantMessageContent({
   }, [content])
 
   if (morphic_result) {
+    if (!content.trim() && isStreaming) {
+      return (
+        <span role="status" className="inline-flex items-center gap-2 text-ink text-sm">
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-ink-faint" aria-hidden="true" />
+          <span>Searching…</span>
+        </span>
+      )
+    }
     return <MorphicSearchResult content={content} morphic_result={morphic_result} />
   }
 
@@ -141,7 +149,7 @@ function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBran
               <MessageAttachments attachments={attachments} onClick={onAttachmentClick ?? (() => {})} />
             )}
           </>
-        ) : content && !isResearchRunning ? (
+        ) : (content || morphic_result) && !isResearchRunning ? (
           <AssistantMessageContent
             content={content}
             isStreaming={isStreaming}
