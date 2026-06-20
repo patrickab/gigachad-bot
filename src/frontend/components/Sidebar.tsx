@@ -144,7 +144,6 @@ export function Sidebar({
           <VaultTree
             sectionIcon={FolderKanban}
             sectionTitle="Projects"
-            storageKey="expanded_project_folders"
             count={projects.length}
             items={projectItems}
             collapsed={collapsed}

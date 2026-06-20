@@ -405,7 +405,7 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
   } = useTree<T>()
 
   const isVault = item.type === "vault"
-  const isExpanded = expandedFolders.has(item.id)
+  const isExpanded = isVault ? (item.isActive ?? false) : expandedFolders.has(item.id)
   const BranchIcon = item.icon || Folder
   const hasChildren = item.children && item.children.length > 0
   const paddingLeft = INDENT_BASE + depth * INDENT_STEP
@@ -414,9 +414,7 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
     <div>
       <div
         className={cn(
-          "flex items-center gap-1.5 rounded-md transition-all duration-200 ease-out group",
-          isVault && item.isActive && "bg-surface-elevated border border-divider-strong",
-          isVault && !item.isActive && "border border-transparent",
+          "flex items-center gap-1.5 rounded-md transition-colors duration-200 ease-out group",
           dragOverId === item.id && "ring-1 ring-ink-muted bg-surface-elevated",
         )}
         onDragOver={(e) => { e.stopPropagation(); onDragOver(e, item.id) }}
@@ -428,28 +426,29 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
           onClick={() => {
             if (isVault) {
               onVaultClick?.(item.id)
-              if (item.isActive) {
-                if (isExpanded) toggleFolder(item.id)
-              } else {
-                if (!isExpanded) toggleFolder(item.id)
-              }
             } else {
               toggleFolder(item.id)
             }
           }}
           className={cn(
             "flex items-center gap-1.5 py-1 flex-1 text-left transition-colors",
-            !isVault && "text-ink-subtle hover:text-ink",
+            isVault
+              ? item.isActive ? "text-ink" : "text-ink-subtle hover:text-ink-muted"
+              : "text-ink-subtle hover:text-ink",
           )}
         >
           <ChevronIcon open={isExpanded} />
           <BranchIcon className={cn(
             "h-3.5 w-3.5 shrink-0",
-            isVault && item.isActive ? "text-ink" : "text-ink-muted",
+            isVault
+              ? item.isActive ? "text-ink" : "text-ink-subtle"
+              : "text-ink-muted",
           )} />
           <span className={cn(
             "text-[11px] font-medium truncate",
-            isVault && item.isActive ? "text-ink font-semibold" : "text-ink-muted hover:text-ink",
+            isVault
+              ? item.isActive ? "text-ink" : "text-ink-subtle"
+              : undefined,
           )}>
             {item.label}
           </span>
