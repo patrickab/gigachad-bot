@@ -4,13 +4,9 @@ version = "0.1.0"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
-    "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
     "fastapi>=0.137.1",
-    "fastembed>=0.8.0",
-    "google-genai>=2.8.0",
     "gpt-researcher>=0.15.1",
     "langchain-litellm>=0.7.0",
-    "langchain-ollama>=1.1.0",
     "litellm>=1.89.2",
     "llm-baseclient @ git+https://github.com/patrickab/llm-baseclient.git@main",
     "mineru[all]>=3.3.1",
@@ -66,5 +62,3 @@ section-order = ["future", "standard-library", "third-party", "first-party", "lo
 # Enables Ruff formatter with default options (Black-compatible)
 [tool.ruff.format]
 
-[tool.uv.sources]
-en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }

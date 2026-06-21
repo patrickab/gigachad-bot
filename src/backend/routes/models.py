@@ -7,7 +7,7 @@ from llm_baseclient.config import (
     # MODELS_OPENAI
 )
 
-from lib.prompts import (
+from lib.prompts.user import (
     SYS_ADVISOR,
     SYS_ARTICLE,
     SYS_CONCEPT_IN_DEPTH,

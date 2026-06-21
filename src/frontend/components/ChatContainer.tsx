@@ -2,16 +2,376 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence } from "framer-motion"
-import type { Message, Attachment, ProjectDocument } from "@/lib/types"
+import dynamic from "next/dynamic"
+import type { Message, Attachment, MorphicSearchResult, ProjectDocument } from "@/lib/types"
 import { ChatMessage, AssistantMessageContent } from "./ChatMessage"
 import { ChatInput } from "./ChatInput"
-import { ChatSidebar } from "./ChatSidebar"
-import { getChatSidebarConfig } from "./chatSidebarConfig"
+import { ChatSidebar, type ChatSidebarElementConfig } from "./ChatSidebar"
+import { rewriteImages } from "@/lib/api"
 
-import { ChevronLeft, ChevronRight, ChevronsLeftRight, ChevronsRightLeft, GitFork, User } from "lucide-react"
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronsLeftRight, ChevronsRightLeft, FileText, FileType, Globe, GitFork, Image as ImageIcon, Library, Plus, User, X } from "lucide-react"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { cn } from "@/lib/utils"
 import { ElevationProvider, ElevatedContainer } from "./ElevatedContainer"
+
+const PdfViewer = dynamic(() => import("./PdfViewer").then((m) => ({ default: m.PdfViewer })), { ssr: false })
+
+function ObsidianGlyph({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="M12 2 L20 8 L15 22 L6.5 20 L4 9 Z" />
+      <path d="M12 2 L11 13 L15 22" />
+      <path d="M11 13 L4 9" />
+      <path d="M11 13 L6.5 20" />
+    </svg>
+  )
+}
+
+function AttachmentIcon({ mime }: { mime: string }) {
+  if (mime.startsWith("image/")) return <ImageIcon className="h-3.5 w-3.5 text-ink shrink-0" />
+  if (mime === "application/pdf") return <FileText className="h-3.5 w-3.5 text-ink shrink-0" />
+  return <FileText className="h-3.5 w-3.5 text-ink-muted shrink-0" />
+}
+
+function AttachmentViewer({ attachment, chatId, slug, onContentChange, pdfWide, onTogglePdfWide }: { attachment: Attachment; chatId: string; slug: string | null; onContentChange?: (newContent: string) => void; pdfWide?: boolean; onTogglePdfWide?: () => void }) {
+  if (attachment.mime.startsWith("image/")) {
+    return (
+      <div className="p-2">
+        <img src={attachment.url} alt={attachment.name} className="max-w-full rounded border border-divider" />
+      </div>
+    )
+  }
+
+  if (attachment.mime === "application/pdf") {
+    const parsedContent = attachment.parsedMd
+    return <PdfAttachmentViewer url={attachment.url} parsedContent={parsedContent} chatId={chatId} slug={slug} pdfWide={pdfWide} onTogglePdfWide={onTogglePdfWide} />
+  }
+
+  const content = attachment.parsedMd ?? attachment.content
+  if (content) {
+    const rewritten = rewriteImages(content, chatId, slug)
+    return (
+      <div className="p-2 max-h-[500px] overflow-y-auto">
+        <LaTeXMarkdown content={rewritten} onContentChange={onContentChange} />
+      </div>
+    )
+  }
+
+  return <p className="p-2 text-xs text-ink-subtle">No preview available</p>
+}
+
+function PdfAttachmentViewer({ url, parsedContent, chatId, slug, pdfWide, onTogglePdfWide }: { url: string; parsedContent?: string; chatId: string; slug: string | null; pdfWide?: boolean; onTogglePdfWide?: () => void }) {
+  const [mdOpen, setMdOpen] = useState(false)
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex-1 min-h-0">
+        <PdfViewer url={url} isWide={pdfWide} onToggleWide={onTogglePdfWide} />
+      </div>
+      {parsedContent && (
+        <div className="border-t border-divider">
+          <button
+            onClick={() => setMdOpen((o) => !o)}
+            className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-ink-subtle hover:text-ink hover:bg-surface/50 transition-colors"
+          >
+            {mdOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+            Markdown
+          </button>
+          {mdOpen && (
+            <div className="p-2 max-h-[40vh] overflow-y-auto border-t border-divider">
+              <LaTeXMarkdown content={rewriteImages(parsedContent, chatId, slug)} />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ContextBody({
+  chatId,
+  slug,
+  allAttachments,
+  expandedEntries,
+  onToggleExpand,
+  onToggleActive,
+  onRemoveAttachment,
+  onAttachmentContentChange,
+  pdfWide,
+  onTogglePdfWide,
+}: {
+  chatId: string
+  slug: string | null
+  allAttachments: { messageIndex: number; attachment: Attachment }[]
+  expandedEntries: { messageIndex: number; attachmentName: string }[]
+  onToggleExpand: (messageIndex: number, attachmentName: string) => void
+  onToggleActive?: (messageIndex: number, attachmentName: string) => void
+  onRemoveAttachment: (messageIndex: number, attachmentName: string) => void
+  onAttachmentContentChange?: (messageIndex: number, attachmentName: string, newContent: string) => void
+  pdfWide?: boolean
+  onTogglePdfWide?: () => void
+}) {
+  const isExpanded = (mi: number, name: string) =>
+    expandedEntries.some((e) => e.messageIndex === mi && e.attachmentName === name)
+
+  if (allAttachments.length === 0) {
+    return (
+      <div className="flex items-center justify-center py-6 text-xs text-ink-faint">
+        No attachments
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      {allAttachments.map(({ messageIndex: mi, attachment: att }) => {
+        const expanded = isExpanded(mi, att.name)
+        return (
+          <div key={`${mi}-${att.name}`} className="border-b border-divider/50">
+            <div className="flex items-center gap-1 px-2 py-2 hover:bg-surface/50 transition-colors">
+              <button
+                type="button"
+                onClick={() => onToggleExpand(mi, att.name)}
+                className="rounded p-0.5 text-ink-faint hover:text-ink hover:bg-surface-elevated transition-colors shrink-0"
+                aria-label={expanded ? "Collapse preview" : "Expand preview"}
+              >
+                {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+              </button>
+              <button
+                type="button"
+                onClick={() => onToggleActive?.(mi, att.name)}
+                className={cn(
+                  "flex min-w-0 flex-1 items-center gap-2 text-left transition-colors",
+                  att.active ? "text-ink" : "text-ink-faint",
+                )}
+                title={att.active ? "Active in context — click to deactivate" : "Inactive — click to activate"}
+              >
+                <AttachmentIcon mime={att.mime} />
+                <span className="text-[11px] font-medium truncate">{att.name}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onRemoveAttachment(mi, att.name)}
+                className="rounded p-0.5 text-ink-faint hover:text-danger hover:bg-surface-elevated transition-colors shrink-0"
+                title="Remove"
+                aria-label="Remove attachment"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+            {expanded && (
+              <div className={att.mime === "application/pdf" ? "h-[60vh]" : "max-h-[60vh] overflow-y-auto"}>
+                <AttachmentViewer attachment={att} chatId={chatId} slug={slug} onContentChange={onAttachmentContentChange ? (nc: string) => onAttachmentContentChange(mi, att.name, nc) : undefined} pdfWide={pdfWide} onTogglePdfWide={onTogglePdfWide} />
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function DocumentsBody({ documents, onSelect }: { documents: ProjectDocument[]; onSelect?: (path: string) => void }) {
+  if (documents.length === 0) {
+    return (
+      <div className="flex items-center justify-center py-6 text-xs text-ink-faint">
+        No documents
+      </div>
+    )
+  }
+  return (
+    <div>
+      {documents.map((doc) => {
+        const Icon = doc.mime === "application/pdf" ? FileType : FileText
+        return (
+          <button
+            key={doc.path}
+            type="button"
+            onClick={() => onSelect?.(doc.path)}
+            title="Attach to current chat"
+            className="flex w-full items-center gap-2 border-b border-divider/50 px-2 py-2 text-left text-ink-muted hover:bg-surface/50 hover:text-ink transition-colors"
+          >
+            <Icon className="h-3.5 w-3.5 shrink-0 text-ink-faint" />
+            <span className="min-w-0 flex-1 truncate text-[11px] font-medium">{doc.name}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function SourcesBody({ result }: { result: MorphicSearchResult }) {
+  const seen = new Set<string>()
+  const sources = result.sources.filter((s) => !seen.has(s.url) && seen.add(s.url))
+  const images = [...new Set(result.images)]
+
+  if (sources.length === 0 && images.length === 0) {
+    return <div className="flex items-center justify-center py-6 text-xs text-ink-faint">No sources</div>
+  }
+
+  return (
+    <div className="p-2 space-y-2">
+      {images.length > 0 && (
+        <div className="mb-2">
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <ImageIcon className="h-3 w-3 text-ink-subtle" />
+            <span className="text-[9px] font-medium text-ink-subtle uppercase tracking-wider">Images</span>
+          </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            {images.slice(0, 4).map((img, i) => (
+              <a key={i} href={img} target="_blank" rel="noopener noreferrer">
+                <img
+                  src={img}
+                  alt=""
+                  className="w-full h-16 object-cover rounded border border-divider hover:border-ink-muted transition-colors"
+                  onError={(e) => {
+                    ;(e.target as HTMLImageElement).style.display = "none"
+                  }}
+                />
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+      {sources.map((s, i) => {
+        const domain = s.url.replace(/^https?:\/\/(www\.)?/, "").split("/")[0]
+        return (
+          <a
+            key={i}
+            href={s.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block rounded-md border border-divider bg-surface/40 p-2.5 hover:border-divider-strong hover:bg-surface/70 transition-colors"
+          >
+            <div className="flex items-center gap-1.5 mb-0.5">
+              <Globe className="h-2.5 w-2.5 text-ink shrink-0" />
+              <span className="text-[10px] font-medium text-ink truncate">{domain}</span>
+            </div>
+            {s.title && <div className="text-[10px] font-medium text-ink mb-0.5 line-clamp-2">{s.title}</div>}
+            {s.content && <div className="text-[9px] text-ink-subtle line-clamp-3">{s.content.slice(0, 150)}</div>}
+          </a>
+        )
+      })}
+    </div>
+  )
+}
+
+function buildSidebarElements({
+  chatId,
+  slug,
+  allAttachments,
+  expandedEntries,
+  onToggleExpand,
+  onToggleAttachmentActive,
+  onRemoveAttachment,
+  onAttachmentContentChange,
+  lastMorphicResult,
+  obsidianEnabled,
+  onOpenObsidian,
+  documents,
+  onSelectDocument,
+  onOpenDocuments,
+  isElementOpen,
+  onElementOpenChange,
+  pdfWide,
+  onTogglePdfWide,
+}: {
+  chatId: string
+  slug: string | null
+  allAttachments: { messageIndex: number; attachment: Attachment }[]
+  expandedEntries: { messageIndex: number; attachmentName: string }[]
+  onToggleExpand: (messageIndex: number, attachmentName: string) => void
+  onToggleAttachmentActive?: (messageIndex: number, attachmentName: string) => void
+  onRemoveAttachment: (messageIndex: number, attachmentName: string) => void
+  onAttachmentContentChange?: (messageIndex: number, attachmentName: string, newContent: string) => void
+  lastMorphicResult?: MorphicSearchResult
+  obsidianEnabled?: boolean
+  onOpenObsidian?: () => void
+  documents?: ProjectDocument[]
+  onSelectDocument?: (path: string) => void
+  onOpenDocuments?: () => void
+  isElementOpen: (id: string) => boolean
+  onElementOpenChange: (id: string, open: boolean) => void
+  pdfWide?: boolean
+  onTogglePdfWide?: () => void
+}): ChatSidebarElementConfig[] {
+  const elements: ChatSidebarElementConfig[] = []
+
+  if (allAttachments.length > 0 || obsidianEnabled) {
+    elements.push({
+      id: "context",
+      icon: FileText,
+      title: "Context",
+      badge: allAttachments.length > 0 ? allAttachments.length : undefined,
+      action: obsidianEnabled ? (
+        <button
+          type="button"
+          onClick={onOpenObsidian}
+          title="Load Obsidian note"
+          aria-label="Load Obsidian note"
+          className="rounded p-1 text-ink-faint hover:text-ink hover:bg-surface-elevated transition-colors"
+        >
+          <ObsidianGlyph className="h-3.5 w-3.5" />
+        </button>
+      ) : undefined,
+      open: isElementOpen("context"),
+      onOpenChange: (o) => onElementOpenChange("context", o),
+        body: (
+          <ContextBody
+            chatId={chatId}
+            slug={slug}
+            allAttachments={allAttachments}
+            expandedEntries={expandedEntries}
+            onToggleExpand={onToggleExpand}
+            onToggleActive={onToggleAttachmentActive}
+            onRemoveAttachment={onRemoveAttachment}
+            onAttachmentContentChange={onAttachmentContentChange}
+            pdfWide={pdfWide}
+            onTogglePdfWide={onTogglePdfWide}
+          />
+        ),
+    })
+  }
+
+  if (onOpenDocuments) {
+    const docs = documents ?? []
+    elements.push({
+      id: "documents",
+      icon: Library,
+      title: "Documents",
+      badge: docs.length > 0 ? docs.length : undefined,
+      action: (
+        <button
+          type="button"
+          onClick={onOpenDocuments}
+          title="Browse documents (Alt+X)"
+          aria-label="Browse documents"
+          className="rounded p-1 text-ink-faint hover:text-ink hover:bg-surface-elevated transition-colors"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </button>
+      ),
+      open: isElementOpen("documents"),
+      onOpenChange: (o) => onElementOpenChange("documents", o),
+      body: <DocumentsBody documents={docs} onSelect={onSelectDocument} />,
+    })
+  }
+
+  if (lastMorphicResult) {
+    const seen = new Set<string>()
+    const sources = lastMorphicResult.sources.filter((s) => !seen.has(s.url) && seen.add(s.url))
+    elements.push({
+      id: "sources",
+      icon: Globe,
+      title: lastMorphicResult.query,
+      badge: sources.length,
+      open: isElementOpen("sources"),
+      onOpenChange: (o) => onElementOpenChange("sources", o),
+      body: <SourcesBody result={lastMorphicResult} />,
+    })
+  }
+
+  return elements
+}
 
 const DEFAULT_EXPANDED_TAIL = 1
 const BOTTOM_GAP_PX = 16
@@ -341,7 +701,7 @@ export function ChatContainer({
 
   const sidebarElements = useMemo(
     () =>
-      getChatSidebarConfig({
+      buildSidebarElements({
         chatId,
         slug,
         allAttachments,

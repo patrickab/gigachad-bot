@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from config import VISION_MODEL
-from lib.prompts import SYS_OCR_TEXT_EXTRACTION
+from lib.prompts.internal import SYS_OCR_TEXT_EXTRACTION
 
 from .deps import decode_image, request_client, sse_event_stream
 
