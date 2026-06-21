@@ -660,7 +660,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         onCascadeDelete={handleCascadeDelete}
       />
       <main className="flex-1 min-w-0 flex flex-col relative bg-paper">
-        <header className="h-[60px] shrink-0 flex items-center px-4 gap-4 bg-paper z-40 border-b border-divider/50">
+        <header className="h-[60px] shrink-0 flex items-center px-4 gap-4 z-40 border-b border-divider/50 bg-paper/80 backdrop-blur-xl">
           {researchEnabled ? (
             <ResearchModelsBar
               models={models}

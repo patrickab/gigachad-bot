@@ -67,11 +67,22 @@
    --hover-overlay:        color-mix(in oklab, var(--ink) 6%,  transparent);
    --hover-overlay-strong: color-mix(in oklab, var(--ink) 10%, transparent);
  
-   /* --- Shadows (dark mode — stronger, warm-tinted) --- */
-   --shadow-sm:  0 2px 10px color-mix(in oklab, var(--shadow-color) 35%, transparent);
-   --shadow-md:  0 4px 15px color-mix(in oklab, var(--shadow-color) 35%, transparent);
-   --shadow-lg:  0 8px 30px color-mix(in oklab, var(--shadow-color) 35%, transparent);
-   --shadow-xl:  0 12px 30px color-mix(in oklab, var(--shadow-color) 35%, transparent);
+   /* --- Shadows (dark mode — layered, warm-tinted) --- */
+   --shadow-sm:  0 1px 2px color-mix(in oklab, var(--shadow-color) 30%, transparent),
+                 0 2px 8px color-mix(in oklab, var(--shadow-color) 20%, transparent);
+   --shadow-md:  0 1px 3px color-mix(in oklab, var(--shadow-color) 30%, transparent),
+                 0 4px 12px color-mix(in oklab, var(--shadow-color) 25%, transparent),
+                 0 8px 20px color-mix(in oklab, var(--shadow-color) 15%, transparent);
+   --shadow-lg:  0 2px 4px color-mix(in oklab, var(--shadow-color) 25%, transparent),
+                 0 8px 20px color-mix(in oklab, var(--shadow-color) 20%, transparent),
+                 0 16px 40px color-mix(in oklab, var(--shadow-color) 15%, transparent);
+   --shadow-xl:  0 2px 6px color-mix(in oklab, var(--shadow-color) 25%, transparent),
+                 0 12px 24px color-mix(in oklab, var(--shadow-color) 20%, transparent),
+                 0 24px 48px color-mix(in oklab, var(--shadow-color) 15%, transparent);
+
+   /* --- Subtle inner highlight for depth on containers --- */
+   --inner-highlight: inset 0 1px 0 0 oklch(100% 0 0 / 0.03);
+   --inner-highlight-strong: inset 0 1px 0 0 oklch(100% 0 0 / 0.06);
  }
 
   .light {
@@ -100,11 +111,22 @@
     --divider:        color-mix(in oklab, var(--ink) 24%, transparent);
     --divider-strong: color-mix(in oklab, var(--ink) 42%, transparent);
   
-    /* --- Shadows (light mode — softer, warm-tinted) --- */
-    --shadow-sm:  0 2px 10px color-mix(in oklab, var(--shadow-color) 8%, transparent);
-    --shadow-md:  0 4px 15px color-mix(in oklab, var(--shadow-color) 8%, transparent);
-    --shadow-lg:  0 8px 30px color-mix(in oklab, var(--shadow-color) 8%, transparent);
-    --shadow-xl:  0 12px 30px color-mix(in oklab, var(--shadow-color) 8%, transparent);
+    /* --- Shadows (light mode — layered, softer) --- */
+    --shadow-sm:  0 1px 2px color-mix(in oklab, var(--shadow-color) 6%, transparent),
+                  0 2px 8px color-mix(in oklab, var(--shadow-color) 5%, transparent);
+    --shadow-md:  0 1px 3px color-mix(in oklab, var(--shadow-color) 8%, transparent),
+                  0 4px 12px color-mix(in oklab, var(--shadow-color) 5%, transparent),
+                  0 8px 20px color-mix(in oklab, var(--shadow-color) 3%, transparent);
+    --shadow-lg:  0 2px 4px color-mix(in oklab, var(--shadow-color) 6%, transparent),
+                  0 8px 20px color-mix(in oklab, var(--shadow-color) 5%, transparent),
+                  0 16px 40px color-mix(in oklab, var(--shadow-color) 3%, transparent);
+    --shadow-xl:  0 2px 6px color-mix(in oklab, var(--shadow-color) 6%, transparent),
+                  0 12px 24px color-mix(in oklab, var(--shadow-color) 5%, transparent),
+                  0 24px 48px color-mix(in oklab, var(--shadow-color) 3%, transparent);
+
+    /* --- Inner highlight stronger on light mode --- */
+    --inner-highlight: inset 0 1px 0 0 oklch(100% 0 0 / 0.5);
+    --inner-highlight-strong: inset 0 1px 0 0 oklch(100% 0 0 / 0.7);
   }
 
 /* ============================================================
@@ -202,21 +224,36 @@ code, pre, .font-mono {
   }
 }
 
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9998;
+  background: radial-gradient(ellipse 80% 50% at 50% -5%, oklch(35% 0.015 85 / 0.12), transparent 70%);
+}
+
+.light body::before {
+  background: radial-gradient(ellipse 80% 50% at 50% -5%, oklch(85% 0.02 85 / 0.06), transparent 70%);
+}
+
 body::after {
   content: "";
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 9999;
-  opacity: 0.018;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.024;
+  background-image:
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n2'%3E%3CfeTurbulence type='turbulence' baseFrequency='0.35' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n2)'/%3E%3C/svg%3E");
   background-repeat: repeat;
-  background-size: 256px 256px;
+  background-size: 512px 512px, 256px 256px;
   mix-blend-mode: overlay;
 }
 
 .light body::after {
-  opacity: 0.015;
+  opacity: 0.018;
 }
 
 .markdown-body,
@@ -242,11 +279,11 @@ body::after {
 pre {
   overflow-x: auto;
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-md), var(--inner-highlight);
 }
 
 .light pre {
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-sm), var(--inner-highlight);
 }
 
 [data-rehype-pretty-code-figure] pre {
@@ -296,6 +333,7 @@ code {
   padding: 0.1em 0.35em;
   border-radius: var(--radius-sm);
   white-space: nowrap;
+  box-shadow: var(--inner-highlight);
 }
 
 .markdown-body strong,
@@ -502,6 +540,7 @@ code {
    toward paper. Both inherit the parent's polarity. */
 .bg-assistant-message {
   background-color: color-mix(in oklab, var(--paper), var(--surface) 50%);
+  background-image: linear-gradient(180deg, oklch(100% 0 0 / 0.015) 0%, transparent 40%);
 }
 
 .animate-shimmer {

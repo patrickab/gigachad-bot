@@ -112,9 +112,9 @@ export function Sidebar({
       initial={false}
       animate={animateWidth}
       transition={{ duration: 0.25, ease: "easeInOut" }}
-      className="shrink-0 border-r border-divider bg-paper flex flex-col overflow-hidden"
+      className="shrink-0 border-r border-divider bg-paper flex flex-col overflow-hidden shadow-[inset_-1px_0_0_0_oklch(100%_0_0/0.02)]"
     >
-      <div className="group flex items-center justify-between px-2 py-2 border-b border-divider h-[60px]">
+      <div className="group flex items-center justify-between px-2 py-2 border-b border-divider h-[60px] bg-paper/60 backdrop-blur-lg">
         {!collapsed && (
           <div className="flex items-center gap-1.5 px-2 min-w-0">
             <span className="text-base font-semibold tracking-tight text-ink truncate">GigaChat Bot</span>

@@ -534,7 +534,7 @@ export function ChatContainer({
           </div>
         </div>
         <div ref={inputAreaRef} className="absolute bottom-0 left-0 right-0 z-10 pointer-events-none">
-          <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-paper via-paper/20 to-transparent pointer-events-none" />
+          <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-paper via-paper/40 via-30% to-transparent pointer-events-none" />
           <div className="relative pb-6 pointer-events-auto">
             <div className="mx-auto" style={chatMaxWidth && !isWideMode ? { maxWidth: chatMaxWidth } : undefined}>
             <ChatInput
