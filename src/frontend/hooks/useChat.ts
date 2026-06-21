@@ -7,8 +7,7 @@ import type { ChatRequest, Message, ModelsResponse, MorphicSearchParams, Usage }
 import { useChatStream } from "./useChatStream"
 import { useResearch, type ResearchParams } from "./useResearch"
 import { morphicFetch, parseMorphicStream } from "@/lib/morphic"
-
-const MORPHIC_FLUSH_MS = 60
+import { createFlushBatcher } from "@/lib/streaming"
 
 export type { ResearchParams }
 
@@ -77,44 +76,7 @@ export function useChat(): UseChatReturn {
     appendMessage(userMsg)
     appendMessage(assistantMsg)
 
-    let lastFlush = 0
-    let pending = false
-    let flushTimer: ReturnType<typeof setTimeout> | null = null
-
-    const flush = () => {
-      pending = false
-      lastFlush = performance.now()
-      setMessages((prev) => {
-        const last = prev[prev.length - 1]
-        if (!last || last.role !== "assistant") return prev
-        const copy = [...prev]
-        copy[copy.length - 1] = {
-          role: "assistant",
-          content: assistantMsg.content,
-          morphic_result: assistantMsg.morphic_result
-            ? {
-                query: assistantMsg.morphic_result.query,
-                sources: assistantMsg.morphic_result.sources,
-                images: assistantMsg.morphic_result.images,
-                citationMap: assistantMsg.morphic_result.citationMap,
-              }
-            : undefined,
-        }
-        return copy
-      })
-    }
-
-    const scheduleFlush = () => {
-      if (pending) return
-      const now = performance.now()
-      const delay = Math.max(0, MORPHIC_FLUSH_MS - (now - lastFlush))
-      if (delay <= 0) {
-        flush()
-      } else {
-        pending = true
-        flushTimer = setTimeout(flush, delay)
-      }
-    }
+    const batch = createFlushBatcher(setMessages, assistantMsg)
 
     try {
       const { promise, abort } = morphicFetch(params)
@@ -125,7 +87,7 @@ export function useChat(): UseChatReturn {
       for await (const event of parseMorphicStream(res)) {
         if (event.type === "text" && event.text) {
           assistantMsg.content += event.text
-          scheduleFlush()
+          batch.schedule()
         } else if (event.type === "source") {
           const prev = assistantMsg.morphic_result
           assistantMsg.morphic_result = {
@@ -134,7 +96,7 @@ export function useChat(): UseChatReturn {
             images: event.images ? [...new Set([...(prev?.images ?? []), ...event.images])] : (prev?.images ?? []),
             citationMap: event.citationMap ?? prev?.citationMap,
           }
-          scheduleFlush()
+          batch.schedule()
         } else if (event.type === "error") {
           throw new Error(event.text || "Morphic search error")
         }
@@ -144,11 +106,8 @@ export function useChat(): UseChatReturn {
       const msg = (e as Error)?.message ?? "Search failed"
       setMorphicError(msg)
       assistantMsg.content = assistantMsg.content || `Search error: ${msg}`
-      if (flushTimer) clearTimeout(flushTimer)
-      flush()
     } finally {
-      if (flushTimer) clearTimeout(flushTimer)
-      flush()
+      batch.final()
       morphicAbortRef.current = null
       setMorphicSearching(false)
     }

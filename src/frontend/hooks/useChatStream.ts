@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react"
 import { createChatStream } from "@/lib/api"
 import { deactivateSentImages } from "@/lib/attachments"
+import { createFlushBatcher } from "@/lib/streaming"
 import type { ChatRequest, Message, Usage } from "@/lib/types"
 
 export interface UseChatStreamReturn {
@@ -17,8 +18,6 @@ export interface UseChatStreamReturn {
   totalUsage: Usage
   setTotalUsage: React.Dispatch<React.SetStateAction<Usage>>
 }
-
-const FLUSH_MS = 60
 
 function buildHistory(msgs: Message[]): { role: string; content: string }[] {
   return msgs
@@ -44,30 +43,7 @@ export function useChatStream(): UseChatStreamReturn {
     async (req: ChatRequest, history: { role: string; content: string }[], assistantMsg: Message) => {
       setIsStreaming(true)
 
-      let lastFlush = 0
-      let pending = false
-
-      const flush = () => {
-        pending = false
-        lastFlush = performance.now()
-        setMessages((prev) => {
-          const copy = [...prev]
-          copy[copy.length - 1] = { ...assistantMsg }
-          return copy
-        })
-      }
-
-      const scheduleFlush = () => {
-        if (pending) return
-        const now = performance.now()
-        const delay = Math.max(0, FLUSH_MS - (now - lastFlush))
-        if (delay <= 0) {
-          flush()
-        } else {
-          pending = true
-          setTimeout(flush, delay)
-        }
-      }
+      const batch = createFlushBatcher(setMessages, assistantMsg)
 
       try {
         const stream = createChatStream({ ...req, messages: history })
@@ -76,7 +52,7 @@ export function useChatStream(): UseChatStreamReturn {
         for await (const event of stream) {
           if (event.event === "token") {
             assistantMsg.content += event.data
-            scheduleFlush()
+            batch.schedule()
           } else if (event.event === "usage") {
             const turn: Usage = JSON.parse(event.data)
             setTotalUsage((prev) => ({
@@ -88,18 +64,15 @@ export function useChatStream(): UseChatStreamReturn {
             break
           } else if (event.event === "error") {
             assistantMsg.content += `\n\nError: ${event.data}`
-            scheduleFlush()
+            batch.schedule()
             break
           }
         }
       } catch (e) {
         if ((e as Error).name === "AbortError") return
       } finally {
-        setMessages((prev) => {
-          const copy = [...prev]
-          copy[copy.length - 1] = { ...assistantMsg }
-          return deactivateSentImages(copy, req.img_paths)
-        })
+        batch.final()
+        setMessages((prev) => deactivateSentImages(prev, req.img_paths))
         setIsStreaming(false)
         abortRef.current = null
       }

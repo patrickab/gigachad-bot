@@ -52,9 +52,9 @@ import {
 import { DEFAULT_VISION_MODEL } from "@/lib/config"
 import type { Attachment, Message, ObsidianFile, ProjectDocument, Usage } from "@/lib/types"
 import {
+  buildAttachedSend,
   buildHiddenContent,
   collectActiveImagePaths,
-  isImageAttachment,
   normalizeMessageAttachments,
 } from "@/lib/attachments"
 
@@ -475,25 +475,23 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           { role: "assistant" as const, content: "" },
         ])
 
-        const needsParsing = activeAttachments.filter(a => !a.mime.startsWith("image/") && !a.content && !a.parsedMd)
-        let enriched = activeAttachments
-
-        if (needsParsing.length > 0) {
-          try {
-            const parsed = await parseFiles(chatId, needsParsing.map(a => a.name), activeProject)
-            enriched = activeAttachments.map(a => {
-              if (a.content || a.parsedMd || a.mime.startsWith("image/")) return a
-              const p = parsed.find(r => r.name === a.name)
-              return { ...a, parsedMd: p?.parsedMd ?? undefined }
-            })
-          } catch {
-            updateLastAssistant(setMessages, m => ({ ...m, content: "Failed to parse attached documents. You can try again or re-upload the file." }))
-            return
-          }
+        let result
+        try {
+          result = await buildAttachedSend({
+            text,
+            attachments: activeAttachments,
+            priorMessages: messages,
+            chatId,
+            slug: activeProject,
+            downscaleImages: config.downscaleImages,
+            baseParams: defaultSendParams(config, prompts),
+          }, parseFiles)
+        } catch {
+          updateLastAssistant(setMessages, m => ({ ...m, content: "Failed to parse attached documents. You can try again or re-upload the file." }))
+          return
         }
 
-        const hiddenContent = buildHiddenContent(enriched) || undefined
-
+        const { enriched, hiddenContent, request } = result
         setMessages(prev => {
           const copy = [...prev]
           const idx = copy.length - 2
@@ -501,18 +499,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           return copy
         })
 
-        const priorImgPaths = collectActiveImagePaths(messages)
-        const newImgPaths = enriched.filter((a) => a.active && isImageAttachment(a)).map((a) => a.name)
-        const fallbackPrompt = text.trim() ? text : "Please review the attached document and provide a summary."
-        const llmMsg = hiddenContent ? `${hiddenContent}\n\n${fallbackPrompt}` : fallbackPrompt
-        send({
-          ...defaultSendParams(config, prompts),
-          chat_id: chatId,
-          user_msg: llmMsg,
-          img_paths: [...priorImgPaths, ...newImgPaths],
-          downscale_images: config.downscaleImages,
-          project_slug: activeProject,
-        }, true)
+        send(request, true)
         return
       }
 
