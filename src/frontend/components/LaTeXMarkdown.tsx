@@ -343,6 +343,7 @@ function LaTeXMarkdownInner({
       <Streamdown
         mode={streaming ? "streaming" : "static"}
         isAnimating={!!streaming}
+        animated={!!streaming}
         plugins={PLUGINS}
         remarkPlugins={REMARK_PLUGINS}
         linkSafety={LINK_SAFETY_OFF}
