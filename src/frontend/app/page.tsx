@@ -13,6 +13,7 @@ import { ResearchModelsBar } from "@/components/ResearchModelsBar"
 import { ThemeToggle } from "@/components/ThemeToggle"
 import { OCRPanel } from "@/components/OCRPanel"
 import { SaveChatModal } from "@/components/SaveChatModal"
+import { MindmapModal } from "@/components/MindmapModal"
 import { MemoryPanel } from "@/components/MemoryPanel"
 import { FileViewer } from "@/components/FileViewer"
 import { DocumentPicker } from "@/components/DocumentPicker"
@@ -48,6 +49,7 @@ import {
   uploadDocument,
   addDocument,
   attachDocument,
+  generateMindmap,
 } from "@/lib/api"
 import { DEFAULT_VISION_MODEL } from "@/lib/config"
 import type { Attachment, Message, ObsidianFile, ProjectDocument, Usage } from "@/lib/types"
@@ -71,6 +73,7 @@ function defaultSendParams(config: TabConfig, prompts: Record<string, string>, o
 }
 
 const COMMANDS: CommandMenuItem[] = [
+  { command: "/mindmap", keywords: ["mind", "map", "overview", "visualize"] },
   { command: "/memorize", keywords: ["memory", "both"] },
   { command: "/memorize-global", keywords: ["memory", "global", "profile"] },
   { command: "/memorize-project", keywords: ["memory", "project"] },
@@ -260,6 +263,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
 
   const [branchMessageIdx, setBranchMessageIdx] = useState<number | null>(null)
   const [saveModalOpen, setSaveModalOpen] = useState(false)
+  const [mindmapModalOpen, setMindmapModalOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const loadIdRef = useRef(0)
   const [measuredWidth, setMeasuredWidth] = useState(0)
@@ -370,6 +374,27 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     setSaveModalOpen(false)
   }, [messages, chatId, tab.id, tab.name, activeProject, hasUsage, onHistoryFileChanged, refreshAll])
 
+  const handleMindmapSubmit = useCallback(async (prompt: string) => {
+    if (messages.length === 0) return
+    const userMsg = prompt ? `Provide a mindmap. ${prompt}` : "Provide a mindmap."
+    setMessages(prev => [
+      ...prev,
+      { role: "user" as const, content: userMsg },
+      { role: "assistant" as const, content: "Generating mind map…" },
+    ])
+    setMindmapModalOpen(false)
+    try {
+      const mindmap = await generateMindmap(
+        messages.map((m) => ({ role: m.role, content: m.content })),
+        config.selectedModel,
+        prompt,
+      )
+      updateLastAssistant(setMessages, m => ({ ...m, content: mindmap }))
+    } catch {
+      updateLastAssistant(setMessages, m => ({ ...m, content: "Mind map generation failed." }))
+    }
+  }, [messages, config.selectedModel, setMessages])
+
   useEffect(() => {
     if (!isActive) return
 
@@ -413,10 +438,16 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     }
   }, [isActive, isTitled, handleQuickSave, openSaveModal, reset, commandBar.open, commandBar.submitCommand, commandBar.state.phase, messages, activeProject, chatId, branchMessageIdx, obsidianEnabled, openObsidian])
 
-  const runCommand = useCallback((command: string) => {
+  const runCommand = useCallback(async (command: string) => {
     if (command === "/obsidian-load") {
       commandBar.close()
       openObsidian()
+      return
+    }
+    if (command === "/mindmap") {
+      commandBar.close()
+      if (messages.length === 0) return
+      setMindmapModalOpen(true)
       return
     }
     // Memory is extracted from the main branch only — branches don't influence memories.
@@ -430,7 +461,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       chatId,
       command,
     )
-  }, [commandBar.submitCommand, commandBar.close, messages, activeProject, chatId, branchMessageIdx, openObsidian])
+  }, [commandBar.submitCommand, commandBar.close, messages, activeProject, chatId, branchMessageIdx, openObsidian, setMindmapModalOpen])
 
   const commandItems = COMMANDS.filter((cmd) =>
     (cmd.command !== "/obsidian-load" || obsidianEnabled) &&
@@ -442,6 +473,16 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       const trimmed = text.trim()
       if (trimmed === "/obsidian-load") {
         openObsidian()
+        return
+      }
+      if (trimmed === "/mindmap" || trimmed.startsWith("/mindmap ")) {
+        if (messages.length === 0) return
+        const userPrompt = trimmed === "/mindmap" ? "" : trimmed.slice("/mindmap ".length).trim()
+        if (userPrompt) {
+          await handleMindmapSubmit(userPrompt)
+        } else {
+          setMindmapModalOpen(true)
+        }
         return
       }
       if (trimmed === "/memorize" || trimmed.startsWith("/memorize ") || trimmed.startsWith("/memorize-")) {
@@ -520,7 +561,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         })
       }
     },
-    [morphicSearchEnabled, researchEnabled, studyEnabled, chatId, branchMessageIdx, activeProject, config, send, research, morphicSearch, setMessages, toggleStudy, commandBar.submitCommand, messages, openObsidian],
+    [morphicSearchEnabled, researchEnabled, studyEnabled, chatId, branchMessageIdx, activeProject, config, send, research, morphicSearch, setMessages, toggleStudy, commandBar.submitCommand, messages, openObsidian, handleMindmapSubmit, setMindmapModalOpen],
   )
 
   const handleRegenerate = useCallback(
@@ -711,6 +752,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         </div>
       </main>
       <SaveChatModal open={saveModalOpen} onClose={() => setSaveModalOpen(false)} onSave={handleSaveSubmit} />
+      <MindmapModal open={mindmapModalOpen} onClose={() => setMindmapModalOpen(false)} onGenerate={handleMindmapSubmit} />
       {isActive && obsidianOpen && obsidianEnabled && (
         <FileViewer
           files={obsidianFiles.map((f) => f.path)}

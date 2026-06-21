@@ -258,6 +258,16 @@ export async function uploadDocument(slug: string, file: File): Promise<ProjectD
   return res.json()
 }
 
+export async function registerUploadAsDocument(chatId: string, filename: string, slug: string | null = null): Promise<void> {
+  const params = new URLSearchParams()
+  if (slug) params.set("slug", slug)
+  await request(`/documents/register-upload?${params}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, filename }),
+  })
+}
+
 export async function addDocument(slug: string, path: string): Promise<ProjectDocument> {
   return request<ProjectDocument>(`/documents/add?slug=${encodeURIComponent(slug)}`, {
     method: "POST",
@@ -273,6 +283,15 @@ export async function removeDocument(slug: string, path: string): Promise<void> 
 
 export function attachDocument(chatId: string, path: string, slug: string | null = null): Promise<Attachment> {
   return attachFileByPath("documents", chatId, path, slug)
+}
+
+export async function generateMindmap(messages: { role: string; content: string }[], model: string, prompt: string = ""): Promise<string> {
+  const data = await request<{ mindmap: string }>("/study/mindmap", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages, model, prompt }),
+  })
+  return data.mindmap
 }
 
 export async function processStudyPdf(req: StudyProcessRequest): Promise<StudyProcessResponse> {

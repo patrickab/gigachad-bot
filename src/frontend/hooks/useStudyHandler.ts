@@ -1,5 +1,5 @@
 import type { Attachment, Message } from "@/lib/types"
-import { parseFiles, processStudyPdf } from "@/lib/api"
+import { parseFiles, processStudyPdf, registerUploadAsDocument } from "@/lib/api"
 
 export function updateLastMsg(
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>,
@@ -50,6 +50,10 @@ export async function handleStudyPdf(
       })
     }
 
+    for (const att of pdfAtts) {
+      registerUploadAsDocument(chatId, att.name, slug).catch(() => {})
+    }
+
     const md = enriched.filter(a => a.parsedMd).map(a => `### ${a.name}\n\n${a.parsedMd}`).join("\n\n")
 
     if (!md.trim()) {
@@ -60,12 +64,10 @@ export async function handleStudyPdf(
     updateLastMsg(setMessages, m => ({ ...m, content: "Generating study materials…" }))
 
     const result = await processStudyPdf({ markdown: md, filename: pdfNames[0], model })
-    const goalsMd = result.topics.map(t => `- [ ] ${t.label}`).join("\n")
 
     updateLastMsg(setMessages, m => ({
       ...m,
-      content: result.overview + "\n\n" + result.article,
-      attachments: [{ name: "Learning Goals", mime: "text/markdown", url: "", content: goalsMd, active: true }],
+      content: result.mindmap + "\n\n" + result.overview + "\n\n" + result.article,
     }))
   } catch (e) {
     updateLastMsg(setMessages, m => ({ ...m, content: `Error: ${(e as Error).message || "Study processing failed"}` }))

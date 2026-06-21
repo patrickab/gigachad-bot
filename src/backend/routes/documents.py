@@ -130,6 +130,27 @@ async def add_document(
     return DocumentMeta(**lib_docs.document_meta(resolved))
 
 
+class RegisterUploadRequest(BaseModel):
+    chat_id: str
+    filename: str
+
+
+@router.post("/register-upload", response_model=DocumentMeta)
+async def register_upload(
+    req: RegisterUploadRequest,
+    slug: str | None = Query(default=None),
+    store: ProjectStore = Depends(get_project_store),
+):
+    """Organize a chat-uploaded file into the library and optionally register it in a project."""
+    src = chat_upload_dir(req.chat_id, slug) / req.filename
+    if not src.is_file():
+        raise HTTPException(status_code=404, detail="Uploaded file not found")
+    dest = lib_docs.organize_file(src)
+    if slug:
+        store.add_file(slug, str(dest))
+    return DocumentMeta(**lib_docs.document_meta(dest))
+
+
 @router.delete("")
 async def remove_document(
     slug: str = Query(...),

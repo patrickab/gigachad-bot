@@ -14,6 +14,8 @@
     "framer-motion": "^12.6.0",
     "katex": "^0.16.21",
     "lucide-react": "^0.503.0",
+    "markmap-lib": "^0.18.12",
+    "markmap-view": "^0.18.12",
     "mermaid": "^11.15.0",
     "next": "^15.3.0",
     "perfect-freehand": "^1.2.3",

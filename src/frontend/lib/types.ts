@@ -139,7 +139,7 @@ export interface StudyProcessRequest {
 
 export interface StudyProcessResponse {
   filename: string
-  topics: { label: string }[]
+  mindmap: string
   overview: string
   article: string
 }

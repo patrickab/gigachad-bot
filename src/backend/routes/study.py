@@ -4,21 +4,13 @@ import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from lib.llm_json import extract_json_from_llm
-from lib.naming import slugify
-from lib.prompts.non_user_prompts import SYS_STUDY_ARTICLE, SYS_STUDY_LEARNING_GOALS, SYS_STUDY_OVERVIEW
+from lib.prompts.non_user_prompts import SYS_STUDY_ARTICLE, SYS_STUDY_MINDMAP, SYS_STUDY_OVERVIEW
 
 from .deps import request_client
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/study", tags=["study"])
-
-
-class StudyTopic(BaseModel):
-    id: str
-    label: str
-    anchor: str
 
 
 class StudyProcessRequest(BaseModel):
@@ -29,32 +21,9 @@ class StudyProcessRequest(BaseModel):
 
 class StudyProcessResponse(BaseModel):
     filename: str
-    topics: list[StudyTopic]
+    mindmap: str
     overview: str
     article: str
-
-
-def _coerce_topics(raw: object) -> list[StudyTopic]:
-    if not isinstance(raw, list):
-        return []
-    out: list[StudyTopic] = []
-    seen_ids: set[str] = set()
-    for item in raw:
-        if not isinstance(item, dict):
-            continue
-        label = str(item.get("label", "")).strip()
-        anchor = str(item.get("anchor", "")).strip() or label
-        if not label:
-            continue
-        base_id = slugify(str(item.get("id", "") or label), fallback="topic")
-        cand = base_id
-        n = 2
-        while cand in seen_ids:
-            cand = f"{base_id}-{n}"
-            n += 1
-        seen_ids.add(cand)
-        out.append(StudyTopic(id=cand, label=label, anchor=anchor))
-    return out
 
 
 def _build_user_msg(markdown: str) -> str:
@@ -92,14 +61,9 @@ async def process_pdf(req: StudyProcessRequest) -> StudyProcessResponse:
     """Accept markdown extracted from a PDF, run three parallel LLM calls (learning goals, overview, article)."""
     user_msg = _build_user_msg(req.markdown)
 
-    async def run_topics() -> list[StudyTopic]:
-        content = await _llm_call(req.model, SYS_STUDY_LEARNING_GOALS, user_msg)
-        try:
-            data = extract_json_from_llm(content)
-        except (ValueError, Exception) as e:
-            log.warning("learning_goals: JSON extraction failed: %s (raw=%r)", e, content[:300])
-            return []
-        return _coerce_topics(data.get("topics"))
+    async def run_mindmap() -> str:
+        content = await _llm_call(req.model, SYS_STUDY_MINDMAP, user_msg)
+        return content.strip()
 
     async def run_overview() -> str:
         content = await _llm_call(req.model, SYS_STUDY_OVERVIEW, user_msg)
@@ -110,8 +74,8 @@ async def process_pdf(req: StudyProcessRequest) -> StudyProcessResponse:
         return content.strip()
 
     try:
-        topics, overview, article = await asyncio.gather(
-            run_topics(), run_overview(), run_article(),
+        mindmap, overview, article = await asyncio.gather(
+            run_mindmap(), run_overview(), run_article(),
         )
     except HTTPException:
         raise
@@ -121,7 +85,32 @@ async def process_pdf(req: StudyProcessRequest) -> StudyProcessResponse:
 
     return StudyProcessResponse(
         filename=req.filename,
-        topics=topics,
+        mindmap=mindmap,
         overview=overview,
         article=article,
     )
+
+
+class MindmapRequest(BaseModel):
+    messages: list[dict[str, str]]
+    model: str
+    prompt: str = ""
+
+
+class MindmapResponse(BaseModel):
+    mindmap: str
+
+
+@router.post("/mindmap", response_model=MindmapResponse)
+async def generate_mindmap(req: MindmapRequest) -> MindmapResponse:
+    transcript = "\n".join(f"[{m.get('role', 'user')}]: {m.get('content', '')}" for m in req.messages)
+    user_msg = (
+        "Below is a conversation transcript. Produce the requested mind map as specified in the system prompt.\n\n"
+        "<transcript>\n" + transcript + "\n</transcript>"
+    )
+    sys_prompt = SYS_STUDY_MINDMAP
+    if req.prompt:
+        sys_prompt += f"\n\n# Additional instructions from the user\n{req.prompt}"
+
+    content = await _llm_call(req.model, sys_prompt, user_msg)
+    return MindmapResponse(mindmap=content.strip())

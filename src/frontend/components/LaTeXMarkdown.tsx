@@ -59,6 +59,61 @@ function MermaidDiagram({ code }: { code: string }) {
   )
 }
 
+function MarkmapDiagram({ code }: { code: string }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const svgRef = useRef<SVGSVGElement | null>(null)
+  const mmRef = useRef<any>(null)
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const { Transformer } = await import("markmap-lib")
+        const { Markmap } = await import("markmap-view")
+        if (cancelled || !containerRef.current) return
+
+        const transformer = new Transformer()
+        const { root } = transformer.transform(code)
+
+        if (!svgRef.current) {
+          const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
+          svg.style.width = "100%"
+          svg.style.height = "400px"
+          containerRef.current.appendChild(svg)
+          svgRef.current = svg
+        }
+
+        const isLight = document.documentElement.classList.contains("light")
+        const isGlass = document.documentElement.classList.contains("glass")
+        const ink = isLight ? "#1c1917" : isGlass ? "rgba(255,255,255,0.85)" : "#d4d4d8"
+        const linkColor = isLight ? "#a8a29e" : isGlass ? "rgba(255,255,255,0.2)" : "#3f3f46"
+
+        if (mmRef.current) {
+          mmRef.current.setData(root)
+          mmRef.current.fit()
+        } else {
+          mmRef.current = Markmap.create(svgRef.current, {
+            autoFit: true,
+            duration: 300,
+            paddingX: 16,
+            initialExpandLevel: -1,
+            color: () => linkColor,
+          }, root)
+
+          svgRef.current.style.setProperty("--markmap-text-color", ink)
+        }
+      } catch {
+        if (!cancelled) setFailed(true)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [code])
+
+  if (failed) return <CodeBlock codeString={code} language="markdown" />
+  return <div ref={containerRef} className="my-3 overflow-hidden rounded-md" />
+}
+
 const REMARK_PLUGINS = [...Object.values(defaultRemarkPlugins), remarkBreaks]
 const LINK_SAFETY_OFF = { enabled: false }
 
@@ -187,6 +242,9 @@ const PROSE_COMPONENTS: Components = {
     const codeString = String(children).replace(/\n$/, "")
     if (match?.[1] === "mermaid" || isMermaidCode(codeString)) {
       return <MermaidDiagram code={codeString} />
+    }
+    if (match?.[1] === "markmap") {
+      return <MarkmapDiagram code={codeString} />
     }
     if (!match && containsAsciiTableArt(codeString)) {
       return <AsciiDiagram codeString={codeString} />
@@ -344,6 +402,8 @@ function LaTeXMarkdownInner({
         mode={streaming ? "streaming" : "static"}
         isAnimating={!!streaming}
         animated={!!streaming}
+        caret={streaming ? "block" : undefined}
+        controls={{ code: false, table: { copy: true, download: true }, mermaid: false }}
         plugins={PLUGINS}
         remarkPlugins={REMARK_PLUGINS}
         linkSafety={LINK_SAFETY_OFF}
