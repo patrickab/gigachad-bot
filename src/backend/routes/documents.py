@@ -28,7 +28,6 @@ from config import (
     chat_upload_dir,
 )
 from lib import document_library as lib_docs
-from lib.naming import dedup_filename
 from lib.project_store import ProjectStore
 
 log = logging.getLogger(__name__)
@@ -267,7 +266,7 @@ async def attach_document(
     resolved = _validate_doc_path(store, path)
     chat_dir = chat_upload_dir(chat_id, slug)
     chat_dir.mkdir(parents=True, exist_ok=True)
-    name = dedup_filename(chat_dir, resolved.name)
+    name = resolved.name
     dest = chat_dir / name
     dest.write_bytes(resolved.read_bytes())
 

@@ -17,6 +17,7 @@ interface DocumentEditorProps {
   onClose: () => void
   onSaved?: (filename?: string, content?: string) => void
   onLiveContent?: (path: string, content: string | null) => void
+  availablePdfs?: { path: string; name: string }[]
 }
 
 function editorLanguage(path: string): string {
@@ -112,7 +113,7 @@ function ResizableEditor({ children }: { children: React.ReactNode }) {
   )
 }
 
-export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent }: DocumentEditorProps) {
+export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, availablePdfs }: DocumentEditorProps) {
   const isCanvas = path.endsWith(".canvas")
   const [content, setContent] = useState<string | null>(null)
   const [canvasDoc, setCanvasDoc] = useState<CanvasDocument | null>(null)
@@ -251,7 +252,7 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent }: 
   }
 
   const editorBody = isCanvas
-    ? <CanvasEditor doc={canvasDoc!} onChange={handleCanvasChange} />
+    ? <CanvasEditor doc={canvasDoc!} onChange={handleCanvasChange} availablePdfs={availablePdfs} />
     : <TextEditor value={content!} onChange={handleTextChange} language={language} isFullscreen={isFullscreen} />
 
   const chrome = (
@@ -265,7 +266,6 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent }: 
           onClick={handleSave}
           disabled={!dirty || saving}
           className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors"
-          title="Save (Ctrl+S)"
         >
           <Save className="h-3.5 w-3.5" />
         </button>
@@ -274,7 +274,6 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent }: 
             onClick={handleExportPdf}
             disabled={exporting || !canvasDoc || canvasDoc.pages.length === 0}
             className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors"
-            title="Export pages to PDF"
           >
             {exporting
               ? <span className="h-3.5 w-3.5 block animate-spin rounded-full border-2 border-ink-faint border-t-ink" />
@@ -284,14 +283,12 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent }: 
         <button
           onClick={() => setIsFullscreen((f) => !f)}
           className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
-          title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
         >
           {isFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
         </button>
         <button
           onClick={onClose}
           className="rounded p-1 text-ink-subtle hover:text-danger transition-colors"
-          title="Close"
         >
           <X className="h-3.5 w-3.5" />
         </button>

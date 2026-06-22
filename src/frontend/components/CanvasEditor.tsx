@@ -3,13 +3,18 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { getStroke } from "perfect-freehand"
 import { type StrokeData, getSvgPathFromStroke } from "@/lib/drawing"
+import { fileViewerRawUrl } from "@/lib/api"
 import { activeThemeName } from "@/lib/palette"
 import { cn } from "@/lib/utils"
-import { Plus, Undo2, Trash2 } from "lucide-react"
+import { Plus, Undo2, Redo2, Trash2, FileType, X } from "lucide-react"
+import { PdfViewer } from "./PdfViewer"
 
 const A4_W = 794
 const A4_H = 1123
 const PAGE_GAP = 40
+const DEFAULT_EMBED_WIDTH = 500 // canvas units; height follows the PDF's own aspect
+const MIN_EMBED_WIDTH = 200
+const FALLBACK_EMBED_ASPECT = 1.3 // height/width used until the real page aspect is measured
 const MIN_SCALE = 0.15
 const MAX_SCALE = 3
 const THIN_WIDTH = 2
@@ -39,11 +44,20 @@ export interface CanvasPage {
   y: number
 }
 
+export interface PdfEmbed {
+  id: string
+  path: string
+  x: number
+  y: number
+  width: number
+}
+
 export interface CanvasDocument {
   version: 1
   viewport?: { scale: number; offsetX: number; offsetY: number }
   pages: CanvasPage[]
   strokes: StrokeData[]
+  pdfEmbeds?: PdfEmbed[]
 }
 
 export function emptyCanvasDoc(): CanvasDocument {
@@ -69,9 +83,10 @@ export function serializeCanvasDoc(doc: CanvasDocument): string {
 interface CanvasEditorProps {
   doc: CanvasDocument
   onChange: (doc: CanvasDocument) => void
+  availablePdfs?: { path: string; name: string }[]
 }
 
-export function CanvasEditor({ doc, onChange }: CanvasEditorProps) {
+export function CanvasEditor({ doc, onChange, availablePdfs }: CanvasEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
 
@@ -93,6 +108,8 @@ export function CanvasEditor({ doc, onChange }: CanvasEditorProps) {
   const [recentColors, setRecentColors] = useState<string[]>([])
   const [colorOpen, setColorOpen] = useState(false)
   const colorRef = useRef<HTMLDivElement>(null)
+
+  const [redoStack, setRedoStack] = useState<StrokeData[]>([])
 
   const baseWidth = SIZE_MAP[strokeWidth]
 
@@ -121,13 +138,13 @@ export function CanvasEditor({ doc, onChange }: CanvasEditorProps) {
     return () => document.removeEventListener("mousedown", handler)
   }, [colorOpen])
 
-  const pickColor = useCallback((c: string) => {
+  const pickColor = useCallback((c: string, close = true) => {
     setColor(c)
     setRecentColors((prev) => {
       const without = prev.filter((x) => x !== c)
       return [c, ...without].slice(0, 3)
     })
-    setColorOpen(false)
+    if (close) setColorOpen(false)
   }, [])
 
   const persistViewport = useCallback((s: number, o: { x: number; y: number }) => {
@@ -314,20 +331,40 @@ export function CanvasEditor({ doc, onChange }: CanvasEditorProps) {
     setIsDrawing(false)
     if (currentPoints.length < 2) { setCurrentPoints([]); return }
     onChange({ ...doc, strokes: [...doc.strokes, { points: currentPoints, color, width: baseWidth }] })
+    setRedoStack([])
     setCurrentPoints([])
   }, [isDrawing, isErasing, currentPoints, color, baseWidth, doc, onChange])
 
-  // --- Undo ---
+  // --- Undo / Redo ---
+  const undo = useCallback(() => {
+    if (doc.strokes.length === 0) return
+    setRedoStack((prev) => [...prev, doc.strokes[doc.strokes.length - 1]!])
+    onChange({ ...doc, strokes: doc.strokes.slice(0, -1) })
+  }, [doc, onChange])
+
+  const redo = useCallback(() => {
+    setRedoStack((prev) => {
+      if (prev.length === 0) return prev
+      const stroke = prev[prev.length - 1]!
+      onChange({ ...doc, strokes: [...doc.strokes, stroke] })
+      return prev.slice(0, -1)
+    })
+  }, [doc, onChange])
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "z") {
         e.preventDefault()
-        onChange({ ...doc, strokes: doc.strokes.slice(0, -1) })
+        undo()
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "y") {
+        e.preventDefault()
+        redo()
       }
     }
     window.addEventListener("keydown", handler)
     return () => window.removeEventListener("keydown", handler)
-  }, [doc, onChange])
+  }, [undo, redo])
 
   // --- Add / remove page ---
   const addPage = useCallback(() => {
@@ -342,6 +379,7 @@ export function CanvasEditor({ doc, onChange }: CanvasEditorProps) {
   }, [doc, onChange])
 
   const clearAll = useCallback(() => {
+    setRedoStack([])
     onChange({ ...doc, strokes: [] })
   }, [doc, onChange])
 
@@ -353,44 +391,149 @@ export function CanvasEditor({ doc, onChange }: CanvasEditorProps) {
     setStrokeWidth((w) => w === "thin" ? "medium" : w === "medium" ? "thick" : "thin")
   }, [])
 
+  // --- PDF embeds ---
+  const [addMenuOpen, setAddMenuOpen] = useState(false)
+  const addMenuRef = useRef<HTMLDivElement>(null)
+  const [embedAspects, setEmbedAspects] = useState<Record<string, number>>({})
+  const embedDrag = useRef<{
+    id: string; startX: number; startY: number
+    origX: number; origY: number; origW: number
+    mode: "move" | "resize"
+  } | null>(null)
+
+  useEffect(() => {
+    if (!addMenuOpen) return
+    const handler = (e: MouseEvent) => {
+      if (addMenuRef.current && !addMenuRef.current.contains(e.target as Node)) setAddMenuOpen(false)
+    }
+    document.addEventListener("mousedown", handler)
+    return () => document.removeEventListener("mousedown", handler)
+  }, [addMenuOpen])
+
+  // latest doc/onChange for the long-lived window drag listeners, so they don't
+  // need to re-subscribe on every stroke
+  const liveRef = useRef({ doc, onChange })
+  liveRef.current = { doc, onChange }
+
+  const addPdfEmbed = useCallback((path: string) => {
+    const embeds = doc.pdfEmbeds ?? []
+    if (embeds.some((e) => e.path === path)) { setAddMenuOpen(false); return }
+    const el = containerRef.current
+    const vw = el ? el.clientWidth : 800
+    const vh = el ? el.clientHeight : 600
+    // drop it centred in the current viewport (height unknown until measured)
+    const cx = (-offsetRef.current.x + vw / 2) / scaleRef.current - DEFAULT_EMBED_WIDTH / 2
+    const cy = (-offsetRef.current.y + vh / 2) / scaleRef.current - (DEFAULT_EMBED_WIDTH * FALLBACK_EMBED_ASPECT) / 2
+    onChange({ ...doc, pdfEmbeds: [...embeds, { id: `pdf-${Date.now()}`, path, x: cx, y: cy, width: DEFAULT_EMBED_WIDTH }] })
+    setAddMenuOpen(false)
+  }, [doc, onChange])
+
+  const removePdfEmbed = useCallback((id: string) => {
+    onChange({ ...doc, pdfEmbeds: (doc.pdfEmbeds ?? []).filter((e) => e.id !== id) })
+    setEmbedAspects(({ [id]: _removed, ...rest }) => rest)
+  }, [doc, onChange])
+
+  const startEmbedInteraction = useCallback((id: string, clientX: number, clientY: number, mode: "move" | "resize") => {
+    const embed = (liveRef.current.doc.pdfEmbeds ?? []).find((e) => e.id === id)
+    if (!embed) return
+    embedDrag.current = { id, startX: clientX, startY: clientY, origX: embed.x, origY: embed.y, origW: embed.width, mode }
+  }, [])
+
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      const d = embedDrag.current
+      if (!d) return
+      const { doc: cur, onChange: change } = liveRef.current
+      const dx = (e.clientX - d.startX) / scaleRef.current
+      const dy = (e.clientY - d.startY) / scaleRef.current
+      const embeds = (cur.pdfEmbeds ?? []).map((em) => {
+        if (em.id !== d.id) return em
+        // only width is stored; height always follows the PDF's real aspect ratio
+        if (d.mode === "resize") return { ...em, width: Math.max(MIN_EMBED_WIDTH, d.origW + dx) }
+        return { ...em, x: d.origX + dx, y: d.origY + dy }
+      })
+      change({ ...cur, pdfEmbeds: embeds })
+    }
+    const onUp = () => { embedDrag.current = null }
+    window.addEventListener("pointermove", onMove)
+    window.addEventListener("pointerup", onUp)
+    return () => {
+      window.removeEventListener("pointermove", onMove)
+      window.removeEventListener("pointerup", onUp)
+    }
+  }, [])
+
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
       <div className="flex items-center gap-1 px-2 py-1.5 border-b border-divider/50 shrink-0">
-        <button onClick={addPage} className="flex items-center gap-1 rounded px-2 py-1 text-[10px] font-medium text-ink-muted hover:text-ink hover:bg-hover transition-colors">
-          <Plus className="h-3 w-3" /> Page
-        </button>
+        <div className="relative" ref={addMenuRef}>
+          <button
+            onClick={() => setAddMenuOpen((o) => !o)}
+            className="flex items-center gap-1 rounded px-2 py-1 text-[10px] font-medium text-ink-muted hover:text-ink hover:bg-hover transition-colors"
+          >
+            <Plus className="h-3 w-3" />
+          </button>
+          {addMenuOpen && (
+            <div className="absolute top-full left-0 mt-1 z-10 rounded-lg border border-divider bg-paper shadow-[var(--shadow-lg)] py-1 min-w-[160px]">
+              <button
+                onClick={() => { addPage(); setAddMenuOpen(false) }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink hover:bg-hover transition-colors"
+              >
+                Page
+              </button>
+              {(availablePdfs ?? []).length > 0 && (
+                <>
+                  <div className="mx-2 my-1 border-t border-divider/50" />
+                  {availablePdfs!.map((pdf) => (
+                    <button
+                      key={pdf.path}
+                      onClick={() => addPdfEmbed(pdf.path)}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink hover:bg-hover transition-colors truncate"
+                    >
+                      <FileType className="h-3 w-3 shrink-0 text-ink-faint" />
+                      <span className="truncate">{pdf.name}</span>
+                    </button>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
+        </div>
         <div className="w-px h-4 bg-divider/50 mx-0.5" />
         <button
-          onClick={() => onChange({ ...doc, strokes: doc.strokes.slice(0, -1) })}
+          onClick={undo}
           disabled={doc.strokes.length === 0}
           className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors"
-          title="Undo (Ctrl+Z)"
         >
           <Undo2 className="h-3.5 w-3.5" />
         </button>
+        <div className="w-px h-4 bg-divider/50 mx-0.5" />
+        <button
+          onClick={redo}
+          disabled={redoStack.length === 0}
+          className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors"
+        >
+          <Redo2 className="h-3.5 w-3.5" />
+        </button>
+        <div className="w-px h-4 bg-divider/50 mx-0.5" />
         <button
           onClick={clearAll}
           disabled={doc.strokes.length === 0}
           className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors"
-          title="Clear all"
         >
           <Trash2 className="h-3.5 w-3.5" />
         </button>
         <div className="w-px h-4 bg-divider/50 mx-0.5" />
-        {/* Size toggle with dot hint */}
         <button
           onClick={nextSize}
-          className="flex items-center gap-1.5 rounded px-2 py-1 text-[10px] font-medium text-ink-subtle hover:text-ink transition-colors"
-          title="Stroke width"
+          className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
         >
-          <svg width="8" height="8" viewBox="0 0 8 8" className="shrink-0">
-            <circle cx="4" cy="4" r={strokeWidth === "thin" ? 1.5 : strokeWidth === "medium" ? 2.5 : 3.5} fill="currentColor" />
+          <svg width="10" height="10" viewBox="0 0 10 10" className="shrink-0">
+            <circle cx="5" cy="5" r={strokeWidth === "thin" ? 1.5 : strokeWidth === "medium" ? 2.5 : 4} fill="currentColor" />
           </svg>
-          {strokeWidth === "thin" ? "Thin" : strokeWidth === "medium" ? "Medium" : "Thick"}
         </button>
         <div className="w-px h-4 bg-divider/50 mx-0.5" />
-        {/* Color popover */}
         <div className="relative" ref={colorRef}>
           <button
             onClick={() => setColorOpen((o) => !o)}
@@ -400,15 +543,14 @@ export function CanvasEditor({ doc, onChange }: CanvasEditorProps) {
             Color
           </button>
           {colorOpen && (
-            <div className="absolute top-full left-0 mt-1 z-10 rounded-lg border border-divider bg-paper shadow-[var(--shadow-lg)] p-2 min-w-[120px]">
+            <div className="absolute top-full left-0 mt-1 z-10 rounded-lg border border-divider bg-paper shadow-[var(--shadow-lg)] p-2 min-w-[100px]">
               <div className="grid grid-cols-4 gap-1 mb-1.5">
                 {PRESET_COLORS.map((c) => (
                   <button
                     key={c.value}
                     onClick={() => pickColor(c.value)}
-                    title={c.name}
                     className={cn(
-                      "w-6 h-6 rounded-full border-2 transition-all",
+                      "w-5 h-5 rounded-full border-2 transition-all",
                       color === c.value ? "border-ink scale-110" : "border-transparent hover:border-ink-faint"
                     )}
                     style={{ backgroundColor: displayColor(c.value) }}
@@ -439,7 +581,7 @@ export function CanvasEditor({ doc, onChange }: CanvasEditorProps) {
                   value={color}
                   onFocus={() => { nativePickerOpen.current = true }}
                   onBlur={() => { nativePickerOpen.current = false }}
-                  onChange={(e) => pickColor(e.target.value)}
+                  onChange={(e) => pickColor(e.target.value, false)}
                   className="w-5 h-5 rounded border-0 p-0 cursor-pointer bg-transparent [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded [&::-webkit-color-swatch]:border-divider"
                 />
                 <span className="text-[10px] text-ink-subtle">Custom</span>
@@ -508,22 +650,18 @@ export function CanvasEditor({ doc, onChange }: CanvasEditorProps) {
                   </text>
                   {/* Delete icon — visible only when pointer is near it */}
                   <foreignObject
-                    x={page.x + A4_W - btnSize - 4 / scale}
-                    y={page.y + 4 / scale}
-                    width={btnSize + 16 / scale}
-                    height={btnSize + 16 / scale}
+                    x={page.x + A4_W - btnSize / 2}
+                    y={page.y - btnSize / 2}
+                    width={btnSize}
+                    height={btnSize}
                     className="group/del"
                   >
-                    <div className="flex items-start justify-end w-full h-full p-[4px]">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); removePage(page.id) }}
-                        className="flex items-center justify-center rounded opacity-0 group-hover/del:opacity-100 transition-opacity bg-danger/10 text-danger hover:bg-danger/20"
-                        style={{ width: btnSize * scale, height: btnSize * scale }}
-                        title="Delete page"
-                      >
-                        <Trash2 style={{ width: btnSize * scale * 0.55, height: btnSize * scale * 0.55 }} />
-                      </button>
-                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); removePage(page.id) }}
+                      className="flex items-center justify-center w-full h-full rounded opacity-0 group-hover/del:opacity-100 transition-opacity bg-danger/10 text-danger hover:bg-danger/20"
+                    >
+                      <Trash2 style={{ width: btnSize * scale * 0.55, height: btnSize * scale * 0.55 }} />
+                    </button>
                   </foreignObject>
                 </g>
               )
@@ -538,6 +676,55 @@ export function CanvasEditor({ doc, onChange }: CanvasEditorProps) {
             {currentOutline && <path d={currentOutline} fill={displayColor(color)} />}
           </g>
         </svg>
+
+        {/* PDF embeds — positioned HTML over SVG, not part of export */}
+        {(doc.pdfEmbeds ?? []).map((embed) => {
+          const screenX = embed.x * scale + offset.x
+          const screenY = embed.y * scale + offset.y
+          const screenW = embed.width * scale
+          // body height derived synchronously from width × aspect so resizing
+          // never stretches; the page aspect is reported by PdfViewer once loaded
+          const aspect = embedAspects[embed.id] ?? FALLBACK_EMBED_ASPECT
+          const name = embed.path.split("/").pop() ?? "PDF"
+          return (
+            <div
+              key={embed.id}
+              className="absolute flex flex-col border border-divider-strong rounded-lg overflow-hidden bg-paper shadow-[var(--shadow-lg)]"
+              style={{ left: screenX, top: screenY, width: screenW }}
+            >
+              {/* Header — drag to move */}
+              <div
+                className="flex items-center gap-1.5 px-2 py-1 border-b border-divider/50 cursor-grab active:cursor-grabbing select-none shrink-0"
+                onPointerDown={(e) => { e.stopPropagation(); startEmbedInteraction(embed.id, e.clientX, e.clientY, "move") }}
+              >
+                <FileType className="h-3 w-3 text-ink-faint shrink-0" />
+                <span className="flex-1 min-w-0 truncate text-[10px] font-medium text-ink-muted">{name}</span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); removePdfEmbed(embed.id) }}
+                  className="rounded p-0.5 text-ink-faint hover:text-danger transition-colors shrink-0"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+              {/* PDF content — fills this fixed-aspect box */}
+              <div style={{ height: screenW * aspect }} onPointerDown={(e) => e.stopPropagation()}>
+                <PdfViewer
+                  url={fileViewerRawUrl(embed.path)}
+                  onPageAspect={(r) => setEmbedAspects((prev) => prev[embed.id] === r ? prev : { ...prev, [embed.id]: r })}
+                />
+              </div>
+              {/* Resize handle — bottom-right corner */}
+              <div
+                className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize"
+                onPointerDown={(e) => { e.stopPropagation(); startEmbedInteraction(embed.id, e.clientX, e.clientY, "resize") }}
+              >
+                <svg className="w-full h-full text-ink-faint" viewBox="0 0 16 16">
+                  <path d="M14 2L2 14M14 6L6 14M14 10L10 14" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                </svg>
+              </div>
+            </div>
+          )
+        })}
       </div>
     </div>
   )

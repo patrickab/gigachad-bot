@@ -6,7 +6,6 @@ import { Document, Page, pdfjs } from "react-pdf"
 import { ChevronsLeftRight, ChevronsRightLeft, Maximize2, Minimize2, Minus, Plus } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import "react-pdf/dist/esm/Page/AnnotationLayer.css"
-import "react-pdf/dist/esm/Page/TextLayer.css"
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs"
 
@@ -25,22 +24,33 @@ interface ScrollAnchor {
   ratio: number
 }
 
+// vertical scrollbar gutter reserved so a fitted page never triggers horizontal scroll
+const SCROLLBAR = 16
+
 function PdfViewerInner({
   url,
   isFullscreen,
   onToggleFullscreen,
   isWide,
   onToggleWide,
+  fitWidth,
+  onPageAspect,
 }: {
   url: string
   isFullscreen: boolean
   onToggleFullscreen: () => void
   isWide?: boolean
   onToggleWide?: () => void
+  // when set, the parent controls width and the viewer sizes its own height to
+  // fit exactly one page. Otherwise it fills its parent in both dimensions.
+  fitWidth?: boolean
+  onPageAspect?: (ratio: number) => void
 }) {
   const [numPages, setNumPages] = useState<number | null>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
-  const [containerWidth, setContainerWidth] = useState<number | null>(null)
+  const [availWidth, setAvailWidth] = useState<number | null>(null)
+  const [pageAspect, setPageAspect] = useState<number | null>(null) // height / width
   const [zoom, setZoom] = useState(1)
   const zoomRef = useRef(1)
   const anchorRef = useRef<ScrollAnchor | null>(null)
@@ -49,15 +59,14 @@ function PdfViewerInner({
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
+  // measure the parent-controlled dimension — debounced so resizing doesn't re-render every frame
   useEffect(() => {
-    const el = scrollRef.current
+    const el = rootRef.current
     if (!el) return
 
     let timer: ReturnType<typeof setTimeout> | null = null
-
     const update = () => {
-      const w = el.clientWidth
-      if (w > 0) setContainerWidth(w)
+      if (el.clientWidth > 0) setAvailWidth(el.clientWidth)
     }
 
     update()
@@ -67,10 +76,7 @@ function PdfViewerInner({
       timer = setTimeout(update, 150)
     })
     ro.observe(el)
-    return () => {
-      ro.disconnect()
-      if (timer) clearTimeout(timer)
-    }
+    return () => { ro.disconnect(); if (timer) clearTimeout(timer) }
   }, [])
 
   useEffect(() => {
@@ -124,6 +130,28 @@ function PdfViewerInner({
     return () => el.removeEventListener("wheel", onWheel)
   }, [showControls])
 
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el || !numPages) return
+
+    // arrow keys step one page from whichever page is currently nearest the top
+    const onKeyDown = (e: KeyboardEvent) => {
+      const dir = (e.key === "ArrowUp" || e.key === "ArrowLeft") ? -1
+        : (e.key === "ArrowDown" || e.key === "ArrowRight") ? 1 : 0
+      if (dir === 0) return
+      e.preventDefault()
+      const pageH = el.scrollHeight / numPages
+      const current = pageH > 0 ? Math.round(el.scrollTop / pageH) : 0 // 0-based
+      const target = Math.min(numPages - 1, Math.max(0, current + dir))
+      if (target === current) return
+      const node = el.querySelector(`[data-page-number="${target + 1}"]`) as HTMLElement | null
+      node?.scrollIntoView({ behavior: "smooth", block: "start" })
+    }
+
+    el.addEventListener("keydown", onKeyDown)
+    return () => el.removeEventListener("keydown", onKeyDown)
+  }, [numPages])
+
   useLayoutEffect(() => {
     const anchor = anchorRef.current
     if (!anchor) return
@@ -158,20 +186,50 @@ function PdfViewerInner({
     showControls()
   }, [showControls])
 
-  const onDocumentLoadSuccess = useCallback(({ numPages }: { numPages: number }) => {
-    setNumPages(numPages)
-  }, [])
+  const onDocumentLoadSuccess = useCallback(
+    async (pdf: { numPages: number; getPage: (n: number) => Promise<{ getViewport: (o: { scale: number }) => { width: number; height: number } }> }) => {
+      setNumPages(pdf.numPages)
+      // read the real first-page dimensions (works for any page size, not just A4)
+      try {
+        const page = await pdf.getPage(1)
+        const vp = page.getViewport({ scale: 1 })
+        const ratio = vp.height / vp.width
+        setPageAspect(ratio)
+        onPageAspect?.(ratio)
+      } catch {
+        /* leave pageAspect null → falls back to fill-parent rendering */
+      }
+    },
+    [onPageAspect],
+  )
 
-  const baseScale = containerWidth != null ? Math.min(1, (containerWidth - 16) / RENDER_WIDTH) : null
-  const renderWidth = baseScale != null ? Math.round(RENDER_WIDTH * baseScale) : RENDER_WIDTH
+  // Page is rendered at the available width (minus scrollbar gutter), capped at
+  // RENDER_WIDTH. In fitWidth mode the box height is derived to show one page.
+  let renderWidth = RENDER_WIDTH
+  let boxHeight: number | undefined
+  if (availWidth != null) {
+    renderWidth = Math.round(Math.min(RENDER_WIDTH, availWidth - SCROLLBAR))
+    if (fitWidth && pageAspect != null) {
+      boxHeight = Math.round(renderWidth * pageAspect)
+    }
+  }
+
+  const ready = numPages != null && availWidth != null && (!fitWidth || pageAspect != null)
 
   const zoomLabel = `${Math.round(zoom * 100)}%`
 
+  // fitWidth: fill parent width, self-size height to one page. Otherwise fill parent.
+  const rootStyle: React.CSSProperties = fitWidth
+    ? { width: "100%", height: boxHeight ?? "auto" }
+    : { width: "100%", height: "100%", minHeight: 0 }
+
   return (
     <div
-      className="relative w-full h-full min-h-0 flex flex-col"
+      ref={rootRef}
+      className="relative flex flex-col"
       onMouseEnter={showControls}
       onMouseMove={showControls}
+      style={rootStyle}
     >
       <div
         ref={dropdownRef}
@@ -231,7 +289,6 @@ function PdfViewerInner({
             <button
               onClick={onToggleWide}
               className="p-1.5 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
-              title={isWide ? "Narrow sidebar" : "Widen sidebar"}
             >
               {isWide ? <ChevronsRightLeft className="h-3.5 w-3.5" /> : <ChevronsLeftRight className="h-3.5 w-3.5" />}
             </button>
@@ -241,19 +298,27 @@ function PdfViewerInner({
         <button
           onClick={onToggleFullscreen}
           className="rounded-r-lg p-1.5 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
-          title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
         >
           {isFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
         </button>
       </div>
-      <div ref={scrollRef} className="flex-1 min-h-0 overflow-auto">
+      <div
+        ref={scrollRef}
+        className="flex-1 min-h-0 overflow-auto focus:outline-none"
+        tabIndex={0}
+        style={fitWidth ? { scrollSnapType: "y proximity" } : undefined}
+      >
         <Document file={url} onLoadSuccess={onDocumentLoadSuccess}>
-          {baseScale != null && numPages != null && (
-            <div style={{ width: renderWidth * zoom }} className={isFullscreen ? "mx-auto" : undefined}>
+          {ready && (
+            <div style={{ width: renderWidth * zoom }} className="mx-auto">
               <div style={{ transform: `scale(${zoom})`, transformOrigin: "0 0" }}>
-                {Array.from({ length: numPages }, (_, i) => (
-                  <div key={i} style={{ marginBottom: PAGE_GAP }}>
-                    <Page pageNumber={i + 1} width={renderWidth} />
+                {Array.from({ length: numPages! }, (_, i) => (
+                  <div
+                    key={i}
+                    style={{ marginBottom: PAGE_GAP, scrollSnapAlign: fitWidth ? "start" : undefined }}
+                    data-page-number={i + 1}
+                  >
+                    <Page pageNumber={i + 1} width={renderWidth} renderTextLayer={false} />
                   </div>
                 ))}
               </div>
@@ -265,7 +330,19 @@ function PdfViewerInner({
   )
 }
 
-export function PdfViewer({ url, isWide, onToggleWide }: { url: string; isWide?: boolean; onToggleWide?: () => void }) {
+export function PdfViewer({
+  url,
+  isWide,
+  onToggleWide,
+  fitWidth,
+  onPageAspect,
+}: {
+  url: string
+  isWide?: boolean
+  onToggleWide?: () => void
+  fitWidth?: boolean
+  onPageAspect?: (ratio: number) => void
+}) {
   const [isFullscreen, setIsFullscreen] = useState(false)
 
   useEffect(() => {
@@ -283,7 +360,17 @@ export function PdfViewer({ url, isWide, onToggleWide }: { url: string; isWide?:
   const toggleFullscreen = useCallback(() => setIsFullscreen((f) => !f), [])
 
   if (!isFullscreen) {
-    return <PdfViewerInner url={url} isFullscreen={false} onToggleFullscreen={toggleFullscreen} isWide={isWide} onToggleWide={onToggleWide} />
+    return (
+      <PdfViewerInner
+        url={url}
+        isFullscreen={false}
+        onToggleFullscreen={toggleFullscreen}
+        isWide={isWide}
+        onToggleWide={onToggleWide}
+        fitWidth={fitWidth}
+        onPageAspect={onPageAspect}
+      />
+    )
   }
 
   return createPortal(

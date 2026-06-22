@@ -7,7 +7,7 @@ import type { Message, Attachment, WebSearchResult, ProjectDocument } from "@/li
 import { ChatMessage, AssistantMessageContent } from "./ChatMessage"
 import { ChatInput, type ChatInputHandle } from "./ChatInput"
 import { ChatSidebar, type ChatSidebarElementConfig } from "./ChatSidebar"
-import { rewriteImages } from "@/lib/api"
+import { rewriteImages, fileViewerRawUrl } from "@/lib/api"
 
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronsLeftRight, ChevronsRightLeft, FilePlus, FileText, FileType, Globe, GitFork, Image as ImageIcon, Library, Plus, User, X } from "lucide-react"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
@@ -144,7 +144,6 @@ function ContextBody({
                   "flex min-w-0 flex-1 items-center gap-2 text-left transition-colors",
                   att.active ? "text-ink" : "text-ink-faint",
                 )}
-                title={att.active ? "Active in context — click to deactivate" : "Inactive — click to activate"}
               >
                 <AttachmentIcon mime={att.mime} />
                 <span className="text-[11px] font-medium truncate">{att.name}</span>
@@ -153,7 +152,6 @@ function ContextBody({
                 type="button"
                 onClick={() => onRemoveAttachment(mi, att.name)}
                 className="rounded p-0.5 text-ink-faint hover:text-danger hover:bg-surface-elevated transition-colors shrink-0"
-                title="Remove"
                 aria-label="Remove attachment"
               >
                 <X className="h-3 w-3" />
@@ -171,7 +169,7 @@ function ContextBody({
   )
 }
 
-function DocumentsBody({ documents, slug, onSelect, editingPath, onEdit, onDelete, onSaved, onLiveContent }: { documents: ProjectDocument[]; slug: string | null; onSelect?: (path: string) => void; editingPath?: string | null; onEdit?: (path: string | null) => void; onDelete?: (path: string) => void; onSaved?: (filename?: string, content?: string) => void; onLiveContent?: (path: string, content: string | null) => void }) {
+function DocumentsBody({ documents, slug, onSelect, editingPath, onEdit, onDelete, onSaved, onLiveContent, pdfWide, onTogglePdfWide }: { documents: ProjectDocument[]; slug: string | null; onSelect?: (path: string) => void; editingPath?: string | null; onEdit?: (path: string | null) => void; onDelete?: (path: string) => void; onSaved?: (filename?: string, content?: string) => void; onLiveContent?: (path: string, content: string | null) => void; pdfWide?: boolean; onTogglePdfWide?: () => void }) {
   if (documents.length === 0) {
     return (
       <div className="flex items-center justify-center py-6 text-xs text-ink-faint">
@@ -181,29 +179,27 @@ function DocumentsBody({ documents, slug, onSelect, editingPath, onEdit, onDelet
   }
 
   const isEditable = (doc: ProjectDocument) => /\.(md|tex|canvas)$/.test(doc.name)
+  const pdfDocs = documents.filter((d) => d.mime === "application/pdf").map((d) => ({ path: d.path, name: d.name }))
 
   return (
     <div>
       {documents.map((doc) => {
         const Icon = doc.mime === "application/pdf" ? FileType : FileText
         const editable = isEditable(doc)
-        const editing = editingPath === doc.path
+        const expanded = editingPath === doc.path
         return (
           <div key={doc.path} className="border-b border-divider/50">
             <div className="flex items-center gap-1 px-2 py-2 hover:bg-surface/50 transition-colors">
-              {editable && (
-                <button
-                  type="button"
-                  onClick={() => onEdit?.(editing ? null : doc.path)}
-                  className="rounded p-0.5 text-ink-faint hover:text-ink hover:bg-surface-elevated transition-colors shrink-0"
-                >
-                  {editing ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => onEdit?.(expanded ? null : doc.path)}
+                className="rounded p-0.5 text-ink-faint hover:text-ink hover:bg-surface-elevated transition-colors shrink-0"
+              >
+                {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+              </button>
               <button
                 type="button"
                 onClick={() => onSelect?.(doc.path)}
-                title="Attach to context"
                 className="flex min-w-0 flex-1 items-center gap-2 text-left text-ink-muted hover:text-ink transition-colors"
               >
                 <Icon className="h-3.5 w-3.5 shrink-0 text-ink-faint" />
@@ -213,13 +209,20 @@ function DocumentsBody({ documents, slug, onSelect, editingPath, onEdit, onDelet
                 type="button"
                 onClick={() => onDelete?.(doc.path)}
                 className="rounded p-0.5 text-ink-faint hover:text-danger hover:bg-surface-elevated transition-colors shrink-0"
-                title="Remove"
               >
                 <X className="h-3 w-3" />
               </button>
             </div>
-            {editable && editing && slug && (
-              <DocumentEditor path={doc.path} slug={slug} onClose={() => onEdit?.(null)} onSaved={onSaved} onLiveContent={onLiveContent} />
+            {expanded && editable && slug && (
+              <DocumentEditor path={doc.path} slug={slug} onClose={() => onEdit?.(null)} onSaved={onSaved} onLiveContent={onLiveContent} availablePdfs={pdfDocs} />
+            )}
+            {expanded && !editable && doc.mime === "application/pdf" && (
+              <PdfViewer url={fileViewerRawUrl(doc.path)} isWide={pdfWide} onToggleWide={onTogglePdfWide} fitWidth />
+            )}
+            {expanded && !editable && doc.mime.startsWith("image/") && (
+              <div className="p-2 max-h-[60vh] overflow-y-auto">
+                <img src={fileViewerRawUrl(doc.path)} alt={doc.name} className="max-w-full rounded border border-divider" />
+              </div>
             )}
           </div>
         )
@@ -248,7 +251,7 @@ function SourcesBody({ result }: { result: WebSearchResult }) {
           </div>
           <div className="grid grid-cols-2 gap-1.5">
             {videos.slice(0, 4).map((v, i) => (
-              <a key={i} href={v.url} target="_blank" rel="noopener noreferrer" title={v.title}>
+              <a key={i} href={v.url} target="_blank" rel="noopener noreferrer">
                 <img
                   src={v.thumbnail}
                   alt=""
@@ -368,7 +371,6 @@ function buildSidebarElements({
         <button
           type="button"
           onClick={onOpenObsidian}
-          title="Load Obsidian note"
           aria-label="Load Obsidian note"
           className="rounded p-1 text-ink-faint hover:text-ink hover:bg-surface-elevated transition-colors"
         >
@@ -426,7 +428,7 @@ function buildSidebarElements({
       open: isElementOpen("documents"),
       onOpenChange: (o) => onElementOpenChange("documents", o),
       body: (
-        <DocumentsBody documents={docs} slug={slug} onSelect={onSelectDocument} editingPath={editingDocPath} onEdit={onEditDocument} onDelete={onDeleteDocument} onSaved={onDocumentSaved} onLiveContent={liveCanvasRef ? (p, c) => { liveCanvasRef.current = c !== null ? { path: p, content: c } : null } : undefined} />
+        <DocumentsBody documents={docs} slug={slug} onSelect={onSelectDocument} editingPath={editingDocPath} onEdit={onEditDocument} onDelete={onDeleteDocument} onSaved={onDocumentSaved} onLiveContent={liveCanvasRef ? (p, c) => { liveCanvasRef.current = c !== null ? { path: p, content: c } : null } : undefined} pdfWide={pdfWide} onTogglePdfWide={onTogglePdfWide} />
       ),
     })
   }
@@ -1005,7 +1007,6 @@ export function ChatContainer({
         {hasSidebarContent && (
           <button
             onClick={() => setContextOpen((c) => !c)}
-            title={contextOpen ? "Collapse sidebar" : "Open sidebar"}
             aria-label={contextOpen ? "Collapse sidebar" : "Open sidebar"}
             aria-expanded={contextOpen}
             className="absolute right-0 top-3 z-30 flex items-center justify-center h-12 w-4 rounded-l-md border border-r-0 border-divider-strong bg-surface-elevated/80 text-ink hover:bg-surface-elevated hover:text-ink hover:w-5 transition-all shadow-[var(--shadow-sm)]"
