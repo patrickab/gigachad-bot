@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import dynamic from "next/dynamic"
-import { Search, FileText, FileType, Image as ImageIcon, Folder, ChevronRight, CornerDownLeft } from "lucide-react"
+import { Search, FileText, FileType, Image as ImageIcon, Folder, ChevronRight } from "lucide-react"
 import { fileViewerRawUrl, loadFileViewerText } from "@/lib/api"
 import { LaTeXMarkdown } from "@/components/LaTeXMarkdown"
 import { FloatingWindow } from "@/components/FloatingWindow"
@@ -72,8 +72,6 @@ interface FileViewerProps {
   headerActions?: React.ReactNode
   /** Per-row trailing control (e.g. an add-to-project button). */
   renderRowSuffix?: (path: string) => React.ReactNode
-  /** Extra footer hints rendered before the esc hint. */
-  footerHints?: React.ReactNode
   onArrowLeft?: () => void
   onArrowRight?: () => void
 }
@@ -87,7 +85,6 @@ export function FileViewer({
   statusLabel,
   headerActions,
   renderRowSuffix,
-  footerHints,
   onArrowLeft,
   onArrowRight,
 }: FileViewerProps) {
@@ -204,37 +201,34 @@ export function FileViewer({
   }, [entries, idx, searching, stack.length, goUp, enterDir, activate, onArrowLeft, onArrowRight])
 
   return (
-    <FloatingWindow onClose={onClose} panelClassName="h-[min(560px,85vh)] max-w-4xl">
+    <FloatingWindow onClose={onClose} panelClassName="h-[86vh] max-h-[840px]">
       <div className="flex min-h-0 flex-1">
-        {/* Left: search + navigable list */}
-        <div className="flex w-[42%] min-w-0 flex-col border-r border-divider">
-          <div className="flex items-center gap-2 border-b border-divider px-3 py-2.5">
-            <Search className="h-3.5 w-3.5 shrink-0 text-ink-subtle" />
-            <input
-              ref={inputRef}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={onKeyDown}
-              placeholder={placeholder}
-              spellCheck={false}
-              autoComplete="off"
-              className="w-full bg-transparent text-sm text-ink placeholder:text-ink-subtle outline-none"
-            />
+        {/* Left: navigable list with ghost search */}
+        <div className="flex w-[42%] min-w-0 flex-col border-r border-divider/30" onClick={() => inputRef.current?.focus()}>
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder={placeholder}
+            spellCheck={false}
+            autoComplete="off"
+            className="sr-only"
+            aria-label={placeholder}
+          />
+
+          <div className="flex items-center justify-between border-b border-divider/30 px-3 py-2">
+            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-ink-faint min-w-0">
+              {searching ? (
+                <><Search className="h-3 w-3 shrink-0" /><span className="truncate">{query}</span></>
+              ) : statusLabel ? (
+                statusLabel
+              ) : (
+                <><Folder className="h-3 w-3 shrink-0" /><span className="truncate">{breadcrumb}</span></>
+              )}
+            </div>
             {headerActions}
           </div>
-
-          {statusLabel && (
-            <div className="flex items-center gap-1.5 border-b border-divider/50 px-3 py-1.5 text-[10px] uppercase tracking-wider text-ink-faint">
-              {statusLabel}
-            </div>
-          )}
-
-          {!searching && (
-            <div className="flex items-center gap-1 border-b border-divider/50 px-3 py-1.5 text-[10px] uppercase tracking-wider text-ink-faint">
-              <Folder className="h-3 w-3 shrink-0" />
-              <span className="truncate">{breadcrumb}</span>
-            </div>
-          )}
 
           <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto py-1">
             {entries.length === 0 && (
@@ -265,20 +259,11 @@ export function FileViewer({
               )
             })}
           </div>
-
-          <div className="flex items-center gap-3 border-t border-divider px-3 py-2 text-[10px] text-ink-faint">
-            <span>↑↓ move</span>
-            {!searching && <span>→ open</span>}
-            {!searching && stack.length > 1 && <span>← up</span>}
-            {footerHints}
-            <span className="flex items-center gap-1"><CornerDownLeft className="h-2.5 w-2.5" /> select</span>
-            <span className="ml-auto">esc</span>
-          </div>
         </div>
 
         {/* Right: type-aware preview */}
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="truncate border-b border-divider px-4 py-2.5 text-[11px] text-ink-subtle">
+          <div className="truncate border-b border-divider/30 px-4 py-2 text-[11px] text-ink-subtle">
             {highlighted?.type === "file" ? highlighted.path : "Select a file to preview"}
           </div>
           <div className={cn("min-h-0 flex-1", highlightedKind === "pdf" ? "" : "overflow-y-auto p-4")}>

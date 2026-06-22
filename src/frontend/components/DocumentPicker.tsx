@@ -93,7 +93,6 @@ export function DocumentPicker({
       statusLabel={statusLabel}
       headerActions={headerActions}
       renderRowSuffix={renderRowSuffix}
-      footerHints={projectSlug ? <span>← {scope === "project" ? "all docs" : "project"}</span> : undefined}
       onArrowLeft={projectSlug ? () => setScope((s) => (s === "project" ? "global" : "project")) : undefined}
     />
   )

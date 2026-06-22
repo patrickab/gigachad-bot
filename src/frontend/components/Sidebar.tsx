@@ -167,6 +167,12 @@ export function Sidebar({
             onElementClick={(item) => {
               if (item.data && !item.isSystem) onOpenChat(item.data as string)
             }}
+            onMoveElement={async (elementId: string, targetId: string | null) => {
+              const slug = targetId && projects.find(p => p.slug === targetId)?.slug
+              if (!slug) return
+              await moveHistoryItem(elementId, slug)
+              await onRefreshAll()
+            }}
             renderElement={renderChatElement}
           />
         </div>

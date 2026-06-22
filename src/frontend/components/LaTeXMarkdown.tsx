@@ -17,6 +17,55 @@ function isMermaidCode(code: string): boolean {
   return /^\s*(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitGraph|journey|requirementDiagram|mindmap|timeline|sankey|xychart|block-beta|packet-beta|architecture-beta)\b/i.test(code)
 }
 
+// ponytail: mutex serializes mermaid renders — it's a singleton that corrupts on concurrent calls
+let mermaidQueue = Promise.resolve()
+let lastTheme = ""
+
+function enqueueMermaidRender(id: string, code: string): Promise<string> {
+  const job = mermaidQueue.then(async () => {
+    const mermaid = (await import("mermaid")).default
+    const isLight =
+      typeof document !== "undefined" && document.documentElement.classList.contains("light")
+    const theme = isLight ? "light" : "dark"
+    if (theme !== lastTheme) {
+      lastTheme = theme
+      mermaid.initialize({
+        startOnLoad: false,
+        theme: isLight ? "neutral" : "dark",
+        securityLevel: "strict",
+        fontFamily: "var(--font-sans), system-ui, sans-serif",
+        logLevel: "fatal",
+        ...(isLight ? {} : {
+          themeVariables: {
+            background: "transparent",
+            primaryColor: "rgba(255,255,255,0.08)",
+            primaryTextColor: "rgba(255,255,255,0.85)",
+            primaryBorderColor: "rgba(255,255,255,0.2)",
+            secondaryColor: "rgba(255,255,255,0.05)",
+            secondaryTextColor: "rgba(255,255,255,0.7)",
+            secondaryBorderColor: "rgba(255,255,255,0.15)",
+            tertiaryColor: "rgba(255,255,255,0.03)",
+            tertiaryTextColor: "rgba(255,255,255,0.6)",
+            tertiaryBorderColor: "rgba(255,255,255,0.1)",
+            lineColor: "rgba(255,255,255,0.3)",
+            textColor: "rgba(255,255,255,0.85)",
+            mainBkg: "rgba(255,255,255,0.08)",
+            nodeBorder: "rgba(255,255,255,0.2)",
+            clusterBkg: "rgba(255,255,255,0.04)",
+            clusterBorder: "rgba(255,255,255,0.15)",
+            edgeLabelBackground: "rgba(30,30,30,0.8)",
+          },
+        }),
+      })
+    }
+    await mermaid.parse(code)
+    const { svg } = await mermaid.render(id, code)
+    return svg
+  })
+  mermaidQueue = job.catch(() => {})
+  return job
+}
+
 function MermaidDiagram({ code }: { code: string }) {
   const [svg, setSvg] = useState("")
   const [failed, setFailed] = useState(false)
@@ -26,25 +75,9 @@ function MermaidDiagram({ code }: { code: string }) {
     let cancelled = false
     setFailed(false)
     setSvg("")
-    void (async () => {
-      try {
-        const mermaid = (await import("mermaid")).default
-        const isLight =
-          typeof document !== "undefined" && document.documentElement.classList.contains("light")
-        mermaid.initialize({
-          startOnLoad: false,
-          theme: isLight ? "neutral" : "dark",
-          securityLevel: "strict",
-          fontFamily: "var(--font-sans), system-ui, sans-serif",
-          logLevel: "fatal",
-        })
-        await mermaid.parse(code)
-        const { svg: rendered } = await mermaid.render(idRef.current, code)
-        if (!cancelled) setSvg(rendered)
-      } catch {
-        if (!cancelled) setFailed(true)
-      }
-    })()
+    enqueueMermaidRender(idRef.current, code)
+      .then((rendered) => { if (!cancelled) setSvg(rendered) })
+      .catch(() => { if (!cancelled) setFailed(true) })
     return () => { cancelled = true }
   }, [code])
 
@@ -220,7 +253,11 @@ const PROSE_COMPONENTS: Components = {
   em: "em",
   del: "del",
   img: "img",
-  table: "table",
+  table: ({ children, ...props }: any) => (
+    <div className="overflow-x-auto my-3">
+      <table {...props}>{children}</table>
+    </div>
+  ),
   thead: "thead",
   tbody: "tbody",
   tr: "tr",
