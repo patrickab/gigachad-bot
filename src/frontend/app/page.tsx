@@ -197,7 +197,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         ]
       }
       const msg = copy[idx]
-      const attachments = [...(msg.attachments ?? []), att]
+      const attachments = [...(msg.attachments ?? []).filter((a) => a.name !== att.name), att]
       copy[idx] = { ...msg, attachments, hiddenContent: buildHiddenContent(attachments) || undefined }
       return copy
     })

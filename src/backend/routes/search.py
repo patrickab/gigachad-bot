@@ -32,6 +32,11 @@ _vane_lock = threading.Lock()
 _provider_cache: dict[str, dict[str, str]] = {}
 
 
+def _clear_provider_cache() -> None:
+    """Clear the provider resolution cache (e.g., after adding new providers)."""
+    _provider_cache.clear()
+
+
 # --- Docker lifecycle ------------------------------------------------------
 
 def _docker_context() -> str | None:
@@ -102,6 +107,10 @@ def ensure_vane() -> None:
         if not _is_vane_ready():
             raise RuntimeError("Vane did not become ready within 30 seconds")
         print("Vane is ready.", file=sys.stderr)
+        try:
+            _ensure_providers()
+        except Exception as e:
+            print(f"Warning: Failed to initialize Vane providers: {e}", file=sys.stderr)
         _vane_started = True
 
 
@@ -128,14 +137,27 @@ def _resolve_from_providers(providers: list[dict], model: str, embedding: bool) 
     """Find {providerId, key} for a model in a /api/providers payload.
 
     Matches the model key against each provider's chat/embedding model list.
+    Tries exact match first, then substring/fuzzy match.
     Returns None if no provider exposes it (caller surfaces a setup hint).
     """
     key = _model_key(model)
     field = "embeddingModels" if embedding else "chatModels"
+
+    # First pass: exact match on key or name
     for p in providers:
         for m in p.get(field, []):
             if m.get("key") == key or m.get("name") == key:
                 return {"providerId": p["id"], "key": m["key"]}
+
+    # Second pass: substring/fuzzy match (case-insensitive)
+    key_lower = key.lower()
+    for p in providers:
+        for m in p.get(field, []):
+            m_key_lower = (m.get("key") or "").lower()
+            m_name_lower = (m.get("name") or "").lower()
+            if key_lower in m_key_lower or key_lower in m_name_lower:
+                return {"providerId": p["id"], "key": m["key"]}
+
     return None
 
 
@@ -145,6 +167,51 @@ def _fetch_providers() -> list[dict]:
     r = httpx.get(f"{VANE_URL.rstrip('/')}/api/providers", timeout=10.0)
     r.raise_for_status()
     return r.json().get("providers", [])
+
+
+def _ensure_providers() -> None:
+    """Initialize Vane with default Ollama + Gemini providers if missing."""
+    import os
+    import httpx
+
+    providers = _fetch_providers()
+    provider_names = {p.get("name") for p in providers}
+    added = False
+
+    # Ollama provider
+    if "Ollama" not in provider_names:
+        try:
+            httpx.post(
+                f"{VANE_URL.rstrip('/')}/api/providers",
+                json={
+                    "name": "Ollama",
+                    "type": "ollama",
+                    "apiBase": os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"),
+                },
+                timeout=10.0,
+            ).raise_for_status()
+            added = True
+        except Exception as e:
+            print(f"Warning: Failed to add Ollama provider to Vane: {e}", file=sys.stderr)
+
+    # Gemini provider (if API key exists)
+    if "Google" not in provider_names and os.environ.get("GEMINI_API_KEY"):
+        try:
+            httpx.post(
+                f"{VANE_URL.rstrip('/')}/api/providers",
+                json={
+                    "name": "Google",
+                    "type": "google",
+                    "apiKey": os.environ.get("GEMINI_API_KEY", ""),
+                },
+                timeout=10.0,
+            ).raise_for_status()
+            added = True
+        except Exception as e:
+            print(f"Warning: Failed to add Google provider to Vane: {e}", file=sys.stderr)
+
+    if added:
+        _clear_provider_cache()
 
 
 def _resolve(model: str, embedding: bool) -> dict[str, str]:

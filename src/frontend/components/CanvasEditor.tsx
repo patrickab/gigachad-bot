@@ -52,12 +52,21 @@ export interface PdfEmbed {
   width: number
 }
 
+export interface ImageEmbed {
+  id: string
+  path: string
+  x: number
+  y: number
+  width: number
+}
+
 export interface CanvasDocument {
   version: 1
-  viewport?: { scale: number; offsetX: number; offsetY: number }
+  viewport?: { scale: number; centerX: number; centerY: number }
   pages: CanvasPage[]
   strokes: StrokeData[]
   pdfEmbeds?: PdfEmbed[]
+  imageEmbeds?: ImageEmbed[]
 }
 
 export function emptyCanvasDoc(): CanvasDocument {
@@ -86,16 +95,59 @@ interface CanvasEditorProps {
   availablePdfs?: { path: string; name: string }[]
 }
 
+// convert between center (canvas-space point at view center) and offset (SVG translate)
+function centerToOffset(cx: number, cy: number, s: number, w: number, h: number) {
+  return { x: w / 2 - cx * s, y: h / 2 - cy * s }
+}
+function offsetToCenter(ox: number, oy: number, s: number, w: number, h: number) {
+  return { cx: (w / 2 - ox) / s, cy: (h / 2 - oy) / s }
+}
+
 export function CanvasEditor({ doc, onChange, availablePdfs }: CanvasEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
 
-  const [scale, setScale] = useState(doc.viewport?.scale ?? 0.5)
-  const [offset, setOffset] = useState({ x: doc.viewport?.offsetX ?? 40, y: doc.viewport?.offsetY ?? 40 })
+  const initScale = doc.viewport?.scale ?? 0.5
+  // offset is derived once the container mounts; fall back to a reasonable default
+  const [scale, setScale] = useState(initScale)
+  const [offset, setOffset] = useState({ x: 40, y: 40 })
   const scaleRef = useRef(scale)
   const offsetRef = useRef(offset)
   scaleRef.current = scale
   offsetRef.current = offset
+
+  // on mount (and resize), recompute offset from the stored center so the same
+  // canvas point stays centered regardless of container dimensions
+  const restoredRef = useRef(false)
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const apply = () => {
+      const vp = doc.viewport
+      const cx = vp?.centerX ?? 0
+      const cy = vp?.centerY ?? 0
+      const s = vp?.scale ?? 0.5
+      const o = centerToOffset(cx, cy, s, el.clientWidth, el.clientHeight)
+      offsetRef.current = o
+      scaleRef.current = s
+      setOffset(o)
+      setScale(s)
+      restoredRef.current = true
+    }
+    apply()
+    const ro = new ResizeObserver(() => {
+      if (!restoredRef.current) return
+      // re-derive offset from current center so resize keeps the same canvas point centered
+      const { cx, cy } = offsetToCenter(offsetRef.current.x, offsetRef.current.y, scaleRef.current, el.clientWidth, el.clientHeight)
+      const o = centerToOffset(cx, cy, scaleRef.current, el.clientWidth, el.clientHeight)
+      offsetRef.current = o
+      setOffset(o)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  // only re-run on mount, not on doc changes (viewport is persisted separately)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const [isPanning, setIsPanning] = useState(false)
   const panStart = useRef({ x: 0, y: 0, ox: 0, oy: 0 })
@@ -148,7 +200,10 @@ export function CanvasEditor({ doc, onChange, availablePdfs }: CanvasEditorProps
   }, [])
 
   const persistViewport = useCallback((s: number, o: { x: number; y: number }) => {
-    onChange({ ...doc, viewport: { scale: s, offsetX: o.x, offsetY: o.y } })
+    const el = containerRef.current
+    if (!el) return
+    const { cx, cy } = offsetToCenter(o.x, o.y, s, el.clientWidth, el.clientHeight)
+    onChange({ ...doc, viewport: { scale: s, centerX: cx, centerY: cy } })
   }, [doc, onChange])
 
   const screenToCanvas = useCallback((clientX: number, clientY: number): [number, number] => {
