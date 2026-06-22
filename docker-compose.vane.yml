@@ -1,0 +1,33 @@
+name: vane-sidecar
+
+services:
+  # Web-search synthesis (Perplexica/Vane). Slim image — no bundled SearXNG;
+  # uses the standalone instance below via SEARXNG_API_URL.
+  vane:
+    image: itzcrazykns1337/vane:slim-latest
+    ports:
+      - "3001:3000"
+    volumes:
+      - vane_data:/home/vane/data
+    environment:
+      SEARXNG_API_URL: http://searxng:8080
+    depends_on:
+      - searxng
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # SearXNG — shared by Vane (web search) and gpt-researcher (deep research).
+  searxng:
+    image: searxng/searxng
+    ports:
+      - "8888:8080"
+    volumes:
+      - ./searxng-settings.yml:/etc/searxng/settings.yml
+      - ./searxng-limiter.toml:/etc/searxng/limiter.toml
+      - searxng_data:/data
+    restart: unless-stopped
+
+volumes:
+  vane_data:
+  searxng_data:

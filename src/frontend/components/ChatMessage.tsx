@@ -9,7 +9,7 @@ import { ResearchTrace } from "./ResearchTrace"
 import { MessageAttachments } from "./MessageAttachments"
 import type { Message, Attachment } from "@/lib/types"
 
-const MorphicSearchResult = dynamic(() => import("./MorphicSearchResult").then(m => m.MorphicSearchResult), { ssr: false })
+const WebSearchResult = dynamic(() => import("./WebSearchResult").then(m => m.WebSearchResult), { ssr: false })
 
 const PULSE_DURATION_S = 1.4
 const PULSE_SCALE_PEAK = 1.12
@@ -22,7 +22,7 @@ interface ChatMessageProps {
   onDelete?: (index: number) => void
   onRegenerate?: (index: number) => void
   onBranch?: (index: number) => void
-  morphic_result?: Message["morphic_result"]
+  search_result?: Message["search_result"]
   research_steps?: Message["research_steps"]
   research_progress?: Message["research_progress"]
   research_trace_id?: string
@@ -38,14 +38,14 @@ export interface AssistantMessageContentProps {
   content: string
   isStreaming?: boolean
   compact?: boolean
-  morphic_result?: Message["morphic_result"]
+  search_result?: Message["search_result"]
 }
 
 export function AssistantMessageContent({
   content,
   isStreaming,
   compact,
-  morphic_result,
+  search_result,
 }: AssistantMessageContentProps) {
   const { thought, cleanContent } = useMemo(() => {
     const startTag = "<thought>\n"
@@ -65,7 +65,7 @@ export function AssistantMessageContent({
     return { thought: t, cleanContent: before.trim() }
   }, [content])
 
-  if (morphic_result) {
+  if (search_result) {
     if (!content.trim() && isStreaming) {
       return (
         <span role="status" className="inline-flex items-center gap-2 text-ink text-sm">
@@ -74,7 +74,7 @@ export function AssistantMessageContent({
         </span>
       )
     }
-    return <MorphicSearchResult content={content} morphic_result={morphic_result} />
+    return <WebSearchResult content={content} search_result={search_result} />
   }
 
   return (
@@ -101,7 +101,7 @@ export function AssistantMessageContent({
   )
 }
 
-function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBranch, morphic_result, research_steps, research_progress, research_trace_id, isStreaming, attachments, onAttachmentClick, collapsibleUser, onCollapse }: ChatMessageProps) {
+function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBranch, search_result, research_steps, research_progress, research_trace_id, isStreaming, attachments, onAttachmentClick, collapsibleUser, onCollapse }: ChatMessageProps) {
   const isUser = role === "user"
   const [copied, setCopied] = useState(false)
 
@@ -113,7 +113,7 @@ function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBran
   }
 
   const isResearchRunning = !isUser && isStreaming && research_steps && research_steps.length > 0
-  const canRegenerate = !isUser && onRegenerate && !isStreaming && !morphic_result && !(research_steps && research_steps.length > 0)
+  const canRegenerate = !isUser && onRegenerate && !isStreaming && !search_result && !(research_steps && research_steps.length > 0)
 
   return (
     <motion.div
@@ -149,11 +149,11 @@ function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBran
               <MessageAttachments attachments={attachments} onClick={onAttachmentClick ?? (() => {})} />
             )}
           </>
-        ) : (content || morphic_result) && !isResearchRunning ? (
+        ) : (content || search_result) && !isResearchRunning ? (
           <AssistantMessageContent
             content={content}
             isStreaming={isStreaming}
-            morphic_result={morphic_result}
+            search_result={search_result}
           />
         ) : content ? (
           <span role="status" className="inline-flex items-center gap-1 text-ink text-sm">

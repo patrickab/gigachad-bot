@@ -1,4 +1,4 @@
-import type { MorphicResultItem } from "./morphic"
+import type { WebSearchResultItem, WebSearchVideo } from "./webSearch"
 
 export interface Usage {
   prompt_tokens: number
@@ -33,7 +33,7 @@ export interface Message {
   hiddenContent?: string
   tool_call_id?: string
   tool_calls?: unknown[]
-  morphic_result?: MorphicSearchResult
+  search_result?: WebSearchResult
   research_trace_id?: string
   research_steps?: ResearchTraceStep[]
   research_progress?: ResearchTraceProgress
@@ -118,17 +118,23 @@ export interface ResearchTraceProgress {
   total_queries: number
 }
 
-export interface MorphicSearchParams {
+export interface WebSearchParams {
   query: string
-  searchDepth: "quick" | "adaptive"
+  focusMode: string
+  optimizationMode: string
+  systemInstructions?: string
+  domain?: string
+  images?: boolean
+  videos?: boolean
   model?: string
 }
 
-export interface MorphicSearchResult {
+export interface WebSearchResult {
   query: string
-  sources: MorphicResultItem[]
+  sources: WebSearchResultItem[]
   images: string[]
-  citationMap?: Record<string, MorphicResultItem>
+  videos: WebSearchVideo[]
+  citationMap?: Record<string, WebSearchResultItem>
 }
 
 export interface StudyProcessRequest {

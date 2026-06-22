@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export MORPHIC_URL="${MORPHIC_URL:-http://localhost:3001}"
+export VANE_URL="${VANE_URL:-http://localhost:3001}"
 
 export PATH="$(pwd)/.venv/bin:$PATH"
 
@@ -19,7 +19,7 @@ cleanup() {
     kill -TERM -- "-$PID" 2>/dev/null || kill -TERM "$PID" 2>/dev/null || true
   done
   pkill -f "mineru.cli.fast_api" 2>/dev/null || true
-  docker compose -f docker-compose.morphic.yml down 2>/dev/null || true
+  docker compose -f docker-compose.vane.yml down 2>/dev/null || true
   wait 2>/dev/null || true
   echo "Done."
 }

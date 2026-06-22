@@ -17,18 +17,41 @@ interface MoreOptionsMenuProps {
   prompts: Record<string, string>
   config: TabConfig
   onConfigChange: (config: Partial<TabConfig>) => void
-  searchDepth: "quick" | "adaptive"
-  onSearchDepthChange: (v: "quick" | "adaptive") => void
+}
+
+const FOCUS_MODES: { value: string; label: string }[] = [
+  { value: "webSearch", label: "Web" },
+  { value: "academicSearch", label: "Academic" },
+  { value: "redditSearch", label: "Reddit" },
+  { value: "youtubeSearch", label: "YouTube" },
+  { value: "wolframAlphaSearch", label: "Wolfram" },
+]
+
+const OPTIMIZATION_MODES: { value: string; label: string }[] = [
+  { value: "speed", label: "Speed" },
+  { value: "balanced", label: "Balanced" },
+  { value: "quality", label: "Quality" },
+]
+
+function Toggle({ on, onChange }: { on: boolean; onChange: () => void }) {
+  return (
+    <button
+      role="switch"
+      aria-checked={on}
+      onClick={onChange}
+      className={cn("relative h-5 w-9 rounded-full transition-colors", on ? "bg-ink-muted" : "bg-surface-elevated")}
+    >
+      <span className={cn("absolute top-0.5 h-4 w-4 rounded-full bg-ink transition-transform", on ? "left-[18px]" : "left-0.5")} />
+    </button>
+  )
 }
 
 export function MoreOptionsMenu({
   prompts,
   config,
   onConfigChange,
-  searchDepth,
-  onSearchDepthChange,
 }: MoreOptionsMenuProps) {
-  const { researchEnabled, morphicSearchEnabled } = useModeState()
+  const { researchEnabled, searchEnabled } = useModeState()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -99,19 +122,75 @@ export function MoreOptionsMenu({
               </>
             )}
 
-            {morphicSearchEnabled && searchDepth !== undefined && (
-              <div className="pt-2 border-t border-divider/50 space-y-2">
-                <div className="flex items-center gap-2 text-xs font-medium text-ink">
-                  <span className="h-1.5 w-1.5 rounded-full bg-ink" />
-                  Search Depth
+            {searchEnabled && (
+              <div className="pt-2 border-t border-divider/50 space-y-3">
+                {/* Focus mode (single-select, authoritative) */}
+                <div className="space-y-1.5">
+                  <div className="text-xs font-medium text-ink-subtle">Focus</div>
+                  <div className="flex flex-wrap gap-1">
+                    {FOCUS_MODES.map((m) => (
+                      <PillButton
+                        key={m.value}
+                        accent="muted"
+                        active={config.searchFocusMode === m.value}
+                        onClick={() => onConfigChange({ searchFocusMode: m.value })}
+                      >
+                        {m.label}
+                      </PillButton>
+                    ))}
+                  </div>
                 </div>
-                <div className="flex gap-1">
-                  <PillButton accent="muted" active={searchDepth === "quick"} onClick={() => onSearchDepthChange("quick")}>
-                    Quick
-                  </PillButton>
-                  <PillButton accent="muted" active={searchDepth === "adaptive"} onClick={() => onSearchDepthChange("adaptive")}>
-                    Adaptive
-                  </PillButton>
+
+                {/* Optimization mode */}
+                <div className="space-y-1.5">
+                  <div className="text-xs font-medium text-ink-subtle">Optimization</div>
+                  <div className="flex gap-1">
+                    {OPTIMIZATION_MODES.map((m) => (
+                      <PillButton
+                        key={m.value}
+                        accent="muted"
+                        active={config.searchOptimization === m.value}
+                        onClick={() => onConfigChange({ searchOptimization: m.value })}
+                      >
+                        {m.label}
+                      </PillButton>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Image / video search (default off) */}
+                <label className="flex items-center justify-between cursor-pointer">
+                  <span className="text-xs text-ink-subtle">Image search</span>
+                  <Toggle on={config.searchImages} onChange={() => onConfigChange({ searchImages: !config.searchImages })} />
+                </label>
+                <label className="flex items-center justify-between cursor-pointer">
+                  <span className="text-xs text-ink-subtle">Video search</span>
+                  <Toggle on={config.searchVideos} onChange={() => onConfigChange({ searchVideos: !config.searchVideos })} />
+                </label>
+
+                {/* Domain filter helper — prepended verbatim to the query */}
+                <div className="space-y-1">
+                  <span className="text-[10px] text-ink-faint">Domain filter</span>
+                  <input
+                    value={config.searchDomain}
+                    onChange={(e) => onConfigChange({ searchDomain: e.target.value })}
+                    placeholder="site:nature.com -reddit.com"
+                    spellCheck={false}
+                    className="w-full rounded-md border border-divider bg-surface px-2 py-1 text-xs text-ink placeholder:text-ink-faint outline-none focus:border-divider-strong"
+                  />
+                </div>
+
+                {/* System instructions */}
+                <div className="space-y-1">
+                  <span className="text-[10px] text-ink-faint">System instructions</span>
+                  <textarea
+                    value={config.searchSystemInstructions}
+                    onChange={(e) => onConfigChange({ searchSystemInstructions: e.target.value })}
+                    placeholder="Optional guidance for the answer…"
+                    rows={2}
+                    spellCheck={false}
+                    className="w-full resize-none rounded-md border border-divider bg-surface px-2 py-1 text-xs text-ink placeholder:text-ink-faint outline-none focus:border-divider-strong"
+                  />
                 </div>
               </div>
             )}

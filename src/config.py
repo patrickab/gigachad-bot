@@ -30,8 +30,14 @@ VISION_MODEL = "ollama/qwen3-vl:235b-instruct-cloud"
 DIRECTORY_OUTPUT_MINERU = DIRECTORY_CLOUD / "Documents" / "Mineru"
 DIRECTORY_OUTPUT_PDF = DIRECTORY_CLOUD / "Documents" / "PDFs"
 
-MORPHIC_URL = os.environ.get("MORPHIC_URL", "http://localhost:3001")
+# Vane (Perplexica) web-search sidecar. Single container, SearXNG bundled internally.
+VANE_URL = os.environ.get("VANE_URL", "http://localhost:3001")
+# Embedding model Vane uses to rerank sources. Must also be configured in Vane's
+# provider settings (bge-m3 served by local Ollama).
+EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "ollama/bge-m3:latest")
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+# Standalone SearXNG (searxng-settings.yml) — retriever for Deep Research (gpt-researcher).
+# Separate from Vane's internal SearXNG, which is not exposed on a host port.
 SEARX_URL = os.environ.get("SEARX_URL", "http://localhost:8888")
 
 

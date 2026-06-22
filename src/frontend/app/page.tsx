@@ -99,7 +99,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     regenerateAt,
     cancel,
     research,
-    morphicSearch,
+    webSearch,
     reset,
     models,
     prompts,
@@ -123,11 +123,11 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
 
   const {
     researchEnabled,
-    morphicSearchEnabled,
+    searchEnabled,
     ocrEnabled,
     studyEnabled,
     toggleResearch,
-    toggleMorphicSearch,
+    toggleSearch,
     toggleOCR,
     toggleStudy,
   } = useModeState()
@@ -332,11 +332,11 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     else if (commandBar.state.phase === "doc-review") onModeLabel("Review memory docs", docReviewLoading)
     else if (commandBar.state.phase === "error") onModeLabel("Memory error")
     else if (researchEnabled) onModeLabel("Deep Research")
-    else if (morphicSearchEnabled) onModeLabel("Search")
+    else if (searchEnabled) onModeLabel("Search")
     else if (ocrEnabled) onModeLabel("LaTeX OCR")
     else if (studyEnabled) onModeLabel("PDF Study")
     else onModeLabel("Chat")
-  }, [commandBar.state.phase, docReviewLoading, commandMemoryCount, researchEnabled, morphicSearchEnabled, ocrEnabled, studyEnabled, onModeLabel])
+  }, [commandBar.state.phase, docReviewLoading, commandMemoryCount, researchEnabled, searchEnabled, ocrEnabled, studyEnabled, onModeLabel])
 
   const isTitled = !!tab.historyFile
 
@@ -498,7 +498,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         return
       }
 
-      if (morphicSearchEnabled || researchEnabled) {
+      if (searchEnabled || researchEnabled) {
         if (attachments.length > 0) return
       }
 
@@ -544,8 +544,17 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         return
       }
 
-      if (morphicSearchEnabled) {
-        morphicSearch({ query: text, searchDepth: settings.searchDepth, model: config.selectedModel || undefined })
+      if (searchEnabled) {
+        webSearch({
+          query: text,
+          focusMode: config.searchFocusMode,
+          optimizationMode: config.searchOptimization,
+          systemInstructions: config.searchSystemInstructions,
+          domain: config.searchDomain,
+          images: config.searchImages,
+          videos: config.searchVideos,
+          model: config.selectedModel || undefined,
+        })
       } else if (researchEnabled) {
         research({
           query: text, fastModel: config.researchFastModel, smartModel: config.researchSmartModel, strategicModel: config.researchStrategicModel,
@@ -561,7 +570,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         })
       }
     },
-    [morphicSearchEnabled, researchEnabled, studyEnabled, chatId, branchMessageIdx, activeProject, config, send, research, morphicSearch, setMessages, toggleStudy, commandBar.submitCommand, messages, openObsidian, handleMindmapSubmit, setMindmapModalOpen],
+    [searchEnabled, researchEnabled, studyEnabled, chatId, branchMessageIdx, activeProject, config, send, research, webSearch, setMessages, toggleStudy, commandBar.submitCommand, messages, openObsidian, handleMindmapSubmit, setMindmapModalOpen],
   )
 
   const handleRegenerate = useCallback(
@@ -570,7 +579,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       const userMsg = messages[globalIndex]
       if (!userMsg || userMsg.role !== "user") return
       const assistantMsg = messages[globalIndex + 1]
-      if (assistantMsg?.morphic_result || assistantMsg?.research_steps?.length) return
+      if (assistantMsg?.search_result || assistantMsg?.research_steps?.length) return
 
       const attachments = userMsg.attachments ?? []
       if (attachments.length > 0) {
@@ -712,7 +721,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           <div className="flex items-center gap-2">
             <TokenCounter usage={totalUsage} />
             <ThemeToggle />
-            <MoreOptionsMenu prompts={prompts} config={config} onConfigChange={onConfigChange} searchDepth={settings.searchDepth} onSearchDepthChange={settings.setSearchDepth} />
+            <MoreOptionsMenu prompts={prompts} config={config} onConfigChange={onConfigChange} />
           </div>
         </header>
         <div className="flex-1 overflow-hidden relative transition-opacity duration-200">

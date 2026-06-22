@@ -41,7 +41,7 @@ export function ChatInput({
   onCancel,
   slug = null,
 }: ChatInputProps) {
-  const { researchEnabled, morphicSearchEnabled, ocrEnabled, studyEnabled, toggleResearch, toggleMorphicSearch, toggleOCR, toggleStudy } = useModeState()
+  const { researchEnabled, searchEnabled, ocrEnabled, studyEnabled, toggleResearch, toggleSearch, toggleOCR, toggleStudy } = useModeState()
   const { ocrModel } = useSettings()
 
   const tools = [
@@ -56,14 +56,14 @@ export function ChatInput({
       toggle: toggleResearch,
     },
     {
-      id: "morphic",
+      id: "search",
       label: "Web Search",
       shortLabel: "Search",
       icon: Globe,
       color: "text-ink",
       accent: "muted",
-      enabled: morphicSearchEnabled,
-      toggle: toggleMorphicSearch,
+      enabled: searchEnabled,
+      toggle: toggleSearch,
     },
     {
       id: "ocr",

@@ -20,10 +20,10 @@ function truncateAtSections(text: string): string {
 
 interface Props {
   content: string
-  morphic_result: NonNullable<Message["morphic_result"]>
+  search_result: NonNullable<Message["search_result"]>
 }
 
-function MorphicSearchResultInner({ content, morphic_result }: Props) {
+function WebSearchResultInner({ content, search_result }: Props) {
   const text = useMemo(() => {
     let text = content
 
@@ -37,13 +37,20 @@ function MorphicSearchResultInner({ content, morphic_result }: Props) {
     text = truncateAtSections(text)
 
     // Resolve citation markers to URLs using citationMap
-    const cm = morphic_result.citationMap
+    const cm = search_result.citationMap
     if (cm && Object.keys(cm).length) {
       text = text
+        // Vane format: plain [N] citations → convert to markdown links
+        .replace(/\[(\d+)\](?!\()/g, (match, n: string) => {
+          const url = cm[n]?.url
+          return url ? `[${n}](${url})` : match
+        })
+        // Legacy format: [N](#anchor) citations
         .replace(/\[(\d+)\]\(#[^)]*\)/g, (_, n: string) => {
           const url = cm[n]?.url
           return url ? `[${n}](${url})` : `[${n}]`
         })
+        // CJK bracket format: 【N†...】
         .replace(/【(\d+)†[^】]*】/g, (_, n: string) => {
           const url = cm[n]?.url
           return url ? `[${n}](${url})` : `[${n}]`
@@ -51,9 +58,9 @@ function MorphicSearchResultInner({ content, morphic_result }: Props) {
     }
 
     return text
-  }, [content, morphic_result])
+  }, [content, search_result])
 
-  return <LaTeXMarkdown content={text} citationMap={morphic_result.citationMap} />
+  return <LaTeXMarkdown content={text} citationMap={search_result.citationMap} />
 }
 
-export const MorphicSearchResult = memo(MorphicSearchResultInner)
+export const WebSearchResult = memo(WebSearchResultInner)

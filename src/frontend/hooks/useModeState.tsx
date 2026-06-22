@@ -7,11 +7,11 @@ export type AppMode = "chat" | "research" | "search" | "ocr" | "study"
 export interface ModeState {
   mode: AppMode
   researchEnabled: boolean
-  morphicSearchEnabled: boolean
+  searchEnabled: boolean
   ocrEnabled: boolean
   studyEnabled: boolean
   toggleResearch: () => void
-  toggleMorphicSearch: () => void
+  toggleSearch: () => void
   toggleOCR: () => void
   toggleStudy: () => void
   setMode: (mode: AppMode) => void
@@ -32,7 +32,7 @@ export function ModeProvider({ children }: { children: ReactNode }) {
     setMode((prev) => prev === "research" ? "chat" : "research")
   }, [])
 
-  const toggleMorphicSearch = useCallback(() => {
+  const toggleSearch = useCallback(() => {
     setMode((prev) => prev === "search" ? "chat" : "search")
   }, [])
 
@@ -47,11 +47,11 @@ export function ModeProvider({ children }: { children: ReactNode }) {
   const value: ModeState = {
     mode,
     researchEnabled: mode === "research",
-    morphicSearchEnabled: mode === "search",
+    searchEnabled: mode === "search",
     ocrEnabled: mode === "ocr",
     studyEnabled: mode === "study",
     toggleResearch,
-    toggleMorphicSearch,
+    toggleSearch,
     toggleOCR,
     toggleStudy,
     setMode,

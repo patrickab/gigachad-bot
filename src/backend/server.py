@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from backend.routes.chat import router as chat_router
-from backend.routes.deps import get_client, get_chat_store, get_project_store, shutdown_client
+from backend.routes.deps import get_chat_store, get_client, get_project_store, shutdown_client
 from backend.routes.documents import router as documents_router
 from backend.routes.files import router as files_router
 from backend.routes.fileviewer import router as fileviewer_router
@@ -26,11 +26,12 @@ from backend.routes.memory import router as memory_router
 from backend.routes.mineru import kill_all_mineru_servers, reset_cancel
 from backend.routes.mineru import router as mineru_router
 from backend.routes.models import router as models_router
-from backend.routes.morphic import router as morphic_router, stop_morphic
 from backend.routes.obsidian import router as obsidian_router
 from backend.routes.ocr import router as ocr_router
 from backend.routes.projects import router as projects_router
 from backend.routes.research import router as research_router
+from backend.routes.search import router as search_router
+from backend.routes.search import stop_vane
 from backend.routes.study import router as study_router
 from config import DIRECTORY_CHAT_HISTORIES, DIRECTORY_CHAT_UPLOADS, DIRECTORY_OUTPUT_MINERU, ensure_directories
 
@@ -58,7 +59,7 @@ async def lifespan(app: FastAPI):
     yield
     shutdown_client()
     kill_all_mineru_servers()
-    stop_morphic()
+    stop_vane()
 
 
 app = FastAPI(title="gigachad-bot", lifespan=lifespan)
@@ -77,7 +78,7 @@ app.include_router(fileviewer_router)
 app.include_router(histories_router)
 app.include_router(memory_router)
 app.include_router(models_router)
-app.include_router(morphic_router)
+app.include_router(search_router)
 app.include_router(obsidian_router)
 app.include_router(mineru_router)
 app.include_router(ocr_router)

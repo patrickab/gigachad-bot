@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import type React from "react"
 import { fetchModels, fetchPrompts, loadChatHistory as apiLoadChatHistory } from "@/lib/api"
-import type { ChatRequest, Message, ModelsResponse, MorphicSearchParams, Usage } from "@/lib/types"
+import type { ChatRequest, Message, ModelsResponse, WebSearchParams, Usage } from "@/lib/types"
 import { useChatStream } from "./useChatStream"
 import { useResearch, type ResearchParams } from "./useResearch"
-import { morphicFetch, parseMorphicStream } from "@/lib/morphic"
+import { webSearchFetch, parseWebSearchStream, fetchWebSearchImages, fetchWebSearchVideos, type WebSearchResultItem } from "@/lib/webSearch"
 import { createFlushBatcher } from "@/lib/streaming"
 
 export type { ResearchParams }
@@ -19,7 +19,7 @@ export interface UseChatReturn {
   cancel: () => void
   reset: () => Promise<void>
   research: (params: ResearchParams) => Promise<void>
-  morphicSearch: (params: MorphicSearchParams) => Promise<void>
+  webSearch: (params: WebSearchParams) => Promise<void>
   models: ModelsResponse | null
   prompts: Record<string, string>
   loadHistory: (filename: string) => Promise<{ messages: Message[]; chat_id: string | null; parent_id: string | null; branch_message_idx: number | null }>
@@ -37,11 +37,11 @@ export function useChat(): UseChatReturn {
 
   const [models, setModels] = useState<ModelsResponse | null>(null)
   const [prompts, setPrompts] = useState<Record<string, string>>({})
-  const [morphicError, setMorphicError] = useState<string | null>(null)
-  const [morphicSearching, setMorphicSearching] = useState(false)
-  const morphicAbortRef = useRef<(() => void) | null>(null)
+  const [searchError, setSearchError] = useState<string | null>(null)
+  const [searching, setSearching] = useState(false)
+  const searchAbortRef = useRef<(() => void) | null>(null)
 
-  const error = researchError || morphicError
+  const error = researchError || searchError
 
   useEffect(() => {
     fetchModels().then(setModels).catch(console.error)
@@ -66,9 +66,9 @@ export function useChat(): UseChatReturn {
     await doResearch(params, appendMessage, updateLast)
   }, [doResearch, appendMessage, updateLast])
 
-  const morphicSearch = useCallback(async (params: MorphicSearchParams) => {
-    setMorphicError(null)
-    setMorphicSearching(true)
+  const webSearch = useCallback(async (params: WebSearchParams) => {
+    setSearchError(null)
+    setSearching(true)
 
     const userMsg: Message = { role: "user", content: params.query }
     const assistantMsg: Message = { role: "assistant", content: "" }
@@ -78,48 +78,70 @@ export function useChat(): UseChatReturn {
 
     const batch = createFlushBatcher(setMessages, assistantMsg)
 
+    // Sources arrive as a list; build a 1-based citation map so [n] markers resolve.
+    const setSources = (sources: WebSearchResultItem[]) => {
+      assistantMsg.search_result = {
+        query: params.query,
+        sources,
+        images: assistantMsg.search_result?.images ?? [],
+        videos: assistantMsg.search_result?.videos ?? [],
+        citationMap: Object.fromEntries(sources.map((s, i) => [String(i + 1), s])),
+      }
+    }
+
     try {
-      const { promise, abort } = morphicFetch(params)
-      morphicAbortRef.current = abort
+      const { promise, abort } = webSearchFetch(params)
+      searchAbortRef.current = abort
 
       const res = await promise
 
-      for await (const event of parseMorphicStream(res)) {
+      for await (const event of parseWebSearchStream(res)) {
         if (event.type === "text" && event.text) {
           assistantMsg.content += event.text
           batch.schedule()
-        } else if (event.type === "source") {
-          const prev = assistantMsg.morphic_result
-          assistantMsg.morphic_result = {
-            query: event.query ?? prev?.query ?? params.query,
-            sources: event.sources ? [...(prev?.sources ?? []), ...event.sources] : (prev?.sources ?? []),
-            images: event.images ? [...new Set([...(prev?.images ?? []), ...event.images])] : (prev?.images ?? []),
-            citationMap: event.citationMap ?? prev?.citationMap,
-          }
+        } else if (event.type === "sources") {
+          const prev = assistantMsg.search_result?.sources ?? []
+          setSources([...prev, ...(event.sources ?? [])])
           batch.schedule()
         } else if (event.type === "error") {
-          throw new Error(event.text || "Morphic search error")
+          throw new Error(event.text || "Web search error")
         }
+      }
+
+      // Image/video search are separate Vane endpoints, fired only when toggled on.
+      if (params.images || params.videos) {
+        const [images, videos] = await Promise.all([
+          params.images ? fetchWebSearchImages(params.query, params.model ?? "") : Promise.resolve([]),
+          params.videos ? fetchWebSearchVideos(params.query, params.model ?? "") : Promise.resolve([]),
+        ])
+        assistantMsg.search_result = {
+          query: params.query,
+          sources: assistantMsg.search_result?.sources ?? [],
+          citationMap: assistantMsg.search_result?.citationMap,
+          images,
+          videos,
+        }
+        batch.schedule()
       }
     } catch (e) {
       if ((e as Error).name === "AbortError") return
       const msg = (e as Error)?.message ?? "Search failed"
-      setMorphicError(msg)
+      setSearchError(msg)
       assistantMsg.content = assistantMsg.content || `Search error: ${msg}`
     } finally {
       batch.final()
-      morphicAbortRef.current = null
-      setMorphicSearching(false)
+      searchAbortRef.current = null
+      setSearching(false)
     }
   }, [appendMessage, setMessages])
 
   const cancel = useCallback(() => {
     cancelStream()
-    morphicAbortRef.current?.()
+    searchAbortRef.current?.()
   }, [cancelStream])
 
   const reset = useCallback(async () => {
-    morphicAbortRef.current?.()
+    searchAbortRef.current?.()
     setMessages([])
     setTotalUsage({ prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 })
   }, [setMessages, setTotalUsage])
@@ -135,13 +157,13 @@ export function useChat(): UseChatReturn {
 
   return {
     messages,
-    isStreaming: isStreaming || morphicSearching,
+    isStreaming: isStreaming || searching,
     send,
     regenerateAt,
     cancel,
     reset,
     research,
-    morphicSearch,
+    webSearch,
     models,
     prompts,
     loadHistory,

@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence } from "framer-motion"
 import dynamic from "next/dynamic"
-import type { Message, Attachment, MorphicSearchResult, ProjectDocument } from "@/lib/types"
+import type { Message, Attachment, WebSearchResult, ProjectDocument } from "@/lib/types"
 import { ChatMessage, AssistantMessageContent } from "./ChatMessage"
 import { ChatInput } from "./ChatInput"
 import { ChatSidebar, type ChatSidebarElementConfig } from "./ChatSidebar"
@@ -199,17 +199,38 @@ function DocumentsBody({ documents, onSelect }: { documents: ProjectDocument[]; 
   )
 }
 
-function SourcesBody({ result }: { result: MorphicSearchResult }) {
+function SourcesBody({ result }: { result: WebSearchResult }) {
   const seen = new Set<string>()
   const sources = result.sources.filter((s) => !seen.has(s.url) && seen.add(s.url))
   const images = [...new Set(result.images)]
+  const videos = result.videos ?? []
 
-  if (sources.length === 0 && images.length === 0) {
+  if (sources.length === 0 && images.length === 0 && videos.length === 0) {
     return <div className="flex items-center justify-center py-6 text-xs text-ink-faint">No sources</div>
   }
 
   return (
     <div className="p-2 space-y-2">
+      {videos.length > 0 && (
+        <div className="mb-2">
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <Globe className="h-3 w-3 text-ink-subtle" />
+            <span className="text-[9px] font-medium text-ink-subtle uppercase tracking-wider">Videos</span>
+          </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            {videos.slice(0, 4).map((v, i) => (
+              <a key={i} href={v.url} target="_blank" rel="noopener noreferrer" title={v.title}>
+                <img
+                  src={v.thumbnail}
+                  alt=""
+                  className="w-full h-16 object-cover rounded border border-divider hover:border-ink-muted transition-colors"
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = "none" }}
+                />
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
       {images.length > 0 && (
         <div className="mb-2">
           <div className="flex items-center gap-1.5 mb-1.5">
@@ -264,7 +285,7 @@ function buildSidebarElements({
   onToggleAttachmentActive,
   onRemoveAttachment,
   onAttachmentContentChange,
-  lastMorphicResult,
+  lastSearchResult,
   obsidianEnabled,
   onOpenObsidian,
   documents,
@@ -283,7 +304,7 @@ function buildSidebarElements({
   onToggleAttachmentActive?: (messageIndex: number, attachmentName: string) => void
   onRemoveAttachment: (messageIndex: number, attachmentName: string) => void
   onAttachmentContentChange?: (messageIndex: number, attachmentName: string, newContent: string) => void
-  lastMorphicResult?: MorphicSearchResult
+  lastSearchResult?: WebSearchResult
   obsidianEnabled?: boolean
   onOpenObsidian?: () => void
   documents?: ProjectDocument[]
@@ -356,17 +377,17 @@ function buildSidebarElements({
     })
   }
 
-  if (lastMorphicResult) {
+  if (lastSearchResult) {
     const seen = new Set<string>()
-    const sources = lastMorphicResult.sources.filter((s) => !seen.has(s.url) && seen.add(s.url))
+    const sources = lastSearchResult.sources.filter((s) => !seen.has(s.url) && seen.add(s.url))
     elements.push({
       id: "sources",
       icon: Globe,
-      title: lastMorphicResult.query,
+      title: lastSearchResult.query,
       badge: sources.length,
       open: isElementOpen("sources"),
       onOpenChange: (o) => onElementOpenChange("sources", o),
-      body: <SourcesBody result={lastMorphicResult} />,
+      body: <SourcesBody result={lastSearchResult} />,
     })
   }
 
@@ -433,9 +454,9 @@ export function ChatContainer({
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isPinnedToBottomRef = useRef(true)
 
-  const lastMorphicResult = useMemo(() => {
+  const lastSearchResult = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].morphic_result) return messages[i].morphic_result
+      if (messages[i].search_result) return messages[i].search_result
     }
     return undefined
   }, [messages])
@@ -710,7 +731,7 @@ export function ChatContainer({
         onToggleAttachmentActive,
         onRemoveAttachment: handleRemoveAttachment,
         onAttachmentContentChange,
-        lastMorphicResult,
+        lastSearchResult,
         obsidianEnabled,
         onOpenObsidian,
         documents,
@@ -728,7 +749,7 @@ export function ChatContainer({
         pdfWide,
         onTogglePdfWide: togglePdfWide,
       }),
-    [chatId, slug, allAttachments, expandedEntries, handleToggleExpand, onToggleAttachmentActive, handleRemoveAttachment, onAttachmentContentChange, lastMorphicResult, obsidianEnabled, onOpenObsidian, documents, onSelectDocument, onOpenDocuments, openElements, pdfWide, togglePdfWide]
+    [chatId, slug, allAttachments, expandedEntries, handleToggleExpand, onToggleAttachmentActive, handleRemoveAttachment, onAttachmentContentChange, lastSearchResult, obsidianEnabled, onOpenObsidian, documents, onSelectDocument, onOpenDocuments, openElements, pdfWide, togglePdfWide]
   )
 
   const hasSidebarContent = sidebarElements.length > 0
@@ -863,7 +884,7 @@ export function ChatContainer({
                           <ChatMessage
                             role="assistant"
                             content={assistant.content}
-                            morphic_result={assistant.morphic_result}
+                            search_result={assistant.search_result}
                             research_steps={assistant.research_steps}
                             research_progress={assistant.research_progress}
                             research_trace_id={assistant.research_trace_id}

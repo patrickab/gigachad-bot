@@ -28,8 +28,6 @@ export interface SettingsState {
   setResearchReasoning: (v: string) => void
   researchReportType: string
   setResearchReportType: (v: string) => void
-  searchDepth: "quick" | "adaptive"
-  setSearchDepth: (v: "quick" | "adaptive") => void
   ocrModel: string
   setOCRModel: (v: string) => void
 }
@@ -57,8 +55,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [researchReasoning, setResearchReasoning] = useState("medium")
   const [researchReportType, setResearchReportType] = useState("deep")
 
-  const [searchDepth, setSearchDepth] = useState<"quick" | "adaptive">("adaptive")
-
   const [ocrModel, setOCRModel] = useState(DEFAULT_VISION_MODEL)
 
   const value = {
@@ -74,7 +70,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     researchBreadth, setResearchBreadth,
     researchReasoning, setResearchReasoning,
     researchReportType, setResearchReportType,
-    searchDepth, setSearchDepth,
     ocrModel, setOCRModel,
   }
 

@@ -4,7 +4,7 @@ import type { Message } from "./types"
 const FLUSH_MS = 60
 
 // Coalesces in-place mutations of the trailing assistant `msg` into setMessages
-// calls at most every FLUSH_MS. Both useChatStream and useChat.morphicSearch
+// calls at most every FLUSH_MS. Both useChatStream and useChat.webSearch
 // accumulate tokens onto that message and call schedule() per event; final()
 // guarantees the last state lands. Single home for the flush plumbing both
 // callers used to duplicate verbatim.
