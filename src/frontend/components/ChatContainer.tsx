@@ -180,6 +180,7 @@ function DocumentsBody({ documents, slug, onSelect, editingPath, onEdit, onDelet
 
   const isEditable = (doc: ProjectDocument) => /\.(md|tex|canvas)$/.test(doc.name)
   const pdfDocs = documents.filter((d) => d.mime === "application/pdf").map((d) => ({ path: d.path, name: d.name }))
+  const imageDocs = documents.filter((d) => d.mime.startsWith("image/")).map((d) => ({ path: d.path, name: d.name }))
 
   return (
     <div>
@@ -214,7 +215,7 @@ function DocumentsBody({ documents, slug, onSelect, editingPath, onEdit, onDelet
               </button>
             </div>
             {expanded && editable && slug && (
-              <DocumentEditor path={doc.path} slug={slug} onClose={() => onEdit?.(null)} onSaved={onSaved} onLiveContent={onLiveContent} availablePdfs={pdfDocs} />
+              <DocumentEditor path={doc.path} slug={slug} onClose={() => onEdit?.(null)} onSaved={onSaved} onLiveContent={onLiveContent} availablePdfs={pdfDocs} availableImages={imageDocs} />
             )}
             {expanded && !editable && doc.mime === "application/pdf" && (
               <PdfViewer url={fileViewerRawUrl(doc.path)} isWide={pdfWide} onToggleWide={onTogglePdfWide} fitWidth />

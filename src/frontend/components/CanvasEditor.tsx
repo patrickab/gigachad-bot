@@ -3,18 +3,21 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { getStroke } from "perfect-freehand"
 import { type StrokeData, getSvgPathFromStroke } from "@/lib/drawing"
-import { fileViewerRawUrl } from "@/lib/api"
+import { fileViewerRawUrl, writeBinaryDocument } from "@/lib/api"
 import { activeThemeName } from "@/lib/palette"
 import { cn } from "@/lib/utils"
-import { Plus, Undo2, Redo2, Trash2, FileType, X } from "lucide-react"
+import { Plus, Undo2, Redo2, Trash2, FileType, ImageIcon, X } from "lucide-react"
 import { PdfViewer } from "./PdfViewer"
 
 const A4_W = 794
 const A4_H = 1123
+const A4_ASPECT = A4_H / A4_W // height / width — page frames are locked to this
 const PAGE_GAP = 40
-const DEFAULT_EMBED_WIDTH = 500 // canvas units; height follows the PDF's own aspect
-const MIN_EMBED_WIDTH = 200
-const FALLBACK_EMBED_ASPECT = 1.3 // height/width used until the real page aspect is measured
+const DEFAULT_PDF_WIDTH = 500 // attachment default width (canvas units)
+const DEFAULT_IMAGE_WIDTH = 400 // image-frame default width (canvas units)
+const MIN_FRAME_WIDTH = 120
+const MIN_ATTACH_WIDTH = 200
+const FALLBACK_ASPECT = 1.3 // height/width used until the real aspect is measured
 const MIN_SCALE = 0.15
 const MAX_SCALE = 3
 const THIN_WIDTH = 2
@@ -38,22 +41,25 @@ const PRESET_COLORS = [
 type StrokeSize = "thin" | "medium" | "thick"
 const SIZE_MAP: Record<StrokeSize, number> = { thin: THIN_WIDTH, medium: MEDIUM_WIDTH, thick: THICK_WIDTH }
 
-export interface CanvasPage {
-  id: string
-  x: number
-  y: number
-}
+// --- Canvas primitives ---------------------------------------------------
+// CanvasFrame  = content that IS the artwork (page or image). Rasterized into
+//                the PDF/image export. Shared minimalistic chrome: drag the top
+//                border to move, bottom-right corner to resize, top-right to delete.
+// CanvasAttachment = a live, scrollable file reference (PDF; later text/LaTeX).
+//                NOT baked into export. Filename header doubles as the move handle.
 
-export interface PdfEmbed {
+export interface CanvasFrame {
   id: string
-  path: string
+  kind: "page" | "image"
   x: number
   y: number
   width: number
+  path?: string // image source (library/project path); pages have none
 }
 
-export interface ImageEmbed {
+export interface CanvasAttachment {
   id: string
+  kind: "pdf"
   path: string
   x: number
   y: number
@@ -63,24 +69,43 @@ export interface ImageEmbed {
 export interface CanvasDocument {
   version: 1
   viewport?: { scale: number; centerX: number; centerY: number }
-  pages: CanvasPage[]
+  frames: CanvasFrame[]
   strokes: StrokeData[]
-  pdfEmbeds?: PdfEmbed[]
-  imageEmbeds?: ImageEmbed[]
+  attachments: CanvasAttachment[]
 }
 
 export function emptyCanvasDoc(): CanvasDocument {
-  return {
-    version: 1,
-    pages: [],
-    strokes: [],
+  return { version: 1, frames: [], strokes: [], attachments: [] }
+}
+
+// Legacy on-disk shape (pages / pdfEmbeds / imageEmbeds) — migrated on load.
+type LegacyEmbed = { id: string; path: string; x: number; y: number; width: number }
+type LegacyDoc = {
+  version: 1
+  viewport?: CanvasDocument["viewport"]
+  strokes?: StrokeData[]
+  frames?: CanvasFrame[]
+  attachments?: CanvasAttachment[]
+  pages?: { id: string; x: number; y: number }[]
+  pdfEmbeds?: LegacyEmbed[]
+  imageEmbeds?: LegacyEmbed[]
+}
+
+function migrate(d: LegacyDoc): CanvasDocument {
+  if (Array.isArray(d.frames)) {
+    return { version: 1, viewport: d.viewport, frames: d.frames, strokes: d.strokes ?? [], attachments: d.attachments ?? [] }
   }
+  const frames: CanvasFrame[] = []
+  for (const p of d.pages ?? []) frames.push({ id: p.id, kind: "page", x: p.x, y: p.y, width: A4_W })
+  for (const im of d.imageEmbeds ?? []) frames.push({ id: im.id, kind: "image", x: im.x, y: im.y, width: im.width, path: im.path })
+  const attachments: CanvasAttachment[] = (d.pdfEmbeds ?? []).map((e) => ({ id: e.id, kind: "pdf", x: e.x, y: e.y, width: e.width, path: e.path }))
+  return { version: 1, viewport: d.viewport, frames, strokes: d.strokes ?? [], attachments }
 }
 
 export function parseCanvasDoc(text: string): CanvasDocument {
   try {
-    const parsed = JSON.parse(text)
-    if (parsed.version === 1 && Array.isArray(parsed.pages)) return parsed
+    const parsed = JSON.parse(text) as LegacyDoc
+    if (parsed && parsed.version === 1) return migrate(parsed)
   } catch { /* */ }
   return emptyCanvasDoc()
 }
@@ -93,6 +118,9 @@ interface CanvasEditorProps {
   doc: CanvasDocument
   onChange: (doc: CanvasDocument) => void
   availablePdfs?: { path: string; name: string }[]
+  availableImages?: { path: string; name: string }[]
+  slug?: string
+  onImageAdded?: (path: string) => void
 }
 
 // convert between center (canvas-space point at view center) and offset (SVG translate)
@@ -103,7 +131,7 @@ function offsetToCenter(ox: number, oy: number, s: number, w: number, h: number)
   return { cx: (w / 2 - ox) / s, cy: (h / 2 - oy) / s }
 }
 
-export function CanvasEditor({ doc, onChange, availablePdfs }: CanvasEditorProps) {
+export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, slug, onImageAdded }: CanvasEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
 
@@ -343,6 +371,42 @@ export function CanvasEditor({ doc, onChange, availablePdfs }: CanvasEditorProps
     }
   }, [])
 
+  // --- Aspect cache (image frames + pdf attachments), keyed by element id ---
+  const [aspects, setAspects] = useState<Record<string, number>>({})
+  const setAspect = useCallback((id: string, r: number) => {
+    setAspects((prev) => (Math.abs((prev[id] ?? 0) - r) < 0.001 ? prev : { ...prev, [id]: r }))
+  }, [])
+  const aspectFor = useCallback((f: CanvasFrame) => f.kind === "page" ? A4_ASPECT : (aspects[f.id] ?? FALLBACK_ASPECT), [aspects])
+
+  // --- Long-press context menu ---
+  const [contextMenu, setContextMenu] = useState<{ screenX: number; screenY: number; canvasX: number; canvasY: number } | null>(null)
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const longPressPos = useRef<{ clientX: number; clientY: number } | null>(null)
+
+  const startLongPress = useCallback((clientX: number, clientY: number) => {
+    longPressPos.current = { clientX, clientY }
+    longPressTimer.current = setTimeout(() => {
+      const [cx, cy] = screenToCanvas(clientX, clientY)
+      setIsDrawing(false)
+      setCurrentPoints([])
+      setContextMenu({ screenX: clientX, screenY: clientY, canvasX: cx, canvasY: cy })
+    }, 500)
+  }, [screenToCanvas])
+
+  const cancelLongPress = useCallback(() => {
+    clearTimeout(longPressTimer.current)
+    longPressPos.current = null
+  }, [])
+
+  useEffect(() => {
+    if (!contextMenu) return
+    const close = () => setContextMenu(null)
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") close() }
+    document.addEventListener("pointerdown", close)
+    document.addEventListener("keydown", esc)
+    return () => { document.removeEventListener("pointerdown", close); document.removeEventListener("keydown", esc) }
+  }, [contextMenu])
+
   // --- Drawing (on SVG) ---
   const handleSvgPointerDown = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
     if (e.pointerType === "touch") return
@@ -354,10 +418,17 @@ export function CanvasEditor({ doc, onChange, availablePdfs }: CanvasEditorProps
     setIsDrawing(true)
     const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
     setCurrentPoints([[cx, cy, e.pressure > 0 ? e.pressure : 0.5]])
-  }, [screenToCanvas])
+    startLongPress(e.clientX, e.clientY)
+  }, [screenToCanvas, startLongPress])
 
   const handleSvgPointerMove = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
     if (e.pointerType === "touch") return
+    // cancel long-press if pointer moves more than a few pixels
+    if (longPressPos.current) {
+      const dx = e.clientX - longPressPos.current.clientX
+      const dy = e.clientY - longPressPos.current.clientY
+      if (dx * dx + dy * dy > 25) cancelLongPress()
+    }
     if (isErasing) {
       const [ex, ey] = screenToCanvas(e.clientX, e.clientY)
       const threshold = 15 / scaleRef.current
@@ -377,9 +448,10 @@ export function CanvasEditor({ doc, onChange, availablePdfs }: CanvasEditorProps
     if (!isDrawing) return
     const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
     setCurrentPoints((prev) => [...prev, [cx, cy, e.pressure > 0 ? e.pressure : 0.5]])
-  }, [isDrawing, isErasing, screenToCanvas, doc, onChange])
+  }, [isDrawing, isErasing, screenToCanvas, doc, onChange, cancelLongPress])
 
   const handleSvgPointerUp = useCallback((e?: React.PointerEvent<SVGSVGElement>) => {
+    cancelLongPress()
     if (e?.pointerType === "touch") return
     if (isErasing) { setIsErasing(false); return }
     if (!isDrawing) return
@@ -388,7 +460,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs }: CanvasEditorProps
     onChange({ ...doc, strokes: [...doc.strokes, { points: currentPoints, color, width: baseWidth }] })
     setRedoStack([])
     setCurrentPoints([])
-  }, [isDrawing, isErasing, currentPoints, color, baseWidth, doc, onChange])
+  }, [isDrawing, isErasing, currentPoints, color, baseWidth, doc, onChange, cancelLongPress])
 
   // --- Undo / Redo ---
   const undo = useCallback(() => {
@@ -421,18 +493,6 @@ export function CanvasEditor({ doc, onChange, availablePdfs }: CanvasEditorProps
     return () => window.removeEventListener("keydown", handler)
   }, [undo, redo])
 
-  // --- Add / remove page ---
-  const addPage = useCallback(() => {
-    const lastPage = doc.pages[doc.pages.length - 1]
-    const newX = lastPage ? lastPage.x + A4_W + PAGE_GAP : 0
-    const newId = `p${Date.now()}`
-    onChange({ ...doc, pages: [...doc.pages, { id: newId, x: newX, y: lastPage?.y ?? 0 }] })
-  }, [doc, onChange])
-
-  const removePage = useCallback((id: string) => {
-    onChange({ ...doc, pages: doc.pages.filter((p) => p.id !== id) })
-  }, [doc, onChange])
-
   const clearAll = useCallback(() => {
     setRedoStack([])
     onChange({ ...doc, strokes: [] })
@@ -446,16 +506,9 @@ export function CanvasEditor({ doc, onChange, availablePdfs }: CanvasEditorProps
     setStrokeWidth((w) => w === "thin" ? "medium" : w === "medium" ? "thick" : "thin")
   }, [])
 
-  // --- PDF embeds ---
+  // --- Add menu (pages / images / pdf attachments) ---
   const [addMenuOpen, setAddMenuOpen] = useState(false)
   const addMenuRef = useRef<HTMLDivElement>(null)
-  const [embedAspects, setEmbedAspects] = useState<Record<string, number>>({})
-  const embedDrag = useRef<{
-    id: string; startX: number; startY: number
-    origX: number; origY: number; origW: number
-    mode: "move" | "resize"
-  } | null>(null)
-
   useEffect(() => {
     if (!addMenuOpen) return
     const handler = (e: MouseEvent) => {
@@ -465,51 +518,130 @@ export function CanvasEditor({ doc, onChange, availablePdfs }: CanvasEditorProps
     return () => document.removeEventListener("mousedown", handler)
   }, [addMenuOpen])
 
-  // latest doc/onChange for the long-lived window drag listeners, so they don't
-  // need to re-subscribe on every stroke
+  // latest doc/onChange for the long-lived window drag listeners
   const liveRef = useRef({ doc, onChange })
   liveRef.current = { doc, onChange }
 
-  const addPdfEmbed = useCallback((path: string) => {
-    const embeds = doc.pdfEmbeds ?? []
-    if (embeds.some((e) => e.path === path)) { setAddMenuOpen(false); return }
+  const pointAtCenter = useCallback((w: number, aspect: number) => {
     const el = containerRef.current
     const vw = el ? el.clientWidth : 800
     const vh = el ? el.clientHeight : 600
-    // drop it centred in the current viewport (height unknown until measured)
-    const cx = (-offsetRef.current.x + vw / 2) / scaleRef.current - DEFAULT_EMBED_WIDTH / 2
-    const cy = (-offsetRef.current.y + vh / 2) / scaleRef.current - (DEFAULT_EMBED_WIDTH * FALLBACK_EMBED_ASPECT) / 2
-    onChange({ ...doc, pdfEmbeds: [...embeds, { id: `pdf-${Date.now()}`, path, x: cx, y: cy, width: DEFAULT_EMBED_WIDTH }] })
+    const cx = (-offsetRef.current.x + vw / 2) / scaleRef.current - w / 2
+    const cy = (-offsetRef.current.y + vh / 2) / scaleRef.current - (w * aspect) / 2
+    return { cx, cy }
+  }, [])
+
+  // --- Frames (pages + images) ---
+  const addPage = useCallback(() => {
+    const pages = doc.frames.filter((f) => f.kind === "page")
+    const last = pages[pages.length - 1]
+    const newX = last ? last.x + last.width + PAGE_GAP : 0
+    onChange({ ...doc, frames: [...doc.frames, { id: `p-${Date.now()}`, kind: "page", x: newX, y: last?.y ?? 0, width: A4_W }] })
+  }, [doc, onChange])
+
+  const addImageFrameAt = useCallback((path: string, x: number, y: number) => {
+    onChange({ ...doc, frames: [...doc.frames, { id: `img-${Date.now()}`, kind: "image", x, y, width: DEFAULT_IMAGE_WIDTH, path }] })
+  }, [doc, onChange])
+
+  const addImageFrame = useCallback((path: string) => {
+    const { cx, cy } = pointAtCenter(DEFAULT_IMAGE_WIDTH, FALLBACK_ASPECT)
+    addImageFrameAt(path, cx, cy)
     setAddMenuOpen(false)
+  }, [pointAtCenter, addImageFrameAt])
+
+  const removeFrame = useCallback((id: string) => {
+    onChange({ ...doc, frames: doc.frames.filter((f) => f.id !== id) })
+    setAspects(({ [id]: _gone, ...rest }) => rest)
   }, [doc, onChange])
 
-  const removePdfEmbed = useCallback((id: string) => {
-    onChange({ ...doc, pdfEmbeds: (doc.pdfEmbeds ?? []).filter((e) => e.id !== id) })
-    setEmbedAspects(({ [id]: _removed, ...rest }) => rest)
+  // --- Attachments (pdf) ---
+  const addAttachment = useCallback((path: string) => {
+    if (doc.attachments.some((a) => a.path === path)) { setAddMenuOpen(false); return }
+    const { cx, cy } = pointAtCenter(DEFAULT_PDF_WIDTH, FALLBACK_ASPECT)
+    onChange({ ...doc, attachments: [...doc.attachments, { id: `pdf-${Date.now()}`, kind: "pdf", path, x: cx, y: cy, width: DEFAULT_PDF_WIDTH }] })
+    setAddMenuOpen(false)
+  }, [doc, onChange, pointAtCenter])
+
+  const removeAttachment = useCallback((id: string) => {
+    onChange({ ...doc, attachments: doc.attachments.filter((a) => a.id !== id) })
+    setAspects(({ [id]: _gone, ...rest }) => rest)
   }, [doc, onChange])
 
-  const startEmbedInteraction = useCallback((id: string, clientX: number, clientY: number, mode: "move" | "resize") => {
-    const embed = (liveRef.current.doc.pdfEmbeds ?? []).find((e) => e.id === id)
-    if (!embed) return
-    embedDrag.current = { id, startX: clientX, startY: clientY, origX: embed.x, origY: embed.y, origW: embed.width, mode }
+  // --- Paste image (Ctrl+V or long-press menu) ---
+  const pasteImageAtPoint = useCallback(async (canvasX: number, canvasY: number) => {
+    if (!slug) return
+    try {
+      const items = await navigator.clipboard.read()
+      for (const item of items) {
+        const imageType = item.types.find((t) => t.startsWith("image/"))
+        if (!imageType) continue
+        const blob = await item.getType(imageType)
+        const ext = imageType.split("/")[1] || "png"
+        const name = `pasted-${Date.now()}.${ext}`
+        const res = await writeBinaryDocument(slug, name, blob)
+        addImageFrameAt(res.path, canvasX, canvasY)
+        onImageAdded?.(res.path)
+        return
+      }
+    } catch { /* clipboard empty or no permission */ }
+  }, [slug, addImageFrameAt, onImageAdded])
+
+  useEffect(() => {
+    const handler = (e: ClipboardEvent) => {
+      if (!slug) return
+      const items = e.clipboardData?.items
+      if (!items) return
+      for (const item of items) {
+        if (!item.type.startsWith("image/")) continue
+        e.preventDefault()
+        const blob = item.getAsFile()
+        if (!blob) continue
+        const ext = item.type.split("/")[1] || "png"
+        const name = `pasted-${Date.now()}.${ext}`
+        const { cx, cy } = pointAtCenter(DEFAULT_IMAGE_WIDTH, FALLBACK_ASPECT)
+        writeBinaryDocument(slug, name, blob).then((res) => {
+          addImageFrameAt(res.path, cx, cy)
+          onImageAdded?.(res.path)
+        }).catch(() => {})
+        return
+      }
+    }
+    window.addEventListener("paste", handler)
+    return () => window.removeEventListener("paste", handler)
+  }, [slug, pointAtCenter, addImageFrameAt, onImageAdded])
+
+  // --- Shared move / resize for frames + attachments ---
+  const dragRef = useRef<{
+    id: string; target: "frame" | "attachment"; mode: "move" | "resize"
+    startX: number; startY: number; origX: number; origY: number; origW: number
+  } | null>(null)
+
+  const startInteraction = useCallback((id: string, target: "frame" | "attachment", mode: "move" | "resize", clientX: number, clientY: number) => {
+    const list = target === "frame" ? liveRef.current.doc.frames : liveRef.current.doc.attachments
+    const item = list.find((e) => e.id === id)
+    if (!item) return
+    dragRef.current = { id, target, mode, startX: clientX, startY: clientY, origX: item.x, origY: item.y, origW: item.width }
   }, [])
 
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
-      const d = embedDrag.current
+      const d = dragRef.current
       if (!d) return
       const { doc: cur, onChange: change } = liveRef.current
       const dx = (e.clientX - d.startX) / scaleRef.current
       const dy = (e.clientY - d.startY) / scaleRef.current
-      const embeds = (cur.pdfEmbeds ?? []).map((em) => {
-        if (em.id !== d.id) return em
-        // only width is stored; height always follows the PDF's real aspect ratio
-        if (d.mode === "resize") return { ...em, width: Math.max(MIN_EMBED_WIDTH, d.origW + dx) }
-        return { ...em, x: d.origX + dx, y: d.origY + dy }
-      })
-      change({ ...cur, pdfEmbeds: embeds })
+      const minW = d.target === "frame" ? MIN_FRAME_WIDTH : MIN_ATTACH_WIDTH
+      if (d.target === "frame") {
+        change({ ...cur, frames: cur.frames.map((f) => f.id !== d.id ? f
+          : d.mode === "resize" ? { ...f, width: Math.max(minW, d.origW + dx) }
+          : { ...f, x: d.origX + dx, y: d.origY + dy }) })
+      } else {
+        change({ ...cur, attachments: cur.attachments.map((a) => a.id !== d.id ? a
+          : d.mode === "resize" ? { ...a, width: Math.max(minW, d.origW + dx) }
+          : { ...a, x: d.origX + dx, y: d.origY + dy }) })
+      }
     }
-    const onUp = () => { embedDrag.current = null }
+    const onUp = () => { dragRef.current = null }
     window.addEventListener("pointermove", onMove)
     window.addEventListener("pointerup", onUp)
     return () => {
@@ -537,13 +669,30 @@ export function CanvasEditor({ doc, onChange, availablePdfs }: CanvasEditorProps
               >
                 Page
               </button>
+              {(availableImages ?? []).length > 0 && (
+                <>
+                  <div className="mx-2 my-1 border-t border-divider/50" />
+                  <div className="px-3 py-0.5 text-[9px] text-ink-faint uppercase tracking-wider">Images</div>
+                  {availableImages!.map((img) => (
+                    <button
+                      key={img.path}
+                      onClick={() => addImageFrame(img.path)}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink hover:bg-hover transition-colors truncate"
+                    >
+                      <ImageIcon className="h-3 w-3 shrink-0 text-ink-faint" />
+                      <span className="truncate">{img.name}</span>
+                    </button>
+                  ))}
+                </>
+              )}
               {(availablePdfs ?? []).length > 0 && (
                 <>
                   <div className="mx-2 my-1 border-t border-divider/50" />
+                  <div className="px-3 py-0.5 text-[9px] text-ink-faint uppercase tracking-wider">PDFs</div>
                   {availablePdfs!.map((pdf) => (
                     <button
                       key={pdf.path}
-                      onClick={() => addPdfEmbed(pdf.path)}
+                      onClick={() => addAttachment(pdf.path)}
                       className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink hover:bg-hover transition-colors truncate"
                     >
                       <FileType className="h-3 w-3 shrink-0 text-ink-faint" />
@@ -668,7 +817,8 @@ export function CanvasEditor({ doc, onChange, availablePdfs }: CanvasEditorProps
           <rect width="100%" height="100%" fill="url(#canvas-dots)" />
         </svg>
 
-        {/* Transformed canvas layer */}
+        {/* Transformed canvas layer — frames + strokes share this space so strokes
+            always render over frame content and both export identically. */}
         <svg
           ref={svgRef}
           className="absolute inset-0 w-full h-full"
@@ -679,45 +829,88 @@ export function CanvasEditor({ doc, onChange, availablePdfs }: CanvasEditorProps
           onPointerLeave={handleSvgPointerUp}
         >
           <g transform={`translate(${offset.x},${offset.y}) scale(${scale})`}>
-            {/* Pages */}
-            {doc.pages.map((page) => {
-              const btnSize = 24 / scale
+            {/* Frames (pages + images) — the CanvasFrame primitive.
+                All chrome is sized in `u` (= one screen px) so it stays a
+                constant, light size at any zoom. */}
+            {doc.frames.map((f) => {
+              const u = 1 / scale // one screen pixel in canvas units
+              const w = f.width
+              const h = f.width * aspectFor(f)
+              const rx = 6 * u
+              const band = 16 * u           // top drag-band height
+              const gripW = 26 * u          // grip handle pill
+              const delC = { x: f.x + w - 11 * u, y: f.y + 11 * u } // delete center (inside top-right)
+              const arm = 2.75 * u
               return (
-                <g key={page.id}>
+                <g key={f.id} className="group/frame">
+                  {/* content — clipped to rounded corners, pointer-transparent so you can draw over it */}
+                  <clipPath id={`frame-clip-${f.id}`}>
+                    <rect x={f.x} y={f.y} width={w} height={h} rx={rx} ry={rx} />
+                  </clipPath>
+                  <g clipPath={`url(#frame-clip-${f.id})`} style={{ pointerEvents: "none" }}>
+                    {f.kind === "page" ? (
+                      <rect x={f.x} y={f.y} width={w} height={h} fill="var(--surface-elevated)" />
+                    ) : (
+                      <image
+                        href={fileViewerRawUrl(f.path!)}
+                        x={f.x} y={f.y} width={w} height={h}
+                        preserveAspectRatio="none"
+                        onLoad={(e) => {
+                          const img = e.currentTarget as unknown as SVGImageElement & { naturalWidth?: number; naturalHeight?: number }
+                          if (img.naturalWidth && img.naturalHeight) setAspect(f.id, img.naturalHeight / img.naturalWidth)
+                          else {
+                            const probe = new Image()
+                            probe.onload = () => { if (probe.naturalWidth) setAspect(f.id, probe.naturalHeight / probe.naturalWidth) }
+                            probe.src = fileViewerRawUrl(f.path!)
+                          }
+                        }}
+                      />
+                    )}
+                  </g>
+                  {/* rounded border */}
+                  <rect x={f.x} y={f.y} width={w} height={h} rx={rx} ry={rx} fill="none" stroke="var(--divider-strong)" strokeWidth={u} style={{ pointerEvents: "none" }} />
+
+                  {/* top drag-band hit area (move) */}
                   <rect
-                    x={page.x}
-                    y={page.y}
-                    width={A4_W}
-                    height={A4_H}
-                    fill="var(--surface-elevated)"
-                    stroke="var(--divider-strong)"
-                    strokeWidth={1 / scale}
+                    x={f.x} y={f.y} width={w} height={band}
+                    fill="transparent" style={{ cursor: "grab" }}
+                    onPointerDown={(e) => { e.stopPropagation(); startInteraction(f.id, "frame", "move", e.clientX, e.clientY) }}
                   />
-                  <text
-                    x={page.x + A4_W / 2}
-                    y={page.y + A4_H + 16 / scale}
-                    textAnchor="middle"
-                    fontSize={10 / scale}
+                  {/* grip handle — the minimal drag affordance, dim until hover */}
+                  <rect
+                    x={f.x + w / 2 - gripW / 2} y={f.y + 2.5 * u} width={gripW} height={3.5 * u} rx={1.75 * u}
                     fill="var(--ink-faint)"
-                    style={{ userSelect: "none", pointerEvents: "none" }}
+                    className="opacity-50 group-hover/frame:opacity-90 transition-opacity"
+                    style={{ pointerEvents: "none" }}
+                  />
+
+                  {/* resize handle (bottom-right) — subtle corner ticks */}
+                  <g
+                    style={{ cursor: "nwse-resize" }}
+                    onPointerDown={(e) => { e.stopPropagation(); startInteraction(f.id, "frame", "resize", e.clientX, e.clientY) }}
                   >
-                    A4 · rasterize on export
-                  </text>
-                  {/* Delete icon — visible only when pointer is near it */}
-                  <foreignObject
-                    x={page.x + A4_W - btnSize / 2}
-                    y={page.y - btnSize / 2}
-                    width={btnSize}
-                    height={btnSize}
-                    className="group/del"
+                    <rect x={f.x + w - 16 * u} y={f.y + h - 16 * u} width={16 * u} height={16 * u} fill="transparent" />
+                    <path
+                      d={`M ${f.x + w - 4.5 * u},${f.y + h - 1.5 * u} L ${f.x + w - 1.5 * u},${f.y + h - 4.5 * u} M ${f.x + w - 9 * u},${f.y + h - 1.5 * u} L ${f.x + w - 1.5 * u},${f.y + h - 9 * u}`}
+                      stroke="var(--ink-faint)" strokeWidth={1.25 * u} strokeLinecap="round" fill="none"
+                      className="opacity-50 group-hover/frame:opacity-90 transition-opacity"
+                      style={{ pointerEvents: "none" }}
+                    />
+                  </g>
+
+                  {/* delete — always visible, grey → red on hover, no background (matches CanvasAttachment) */}
+                  <g
+                    className="text-ink-faint hover:text-danger transition-colors"
+                    style={{ cursor: "pointer" }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => { e.stopPropagation(); removeFrame(f.id) }}
                   >
-                    <button
-                      onClick={(e) => { e.stopPropagation(); removePage(page.id) }}
-                      className="flex items-center justify-center w-full h-full rounded opacity-0 group-hover/del:opacity-100 transition-opacity bg-danger/10 text-danger hover:bg-danger/20"
-                    >
-                      <Trash2 style={{ width: btnSize * scale * 0.55, height: btnSize * scale * 0.55 }} />
-                    </button>
-                  </foreignObject>
+                    <circle cx={delC.x} cy={delC.y} r={8 * u} fill="transparent" />
+                    <path
+                      d={`M ${delC.x - arm},${delC.y - arm} L ${delC.x + arm},${delC.y + arm} M ${delC.x - arm},${delC.y + arm} L ${delC.x + arm},${delC.y - arm}`}
+                      stroke="currentColor" strokeWidth={1.5 * u} strokeLinecap="round" fill="none"
+                    />
+                  </g>
                 </g>
               )
             })}
@@ -732,46 +925,42 @@ export function CanvasEditor({ doc, onChange, availablePdfs }: CanvasEditorProps
           </g>
         </svg>
 
-        {/* PDF embeds — positioned HTML over SVG, not part of export */}
-        {(doc.pdfEmbeds ?? []).map((embed) => {
-          const screenX = embed.x * scale + offset.x
-          const screenY = embed.y * scale + offset.y
-          const screenW = embed.width * scale
-          // body height derived synchronously from width × aspect so resizing
-          // never stretches; the page aspect is reported by PdfViewer once loaded
-          const aspect = embedAspects[embed.id] ?? FALLBACK_EMBED_ASPECT
-          const name = embed.path.split("/").pop() ?? "PDF"
+        {/* Attachments (pdf) — the CanvasAttachment primitive. Live, scrollable,
+            positioned HTML over the SVG, never baked into export. */}
+        {doc.attachments.map((att) => {
+          const screenX = att.x * scale + offset.x
+          const screenY = att.y * scale + offset.y
+          const screenW = att.width * scale
+          const aspect = aspects[att.id] ?? FALLBACK_ASPECT
+          const name = att.path.split("/").pop() ?? "PDF"
           return (
             <div
-              key={embed.id}
+              key={att.id}
               className="absolute flex flex-col border border-divider-strong rounded-lg overflow-hidden bg-paper shadow-[var(--shadow-lg)]"
               style={{ left: screenX, top: screenY, width: screenW }}
             >
-              {/* Header — drag to move */}
               <div
                 className="flex items-center gap-1.5 px-2 py-1 border-b border-divider/50 cursor-grab active:cursor-grabbing select-none shrink-0"
-                onPointerDown={(e) => { e.stopPropagation(); startEmbedInteraction(embed.id, e.clientX, e.clientY, "move") }}
+                onPointerDown={(e) => { e.stopPropagation(); startInteraction(att.id, "attachment", "move", e.clientX, e.clientY) }}
               >
                 <FileType className="h-3 w-3 text-ink-faint shrink-0" />
                 <span className="flex-1 min-w-0 truncate text-[10px] font-medium text-ink-muted">{name}</span>
                 <button
-                  onClick={(e) => { e.stopPropagation(); removePdfEmbed(embed.id) }}
+                  onClick={(e) => { e.stopPropagation(); removeAttachment(att.id) }}
                   className="rounded p-0.5 text-ink-faint hover:text-danger transition-colors shrink-0"
                 >
                   <X className="h-3 w-3" />
                 </button>
               </div>
-              {/* PDF content — fills this fixed-aspect box */}
               <div style={{ height: screenW * aspect }} onPointerDown={(e) => e.stopPropagation()}>
                 <PdfViewer
-                  url={fileViewerRawUrl(embed.path)}
-                  onPageAspect={(r) => setEmbedAspects((prev) => prev[embed.id] === r ? prev : { ...prev, [embed.id]: r })}
+                  url={fileViewerRawUrl(att.path)}
+                  onPageAspect={(r) => setAspect(att.id, r)}
                 />
               </div>
-              {/* Resize handle — bottom-right corner */}
               <div
                 className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize"
-                onPointerDown={(e) => { e.stopPropagation(); startEmbedInteraction(embed.id, e.clientX, e.clientY, "resize") }}
+                onPointerDown={(e) => { e.stopPropagation(); startInteraction(att.id, "attachment", "resize", e.clientX, e.clientY) }}
               >
                 <svg className="w-full h-full text-ink-faint" viewBox="0 0 16 16">
                   <path d="M14 2L2 14M14 6L6 14M14 10L10 14" stroke="currentColor" strokeWidth="1.5" fill="none" />
@@ -780,6 +969,31 @@ export function CanvasEditor({ doc, onChange, availablePdfs }: CanvasEditorProps
             </div>
           )
         })}
+
+        {/* Long-press context menu */}
+        {contextMenu && (
+          <div
+            className="absolute z-20 rounded-lg border border-divider bg-paper shadow-[var(--shadow-lg)] py-1 min-w-[100px]"
+            style={{ left: contextMenu.screenX - (containerRef.current?.getBoundingClientRect().left ?? 0), top: contextMenu.screenY - (containerRef.current?.getBoundingClientRect().top ?? 0) }}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => {
+                const { canvasX, canvasY } = contextMenu
+                setContextMenu(null)
+                // discard the tiny hold-dot stroke
+                setIsDrawing(false)
+                setCurrentPoints([])
+                pasteImageAtPoint(canvasX, canvasY)
+              }}
+              disabled={!slug}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink hover:bg-hover transition-colors disabled:opacity-30"
+            >
+              <ImageIcon className="h-3 w-3 shrink-0 text-ink-faint" />
+              Paste image
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )

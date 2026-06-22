@@ -8,8 +8,8 @@ import { cn } from "@/lib/utils"
 import { ConsoleEditor } from "./ConsoleEditor"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { CanvasEditor, parseCanvasDoc, serializeCanvasDoc, emptyCanvasDoc, type CanvasDocument } from "./CanvasEditor"
-import { loadFileViewerText, writeDocument, writeBinaryDocument, mirrorDrawing } from "@/lib/api"
-import { renderPageToPng, renderCanvasToJpeg } from "@/lib/drawing"
+import { loadFileViewerText, writeDocument, writeBinaryDocument, mirrorDrawing, fileViewerRawUrl } from "@/lib/api"
+import { renderPageToPng, renderCanvasToJpeg, type EmbedRect } from "@/lib/drawing"
 
 interface DocumentEditorProps {
   path: string
@@ -18,6 +18,7 @@ interface DocumentEditorProps {
   onSaved?: (filename?: string, content?: string) => void
   onLiveContent?: (path: string, content: string | null) => void
   availablePdfs?: { path: string; name: string }[]
+  availableImages?: { path: string; name: string }[]
 }
 
 function editorLanguage(path: string): string {
@@ -113,7 +114,7 @@ function ResizableEditor({ children }: { children: React.ReactNode }) {
   )
 }
 
-export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, availablePdfs }: DocumentEditorProps) {
+export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, availablePdfs, availableImages }: DocumentEditorProps) {
   const isCanvas = path.endsWith(".canvas")
   const [content, setContent] = useState<string | null>(null)
   const [canvasDoc, setCanvasDoc] = useState<CanvasDocument | null>(null)
@@ -174,22 +175,37 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
     return () => { onLiveContent?.(path, null) }
   }, [path, onLiveContent])
 
-  // single source of save bookkeeping — used by manual save, auto-save and export
+  // image frames → export rects (aspect measured fresh so the bake never distorts)
+  const buildImageEmbeds = useCallback(async (doc: CanvasDocument): Promise<EmbedRect[]> => {
+    const images = doc.frames.filter((f) => f.kind === "image" && f.path)
+    if (images.length === 0) return []
+    return Promise.all(images.map(async (f) => {
+      const url = fileViewerRawUrl(f.path!)
+      let aspect = 1
+      try {
+        const img = new Image()
+        img.crossOrigin = "anonymous"
+        await new Promise<void>((resolve, reject) => { img.onload = () => resolve(); img.onerror = reject; img.src = url })
+        if (img.naturalWidth > 0) aspect = img.naturalHeight / img.naturalWidth
+      } catch { /* */ }
+      return { url, x: f.x, y: f.y, width: f.width, aspect }
+    }))
+  }, [])
+
   const persist = useCallback(async (serialized: string) => {
     await writeDocument(slug, filename, serialized)
     savedContentRef.current = serialized
     if (isCanvas && canvasDoc) savedCanvasKey.current = canvasContentKey(canvasDoc)
     setDirty(false)
     onSaved?.(filename, serialized)
-    // mirror the rendered drawing into the cloud collection (md/tex mirror server-side).
-    // ponytail: skip empty canvases so a cleared sketch leaves a stale .jpg rather than erroring
-    if (isCanvas && canvasDoc?.strokes.length) {
+    if (isCanvas && canvasDoc && (canvasDoc.strokes.length > 0 || canvasDoc.frames.some((f) => f.kind === "image"))) {
       try {
-        const blob = await renderCanvasToJpeg(canvasDoc.strokes)
+        const imgs = await buildImageEmbeds(canvasDoc)
+        const blob = await renderCanvasToJpeg(canvasDoc.strokes, 20, imgs)
         await mirrorDrawing(filename.replace(/\.canvas$/, ".jpg"), blob)
       } catch { /* */ }
     }
-  }, [slug, filename, isCanvas, canvasDoc, canvasContentKey, onSaved])
+  }, [slug, filename, isCanvas, canvasDoc, canvasContentKey, onSaved, buildImageEmbeds])
 
   const handleSave = useCallback(async () => {
     if (currentSerialized === null || saving) return
@@ -209,15 +225,17 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
 
   const handleExportPdf = useCallback(async () => {
     if (!isCanvas || !canvasDoc || exporting) return
-    if (canvasDoc.pages.length === 0) return
+    const pages = canvasDoc.frames.filter((f) => f.kind === "page")
+    if (pages.length === 0) return
     setExporting(true)
     try {
       if (dirty && currentSerialized !== null) await persist(currentSerialized)
       const { PDFDocument } = await import("pdf-lib")
-      const A4_W = 794, A4_H = 1123
+      const A4_ASPECT = 1123 / 794 // page frames are locked to A4 proportions
+      const imgs = await buildImageEmbeds(canvasDoc)
       const pdfDoc = await PDFDocument.create()
-      for (const page of canvasDoc.pages) {
-        const pngBytes = await renderPageToPng(canvasDoc.strokes, page.x, page.y, A4_W, A4_H)
+      for (const page of pages) {
+        const pngBytes = await renderPageToPng(canvasDoc.strokes, page.x, page.y, page.width, page.width * A4_ASPECT, imgs)
         const img = await pdfDoc.embedPng(pngBytes)
         // A4 in PDF points: 595.28 x 841.89
         const pdfPage = pdfDoc.addPage([595.28, 841.89])
@@ -229,7 +247,7 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
       onSaved?.()
     } catch { /* */ }
     setExporting(false)
-  }, [isCanvas, canvasDoc, exporting, dirty, currentSerialized, slug, filename, persist, onSaved])
+  }, [isCanvas, canvasDoc, exporting, dirty, currentSerialized, slug, filename, persist, onSaved, buildImageEmbeds])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -252,7 +270,7 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
   }
 
   const editorBody = isCanvas
-    ? <CanvasEditor doc={canvasDoc!} onChange={handleCanvasChange} availablePdfs={availablePdfs} />
+    ? <CanvasEditor doc={canvasDoc!} onChange={handleCanvasChange} availablePdfs={availablePdfs} availableImages={availableImages} slug={slug} onImageAdded={() => onSaved?.()} />
     : <TextEditor value={content!} onChange={handleTextChange} language={language} isFullscreen={isFullscreen} />
 
   const chrome = (
@@ -272,7 +290,7 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
         {isCanvas && (
           <button
             onClick={handleExportPdf}
-            disabled={exporting || !canvasDoc || canvasDoc.pages.length === 0}
+            disabled={exporting || !canvasDoc || !canvasDoc.frames.some((f) => f.kind === "page")}
             className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors"
           >
             {exporting
