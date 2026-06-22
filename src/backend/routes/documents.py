@@ -20,7 +20,13 @@ from pydantic import BaseModel
 
 from backend.routes.deps import get_project_store
 from backend.routes.mineru import _parse_pdf
-from config import DIRECTORY_OUTPUT_MINERU, chat_upload_dir
+from config import (
+    DIRECTORY_OUTPUT_DRAWINGS,
+    DIRECTORY_OUTPUT_LATEX,
+    DIRECTORY_OUTPUT_MARKDOWN,
+    DIRECTORY_OUTPUT_MINERU,
+    chat_upload_dir,
+)
 from lib import document_library as lib_docs
 from lib.naming import dedup_filename
 from lib.project_store import ProjectStore
@@ -45,6 +51,12 @@ class DocumentAttachResult(BaseModel):
     mime: str
     parsedMd: str | None = None
     content: str | None = None
+
+
+class WriteDocumentRequest(BaseModel):
+    slug: str
+    name: str
+    content: str = ""
 
 
 class AddDocumentRequest(BaseModel):
@@ -87,6 +99,81 @@ async def list_documents(slug: str = Query(...), store: ProjectStore = Depends(g
 @router.get("/all", response_model=DocumentListResponse)
 async def list_all_documents(store: ProjectStore = Depends(get_project_store)):
     return DocumentListResponse(documents=_meta_list(store.list_all_files()))
+
+
+@router.post("/write", response_model=DocumentMeta)
+async def write_document(
+    req: WriteDocumentRequest,
+    store: ProjectStore = Depends(get_project_store),
+):
+    """Create or overwrite a document in the project's documents/ directory."""
+    meta = store._read_meta()
+    if not store._find_entry(meta, req.slug):
+        raise HTTPException(status_code=404, detail="Project not found")
+    docs_dir = store._resolve_project_dir(req.slug) / "documents"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+
+    safe_name = Path(req.name).name
+    if not safe_name:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    dest = docs_dir / safe_name
+    dest.write_text(req.content, encoding="utf-8")
+
+    abs_path = str(dest.resolve())
+    store.add_file(req.slug, abs_path)
+
+    # keep _uploads copies in sync so attached context stays current
+    project_dir = store._resolve_project_dir(req.slug)
+    for uploads in project_dir.glob("*/_uploads"):
+        copy = uploads / safe_name
+        if copy.is_file():
+            copy.write_text(req.content, encoding="utf-8")
+
+    # mirror into the browsable cloud collection (overwrite by name).
+    # canvas → .jpg is rendered client-side; only md/tex mirror here.
+    mirror_dir = {".md": DIRECTORY_OUTPUT_MARKDOWN, ".tex": DIRECTORY_OUTPUT_LATEX}.get(dest.suffix.lower())
+    if mirror_dir:
+        mirror_dir.mkdir(parents=True, exist_ok=True)
+        (mirror_dir / safe_name).write_text(req.content, encoding="utf-8")
+
+    return DocumentMeta(**lib_docs.document_meta(dest))
+
+
+@router.post("/write-binary", response_model=DocumentMeta)
+async def write_binary_document(
+    file: UploadFile = File(...),
+    slug: str = Query(...),
+    store: ProjectStore = Depends(get_project_store),
+):
+    """Write a binary file (e.g. PDF) to the project's documents/ directory."""
+    meta = store._read_meta()
+    if not store._find_entry(meta, slug):
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Missing filename")
+    docs_dir = store._resolve_project_dir(slug) / "documents"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = Path(file.filename).name
+    if not safe_name:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    dest = docs_dir / safe_name
+    dest.write_bytes(await file.read())
+    store.add_file(slug, str(dest.resolve()))
+    return DocumentMeta(**lib_docs.document_meta(dest))
+
+
+@router.post("/mirror-drawing")
+async def mirror_drawing(file: UploadFile = File(...)):
+    """Mirror a rendered canvas (.jpg) into the browsable cloud Drawings dir,
+    overwriting any same-named drawing. The raw .canvas never lands here."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Missing filename")
+    safe_name = Path(file.filename).name
+    if not safe_name:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    DIRECTORY_OUTPUT_DRAWINGS.mkdir(parents=True, exist_ok=True)
+    (DIRECTORY_OUTPUT_DRAWINGS / safe_name).write_bytes(await file.read())
+    return {"status": "ok"}
 
 
 @router.post("/upload", response_model=DocumentMeta)
@@ -157,11 +244,16 @@ async def remove_document(
     path: str = Query(...),
     store: ProjectStore = Depends(get_project_store),
 ):
-    """Unassign a document from a project. The file itself stays in the library."""
+    """Unassign a document from a project. If it lives in the project's
+    documents/ directory, also delete the file itself."""
     try:
         store.remove_file(slug, path)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    resolved = Path(path).expanduser().resolve()
+    docs_dir = (store._resolve_project_dir(slug) / "documents").resolve()
+    if resolved.is_relative_to(docs_dir) and resolved.is_file():
+        resolved.unlink()
     return {"status": "ok"}
 
 
@@ -183,11 +275,21 @@ async def attach_document(
     result = DocumentAttachResult(name=name, mime=mime)
 
     if resolved.suffix.lower() == ".pdf":
+        # reuse cached markdown if MinerU already extracted this PDF
+        cached_md = DIRECTORY_OUTPUT_MINERU / f"{resolved.stem}.md"
+        if cached_md.is_file():
+            result.parsedMd = cached_md.read_text(encoding="utf-8")
+        else:
+            try:
+                md_path, _images = await _parse_pdf(dest, chat_dir)
+                result.parsedMd = md_path.read_text(encoding="utf-8")
+            except Exception:
+                log.exception("MinerU parse failed attaching document %s", name)
+        # ensure the raw PDF is in the library
         try:
-            md_path, _images = await _parse_pdf(dest, chat_dir)
-            result.parsedMd = md_path.read_text(encoding="utf-8")
+            lib_docs.organize_file(resolved)
         except Exception:
-            log.exception("MinerU parse failed attaching document %s", name)
+            log.exception("Failed to organize %s into PDF library", name)
     elif mime.startswith("text/"):
         try:
             result.content = dest.read_text(encoding="utf-8")

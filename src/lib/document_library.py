@@ -18,13 +18,12 @@ from pathlib import Path
 import shutil
 
 from config import DIRECTORY_CHAT_HISTORIES, DIRECTORY_OUTPUT_MINERU, DIRECTORY_OUTPUT_PDF
-from lib.naming import dedup_filename
 
 log = logging.getLogger(__name__)
 
 LIBRARY_DIR = DIRECTORY_OUTPUT_PDF
 
-_TEXT_EXTS = {".csv", ".json", ".yaml", ".yml", ".xml", ".toml", ".ini", ".cfg", ".conf", ".log", ".md", ".rst", ".txt", ".svg"}
+_TEXT_EXTS = {".canvas", ".csv", ".json", ".yaml", ".yml", ".xml", ".toml", ".ini", ".cfg", ".conf", ".log", ".md", ".rst", ".tex", ".txt", ".svg"}
 
 
 def mime_for(path: str | Path) -> str:
@@ -48,19 +47,14 @@ def document_meta(path: str | Path) -> dict[str, str]:
 
 
 def organize_file(src: Path) -> Path:
-    """Copy *src* into the library, returning the destination path.
-
-    If a file with the same name and identical bytes already exists it is
-    reused; otherwise the name is de-duplicated so distinct files never clobber.
+    """Copy *src* into the library under its own name, overwriting any existing
+    file with that name. Filename is the document's identity, so re-promoting the
+    same PDF refreshes the library copy instead of spawning ``<name> (n).pdf``.
     """
     LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
-    existing = LIBRARY_DIR / src.name
-    src_bytes = src.read_bytes()
-    if existing.exists() and existing.read_bytes() == src_bytes:
-        return existing
-    name = dedup_filename(LIBRARY_DIR, src.name)
-    dest = LIBRARY_DIR / name
-    dest.write_bytes(src_bytes)
+    dest = LIBRARY_DIR / src.name
+    if src.resolve() != dest.resolve():
+        dest.write_bytes(src.read_bytes())
     return dest
 
 

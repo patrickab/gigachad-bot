@@ -43,45 +43,74 @@ export function strokeToPathData(stroke: StrokeData): string {
   return getSvgPathFromStroke(outline)
 }
 
+// Render strokes onto a 2x canvas, translating by (offsetX, offsetY).
+function drawStrokes(
+  strokes: StrokeData[],
+  w: number,
+  h: number,
+  offsetX: number,
+  offsetY: number,
+  bg: string,
+): HTMLCanvasElement {
+  const dpr = 2
+  const canvas = document.createElement("canvas")
+  canvas.width = w * dpr
+  canvas.height = h * dpr
+  const ctx = canvas.getContext("2d")
+  if (!ctx) throw new Error("No canvas context")
+  ctx.scale(dpr, dpr)
+  ctx.fillStyle = bg
+  ctx.fillRect(0, 0, w, h)
+  for (const stroke of strokes) {
+    const outline = getStroke(
+      stroke.points.map((p) => [p[0]! - offsetX, p[1]! - offsetY, p[2] ?? 0.5]),
+      { ...STROKE_OPTIONS, size: stroke.width },
+    )
+    if (outline.length < 4) continue
+    ctx.fillStyle = stroke.color
+    ctx.fill(new Path2D(getSvgPathFromStroke(outline)))
+  }
+  return canvas
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob> {
+  return new Promise((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Failed to create blob"))), type, quality),
+  )
+}
+
+export async function renderPageToPng(
+  strokes: StrokeData[],
+  pageX: number,
+  pageY: number,
+  pageW: number,
+  pageH: number,
+): Promise<Uint8Array> {
+  const blob = await canvasToBlob(drawStrokes(strokes, pageW, pageH, pageX, pageY, "#ffffff"), "image/png")
+  return new Uint8Array(await blob.arrayBuffer())
+}
+
+export function renderCanvasToJpeg(strokes: StrokeData[], padding = 20): Promise<Blob> {
+  if (strokes.length === 0) return Promise.reject(new Error("No strokes"))
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const s of strokes) {
+    for (const p of s.points) {
+      if (p[0]! < minX) minX = p[0]!
+      if (p[1]! < minY) minY = p[1]!
+      if (p[0]! > maxX) maxX = p[0]!
+      if (p[1]! > maxY) maxY = p[1]!
+    }
+  }
+  const w = maxX - minX + padding * 2
+  const h = maxY - minY + padding * 2
+  return canvasToBlob(drawStrokes(strokes, w, h, minX - padding, minY - padding, "#ffffff"), "image/jpeg", 0.92)
+}
+
 export function renderStrokesToJpeg(
   strokes: StrokeData[],
   width: number,
   height: number,
   bgColor: string,
 ): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const canvas = document.createElement("canvas")
-    const scale = 2
-    canvas.width = width * scale
-    canvas.height = height * scale
-    const ctx = canvas.getContext("2d")
-    if (!ctx) {
-      reject(new Error("No canvas context"))
-      return
-    }
-    ctx.scale(scale, scale)
-    ctx.fillStyle = bgColor
-    ctx.fillRect(0, 0, width, height)
-
-    for (const stroke of strokes) {
-      const outline = getStroke(stroke.points, {
-        ...STROKE_OPTIONS,
-        size: stroke.width,
-      })
-      if (outline.length < 4) continue
-      const pathData = getSvgPathFromStroke(outline)
-      const path = new Path2D(pathData)
-      ctx.fillStyle = stroke.color
-      ctx.fill(path)
-    }
-
-    canvas.toBlob(
-      (blob) => {
-        if (blob) resolve(blob)
-        else reject(new Error("Failed to create blob"))
-      },
-      "image/jpeg",
-      0.9,
-    )
-  })
+  return canvasToBlob(drawStrokes(strokes, width, height, 0, 0, bgColor), "image/jpeg", 0.9)
 }

@@ -54,6 +54,7 @@ async def upload_file(
     file: UploadFile = File(...),
     chat_id: str = Query(...),
     slug: str | None = Query(default=None),
+    overwrite: bool = Query(default=False),
 ):
     if not file.filename:
         raise HTTPException(status_code=400, detail="Missing filename")
@@ -61,7 +62,7 @@ async def upload_file(
     chat_dir = chat_upload_dir(chat_id, slug)
     chat_dir.mkdir(parents=True, exist_ok=True)
 
-    deduped = dedup_filename(chat_dir, file.filename)
+    deduped = file.filename if overwrite else dedup_filename(chat_dir, file.filename)
     dest = chat_dir / deduped
     content_b = await file.read()
     dest.write_bytes(content_b)
@@ -106,25 +107,32 @@ async def parse_attachments(
             mime = "pdf"
 
         if mime == "pdf":
-            from backend.routes.mineru import _parse_pdf
+            from config import DIRECTORY_OUTPUT_MINERU
+            from lib.document_library import organize_file
 
-            with tempfile.TemporaryDirectory() as tmpdir:
-                tmp_path = Path(tmpdir) / filename
-                tmp_path.write_bytes(file_path.read_bytes())
+            cached_md = DIRECTORY_OUTPUT_MINERU / f"{file_path.stem}.md"
+            if cached_md.is_file():
                 try:
-                    md_path, _images_dir = await _parse_pdf(tmp_path, chat_dir)
-                    # Tidy the raw PDF into the central document library now that
-                    # parsing succeeded (its <stem>.md is guaranteed to exist).
-                    from lib.document_library import organize_file
-
-                    try:
-                        organize_file(file_path)
-                    except Exception:
-                        log.exception("Failed to organize %s into document library", filename)
-                    results.append(ParsedAttachment(name=filename, parsedMd=md_path.read_text(encoding="utf-8")))
+                    organize_file(file_path)
                 except Exception:
-                    log.exception("MinerU parse failed for %s", filename)
-                    results.append(ParsedAttachment(name=filename, parsedMd=None))
+                    log.exception("Failed to organize %s into document library", filename)
+                results.append(ParsedAttachment(name=filename, parsedMd=cached_md.read_text(encoding="utf-8")))
+            else:
+                from backend.routes.mineru import _parse_pdf
+
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    tmp_path = Path(tmpdir) / filename
+                    tmp_path.write_bytes(file_path.read_bytes())
+                    try:
+                        md_path, _images_dir = await _parse_pdf(tmp_path, chat_dir)
+                        try:
+                            organize_file(file_path)
+                        except Exception:
+                            log.exception("Failed to organize %s into document library", filename)
+                        results.append(ParsedAttachment(name=filename, parsedMd=md_path.read_text(encoding="utf-8")))
+                    except Exception:
+                        log.exception("MinerU parse failed for %s", filename)
+                        results.append(ParsedAttachment(name=filename, parsedMd=None))
         elif mime == "text":
             try:
                 results.append(ParsedAttachment(name=filename, parsedMd=file_path.read_text(encoding="utf-8")))

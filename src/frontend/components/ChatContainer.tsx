@@ -5,16 +5,17 @@ import { AnimatePresence } from "framer-motion"
 import dynamic from "next/dynamic"
 import type { Message, Attachment, WebSearchResult, ProjectDocument } from "@/lib/types"
 import { ChatMessage, AssistantMessageContent } from "./ChatMessage"
-import { ChatInput } from "./ChatInput"
+import { ChatInput, type ChatInputHandle } from "./ChatInput"
 import { ChatSidebar, type ChatSidebarElementConfig } from "./ChatSidebar"
 import { rewriteImages } from "@/lib/api"
 
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronsLeftRight, ChevronsRightLeft, FileText, FileType, Globe, GitFork, Image as ImageIcon, Library, Plus, User, X } from "lucide-react"
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronsLeftRight, ChevronsRightLeft, FilePlus, FileText, FileType, Globe, GitFork, Image as ImageIcon, Library, Plus, User, X } from "lucide-react"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { cn } from "@/lib/utils"
 import { ElevationProvider, ElevatedContainer } from "./ElevatedContainer"
 
 const PdfViewer = dynamic(() => import("./PdfViewer").then((m) => ({ default: m.PdfViewer })), { ssr: false })
+import { DocumentEditor } from "./DocumentEditor"
 
 function ObsidianGlyph({ className }: { className?: string }) {
   return (
@@ -170,7 +171,7 @@ function ContextBody({
   )
 }
 
-function DocumentsBody({ documents, onSelect }: { documents: ProjectDocument[]; onSelect?: (path: string) => void }) {
+function DocumentsBody({ documents, slug, onSelect, editingPath, onEdit, onDelete, onSaved, onLiveContent }: { documents: ProjectDocument[]; slug: string | null; onSelect?: (path: string) => void; editingPath?: string | null; onEdit?: (path: string | null) => void; onDelete?: (path: string) => void; onSaved?: (filename?: string, content?: string) => void; onLiveContent?: (path: string, content: string | null) => void }) {
   if (documents.length === 0) {
     return (
       <div className="flex items-center justify-center py-6 text-xs text-ink-faint">
@@ -178,21 +179,49 @@ function DocumentsBody({ documents, onSelect }: { documents: ProjectDocument[]; 
       </div>
     )
   }
+
+  const isEditable = (doc: ProjectDocument) => /\.(md|tex|canvas)$/.test(doc.name)
+
   return (
     <div>
       {documents.map((doc) => {
         const Icon = doc.mime === "application/pdf" ? FileType : FileText
+        const editable = isEditable(doc)
+        const editing = editingPath === doc.path
         return (
-          <button
-            key={doc.path}
-            type="button"
-            onClick={() => onSelect?.(doc.path)}
-            title="Attach to current chat"
-            className="flex w-full items-center gap-2 border-b border-divider/50 px-2 py-2 text-left text-ink-muted hover:bg-surface/50 hover:text-ink transition-colors"
-          >
-            <Icon className="h-3.5 w-3.5 shrink-0 text-ink-faint" />
-            <span className="min-w-0 flex-1 truncate text-[11px] font-medium">{doc.name}</span>
-          </button>
+          <div key={doc.path} className="border-b border-divider/50">
+            <div className="flex items-center gap-1 px-2 py-2 hover:bg-surface/50 transition-colors">
+              {editable && (
+                <button
+                  type="button"
+                  onClick={() => onEdit?.(editing ? null : doc.path)}
+                  className="rounded p-0.5 text-ink-faint hover:text-ink hover:bg-surface-elevated transition-colors shrink-0"
+                >
+                  {editing ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => onSelect?.(doc.path)}
+                title="Attach to context"
+                className="flex min-w-0 flex-1 items-center gap-2 text-left text-ink-muted hover:text-ink transition-colors"
+              >
+                <Icon className="h-3.5 w-3.5 shrink-0 text-ink-faint" />
+                <span className="min-w-0 flex-1 truncate text-[11px] font-medium">{doc.name}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onDelete?.(doc.path)}
+                className="rounded p-0.5 text-ink-faint hover:text-danger hover:bg-surface-elevated transition-colors shrink-0"
+                title="Remove"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+            {editable && editing && slug && (
+              <DocumentEditor path={doc.path} slug={slug} onClose={() => onEdit?.(null)} onSaved={onSaved} onLiveContent={onLiveContent} />
+            )}
+          </div>
         )
       })}
     </div>
@@ -291,10 +320,16 @@ function buildSidebarElements({
   documents,
   onSelectDocument,
   onOpenDocuments,
+  onCreateDocument,
+  editingDocPath,
+  onEditDocument,
+  onDeleteDocument,
+  onDocumentSaved,
   isElementOpen,
   onElementOpenChange,
   pdfWide,
   onTogglePdfWide,
+  liveCanvasRef,
 }: {
   chatId: string
   slug: string | null
@@ -310,10 +345,16 @@ function buildSidebarElements({
   documents?: ProjectDocument[]
   onSelectDocument?: (path: string) => void
   onOpenDocuments?: () => void
+  onCreateDocument?: () => void
+  editingDocPath?: string | null
+  onEditDocument?: (path: string | null) => void
+  onDeleteDocument?: (path: string) => void
+  onDocumentSaved?: (filename?: string, content?: string) => void
   isElementOpen: (id: string) => boolean
   onElementOpenChange: (id: string, open: boolean) => void
   pdfWide?: boolean
   onTogglePdfWide?: () => void
+  liveCanvasRef?: React.MutableRefObject<{ path: string; content: string } | null>
 }): ChatSidebarElementConfig[] {
   const elements: ChatSidebarElementConfig[] = []
 
@@ -361,19 +402,32 @@ function buildSidebarElements({
       title: "Documents",
       badge: docs.length > 0 ? docs.length : undefined,
       action: (
-        <button
-          type="button"
-          onClick={onOpenDocuments}
-          title="Browse documents (Alt+X)"
-          aria-label="Browse documents"
-          className="rounded p-1 text-ink-faint hover:text-ink hover:bg-surface-elevated transition-colors"
-        >
-          <Plus className="h-3.5 w-3.5" />
-        </button>
+        <div className="flex items-center gap-0.5">
+          {onCreateDocument && (
+            <button
+              type="button"
+              onClick={onCreateDocument}
+              aria-label="Create document"
+              className="rounded p-1 text-ink-faint hover:text-ink hover:bg-surface-elevated transition-colors"
+            >
+              <FilePlus className="h-3.5 w-3.5" />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onOpenDocuments}
+            aria-label="Browse documents"
+            className="rounded p-1 text-ink-faint hover:text-ink hover:bg-surface-elevated transition-colors"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+        </div>
       ),
       open: isElementOpen("documents"),
       onOpenChange: (o) => onElementOpenChange("documents", o),
-      body: <DocumentsBody documents={docs} onSelect={onSelectDocument} />,
+      body: (
+        <DocumentsBody documents={docs} slug={slug} onSelect={onSelectDocument} editingPath={editingDocPath} onEdit={onEditDocument} onDelete={onDeleteDocument} onSaved={onDocumentSaved} onLiveContent={liveCanvasRef ? (p, c) => { liveCanvasRef.current = c !== null ? { path: p, content: c } : null } : undefined} />
+      ),
     })
   }
 
@@ -422,6 +476,11 @@ interface ChatContainerProps {
   documents?: ProjectDocument[]
   onSelectDocument?: (path: string) => void
   onOpenDocuments?: () => void
+  onCreateDocument?: () => void
+  onDeleteDocument?: (path: string) => void
+  onDocumentSaved?: (filename?: string, content?: string) => void
+  chatInputRef?: React.RefObject<ChatInputHandle | null>
+  liveCanvasRef?: React.MutableRefObject<{ path: string; content: string } | null>
 }
 
 export function ChatContainer({
@@ -449,8 +508,14 @@ export function ChatContainer({
   documents,
   onSelectDocument,
   onOpenDocuments,
+  onCreateDocument,
+  onDeleteDocument,
+  onDocumentSaved,
+  chatInputRef,
+  liveCanvasRef,
 }: ChatContainerProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
+  const [editingDocPath, setEditingDocPath] = useState<string | null>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isPinnedToBottomRef = useRef(true)
 
@@ -737,6 +802,11 @@ export function ChatContainer({
         documents,
         onSelectDocument,
         onOpenDocuments,
+        onCreateDocument,
+        editingDocPath,
+        onEditDocument: setEditingDocPath,
+        onDeleteDocument,
+        onDocumentSaved,
         isElementOpen: (id) => openElements.has(id),
         onElementOpenChange: (id, open) => {
           setOpenElements((prev) => {
@@ -748,8 +818,9 @@ export function ChatContainer({
         },
         pdfWide,
         onTogglePdfWide: togglePdfWide,
+        liveCanvasRef,
       }),
-    [chatId, slug, allAttachments, expandedEntries, handleToggleExpand, onToggleAttachmentActive, handleRemoveAttachment, onAttachmentContentChange, lastSearchResult, obsidianEnabled, onOpenObsidian, documents, onSelectDocument, onOpenDocuments, openElements, pdfWide, togglePdfWide]
+    [chatId, slug, allAttachments, expandedEntries, handleToggleExpand, onToggleAttachmentActive, handleRemoveAttachment, onAttachmentContentChange, lastSearchResult, obsidianEnabled, onOpenObsidian, documents, onSelectDocument, onOpenDocuments, onCreateDocument, editingDocPath, onDeleteDocument, onDocumentSaved, openElements, pdfWide, togglePdfWide, liveCanvasRef]
   )
 
   const hasSidebarContent = sidebarElements.length > 0
@@ -919,6 +990,7 @@ export function ChatContainer({
           <div className="relative pb-6 pointer-events-auto">
             <div className="mx-auto" style={chatMaxWidth && !isWideMode ? { maxWidth: chatMaxWidth } : undefined}>
             <ChatInput
+              ref={chatInputRef}
               chatId={chatId}
               onSend={handleSend}
               onOCRRequest={onOCRRequest}

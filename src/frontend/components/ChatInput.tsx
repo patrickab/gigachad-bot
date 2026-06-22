@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import { ArrowUp, Plus, LayoutGrid, Mic, Search, Globe, Sigma, Square, X, FileText, Image as ImageIcon, File as FileIcon, BookOpen, FileUp, Pencil } from "lucide-react"
@@ -26,13 +26,17 @@ interface ChatInputProps {
   slug?: string | null
 }
 
+export interface ChatInputHandle {
+  addAttachment: (att: Attachment) => void
+}
+
 function fileIcon(mime: string) {
   if (mime.startsWith("image/")) return ImageIcon
   if (mime === "application/pdf") return FileText
   return FileIcon
 }
 
-export function ChatInput({
+export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({
   chatId,
   onSend,
   onOCRRequest,
@@ -40,7 +44,7 @@ export function ChatInput({
   isStreaming,
   onCancel,
   slug = null,
-}: ChatInputProps) {
+}, ref) {
   const { researchEnabled, searchEnabled, ocrEnabled, studyEnabled, toggleResearch, toggleSearch, toggleOCR, toggleStudy } = useModeState()
   const { ocrModel } = useSettings()
 
@@ -97,6 +101,15 @@ export function ChatInput({
   const [drawingOcrImage, setDrawingOcrImage] = useState<string | null>(null)
   const [previewAttachment, setPreviewAttachment] = useState<Attachment | null>(null)
   const [isListening, setIsListening] = useState(false)
+
+  useImperativeHandle(ref, () => ({
+    addAttachment: (att: Attachment) => setAttachments(prev => {
+      const existing = prev.findIndex(a => a.name === att.name)
+      if (existing >= 0) { const copy = [...prev]; copy[existing] = att; return copy }
+      return [...prev, att]
+    }),
+  }), [])
+
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const toolsRef = useRef<HTMLDivElement>(null)
@@ -428,4 +441,4 @@ export function ChatInput({
       <AttachmentPreview attachment={previewAttachment} chatId={chatId} slug={slug} onClose={() => setPreviewAttachment(null)} />
     </motion.div>
   )
-}
+})

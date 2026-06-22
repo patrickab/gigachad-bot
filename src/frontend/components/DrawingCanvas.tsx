@@ -90,6 +90,8 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<SVGSVGElement>) => {
+      // ponytail: ignore touch (palm/hand) — only pen and mouse draw
+      if (e.pointerType === "touch") return
       if (e.button === 5) {
         setIsErasing(true)
         return
@@ -105,6 +107,7 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<SVGSVGElement>) => {
+      if (e.pointerType === "touch") return
       if (isErasing) {
         const svg = svgRef.current
         if (!svg) return
@@ -131,7 +134,8 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
     [isDrawing, isErasing, getPointerPos],
   )
 
-  const handlePointerUp = useCallback(() => {
+  const handlePointerUp = useCallback((e?: React.PointerEvent<SVGSVGElement>) => {
+    if (e?.pointerType === "touch") return
     if (isErasing) {
       setIsErasing(false)
       return

@@ -185,11 +185,12 @@ export function chatFileUrl(chatId: string, filename: string, slug: string | nul
   return `${uploadsBase(chatId, slug)}/${encodeURIComponent(filename)}`
 }
 
-export async function uploadFile(chatId: string, file: File, slug: string | null = null): Promise<Attachment> {
+export async function uploadFile(chatId: string, file: File, slug: string | null = null, overwrite = false): Promise<Attachment> {
   const form = new FormData()
   form.append("file", file)
   const params = new URLSearchParams({ chat_id: chatId })
   if (slug) params.set("slug", slug)
+  if (overwrite) params.set("overwrite", "true")
   const res = await ensureOk(await fetch(`${API_BASE}/files/upload?${params}`, { method: "POST", body: form }))
   const data = await res.json()
   return { ...data, active: true, url: chatFileUrl(chatId, data.name, slug) }
@@ -283,6 +284,30 @@ export async function removeDocument(slug: string, path: string): Promise<void> 
 
 export function attachDocument(chatId: string, path: string, slug: string | null = null): Promise<Attachment> {
   return attachFileByPath("documents", chatId, path, slug)
+}
+
+export async function writeDocument(slug: string, name: string, content: string = ""): Promise<ProjectDocument> {
+  return request<ProjectDocument>("/documents/write", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ slug, name, content }),
+  })
+}
+
+export async function writeBinaryDocument(slug: string, filename: string, blob: Blob): Promise<ProjectDocument> {
+  const form = new FormData()
+  form.append("file", blob, filename)
+  return request<ProjectDocument>(`/documents/write-binary?slug=${encodeURIComponent(slug)}`, {
+    method: "POST",
+    body: form,
+  })
+}
+
+/** Mirror a rendered canvas (.jpg) into the browsable cloud Drawings collection. */
+export async function mirrorDrawing(filename: string, blob: Blob): Promise<void> {
+  const form = new FormData()
+  form.append("file", blob, filename)
+  await request("/documents/mirror-drawing", { method: "POST", body: form })
 }
 
 export async function generateMindmap(messages: { role: string; content: string }[], model: string, prompt: string = ""): Promise<string> {

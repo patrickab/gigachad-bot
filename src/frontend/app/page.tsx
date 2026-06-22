@@ -5,6 +5,7 @@ import { createPortal } from "react-dom"
 import { Sidebar } from "@/components/Sidebar"
 import { CommandMenu, type CommandMenuItem } from "@/components/CommandMenu"
 import { ChatContainer } from "@/components/ChatContainer"
+import type { ChatInputHandle } from "@/components/ChatInput"
 import { MAX_SIDEBAR_WIDTH } from "@/components/ChatSidebar"
 import { ModelDropdown } from "@/components/ModelDropdown"
 import { MoreOptionsMenu } from "@/components/MoreOptionsMenu"
@@ -17,6 +18,7 @@ import { MindmapModal } from "@/components/MindmapModal"
 import { MemoryPanel } from "@/components/MemoryPanel"
 import { FileViewer } from "@/components/FileViewer"
 import { DocumentPicker } from "@/components/DocumentPicker"
+import { CreateDocumentPanel } from "@/components/CreateDocumentPanel"
 import { useCommandBar } from "@/hooks/useCommandBar"
 import { useMemoryCategories } from "@/hooks/useMemoryCategories"
 import { TabManager, nextTab, settingsToTabConfig, type TabConfig } from "@/components/TabManager"
@@ -49,8 +51,13 @@ import {
   uploadDocument,
   addDocument,
   attachDocument,
+  removeDocument,
+  writeDocument,
+  uploadFile,
+  loadFileViewerText,
   generateMindmap,
 } from "@/lib/api"
+import { renderCanvasToJpeg } from "@/lib/drawing"
 import { DEFAULT_VISION_MODEL } from "@/lib/config"
 import type { Attachment, Message, ObsidianFile, ProjectDocument, Usage } from "@/lib/types"
 import {
@@ -142,6 +149,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   const [obsidianFiles, setObsidianFiles] = useState<ObsidianFile[]>([])
   const [obsidianOpen, setObsidianOpen] = useState(false)
   const [documentOpen, setDocumentOpen] = useState(false)
+  const [createDocOpen, setCreateDocOpen] = useState(false)
   const [projectDocuments, setProjectDocuments] = useState<ProjectDocument[]>([])
   const [allDocuments, setAllDocuments] = useState<ProjectDocument[]>([])
 
@@ -168,6 +176,8 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   const [tabLabelSlot, setTabLabelSlot] = useState<HTMLElement | null>(null)
   const [commandQuery, setCommandQuery] = useState("")
   const commandInputRef = useRef<HTMLInputElement>(null)
+  const chatInputRef = useRef<ChatInputHandle>(null)
+  const liveCanvasRef = useRef<{ path: string; content: string } | null>(null)
   const [ocrImage, setOCRImage] = useState<string | null>(null)
   const [chatId, setChatId] = useState(() => tab.chatId)
 
@@ -205,10 +215,24 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     attachToChat(attachObsidianFile, path)
   }, [attachToChat])
 
-  const handleDocumentSelect = useCallback((path: string) => {
+  const handleDocumentSelect = useCallback(async (path: string) => {
     setDocumentOpen(false)
-    attachToChat(attachDocument, path)
-  }, [attachToChat])
+    if (path.endsWith(".canvas")) {
+      try {
+        const live = liveCanvasRef.current
+        const text = live?.path === path ? live.content : await loadFileViewerText(path)
+        const doc = text.trim() ? JSON.parse(text) : null
+        if (!doc?.strokes?.length) return
+        const blob = await renderCanvasToJpeg(doc.strokes)
+        const name = path.split("/").pop()!.replace(/\.canvas$/, ".jpg")
+        const file = new File([blob], name, { type: "image/jpeg" })
+        const att = await uploadFile(chatId, file, activeProject, true)
+        chatInputRef.current?.addAttachment(att)
+      } catch { /* */ }
+    } else {
+      attachToChat(attachDocument, path)
+    }
+  }, [attachToChat, chatId, activeProject])
 
   const loadProjectDocs = useCallback(() => {
     if (activeProject) listProjectDocuments(activeProject).then(setProjectDocuments).catch(() => {})
@@ -221,6 +245,34 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   }, [loadProjectDocs])
 
   useEffect(() => { loadProjectDocs() }, [loadProjectDocs])
+
+  const handleCreateDocument = useCallback(async (name: string) => {
+    if (!activeProject) return
+    try {
+      await writeDocument(activeProject, name)
+      setCreateDocOpen(false)
+      refreshDocuments()
+    } catch { /* */ }
+  }, [activeProject, refreshDocuments])
+
+  const handleDeleteDocument = useCallback(async (path: string) => {
+    if (!activeProject) return
+    try {
+      await removeDocument(activeProject, path)
+      refreshDocuments()
+    } catch { /* */ }
+  }, [activeProject, refreshDocuments])
+
+  const handleDocumentSaved = useCallback((filename?: string, content?: string) => {
+    refreshDocuments()
+    if (filename && content !== undefined) {
+      setMessages(prev => prev.map(msg => {
+        if (!msg.attachments?.some(a => a.name === filename)) return msg
+        const attachments = msg.attachments!.map(a => a.name === filename ? { ...a, content } : a)
+        return { ...msg, attachments, hiddenContent: buildHiddenContent(attachments) || undefined }
+      }))
+    }
+  }, [refreshDocuments, setMessages])
 
   const openDocuments = useCallback(() => {
     refreshDocuments()
@@ -747,6 +799,11 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
             documents={projectDocuments}
             onSelectDocument={handleDocumentSelect}
             onOpenDocuments={activeProject ? openDocuments : undefined}
+            onCreateDocument={activeProject ? () => setCreateDocOpen(true) : undefined}
+            onDeleteDocument={handleDeleteDocument}
+            onDocumentSaved={handleDocumentSaved}
+            chatInputRef={chatInputRef}
+            liveCanvasRef={liveCanvasRef}
             slug={activeProject}
             chatMaxWidth={chatMaxWidth}
           />
@@ -761,6 +818,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         </div>
       </main>
       <SaveChatModal open={saveModalOpen} onClose={() => setSaveModalOpen(false)} onSave={handleSaveSubmit} />
+      <CreateDocumentPanel open={createDocOpen} onClose={() => setCreateDocOpen(false)} onCreate={handleCreateDocument} />
       <MindmapModal open={mindmapModalOpen} onClose={() => setMindmapModalOpen(false)} onGenerate={handleMindmapSubmit} />
       {isActive && obsidianOpen && obsidianEnabled && (
         <FileViewer

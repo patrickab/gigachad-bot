@@ -30,6 +30,12 @@ VISION_MODEL = "ollama/qwen3-vl:235b-instruct-cloud"
 DIRECTORY_OUTPUT_MINERU = DIRECTORY_CLOUD / "Documents" / "Mineru"
 DIRECTORY_OUTPUT_PDF = DIRECTORY_CLOUD / "Documents" / "PDFs"
 
+# Cloud collection of user-created documents, mirrored on save (filename = identity,
+# overwritten on conflict). Per-chat _uploads copies are independent of these.
+DIRECTORY_OUTPUT_MARKDOWN = DIRECTORY_CLOUD / "Documents" / "Markdown"
+DIRECTORY_OUTPUT_LATEX = DIRECTORY_CLOUD / "Documents" / "LaTeX"
+DIRECTORY_OUTPUT_DRAWINGS = DIRECTORY_CLOUD / "Documents" / "Drawings"
+
 # Vane (Perplexica) web-search sidecar. Single container, SearXNG bundled internally.
 VANE_URL = os.environ.get("VANE_URL", "http://localhost:3001")
 # Embedding model Vane uses to rerank sources. Must also be configured in Vane's
@@ -61,6 +67,9 @@ def ensure_directories() -> None:
         DIRECTORY_OUTPUT_MINERU,
         DIRECTORY_OUTPUT_MINERU / "images",
         DIRECTORY_OUTPUT_PDF,
+        DIRECTORY_OUTPUT_MARKDOWN,
+        DIRECTORY_OUTPUT_LATEX,
+        DIRECTORY_OUTPUT_DRAWINGS,
         DIRECTORY_CHAT_UPLOADS,
         DIRECTORY_CHAT_HISTORIES / "memory",
         DIRECTORY_CHAT_HISTORIES / "memory" / "pending",
