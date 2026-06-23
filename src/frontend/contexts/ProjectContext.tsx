@@ -101,9 +101,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }, [bumpVersion])
 
   const createProject = useCallback(async (name: string) => {
-    await apiCreateProject(name)
+    const created = await apiCreateProject(name)
     await refreshProjects()
-    await openProject(name)
+    await openProject(created.slug)
   }, [refreshProjects, openProject])
 
   const deleteProject = useCallback(async (name: string) => {
