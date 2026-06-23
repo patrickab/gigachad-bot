@@ -892,7 +892,7 @@ function AppContent() {
     const activeTab = tabs.find((t) => t.id === activeTabId)
 
     // toggle: clicking the active element deactivates it (blank chat)
-    if (activeTab?.historyFile === historyFile && qaIndex == null) {
+    if (activeTab && activeTab.historyFile === historyFile && qaIndex == null) {
       tabManagerRef.current?.initTabs([nextTab(null, null, null, settingsToTabConfig(settings))])
       return
     }

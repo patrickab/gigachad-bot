@@ -88,7 +88,7 @@ export interface TabManagerHandle {
   getTabs: () => Tab[]
   getActiveTabId: () => string
   getTabBarWidth: () => number
-  updateTabHistoryFile: (tabId: string, historyFile: string) => void
+  updateTabHistoryFile: (tabId: string, historyFile: string | null) => void
   updateTabTitle: (tabId: string, title: string | null) => void
   updateTabConfig: (tabId: string, config: Partial<TabConfig>) => void
 }
@@ -143,7 +143,7 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
     getTabs: () => tabs,
     getActiveTabId: () => activeTab,
     getTabBarWidth: () => tabBarRef.current?.clientWidth ?? 0,
-    updateTabHistoryFile: (tabId: string, historyFile: string) => {
+    updateTabHistoryFile: (tabId: string, historyFile: string | null) => {
       setTabs((prev) => prev.map((t) => t.id === tabId ? { ...t, historyFile } : t))
     },
     updateTabTitle: (tabId: string, title: string | null) => {
