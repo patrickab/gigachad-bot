@@ -9,6 +9,7 @@ import type { ChatInputHandle } from "@/components/ChatInput"
 import { MAX_SIDEBAR_WIDTH } from "@/components/ChatSidebar"
 import { ModelDropdown } from "@/components/ModelDropdown"
 import { MoreOptionsMenu } from "@/components/MoreOptionsMenu"
+import { PromptEditor } from "@/components/PromptEditor"
 import { ReasoningSelector } from "@/components/ReasoningSelector"
 import { ResearchModelsBar } from "@/components/ResearchModelsBar"
 import { ThemeToggle } from "@/components/ThemeToggle"
@@ -110,6 +111,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     reset,
     models,
     prompts,
+    setPrompts,
     loadHistory,
     deleteMessagePair,
     addMessagePair,
@@ -316,6 +318,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   const [branchMessageIdx, setBranchMessageIdx] = useState<number | null>(null)
   const [saveModalOpen, setSaveModalOpen] = useState(false)
   const [mindmapModalOpen, setMindmapModalOpen] = useState(false)
+  const [promptEditorOpen, setPromptEditorOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const loadIdRef = useRef(0)
   const [measuredWidth, setMeasuredWidth] = useState(0)
@@ -773,7 +776,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           <div className="flex items-center gap-2">
             <TokenCounter usage={totalUsage} />
             <ThemeToggle />
-            <MoreOptionsMenu prompts={prompts} config={config} onConfigChange={onConfigChange} />
+            <MoreOptionsMenu prompts={prompts} config={config} onConfigChange={onConfigChange} onEditPrompts={() => setPromptEditorOpen(true)} />
           </div>
         </header>
         <div className="flex-1 overflow-hidden relative transition-opacity duration-200">
@@ -820,6 +823,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       <SaveChatModal open={saveModalOpen} onClose={() => setSaveModalOpen(false)} onSave={handleSaveSubmit} />
       <CreateDocumentPanel open={createDocOpen} onClose={() => setCreateDocOpen(false)} onCreate={handleCreateDocument} />
       <MindmapModal open={mindmapModalOpen} onClose={() => setMindmapModalOpen(false)} onGenerate={handleMindmapSubmit} />
+      <PromptEditor open={promptEditorOpen} onClose={() => setPromptEditorOpen(false)} onPromptsChanged={setPrompts} />
       {isActive && obsidianOpen && obsidianEnabled && (
         <FileViewer
           files={obsidianFiles.map((f) => f.path)}

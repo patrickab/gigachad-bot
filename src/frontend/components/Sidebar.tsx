@@ -120,7 +120,6 @@ export function Sidebar({
             <span className="text-base font-semibold tracking-tight text-ink truncate">GigaChat Bot</span>
             <button
               onClick={() => openMemoryViewer({ scope: "global" })}
-              title="Global memory profile"
               aria-label="Open global memory profile"
               className="shrink-0 rounded-md p-1 text-ink-subtle opacity-0 group-hover:opacity-100 hover:bg-surface hover:text-ink transition-all"
             >

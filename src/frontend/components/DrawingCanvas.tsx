@@ -224,7 +224,6 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
                   onClick={handleUndo}
                   disabled={strokes.length === 0}
                   className="rounded p-1.5 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors"
-                  title="Undo (Ctrl+Z)"
                 >
                   <Undo2 className="h-4 w-4" />
                 </button>
@@ -232,7 +231,6 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
                   onClick={handleClear}
                   disabled={strokes.length === 0}
                   className="rounded p-1.5 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors"
-                  title="Clear"
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
@@ -245,14 +243,12 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
                       ? "text-ink bg-surface"
                       : "text-ink-subtle hover:text-ink",
                   )}
-                  title="Toggle stroke width"
                 >
                   {strokeWidth === "thin" ? "Thin" : "Thick"}
                 </button>
                 <button
                   onClick={() => setIsMaximized((m) => !m)}
                   className="rounded p-1.5 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
-                  title={isMaximized ? "Minimize" : "Maximize"}
                 >
                   {isMaximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
                 </button>
@@ -260,7 +256,6 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
                 <button
                   onClick={onClose}
                   className="rounded p-1.5 text-ink-subtle hover:text-danger transition-colors"
-                  title="Close (Esc)"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -273,7 +268,6 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
                       ? "text-ink bg-surface-elevated border-divider-strong hover:bg-surface-elevated"
                       : "text-ink-faint border-divider-strong",
                   )}
-                  title="Confirm drawing"
                 >
                   {isExporting ? (
                     <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-ink-faint border-t-ink" />

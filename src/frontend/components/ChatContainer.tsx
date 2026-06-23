@@ -1007,12 +1007,13 @@ export function ChatContainer({
         </div>
         {hasSidebarContent && (
           <button
+            type="button"
             onClick={() => setContextOpen((c) => !c)}
             aria-label={contextOpen ? "Collapse sidebar" : "Open sidebar"}
             aria-expanded={contextOpen}
-            className="absolute right-0 top-3 z-30 flex items-center justify-center h-12 w-4 rounded-l-md border border-r-0 border-divider-strong bg-surface-elevated/80 text-ink hover:bg-surface-elevated hover:text-ink hover:w-5 transition-all shadow-[var(--shadow-sm)]"
+            className="absolute right-1 top-4 z-30 flex items-center justify-center h-10 w-6 rounded-md text-ink-faint hover:text-ink hover:bg-surface-elevated/60 transition-colors"
           >
-            <ChevronLeft className="h-4 w-4" />
+            <ChevronLeft className={cn("h-4 w-4 transition-transform", contextOpen && "rotate-180")} />
           </button>
         )}
       </div>

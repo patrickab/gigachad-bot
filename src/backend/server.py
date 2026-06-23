@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from backend.routes.chat import router as chat_router
-from backend.routes.deps import get_chat_store, get_client, get_project_store, shutdown_client
+from backend.routes.deps import get_chat_store, get_client, get_project_store, get_prompt_store, shutdown_client
 from backend.routes.documents import router as documents_router
 from backend.routes.files import router as files_router
 from backend.routes.fileviewer import router as fileviewer_router
@@ -52,6 +52,7 @@ async def lifespan(app: FastAPI):
     get_client()
     get_chat_store()
     get_project_store()
+    get_prompt_store()
     reset_cancel()
     from lib.document_library import backfill_pdf_library
 

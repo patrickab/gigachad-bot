@@ -27,7 +27,7 @@ export function FloatingWindow({ children, onClose, overlayClassName, panelClass
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.15 }}
-      className={cn("fixed inset-0 z-[90] flex items-center justify-center bg-backdrop p-3 backdrop-blur-sm sm:p-6", overlayClassName)}
+      className={cn("fixed inset-0 z-[90] flex items-center justify-center bg-backdrop p-3 backdrop-blur-[2px] sm:p-6", overlayClassName)}
       onClick={onClose}
     >
       <motion.div

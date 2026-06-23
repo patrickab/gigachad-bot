@@ -56,6 +56,40 @@ export async function fetchPrompts(): Promise<Record<string, string>> {
   return data.prompts
 }
 
+export interface PromptMeta { slug: string; name: string; includes: string[] }
+
+export async function fetchPromptList(): Promise<PromptMeta[]> {
+  return request<PromptMeta[]>("/prompts/list")
+}
+
+export async function fetchPromptBlocks(): Promise<Record<string, string>> {
+  return request<Record<string, string>>("/prompts/blocks")
+}
+
+export async function fetchPromptRaw(slug: string): Promise<{ slug: string; content: string }> {
+  return request<{ slug: string; content: string }>(`/prompts/${encodeURIComponent(slug)}`)
+}
+
+export async function savePrompt(slug: string, content: string): Promise<{ slug: string; name: string }> {
+  return request<{ slug: string; name: string }>(`/prompts/${encodeURIComponent(slug)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  })
+}
+
+export async function deletePrompt(slug: string): Promise<void> {
+  await request<{ deleted: boolean }>(`/prompts/${encodeURIComponent(slug)}`, { method: "DELETE" })
+}
+
+export async function savePromptOrder(order: string[]): Promise<void> {
+  await request<{ ok: boolean }>("/prompt-order", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ order }),
+  })
+}
+
 export function createChatStream(req: ChatRequest): SSEStreamResult {
   const body: Record<string, unknown> = {
     model: req.model,

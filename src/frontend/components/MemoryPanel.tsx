@@ -318,7 +318,7 @@ function CandidateWorkspace({
               <Globe className="h-3 w-3" />Global profile
             </div>
             <button onClick={() => setAddingScope(addingScope === "global" ? null : "global")}
-              className="rounded-md p-1 text-ink-subtle hover:bg-hover hover:text-ink transition-colors" title="Add global memory">
+              className="rounded-md p-1 text-ink-subtle hover:bg-hover hover:text-ink transition-colors">
               <Plus className="h-3.5 w-3.5" />
             </button>
           </div>
@@ -349,7 +349,7 @@ function CandidateWorkspace({
             </div>
             {projectEnabled && (
               <button onClick={() => setAddingScope(addingScope === "project" ? null : "project")}
-                className="rounded-md p-1 text-ink-subtle hover:bg-hover hover:text-ink transition-colors" title="Add project memory">
+                className="rounded-md p-1 text-ink-subtle hover:bg-hover hover:text-ink transition-colors">
                 <Plus className="h-3.5 w-3.5" />
               </button>
             )}

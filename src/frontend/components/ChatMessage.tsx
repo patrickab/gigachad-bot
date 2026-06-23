@@ -127,7 +127,7 @@ function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBran
         onClick={isUser && collapsibleUser ? onCollapse : undefined}
       >
         {isUser ? (
-          <div className={`flex h-7 w-7 items-center justify-center rounded-xl bg-surface-elevated ${isUser && collapsibleUser ? "hover:bg-surface-elevated transition-colors" : ""}`} title={collapsibleUser ? "Click to collapse" : undefined}>
+          <div className={`flex h-7 w-7 items-center justify-center rounded-xl bg-surface-elevated ${isUser && collapsibleUser ? "hover:bg-surface-elevated transition-colors" : ""}`}>
             <User className="h-3.5 w-3.5 text-ink-muted" />
           </div>
         ) : (
@@ -231,7 +231,7 @@ function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBran
           onClick={(e) => { e.stopPropagation(); onCollapse?.() }}
           className="mt-1 shrink-0 self-start rounded p-0.5 text-ink-faint hover:text-ink transition-colors"
           aria-label="Collapse message pair"
-          title="Collapse"
+
         >
           <ChevronDown className="h-4 w-4" />
         </button>

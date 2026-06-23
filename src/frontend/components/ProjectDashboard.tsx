@@ -77,7 +77,7 @@ function AddCardModal({ open, onClose, onAdd, defaultState }: AddCardModalProps)
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.15 }}
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-backdrop backdrop-blur-md"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-backdrop backdrop-blur-[2px]"
           onClick={onClose}
         >
           <motion.div
@@ -211,7 +211,6 @@ export function ProjectDashboard() {
                         <button
                           onClick={() => setAddModalState(col.id)}
                           className="p-1 rounded-md text-ink-subtle hover:text-ink hover:bg-hover transition-all duration-200"
-                          title={`Add task to ${col.label}`}
                         >
                           <Plus className="h-4 w-4" />
                         </button>

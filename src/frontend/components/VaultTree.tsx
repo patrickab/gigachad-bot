@@ -264,7 +264,6 @@ export function VaultTree<T>({
       <button
         onClick={() => { onExpand?.(); onOpenChange?.(true) }}
         className="w-full flex items-center justify-center p-2 rounded-md text-ink-muted hover:bg-surface-elevated/50 hover:text-ink transition-colors"
-        title={sectionTitle}
         aria-label={collapsed ? `Expand ${sectionTitle ?? "section"}` : undefined}
       >
         <SectionIcon className="h-4 w-4 shrink-0" />
@@ -314,7 +313,6 @@ export function VaultTree<T>({
               <button
                 onClick={(e) => { e.stopPropagation(); handlePlus() }}
                 className="p-1 rounded text-ink-subtle hover:text-ink hover:bg-surface transition-colors"
-                title={plusTitle}
               >
                 <Plus className="h-4 w-4" />
               </button>

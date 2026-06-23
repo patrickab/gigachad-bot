@@ -22,6 +22,7 @@ export interface UseChatReturn {
   webSearch: (params: WebSearchParams) => Promise<void>
   models: ModelsResponse | null
   prompts: Record<string, string>
+  setPrompts: React.Dispatch<React.SetStateAction<Record<string, string>>>
   loadHistory: (filename: string) => Promise<{ messages: Message[]; chat_id: string | null; parent_id: string | null; branch_message_idx: number | null }>
   deleteMessagePair: (index: number) => void
   addMessagePair: (userContent: string, assistantContent: string) => void
@@ -166,6 +167,7 @@ export function useChat(): UseChatReturn {
     webSearch,
     models,
     prompts,
+    setPrompts,
     loadHistory,
     deleteMessagePair,
     addMessagePair,

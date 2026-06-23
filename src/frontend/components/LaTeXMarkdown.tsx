@@ -182,7 +182,6 @@ function AsciiDiagram({ codeString }: { codeString: string }) {
       <button
         onClick={handleCopy}
         className="absolute top-2 right-2 rounded p-1 opacity-0 transition-opacity group-hover/code:opacity-100 hover:bg-surface-elevated/60 text-ink-subtle hover:text-ink"
-        title="Copy code"
       >
         {copied ? <Check className="h-3.5 w-3.5 text-ink" /> : <Copy className="h-3.5 w-3.5" />}
       </button>
@@ -228,7 +227,6 @@ function CodeBlock({ codeString, language }: { codeString: string; language: str
       <button
         onClick={handleCopy}
         className="absolute top-2 right-2 rounded p-1 opacity-0 transition-opacity group-hover/code:opacity-100 hover:bg-surface-elevated/60 text-ink-subtle hover:text-ink"
-        title="Copy code"
       >
         {copied ? <Check className="h-3.5 w-3.5 text-ink" /> : <Copy className="h-3.5 w-3.5" />}
       </button>

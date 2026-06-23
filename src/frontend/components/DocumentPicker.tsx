@@ -52,7 +52,6 @@ export function DocumentPicker({
         type="button"
         onClick={() => fileInputRef.current?.click()}
         disabled={uploading}
-        title="Add documents (PDF → MinerU)"
         aria-label="Add documents"
         className="rounded p-1 text-ink-faint hover:text-ink hover:bg-surface-elevated transition-colors disabled:cursor-not-allowed disabled:opacity-60"
       >
@@ -75,7 +74,6 @@ export function DocumentPicker({
         role="button"
         tabIndex={-1}
         onClick={(e) => { e.stopPropagation(); onAddToProject(path) }}
-        title="Add to current project"
         className="rounded p-0.5 text-ink-faint opacity-0 group-hover:opacity-100 hover:text-ink hover:bg-surface transition"
       >
         <Plus className="h-3 w-3" />

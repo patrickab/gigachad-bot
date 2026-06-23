@@ -1,0 +1,2 @@
+- Use emojis sparingly, but strategically to improve readability and engagement.
+- Recommended set: ✅ (Pro), ❌ (Con), ⚠️ (Important), 💡 (Insight/Conclusion/Tip), 🎯 (Goal)

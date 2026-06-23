@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback } from "react"
 import { AnimatePresence, motion } from "framer-motion"
-import { MoreHorizontal, BookOpen } from "lucide-react"
+import { MoreHorizontal, BookOpen, Pencil } from "lucide-react"
 import { LLMParams } from "./LLMParams"
 import { PillButton } from "./PillButton"
 import { ParamSlider } from "./ParamSlider"
@@ -17,6 +17,7 @@ interface MoreOptionsMenuProps {
   prompts: Record<string, string>
   config: TabConfig
   onConfigChange: (config: Partial<TabConfig>) => void
+  onEditPrompts?: () => void
 }
 
 const FOCUS_MODES: { value: string; label: string }[] = [
@@ -50,6 +51,7 @@ export function MoreOptionsMenu({
   prompts,
   config,
   onConfigChange,
+  onEditPrompts,
 }: MoreOptionsMenuProps) {
   const { researchEnabled, searchEnabled } = useModeState()
   const [open, setOpen] = useState(false)
@@ -80,9 +82,16 @@ export function MoreOptionsMenu({
               <>
                 {/* System Prompt */}
                 <div className="space-y-1.5">
-                  <div className="flex items-center gap-2 text-xs font-medium text-ink-subtle">
-                    <BookOpen className="h-3.5 w-3.5" />
-                    System Prompt
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-xs font-medium text-ink-subtle">
+                      <BookOpen className="h-3.5 w-3.5" />
+                      System Prompt
+                    </div>
+                    {onEditPrompts && (
+                      <button onClick={() => { onEditPrompts(); close() }} className="p-0.5 rounded hover:bg-hover text-ink-faint hover:text-ink transition-colors">
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                    )}
                   </div>
                   <StyledSelect
                     options={Object.keys(prompts).map((p) => ({ value: p, label: p }))}

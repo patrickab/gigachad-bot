@@ -21,7 +21,6 @@ export function SidebarElement({
   return (
     <button
       onClick={onClick}
-      title={collapsed ? title : undefined}
       className={`w-full flex items-center p-2 rounded-md transition-colors ${
         isActive
           ? "bg-surface-elevated text-ink"

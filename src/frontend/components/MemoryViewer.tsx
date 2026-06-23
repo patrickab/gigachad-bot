@@ -131,7 +131,7 @@ function CategoriesPanel({
           Categories ({categories.length})
         </button>
         <button onClick={() => { setExpanded(true); setAddingCat(true) }} disabled={disabled}
-          className="rounded-md p-1 text-ink-subtle hover:bg-hover hover:text-ink disabled:opacity-40 transition-colors" title="Add category">
+          className="rounded-md p-1 text-ink-subtle hover:bg-hover hover:text-ink disabled:opacity-40 transition-colors">
           <Plus className="h-3.5 w-3.5" />
         </button>
       </div>
@@ -382,7 +382,7 @@ function MemoryViewerInner({
                   <ScopeIcon className="h-3 w-3" />Memories
                 </div>
                 <button onClick={() => setAdding((v) => !v)} disabled={isLocked}
-                  className="rounded-md p-1 text-ink-subtle hover:bg-hover hover:text-ink disabled:opacity-40 transition-colors" title="Add memory">
+                  className="rounded-md p-1 text-ink-subtle hover:bg-hover hover:text-ink disabled:opacity-40 transition-colors">
                   <Plus className="h-3.5 w-3.5" />
                 </button>
               </div>
