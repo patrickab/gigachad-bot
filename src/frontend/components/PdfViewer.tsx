@@ -366,27 +366,25 @@ function PdfViewerInner({
       >
         <Document file={url} onLoadSuccess={onDocumentLoadSuccess}>
           {ready && (
-            <div style={{ width: renderWidth * zoom }} className="mx-auto">
-              <div style={{ transform: `scale(${zoom})`, transformOrigin: "0 0" }}>
-                {Array.from({ length: numPages! }, (_, i) => (
-                  <div
-                    key={i}
-                    className="pdf-page relative"
-                    style={{ marginBottom: PAGE_GAP, scrollSnapAlign: fitWidth ? "start" : undefined }}
-                    data-page-number={i + 1}
-                  >
-                    <Page pageNumber={i + 1} width={renderWidth} renderTextLayer={false} />
-                    <div className="pdf-page-tint absolute inset-0 pointer-events-none" />
-                    {(imageRects[i + 1] ?? []).map((r, k) => (
-                      <div
-                        key={k}
-                        className="pdf-image-mask absolute pointer-events-none"
-                        style={{ left: `${r.left * 100}%`, top: `${r.top * 100}%`, width: `${r.width * 100}%`, height: `${r.height * 100}%` }}
-                      />
-                    ))}
-                  </div>
-                ))}
-              </div>
+            <div style={{ width: Math.round(renderWidth * zoom) }} className="mx-auto">
+              {Array.from({ length: numPages! }, (_, i) => (
+                <div
+                  key={i}
+                  className="pdf-page relative"
+                  style={{ marginBottom: PAGE_GAP, scrollSnapAlign: fitWidth ? "start" : undefined }}
+                  data-page-number={i + 1}
+                >
+                  <Page pageNumber={i + 1} width={Math.round(renderWidth * zoom)} renderTextLayer={false} />
+                  <div className="pdf-page-tint absolute inset-0 pointer-events-none" />
+                  {(imageRects[i + 1] ?? []).map((r, k) => (
+                    <div
+                      key={k}
+                      className="pdf-image-mask absolute pointer-events-none"
+                      style={{ left: `${r.left * 100}%`, top: `${r.top * 100}%`, width: `${r.width * 100}%`, height: `${r.height * 100}%` }}
+                    />
+                  ))}
+                </div>
+              ))}
             </div>
           )}
         </Document>

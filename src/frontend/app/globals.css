@@ -36,19 +36,19 @@
 
  :root {
    --shadow-strength: 0.35;
-   --shadow-color: oklch(20% 0.01 85);
- 
+   --shadow-color: oklch(19% 0.011 83);
+
     /* --- Text (ink) — slightly muted high contrast on dark surfaces --- */
-    --ink:        oklch(90% 0.006 85);
-    --ink-muted:  oklch(68% 0.010 85);
-    --ink-subtle: oklch(52% 0.010 85);
-    --ink-faint:  oklch(40% 0.008 85);
+    --ink:        oklch(92% 0.007 83);
+    --ink-muted:  oklch(70% 0.011 83);
+    --ink-subtle: oklch(54% 0.011 83);
+    --ink-faint:  oklch(42% 0.009 83);
  
    /* --- Surfaces — warm-tinted dark greys (not near-black) --- */
-   --paper:            oklch(19% 0.013 85);
-   --surface:          oklch(24% 0.014 85);
-   --surface-elevated: oklch(30% 0.015 85);
-   --overlay:          oklch(16% 0.013 85);
+   --paper:            oklch(20% 0.015 83);
+   --surface:          oklch(25% 0.016 83);
+   --surface-elevated: oklch(31% 0.017 83);
+   --overlay:          oklch(17% 0.015 83);
  
    /* --- Danger (red, reserved for destructive actions only) --- */
    --danger:      oklch(68% 0.20 25);
@@ -263,7 +263,7 @@ body::after {
 
 .markdown-body .katex,
 .markdown-body-compact .katex {
-  color: var(--ink);
+  color: inherit;
 }
 
 * {
@@ -562,15 +562,16 @@ code {
 .pdf-page-tint { background-color: var(--surface-elevated); }
 
 :root:not(.light) .react-pdf__Page__canvas {
-  filter: invert(1) hue-rotate(180deg);
+  /* ponytail: 0.88 instead of 1 — dark-gray paper, not near-black */
+  filter: invert(0.88) hue-rotate(180deg);
 }
 
 :root:not(.light) .pdf-page-tint { mix-blend-mode: lighten; }
 .light            .pdf-page-tint { mix-blend-mode: darken; }
 
 :root:not(.light) .pdf-image-mask {
-  -webkit-backdrop-filter: invert(1) hue-rotate(180deg);
-  backdrop-filter: invert(1) hue-rotate(180deg);
+  -webkit-backdrop-filter: invert(0.88) hue-rotate(180deg);
+  backdrop-filter: invert(0.88) hue-rotate(180deg);
 }
 
 @media (prefers-reduced-motion: no-preference) {

@@ -80,16 +80,16 @@ export function AssistantMessageContent({
   return (
     <div className="text-ink">
       {thought && (
-        <details className={`group ${THOUGHT_VERTICAL_SPACING} pl-4`}>
-          <summary className="cursor-pointer select-none list-none flex items-center gap-1.5 text-[10px] text-ink-subtle hover:text-ink transition-colors marker:text-ink-faint">
+        <details className={`${THOUGHT_VERTICAL_SPACING} pl-4`}>
+          <summary className="group/reason cursor-pointer select-none list-none flex items-center gap-1.5 text-[10px] text-ink-subtle hover:text-ink transition-colors marker:text-ink-faint">
             <motion.span
               animate={isStreaming ? { scale: [1, PULSE_SCALE_PEAK, 1] } : { scale: 1 }}
               transition={{ repeat: Infinity, duration: PULSE_DURATION_S, ease: "easeInOut" }}
               className="inline-flex"
             >
-              <Brain className="h-3 w-3 text-ink-muted group-hover:text-ink transition-colors" />
+              <Brain className="h-3 w-3 text-ink-muted group-hover/reason:text-ink transition-colors" />
             </motion.span>
-            <span className="font-medium tracking-wide uppercase group-hover:text-ink transition-colors">Reasoning</span>
+            <span className="font-medium tracking-wide uppercase group-hover/reason:text-ink transition-colors">Reasoning</span>
           </summary>
           <p className="mt-1 pl-4 border-l-2 border-divider/80 text-xs text-ink-subtle leading-relaxed whitespace-pre-wrap italic">
             {thought}
