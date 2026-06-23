@@ -19,45 +19,69 @@ function isMermaidCode(code: string): boolean {
 
 // ponytail: mutex serializes mermaid renders — it's a singleton that corrupts on concurrent calls
 let mermaidQueue = Promise.resolve()
-let lastTheme = ""
+
+// Mirrors the globals.css role tokens (sRGB of the oklch palette). Hardcoded because mermaid
+// can't parse oklch() and the browser preserves it through getComputedStyle/canvas. If the
+// palette warmth is retuned in globals.css, regenerate these to match.
+const MERMAID_DARK = {
+  ink: "rgb(231, 228, 223)", inkMuted: "rgb(162, 158, 151)", inkSubtle: "rgb(114, 110, 104)",
+  inkFaint: "rgb(79, 77, 72)", paper: "rgb(25, 21, 14)", surface: "rgb(37, 33, 25)",
+  surfaceElevated: "rgb(53, 48, 39)",
+}
+const MERMAID_LIGHT = {
+  ink: "rgb(80, 77, 70)", inkMuted: "rgb(108, 104, 97)", inkSubtle: "rgb(137, 134, 127)",
+  inkFaint: "rgb(167, 164, 159)", paper: "rgb(245, 238, 224)", surface: "rgb(250, 246, 238)",
+  surfaceElevated: "rgb(254, 252, 247)",
+}
+
+// Bumps on any <html> class change (light/dark/glass toggle) so diagrams re-render with
+// the current palette — their colors are read/baked at render time, not via reactive CSS.
+function useThemeVersion(): number {
+  const [v, setV] = useState(0)
+  useEffect(() => {
+    const obs = new MutationObserver(() => setV((x) => x + 1))
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] })
+    return () => obs.disconnect()
+  }, [])
+  return v
+}
 
 function enqueueMermaidRender(id: string, code: string): Promise<string> {
   const job = mermaidQueue.then(async () => {
     const mermaid = (await import("mermaid")).default
     const isLight =
       typeof document !== "undefined" && document.documentElement.classList.contains("light")
-    const theme = isLight ? "light" : "dark"
-    if (theme !== lastTheme) {
-      lastTheme = theme
-      mermaid.initialize({
-        startOnLoad: false,
-        theme: isLight ? "neutral" : "dark",
-        securityLevel: "strict",
-        fontFamily: "var(--font-sans), system-ui, sans-serif",
-        logLevel: "fatal",
-        ...(isLight ? {} : {
-          themeVariables: {
-            background: "transparent",
-            primaryColor: "rgba(255,255,255,0.08)",
-            primaryTextColor: "rgba(255,255,255,0.85)",
-            primaryBorderColor: "rgba(255,255,255,0.2)",
-            secondaryColor: "rgba(255,255,255,0.05)",
-            secondaryTextColor: "rgba(255,255,255,0.7)",
-            secondaryBorderColor: "rgba(255,255,255,0.15)",
-            tertiaryColor: "rgba(255,255,255,0.03)",
-            tertiaryTextColor: "rgba(255,255,255,0.6)",
-            tertiaryBorderColor: "rgba(255,255,255,0.1)",
-            lineColor: "rgba(255,255,255,0.3)",
-            textColor: "rgba(255,255,255,0.85)",
-            mainBkg: "rgba(255,255,255,0.08)",
-            nodeBorder: "rgba(255,255,255,0.2)",
-            clusterBkg: "rgba(255,255,255,0.04)",
-            clusterBorder: "rgba(255,255,255,0.15)",
-            edgeLabelBackground: "rgba(30,30,30,0.8)",
-          },
-        }),
-      })
-    }
+    const c = isLight ? MERMAID_LIGHT : MERMAID_DARK
+
+    // theme: "base" is the only mermaid theme fully driven by themeVariables; named
+    // themes recompute their own palette and ignore overrides. Re-initialize every
+    // render (cheap, inside the mutex) so theme switches never inherit stale config.
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: "base",
+      securityLevel: "strict",
+      fontFamily: "var(--font-sans), system-ui, sans-serif",
+      logLevel: "fatal",
+      themeVariables: {
+        primaryColor: c.surfaceElevated,
+        primaryTextColor: c.ink,
+        primaryBorderColor: c.inkFaint,
+        secondaryColor: c.surface,
+        secondaryTextColor: c.inkMuted,
+        secondaryBorderColor: c.inkFaint,
+        tertiaryColor: c.paper,
+        tertiaryTextColor: c.inkSubtle,
+        tertiaryBorderColor: c.inkFaint,
+        lineColor: c.inkFaint,
+        textColor: c.ink,
+        mainBkg: c.surfaceElevated,
+        nodeBorder: c.inkFaint,
+        clusterBkg: c.surface,
+        clusterBorder: c.inkFaint,
+        edgeLabelBackground: c.paper,
+        fontSize: "14px",
+      },
+    })
     await mermaid.parse(code)
     const { svg } = await mermaid.render(id, code)
     return svg
@@ -69,17 +93,20 @@ function enqueueMermaidRender(id: string, code: string): Promise<string> {
 function MermaidDiagram({ code }: { code: string }) {
   const [svg, setSvg] = useState("")
   const [failed, setFailed] = useState(false)
-  const idRef = useRef(`mmd-${Math.random().toString(36).slice(2)}`)
+  const themeVersion = useThemeVersion()
 
   useEffect(() => {
     let cancelled = false
     setFailed(false)
     setSvg("")
-    enqueueMermaidRender(idRef.current, code)
+    // Fresh id per render — reusing one collides with the previous SVG still in the DOM
+    // (re-render on theme switch), which makes mermaid.render fail and the diagram vanish.
+    const id = `mmd-${Math.random().toString(36).slice(2)}`
+    enqueueMermaidRender(id, code)
       .then((rendered) => { if (!cancelled) setSvg(rendered) })
       .catch(() => { if (!cancelled) setFailed(true) })
     return () => { cancelled = true }
-  }, [code])
+  }, [code, themeVersion])
 
   if (failed) return <CodeBlock codeString={code} language="mermaid" />
   if (!svg) return <div className="my-3 text-xs text-ink-subtle">Rendering diagram…</div>
@@ -97,6 +124,7 @@ function MarkmapDiagram({ code }: { code: string }) {
   const svgRef = useRef<SVGSVGElement | null>(null)
   const mmRef = useRef<any>(null)
   const [failed, setFailed] = useState(false)
+  const themeVersion = useThemeVersion()
 
   useEffect(() => {
     let cancelled = false
@@ -124,7 +152,9 @@ function MarkmapDiagram({ code }: { code: string }) {
 
         if (mmRef.current) {
           mmRef.current.setData(root)
-          mmRef.current.fit()
+          // fit() reads the svg's resolved size; in a hidden/zero-width tab the
+          // percentage width can't resolve and throws SVGLength. Non-fatal.
+          try { mmRef.current.fit() } catch {}
         } else {
           mmRef.current = Markmap.create(svgRef.current, {
             autoFit: true,
@@ -133,15 +163,16 @@ function MarkmapDiagram({ code }: { code: string }) {
             initialExpandLevel: -1,
             color: () => linkColor,
           }, root)
-
-          svgRef.current.style.setProperty("--markmap-text-color", ink)
         }
+
+        // text recolors on theme switch; link color is baked at create (minor)
+        svgRef.current.style.setProperty("--markmap-text-color", ink)
       } catch {
         if (!cancelled) setFailed(true)
       }
     })()
     return () => { cancelled = true }
-  }, [code])
+  }, [code, themeVersion])
 
   if (failed) return <CodeBlock codeString={code} language="markdown" />
   return <div ref={containerRef} className="my-3 overflow-hidden rounded-md" />
@@ -275,11 +306,11 @@ const PROSE_COMPONENTS: Components = {
     }
     const match = /language-(\w+)/.exec(className || "")
     const codeString = String(children).replace(/\n$/, "")
+    if (match?.[1] === "markmap" || className?.includes("markmap")) {
+      return <MarkmapDiagram code={codeString} />
+    }
     if (match?.[1] === "mermaid" || isMermaidCode(codeString)) {
       return <MermaidDiagram code={codeString} />
-    }
-    if (match?.[1] === "markmap") {
-      return <MarkmapDiagram code={codeString} />
     }
     if (!match && containsAsciiTableArt(codeString)) {
       return <AsciiDiagram codeString={codeString} />

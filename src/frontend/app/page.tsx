@@ -318,6 +318,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   const [branchMessageIdx, setBranchMessageIdx] = useState<number | null>(null)
   const [saveModalOpen, setSaveModalOpen] = useState(false)
   const [mindmapModalOpen, setMindmapModalOpen] = useState(false)
+  const [mindmapAttachments, setMindmapAttachments] = useState<Attachment[]>([])
   const [promptEditorOpen, setPromptEditorOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const loadIdRef = useRef(0)
@@ -429,7 +430,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     setSaveModalOpen(false)
   }, [messages, chatId, tab.id, tab.name, activeProject, hasUsage, onHistoryFileChanged, refreshAll])
 
-  const handleMindmapSubmit = useCallback(async (prompt: string) => {
+  const handleMindmapSubmit = useCallback(async (prompt: string, attachments: Attachment[] = []) => {
     if (messages.length === 0) return
     const userMsg = prompt ? `Provide a mindmap. ${prompt}` : "Provide a mindmap."
     setMessages(prev => [
@@ -439,8 +440,12 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     ])
     setMindmapModalOpen(false)
     try {
+      const context = attachments.map(a => a.parsedMd || a.content || "").filter(Boolean).join("\n\n")
+      const mindmapMessages = messages.map((m) => ({ role: m.role, content: m.content }))
+      if (context) mindmapMessages.push({ role: "user" as const, content: context })
+
       const mindmap = await generateMindmap(
-        messages.map((m) => ({ role: m.role, content: m.content })),
+        mindmapMessages,
         config.selectedModel,
         prompt,
       )
@@ -534,8 +539,9 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         if (messages.length === 0) return
         const userPrompt = trimmed === "/mindmap" ? "" : trimmed.slice("/mindmap ".length).trim()
         if (userPrompt) {
-          await handleMindmapSubmit(userPrompt)
+          await handleMindmapSubmit(userPrompt, attachments)
         } else {
+          setMindmapAttachments(attachments)
           setMindmapModalOpen(true)
         }
         return
@@ -822,7 +828,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       </main>
       <SaveChatModal open={saveModalOpen} onClose={() => setSaveModalOpen(false)} onSave={handleSaveSubmit} />
       <CreateDocumentPanel open={createDocOpen} onClose={() => setCreateDocOpen(false)} onCreate={handleCreateDocument} />
-      <MindmapModal open={mindmapModalOpen} onClose={() => setMindmapModalOpen(false)} onGenerate={handleMindmapSubmit} />
+      <MindmapModal open={mindmapModalOpen} onClose={() => setMindmapModalOpen(false)} onGenerate={(prompt) => handleMindmapSubmit(prompt, mindmapAttachments)} />
       <PromptEditor open={promptEditorOpen} onClose={() => setPromptEditorOpen(false)} onPromptsChanged={setPrompts} />
       {isActive && obsidianOpen && obsidianEnabled && (
         <FileViewer
