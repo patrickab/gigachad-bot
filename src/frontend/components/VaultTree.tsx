@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useEffect, useState, type ElementType } from "react"
+import { createContext, useContext, useState, type ElementType } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Brain,
@@ -14,6 +14,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "./Skeleton"
+import type { VaultBranchController } from "@/hooks/useVaultTree"
 
 export type VaultTreeItemType = "vault" | "folder" | "element"
 
@@ -46,8 +47,10 @@ interface VaultTreeProps<T> {
   onOpenChange?: (open: boolean) => void
   onExpand?: () => void
 
+  // Branch expansion + activation — owned by the shared primitive (see useVaultTree)
+  controller: VaultBranchController
+
   // Tree actions
-  onVaultClick?: (id: string) => void
   onVaultDelete?: (id: string) => void
   onElementClick?: (item: VaultTreeItem<T>) => void
   onElementDelete?: (item: VaultTreeItem<T>) => void
@@ -57,7 +60,6 @@ interface VaultTreeProps<T> {
   onMoveElement?: (elementId: string, targetId: string | null) => Promise<void>
   onDashboardClick?: (vaultId: string) => void
   onMemoryClick?: (vaultId: string) => void
-  storageKey?: string
 }
 
 const INDENT_BASE = 8
@@ -66,14 +68,12 @@ const INDENT_STEP = 16
 /* ─── context ─── */
 
 interface TreeCtx<T> {
-  expandedFolders: Set<string>
-  toggleFolder: (id: string) => void
+  controller: VaultBranchController
   dragOverId: string | null
   onDragOver: (e: React.DragEvent, targetId: string) => void
   onDragLeave: () => void
   onDrop: (e: React.DragEvent, targetId: string | null) => void
   onDragStart: (e: React.DragEvent, itemId: string) => void
-  onVaultClick?: (id: string) => void
   onVaultDelete?: (id: string) => void
   onElementClick?: (item: VaultTreeItem<T>) => void
   onElementDelete?: (item: VaultTreeItem<T>) => void
@@ -127,7 +127,7 @@ export function VaultTree<T>({
   open,
   onOpenChange,
   onExpand,
-  onVaultClick,
+  controller,
   onVaultDelete,
   onElementClick,
   onElementDelete,
@@ -137,46 +137,13 @@ export function VaultTree<T>({
   onMoveElement,
   onDashboardClick,
   onMemoryClick,
-  storageKey,
 }: VaultTreeProps<T>) {
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
   const [createMode, setCreateMode] = useState<"vault" | "folder" | null>(null)
   const [createParentId, setCreateParentId] = useState<string | null>(null)
   const [createName, setCreateName] = useState("")
   const [dragOverId, setDragOverId] = useState<string | null>(null)
 
   const isRoot = depth === 0
-
-  useEffect(() => {
-    if (storageKey) {
-      try {
-        const saved = localStorage.getItem(storageKey)
-        if (saved) {
-          setExpandedFolders(new Set(JSON.parse(saved)))
-        }
-      } catch {}
-    }
-  }, [storageKey])
-
-  const updateExpanded = (updater: (prev: Set<string>) => Set<string>) => {
-    setExpandedFolders((prev) => {
-      const next = updater(prev)
-      if (storageKey) {
-        try {
-          localStorage.setItem(storageKey, JSON.stringify(Array.from(next)))
-        } catch {}
-      }
-      return next
-    })
-  }
-
-  const toggleFolder = (id: string) => {
-    updateExpanded((prev) => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
-      return next
-    })
-  }
 
   const handleCreateSubmit = async () => {
     if (!createName.trim()) return
@@ -188,13 +155,7 @@ export function VaultTree<T>({
     setCreateName("")
     setCreateMode(null)
     setCreateParentId(null)
-    if (createParentId) {
-      updateExpanded((prev) => {
-        const next = new Set(prev)
-        next.add(createParentId!)
-        return next
-      })
-    }
+    if (createParentId) controller.expand(createParentId)
   }
 
   const handleDragStart = (e: React.DragEvent, itemId: string) => {
@@ -234,14 +195,12 @@ export function VaultTree<T>({
   }
 
   const ctx: TreeCtx<T> = {
-    expandedFolders,
-    toggleFolder,
+    controller,
     dragOverId,
     onDragOver: handleDragOver,
     onDragLeave: handleDragLeave,
     onDrop: handleDrop,
     onDragStart: handleDragStart,
-    onVaultClick,
     onVaultDelete,
     onElementClick,
     onElementDelete,
@@ -382,13 +341,11 @@ function TreeContent<T>({ items, depth }: { items?: VaultTreeItem<T>[]; depth: n
 
 function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number }) {
   const {
-    expandedFolders,
-    toggleFolder,
+    controller,
     dragOverId,
     onDragOver,
     onDragLeave,
     onDrop,
-    onVaultClick,
     onVaultDelete,
     onAddFolder,
     onDashboardClick,
@@ -403,7 +360,7 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
   } = useTree<T>()
 
   const isVault = item.type === "vault"
-  const isExpanded = isVault ? (item.isActive ?? false) : expandedFolders.has(item.id)
+  const isExpanded = controller.isExpanded(item.id)
   const BranchIcon = item.icon || Folder
   const hasChildren = item.children && item.children.length > 0
   const paddingLeft = INDENT_BASE + depth * INDENT_STEP
@@ -421,13 +378,7 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
         style={{ paddingLeft, paddingRight: 8 }}
       >
         <button
-          onClick={() => {
-            if (isVault) {
-              onVaultClick?.(item.id)
-            } else {
-              toggleFolder(item.id)
-            }
-          }}
+          onClick={() => controller.toggleBranch(item.id)}
           className={cn(
             "flex items-center gap-1.5 py-1 flex-1 text-left transition-colors",
             isVault

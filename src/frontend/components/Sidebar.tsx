@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo } from "react"
 import { motion } from "framer-motion"
 import { VaultTree, type VaultTreeItem } from "./VaultTree"
+import { useVaultTree } from "@/hooks/useVaultTree"
 import { Brain, FolderKanban, LayoutDashboard, Clock, PanelLeftClose, PanelLeft, Save, RotateCcw } from "lucide-react"
 import { useMemoryViewer } from "@/contexts/MemoryViewerContext"
 import { SidebarElement } from "./SidebarElement"
@@ -85,6 +86,18 @@ export function Sidebar({
   const animateWidth = useMemo(() => ({ width: sidebarWidth }), [sidebarWidth])
 
 
+  // Selection primitives — one per tree, so the trees behave identically yet stay
+  // independent (collapsing a project never touches a histories folder).
+  // Projects: accordion sourced from activeProject; opening loads the project
+  // context, closing tears it down. Histories: a persisted multi-open file browser.
+  const projectsController = useVaultTree({
+    accordion: true,
+    activeId: activeProject,
+    onActivate: openProject,
+    onDeactivate: closeProject,
+  })
+  const historiesController = useVaultTree({ storageKey: "expanded_history_folders" })
+
   const projectItems = useMemo(() =>
     buildProjectItems(projects, activeProject, branchMeta),
     [projects, activeProject, branchMeta],
@@ -149,13 +162,7 @@ export function Sidebar({
             open={projectsOpen}
             onOpenChange={setProjectsOpen}
             onExpand={expandIfCollapsed}
-            onVaultClick={(id) => {
-              if (activeProject === id) {
-                closeProject()
-              } else {
-                openProject(id)
-              }
-            }}
+            controller={projectsController}
             onVaultDelete={(id) => deleteProject(id)}
             onAddVault={(name) => createProject(name)}
             onDashboardClick={(vaultId) => {
@@ -163,9 +170,6 @@ export function Sidebar({
               setDashboardOpen(true)
             }}
             onMemoryClick={(vaultId) => openMemoryViewer({ scope: "project", projectSlug: vaultId })}
-            onElementClick={(item) => {
-              if (item.data && !item.isSystem) onOpenChat(item.data as string)
-            }}
             onMoveElement={async (elementId: string, targetId: string | null) => {
               const slug = targetId && projects.find(p => p.slug === targetId)?.slug
               if (!slug) return
@@ -180,7 +184,6 @@ export function Sidebar({
           <VaultTree
             sectionIcon={Clock}
             sectionTitle="Histories"
-            storageKey="expanded_history_folders"
             items={historyItems}
             loading={historiesLoading}
             collapsed={collapsed}
@@ -188,9 +191,7 @@ export function Sidebar({
             onOpenChange={setHistoriesOpen}
             onExpand={expandIfCollapsed}
             plusTitle="New folder"
-            onElementClick={(item) => {
-              if (item.data) onOpenChat(item.data as string)
-            }}
+            controller={historiesController}
             renderElement={renderChatElement}
             onAddFolder={async (parentId: string | null, name: string) => {
               await createDirectory(parentId ?? "", name)

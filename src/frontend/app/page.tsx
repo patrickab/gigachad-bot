@@ -336,7 +336,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   }, [tab.id])
 
   useEffect(() => {
-    if (isActive && tab.historyFile) {
+    if (isActive) {
       setActiveFile(tab.historyFile)
     }
   }, [isActive, tab.historyFile, setActiveFile])
@@ -888,6 +888,15 @@ function AppContent() {
       setFocusQaIndex(null)
     }
     const tabs = tabManagerRef.current?.getTabs() ?? []
+    const activeTabId = tabManagerRef.current?.getActiveTabId()
+    const activeTab = tabs.find((t) => t.id === activeTabId)
+
+    // toggle: clicking the active element deactivates it (blank chat)
+    if (activeTab?.historyFile === historyFile && qaIndex == null) {
+      tabManagerRef.current?.initTabs([nextTab(null, null, null, settingsToTabConfig(settings))])
+      return
+    }
+
     const existing = tabs.find((t) => t.historyFile === historyFile)
     if (existing) {
       tabManagerRef.current?.switchToTab(existing.id)
@@ -901,11 +910,10 @@ function AppContent() {
         return
       }
     }
-    const activeTabId = tabManagerRef.current?.getActiveTabId()
     if (activeTabId) {
       tabManagerRef.current?.updateTabHistoryFile(activeTabId, historyFile)
     }
-  }, [activeProject, closeProject])
+  }, [activeProject, closeProject, settings])
 
   const handleTabsChange = useCallback((tabs: Tab[]) => {
     if (!activeProject) return
@@ -923,21 +931,16 @@ function AppContent() {
     if (activeProject === loadedProjectRef.current) return
     loadedProjectRef.current = activeProject
 
-    if (!activeProject || !projectData) {
-      const pending = pendingHistoryRef.current
-      if (pending) {
-        pendingHistoryRef.current = null
-        const label = pending.replace(".json", "")
-        tabManagerRef.current?.initTabs([nextTab(label, pending, null, settingsToTabConfig(settings))])
-      } else {
-        tabManagerRef.current?.initTabs([nextTab(null, null, null, settingsToTabConfig(settings))])
-      }
+    const pending = pendingHistoryRef.current
+    if (pending) {
+      // a chat was clicked while another project was active — open exactly it
+      pendingHistoryRef.current = null
+      tabManagerRef.current?.initTabs([nextTab(pending.replace(".json", ""), pending, null, settingsToTabConfig(settings))])
     } else {
-      const newTabs: Tab[] = projectData.tabs.map((t) =>
-        nextTab(t.name, `${activeProject}/${t.filename}`, t.title, settingsToTabConfig(settings))
-      )
-      if (newTabs.length === 0) newTabs.push(nextTab(null, null, null, settingsToTabConfig(settings)))
-      tabManagerRef.current?.initTabs(newTabs)
+      // entering or leaving a project lands on a fresh chat. Saved chats are
+      // opened explicitly from the sidebar, never auto-restored — selecting a
+      // project must not silently activate a conversation.
+      tabManagerRef.current?.initTabs([nextTab(null, null, null, settingsToTabConfig(settings))])
     }
   }, [activeProject, projectData])
 
