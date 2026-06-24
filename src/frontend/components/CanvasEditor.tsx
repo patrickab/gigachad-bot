@@ -470,13 +470,11 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
   }, [doc, onChange])
 
   const redo = useCallback(() => {
-    setRedoStack((prev) => {
-      if (prev.length === 0) return prev
-      const stroke = prev[prev.length - 1]!
-      onChange({ ...doc, strokes: [...doc.strokes, stroke] })
-      return prev.slice(0, -1)
-    })
-  }, [doc, onChange])
+    if (redoStack.length === 0) return
+    const stroke = redoStack[redoStack.length - 1]!
+    setRedoStack((prev) => prev.slice(0, -1))
+    onChange({ ...doc, strokes: [...doc.strokes, stroke] })
+  }, [doc, onChange, redoStack])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

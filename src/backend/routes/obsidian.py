@@ -31,6 +31,27 @@ class ObsidianListResponse(BaseModel):
     files: list[ObsidianFile]
 
 
+class ObsidianNode(BaseModel):
+    name: str
+    path: str
+    type: str
+    children: list["ObsidianNode"] | None = None
+
+
+class ObsidianTreeResponse(BaseModel):
+    enabled: bool
+    tree: list[ObsidianNode]
+
+
+class RootBody(BaseModel):
+    path: str
+
+
+class WriteBody(BaseModel):
+    path: str
+    content: str
+
+
 class ObsidianFileContent(BaseModel):
     path: str
     content: str
@@ -47,12 +68,41 @@ async def list_files(vault: ObsidianVault = Depends(get_obsidian_vault)):
     return ObsidianListResponse(enabled=vault.enabled, files=vault.list_markdown())
 
 
+@router.get("/tree", response_model=ObsidianTreeResponse)
+async def list_tree(vault: ObsidianVault = Depends(get_obsidian_vault)):
+    return ObsidianTreeResponse(enabled=vault.enabled, tree=vault.tree())
+
+
+@router.post("/roots", response_model=ObsidianTreeResponse)
+async def add_root(body: RootBody, vault: ObsidianVault = Depends(get_obsidian_vault)):
+    try:
+        vault.add_root(body.path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ObsidianTreeResponse(enabled=vault.enabled, tree=vault.tree())
+
+
+@router.delete("/roots", response_model=ObsidianTreeResponse)
+async def remove_root(path: str = Query(...), vault: ObsidianVault = Depends(get_obsidian_vault)):
+    vault.remove_root(path)
+    return ObsidianTreeResponse(enabled=vault.enabled, tree=vault.tree())
+
+
 @router.get("/file", response_model=ObsidianFileContent)
 async def read_file(path: str = Query(...), vault: ObsidianVault = Depends(get_obsidian_vault)):
     try:
         return ObsidianFileContent(path=path, content=vault.read(path))
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/file")
+async def write_file(body: WriteBody, vault: ObsidianVault = Depends(get_obsidian_vault)):
+    try:
+        vault.write(body.path, body.content)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True}
 
 
 @router.post("/attach", response_model=AttachResult)

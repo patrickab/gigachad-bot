@@ -11,6 +11,8 @@ import { CanvasEditor, parseCanvasDoc, serializeCanvasDoc, emptyCanvasDoc, type 
 import { loadFileViewerText, writeDocument, writeBinaryDocument, mirrorDrawing, fileViewerRawUrl } from "@/lib/api"
 import { renderPageToPng, renderCanvasToJpeg, type EmbedRect } from "@/lib/drawing"
 
+type EditorView = "edit" | "preview"
+
 interface DocumentEditorProps {
   path: string
   slug: string
@@ -19,6 +21,9 @@ interface DocumentEditorProps {
   onLiveContent?: (path: string, content: string | null) => void
   availablePdfs?: { path: string; name: string }[]
   availableImages?: { path: string; name: string }[]
+  overlay?: boolean
+  persistOverride?: (content: string) => Promise<void>
+  onModeLabel?: (label: string) => void
 }
 
 function editorLanguage(path: string): string {
@@ -26,54 +31,21 @@ function editorLanguage(path: string): string {
   return "markdown"
 }
 
-function TextEditor({ value, onChange, language, isFullscreen }: {
-  value: string
-  onChange: (v: string) => void
-  language: string
-  isFullscreen: boolean
-}) {
-  const [previewContent, setPreviewContent] = useState(value)
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-        e.preventDefault()
-        setPreviewContent(value)
-      }
-    }
-    document.addEventListener("keydown", handler)
-    return () => document.removeEventListener("keydown", handler)
-  }, [value])
-
-  if (!isFullscreen) {
-    return (
-      <div className="flex-1 min-h-0 flex flex-col">
-        <ConsoleEditor value={value} onChange={onChange} language={language} placeholder="Start writing..." />
-      </div>
-    )
-  }
-
+function ViewPills({ view, onViewChange }: { view: EditorView; onViewChange: (v: EditorView) => void }) {
   return (
-    <div className="flex-1 min-h-0 flex">
-      <div className="w-1/2 border-r border-divider/50 flex flex-col min-w-0">
-        <div className="px-3 py-1.5 border-b border-divider/30 text-[10px] text-ink-faint font-medium uppercase tracking-wider">
-          Editor
-        </div>
-        <ConsoleEditor value={value} onChange={onChange} language={language} placeholder="Start writing..." />
-      </div>
-      <div className="w-1/2 flex flex-col min-w-0">
-        <div className="px-3 py-1.5 border-b border-divider/30 text-[10px] text-ink-faint font-medium uppercase tracking-wider flex items-center gap-2">
-          Preview
-          <span className="text-ink-faint">(Ctrl+Enter)</span>
-        </div>
-        <div className="flex-1 overflow-y-auto min-h-0 p-4">
-          {previewContent ? (
-            <LaTeXMarkdown content={previewContent} />
-          ) : (
-            <div className="text-xs text-ink-faint italic">Preview appears after Ctrl+Enter...</div>
+    <div className="absolute top-2 left-3 z-10 flex items-center gap-px rounded-md bg-surface/80 backdrop-blur-sm p-0.5">
+      {(["edit", "preview"] as const).map((v) => (
+        <button
+          key={v}
+          onClick={() => onViewChange(v)}
+          className={cn(
+            "px-2 py-0.5 rounded text-[10px] font-medium transition-colors",
+            view === v ? "bg-surface-elevated text-ink" : "text-ink-subtle hover:text-ink",
           )}
-        </div>
-      </div>
+        >
+          {v === "edit" ? "Edit" : "Preview"}
+        </button>
+      ))}
     </div>
   )
 }
@@ -114,18 +86,28 @@ function ResizableEditor({ children }: { children: React.ReactNode }) {
   )
 }
 
-export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, availablePdfs, availableImages }: DocumentEditorProps) {
+export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, availablePdfs, availableImages, overlay, persistOverride, onModeLabel }: DocumentEditorProps) {
   const isCanvas = path.endsWith(".canvas")
   const [content, setContent] = useState<string | null>(null)
   const [canvasDoc, setCanvasDoc] = useState<CanvasDocument | null>(null)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [exporting, setExporting] = useState(false)
-  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(!!overlay)
+  const [view, setView] = useState<EditorView>("edit")
   const savedContentRef = useRef("")
 
   const filename = path.split("/").pop() ?? path
   const language = editorLanguage(path)
+
+  // Overlay claims the tab label while mounted. Ref-stable to avoid re-render loops
+  // (onModeLabel is an inline arrow that changes identity every render).
+  const modeLabelRef = useRef(onModeLabel)
+  useEffect(() => { modeLabelRef.current = onModeLabel }, [onModeLabel])
+  useEffect(() => {
+    if (!overlay) return
+    modeLabelRef.current?.(filename)
+  }, [overlay, filename])
 
   useEffect(() => {
     loadFileViewerText(path).then((text) => {
@@ -175,7 +157,6 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
     return () => { onLiveContent?.(path, null) }
   }, [path, onLiveContent])
 
-  // image frames → export rects (aspect measured fresh so the bake never distorts)
   const buildImageEmbeds = useCallback(async (doc: CanvasDocument): Promise<EmbedRect[]> => {
     const images = doc.frames.filter((f) => f.kind === "image" && f.path)
     if (images.length === 0) return []
@@ -193,6 +174,13 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
   }, [])
 
   const persist = useCallback(async (serialized: string) => {
+    if (persistOverride) {
+      await persistOverride(serialized)
+      savedContentRef.current = serialized
+      setDirty(false)
+      onSaved?.(filename, serialized)
+      return
+    }
     await writeDocument(slug, filename, serialized)
     savedContentRef.current = serialized
     if (isCanvas && canvasDoc) savedCanvasKey.current = canvasContentKey(canvasDoc)
@@ -205,7 +193,7 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
         await mirrorDrawing(filename.replace(/\.canvas$/, ".jpg"), blob)
       } catch { /* */ }
     }
-  }, [slug, filename, isCanvas, canvasDoc, canvasContentKey, onSaved, buildImageEmbeds])
+  }, [slug, filename, isCanvas, canvasDoc, canvasContentKey, onSaved, buildImageEmbeds, persistOverride])
 
   const handleSave = useCallback(async () => {
     if (currentSerialized === null || saving) return
@@ -214,7 +202,6 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
     setSaving(false)
   }, [currentSerialized, saving, persist])
 
-  // auto-save canvas on content changes (debounced)
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => {
     if (!isCanvas || !dirty || currentSerialized === null) return
@@ -231,13 +218,12 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
     try {
       if (dirty && currentSerialized !== null) await persist(currentSerialized)
       const { PDFDocument } = await import("pdf-lib")
-      const A4_ASPECT = 1123 / 794 // page frames are locked to A4 proportions
+      const A4_ASPECT = 1123 / 794
       const imgs = await buildImageEmbeds(canvasDoc)
       const pdfDoc = await PDFDocument.create()
       for (const page of pages) {
         const pngBytes = await renderPageToPng(canvasDoc.strokes, page.x, page.y, page.width, page.width * A4_ASPECT, imgs)
         const img = await pdfDoc.embedPng(pngBytes)
-        // A4 in PDF points: 595.28 x 841.89
         const pdfPage = pdfDoc.addPage([595.28, 841.89])
         pdfPage.drawImage(img, { x: 0, y: 0, width: 595.28, height: 841.89 })
       }
@@ -255,36 +241,48 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
         e.preventDefault()
         handleSave()
       }
-      if (e.key === "Escape" && isFullscreen) {
-        e.preventDefault()
-        setIsFullscreen(false)
+      if (e.key === "Escape") {
+        if (overlay) { e.preventDefault(); onClose() }
+        else if (isFullscreen) { e.preventDefault(); setIsFullscreen(false) }
       }
     }
     document.addEventListener("keydown", handler)
     return () => document.removeEventListener("keydown", handler)
-  }, [handleSave, isFullscreen])
+  }, [handleSave, isFullscreen, overlay, onClose])
 
   const loaded = isCanvas ? canvasDoc !== null : content !== null
   if (!loaded) {
     return <div className="flex items-center justify-center py-6 text-xs text-ink-faint">Loading...</div>
   }
 
-  const editorBody = isCanvas
-    ? <CanvasEditor doc={canvasDoc!} onChange={handleCanvasChange} availablePdfs={availablePdfs} availableImages={availableImages} slug={slug} onImageAdded={() => onSaved?.()} />
-    : <TextEditor value={content!} onChange={handleTextChange} language={language} isFullscreen={isFullscreen} />
+  const textBody = content !== null && !isCanvas && (
+    <div className="relative flex-1 min-h-0 flex flex-col">
+      <ViewPills view={view} onViewChange={setView} />
+      {view === "edit" ? (
+        <ConsoleEditor value={content} onChange={handleTextChange} language={language} placeholder="Start writing..." />
+      ) : (
+        <div className="flex-1 overflow-y-auto min-h-0 p-4 pt-10">
+          <LaTeXMarkdown content={content} />
+        </div>
+      )}
+    </div>
+  )
 
-  const chrome = (
+  const canvasBody = isCanvas && canvasDoc && (
+    <CanvasEditor doc={canvasDoc} onChange={handleCanvasChange} availablePdfs={availablePdfs} availableImages={availableImages} slug={slug} onImageAdded={() => onSaved?.()} />
+  )
+
+  const editorBody = textBody || canvasBody
+
+  // Inline chrome (sidebar documents): filename, save, fullscreen, close.
+  const chrome = !overlay && (
     <div className="flex items-center justify-between px-3 py-1.5 border-b border-divider/50 shrink-0">
       <div className="flex items-center gap-2 min-w-0">
         <span className="text-[11px] font-medium text-ink truncate">{filename}</span>
         {dirty && <span className="text-[10px] text-ink-faint">(modified)</span>}
       </div>
       <div className="flex items-center gap-1 shrink-0">
-        <button
-          onClick={handleSave}
-          disabled={!dirty || saving}
-          className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors"
-        >
+        <button onClick={handleSave} disabled={!dirty || saving} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors">
           <Save className="h-3.5 w-3.5" />
         </button>
         {isCanvas && (
@@ -298,21 +296,28 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
               : <Download className="h-3.5 w-3.5" />}
           </button>
         )}
-        <button
-          onClick={() => setIsFullscreen((f) => !f)}
-          className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
-        >
+        <button onClick={() => setIsFullscreen((f) => !f)} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors">
           {isFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
         </button>
-        <button
-          onClick={onClose}
-          className="rounded p-1 text-ink-subtle hover:text-danger transition-colors"
-        >
+        <button onClick={onClose} className="rounded p-1 text-ink-subtle hover:text-danger transition-colors">
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
     </div>
   )
+
+  if (overlay) {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.15 }}
+        className="absolute inset-0 z-30 flex flex-col bg-paper"
+      >
+        {editorBody}
+      </motion.div>
+    )
+  }
 
   if (isFullscreen) {
     return createPortal(

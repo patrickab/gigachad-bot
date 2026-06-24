@@ -1,4 +1,4 @@
-import type { Attachment, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelsResponse, ObsidianFile, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage } from "./types"
+import type { Attachment, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelsResponse, ObsidianFile, ObsidianNode, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { API_BASE, DEFAULT_TEMPERATURE, DEFAULT_DOWNSCALE_IMAGES } from "./config"
@@ -250,6 +250,30 @@ export async function deleteAttachment(chatId: string, filename: string, slug: s
 
 export async function listObsidianFiles(): Promise<{ enabled: boolean; files: ObsidianFile[] }> {
   return request("/obsidian/files")
+}
+
+export async function obsidianTree(): Promise<{ enabled: boolean; tree: ObsidianNode[] }> {
+  return request("/obsidian/tree")
+}
+
+export async function addObsidianRoot(path: string): Promise<{ enabled: boolean; tree: ObsidianNode[] }> {
+  return request("/obsidian/roots", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  })
+}
+
+export async function removeObsidianRoot(path: string): Promise<{ enabled: boolean; tree: ObsidianNode[] }> {
+  return request(`/obsidian/roots?path=${encodeURIComponent(path)}`, { method: "DELETE" })
+}
+
+export async function writeObsidianFile(path: string, content: string): Promise<void> {
+  await request("/obsidian/file", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, content }),
+  })
 }
 
 /** Direct URL to a file's raw bytes (images, PDFs) — usable as an `<img>`/PDF src. */

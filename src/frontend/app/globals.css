@@ -535,6 +535,32 @@ code {
   background-color: var(--shiki-light-bg);
 }
 
+/* ConsoleEditor: the highlighted Shiki <pre> sits under a transparent <textarea>.
+   The <pre> UA default is `white-space: pre` (no wrap), so without this it would
+   not wrap like the textarea and the layers drift apart line by line. Force the
+   <pre> to inherit the wrapper's font/wrapping exactly and drop its own box. */
+.shiki-wrapper pre.shiki,
+.shiki-wrapper pre.shiki code,
+.shiki-wrapper .shiki span {
+  margin: 0;
+  padding: 0;
+  background: transparent !important;
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+/* The editor textarea must wrap at the exact same width as the backdrop, which has
+   no scrollbar. The global `scrollbar-width: thin` would steal width from the
+   textarea and shift its wrap points, drifting the two layers apart. Hide its
+   scrollbar (wheel/keyboard scrolling still works) so both wrap identically. */
+.console-textarea {
+  scrollbar-width: none;
+}
+.console-textarea::-webkit-scrollbar {
+  display: none;
+}
+
 /* Assistant message sits between page bg and full surface — the color-mix signature
    dynamically adapts: in dark mode it leans toward surface; in light mode it leans
    toward paper. Both inherit the parent's polarity. */

@@ -19,6 +19,7 @@ import { MindmapModal } from "@/components/MindmapModal"
 import { MemoryPanel } from "@/components/MemoryPanel"
 import { FileViewer } from "@/components/FileViewer"
 import { DocumentPicker } from "@/components/DocumentPicker"
+import { DocumentEditor } from "@/components/DocumentEditor"
 import { CreateDocumentPanel } from "@/components/CreateDocumentPanel"
 import { useCommandBar } from "@/hooks/useCommandBar"
 import { useMemoryCategories } from "@/hooks/useMemoryCategories"
@@ -47,6 +48,7 @@ import {
   buildHistoryFile,
   listObsidianFiles,
   attachObsidianFile,
+  writeObsidianFile,
   listProjectDocuments,
   listAllDocuments,
   uploadDocument,
@@ -150,6 +152,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   const [obsidianEnabled, setObsidianEnabled] = useState(false)
   const [obsidianFiles, setObsidianFiles] = useState<ObsidianFile[]>([])
   const [obsidianOpen, setObsidianOpen] = useState(false)
+  const [obsidianEditPath, setObsidianEditPath] = useState<string | null>(null)
   const [documentOpen, setDocumentOpen] = useState(false)
   const [createDocOpen, setCreateDocOpen] = useState(false)
   const [projectDocuments, setProjectDocuments] = useState<ProjectDocument[]>([])
@@ -212,10 +215,16 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     [chatId, activeProject, appendAttachment],
   )
 
-  const handleObsidianSelect = useCallback((path: string) => {
+  const handleObsidianSelect = useCallback(async (path: string) => {
     setObsidianOpen(false)
-    attachToChat(attachObsidianFile, path)
-  }, [attachToChat])
+    // Empty chat → edit the note; active conversation → stage it on the chat input
+    // (the *next* message), not the already-sent latest message.
+    if (messages.length === 0) {
+      setObsidianEditPath(path)
+    } else {
+      try { chatInputRef.current?.addAttachment(await attachObsidianFile(chatId, path, activeProject)) } catch { /* */ }
+    }
+  }, [messages.length, chatId, activeProject])
 
   const handleDocumentSelect = useCallback(async (path: string) => {
     setDocumentOpen(false)
@@ -756,6 +765,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         onReset={reset}
         onMerge={(childFile) => doMergeBranch(childFile)}
         onCascadeDelete={handleCascadeDelete}
+        onObsidianSelect={handleObsidianSelect}
       />
       <main className="flex-1 min-w-0 flex flex-col relative bg-paper">
         <header className="h-[60px] shrink-0 flex items-center px-4 gap-4 z-40 border-b border-divider/50 bg-paper/80 backdrop-blur-xl">
@@ -822,6 +832,16 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
               model={settings.ocrModel || DEFAULT_VISION_MODEL}
               onComplete={(output) => { addMessagePair("OCR Request", output); setOCRImage(null) }}
               onClose={() => { setOCRImage(null); toggleOCR() }}
+            />
+          )}
+          {isActive && obsidianEditPath && (
+            <DocumentEditor
+              path={obsidianEditPath}
+              slug=""
+              overlay
+              persistOverride={(content) => writeObsidianFile(obsidianEditPath, content)}
+              onClose={() => setObsidianEditPath(null)}
+              onModeLabel={onModeLabel}
             />
           )}
         </div>

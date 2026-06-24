@@ -39,7 +39,6 @@ interface VaultTreeProps<T> {
   // Section header (root level only)
   sectionIcon?: ElementType
   sectionTitle?: string
-  count?: number
   onPlusClick?: () => void
   plusTitle?: string
   collapsed?: boolean
@@ -56,6 +55,7 @@ interface VaultTreeProps<T> {
   onElementDelete?: (item: VaultTreeItem<T>) => void
   renderElement?: (item: VaultTreeItem<T>, depth: number) => React.ReactNode
   onAddVault?: (name: string) => Promise<void>
+  vaultPlaceholder?: string
   onAddFolder?: (parentId: string | null, name: string) => Promise<void>
   onMoveElement?: (elementId: string, targetId: string | null) => Promise<void>
   onDashboardClick?: (vaultId: string) => void
@@ -120,7 +120,6 @@ export function VaultTree<T>({
   loading,
   sectionIcon: SectionIcon,
   sectionTitle,
-  count,
   onPlusClick,
   plusTitle,
   collapsed,
@@ -133,6 +132,7 @@ export function VaultTree<T>({
   onElementDelete,
   renderElement,
   onAddVault,
+  vaultPlaceholder = "Project name",
   onAddFolder,
   onMoveElement,
   onDashboardClick,
@@ -257,11 +257,6 @@ export function VaultTree<T>({
             >
               <SectionIcon className="h-4 w-4 shrink-0 text-ink-muted" />
               <span className="text-sm font-medium">{sectionTitle}</span>
-              {count != null && count > 0 && (
-                <span className="rounded-full bg-surface-elevated px-1.5 py-0.5 text-[10px] text-ink-subtle font-semibold">
-                  {count}
-                </span>
-              )}
               {open != null && (
                 <div className="ml-auto">
                   <ChevronIcon open={open} />
@@ -289,7 +284,7 @@ export function VaultTree<T>({
                     onChange={setCreateName}
                     onSubmit={handleCreateSubmit}
                     onCancel={() => { setCreateMode(null); setCreateName("") }}
-                    placeholder={createMode === "vault" ? "Project name" : "Folder name"}
+                    placeholder={createMode === "vault" ? vaultPlaceholder : "Folder name"}
                   />
                 )}
               </AnimatePresence>

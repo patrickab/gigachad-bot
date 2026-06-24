@@ -20,6 +20,13 @@ export interface ObsidianFile {
   name: string
 }
 
+export interface ObsidianNode {
+  name: string
+  path: string
+  type: "vault" | "folder" | "file"
+  children?: ObsidianNode[]
+}
+
 export interface ProjectDocument {
   path: string
   name: string

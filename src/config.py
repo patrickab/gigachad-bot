@@ -9,9 +9,9 @@ SERVER_STATIC_DIR = BASE_DIR / "src" / "static"
 
 DIRECTORY_CLOUD = Path("~/Nextcloud/linux").expanduser()
 
-# Set to empty string if you dont use Obsidian
-# Note: You can sync obsidian with Nextcloud, Dropbox, etc. to enable cloud integration of your notes.
-DIRECTORY_OBSIDIAN_VAULT = DIRECTORY_CLOUD / "obsidian"
+# Obsidian vault roots are NOT configured here. They live in
+# chat_histories/obsidian-roots.json (the single source of truth), managed at
+# runtime by ObsidianVault — see src/lib/obsidian_vault.py.
 DIRECTORY_CHAT_HISTORIES = BASE_DIR / "chat_histories"
 
 # Uploads directory for non-project chats. Project-scoped uploads live under

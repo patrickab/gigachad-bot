@@ -1,18 +1,18 @@
 "use client"
 
-import { useCallback, useEffect, useMemo } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion } from "framer-motion"
 import { VaultTree, type VaultTreeItem } from "./VaultTree"
 import { useVaultTree } from "@/hooks/useVaultTree"
-import { Brain, FolderKanban, LayoutDashboard, Clock, PanelLeftClose, PanelLeft, Save, RotateCcw } from "lucide-react"
+import { Brain, FolderKanban, LayoutDashboard, Clock, FileText, NotebookText, PanelLeftClose, PanelLeft, Save, RotateCcw } from "lucide-react"
 import { useMemoryViewer } from "@/contexts/MemoryViewerContext"
 import { SidebarElement } from "./SidebarElement"
 import { useProject } from "@/contexts/ProjectContext"
 import { useBranches } from "@/contexts/BranchContext"
 import { useSidebar } from "@/contexts/SidebarContext"
-import type { BranchMeta, ProjectListItem } from "@/lib/types"
+import type { BranchMeta, ObsidianNode, ProjectListItem } from "@/lib/types"
 import { ChatBranchItem } from "./ChatBranchItem"
-import { createDirectory, moveHistoryItem, Vault } from "@/lib/api"
+import { addObsidianRoot, createDirectory, moveHistoryItem, obsidianTree, removeObsidianRoot, Vault } from "@/lib/api"
 
 const COLLAPSED_WIDTH = 50
 const EXPANDED_WIDTH = 280
@@ -24,6 +24,7 @@ interface SidebarProps {
   onReset: () => void
   onMerge?: (childFile: string) => Promise<void>
   onCascadeDelete?: (filename: string) => Promise<void>
+  onObsidianSelect?: (path: string) => void
 }
 
 export function Sidebar({
@@ -33,6 +34,7 @@ export function Sidebar({
   onReset,
   onMerge,
   onCascadeDelete,
+  onObsidianSelect,
 }: SidebarProps) {
   const {
     collapsed,
@@ -97,6 +99,22 @@ export function Sidebar({
     onDeactivate: closeProject,
   })
   const historiesController = useVaultTree({ storageKey: "expanded_history_folders" })
+  const obsidianController = useVaultTree({ storageKey: "expanded_obsidian_folders" })
+
+  // Obsidian vaults: roots maintained server-side in obsidian-roots.json; rendered
+  // as a read-only file tree. Clicking a note attaches it to the active chat.
+  const [obsidianTreeData, setObsidianTreeData] = useState<ObsidianNode[]>([])
+  const [obsidianOpen, setObsidianOpen] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    obsidianTree()
+      .then((r) => { if (!cancelled) setObsidianTreeData(r.tree) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
+  const obsidianItems = useMemo(() => buildObsidianItems(obsidianTreeData), [obsidianTreeData])
 
   const projectItems = useMemo(() =>
     buildProjectItems(projects, activeProject, branchMeta),
@@ -156,7 +174,6 @@ export function Sidebar({
           <VaultTree
             sectionIcon={FolderKanban}
             sectionTitle="Projects"
-            count={projects.length}
             items={projectItems}
             collapsed={collapsed}
             open={projectsOpen}
@@ -209,6 +226,31 @@ export function Sidebar({
           />
         </div>
 
+        <div className="px-2">
+          <VaultTree
+            sectionIcon={NotebookText}
+            sectionTitle="Obsidian"
+            items={obsidianItems}
+            collapsed={collapsed}
+            open={obsidianOpen}
+            onOpenChange={setObsidianOpen}
+            onExpand={expandIfCollapsed}
+            plusTitle="Add vault root"
+            controller={obsidianController}
+            vaultPlaceholder="Vault filepath…"
+            onElementClick={(item) => onObsidianSelect?.((item.data as string) ?? item.id)}
+            onAddVault={async (path: string) => {
+              const r = await addObsidianRoot(path)
+              setObsidianTreeData(r.tree)
+              setObsidianOpen(true)
+            }}
+            onVaultDelete={async (id: string) => {
+              const r = await removeObsidianRoot(id)
+              setObsidianTreeData(r.tree)
+            }}
+          />
+        </div>
+
         <div className="px-2 flex flex-col gap-1">
           {mainItems.map((item) => (
             <SidebarElement
@@ -221,6 +263,21 @@ export function Sidebar({
       </div>
     </motion.aside>
   )
+}
+
+function buildObsidianItems(nodes: ObsidianNode[]): VaultTreeItem<string>[] {
+  return nodes.map((n) => {
+    if (n.type === "file") {
+      return { id: n.path, label: n.name, type: "element" as const, data: n.path, icon: FileText }
+    }
+    return {
+      id: n.path,
+      label: n.name,
+      type: n.type, // "vault" | "folder"
+      data: n.path,
+      children: buildObsidianItems(n.children ?? []),
+    }
+  })
 }
 
 function buildProjectItems(

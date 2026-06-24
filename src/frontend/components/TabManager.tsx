@@ -280,7 +280,8 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
 
   return (
     <div className="flex flex-col h-screen overflow-hidden">
-      <div className="relative z-[90] h-8 shrink-0 flex items-center border-b border-divider/50 bg-paper select-none">
+      {/* ponytail: hide tab bar when single tab */}
+      <div className={cn("relative z-[90] h-8 shrink-0 flex items-center border-b border-divider/50 bg-paper select-none", tabs.length <= 1 && "hidden")}>
         <div ref={tabBarRef} data-tabbar className="flex-1 flex items-center h-full min-w-0">
           {tabs.map((tab) => {
             const isActive = tab.id === activeTab

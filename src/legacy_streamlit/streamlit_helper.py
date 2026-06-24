@@ -19,8 +19,13 @@ from streamlit_ace import THEMES, st_ace
 from streamlit_paste_button import PasteResult, paste_image_button
 
 from config import (
-    DIRECTORY_OBSIDIAN_VAULT,
+    DIRECTORY_CLOUD,
 )
+
+# Obsidian vault path is no longer in config.py (the obsidian-roots.json file is
+# the single source of truth). This frozen Streamlit helper keeps its own legacy
+# save target to stay self-contained.
+DIRECTORY_OBSIDIAN_VAULT = DIRECTORY_CLOUD / "obsidian"
 from lib.prompts import (
     SYS_ADVISOR,
     SYS_ARTICLE,

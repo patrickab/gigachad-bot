@@ -54,7 +54,7 @@ export function ConsoleEditor({
         {highlightedHtml ? (
           <div
             className="shiki-wrapper min-h-full p-4"
-            style={{ fontSize: "0.75rem", lineHeight: "1.625", fontFamily: MONO_FONT, whiteSpace: "pre-wrap", wordBreak: "break-word", overflowWrap: "break-word" }}
+            style={{ fontSize: "0.75rem", lineHeight: "1.625", fontFamily: MONO_FONT, whiteSpace: "pre-wrap", overflowWrap: "break-word" }}
             dangerouslySetInnerHTML={{ __html: highlightedHtml }}
           />
         ) : (
@@ -63,7 +63,7 @@ export function ConsoleEditor({
       </div>
       <textarea
         ref={textareaRef}
-        className="relative h-full w-full resize-none overflow-auto bg-transparent p-4 text-transparent caret-ink outline-none placeholder:text-ink-faint whitespace-pre-wrap break-words"
+        className="console-textarea relative h-full w-full resize-none overflow-auto bg-transparent p-4 text-transparent caret-ink outline-none placeholder:text-ink-faint whitespace-pre-wrap break-words"
         style={{ fontSize: "0.75rem", lineHeight: "1.625", fontFamily: MONO_FONT }}
         value={value}
         onChange={(e) => onChange(e.target.value)}
