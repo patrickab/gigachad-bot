@@ -128,6 +128,16 @@ def stop_vane() -> None:
 
 # --- Provider resolution ---------------------------------------------------
 
+# gigachad provider prefix -> Vane provider name (set by _ensure_providers).
+# Without this scoping, the fuzzy pass cross-matches e.g. deepseek/deepseek-v4-pro
+# onto Ollama's deepseek-v4-pro:cloud (subscription-gated) → wrong backend.
+_PROVIDER_NAME_BY_PREFIX = {
+    "ollama": "Ollama",
+    "gemini": "Google",
+    "deepseek": "DeepSeek",
+}
+
+
 def _model_key(model: str) -> str:
     """gigachad model string -> Vane model key. Strips the provider prefix."""
     return model.split("/", 1)[1] if "/" in model else model
@@ -136,22 +146,29 @@ def _model_key(model: str) -> str:
 def _resolve_from_providers(providers: list[dict], model: str, embedding: bool) -> dict[str, str] | None:
     """Find {providerId, key} for a model in a /api/providers payload.
 
-    Matches the model key against each provider's chat/embedding model list.
-    Tries exact match first, then substring/fuzzy match.
-    Returns None if no provider exposes it (caller surfaces a setup hint).
+    The gigachad model string is "<prefix>/<key>" (e.g. "deepseek/deepseek-v4-pro").
+    The prefix names the intended backend, so we scope matching to the Vane provider
+    it maps to — otherwise the fuzzy pass below would route deepseek/* onto Ollama's
+    deepseek-*:cloud copies. Within that provider: exact match first, then substring.
+    Returns None if that provider doesn't expose the model (caller surfaces a hint).
     """
     key = _model_key(model)
     field = "embeddingModels" if embedding else "chatModels"
 
+    prefix = model.split("/", 1)[0] if "/" in model else ""
+    expected = _PROVIDER_NAME_BY_PREFIX.get(prefix)
+    # Known prefix → only that provider. Unknown prefix → fall back to all providers.
+    scoped = [p for p in providers if p.get("name") == expected] if expected else providers
+
     # First pass: exact match on key or name
-    for p in providers:
+    for p in scoped:
         for m in p.get(field, []):
             if m.get("key") == key or m.get("name") == key:
                 return {"providerId": p["id"], "key": m["key"]}
 
     # Second pass: substring/fuzzy match (case-insensitive)
     key_lower = key.lower()
-    for p in providers:
+    for p in scoped:
         for m in p.get(field, []):
             m_key_lower = (m.get("key") or "").lower()
             m_name_lower = (m.get("name") or "").lower()
@@ -336,7 +353,11 @@ if __name__ == "__main__":
         {
             "id": "uuid-ollama",
             "name": "Ollama",
-            "chatModels": [{"name": "Gemma 4", "key": "gemma4:31b-cloud"}],
+            # Ollama's cloud catalog carries deepseek-*:cloud copies (subscription-gated).
+            "chatModels": [
+                {"name": "Gemma 4", "key": "gemma4:31b-cloud"},
+                {"name": "DeepSeek v4 Pro", "key": "deepseek-v4-pro:cloud"},
+            ],
             "embeddingModels": [{"name": "BGE M3", "key": "bge-m3:latest"}],
         },
         {
@@ -354,4 +375,9 @@ if __name__ == "__main__":
     assert _check("ollama/bge-m3:latest", True) == {"providerId": "uuid-ollama", "key": "bge-m3:latest"}
     assert _check("gemini/gemini-3.1-flash-lite", False) == {"providerId": "uuid-google", "key": "gemini-3.1-flash-lite"}
     assert _check("ollama/does-not-exist", False) is None
+    # ollama/deepseek-* DOES belong to Ollama (its cloud copy).
+    assert _check("ollama/deepseek-v4-pro", False) == {"providerId": "uuid-ollama", "key": "deepseek-v4-pro:cloud"}
+    # Regression: deepseek/* must NOT cross-match onto Ollama's deepseek-*:cloud.
+    # No DeepSeek provider here → None (caller surfaces "add it in Vane Settings").
+    assert _check("deepseek/deepseek-v4-pro", False) is None
     print("ok")

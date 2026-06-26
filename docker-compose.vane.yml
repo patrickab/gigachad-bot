@@ -17,6 +17,17 @@ services:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
+  # DeepSeek shim — rewrites json_schema -> json_object so Vane's planner works
+  # against DeepSeek. Vane's DeepSeek provider baseURL points at this service.
+  deepseek-shim:
+    image: python:3.12-slim
+    command: python /app/shim.py
+    volumes:
+      - ./vane-deepseek-shim.py:/app/shim.py:ro
+    expose:
+      - "8000"
+    restart: unless-stopped
+
   # SearXNG — shared by Vane (web search) and gpt-researcher (deep research).
   searxng:
     image: searxng/searxng
