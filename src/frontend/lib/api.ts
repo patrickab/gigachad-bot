@@ -268,6 +268,11 @@ export async function removeObsidianRoot(path: string): Promise<{ enabled: boole
   return request(`/obsidian/roots?path=${encodeURIComponent(path)}`, { method: "DELETE" })
 }
 
+export async function readObsidianRendered(path: string): Promise<string> {
+  const data = await request<{ path: string; content: string }>(`/obsidian/rendered?path=${encodeURIComponent(path)}`)
+  return data.content
+}
+
 export async function writeObsidianFile(path: string, content: string): Promise<void> {
   await request("/obsidian/file", {
     method: "POST",

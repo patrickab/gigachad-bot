@@ -2,14 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { Download, Maximize2, Minimize2, Save, X } from "lucide-react"
+import { ChevronLeft, ChevronRight, Download, Maximize2, Minimize2, Save, X } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import { cn } from "@/lib/utils"
 import { ConsoleEditor } from "./ConsoleEditor"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { CanvasEditor, parseCanvasDoc, serializeCanvasDoc, emptyCanvasDoc, type CanvasDocument } from "./CanvasEditor"
-import { loadFileViewerText, writeDocument, writeBinaryDocument, mirrorDrawing, fileViewerRawUrl } from "@/lib/api"
+import { loadFileViewerText, readObsidianRendered, writeDocument, writeBinaryDocument, mirrorDrawing, fileViewerRawUrl } from "@/lib/api"
 import { renderPageToPng, renderCanvasToJpeg, type EmbedRect } from "@/lib/drawing"
+import { EditorSidebar, InlineEditPanel } from "./EditorSidebar"
 
 type EditorView = "edit" | "preview"
 
@@ -24,6 +25,8 @@ interface DocumentEditorProps {
   overlay?: boolean
   persistOverride?: (content: string) => Promise<void>
   onModeLabel?: (label: string) => void
+  onNavigate?: (path: string) => void
+  model?: string
 }
 
 function editorLanguage(path: string): string {
@@ -33,7 +36,7 @@ function editorLanguage(path: string): string {
 
 function ViewPills({ view, onViewChange }: { view: EditorView; onViewChange: (v: EditorView) => void }) {
   return (
-    <div className="absolute top-2 left-3 z-10 flex items-center gap-px rounded-md bg-surface/80 backdrop-blur-sm p-0.5">
+    <div className="absolute top-2 left-3 z-10 flex items-center gap-px rounded-md bg-surface/80 backdrop-blur-sm p-0.5 opacity-0 hover:opacity-100 transition-opacity">
       {(["edit", "preview"] as const).map((v) => (
         <button
           key={v}
@@ -86,15 +89,19 @@ function ResizableEditor({ children }: { children: React.ReactNode }) {
   )
 }
 
-export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, availablePdfs, availableImages, overlay, persistOverride, onModeLabel }: DocumentEditorProps) {
+export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, availablePdfs, availableImages, overlay, persistOverride, onModeLabel, onNavigate, model }: DocumentEditorProps) {
   const isCanvas = path.endsWith(".canvas")
   const [content, setContent] = useState<string | null>(null)
+  const [renderedContent, setRenderedContent] = useState<string | null>(null)
   const [canvasDoc, setCanvasDoc] = useState<CanvasDocument | null>(null)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(!!overlay)
   const [view, setView] = useState<EditorView>("edit")
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [sidebarWidth, setSidebarWidth] = useState(340)
+  const [inlineEdit, setInlineEdit] = useState<{ text: string; start: number; end: number; splitPx: number } | null>(null)
   const savedContentRef = useRef("")
 
   const filename = path.split("/").pop() ?? path
@@ -110,6 +117,7 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
   }, [overlay, filename])
 
   useEffect(() => {
+    setRenderedContent(null)
     loadFileViewerText(path).then((text) => {
       if (isCanvas) {
         const doc = text.trim() ? parseCanvasDoc(text) : emptyCanvasDoc()
@@ -130,7 +138,10 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
         setContent("")
       }
     })
-  }, [path, isCanvas])
+    if (overlay && !isCanvas) {
+      readObsidianRendered(path).then(setRenderedContent).catch(() => {})
+    }
+  }, [path, isCanvas, overlay])
 
   const currentSerialized = isCanvas
     ? (canvasDoc ? serializeCanvasDoc(canvasDoc) : null)
@@ -250,19 +261,74 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
     return () => document.removeEventListener("keydown", handler)
   }, [handleSave, isFullscreen, overlay, onClose])
 
+  const handlePreviewClick = useCallback((e: React.MouseEvent) => {
+    const anchor = (e.target as HTMLElement).closest("a")
+    if (!anchor) return
+    const href = anchor.getAttribute("href")
+    if (!href?.startsWith("#obsidian:")) return
+    e.preventDefault()
+    onNavigate?.(decodeURIComponent(href.slice("#obsidian:".length)))
+  }, [onNavigate])
+
+  const handleSidebarApply = useCallback((newContent: string) => {
+    setContent(newContent)
+    setDirty(newContent !== savedContentRef.current)
+  }, [])
+
+  const handleInlineApply = useCallback((replacement: string) => {
+    if (!inlineEdit || content === null) return
+    const next = content.substring(0, inlineEdit.start) + replacement + content.substring(inlineEdit.end)
+    setContent(next)
+    setDirty(next !== savedContentRef.current)
+    setInlineEdit(null)
+  }, [inlineEdit, content])
+
+  const handleInlineEditOpen = useCallback((text: string, start: number, end: number, splitPx: number) => {
+    setInlineEdit({ text, start, end, splitPx })
+  }, [])
+
   const loaded = isCanvas ? canvasDoc !== null : content !== null
   if (!loaded) {
     return <div className="flex items-center justify-center py-6 text-xs text-ink-faint">Loading...</div>
   }
 
+  const splitIdx = inlineEdit && content ? content.indexOf("\n", inlineEdit.end) : -1
+  const splitChar = splitIdx === -1 ? (content?.length ?? 0) : splitIdx + 1
+  const [topContent, botContent] = inlineEdit && content
+    ? [content.substring(0, splitChar), content.substring(splitChar)]
+    : ["", ""]
+  const botStart = topContent.split("\n").length
+  // Pixel height of the bottom slice so the scroll viewport knows its true extent
+  const BOT_LINE_H = 19.5  // 0.75rem × 1.625
+  const BOT_PAD = 16       // p-4
+  const botHeight = BOT_PAD + botContent.split("\n").length * BOT_LINE_H + BOT_PAD
+
   const textBody = content !== null && !isCanvas && (
-    <div className="relative flex-1 min-h-0 flex flex-col">
+    // When inline-edit is active the div becomes a plain scroll viewport so the
+    // user can scroll through the whole document with the panel inserted inline.
+    <div className={`relative flex-1 min-h-0 group/editor${inlineEdit && model ? " overflow-y-auto" : " flex flex-col"}`}>
       <ViewPills view={view} onViewChange={setView} />
-      {view === "edit" ? (
-        <ConsoleEditor value={content} onChange={handleTextChange} language={language} placeholder="Start writing..." />
+      {view === "edit" && inlineEdit && model ? (
+        <>
+          <div style={{ height: inlineEdit.splitPx }} className="flex flex-col shrink-0 overflow-hidden">
+            <ConsoleEditor value={topContent} onChange={() => {}} language={language} readOnly />
+          </div>
+          <InlineEditPanel
+            selectedText={inlineEdit.text}
+            model={model}
+            onApply={handleInlineApply}
+            onClose={() => setInlineEdit(null)}
+          />
+          <div style={{ height: botHeight }} className="flex flex-col shrink-0">
+            <ConsoleEditor value={botContent} onChange={() => {}} language={language} startLineNumber={botStart} readOnly />
+          </div>
+        </>
+      ) : view === "edit" ? (
+        <ConsoleEditor value={content} onChange={handleTextChange} language={language} placeholder="Start writing..." onInlineEdit={model ? handleInlineEditOpen : undefined} />
       ) : (
-        <div className="flex-1 overflow-y-auto min-h-0 p-4 pt-10">
-          <LaTeXMarkdown content={content} />
+        // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
+        <div className="flex-1 overflow-y-auto min-h-0 p-4 pt-10" onClick={handlePreviewClick}>
+          <LaTeXMarkdown content={renderedContent ?? content} />
         </div>
       )}
     </div>
@@ -312,9 +378,28 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.15 }}
-        className="absolute inset-0 z-30 flex flex-col bg-paper"
+        className="absolute inset-0 z-30 flex flex-row bg-paper"
       >
-        {editorBody}
+        <div className="flex-1 min-w-0 flex flex-col relative">
+          {editorBody}
+          {model && !isCanvas && (
+            <button
+              onClick={() => setSidebarOpen(v => !v)}
+              className="absolute top-2 right-3 z-10 p-1 rounded text-ink-subtle hover:text-ink hover:bg-surface/80 transition-colors"
+            >
+              {sidebarOpen ? <ChevronRight className="h-3 w-3" /> : <ChevronLeft className="h-3 w-3" />}
+            </button>
+          )}
+        </div>
+        {sidebarOpen && model && (
+          <EditorSidebar
+            content={content ?? ""}
+            model={model}
+            width={sidebarWidth}
+            onWidthChange={setSidebarWidth}
+            onApply={handleSidebarApply}
+          />
+        )}
       </motion.div>
     )
   }

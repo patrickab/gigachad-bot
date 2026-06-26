@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion } from "framer-motion"
 import { VaultTree, type VaultTreeItem } from "./VaultTree"
 import { useVaultTree } from "@/hooks/useVaultTree"
-import { Brain, FolderKanban, LayoutDashboard, Clock, FileText, NotebookText, PanelLeftClose, PanelLeft, Save, RotateCcw } from "lucide-react"
+import { Brain, FolderKanban, LayoutDashboard, Clock, FileText, Diamond, PanelLeftClose, PanelLeft, Save, RotateCcw } from "lucide-react"
 import { useMemoryViewer } from "@/contexts/MemoryViewerContext"
 import { SidebarElement } from "./SidebarElement"
 import { useProject } from "@/contexts/ProjectContext"
@@ -228,7 +228,7 @@ export function Sidebar({
 
         <div className="px-2">
           <VaultTree
-            sectionIcon={NotebookText}
+            sectionIcon={Diamond}
             sectionTitle="Obsidian"
             items={obsidianItems}
             collapsed={collapsed}

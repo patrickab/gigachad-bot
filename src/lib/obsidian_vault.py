@@ -11,13 +11,16 @@ Named ``ObsidianVault`` (not ``VaultStore``) because "vault" already refers to
 the sidebar projects/histories tree (``VaultTree``) elsewhere in the codebase.
 """
 
+import re
 from pathlib import Path
+from urllib.parse import quote as _url_quote
 
 from config import DIRECTORY_CHAT_HISTORIES
 from lib.json_io import safe_read_json, safe_write_json
 
 # Directories that hold Obsidian internals or noise rather than notes.
 _SKIP_DIRS = {".obsidian", ".trash", ".git", "node_modules"}
+_IMG_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp"})
 
 ROOTS_FILE = DIRECTORY_CHAT_HISTORIES / "obsidian-roots.json"
 
@@ -155,3 +158,66 @@ class ObsidianVault:
         """Overwrite a markdown note in place (validated under a vault root)."""
         resolved = self._root_for(path)
         resolved.write_text(content, encoding="utf-8")
+
+    # ─── wiki-link resolution ───
+
+    def find_in_vault(self, name: str, source_dir: Path | None = None) -> Path | None:
+        """Find a file by name. Checks source directory first, then all roots."""
+        # ponytail: rglob(name) — breaks if name has glob metacharacters
+        name = name.split("#")[0].strip()
+        if not name:
+            return None
+        candidates = [name] if Path(name).suffix else [name + ".md", name]
+        if source_dir and source_dir.is_dir():
+            for c in candidates:
+                p = (source_dir / c).resolve()
+                if p.is_file() and self.contains(p):
+                    return p
+        for root in self._roots:
+            if not root.is_dir():
+                continue
+            for c in candidates:
+                for hit in root.rglob(c):
+                    if hit.is_file():
+                        return hit
+        return None
+
+    def resolve_wiki_content(self, content: str, source_path: str) -> str:
+        """Rewrite ``![[embed]]``, ``[[link]]``, and relative images to standard markdown."""
+        source_dir = Path(source_path).parent
+
+        def _resolve(name: str) -> Path | None:
+            return self.find_in_vault(name, source_dir)
+
+        def _repl_embed(m: re.Match[str]) -> str:
+            name = m.group(1).split("|")[0].strip()
+            found = _resolve(name)
+            if not found:
+                return m.group(0)
+            if found.suffix.lower() in _IMG_SUFFIXES:
+                return f"![{name}](/api/fileviewer/raw?path={_url_quote(str(found))})"
+            return f"[{name}](#obsidian:{_url_quote(str(found))})"
+
+        content = re.sub(r"!\[\[([^\]]+)\]\]", _repl_embed, content)
+
+        def _repl_link(m: re.Match[str]) -> str:
+            parts = m.group(1).split("|", 1)
+            name = parts[0].strip()
+            display = parts[1].strip() if len(parts) > 1 else name
+            found = _resolve(name)
+            if found:
+                return f"[{display}](#obsidian:{_url_quote(str(found))})"
+            return f"[{display}](#)"
+
+        content = re.sub(r"\[\[([^\]]+)\]\]", _repl_link, content)
+
+        def _repl_rel_img(m: re.Match[str]) -> str:
+            alt, src = m.group(1), m.group(2)
+            if src.startswith(("/", "http://", "https://", "data:")):
+                return m.group(0)
+            resolved = (source_dir / src).resolve()
+            if resolved.is_file() and self.contains(resolved):
+                return f"![{alt}](/api/fileviewer/raw?path={_url_quote(str(resolved))})"
+            return m.group(0)
+
+        return re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", _repl_rel_img, content)

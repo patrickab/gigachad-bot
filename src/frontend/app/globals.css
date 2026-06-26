@@ -256,6 +256,13 @@ body::after {
   opacity: 0.018;
 }
 
+::selection {
+  background-color: oklch(68% 0 0 / 0.35);
+}
+.light ::selection {
+  background-color: oklch(52% 0 0 / 0.22);
+}
+
 .markdown-body,
 .markdown-body-compact {
   color: var(--ink-muted);

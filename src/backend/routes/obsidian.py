@@ -105,6 +105,15 @@ async def write_file(body: WriteBody, vault: ObsidianVault = Depends(get_obsidia
     return {"ok": True}
 
 
+@router.get("/rendered", response_model=ObsidianFileContent)
+async def read_rendered(path: str = Query(...), vault: ObsidianVault = Depends(get_obsidian_vault)):
+    try:
+        raw = vault.read(path)
+        return ObsidianFileContent(path=path, content=vault.resolve_wiki_content(raw, path))
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.post("/attach", response_model=AttachResult)
 async def attach_file(
     path: str = Query(...),

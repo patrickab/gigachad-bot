@@ -842,6 +842,8 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
               persistOverride={(content) => writeObsidianFile(obsidianEditPath, content)}
               onClose={() => setObsidianEditPath(null)}
               onModeLabel={onModeLabel}
+              onNavigate={setObsidianEditPath}
+              model={config.selectedModel}
             />
           )}
         </div>
