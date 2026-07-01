@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
+import dynamic from "next/dynamic"
 import { Sidebar } from "@/components/Sidebar"
 import { CommandMenu, type CommandMenuItem } from "@/components/CommandMenu"
 import { ChatContainer } from "@/components/ChatContainer"
@@ -46,9 +47,9 @@ import {
   loadProjectTab,
   parseHistoryFile,
   buildHistoryFile,
-  listObsidianFiles,
-  attachObsidianFile,
-  writeObsidianFile,
+  listFileVaultFiles,
+  attachFileVaultFile,
+  writeFileVaultFile,
   listProjectDocuments,
   listAllDocuments,
   uploadDocument,
@@ -58,11 +59,14 @@ import {
   writeDocument,
   uploadFile,
   loadFileViewerText,
+  fileViewerRawUrl,
   generateMindmap,
 } from "@/lib/api"
 import { renderCanvasToJpeg } from "@/lib/drawing"
+
+const PdfViewer = dynamic(() => import("@/components/PdfViewer").then((m) => ({ default: m.PdfViewer })), { ssr: false })
 import { DEFAULT_VISION_MODEL } from "@/lib/config"
-import type { Attachment, Message, ObsidianFile, ProjectDocument, Usage } from "@/lib/types"
+import type { Attachment, Message, VaultFile, ProjectDocument, Usage } from "@/lib/types"
 import {
   buildAttachedSend,
   buildHiddenContent,
@@ -87,7 +91,7 @@ const COMMANDS: CommandMenuItem[] = [
   { command: "/memorize", keywords: ["memory", "both"] },
   { command: "/memorize-global", keywords: ["memory", "global", "profile"] },
   { command: "/memorize-project", keywords: ["memory", "project"] },
-  { command: "/obsidian-load" },
+  { command: "/vault-load" },
 ]
 
 function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleLoaded, onOpenChat, activeProject, focusQaIndex, focusKey, onConfigChange }: {
@@ -149,10 +153,11 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
 
   const commandBar = useCommandBar()
   const { globalCategories, projectCategories } = useMemoryCategories(activeProject)
-  const [obsidianEnabled, setObsidianEnabled] = useState(false)
-  const [obsidianFiles, setObsidianFiles] = useState<ObsidianFile[]>([])
-  const [obsidianOpen, setObsidianOpen] = useState(false)
-  const [obsidianEditPath, setObsidianEditPath] = useState<string | null>(null)
+  const [vaultEnabled, setVaultEnabled] = useState(false)
+  const [vaultFiles, setVaultFiles] = useState<VaultFile[]>([])
+  const [vaultPickerOpen, setVaultPickerOpen] = useState(false)
+  const [vaultEditPath, setVaultEditPath] = useState<string | null>(null)
+  const [vaultPdfPath, setVaultPdfPath] = useState<string | null>(null)
   const [documentOpen, setDocumentOpen] = useState(false)
   const [createDocOpen, setCreateDocOpen] = useState(false)
   const [projectDocuments, setProjectDocuments] = useState<ProjectDocument[]>([])
@@ -160,23 +165,23 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
 
   useEffect(() => {
     let cancelled = false
-    listObsidianFiles()
-      .then((r) => { if (!cancelled) { setObsidianEnabled(r.enabled); setObsidianFiles(r.files) } })
+    listFileVaultFiles()
+      .then((r) => { if (!cancelled) { setVaultEnabled(r.enabled); setVaultFiles(r.files) } })
       .catch(() => {})
     return () => { cancelled = true }
   }, [])
 
-  const refreshObsidianList = useCallback(() => {
-    listObsidianFiles()
-      .then((r) => { setObsidianEnabled(r.enabled); setObsidianFiles(r.files) })
+  const refreshVaultList = useCallback(() => {
+    listFileVaultFiles()
+      .then((r) => { setVaultEnabled(r.enabled); setVaultFiles(r.files) })
       .catch(() => {})
   }, [])
 
-  const openObsidian = useCallback(() => {
-    setObsidianOpen(true)
+  const openVaultPicker = useCallback(() => {
+    setVaultPickerOpen(true)
     // Refresh the listing on open so vault changes are reflected.
-    refreshObsidianList()
-  }, [refreshObsidianList])
+    refreshVaultList()
+  }, [refreshVaultList])
   const commandMemoryCount = commandBar.state.phase === "review" || commandBar.state.phase === "composing"
     ? commandBar.state.globalMemories.length + (commandBar.state.projectMemories?.length ?? 0)
     : 0
@@ -191,16 +196,29 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   const [chatId, setChatId] = useState(() => tab.chatId)
   const [extracting, setExtracting] = useState(0)
 
-  const handleObsidianSelect = useCallback(async (path: string) => {
-    setObsidianOpen(false)
-    // Empty chat → edit the note; active conversation → stage it on the chat input
-    // (the *next* message), not the already-sent latest message.
+  const handleVaultSelect = useCallback(async (path: string) => {
+    setVaultPickerOpen(false)
+    // Empty chat → open standalone (edit text files, view PDFs); active
+    // conversation → stage a live reference on the chat input (the *next*
+    // message), not the already-sent latest message.
     if (messages.length === 0) {
-      setObsidianEditPath(path)
+      if (path.toLowerCase().endsWith(".pdf")) setVaultPdfPath(path)
+      else setVaultEditPath(path)
     } else {
-      try { chatInputRef.current?.addAttachment(await attachObsidianFile(chatId, path, activeProject)) } catch { /* */ }
+      setExtracting((n) => n + 1)
+      try { chatInputRef.current?.addAttachment(await attachFileVaultFile(path)) } catch { /* */ }
+      finally { setExtracting((n) => n - 1) }
     }
-  }, [messages.length, chatId, activeProject])
+  }, [messages.length])
+
+  useEffect(() => {
+    if (!isActive || !vaultPdfPath) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.preventDefault(); setVaultPdfPath(null) }
+    }
+    window.addEventListener("keydown", onKey, true)
+    return () => window.removeEventListener("keydown", onKey, true)
+  }, [isActive, vaultPdfPath])
 
   const handleDocumentSelect = useCallback(async (path: string) => {
     setDocumentOpen(false)
@@ -458,7 +476,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       }
       if (e.altKey && e.key.toLowerCase() === "o") {
         e.preventDefault()
-        if (obsidianEnabled) openObsidian()
+        if (vaultEnabled) openVaultPicker()
         return
       }
 
@@ -478,12 +496,12 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     return () => {
       window.removeEventListener("keydown", handler, true)
     }
-  }, [isActive, isTitled, handleQuickSave, openSaveModal, reset, commandBar.open, commandBar.submitCommand, commandBar.state.phase, messages, activeProject, chatId, branchMessageIdx, obsidianEnabled, openObsidian])
+  }, [isActive, isTitled, handleQuickSave, openSaveModal, reset, commandBar.open, commandBar.submitCommand, commandBar.state.phase, messages, activeProject, chatId, branchMessageIdx, vaultEnabled, openVaultPicker])
 
   const runCommand = useCallback(async (command: string) => {
-    if (command === "/obsidian-load") {
+    if (command === "/vault-load") {
       commandBar.close()
-      openObsidian()
+      openVaultPicker()
       return
     }
     if (command === "/mindmap") {
@@ -503,18 +521,18 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       chatId,
       command,
     )
-  }, [commandBar.submitCommand, commandBar.close, messages, activeProject, chatId, branchMessageIdx, openObsidian, setMindmapModalOpen])
+  }, [commandBar.submitCommand, commandBar.close, messages, activeProject, chatId, branchMessageIdx, openVaultPicker, setMindmapModalOpen])
 
   const commandItems = COMMANDS.filter((cmd) =>
-    (cmd.command !== "/obsidian-load" || obsidianEnabled) &&
+    (cmd.command !== "/vault-load" || vaultEnabled) &&
     (cmd.command !== "/memorize-project" || activeProject != null)
   )
 
   const handleSend = useCallback(
     async (text: string, attachments: Attachment[]) => {
       const trimmed = text.trim()
-      if (trimmed === "/obsidian-load") {
-        openObsidian()
+      if (trimmed === "/vault-load") {
+        openVaultPicker()
         return
       }
       if (trimmed === "/mindmap" || trimmed.startsWith("/mindmap ")) {
@@ -569,7 +587,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
             slug: activeProject,
             downscaleImages: config.downscaleImages,
             baseParams: defaultSendParams(config, prompts),
-          }, parseFiles)
+          }, parseFiles, attachFileVaultFile)
         } catch {
           updateLastAssistant(setMessages, m => ({ ...m, content: "Failed to parse attached documents. You can try again or re-upload the file." }))
           return
@@ -613,7 +631,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         })
       }
     },
-    [searchEnabled, researchEnabled, studyEnabled, chatId, branchMessageIdx, activeProject, config, send, research, webSearch, setMessages, toggleStudy, commandBar.submitCommand, messages, openObsidian, handleMindmapSubmit, setMindmapModalOpen],
+    [searchEnabled, researchEnabled, studyEnabled, chatId, branchMessageIdx, activeProject, config, send, research, webSearch, setMessages, toggleStudy, commandBar.submitCommand, messages, openVaultPicker, handleMindmapSubmit, setMindmapModalOpen],
   )
 
   const handleRegenerate = useCallback(
@@ -671,7 +689,8 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       const msg = copy[messageIndex]
       if (msg?.attachments) {
         const att = msg.attachments.find(a => a.name === attachmentName)
-        if (att) deleteAttachment(chatId, attachmentName, activeProject).catch(() => { })
+        // Vault refs have no upload copy — and the source file must never be deleted.
+        if (att && !att.vaultPath) deleteAttachment(chatId, attachmentName, activeProject).catch(() => { })
         const remaining = msg.attachments.filter(a => a.name !== attachmentName)
         const hiddenContent = buildHiddenContent(remaining) || undefined
         copy[messageIndex] = { ...msg, attachments: remaining, hiddenContent }
@@ -738,8 +757,8 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         onReset={reset}
         onMerge={(childFile) => doMergeBranch(childFile)}
         onCascadeDelete={handleCascadeDelete}
-        onObsidianSelect={handleObsidianSelect}
-        onObsidianChanged={refreshObsidianList}
+        onVaultSelect={handleVaultSelect}
+        onVaultsChanged={refreshVaultList}
       />
       <main className="flex-1 min-w-0 flex flex-col relative bg-paper">
         <header className="h-[60px] shrink-0 flex items-center px-4 gap-4 z-40 border-b border-divider/50 bg-paper/80 backdrop-blur-xl">
@@ -788,8 +807,8 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
             onRemoveAttachment={handleRemoveAttachment}
             onToggleAttachmentActive={handleToggleAttachmentActive}
             onAttachmentContentChange={handleAttachmentContentChange}
-            obsidianEnabled={obsidianEnabled}
-            onOpenObsidian={openObsidian}
+            vaultEnabled={vaultEnabled}
+            onOpenVault={openVaultPicker}
             documents={projectDocuments}
             onSelectDocument={handleDocumentSelect}
             onOpenDocuments={activeProject ? openDocuments : undefined}
@@ -809,17 +828,27 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
               onClose={() => { setOCRImage(null); toggleOCR() }}
             />
           )}
-          {isActive && obsidianEditPath && (
+          {isActive && vaultEditPath && (
             <DocumentEditor
-              path={obsidianEditPath}
+              path={vaultEditPath}
               slug=""
               overlay
-              persistOverride={(content) => writeObsidianFile(obsidianEditPath, content)}
-              onClose={() => setObsidianEditPath(null)}
+              persistOverride={(content) => writeFileVaultFile(vaultEditPath, content)}
+              onClose={() => setVaultEditPath(null)}
               onModeLabel={onModeLabel}
-              onNavigate={setObsidianEditPath}
+              onNavigate={setVaultEditPath}
               model={config.selectedModel}
             />
+          )}
+          {isActive && vaultPdfPath && (
+            <div className="absolute inset-0 z-50 flex flex-col bg-paper">
+              <div className="flex h-9 shrink-0 items-center border-b border-divider/50 px-4">
+                <span className="truncate text-xs font-medium text-ink">{vaultPdfPath.split("/").pop()}</span>
+              </div>
+              <div className="min-h-0 flex-1">
+                <PdfViewer url={fileViewerRawUrl(vaultPdfPath)} />
+              </div>
+            </div>
           )}
         </div>
       </main>
@@ -827,13 +856,13 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       <CreateDocumentPanel open={createDocOpen} onClose={() => setCreateDocOpen(false)} onCreate={handleCreateDocument} />
       <MindmapModal open={mindmapModalOpen} onClose={() => setMindmapModalOpen(false)} onGenerate={(prompt) => handleMindmapSubmit(prompt, mindmapAttachments)} />
       <PromptEditor open={promptEditorOpen} onClose={() => setPromptEditorOpen(false)} onPromptsChanged={setPrompts} />
-      {isActive && obsidianOpen && obsidianEnabled && (
+      {isActive && vaultPickerOpen && vaultEnabled && (
         <FileViewer
-          files={obsidianFiles.map((f) => f.path)}
-          onSelect={handleObsidianSelect}
-          onClose={() => setObsidianOpen(false)}
-          placeholder="Search vault…"
-          emptyLabel="No notes"
+          files={vaultFiles.map((f) => f.path)}
+          onSelect={handleVaultSelect}
+          onClose={() => setVaultPickerOpen(false)}
+          placeholder="Search vaults…"
+          emptyLabel="No files"
         />
       )}
       {isActive && documentOpen && (

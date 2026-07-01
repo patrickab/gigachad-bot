@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
 import { ConsoleEditor } from "./ConsoleEditor"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { CanvasEditor, parseCanvasDoc, serializeCanvasDoc, emptyCanvasDoc, type CanvasDocument } from "./CanvasEditor"
-import { loadFileViewerText, readObsidianRendered, writeDocument, writeBinaryDocument, mirrorDrawing, fileViewerRawUrl } from "@/lib/api"
+import { loadFileViewerText, readFileVaultRendered, writeDocument, writeBinaryDocument, mirrorDrawing, fileViewerRawUrl } from "@/lib/api"
 import { renderPageToPng, renderCanvasToJpeg, type EmbedRect } from "@/lib/drawing"
 import { EditorSidebar, InlineEditPanel } from "./EditorSidebar"
 
@@ -139,7 +139,7 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
       }
     })
     if (overlay && !isCanvas) {
-      readObsidianRendered(path).then(setRenderedContent).catch(() => {})
+      readFileVaultRendered(path).then(setRenderedContent).catch(() => {})
     }
   }, [path, isCanvas, overlay])
 
@@ -265,9 +265,9 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
     const anchor = (e.target as HTMLElement).closest("a")
     if (!anchor) return
     const href = anchor.getAttribute("href")
-    if (!href?.startsWith("#obsidian:")) return
+    if (!href?.startsWith("#vault:")) return
     e.preventDefault()
-    onNavigate?.(decodeURIComponent(href.slice("#obsidian:".length)))
+    onNavigate?.(decodeURIComponent(href.slice("#vault:".length)))
   }, [onNavigate])
 
   const handleSidebarApply = useCallback((newContent: string) => {

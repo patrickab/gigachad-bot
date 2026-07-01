@@ -10,8 +10,8 @@ from sse_starlette.sse import EventSourceResponse
 
 from config import BASE_DIR, DIRECTORY_CHAT_HISTORIES
 from lib.chat_store import ChatStore
+from lib.file_vault import FileVault
 from lib.memory_store import MemoryStore
-from lib.obsidian_vault import ObsidianVault
 from lib.project_store import ProjectStore
 from lib.prompt_store import PromptStore
 
@@ -19,7 +19,7 @@ _client: LLMClient | None = None
 _chat_store: ChatStore | None = None
 _project_store: ProjectStore | None = None
 _memory_store: MemoryStore | None = None
-_obsidian_vault: ObsidianVault | None = None
+_file_vault: FileVault | None = None
 _prompt_store: PromptStore | None = None
 
 
@@ -51,11 +51,11 @@ def get_memory_store() -> MemoryStore:
     return _memory_store
 
 
-def get_obsidian_vault() -> ObsidianVault:
-    global _obsidian_vault
-    if _obsidian_vault is None:
-        _obsidian_vault = ObsidianVault()
-    return _obsidian_vault
+def get_file_vault() -> FileVault:
+    global _file_vault
+    if _file_vault is None:
+        _file_vault = FileVault()
+    return _file_vault
 
 
 def get_prompt_store() -> PromptStore:

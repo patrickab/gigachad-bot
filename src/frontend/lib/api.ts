@@ -1,4 +1,4 @@
-import type { Attachment, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelsResponse, ObsidianFile, ObsidianNode, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage } from "./types"
+import type { Attachment, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelsResponse, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage, VaultFile, VaultNode } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { API_BASE, DEFAULT_TEMPERATURE, DEFAULT_DOWNSCALE_IMAGES } from "./config"
@@ -248,54 +248,54 @@ export async function deleteAttachment(chatId: string, filename: string, slug: s
   await request(`/files/chat/${chatId}/att/${encodeURIComponent(filename)}${params}`, { method: "DELETE" })
 }
 
-export async function listObsidianFiles(): Promise<{ enabled: boolean; files: ObsidianFile[] }> {
-  return request("/obsidian/files")
+export async function listFileVaultFiles(): Promise<{ enabled: boolean; files: VaultFile[] }> {
+  return request("/filevaults/files")
 }
 
-export async function obsidianTree(): Promise<{ enabled: boolean; tree: ObsidianNode[] }> {
-  return request("/obsidian/tree")
+export async function fileVaultTree(): Promise<{ enabled: boolean; tree: VaultNode[] }> {
+  return request("/filevaults/tree")
 }
 
-export async function addObsidianRoot(path: string): Promise<{ enabled: boolean; tree: ObsidianNode[] }> {
-  return request("/obsidian/roots", {
+export async function addFileVaultRoot(path: string, project: string | null = null): Promise<{ enabled: boolean; tree: VaultNode[] }> {
+  return request("/filevaults/roots", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, project }),
+  })
+}
+
+export async function removeFileVaultRoot(path: string): Promise<{ enabled: boolean; tree: VaultNode[] }> {
+  return request(`/filevaults/roots?path=${encodeURIComponent(path)}`, { method: "DELETE" })
+}
+
+export async function addFileVaultMountpoint(
+  vault: string,
+  path: string,
+): Promise<{ enabled: boolean; tree: VaultNode[] }> {
+  return request(`/filevaults/mountpoints?vault=${encodeURIComponent(vault)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path }),
   })
 }
 
-export async function removeObsidianRoot(path: string): Promise<{ enabled: boolean; tree: ObsidianNode[] }> {
-  return request(`/obsidian/roots?path=${encodeURIComponent(path)}`, { method: "DELETE" })
-}
-
-export async function addObsidianMountpoint(
+export async function removeFileVaultMountpoint(
   vault: string,
   path: string,
-): Promise<{ enabled: boolean; tree: ObsidianNode[] }> {
-  return request(`/obsidian/mountpoints?vault=${encodeURIComponent(vault)}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path }),
-  })
-}
-
-export async function removeObsidianMountpoint(
-  vault: string,
-  path: string,
-): Promise<{ enabled: boolean; tree: ObsidianNode[] }> {
+): Promise<{ enabled: boolean; tree: VaultNode[] }> {
   return request(
-    `/obsidian/mountpoints?vault=${encodeURIComponent(vault)}&path=${encodeURIComponent(path)}`,
+    `/filevaults/mountpoints?vault=${encodeURIComponent(vault)}&path=${encodeURIComponent(path)}`,
     { method: "DELETE" },
   )
 }
 
-export async function readObsidianRendered(path: string): Promise<string> {
-  const data = await request<{ path: string; content: string }>(`/obsidian/rendered?path=${encodeURIComponent(path)}`)
+export async function readFileVaultRendered(path: string): Promise<string> {
+  const data = await request<{ path: string; content: string }>(`/filevaults/rendered?path=${encodeURIComponent(path)}`)
   return data.content
 }
 
-export async function writeObsidianFile(path: string, content: string): Promise<void> {
-  await request("/obsidian/file", {
+export async function writeFileVaultFile(path: string, content: string): Promise<void> {
+  await request("/filevaults/file", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path, content }),
@@ -322,8 +322,13 @@ async function attachFileByPath(endpoint: string, chatId: string, path: string, 
   return { ...data, active: true, url: chatFileUrl(chatId, data.name, slug) }
 }
 
-export function attachObsidianFile(chatId: string, path: string, slug: string | null = null): Promise<Attachment> {
-  return attachFileByPath("obsidian", chatId, path, slug)
+/** Attach a FileVault file as a live reference — no copy; content is read from the source. */
+export async function attachFileVaultFile(path: string): Promise<Attachment> {
+  const data = await request<{ name: string; mime: string; path: string; content?: string; parsedMd?: string }>(
+    `/filevaults/attach?path=${encodeURIComponent(path)}`,
+    { method: "POST" },
+  )
+  return { ...data, active: true, vaultPath: data.path, url: fileViewerRawUrl(data.path) }
 }
 
 export async function listProjectDocuments(slug: string): Promise<ProjectDocument[]> {

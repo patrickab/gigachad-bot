@@ -9,7 +9,7 @@ import { ChatInput, type ChatInputHandle } from "./ChatInput"
 import { ChatSidebar, type ChatSidebarElementConfig } from "./ChatSidebar"
 import { rewriteImages, fileViewerRawUrl } from "@/lib/api"
 
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronsLeftRight, ChevronsRightLeft, FilePlus, FileText, FileType, Globe, GitFork, Image as ImageIcon, Library, Plus, User, X } from "lucide-react"
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronsLeftRight, ChevronsRightLeft, FilePlus, FileText, FileType, FolderOpen, Globe, GitFork, Image as ImageIcon, Library, Plus, User, X } from "lucide-react"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { cn } from "@/lib/utils"
 import { ElevationProvider, ElevatedContainer } from "./ElevatedContainer"
@@ -17,17 +17,6 @@ import { ElevationProvider, ElevatedContainer } from "./ElevatedContainer"
 const PdfViewer = dynamic(() => import("./PdfViewer").then((m) => ({ default: m.PdfViewer })), { ssr: false })
 import { DocumentEditor } from "./DocumentEditor"
 import { FloatingWindow } from "./FloatingWindow"
-
-function ObsidianGlyph({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinejoin="round" className={className} aria-hidden="true">
-      <path d="M12 2 L20 8 L15 22 L6.5 20 L4 9 Z" />
-      <path d="M12 2 L11 13 L15 22" />
-      <path d="M11 13 L4 9" />
-      <path d="M11 13 L6.5 20" />
-    </svg>
-  )
-}
 
 function AttachmentIcon({ mime }: { mime: string }) {
   if (mime.startsWith("image/")) return <ImageIcon className="h-3.5 w-3.5 text-ink shrink-0" />
@@ -337,8 +326,8 @@ function buildSidebarElements({
   onRemoveAttachment,
   onAttachmentContentChange,
   lastSearchResult,
-  obsidianEnabled,
-  onOpenObsidian,
+  vaultEnabled,
+  onOpenVault,
   documents,
   onSelectDocument,
   onOpenDocuments,
@@ -362,8 +351,8 @@ function buildSidebarElements({
   onRemoveAttachment: (messageIndex: number, attachmentName: string) => void
   onAttachmentContentChange?: (messageIndex: number, attachmentName: string, newContent: string) => void
   lastSearchResult?: WebSearchResult
-  obsidianEnabled?: boolean
-  onOpenObsidian?: () => void
+  vaultEnabled?: boolean
+  onOpenVault?: () => void
   documents?: ProjectDocument[]
   onSelectDocument?: (path: string) => void
   onOpenDocuments?: () => void
@@ -380,20 +369,20 @@ function buildSidebarElements({
 }): ChatSidebarElementConfig[] {
   const elements: ChatSidebarElementConfig[] = []
 
-  if (allAttachments.length > 0 || obsidianEnabled) {
+  if (allAttachments.length > 0 || vaultEnabled) {
     elements.push({
       id: "context",
       icon: FileText,
       title: "Context",
       badge: allAttachments.length > 0 ? allAttachments.length : undefined,
-      action: obsidianEnabled ? (
+      action: vaultEnabled ? (
         <button
           type="button"
-          onClick={onOpenObsidian}
-          aria-label="Load Obsidian note"
+          onClick={onOpenVault}
+          aria-label="Load vault file"
           className="rounded p-1 text-ink-faint hover:text-ink hover:bg-surface-elevated transition-colors"
         >
-          <ObsidianGlyph className="h-3.5 w-3.5" />
+          <FolderOpen className="h-3.5 w-3.5" />
         </button>
       ) : undefined,
       open: isElementOpen("context"),
@@ -492,8 +481,8 @@ interface ChatContainerProps {
   onRemoveAttachment?: (messageIndex: number, attachmentName: string) => void
   onToggleAttachmentActive?: (messageIndex: number, attachmentName: string) => void
   onAttachmentContentChange?: (messageIndex: number, attachmentName: string, newContent: string) => void
-  obsidianEnabled?: boolean
-  onOpenObsidian?: () => void
+  vaultEnabled?: boolean
+  onOpenVault?: () => void
   documents?: ProjectDocument[]
   onSelectDocument?: (path: string) => void
   onOpenDocuments?: () => void
@@ -525,8 +514,8 @@ export function ChatContainer({
   onRemoveAttachment,
   onToggleAttachmentActive,
   onAttachmentContentChange,
-  obsidianEnabled,
-  onOpenObsidian,
+  vaultEnabled,
+  onOpenVault,
   documents,
   onSelectDocument,
   onOpenDocuments,
@@ -820,8 +809,8 @@ export function ChatContainer({
         onRemoveAttachment: handleRemoveAttachment,
         onAttachmentContentChange,
         lastSearchResult,
-        obsidianEnabled,
-        onOpenObsidian,
+        vaultEnabled,
+        onOpenVault,
         documents,
         onSelectDocument,
         onOpenDocuments,
@@ -843,7 +832,7 @@ export function ChatContainer({
         onTogglePdfWide: togglePdfWide,
         liveCanvasRef,
       }),
-    [chatId, slug, allAttachments, expandedEntries, handleToggleExpand, onToggleAttachmentActive, handleRemoveAttachment, onAttachmentContentChange, lastSearchResult, obsidianEnabled, onOpenObsidian, documents, onSelectDocument, onOpenDocuments, onCreateDocument, editingDocPath, onDeleteDocument, onDocumentSaved, openElements, pdfWide, togglePdfWide, liveCanvasRef]
+    [chatId, slug, allAttachments, expandedEntries, handleToggleExpand, onToggleAttachmentActive, handleRemoveAttachment, onAttachmentContentChange, lastSearchResult, vaultEnabled, onOpenVault, documents, onSelectDocument, onOpenDocuments, onCreateDocument, editingDocPath, onDeleteDocument, onDocumentSaved, openElements, pdfWide, togglePdfWide, liveCanvasRef]
   )
 
   const hasSidebarContent = sidebarElements.length > 0

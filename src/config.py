@@ -9,9 +9,9 @@ SERVER_STATIC_DIR = BASE_DIR / "src" / "static"
 
 DIRECTORY_CLOUD = Path("~/Nextcloud/linux").expanduser()
 
-# Obsidian vault roots are NOT configured here. They live in
-# chat_histories/obsidian-roots.json (the single source of truth), managed at
-# runtime by ObsidianVault — see src/lib/obsidian_vault.py.
+# File-vault roots are NOT configured here. They live in
+# chat_histories/file-vault-roots.json (the single source of truth), managed at
+# runtime by FileVault — see src/lib/file_vault.py.
 DIRECTORY_CHAT_HISTORIES = BASE_DIR / "chat_histories"
 
 # Uploads directory for non-project chats. Project-scoped uploads live under

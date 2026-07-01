@@ -26,7 +26,7 @@ from backend.routes.memory import router as memory_router
 from backend.routes.mineru import kill_all_mineru_servers, reset_cancel
 from backend.routes.mineru import router as mineru_router
 from backend.routes.models import router as models_router
-from backend.routes.obsidian import router as obsidian_router
+from backend.routes.file_vaults import router as file_vaults_router
 from backend.routes.ocr import router as ocr_router
 from backend.routes.projects import router as projects_router
 from backend.routes.research import router as research_router
@@ -83,7 +83,7 @@ app.include_router(histories_router)
 app.include_router(memory_router)
 app.include_router(models_router)
 app.include_router(search_router)
-app.include_router(obsidian_router)
+app.include_router(file_vaults_router)
 app.include_router(mineru_router)
 app.include_router(ocr_router)
 app.include_router(projects_router)

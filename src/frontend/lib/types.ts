@@ -13,18 +13,22 @@ export interface Attachment {
   content?: string
   parsedMd?: string
   active: boolean
+  /** Live reference to a FileVault file — no upload copy exists; edits write back to this path. */
+  vaultPath?: string
 }
 
-export interface ObsidianFile {
+export interface VaultFile {
   path: string
   name: string
 }
 
-export interface ObsidianNode {
+export interface VaultNode {
   name: string
   path: string
   type: "vault" | "folder" | "file"
-  children?: ObsidianNode[]
+  /** Project slug this root is mounted to; null/absent = global Vaults section. */
+  project?: string | null
+  children?: VaultNode[]
 }
 
 export interface ProjectDocument {

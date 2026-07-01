@@ -4,15 +4,15 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion } from "framer-motion"
 import { VaultTree, type VaultTreeItem } from "./VaultTree"
 import { useVaultTree } from "@/hooks/useVaultTree"
-import { Brain, FolderKanban, LayoutDashboard, Clock, FileText, Diamond, PanelLeftClose, PanelLeft, Save, RotateCcw } from "lucide-react"
+import { Brain, Clock, FileText, FolderOpen, Lightbulb, LayoutDashboard, PanelLeftClose, PanelLeft, Save, RotateCcw } from "lucide-react"
 import { useMemoryViewer } from "@/contexts/MemoryViewerContext"
 import { SidebarElement } from "./SidebarElement"
 import { useProject } from "@/contexts/ProjectContext"
 import { useBranches } from "@/contexts/BranchContext"
 import { useSidebar } from "@/contexts/SidebarContext"
-import type { BranchMeta, ObsidianNode, ProjectListItem } from "@/lib/types"
+import type { BranchMeta, VaultNode, ProjectListItem } from "@/lib/types"
 import { ChatBranchItem } from "./ChatBranchItem"
-import { addObsidianMountpoint, addObsidianRoot, createDirectory, moveHistoryItem, obsidianTree, removeObsidianRoot, Vault } from "@/lib/api"
+import { addFileVaultMountpoint, addFileVaultRoot, createDirectory, moveHistoryItem, fileVaultTree, removeFileVaultRoot, Vault } from "@/lib/api"
 
 const COLLAPSED_WIDTH = 50
 const EXPANDED_WIDTH = 280
@@ -24,8 +24,8 @@ interface SidebarProps {
   onReset: () => void
   onMerge?: (childFile: string) => Promise<void>
   onCascadeDelete?: (filename: string) => Promise<void>
-  onObsidianSelect?: (path: string) => void
-  onObsidianChanged?: () => void
+  onVaultSelect?: (path: string) => void
+  onVaultsChanged?: () => void
 }
 
 export function Sidebar({
@@ -35,8 +35,8 @@ export function Sidebar({
   onReset,
   onMerge,
   onCascadeDelete,
-  onObsidianSelect,
-  onObsidianChanged,
+  onVaultSelect,
+  onVaultsChanged,
 }: SidebarProps) {
   const {
     collapsed,
@@ -99,28 +99,31 @@ export function Sidebar({
     activeId: activeProject,
     onActivate: openProject,
     onDeactivate: closeProject,
+    // ponytail: mounted-vault ids are absolute paths; only project slugs join the accordion
+    isAccordionId: (id) => !id.startsWith("/"),
   })
   const historiesController = useVaultTree({ storageKey: "expanded_history_folders" })
-  const obsidianController = useVaultTree({ storageKey: "expanded_obsidian_folders" })
+  const vaultsController = useVaultTree({ storageKey: "expanded_vault_folders" })
 
-  // Obsidian vaults: roots maintained server-side in obsidian-roots.json; rendered
-  // as a read-only file tree. Clicking a note attaches it to the active chat.
-  const [obsidianTreeData, setObsidianTreeData] = useState<ObsidianNode[]>([])
-  const [obsidianOpen, setObsidianOpen] = useState(false)
+  // File vaults: roots maintained server-side in file-vault-roots.json; rendered
+  // as a file tree. Clicking a file attaches it to the active chat as a live reference.
+  const [vaultTreeData, setVaultTreeData] = useState<VaultNode[]>([])
+  const [vaultsOpen, setVaultsOpen] = useState(false)
 
   useEffect(() => {
     let cancelled = false
-    obsidianTree()
-      .then((r) => { if (!cancelled) setObsidianTreeData(r.tree) })
+    fileVaultTree()
+      .then((r) => { if (!cancelled) setVaultTreeData(r.tree) })
       .catch(() => {})
     return () => { cancelled = true }
   }, [])
 
-  const obsidianItems = useMemo(() => buildObsidianItems(obsidianTreeData), [obsidianTreeData])
+  // Roots mounted to a project render inside that project's subtree, not here.
+  const vaultItems = useMemo(() => buildVaultItems(vaultTreeData.filter((n) => !n.project)), [vaultTreeData])
 
   const projectItems = useMemo(() =>
-    buildProjectItems(projects, activeProject, branchMeta),
-    [projects, activeProject, branchMeta],
+    buildProjectItems(projects, activeProject, branchMeta, vaultTreeData),
+    [projects, activeProject, branchMeta, vaultTreeData],
   )
 
   const historyItems = useMemo(() =>
@@ -128,13 +131,30 @@ export function Sidebar({
     [rootFiles, histories, projects],
   )
 
-  const renderChatElement = useCallback((item: VaultTreeItem<string>, depth: number) => (
-    <ChatBranchItem
-      file={(item.data as string) ?? item.id}
-      label={item.label}
-      depth={depth}
-    />
-  ), [])
+  const renderChatElement = useCallback((item: VaultTreeItem<string>, depth: number) => {
+    const data = (item.data as string) ?? item.id
+    // ponytail: absolute path = file inside a mounted vault; chat files are always relative
+    if (data.startsWith("/")) {
+      return (
+        <div style={{ paddingLeft: 8 + depth * 16, paddingRight: 8 }}>
+          <button
+            onClick={() => onVaultSelect?.(data)}
+            className="flex w-full items-center gap-1.5 truncate py-0.5 text-left text-[11px] text-ink-muted transition-colors hover:text-ink"
+          >
+            <FileText className="h-3.5 w-3.5 shrink-0 text-ink-muted" />
+            {item.label}
+          </button>
+        </div>
+      )
+    }
+    return (
+      <ChatBranchItem
+        file={data}
+        label={item.label}
+        depth={depth}
+      />
+    )
+  }, [onVaultSelect])
 
   useEffect(() => { registerOnFileClick(onOpenChat) }, [onOpenChat, registerOnFileClick])
   useEffect(() => { if (onMerge) registerOnMerge(onMerge) }, [onMerge, registerOnMerge])
@@ -174,7 +194,7 @@ export function Sidebar({
       <div className="flex-1 overflow-y-auto py-3 flex flex-col gap-2">
         <div className="px-2">
           <VaultTree
-            sectionIcon={FolderKanban}
+            sectionIcon={Lightbulb}
             sectionTitle="Projects"
             items={projectItems}
             collapsed={collapsed}
@@ -182,8 +202,26 @@ export function Sidebar({
             onOpenChange={setProjectsOpen}
             onExpand={expandIfCollapsed}
             controller={projectsController}
-            onVaultDelete={(id) => deleteProject(id)}
+            onVaultDelete={async (id) => {
+              // ponytail: absolute path = mounted vault row (unmount), slug = project row
+              if (id.startsWith("/")) {
+                const r = await removeFileVaultRoot(id)
+                setVaultTreeData(r.tree)
+                onVaultsChanged?.()
+              } else {
+                deleteProject(id)
+              }
+            }}
             onAddVault={(name) => createProject(name)}
+            onAddMountpoint={async (vaultId: string, path: string) => {
+              // Project row → mount a FileVault to the project; mounted vault row → nested mountpoint.
+              const r = vaultId.startsWith("/")
+                ? await addFileVaultMountpoint(vaultId, path)
+                : await addFileVaultRoot(path, vaultId)
+              setVaultTreeData(r.tree)
+              onVaultsChanged?.()
+            }}
+            mountpointPlaceholder="Vault filepath…"
             onDashboardClick={(vaultId) => {
               openProject(vaultId)
               setDashboardOpen(true)
@@ -230,32 +268,32 @@ export function Sidebar({
 
         <div className="px-2">
           <VaultTree
-            sectionIcon={Diamond}
-            sectionTitle="Obsidian"
-            items={obsidianItems}
+            sectionIcon={FolderOpen}
+            sectionTitle="Vaults"
+            items={vaultItems}
             collapsed={collapsed}
-            open={obsidianOpen}
-            onOpenChange={setObsidianOpen}
+            open={vaultsOpen}
+            onOpenChange={setVaultsOpen}
             onExpand={expandIfCollapsed}
             plusTitle="Add vault root"
-            controller={obsidianController}
+            controller={vaultsController}
             vaultPlaceholder="Vault filepath…"
-            onElementClick={(item) => onObsidianSelect?.((item.data as string) ?? item.id)}
+            onElementClick={(item) => onVaultSelect?.((item.data as string) ?? item.id)}
             onAddVault={async (path: string) => {
-              const r = await addObsidianRoot(path)
-              setObsidianTreeData(r.tree)
-              setObsidianOpen(true)
-              onObsidianChanged?.()
+              const r = await addFileVaultRoot(path)
+              setVaultTreeData(r.tree)
+              setVaultsOpen(true)
+              onVaultsChanged?.()
             }}
             onAddMountpoint={async (vaultId: string, path: string) => {
-              const r = await addObsidianMountpoint(vaultId, path)
-              setObsidianTreeData(r.tree)
-              onObsidianChanged?.()
+              const r = await addFileVaultMountpoint(vaultId, path)
+              setVaultTreeData(r.tree)
+              onVaultsChanged?.()
             }}
             onVaultDelete={async (id: string) => {
-              const r = await removeObsidianRoot(id)
-              setObsidianTreeData(r.tree)
-              onObsidianChanged?.()
+              const r = await removeFileVaultRoot(id)
+              setVaultTreeData(r.tree)
+              onVaultsChanged?.()
             }}
           />
         </div>
@@ -274,17 +312,21 @@ export function Sidebar({
   )
 }
 
-function buildObsidianItems(nodes: ObsidianNode[]): VaultTreeItem<string>[] {
+function buildVaultItems(nodes: VaultNode[]): VaultTreeItem<string>[] {
   return nodes.map((n) => {
     if (n.type === "file") {
       return { id: n.path, label: n.name, type: "element" as const, data: n.path, icon: FileText }
     }
+    const isVault = n.type === "vault"
     return {
       id: n.path,
       label: n.name,
       type: n.type, // "vault" | "folder"
       data: n.path,
-      children: buildObsidianItems(n.children ?? []),
+      icon: isVault ? FolderOpen : undefined,
+      mountable: isVault,
+      mounted: isVault,
+      children: buildVaultItems(n.children ?? []),
     }
   })
 }
@@ -293,6 +335,7 @@ function buildProjectItems(
   projects: ProjectListItem[],
   activeProject: string | null,
   branchMeta: Record<string, BranchMeta>,
+  vaultTree: VaultNode[],
 ): VaultTreeItem<string>[] {
   return projects.map((project) => {
     const dirPrefix = `${project.slug}/`
@@ -309,13 +352,19 @@ function buildProjectItems(
       items.push({ id: key, label, type: "element", data: key })
     }
 
+    // FileVault roots mounted to this project appear as vault nodes in its subtree.
+    const mountedVaults = buildVaultItems(vaultTree.filter((n) => n.project === project.slug))
+
     return {
       id: project.slug,
       label: project.name,
       type: "vault",
       data: project.slug,
+      icon: Lightbulb,
+      mountable: true,
       isActive: activeProject === project.slug,
       children: [
+        ...mountedVaults,
         {
           id: `${project.slug}/__dashboard__`,
           label: "Dashboard",

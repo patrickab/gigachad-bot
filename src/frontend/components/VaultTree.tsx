@@ -8,7 +8,6 @@ import {
   ChevronRight,
   Folder,
   HardDrive,
-  LayoutDashboard,
   Plus,
   Trash2,
   X,
@@ -30,6 +29,10 @@ export interface VaultTreeItem<T = unknown> {
   isSystem?: boolean
   displayInVault?: boolean
   badge?: string | number
+  /** Vault accepts mountpoints — shows the mount (HardDrive) hover button. */
+  mountable?: boolean
+  /** This vault row is a mounted FileVault (not a native tree vault like a project). */
+  mounted?: boolean
 }
 
 interface VaultTreeProps<T> {
@@ -356,7 +359,6 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
     onAddFolder,
     onAddMountpoint,
     mountpointPlaceholder,
-    onDashboardClick,
     onMemoryClick,
     createMode,
     createParentId,
@@ -414,15 +416,7 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
           )}
         </button>
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-          {isVault && onDashboardClick && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onDashboardClick(item.id) }}
-              className="p-0.5 rounded text-ink-faint hover:text-ink transition-colors"
-            >
-              <LayoutDashboard className="h-3 w-3" />
-            </button>
-          )}
-          {isVault && onMemoryClick && (
+          {isVault && !item.mounted && onMemoryClick && (
             <button
               onClick={(e) => { e.stopPropagation(); onMemoryClick(item.id) }}
               className="p-0.5 rounded text-ink-faint hover:text-ink transition-colors"
@@ -443,7 +437,7 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
               <Plus className="h-3 w-3" />
             </button>
           )}
-          {isVault && onAddMountpoint && (
+          {isVault && item.mountable && onAddMountpoint && (
             <button
               onClick={(e) => {
                 e.stopPropagation()

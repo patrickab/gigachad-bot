@@ -74,15 +74,31 @@ export async function buildAttachedSend(
     baseParams: Omit<ChatRequest, "chat_id" | "user_msg" | "img_paths" | "project_slug">
   },
   parse: (chatId: string, names: string[], slug: string | null) => Promise<{ name: string; parsedMd: string | null }[]>,
+  refreshVault?: (path: string) => Promise<Attachment>,
 ): Promise<{ enriched: Attachment[]; hiddenContent?: string; request: ChatRequest }> {
   const { text, attachments, priorMessages, chatId, slug, downscaleImages, baseParams } = opts
 
-  const needsParsing = attachments.filter((a) => !isImageAttachment(a) && !a.content && !a.parsedMd)
+  // Vault refs are live: re-read content from the source at send time (also
+  // picks up a PDF extraction that finished after attach). No upload copy
+  // exists, so they never go through the chat-upload parse endpoint.
   let enriched = attachments
+  if (refreshVault) {
+    enriched = await Promise.all(enriched.map(async (a) => {
+      if (!a.vaultPath) return a
+      try {
+        const fresh = await refreshVault(a.vaultPath)
+        return { ...a, content: fresh.content, parsedMd: fresh.parsedMd ?? a.parsedMd }
+      } catch {
+        return a // dangling ref (deleted file / unmounted vault) — keep last known content
+      }
+    }))
+  }
+
+  const needsParsing = enriched.filter((a) => !isImageAttachment(a) && !a.vaultPath && !a.content && !a.parsedMd)
   if (needsParsing.length > 0) {
     const parsed = await parse(chatId, needsParsing.map((a) => a.name), slug)
-    enriched = attachments.map((a) => {
-      if (a.content || a.parsedMd || isImageAttachment(a)) return a
+    enriched = enriched.map((a) => {
+      if (a.content || a.parsedMd || a.vaultPath || isImageAttachment(a)) return a
       const p = parsed.find((r) => r.name === a.name)
       return { ...a, parsedMd: p?.parsedMd ?? undefined }
     })

@@ -5,7 +5,7 @@ previews each by kind: images and PDFs stream their bytes from ``/raw``;
 markdown and unknown (treated as text) files read their content from ``/text``.
 
 Every path is validated against the union of places the app legitimately knows
-about — the Obsidian vault, the document library, and any path referenced by a
+about — the file vaults, the document library, and any path referenced by a
 project — so this generic reader can never be coaxed into serving an arbitrary
 file off disk.
 """
@@ -17,9 +17,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from backend.routes.deps import get_obsidian_vault, get_project_store
+from backend.routes.deps import get_file_vault, get_project_store
 from lib import document_library as lib_docs
-from lib.obsidian_vault import ObsidianVault
+from lib.file_vault import FileVault
 from lib.project_store import ProjectStore
 
 log = logging.getLogger(__name__)
@@ -32,7 +32,7 @@ class FileTextContent(BaseModel):
     content: str
 
 
-def _resolve_allowed(path: str, vault: ObsidianVault, store: ProjectStore) -> Path:
+def _resolve_allowed(path: str, vault: FileVault, store: ProjectStore) -> Path:
     resolved = Path(path).expanduser().resolve()
     library = lib_docs.LIBRARY_DIR.resolve()
     allowed = (
@@ -50,7 +50,7 @@ def _resolve_allowed(path: str, vault: ObsidianVault, store: ProjectStore) -> Pa
 @router.get("/text", response_model=FileTextContent)
 async def read_text(
     path: str = Query(...),
-    vault: ObsidianVault = Depends(get_obsidian_vault),
+    vault: FileVault = Depends(get_file_vault),
     store: ProjectStore = Depends(get_project_store),
 ) -> FileTextContent:
     resolved = _resolve_allowed(path, vault, store)
@@ -64,7 +64,7 @@ async def read_text(
 @router.get("/raw")
 async def read_raw(
     path: str = Query(...),
-    vault: ObsidianVault = Depends(get_obsidian_vault),
+    vault: FileVault = Depends(get_file_vault),
     store: ProjectStore = Depends(get_project_store),
 ) -> FileResponse:
     resolved = _resolve_allowed(path, vault, store)

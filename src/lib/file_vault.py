@@ -1,21 +1,22 @@
-"""Read-only access seam for Obsidian vaults.
+"""Access seam for file vaults — directories of Attachment-compatible files.
 
-A user can register several vault roots (e.g. one per Obsidian vault). The list
-of roots is maintained in ``chat_histories/obsidian-roots.json`` — the single
-source of truth for vault locations (nothing is configured in ``config.py``).
-When that file is absent the vault is simply empty until the user adds a root.
+A user can register several vault roots (an Obsidian vault is just one flavor
+of file vault). The list of roots is maintained in
+``chat_histories/file-vault-roots.json`` — the single source of truth for vault
+locations (nothing is configured in ``config.py``). When that file is absent
+the vault is simply empty until the user adds a root.
 
 Each root may carry additional **mountpoints** — external directories (e.g. a
-``/mnt`` drive) attached to that vault. Mountpoint notes appear as folder nodes
+``/mnt`` drive) attached to that vault. Mountpoint files appear as folder nodes
 inside the parent vault's tree rather than as separate top-level vaults, so a
 mounted drive is browsed as part of the vault it was attached to.
 
-All paths handed to the UI are absolute, and every read is validated to live
-under one of the roots or their mountpoints (mirroring the path-traversal guard
-used by ``ChatStore``).
+Vault files are used as **live references**: attaching one to a chat stores its
+path, never a copy — edits through the app write back to the actual file.
 
-Named ``ObsidianVault`` (not ``VaultStore``) because "vault" already refers to
-the sidebar projects/histories tree (``VaultTree``) elsewhere in the codebase.
+All paths handed to the UI are absolute, and every read/write is validated to
+live under one of the roots or their mountpoints (mirroring the path-traversal
+guard used by ``ChatStore``).
 """
 
 from __future__ import annotations
@@ -28,11 +29,14 @@ from urllib.parse import quote as _url_quote
 from config import DIRECTORY_CHAT_HISTORIES
 from lib.json_io import safe_read_json, safe_write_json
 
-# Directories that hold Obsidian internals or noise rather than notes.
+# Directories that hold app internals (e.g. Obsidian's) or noise rather than files.
 _SKIP_DIRS = {".obsidian", ".trash", ".git", "node_modules"}
 _IMG_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp"})
+# Attachment-compatible file types surfaced by listings.
+VAULT_SUFFIXES = frozenset({".md", ".txt", ".tex", ".pdf"})
 
-ROOTS_FILE = DIRECTORY_CHAT_HISTORIES / "obsidian-roots.json"
+ROOTS_FILE = DIRECTORY_CHAT_HISTORIES / "file-vault-roots.json"
+_LEGACY_ROOTS_FILE = DIRECTORY_CHAT_HISTORIES / "obsidian-roots.json"
 
 
 def _is_untitled(name: str) -> bool:
@@ -40,19 +44,26 @@ def _is_untitled(name: str) -> bool:
     return Path(name).stem.lower().startswith("untitled")
 
 
-class ObsidianVault:
-    """All read access to the user's Obsidian vault roots goes through this class."""
+class FileVault:
+    """All access to the user's file-vault roots goes through this class."""
 
     def __init__(self, roots_file: Path | None = None) -> None:
         self._roots_file = roots_file or ROOTS_FILE
         self._roots: list[Path] = []
         self._mountpoints: dict[Path, list[Path]] = defaultdict(list)
+        # A root may be mounted to a project (slug) instead of the global Vaults section.
+        self._project_tags: dict[Path, str] = {}
         self._reload()
 
     def _reload(self) -> None:
-        raw = safe_read_json(self._roots_file, {"roots": []}).get("roots") or []
+        source = self._roots_file
+        # One-time migration: fall back to the pre-rename obsidian-roots.json.
+        if not source.is_file() and self._roots_file == ROOTS_FILE and _LEGACY_ROOTS_FILE.is_file():
+            source = _LEGACY_ROOTS_FILE
+        raw = safe_read_json(source, {"roots": []}).get("roots") or []
         self._roots = []
         self._mountpoints = defaultdict(list)
+        self._project_tags = {}
         for entry in raw:
             # Backward compat: a bare string entry is a root with no mountpoints.
             if isinstance(entry, str):
@@ -67,6 +78,8 @@ class ObsidianVault:
                 continue
             if path not in self._roots:
                 self._roots.append(path)
+            if entry.get("project"):
+                self._project_tags[path] = str(entry["project"])
             for mp in entry.get("mountpoints") or []:
                 resolved_mp = Path(str(mp)).expanduser().resolve()
                 if resolved_mp not in self._mountpoints[path]:
@@ -75,7 +88,11 @@ class ObsidianVault:
     def _save_roots(self) -> None:
         payload = {
             "roots": [
-                {"path": str(r), "mountpoints": [str(m) for m in self._mountpoints.get(r, [])]}
+                {
+                    "path": str(r),
+                    "mountpoints": [str(m) for m in self._mountpoints.get(r, [])],
+                    **({"project": self._project_tags[r]} if r in self._project_tags else {}),
+                }
                 for r in self._roots
             ]
         }
@@ -98,18 +115,21 @@ class ObsidianVault:
     def roots(self) -> list[str]:
         return [str(r) for r in self._roots]
 
-    def add_root(self, path: str) -> None:
+    def add_root(self, path: str, project: str | None = None) -> None:
         resolved = Path(path).expanduser().resolve()
         if not resolved.is_dir():
             raise ValueError(f"Not a directory: {path}")
         if resolved not in self._roots:
             self._roots.append(resolved)
-            self._save_roots()
+        if project:
+            self._project_tags[resolved] = project
+        self._save_roots()
 
     def remove_root(self, path: str) -> None:
         resolved = Path(path).expanduser().resolve()
         self._roots = [r for r in self._roots if r != resolved]
         self._mountpoints.pop(resolved, None)
+        self._project_tags.pop(resolved, None)
         self._save_roots()
 
     # ─── mountpoint management ───
@@ -167,18 +187,18 @@ class ObsidianVault:
 
     # ─── listing ───
 
-    def list_markdown(self) -> list[dict[str, str]]:
-        """Flat list of every note as ``{path, name}`` (absolute paths), Untitled filtered.
+    def list_files(self) -> list[dict[str, str]]:
+        """Flat list of every vault file as ``{path, name}`` (absolute paths), Untitled filtered.
 
-        Kept for the existing Obsidian picker/attach flow, which wants a flat,
-        searchable list rather than the nested tree.
+        Kept for the picker/attach flow, which wants a flat, searchable list
+        rather than the nested tree.
         """
         files: list[dict[str, str]] = []
         for root in self._roots:
             if not root.is_dir():
                 continue
-            for path in root.rglob("*.md"):
-                if not path.is_file():
+            for path in root.rglob("*"):
+                if not path.is_file() or path.suffix.lower() not in VAULT_SUFFIXES:
                     continue
                 rel = path.relative_to(root)
                 if any(part in _SKIP_DIRS for part in rel.parts):
@@ -192,9 +212,10 @@ class ObsidianVault:
     def tree(self) -> list[dict]:
         """Nested folder/file tree per root for the sidebar VaultTree.
 
-        Each root is a ``vault`` node; directories are ``folder`` nodes, ``.md``
-        files are ``file`` leaves. Empty folders (no notes underneath) are pruned.
-        Mountpoints attached to a vault appear as folder nodes inside that vault.
+        Each root is a ``vault`` node; directories are ``folder`` nodes,
+        Attachment-compatible files are ``file`` leaves. Empty folders (no vault
+        files underneath) are pruned. Mountpoints attached to a vault appear as
+        folder nodes inside that vault.
         """
         out: list[dict] = []
         for root in self._roots:
@@ -214,6 +235,7 @@ class ObsidianVault:
                 "name": root.name,
                 "path": str(root),
                 "type": "vault",
+                "project": self._project_tags.get(root),
                 "children": children,
             })
         return out
@@ -230,21 +252,25 @@ class ObsidianVault:
                 continue
             if entry.is_dir():
                 sub = self._build_children(entry)
-                if sub:  # prune folders with no notes
+                if sub:  # prune folders with no vault files
                     children.append({"name": entry.name, "path": str(entry), "type": "folder", "children": sub})
-            elif entry.is_file() and entry.suffix == ".md" and not _is_untitled(entry.name):
+            elif entry.is_file() and entry.suffix.lower() in VAULT_SUFFIXES and not _is_untitled(entry.name):
                 children.append({"name": entry.stem, "path": str(entry), "type": "file"})
         return children
 
-    def read(self, path: str) -> str:
-        """Return the text content of a markdown note."""
+    def resolve(self, path: str) -> Path:
+        """Validate *path* against the roots and require it to be an existing file."""
         resolved = self._root_for(path)
         if not resolved.is_file():
             raise FileNotFoundError(path)
-        return resolved.read_text(encoding="utf-8")
+        return resolved
+
+    def read(self, path: str) -> str:
+        """Return the text content of a vault file."""
+        return self.resolve(path).read_text(encoding="utf-8")
 
     def write(self, path: str, content: str) -> None:
-        """Overwrite a markdown note in place (validated under a vault root)."""
+        """Overwrite a vault file in place (validated under a vault root)."""
         resolved = self._root_for(path)
         resolved.write_text(content, encoding="utf-8")
 
@@ -292,7 +318,7 @@ class ObsidianVault:
                 return m.group(0)
             if found.suffix.lower() in _IMG_SUFFIXES:
                 return f"![{name}](/api/fileviewer/raw?path={_url_quote(str(found))})"
-            return f"[{name}](#obsidian:{_url_quote(str(found))})"
+            return f"[{name}](#vault:{_url_quote(str(found))})"
 
         content = re.sub(r"!\[\[([^\]]+)\]\]", _repl_embed, content)
 
@@ -302,7 +328,7 @@ class ObsidianVault:
             display = parts[1].strip() if len(parts) > 1 else name
             found = _resolve(name)
             if found:
-                return f"[{display}](#obsidian:{_url_quote(str(found))})"
+                return f"[{display}](#vault:{_url_quote(str(found))})"
             return f"[{display}](#)"
 
         content = re.sub(r"\[\[([^\]]+)\]\]", _repl_link, content)

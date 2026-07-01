@@ -89,10 +89,10 @@
     --shadow-strength: 0.08;
     --shadow-color: oklch(35% 0.01 85);
   
-    /* --- Text: medium warm-tinted greys (not black) --- */
-    --ink:        oklch(42% 0.012 85);
-    --ink-muted:  oklch(52% 0.012 85);
-    --ink-subtle: oklch(62% 0.010 85);
+    /* --- Text: warm near-charcoal down to faint grey --- */
+    --ink:        oklch(30% 0.012 85);
+    --ink-muted:  oklch(46% 0.012 85);
+    --ink-subtle: oklch(58% 0.010 85);
     --ink-faint:  oklch(72% 0.008 85);
   
     /* --- Surfaces: yellowish broken white, ascending toward (not to) white --- */
@@ -257,10 +257,10 @@ body::after {
 }
 
 ::selection {
-  background-color: oklch(68% 0 0 / 0.35);
+  background-color: oklch(70% 0.02 83 / 0.35);
 }
 .light ::selection {
-  background-color: oklch(52% 0 0 / 0.22);
+  background-color: oklch(45% 0.03 85 / 0.25);
 }
 
 .markdown-body,
@@ -612,6 +612,6 @@ code {
   .theme-transition *,
   .theme-transition *::before,
   .theme-transition *::after {
-    transition: background-color 3s ease, color 3s ease, border-color 3s ease, box-shadow 3s ease;
+    transition: background-color 0.6s ease, color 0.6s ease, border-color 0.6s ease, box-shadow 0.6s ease;
   }
 }

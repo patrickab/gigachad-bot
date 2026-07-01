@@ -36,11 +36,22 @@ export interface VaultTreeConfig {
   onActivate?: (id: string) => void
   /** a branch was closed — e.g. close its project + chat. */
   onDeactivate?: (id: string) => void
+  /**
+   * Accordion mode only: restrict accordion semantics to ids this predicate
+   * accepts. Other branches (e.g. mounted file vaults nested inside a project)
+   * fall back to the multi-expand set instead of firing onActivate.
+   */
+  isAccordionId?: (id: string) => boolean
 }
 
 export function useVaultTree(config: VaultTreeConfig = {}): VaultBranchController {
-  const { accordion, activeId, storageKey, onActivate, onDeactivate } = config
+  const { accordion, activeId, storageKey, onActivate, onDeactivate, isAccordionId } = config
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+
+  const accordionApplies = useCallback(
+    (id: string) => !!accordion && (isAccordionId?.(id) ?? true),
+    [accordion, isAccordionId],
+  )
 
   // multi-mode persistence load
   useEffect(() => {
@@ -57,12 +68,12 @@ export function useVaultTree(config: VaultTreeConfig = {}): VaultBranchControlle
   }, [accordion, storageKey])
 
   const isExpanded = useCallback(
-    (id: string) => (accordion ? activeId === id : expanded.has(id)),
-    [accordion, activeId, expanded],
+    (id: string) => (accordionApplies(id) ? activeId === id : expanded.has(id)),
+    [accordionApplies, activeId, expanded],
   )
 
   const expand = useCallback((id: string) => {
-    if (accordion) {
+    if (accordionApplies(id)) {
       if (activeId !== id) onActivate?.(id)
       return
     }
@@ -72,10 +83,10 @@ export function useVaultTree(config: VaultTreeConfig = {}): VaultBranchControlle
       persist(next)
       return next
     })
-  }, [accordion, activeId, onActivate, persist])
+  }, [accordionApplies, activeId, onActivate, persist])
 
   const toggleBranch = useCallback((id: string) => {
-    if (accordion) {
+    if (accordionApplies(id)) {
       activeId === id ? onDeactivate?.(id) : onActivate?.(id)
       return
     }
@@ -85,7 +96,7 @@ export function useVaultTree(config: VaultTreeConfig = {}): VaultBranchControlle
       persist(next)
       return next
     })
-  }, [accordion, activeId, onActivate, onDeactivate, persist])
+  }, [accordionApplies, activeId, onActivate, onDeactivate, persist])
 
   return { isExpanded, toggleBranch, expand }
 }
