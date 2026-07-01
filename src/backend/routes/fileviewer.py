@@ -52,7 +52,7 @@ async def read_text(
     path: str = Query(...),
     vault: ObsidianVault = Depends(get_obsidian_vault),
     store: ProjectStore = Depends(get_project_store),
-):
+) -> FileTextContent:
     resolved = _resolve_allowed(path, vault, store)
     try:
         content = resolved.read_text(encoding="utf-8", errors="replace")

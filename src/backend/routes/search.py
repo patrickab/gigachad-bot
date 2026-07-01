@@ -135,6 +135,7 @@ _PROVIDER_NAME_BY_PREFIX = {
     "ollama": "Ollama",
     "gemini": "Google",
     "deepseek": "DeepSeek",
+    "openrouter": "OpenRouter",
 }
 
 
@@ -189,6 +190,7 @@ def _fetch_providers() -> list[dict]:
 def _ensure_providers() -> None:
     """Initialize Vane with default Ollama + Gemini providers if missing."""
     import os
+
     import httpx
 
     providers = _fetch_providers()
@@ -226,6 +228,23 @@ def _ensure_providers() -> None:
             added = True
         except Exception as e:
             print(f"Warning: Failed to add Google provider to Vane: {e}", file=sys.stderr)
+
+    # OpenRouter provider (if API key exists)
+    if "OpenRouter" not in provider_names and os.environ.get("OPENROUTER_API_KEY"):
+        try:
+            httpx.post(
+                f"{VANE_URL.rstrip('/')}/api/providers",
+                json={
+                    "name": "OpenRouter",
+                    "type": "openrouter",
+                    "apiBase": "https://openrouter.ai/api/v1",
+                    "apiKey": os.environ.get("OPENROUTER_API_KEY", ""),
+                },
+                timeout=10.0,
+            ).raise_for_status()
+            added = True
+        except Exception as e:
+            print(f"Warning: Failed to add OpenRouter provider to Vane: {e}", file=sys.stderr)
 
     if added:
         _clear_provider_cache()

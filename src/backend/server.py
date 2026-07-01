@@ -55,12 +55,15 @@ async def lifespan(app: FastAPI):
     get_prompt_store()
     reset_cancel()
     from lib.document_library import backfill_pdf_library
+    from lib import extract_queue
 
     backfill_pdf_library()
+    await extract_queue.start()
     yield
     shutdown_client()
     kill_all_mineru_servers()
     stop_vane()
+    await extract_queue.stop()
 
 
 app = FastAPI(title="gigachad-bot", lifespan=lifespan)

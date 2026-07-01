@@ -264,7 +264,9 @@ class ProjectStore:
     # ------------------------------------------------------------------
 
     def list_files(self, slug: str) -> list[str]:
-        return self._mutate_files(slug, lambda files: files)
+        files = self._mutate_files(slug, lambda files: files)
+        files.sort(key=lambda f: Path(f).name.lower())
+        return files
 
     def add_file(self, slug: str, path: str) -> list[str]:
         return self._mutate_files(slug, lambda files: files if path in files else [*files, path])

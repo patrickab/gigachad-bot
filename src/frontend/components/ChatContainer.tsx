@@ -16,6 +16,7 @@ import { ElevationProvider, ElevatedContainer } from "./ElevatedContainer"
 
 const PdfViewer = dynamic(() => import("./PdfViewer").then((m) => ({ default: m.PdfViewer })), { ssr: false })
 import { DocumentEditor } from "./DocumentEditor"
+import { FloatingWindow } from "./FloatingWindow"
 
 function ObsidianGlyph({ className }: { className?: string }) {
   return (
@@ -169,7 +170,9 @@ function ContextBody({
   )
 }
 
-function DocumentsBody({ documents, slug, onSelect, editingPath, onEdit, onDelete, onSaved, onLiveContent, pdfWide, onTogglePdfWide }: { documents: ProjectDocument[]; slug: string | null; onSelect?: (path: string) => void; editingPath?: string | null; onEdit?: (path: string | null) => void; onDelete?: (path: string) => void; onSaved?: (filename?: string, content?: string) => void; onLiveContent?: (path: string, content: string | null) => void; pdfWide?: boolean; onTogglePdfWide?: () => void }) {
+function DocumentsBody({ documents, slug, onSelect, editingPath, onEdit, onDelete, onSaved, onLiveContent }: { documents: ProjectDocument[]; slug: string | null; onSelect?: (path: string) => void; editingPath?: string | null; onEdit?: (path: string | null) => void; onDelete?: (path: string) => void; onSaved?: (filename?: string, content?: string) => void; onLiveContent?: (path: string, content: string | null) => void }) {
+  const [pdfPreviewPath, setPdfPreviewPath] = useState<string | null>(null)
+
   if (documents.length === 0) {
     return (
       <div className="flex items-center justify-center py-6 text-xs text-ink-faint">
@@ -183,52 +186,67 @@ function DocumentsBody({ documents, slug, onSelect, editingPath, onEdit, onDelet
   const imageDocs = documents.filter((d) => d.mime.startsWith("image/")).map((d) => ({ path: d.path, name: d.name }))
 
   return (
-    <div>
-      {documents.map((doc) => {
-        const Icon = doc.mime === "application/pdf" ? FileType : FileText
-        const editable = isEditable(doc)
-        const expanded = editingPath === doc.path
-        return (
-          <div key={doc.path} className="border-b border-divider/50">
-            <div className="flex items-center gap-1 px-2 py-2 hover:bg-surface/50 transition-colors">
-              <button
-                type="button"
-                onClick={() => onEdit?.(expanded ? null : doc.path)}
-                className="rounded p-0.5 text-ink-faint hover:text-ink hover:bg-surface-elevated transition-colors shrink-0"
-              >
-                {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-              </button>
-              <button
-                type="button"
-                onClick={() => onSelect?.(doc.path)}
-                className="flex min-w-0 flex-1 items-center gap-2 text-left text-ink-muted hover:text-ink transition-colors"
-              >
-                <Icon className="h-3.5 w-3.5 shrink-0 text-ink-faint" />
-                <span className="min-w-0 flex-1 truncate text-[11px] font-medium">{doc.name}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => onDelete?.(doc.path)}
-                className="rounded p-0.5 text-ink-faint hover:text-danger hover:bg-surface-elevated transition-colors shrink-0"
-              >
-                <X className="h-3 w-3" />
+    <>
+      <AnimatePresence>
+        {pdfPreviewPath && (
+          <FloatingWindow onClose={() => setPdfPreviewPath(null)}>
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-divider/50 shrink-0">
+              <span className="text-xs font-medium text-ink truncate">{pdfPreviewPath.split("/").pop()}</span>
+              <button onClick={() => setPdfPreviewPath(null)} className="rounded p-1.5 text-ink-subtle hover:text-ink hover:bg-surface-elevated transition-colors">
+                <X className="h-4 w-4" />
               </button>
             </div>
-            {expanded && editable && slug && (
-              <DocumentEditor path={doc.path} slug={slug} onClose={() => onEdit?.(null)} onSaved={onSaved} onLiveContent={onLiveContent} availablePdfs={pdfDocs} availableImages={imageDocs} />
-            )}
-            {expanded && !editable && doc.mime === "application/pdf" && (
-              <PdfViewer url={fileViewerRawUrl(doc.path)} isWide={pdfWide} onToggleWide={onTogglePdfWide} fitWidth />
-            )}
-            {expanded && !editable && doc.mime.startsWith("image/") && (
-              <div className="p-2 max-h-[60vh] overflow-y-auto">
-                <img src={fileViewerRawUrl(doc.path)} alt={doc.name} className="max-w-full rounded border border-divider" />
+            <div className="flex-1 min-h-0">
+              <PdfViewer url={fileViewerRawUrl(pdfPreviewPath)} />
+            </div>
+          </FloatingWindow>
+        )}
+      </AnimatePresence>
+      <div>
+        {documents.map((doc) => {
+          const Icon = doc.mime === "application/pdf" ? FileType : FileText
+          const editable = isEditable(doc)
+          const expanded = editingPath === doc.path
+          const isPdf = doc.mime === "application/pdf"
+          return (
+            <div key={doc.path} className="border-b border-divider/50">
+              <div className="flex items-center gap-1 px-2 py-2 hover:bg-surface/50 transition-colors">
+                <button
+                  type="button"
+                  onClick={() => isPdf && !editable ? setPdfPreviewPath(doc.path) : onEdit?.(expanded ? null : doc.path)}
+                  className="rounded p-0.5 text-ink-faint hover:text-ink hover:bg-surface-elevated transition-colors shrink-0"
+                >
+                  {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSelect?.(doc.path)}
+                  className="flex min-w-0 flex-1 items-center gap-2 text-left text-ink-muted hover:text-ink transition-colors"
+                >
+                  <Icon className="h-3.5 w-3.5 shrink-0 text-ink-faint" />
+                  <span className="min-w-0 flex-1 truncate text-[11px] font-medium">{doc.name}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDelete?.(doc.path)}
+                  className="rounded p-0.5 text-ink-faint hover:text-danger hover:bg-surface-elevated transition-colors shrink-0"
+                >
+                  <X className="h-3 w-3" />
+                </button>
               </div>
-            )}
-          </div>
-        )
-      })}
-    </div>
+              {expanded && editable && slug && (
+                <DocumentEditor path={doc.path} slug={slug} onClose={() => onEdit?.(null)} onSaved={onSaved} onLiveContent={onLiveContent} availablePdfs={pdfDocs} availableImages={imageDocs} />
+              )}
+              {expanded && !editable && doc.mime.startsWith("image/") && (
+                <div className="p-2 max-h-[60vh] overflow-y-auto">
+                  <img src={fileViewerRawUrl(doc.path)} alt={doc.name} className="max-w-full rounded border border-divider" />
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </>
   )
 }
 
@@ -429,7 +447,7 @@ function buildSidebarElements({
       open: isElementOpen("documents"),
       onOpenChange: (o) => onElementOpenChange("documents", o),
       body: (
-        <DocumentsBody documents={docs} slug={slug} onSelect={onSelectDocument} editingPath={editingDocPath} onEdit={onEditDocument} onDelete={onDeleteDocument} onSaved={onDocumentSaved} onLiveContent={liveCanvasRef ? (p, c) => { liveCanvasRef.current = c !== null ? { path: p, content: c } : null } : undefined} pdfWide={pdfWide} onTogglePdfWide={onTogglePdfWide} />
+        <DocumentsBody documents={docs} slug={slug} onSelect={onSelectDocument} editingPath={editingDocPath} onEdit={onEditDocument} onDelete={onDeleteDocument} onSaved={onDocumentSaved} onLiveContent={liveCanvasRef ? (p, c) => { liveCanvasRef.current = c !== null ? { path: p, content: c } : null } : undefined} />
       ),
     })
   }
@@ -482,6 +500,7 @@ interface ChatContainerProps {
   onCreateDocument?: () => void
   onDeleteDocument?: (path: string) => void
   onDocumentSaved?: (filename?: string, content?: string) => void
+  extracting?: boolean
   chatInputRef?: React.RefObject<ChatInputHandle | null>
   liveCanvasRef?: React.MutableRefObject<{ path: string; content: string } | null>
 }
@@ -514,6 +533,7 @@ export function ChatContainer({
   onCreateDocument,
   onDeleteDocument,
   onDocumentSaved,
+  extracting,
   chatInputRef,
   liveCanvasRef,
 }: ChatContainerProps) {
@@ -997,7 +1017,8 @@ export function ChatContainer({
               chatId={chatId}
               onSend={handleSend}
               onOCRRequest={onOCRRequest}
-              disabled={isStreaming}
+              disabled={isStreaming || extracting}
+              extracting={extracting}
               isStreaming={isStreaming}
               onCancel={onCancel}
               slug={slug}

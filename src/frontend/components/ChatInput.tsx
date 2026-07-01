@@ -3,7 +3,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import { ArrowUp, Plus, LayoutGrid, Mic, Search, Globe, Sigma, Square, X, FileText, Image as ImageIcon, File as FileIcon, BookOpen, FileUp, Pencil } from "lucide-react"
+import { ArrowUp, Loader2, Plus, LayoutGrid, Mic, Search, Globe, Sigma, Square, X, FileText, Image as ImageIcon, File as FileIcon, BookOpen, FileUp, Pencil } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { uploadFile as apiUploadFile } from "@/lib/api"
 import type { Attachment } from "@/lib/types"
@@ -21,6 +21,7 @@ interface ChatInputProps {
   onSend: (text: string, attachments: Attachment[]) => void
   onOCRRequest?: (imageDataUrl: string) => void
   disabled?: boolean
+  extracting?: boolean
   isStreaming?: boolean
   onCancel?: () => void
   slug?: string | null
@@ -41,6 +42,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   onSend,
   onOCRRequest,
   disabled,
+  extracting,
   isStreaming,
   onCancel,
   slug = null,
@@ -159,7 +161,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   }, [text, attachments, onSend, onOCRRequest, ocrEnabled, clearAttachments, adjustHeight])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey && !isStreaming) { e.preventDefault(); handleSubmit() }
+    if (e.key === "Enter" && !e.shiftKey && !isStreaming && !extracting) { e.preventDefault(); handleSubmit() }
   }, [handleSubmit, isStreaming])
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
@@ -242,7 +244,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             const Icon = fileIcon(att.mime)
             const uploading = uploadingNames.has(att.name)
             return (
-              <motion.div key={att.name} layout className="relative">
+              <motion.div key={att.name} layout className="relative w-44">
                 <div
                   onClick={() => setPreviewAttachment(att)}
                   className="flex items-center gap-1.5 rounded-xl border border-divider-strong bg-surface-elevated px-2.5 py-1.5 pr-6 cursor-pointer hover:border-ink-muted transition-colors"
@@ -379,6 +381,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                   aria-label="Stop generating"
                 >
                   <Square className="h-4 w-4 fill-current" />
+                </button>
+              ) : extracting ? (
+                <button disabled className="rounded-full p-2.5 bg-surface-elevated text-ink-subtle">
+                  <Loader2 className="h-4 w-4 animate-spin" />
                 </button>
               ) : (
                 <button

@@ -64,6 +64,7 @@ export interface ModelsResponse {
   ollama: string[]
   gemini: string[]
   deepseek: string[]
+  openrouter: string[]
 }
 
 export interface ChatHistoriesResponse {
@@ -84,7 +85,7 @@ export interface BranchChild {
   branch_message_idx: number
 }
 
-export type Provider = "Ollama" | "Gemini" | "DeepSeek"
+export type Provider = "Ollama" | "Gemini" | "DeepSeek" | "OpenRouter"
 
 export interface ResearchRequest {
   query: string

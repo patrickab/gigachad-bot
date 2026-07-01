@@ -7,6 +7,7 @@ import {
   Check,
   ChevronRight,
   Folder,
+  HardDrive,
   LayoutDashboard,
   Plus,
   Trash2,
@@ -56,6 +57,8 @@ interface VaultTreeProps<T> {
   renderElement?: (item: VaultTreeItem<T>, depth: number) => React.ReactNode
   onAddVault?: (name: string) => Promise<void>
   vaultPlaceholder?: string
+  onAddMountpoint?: (vaultId: string, path: string) => Promise<void>
+  mountpointPlaceholder?: string
   onAddFolder?: (parentId: string | null, name: string) => Promise<void>
   onMoveElement?: (elementId: string, targetId: string | null) => Promise<void>
   onDashboardClick?: (vaultId: string) => void
@@ -79,12 +82,14 @@ interface TreeCtx<T> {
   onElementDelete?: (item: VaultTreeItem<T>) => void
   renderElement?: (item: VaultTreeItem<T>, depth: number) => React.ReactNode
   onAddFolder?: (parentId: string | null, name: string) => Promise<void>
+  onAddMountpoint?: (vaultId: string, path: string) => Promise<void>
+  mountpointPlaceholder: string
   onDashboardClick?: (vaultId: string) => void
   onMemoryClick?: (vaultId: string) => void
-  createMode: "vault" | "folder" | null
+  createMode: "vault" | "folder" | "mountpoint" | null
   createParentId: string | null
   createName: string
-  setCreateMode: (mode: "vault" | "folder" | null) => void
+  setCreateMode: (mode: "vault" | "folder" | "mountpoint" | null) => void
   setCreateParentId: (id: string | null) => void
   setCreateName: (name: string) => void
   handleCreateSubmit: () => Promise<void>
@@ -133,12 +138,14 @@ export function VaultTree<T>({
   renderElement,
   onAddVault,
   vaultPlaceholder = "Project name",
+  onAddMountpoint,
+  mountpointPlaceholder = "Mountpoint path…",
   onAddFolder,
   onMoveElement,
   onDashboardClick,
   onMemoryClick,
 }: VaultTreeProps<T>) {
-  const [createMode, setCreateMode] = useState<"vault" | "folder" | null>(null)
+  const [createMode, setCreateMode] = useState<"vault" | "folder" | "mountpoint" | null>(null)
   const [createParentId, setCreateParentId] = useState<string | null>(null)
   const [createName, setCreateName] = useState("")
   const [dragOverId, setDragOverId] = useState<string | null>(null)
@@ -151,6 +158,8 @@ export function VaultTree<T>({
       await onAddVault?.(createName.trim())
     } else if (createMode === "folder") {
       await onAddFolder?.(createParentId, createName.trim())
+    } else if (createMode === "mountpoint") {
+      if (createParentId) await onAddMountpoint?.(createParentId, createName.trim())
     }
     setCreateName("")
     setCreateMode(null)
@@ -206,6 +215,8 @@ export function VaultTree<T>({
     onElementDelete,
     renderElement,
     onAddFolder,
+    onAddMountpoint,
+    mountpointPlaceholder,
     onDashboardClick,
     onMemoryClick,
     createMode,
@@ -343,6 +354,8 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
     onDrop,
     onVaultDelete,
     onAddFolder,
+    onAddMountpoint,
+    mountpointPlaceholder,
     onDashboardClick,
     onMemoryClick,
     createMode,
@@ -430,6 +443,20 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
               <Plus className="h-3 w-3" />
             </button>
           )}
+          {isVault && onAddMountpoint && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                setCreateMode("mountpoint")
+                setCreateParentId(item.id)
+                setCreateName("")
+                controller.expand(item.id)
+              }}
+              className="p-0.5 rounded text-ink-faint hover:text-ink transition-colors"
+            >
+              <HardDrive className="h-3 w-3" />
+            </button>
+          )}
           {onVaultDelete && (
             <button
               onClick={(e) => { e.stopPropagation(); onVaultDelete(item.id) }}
@@ -456,15 +483,16 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
       </AnimatePresence>
 
       <AnimatePresence>
-        {createMode === "folder" && createParentId === item.id && (
+        {(createMode === "folder" || createMode === "mountpoint") && createParentId === item.id && (
           <InlineCreateForm
-            key="folder-create"
+            key={`${createMode}-create`}
             depth={depth + 1}
             value={createName}
             onChange={setCreateName}
             onSubmit={handleCreateSubmit}
             onCancel={() => { setCreateMode(null); setCreateName("") }}
-            placeholder="Folder name"
+            placeholder={createMode === "mountpoint" ? mountpointPlaceholder : "Folder name"}
+            icon={createMode === "mountpoint" ? HardDrive : Folder}
           />
         )}
       </AnimatePresence>
@@ -533,6 +561,7 @@ function InlineCreateForm({
   onSubmit,
   onCancel,
   placeholder,
+  icon: Icon = Folder,
 }: {
   depth: number
   value: string
@@ -540,6 +569,7 @@ function InlineCreateForm({
   onSubmit: () => void
   onCancel: () => void
   placeholder: string
+  icon?: ElementType
 }) {
   return (
     <motion.div
@@ -551,7 +581,7 @@ function InlineCreateForm({
       style={{ paddingLeft: INDENT_BASE + depth * INDENT_STEP }}
     >
       <ChevronRight className="h-3 w-3 shrink-0 text-ink-muted" />
-      <Folder className="h-3.5 w-3.5 shrink-0 text-ink-muted" />
+      <Icon className="h-3.5 w-3.5 shrink-0 text-ink-muted" />
       <input
         autoFocus
         value={value}

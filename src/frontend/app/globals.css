@@ -45,10 +45,10 @@
     --ink-faint:  oklch(42% 0.009 83);
  
    /* --- Surfaces — warm-tinted dark greys (not near-black) --- */
-   --paper:            oklch(20% 0.015 83);
-   --surface:          oklch(25% 0.016 83);
-   --surface-elevated: oklch(31% 0.017 83);
-   --overlay:          oklch(17% 0.015 83);
+   --paper:            oklch(20% 0.006 83);
+   --surface:          oklch(25% 0.007 83);
+   --surface-elevated: oklch(31% 0.008 83);
+   --overlay:          oklch(17% 0.006 83);
  
    /* --- Danger (red, reserved for destructive actions only) --- */
    --danger:      oklch(68% 0.20 25);
@@ -230,11 +230,11 @@ body::before {
   inset: 0;
   pointer-events: none;
   z-index: 9998;
-  background: radial-gradient(ellipse 80% 50% at 50% -5%, oklch(35% 0.015 85 / 0.12), transparent 70%);
+  background: none;
 }
 
 .light body::before {
-  background: radial-gradient(ellipse 80% 50% at 50% -5%, oklch(85% 0.02 85 / 0.06), transparent 70%);
+  background: none;
 }
 
 body::after {

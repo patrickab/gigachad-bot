@@ -64,17 +64,17 @@ class AttachResult(BaseModel):
 
 
 @router.get("/files", response_model=ObsidianListResponse)
-async def list_files(vault: ObsidianVault = Depends(get_obsidian_vault)):
+async def list_files(vault: ObsidianVault = Depends(get_obsidian_vault)) -> ObsidianListResponse:
     return ObsidianListResponse(enabled=vault.enabled, files=vault.list_markdown())
 
 
 @router.get("/tree", response_model=ObsidianTreeResponse)
-async def list_tree(vault: ObsidianVault = Depends(get_obsidian_vault)):
+async def list_tree(vault: ObsidianVault = Depends(get_obsidian_vault)) -> ObsidianTreeResponse:
     return ObsidianTreeResponse(enabled=vault.enabled, tree=vault.tree())
 
 
 @router.post("/roots", response_model=ObsidianTreeResponse)
-async def add_root(body: RootBody, vault: ObsidianVault = Depends(get_obsidian_vault)):
+async def add_root(body: RootBody, vault: ObsidianVault = Depends(get_obsidian_vault)) -> ObsidianTreeResponse:
     try:
         vault.add_root(body.path)
     except ValueError as exc:
@@ -83,13 +83,40 @@ async def add_root(body: RootBody, vault: ObsidianVault = Depends(get_obsidian_v
 
 
 @router.delete("/roots", response_model=ObsidianTreeResponse)
-async def remove_root(path: str = Query(...), vault: ObsidianVault = Depends(get_obsidian_vault)):
+async def remove_root(path: str = Query(...), vault: ObsidianVault = Depends(get_obsidian_vault)) -> ObsidianTreeResponse:
     vault.remove_root(path)
     return ObsidianTreeResponse(enabled=vault.enabled, tree=vault.tree())
 
 
+class MountpointBody(BaseModel):
+    path: str
+
+
+@router.post("/mountpoints", response_model=ObsidianTreeResponse)
+async def add_mountpoint(
+    body: MountpointBody,
+    vault_path: str = Query(..., alias="vault"),
+    vault: ObsidianVault = Depends(get_obsidian_vault),
+) -> ObsidianTreeResponse:
+    try:
+        vault.add_mountpoint(vault_path, body.path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ObsidianTreeResponse(enabled=vault.enabled, tree=vault.tree())
+
+
+@router.delete("/mountpoints", response_model=ObsidianTreeResponse)
+async def remove_mountpoint(
+    vault_path: str = Query(..., alias="vault"),
+    path: str = Query(...),
+    vault: ObsidianVault = Depends(get_obsidian_vault),
+) -> ObsidianTreeResponse:
+    vault.remove_mountpoint(vault_path, path)
+    return ObsidianTreeResponse(enabled=vault.enabled, tree=vault.tree())
+
+
 @router.get("/file", response_model=ObsidianFileContent)
-async def read_file(path: str = Query(...), vault: ObsidianVault = Depends(get_obsidian_vault)):
+async def read_file(path: str = Query(...), vault: ObsidianVault = Depends(get_obsidian_vault)) -> ObsidianFileContent:
     try:
         return ObsidianFileContent(path=path, content=vault.read(path))
     except (FileNotFoundError, ValueError) as exc:
@@ -97,7 +124,7 @@ async def read_file(path: str = Query(...), vault: ObsidianVault = Depends(get_o
 
 
 @router.post("/file")
-async def write_file(body: WriteBody, vault: ObsidianVault = Depends(get_obsidian_vault)):
+async def write_file(body: WriteBody, vault: ObsidianVault = Depends(get_obsidian_vault)) -> dict[str, bool]:
     try:
         vault.write(body.path, body.content)
     except (OSError, ValueError) as exc:
@@ -106,7 +133,7 @@ async def write_file(body: WriteBody, vault: ObsidianVault = Depends(get_obsidia
 
 
 @router.get("/rendered", response_model=ObsidianFileContent)
-async def read_rendered(path: str = Query(...), vault: ObsidianVault = Depends(get_obsidian_vault)):
+async def read_rendered(path: str = Query(...), vault: ObsidianVault = Depends(get_obsidian_vault)) -> ObsidianFileContent:
     try:
         raw = vault.read(path)
         return ObsidianFileContent(path=path, content=vault.resolve_wiki_content(raw, path))
@@ -120,7 +147,7 @@ async def attach_file(
     chat_id: str = Query(...),
     slug: str | None = Query(default=None),
     vault: ObsidianVault = Depends(get_obsidian_vault),
-):
+) -> AttachResult:
     try:
         content = vault.read(path)
     except (FileNotFoundError, ValueError) as exc:

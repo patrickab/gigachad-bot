@@ -166,13 +166,17 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     return () => { cancelled = true }
   }, [])
 
-  const openObsidian = useCallback(() => {
-    setObsidianOpen(true)
-    // Refresh the listing on open so vault changes are reflected.
+  const refreshObsidianList = useCallback(() => {
     listObsidianFiles()
       .then((r) => { setObsidianEnabled(r.enabled); setObsidianFiles(r.files) })
       .catch(() => {})
   }, [])
+
+  const openObsidian = useCallback(() => {
+    setObsidianOpen(true)
+    // Refresh the listing on open so vault changes are reflected.
+    refreshObsidianList()
+  }, [refreshObsidianList])
   const commandMemoryCount = commandBar.state.phase === "review" || commandBar.state.phase === "composing"
     ? commandBar.state.globalMemories.length + (commandBar.state.projectMemories?.length ?? 0)
     : 0
@@ -185,35 +189,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   const liveCanvasRef = useRef<{ path: string; content: string } | null>(null)
   const [ocrImage, setOCRImage] = useState<string | null>(null)
   const [chatId, setChatId] = useState(() => tab.chatId)
-
-  const appendAttachment = useCallback((att: Attachment) => {
-    setMessages((prev) => {
-      const copy = [...prev]
-      let idx = -1
-      for (let i = copy.length - 1; i >= 0; i--) {
-        if (copy[i].role === "user") { idx = i; break }
-      }
-      if (idx === -1) {
-        // Empty chat: seed a complete pair so display stays strictly alternating.
-        const attachments = [att]
-        return [
-          { role: "user" as const, content: "", attachments, hiddenContent: buildHiddenContent(attachments) || undefined },
-          { role: "assistant" as const, content: "" },
-        ]
-      }
-      const msg = copy[idx]
-      const attachments = [...(msg.attachments ?? []).filter((a) => a.name !== att.name), att]
-      copy[idx] = { ...msg, attachments, hiddenContent: buildHiddenContent(attachments) || undefined }
-      return copy
-    })
-  }, [setMessages])
-
-  const attachToChat = useCallback(
-    async (attach: (chatId: string, path: string, slug: string | null) => Promise<Attachment>, path: string) => {
-      try { appendAttachment(await attach(chatId, path, activeProject)) } catch { }
-    },
-    [chatId, activeProject, appendAttachment],
-  )
+  const [extracting, setExtracting] = useState(0)
 
   const handleObsidianSelect = useCallback(async (path: string) => {
     setObsidianOpen(false)
@@ -241,9 +217,11 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         chatInputRef.current?.addAttachment(att)
       } catch { /* */ }
     } else {
-      attachToChat(attachDocument, path)
+      setExtracting((n) => n + 1)
+      try { chatInputRef.current?.addAttachment(await attachDocument(chatId, path, activeProject)) } catch { /* */ }
+      finally { setExtracting((n) => n - 1) }
     }
-  }, [attachToChat, chatId, activeProject])
+  }, [chatId, activeProject])
 
   const loadProjectDocs = useCallback(() => {
     if (activeProject) listProjectDocuments(activeProject).then(setProjectDocuments).catch(() => {})
@@ -292,12 +270,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
 
   const handleDocumentUpload = useCallback(async (files: File[]) => {
     if (!activeProject) return
-    // Sequential: each PDF spawns a MinerU server, so avoid parallel contention.
-    for (const file of files) {
-      try {
-        await uploadDocument(activeProject, file)
-      } catch { }
-    }
+    await Promise.allSettled(files.map(f => uploadDocument(activeProject, f)))
     refreshDocuments()
   }, [activeProject, refreshDocuments])
 
@@ -766,6 +739,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         onMerge={(childFile) => doMergeBranch(childFile)}
         onCascadeDelete={handleCascadeDelete}
         onObsidianSelect={handleObsidianSelect}
+        onObsidianChanged={refreshObsidianList}
       />
       <main className="flex-1 min-w-0 flex flex-col relative bg-paper">
         <header className="h-[60px] shrink-0 flex items-center px-4 gap-4 z-40 border-b border-divider/50 bg-paper/80 backdrop-blur-xl">
@@ -800,6 +774,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
             chatId={chatId}
             messages={messages}
             isStreaming={isStreaming}
+            extracting={extracting > 0}
             onSend={handleSend}
             onCancel={cancel}
             onDeletePair={deleteMessagePair}

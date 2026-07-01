@@ -46,6 +46,17 @@ OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 # Separate from Vane's internal SearXNG, which is not exposed on a host port.
 SEARX_URL = os.environ.get("SEARX_URL", "http://localhost:8888")
 
+# --- OpenRouter model definitions ---
+MODELS_OPENROUTER = (
+    [
+        "openrouter/glm-5.2",
+        "openrouter/deepseek-v4-pro",
+        "openrouter/deepseek-v4-flash",
+    ]
+    if os.environ.get("OPENROUTER_API_KEY")
+    else []
+)
+
 
 def uploads_dir_for(slug: str | None) -> Path:
     """Resolve the uploads directory for a given project slug (or None for non-project)."""

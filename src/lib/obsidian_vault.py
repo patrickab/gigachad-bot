@@ -4,15 +4,25 @@ A user can register several vault roots (e.g. one per Obsidian vault). The list
 of roots is maintained in ``chat_histories/obsidian-roots.json`` — the single
 source of truth for vault locations (nothing is configured in ``config.py``).
 When that file is absent the vault is simply empty until the user adds a root.
+
+Each root may carry additional **mountpoints** — external directories (e.g. a
+``/mnt`` drive) attached to that vault. Mountpoint notes appear as folder nodes
+inside the parent vault's tree rather than as separate top-level vaults, so a
+mounted drive is browsed as part of the vault it was attached to.
+
 All paths handed to the UI are absolute, and every read is validated to live
-under one of the roots (mirroring the path-traversal guard used by ``ChatStore``).
+under one of the roots or their mountpoints (mirroring the path-traversal guard
+used by ``ChatStore``).
 
 Named ``ObsidianVault`` (not ``VaultStore``) because "vault" already refers to
 the sidebar projects/histories tree (``VaultTree``) elsewhere in the codebase.
 """
 
-import re
+from __future__ import annotations
+
+from collections import defaultdict
 from pathlib import Path
+import re
 from urllib.parse import quote as _url_quote
 
 from config import DIRECTORY_CHAT_HISTORIES
@@ -35,19 +45,49 @@ class ObsidianVault:
 
     def __init__(self, roots_file: Path | None = None) -> None:
         self._roots_file = roots_file or ROOTS_FILE
-        self._roots = self._load_roots()
+        self._roots: list[Path] = []
+        self._mountpoints: dict[Path, list[Path]] = defaultdict(list)
+        self._reload()
 
-    def _load_roots(self) -> list[Path]:
+    def _reload(self) -> None:
         raw = safe_read_json(self._roots_file, {"roots": []}).get("roots") or []
-        roots: list[Path] = []
-        for p in raw:
-            resolved = Path(p).expanduser().resolve()
-            if resolved not in roots:
-                roots.append(resolved)
-        return roots
+        self._roots = []
+        self._mountpoints = defaultdict(list)
+        for entry in raw:
+            # Backward compat: a bare string entry is a root with no mountpoints.
+            if isinstance(entry, str):
+                path = Path(entry).expanduser().resolve()
+                if path not in self._roots:
+                    self._roots.append(path)
+                continue
+            if not isinstance(entry, dict):
+                continue
+            path = Path(str(entry.get("path", ""))).expanduser().resolve()
+            if not path:
+                continue
+            if path not in self._roots:
+                self._roots.append(path)
+            for mp in entry.get("mountpoints") or []:
+                resolved_mp = Path(str(mp)).expanduser().resolve()
+                if resolved_mp not in self._mountpoints[path]:
+                    self._mountpoints[path].append(resolved_mp)
 
     def _save_roots(self) -> None:
-        safe_write_json(self._roots_file, {"roots": [str(r) for r in self._roots]})
+        payload = {
+            "roots": [
+                {"path": str(r), "mountpoints": [str(m) for m in self._mountpoints.get(r, [])]}
+                for r in self._roots
+            ]
+        }
+        safe_write_json(self._roots_file, payload)
+
+    def _all_mountpoints(self) -> list[Path]:
+        out: list[Path] = []
+        for mps in self._mountpoints.values():
+            for m in mps:
+                if m not in out:
+                    out.append(m)
+        return out
 
     # ─── roots management ───
 
@@ -69,15 +109,53 @@ class ObsidianVault:
     def remove_root(self, path: str) -> None:
         resolved = Path(path).expanduser().resolve()
         self._roots = [r for r in self._roots if r != resolved]
+        self._mountpoints.pop(resolved, None)
+        self._save_roots()
+
+    # ─── mountpoint management ───
+
+    def mountpoints(self, vault_path: str) -> list[str]:
+        resolved = Path(vault_path).expanduser().resolve()
+        return [str(m) for m in self._mountpoints.get(resolved, [])]
+
+    def add_mountpoint(self, vault_path: str, mountpoint_path: str) -> None:
+        vault = Path(vault_path).expanduser().resolve()
+        if vault not in self._roots:
+            raise ValueError(f"Unknown vault: {vault_path}")
+        mountpoint = Path(mountpoint_path).expanduser().resolve()
+        if not mountpoint.is_dir():
+            raise ValueError(f"Not a directory: {mountpoint_path}")
+        if mountpoint == vault:
+            raise ValueError("Mountpoint cannot be the vault itself")
+        # Reject if this path is already a root or a mountpoint of another vault.
+        if mountpoint in self._roots:
+            raise ValueError(f"Already a vault root: {mountpoint_path}")
+        for v, mps in self._mountpoints.items():
+            if v != vault and mountpoint in mps:
+                raise ValueError(f"Already mounted under another vault: {mountpoint_path}")
+        if mountpoint not in self._mountpoints[vault]:
+            self._mountpoints[vault].append(mountpoint)
+            self._save_roots()
+
+    def remove_mountpoint(self, vault_path: str, mountpoint_path: str) -> None:
+        vault = Path(vault_path).expanduser().resolve()
+        mountpoint = Path(mountpoint_path).expanduser().resolve()
+        self._mountpoints[vault] = [m for m in self._mountpoints.get(vault, []) if m != mountpoint]
+        if not self._mountpoints[vault]:
+            self._mountpoints.pop(vault, None)
         self._save_roots()
 
     # ─── path safety ───
 
     def _root_for(self, path: str) -> Path:
-        """Resolve *path*, rejecting anything that lives outside all roots."""
+        """Resolve *path*, rejecting anything that lives outside all roots and mountpoints."""
         target = Path(path).expanduser().resolve()
-        if any(target.is_relative_to(root) for root in self._roots):
-            return target
+        for root in self._roots:
+            if target.is_relative_to(root):
+                return target
+        for mountpoint in self._all_mountpoints():
+            if target.is_relative_to(mountpoint):
+                return target
         raise ValueError(f"Path outside vault roots: {path}")
 
     def contains(self, abs_path: Path) -> bool:
@@ -116,16 +194,27 @@ class ObsidianVault:
 
         Each root is a ``vault`` node; directories are ``folder`` nodes, ``.md``
         files are ``file`` leaves. Empty folders (no notes underneath) are pruned.
+        Mountpoints attached to a vault appear as folder nodes inside that vault.
         """
         out: list[dict] = []
         for root in self._roots:
             if not root.is_dir():
                 continue
+            children = self._build_children(root)
+            for mp in self._mountpoints.get(root, []):
+                if not mp.is_dir():
+                    continue
+                sub = self._build_children(mp)
+                if not sub:
+                    # Surface empty mountpoints too so the user can see them.
+                    children.append({"name": mp.name, "path": str(mp), "type": "folder", "children": []})
+                else:
+                    children.append({"name": mp.name, "path": str(mp), "type": "folder", "children": sub})
             out.append({
                 "name": root.name,
                 "path": str(root),
                 "type": "vault",
-                "children": self._build_children(root),
+                "children": children,
             })
         return out
 
@@ -178,6 +267,13 @@ class ObsidianVault:
                 continue
             for c in candidates:
                 for hit in root.rglob(c):
+                    if hit.is_file():
+                        return hit
+        for mountpoint in self._all_mountpoints():
+            if not mountpoint.is_dir():
+                continue
+            for c in candidates:
+                for hit in mountpoint.rglob(c):
                     if hit.is_file():
                         return hit
         return None

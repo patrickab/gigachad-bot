@@ -19,7 +19,6 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
 from backend.routes.deps import get_project_store
-from backend.routes.mineru import _parse_pdf
 from config import (
     DIRECTORY_OUTPUT_DRAWINGS,
     DIRECTORY_OUTPUT_LATEX,
@@ -28,6 +27,7 @@ from config import (
     chat_upload_dir,
 )
 from lib import document_library as lib_docs
+from lib import extract_queue
 from lib.project_store import ProjectStore
 
 log = logging.getLogger(__name__)
@@ -79,12 +79,9 @@ def _validate_doc_path(store: ProjectStore, path: str) -> Path:
     return resolved
 
 
-async def _parse_pdf_into_cache(pdf_path: Path) -> None:
-    """Ensure a PDF has cached MinerU markdown so previews/attach work."""
-    try:
-        await _parse_pdf(pdf_path, DIRECTORY_OUTPUT_MINERU)
-    except Exception:
-        log.exception("MinerU parse failed for document %s", pdf_path.name)
+@router.get("/extract-status")
+async def extract_status():
+    return extract_queue.status()
 
 
 @router.get("", response_model=DocumentListResponse)
@@ -195,7 +192,7 @@ async def upload_document(
         dest = lib_docs.organize_file(tmp_path)
 
     if dest.suffix.lower() == ".pdf":
-        await _parse_pdf_into_cache(dest)
+        extract_queue.enqueue(dest)
 
     store.add_file(slug, str(dest))
     return DocumentMeta(**lib_docs.document_meta(dest))
@@ -274,17 +271,12 @@ async def attach_document(
     result = DocumentAttachResult(name=name, mime=mime)
 
     if resolved.suffix.lower() == ".pdf":
-        # reuse cached markdown if MinerU already extracted this PDF
         cached_md = DIRECTORY_OUTPUT_MINERU / f"{resolved.stem}.md"
         if cached_md.is_file():
             result.parsedMd = cached_md.read_text(encoding="utf-8")
         else:
-            try:
-                md_path, _images = await _parse_pdf(dest, chat_dir)
-                result.parsedMd = md_path.read_text(encoding="utf-8")
-            except Exception:
-                log.exception("MinerU parse failed attaching document %s", name)
-        # ensure the raw PDF is in the library
+            # ponytail: enqueue for background extraction; attach returns immediately without parsedMd
+            extract_queue.enqueue(resolved)
         try:
             lib_docs.organize_file(resolved)
         except Exception:

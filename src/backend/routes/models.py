@@ -9,6 +9,7 @@ from llm_baseclient.config import (
 )
 from pydantic import BaseModel
 
+from config import MODELS_OPENROUTER
 from lib.prompt_store import PromptStore
 
 from .deps import get_prompt_store
@@ -26,6 +27,7 @@ async def get_models() -> dict:
         "ollama": MODELS_OLLAMA,
         "gemini": MODELS_GEMINI,
         "deepseek": MODELS_DEEPSEEK,
+        "openrouter": MODELS_OPENROUTER,
     }
 
 

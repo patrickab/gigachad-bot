@@ -12,7 +12,7 @@ import { useBranches } from "@/contexts/BranchContext"
 import { useSidebar } from "@/contexts/SidebarContext"
 import type { BranchMeta, ObsidianNode, ProjectListItem } from "@/lib/types"
 import { ChatBranchItem } from "./ChatBranchItem"
-import { addObsidianRoot, createDirectory, moveHistoryItem, obsidianTree, removeObsidianRoot, Vault } from "@/lib/api"
+import { addObsidianMountpoint, addObsidianRoot, createDirectory, moveHistoryItem, obsidianTree, removeObsidianRoot, Vault } from "@/lib/api"
 
 const COLLAPSED_WIDTH = 50
 const EXPANDED_WIDTH = 280
@@ -25,6 +25,7 @@ interface SidebarProps {
   onMerge?: (childFile: string) => Promise<void>
   onCascadeDelete?: (filename: string) => Promise<void>
   onObsidianSelect?: (path: string) => void
+  onObsidianChanged?: () => void
 }
 
 export function Sidebar({
@@ -35,6 +36,7 @@ export function Sidebar({
   onMerge,
   onCascadeDelete,
   onObsidianSelect,
+  onObsidianChanged,
 }: SidebarProps) {
   const {
     collapsed,
@@ -243,10 +245,17 @@ export function Sidebar({
               const r = await addObsidianRoot(path)
               setObsidianTreeData(r.tree)
               setObsidianOpen(true)
+              onObsidianChanged?.()
+            }}
+            onAddMountpoint={async (vaultId: string, path: string) => {
+              const r = await addObsidianMountpoint(vaultId, path)
+              setObsidianTreeData(r.tree)
+              onObsidianChanged?.()
             }}
             onVaultDelete={async (id: string) => {
               const r = await removeObsidianRoot(id)
               setObsidianTreeData(r.tree)
+              onObsidianChanged?.()
             }}
           />
         </div>

@@ -268,6 +268,27 @@ export async function removeObsidianRoot(path: string): Promise<{ enabled: boole
   return request(`/obsidian/roots?path=${encodeURIComponent(path)}`, { method: "DELETE" })
 }
 
+export async function addObsidianMountpoint(
+  vault: string,
+  path: string,
+): Promise<{ enabled: boolean; tree: ObsidianNode[] }> {
+  return request(`/obsidian/mountpoints?vault=${encodeURIComponent(vault)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  })
+}
+
+export async function removeObsidianMountpoint(
+  vault: string,
+  path: string,
+): Promise<{ enabled: boolean; tree: ObsidianNode[] }> {
+  return request(
+    `/obsidian/mountpoints?vault=${encodeURIComponent(vault)}&path=${encodeURIComponent(path)}`,
+    { method: "DELETE" },
+  )
+}
+
 export async function readObsidianRendered(path: string): Promise<string> {
   const data = await request<{ path: string; content: string }>(`/obsidian/rendered?path=${encodeURIComponent(path)}`)
   return data.content

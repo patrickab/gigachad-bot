@@ -4,6 +4,7 @@ export const PROVIDER_PREFIXES: Record<Provider, string> = {
   Ollama: "ollama/",
   Gemini: "gemini/",
   DeepSeek: "deepseek/",
+  OpenRouter: "openrouter/",
 }
 
 export function displayName(m: string): string {
@@ -14,13 +15,14 @@ export function displayName(m: string): string {
 }
 
 export function groupByProvider(
-  models: { ollama: string[]; gemini: string[]; deepseek: string[] } | null
+  models: { ollama: string[]; gemini: string[]; deepseek: string[]; openrouter: string[] } | null
 ): Record<Provider, string[]> {
-  if (!models) return { Ollama: [], Gemini: [], DeepSeek: [] }
+  if (!models) return { Ollama: [], Gemini: [], DeepSeek: [], OpenRouter: [] }
   return {
     Ollama: models.ollama ?? [],
     Gemini: models.gemini ?? [],
     DeepSeek: models.deepseek ?? [],
+    OpenRouter: models.openrouter ?? [],
   }
 }
 
