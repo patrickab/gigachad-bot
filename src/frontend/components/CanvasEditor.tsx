@@ -2,11 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { getStroke } from "perfect-freehand"
-import { type StrokeData, getSvgPathFromStroke } from "@/lib/drawing"
+import { type StrokeData, type EmbedRect, getSvgPathFromStroke, renderPageToPng } from "@/lib/drawing"
 import { fileViewerRawUrl, writeBinaryDocument } from "@/lib/api"
 import { activeThemeName } from "@/lib/palette"
 import { cn } from "@/lib/utils"
-import { Plus, Undo2, Redo2, Trash2, FileType, ImageIcon, X } from "lucide-react"
+import { Plus, Undo2, Redo2, Trash2, FileType, ImageIcon, X, Camera, CircleDashed } from "lucide-react"
 import { PdfViewer } from "./PdfViewer"
 
 const A4_W = 794
@@ -23,6 +23,8 @@ const MAX_SCALE = 3
 const THIN_WIDTH = 2
 const MEDIUM_WIDTH = 5
 const THICK_WIDTH = 10
+const PEN_HOLD_MS = 400 // press-and-hold the pen button to activate selection mode
+const PEN_DOUBLE_CLICK_MS = 350 // double-click the pen button to activate screenshot mode
 
 const STROKE_OPTIONS = {
   smoothing: 0.5,
@@ -131,6 +133,17 @@ function offsetToCenter(ox: number, oy: number, s: number, w: number, h: number)
   return { cx: (w / 2 - ox) / s, cy: (h / 2 - oy) / s }
 }
 
+// ray-casting point-in-polygon test — used by the lasso selection tool
+function pointInPolygon(x: number, y: number, poly: [number, number][]): boolean {
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i]!
+    const [xj, yj] = poly[j]!
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside
+  }
+  return inside
+}
+
 export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, slug, onImageAdded }: CanvasEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
@@ -192,6 +205,34 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
   const [redoStack, setRedoStack] = useState<StrokeData[]>([])
 
   const baseWidth = SIZE_MAP[strokeWidth]
+
+  // --- Select & move strokes. Draw a freehand lasso (any stroke fully enclosed by
+  // the loop is picked) — not a rectangle, so any shaped area works. Activated either
+  // via the toolbar icon or by press-and-holding the pen's side button (which used to
+  // pan the canvas — panning is still available via space+drag / touch). ---
+  type RectDrag = { x0: number; y0: number; x1: number; y1: number }
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [lassoPoints, setLassoPoints] = useState<[number, number][] | null>(null) // in-progress lasso being drawn
+  const lassoActive = useRef(false)
+  const [selectionLasso, setSelectionLasso] = useState<[number, number][] | null>(null) // frozen shape backing the current selection
+  const [selectedStrokes, setSelectedStrokes] = useState<Set<number>>(new Set())
+  const selDragRef = useRef<{ startX: number; startY: number; originals: Map<number, number[][]>; origLasso: [number, number][] } | null>(null)
+
+  const clearSelection = useCallback(() => {
+    setSelectedStrokes((prev) => (prev.size === 0 ? prev : new Set()))
+    setSelectionLasso(null)
+  }, [])
+
+  // Pen side-button gesture: hold => activate selection mode, double-click => activate screenshot mode
+  const penHoldTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const penHoldFired = useRef(false)
+  const penClickPending = useRef(false)
+  const penClickTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  // --- Screenshot: drag a rect, release copies the rasterized region to clipboard ---
+  const [screenshotMode, setScreenshotMode] = useState(false)
+  const [shotRect, setShotRect] = useState<RectDrag | null>(null)
+  const shotStart = useRef<{ x: number; y: number } | null>(null)
 
   const [isDark, setIsDark] = useState(() => activeThemeName() === "dark")
   useEffect(() => {
@@ -288,14 +329,35 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
   }, [])
 
   const handleContainerPointerDown = useCallback((e: React.PointerEvent) => {
-    if (e.pointerType === "touch") return
-    if (e.button === 1 || (e.button === 0 && spaceDown.current)) {
+    if (e.pointerType === "touch" || screenshotMode || selectionMode) return
+    // any pointerdown that bubbles this far didn't hit the selection lasso or its
+    // handles (they stopPropagation) — so it's "outside" and drops the selection
+    clearSelection()
+    if (e.button === 1) {
+      // pen side button: hold = activate selection mode & start the lasso right on this
+      // same press (no lift-and-retouch needed), double-click = activate screenshot mode
+      e.preventDefault()
+      ;(e.target as Element).setPointerCapture(e.pointerId)
+      penHoldFired.current = false
+      clearTimeout(penHoldTimer.current)
+      const clientX = e.clientX, clientY = e.clientY
+      penHoldTimer.current = setTimeout(() => {
+        penHoldFired.current = true
+        setSelectionMode(true)
+        setScreenshotMode(false)
+        const [cx, cy] = screenToCanvas(clientX, clientY)
+        lassoActive.current = true
+        setLassoPoints([[cx, cy]])
+      }, PEN_HOLD_MS)
+      return
+    }
+    if (e.button === 0 && spaceDown.current) {
       e.preventDefault()
       setIsPanning(true)
       panStart.current = { x: e.clientX, y: e.clientY, ox: offsetRef.current.x, oy: offsetRef.current.y }
       ;(e.target as Element).setPointerCapture(e.pointerId)
     }
-  }, [])
+  }, [screenshotMode, selectionMode, clearSelection, screenToCanvas])
 
   const handleContainerPointerMove = useCallback((e: React.PointerEvent) => {
     if (e.pointerType === "touch") return
@@ -309,8 +371,34 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
 
   const handleContainerPointerUp = useCallback((e: React.PointerEvent) => {
     if (e.pointerType === "touch") return
+    if (e.button === 1) {
+      clearTimeout(penHoldTimer.current)
+      if (penHoldFired.current) { penHoldFired.current = false; return }
+      if (penClickPending.current) {
+        penClickPending.current = false
+        clearTimeout(penClickTimer.current)
+        setScreenshotMode(true)
+        setSelectionMode(false)
+      } else {
+        penClickPending.current = true
+        penClickTimer.current = setTimeout(() => { penClickPending.current = false }, PEN_DOUBLE_CLICK_MS)
+      }
+      return
+    }
     if (isPanning) setIsPanning(false)
   }, [isPanning])
+
+  // Test every stroke against the finished lasso loop and freeze the ones fully enclosed
+  const finalizeLasso = useCallback((pts: [number, number][] | null) => {
+    if (pts && pts.length >= 3) {
+      const picked = new Set<number>()
+      doc.strokes.forEach((s, i) => {
+        if (s.points.length > 0 && s.points.every((p) => pointInPolygon(p[0]!, p[1]!, pts))) picked.add(i)
+      })
+      setSelectedStrokes(picked)
+      setSelectionLasso(picked.size > 0 ? pts : null)
+    }
+  }, [doc.strokes])
 
   // --- Two-finger touch: pinch-zoom + pan ---
   const touchRef = useRef<{ dist: number; cx: number; cy: number; scale: number; ox: number; oy: number } | null>(null)
@@ -407,10 +495,47 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     return () => { document.removeEventListener("pointerdown", close); document.removeEventListener("keydown", esc) }
   }, [contextMenu])
 
+  // --- Screenshot capture: rasterize a canvas-space rect and copy it to the clipboard ---
+  const captureScreenshot = useCallback(async (rect: RectDrag) => {
+    const x = Math.min(rect.x0, rect.x1)
+    const y = Math.min(rect.y0, rect.y1)
+    const w = Math.abs(rect.x1 - rect.x0)
+    const h = Math.abs(rect.y1 - rect.y0)
+    if (w < 4 || h < 4) return
+    const images: EmbedRect[] = doc.frames
+      .filter((f) => f.kind === "image" && f.path)
+      .map((f) => ({ url: fileViewerRawUrl(f.path!), x: f.x, y: f.y, width: f.width, aspect: aspectFor(f) }))
+    try {
+      const pngBytes = await renderPageToPng(doc.strokes, x, y, w, h, images)
+      const blob = new Blob([pngBytes.buffer as ArrayBuffer], { type: "image/png" })
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })])
+    } catch { /* clipboard write can fail without permission — silently drop */ }
+  }, [doc.frames, doc.strokes, aspectFor])
+
   // --- Drawing (on SVG) ---
   const handleSvgPointerDown = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
     if (e.pointerType === "touch") return
     if (spaceDown.current) return
+    if (screenshotMode) {
+      if (e.button !== 0) return
+      e.stopPropagation()
+      ;(e.target as Element).setPointerCapture(e.pointerId)
+      const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
+      shotStart.current = { x: cx, y: cy }
+      setShotRect({ x0: cx, y0: cy, x1: cx, y1: cy })
+      return
+    }
+    if (selectionMode) {
+      if (e.button !== 0) return
+      e.stopPropagation()
+      ;(e.target as Element).setPointerCapture(e.pointerId)
+      const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
+      lassoActive.current = true
+      setLassoPoints([[cx, cy]])
+      return
+    }
+    // drawing/erasing directly on the canvas counts as "outside" the selection
+    clearSelection()
     if (e.button === 5) { setIsErasing(true); return }
     if (e.button !== 0) return
     e.stopPropagation()
@@ -419,10 +544,20 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
     setCurrentPoints([[cx, cy, e.pressure > 0 ? e.pressure : 0.5]])
     startLongPress(e.clientX, e.clientY)
-  }, [screenToCanvas, startLongPress])
+  }, [screenToCanvas, startLongPress, screenshotMode, selectionMode, clearSelection])
 
   const handleSvgPointerMove = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
     if (e.pointerType === "touch") return
+    if (lassoActive.current) {
+      const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
+      setLassoPoints((prev) => (prev ? [...prev, [cx, cy]] : [[cx, cy]]))
+      return
+    }
+    if (shotStart.current) {
+      const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
+      setShotRect({ x0: shotStart.current.x, y0: shotStart.current.y, x1: cx, y1: cy })
+      return
+    }
     // cancel long-press if pointer moves more than a few pixels
     if (longPressPos.current) {
       const dx = e.clientX - longPressPos.current.clientX
@@ -453,6 +588,21 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
   const handleSvgPointerUp = useCallback((e?: React.PointerEvent<SVGSVGElement>) => {
     cancelLongPress()
     if (e?.pointerType === "touch") return
+    if (lassoActive.current) {
+      lassoActive.current = false
+      setLassoPoints((pts) => { finalizeLasso(pts); return null })
+      setSelectionMode(false)
+      return
+    }
+    if (shotStart.current) {
+      shotStart.current = null
+      setShotRect((rect) => {
+        if (rect) captureScreenshot(rect)
+        return null
+      })
+      setScreenshotMode(false)
+      return
+    }
     if (isErasing) { setIsErasing(false); return }
     if (!isDrawing) return
     setIsDrawing(false)
@@ -460,7 +610,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     onChange({ ...doc, strokes: [...doc.strokes, { points: currentPoints, color, width: baseWidth }] })
     setRedoStack([])
     setCurrentPoints([])
-  }, [isDrawing, isErasing, currentPoints, color, baseWidth, doc, onChange, cancelLongPress])
+  }, [isDrawing, isErasing, currentPoints, color, baseWidth, doc, onChange, cancelLongPress, captureScreenshot, finalizeLasso])
 
   // --- Undo / Redo ---
   const undo = useCallback(() => {
@@ -495,6 +645,23 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     setRedoStack([])
     onChange({ ...doc, strokes: [] })
   }, [doc, onChange])
+
+  // Escape cancels an in-progress screenshot/selection-drawing or drops the current stroke selection
+  useEffect(() => {
+    if (!screenshotMode && !selectionMode && selectedStrokes.size === 0) return
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return
+      shotStart.current = null
+      setShotRect(null)
+      setScreenshotMode(false)
+      lassoActive.current = false
+      setLassoPoints(null)
+      setSelectionMode(false)
+      clearSelection()
+    }
+    document.addEventListener("keydown", esc)
+    return () => document.removeEventListener("keydown", esc)
+  }, [screenshotMode, selectionMode, selectedStrokes, clearSelection])
 
   const currentOutline = currentPoints.length >= 2
     ? getSvgPathFromStroke(getStroke(currentPoints, { ...STROKE_OPTIONS, size: baseWidth, last: false }))
@@ -621,8 +788,39 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     dragRef.current = { id, target, mode, startX: clientX, startY: clientY, origX: item.x, origY: item.y, origW: item.width }
   }, [])
 
+  // Drag the lasso selection to translate every selected stroke together
+  const startSelectionMove = useCallback((clientX: number, clientY: number) => {
+    const originals = new Map<number, number[][]>()
+    for (const i of selectedStrokes) {
+      const s = liveRef.current.doc.strokes[i]
+      if (s) originals.set(i, s.points.map((p) => [...p]))
+    }
+    if (originals.size === 0 || !selectionLasso) return
+    selDragRef.current = { startX: clientX, startY: clientY, originals, origLasso: selectionLasso.map((p) => [...p] as [number, number]) }
+  }, [selectedStrokes, selectionLasso])
+
+  const deleteSelection = useCallback(() => {
+    if (selectedStrokes.size === 0) return
+    const { doc: cur, onChange: change } = liveRef.current
+    change({ ...cur, strokes: cur.strokes.filter((_, i) => !selectedStrokes.has(i)) })
+    clearSelection()
+  }, [selectedStrokes, clearSelection])
+
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
+      const s = selDragRef.current
+      if (s) {
+        const dx = (e.clientX - s.startX) / scaleRef.current
+        const dy = (e.clientY - s.startY) / scaleRef.current
+        const { doc: cur, onChange: change } = liveRef.current
+        change({ ...cur, strokes: cur.strokes.map((stroke, i) => {
+          const orig = s.originals.get(i)
+          return orig ? { ...stroke, points: orig.map((p) => [p[0]! + dx, p[1]! + dy, p[2] ?? 0.5]) } : stroke
+        }) })
+        // the lasso boundary (and the trash icon anchored to it) rides along with the strokes
+        setSelectionLasso(s.origLasso.map(([x, y]) => [x + dx, y + dy]))
+        return
+      }
       const d = dragRef.current
       if (!d) return
       const { doc: cur, onChange: change } = liveRef.current
@@ -639,7 +837,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
           : { ...a, x: d.origX + dx, y: d.origY + dy }) })
       }
     }
-    const onUp = () => { dragRef.current = null }
+    const onUp = () => { dragRef.current = null; selDragRef.current = null }
     window.addEventListener("pointermove", onMove)
     window.addEventListener("pointerup", onUp)
     return () => {
@@ -647,6 +845,14 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
       window.removeEventListener("pointerup", onUp)
     }
   }, [])
+
+  // Bounding box of the frozen selection lasso, in canvas units — positions the trash icon
+  let selectionTop: { x: number; y: number } | null = null
+  if (selectionLasso) {
+    for (const [x, y] of selectionLasso) {
+      if (!selectionTop || y < selectionTop.y) selectionTop = { x, y }
+    }
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -791,9 +997,32 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
             </div>
           )}
         </div>
+        <div className="w-px h-4 bg-divider/50 mx-0.5" />
+        <button
+          onClick={() => { setSelectionMode((v) => !v); setScreenshotMode(false) }}
+          className={cn(
+            "rounded p-1 transition-colors",
+            selectionMode ? "text-ink bg-hover" : "text-ink-subtle hover:text-ink hover:bg-hover",
+          )}
+        >
+          <CircleDashed className="h-3.5 w-3.5" />
+        </button>
+        <div className="w-px h-4 bg-divider/50 mx-0.5" />
+        <button
+          onClick={() => { setScreenshotMode((v) => !v); setSelectionMode(false) }}
+          className={cn(
+            "rounded p-1 transition-colors",
+            screenshotMode ? "text-ink bg-hover" : "text-ink-subtle hover:text-ink hover:bg-hover",
+          )}
+        >
+          <Camera className="h-3.5 w-3.5" />
+        </button>
         <div className="flex-1" />
         <span className="text-[10px] text-ink-faint tabular-nums">{Math.round(scale * 100)}%</span>
         {isErasing && <span className="text-[10px] text-ink-faint ml-1">(eraser)</span>}
+        {screenshotMode && <span className="text-[10px] text-ink-faint ml-1">(drag to capture)</span>}
+        {selectionMode && <span className="text-[10px] text-ink-faint ml-1">(draw a lasso to select)</span>}
+        {selectedStrokes.size > 0 && <span className="text-[10px] text-ink-faint ml-1">({selectedStrokes.size} selected — drag or Esc)</span>}
       </div>
 
       {/* Canvas area */}
@@ -920,8 +1149,62 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
             })}
             {/* In-progress stroke */}
             {currentOutline && <path d={currentOutline} fill={displayColor(color)} />}
+
+            {/* Stroke selection — highlighted outlines + a draggable lasso fill (moves them together) */}
+            {selectionLasso && (
+              <>
+                {[...selectedStrokes].map((i) => {
+                  const s = doc.strokes[i]
+                  if (!s) return null
+                  const d = getSvgPathFromStroke(getStroke(s.points, { ...STROKE_OPTIONS, size: s.width }))
+                  return d ? <path key={`sel-${i}`} d={d} fill="none" stroke="var(--ink)" strokeWidth={1.5 / scale} strokeDasharray={`${3 / scale} ${3 / scale}`} /> : null
+                })}
+                <path
+                  d={`M ${selectionLasso.map(([x, y]) => `${x},${y}`).join(" L ")} Z`}
+                  fill="var(--ink-faint)" fillOpacity={0.08}
+                  stroke="var(--ink-muted)" strokeWidth={1 / scale} strokeDasharray={`${4 / scale} ${4 / scale}`}
+                  style={{ cursor: "grab", pointerEvents: "all" }}
+                  onPointerDown={(e) => { e.stopPropagation(); startSelectionMove(e.clientX, e.clientY) }}
+                />
+              </>
+            )}
+
+            {/* In-progress lasso — pen-button drag traces the selection outline freehand */}
+            {lassoPoints && lassoPoints.length > 1 && (
+              <path
+                d={`M ${lassoPoints.map(([x, y]) => `${x},${y}`).join(" L ")}`}
+                fill="none"
+                stroke="var(--ink-muted)" strokeWidth={1.5 / scale} strokeDasharray={`${4 / scale} ${4 / scale}`}
+                style={{ pointerEvents: "none" }}
+              />
+            )}
+            {/* Rubber-band rect — screenshot capture area */}
+            {shotRect && (
+              <rect
+                x={Math.min(shotRect.x0, shotRect.x1)} y={Math.min(shotRect.y0, shotRect.y1)}
+                width={Math.abs(shotRect.x1 - shotRect.x0)} height={Math.abs(shotRect.y1 - shotRect.y0)}
+                fill="var(--ink)" fillOpacity={0.06}
+                stroke="var(--ink)" strokeWidth={1.5 / scale} strokeDasharray={`${5 / scale} ${3 / scale}`}
+                style={{ pointerEvents: "none" }}
+              />
+            )}
           </g>
         </svg>
+
+        {/* Selection delete — hover-responsive trash icon at the topmost point of the lasso */}
+        {selectionTop && (
+          <button
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); deleteSelection() }}
+            className="absolute z-10 -translate-x-1/2 -translate-y-full rounded-full p-1 bg-paper border border-divider-strong text-ink-faint hover:text-danger shadow-[var(--shadow-lg)] transition-colors"
+            style={{
+              left: selectionTop.x * scale + offset.x,
+              top: selectionTop.y * scale + offset.y - 6,
+            }}
+          >
+            <Trash2 className="h-3 w-3" />
+          </button>
+        )}
 
         {/* Attachments (pdf) — the CanvasAttachment primitive. Live, scrollable,
             positioned HTML over the SVG, never baked into export. */}
