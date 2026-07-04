@@ -40,6 +40,18 @@ const STROKE_OPTIONS = {
   last: true,
 } as const
 
+// Stroke objects are immutable once committed, so their outline path is computed
+// once per object — not on every render of the canvas.
+const strokePathCache = new WeakMap<StrokeData, string>()
+function strokePath(stroke: StrokeData): string {
+  let d = strokePathCache.get(stroke)
+  if (d === undefined) {
+    d = getSvgPathFromStroke(getStroke(stroke.points, { ...STROKE_OPTIONS, size: stroke.width }))
+    strokePathCache.set(stroke, d)
+  }
+  return d
+}
+
 const PRESET_COLORS = [
   { name: "Black", value: "#000000" },
   { name: "Red", value: "#dc2626" },
@@ -234,7 +246,10 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
   const panStart = useRef({ x: 0, y: 0, ox: 0, oy: 0 })
 
   const [isDrawing, setIsDrawing] = useState(false)
-  const [currentPoints, setCurrentPoints] = useState<number[][]>([])
+  // The in-progress stroke lives in a ref and renders imperatively via livePathRef,
+  // so a pointermove never triggers a React re-render of the whole editor.
+  const currentPointsRef = useRef<number[][]>([])
+  const livePathRef = useRef<SVGPathElement>(null)
   const [isErasing, setIsErasing] = useState(false)
   const [strokeWidth, setStrokeWidth] = useState<StrokeSize>("thin")
   const [color, setColor] = useState("#000000")
@@ -245,6 +260,15 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
   const [redoStack, setRedoStack] = useState<StrokeData[]>([])
 
   const baseWidth = SIZE_MAP[strokeWidth]
+
+  // Redraw the in-progress stroke. Predicted points are appended for display only
+  // (latency hiding) and never stored — real samples overwrite them next frame.
+  const redrawLive = useCallback((predicted: number[][] = []) => {
+    const el = livePathRef.current
+    if (!el) return
+    const pts = predicted.length > 0 ? [...currentPointsRef.current, ...predicted] : currentPointsRef.current
+    el.setAttribute("d", pts.length >= 2 ? getSvgPathFromStroke(getStroke(pts, { ...STROKE_OPTIONS, size: baseWidth })) : "")
+  }, [baseWidth])
 
   // --- Select & move strokes. Draw a freehand lasso (any stroke fully enclosed by
   // the loop is picked) — not a rectangle, so any shaped area works. Activated either
@@ -528,13 +552,13 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     straightenAnchor.current = { clientX, clientY }
     clearTimeout(straightenTimer.current)
     straightenTimer.current = setTimeout(() => {
-      setCurrentPoints((prev) => {
-        if (prev.length < 2) return prev
-        straightened.current = true
-        return [prev[0]!, prev[prev.length - 1]!]
-      })
+      const pts = currentPointsRef.current
+      if (pts.length < 2) return
+      straightened.current = true
+      currentPointsRef.current = [pts[0]!, pts[pts.length - 1]!]
+      redrawLive()
     }, STRAIGHTEN_HOLD_MS)
-  }, [])
+  }, [redrawLive])
 
   const cancelStraighten = useCallback(() => {
     clearTimeout(straightenTimer.current)
@@ -552,11 +576,12 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     longPressTimer.current = setTimeout(() => {
       const [cx, cy] = screenToCanvas(clientX, clientY)
       setIsDrawing(false)
-      setCurrentPoints([])
+      currentPointsRef.current = []
+      redrawLive()
       cancelStraighten()
       setContextMenu({ screenX: clientX, screenY: clientY, canvasX: cx, canvasY: cy })
     }, 500)
-  }, [screenToCanvas, cancelStraighten])
+  }, [screenToCanvas, cancelStraighten, redrawLive])
 
   const cancelLongPress = useCallback(() => {
     clearTimeout(longPressTimer.current)
@@ -628,10 +653,11 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     ;(e.target as Element).setPointerCapture(e.pointerId)
     setIsDrawing(true)
     const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
-    setCurrentPoints([[cx, cy, e.pressure > 0 ? e.pressure : 0.5]])
+    currentPointsRef.current = [[cx, cy, e.pressure > 0 ? e.pressure : 0.5]]
+    redrawLive()
     startLongPress(e.clientX, e.clientY)
     armStraighten(e.clientX, e.clientY)
-  }, [screenToCanvas, startLongPress, armStraighten, screenshotMode, selectionMode, textMode, clearSelection])
+  }, [screenToCanvas, startLongPress, armStraighten, screenshotMode, selectionMode, textMode, clearSelection, redrawLive])
 
   const handleSvgPointerMove = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
     if (e.pointerType === "touch") return
@@ -673,9 +699,10 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
       return
     }
     if (!isDrawing) return
-    const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
     if (straightened.current) {
-      setCurrentPoints((prev) => [prev[0]!, [cx, cy, e.pressure > 0 ? e.pressure : 0.5]])
+      const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
+      currentPointsRef.current = [currentPointsRef.current[0]!, [cx, cy, e.pressure > 0 ? e.pressure : 0.5]]
+      redrawLive()
       return
     }
     if (straightenAnchor.current) {
@@ -683,8 +710,18 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
       const dy = e.clientY - straightenAnchor.current.clientY
       if (dx * dx + dy * dy > STRAIGHTEN_MOVE_TOLERANCE * STRAIGHTEN_MOVE_TOLERANCE) armStraighten(e.clientX, e.clientY)
     }
-    setCurrentPoints((prev) => [...prev, [cx, cy, e.pressure > 0 ? e.pressure : 0.5]])
-  }, [isDrawing, isErasing, screenToCanvas, doc, onChange, cancelLongPress, armStraighten])
+    // coalesced events surface the pen's full sample rate (~240Hz on pen hardware)
+    // instead of one point per display frame
+    const native = e.nativeEvent
+    for (const ev of native.getCoalescedEvents?.() ?? [native]) {
+      const [cx, cy] = screenToCanvas(ev.clientX, ev.clientY)
+      currentPointsRef.current.push([cx, cy, ev.pressure > 0 ? ev.pressure : 0.5])
+    }
+    redrawLive((native.getPredictedEvents?.() ?? []).map((ev) => {
+      const [cx, cy] = screenToCanvas(ev.clientX, ev.clientY)
+      return [cx, cy, ev.pressure > 0 ? ev.pressure : 0.5]
+    }))
+  }, [isDrawing, isErasing, screenToCanvas, doc, onChange, cancelLongPress, armStraighten, redrawLive])
 
   const handleSvgPointerUp = useCallback((e?: React.PointerEvent<SVGSVGElement>) => {
     cancelLongPress()
@@ -727,11 +764,13 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     if (isErasing) { setIsErasing(false); return }
     if (!isDrawing) return
     setIsDrawing(false)
-    if (currentPoints.length < 2) { setCurrentPoints([]); return }
-    onChange({ ...doc, strokes: [...doc.strokes, { points: currentPoints, color, width: baseWidth }] })
+    const pts = currentPointsRef.current
+    currentPointsRef.current = []
+    redrawLive()
+    if (pts.length < 2) return
+    onChange({ ...doc, strokes: [...doc.strokes, { points: pts, color, width: baseWidth }] })
     setRedoStack([])
-    setCurrentPoints([])
-  }, [isDrawing, isErasing, currentPoints, color, baseWidth, doc, onChange, cancelLongPress, cancelStraighten, captureScreenshot, finalizeLasso, screenToCanvas])
+  }, [isDrawing, isErasing, color, baseWidth, doc, onChange, cancelLongPress, cancelStraighten, captureScreenshot, finalizeLasso, screenToCanvas, redrawLive])
 
   // --- Undo / Redo ---
   const undo = useCallback(() => {
@@ -800,10 +839,6 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     document.addEventListener("keydown", esc)
     return () => document.removeEventListener("keydown", esc)
   }, [screenshotMode, selectionMode, textMode, selectedStrokes, clearSelection])
-
-  const currentOutline = currentPoints.length >= 2
-    ? getSvgPathFromStroke(getStroke(currentPoints, { ...STROKE_OPTIONS, size: baseWidth }))
-    : ""
 
   const nextSize = useCallback(() => {
     setStrokeWidth((w) => w === "thin" ? "medium" : w === "medium" ? "thick" : "thin")
@@ -1297,12 +1332,11 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
             })}
             {/* Committed strokes */}
             {doc.strokes.map((stroke, i) => {
-              const outline = getStroke(stroke.points, { ...STROKE_OPTIONS, size: stroke.width })
-              const d = getSvgPathFromStroke(outline)
+              const d = strokePath(stroke)
               return d ? <path key={i} d={d} fill={displayColor(stroke.color)} /> : null
             })}
-            {/* In-progress stroke */}
-            {currentOutline && <path d={currentOutline} fill={displayColor(color)} />}
+            {/* In-progress stroke — d is set imperatively by redrawLive */}
+            <path ref={livePathRef} fill={displayColor(color)} />
 
             {/* Stroke selection — highlighted outlines + a draggable lasso fill (moves them together) */}
             {selectionLasso && (
@@ -1310,7 +1344,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
                 {[...selectedStrokes].map((i) => {
                   const s = doc.strokes[i]
                   if (!s) return null
-                  const d = getSvgPathFromStroke(getStroke(s.points, { ...STROKE_OPTIONS, size: s.width }))
+                  const d = strokePath(s)
                   return d ? <path key={`sel-${i}`} d={d} fill="none" stroke="var(--ink)" strokeWidth={1.5 / scale} strokeDasharray={`${3 / scale} ${3 / scale}`} /> : null
                 })}
                 <path
@@ -1477,7 +1511,8 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
                 setContextMenu(null)
                 // discard the tiny hold-dot stroke
                 setIsDrawing(false)
-                setCurrentPoints([])
+                currentPointsRef.current = []
+                redrawLive()
                 cancelStraighten()
                 pasteImageAtPoint(canvasX, canvasY)
               }}

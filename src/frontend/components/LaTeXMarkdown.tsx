@@ -467,8 +467,8 @@ function LaTeXMarkdownInner({
       <Streamdown
         mode={streaming ? "streaming" : "static"}
         isAnimating={!!streaming}
-        animated={!!streaming}
-        caret={streaming ? "block" : undefined}
+        animated={streaming ? { duration: 60, animation: "fadeIn" } : false}
+        caret={undefined}
         controls={{ code: false, table: { copy: true, download: true }, mermaid: false }}
         plugins={PLUGINS}
         remarkPlugins={REMARK_PLUGINS}
