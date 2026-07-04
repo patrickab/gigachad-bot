@@ -6,7 +6,7 @@ import { type StrokeData, type EmbedRect, getSvgPathFromStroke, renderPageToPng 
 import { fileViewerRawUrl, writeBinaryDocument } from "@/lib/api"
 import { activeThemeName } from "@/lib/palette"
 import { cn } from "@/lib/utils"
-import { Plus, Undo2, Redo2, Trash2, FileType, ImageIcon, X, Camera, CircleDashed } from "lucide-react"
+import { Plus, Undo2, Redo2, Trash2, FileType, ImageIcon, X, Camera, CircleDashed, Type } from "lucide-react"
 import { PdfViewer } from "./PdfViewer"
 
 const A4_W = 794
@@ -25,11 +25,18 @@ const MEDIUM_WIDTH = 5
 const THICK_WIDTH = 10
 const PEN_HOLD_MS = 400 // press-and-hold the pen button to activate selection mode
 const PEN_DOUBLE_CLICK_MS = 350 // double-click the pen button to activate screenshot mode
+const TEXT_DEFAULT_SIZE = 28 // canvas units — font size for new text notes
+const TEXT_DEFAULT_WIDTH = 240 // box size for a plain click (no drag) in text mode
+const TEXT_DEFAULT_HEIGHT = 80
+const MIN_TEXT_WIDTH = 80
+const MIN_TEXT_HEIGHT = 40
+const STRAIGHTEN_HOLD_MS = 500 // hold the pen still mid-stroke to snap it into a straight line
+const STRAIGHTEN_MOVE_TOLERANCE = 5 // px of client movement that resets the "holding still" timer
 
 const STROKE_OPTIONS = {
   smoothing: 0.5,
   streamline: 0.5,
-  simulatePressure: true,
+  simulatePressure: false,
   last: true,
 } as const
 
@@ -68,40 +75,62 @@ export interface CanvasAttachment {
   width: number
 }
 
+// CanvasText = handwriting-style note in a resizable box. Rasterized into export
+// like CanvasFrame content (word-wrapped and clipped to width/height).
+export interface CanvasText {
+  id: string
+  x: number
+  y: number
+  width: number
+  height: number
+  text: string
+  color: string
+  size: number
+}
+
 export interface CanvasDocument {
   version: 1
   viewport?: { scale: number; centerX: number; centerY: number }
   frames: CanvasFrame[]
   strokes: StrokeData[]
   attachments: CanvasAttachment[]
+  texts: CanvasText[]
 }
 
 export function emptyCanvasDoc(): CanvasDocument {
-  return { version: 1, frames: [], strokes: [], attachments: [] }
+  return { version: 1, frames: [], strokes: [], attachments: [], texts: [] }
 }
 
 // Legacy on-disk shape (pages / pdfEmbeds / imageEmbeds) — migrated on load.
 type LegacyEmbed = { id: string; path: string; x: number; y: number; width: number }
+// earlier point-text model saved notes without width/height
+type LegacyText = Omit<CanvasText, "width" | "height"> & { width?: number; height?: number }
 type LegacyDoc = {
   version: 1
   viewport?: CanvasDocument["viewport"]
   strokes?: StrokeData[]
   frames?: CanvasFrame[]
   attachments?: CanvasAttachment[]
+  texts?: LegacyText[]
   pages?: { id: string; x: number; y: number }[]
   pdfEmbeds?: LegacyEmbed[]
   imageEmbeds?: LegacyEmbed[]
 }
 
+// backfills width/height for text notes saved under the earlier point-text model
+function migrateTexts(texts: LegacyText[] | undefined): CanvasText[] {
+  return (texts ?? []).map((t) => ({ ...t, width: t.width ?? TEXT_DEFAULT_WIDTH, height: t.height ?? TEXT_DEFAULT_HEIGHT }))
+}
+
 function migrate(d: LegacyDoc): CanvasDocument {
   if (Array.isArray(d.frames)) {
-    return { version: 1, viewport: d.viewport, frames: d.frames, strokes: d.strokes ?? [], attachments: d.attachments ?? [] }
+    return { version: 1, viewport: d.viewport, frames: d.frames, strokes: d.strokes ?? [], attachments: d.attachments ?? [], texts: migrateTexts(d.texts) }
   }
   const frames: CanvasFrame[] = []
   for (const p of d.pages ?? []) frames.push({ id: p.id, kind: "page", x: p.x, y: p.y, width: A4_W })
   for (const im of d.imageEmbeds ?? []) frames.push({ id: im.id, kind: "image", x: im.x, y: im.y, width: im.width, path: im.path })
   const attachments: CanvasAttachment[] = (d.pdfEmbeds ?? []).map((e) => ({ id: e.id, kind: "pdf", x: e.x, y: e.y, width: e.width, path: e.path }))
-  return { version: 1, viewport: d.viewport, frames, strokes: d.strokes ?? [], attachments }
+  return { version: 1, viewport: d.viewport, frames, strokes: d.strokes ?? [], attachments, texts: migrateTexts(d.texts) }
 }
 
 export function parseCanvasDoc(text: string): CanvasDocument {
@@ -131,6 +160,17 @@ function centerToOffset(cx: number, cy: number, s: number, w: number, h: number)
 }
 function offsetToCenter(ox: number, oy: number, s: number, w: number, h: number) {
   return { cx: (w / 2 - ox) / s, cy: (h / 2 - oy) / s }
+}
+
+// shortest distance from (px,py) to segment (ax,ay)-(bx,by) — straight strokes (e.g.
+// straightened lines) can be as sparse as 2 points, so the eraser must hit-test the
+// segment between points, not just the points themselves
+function distToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax
+  const dy = by - ay
+  const lenSq = dx * dx + dy * dy
+  const t = lenSq === 0 ? 0 : Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq))
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy))
 }
 
 // ray-casting point-in-polygon test — used by the lasso selection tool
@@ -234,6 +274,14 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
   const [shotRect, setShotRect] = useState<RectDrag | null>(null)
   const shotStart = useRef<{ x: number; y: number } | null>(null)
 
+  // --- Text: drag a box to define where a handwriting-style note goes. A plain click
+  // (no real drag) still drops a default-size box. Clicking an existing note focuses its
+  // textarea and places the cursor natively; a thin top band moves it, corner resizes it. ---
+  const [textMode, setTextMode] = useState(false)
+  const [textDragRect, setTextDragRect] = useState<RectDrag | null>(null)
+  const textDragStart = useRef<{ x: number; y: number } | null>(null)
+  const [autoFocusId, setAutoFocusId] = useState<string | null>(null)
+
   const [isDark, setIsDark] = useState(() => activeThemeName() === "dark")
   useEffect(() => {
     const obs = new MutationObserver(() => setIsDark(activeThemeName() === "dark"))
@@ -289,6 +337,10 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     const el = containerRef.current
     if (!el) return
     const onWheel = (e: WheelEvent) => {
+      // let attachments (e.g. PDFs) handle their own scroll/zoom — a native listener
+      // here fires before React's onWheel props even see the event, so stopPropagation
+      // in JSX can't reach it; the bail-out has to live here instead
+      if ((e.target as Element).closest("[data-canvas-attachment]")) return
       e.preventDefault()
       const rect = el.getBoundingClientRect()
       const mx = e.clientX - rect.left
@@ -466,6 +518,30 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
   }, [])
   const aspectFor = useCallback((f: CanvasFrame) => f.kind === "page" ? A4_ASPECT : (aspects[f.id] ?? FALLBACK_ASPECT), [aspects])
 
+  // --- Straighten-on-hold: pausing mid-stroke for STRAIGHTEN_HOLD_MS snaps the
+  // in-progress freehand stroke to a straight line from its start to the hold point. ---
+  const straightenTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const straightenAnchor = useRef<{ clientX: number; clientY: number } | null>(null)
+  const straightened = useRef(false)
+
+  const armStraighten = useCallback((clientX: number, clientY: number) => {
+    straightenAnchor.current = { clientX, clientY }
+    clearTimeout(straightenTimer.current)
+    straightenTimer.current = setTimeout(() => {
+      setCurrentPoints((prev) => {
+        if (prev.length < 2) return prev
+        straightened.current = true
+        return [prev[0]!, prev[prev.length - 1]!]
+      })
+    }, STRAIGHTEN_HOLD_MS)
+  }, [])
+
+  const cancelStraighten = useCallback(() => {
+    clearTimeout(straightenTimer.current)
+    straightenAnchor.current = null
+    straightened.current = false
+  }, [])
+
   // --- Long-press context menu ---
   const [contextMenu, setContextMenu] = useState<{ screenX: number; screenY: number; canvasX: number; canvasY: number } | null>(null)
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -477,9 +553,10 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
       const [cx, cy] = screenToCanvas(clientX, clientY)
       setIsDrawing(false)
       setCurrentPoints([])
+      cancelStraighten()
       setContextMenu({ screenX: clientX, screenY: clientY, canvasX: cx, canvasY: cy })
     }, 500)
-  }, [screenToCanvas])
+  }, [screenToCanvas, cancelStraighten])
 
   const cancelLongPress = useCallback(() => {
     clearTimeout(longPressTimer.current)
@@ -506,11 +583,11 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
       .filter((f) => f.kind === "image" && f.path)
       .map((f) => ({ url: fileViewerRawUrl(f.path!), x: f.x, y: f.y, width: f.width, aspect: aspectFor(f) }))
     try {
-      const pngBytes = await renderPageToPng(doc.strokes, x, y, w, h, images)
+      const pngBytes = await renderPageToPng(doc.strokes, x, y, w, h, images, doc.texts)
       const blob = new Blob([pngBytes.buffer as ArrayBuffer], { type: "image/png" })
       await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })])
     } catch { /* clipboard write can fail without permission — silently drop */ }
-  }, [doc.frames, doc.strokes, aspectFor])
+  }, [doc.frames, doc.strokes, doc.texts, aspectFor])
 
   // --- Drawing (on SVG) ---
   const handleSvgPointerDown = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
@@ -534,6 +611,15 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
       setLassoPoints([[cx, cy]])
       return
     }
+    if (textMode) {
+      if (e.button !== 0) return
+      e.stopPropagation()
+      ;(e.target as Element).setPointerCapture(e.pointerId)
+      const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
+      textDragStart.current = { x: cx, y: cy }
+      setTextDragRect({ x0: cx, y0: cy, x1: cx, y1: cy })
+      return
+    }
     // drawing/erasing directly on the canvas counts as "outside" the selection
     clearSelection()
     if (e.button === 5) { setIsErasing(true); return }
@@ -544,7 +630,8 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
     setCurrentPoints([[cx, cy, e.pressure > 0 ? e.pressure : 0.5]])
     startLongPress(e.clientX, e.clientY)
-  }, [screenToCanvas, startLongPress, screenshotMode, selectionMode, clearSelection])
+    armStraighten(e.clientX, e.clientY)
+  }, [screenToCanvas, startLongPress, armStraighten, screenshotMode, selectionMode, textMode, clearSelection])
 
   const handleSvgPointerMove = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
     if (e.pointerType === "touch") return
@@ -558,6 +645,11 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
       setShotRect({ x0: shotStart.current.x, y0: shotStart.current.y, x1: cx, y1: cy })
       return
     }
+    if (textDragStart.current) {
+      const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
+      setTextDragRect({ x0: textDragStart.current.x, y0: textDragStart.current.y, x1: cx, y1: cy })
+      return
+    }
     // cancel long-press if pointer moves more than a few pixels
     if (longPressPos.current) {
       const dx = e.clientX - longPressPos.current.clientX
@@ -568,10 +660,10 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
       const [ex, ey] = screenToCanvas(e.clientX, e.clientY)
       const threshold = 15 / scaleRef.current
       const updated = doc.strokes.filter((stroke) => {
-        for (const pt of stroke.points) {
-          const dx = pt[0]! - ex
-          const dy = pt[1]! - ey
-          if (Math.sqrt(dx * dx + dy * dy) < threshold) return false
+        const pts = stroke.points
+        if (pts.length === 1) return Math.hypot(pts[0]![0]! - ex, pts[0]![1]! - ey) >= threshold
+        for (let i = 1; i < pts.length; i++) {
+          if (distToSegment(ex, ey, pts[i - 1]![0]!, pts[i - 1]![1]!, pts[i]![0]!, pts[i]![1]!) < threshold) return false
         }
         return true
       })
@@ -582,11 +674,21 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     }
     if (!isDrawing) return
     const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
+    if (straightened.current) {
+      setCurrentPoints((prev) => [prev[0]!, [cx, cy, e.pressure > 0 ? e.pressure : 0.5]])
+      return
+    }
+    if (straightenAnchor.current) {
+      const dx = e.clientX - straightenAnchor.current.clientX
+      const dy = e.clientY - straightenAnchor.current.clientY
+      if (dx * dx + dy * dy > STRAIGHTEN_MOVE_TOLERANCE * STRAIGHTEN_MOVE_TOLERANCE) armStraighten(e.clientX, e.clientY)
+    }
     setCurrentPoints((prev) => [...prev, [cx, cy, e.pressure > 0 ? e.pressure : 0.5]])
-  }, [isDrawing, isErasing, screenToCanvas, doc, onChange, cancelLongPress])
+  }, [isDrawing, isErasing, screenToCanvas, doc, onChange, cancelLongPress, armStraighten])
 
   const handleSvgPointerUp = useCallback((e?: React.PointerEvent<SVGSVGElement>) => {
     cancelLongPress()
+    cancelStraighten()
     if (e?.pointerType === "touch") return
     if (lassoActive.current) {
       lassoActive.current = false
@@ -603,6 +705,25 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
       setScreenshotMode(false)
       return
     }
+    if (textDragStart.current) {
+      const start = textDragStart.current
+      textDragStart.current = null
+      setTextDragRect(null)
+      if (e) {
+        const [ex, ey] = screenToCanvas(e.clientX, e.clientY)
+        const x = Math.min(start.x, ex)
+        const y = Math.min(start.y, ey)
+        const dragW = Math.abs(ex - start.x)
+        const dragH = Math.abs(ey - start.y)
+        // a plain click (no real drag) gets a default-size box instead of a sliver
+        const width = dragW < MIN_TEXT_WIDTH ? TEXT_DEFAULT_WIDTH : dragW
+        const height = dragH < MIN_TEXT_HEIGHT ? TEXT_DEFAULT_HEIGHT : dragH
+        const id = `txt-${Date.now()}`
+        onChange({ ...doc, texts: [...doc.texts, { id, x, y, width, height, text: "", color, size: TEXT_DEFAULT_SIZE }] })
+        setAutoFocusId(id)
+      }
+      return
+    }
     if (isErasing) { setIsErasing(false); return }
     if (!isDrawing) return
     setIsDrawing(false)
@@ -610,7 +731,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     onChange({ ...doc, strokes: [...doc.strokes, { points: currentPoints, color, width: baseWidth }] })
     setRedoStack([])
     setCurrentPoints([])
-  }, [isDrawing, isErasing, currentPoints, color, baseWidth, doc, onChange, cancelLongPress, captureScreenshot, finalizeLasso])
+  }, [isDrawing, isErasing, currentPoints, color, baseWidth, doc, onChange, cancelLongPress, cancelStraighten, captureScreenshot, finalizeLasso, screenToCanvas])
 
   // --- Undo / Redo ---
   const undo = useCallback(() => {
@@ -646,9 +767,23 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     onChange({ ...doc, strokes: [] })
   }, [doc, onChange])
 
-  // Escape cancels an in-progress screenshot/selection-drawing or drops the current stroke selection
+  // latest doc/onChange for the long-lived window drag listeners
+  const liveRef = useRef({ doc, onChange })
+  liveRef.current = { doc, onChange }
+
+  // Removes a text note if its content is blank — called on blur so an
+  // untouched or fully-cleared box doesn't linger as an empty artifact.
+  const dropIfEmptyText = useCallback((id: string) => {
+    const { doc: cur, onChange: change } = liveRef.current
+    const item = cur.texts.find((t) => t.id === id)
+    if (item && item.text.trim() === "") {
+      change({ ...cur, texts: cur.texts.filter((t) => t.id !== id) })
+    }
+  }, [])
+
+  // Escape cancels an in-progress screenshot/selection-drawing/text-box-drag, or drops the current stroke selection
   useEffect(() => {
-    if (!screenshotMode && !selectionMode && selectedStrokes.size === 0) return
+    if (!screenshotMode && !selectionMode && !textMode && selectedStrokes.size === 0) return
     const esc = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return
       shotStart.current = null
@@ -657,14 +792,17 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
       lassoActive.current = false
       setLassoPoints(null)
       setSelectionMode(false)
+      textDragStart.current = null
+      setTextDragRect(null)
+      setTextMode(false)
       clearSelection()
     }
     document.addEventListener("keydown", esc)
     return () => document.removeEventListener("keydown", esc)
-  }, [screenshotMode, selectionMode, selectedStrokes, clearSelection])
+  }, [screenshotMode, selectionMode, textMode, selectedStrokes, clearSelection])
 
   const currentOutline = currentPoints.length >= 2
-    ? getSvgPathFromStroke(getStroke(currentPoints, { ...STROKE_OPTIONS, size: baseWidth, last: false }))
+    ? getSvgPathFromStroke(getStroke(currentPoints, { ...STROKE_OPTIONS, size: baseWidth }))
     : ""
 
   const nextSize = useCallback(() => {
@@ -682,10 +820,6 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     document.addEventListener("mousedown", handler)
     return () => document.removeEventListener("mousedown", handler)
   }, [addMenuOpen])
-
-  // latest doc/onChange for the long-lived window drag listeners
-  const liveRef = useRef({ doc, onChange })
-  liveRef.current = { doc, onChange }
 
   const pointAtCenter = useCallback((w: number, aspect: number) => {
     const el = containerRef.current
@@ -775,17 +909,20 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     return () => window.removeEventListener("paste", handler)
   }, [slug, pointAtCenter, addImageFrameAt, onImageAdded])
 
-  // --- Shared move / resize for frames + attachments ---
+  // --- Shared move / resize for frames + attachments + text notes ---
   const dragRef = useRef<{
-    id: string; target: "frame" | "attachment"; mode: "move" | "resize"
-    startX: number; startY: number; origX: number; origY: number; origW: number
+    id: string; target: "frame" | "attachment" | "text"; mode: "move" | "resize"
+    startX: number; startY: number; origX: number; origY: number; origW: number; origH: number
   } | null>(null)
 
-  const startInteraction = useCallback((id: string, target: "frame" | "attachment", mode: "move" | "resize", clientX: number, clientY: number) => {
-    const list = target === "frame" ? liveRef.current.doc.frames : liveRef.current.doc.attachments
+  const startInteraction = useCallback((id: string, target: "frame" | "attachment" | "text", mode: "move" | "resize", clientX: number, clientY: number) => {
+    const list = target === "frame" ? liveRef.current.doc.frames : target === "attachment" ? liveRef.current.doc.attachments : liveRef.current.doc.texts
     const item = list.find((e) => e.id === id)
     if (!item) return
-    dragRef.current = { id, target, mode, startX: clientX, startY: clientY, origX: item.x, origY: item.y, origW: item.width }
+    dragRef.current = {
+      id, target, mode, startX: clientX, startY: clientY, origX: item.x, origY: item.y,
+      origW: "width" in item ? item.width : 0, origH: "height" in item ? item.height : 0,
+    }
   }, [])
 
   // Drag the lasso selection to translate every selected stroke together
@@ -831,10 +968,14 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
         change({ ...cur, frames: cur.frames.map((f) => f.id !== d.id ? f
           : d.mode === "resize" ? { ...f, width: Math.max(minW, d.origW + dx) }
           : { ...f, x: d.origX + dx, y: d.origY + dy }) })
-      } else {
+      } else if (d.target === "attachment") {
         change({ ...cur, attachments: cur.attachments.map((a) => a.id !== d.id ? a
           : d.mode === "resize" ? { ...a, width: Math.max(minW, d.origW + dx) }
           : { ...a, x: d.origX + dx, y: d.origY + dy }) })
+      } else {
+        change({ ...cur, texts: cur.texts.map((t) => t.id !== d.id ? t
+          : d.mode === "resize" ? { ...t, width: Math.max(MIN_TEXT_WIDTH, d.origW + dx), height: Math.max(MIN_TEXT_HEIGHT, d.origH + dy) }
+          : { ...t, x: d.origX + dx, y: d.origY + dy }) })
       }
     }
     const onUp = () => { dragRef.current = null; selDragRef.current = null }
@@ -999,7 +1140,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
         </div>
         <div className="w-px h-4 bg-divider/50 mx-0.5" />
         <button
-          onClick={() => { setSelectionMode((v) => !v); setScreenshotMode(false) }}
+          onClick={() => { setSelectionMode((v) => !v); setScreenshotMode(false); setTextMode(false) }}
           className={cn(
             "rounded p-1 transition-colors",
             selectionMode ? "text-ink bg-hover" : "text-ink-subtle hover:text-ink hover:bg-hover",
@@ -1009,7 +1150,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
         </button>
         <div className="w-px h-4 bg-divider/50 mx-0.5" />
         <button
-          onClick={() => { setScreenshotMode((v) => !v); setSelectionMode(false) }}
+          onClick={() => { setScreenshotMode((v) => !v); setSelectionMode(false); setTextMode(false) }}
           className={cn(
             "rounded p-1 transition-colors",
             screenshotMode ? "text-ink bg-hover" : "text-ink-subtle hover:text-ink hover:bg-hover",
@@ -1017,11 +1158,23 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
         >
           <Camera className="h-3.5 w-3.5" />
         </button>
+        <div className="w-px h-4 bg-divider/50 mx-0.5" />
+        <button
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => { setTextMode((v) => !v); setSelectionMode(false); setScreenshotMode(false) }}
+          className={cn(
+            "rounded p-1 transition-colors",
+            textMode ? "text-ink bg-hover" : "text-ink-subtle hover:text-ink hover:bg-hover",
+          )}
+        >
+          <Type className="h-3.5 w-3.5" />
+        </button>
         <div className="flex-1" />
         <span className="text-[10px] text-ink-faint tabular-nums">{Math.round(scale * 100)}%</span>
         {isErasing && <span className="text-[10px] text-ink-faint ml-1">(eraser)</span>}
         {screenshotMode && <span className="text-[10px] text-ink-faint ml-1">(drag to capture)</span>}
         {selectionMode && <span className="text-[10px] text-ink-faint ml-1">(draw a lasso to select)</span>}
+        {textMode && <span className="text-[10px] text-ink-faint ml-1">(drag a box to write in)</span>}
         {selectedStrokes.size > 0 && <span className="text-[10px] text-ink-faint ml-1">({selectedStrokes.size} selected — drag or Esc)</span>}
       </div>
 
@@ -1029,10 +1182,11 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
       <div
         ref={containerRef}
         className={cn("flex-1 min-h-0 overflow-hidden relative", isPanning ? "cursor-grabbing" : "cursor-crosshair")}
-        style={{ touchAction: "none" }}
+        style={{ touchAction: "none", WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none" }}
         onPointerDown={handleContainerPointerDown}
         onPointerMove={handleContainerPointerMove}
         onPointerUp={handleContainerPointerUp}
+        onContextMenu={(e) => e.preventDefault()}
       >
         {/* Dot grid background */}
         <svg className="absolute inset-0 w-full h-full pointer-events-none" aria-hidden>
@@ -1188,6 +1342,16 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
                 style={{ pointerEvents: "none" }}
               />
             )}
+            {/* Rubber-band rect — text box being dragged out */}
+            {textDragRect && (
+              <rect
+                x={Math.min(textDragRect.x0, textDragRect.x1)} y={Math.min(textDragRect.y0, textDragRect.y1)}
+                width={Math.abs(textDragRect.x1 - textDragRect.x0)} height={Math.abs(textDragRect.y1 - textDragRect.y0)}
+                fill="var(--ink)" fillOpacity={0.06}
+                stroke="var(--ink)" strokeWidth={1.5 / scale} strokeDasharray={`${5 / scale} ${3 / scale}`}
+                style={{ pointerEvents: "none" }}
+              />
+            )}
           </g>
         </svg>
 
@@ -1233,7 +1397,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
                   <X className="h-3 w-3" />
                 </button>
               </div>
-              <div style={{ height: screenW * aspect }} onPointerDown={(e) => e.stopPropagation()}>
+              <div data-canvas-attachment style={{ height: screenW * aspect }} onPointerDown={(e) => e.stopPropagation()}>
                 <PdfViewer
                   url={fileViewerRawUrl(att.path)}
                   onPageAspect={(r) => setAspect(att.id, r)}
@@ -1242,6 +1406,55 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
               <div
                 className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize"
                 onPointerDown={(e) => { e.stopPropagation(); startInteraction(att.id, "attachment", "resize", e.clientX, e.clientY) }}
+              >
+                <svg className="w-full h-full text-ink-faint" viewBox="0 0 16 16">
+                  <path d="M14 2L2 14M14 6L6 14M14 10L10 14" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                </svg>
+              </div>
+            </div>
+          )
+        })}
+
+        {/* Text notes — the CanvasText primitive. A draggable/resizable box with a real
+            textarea inside, so clicking always focuses natively at the click position.
+            Rasterized (word-wrapped, clipped) into export, unlike CanvasAttachment. */}
+        {doc.texts.map((t) => {
+          const screenX = t.x * scale + offset.x
+          const screenY = t.y * scale + offset.y
+          const screenW = t.width * scale
+          const screenH = t.height * scale
+          const band = 6
+          return (
+            <div key={t.id} className="absolute group/text" style={{ left: screenX, top: screenY, width: screenW, height: screenH }}>
+              <textarea
+                autoFocus={t.id === autoFocusId}
+                value={t.text}
+                onChange={(e) => onChange({ ...doc, texts: doc.texts.map((x) => x.id === t.id ? { ...x, text: e.target.value } : x) })}
+                onFocus={() => setAutoFocusId((cur) => cur === t.id ? null : cur)}
+                onBlur={() => dropIfEmptyText(t.id)}
+                onKeyDown={(e) => {
+                  e.stopPropagation()
+                  if (e.key === "Escape") { e.preventDefault(); (e.target as HTMLTextAreaElement).blur() }
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                className="absolute inset-0 resize-none bg-transparent outline-none border border-transparent focus:border-dashed focus:border-divider-strong rounded px-1"
+                style={{
+                  fontFamily: "var(--font-handwriting), cursive",
+                  fontSize: t.size * scale,
+                  lineHeight: 1.2,
+                  color: displayColor(t.color),
+                }}
+              />
+              {/* top drag-band (move) — thin sliver above the textarea, dim until hover */}
+              <div
+                className="absolute inset-x-0 top-0 opacity-0 group-hover/text:opacity-60 hover:!opacity-100 transition-opacity bg-[var(--ink-faint)] rounded-t"
+                style={{ height: band, cursor: "grab" }}
+                onPointerDown={(e) => { e.stopPropagation(); startInteraction(t.id, "text", "move", e.clientX, e.clientY) }}
+              />
+              {/* resize handle (bottom-right) — broadens/elongates the box */}
+              <div
+                className="absolute bottom-0 right-0 w-3 h-3 opacity-0 group-hover/text:opacity-100 transition-opacity cursor-nwse-resize"
+                onPointerDown={(e) => { e.stopPropagation(); startInteraction(t.id, "text", "resize", e.clientX, e.clientY) }}
               >
                 <svg className="w-full h-full text-ink-faint" viewBox="0 0 16 16">
                   <path d="M14 2L2 14M14 6L6 14M14 10L10 14" stroke="currentColor" strokeWidth="1.5" fill="none" />
@@ -1265,6 +1478,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
                 // discard the tiny hold-dot stroke
                 setIsDrawing(false)
                 setCurrentPoints([])
+                cancelStraighten()
                 pasteImageAtPoint(canvasX, canvasY)
               }}
               disabled={!slug}

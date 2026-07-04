@@ -187,11 +187,13 @@
 html {
   scroll-behavior: smooth;
   min-height: 100dvh;
+  overscroll-behavior-x: none;
 }
 
 body {
   font-family: var(--font-sans), Outfit, system-ui, -apple-system, sans-serif;
   min-height: 100dvh;
+  overscroll-behavior-x: none;
 }
 
 

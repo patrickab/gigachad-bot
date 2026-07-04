@@ -9,7 +9,7 @@ export interface StrokeData {
 const STROKE_OPTIONS = {
   smoothing: 0.5,
   streamline: 0.5,
-  simulatePressure: true,
+  simulatePressure: false,
   last: true,
 } as const
 
@@ -43,6 +43,61 @@ export interface EmbedRect {
   aspect: number
 }
 
+export interface TextData {
+  x: number
+  y: number
+  width: number
+  height: number
+  text: string
+  color: string
+  size: number
+}
+
+function handwritingFontFamily(): string {
+  if (typeof document === "undefined") return "cursive"
+  const name = getComputedStyle(document.documentElement).getPropertyValue("--font-handwriting").trim()
+  return name ? `${name}, cursive` : "cursive"
+}
+
+// word-wrap a single line to fit maxWidth, using the context's currently-set font
+function wrapLine(ctx: CanvasRenderingContext2D, line: string, maxWidth: number): string[] {
+  const words = line.split(" ")
+  const lines: string[] = []
+  let cur = ""
+  for (const word of words) {
+    const test = cur ? `${cur} ${word}` : word
+    if (cur && ctx.measureText(test).width > maxWidth) {
+      lines.push(cur)
+      cur = word
+    } else {
+      cur = test
+    }
+  }
+  lines.push(cur)
+  return lines
+}
+
+function drawTexts(ctx: CanvasRenderingContext2D, texts: TextData[], offsetX: number, offsetY: number) {
+  if (texts.length === 0) return
+  const family = handwritingFontFamily()
+  for (const t of texts) {
+    const bx = t.x - offsetX
+    const by = t.y - offsetY
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(bx, by, t.width, t.height)
+    ctx.clip()
+    ctx.font = `${t.size}px ${family}`
+    ctx.fillStyle = t.color
+    const lineHeight = t.size * 1.2
+    const lines = t.text.split("\n").flatMap((line) => wrapLine(ctx, line, t.width))
+    lines.forEach((line, i) => {
+      ctx.fillText(line, bx, by + t.size * 0.85 + i * lineHeight)
+    })
+    ctx.restore()
+  }
+}
+
 export function strokeToPathData(stroke: StrokeData): string {
   const outline = getStroke(stroke.points, {
     ...STROKE_OPTIONS,
@@ -70,6 +125,7 @@ async function drawCanvas(
   offsetX: number,
   offsetY: number,
   bg: string,
+  texts: TextData[] = [],
 ): Promise<HTMLCanvasElement> {
   const dpr = 2
   const canvas = document.createElement("canvas")
@@ -99,6 +155,8 @@ async function drawCanvas(
     ctx.fillStyle = stroke.color
     ctx.fill(new Path2D(getSvgPathFromStroke(outline)))
   }
+  if (texts.length > 0) await document.fonts.ready
+  drawTexts(ctx, texts, offsetX, offsetY)
   return canvas
 }
 
@@ -145,16 +203,17 @@ export async function renderPageToPng(
   pageW: number,
   pageH: number,
   images: EmbedRect[] = [],
+  texts: TextData[] = [],
 ): Promise<Uint8Array> {
-  const canvas = images.length > 0
-    ? await drawCanvas(strokes, images, pageW, pageH, pageX, pageY, "#ffffff")
+  const canvas = images.length > 0 || texts.length > 0
+    ? await drawCanvas(strokes, images, pageW, pageH, pageX, pageY, "#ffffff", texts)
     : drawStrokes(strokes, pageW, pageH, pageX, pageY, "#ffffff")
   const blob = await canvasToBlob(canvas, "image/png")
   return new Uint8Array(await blob.arrayBuffer())
 }
 
-export async function renderCanvasToJpeg(strokes: StrokeData[], padding = 20, images: EmbedRect[] = []): Promise<Blob> {
-  if (strokes.length === 0 && images.length === 0) return Promise.reject(new Error("Nothing to render"))
+export async function renderCanvasToJpeg(strokes: StrokeData[], padding = 20, images: EmbedRect[] = [], texts: TextData[] = []): Promise<Blob> {
+  if (strokes.length === 0 && images.length === 0 && texts.length === 0) return Promise.reject(new Error("Nothing to render"))
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
   for (const s of strokes) {
     for (const p of s.points) {
@@ -170,10 +229,16 @@ export async function renderCanvasToJpeg(strokes: StrokeData[], padding = 20, im
     if (img.x + img.width > maxX) maxX = img.x + img.width
     if (img.y + img.width * img.aspect > maxY) maxY = img.y + img.width * img.aspect
   }
+  for (const t of texts) {
+    if (t.x < minX) minX = t.x
+    if (t.y < minY) minY = t.y
+    if (t.x + t.width > maxX) maxX = t.x + t.width
+    if (t.y + t.height > maxY) maxY = t.y + t.height
+  }
   const w = maxX - minX + padding * 2
   const h = maxY - minY + padding * 2
-  const canvas = images.length > 0
-    ? await drawCanvas(strokes, images, w, h, minX - padding, minY - padding, "#ffffff")
+  const canvas = images.length > 0 || texts.length > 0
+    ? await drawCanvas(strokes, images, w, h, minX - padding, minY - padding, "#ffffff", texts)
     : drawStrokes(strokes, w, h, minX - padding, minY - padding, "#ffffff")
   return canvasToBlob(canvas, "image/jpeg", 0.92)
 }

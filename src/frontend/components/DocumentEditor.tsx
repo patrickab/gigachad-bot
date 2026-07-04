@@ -197,10 +197,10 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
     if (isCanvas && canvasDoc) savedCanvasKey.current = canvasContentKey(canvasDoc)
     setDirty(false)
     onSaved?.(filename, serialized)
-    if (isCanvas && canvasDoc && (canvasDoc.strokes.length > 0 || canvasDoc.frames.some((f) => f.kind === "image"))) {
+    if (isCanvas && canvasDoc && (canvasDoc.strokes.length > 0 || canvasDoc.texts.length > 0 || canvasDoc.frames.some((f) => f.kind === "image"))) {
       try {
         const imgs = await buildImageEmbeds(canvasDoc)
-        const blob = await renderCanvasToJpeg(canvasDoc.strokes, 20, imgs)
+        const blob = await renderCanvasToJpeg(canvasDoc.strokes, 20, imgs, canvasDoc.texts)
         await mirrorDrawing(filename.replace(/\.canvas$/, ".jpg"), blob)
       } catch { /* */ }
     }
@@ -233,7 +233,7 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
       const imgs = await buildImageEmbeds(canvasDoc)
       const pdfDoc = await PDFDocument.create()
       for (const page of pages) {
-        const pngBytes = await renderPageToPng(canvasDoc.strokes, page.x, page.y, page.width, page.width * A4_ASPECT, imgs)
+        const pngBytes = await renderPageToPng(canvasDoc.strokes, page.x, page.y, page.width, page.width * A4_ASPECT, imgs, canvasDoc.texts)
         const img = await pdfDoc.embedPng(pngBytes)
         const pdfPage = pdfDoc.addPage([595.28, 841.89])
         pdfPage.drawImage(img, { x: 0, y: 0, width: 595.28, height: 841.89 })

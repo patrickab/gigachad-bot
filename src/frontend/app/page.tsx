@@ -227,8 +227,8 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         const live = liveCanvasRef.current
         const text = live?.path === path ? live.content : await loadFileViewerText(path)
         const doc = text.trim() ? JSON.parse(text) : null
-        if (!doc?.strokes?.length) return
-        const blob = await renderCanvasToJpeg(doc.strokes)
+        if (!doc?.strokes?.length && !doc?.texts?.length) return
+        const blob = await renderCanvasToJpeg(doc.strokes ?? [], 20, [], doc.texts ?? [])
         const name = path.split("/").pop()!.replace(/\.canvas$/, ".jpg")
         const file = new File([blob], name, { type: "image/jpeg" })
         const att = await uploadFile(chatId, file, activeProject, true)
