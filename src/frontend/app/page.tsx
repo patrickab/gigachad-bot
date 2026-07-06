@@ -35,7 +35,7 @@ import { useSettings, SettingsProvider } from "@/contexts/SettingsContext"
 import { useProject, ProjectProvider } from "@/contexts/ProjectContext"
 import { useBranches } from "@/contexts/BranchContext"
 import { BranchProvider } from "@/contexts/BranchContext"
-import { SidebarProvider, useSidebar } from "@/contexts/SidebarContext"
+import { SidebarProvider, type AppSurface } from "@/contexts/SidebarContext"
 import { MemoryViewerProvider } from "@/contexts/MemoryViewerContext"
 import { MemoryViewer } from "@/components/MemoryViewer"
 import { handleStudyPdf, updateLastMsg as updateLastAssistant } from "@/hooks/useStudyHandler"
@@ -95,7 +95,7 @@ const COMMANDS: CommandMenuItem[] = [
   { command: "/vault-load" },
 ]
 
-function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleLoaded, onOpenChat, activeProject, focusQaIndex, focusKey, onConfigChange }: {
+function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleLoaded, onOpenChat, activeProject, focusQaIndex, focusKey, onConfigChange, onAppModeChange }: {
   tab: Tab
   isActive: boolean
   onModeLabel: (label: string, loading?: boolean) => void
@@ -106,6 +106,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   focusQaIndex: number | null
   focusKey: number
   onConfigChange: (config: Partial<TabConfig>) => void
+  onAppModeChange: (mode: AppSurface) => void
 }) {
   const {
     messages,
@@ -151,7 +152,8 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   const settings = useSettings()
   const config = tab.config
   const hasUsage = totalUsage.total_tokens > 0 ? totalUsage : undefined
-  const { appMode } = useSidebar()
+  const appMode = tab.appMode
+  const setTabAppMode = onAppModeChange
   const [canvasSel, setCanvasSel] = useState<CanvasSelection | null>(null)
   const [canvasToolbarSlot, setCanvasToolbarSlot] = useState<HTMLElement | null>(null)
 
@@ -766,6 +768,8 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         activeCanvasPath={canvasSel?.path ?? null}
         onCanvasSelect={(path, scope) => setCanvasSel({ path, scope })}
         onCanvasDeleted={(path) => setCanvasSel((s) => (s?.path === path ? null : s))}
+        appMode={appMode}
+        onAppModeChange={setTabAppMode}
       />
       <main className="flex-1 min-w-0 flex flex-col relative bg-paper">
         <header className="h-[60px] shrink-0 flex items-center px-4 gap-4 z-40 border-b border-divider/50 bg-paper/80 backdrop-blur-xl">
@@ -1012,7 +1016,7 @@ function AppContent() {
         ref={tabManagerRef}
         onTabsChange={handleTabsChange}
         defaultConfig={settingsToTabConfig(settings)}
-        renderContent={(tab, onModeLabel, isActive, onConfigChange) => (
+        renderContent={(tab, onModeLabel, isActive, onConfigChange, onAppModeChange) => (
           <ModeProvider>
             <TabContent
               tab={tab}
@@ -1025,6 +1029,7 @@ function AppContent() {
               focusQaIndex={focusQaIndex}
               focusKey={focusKey}
               onConfigChange={onConfigChange}
+              onAppModeChange={onAppModeChange}
             />
           </ModeProvider>
         )}

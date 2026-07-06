@@ -9,7 +9,7 @@ import { useMemoryViewer } from "@/contexts/MemoryViewerContext"
 import { SidebarElement } from "./SidebarElement"
 import { useProject } from "@/contexts/ProjectContext"
 import { useBranches } from "@/contexts/BranchContext"
-import { useSidebar } from "@/contexts/SidebarContext"
+import { useSidebar, type AppSurface } from "@/contexts/SidebarContext"
 import type { BranchMeta, VaultNode, ProjectListItem, ProjectDocument } from "@/lib/types"
 import { ChatBranchItem } from "./ChatBranchItem"
 import { addFileVaultMountpoint, addFileVaultRoot, createDirectory, moveHistoryItem, fileVaultTree, removeFileVaultRoot, listNotes, listProjectDocuments, removeDocument, writeDocument, Vault } from "@/lib/api"
@@ -29,6 +29,8 @@ interface SidebarProps {
   activeCanvasPath?: string | null
   onCanvasSelect?: (path: string, scope: string) => void
   onCanvasDeleted?: (path: string) => void
+  appMode: AppSurface
+  onAppModeChange: (mode: AppSurface) => void
 }
 
 export function Sidebar({
@@ -43,6 +45,8 @@ export function Sidebar({
   activeCanvasPath,
   onCanvasSelect,
   onCanvasDeleted,
+  appMode,
+  onAppModeChange,
 }: SidebarProps) {
   const {
     collapsed,
@@ -51,8 +55,6 @@ export function Sidebar({
     setProjectsOpen,
     historiesOpen,
     setHistoriesOpen,
-    appMode,
-    setAppMode,
   } = useSidebar()
 
   const {
@@ -163,9 +165,9 @@ export function Sidebar({
   )
 
   const renderChatElement = useCallback((item: VaultTreeItem<string>, depth: number) => {
-    const data = (item.data as string) ?? item.id
+    const data = typeof item.data === "string" ? item.data : item.id
     // ponytail: absolute path = file inside a mounted vault; chat files are always relative
-    if (data.startsWith("/")) {
+    if (typeof data === "string" && data.startsWith("/")) {
       return (
         <div style={{ paddingLeft: 8 + depth * 16, paddingRight: 8 }}>
           <button
@@ -202,7 +204,7 @@ export function Sidebar({
         {!collapsed && (
           <div className="flex items-center gap-1.5 px-2 min-w-0">
             <button
-              onClick={() => setAppMode(appMode === "canvas" ? "chat" : "canvas")}
+              onClick={() => onAppModeChange(appMode === "canvas" ? "chat" : "canvas")}
               className="text-base font-semibold tracking-tight text-ink truncate hover:opacity-80 transition-opacity"
             >
               {appMode === "canvas" ? "Canvas" : "GigaChat Bot"}

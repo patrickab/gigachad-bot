@@ -5,6 +5,7 @@ import { Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { DEFAULT_MODEL, DEFAULT_TEMPERATURE } from "@/lib/config"
 import type { SettingsState } from "@/contexts/SettingsContext"
+import type { AppSurface } from "@/contexts/SidebarContext"
 
 export interface TabConfig {
   selectedModel: string
@@ -71,10 +72,11 @@ export interface Tab {
   historyFile: string | null
   title: string | null
   config: TabConfig
+  appMode: AppSurface
 }
 
 interface TabManagerProps {
-  renderContent: (tab: Tab, onModeLabel: (label: string, loading?: boolean) => void, isActive: boolean, onConfigChange: (config: Partial<TabConfig>) => void) => React.ReactNode
+  renderContent: (tab: Tab, onModeLabel: (label: string, loading?: boolean) => void, isActive: boolean, onConfigChange: (config: Partial<TabConfig>) => void, onAppModeChange: (mode: AppSurface) => void) => React.ReactNode
   onCloseTab?: (tab: Tab) => void
   onTabsChange?: (tabs: Tab[]) => void
   defaultConfig?: TabConfig
@@ -91,12 +93,13 @@ export interface TabManagerHandle {
   updateTabHistoryFile: (tabId: string, historyFile: string | null) => void
   updateTabTitle: (tabId: string, title: string | null) => void
   updateTabConfig: (tabId: string, config: Partial<TabConfig>) => void
+  updateTabAppMode: (tabId: string, mode: AppSurface) => void
 }
 
 let tabIdCounter = 0
 
-export function nextTab(name: string | null = null, historyFile: string | null = null, title: string | null = null, config?: Partial<TabConfig>): Tab {
-  return { id: `tab-${++tabIdCounter}`, name, chatId: crypto.randomUUID(), historyFile, title, config: { ...DEFAULT_CONFIG, ...config } }
+export function nextTab(name: string | null = null, historyFile: string | null = null, title: string | null = null, config?: Partial<TabConfig>, appMode: AppSurface = "chat"): Tab {
+  return { id: `tab-${++tabIdCounter}`, name, chatId: crypto.randomUUID(), historyFile, title, config: { ...DEFAULT_CONFIG, ...config }, appMode }
 }
 
 const INITIAL_TAB: Tab = nextTab()
@@ -151,6 +154,9 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
     },
     updateTabConfig: (tabId: string, config: Partial<TabConfig>) => {
       setTabs((prev) => prev.map((t) => t.id === tabId ? { ...t, config: { ...t.config, ...config } } : t))
+    },
+    updateTabAppMode: (tabId: string, mode: AppSurface) => {
+      setTabs((prev) => prev.map((t) => t.id === tabId ? { ...t, appMode: mode } : t))
     },
   }), [tabs, activeTab])
 
@@ -352,6 +358,8 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
             >
               {renderContent(tab, hook, isActive, (config) => {
                 setTabs((prev) => prev.map((t) => t.id === tab.id ? { ...t, config: { ...t.config, ...config } } : t))
+              }, (mode) => {
+                setTabs((prev) => prev.map((t) => t.id === tab.id ? { ...t, appMode: mode } : t))
               })}
             </div>
           )
