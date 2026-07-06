@@ -71,6 +71,15 @@ export interface ModelsResponse {
   openrouter: string[]
 }
 
+export interface BackendConfig {
+  small_model: string
+  vision_model: string
+  memory_model: string
+  default_model: string
+  temperature: number
+  downscale_images: boolean
+}
+
 export interface ChatHistoriesResponse {
   files: string[]
   histories: Record<string, string[]>

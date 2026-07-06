@@ -11,6 +11,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from config import DIRECTORY_OUTPUT_MINERU, DIRECTORY_OUTPUT_PDF, SMALL_MODEL
+from lib.attachment_materialize import mineru_cache_path
 
 from .deps import request_client
 
@@ -99,7 +100,7 @@ async def _parse_pdf(
         log.info("MinerU already extracted for %s", stem)
         return extracted_md, images_dir
 
-    global_md = DIRECTORY_OUTPUT_MINERU / f"{stem}.md"
+    global_md = mineru_cache_path(stem)
     if global_md.exists():
         log.info("MinerU already extracted for %s (global cache)", stem)
         shutil.copy2(global_md, extracted_md)
@@ -190,7 +191,7 @@ async def _parse_pdf(
         final_md_path.write_text(md_content, encoding="utf-8")
 
     if output_dir != DIRECTORY_OUTPUT_MINERU:
-        global_md_path = DIRECTORY_OUTPUT_MINERU / f"{stem}.md"
+        global_md_path = mineru_cache_path(stem)
         if not global_md_path.exists():
             shutil.copy2(final_md_path, global_md_path)
             for img in images_dir.iterdir():

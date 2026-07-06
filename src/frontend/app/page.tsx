@@ -5,7 +5,7 @@ import { createPortal } from "react-dom"
 import dynamic from "next/dynamic"
 import { Sidebar } from "@/components/Sidebar"
 import { CommandMenu, type CommandMenuItem } from "@/components/CommandMenu"
-import { ChatContainer } from "@/components/ChatContainer"
+import { ChatContainer, ChatSidebarProvider, type ChatSidebarContextValue } from "@/components/ChatContainer"
 import type { ChatInputHandle } from "@/components/ChatInput"
 import { MAX_SIDEBAR_WIDTH } from "@/components/ChatSidebar"
 import { ModelDropdown } from "@/components/ModelDropdown"
@@ -25,6 +25,9 @@ import { CreateDocumentPanel } from "@/components/CreateDocumentPanel"
 import { CanvasWorkspace, type CanvasSelection } from "@/components/CanvasWorkspace"
 import { useCommandBar } from "@/hooks/useCommandBar"
 import { useMemoryCategories } from "@/hooks/useMemoryCategories"
+import { useVaultPicker } from "@/hooks/useVaultPicker"
+import { useProjectDocuments } from "@/hooks/useProjectDocuments"
+import { useChatModals } from "@/hooks/useChatModals"
 import { TabManager, nextTab, settingsToTabConfig, type TabConfig } from "@/components/TabManager"
 import type { Tab, TabManagerHandle } from "@/components/TabManager"
 import { ProjectDashboard } from "@/components/ProjectDashboard"
@@ -40,35 +43,18 @@ import { MemoryViewerProvider } from "@/contexts/MemoryViewerContext"
 import { MemoryViewer } from "@/components/MemoryViewer"
 import { handleStudyPdf, updateLastMsg as updateLastAssistant } from "@/hooks/useStudyHandler"
 import {
-  saveChatHistory as apiSaveChatHistory,
   loadChatHistory as apiLoadChatHistory,
   parseFiles,
   deleteAttachment,
-  saveProjectTab,
   loadProjectTab,
   parseHistoryFile,
-  buildHistoryFile,
-  listFileVaultFiles,
-  listProjectVaultDocuments,
   attachFileVaultFile,
   writeFileVaultFile,
-  listProjectDocuments,
-  listAllDocuments,
-  uploadDocument,
-  addDocument,
-  attachDocument,
-  removeDocument,
-  writeDocument,
-  uploadFile,
-  loadFileViewerText,
   fileViewerRawUrl,
-  generateMindmap,
 } from "@/lib/api"
-import { renderCanvasToJpeg } from "@/lib/drawing"
 
 const PdfViewer = dynamic(() => import("@/components/PdfViewer").then((m) => ({ default: m.PdfViewer })), { ssr: false })
-import { DEFAULT_VISION_MODEL } from "@/lib/config"
-import type { Attachment, Message, VaultFile, ProjectDocument, Usage } from "@/lib/types"
+import type { Attachment, Message } from "@/lib/types"
 import {
   buildAttachedSend,
   buildHiddenContent,
@@ -160,62 +146,6 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
 
   const commandBar = useCommandBar()
   const { globalCategories, projectCategories } = useMemoryCategories(activeProject)
-  const [vaultEnabled, setVaultEnabled] = useState(false)
-  const [vaultFiles, setVaultFiles] = useState<VaultFile[]>([])
-  const [vaultPickerOpen, setVaultPickerOpen] = useState(false)
-  const [vaultEditPath, setVaultEditPath] = useState<string | null>(null)
-  const [vaultPdfPath, setVaultPdfPath] = useState<string | null>(null)
-  const [documentOpen, setDocumentOpen] = useState(false)
-  const [createDocOpen, setCreateDocOpen] = useState(false)
-  const [projectDocuments, setProjectDocuments] = useState<ProjectDocument[]>([])
-  const [vaultProjectDocs, setVaultProjectDocs] = useState<ProjectDocument[]>([])
-  const [allDocuments, setAllDocuments] = useState<ProjectDocument[]>([])
-
-  // A path is "vault-surfaced" only when it's not already a project file — a
-  // promoted vault PDF that's also in the project behaves as a project doc
-  // (deletable, library attach), and the merged list shows it just once.
-  const vaultDocPaths = useMemo(() => {
-    const projectPaths = new Set(projectDocuments.map((d) => d.path))
-    return new Set(vaultProjectDocs.filter((d) => !projectPaths.has(d.path)).map((d) => d.path))
-  }, [projectDocuments, vaultProjectDocs])
-  // Merge library/project docs with vault docs, deduping by path so a PDF that
-  // exists both in the project files and in a mounted vault (or was promoted
-  // into the cloud library) appears exactly once — library/cloud wins.
-  const mergedDocuments = useMemo(() => {
-    const seen = new Set<string>()
-    const out: ProjectDocument[] = []
-    for (const d of projectDocuments) {
-      if (seen.has(d.path)) continue
-      seen.add(d.path)
-      out.push(d)
-    }
-    for (const d of vaultProjectDocs) {
-      if (seen.has(d.path)) continue
-      seen.add(d.path)
-      out.push(d)
-    }
-    return out
-  }, [projectDocuments, vaultProjectDocs])
-
-  useEffect(() => {
-    let cancelled = false
-    listFileVaultFiles()
-      .then((r) => { if (!cancelled) { setVaultEnabled(r.enabled); setVaultFiles(r.files) } })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [])
-
-  const refreshVaultList = useCallback(() => {
-    listFileVaultFiles()
-      .then((r) => { setVaultEnabled(r.enabled); setVaultFiles(r.files) })
-      .catch(() => {})
-  }, [])
-
-  const openVaultPicker = useCallback(() => {
-    setVaultPickerOpen(true)
-    // Refresh the listing on open so vault changes are reflected.
-    refreshVaultList()
-  }, [refreshVaultList])
   const commandMemoryCount = commandBar.state.phase === "review" || commandBar.state.phase === "composing"
     ? commandBar.state.globalMemories.length + (commandBar.state.projectMemories?.length ?? 0)
     : 0
@@ -230,141 +160,41 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   const [chatId, setChatId] = useState(() => tab.chatId)
   const [extracting, setExtracting] = useState(0)
 
-  const handleVaultSelect = useCallback(async (path: string) => {
-    setVaultPickerOpen(false)
-    // Empty chat → open standalone (edit text files, view PDFs); active
-    // conversation → stage a live reference on the chat input (the *next*
-    // message), not the already-sent latest message.
-    if (messages.length === 0) {
-      if (path.toLowerCase().endsWith(".pdf")) setVaultPdfPath(path)
-      else setVaultEditPath(path)
-    } else {
-      setExtracting((n) => n + 1)
-      try { chatInputRef.current?.addAttachment(await attachFileVaultFile(path)) } catch { /* */ }
-      finally { setExtracting((n) => n - 1) }
-    }
-  }, [messages.length])
+  const vault = useVaultPicker({
+    isActive,
+    hasMessages: messages.length > 0,
+    chatInputRef,
+    setExtracting,
+  })
 
-  useEffect(() => {
-    if (!isActive || !vaultPdfPath) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { e.preventDefault(); setVaultPdfPath(null) }
-    }
-    window.addEventListener("keydown", onKey, true)
-    return () => window.removeEventListener("keydown", onKey, true)
-  }, [isActive, vaultPdfPath])
+  const docs = useProjectDocuments({
+    isActive,
+    appMode,
+    activeProject,
+    chatId,
+    chatInputRef,
+    liveCanvasRef,
+    setExtracting,
+    setMessages,
+  })
 
-  const handleDocumentSelect = useCallback(async (path: string) => {
-    setDocumentOpen(false)
-    if (vaultDocPaths.has(path)) {
-      setExtracting((n) => n + 1)
-      try { chatInputRef.current?.addAttachment(await attachFileVaultFile(path)) } catch { /* */ }
-      finally { setExtracting((n) => n - 1) }
-      return
-    }
-    if (path.endsWith(".canvas")) {
-      try {
-        const live = liveCanvasRef.current
-        const text = live?.path === path ? live.content : await loadFileViewerText(path)
-        const doc = text.trim() ? JSON.parse(text) : null
-        if (!doc?.strokes?.length && !doc?.texts?.length) return
-        const blob = await renderCanvasToJpeg(doc.strokes ?? [], 20, [], doc.texts ?? [])
-        const name = path.split("/").pop()!.replace(/\.canvas$/, ".jpg")
-        const file = new File([blob], name, { type: "image/jpeg" })
-        const att = await uploadFile(chatId, file, activeProject, true)
-        chatInputRef.current?.addAttachment(att)
-      } catch { /* */ }
-    } else {
-      setExtracting((n) => n + 1)
-      try { chatInputRef.current?.addAttachment(await attachDocument(chatId, path, activeProject)) } catch { /* */ }
-      finally { setExtracting((n) => n - 1) }
-    }
-  }, [chatId, activeProject, vaultDocPaths])
-
-  const loadProjectDocs = useCallback(() => {
-    if (activeProject) {
-      listProjectDocuments(activeProject).then(setProjectDocuments).catch(() => {})
-      listProjectVaultDocuments(activeProject).then(setVaultProjectDocs).catch(() => setVaultProjectDocs([]))
-    } else {
-      setProjectDocuments([])
-      setVaultProjectDocs([])
-    }
-  }, [activeProject])
-
-  const refreshDocuments = useCallback(() => {
-    loadProjectDocs()
-    listAllDocuments().then(setAllDocuments).catch(() => {})
-  }, [loadProjectDocs])
-
-  useEffect(() => { loadProjectDocs() }, [loadProjectDocs])
-
-  const handleCreateDocument = useCallback(async (name: string) => {
-    if (!activeProject) return
-    try {
-      await writeDocument(activeProject, name)
-      setCreateDocOpen(false)
-      refreshDocuments()
-    } catch { /* */ }
-  }, [activeProject, refreshDocuments])
-
-  const handleDeleteDocument = useCallback(async (path: string) => {
-    if (!activeProject) return
-    try {
-      await removeDocument(activeProject, path)
-      refreshDocuments()
-    } catch { /* */ }
-  }, [activeProject, refreshDocuments])
-
-  const handleDocumentSaved = useCallback((filename?: string, content?: string) => {
-    refreshDocuments()
-    if (filename && content !== undefined) {
-      setMessages(prev => prev.map(msg => {
-        if (!msg.attachments?.some(a => a.name === filename)) return msg
-        const attachments = msg.attachments!.map(a => a.name === filename ? { ...a, content } : a)
-        return { ...msg, attachments, hiddenContent: buildHiddenContent(attachments) || undefined }
-      }))
-    }
-  }, [refreshDocuments, setMessages])
-
-  const openDocuments = useCallback(() => {
-    refreshDocuments()
-    setDocumentOpen(true)
-  }, [refreshDocuments])
-
-  const handleDocumentUpload = useCallback(async (files: File[]) => {
-    if (!activeProject) return
-    await Promise.allSettled(files.map(f => uploadDocument(activeProject, f)))
-    refreshDocuments()
-  }, [activeProject, refreshDocuments])
-
-  const handleAddDocToProject = useCallback(async (path: string) => {
-    if (!activeProject) return
-    try {
-      await addDocument(activeProject, path)
-      refreshDocuments()
-    } catch { }
-  }, [activeProject, refreshDocuments])
-
-  useEffect(() => {
-    if (!isActive || appMode === "canvas") return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.altKey && (e.key === "x" || e.key === "X")) {
-        e.preventDefault()
-        setDocumentOpen((open) => {
-          if (!open) refreshDocuments()
-          return !open
-        })
-      }
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [isActive, appMode, refreshDocuments])
-
+  // branchMessageIdx is read/written from the memory keydown shortcut, the
+  // command bar, handleSend's memorize dispatch, and the history-load effect
+  // below — it stays here rather than in one of the domain hooks.
   const [branchMessageIdx, setBranchMessageIdx] = useState<number | null>(null)
-  const [saveModalOpen, setSaveModalOpen] = useState(false)
-  const [mindmapModalOpen, setMindmapModalOpen] = useState(false)
-  const [mindmapAttachments, setMindmapAttachments] = useState<Attachment[]>([])
-  const [promptEditorOpen, setPromptEditorOpen] = useState(false)
+
+  const modals = useChatModals({
+    tab,
+    activeProject,
+    messages,
+    chatId,
+    hasUsage,
+    selectedModel: config.selectedModel,
+    refreshAll,
+    onHistoryFileChanged,
+    setMessages,
+  })
+
   const containerRef = useRef<HTMLDivElement>(null)
   const loadIdRef = useRef(0)
   const [measuredWidth, setMeasuredWidth] = useState(0)
@@ -439,72 +269,11 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     else onModeLabel("Chat")
   }, [commandBar.state.phase, docReviewLoading, commandMemoryCount, researchEnabled, searchEnabled, ocrEnabled, studyEnabled, onModeLabel])
 
-  const isTitled = !!tab.historyFile
-
-  const openSaveModal = useCallback(() => {
-    setSaveModalOpen(true)
-  }, [])
-
-  const handleQuickSave = useCallback(async () => {
-    if (!tab.historyFile) return
-    const { slug, filename } = parseHistoryFile(tab.historyFile)
-    const title = tab.title ?? filename.replace(".json", "")
-    if (slug && slug === activeProject) {
-      await saveProjectTab(activeProject!, filename, messages, chatId, tab.name ?? undefined, title, hasUsage)
-    } else {
-      await apiSaveChatHistory(tab.historyFile, messages, chatId, title, hasUsage)
-    }
-    await refreshAll()
-  }, [tab.historyFile, tab.title, tab.name, activeProject, messages, chatId, hasUsage, refreshAll])
-
-  const handleSaveSubmit = useCallback(async (name: string) => {
-    const newFilename = name + ".json"
-
-    if (activeProject) {
-      try {
-        await saveProjectTab(activeProject, newFilename, messages, chatId, tab.name ?? undefined, name, hasUsage)
-      } catch { }
-      onHistoryFileChanged(tab.id, buildHistoryFile(newFilename, activeProject))
-    } else {
-      try {
-        await apiSaveChatHistory(newFilename, messages, chatId, name, hasUsage)
-      } catch { }
-      onHistoryFileChanged(tab.id, newFilename)
-    }
-    await refreshAll()
-    setSaveModalOpen(false)
-  }, [messages, chatId, tab.id, tab.name, activeProject, hasUsage, onHistoryFileChanged, refreshAll])
-
-  const handleMindmapSubmit = useCallback(async (prompt: string, attachments: Attachment[] = []) => {
-    if (messages.length === 0) return
-    const userMsg = prompt ? `Provide a mindmap. ${prompt}` : "Provide a mindmap."
-    setMessages(prev => [
-      ...prev,
-      { role: "user" as const, content: userMsg },
-      { role: "assistant" as const, content: "Generating mind map…" },
-    ])
-    setMindmapModalOpen(false)
-    try {
-      const context = attachments.map(a => a.parsedMd || a.content || "").filter(Boolean).join("\n\n")
-      const mindmapMessages = messages.map((m) => ({ role: m.role, content: m.content }))
-      if (context) mindmapMessages.push({ role: "user" as const, content: context })
-
-      const mindmap = await generateMindmap(
-        mindmapMessages,
-        config.selectedModel,
-        prompt,
-      )
-      updateLastAssistant(setMessages, m => ({ ...m, content: mindmap }))
-    } catch {
-      updateLastAssistant(setMessages, m => ({ ...m, content: "Mind map generation failed." }))
-    }
-  }, [messages, config.selectedModel, setMessages])
-
   useEffect(() => {
     if (!isActive || appMode === "canvas") return
 
     function handler(e: KeyboardEvent) {
-      if (e.altKey && e.key === "s") { e.preventDefault(); isTitled ? handleQuickSave() : openSaveModal() }
+      if (e.altKey && e.key === "s") { e.preventDefault(); modals.isTitled ? modals.handleQuickSave() : modals.setSaveModalOpen(true) }
       if (e.altKey && e.key === "r") { e.preventDefault(); reset() }
       if (e.altKey && e.key.toLowerCase() === "m") {
         e.preventDefault()
@@ -521,7 +290,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       }
       if (e.altKey && e.key.toLowerCase() === "o") {
         e.preventDefault()
-        if (vaultEnabled) openVaultPicker()
+        if (vault.vaultEnabled) vault.openVaultPicker()
         return
       }
 
@@ -541,18 +310,18 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     return () => {
       window.removeEventListener("keydown", handler, true)
     }
-  }, [isActive, appMode, isTitled, handleQuickSave, openSaveModal, reset, commandBar.open, commandBar.submitCommand, commandBar.state.phase, messages, activeProject, chatId, branchMessageIdx, vaultEnabled, openVaultPicker])
+  }, [isActive, appMode, modals.isTitled, modals.handleQuickSave, modals.setSaveModalOpen, reset, commandBar.open, commandBar.submitCommand, commandBar.state.phase, messages, activeProject, chatId, branchMessageIdx, vault.vaultEnabled, vault.openVaultPicker])
 
   const runCommand = useCallback(async (command: string) => {
     if (command === "/vault-load") {
       commandBar.close()
-      openVaultPicker()
+      vault.openVaultPicker()
       return
     }
     if (command === "/mindmap") {
       commandBar.close()
       if (messages.length === 0) return
-      setMindmapModalOpen(true)
+      modals.setMindmapModalOpen(true)
       return
     }
     // Memory is extracted from the main branch only — branches don't influence memories.
@@ -566,10 +335,10 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       chatId,
       command,
     )
-  }, [commandBar.submitCommand, commandBar.close, messages, activeProject, chatId, branchMessageIdx, openVaultPicker, setMindmapModalOpen])
+  }, [commandBar.submitCommand, commandBar.close, messages, activeProject, chatId, branchMessageIdx, vault.openVaultPicker, modals.setMindmapModalOpen])
 
   const commandItems = COMMANDS.filter((cmd) =>
-    (cmd.command !== "/vault-load" || vaultEnabled) &&
+    (cmd.command !== "/vault-load" || vault.vaultEnabled) &&
     (cmd.command !== "/memorize-project" || activeProject != null)
   )
 
@@ -577,17 +346,17 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     async (text: string, attachments: Attachment[]) => {
       const trimmed = text.trim()
       if (trimmed === "/vault-load") {
-        openVaultPicker()
+        vault.openVaultPicker()
         return
       }
       if (trimmed === "/mindmap" || trimmed.startsWith("/mindmap ")) {
         if (messages.length === 0) return
         const userPrompt = trimmed === "/mindmap" ? "" : trimmed.slice("/mindmap ".length).trim()
         if (userPrompt) {
-          await handleMindmapSubmit(userPrompt, attachments)
+          await modals.handleMindmapSubmit(userPrompt, attachments)
         } else {
-          setMindmapAttachments(attachments)
-          setMindmapModalOpen(true)
+          modals.setMindmapAttachments(attachments)
+          modals.setMindmapModalOpen(true)
         }
         return
       }
@@ -676,7 +445,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         })
       }
     },
-    [searchEnabled, researchEnabled, studyEnabled, chatId, branchMessageIdx, activeProject, config, send, research, webSearch, setMessages, toggleStudy, commandBar.submitCommand, messages, openVaultPicker, handleMindmapSubmit, setMindmapModalOpen],
+    [searchEnabled, researchEnabled, studyEnabled, chatId, branchMessageIdx, activeProject, config, send, research, webSearch, setMessages, toggleStudy, commandBar.submitCommand, messages, vault.openVaultPicker, modals.handleMindmapSubmit, modals.setMindmapAttachments, modals.setMindmapModalOpen],
   )
 
   const handleRegenerate = useCallback(
@@ -758,6 +527,30 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     })
   }, [setMessages])
 
+  const sidebarContext = useMemo<ChatSidebarContextValue>(() => ({
+    onRemoveAttachment: handleRemoveAttachment,
+    onToggleAttachmentActive: handleToggleAttachmentActive,
+    onAttachmentContentChange: handleAttachmentContentChange,
+    vaultEnabled: vault.vaultEnabled,
+    onOpenVault: vault.openVaultPicker,
+    documents: docs.mergedDocuments,
+    onSelectDocument: docs.handleDocumentSelect,
+    onOpenDocuments: activeProject ? docs.openDocuments : undefined,
+    onCreateDocument: activeProject ? () => docs.setCreateDocOpen(true) : undefined,
+    onDeleteDocument: docs.handleDeleteDocument,
+    onDocumentSaved: docs.handleDocumentSaved,
+    liveCanvasRef,
+    vaultPaths: docs.vaultDocPaths,
+    vaultEditingPath: vault.vaultEditPath,
+    onEditVaultDocument: vault.setVaultEditPath,
+  }), [
+    handleRemoveAttachment, handleToggleAttachmentActive, handleAttachmentContentChange,
+    vault.vaultEnabled, vault.openVaultPicker, vault.vaultEditPath, vault.setVaultEditPath,
+    docs.mergedDocuments, docs.handleDocumentSelect, docs.openDocuments, docs.setCreateDocOpen,
+    docs.handleDeleteDocument, docs.handleDocumentSaved, docs.vaultDocPaths,
+    activeProject,
+  ])
+
   const handleCascadeDelete = useCallback(async (filename: string) => {
     await doCascadeDelete(filename)
     await refreshAll()
@@ -798,12 +591,12 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       <Sidebar
         onOpenChat={onOpenChat}
         onRefreshAll={refreshAll}
-        onSave={openSaveModal}
+        onSave={() => modals.setSaveModalOpen(true)}
         onReset={reset}
         onMerge={(childFile) => doMergeBranch(childFile)}
         onCascadeDelete={handleCascadeDelete}
-        onVaultSelect={handleVaultSelect}
-        onVaultsChanged={refreshVaultList}
+        onVaultSelect={vault.handleVaultSelect}
+        onVaultsChanged={vault.refreshVaultList}
         activeCanvasPath={canvasSel?.path ?? null}
         onCanvasSelect={(path, scope) => setCanvasSel({ path, scope })}
         onCanvasDeleted={(path) => setCanvasSel((s) => (s?.path === path ? null : s))}
@@ -837,7 +630,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           <div className="flex items-center gap-2">
             {appMode !== "canvas" && <TokenCounter usage={totalUsage} />}
             <ThemeToggle />
-            <MoreOptionsMenu prompts={prompts} config={config} onConfigChange={onConfigChange} onEditPrompts={() => setPromptEditorOpen(true)} />
+            <MoreOptionsMenu prompts={prompts} config={config} onConfigChange={onConfigChange} onEditPrompts={() => modals.setPromptEditorOpen(true)} />
           </div>
         </header>
         <div className="flex-1 overflow-hidden relative transition-opacity duration-200">
@@ -851,95 +644,82 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
               onModeLabel={onModeLabel}
             />
           ) : (
-          <ChatContainer
-            chatId={chatId}
-            messages={messages}
-            isStreaming={isStreaming}
-            extracting={extracting > 0}
-            onSend={handleSend}
-            onCancel={cancel}
-            onDeletePair={deleteMessagePair}
-            onRegenerate={handleRegenerate}
-            onBranch={tab.historyFile ? handleBranch : undefined}
-            focusQaIndex={focusQaIndex}
-            focusKey={focusKey}
-            isActive={isActive}
-            branchMessageIdx={branchMessageIdx}
-            onOCRRequest={setOCRImage}
-            onRemoveAttachment={handleRemoveAttachment}
-            onToggleAttachmentActive={handleToggleAttachmentActive}
-            onAttachmentContentChange={handleAttachmentContentChange}
-            vaultEnabled={vaultEnabled}
-            onOpenVault={openVaultPicker}
-            documents={mergedDocuments}
-            vaultPaths={vaultDocPaths}
-            vaultEditingPath={vaultEditPath}
-            onEditVaultDocument={setVaultEditPath}
-            onSelectDocument={handleDocumentSelect}
-            onOpenDocuments={activeProject ? openDocuments : undefined}
-            onCreateDocument={activeProject ? () => setCreateDocOpen(true) : undefined}
-            onDeleteDocument={handleDeleteDocument}
-            onDocumentSaved={handleDocumentSaved}
-            chatInputRef={chatInputRef}
-            liveCanvasRef={liveCanvasRef}
-            slug={activeProject}
-            chatMaxWidth={chatMaxWidth}
-          />
+          <ChatSidebarProvider value={sidebarContext}>
+            <ChatContainer
+              chatId={chatId}
+              messages={messages}
+              isStreaming={isStreaming}
+              extracting={extracting > 0}
+              onSend={handleSend}
+              onCancel={cancel}
+              onDeletePair={deleteMessagePair}
+              onRegenerate={handleRegenerate}
+              onBranch={tab.historyFile ? handleBranch : undefined}
+              focusQaIndex={focusQaIndex}
+              focusKey={focusKey}
+              isActive={isActive}
+              branchMessageIdx={branchMessageIdx}
+              onOCRRequest={setOCRImage}
+              chatInputRef={chatInputRef}
+              slug={activeProject}
+              chatMaxWidth={chatMaxWidth}
+            />
+          </ChatSidebarProvider>
           )}
           {ocrEnabled && ocrImage && (
             <OCRPanel
               image={ocrImage}
-              model={settings.ocrModel || DEFAULT_VISION_MODEL}
+              model={settings.ocrModel}
               onComplete={(output) => { addMessagePair("OCR Request", output); setOCRImage(null) }}
               onClose={() => { setOCRImage(null); toggleOCR() }}
             />
           )}
-          {isActive && vaultEditPath && (
+          {isActive && vault.vaultEditPath && (
             <DocumentEditor
-              path={vaultEditPath}
+              path={vault.vaultEditPath}
               slug=""
               overlay
-              persistOverride={(content) => writeFileVaultFile(vaultEditPath, content)}
-              onClose={() => setVaultEditPath(null)}
+              persistOverride={(content) => writeFileVaultFile(vault.vaultEditPath!, content)}
+              onClose={() => vault.setVaultEditPath(null)}
               onModeLabel={onModeLabel}
-              onNavigate={setVaultEditPath}
+              onNavigate={vault.setVaultEditPath}
               model={config.selectedModel}
             />
           )}
-          {isActive && vaultPdfPath && (
+          {isActive && vault.vaultPdfPath && (
             <div className="absolute inset-0 z-50 flex flex-col bg-paper">
               <div className="flex h-9 shrink-0 items-center border-b border-divider/50 px-4">
-                <span className="truncate text-xs font-medium text-ink">{vaultPdfPath.split("/").pop()}</span>
+                <span className="truncate text-xs font-medium text-ink">{vault.vaultPdfPath.split("/").pop()}</span>
               </div>
               <div className="min-h-0 flex-1">
-                <PdfViewer url={fileViewerRawUrl(vaultPdfPath)} />
+                <PdfViewer url={fileViewerRawUrl(vault.vaultPdfPath)} />
               </div>
             </div>
           )}
         </div>
       </main>
-      <SaveChatModal open={saveModalOpen} onClose={() => setSaveModalOpen(false)} onSave={handleSaveSubmit} />
-      <CreateDocumentPanel open={createDocOpen} onClose={() => setCreateDocOpen(false)} onCreate={handleCreateDocument} />
-      <MindmapModal open={mindmapModalOpen} onClose={() => setMindmapModalOpen(false)} onGenerate={(prompt) => handleMindmapSubmit(prompt, mindmapAttachments)} />
-      <PromptEditor open={promptEditorOpen} onClose={() => setPromptEditorOpen(false)} onPromptsChanged={setPrompts} />
-      {isActive && vaultPickerOpen && vaultEnabled && (
+      <SaveChatModal open={modals.saveModalOpen} onClose={() => modals.setSaveModalOpen(false)} onSave={modals.handleSaveSubmit} />
+      <CreateDocumentPanel open={docs.createDocOpen} onClose={() => docs.setCreateDocOpen(false)} onCreate={docs.handleCreateDocument} />
+      <MindmapModal open={modals.mindmapModalOpen} onClose={() => modals.setMindmapModalOpen(false)} onGenerate={(prompt) => modals.handleMindmapSubmit(prompt, modals.mindmapAttachments)} />
+      <PromptEditor open={modals.promptEditorOpen} onClose={() => modals.setPromptEditorOpen(false)} onPromptsChanged={setPrompts} />
+      {isActive && vault.vaultPickerOpen && vault.vaultEnabled && (
         <FileViewer
-          files={vaultFiles.map((f) => f.path)}
-          onSelect={handleVaultSelect}
-          onClose={() => setVaultPickerOpen(false)}
+          files={vault.vaultFiles.map((f) => f.path)}
+          onSelect={vault.handleVaultSelect}
+          onClose={() => vault.setVaultPickerOpen(false)}
           placeholder="Search vaults…"
           emptyLabel="No files"
         />
       )}
-      {isActive && documentOpen && (
+      {isActive && docs.documentOpen && (
         <DocumentPicker
           projectSlug={activeProject}
-          projectDocuments={projectDocuments}
-          allDocuments={allDocuments}
-          onAttach={handleDocumentSelect}
-          onAddToProject={handleAddDocToProject}
-          onUpload={handleDocumentUpload}
-          onClose={() => setDocumentOpen(false)}
+          projectDocuments={docs.projectDocuments}
+          allDocuments={docs.allDocuments}
+          onAttach={docs.handleDocumentSelect}
+          onAddToProject={docs.handleAddDocToProject}
+          onUpload={docs.handleDocumentUpload}
+          onClose={() => docs.setDocumentOpen(false)}
         />
       )}
       {commandBar.state.phase === "input" && (

@@ -13,9 +13,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from backend.routes.deps import get_file_vault
-from config import DIRECTORY_OUTPUT_MINERU
 from lib import document_library as lib_docs
-from lib import extract_queue
+from lib.attachment_materialize import materialize
 from lib.file_vault import FileVault
 
 log = logging.getLogger(__name__)
@@ -223,10 +222,7 @@ async def attach_file(
                 except Exception:
                     log.exception("Failed to promote vault PDF %s into library", vault_resolved)
                     canonical = vault_resolved  # fall back to the vault path
-        cached_md = DIRECTORY_OUTPUT_MINERU / f"{canonical.stem}.md"
-        parsed = cached_md.read_text(encoding="utf-8") if cached_md.is_file() else None
-        if parsed is None:
-            extract_queue.enqueue(canonical)
+        parsed = materialize(canonical).parsed_md
         return AttachResult(name=canonical.name, mime=mime, path=str(canonical), parsedMd=parsed)
 
     try:

@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react"
 import { Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { DEFAULT_MODEL, DEFAULT_TEMPERATURE } from "@/lib/config"
+// Fallback defaults — overridden at runtime by backend /api/config via SettingsContext.
+const FALLBACK_MODEL = "ollama/gemma4:31b-cloud"
+const FALLBACK_TEMPERATURE = 0.2
 import type { SettingsState } from "@/contexts/SettingsContext"
 import type { AppSurface } from "@/contexts/SidebarContext"
 
@@ -35,9 +37,9 @@ const TAB_CONFIG_KEYS: (keyof TabConfig)[] = [
 ]
 
 const DEFAULT_CONFIG: TabConfig = {
-  selectedModel: DEFAULT_MODEL,
+  selectedModel: FALLBACK_MODEL,
   selectedPrompt: null,
-  temperature: DEFAULT_TEMPERATURE,
+  temperature: FALLBACK_TEMPERATURE,
   reasoningEffort: "none",
   downscaleImages: true,
   researchFastModel: "",

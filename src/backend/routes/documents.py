@@ -24,11 +24,11 @@ from config import (
     DIRECTORY_OUTPUT_DRAWINGS,
     DIRECTORY_OUTPUT_LATEX,
     DIRECTORY_OUTPUT_MARKDOWN,
-    DIRECTORY_OUTPUT_MINERU,
     chat_upload_dir,
 )
 from lib import document_library as lib_docs
 from lib import extract_queue
+from lib.attachment_materialize import materialize
 from lib.project_store import ProjectStore
 
 log = logging.getLogger(__name__)
@@ -289,24 +289,13 @@ async def attach_document(
     dest = chat_dir / name
     dest.write_bytes(resolved.read_bytes())
 
-    mime = lib_docs.mime_for(resolved)
-    result = DocumentAttachResult(name=name, mime=mime)
+    materialized = materialize(resolved)
+    result = DocumentAttachResult(name=name, mime=materialized.mime, parsedMd=materialized.parsed_md, content=materialized.content)
 
     if resolved.suffix.lower() == ".pdf":
-        cached_md = DIRECTORY_OUTPUT_MINERU / f"{resolved.stem}.md"
-        if cached_md.is_file():
-            result.parsedMd = cached_md.read_text(encoding="utf-8")
-        else:
-            # ponytail: enqueue for background extraction; attach returns immediately without parsedMd
-            extract_queue.enqueue(resolved)
         try:
             lib_docs.organize_file(resolved)
         except Exception:
             log.exception("Failed to organize %s into PDF library", name)
-    elif mime.startswith("text/"):
-        try:
-            result.content = dest.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            result.content = None
 
     return result

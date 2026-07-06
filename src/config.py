@@ -28,7 +28,9 @@ DIRECTORY_NOTES = DIRECTORY_CHAT_HISTORIES / "_notes"
 # Provider-prefixed models route through LiteLLM; unprefixed models are treated as Ollama by callers.
 SMALL_MODEL = "ollama/gemma4:31b-cloud"
 MEMORY_MODEL = "gemini/gemini-3.1-flash-lite"
-VISION_MODEL = "ollama/qwen3-vl:235b-instruct-cloud"
+VISION_MODEL = "ollama/gemma4:31b-cloud"
+DEFAULT_TEMPERATURE = 0.2
+DEFAULT_DOWNSCALE_IMAGES = True
 
 # --- MinerU PDF parsing config ---
 DIRECTORY_OUTPUT_MINERU = DIRECTORY_CLOUD / "Documents" / "Mineru"

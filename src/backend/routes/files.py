@@ -107,16 +107,16 @@ async def parse_attachments(
             mime = "pdf"
 
         if mime == "pdf":
-            from config import DIRECTORY_OUTPUT_MINERU
+            from lib.attachment_materialize import materialize
             from lib.document_library import organize_file
 
-            cached_md = DIRECTORY_OUTPUT_MINERU / f"{file_path.stem}.md"
-            if cached_md.is_file():
+            cached = materialize(file_path, enqueue_on_miss=False)
+            if cached.parsed_md is not None:
                 try:
                     organize_file(file_path)
                 except Exception:
                     log.exception("Failed to organize %s into document library", filename)
-                results.append(ParsedAttachment(name=filename, parsedMd=cached_md.read_text(encoding="utf-8")))
+                results.append(ParsedAttachment(name=filename, parsedMd=cached.parsed_md))
             else:
                 from backend.routes.mineru import _parse_pdf
 

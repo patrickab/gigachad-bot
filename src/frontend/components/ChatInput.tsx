@@ -7,7 +7,6 @@ import { ArrowUp, Loader2, Plus, LayoutGrid, Mic, Search, Globe, Sigma, Square, 
 import { cn } from "@/lib/utils"
 import { uploadFile as apiUploadFile } from "@/lib/api"
 import type { Attachment } from "@/lib/types"
-import { DEFAULT_VISION_MODEL } from "@/lib/config"
 import { useClickOutside } from "@/hooks/useClickOutside"
 import { useModeState } from "@/hooks/useModeState"
 import { useSettings } from "@/contexts/SettingsContext"
@@ -429,7 +428,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
         <div className="fixed inset-0 z-[90]">
           <OCRPanel
             image={drawingOcrImage}
-            model={ocrModel || DEFAULT_VISION_MODEL}
+            model={ocrModel}
             onComplete={async (output) => {
               setDrawingOcrImage(null)
               const blob = new Blob([output], { type: "text/markdown" })

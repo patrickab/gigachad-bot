@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from backend.routes.chat import router as chat_router
+from backend.routes.config import router as config_router
 from backend.routes.deps import get_chat_store, get_client, get_project_store, get_prompt_store, shutdown_client
 from backend.routes.documents import router as documents_router
 from backend.routes.files import router as files_router
@@ -76,6 +77,7 @@ app.add_middleware(
 )
 
 app.include_router(chat_router)
+app.include_router(config_router)
 app.include_router(documents_router)
 app.include_router(files_router)
 app.include_router(fileviewer_router)

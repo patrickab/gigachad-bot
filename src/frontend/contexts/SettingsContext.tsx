@@ -1,7 +1,7 @@
 "use client"
 
-import { createContext, useCallback, useContext, useState, type ReactNode } from "react"
-import { DEFAULT_TEMPERATURE, DEFAULT_DOWNSCALE_IMAGES, DEFAULT_VISION_MODEL, DEFAULT_MODEL } from "@/lib/config"
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
+import { fetchBackendConfig } from "@/lib/api"
 
 export interface SettingsState {
   selectedModel: string
@@ -41,11 +41,11 @@ export function useSettings(): SettingsState {
 }
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
-  const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL)
+  const [selectedModel, setSelectedModel] = useState("")
   const [selectedPrompt, setSelectedPrompt] = useState<string | null>(null)
-  const [temperature, setTemperature] = useState(DEFAULT_TEMPERATURE)
+  const [temperature, setTemperature] = useState(0.2)
   const [reasoningEffort, setReasoningEffort] = useState("none")
-  const [downscaleImages, setDownscaleImages] = useState(DEFAULT_DOWNSCALE_IMAGES)
+  const [downscaleImages, setDownscaleImages] = useState(true)
 
   const [researchFastModel, setResearchFastModel] = useState("")
   const [researchSmartModel, setResearchSmartModel] = useState("")
@@ -55,7 +55,20 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [researchReasoning, setResearchReasoning] = useState("medium")
   const [researchReportType, setResearchReportType] = useState("deep")
 
-  const [ocrModel, setOCRModel] = useState(DEFAULT_VISION_MODEL)
+  const [ocrModel, setOCRModel] = useState("")
+
+  useEffect(() => {
+    fetchBackendConfig()
+      .then((cfg) => {
+        setSelectedModel((prev) => prev || cfg.default_model)
+        setTemperature((prev) => prev === 0.2 ? cfg.temperature : prev)
+        setDownscaleImages((prev) => prev === true ? cfg.downscale_images : prev)
+        setOCRModel((prev) => prev || cfg.vision_model)
+      })
+      .catch(() => {
+        // backend unreachable — keep hardcoded fallbacks
+      })
+  }, [])
 
   const value = {
     selectedModel, setSelectedModel,

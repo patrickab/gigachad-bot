@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Fragment, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence } from "framer-motion"
 import dynamic from "next/dynamic"
 import type { Message, Attachment, WebSearchResult, ProjectDocument } from "@/lib/types"
@@ -16,6 +16,30 @@ import { ElevationProvider, ElevatedContainer } from "./ElevatedContainer"
 
 const PdfViewer = dynamic(() => import("./PdfViewer").then((m) => ({ default: m.PdfViewer })), { ssr: false })
 import { DocumentEditor } from "./DocumentEditor"
+
+// Document/vault/attachment callbacks the sidebar (Context + Documents
+// elements) needs but ChatContainer itself never touches — provided by
+// TabContent so they don't have to thread through ChatContainerProps.
+export interface ChatSidebarContextValue {
+  onRemoveAttachment?: (messageIndex: number, attachmentName: string) => void
+  onToggleAttachmentActive?: (messageIndex: number, attachmentName: string) => void
+  onAttachmentContentChange?: (messageIndex: number, attachmentName: string, newContent: string) => void
+  vaultEnabled?: boolean
+  onOpenVault?: () => void
+  documents?: ProjectDocument[]
+  onSelectDocument?: (path: string) => void
+  onOpenDocuments?: () => void
+  onCreateDocument?: () => void
+  onDeleteDocument?: (path: string) => void
+  onDocumentSaved?: (filename?: string, content?: string) => void
+  liveCanvasRef?: React.MutableRefObject<{ path: string; content: string } | null>
+  vaultPaths?: Set<string>
+  vaultEditingPath?: string | null
+  onEditVaultDocument?: (path: string | null) => void
+}
+
+const ChatSidebarContext = createContext<ChatSidebarContextValue>({})
+export const ChatSidebarProvider = ChatSidebarContext.Provider
 
 function AttachmentIcon({ mime }: { mime: string }) {
   if (mime.startsWith("image/")) return <ImageIcon className="h-3.5 w-3.5 text-ink shrink-0" />
@@ -95,7 +119,7 @@ function ContextBody({
   expandedEntries: { messageIndex: number; attachmentName: string }[]
   onToggleExpand: (messageIndex: number, attachmentName: string) => void
   onToggleActive?: (messageIndex: number, attachmentName: string) => void
-  onRemoveAttachment: (messageIndex: number, attachmentName: string) => void
+  onRemoveAttachment?: (messageIndex: number, attachmentName: string) => void
   onAttachmentContentChange?: (messageIndex: number, attachmentName: string, newContent: string) => void
   pdfWide?: boolean
   onTogglePdfWide?: () => void
@@ -139,7 +163,7 @@ function ContextBody({
               </button>
               <button
                 type="button"
-                onClick={() => onRemoveAttachment(mi, att.name)}
+                onClick={() => onRemoveAttachment?.(mi, att.name)}
                 className="rounded p-0.5 text-ink-faint hover:text-danger hover:bg-surface-elevated transition-colors shrink-0"
                 aria-label="Remove attachment"
               >
@@ -310,63 +334,52 @@ function SourcesBody({ result }: { result: WebSearchResult }) {
   )
 }
 
-function buildSidebarElements({
+export function useSidebarElements({
   chatId,
   slug,
   allAttachments,
   expandedEntries,
   onToggleExpand,
-  onToggleAttachmentActive,
-  onRemoveAttachment,
-  onAttachmentContentChange,
   lastSearchResult,
-  vaultEnabled,
-  onOpenVault,
-  documents,
-  onSelectDocument,
-  onOpenDocuments,
-  onCreateDocument,
   editingDocPath,
   onEditDocument,
-  onDeleteDocument,
-  onDocumentSaved,
   isElementOpen,
   onElementOpenChange,
   pdfWide,
   onTogglePdfWide,
-  liveCanvasRef,
-  vaultPaths,
-  vaultEditingPath,
-  onEditVaultDocument,
 }: {
   chatId: string
   slug: string | null
   allAttachments: { messageIndex: number; attachment: Attachment }[]
   expandedEntries: { messageIndex: number; attachmentName: string }[]
   onToggleExpand: (messageIndex: number, attachmentName: string) => void
-  onToggleAttachmentActive?: (messageIndex: number, attachmentName: string) => void
-  onRemoveAttachment: (messageIndex: number, attachmentName: string) => void
-  onAttachmentContentChange?: (messageIndex: number, attachmentName: string, newContent: string) => void
   lastSearchResult?: WebSearchResult
-  vaultEnabled?: boolean
-  onOpenVault?: () => void
-  documents?: ProjectDocument[]
-  onSelectDocument?: (path: string) => void
-  onOpenDocuments?: () => void
-  onCreateDocument?: () => void
   editingDocPath?: string | null
   onEditDocument?: (path: string | null) => void
-  onDeleteDocument?: (path: string) => void
-  onDocumentSaved?: (filename?: string, content?: string) => void
   isElementOpen: (id: string) => boolean
   onElementOpenChange: (id: string, open: boolean) => void
   pdfWide?: boolean
   onTogglePdfWide?: () => void
-  liveCanvasRef?: React.MutableRefObject<{ path: string; content: string } | null>
-  vaultPaths?: Set<string>
-  vaultEditingPath?: string | null
-  onEditVaultDocument?: (path: string | null) => void
 }): ChatSidebarElementConfig[] {
+  const {
+    onToggleAttachmentActive,
+    onRemoveAttachment,
+    onAttachmentContentChange,
+    vaultEnabled,
+    onOpenVault,
+    documents,
+    onSelectDocument,
+    onOpenDocuments,
+    onCreateDocument,
+    onDeleteDocument,
+    onDocumentSaved,
+    liveCanvasRef,
+    vaultPaths,
+    vaultEditingPath,
+    onEditVaultDocument,
+  } = useContext(ChatSidebarContext)
+
+  return useMemo(() => {
   const elements: ChatSidebarElementConfig[] = []
 
   if (allAttachments.length > 0 || vaultEnabled) {
@@ -455,7 +468,16 @@ function buildSidebarElements({
     })
   }
 
-  return elements
+    return elements
+  }, [
+    chatId, slug, allAttachments, expandedEntries, onToggleExpand,
+    onToggleAttachmentActive, onRemoveAttachment, onAttachmentContentChange,
+    lastSearchResult, vaultEnabled, onOpenVault,
+    documents, onSelectDocument, onOpenDocuments, onCreateDocument,
+    editingDocPath, onEditDocument, onDeleteDocument, onDocumentSaved,
+    isElementOpen, onElementOpenChange, pdfWide, onTogglePdfWide,
+    liveCanvasRef, vaultPaths, vaultEditingPath, onEditVaultDocument,
+  ])
 }
 
 const DEFAULT_EXPANDED_TAIL = 1
@@ -478,23 +500,8 @@ interface ChatContainerProps {
   slug?: string | null
   chatMaxWidth?: number
   onOCRRequest?: (image: string) => void
-  onRemoveAttachment?: (messageIndex: number, attachmentName: string) => void
-  onToggleAttachmentActive?: (messageIndex: number, attachmentName: string) => void
-  onAttachmentContentChange?: (messageIndex: number, attachmentName: string, newContent: string) => void
-  vaultEnabled?: boolean
-  onOpenVault?: () => void
-  documents?: ProjectDocument[]
-  onSelectDocument?: (path: string) => void
-  onOpenDocuments?: () => void
-  onCreateDocument?: () => void
-  onDeleteDocument?: (path: string) => void
-  onDocumentSaved?: (filename?: string, content?: string) => void
   extracting?: boolean
   chatInputRef?: React.RefObject<ChatInputHandle | null>
-  liveCanvasRef?: React.MutableRefObject<{ path: string; content: string } | null>
-  vaultPaths?: Set<string>
-  vaultEditingPath?: string | null
-  onEditVaultDocument?: (path: string | null) => void
 }
 
 export function ChatContainer({
@@ -514,23 +521,8 @@ export function ChatContainer({
   slug = null,
   chatMaxWidth,
   onOCRRequest,
-  onRemoveAttachment,
-  onToggleAttachmentActive,
-  onAttachmentContentChange,
-  vaultEnabled,
-  onOpenVault,
-  documents,
-  onSelectDocument,
-  onOpenDocuments,
-  onCreateDocument,
-  onDeleteDocument,
-  onDocumentSaved,
   extracting,
   chatInputRef,
-  liveCanvasRef,
-  vaultPaths,
-  vaultEditingPath,
-  onEditVaultDocument,
 }: ChatContainerProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const [editingDocPath, setEditingDocPath] = useState<string | null>(null)
@@ -596,10 +588,6 @@ export function ChatContainer({
       return [...prev, { messageIndex: mi, attachmentName: name }]
     })
   }, [])
-
-  const handleRemoveAttachment = useCallback((mi: number, name: string) => {
-    onRemoveAttachment?.(mi, name)
-  }, [onRemoveAttachment])
 
   useEffect(() => {
     const el = scrollContainerRef.current
@@ -803,46 +791,30 @@ export function ChatContainer({
     })
   }, [keyboardFocusIdx, allPairsList])
 
-  const sidebarElements = useMemo(
-    () =>
-      buildSidebarElements({
-        chatId,
-        slug,
-        allAttachments,
-        expandedEntries,
-        onToggleExpand: handleToggleExpand,
-        onToggleAttachmentActive,
-        onRemoveAttachment: handleRemoveAttachment,
-        onAttachmentContentChange,
-        lastSearchResult,
-        vaultEnabled,
-        onOpenVault,
-        documents,
-        onSelectDocument,
-        onOpenDocuments,
-        onCreateDocument,
-        editingDocPath,
-        onEditDocument: setEditingDocPath,
-        onDeleteDocument,
-        onDocumentSaved,
-        isElementOpen: (id) => openElements.has(id),
-        onElementOpenChange: (id, open) => {
-          setOpenElements((prev) => {
-            const next = new Set(prev)
-            if (open) next.add(id)
-            else next.delete(id)
-            return next
-          })
-        },
-        pdfWide,
-        onTogglePdfWide: togglePdfWide,
-        liveCanvasRef,
-        vaultPaths,
-        vaultEditingPath,
-        onEditVaultDocument,
-      }),
-    [chatId, slug, allAttachments, expandedEntries, handleToggleExpand, onToggleAttachmentActive, handleRemoveAttachment, onAttachmentContentChange, lastSearchResult, vaultEnabled, onOpenVault, documents, onSelectDocument, onOpenDocuments, onCreateDocument, editingDocPath, onDeleteDocument, onDocumentSaved, openElements, pdfWide, togglePdfWide, liveCanvasRef, vaultPaths, vaultEditingPath, onEditVaultDocument]
-  )
+  const isElementOpen = useCallback((id: string) => openElements.has(id), [openElements])
+  const onElementOpenChange = useCallback((id: string, open: boolean) => {
+    setOpenElements((prev) => {
+      const next = new Set(prev)
+      if (open) next.add(id)
+      else next.delete(id)
+      return next
+    })
+  }, [])
+
+  const sidebarElements = useSidebarElements({
+    chatId,
+    slug,
+    allAttachments,
+    expandedEntries,
+    onToggleExpand: handleToggleExpand,
+    lastSearchResult,
+    editingDocPath,
+    onEditDocument: setEditingDocPath,
+    isElementOpen,
+    onElementOpenChange,
+    pdfWide,
+    onTogglePdfWide: togglePdfWide,
+  })
 
   const hasSidebarContent = sidebarElements.length > 0
   const inputAreaRef = useRef<HTMLDivElement>(null)

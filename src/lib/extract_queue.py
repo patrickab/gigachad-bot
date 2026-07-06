@@ -27,8 +27,9 @@ async def _worker() -> None:
         try:
             from backend.routes.mineru import _parse_pdf
             from config import DIRECTORY_OUTPUT_MINERU
+            from lib.attachment_materialize import mineru_cache_path
 
-            cached = DIRECTORY_OUTPUT_MINERU / f"{pdf_path.stem}.md"
+            cached = mineru_cache_path(pdf_path)
             if not cached.is_file():
                 log.info("Extracting %s via MinerU", pdf_path.name)
                 await _parse_pdf(pdf_path, DIRECTORY_OUTPUT_MINERU)
@@ -42,9 +43,9 @@ async def _worker() -> None:
 
 def enqueue(pdf_path: Path) -> None:
     """Queue a PDF for background extraction. No-op if already cached."""
-    from config import DIRECTORY_OUTPUT_MINERU
+    from lib.attachment_materialize import mineru_cache_path
 
-    cached = DIRECTORY_OUTPUT_MINERU / f"{pdf_path.stem}.md"
+    cached = mineru_cache_path(pdf_path)
     if cached.is_file():
         return
     _queue.put_nowait(pdf_path)
