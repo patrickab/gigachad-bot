@@ -341,6 +341,11 @@ export async function listAllDocuments(): Promise<ProjectDocument[]> {
   return data.documents
 }
 
+export async function listNotes(): Promise<ProjectDocument[]> {
+  const data = await request<{ documents: ProjectDocument[] }>("/documents/notes")
+  return data.documents
+}
+
 export async function uploadDocument(slug: string, file: File): Promise<ProjectDocument> {
   const form = new FormData()
   form.append("file", file)

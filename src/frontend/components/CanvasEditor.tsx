@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { getStroke } from "perfect-freehand"
 import { type StrokeData, type EmbedRect, getSvgPathFromStroke, renderPageToPng } from "@/lib/drawing"
 import { fileViewerRawUrl, writeBinaryDocument } from "@/lib/api"
@@ -164,6 +165,9 @@ interface CanvasEditorProps {
   availableImages?: { path: string; name: string }[]
   slug?: string
   onImageAdded?: (path: string) => void
+  // When given, the toolbar renders into this external element (e.g. the app
+  // header in canvas mode) instead of above the drawing surface.
+  toolbarSlot?: HTMLElement | null
 }
 
 // convert between center (canvas-space point at view center) and offset (SVG translate)
@@ -196,7 +200,7 @@ function pointInPolygon(x: number, y: number, poly: [number, number][]): boolean
   return inside
 }
 
-export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, slug, onImageAdded }: CanvasEditorProps) {
+export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, slug, onImageAdded, toolbarSlot }: CanvasEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
 
@@ -1030,10 +1034,8 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     }
   }
 
-  return (
-    <div className="flex flex-col h-full">
-      {/* Toolbar */}
-      <div className="flex items-center gap-1 px-2 py-1.5 border-b border-divider/50 shrink-0">
+  const toolbar = (
+      <div className={cn("flex items-center gap-1 shrink-0 min-w-0", toolbarSlot ? "flex-1" : "px-2 py-1.5 border-b border-divider/50")}>
         <div className="relative" ref={addMenuRef}>
           <button
             onClick={() => setAddMenuOpen((o) => !o)}
@@ -1212,6 +1214,12 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
         {textMode && <span className="text-[10px] text-ink-faint ml-1">(drag a box to write in)</span>}
         {selectedStrokes.size > 0 && <span className="text-[10px] text-ink-faint ml-1">({selectedStrokes.size} selected — drag or Esc)</span>}
       </div>
+  )
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Toolbar — inline above the canvas, or portaled into the app header in canvas mode */}
+      {toolbarSlot ? createPortal(toolbar, toolbarSlot) : toolbar}
 
       {/* Canvas area */}
       <div

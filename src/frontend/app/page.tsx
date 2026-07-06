@@ -22,6 +22,7 @@ import { FileViewer } from "@/components/FileViewer"
 import { DocumentPicker } from "@/components/DocumentPicker"
 import { DocumentEditor } from "@/components/DocumentEditor"
 import { CreateDocumentPanel } from "@/components/CreateDocumentPanel"
+import { CanvasWorkspace, type CanvasSelection } from "@/components/CanvasWorkspace"
 import { useCommandBar } from "@/hooks/useCommandBar"
 import { useMemoryCategories } from "@/hooks/useMemoryCategories"
 import { TabManager, nextTab, settingsToTabConfig, type TabConfig } from "@/components/TabManager"
@@ -34,7 +35,7 @@ import { useSettings, SettingsProvider } from "@/contexts/SettingsContext"
 import { useProject, ProjectProvider } from "@/contexts/ProjectContext"
 import { useBranches } from "@/contexts/BranchContext"
 import { BranchProvider } from "@/contexts/BranchContext"
-import { SidebarProvider } from "@/contexts/SidebarContext"
+import { SidebarProvider, useSidebar } from "@/contexts/SidebarContext"
 import { MemoryViewerProvider } from "@/contexts/MemoryViewerContext"
 import { MemoryViewer } from "@/components/MemoryViewer"
 import { handleStudyPdf, updateLastMsg as updateLastAssistant } from "@/hooks/useStudyHandler"
@@ -150,6 +151,9 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   const settings = useSettings()
   const config = tab.config
   const hasUsage = totalUsage.total_tokens > 0 ? totalUsage : undefined
+  const { appMode } = useSidebar()
+  const [canvasSel, setCanvasSel] = useState<CanvasSelection | null>(null)
+  const [canvasToolbarSlot, setCanvasToolbarSlot] = useState<HTMLElement | null>(null)
 
   const commandBar = useCommandBar()
   const { globalCategories, projectCategories } = useMemoryCategories(activeProject)
@@ -301,7 +305,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   }, [activeProject, refreshDocuments])
 
   useEffect(() => {
-    if (!isActive) return
+    if (!isActive || appMode === "canvas") return
     const onKey = (e: KeyboardEvent) => {
       if (e.altKey && (e.key === "x" || e.key === "X")) {
         e.preventDefault()
@@ -313,7 +317,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [isActive, refreshDocuments])
+  }, [isActive, appMode, refreshDocuments])
 
   const [branchMessageIdx, setBranchMessageIdx] = useState<number | null>(null)
   const [saveModalOpen, setSaveModalOpen] = useState(false)
@@ -456,7 +460,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   }, [messages, config.selectedModel, setMessages])
 
   useEffect(() => {
-    if (!isActive) return
+    if (!isActive || appMode === "canvas") return
 
     function handler(e: KeyboardEvent) {
       if (e.altKey && e.key === "s") { e.preventDefault(); isTitled ? handleQuickSave() : openSaveModal() }
@@ -496,7 +500,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     return () => {
       window.removeEventListener("keydown", handler, true)
     }
-  }, [isActive, isTitled, handleQuickSave, openSaveModal, reset, commandBar.open, commandBar.submitCommand, commandBar.state.phase, messages, activeProject, chatId, branchMessageIdx, vaultEnabled, openVaultPicker])
+  }, [isActive, appMode, isTitled, handleQuickSave, openSaveModal, reset, commandBar.open, commandBar.submitCommand, commandBar.state.phase, messages, activeProject, chatId, branchMessageIdx, vaultEnabled, openVaultPicker])
 
   const runCommand = useCallback(async (command: string) => {
     if (command === "/vault-load") {
@@ -759,10 +763,15 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         onCascadeDelete={handleCascadeDelete}
         onVaultSelect={handleVaultSelect}
         onVaultsChanged={refreshVaultList}
+        activeCanvasPath={canvasSel?.path ?? null}
+        onCanvasSelect={(path, scope) => setCanvasSel({ path, scope })}
+        onCanvasDeleted={(path) => setCanvasSel((s) => (s?.path === path ? null : s))}
       />
       <main className="flex-1 min-w-0 flex flex-col relative bg-paper">
         <header className="h-[60px] shrink-0 flex items-center px-4 gap-4 z-40 border-b border-divider/50 bg-paper/80 backdrop-blur-xl">
-          {researchEnabled ? (
+          {appMode === "canvas" ? (
+            <div ref={setCanvasToolbarSlot} className="flex-1 min-w-0 flex items-center" />
+          ) : researchEnabled ? (
             <ResearchModelsBar
               models={models}
               fastModel={config.researchFastModel}
@@ -780,15 +789,25 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
             </div>
           )}
 
-          <div className="flex-1" />
+          {appMode !== "canvas" && <div className="flex-1" />}
 
           <div className="flex items-center gap-2">
-            <TokenCounter usage={totalUsage} />
+            {appMode !== "canvas" && <TokenCounter usage={totalUsage} />}
             <ThemeToggle />
             <MoreOptionsMenu prompts={prompts} config={config} onConfigChange={onConfigChange} onEditPrompts={() => setPromptEditorOpen(true)} />
           </div>
         </header>
         <div className="flex-1 overflow-hidden relative transition-opacity duration-200">
+          {appMode === "canvas" ? (
+            <CanvasWorkspace
+              selected={canvasSel}
+              slug={activeProject}
+              toolbarSlot={canvasToolbarSlot}
+              onCloseEditor={() => setCanvasSel(null)}
+              onCreated={setCanvasSel}
+              onModeLabel={onModeLabel}
+            />
+          ) : (
           <ChatContainer
             chatId={chatId}
             messages={messages}
@@ -820,6 +839,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
             slug={activeProject}
             chatMaxWidth={chatMaxWidth}
           />
+          )}
           {ocrEnabled && ocrImage && (
             <OCRPanel
               image={ocrImage}

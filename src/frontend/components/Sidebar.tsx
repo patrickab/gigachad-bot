@@ -4,15 +4,15 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion } from "framer-motion"
 import { VaultTree, type VaultTreeItem } from "./VaultTree"
 import { useVaultTree } from "@/hooks/useVaultTree"
-import { Brain, Clock, FileText, FolderOpen, Lightbulb, LayoutDashboard, PanelLeftClose, PanelLeft, Save, RotateCcw } from "lucide-react"
+import { Brain, Clock, FileText, FolderOpen, Lightbulb, LayoutDashboard, PanelLeftClose, PanelLeft, PenLine, Save, RotateCcw } from "lucide-react"
 import { useMemoryViewer } from "@/contexts/MemoryViewerContext"
 import { SidebarElement } from "./SidebarElement"
 import { useProject } from "@/contexts/ProjectContext"
 import { useBranches } from "@/contexts/BranchContext"
 import { useSidebar } from "@/contexts/SidebarContext"
-import type { BranchMeta, VaultNode, ProjectListItem } from "@/lib/types"
+import type { BranchMeta, VaultNode, ProjectListItem, ProjectDocument } from "@/lib/types"
 import { ChatBranchItem } from "./ChatBranchItem"
-import { addFileVaultMountpoint, addFileVaultRoot, createDirectory, moveHistoryItem, fileVaultTree, removeFileVaultRoot, Vault } from "@/lib/api"
+import { addFileVaultMountpoint, addFileVaultRoot, createDirectory, moveHistoryItem, fileVaultTree, removeFileVaultRoot, listNotes, listProjectDocuments, removeDocument, writeDocument, Vault } from "@/lib/api"
 
 const COLLAPSED_WIDTH = 50
 const EXPANDED_WIDTH = 280
@@ -26,6 +26,9 @@ interface SidebarProps {
   onCascadeDelete?: (filename: string) => Promise<void>
   onVaultSelect?: (path: string) => void
   onVaultsChanged?: () => void
+  activeCanvasPath?: string | null
+  onCanvasSelect?: (path: string, scope: string) => void
+  onCanvasDeleted?: (path: string) => void
 }
 
 export function Sidebar({
@@ -37,6 +40,9 @@ export function Sidebar({
   onCascadeDelete,
   onVaultSelect,
   onVaultsChanged,
+  activeCanvasPath,
+  onCanvasSelect,
+  onCanvasDeleted,
 }: SidebarProps) {
   const {
     collapsed,
@@ -45,6 +51,8 @@ export function Sidebar({
     setProjectsOpen,
     historiesOpen,
     setHistoriesOpen,
+    appMode,
+    setAppMode,
   } = useSidebar()
 
   const {
@@ -104,6 +112,29 @@ export function Sidebar({
   })
   const historiesController = useVaultTree({ storageKey: "expanded_history_folders" })
   const vaultsController = useVaultTree({ storageKey: "expanded_vault_folders" })
+  const canvasController = useVaultTree({ storageKey: "expanded_canvas_folders" })
+
+  const [canvasOpen, setCanvasOpen] = useState(true)
+  const [canvasNotes, setCanvasNotes] = useState<ProjectDocument[]>([])
+  const [projectCanvases, setProjectCanvases] = useState<Record<string, ProjectDocument[]>>({})
+
+  const refreshCanvases = useCallback(async () => {
+    const notes = await listNotes().catch(() => [])
+    setCanvasNotes(notes.filter((d) => d.name.endsWith(".canvas")))
+    const entries = await Promise.all(
+      projects.map(async (p) => [p.slug, (await listProjectDocuments(p.slug).catch(() => [])).filter((d) => d.name.endsWith(".canvas"))] as const),
+    )
+    setProjectCanvases(Object.fromEntries(entries))
+  }, [projects])
+
+  useEffect(() => {
+    if (appMode === "canvas") refreshCanvases()
+  }, [appMode, activeCanvasPath, refreshCanvases])
+
+  const canvasItems = useMemo(() =>
+    buildCanvasItems(canvasNotes, projects, projectCanvases, activeCanvasPath ?? null),
+    [canvasNotes, projects, projectCanvases, activeCanvasPath],
+  )
 
   // File vaults: roots maintained server-side in file-vault-roots.json; rendered
   // as a file tree. Clicking a file attaches it to the active chat as a live reference.
@@ -170,14 +201,21 @@ export function Sidebar({
       <div className="group flex items-center justify-between px-2 py-2 border-b border-divider h-[60px] bg-paper/60 backdrop-blur-lg">
         {!collapsed && (
           <div className="flex items-center gap-1.5 px-2 min-w-0">
-            <span className="text-base font-semibold tracking-tight text-ink truncate">GigaChat Bot</span>
             <button
-              onClick={() => openMemoryViewer({ scope: "global" })}
-              aria-label="Open global memory profile"
-              className="shrink-0 rounded-md p-1 text-ink-subtle opacity-0 group-hover:opacity-100 hover:bg-surface hover:text-ink transition-all"
+              onClick={() => setAppMode(appMode === "canvas" ? "chat" : "canvas")}
+              className="text-base font-semibold tracking-tight text-ink truncate hover:opacity-80 transition-opacity"
             >
-              <Brain className="h-4 w-4" />
+              {appMode === "canvas" ? "Canvas" : "GigaChat Bot"}
             </button>
+            {appMode !== "canvas" && (
+              <button
+                onClick={() => openMemoryViewer({ scope: "global" })}
+                aria-label="Open global memory profile"
+                className="shrink-0 rounded-md p-1 text-ink-subtle opacity-0 group-hover:opacity-100 hover:bg-surface hover:text-ink transition-all"
+              >
+                <Brain className="h-4 w-4" />
+              </button>
+            )}
           </div>
         )}
         <div className={collapsed ? "flex justify-center w-full" : "flex justify-end"}>
@@ -192,6 +230,39 @@ export function Sidebar({
       </div>
 
       <div className="flex-1 overflow-y-auto py-3 flex flex-col gap-2">
+        {appMode === "canvas" ? (
+          <div className="px-2">
+            <VaultTree<CanvasData>
+              sectionIcon={PenLine}
+              sectionTitle="Canvases"
+              items={canvasItems}
+              collapsed={collapsed}
+              open={canvasOpen}
+              onOpenChange={setCanvasOpen}
+              onExpand={expandIfCollapsed}
+              controller={canvasController}
+              plusTitle="New canvas"
+              folderPlaceholder="Canvas name"
+              folderIcon={PenLine}
+              onElementClick={(item) => item.data && onCanvasSelect?.(item.data.path, item.data.scope)}
+              onElementDelete={async (item) => {
+                if (!item.data) return
+                await removeDocument(item.data.scope, item.data.path)
+                refreshCanvases()
+                onCanvasDeleted?.(item.data.path)
+              }}
+              onAddFolder={async (parentId, name) => {
+                const scope = parentId ?? ""
+                const filename = name.endsWith(".canvas") ? name : `${name}.canvas`
+                const doc = await writeDocument(scope, filename)
+                refreshCanvases()
+                setCanvasOpen(true)
+                onCanvasSelect?.(doc.path, scope)
+              }}
+            />
+          </div>
+        ) : (
+        <>
         <div className="px-2">
           <VaultTree
             sectionIcon={Lightbulb}
@@ -307,9 +378,45 @@ export function Sidebar({
             />
           ))}
         </div>
+        </>
+        )}
       </div>
     </motion.aside>
   )
+}
+
+interface CanvasData {
+  path: string
+  scope: string
+}
+
+function buildCanvasItems(
+  canvasNotes: ProjectDocument[],
+  projects: ProjectListItem[],
+  projectCanvases: Record<string, ProjectDocument[]>,
+  activeCanvasPath: string | null,
+): VaultTreeItem<CanvasData>[] {
+  const canvasElement = (doc: ProjectDocument, scope: string): VaultTreeItem<CanvasData> => ({
+    id: doc.path,
+    label: doc.name.replace(/\.canvas$/, ""),
+    type: "element",
+    icon: PenLine,
+    data: { path: doc.path, scope },
+    isActive: activeCanvasPath === doc.path,
+  })
+
+  const projectItems: VaultTreeItem<CanvasData>[] = projects
+    .filter((p) => (projectCanvases[p.slug] ?? []).length > 0)
+    .map((p) => ({
+      id: p.slug,
+      label: p.name,
+      type: "vault" as const,
+      icon: Lightbulb,
+      children: (projectCanvases[p.slug] ?? []).map((doc) => canvasElement(doc, p.slug)),
+    }))
+
+  const rootItems = canvasNotes.map((doc) => canvasElement(doc, ""))
+  return [...projectItems, ...rootItems]
 }
 
 function buildVaultItems(nodes: VaultNode[]): VaultTreeItem<string>[] {

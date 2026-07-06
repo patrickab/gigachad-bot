@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from backend.routes.deps import get_project_store
 from config import (
+    DIRECTORY_NOTES,
     DIRECTORY_OUTPUT_DRAWINGS,
     DIRECTORY_OUTPUT_LATEX,
     DIRECTORY_OUTPUT_MARKDOWN,
@@ -97,21 +98,35 @@ async def list_all_documents(store: ProjectStore = Depends(get_project_store)):
     return DocumentListResponse(documents=_meta_list(store.list_all_files()))
 
 
+@router.get("/notes", response_model=DocumentListResponse)
+async def list_notes() -> DocumentListResponse:
+    """List non-project canvases/notes (DIRECTORY_NOTES)."""
+    paths = [str(p) for p in DIRECTORY_NOTES.iterdir() if p.is_file()]
+    return DocumentListResponse(documents=_meta_list(paths))
+
+
 @router.post("/write", response_model=DocumentMeta)
 async def write_document(
     req: WriteDocumentRequest,
     store: ProjectStore = Depends(get_project_store),
 ):
-    """Create or overwrite a document in the project's documents/ directory."""
+    """Create or overwrite a document. Empty slug = non-project note (DIRECTORY_NOTES),
+    otherwise the project's documents/ directory."""
+    safe_name = Path(req.name).name
+    if not safe_name:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    if req.slug == "":
+        dest = DIRECTORY_NOTES / safe_name
+        dest.write_text(req.content, encoding="utf-8")
+        return DocumentMeta(**lib_docs.document_meta(dest))
+
     meta = store._read_meta()
     if not store._find_entry(meta, req.slug):
         raise HTTPException(status_code=404, detail="Project not found")
     docs_dir = store._resolve_project_dir(req.slug) / "documents"
     docs_dir.mkdir(parents=True, exist_ok=True)
 
-    safe_name = Path(req.name).name
-    if not safe_name:
-        raise HTTPException(status_code=400, detail="Invalid filename")
     dest = docs_dir / safe_name
     dest.write_text(req.content, encoding="utf-8")
 
@@ -241,7 +256,14 @@ async def remove_document(
     store: ProjectStore = Depends(get_project_store),
 ):
     """Unassign a document from a project. If it lives in the project's
-    documents/ directory, also delete the file itself."""
+    documents/ directory, also delete the file itself. Empty slug = non-project
+    note (DIRECTORY_NOTES), deleted directly since there's no project to unlink from."""
+    if slug == "":
+        resolved = Path(path).expanduser().resolve()
+        if resolved.is_relative_to(DIRECTORY_NOTES.resolve()) and resolved.is_file():
+            resolved.unlink()
+        return {"status": "ok"}
+
     try:
         store.remove_file(slug, path)
     except FileNotFoundError as exc:

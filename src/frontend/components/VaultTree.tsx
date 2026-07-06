@@ -63,6 +63,8 @@ interface VaultTreeProps<T> {
   onAddMountpoint?: (vaultId: string, path: string) => Promise<void>
   mountpointPlaceholder?: string
   onAddFolder?: (parentId: string | null, name: string) => Promise<void>
+  folderPlaceholder?: string
+  folderIcon?: ElementType
   onMoveElement?: (elementId: string, targetId: string | null) => Promise<void>
   onDashboardClick?: (vaultId: string) => void
   onMemoryClick?: (vaultId: string) => void
@@ -85,6 +87,8 @@ interface TreeCtx<T> {
   onElementDelete?: (item: VaultTreeItem<T>) => void
   renderElement?: (item: VaultTreeItem<T>, depth: number) => React.ReactNode
   onAddFolder?: (parentId: string | null, name: string) => Promise<void>
+  folderPlaceholder: string
+  folderIcon: ElementType
   onAddMountpoint?: (vaultId: string, path: string) => Promise<void>
   mountpointPlaceholder: string
   onDashboardClick?: (vaultId: string) => void
@@ -144,6 +148,8 @@ export function VaultTree<T>({
   onAddMountpoint,
   mountpointPlaceholder = "Mountpoint path…",
   onAddFolder,
+  folderPlaceholder = "Folder name",
+  folderIcon = Folder,
   onMoveElement,
   onDashboardClick,
   onMemoryClick,
@@ -218,6 +224,8 @@ export function VaultTree<T>({
     onElementDelete,
     renderElement,
     onAddFolder,
+    folderPlaceholder,
+    folderIcon,
     onAddMountpoint,
     mountpointPlaceholder,
     onDashboardClick,
@@ -298,7 +306,8 @@ export function VaultTree<T>({
                     onChange={setCreateName}
                     onSubmit={handleCreateSubmit}
                     onCancel={() => { setCreateMode(null); setCreateName("") }}
-                    placeholder={createMode === "vault" ? vaultPlaceholder : "Folder name"}
+                    placeholder={createMode === "vault" ? vaultPlaceholder : folderPlaceholder}
+                    icon={createMode === "vault" ? undefined : folderIcon}
                   />
                 )}
               </AnimatePresence>
@@ -357,6 +366,8 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
     onDrop,
     onVaultDelete,
     onAddFolder,
+    folderPlaceholder,
+    folderIcon,
     onAddMountpoint,
     mountpointPlaceholder,
     onMemoryClick,
@@ -485,8 +496,8 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
             onChange={setCreateName}
             onSubmit={handleCreateSubmit}
             onCancel={() => { setCreateMode(null); setCreateName("") }}
-            placeholder={createMode === "mountpoint" ? mountpointPlaceholder : "Folder name"}
-            icon={createMode === "mountpoint" ? HardDrive : Folder}
+            placeholder={createMode === "mountpoint" ? mountpointPlaceholder : folderPlaceholder}
+            icon={createMode === "mountpoint" ? HardDrive : folderIcon}
           />
         )}
       </AnimatePresence>

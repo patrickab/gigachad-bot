@@ -27,6 +27,7 @@ interface DocumentEditorProps {
   onModeLabel?: (label: string) => void
   onNavigate?: (path: string) => void
   model?: string
+  canvasToolbarSlot?: HTMLElement | null
 }
 
 function editorLanguage(path: string): string {
@@ -89,7 +90,7 @@ function ResizableEditor({ children }: { children: React.ReactNode }) {
   )
 }
 
-export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, availablePdfs, availableImages, overlay, persistOverride, onModeLabel, onNavigate, model }: DocumentEditorProps) {
+export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, availablePdfs, availableImages, overlay, persistOverride, onModeLabel, onNavigate, model, canvasToolbarSlot }: DocumentEditorProps) {
   const isCanvas = path.endsWith(".canvas")
   const [content, setContent] = useState<string | null>(null)
   const [renderedContent, setRenderedContent] = useState<string | null>(null)
@@ -335,7 +336,7 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
   )
 
   const canvasBody = isCanvas && canvasDoc && (
-    <CanvasEditor doc={canvasDoc} onChange={handleCanvasChange} availablePdfs={availablePdfs} availableImages={availableImages} slug={slug} onImageAdded={() => onSaved?.()} />
+    <CanvasEditor doc={canvasDoc} onChange={handleCanvasChange} availablePdfs={availablePdfs} availableImages={availableImages} slug={slug} onImageAdded={() => onSaved?.()} toolbarSlot={canvasToolbarSlot} />
   )
 
   const editorBody = textBody || canvasBody

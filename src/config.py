@@ -19,6 +19,10 @@ DIRECTORY_CHAT_HISTORIES = BASE_DIR / "chat_histories"
 # folder visually distinct from chat JSON files when browsing with `ls`.
 DIRECTORY_CHAT_UPLOADS = DIRECTORY_CHAT_HISTORIES / "_uploads"
 
+# Non-project canvases/notes. Leading underscore mirrors DIRECTORY_CHAT_UPLOADS
+# so it stays visually distinct from chat JSON files when browsing with `ls`.
+DIRECTORY_NOTES = DIRECTORY_CHAT_HISTORIES / "_notes"
+
 # --- Application-wide small/fast model defaults ---
 # Used for lightweight tasks like query expansion, where speed matters more than raw capability.
 # Provider-prefixed models route through LiteLLM; unprefixed models are treated as Ollama by callers.
@@ -82,6 +86,7 @@ def ensure_directories() -> None:
         DIRECTORY_OUTPUT_LATEX,
         DIRECTORY_OUTPUT_DRAWINGS,
         DIRECTORY_CHAT_UPLOADS,
+        DIRECTORY_NOTES,
         DIRECTORY_CHAT_HISTORIES / "memory",
         DIRECTORY_CHAT_HISTORIES / "memory" / "pending",
     ]

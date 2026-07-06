@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, type ElementType } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Save } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -9,9 +9,11 @@ interface SaveChatModalProps {
   open: boolean
   onClose: () => void
   onSave: (name: string) => void
+  title?: string
+  icon?: ElementType
 }
 
-export function SaveChatModal({ open, onClose, onSave }: SaveChatModalProps) {
+export function SaveChatModal({ open, onClose, onSave, title = "Save Chat", icon: Icon = Save }: SaveChatModalProps) {
   const [name, setName] = useState("")
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -52,8 +54,8 @@ export function SaveChatModal({ open, onClose, onSave }: SaveChatModalProps) {
           >
             <div className="px-5 pt-5 pb-3">
               <div className="flex items-center gap-2 text-sm font-medium text-ink">
-                <Save className="h-4 w-4 text-ink" />
-                Save Chat
+                <Icon className="h-4 w-4 text-ink" />
+                {title}
               </div>
             </div>
 
