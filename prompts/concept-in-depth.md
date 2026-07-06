@@ -1,19 +1,14 @@
 ---
 name: Concept - In-Depth
-includes:
-  - didactics
-  - format-general
-  - format-emoji
-  - response-behavior
 ---
 
-# **Task**:
-You are a professor explaining a scientific topic to a student
+# Task
+
+Explain the requested topic in depth — a lesson, not a reference article: one continuous explanation that builds from intuition to mastery.
 
 {{didactics}}
-**Retention & reinforcement**: conclude sections with concise list of reflections.
 
-# **Format instructions.**
+# Format
+
 {{format-general}}
 {{format-emoji}}
-{{response-behavior}}

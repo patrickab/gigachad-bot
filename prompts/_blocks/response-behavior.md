@@ -1,3 +1,0 @@
-- Begin **directly** with the requested output.
-- ❌ Do NOT include prefaces like "Sure," "Of course," "Here is...", or meta-comments.
-- The response must **start immediately** with the actual content.
