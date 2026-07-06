@@ -195,19 +195,41 @@ class FileVault:
         """
         files: list[dict[str, str]] = []
         for root in self._roots:
-            if not root.is_dir():
-                continue
-            for path in root.rglob("*"):
-                if not path.is_file() or path.suffix.lower() not in VAULT_SUFFIXES:
-                    continue
-                rel = path.relative_to(root)
-                if any(part in _SKIP_DIRS for part in rel.parts):
-                    continue
-                if _is_untitled(path.name):
-                    continue
-                files.append({"path": str(path), "name": path.name})
+            if root.is_dir():
+                self._collect_files(root, files)
         files.sort(key=lambda f: f["path"].lower())
         return files
+
+    def list_files_for_project(self, slug: str) -> list[dict[str, str]]:
+        """Flat ``{path, name}`` list of files under vaults mounted to *slug*.
+
+        Includes files from each such vault's mountpoints so a mounted drive's
+        contents surface alongside the vault's own files.
+        """
+        files: list[dict[str, str]] = []
+        for root in self._roots:
+            if not root.is_dir():
+                continue
+            if self._project_tags.get(root) != slug:
+                continue
+            self._collect_files(root, files)
+            for mp in self._mountpoints.get(root, []):
+                if mp.is_dir():
+                    self._collect_files(mp, files)
+        files.sort(key=lambda f: f["path"].lower())
+        return files
+
+    @staticmethod
+    def _collect_files(base: Path, out: list[dict[str, str]]) -> None:
+        for path in base.rglob("*"):
+            if not path.is_file() or path.suffix.lower() not in VAULT_SUFFIXES:
+                continue
+            rel = path.relative_to(base)
+            if any(part in _SKIP_DIRS for part in rel.parts):
+                continue
+            if _is_untitled(path.name):
+                continue
+            out.append({"path": str(path), "name": path.name})
 
     def tree(self) -> list[dict]:
         """Nested folder/file tree per root for the sidebar VaultTree.

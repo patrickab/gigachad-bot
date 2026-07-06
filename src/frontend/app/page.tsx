@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import dynamic from "next/dynamic"
 import { Sidebar } from "@/components/Sidebar"
@@ -49,6 +49,7 @@ import {
   parseHistoryFile,
   buildHistoryFile,
   listFileVaultFiles,
+  listProjectVaultDocuments,
   attachFileVaultFile,
   writeFileVaultFile,
   listProjectDocuments,
@@ -167,7 +168,34 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   const [documentOpen, setDocumentOpen] = useState(false)
   const [createDocOpen, setCreateDocOpen] = useState(false)
   const [projectDocuments, setProjectDocuments] = useState<ProjectDocument[]>([])
+  const [vaultProjectDocs, setVaultProjectDocs] = useState<ProjectDocument[]>([])
   const [allDocuments, setAllDocuments] = useState<ProjectDocument[]>([])
+
+  // A path is "vault-surfaced" only when it's not already a project file — a
+  // promoted vault PDF that's also in the project behaves as a project doc
+  // (deletable, library attach), and the merged list shows it just once.
+  const vaultDocPaths = useMemo(() => {
+    const projectPaths = new Set(projectDocuments.map((d) => d.path))
+    return new Set(vaultProjectDocs.filter((d) => !projectPaths.has(d.path)).map((d) => d.path))
+  }, [projectDocuments, vaultProjectDocs])
+  // Merge library/project docs with vault docs, deduping by path so a PDF that
+  // exists both in the project files and in a mounted vault (or was promoted
+  // into the cloud library) appears exactly once — library/cloud wins.
+  const mergedDocuments = useMemo(() => {
+    const seen = new Set<string>()
+    const out: ProjectDocument[] = []
+    for (const d of projectDocuments) {
+      if (seen.has(d.path)) continue
+      seen.add(d.path)
+      out.push(d)
+    }
+    for (const d of vaultProjectDocs) {
+      if (seen.has(d.path)) continue
+      seen.add(d.path)
+      out.push(d)
+    }
+    return out
+  }, [projectDocuments, vaultProjectDocs])
 
   useEffect(() => {
     let cancelled = false
@@ -228,6 +256,12 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
 
   const handleDocumentSelect = useCallback(async (path: string) => {
     setDocumentOpen(false)
+    if (vaultDocPaths.has(path)) {
+      setExtracting((n) => n + 1)
+      try { chatInputRef.current?.addAttachment(await attachFileVaultFile(path)) } catch { /* */ }
+      finally { setExtracting((n) => n - 1) }
+      return
+    }
     if (path.endsWith(".canvas")) {
       try {
         const live = liveCanvasRef.current
@@ -245,11 +279,16 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       try { chatInputRef.current?.addAttachment(await attachDocument(chatId, path, activeProject)) } catch { /* */ }
       finally { setExtracting((n) => n - 1) }
     }
-  }, [chatId, activeProject])
+  }, [chatId, activeProject, vaultDocPaths])
 
   const loadProjectDocs = useCallback(() => {
-    if (activeProject) listProjectDocuments(activeProject).then(setProjectDocuments).catch(() => {})
-    else setProjectDocuments([])
+    if (activeProject) {
+      listProjectDocuments(activeProject).then(setProjectDocuments).catch(() => {})
+      listProjectVaultDocuments(activeProject).then(setVaultProjectDocs).catch(() => setVaultProjectDocs([]))
+    } else {
+      setProjectDocuments([])
+      setVaultProjectDocs([])
+    }
   }, [activeProject])
 
   const refreshDocuments = useCallback(() => {
@@ -832,7 +871,10 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
             onAttachmentContentChange={handleAttachmentContentChange}
             vaultEnabled={vaultEnabled}
             onOpenVault={openVaultPicker}
-            documents={projectDocuments}
+            documents={mergedDocuments}
+            vaultPaths={vaultDocPaths}
+            vaultEditingPath={vaultEditPath}
+            onEditVaultDocument={setVaultEditPath}
             onSelectDocument={handleDocumentSelect}
             onOpenDocuments={activeProject ? openDocuments : undefined}
             onCreateDocument={activeProject ? () => setCreateDocOpen(true) : undefined}

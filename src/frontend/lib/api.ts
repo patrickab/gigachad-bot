@@ -252,6 +252,12 @@ export async function listFileVaultFiles(): Promise<{ enabled: boolean; files: V
   return request("/filevaults/files")
 }
 
+/** Files from vaults mounted to *slug* — shaped like ProjectDocument so the chat sidebar can list them. */
+export async function listProjectVaultDocuments(slug: string): Promise<ProjectDocument[]> {
+  const data = await request<{ documents: ProjectDocument[] }>(`/filevaults/project-documents?slug=${encodeURIComponent(slug)}`)
+  return data.documents
+}
+
 export async function fileVaultTree(): Promise<{ enabled: boolean; tree: VaultNode[] }> {
   return request("/filevaults/tree")
 }

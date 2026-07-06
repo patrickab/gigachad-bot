@@ -158,7 +158,7 @@ function ContextBody({
   )
 }
 
-function DocumentsBody({ documents, slug, onSelect, editingPath, onEdit, onDelete, onSaved, onLiveContent, pdfWide, onTogglePdfWide }: { documents: ProjectDocument[]; slug: string | null; onSelect?: (path: string) => void; editingPath?: string | null; onEdit?: (path: string | null) => void; onDelete?: (path: string) => void; onSaved?: (filename?: string, content?: string) => void; onLiveContent?: (path: string, content: string | null) => void; pdfWide?: boolean; onTogglePdfWide?: () => void }) {
+function DocumentsBody({ documents, slug, onSelect, editingPath, onEdit, onDelete, onSaved, onLiveContent, pdfWide, onTogglePdfWide, vaultPaths, vaultEditingPath, onEditVault }: { documents: ProjectDocument[]; slug: string | null; onSelect?: (path: string) => void; editingPath?: string | null; onEdit?: (path: string | null) => void; onDelete?: (path: string) => void; onSaved?: (filename?: string, content?: string) => void; onLiveContent?: (path: string, content: string | null) => void; pdfWide?: boolean; onTogglePdfWide?: () => void; vaultPaths?: Set<string>; vaultEditingPath?: string | null; onEditVault?: (path: string | null) => void }) {
   if (documents.length === 0) {
     return (
       <div className="flex items-center justify-center py-6 text-xs text-ink-faint">
@@ -175,15 +175,22 @@ function DocumentsBody({ documents, slug, onSelect, editingPath, onEdit, onDelet
     <div>
       {documents.map((doc) => {
         const Icon = doc.mime === "application/pdf" ? FileType : FileText
-        const editable = isEditable(doc)
-        const expanded = editingPath === doc.path
+        const isVault = vaultPaths?.has(doc.path) ?? false
         const isPdf = doc.mime === "application/pdf"
+        // Vault PDFs inline-preview like library PDFs; only vault *text* docs
+        // (.md/.tex/.txt) route to the vault-editor overlay (onEditVault).
+        const vaultText = isVault && !isPdf
+        const editable = isEditable(doc) && !vaultText
+        const expanded = editingPath === doc.path || (vaultText && vaultEditingPath === doc.path)
         return (
           <div key={doc.path} className="border-b border-divider/50">
             <div className="flex items-center gap-1 px-2 py-2 hover:bg-surface/50 transition-colors">
               <button
                 type="button"
-                onClick={() => onEdit?.(expanded ? null : doc.path)}
+                onClick={() => {
+                  if (vaultText) onEditVault?.(expanded ? null : doc.path)
+                  else onEdit?.(expanded ? null : doc.path)
+                }}
                 className="rounded p-0.5 text-ink-faint hover:text-ink hover:bg-surface-elevated transition-colors shrink-0"
               >
                 {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
@@ -196,13 +203,15 @@ function DocumentsBody({ documents, slug, onSelect, editingPath, onEdit, onDelet
                 <Icon className="h-3.5 w-3.5 shrink-0 text-ink-faint" />
                 <span className="min-w-0 flex-1 truncate text-[11px] font-medium">{doc.name}</span>
               </button>
-              <button
-                type="button"
-                onClick={() => onDelete?.(doc.path)}
-                className="rounded p-0.5 text-ink-faint hover:text-danger hover:bg-surface-elevated transition-colors shrink-0"
-              >
-                <X className="h-3 w-3" />
-              </button>
+              {!isVault && (
+                <button
+                  type="button"
+                  onClick={() => onDelete?.(doc.path)}
+                  className="rounded p-0.5 text-ink-faint hover:text-danger hover:bg-surface-elevated transition-colors shrink-0"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
             </div>
             {expanded && editable && slug && (
               <DocumentEditor path={doc.path} slug={slug} onClose={() => onEdit?.(null)} onSaved={onSaved} onLiveContent={onLiveContent} availablePdfs={pdfDocs} availableImages={imageDocs} />
@@ -326,6 +335,9 @@ function buildSidebarElements({
   pdfWide,
   onTogglePdfWide,
   liveCanvasRef,
+  vaultPaths,
+  vaultEditingPath,
+  onEditVaultDocument,
 }: {
   chatId: string
   slug: string | null
@@ -351,6 +363,9 @@ function buildSidebarElements({
   pdfWide?: boolean
   onTogglePdfWide?: () => void
   liveCanvasRef?: React.MutableRefObject<{ path: string; content: string } | null>
+  vaultPaths?: Set<string>
+  vaultEditingPath?: string | null
+  onEditVaultDocument?: (path: string | null) => void
 }): ChatSidebarElementConfig[] {
   const elements: ChatSidebarElementConfig[] = []
 
@@ -421,7 +436,7 @@ function buildSidebarElements({
       open: isElementOpen("documents"),
       onOpenChange: (o) => onElementOpenChange("documents", o),
       body: (
-        <DocumentsBody documents={docs} slug={slug} onSelect={onSelectDocument} editingPath={editingDocPath} onEdit={onEditDocument} onDelete={onDeleteDocument} onSaved={onDocumentSaved} onLiveContent={liveCanvasRef ? (p, c) => { liveCanvasRef.current = c !== null ? { path: p, content: c } : null } : undefined} pdfWide={pdfWide} onTogglePdfWide={onTogglePdfWide} />
+        <DocumentsBody documents={docs} slug={slug} onSelect={onSelectDocument} editingPath={editingDocPath} onEdit={onEditDocument} onDelete={onDeleteDocument} onSaved={onDocumentSaved} onLiveContent={liveCanvasRef ? (p, c) => { liveCanvasRef.current = c !== null ? { path: p, content: c } : null } : undefined} pdfWide={pdfWide} onTogglePdfWide={onTogglePdfWide} vaultPaths={vaultPaths} vaultEditingPath={vaultEditingPath} onEditVault={onEditVaultDocument} />
       ),
     })
   }
@@ -477,6 +492,9 @@ interface ChatContainerProps {
   extracting?: boolean
   chatInputRef?: React.RefObject<ChatInputHandle | null>
   liveCanvasRef?: React.MutableRefObject<{ path: string; content: string } | null>
+  vaultPaths?: Set<string>
+  vaultEditingPath?: string | null
+  onEditVaultDocument?: (path: string | null) => void
 }
 
 export function ChatContainer({
@@ -510,6 +528,9 @@ export function ChatContainer({
   extracting,
   chatInputRef,
   liveCanvasRef,
+  vaultPaths,
+  vaultEditingPath,
+  onEditVaultDocument,
 }: ChatContainerProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const [editingDocPath, setEditingDocPath] = useState<string | null>(null)
@@ -816,8 +837,11 @@ export function ChatContainer({
         pdfWide,
         onTogglePdfWide: togglePdfWide,
         liveCanvasRef,
+        vaultPaths,
+        vaultEditingPath,
+        onEditVaultDocument,
       }),
-    [chatId, slug, allAttachments, expandedEntries, handleToggleExpand, onToggleAttachmentActive, handleRemoveAttachment, onAttachmentContentChange, lastSearchResult, vaultEnabled, onOpenVault, documents, onSelectDocument, onOpenDocuments, onCreateDocument, editingDocPath, onDeleteDocument, onDocumentSaved, openElements, pdfWide, togglePdfWide, liveCanvasRef]
+    [chatId, slug, allAttachments, expandedEntries, handleToggleExpand, onToggleAttachmentActive, handleRemoveAttachment, onAttachmentContentChange, lastSearchResult, vaultEnabled, onOpenVault, documents, onSelectDocument, onOpenDocuments, onCreateDocument, editingDocPath, onDeleteDocument, onDocumentSaved, openElements, pdfWide, togglePdfWide, liveCanvasRef, vaultPaths, vaultEditingPath, onEditVaultDocument]
   )
 
   const hasSidebarContent = sidebarElements.length > 0
