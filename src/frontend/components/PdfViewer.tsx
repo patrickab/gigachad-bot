@@ -71,6 +71,7 @@ async function collectImageRects(page: any): Promise<ImageRect[]> {
 // vertical scrollbar gutter reserved so a fitted page never triggers horizontal scroll
 const SCROLLBAR = 16
 
+
 function PdfViewerInner({
   url,
   isFullscreen,
@@ -272,6 +273,33 @@ function PdfViewerInner({
 
   const ready = numPages != null && availWidth != null && (!fitWidth || pageAspect != null)
 
+  // Keep the document spot at the viewport's top edge fixed across width
+  // changes (container resize). Pages scale with width but the PAGE_GAPs
+  // don't, so map scrollTop exactly: page index + fraction within that page,
+  // re-projected onto the new page height. Runs before paint; the minHeight
+  // floor below guarantees the new scrollHeight already exists, so the
+  // assignment can't be clamped away. Requires overflow-anchor: none on the
+  // scroller — otherwise native scroll anchoring makes its own correction and
+  // this one lands past the right spot.
+  const prevRenderWidthRef = useRef(renderWidth)
+  useLayoutEffect(() => {
+    const prev = prevRenderWidthRef.current
+    prevRenderWidthRef.current = renderWidth
+    const el = scrollRef.current
+    if (!el || prev === renderWidth || prev <= 0) return
+    if (pageAspect != null) {
+      const pageOld = prev * zoom * pageAspect
+      const pageNew = renderWidth * zoom * pageAspect
+      const page = Math.floor(el.scrollTop / (pageOld + PAGE_GAP))
+      const frac = (el.scrollTop - page * (pageOld + PAGE_GAP)) / pageOld
+      el.scrollTop = page * (pageNew + PAGE_GAP) + frac * pageNew
+    } else {
+      el.scrollTop *= renderWidth / prev
+    }
+    el.scrollLeft *= renderWidth / prev
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reposition only when the width actually changes
+  }, [renderWidth])
+
   const zoomLabel = `${Math.round(zoom * 100)}%`
 
   // fitWidth: fill parent width, self-size height to one page. Otherwise fill parent.
@@ -362,7 +390,9 @@ function PdfViewerInner({
         ref={scrollRef}
         className="flex-1 min-h-0 overflow-auto focus:outline-none"
         tabIndex={0}
-        style={fitWidth ? { scrollSnapType: "y proximity" } : undefined}
+        // overflow-anchor off: the width-change effect above owns the scroll
+        // position; native scroll anchoring would apply a second correction
+        style={{ overflowAnchor: "none", ...(fitWidth ? { scrollSnapType: "y proximity" as const } : undefined) }}
       >
         <Document file={url} onLoadSuccess={onDocumentLoadSuccess}>
           {ready && (
@@ -371,7 +401,16 @@ function PdfViewerInner({
                 <div
                   key={i}
                   className="pdf-page relative"
-                  style={{ marginBottom: PAGE_GAP, scrollSnapAlign: fitWidth ? "start" : undefined }}
+                  // minHeight floor: react-pdf pages collapse to a tiny placeholder
+                  // while re-rasterizing, which caves in scrollHeight and clamps
+                  // scrollTop to 0 — "the PDF jumped back to page 1". ponytail:
+                  // floor uses the first page's aspect; mixed page sizes drift a
+                  // little but never collapse.
+                  style={{
+                    marginBottom: PAGE_GAP,
+                    minHeight: pageAspect != null ? Math.round(renderWidth * zoom * pageAspect) : undefined,
+                    scrollSnapAlign: fitWidth ? "start" : undefined,
+                  }}
                   data-page-number={i + 1}
                 >
                   <Page pageNumber={i + 1} width={Math.round(renderWidth * zoom)} renderTextLayer={false} />

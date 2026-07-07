@@ -1,8 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { PenLine } from "lucide-react"
-import { CanvasEditor, emptyCanvasDoc, serializeCanvasDoc, type CanvasDocument } from "./CanvasEditor"
+import { CanvasEditor, emptyCanvasDoc, parseCanvasDoc, serializeCanvasDoc, type CanvasDocument } from "./CanvasEditor"
 import { DocumentEditor } from "./DocumentEditor"
 import { SaveChatModal } from "./SaveChatModal"
 import { writeDocument } from "@/lib/api"
@@ -22,17 +22,33 @@ interface CanvasWorkspaceProps {
   onModeLabel?: (label: string) => void
 }
 
+const SCRATCH_STORAGE_KEY = "scratch-canvas-doc"
+
 export function CanvasWorkspace({ selected, slug, toolbarSlot, onCloseEditor, onCreated, onModeLabel }: CanvasWorkspaceProps) {
-  // The scratch canvas shown by default — not persisted until the user saves it.
+  // The scratch canvas shown by default — no backing file until the user saves
+  // it, so it lives in localStorage: every change persists, and leaving canvas
+  // mode (which unmounts this component) loses nothing.
   const [doc, setDoc] = useState<CanvasDocument>(() => emptyCanvasDoc())
   const [saveOpen, setSaveOpen] = useState(false)
 
+  const restoredRef = useRef(false)
+  useEffect(() => {
+    if (restoredRef.current) return
+    restoredRef.current = true
+    try {
+      const s = localStorage.getItem(SCRATCH_STORAGE_KEY)
+      if (s?.trim()) setDoc(parseCanvasDoc(s))
+    } catch { /* corrupt scratch — start empty */ }
+  }, [])
+
+  useEffect(() => {
+    if (!restoredRef.current) return
+    try { localStorage.setItem(SCRATCH_STORAGE_KEY, serializeCanvasDoc(doc)) } catch { /* quota */ }
+  }, [doc])
+
   // eslint-disable-next-line react-hooks/exhaustive-deps -- re-firing would only re-set the same label
   useEffect(() => {
-    if (!selected) {
-      setDoc(emptyCanvasDoc())
-      onModeLabel?.("untitled.canvas")
-    }
+    if (!selected) onModeLabel?.("untitled.canvas")
   }, [selected])
 
   useEffect(() => {
@@ -53,6 +69,7 @@ export function CanvasWorkspace({ selected, slug, toolbarSlot, onCloseEditor, on
     try {
       const saved = await writeDocument(scope, filename, serializeCanvasDoc(doc))
       setSaveOpen(false)
+      setDoc(emptyCanvasDoc()) // content now lives in the named file — reset the scratch
       onCreated({ path: saved.path, scope })
     } catch { /* */ }
   }, [slug, doc, onCreated])

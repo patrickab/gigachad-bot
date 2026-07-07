@@ -32,6 +32,9 @@ const TEXT_DEFAULT_HEIGHT = 80
 const MIN_TEXT_WIDTH = 80
 const MIN_TEXT_HEIGHT = 40
 const STRAIGHTEN_HOLD_MS = 500 // hold the pen still mid-stroke to snap it into a straight line
+const PEN_TOUCH_SUPPRESS_MS = 700 // touch gestures stay suppressed this long after the last pen event (hover included)
+const ZOOM_SETTLE_MS = 250 // attachments re-rasterize at full resolution this long after the zoom stops changing
+const PDF_LAYOUT_CAP = 916 // PdfViewer caps rendering at 900px + scrollbar gutter — wider layout gains no resolution
 const STRAIGHTEN_MOVE_TOLERANCE = 5 // px of client movement that resets the "holding still" timer
 
 const STROKE_OPTIONS = {
@@ -265,12 +268,11 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
 
   const baseWidth = SIZE_MAP[strokeWidth]
 
-  // Redraw the in-progress stroke. Predicted points are appended for display only
-  // (latency hiding) and never stored — real samples overwrite them next frame.
-  const redrawLive = useCallback((predicted: number[][] = []) => {
+  // Redraw the in-progress stroke.
+  const redrawLive = useCallback(() => {
     const el = livePathRef.current
     if (!el) return
-    const pts = predicted.length > 0 ? [...currentPointsRef.current, ...predicted] : currentPointsRef.current
+    const pts = currentPointsRef.current
     el.setAttribute("d", pts.length >= 2 ? getSvgPathFromStroke(getStroke(pts, { ...STROKE_OPTIONS, size: baseWidth })) : "")
   }, [baseWidth])
 
@@ -480,64 +482,100 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     }
   }, [doc.strokes])
 
-  // --- Two-finger touch: pinch-zoom + pan ---
+  // --- Two-finger touch: pinch-zoom + pan. Implemented with pointer events, not
+  // TouchEvents — some Linux browsers (Firefox) never deliver TouchEvents even
+  // though touch pointer events fire fine. ---
   const touchRef = useRef<{ dist: number; cx: number; cy: number; scale: number; ox: number; oy: number } | null>(null)
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
-    const getTouchMid = (a: Touch, b: Touch) => ({ x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 })
-    const getTouchDist = (a: Touch, b: Touch) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
+    const touches = new Map<number, { x: number; y: number }>()
 
-    const onStart = (e: TouchEvent) => {
-      if (e.touches.length !== 2) return
-      e.preventDefault()
-      const [a, b] = [e.touches[0]!, e.touches[1]!]
+    // Palm rejection: touch gestures are suppressed while the pen is in contact
+    // and for PEN_TOUCH_SUPPRESS_MS after any pen event, hover included — the
+    // palm lands just before the tip touches and lingers after it lifts. A pen
+    // hover with no buttons also clears the contact flag, so a missed pointerup
+    // can never leave touch permanently disabled. Capture phase so a
+    // stopPropagation in some handler can't hide pen events from us.
+    let penContact = false
+    let penLastSeen = 0
+    const onPen = (e: PointerEvent) => {
+      if (e.pointerType !== "pen") return
+      penLastSeen = performance.now()
+      penContact = e.type === "pointerdown" || (e.type === "pointermove" && e.buttons !== 0)
+      if (penContact && (touchRef.current || touches.size > 0)) { touchRef.current = null; touches.clear() }
+    }
+    const penEvents = ["pointerdown", "pointermove", "pointerup", "pointercancel"] as const
+    penEvents.forEach((t) => window.addEventListener(t, onPen, true))
+    const penNear = () => penContact || performance.now() - penLastSeen < PEN_TOUCH_SUPPRESS_MS
+
+    const beginGesture = () => {
+      const [a, b] = [...touches.values()]
       const rect = el.getBoundingClientRect()
-      const mid = getTouchMid(a, b)
       touchRef.current = {
-        dist: getTouchDist(a, b),
-        cx: mid.x - rect.left,
-        cy: mid.y - rect.top,
+        dist: Math.hypot(a!.x - b!.x, a!.y - b!.y),
+        cx: (a!.x + b!.x) / 2 - rect.left,
+        cy: (a!.y + b!.y) / 2 - rect.top,
         scale: scaleRef.current,
         ox: offsetRef.current.x,
         oy: offsetRef.current.y,
       }
     }
-    const onMove = (e: TouchEvent) => {
-      if (e.touches.length !== 2 || !touchRef.current) return
-      e.preventDefault()
-      const [a, b] = [e.touches[0]!, e.touches[1]!]
-      const rect = el.getBoundingClientRect()
-      const mid = getTouchMid(a, b)
+    const onDown = (e: PointerEvent) => {
+      if (e.pointerType !== "touch" || penNear()) return
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      touchRef.current = null
+      if (touches.size === 2) beginGesture()
+    }
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerType !== "touch" || !touches.has(e.pointerId)) return
+      if (penNear()) { touches.clear(); touchRef.current = null; return }
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY })
       const t = touchRef.current
-      const newDist = getTouchDist(a, b)
-      const ratio = newDist / t.dist
-      const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, t.scale * ratio))
+      if (!t || touches.size !== 2) return
+      const [a, b] = [...touches.values()]
+      const rect = el.getBoundingClientRect()
+      const newDist = Math.hypot(a!.x - b!.x, a!.y - b!.y)
+      const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, t.scale * (newDist / t.dist)))
       const scaleRatio = next / t.scale
-      const mx = mid.x - rect.left
-      const my = mid.y - rect.top
-      const panDx = mx - t.cx
-      const panDy = my - t.cy
-      const newOx = t.cx - (t.cx - t.ox) * scaleRatio + panDx
-      const newOy = t.cy - (t.cy - t.oy) * scaleRatio + panDy
+      const mx = (a!.x + b!.x) / 2 - rect.left
+      const my = (a!.y + b!.y) / 2 - rect.top
+      const newOx = t.cx - (t.cx - t.ox) * scaleRatio + (mx - t.cx)
+      const newOy = t.cy - (t.cy - t.oy) * scaleRatio + (my - t.cy)
       scaleRef.current = next
       offsetRef.current = { x: newOx, y: newOy }
       setScale(next)
       setOffset({ x: newOx, y: newOy })
     }
-    const onEnd = () => { touchRef.current = null }
+    const onUp = (e: PointerEvent) => {
+      if (e.pointerType !== "touch") return
+      touches.delete(e.pointerId)
+      touchRef.current = null
+    }
 
-    el.addEventListener("touchstart", onStart, { passive: false })
-    el.addEventListener("touchmove", onMove, { passive: false })
-    el.addEventListener("touchend", onEnd)
-    el.addEventListener("touchcancel", onEnd)
+    el.addEventListener("pointerdown", onDown)
+    el.addEventListener("pointermove", onMove)
+    window.addEventListener("pointerup", onUp)
+    window.addEventListener("pointercancel", onUp)
     return () => {
-      el.removeEventListener("touchstart", onStart)
-      el.removeEventListener("touchmove", onMove)
-      el.removeEventListener("touchend", onEnd)
-      el.removeEventListener("touchcancel", onEnd)
+      penEvents.forEach((t) => window.removeEventListener(t, onPen, true))
+      el.removeEventListener("pointerdown", onDown)
+      el.removeEventListener("pointermove", onMove)
+      window.removeEventListener("pointerup", onUp)
+      window.removeEventListener("pointercancel", onUp)
     }
   }, [])
+
+  // Attachments scale with canvas zoom, but re-rendering the PDF at every zoom
+  // frame re-rasterizes all pages (flicker). Instead the gesture scales them as
+  // bitmaps via CSS transform, and once the zoom settles the layout width snaps
+  // to the true screen size for one sharp re-render — PdfViewer preserves the
+  // reading position across that width change.
+  const [settledScale, setSettledScale] = useState(scale)
+  useEffect(() => {
+    const t = setTimeout(() => setSettledScale(scale), ZOOM_SETTLE_MS)
+    return () => clearTimeout(t)
+  }, [scale])
 
   // --- Aspect cache (image frames + pdf attachments), keyed by element id ---
   const [aspects, setAspects] = useState<Record<string, number>>({})
@@ -721,10 +759,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
       const [cx, cy] = screenToCanvas(ev.clientX, ev.clientY)
       currentPointsRef.current.push([cx, cy, ev.pressure > 0 ? ev.pressure : 0.5])
     }
-    redrawLive((native.getPredictedEvents?.() ?? []).map((ev) => {
-      const [cx, cy] = screenToCanvas(ev.clientX, ev.clientY)
-      return [cx, cy, ev.pressure > 0 ? ev.pressure : 0.5]
-    }))
+    redrawLive()
   }, [isDrawing, isErasing, screenToCanvas, doc, onChange, cancelLongPress, armStraighten, redrawLive])
 
   const handleSvgPointerUp = useCallback((e?: React.PointerEvent<SVGSVGElement>) => {
@@ -1417,14 +1452,19 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
         {doc.attachments.map((att) => {
           const screenX = att.x * scale + offset.x
           const screenY = att.y * scale + offset.y
-          const screenW = att.width * scale
           const aspect = aspects[att.id] ?? FALLBACK_ASPECT
           const name = att.path.split("/").pop() ?? "PDF"
+          // Visible size follows canvas zoom, but layout width only follows the
+          // settled zoom (capped at what PdfViewer will actually rasterize); the
+          // CSS transform bridges the difference. Mid-gesture that means pure
+          // bitmap scaling, at rest transform ≈ 1 and the PDF is sharp.
+          const screenW = att.width * scale
+          const layoutW = Math.min(att.width * settledScale, PDF_LAYOUT_CAP)
           return (
             <div
               key={att.id}
               className="absolute flex flex-col border border-divider-strong rounded-lg overflow-hidden bg-paper shadow-[var(--shadow-lg)]"
-              style={{ left: screenX, top: screenY, width: screenW }}
+              style={{ left: screenX, top: screenY, width: layoutW, transform: `scale(${screenW / layoutW})`, transformOrigin: "top left" }}
             >
               <div
                 className="flex items-center gap-1.5 px-2 py-1 border-b border-divider/50 cursor-grab active:cursor-grabbing select-none shrink-0"
@@ -1439,7 +1479,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
                   <X className="h-3 w-3" />
                 </button>
               </div>
-              <div data-canvas-attachment style={{ height: screenW * aspect }} onPointerDown={(e) => e.stopPropagation()}>
+              <div data-canvas-attachment style={{ height: layoutW * aspect }} onPointerDown={(e) => e.stopPropagation()}>
                 <PdfViewer
                   url={fileViewerRawUrl(att.path)}
                   onPageAspect={(r) => setAspect(att.id, r)}

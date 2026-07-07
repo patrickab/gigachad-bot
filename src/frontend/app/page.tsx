@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import dynamic from "next/dynamic"
+import { Maximize2, Minimize2 } from "lucide-react"
 import { Sidebar } from "@/components/Sidebar"
 import { CommandMenu, type CommandMenuItem } from "@/components/CommandMenu"
 import { ChatContainer, ChatSidebarProvider, type ChatSidebarContextValue } from "@/components/ChatContainer"
@@ -143,6 +144,22 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   const setTabAppMode = onAppModeChange
   const [canvasSel, setCanvasSel] = useState<CanvasSelection | null>(null)
   const [canvasToolbarSlot, setCanvasToolbarSlot] = useState<HTMLElement | null>(null)
+  const [canvasFullscreen, setCanvasFullscreen] = useState(false)
+
+  // Leaving canvas mode (or switching tabs) drops fullscreen so the sidebar
+  // doesn't stay hidden when the user returns to chat.
+  useEffect(() => {
+    if (appMode !== "canvas") setCanvasFullscreen(false)
+  }, [appMode, isActive])
+
+  useEffect(() => {
+    if (!canvasFullscreen) return
+    const esc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.preventDefault(); setCanvasFullscreen(false) }
+    }
+    document.addEventListener("keydown", esc)
+    return () => document.removeEventListener("keydown", esc)
+  }, [canvasFullscreen])
 
   const commandBar = useCommandBar()
   const { globalCategories, projectCategories } = useMemoryCategories(activeProject)
@@ -588,21 +605,23 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         onClose={commandBar.close}
         container={commandMenuSlot}
       />
-      <Sidebar
-        onOpenChat={onOpenChat}
-        onRefreshAll={refreshAll}
-        onSave={() => modals.setSaveModalOpen(true)}
-        onReset={reset}
-        onMerge={(childFile) => doMergeBranch(childFile)}
-        onCascadeDelete={handleCascadeDelete}
-        onVaultSelect={vault.handleVaultSelect}
-        onVaultsChanged={vault.refreshVaultList}
-        activeCanvasPath={canvasSel?.path ?? null}
-        onCanvasSelect={(path, scope) => setCanvasSel({ path, scope })}
-        onCanvasDeleted={(path) => setCanvasSel((s) => (s?.path === path ? null : s))}
-        appMode={appMode}
-        onAppModeChange={setTabAppMode}
-      />
+      {!canvasFullscreen && (
+        <Sidebar
+          onOpenChat={onOpenChat}
+          onRefreshAll={refreshAll}
+          onSave={() => modals.setSaveModalOpen(true)}
+          onReset={reset}
+          onMerge={(childFile) => doMergeBranch(childFile)}
+          onCascadeDelete={handleCascadeDelete}
+          onVaultSelect={vault.handleVaultSelect}
+          onVaultsChanged={vault.refreshVaultList}
+          activeCanvasPath={canvasSel?.path ?? null}
+          onCanvasSelect={(path, scope) => setCanvasSel({ path, scope })}
+          onCanvasDeleted={(path) => setCanvasSel((s) => (s?.path === path ? null : s))}
+          appMode={appMode}
+          onAppModeChange={setTabAppMode}
+        />
+      )}
       <main className="flex-1 min-w-0 flex flex-col relative bg-paper">
         <header className="h-[60px] shrink-0 flex items-center px-4 gap-4 z-40 border-b border-divider/50 bg-paper/80 backdrop-blur-xl">
           {appMode === "canvas" ? (
@@ -628,6 +647,14 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           {appMode !== "canvas" && <div className="flex-1" />}
 
           <div className="flex items-center gap-2">
+            {appMode === "canvas" && (
+              <button
+                onClick={() => setCanvasFullscreen((f) => !f)}
+                className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
+              >
+                {canvasFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+              </button>
+            )}
             {appMode !== "canvas" && <TokenCounter usage={totalUsage} />}
             <ThemeToggle />
             <MoreOptionsMenu prompts={prompts} config={config} onConfigChange={onConfigChange} onEditPrompts={() => modals.setPromptEditorOpen(true)} />

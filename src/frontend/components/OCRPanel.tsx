@@ -15,13 +15,41 @@ interface OCRPanelProps {
 }
 
 export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
+  // The image lives in state (seeded from the prop) so the panel can be reset
+  // in place: Alt+R clears everything and waits for a newly pasted image.
+  const [img, setImg] = useState<string | null>(image)
   const [output, setOutput] = useState("")
   const [isStreaming, setIsStreaming] = useState(true)
   const abortRef = useRef<(() => void) | null>(null)
   const confirmedRef = useRef(false)
 
+  const reset = useCallback(() => {
+    abortRef.current?.()
+    setImg(null)
+    setOutput("")
+    setIsStreaming(false)
+  }, [])
+
+  // While awaiting a new image, a pasted image restarts OCR
   useEffect(() => {
-    const stream = createOCRStream(image, model)
+    if (img) return
+    const onPaste = (e: ClipboardEvent) => {
+      const item = [...(e.clipboardData?.items ?? [])].find((i) => i.type.startsWith("image/"))
+      const blob = item?.getAsFile()
+      if (!blob) return
+      e.preventDefault()
+      const reader = new FileReader()
+      reader.onload = () => setImg(reader.result as string)
+      reader.readAsDataURL(blob)
+    }
+    window.addEventListener("paste", onPaste)
+    return () => window.removeEventListener("paste", onPaste)
+  }, [img])
+
+  useEffect(() => {
+    if (!img) return
+    setIsStreaming(true)
+    const stream = createOCRStream(img, model)
     abortRef.current = stream.abort
     let text = ""
 
@@ -48,7 +76,7 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
     read()
 
     return () => { stream.abort() }
-  }, [image, model])
+  }, [img, model])
 
   const doConfirm = useCallback(() => {
     if (confirmedRef.current) return
@@ -63,13 +91,17 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
         e.preventDefault()
         doConfirm()
       }
+      if (e.altKey && e.key.toLowerCase() === "r") {
+        e.preventDefault()
+        reset()
+      }
       if (e.key === "Escape") {
         onClose()
       }
     }
     document.addEventListener("keydown", handler)
     return () => document.removeEventListener("keydown", handler)
-  }, [doConfirm, onClose])
+  }, [doConfirm, onClose, reset])
 
   return (
     <AnimatePresence>
@@ -87,7 +119,10 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
           </div>
           <div className="flex items-center gap-1 text-[10px] text-ink-faint">
             <kbd className="rounded border border-divider-strong px-1.5 py-0.5 text-ink-subtle">Ctrl+Enter</kbd>
-            <span>to confirm</span>
+            <span>confirm</span>
+            <span className="mx-0.5">·</span>
+            <kbd className="rounded border border-divider-strong px-1.5 py-0.5 text-ink-subtle">Alt+R</kbd>
+            <span>new image</span>
           </div>
           <div className="flex items-center gap-1">
             <button
@@ -133,9 +168,16 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
                 ) : (
                   <div className="text-xs text-ink-faint italic px-1 mb-3">Preview appears as output streams...</div>
                 )}
-                <div className="rounded-lg border border-divider bg-surface/50 p-1.5">
-                  <img src={image} alt="Source" className="w-full rounded object-contain" />
-                </div>
+                {img ? (
+                  <div className="rounded-lg border border-divider bg-surface/50 p-1.5">
+                    <img src={img} alt="Source" className="w-full rounded object-contain" />
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-dashed border-divider-strong bg-surface/30 px-4 py-10 flex flex-col items-center gap-1 text-center">
+                    <span className="text-xs font-medium text-ink-muted">Paste a new image</span>
+                    <span className="text-[10px] text-ink-faint">Ctrl+V — OCR starts automatically</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>

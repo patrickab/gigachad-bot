@@ -185,7 +185,7 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
     }))
   }, [])
 
-  const persist = useCallback(async (serialized: string) => {
+  const persistNow = useCallback(async (serialized: string) => {
     if (persistOverride) {
       await persistOverride(serialized)
       savedContentRef.current = serialized
@@ -195,10 +195,13 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
     }
     await writeDocument(slug, filename, serialized)
     savedContentRef.current = serialized
+    // mirror the drawing jpeg only when actual content changed — viewport-only
+    // autosaves (pan/zoom) shouldn't re-render and re-upload an image
+    const contentChanged = isCanvas && canvasDoc ? canvasContentKey(canvasDoc) !== savedCanvasKey.current : false
     if (isCanvas && canvasDoc) savedCanvasKey.current = canvasContentKey(canvasDoc)
     setDirty(false)
     onSaved?.(filename, serialized)
-    if (isCanvas && canvasDoc && (canvasDoc.strokes.length > 0 || canvasDoc.texts.length > 0 || canvasDoc.frames.some((f) => f.kind === "image"))) {
+    if (isCanvas && canvasDoc && contentChanged && (canvasDoc.strokes.length > 0 || canvasDoc.texts.length > 0 || canvasDoc.frames.some((f) => f.kind === "image"))) {
       try {
         const imgs = await buildImageEmbeds(canvasDoc)
         const blob = await renderCanvasToJpeg(canvasDoc.strokes, 20, imgs, canvasDoc.texts)
@@ -207,6 +210,15 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
     }
   }, [slug, filename, isCanvas, canvasDoc, canvasContentKey, onSaved, buildImageEmbeds, persistOverride])
 
+  // Saves are chained so an earlier slow write can never resolve after — and
+  // silently clobber — a newer one. Matters now that every stroke persists.
+  const saveChain = useRef(Promise.resolve())
+  const persist = useCallback((serialized: string) => {
+    const run = saveChain.current.then(() => persistNow(serialized))
+    saveChain.current = run.catch(() => {})
+    return run
+  }, [persistNow])
+
   const handleSave = useCallback(async () => {
     if (currentSerialized === null || saving) return
     setSaving(true)
@@ -214,13 +226,25 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
     setSaving(false)
   }, [currentSerialized, saving, persist])
 
+  // Canvas autosave fires on any serialized change — strokes, frames, texts,
+  // and viewport — so re-entering restores exactly what was left, view included.
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => {
-    if (!isCanvas || !dirty || currentSerialized === null) return
+    if (!isCanvas || currentSerialized === null || currentSerialized === savedContentRef.current) return
     clearTimeout(autoSaveTimer.current)
     autoSaveTimer.current = setTimeout(() => { persist(currentSerialized).catch(() => {}) }, 1000)
     return () => clearTimeout(autoSaveTimer.current)
-  }, [isCanvas, dirty, currentSerialized, persist])
+  }, [isCanvas, currentSerialized, persist])
+
+  // Leaving the editor flushes a pending autosave immediately — the debounce
+  // cleanup alone would drop strokes drawn in the final second.
+  const flushRef = useRef<() => void>(() => {})
+  flushRef.current = () => {
+    if (isCanvas && currentSerialized !== null && currentSerialized !== savedContentRef.current) {
+      persist(currentSerialized).catch(() => {})
+    }
+  }
+  useEffect(() => () => flushRef.current(), [])
 
   const handleExportPdf = useCallback(async () => {
     if (!isCanvas || !canvasDoc || exporting) return
