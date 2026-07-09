@@ -16,6 +16,7 @@ A minimalist, local-first LLM web interface. Designed for focus and custom workf
   - **Deep Research**: multi-step reports via [GPT-Researcher](https://github.com/assafelovic/gpt-researcher).
   - **Web Search**: Supports domain filters. Citation-mapped search via [Vane](https://github.com/ItzCrazyKns/Vane)/[SearXNG](https://github.com/searxng/searxng).
 - **Project Mode**: isolated memory, kanban board, and a per-project document library.
+- **Infinite Canvas**: whiteboard for drawing, pdfs attach to canvas, canvas can be rendered as jpg and attached to chat
 - **Chat branching**: fork a conversation from any message, merge branches back.
 - **Obsidian vaults**: integrate Obsidian vaults into project documents. Files can be attached as live references. Edits write back to the source.
 
@@ -23,7 +24,7 @@ A minimalist, local-first LLM web interface. Designed for focus and custom workf
 
 ## Demo
 
-https://github.com/user-attachments/assets/d7297af6-31de-4db2-aaad-e40fa851efa2
+https://github.com/user-attachments/assets/57864372-dac2-49f3-97f7-5bceecf53c49
 
 ---
 
