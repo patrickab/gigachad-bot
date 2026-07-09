@@ -5,7 +5,7 @@ from llm_baseclient.config import (
     AVAILABLE_MODELS,
     MODELS_DEEPSEEK,
     MODELS_GEMINI,
-    MODELS_OLLAMA,
+    discover_ollama_models,
 )
 from pydantic import BaseModel
 
@@ -24,7 +24,7 @@ Slug = Annotated[str, Path(pattern=r"^[A-Za-z0-9_-]+$")]
 async def get_models() -> dict:
     return {
         "all": AVAILABLE_MODELS,
-        "ollama": MODELS_OLLAMA,
+        "ollama": discover_ollama_models(),
         "gemini": MODELS_GEMINI,
         "deepseek": MODELS_DEEPSEEK,
         "openrouter": MODELS_OPENROUTER,
