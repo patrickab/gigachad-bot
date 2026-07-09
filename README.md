@@ -21,6 +21,12 @@ A minimalist, local-first LLM web interface. Designed for focus and custom workf
 
 ---
 
+## Demo
+
+https://github.com/user-attachments/assets/d7297af6-31de-4db2-aaad-e40fa851efa2
+
+---
+
 ## Tech Stack
 
 - **Frontend**: Next.js 15, React 19, Tailwind CSS v4
