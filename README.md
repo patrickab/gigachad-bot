@@ -1,6 +1,6 @@
 # GigaChat Bot
 
-A minimalist, local-first LLM web interface. Designed for focus and custom workflows.
+A minimalist, local-first LLM web interface. Designed for privacy, focus and custom workflows.
 
 <img width="500" height="500" alt="Gigachad Interface" src="https://github.com/user-attachments/assets/34727936-ddbd-44d7-b191-d57084b30984" />
 
