@@ -131,6 +131,16 @@ export function FileViewer({
   const highlighted = entries[idx]
   const highlightedKind = highlighted?.type === "file" ? kindOf(highlighted.path) : null
 
+  // Debounce the *previewed* row separately from the *highlighted* (keyboard/hover) row —
+  // sweeping the cursor across a list changes idx on every mouseenter, and swapping the
+  // PdfViewer's url that fast tears down its pdf.js transport mid-render, crashing react-pdf.
+  const [previewed, setPreviewed] = useState<Row | undefined>(undefined)
+  useEffect(() => {
+    const t = setTimeout(() => setPreviewed(highlighted), 120)
+    return () => clearTimeout(t)
+  }, [highlighted])
+  const previewedKind = previewed?.type === "file" ? kindOf(previewed.path) : null
+
   const breadcrumb = useMemo(
     () => stack.map((n, i) => (i === 0 ? baseName(n.path) || n.path || "root" : relativeName(stack[i - 1].path, n.path))).join(" / "),
     [stack],
@@ -152,22 +162,20 @@ export function FileViewer({
 
   // Text/markdown previews are fetched + cached; images/pdfs render from a URL.
   useEffect(() => {
-    if (highlighted?.type !== "file" || (highlightedKind !== "markdown" && highlightedKind !== "text")) {
+    if (previewed?.type !== "file" || (previewedKind !== "markdown" && previewedKind !== "text")) {
       setPreview("")
       return
     }
-    const path = highlighted.path
+    const path = previewed.path
     const cached = cache.current.get(path)
     if (cached !== undefined) { setPreview(cached); return }
     let cancelled = false
     setPreview("")
-    const t = setTimeout(() => {
-      loadFileViewerText(path)
-        .then((content) => { if (!cancelled) { cache.current.set(path, content); setPreview(content) } })
-        .catch(() => { if (!cancelled) setPreview("") })
-    }, 110)
-    return () => { cancelled = true; clearTimeout(t) }
-  }, [highlighted, highlightedKind])
+    loadFileViewerText(path)
+      .then((content) => { if (!cancelled) { cache.current.set(path, content); setPreview(content) } })
+      .catch(() => { if (!cancelled) setPreview("") })
+    return () => { cancelled = true }
+  }, [previewed, previewedKind])
 
   const activate = useCallback((row: Row | undefined) => {
     if (!row) return
@@ -264,19 +272,19 @@ export function FileViewer({
         {/* Right: type-aware preview */}
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="truncate border-b border-divider/30 px-4 py-2 text-[11px] text-ink-subtle">
-            {highlighted?.type === "file" ? highlighted.path : "Select a file to preview"}
+            {previewed?.type === "file" ? previewed.path : "Select a file to preview"}
           </div>
-          <div className={cn("min-h-0 flex-1", highlightedKind === "pdf" ? "" : "overflow-y-auto p-4")}>
-            {highlighted?.type === "dir" ? (
+          <div className={cn("min-h-0 flex-1", previewedKind === "pdf" ? "" : "overflow-y-auto p-4")}>
+            {previewed?.type === "dir" ? (
               <div className="text-xs text-ink-faint">Folder — press → or Enter to open</div>
-            ) : highlighted?.type !== "file" ? (
+            ) : previewed?.type !== "file" ? (
               <div className="text-xs text-ink-faint" />
-            ) : highlightedKind === "image" ? (
-              <img src={fileViewerRawUrl(highlighted.path)} alt={highlighted.label} className="mx-auto max-h-full max-w-full rounded border border-divider object-contain" />
-            ) : highlightedKind === "pdf" ? (
-              <PdfViewer url={fileViewerRawUrl(highlighted.path)} />
+            ) : previewedKind === "image" ? (
+              <img src={fileViewerRawUrl(previewed.path)} alt={previewed.label} className="mx-auto max-h-full max-w-full rounded border border-divider object-contain" />
+            ) : previewedKind === "pdf" ? (
+              <PdfViewer key={previewed.path} url={fileViewerRawUrl(previewed.path)} />
             ) : preview ? (
-              highlightedKind === "markdown" ? (
+              previewedKind === "markdown" ? (
                 <LaTeXMarkdown content={preview} />
               ) : (
                 <pre className="whitespace-pre-wrap break-words font-mono text-[11px] text-ink-muted">{preview}</pre>

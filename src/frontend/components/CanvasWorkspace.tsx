@@ -41,10 +41,23 @@ export function CanvasWorkspace({ selected, slug, toolbarSlot, onCloseEditor, on
     } catch { /* corrupt scratch — start empty */ }
   }, [])
 
+  // Debounced: serializing the doc and writing it is O(whole canvas) and localStorage is
+  // synchronous, so doing it per stroke/pointermove stalls the drawing surface itself.
   useEffect(() => {
     if (!restoredRef.current) return
-    try { localStorage.setItem(SCRATCH_STORAGE_KEY, serializeCanvasDoc(doc)) } catch { /* quota */ }
+    const t = setTimeout(() => {
+      try { localStorage.setItem(SCRATCH_STORAGE_KEY, serializeCanvasDoc(doc)) } catch { /* quota */ }
+    }, 500)
+    return () => clearTimeout(t)
   }, [doc])
+
+  // Leaving canvas mode unmounts us, and the debounce cleanup alone would drop whatever
+  // was drawn in the last half second — flush it.
+  const docRef = useRef(doc)
+  docRef.current = doc
+  useEffect(() => () => {
+    try { localStorage.setItem(SCRATCH_STORAGE_KEY, serializeCanvasDoc(docRef.current)) } catch { /* quota */ }
+  }, [])
 
   // eslint-disable-next-line react-hooks/exhaustive-deps -- re-firing would only re-set the same label
   useEffect(() => {

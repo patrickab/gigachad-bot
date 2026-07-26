@@ -1,13 +1,13 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { getStroke } from "perfect-freehand"
 import { type StrokeData, type EmbedRect, getSvgPathFromStroke, renderPageToPng } from "@/lib/drawing"
 import { fileViewerRawUrl, writeBinaryDocument } from "@/lib/api"
 import { activeThemeName } from "@/lib/palette"
 import { cn } from "@/lib/utils"
-import { Plus, Undo2, Redo2, Trash2, FileType, ImageIcon, X, Camera, CircleDashed, Type } from "lucide-react"
+import { Plus, Undo2, Redo2, Trash2, Copy, FileType, ImageIcon, X, Camera, CircleDashed, Type } from "lucide-react"
 import { PdfViewer } from "./PdfViewer"
 
 const A4_W = 794
@@ -36,6 +36,10 @@ const PEN_TOUCH_SUPPRESS_MS = 700 // touch gestures stay suppressed this long af
 const ZOOM_SETTLE_MS = 250 // attachments re-rasterize at full resolution this long after the zoom stops changing
 const PDF_LAYOUT_CAP = 916 // PdfViewer caps rendering at 900px + scrollbar gutter — wider layout gains no resolution
 const STRAIGHTEN_MOVE_TOLERANCE = 5 // px of client movement that resets the "holding still" timer
+const HISTORY_LIMIT = 50 // undo depth — whole-doc snapshots, so this is the memory knob
+const LASSO_COVERAGE = 0.6 // fraction of a stroke's points that must fall inside the lasso to select it
+const SELECTION_MIN = 24 // canvas units — selection box can be squeezed no smaller
+const COPY_OFFSET_PX = 24 // screen px a duplicated selection is nudged by, so it reads as a new object
 
 const STROKE_OPTIONS = {
   smoothing: 0.5,
@@ -44,9 +48,29 @@ const STROKE_OPTIONS = {
   last: true,
 } as const
 
-// Stroke objects are immutable once committed, so their outline path is computed
-// once per object — not on every render of the canvas.
+// Stroke objects are immutable once committed, so their outline path and bounds are
+// computed once per object — not on every render, and not on every eraser sample.
+// Weak keys, so a stroke dropped by an edit takes its cached geometry with it.
 const strokePathCache = new WeakMap<StrokeData, string>()
+const strokeBoundsCache = new WeakMap<StrokeData, [number, number, number, number]>()
+
+// The eraser tests every stroke on the canvas against every pointermove, so rejecting a
+// stroke has to be cheap: four comparisons against a cached box instead of a distance
+// computation per segment. On a long session's canvas this is the difference between
+// scanning every point ever drawn and scanning the handful actually under the tip.
+function strokeBounds(s: StrokeData): [number, number, number, number] {
+  let b = strokeBoundsCache.get(s)
+  if (b === undefined) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    for (const p of s.points) {
+      minX = Math.min(minX, p[0]!); maxX = Math.max(maxX, p[0]!)
+      minY = Math.min(minY, p[1]!); maxY = Math.max(maxY, p[1]!)
+    }
+    b = [minX, minY, maxX, maxY]
+    strokeBoundsCache.set(s, b)
+  }
+  return b
+}
 function strokePath(stroke: StrokeData): string {
   let d = strokePathCache.get(stroke)
   if (d === undefined) {
@@ -203,9 +227,77 @@ function pointInPolygon(x: number, y: number, poly: [number, number][]): boolean
   return inside
 }
 
+// --- Selection ------------------------------------------------------------
+// The lasso keeps its freehand shape — that outline is what you drag to move, and it
+// deforms along with the ink when scaled. A single handle at the shape's bottom-right
+// resizes diagonally, anchored at the top-left. Stroke `width` is never touched by a
+// scale — squeezing a drawing must not thin the pen that drew it.
+export interface SelBox { x: number; y: number; w: number; h: number }
+type Poly = [number, number][]
+
+export function polyBounds(poly: Poly): SelBox | null {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const [x, y] of poly) {
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x)
+    minY = Math.min(minY, y); maxY = Math.max(maxY, y)
+  }
+  if (minX === Infinity) return null
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
+}
+
+// The bottom-right handle: top-left stays put, both axes scale independently. Clamped to
+// SELECTION_MIN so the shape can't collapse (zero width ⇒ infinite scale factor) or flip.
+export function resizeBox(b: SelBox, dx: number, dy: number): SelBox {
+  return { x: b.x, y: b.y, w: Math.max(SELECTION_MIN, b.w + dx), h: Math.max(SELECTION_MIN, b.h + dy) }
+}
+
+// Map a point from one box into another. Pure scale+translate — `width` is not a factor.
+function remap(p: number[], from: SelBox, to: SelBox): number[] {
+  return [
+    to.x + (p[0]! - from.x) * (to.w / from.w),
+    to.y + (p[1]! - from.y) * (to.h / from.h),
+    p[2] ?? 0.5,
+  ]
+}
+
+export function scalePoly(poly: Poly, from: SelBox, to: SelBox): Poly {
+  return poly.map((p) => { const [x, y] = remap(p, from, to); return [x!, y!] as [number, number] })
+}
+
+// Rewrite a stroke's geometry from one selection box into another. `width` is carried
+// over deliberately untouched: squeezing a drawing must not thin the pen that drew it.
+export function scaleStroke(stroke: StrokeData, points: number[][], from: SelBox, to: SelBox): StrokeData {
+  return { ...stroke, points: points.map((p) => remap(p, from, to)) }
+}
+
+// ponytail: swap black↔white for display only, stored colour stays unchanged
+function inkColor(c: string, isDark: boolean): string {
+  return isDark && c === "#000000" ? "#ffffff" : c
+}
+
+// The committed ink is by far the biggest thing on the canvas, and it does not change
+// when you pan, zoom, type in a note or drag a frame — memoizing it keeps those off an
+// O(strokes) reconciliation. `hidden` lets a drag preview take a few strokes over
+// without touching the layer, so a selection drag re-renders k strokes, not all of them.
+const StrokeLayer = memo(function StrokeLayer({ strokes, hidden, isDark }: { strokes: StrokeData[]; hidden: Set<number> | null; isDark: boolean }) {
+  return (
+    <>
+      {strokes.map((stroke, i) => {
+        if (hidden?.has(i)) return null
+        const d = strokePath(stroke)
+        return d ? <path key={i} d={d} fill={inkColor(stroke.color, isDark)} /> : null
+      })}
+    </>
+  )
+})
+
 export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, slug, onImageAdded, toolbarSlot }: CanvasEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
+
+  // latest doc/onChange for the long-lived window drag listeners and for history
+  const liveRef = useRef({ doc, onChange })
+  liveRef.current = { doc, onChange }
 
   const initScale = doc.viewport?.scale ?? 0.5
   // offset is derived once the container mounts; fall back to a reasonable default
@@ -264,7 +356,36 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
   const [colorOpen, setColorOpen] = useState(false)
   const colorRef = useRef<HTMLDivElement>(null)
 
-  const [redoStack, setRedoStack] = useState<StrokeData[]>([])
+  // --- History: whole-doc snapshots, so frame/attachment deletes, moves, resizes,
+  // erases and text edits are all undoable — not just strokes. `viewport` is excluded
+  // on restore (a view concern; undoing shouldn't teleport the camera). ---
+  const [undoStack, setUndoStack] = useState<CanvasDocument[]>([])
+  const [redoStack, setRedoStack] = useState<CanvasDocument[]>([])
+
+  // Push the pre-change doc. Call once per user gesture, before its first onChange.
+  // `prev` must be read here, not inside the updater — updaters run during the next
+  // render, by which point liveRef already holds the post-change doc.
+  const snapshot = useCallback(() => {
+    const prev = liveRef.current.doc
+    setUndoStack((s) => [...s, prev].slice(-HISTORY_LIMIT))
+    setRedoStack([])
+  }, [])
+
+  // Discrete (non-drag) mutation: snapshot, then apply.
+  const commit = useCallback((next: CanvasDocument) => {
+    snapshot()
+    liveRef.current.onChange(next)
+  }, [snapshot])
+
+  // A drag fires onChange on every pointermove, so it must snapshot only once — and
+  // only on the move that actually changes something, so a click that moves nothing
+  // (or an eraser pass over empty space) leaves no dead undo step. Reset on pointerup.
+  const gestureSnapped = useRef(false)
+  const snapshotOnce = useCallback(() => {
+    if (gestureSnapped.current) return
+    gestureSnapped.current = true
+    snapshot()
+  }, [snapshot])
 
   const baseWidth = SIZE_MAP[strokeWidth]
 
@@ -276,17 +397,22 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     el.setAttribute("d", pts.length >= 2 ? getSvgPathFromStroke(getStroke(pts, { ...STROKE_OPTIONS, size: baseWidth })) : "")
   }, [baseWidth])
 
-  // --- Select & move strokes. Draw a freehand lasso (any stroke fully enclosed by
-  // the loop is picked) — not a rectangle, so any shaped area works. Activated either
-  // via the toolbar icon or by press-and-holding the pen's side button (which used to
-  // pan the canvas — panning is still available via space+drag / touch). ---
+  // --- Select, move, scale & duplicate strokes. Draw a freehand lasso (not a
+  // rectangle, so any shaped area works); once released the lasso is replaced by the
+  // bounding box of what it caught, which is what you then drag, resize or copy.
+  // Activated either via the toolbar icon or by press-and-holding the pen's side button
+  // (which used to pan the canvas — panning is still available via space+drag / touch). ---
   type RectDrag = { x0: number; y0: number; x1: number; y1: number }
   const [selectionMode, setSelectionMode] = useState(false)
   const [lassoPoints, setLassoPoints] = useState<[number, number][] | null>(null) // in-progress lasso being drawn
   const lassoActive = useRef(false)
-  const [selectionLasso, setSelectionLasso] = useState<[number, number][] | null>(null) // frozen shape backing the current selection
+  const [selectionLasso, setSelectionLasso] = useState<Poly | null>(null) // frozen shape backing the current selection
   const [selectedStrokes, setSelectedStrokes] = useState<Set<number>>(new Set())
-  const selDragRef = useRef<{ startX: number; startY: number; originals: Map<number, number[][]>; origLasso: [number, number][] } | null>(null)
+  const selDragRef = useRef<{ handle: "move" | "resize"; startX: number; startY: number; originals: Map<number, number[][]>; origLasso: Poly; origBox: SelBox; box: SelBox | null } | null>(null)
+  // The strokes under an in-flight drag, as [index, stroke]. While this is set the
+  // committed layer hides those indices and only this small list re-renders per frame;
+  // the document itself is not touched until the gesture ends.
+  const [dragPreview, setDragPreview] = useState<[number, StrokeData][] | null>(null)
 
   const clearSelection = useCallback(() => {
     setSelectedStrokes((prev) => (prev.size === 0 ? prev : new Set()))
@@ -319,12 +445,6 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     return () => obs.disconnect()
   }, [])
 
-  // ponytail: swap black↔white for display only, stored color stays unchanged
-  const displayColor = useCallback((c: string) => {
-    if (!isDark) return c
-    return c === "#000000" ? "#ffffff" : c
-  }, [isDark])
-
   // ponytail: close color popover on outside click, skip if native picker is active
   const nativePickerOpen = useRef(false)
   useEffect(() => {
@@ -346,12 +466,19 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     if (close) setColorOpen(false)
   }, [])
 
+  // Reads the doc through liveRef so this stays identity-stable: depending on `doc`
+  // meant every document change re-armed the save timer, which then wrote a new doc,
+  // which re-armed the timer — a 2Hz mutate/re-render loop that ran for as long as a
+  // canvas was open. The no-op guard stops a write when the view hasn't actually moved.
   const persistViewport = useCallback((s: number, o: { x: number; y: number }) => {
     const el = containerRef.current
     if (!el) return
     const { cx, cy } = offsetToCenter(o.x, o.y, s, el.clientWidth, el.clientHeight)
-    onChange({ ...doc, viewport: { scale: s, centerX: cx, centerY: cy } })
-  }, [doc, onChange])
+    const { doc: cur, onChange: change } = liveRef.current
+    const vp = cur.viewport
+    if (vp && vp.scale === s && Math.abs(vp.centerX - cx) < 0.5 && Math.abs(vp.centerY - cy) < 0.5) return
+    change({ ...cur, viewport: { scale: s, centerX: cx, centerY: cy } })
+  }, [])
 
   const screenToCanvas = useCallback((clientX: number, clientY: number): [number, number] => {
     const el = containerRef.current
@@ -470,12 +597,17 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     if (isPanning) setIsPanning(false)
   }, [isPanning])
 
-  // Test every stroke against the finished lasso loop and freeze the ones fully enclosed
+  // Test every stroke against the finished lasso loop and keep the ones it mostly
+  // covers — full enclosure meant a stroke poking one pixel out was silently missed.
+  // ponytail: coverage is measured on the raw sample points, so a 2-point straightened
+  // line still effectively needs both ends inside; resample if that ever bites.
   const finalizeLasso = useCallback((pts: [number, number][] | null) => {
     if (pts && pts.length >= 3) {
       const picked = new Set<number>()
       doc.strokes.forEach((s, i) => {
-        if (s.points.length > 0 && s.points.every((p) => pointInPolygon(p[0]!, p[1]!, pts))) picked.add(i)
+        if (s.points.length === 0) return
+        const inside = s.points.reduce((n, p) => n + (pointInPolygon(p[0]!, p[1]!, pts) ? 1 : 0), 0)
+        if (inside / s.points.length > LASSO_COVERAGE) picked.add(i)
       })
       setSelectedStrokes(picked)
       setSelectionLasso(picked.size > 0 ? pts : null)
@@ -728,6 +860,8 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
       const [ex, ey] = screenToCanvas(e.clientX, e.clientY)
       const threshold = 15 / scaleRef.current
       const updated = doc.strokes.filter((stroke) => {
+        const [minX, minY, maxX, maxY] = strokeBounds(stroke)
+        if (ex < minX - threshold || ex > maxX + threshold || ey < minY - threshold || ey > maxY + threshold) return true
         const pts = stroke.points
         if (pts.length === 1) return Math.hypot(pts[0]![0]! - ex, pts[0]![1]! - ey) >= threshold
         for (let i = 1; i < pts.length; i++) {
@@ -736,6 +870,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
         return true
       })
       if (updated.length !== doc.strokes.length) {
+        snapshotOnce()
         onChange({ ...doc, strokes: updated })
       }
       return
@@ -760,7 +895,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
       currentPointsRef.current.push([cx, cy, ev.pressure > 0 ? ev.pressure : 0.5])
     }
     redrawLive()
-  }, [isDrawing, isErasing, screenToCanvas, doc, onChange, cancelLongPress, armStraighten, redrawLive])
+  }, [isDrawing, isErasing, screenToCanvas, doc, onChange, cancelLongPress, armStraighten, redrawLive, snapshotOnce])
 
   const handleSvgPointerUp = useCallback((e?: React.PointerEvent<SVGSVGElement>) => {
     cancelLongPress()
@@ -795,7 +930,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
         const width = dragW < MIN_TEXT_WIDTH ? TEXT_DEFAULT_WIDTH : dragW
         const height = dragH < MIN_TEXT_HEIGHT ? TEXT_DEFAULT_HEIGHT : dragH
         const id = `txt-${Date.now()}`
-        onChange({ ...doc, texts: [...doc.texts, { id, x, y, width, height, text: "", color, size: TEXT_DEFAULT_SIZE }] })
+        commit({ ...doc, texts: [...doc.texts, { id, x, y, width, height, text: "", color, size: TEXT_DEFAULT_SIZE }] })
         setAutoFocusId(id)
       }
       return
@@ -807,31 +942,43 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     currentPointsRef.current = []
     redrawLive()
     if (pts.length < 2) return
-    onChange({ ...doc, strokes: [...doc.strokes, { points: pts, color, width: baseWidth }] })
-    setRedoStack([])
-  }, [isDrawing, isErasing, color, baseWidth, doc, onChange, cancelLongPress, cancelStraighten, captureScreenshot, finalizeLasso, screenToCanvas, redrawLive])
+    commit({ ...doc, strokes: [...doc.strokes, { points: pts, color, width: baseWidth }] })
+  }, [isDrawing, isErasing, color, baseWidth, doc, onChange, cancelLongPress, cancelStraighten, captureScreenshot, finalizeLasso, screenToCanvas, redrawLive, commit])
 
   // --- Undo / Redo ---
+  // Selections index into doc.strokes, so a restore that shifts the array would leave
+  // them pointing at the wrong strokes — both directions drop the selection.
+  const restore = useCallback((target: CanvasDocument) => {
+    const cur = liveRef.current.doc
+    liveRef.current.onChange({ ...target, viewport: cur.viewport })
+    clearSelection()
+    return cur
+  }, [clearSelection])
+
   const undo = useCallback(() => {
-    if (doc.strokes.length === 0) return
-    setRedoStack((prev) => [...prev, doc.strokes[doc.strokes.length - 1]!])
-    onChange({ ...doc, strokes: doc.strokes.slice(0, -1) })
-  }, [doc, onChange])
+    if (undoStack.length === 0) return
+    const cur = restore(undoStack[undoStack.length - 1]!)
+    setUndoStack((s) => s.slice(0, -1))
+    setRedoStack((s) => [...s, cur])
+  }, [undoStack, restore])
 
   const redo = useCallback(() => {
     if (redoStack.length === 0) return
-    const stroke = redoStack[redoStack.length - 1]!
-    setRedoStack((prev) => prev.slice(0, -1))
-    onChange({ ...doc, strokes: [...doc.strokes, stroke] })
-  }, [doc, onChange, redoStack])
+    const cur = restore(redoStack[redoStack.length - 1]!)
+    setRedoStack((s) => s.slice(0, -1))
+    setUndoStack((s) => [...s, cur].slice(-HISTORY_LIMIT))
+  }, [redoStack, restore])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "z") {
+      if (!(e.ctrlKey || e.metaKey)) return
+      const key = e.key.toLowerCase() // shift uppercases it, so Ctrl+Shift+Z arrives as "Z"
+      // Redo also matches `code` — the physical key — for layouts where `key` isn't "y".
+      // The undo branch must stay first: on QWERTZ the KeyY position is labelled Z.
+      if (key === "z" && !e.shiftKey) {
         e.preventDefault()
         undo()
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === "y") {
+      } else if (key === "y" || e.code === "KeyY" || (key === "z" && e.shiftKey)) {
         e.preventDefault()
         redo()
       }
@@ -840,14 +987,10 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     return () => window.removeEventListener("keydown", handler)
   }, [undo, redo])
 
-  const clearAll = useCallback(() => {
-    setRedoStack([])
-    onChange({ ...doc, strokes: [] })
-  }, [doc, onChange])
-
-  // latest doc/onChange for the long-lived window drag listeners
-  const liveRef = useRef({ doc, onChange })
-  liveRef.current = { doc, onChange }
+  // One history snapshot per focus session of a text note, so typing a sentence is
+  // one undo step, not one per keystroke. The first keystroke into a freshly created
+  // (empty) box is skipped — the creation snapshot already covers it.
+  const textEdited = useRef(false)
 
   // Removes a text note if its content is blank — called on blur so an
   // untouched or fully-cleared box doesn't linger as an empty artifact.
@@ -909,12 +1052,12 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     const pages = doc.frames.filter((f) => f.kind === "page")
     const last = pages[pages.length - 1]
     const newX = last ? last.x + last.width + PAGE_GAP : 0
-    onChange({ ...doc, frames: [...doc.frames, { id: `p-${Date.now()}`, kind: "page", x: newX, y: last?.y ?? 0, width: A4_W }] })
-  }, [doc, onChange])
+    commit({ ...doc, frames: [...doc.frames, { id: `p-${Date.now()}`, kind: "page", x: newX, y: last?.y ?? 0, width: A4_W }] })
+  }, [doc, commit])
 
   const addImageFrameAt = useCallback((path: string, x: number, y: number) => {
-    onChange({ ...doc, frames: [...doc.frames, { id: `img-${Date.now()}`, kind: "image", x, y, width: DEFAULT_IMAGE_WIDTH, path }] })
-  }, [doc, onChange])
+    commit({ ...doc, frames: [...doc.frames, { id: `img-${Date.now()}`, kind: "image", x, y, width: DEFAULT_IMAGE_WIDTH, path }] })
+  }, [doc, commit])
 
   const addImageFrame = useCallback((path: string) => {
     const { cx, cy } = pointAtCenter(DEFAULT_IMAGE_WIDTH, FALLBACK_ASPECT)
@@ -923,22 +1066,22 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
   }, [pointAtCenter, addImageFrameAt])
 
   const removeFrame = useCallback((id: string) => {
-    onChange({ ...doc, frames: doc.frames.filter((f) => f.id !== id) })
+    commit({ ...doc, frames: doc.frames.filter((f) => f.id !== id) })
     setAspects(({ [id]: _gone, ...rest }) => rest)
-  }, [doc, onChange])
+  }, [doc, commit])
 
   // --- Attachments (pdf) ---
   const addAttachment = useCallback((path: string) => {
     if (doc.attachments.some((a) => a.path === path)) { setAddMenuOpen(false); return }
     const { cx, cy } = pointAtCenter(DEFAULT_PDF_WIDTH, FALLBACK_ASPECT)
-    onChange({ ...doc, attachments: [...doc.attachments, { id: `pdf-${Date.now()}`, kind: "pdf", path, x: cx, y: cy, width: DEFAULT_PDF_WIDTH }] })
+    commit({ ...doc, attachments: [...doc.attachments, { id: `pdf-${Date.now()}`, kind: "pdf", path, x: cx, y: cy, width: DEFAULT_PDF_WIDTH }] })
     setAddMenuOpen(false)
-  }, [doc, onChange, pointAtCenter])
+  }, [doc, commit, pointAtCenter])
 
   const removeAttachment = useCallback((id: string) => {
-    onChange({ ...doc, attachments: doc.attachments.filter((a) => a.id !== id) })
+    commit({ ...doc, attachments: doc.attachments.filter((a) => a.id !== id) })
     setAspects(({ [id]: _gone, ...rest }) => rest)
-  }, [doc, onChange])
+  }, [doc, commit])
 
   // --- Paste image (Ctrl+V or long-press menu) ---
   const pasteImageAtPoint = useCallback(async (canvasX: number, canvasY: number) => {
@@ -999,23 +1142,41 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     }
   }, [])
 
-  // Drag the lasso selection to translate every selected stroke together
-  const startSelectionMove = useCallback((clientX: number, clientY: number) => {
+  // Drag the selection box body to translate every selected stroke together, or a
+  // handle to scale them. Originals are snapshotted at gesture start so every frame
+  // maps from the same source — repeated relative deltas would drift.
+  const startSelDrag = useCallback((handle: "move" | "resize", clientX: number, clientY: number) => {
     const originals = new Map<number, number[][]>()
     for (const i of selectedStrokes) {
       const s = liveRef.current.doc.strokes[i]
       if (s) originals.set(i, s.points.map((p) => [...p]))
     }
-    if (originals.size === 0 || !selectionLasso) return
-    selDragRef.current = { startX: clientX, startY: clientY, originals, origLasso: selectionLasso.map((p) => [...p] as [number, number]) }
+    const origBox = selectionLasso && polyBounds(selectionLasso)
+    if (originals.size === 0 || !selectionLasso || !origBox) return
+    selDragRef.current = { handle, startX: clientX, startY: clientY, originals, origLasso: selectionLasso.map((p) => [...p] as [number, number]), origBox, box: null }
   }, [selectedStrokes, selectionLasso])
 
   const deleteSelection = useCallback(() => {
     if (selectedStrokes.size === 0) return
-    const { doc: cur, onChange: change } = liveRef.current
-    change({ ...cur, strokes: cur.strokes.filter((_, i) => !selectedStrokes.has(i)) })
+    commit({ ...liveRef.current.doc, strokes: liveRef.current.doc.strokes.filter((_, i) => !selectedStrokes.has(i)) })
     clearSelection()
-  }, [selectedStrokes, clearSelection])
+  }, [selectedStrokes, clearSelection, commit])
+
+  // Duplicate the selection, offset so the copy is visibly its own object, and hand the
+  // selection over to it — the originals drop out, the copies are what you keep dragging.
+  const copySelection = useCallback(() => {
+    const cur = liveRef.current.doc
+    if (selectedStrokes.size === 0 || !selectionLasso) return
+    const off = COPY_OFFSET_PX / scaleRef.current
+    const copies = [...selectedStrokes]
+      .map((i) => cur.strokes[i])
+      .filter((s): s is StrokeData => Boolean(s))
+      .map((s) => ({ ...s, points: s.points.map((p) => [p[0]! + off, p[1]! + off, p[2] ?? 0.5]) }))
+    if (copies.length === 0) return
+    commit({ ...cur, strokes: [...cur.strokes, ...copies] })
+    setSelectedStrokes(new Set(copies.map((_, k) => cur.strokes.length + k)))
+    setSelectionLasso(selectionLasso.map(([x, y]) => [x + off, y + off]))
+  }, [selectedStrokes, selectionLasso, commit])
 
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
@@ -1023,20 +1184,30 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
       if (s) {
         const dx = (e.clientX - s.startX) / scaleRef.current
         const dy = (e.clientY - s.startY) / scaleRef.current
-        const { doc: cur, onChange: change } = liveRef.current
-        change({ ...cur, strokes: cur.strokes.map((stroke, i) => {
-          const orig = s.originals.get(i)
-          return orig ? { ...stroke, points: orig.map((p) => [p[0]! + dx, p[1]! + dy, p[2] ?? 0.5]) } : stroke
-        }) })
-        // the lasso boundary (and the trash icon anchored to it) rides along with the strokes
-        setSelectionLasso(s.origLasso.map(([x, y]) => [x + dx, y + dy]))
+        if (dx === 0 && dy === 0) return
+        // A move translates the shape's box by the delta; the handle grows it. Either way
+        // the strokes AND the lasso outline are remapped from the original box into the new
+        // one, so the outline keeps hugging the ink. `width` is left alone — scaling ink
+        // must not change how thick the pen was.
+        const box = s.handle === "move"
+          ? { ...s.origBox, x: s.origBox.x + dx, y: s.origBox.y + dy }
+          : resizeBox(s.origBox, dx, dy)
+        s.box = box
+        // Preview only: writing the document here would rebuild every stroke array and
+        // re-serialize the whole canvas on every pointermove. The commit happens on release.
+        const strokes = liveRef.current.doc.strokes
+        setDragPreview([...s.originals].map(([i, pts]) => [i, scaleStroke(strokes[i]!, pts, s.origBox, box)]))
+        // the outline (and the buttons anchored to it) rides along with the strokes
+        setSelectionLasso(scalePoly(s.origLasso, s.origBox, box))
         return
       }
       const d = dragRef.current
       if (!d) return
-      const { doc: cur, onChange: change } = liveRef.current
       const dx = (e.clientX - d.startX) / scaleRef.current
       const dy = (e.clientY - d.startY) / scaleRef.current
+      if (dx === 0 && dy === 0) return
+      snapshotOnce()
+      const { doc: cur, onChange: change } = liveRef.current
       const minW = d.target === "frame" ? MIN_FRAME_WIDTH : MIN_ATTACH_WIDTH
       if (d.target === "frame") {
         change({ ...cur, frames: cur.frames.map((f) => f.id !== d.id ? f
@@ -1052,22 +1223,31 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
           : { ...t, x: d.origX + dx, y: d.origY + dy }) })
       }
     }
-    const onUp = () => { dragRef.current = null; selDragRef.current = null }
+    const onUp = () => {
+      const s = selDragRef.current
+      if (s?.box) {
+        const { doc: cur } = liveRef.current
+        const box = s.box
+        commit({ ...cur, strokes: cur.strokes.map((stroke, i) => {
+          const orig = s.originals.get(i)
+          return orig ? scaleStroke(stroke, orig, s.origBox, box) : stroke
+        }) })
+      }
+      setDragPreview(null)
+      dragRef.current = null
+      selDragRef.current = null
+      gestureSnapped.current = false
+    }
     window.addEventListener("pointermove", onMove)
     window.addEventListener("pointerup", onUp)
     return () => {
       window.removeEventListener("pointermove", onMove)
       window.removeEventListener("pointerup", onUp)
     }
-  }, [])
+  }, [snapshotOnce, commit])
 
-  // Bounding box of the frozen selection lasso, in canvas units — positions the trash icon
-  let selectionTop: { x: number; y: number } | null = null
-  if (selectionLasso) {
-    for (const [x, y] of selectionLasso) {
-      if (!selectionTop || y < selectionTop.y) selectionTop = { x, y }
-    }
-  }
+  // Bounds of the frozen lasso — positions the resize handle and the action buttons
+  const selectionBounds = selectionLasso ? polyBounds(selectionLasso) : null
 
   const toolbar = (
       <div className={cn("flex items-center gap-1 shrink-0 min-w-0", toolbarSlot ? "flex-1" : "px-2 py-1.5 border-b border-divider/50")}>
@@ -1124,7 +1304,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
         <div className="w-px h-4 bg-divider/50 mx-0.5" />
         <button
           onClick={undo}
-          disabled={doc.strokes.length === 0}
+          disabled={undoStack.length === 0}
           className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors"
         >
           <Undo2 className="h-3.5 w-3.5" />
@@ -1136,14 +1316,6 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
           className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors"
         >
           <Redo2 className="h-3.5 w-3.5" />
-        </button>
-        <div className="w-px h-4 bg-divider/50 mx-0.5" />
-        <button
-          onClick={clearAll}
-          disabled={doc.strokes.length === 0}
-          className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
         </button>
         <div className="w-px h-4 bg-divider/50 mx-0.5" />
         <button
@@ -1159,7 +1331,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
           <button
             onClick={() => setColorOpen((o) => !o)}
             className="flex items-center gap-1.5 rounded px-2 py-1 text-[10px] font-medium hover:bg-hover transition-colors"
-            style={{ color: displayColor(color) }}
+            style={{ color: inkColor(color, isDark) }}
           >
             Color
           </button>
@@ -1174,7 +1346,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
                       "w-5 h-5 rounded-full border-2 transition-all",
                       color === c.value ? "border-ink scale-110" : "border-transparent hover:border-ink-faint"
                     )}
-                    style={{ backgroundColor: displayColor(c.value) }}
+                    style={{ backgroundColor: inkColor(c.value, isDark) }}
                   />
                 ))}
               </div>
@@ -1190,7 +1362,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
                           "w-5 h-5 rounded-full border-2 transition-all",
                           color === c ? "border-ink scale-110" : "border-transparent hover:border-ink-faint"
                         )}
-                        style={{ backgroundColor: displayColor(c) }}
+                        style={{ backgroundColor: inkColor(c, isDark) }}
                       />
                     ))}
                   </div>
@@ -1247,7 +1419,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
         {screenshotMode && <span className="text-[10px] text-ink-faint ml-1">(drag to capture)</span>}
         {selectionMode && <span className="text-[10px] text-ink-faint ml-1">(draw a lasso to select)</span>}
         {textMode && <span className="text-[10px] text-ink-faint ml-1">(drag a box to write in)</span>}
-        {selectedStrokes.size > 0 && <span className="text-[10px] text-ink-faint ml-1">({selectedStrokes.size} selected — drag or Esc)</span>}
+        {selectedStrokes.size > 0 && <span className="text-[10px] text-ink-faint ml-1">({selectedStrokes.size} selected — drag, resize or Esc)</span>}
       </div>
   )
 
@@ -1259,7 +1431,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
       {/* Canvas area */}
       <div
         ref={containerRef}
-        className={cn("flex-1 min-h-0 overflow-hidden relative", isPanning ? "cursor-grabbing" : "cursor-crosshair")}
+        className={cn("flex-1 min-h-0 overflow-hidden relative", isDrawing ? "cursor-none" : isPanning ? "cursor-grabbing" : "cursor-crosshair")}
         style={{ touchAction: "none", WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none" }}
         onPointerDown={handleContainerPointerDown}
         onPointerMove={handleContainerPointerMove}
@@ -1269,8 +1441,8 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
         {/* Dot grid background */}
         <svg className="absolute inset-0 w-full h-full pointer-events-none" aria-hidden>
           <defs>
-            <pattern id="canvas-dots" x={offset.x % (20 * scale)} y={offset.y % (20 * scale)} width={20 * scale} height={20 * scale} patternUnits="userSpaceOnUse">
-              <circle cx={1} cy={1} r={0.8} fill="var(--ink-faint)" opacity={0.3} />
+            <pattern id="canvas-dots" x={offset.x % (30 * scale)} y={offset.y % (30 * scale)} width={30 * scale} height={30 * scale} patternUnits="userSpaceOnUse">
+              <circle cx={1.2} cy={1.2} r={1.2} fill="var(--ink-faint)" opacity={0.7} />
             </pattern>
           </defs>
           <rect width="100%" height="100%" fill="url(#canvas-dots)" />
@@ -1374,31 +1546,55 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
               )
             })}
             {/* Committed strokes */}
-            {doc.strokes.map((stroke, i) => {
-              const d = strokePath(stroke)
-              return d ? <path key={i} d={d} fill={displayColor(stroke.color)} /> : null
-            })}
+            <StrokeLayer strokes={doc.strokes} hidden={dragPreview && selectedStrokes} isDark={isDark} />
             {/* In-progress stroke — d is set imperatively by redrawLive */}
-            <path ref={livePathRef} fill={displayColor(color)} />
+            <path ref={livePathRef} fill={inkColor(color, isDark)} />
 
-            {/* Stroke selection — highlighted outlines + a draggable lasso fill (moves them together) */}
-            {selectionLasso && (
-              <>
-                {[...selectedStrokes].map((i) => {
-                  const s = doc.strokes[i]
-                  if (!s) return null
-                  const d = strokePath(s)
-                  return d ? <path key={`sel-${i}`} d={d} fill="none" stroke="var(--ink)" strokeWidth={1.5 / scale} strokeDasharray={`${3 / scale} ${3 / scale}`} /> : null
-                })}
-                <path
-                  d={`M ${selectionLasso.map(([x, y]) => `${x},${y}`).join(" L ")} Z`}
-                  fill="var(--ink-faint)" fillOpacity={0.08}
-                  stroke="var(--ink-muted)" strokeWidth={1 / scale} strokeDasharray={`${4 / scale} ${4 / scale}`}
-                  style={{ cursor: "grab", pointerEvents: "all" }}
-                  onPointerDown={(e) => { e.stopPropagation(); startSelectionMove(e.clientX, e.clientY) }}
-                />
-              </>
-            )}
+            {/* Stroke selection — highlighted outlines + the freehand lasso fill, which is
+                what you drag to move them together. One handle at the shape's bottom-right
+                scales it diagonally; it is sized in `u` so it stays a constant,
+                thumb-findable size at any zoom. */}
+            {selectionLasso && selectionBounds && (() => {
+              const u = 1 / scale
+              const b = selectionBounds
+              const hit = 13 * u  // invisible grab area — bigger than the dot you see
+              const dot = 5 * u
+              // Mid-drag the committed layer hides these, so they are drawn here from the
+              // preview — one gesture frame re-renders the selection, not the whole canvas.
+              const picked: [number, StrokeData | undefined][] = dragPreview ?? [...selectedStrokes].map((i) => [i, doc.strokes[i]])
+              return (
+                <>
+                  {picked.map(([i, s]) => {
+                    const d = s && strokePath(s)
+                    if (!d) return null
+                    return (
+                      <g key={`sel-${i}`}>
+                        {dragPreview && <path d={d} fill={inkColor(s!.color, isDark)} />}
+                        <path d={d} fill="none" stroke="var(--ink)" strokeWidth={1.5 * u} strokeDasharray={`${3 * u} ${3 * u}`} />
+                      </g>
+                    )
+                  })}
+                  <path
+                    d={`M ${selectionLasso.map(([x, y]) => `${x},${y}`).join(" L ")} Z`}
+                    fill="var(--ink-faint)" fillOpacity={0.08}
+                    stroke="var(--ink-muted)" strokeWidth={u} strokeDasharray={`${4 * u} ${4 * u}`}
+                    style={{ cursor: "grab", pointerEvents: "all" }}
+                    onPointerDown={(e) => { e.stopPropagation(); startSelDrag("move", e.clientX, e.clientY) }}
+                  />
+                  <g
+                    style={{ cursor: "nwse-resize" }}
+                    onPointerDown={(e) => { e.stopPropagation(); startSelDrag("resize", e.clientX, e.clientY) }}
+                  >
+                    <rect x={b.x + b.w - hit / 2} y={b.y + b.h - hit / 2} width={hit} height={hit} fill="transparent" />
+                    <rect
+                      x={b.x + b.w - dot / 2} y={b.y + b.h - dot / 2} width={dot} height={dot} rx={1.5 * u}
+                      fill="var(--paper)" stroke="var(--ink-muted)" strokeWidth={u}
+                      style={{ pointerEvents: "none" }}
+                    />
+                  </g>
+                </>
+              )
+            })()}
 
             {/* In-progress lasso — pen-button drag traces the selection outline freehand */}
             {lassoPoints && lassoPoints.length > 1 && (
@@ -1432,19 +1628,30 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
           </g>
         </svg>
 
-        {/* Selection delete — hover-responsive trash icon at the topmost point of the lasso */}
-        {selectionTop && (
-          <button
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => { e.stopPropagation(); deleteSelection() }}
-            className="absolute z-10 -translate-x-1/2 -translate-y-full rounded-full p-1 bg-paper border border-divider-strong text-ink-faint hover:text-danger shadow-[var(--shadow-lg)] transition-colors"
+        {/* Selection actions — duplicate / delete, anchored just above the lasso's bounds */}
+        {selectionBounds && (
+          <div
+            className="absolute z-10 flex items-center gap-1 -translate-y-full"
             style={{
-              left: selectionTop.x * scale + offset.x,
-              top: selectionTop.y * scale + offset.y - 6,
+              left: selectionBounds.x * scale + offset.x,
+              top: selectionBounds.y * scale + offset.y - 6,
             }}
           >
-            <Trash2 className="h-3 w-3" />
-          </button>
+            <button
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); copySelection() }}
+              className="rounded-full p-1 bg-paper border border-divider-strong text-ink-faint hover:text-ink shadow-[var(--shadow-lg)] transition-colors"
+            >
+              <Copy className="h-3 w-3" />
+            </button>
+            <button
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); deleteSelection() }}
+              className="rounded-full p-1 bg-paper border border-divider-strong text-ink-faint hover:text-danger shadow-[var(--shadow-lg)] transition-colors"
+            >
+              <Trash2 className="h-3 w-3" />
+            </button>
+          </div>
         )}
 
         {/* Attachments (pdf) — the CanvasAttachment primitive. Live, scrollable,
@@ -1511,8 +1718,11 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
               <textarea
                 autoFocus={t.id === autoFocusId}
                 value={t.text}
-                onChange={(e) => onChange({ ...doc, texts: doc.texts.map((x) => x.id === t.id ? { ...x, text: e.target.value } : x) })}
-                onFocus={() => setAutoFocusId((cur) => cur === t.id ? null : cur)}
+                onChange={(e) => {
+                  if (!textEdited.current) { textEdited.current = true; if (t.text !== "") snapshot() }
+                  onChange({ ...doc, texts: doc.texts.map((x) => x.id === t.id ? { ...x, text: e.target.value } : x) })
+                }}
+                onFocus={() => { textEdited.current = false; setAutoFocusId((cur) => cur === t.id ? null : cur) }}
                 onBlur={() => dropIfEmptyText(t.id)}
                 onKeyDown={(e) => {
                   e.stopPropagation()
@@ -1524,7 +1734,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
                   fontFamily: "var(--font-handwriting), cursive",
                   fontSize: t.size * scale,
                   lineHeight: 1.2,
-                  color: displayColor(t.color),
+                  color: inkColor(t.color, isDark),
                 }}
               />
               {/* top drag-band (move) — thin sliver above the textarea, dim until hover */}

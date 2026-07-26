@@ -90,6 +90,13 @@ function ResizableEditor({ children }: { children: React.ReactNode }) {
   )
 }
 
+// Canvas content identity, ignoring viewport. Every canvas mutation is an immutable
+// spread, so comparing the four array references is exact — and O(1), where stringifying
+// the whole document to diff it was the most expensive thing happening during a drag.
+function sameCanvasContent(a: CanvasDocument | null, b: CanvasDocument | null): boolean {
+  return !!a && !!b && a.frames === b.frames && a.strokes === b.strokes && a.attachments === b.attachments && a.texts === b.texts
+}
+
 export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, availablePdfs, availableImages, overlay, persistOverride, onModeLabel, onNavigate, model, canvasToolbarSlot }: DocumentEditorProps) {
   const isCanvas = path.endsWith(".canvas")
   const [content, setContent] = useState<string | null>(null)
@@ -124,7 +131,7 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
         const doc = text.trim() ? parseCanvasDoc(text) : emptyCanvasDoc()
         setCanvasDoc(doc)
         savedContentRef.current = serializeCanvasDoc(doc)
-        savedCanvasKey.current = canvasContentKey(doc)
+        savedCanvasRef.current = doc
       } else {
         setContent(text)
         savedContentRef.current = text
@@ -134,7 +141,7 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
         const doc = emptyCanvasDoc()
         setCanvasDoc(doc)
         savedContentRef.current = serializeCanvasDoc(doc)
-        savedCanvasKey.current = canvasContentKey(doc)
+        savedCanvasRef.current = doc
       } else {
         setContent("")
       }
@@ -144,30 +151,31 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
     }
   }, [path, isCanvas, overlay])
 
-  const currentSerialized = isCanvas
-    ? (canvasDoc ? serializeCanvasDoc(canvasDoc) : null)
-    : content
+  // Serializing a canvas costs O(whole document) — it used to run on every render plus
+  // twice per change, so a drag over a big canvas stringified megabytes per pointermove.
+  // Now it is pulled on demand (save, export) or once per debounce window, never in render.
+  const serializeNow = useCallback(
+    () => (isCanvas ? (canvasDoc ? serializeCanvasDoc(canvasDoc) : null) : content),
+    [isCanvas, canvasDoc, content],
+  )
 
   const handleTextChange = useCallback((v: string) => {
     setContent(v)
     setDirty(v !== savedContentRef.current)
   }, [])
 
-  const canvasContentKey = useCallback((doc: CanvasDocument) => {
-    const { viewport: _, ...rest } = doc
-    return JSON.stringify(rest)
-  }, [])
+  const savedCanvasRef = useRef<CanvasDocument | null>(null)
 
-  const savedCanvasKey = useRef("")
   const handleCanvasChange = useCallback((doc: CanvasDocument) => {
     setCanvasDoc(doc)
-    setDirty(canvasContentKey(doc) !== savedCanvasKey.current)
-    onLiveContent?.(path, serializeCanvasDoc(doc))
-  }, [canvasContentKey, onLiveContent, path])
+    setDirty(!sameCanvasContent(doc, savedCanvasRef.current))
+  }, [])
 
+  const liveRef = useRef(onLiveContent)
+  liveRef.current = onLiveContent
   useEffect(() => {
-    return () => { onLiveContent?.(path, null) }
-  }, [path, onLiveContent])
+    return () => { liveRef.current?.(path, null) }
+  }, [path])
 
   const buildImageEmbeds = useCallback(async (doc: CanvasDocument): Promise<EmbedRect[]> => {
     const images = doc.frames.filter((f) => f.kind === "image" && f.path)
@@ -197,8 +205,8 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
     savedContentRef.current = serialized
     // mirror the drawing jpeg only when actual content changed — viewport-only
     // autosaves (pan/zoom) shouldn't re-render and re-upload an image
-    const contentChanged = isCanvas && canvasDoc ? canvasContentKey(canvasDoc) !== savedCanvasKey.current : false
-    if (isCanvas && canvasDoc) savedCanvasKey.current = canvasContentKey(canvasDoc)
+    const contentChanged = isCanvas && canvasDoc ? !sameCanvasContent(canvasDoc, savedCanvasRef.current) : false
+    if (isCanvas && canvasDoc) savedCanvasRef.current = canvasDoc
     setDirty(false)
     onSaved?.(filename, serialized)
     if (isCanvas && canvasDoc && contentChanged && (canvasDoc.strokes.length > 0 || canvasDoc.texts.length > 0 || canvasDoc.frames.some((f) => f.kind === "image"))) {
@@ -208,7 +216,7 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
         await mirrorDrawing(filename.replace(/\.canvas$/, ".jpg"), blob)
       } catch { /* */ }
     }
-  }, [slug, filename, isCanvas, canvasDoc, canvasContentKey, onSaved, buildImageEmbeds, persistOverride])
+  }, [slug, filename, isCanvas, canvasDoc, onSaved, buildImageEmbeds, persistOverride])
 
   // Saves are chained so an earlier slow write can never resolve after — and
   // silently clobber — a newer one. Matters now that every stroke persists.
@@ -220,28 +228,36 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
   }, [persistNow])
 
   const handleSave = useCallback(async () => {
-    if (currentSerialized === null || saving) return
+    const serialized = serializeNow()
+    if (serialized === null || saving) return
     setSaving(true)
-    try { await persist(currentSerialized) } catch { /* */ }
+    try { await persist(serialized) } catch { /* */ }
     setSaving(false)
-  }, [currentSerialized, saving, persist])
+  }, [serializeNow, saving, persist])
 
   // Canvas autosave fires on any serialized change — strokes, frames, texts,
   // and viewport — so re-entering restores exactly what was left, view included.
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => {
-    if (!isCanvas || currentSerialized === null || currentSerialized === savedContentRef.current) return
+    if (!isCanvas || !canvasDoc) return
     clearTimeout(autoSaveTimer.current)
-    autoSaveTimer.current = setTimeout(() => { persist(currentSerialized).catch(() => {}) }, 1000)
+    autoSaveTimer.current = setTimeout(() => {
+      // the one serialization per quiet second — it feeds both the write and the live
+      // content the chat reads at send time
+      const serialized = serializeCanvasDoc(canvasDoc)
+      liveRef.current?.(path, serialized)
+      if (serialized !== savedContentRef.current) persist(serialized).catch(() => {})
+    }, 1000)
     return () => clearTimeout(autoSaveTimer.current)
-  }, [isCanvas, currentSerialized, persist])
+  }, [isCanvas, canvasDoc, path, persist])
 
   // Leaving the editor flushes a pending autosave immediately — the debounce
   // cleanup alone would drop strokes drawn in the final second.
   const flushRef = useRef<() => void>(() => {})
   flushRef.current = () => {
-    if (isCanvas && currentSerialized !== null && currentSerialized !== savedContentRef.current) {
-      persist(currentSerialized).catch(() => {})
+    const serialized = isCanvas ? serializeNow() : null
+    if (serialized !== null && serialized !== savedContentRef.current) {
+      persist(serialized).catch(() => {})
     }
   }
   useEffect(() => () => flushRef.current(), [])
@@ -252,7 +268,7 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
     if (pages.length === 0) return
     setExporting(true)
     try {
-      if (dirty && currentSerialized !== null) await persist(currentSerialized)
+      if (dirty) { const serialized = serializeNow(); if (serialized !== null) await persist(serialized) }
       const { PDFDocument } = await import("pdf-lib")
       const A4_ASPECT = 1123 / 794
       const imgs = await buildImageEmbeds(canvasDoc)
@@ -269,7 +285,7 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
       onSaved?.()
     } catch { /* */ }
     setExporting(false)
-  }, [isCanvas, canvasDoc, exporting, dirty, currentSerialized, slug, filename, persist, onSaved, buildImageEmbeds])
+  }, [isCanvas, canvasDoc, exporting, dirty, serializeNow, slug, filename, persist, onSaved, buildImageEmbeds])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
