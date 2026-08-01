@@ -625,12 +625,15 @@ export function ChatContainer({
     })
   }, [focusQaIndex, focusKey])
 
+  // Depend on the length, not the array: in an empty chat every re-render hands
+  // down a fresh [] and this would slam the sidebar shut again — including right
+  // after you opened the Documents expander.
   useEffect(() => {
     if (messages.length === 0) {
       setManualOverrides(new Map())
       setOpenElements(new Set())
     }
-  }, [messages])
+  }, [messages.length])
 
   const pairs = useMemo<{ user: Message; assistant: Message; globalIndex: number }[]>(() => {
     const out: { user: Message; assistant: Message; globalIndex: number }[] = []

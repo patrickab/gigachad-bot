@@ -106,14 +106,15 @@ export function strokeToPathData(stroke: StrokeData): string {
   return getSvgPathFromStroke(outline)
 }
 
-async function loadImage(url: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    img.crossOrigin = "anonymous"
-    img.onload = () => resolve(img)
-    img.onerror = reject
-    img.src = url
-  })
+// ponytail: fetch + ImageBitmap, not `new Image()` with crossOrigin. API_BASE is a
+// different origin (:8001) and the live canvas already loaded these same URLs through
+// SVG <image> without CORS; the crossOrigin request then reuses that cached non-CORS
+// entry and errors, which silently dropped every image out of the export. fetch has
+// its own cache entry and a decoded blob never taints the canvas.
+async function loadImage(url: string): Promise<ImageBitmap> {
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`image ${res.status}: ${url}`)
+  return createImageBitmap(await res.blob())
 }
 
 // Render images + strokes onto a 2x canvas, translating by (offsetX, offsetY).
@@ -144,7 +145,7 @@ async function drawCanvas(
       const dy = embed.y - offsetY
       const dh = embed.width * embed.aspect
       ctx.drawImage(img, dx, dy, embed.width, dh)
-    } catch { /* skip broken images */ }
+    } catch (err) { console.warn("canvas export: skipping image", embed.url, err) }
   }
   for (const stroke of strokes) {
     const outline = getStroke(

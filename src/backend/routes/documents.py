@@ -64,7 +64,9 @@ class AddDocumentRequest(BaseModel):
 
 
 def _meta_list(paths: list[str]) -> list[DocumentMeta]:
-    return [DocumentMeta(**lib_docs.document_meta(p)) for p in paths]
+    # ponytail: canvas-pasted images stay registered (so /fileviewer can serve them)
+    # but never surface as documents — they'd flood the sidebar and the canvas add menu.
+    return [DocumentMeta(**lib_docs.document_meta(p)) for p in paths if not Path(p).name.startswith("pasted-")]
 
 
 def _validate_doc_path(store: ProjectStore, path: str) -> Path:

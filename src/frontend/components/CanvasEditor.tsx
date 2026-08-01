@@ -1259,7 +1259,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
             <Plus className="h-3 w-3" />
           </button>
           {addMenuOpen && (
-            <div className="absolute top-full left-0 mt-1 z-10 rounded-lg border border-divider bg-paper shadow-[var(--shadow-lg)] py-1 min-w-[160px]">
+            <div className="absolute top-full left-0 mt-1 z-10 rounded-lg border border-divider bg-paper shadow-[var(--shadow-lg)] py-1 min-w-[160px] max-h-[60vh] overflow-y-auto">
               <button
                 onClick={() => { addPage(); setAddMenuOpen(false) }}
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink hover:bg-hover transition-colors"
