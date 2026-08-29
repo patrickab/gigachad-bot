@@ -466,8 +466,8 @@ function LaTeXMarkdownInner({
     <div className={cn("text-[13px] leading-relaxed", compact ? "markdown-body-compact" : "markdown-body")}>
       <Streamdown
         mode={streaming ? "streaming" : "static"}
-        isAnimating={!!streaming}
-        animated={streaming ? { duration: 60, animation: "fadeIn" } : false}
+        isAnimating={false}
+        animated={false}
         caret={undefined}
         controls={{ code: false, table: { copy: true, download: true }, mermaid: false }}
         plugins={PLUGINS}
