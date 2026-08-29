@@ -1,6 +1,7 @@
 import logging
 import os
 import signal
+import sys
 import threading
 from pathlib import Path
 import re
@@ -10,7 +11,7 @@ import tempfile
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from config import DIRECTORY_OUTPUT_MINERU, DIRECTORY_OUTPUT_PDF, SMALL_MODEL
+from config import DIRECTORY_OUTPUT_MINERU, DIRECTORY_OUTPUT_PDF, MINERU_SERVER_URL, SMALL_MODEL
 from lib.attachment_materialize import mineru_cache_path
 
 from .deps import request_client
@@ -139,20 +140,36 @@ async def _parse_pdf(
     with tempfile.TemporaryDirectory() as tmp_extract:
         tmp_dir = Path(tmp_extract)
 
-        local = api_client.LocalAPIServer()
-        register_mineru_server(local)
-        base_url = local.start()
+        local = None
+        if MINERU_SERVER_URL:
+            base_url = MINERU_SERVER_URL.rstrip("/")
+        elif getattr(sys, "frozen", False):
+            # LocalAPIServer spawns `sys.executable -m mineru.cli.fast_api`,
+            # which cannot work inside a PyInstaller bundle (sys.executable is
+            # the frozen sidecar itself, and the ML stack isn't bundled).
+            # HTTPException so the actionable message reaches the UI.
+            raise HTTPException(
+                status_code=503,
+                detail="PDF OCR in the desktop app requires MINERU_SERVER_URL pointing at a "
+                "running MinerU server (e.g. `python -m mineru.cli.fast_api` from the repo venv).",
+            )
+        else:
+            local = api_client.LocalAPIServer()
+            register_mineru_server(local)
+            base_url = local.start()
         async with httpx.AsyncClient(timeout=api_client.build_http_timeout()) as cli:
             try:
-                await api_client.wait_for_local_api_ready(cli, local)
+                if local is not None:
+                    await api_client.wait_for_local_api_ready(cli, local)
                 sub = await api_client.submit_parse_task(base_url, assets, form_data)
                 await api_client.wait_for_task_result(cli, sub, task_label=pdf_path.name)
                 zp = await api_client.download_result_zip(cli, sub, task_label=pdf_path.name)
                 api_client.safe_extract_zip(zp, tmp_dir)
                 zp.unlink(missing_ok=True)
             finally:
-                unregister_mineru_server(local)
-                local.stop()
+                if local is not None:
+                    unregister_mineru_server(local)
+                    local.stop()
 
         md_files = sorted(tmp_dir.glob("**/*.md"), key=lambda p: len(p.name))
         if not md_files:
@@ -202,9 +219,9 @@ async def _parse_pdf(
 
 
 def _detect_backend() -> str:
-    import torch
-
-    if torch.cuda.is_available():
+    # nvidia-smi presence stands in for torch.cuda.is_available() so the slim
+    # desktop sidecar (which excludes torch) can still pick a sensible backend.
+    if shutil.which("nvidia-smi") is not None:
         return "hybrid-auto-engine"
     return "pipeline"
 

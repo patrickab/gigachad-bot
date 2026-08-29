@@ -1,6 +1,11 @@
+// Tauri v2 sets TAURI_ENV_* in beforeBuildCommand's environment, so the build
+// auto-detects its target: desktop embeds a static export, web keeps a real
+// Node server (`npm run start`, SSR/API routes remain possible).
+const isTauriBuild = !!process.env.TAURI_ENV_PLATFORM;
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: "standalone",
+  output: isTauriBuild ? "export" : "standalone",
   webpack: (config) => {
     config.resolve.alias.canvas = false;
     config.resolve.alias.encoding = false;

@@ -19,6 +19,10 @@ src/archive
 src/frontend/node_modules
 src/frontend/.next
 src/frontend/out
+src/frontend/src-tauri/binaries
+src/frontend/src-tauri/gen
+src/frontend/src-tauri/target
+.build
 src/frontend/build
 src/frontend/.env.local
 src/frontend/tsconfig.tsbuildinfo

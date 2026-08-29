@@ -1,5 +1,5 @@
 import type { WebSearchParams } from "./types"
-import { API_BASE } from "./config"
+import { getApiBase } from "./config"
 import { readLines } from "./sse"
 
 export interface WebSearchResultItem {
@@ -29,7 +29,7 @@ export function applyDomainFilter(query: string, domain: string): string {
 
 export function webSearchFetch(params: WebSearchParams) {
   const controller = new AbortController()
-  const promise = fetch(`${API_BASE}/web-search`, {
+  const promise = fetch(`${getApiBase()}/web-search`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -120,7 +120,7 @@ export async function* parseWebSearchStream(res: Response): AsyncGenerator<WebSe
 
 export async function fetchWebSearchImages(query: string, model: string): Promise<string[]> {
   try {
-    const r = await fetch(`${API_BASE}/web-search/images`, {
+    const r = await fetch(`${getApiBase()}/web-search/images`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query, model }),
@@ -135,7 +135,7 @@ export async function fetchWebSearchImages(query: string, model: string): Promis
 
 export async function fetchWebSearchVideos(query: string, model: string): Promise<WebSearchVideo[]> {
   try {
-    const r = await fetch(`${API_BASE}/web-search/videos`, {
+    const r = await fetch(`${getApiBase()}/web-search/videos`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query, model }),

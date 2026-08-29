@@ -1,4 +1,4 @@
-import { API_BASE } from "./config"
+import { getApiBase } from "./config"
 
 export interface SSEEvent {
   event: string
@@ -35,7 +35,7 @@ export async function* readLines(res: Response): AsyncGenerator<string> {
 export function createSSEStream(
   path: string,
   body: Record<string, unknown>,
-  base: string = API_BASE
+  base: string = getApiBase()
 ): SSEStreamResult {
   const controller = new AbortController()
 

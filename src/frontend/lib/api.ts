@@ -1,7 +1,7 @@
 import type { Attachment, BackendConfig, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelsResponse, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage, VaultFile, VaultNode } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
-import { API_BASE } from "./config"
+import { getApiBase } from "./config"
 
 function encodePath(filename: string): string {
   return filename.split("/").map(encodeURIComponent).join("/")
@@ -43,7 +43,7 @@ async function ensureOk(res: Response): Promise<Response> {
 }
 
 export async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await ensureOk(await fetch(`${API_BASE}${path}`, options))
+  const res = await ensureOk(await fetch(`${getApiBase()}${path}`, options))
   return res.json()
 }
 
@@ -209,7 +209,7 @@ export function createOCRStream(
 }
 
 function _apiOrigin(): string {
-  const url = new URL(API_BASE)
+  const url = new URL(getApiBase())
   return url.origin
 }
 
@@ -298,7 +298,7 @@ export async function writeFileVaultFile(path: string, content: string): Promise
 
 /** Direct URL to a file's raw bytes (images, PDFs) — usable as an `<img>`/PDF src. */
 export function fileViewerRawUrl(path: string): string {
-  return `${API_BASE}/fileviewer/raw?path=${encodeURIComponent(path)}`
+  return `${getApiBase()}/fileviewer/raw?path=${encodeURIComponent(path)}`
 }
 
 /** Read a file's text content (markdown / unknown-treated-as-text). */

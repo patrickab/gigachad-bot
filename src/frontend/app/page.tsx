@@ -42,6 +42,7 @@ import { BranchProvider } from "@/contexts/BranchContext"
 import { SidebarProvider, type AppSurface } from "@/contexts/SidebarContext"
 import { MemoryViewerProvider } from "@/contexts/MemoryViewerContext"
 import { MemoryViewer } from "@/components/MemoryViewer"
+import { DesktopBackendProvider } from "@/components/DesktopBackendProvider"
 import { handleStudyPdf, updateLastMsg as updateLastAssistant } from "@/hooks/useStudyHandler"
 import {
   loadChatHistory as apiLoadChatHistory,
@@ -893,12 +894,14 @@ function AppContent() {
 
 export default function Home() {
   return (
-    <SettingsProvider>
-      <ProjectProvider>
-        <div id="main-content" className="h-dvh">
-          <AppContent />
-        </div>
-      </ProjectProvider>
-    </SettingsProvider>
+    <DesktopBackendProvider>
+      <SettingsProvider>
+        <ProjectProvider>
+          <div id="main-content" className="h-dvh">
+            <AppContent />
+          </div>
+        </ProjectProvider>
+      </SettingsProvider>
+    </DesktopBackendProvider>
   )
 }

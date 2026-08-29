@@ -1,8 +1,9 @@
 import os
 from pathlib import Path
 
-# Base directory of the project
-BASE_DIR = Path(".")
+# Base directory of the project. The desktop sidecar preserves the existing
+# filesystem layout when launched with GIGACHAD_BASE_DIR set by its user.
+BASE_DIR = Path(os.environ.get("GIGACHAD_BASE_DIR", ".")).expanduser()
 
 # Fileserver data location
 SERVER_STATIC_DIR = BASE_DIR / "src" / "static"
@@ -51,6 +52,11 @@ OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 # Standalone SearXNG (searxng-settings.yml) — retriever for Deep Research (gpt-researcher).
 # Separate from Vane's internal SearXNG, which is not exposed on a host port.
 SEARX_URL = os.environ.get("SEARX_URL", "http://localhost:8888")
+
+# External MinerU OCR server (mineru.cli.fast_api). When unset, the backend
+# spawns one per parse from its own environment — impossible in the frozen
+# desktop sidecar, which excludes the ML stack and requires this to be set.
+MINERU_SERVER_URL = os.environ.get("MINERU_SERVER_URL")
 
 # --- OpenRouter model definitions ---
 MODELS_OPENROUTER = (

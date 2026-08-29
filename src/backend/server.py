@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
+import os
 import signal
 import sys
 
@@ -69,9 +70,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="gigachad-bot", lifespan=lifespan)
 
+# Defaults to the pre-desktop wildcard; the Tauri shell narrows it to its own
+# webview origins via this env var, and server deployments can do the same.
+_cors_origins = [o.strip() for o in os.environ.get("GIGACHAD_CORS_ORIGINS", "*").split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

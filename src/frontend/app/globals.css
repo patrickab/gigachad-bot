@@ -129,6 +129,17 @@
     --inner-highlight-strong: inset 0 1px 0 0 oklch(100% 0 0 / 0.7);
   }
 
+/* Opt-in escape hatch: strips only the backmost layer's background (the page
+   body, --paper) so a compositor-level window rule (e.g. Hyprland's
+   `opacity`/`blur` windowrules, which blend the whole window regardless of
+   the app's own alpha support) can show the desktop through that area. Every
+   other surface (cards, menus, popovers — --surface/--surface-elevated/
+   --overlay) deliberately keeps its normal opaque theme color, so floating UI
+   stays legible against the glass. Not a theme — orthogonal to dark/light. */
+.transparent-bg {
+  --paper: transparent;
+}
+
 /* ============================================================
    TAILWIND V4 TOKEN MAPPING
    ------------------------------------------------------------

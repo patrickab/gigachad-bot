@@ -86,7 +86,7 @@ function enqueueMermaidRender(id: string, code: string): Promise<string> {
     const { svg } = await mermaid.render(id, code)
     return svg
   })
-  mermaidQueue = job.catch(() => {})
+  mermaidQueue = job.then(() => undefined, () => undefined)
   return job
 }
 

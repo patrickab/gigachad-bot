@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useCallback } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { MoreHorizontal, BookOpen, Pencil } from "lucide-react"
 import { LLMParams } from "./LLMParams"
@@ -8,7 +8,7 @@ import { PillButton } from "./PillButton"
 import { ParamSlider } from "./ParamSlider"
 import { StyledSelect } from "./StyledSelect"
 import { cn } from "@/lib/utils"
-import { REASONING_LEVELS } from "@/lib/config"
+import { REASONING_LEVELS, STORAGE_KEY_TRANSPARENT_BG } from "@/lib/config"
 import { useClickOutside } from "@/hooks/useClickOutside"
 import { useModeState } from "@/hooks/useModeState"
 import type { TabConfig } from "@/components/TabManager"
@@ -55,10 +55,24 @@ export function MoreOptionsMenu({
 }: MoreOptionsMenuProps) {
   const { researchEnabled, searchEnabled } = useModeState()
   const [open, setOpen] = useState(false)
+  const [transparentBg, setTransparentBg] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
   const close = useCallback(() => { setOpen(false) }, [])
   useClickOutside(ref, close)
+
+  useEffect(() => {
+    try {
+      setTransparentBg(localStorage.getItem(STORAGE_KEY_TRANSPARENT_BG) === "1")
+    } catch {}
+  }, [])
+
+  function toggleTransparentBg() {
+    const next = !transparentBg
+    setTransparentBg(next)
+    try { localStorage.setItem(STORAGE_KEY_TRANSPARENT_BG, next ? "1" : "0") } catch {}
+    document.documentElement.classList.toggle("transparent-bg", next)
+  }
 
   return (
     <div className="relative z-50" ref={ref}>
@@ -78,6 +92,11 @@ export function MoreOptionsMenu({
             transition={{ duration: 0.15 }}
             className="absolute right-0 top-full mt-2 w-72 rounded-xl border border-divider bg-paper p-3 shadow-[var(--shadow-xl)] flex flex-col gap-4"
           >
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="text-xs text-ink-subtle">Transparent background</span>
+              <Toggle on={transparentBg} onChange={toggleTransparentBg} />
+            </label>
+
             {!researchEnabled && (
               <>
                 {/* System Prompt */}
