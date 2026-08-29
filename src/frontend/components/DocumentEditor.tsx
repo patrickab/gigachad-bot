@@ -376,7 +376,7 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
   )
 
   const canvasBody = isCanvas && canvasDoc && (
-    <CanvasEditor doc={canvasDoc} onChange={handleCanvasChange} availablePdfs={availablePdfs} availableImages={availableImages} slug={slug} onImageAdded={() => onSaved?.()} toolbarSlot={canvasToolbarSlot} />
+    <CanvasEditor doc={canvasDoc} onChange={handleCanvasChange} availablePdfs={availablePdfs} availableImages={availableImages} slug={slug} docPath={path} onImageAdded={() => onSaved?.()} toolbarSlot={canvasToolbarSlot} />
   )
 
   const editorBody = textBody || canvasBody

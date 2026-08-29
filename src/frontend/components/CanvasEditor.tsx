@@ -4,10 +4,10 @@ import { memo, useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { getStroke } from "perfect-freehand"
 import { type StrokeData, type EmbedRect, getSvgPathFromStroke, renderPageToPng } from "@/lib/drawing"
-import { fileViewerRawUrl, writeBinaryDocument } from "@/lib/api"
+import { fileViewerRawUrl, writeBinaryDocument, listProjectDocuments, loadFileViewerText, writeDocument } from "@/lib/api"
 import { activeThemeName } from "@/lib/palette"
 import { cn } from "@/lib/utils"
-import { Plus, Undo2, Redo2, Trash2, Copy, FileType, ImageIcon, X, Camera, CircleDashed, Type } from "lucide-react"
+import { Plus, Undo2, Redo2, Trash2, Copy, FileType, ImageIcon, X, Camera, CircleDashed, Type, SquarePen, PenLine, Maximize2, Minimize2 } from "lucide-react"
 import { PdfViewer } from "./PdfViewer"
 
 const A4_W = 794
@@ -16,6 +16,10 @@ const A4_ASPECT = A4_H / A4_W // height / width — page frames are locked to th
 const PAGE_GAP = 40
 const DEFAULT_PDF_WIDTH = 500 // attachment default width (canvas units)
 const DEFAULT_IMAGE_WIDTH = 400 // image-frame default width (canvas units)
+const DEFAULT_CANVAS_WIDTH = 600 // nested canvas window default width (canvas units)
+const CANVAS_ASPECT = 0.7 // nested canvas windows have no intrinsic aspect — fix one
+const NESTED_SAVE_MS = 1000 // quiet time before a file-backed canvas window writes back
+const MAX_NEST_DEPTH = 2 // canvas windows stop opening files here, so A→B→A can't recurse
 const MIN_FRAME_WIDTH = 120
 const MIN_ATTACH_WIDTH = 200
 const FALLBACK_ASPECT = 1.3 // height/width used until the real aspect is measured
@@ -94,7 +98,8 @@ const SIZE_MAP: Record<StrokeSize, number> = { thin: THIN_WIDTH, medium: MEDIUM_
 // CanvasFrame  = content that IS the artwork (page or image). Rasterized into
 //                the PDF/image export. Shared minimalistic chrome: drag the top
 //                border to move, bottom-right corner to resize, top-right to delete.
-// CanvasAttachment = a live, scrollable file reference (PDF; later text/LaTeX).
+// CanvasAttachment = a live, scrollable file reference (PDF; later text/LaTeX), or a
+//                nested canvas window carrying its own CanvasDocument inline.
 //                NOT baked into export. Filename header doubles as the move handle.
 
 export interface CanvasFrame {
@@ -108,8 +113,9 @@ export interface CanvasFrame {
 
 export interface CanvasAttachment {
   id: string
-  kind: "pdf"
-  path: string
+  kind: "pdf" | "canvas"
+  path?: string // pdf source; nested canvases have none
+  canvas?: CanvasDocument // nested canvas contents (kind === "canvas")
   x: number
   y: number
   width: number
@@ -140,6 +146,10 @@ export interface CanvasDocument {
 export function emptyCanvasDoc(): CanvasDocument {
   return { version: 1, frames: [], strokes: [], attachments: [], texts: [] }
 }
+
+// Stable fallback for a nested canvas saved without contents — a fresh object per
+// render would reset the nested editor's identity on every parent re-render.
+const EMPTY_NESTED = emptyCanvasDoc()
 
 // Legacy on-disk shape (pages / pdfEmbeds / imageEmbeds) — migrated on load.
 type LegacyEmbed = { id: string; path: string; x: number; y: number; width: number }
@@ -195,6 +205,13 @@ interface CanvasEditorProps {
   // When given, the toolbar renders into this external element (e.g. the app
   // header in canvas mode) instead of above the drawing surface.
   toolbarSlot?: HTMLElement | null
+  // Path of the `.canvas` file being edited — kept out of the "open canvas" picker so a
+  // canvas can't embed itself.
+  docPath?: string
+  // Nesting depth, set only by canvas windows on themselves. Past MAX_NEST_DEPTH a
+  // canvas window stops opening its file, so a cycle (A embeds B, B embeds A) can't
+  // recurse forever.
+  depth?: number
 }
 
 // convert between center (canvas-space point at view center) and offset (SVG translate)
@@ -270,6 +287,57 @@ export function scaleStroke(stroke: StrokeData, points: number[][], from: SelBox
   return { ...stroke, points: points.map((p) => remap(p, from, to)) }
 }
 
+// --- Cross-canvas stroke transfer ------------------------------------------------
+// Every mounted canvas registers its drawing surface here, so a selection dragged out of
+// one canvas can be handed to whichever canvas is under the pointer on release — into a
+// nested window or back out of one. The handoff is in client coordinates, so the ink
+// lands exactly where it was dropped and comes out at the target's zoom: same on-screen
+// size, which means `width` scales by the zoom ratio (a lasso resize deliberately leaves
+// the pen alone; a canvas with a different zoom is the opposite case).
+// A canvas surface as the transfer sees it: where it sits on screen, and how it maps its
+// own units onto that. `rect` only needs left/top, so tests can pass a bare object.
+export interface CanvasView { rect: { left: number; top: number }; scale: number; offset: { x: number; y: number } }
+type StrokeDrop = (strokes: StrokeData[], from: CanvasView) => void
+const canvasDropTargets = new Map<HTMLElement, StrokeDrop>()
+
+// Rewrite a stroke from one canvas's units into another's, going through client px, so
+// it keeps both its position and its size on screen. `width` is in canvas units, so it
+// takes the zoom ratio too — dropping into a canvas zoomed out 2× would otherwise double
+// the apparent pen thickness.
+export function remapAcrossCanvases(stroke: StrokeData, from: CanvasView, to: CanvasView): StrokeData {
+  return {
+    ...stroke,
+    width: stroke.width * (from.scale / to.scale),
+    points: stroke.points.map((p) => [
+      (from.rect.left + p[0]! * from.scale + from.offset.x - to.rect.left - to.offset.x) / to.scale,
+      (from.rect.top + p[1]! * from.scale + from.offset.y - to.rect.top - to.offset.y) / to.scale,
+      p[2] ?? 0.5,
+    ]),
+  }
+}
+
+// Innermost registered surface under the point, skipping the one being dragged from —
+// walking up from the topmost element is what picks the nested window over its host.
+function dropTargetAt(x: number, y: number, self: HTMLElement | null): StrokeDrop | null {
+  let el: Element | null = document.elementFromPoint(x, y)
+  while (el) {
+    const drop = canvasDropTargets.get(el as HTMLElement)
+    if (drop && el !== self) return drop
+    el = el.parentElement
+  }
+  return null
+}
+
+// True when an event landed in an attachment window that *this* surface owns — those
+// (PDFs, nested canvases) handle their own scroll and zoom, so the host must keep its
+// hands off. Containment is the whole point: a nested canvas's own container also sits
+// inside an attachment element, its own, and that one must still zoom itself. Native
+// listeners run before React's synthetic dispatch, so a JSX stopPropagation can't do it.
+export function inOwnAttachment(target: EventTarget | null, el: HTMLElement): boolean {
+  const att = (target as Element | null)?.closest?.("[data-canvas-attachment]")
+  return !!att && el.contains(att)
+}
+
 // ponytail: swap black↔white for display only, stored colour stays unchanged
 function inkColor(c: string, isDark: boolean): string {
   return isDark && c === "#000000" ? "#ffffff" : c
@@ -291,7 +359,7 @@ const StrokeLayer = memo(function StrokeLayer({ strokes, hidden, isDark }: { str
   )
 })
 
-export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, slug, onImageAdded, toolbarSlot }: CanvasEditorProps) {
+export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, slug, onImageAdded, toolbarSlot, docPath, depth = 0 }: CanvasEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
 
@@ -308,8 +376,8 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
   scaleRef.current = scale
   offsetRef.current = offset
 
-  // on mount (and resize), recompute offset from the stored center so the same
-  // canvas point stays centered regardless of container dimensions
+  // on mount (and, top-level only, on resize) recompute offset from the stored center so
+  // the same canvas point stays centered regardless of container dimensions
   const restoredRef = useRef(false)
   useEffect(() => {
     const el = containerRef.current
@@ -329,6 +397,11 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     apply()
     const ro = new ResizeObserver(() => {
       if (!restoredRef.current) return
+      // A nested window is sized by its host's zoom, so re-centering would slide its ink
+      // on every host zoom step — the two views must be independent. Anchor the top-left
+      // instead: the ink stays put and the box reveals more or less of it. Top-level
+      // canvases keep centering; there the container only resizes with the browser window.
+      if (depth > 0) return
       // re-derive offset from current center so resize keeps the same canvas point centered
       const { cx, cy } = offsetToCenter(offsetRef.current.x, offsetRef.current.y, scaleRef.current, el.clientWidth, el.clientHeight)
       const o = centerToOffset(cx, cy, scaleRef.current, el.clientWidth, el.clientHeight)
@@ -371,11 +444,19 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     setRedoStack([])
   }, [])
 
+  // Writing through this keeps `liveRef` in step within the same tick: two mutations can
+  // land back to back before React re-renders (a cross-canvas stroke drop removes here
+  // and adds there), and the second must not read the pre-first document.
+  const applyChange = useCallback((next: CanvasDocument) => {
+    liveRef.current.doc = next
+    liveRef.current.onChange(next)
+  }, [])
+
   // Discrete (non-drag) mutation: snapshot, then apply.
   const commit = useCallback((next: CanvasDocument) => {
     snapshot()
-    liveRef.current.onChange(next)
-  }, [snapshot])
+    applyChange(next)
+  }, [snapshot, applyChange])
 
   // A drag fires onChange on every pointermove, so it must snapshot only once — and
   // only on the move that actually changes something, so a click that moves nothing
@@ -418,6 +499,23 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     setSelectedStrokes((prev) => (prev.size === 0 ? prev : new Set()))
     setSelectionLasso(null)
   }, [])
+
+  // Receive a selection dropped from another canvas: source canvas units → client px →
+  // our canvas units, so the ink keeps its screen position and screen size.
+  const dropStrokes = useCallback<StrokeDrop>((incoming, from) => {
+    const el = containerRef.current
+    if (!el) return
+    const to = { rect: el.getBoundingClientRect(), scale: scaleRef.current, offset: offsetRef.current }
+    const cur = liveRef.current.doc
+    commit({ ...cur, strokes: [...cur.strokes, ...incoming.map((s) => remapAcrossCanvases(s, from, to))] })
+  }, [commit])
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    canvasDropTargets.set(el, dropStrokes)
+    return () => { canvasDropTargets.delete(el) }
+  }, [dropStrokes])
 
   // Pen side-button gesture: hold => activate selection mode, double-click => activate screenshot mode
   const penHoldTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -494,10 +592,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     const el = containerRef.current
     if (!el) return
     const onWheel = (e: WheelEvent) => {
-      // let attachments (e.g. PDFs) handle their own scroll/zoom — a native listener
-      // here fires before React's onWheel props even see the event, so stopPropagation
-      // in JSX can't reach it; the bail-out has to live here instead
-      if ((e.target as Element).closest("[data-canvas-attachment]")) return
+      if (inOwnAttachment(e.target, el)) return
       e.preventDefault()
       const rect = el.getBoundingClientRect()
       const mx = e.clientX - rect.left
@@ -655,6 +750,8 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     }
     const onDown = (e: PointerEvent) => {
       if (e.pointerType !== "touch" || penNear()) return
+      // fingers that land in a nested window belong to that window's pinch/pan, not ours
+      if (inOwnAttachment(e.target, el)) return
       touches.set(e.pointerId, { x: e.clientX, y: e.clientY })
       touchRef.current = null
       if (touches.size === 2) beginGesture()
@@ -1038,6 +1135,19 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     return () => document.removeEventListener("mousedown", handler)
   }, [addMenuOpen])
 
+  // The project's other `.canvas` files, fetched when the menu opens — unlike PDFs and
+  // images the parent has no such list, and it changes outside this component. Only the
+  // outermost editor offers them: a canvas window can hold a file, not hand out more.
+  const [projectCanvases, setProjectCanvases] = useState<{ path: string; name: string }[]>([])
+  useEffect(() => {
+    if (!addMenuOpen || slug == null || depth > 0) return
+    listProjectDocuments(slug)
+      .then((docs) => setProjectCanvases(docs
+        .filter((d) => d.path.endsWith(".canvas") && d.path !== docPath)
+        .map((d) => ({ path: d.path, name: d.name }))))
+      .catch(() => { /* picker just stays empty */ })
+  }, [addMenuOpen, slug, depth, docPath])
+
   const pointAtCenter = useCallback((w: number, aspect: number) => {
     const el = containerRef.current
     const vw = el ? el.clientWidth : 800
@@ -1078,9 +1188,38 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     setAddMenuOpen(false)
   }, [doc, commit, pointAtCenter])
 
+  // Nested canvas window — a full CanvasEditor living inside this one, contents stored
+  // inline in the parent document.
+  const addCanvasWindow = useCallback(() => {
+    const { cx, cy } = pointAtCenter(DEFAULT_CANVAS_WIDTH, CANVAS_ASPECT)
+    commit({ ...doc, attachments: [...doc.attachments, { id: `cv-${Date.now()}`, kind: "canvas", canvas: emptyCanvasDoc(), x: cx, y: cy, width: DEFAULT_CANVAS_WIDTH }] })
+    setAddMenuOpen(false)
+  }, [doc, commit, pointAtCenter])
+
+  // Same window, but bound to an existing project canvas: it loads, autosaves and
+  // flushes on close by itself (`NestedCanvasFile`), so nothing of it lands in this doc.
+  const addCanvasFile = useCallback((path: string) => {
+    if (doc.attachments.some((a) => a.path === path)) { setAddMenuOpen(false); return }
+    const { cx, cy } = pointAtCenter(DEFAULT_CANVAS_WIDTH, CANVAS_ASPECT)
+    commit({ ...doc, attachments: [...doc.attachments, { id: `cv-${Date.now()}`, kind: "canvas", path, x: cx, y: cy, width: DEFAULT_CANVAS_WIDTH }] })
+    setAddMenuOpen(false)
+  }, [doc, commit, pointAtCenter])
+
+  // ponytail: nested edits bypass the parent's history — the nested editor has its own
+  // undo/redo, and snapshotting the whole parent per nested stroke would be absurd.
+  const updateNestedCanvas = useCallback((id: string, nested: CanvasDocument) => {
+    const cur = liveRef.current.doc
+    applyChange({ ...cur, attachments: cur.attachments.map((a) => a.id === id ? { ...a, canvas: nested } : a) })
+  }, [applyChange])
+
+  // Which attachment window, if any, is blown up over the whole surface. Exiting drops
+  // straight back onto the canvas that holds it.
+  const [fullscreenId, setFullscreenId] = useState<string | null>(null)
+
   const removeAttachment = useCallback((id: string) => {
     commit({ ...doc, attachments: doc.attachments.filter((a) => a.id !== id) })
     setAspects(({ [id]: _gone, ...rest }) => rest)
+    setFullscreenId((cur) => (cur === id ? null : cur))
   }, [doc, commit])
 
   // --- Paste image (Ctrl+V or long-press menu) ---
@@ -1104,7 +1243,9 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
 
   useEffect(() => {
     const handler = (e: ClipboardEvent) => {
-      if (!slug) return
+      // every canvas window listens on `window`; only the outermost may act, or one
+      // paste imports the clipboard image once per open window
+      if (!slug || depth > 0) return
       const items = e.clipboardData?.items
       if (!items) return
       for (const item of items) {
@@ -1124,7 +1265,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     }
     window.addEventListener("paste", handler)
     return () => window.removeEventListener("paste", handler)
-  }, [slug, pointAtCenter, addImageFrameAt, onImageAdded])
+  }, [slug, depth, pointAtCenter, addImageFrameAt, onImageAdded])
 
   // --- Shared move / resize for frames + attachments + text notes ---
   const dragRef = useRef<{
@@ -1223,15 +1364,26 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
           : { ...t, x: d.origX + dx, y: d.origY + dy }) })
       }
     }
-    const onUp = () => {
+    const onUp = (e: PointerEvent) => {
       const s = selDragRef.current
       if (s?.box) {
         const { doc: cur } = liveRef.current
         const box = s.box
-        commit({ ...cur, strokes: cur.strokes.map((stroke, i) => {
+        const moved = cur.strokes.map((stroke, i) => {
           const orig = s.originals.get(i)
           return orig ? scaleStroke(stroke, orig, s.origBox, box) : stroke
-        }) })
+        })
+        // Released over another canvas: hand the ink over and delete it here. Two
+        // documents change, so it costs one undo step on each side.
+        const el = containerRef.current
+        const drop = s.handle === "move" ? dropTargetAt(e.clientX, e.clientY, el) : null
+        if (drop && el) {
+          commit({ ...cur, strokes: moved.filter((_, i) => !s.originals.has(i)) })
+          drop(moved.filter((_, i) => s.originals.has(i)), { rect: el.getBoundingClientRect(), scale: scaleRef.current, offset: offsetRef.current })
+          clearSelection()
+        } else {
+          commit({ ...cur, strokes: moved })
+        }
       }
       setDragPreview(null)
       dragRef.current = null
@@ -1244,7 +1396,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
       window.removeEventListener("pointermove", onMove)
       window.removeEventListener("pointerup", onUp)
     }
-  }, [snapshotOnce, commit])
+  }, [snapshotOnce, commit, clearSelection])
 
   // Bounds of the frozen lasso — positions the resize handle and the action buttons
   const selectionBounds = selectionLasso ? polyBounds(selectionLasso) : null
@@ -1298,6 +1450,25 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
                   ))}
                 </>
               )}
+              <div className="mx-2 my-1 border-t border-divider/50" />
+              <div className="px-3 py-0.5 text-[9px] text-ink-faint uppercase tracking-wider">Canvases</div>
+              <button
+                onClick={addCanvasWindow}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink hover:bg-hover transition-colors"
+              >
+                <SquarePen className="h-3 w-3 shrink-0 text-ink-faint" />
+                <span className="truncate">New canvas</span>
+              </button>
+              {projectCanvases.map((cv) => (
+                <button
+                  key={cv.path}
+                  onClick={() => addCanvasFile(cv.path)}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink hover:bg-hover transition-colors truncate"
+                >
+                  <PenLine className="h-3 w-3 shrink-0 text-ink-faint" />
+                  <span className="truncate">{cv.name}</span>
+                </button>
+              ))}
             </div>
           )}
         </div>
@@ -1659,26 +1830,47 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
         {doc.attachments.map((att) => {
           const screenX = att.x * scale + offset.x
           const screenY = att.y * scale + offset.y
-          const aspect = aspects[att.id] ?? FALLBACK_ASPECT
-          const name = att.path.split("/").pop() ?? "PDF"
+          const nested = att.kind === "canvas"
+          const aspect = nested ? CANVAS_ASPECT : (aspects[att.id] ?? FALLBACK_ASPECT)
+          const name = att.path?.split("/").pop() ?? (nested ? "Canvas" : "PDF")
           // Visible size follows canvas zoom, but layout width only follows the
           // settled zoom (capped at what PdfViewer will actually rasterize); the
           // CSS transform bridges the difference. Mid-gesture that means pure
           // bitmap scaling, at rest transform ≈ 1 and the PDF is sharp.
+          // ponytail: a nested canvas must not sit under a CSS transform — its pointer
+          // math works in layout px, so a scaled wrapper offsets every stroke. It lays
+          // out at screen size instead (transform 1); PDFs keep the trick for sharpness.
           const screenW = att.width * scale
-          const layoutW = Math.min(att.width * settledScale, PDF_LAYOUT_CAP)
+          const layoutW = nested ? screenW : Math.min(att.width * settledScale, PDF_LAYOUT_CAP)
+          // Fullscreen only restyles this same wrapper — moving the window elsewhere in
+          // the tree would remount the editor inside it and lose whatever it holds.
+          const full = fullscreenId === att.id
           return (
             <div
               key={att.id}
-              className="absolute flex flex-col border border-divider-strong rounded-lg overflow-hidden bg-paper shadow-[var(--shadow-lg)]"
-              style={{ left: screenX, top: screenY, width: layoutW, transform: `scale(${screenW / layoutW})`, transformOrigin: "top left" }}
+              className={cn(
+                "absolute flex flex-col border border-divider-strong rounded-lg overflow-hidden bg-paper shadow-[var(--shadow-lg)]",
+                full && "z-20",
+              )}
+              style={full
+                ? { inset: 0, transform: "none" }
+                : { left: screenX, top: screenY, width: layoutW, transform: `scale(${screenW / layoutW})`, transformOrigin: "top left" }}
             >
               <div
-                className="flex items-center gap-1.5 px-2 py-1 border-b border-divider/50 cursor-grab active:cursor-grabbing select-none shrink-0"
-                onPointerDown={(e) => { e.stopPropagation(); startInteraction(att.id, "attachment", "move", e.clientX, e.clientY) }}
+                className={cn(
+                  "flex items-center gap-1.5 px-2 py-1 border-b border-divider/50 select-none shrink-0",
+                  !full && "cursor-grab active:cursor-grabbing",
+                )}
+                onPointerDown={(e) => { e.stopPropagation(); if (!full) startInteraction(att.id, "attachment", "move", e.clientX, e.clientY) }}
               >
-                <FileType className="h-3 w-3 text-ink-faint shrink-0" />
+                {nested ? <SquarePen className="h-3 w-3 text-ink-faint shrink-0" /> : <FileType className="h-3 w-3 text-ink-faint shrink-0" />}
                 <span className="flex-1 min-w-0 truncate text-[10px] font-medium text-ink-muted">{name}</span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setFullscreenId(full ? null : att.id) }}
+                  className="rounded p-0.5 text-ink-faint hover:text-ink transition-colors shrink-0"
+                >
+                  {full ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
+                </button>
                 <button
                   onClick={(e) => { e.stopPropagation(); removeAttachment(att.id) }}
                   className="rounded p-0.5 text-ink-faint hover:text-danger transition-colors shrink-0"
@@ -1686,20 +1878,54 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
                   <X className="h-3 w-3" />
                 </button>
               </div>
-              <div data-canvas-attachment style={{ height: layoutW * aspect }} onPointerDown={(e) => e.stopPropagation()}>
-                <PdfViewer
-                  url={fileViewerRawUrl(att.path)}
-                  onPageAspect={(r) => setAspect(att.id, r)}
-                />
-              </div>
               <div
-                className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize"
-                onPointerDown={(e) => { e.stopPropagation(); startInteraction(att.id, "attachment", "resize", e.clientX, e.clientY) }}
+                data-canvas-attachment
+                className={cn(full && "flex-1 min-h-0")}
+                style={{ height: full ? undefined : layoutW * aspect }}
+                onPointerDown={(e) => e.stopPropagation()}
               >
-                <svg className="w-full h-full text-ink-faint" viewBox="0 0 16 16">
-                  <path d="M14 2L2 14M14 6L6 14M14 10L10 14" stroke="currentColor" strokeWidth="1.5" fill="none" />
-                </svg>
+                {nested ? (
+                  att.path ? (
+                    depth < MAX_NEST_DEPTH ? (
+                      <NestedCanvasFile
+                        path={att.path}
+                        slug={slug}
+                        depth={depth + 1}
+                        availablePdfs={availablePdfs}
+                        availableImages={availableImages}
+                      />
+                    ) : (
+                      <div className="flex h-full items-center justify-center px-3 text-center text-[10px] text-ink-faint">
+                        {name} — open it directly to edit
+                      </div>
+                    )
+                  ) : (
+                    <CanvasEditor
+                      doc={att.canvas ?? EMPTY_NESTED}
+                      onChange={(d) => updateNestedCanvas(att.id, d)}
+                      slug={slug}
+                      depth={depth + 1}
+                      availablePdfs={availablePdfs}
+                      availableImages={availableImages}
+                    />
+                  )
+                ) : (
+                  <PdfViewer
+                    url={fileViewerRawUrl(att.path!)}
+                    onPageAspect={(r) => setAspect(att.id, r)}
+                  />
+                )}
               </div>
+              {!full && (
+                <div
+                  className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize"
+                  onPointerDown={(e) => { e.stopPropagation(); startInteraction(att.id, "attachment", "resize", e.clientX, e.clientY) }}
+                >
+                  <svg className="w-full h-full text-ink-faint" viewBox="0 0 16 16">
+                    <path d="M14 2L2 14M14 6L6 14M14 10L10 14" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                  </svg>
+                </div>
+              )}
             </div>
           )
         })}
@@ -1784,5 +2010,70 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
         )}
       </div>
     </div>
+  )
+}
+
+// A canvas window bound to an existing project `.canvas` file: loads it on open,
+// writes back a second after you stop drawing, flushes on close. It owns the file
+// outright — nothing but the path is stored in the canvas holding the window.
+// ponytail: single-writer assumption, same as DocumentEditor. No dirty flag, no
+// conflict detection; add both together if two surfaces ever edit one canvas at once.
+function NestedCanvasFile({ path, slug, depth, availablePdfs, availableImages }: {
+  path: string
+  slug?: string
+  depth: number
+  availablePdfs?: { path: string; name: string }[]
+  availableImages?: { path: string; name: string }[]
+}) {
+  const [doc, setDoc] = useState<CanvasDocument | null>(null)
+  const savedRef = useRef<string | null>(null)
+  const liveRef = useRef<CanvasDocument | null>(null)
+  liveRef.current = doc
+
+  useEffect(() => {
+    let alive = true
+    setDoc(null)
+    savedRef.current = null
+    loadFileViewerText(path).then((text) => {
+      if (!alive) return
+      const loaded = text.trim() ? parseCanvasDoc(text) : emptyCanvasDoc()
+      savedRef.current = serializeCanvasDoc(loaded)
+      setDoc(loaded)
+    }).catch(() => { if (alive) setDoc(emptyCanvasDoc()) })
+    return () => { alive = false }
+  }, [path])
+
+  const save = useCallback(() => {
+    const live = liveRef.current
+    // savedRef is null until the load lands — writing before that would persist an
+    // empty document over the real one
+    if (!live || !slug || savedRef.current === null) return
+    const serialized = serializeCanvasDoc(live)
+    if (serialized === savedRef.current) return
+    savedRef.current = serialized
+    writeDocument(slug, path.split("/").pop()!, serialized).catch(() => {})
+  }, [slug, path])
+
+  useEffect(() => {
+    if (!doc) return
+    const t = setTimeout(save, NESTED_SAVE_MS)
+    return () => clearTimeout(t)
+  }, [doc, save])
+
+  // Closing the window unmounts us; the debounce cleanup alone would drop whatever was
+  // drawn in the last second.
+  useEffect(() => () => save(), [save])
+
+  if (!doc) return <div className="flex h-full items-center justify-center text-[10px] text-ink-faint">Loading…</div>
+  return (
+    <CanvasEditor
+      doc={doc}
+      onChange={setDoc}
+      slug={slug}
+      depth={depth}
+      docPath={path}
+      availablePdfs={availablePdfs}
+      availableImages={availableImages}
+    />
   )
 }
