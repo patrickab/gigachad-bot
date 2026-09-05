@@ -9,6 +9,9 @@ src/archive
 .aider*
 .gpt-researcher-config.json
 .docs
+.claude*
+.pytest*
+.vscode
 
 # Python virtualenv / linter cache
 .venv
