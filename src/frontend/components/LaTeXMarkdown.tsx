@@ -150,20 +150,21 @@ function MarkmapDiagram({ code }: { code: string }) {
         const ink = isLight ? "#1c1917" : isGlass ? "rgba(255,255,255,0.85)" : "#d4d4d8"
         const linkColor = isLight ? "#a8a29e" : isGlass ? "rgba(255,255,255,0.2)" : "#3f3f46"
 
+        // autoFit: false — markmap calls fit() internally when true, unguarded; we call it ourselves below, wrapped.
         if (mmRef.current) {
-          mmRef.current.setData(root)
-          // fit() reads the svg's resolved size; in a hidden/zero-width tab the
-          // percentage width can't resolve and throws SVGLength. Non-fatal.
-          try { mmRef.current.fit() } catch {}
+          await mmRef.current.setData(root)
         } else {
-          mmRef.current = Markmap.create(svgRef.current, {
-            autoFit: true,
+          mmRef.current = new Markmap(svgRef.current, {
+            autoFit: false,
             duration: 300,
             paddingX: 16,
             initialExpandLevel: -1,
             color: () => linkColor,
-          }, root)
+          })
+          await mmRef.current.setData(root)
         }
+        if (cancelled) return
+        try { await mmRef.current.fit() } catch {}
 
         // text recolors on theme switch; link color is baked at create (minor)
         svgRef.current.style.setProperty("--markmap-text-color", ink)
