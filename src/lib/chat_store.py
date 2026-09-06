@@ -100,6 +100,7 @@ class ChatStore:
                 "parent_id": None,
                 "branch_message_idx": None,
                 "children": [],
+                "architecture_graph_contexts": [],
             }
         return {
             "messages": raw.get("messages", []),
@@ -109,6 +110,7 @@ class ChatStore:
             "parent_id": raw.get("parent_id"),
             "branch_message_idx": raw.get("branch_message_idx"),
             "children": raw.get("children", []),
+            "architecture_graph_contexts": raw.get("architecture_graph_contexts", []),
         }
 
     def save(self, filename: str, data: dict[str, Any] | None = None, *, title: str | None = None) -> dict[str, str]:
@@ -373,6 +375,7 @@ class ChatStore:
             "parent_id": parent_chat_id,
             "branch_message_idx": branch_message_idx,
             "children": [],
+            "architecture_graph_contexts": parent_data.get("architecture_graph_contexts", []),
         }
         if parent_chat_id:
             child_payload["chat_id"] = child_chat_id
@@ -657,5 +660,10 @@ def _build_payload(
         payload["children"] = data["children"]
     elif existing and "children" in existing and (data is None or data.get("children") is None):
         payload["children"] = existing["children"]
+
+    if data and data.get("architecture_graph_contexts") is not None:
+        payload["architecture_graph_contexts"] = data["architecture_graph_contexts"]
+    elif existing and "architecture_graph_contexts" in existing:
+        payload["architecture_graph_contexts"] = existing["architecture_graph_contexts"]
 
     return payload

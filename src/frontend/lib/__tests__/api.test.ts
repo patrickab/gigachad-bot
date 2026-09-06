@@ -119,6 +119,16 @@ describe("api.ts — json helpers (post/put/patch)", () => {
     expect(init.method).toBe("PATCH")
     expect(JSON.parse(init.body as string)).toEqual({ state: "done" })
   })
+
+  it("sends Architecture Graph contexts as live path references", async () => {
+    const calls: Call[] = []
+    vi.stubGlobal("fetch", fetchRecorder(calls))
+    const contexts = [{ path: "/documents/Architecture_Graphs/checkout.architecture.yaml" }]
+
+    await api.saveChatHistory("chat.json", [], { chatId: "chat-1", architectureGraphContexts: contexts })
+
+    expect(JSON.parse(lastCall(calls).init.body as string).architecture_graph_contexts).toEqual(contexts)
+  })
 })
 
 describe("api.ts — del helper", () => {

@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from backend.routes.deps import get_project_store
 from config import (
     DIRECTORY_NOTES,
+    DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS,
     DIRECTORY_OUTPUT_DRAWINGS,
     DIRECTORY_OUTPUT_LATEX,
     DIRECTORY_OUTPUT_MARKDOWN,
@@ -73,8 +74,12 @@ def _validate_doc_path(store: ProjectStore, path: str) -> Path:
     """Only allow paths the app already knows about (library or any project)."""
     resolved = Path(path).expanduser().resolve()
     library = lib_docs.LIBRARY_DIR.resolve()
-    in_library = resolved.is_relative_to(library)
-    known = in_library or str(resolved) in {str(Path(p).resolve()) for p in store.list_all_files()}
+    graphs = DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS.resolve()
+    # Drafts are deliberately not generic documents: they are proposal state
+    # until an explicit accept publishes them as canonical graph files.
+    is_canonical_graph = resolved.parent == graphs and resolved.name.endswith(".architecture.yaml")
+    known_paths = {str(Path(candidate).resolve()) for candidate in store.list_all_files()}
+    known = resolved.is_relative_to(library) or is_canonical_graph or str(resolved) in known_paths
     if not known:
         raise HTTPException(status_code=403, detail="Unknown document path")
     if not resolved.is_file():
@@ -97,7 +102,8 @@ async def list_documents(slug: str = Query(...), store: ProjectStore = Depends(g
 
 @router.get("/all", response_model=DocumentListResponse)
 async def list_all_documents(store: ProjectStore = Depends(get_project_store)):
-    return DocumentListResponse(documents=_meta_list(store.list_all_files()))
+    graph_paths = [str(path) for path in DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS.glob("*.architecture.yaml") if path.is_file()]
+    return DocumentListResponse(documents=_meta_list(list(dict.fromkeys([*store.list_all_files(), *graph_paths]))))
 
 
 @router.get("/notes", response_model=DocumentListResponse)

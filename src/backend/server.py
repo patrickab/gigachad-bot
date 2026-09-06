@@ -13,10 +13,13 @@ _litellm_shim = _lccm_dir / "litellm.py"
 if not _litellm_shim.exists():
     _litellm_shim.write_text('from langchain_litellm import ChatLiteLLM\n\n__all__ = ["ChatLiteLLM"]\n')
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from backend.routes.architecture_graphs import router as architecture_graphs_router
+from lib.architecture_graph import ArchitectureGraphError, ArchitectureGraphNotFound
 from backend.routes.chat import router as chat_router
 from backend.routes.config import router as config_router
 from backend.routes.deps import get_chat_store, get_client, get_project_store, get_prompt_store, shutdown_client
@@ -81,7 +84,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Graph routes raise their store's vocabulary; map it to HTTP once here rather than per handler.
+# The subclass is registered first so Starlette's MRO lookup gives not-found a 404, not a 400.
+@app.exception_handler(ArchitectureGraphNotFound)
+async def _architecture_graph_not_found(_request: Request, exc: Exception) -> JSONResponse:
+    return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
+@app.exception_handler(ArchitectureGraphError)
+async def _architecture_graph_invalid(_request: Request, exc: Exception) -> JSONResponse:
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+
 app.include_router(chat_router)
+app.include_router(architecture_graphs_router)
 app.include_router(config_router)
 app.include_router(documents_router)
 app.include_router(files_router)

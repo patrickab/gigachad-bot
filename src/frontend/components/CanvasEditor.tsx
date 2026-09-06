@@ -4,11 +4,14 @@ import { memo, useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { getStroke } from "perfect-freehand"
 import { type StrokeData, type EmbedRect, getSvgPathFromStroke, renderPageToPng } from "@/lib/drawing"
-import { fileViewerRawUrl, writeBinaryDocument, listProjectDocuments, loadFileViewerText, writeDocument } from "@/lib/api"
+import { createArchitectureGraph, fileViewerRawUrl, writeBinaryDocument, listArchitectureGraphs, listProjectDocuments, loadFileViewerText, readArchitectureGraph, writeArchitectureGraph, writeDocument } from "@/lib/api"
+import { emptyArchitectureGraph, parseArchitectureGraph, serializeArchitectureGraph, type ArchitectureGraph } from "@/lib/architectureGraph"
+import { useGraphAutosave } from "@/lib/graphAutosave"
 import { activeThemeName } from "@/lib/palette"
 import { cn } from "@/lib/utils"
 import { Plus, Undo2, Redo2, Trash2, Copy, FileType, ImageIcon, X, Camera, CircleDashed, Type, SquarePen, PenLine, Maximize2, Minimize2 } from "lucide-react"
 import { PdfViewer } from "./PdfViewer"
+import { ArchitectureGraphSurface } from "./ArchitectureGraphSurface"
 
 const A4_W = 794
 const A4_H = 1123
@@ -18,10 +21,13 @@ const DEFAULT_PDF_WIDTH = 500 // attachment default width (canvas units)
 const DEFAULT_IMAGE_WIDTH = 400 // image-frame default width (canvas units)
 const DEFAULT_CANVAS_WIDTH = 600 // nested canvas window default width (canvas units)
 const CANVAS_ASPECT = 0.7 // nested canvas windows have no intrinsic aspect — fix one
+const DEFAULT_GRAPH_WIDTH = 720
+const DEFAULT_GRAPH_HEIGHT = 480
 const NESTED_SAVE_MS = 1000 // quiet time before a file-backed canvas window writes back
 const MAX_NEST_DEPTH = 2 // canvas windows stop opening files here, so A→B→A can't recurse
 const MIN_FRAME_WIDTH = 120
 const MIN_ATTACH_WIDTH = 200
+const MIN_GRAPH_HEIGHT = 180
 const FALLBACK_ASPECT = 1.3 // height/width used until the real aspect is measured
 const MIN_SCALE = 0.15
 const MAX_SCALE = 3
@@ -113,12 +119,13 @@ export interface CanvasFrame {
 
 export interface CanvasAttachment {
   id: string
-  kind: "pdf" | "canvas"
+  kind: "pdf" | "canvas" | "architecture-graph"
   path?: string // pdf source; nested canvases have none
   canvas?: CanvasDocument // nested canvas contents (kind === "canvas")
   x: number
   y: number
   width: number
+  height?: number // Architecture Graphs own their viewport height; legacy attachments retain their aspect
 }
 
 // CanvasText = handwriting-style note in a resizable box. Rasterized into export
@@ -926,7 +933,9 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
     currentPointsRef.current = [[cx, cy, e.pressure > 0 ? e.pressure : 0.5]]
     redrawLive()
-    startLongPress(e.clientX, e.clientY)
+    // the long-press context menu (incl. "Paste image") is a touch/mouse affordance —
+    // a pen stroke that pauses mid-draw must never be mistaken for a long-press
+    if (e.pointerType !== "pen") startLongPress(e.clientX, e.clientY)
     armStraighten(e.clientX, e.clientY)
   }, [screenToCanvas, startLongPress, armStraighten, screenshotMode, selectionMode, textMode, clearSelection, redrawLive])
 
@@ -1139,6 +1148,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
   // images the parent has no such list, and it changes outside this component. Only the
   // outermost editor offers them: a canvas window can hold a file, not hand out more.
   const [projectCanvases, setProjectCanvases] = useState<{ path: string; name: string }[]>([])
+  const [architectureGraphs, setArchitectureGraphs] = useState<{ path: string; name: string }[]>([])
   useEffect(() => {
     if (!addMenuOpen || slug == null || depth > 0) return
     listProjectDocuments(slug)
@@ -1147,6 +1157,11 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
         .map((d) => ({ path: d.path, name: d.name }))))
       .catch(() => { /* picker just stays empty */ })
   }, [addMenuOpen, slug, depth, docPath])
+
+  useEffect(() => {
+    if (!addMenuOpen || depth > 0) return
+    listArchitectureGraphs().then((graphs) => setArchitectureGraphs(graphs)).catch(() => { /* picker just stays empty */ })
+  }, [addMenuOpen, depth])
 
   const pointAtCenter = useCallback((w: number, aspect: number) => {
     const el = containerRef.current
@@ -1204,6 +1219,27 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     commit({ ...doc, attachments: [...doc.attachments, { id: `cv-${Date.now()}`, kind: "canvas", path, x: cx, y: cy, width: DEFAULT_CANVAS_WIDTH }] })
     setAddMenuOpen(false)
   }, [doc, commit, pointAtCenter])
+
+  const addArchitectureGraph = useCallback((path: string) => {
+    if (doc.attachments.some((attachment) => attachment.path === path)) { setAddMenuOpen(false); return }
+    const { cx, cy } = pointAtCenter(DEFAULT_GRAPH_WIDTH, DEFAULT_GRAPH_HEIGHT / DEFAULT_GRAPH_WIDTH)
+    commit({ ...doc, attachments: [...doc.attachments, {
+      id: `ag-${Date.now()}`, kind: "architecture-graph", path, x: cx, y: cy, width: DEFAULT_GRAPH_WIDTH, height: DEFAULT_GRAPH_HEIGHT,
+    }] })
+    setAddMenuOpen(false)
+  }, [doc, commit, pointAtCenter])
+
+  const createArchitectureGraphWindow = useCallback(async () => {
+    const title = window.prompt("Architecture Graph name")?.trim()
+    if (!title) return
+    const stem = title.replace(/\.architecture\.yaml$/, "").trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "")
+    if (!stem) return
+    const name = `${stem}.architecture.yaml`
+    try {
+      const created = await createArchitectureGraph(name, serializeArchitectureGraph(emptyArchitectureGraph(title)), slug)
+      addArchitectureGraph(created.path)
+    } catch { /* name already exists or graph storage unavailable */ }
+  }, [addArchitectureGraph, slug])
 
   // ponytail: nested edits bypass the parent's history — the nested editor has its own
   // undo/redo, and snapshotting the whole parent per nested stroke would be absurd.
@@ -1279,7 +1315,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     if (!item) return
     dragRef.current = {
       id, target, mode, startX: clientX, startY: clientY, origX: item.x, origY: item.y,
-      origW: "width" in item ? item.width : 0, origH: "height" in item ? item.height : 0,
+      origW: "width" in item ? item.width : 0, origH: "height" in item ? (item.height ?? 0) : 0,
     }
   }, [])
 
@@ -1356,7 +1392,9 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
           : { ...f, x: d.origX + dx, y: d.origY + dy }) })
       } else if (d.target === "attachment") {
         change({ ...cur, attachments: cur.attachments.map((a) => a.id !== d.id ? a
-          : d.mode === "resize" ? { ...a, width: Math.max(minW, d.origW + dx) }
+          : d.mode === "resize" ? a.kind === "architecture-graph"
+            ? { ...a, width: Math.max(minW, d.origW + dx), height: Math.max(MIN_GRAPH_HEIGHT, d.origH + dy) }
+            : { ...a, width: Math.max(minW, d.origW + dx) }
           : { ...a, x: d.origX + dx, y: d.origY + dy }) })
       } else {
         change({ ...cur, texts: cur.texts.map((t) => t.id !== d.id ? t
@@ -1450,6 +1488,28 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
                   ))}
                 </>
               )}
+              <div className="mx-2 my-1 border-t border-divider/50" />
+              {/* section label only earns its place once there is a list under it */}
+              {architectureGraphs.length > 0 && (
+                <div className="px-3 py-0.5 text-[9px] text-ink-faint uppercase tracking-wider">Architecture Graphs</div>
+              )}
+              <button
+                onClick={createArchitectureGraphWindow}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink hover:bg-hover transition-colors"
+              >
+                <Plus className="h-3 w-3 shrink-0 text-ink-faint" />
+                <span>New Architecture Graph</span>
+              </button>
+              {architectureGraphs.map((graph) => (
+                <button
+                  key={graph.path}
+                  onClick={() => addArchitectureGraph(graph.path)}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink hover:bg-hover transition-colors truncate"
+                >
+                  <FileType className="h-3 w-3 shrink-0 text-ink-faint" />
+                  <span className="truncate">{graph.name.replace(/\.architecture\.yaml$/, "")}</span>
+                </button>
+              ))}
               <div className="mx-2 my-1 border-t border-divider/50" />
               <div className="px-3 py-0.5 text-[9px] text-ink-faint uppercase tracking-wider">Canvases</div>
               <button
@@ -1831,8 +1891,9 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
           const screenX = att.x * scale + offset.x
           const screenY = att.y * scale + offset.y
           const nested = att.kind === "canvas"
+          const architectureGraph = att.kind === "architecture-graph"
           const aspect = nested ? CANVAS_ASPECT : (aspects[att.id] ?? FALLBACK_ASPECT)
-          const name = att.path?.split("/").pop() ?? (nested ? "Canvas" : "PDF")
+          const name = att.path?.split("/").pop() ?? (architectureGraph ? "Architecture Graph" : nested ? "Canvas" : "PDF")
           // Visible size follows canvas zoom, but layout width only follows the
           // settled zoom (capped at what PdfViewer will actually rasterize); the
           // CSS transform bridges the difference. Mid-gesture that means pure
@@ -1841,7 +1902,8 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
           // math works in layout px, so a scaled wrapper offsets every stroke. It lays
           // out at screen size instead (transform 1); PDFs keep the trick for sharpness.
           const screenW = att.width * scale
-          const layoutW = nested ? screenW : Math.min(att.width * settledScale, PDF_LAYOUT_CAP)
+          const screenH = (att.height ?? att.width * CANVAS_ASPECT) * scale
+          const layoutW = nested || architectureGraph ? screenW : Math.min(att.width * settledScale, PDF_LAYOUT_CAP)
           // Fullscreen only restyles this same wrapper — moving the window elsewhere in
           // the tree would remount the editor inside it and lose whatever it holds.
           const full = fullscreenId === att.id
@@ -1854,6 +1916,8 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
               )}
               style={full
                 ? { inset: 0, transform: "none" }
+                : architectureGraph
+                  ? { left: screenX, top: screenY, width: screenW, height: screenH, transform: "none" }
                 : { left: screenX, top: screenY, width: layoutW, transform: `scale(${screenW / layoutW})`, transformOrigin: "top left" }}
             >
               <div
@@ -1881,10 +1945,12 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
               <div
                 data-canvas-attachment
                 className={cn(full && "flex-1 min-h-0")}
-                style={{ height: full ? undefined : layoutW * aspect }}
+                style={{ height: full ? undefined : architectureGraph ? screenH - 31 : layoutW * aspect }}
                 onPointerDown={(e) => e.stopPropagation()}
               >
-                {nested ? (
+                {architectureGraph ? (
+                  <CanvasArchitectureGraph path={att.path!} />
+                ) : nested ? (
                   att.path ? (
                     depth < MAX_NEST_DEPTH ? (
                       <NestedCanvasFile
@@ -2011,6 +2077,36 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
       </div>
     </div>
   )
+}
+
+// A graph attachment owns only its canvas-local frame; graph content continues to
+// live in the canonical YAML file. It is deliberately rendered at real layout size:
+// CSS scaling would desynchronise React Flow's handles from the pointer.
+function CanvasArchitectureGraph({ path }: { path: string }) {
+  const name = path.split("/").pop() ?? path
+  const [graph, setGraph] = useState<ArchitectureGraph | null>(null)
+  const write = useCallback((content: string) => writeArchitectureGraph(name, content), [name])
+  const { queue, markSaved } = useGraphAutosave({ key: name, write })
+
+  useEffect(() => {
+    let alive = true
+    setGraph(null)
+    readArchitectureGraph(name).then((document) => {
+      if (!alive) return
+      const loaded = parseArchitectureGraph(document.content)
+      markSaved(serializeArchitectureGraph(loaded))
+      setGraph(loaded)
+    }).catch(() => { if (alive) setGraph(null) })
+    return () => { alive = false }
+  }, [name, markSaved])
+
+  const onChange = useCallback((next: ArchitectureGraph) => {
+    setGraph(next)
+    queue(serializeArchitectureGraph(next))
+  }, [queue])
+
+  if (!graph) return <div className="flex h-full items-center justify-center text-[10px] text-ink-faint">Loading Architecture Graph…</div>
+  return <ArchitectureGraphSurface graph={graph} onChange={onChange} className="h-full" />
 }
 
 // A canvas window bound to an existing project `.canvas` file: loads it on open,

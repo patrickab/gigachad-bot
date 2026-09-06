@@ -1,7 +1,8 @@
-import type { Attachment, BackendConfig, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelsResponse, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage, VaultFile, VaultNode } from "./types"
+import type { ArchitectureGraphContextReference, Attachment, BackendConfig, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelsResponse, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage, VaultFile, VaultNode } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { getApiBase } from "./config"
+import type { ArchitectureGraphDocument } from "./architectureGraph"
 
 function encodePath(filename: string): string {
   return filename.split("/").map(encodeURIComponent).join("/")
@@ -152,15 +153,27 @@ export async function fetchBranchMeta(dirs?: string[]): Promise<Record<string, B
   return request(`/chat-histories/branch-meta${params}`)
 }
 
-export async function loadChatHistory(filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null; title: string | null; usage: Usage | null; parent_id: string | null; branch_message_idx: number | null; children: BranchMeta["children"] }> {
+export async function loadChatHistory(filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null; title: string | null; usage: Usage | null; parent_id: string | null; branch_message_idx: number | null; children: BranchMeta["children"]; architecture_graph_contexts: ArchitectureGraphContextReference[] }> {
   return request(`/chat-histories/${filename}`)
 }
 
-export async function saveChatHistory(filename: string, messages: Message[] = [], chatId?: string, title?: string, usage?: Usage, parentId?: string | null, branchMessageIdx?: number | null, children?: BranchMeta["children"] | null): Promise<{ status: string; filename: string }> {
-  const body: Record<string, unknown> = { messages, chat_id: chatId ?? null, title: title ?? null, usage: usage ?? null }
-  if (parentId !== undefined) body.parent_id = parentId
-  if (branchMessageIdx !== undefined) body.branch_message_idx = branchMessageIdx
-  if (children !== undefined) body.children = children
+/** Omitting a field leaves it unchanged server-side; passing null clears it. */
+export interface SaveChatHistoryOptions {
+  chatId?: string
+  title?: string
+  usage?: Usage
+  parentId?: string | null
+  branchMessageIdx?: number | null
+  children?: BranchMeta["children"] | null
+  architectureGraphContexts?: ArchitectureGraphContextReference[] | null
+}
+
+export async function saveChatHistory(filename: string, messages: Message[] = [], opts: SaveChatHistoryOptions = {}): Promise<{ status: string; filename: string }> {
+  const body: Record<string, unknown> = { messages, chat_id: opts.chatId ?? null, title: opts.title ?? null, usage: opts.usage ?? null }
+  if (opts.parentId !== undefined) body.parent_id = opts.parentId
+  if (opts.branchMessageIdx !== undefined) body.branch_message_idx = opts.branchMessageIdx
+  if (opts.children !== undefined) body.children = opts.children
+  if (opts.architectureGraphContexts !== undefined) body.architecture_graph_contexts = opts.architectureGraphContexts
   return put(`/chat-histories/${filename}`, body)
 }
 
@@ -361,6 +374,23 @@ export async function writeDocument(slug: string, name: string, content: string 
   return post<ProjectDocument>("/documents/write", { slug, name, content })
 }
 
+export async function listArchitectureGraphs(): Promise<ProjectDocument[]> {
+  const data = await request<{ graphs: ProjectDocument[] }>("/architecture-graphs")
+  return data.graphs
+}
+
+export function readArchitectureGraph(name: string): Promise<ArchitectureGraphDocument> {
+  return request<ArchitectureGraphDocument>(`/architecture-graphs/${encodeURIComponent(name)}`)
+}
+
+export function createArchitectureGraph(name: string, content: string, projectSlug?: string | null): Promise<ArchitectureGraphDocument> {
+  return post<ArchitectureGraphDocument>("/architecture-graphs", { name, content, projectSlug: projectSlug ?? null })
+}
+
+export function writeArchitectureGraph(name: string, content: string): Promise<ArchitectureGraphDocument> {
+  return put<ArchitectureGraphDocument>(`/architecture-graphs/${encodeURIComponent(name)}`, { content })
+}
+
 export async function writeBinaryDocument(slug: string, filename: string, blob: Blob): Promise<ProjectDocument> {
   return request<ProjectDocument>(`/documents/write-binary?slug=${encodeURIComponent(slug)}`, {
     method: "POST",
@@ -415,11 +445,22 @@ export async function deleteProjectCard(name: string, cardId: string): Promise<v
   await del(`/projects/${encodeURIComponent(name)}/cards/${cardId}`)
 }
 
-export async function saveProjectTab(name: string, filename: string, messages: Message[], chatId?: string, tabName?: string, title?: string, usage?: Usage): Promise<{ status: string }> {
-  return put(`/projects/${encodeURIComponent(name)}/tabs/${encodeURIComponent(filename)}`, { filename, messages, chat_id: chatId ?? null, tab_name: tabName ?? null, title: title ?? null, usage: usage ?? null })
+/** Omitting a field leaves it unchanged server-side; passing null clears it. */
+export interface SaveProjectTabOptions {
+  chatId?: string
+  tabName?: string
+  title?: string
+  usage?: Usage
+  architectureGraphContexts?: ArchitectureGraphContextReference[] | null
 }
 
-export async function loadProjectTab(name: string, filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null; title: string | null; usage: Usage | null; parent_id: string | null; branch_message_idx: number | null }> {
+export async function saveProjectTab(name: string, filename: string, messages: Message[], opts: SaveProjectTabOptions = {}): Promise<{ status: string }> {
+  const body: Record<string, unknown> = { filename, messages, chat_id: opts.chatId ?? null, tab_name: opts.tabName ?? null, title: opts.title ?? null, usage: opts.usage ?? null }
+  if (opts.architectureGraphContexts !== undefined) body.architecture_graph_contexts = opts.architectureGraphContexts
+  return put(`/projects/${encodeURIComponent(name)}/tabs/${encodeURIComponent(filename)}`, body)
+}
+
+export async function loadProjectTab(name: string, filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null; title: string | null; usage: Usage | null; parent_id: string | null; branch_message_idx: number | null; architecture_graph_contexts: ArchitectureGraphContextReference[] }> {
   return request(`/chat-histories/${encodeURIComponent(name)}/${encodeURIComponent(filename)}`)
 }
 

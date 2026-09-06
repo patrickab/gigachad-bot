@@ -219,6 +219,203 @@ p, li {
   text-wrap: pretty;
 }
 
+/* Architecture Graphs deliberately use the app's semantic palette: the graph is
+   an embedded document surface, not a second visual language. */
+.architecture-graph-surface {
+  /* Use the app's actual elevation levels — no graph-specific colour system. */
+  --architecture-graph-canvas: var(--paper);
+  --architecture-graph-card: var(--surface-elevated);
+  --architecture-graph-card-border: var(--divider-strong);
+  --architecture-graph-card-shadow: var(--shadow-sm);
+  position: relative;
+  min-height: 280px;
+  height: 100%;
+  overflow: hidden;
+  background: var(--architecture-graph-canvas);
+}
+
+.architecture-graph-toolbar {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 5;
+  display: flex;
+  gap: 4px;
+}
+
+.architecture-graph-edge-editor {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 5;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+  box-shadow: var(--shadow-sm);
+}
+.architecture-graph-edge-editor input,
+.architecture-graph-edge-editor select {
+  min-width: 112px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  padding: 0 6px;
+  font: inherit;
+  font-size: 11px;
+}
+.architecture-graph-edge-editor select { min-width: 96px; color: var(--ink-muted); }
+.architecture-graph-delete:hover { color: var(--danger); }
+
+.architecture-graph-button,
+.architecture-graph-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 28px;
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--surface-elevated) 90%, transparent);
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-weight: 600;
+  transition: color 150ms ease, background-color 150ms ease;
+}
+
+.architecture-graph-button { padding: 0 9px; }
+.architecture-graph-icon-button { width: 28px; }
+.architecture-graph-button:hover, .architecture-graph-icon-button:hover { background: var(--hover-overlay-strong); color: var(--ink); }
+.architecture-graph-button:focus-visible, .architecture-graph-icon-button:focus-visible { outline: 2px solid var(--divider-strong); outline-offset: 2px; }
+
+.architecture-graph-toolbar-symbol {
+  display: inline-flex;
+  width: 24px;
+  min-height: 24px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink-muted);
+  padding: 0;
+  transition: color 150ms ease, background-color 150ms ease;
+}
+.architecture-graph-toolbar-symbol:hover { background: var(--hover-overlay); color: var(--ink); }
+.architecture-graph-toolbar-symbol:focus-visible { outline: 2px solid var(--divider-strong); outline-offset: 2px; }
+
+.architecture-graph-toolbar-delimiter { color: var(--ink-muted); font-size: 12px; line-height: 1; user-select: none; }
+
+.architecture-graph-node-titlebar {
+  display: flex;
+  min-height: 28px;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid color-mix(in oklab, var(--divider) 65%, transparent);
+  padding: 3px 9px;
+  user-select: none;
+}
+
+.architecture-graph-node {
+  width: 224px;
+  overflow: hidden;
+  border: 1px solid var(--divider-strong);
+  border-radius: 8px;
+  background: var(--architecture-graph-card);
+  box-shadow: var(--shadow-sm);
+}
+
+.architecture-graph-node-selected {
+  box-shadow: var(--architecture-graph-card-shadow);
+}
+.architecture-graph-node-header { cursor: grab; }
+.architecture-graph-node-header:active { cursor: grabbing; }
+.architecture-graph-title {
+  display: block;
+  box-sizing: border-box;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.architecture-graph-title-input { display: block; flex: 1; width: 100%; padding: 0; }
+.architecture-graph-title-display {
+  display: inline-block;
+  flex: 0 1 auto;
+  max-width: 100%;
+  cursor: text;
+  overflow: hidden;
+  padding: 0;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.architecture-graph-title:focus-visible { outline: 2px solid var(--divider-strong); outline-offset: 2px; }
+
+.architecture-graph-node-body { display: flex; flex-direction: column; gap: 2px; padding: 7px 10px 8px; }
+.architecture-graph-bullet-row { display: flex; align-items: flex-start; gap: 6px; }
+.architecture-graph-bullet-marker { flex-shrink: 0; font: inherit; font-size: 11px; line-height: 1.5; color: var(--ink-muted); }
+.architecture-graph-bullet-input {
+  display: block;
+  box-sizing: border-box;
+  flex: 1;
+  min-width: 0;
+  min-height: 17px;
+  overflow: hidden;
+  resize: none !important;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink-muted);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.architecture-graph-bullet-input::-webkit-resizer { display: none; }
+
+.architecture-graph-handle {
+  width: 6px !important;
+  height: 6px !important;
+  border: 1px solid var(--surface-elevated) !important;
+  background: var(--ink-muted) !important;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+.architecture-graph-node:hover .architecture-graph-handle,
+.architecture-graph-node-selected .architecture-graph-handle { opacity: 1; }
+
+.architecture-graph-edge { stroke: var(--ink-muted); stroke-width: 1.25; }
+.architecture-graph-edge-selected { stroke: var(--ink); stroke-width: 1.6; }
+.architecture-graph-edge-label {
+  fill: var(--ink-muted);
+  font-size: 11px;
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 5px;
+  stroke-linejoin: round;
+}
+
+.architecture-graph-surface .react-flow__controls {
+  overflow: hidden;
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+.architecture-graph-surface .react-flow__controls-button { border-bottom-color: var(--divider); background: var(--surface-elevated); fill: var(--ink-muted); }
+.architecture-graph-surface .react-flow__controls-button:hover { background: var(--hover-overlay-strong); }
+
 @media (max-width: 640px) {
   h1, h2, h3 {
     letter-spacing: -0.005em;

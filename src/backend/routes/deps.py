@@ -9,6 +9,7 @@ from llm_baseclient.client import LLMClient
 from sse_starlette.sse import EventSourceResponse
 
 from config import BASE_DIR, DIRECTORY_CHAT_HISTORIES
+from lib.architecture_graph import ArchitectureGraphStore
 from lib.chat_store import ChatStore
 from lib.file_vault import FileVault
 from lib.memory_store import MemoryStore
@@ -21,6 +22,7 @@ _project_store: ProjectStore | None = None
 _memory_store: MemoryStore | None = None
 _file_vault: FileVault | None = None
 _prompt_store: PromptStore | None = None
+_architecture_graph_store: ArchitectureGraphStore | None = None
 
 
 def get_client() -> LLMClient:
@@ -42,6 +44,13 @@ def get_project_store() -> ProjectStore:
     if _project_store is None:
         _project_store = ProjectStore(DIRECTORY_CHAT_HISTORIES, chat_store=get_chat_store())
     return _project_store
+
+
+def get_architecture_graph_store() -> ArchitectureGraphStore:
+    global _architecture_graph_store
+    if _architecture_graph_store is None:
+        _architecture_graph_store = ArchitectureGraphStore()
+    return _architecture_graph_store
 
 
 def get_memory_store() -> MemoryStore:

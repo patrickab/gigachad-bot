@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from backend.routes.deps import get_file_vault, get_project_store
-from config import DIRECTORY_NOTES
+from config import DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS, DIRECTORY_NOTES
 from lib import document_library as lib_docs
 from lib.file_vault import FileVault
 from lib.project_store import ProjectStore
@@ -39,6 +39,10 @@ def _resolve_allowed(path: str, vault: FileVault, store: ProjectStore) -> Path:
     allowed = (
         resolved.is_relative_to(library)
         or resolved.is_relative_to(DIRECTORY_NOTES.resolve())
+        or (
+            resolved.parent == DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS.resolve()
+            and resolved.name.endswith(".architecture.yaml")
+        )
         or vault.contains(resolved)
         or str(resolved) in {str(Path(p).expanduser().resolve()) for p in store.list_all_files()}
     )

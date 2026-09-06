@@ -45,9 +45,9 @@ export function useChatModals({
     const { slug, filename } = parseHistoryFile(tab.historyFile)
     const title = tab.title ?? filename.replace(".json", "")
     if (slug && slug === activeProject) {
-      await saveProjectTab(activeProject!, filename, messages, chatId, tab.name ?? undefined, title, hasUsage)
+      await saveProjectTab(activeProject!, filename, messages, { chatId, tabName: tab.name ?? undefined, title, usage: hasUsage })
     } else {
-      await apiSaveChatHistory(tab.historyFile, messages, chatId, title, hasUsage)
+      await apiSaveChatHistory(tab.historyFile, messages, { chatId, title, usage: hasUsage })
     }
     await refreshAll()
   }, [tab.historyFile, tab.title, tab.name, activeProject, messages, chatId, hasUsage, refreshAll])
@@ -57,12 +57,12 @@ export function useChatModals({
 
     if (activeProject) {
       try {
-        await saveProjectTab(activeProject, newFilename, messages, chatId, tab.name ?? undefined, name, hasUsage)
+        await saveProjectTab(activeProject, newFilename, messages, { chatId, tabName: tab.name ?? undefined, title: name, usage: hasUsage })
       } catch { }
       onHistoryFileChanged(tab.id, buildHistoryFile(newFilename, activeProject))
     } else {
       try {
-        await apiSaveChatHistory(newFilename, messages, chatId, name, hasUsage)
+        await apiSaveChatHistory(newFilename, messages, { chatId, title: name, usage: hasUsage })
       } catch { }
       onHistoryFileChanged(tab.id, newFilename)
     }

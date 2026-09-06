@@ -11,6 +11,8 @@ import { CanvasEditor, parseCanvasDoc, serializeCanvasDoc, emptyCanvasDoc, type 
 import { loadFileViewerText, readFileVaultRendered, writeDocument, writeBinaryDocument, mirrorDrawing, fileViewerRawUrl } from "@/lib/api"
 import { renderPageToPng, renderCanvasToJpeg, type EmbedRect } from "@/lib/drawing"
 import { EditorSidebar, InlineEditPanel } from "./EditorSidebar"
+import { ArchitectureGraphEditor } from "./ArchitectureGraphEditor"
+import { isArchitectureGraphPath } from "@/lib/architectureGraph"
 
 type EditorView = "edit" | "preview"
 
@@ -97,7 +99,7 @@ function sameCanvasContent(a: CanvasDocument | null, b: CanvasDocument | null): 
   return !!a && !!b && a.frames === b.frames && a.strokes === b.strokes && a.attachments === b.attachments && a.texts === b.texts
 }
 
-export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, availablePdfs, availableImages, overlay, persistOverride, onModeLabel, onNavigate, model, canvasToolbarSlot }: DocumentEditorProps) {
+function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, availablePdfs, availableImages, overlay, persistOverride, onModeLabel, onNavigate, model, canvasToolbarSlot }: DocumentEditorProps) {
   const isCanvas = path.endsWith(".canvas")
   const [content, setContent] = useState<string | null>(null)
   const [renderedContent, setRenderedContent] = useState<string | null>(null)
@@ -470,4 +472,11 @@ export function DocumentEditor({ path, slug, onClose, onSaved, onLiveContent, av
       {editorBody}
     </ResizableEditor>
   )
+}
+
+export function DocumentEditor(props: DocumentEditorProps) {
+  if (isArchitectureGraphPath(props.path)) {
+    return <ArchitectureGraphEditor path={props.path} overlay={props.overlay} onClose={props.onClose} onSaved={props.onSaved} onModeLabel={props.onModeLabel} />
+  }
+  return <StandardDocumentEditor {...props} />
 }

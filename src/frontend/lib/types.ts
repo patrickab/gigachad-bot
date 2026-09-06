@@ -37,6 +37,11 @@ export interface ProjectDocument {
   mime: string
 }
 
+/** A live Architecture Graph reference promoted to a chat's active context. */
+export interface ArchitectureGraphContextReference {
+  path: string
+}
+
 export interface Message {
   role: "user" | "assistant" | "system" | "tool"
   content: string

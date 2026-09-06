@@ -67,7 +67,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         <script dangerouslySetInnerHTML={{ __html: NO_TOUCH_CONTEXTMENU_SCRIPT }} />
       </head>
-      <body className="bg-paper text-ink antialiased">
+      <body spellCheck={false} className="bg-paper text-ink antialiased">
         <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[200] focus:rounded-md focus:bg-surface focus:px-3 focus:py-1 focus:text-ink focus:text-sm">Skip to content</a>
         {children}
       </body>

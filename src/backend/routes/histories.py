@@ -3,6 +3,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from backend.routes.architecture_graphs import ArchitectureGraphContextReferenceModel
 from backend.routes.deps import get_chat_store
 from backend.routes.files import delete_chat_upload_dir
 from lib.chat_store import ChatStore
@@ -18,6 +19,7 @@ class SaveRequest(BaseModel):
     parent_id: str | None = None
     branch_message_idx: int | None = None
     children: list[dict[str, Any]] | None = None
+    architecture_graph_contexts: list[ArchitectureGraphContextReferenceModel] | None = None
 
 
 class RenameRequest(BaseModel):

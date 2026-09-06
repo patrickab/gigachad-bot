@@ -42,6 +42,9 @@ DIRECTORY_OUTPUT_PDF = DIRECTORY_CLOUD / "Documents" / "PDFs"
 DIRECTORY_OUTPUT_MARKDOWN = DIRECTORY_CLOUD / "Documents" / "Markdown"
 DIRECTORY_OUTPUT_LATEX = DIRECTORY_CLOUD / "Documents" / "LaTeX"
 DIRECTORY_OUTPUT_DRAWINGS = DIRECTORY_CLOUD / "Documents" / "Drawings"
+# Canonical, live Architecture Graph documents. Project/canvas/chat features
+# reference files here rather than copying graph state into their own stores.
+DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS = DIRECTORY_CLOUD / "Documents" / "Architecture_Graphs"
 
 # Vane (Perplexica) web-search sidecar. Single container, SearXNG bundled internally.
 VANE_URL = os.environ.get("VANE_URL", "http://localhost:3001")
@@ -93,6 +96,8 @@ def ensure_directories() -> None:
         DIRECTORY_OUTPUT_MARKDOWN,
         DIRECTORY_OUTPUT_LATEX,
         DIRECTORY_OUTPUT_DRAWINGS,
+        DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS,
+        DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS / ".drafts",
         DIRECTORY_CHAT_UPLOADS,
         DIRECTORY_NOTES,
         DIRECTORY_CHAT_HISTORIES / "memory",

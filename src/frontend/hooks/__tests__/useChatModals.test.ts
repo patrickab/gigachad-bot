@@ -158,7 +158,7 @@ describe("useChatModals", () => {
 
       await act(async () => { await result.current.handleQuickSave() })
 
-      expect(saveTab).toHaveBeenCalledWith("proj", "tab1.json", [{ role: "user", content: "hi" }], "chat-1", "n", "T", usage)
+      expect(saveTab).toHaveBeenCalledWith("proj", "tab1.json", [{ role: "user", content: "hi" }], { chatId: "chat-1", tabName: "n", title: "T", usage })
       expect(saveChat).not.toHaveBeenCalled()
       expect(refreshAll).toHaveBeenCalledOnce()
     })
@@ -185,7 +185,7 @@ describe("useChatModals", () => {
 
       await act(async () => { await result.current.handleQuickSave() })
 
-      expect(saveChat).toHaveBeenCalledWith("free.json", [{ role: "user", content: "hi" }], "chat-1", "Free", undefined)
+      expect(saveChat).toHaveBeenCalledWith("free.json", [{ role: "user", content: "hi" }], { chatId: "chat-1", title: "Free", usage: undefined })
       expect(saveTab).not.toHaveBeenCalled()
     })
   })
@@ -213,7 +213,7 @@ describe("useChatModals", () => {
 
       await act(async () => { await result.current.handleSaveSubmit("My Title") })
 
-      expect(saveTab).toHaveBeenCalledWith("proj", "My Title.json", expect.any(Array), "c1", "n", "My Title", undefined)
+      expect(saveTab).toHaveBeenCalledWith("proj", "My Title.json", expect.any(Array), { chatId: "c1", tabName: "n", title: "My Title", usage: undefined })
       expect(onHistoryFileChanged).toHaveBeenCalledWith("t1", "proj/My Title.json")
       expect(refreshAll).toHaveBeenCalledOnce()
       expect(result.current.saveModalOpen).toBe(false)
@@ -240,7 +240,7 @@ describe("useChatModals", () => {
 
       await act(async () => { await result.current.handleSaveSubmit("Solo") })
 
-      expect(saveChat).toHaveBeenCalledWith("Solo.json", expect.any(Array), "c2", "Solo", undefined)
+      expect(saveChat).toHaveBeenCalledWith("Solo.json", expect.any(Array), { chatId: "c2", title: "Solo", usage: undefined })
       expect(onHistoryFileChanged).toHaveBeenCalledWith("t2", "Solo.json")
     })
   })
