@@ -4,6 +4,12 @@ export VANE_URL="${VANE_URL:-http://localhost:3001}"
 
 export PATH="$(pwd)/.venv/bin:$PATH"
 
+echo "Installing backend deps"
+uv sync || exit 1
+
+echo "Installing frontend deps"
+npm --prefix src/frontend install || exit 1
+
 echo "Starting backend on http://127.0.0.1:8001"
 source .venv/bin/activate
 uvicorn src.backend.server:app --host 127.0.0.1 --port 8001 --reload --reload-dir src &
