@@ -38,24 +38,10 @@ async fn start_sidecar(app: &AppHandle) -> Result<(String, CommandChild), String
 
     eprintln!("[gigachad-bot] resolved sidecar path: {}", sidecar_path.display());
 
-    // The sidecar writes chat histories, uploads, etc. under GIGACHAD_BASE_DIR
-    // (defaults to CWD, which is read-only inside a mounted AppImage). A value
-    // already present in the launch environment wins, so the desktop app can
-    // share a data dir with the webapp.
-    let base_dir = match std::env::var_os("GIGACHAD_BASE_DIR") {
-        Some(dir) => std::path::PathBuf::from(dir),
-        None => app
-            .path()
-            .app_data_dir()
-            .map_err(|error| format!("could not resolve app data dir: {error}"))?,
-    };
-    std::fs::create_dir_all(&base_dir)
-        .map_err(|error| format!("could not create app data dir: {error}"))?;
-
+    // Python config owns the shared storage root for desktop and web backends.
     let command = app
         .shell()
         .command(&sidecar_path)
-        .env("GIGACHAD_BASE_DIR", &base_dir)
         .env(
             "GIGACHAD_CORS_ORIGINS",
             "http://127.0.0.1:2999,http://localhost:2999,http://tauri.localhost,https://tauri.localhost,tauri://localhost",

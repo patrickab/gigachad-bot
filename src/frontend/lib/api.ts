@@ -221,7 +221,8 @@ export function createOCRStream(
   return createSSEStream("/ocr", { img_base64: imgBase64, model })
 }
 
-function _apiOrigin(): string {
+/** Origin of the backend, for asset URLs the backend emits as root-relative paths. */
+export function apiOrigin(): string {
   const url = new URL(getApiBase())
   return url.origin
 }
@@ -233,7 +234,7 @@ function _uploadsPath(chatId: string, slug: string | null): string {
 }
 
 function uploadsBase(chatId: string, slug: string | null): string {
-  return `${_apiOrigin()}${_uploadsPath(chatId, slug)}`
+  return `${apiOrigin()}${_uploadsPath(chatId, slug)}`
 }
 
 export function rewriteImages(content: string, chatId: string, slug: string | null): string {

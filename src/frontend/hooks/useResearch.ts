@@ -42,7 +42,6 @@ export function useResearch(): UseResearchReturn {
       abortRef.current = stream.abort
 
       const steps: ResearchTraceStep[] = []
-      let runId = ""
 
       for await (const event of stream) {
         try {
@@ -79,7 +78,6 @@ export function useResearch(): UseResearchReturn {
               ? `\n\n---\n**Sources (${result.sources.length})** | **Cost**: $${Number(result.costs).toFixed(4)}\n${result.sources.map((s: string) => `- ${s}`).join("\n")}`
               : ""
             assistantMsg.content = result.report + sourcesList
-            assistantMsg.research_trace_id = runId || undefined
             updateLast(assistantMsg)
           } else if (event.event === "error") {
             throw new Error(data.message || "Research failed")

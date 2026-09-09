@@ -1,19 +1,19 @@
 import os
 from pathlib import Path
+import shutil
+import sys
 
-# Base directory of the project. The desktop sidecar preserves the existing
-# filesystem layout when launched with GIGACHAD_BASE_DIR set by its user.
-BASE_DIR = Path(os.environ.get("GIGACHAD_BASE_DIR", ".")).expanduser()
-
-# Fileserver data location
-SERVER_STATIC_DIR = BASE_DIR / "src" / "static"
-
-DIRECTORY_CLOUD = Path("~/Nextcloud/linux").expanduser()
+# All mutable application data belongs to the backend's storage root.
+# ponytail: one shared workspace for now; user-specific roots can come later.
+REMOTE_ROOT = Path("~/Nextcloud/linux").expanduser()
+DOCUMENTS = REMOTE_ROOT / "Documents"
+DIRECTORY_CLOUD = REMOTE_ROOT  # legacy alias, only src/legacy_streamlit still imports it
 
 # File-vault roots are NOT configured here. They live in
 # chat_histories/file-vault-roots.json (the single source of truth), managed at
 # runtime by FileVault — see src/lib/file_vault.py.
-DIRECTORY_CHAT_HISTORIES = BASE_DIR / "chat_histories"
+DIRECTORY_CHAT_HISTORIES = DOCUMENTS / "chat_history"
+DIRECTORY_PROMPTS = DOCUMENTS / "Prompts"
 
 # Uploads directory for non-project chats. Project-scoped uploads live under
 # DIRECTORY_CHAT_HISTORIES / <slug> / "_uploads". Leading underscore keeps the
@@ -34,17 +34,17 @@ DEFAULT_TEMPERATURE = 0.2
 DEFAULT_DOWNSCALE_IMAGES = True
 
 # --- MinerU PDF parsing config ---
-DIRECTORY_OUTPUT_MINERU = DIRECTORY_CLOUD / "Documents" / "Mineru"
-DIRECTORY_OUTPUT_PDF = DIRECTORY_CLOUD / "Documents" / "PDFs"
+DIRECTORY_OUTPUT_MINERU = DOCUMENTS / "Mineru"
+DIRECTORY_OUTPUT_PDF = DOCUMENTS / "PDFs"
 
 # Cloud collection of user-created documents, mirrored on save (filename = identity,
 # overwritten on conflict). Per-chat _uploads copies are independent of these.
-DIRECTORY_OUTPUT_MARKDOWN = DIRECTORY_CLOUD / "Documents" / "Markdown"
-DIRECTORY_OUTPUT_LATEX = DIRECTORY_CLOUD / "Documents" / "LaTeX"
-DIRECTORY_OUTPUT_DRAWINGS = DIRECTORY_CLOUD / "Documents" / "Drawings"
+DIRECTORY_OUTPUT_MARKDOWN = DOCUMENTS / "Markdown"
+DIRECTORY_OUTPUT_LATEX = DOCUMENTS / "LaTeX"
+DIRECTORY_OUTPUT_DRAWINGS = DOCUMENTS / "Drawings"
 # Canonical, live Architecture Graph documents. Project/canvas/chat features
 # reference files here rather than copying graph state into their own stores.
-DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS = DIRECTORY_CLOUD / "Documents" / "Architecture_Graphs"
+DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS = DOCUMENTS / "Architecture_Graphs"
 
 # Vane (Perplexica) web-search sidecar. Single container, SearXNG bundled internally.
 VANE_URL = os.environ.get("VANE_URL", "http://localhost:3001")
@@ -88,7 +88,6 @@ def chat_upload_dir(chat_id: str, slug: str | None = None) -> Path:
 def ensure_directories() -> None:
     """Create all config-defined directories that the application needs at startup."""
     _dirs = [
-        SERVER_STATIC_DIR,
         DIRECTORY_CHAT_HISTORIES,
         DIRECTORY_OUTPUT_MINERU,
         DIRECTORY_OUTPUT_MINERU / "images",
@@ -102,6 +101,26 @@ def ensure_directories() -> None:
         DIRECTORY_NOTES,
         DIRECTORY_CHAT_HISTORIES / "memory",
         DIRECTORY_CHAT_HISTORIES / "memory" / "pending",
+        # DIRECTORY_PROMPTS is deliberately absent: seed_prompts() copies into it and
+        # skips a directory that already exists.
     ]
     for d in _dirs:
         d.mkdir(parents=True, exist_ok=True)
+    seed_prompts()
+
+
+def seed_prompts() -> None:
+    """Initialize editable prompts once from the shipped defaults.
+
+    An existing directory is authoritative, including deleted prompts. Defaults
+    remain source assets; all subsequent editor writes go to remote storage.
+    """
+    source = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent)) / "prompts"
+    if DIRECTORY_PROMPTS.exists() or not source.is_dir():
+        return
+    # Stage then rename: a copy interrupted half-way must not leave a directory
+    # that exists (so seeding never runs again) but is missing prompts.
+    staged = DIRECTORY_PROMPTS.with_name(DIRECTORY_PROMPTS.name + ".seeding")
+    shutil.rmtree(staged, ignore_errors=True)
+    shutil.copytree(source, staged)
+    staged.rename(DIRECTORY_PROMPTS)

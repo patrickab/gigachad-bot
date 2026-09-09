@@ -3,34 +3,10 @@
 import argparse
 import asyncio
 import json
-import shutil
-import sys
-from pathlib import Path
 
 import uvicorn
 
 from backend.server import app
-from config import BASE_DIR
-
-
-def seed_prompts() -> None:
-    """Copy bundled default prompts into BASE_DIR on first run.
-
-    The frozen app ships the repo's prompts/ as read-only bundle data, but the
-    PromptStore reads (and the UI edits) BASE_DIR/prompts like every other
-    persistent location. Seed file-by-file and never overwrite, so app updates
-    can add new defaults without clobbering user-edited prompts.
-    """
-    bundled = Path(getattr(sys, "_MEIPASS", "")) / "prompts"
-    if not bundled.is_dir():
-        return
-    target = BASE_DIR / "prompts"
-    for source in bundled.rglob("*"):
-        if source.is_file():
-            dest = target / source.relative_to(bundled)
-            if not dest.exists():
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source, dest)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -57,7 +33,6 @@ async def serve(host: str, port: int) -> None:
 
 def main() -> None:
     args = parse_args()
-    seed_prompts()
     asyncio.run(serve(args.host, args.port))
 
 

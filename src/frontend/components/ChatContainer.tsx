@@ -954,7 +954,6 @@ export function ChatContainer({
                             search_result={assistant.search_result}
                             research_steps={assistant.research_steps}
                             research_progress={assistant.research_progress}
-                            research_trace_id={assistant.research_trace_id}
                             isStreaming={isStreaming}
                             index={globalIndex}
                             onDelete={onDeletePair}

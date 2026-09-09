@@ -8,7 +8,7 @@ from typing import Any, Iterator
 from llm_baseclient.client import LLMClient
 from sse_starlette.sse import EventSourceResponse
 
-from config import BASE_DIR, DIRECTORY_CHAT_HISTORIES
+from config import DIRECTORY_CHAT_HISTORIES, DIRECTORY_PROMPTS
 from lib.architecture_graph import ArchitectureGraphStore
 from lib.chat_store import ChatStore
 from lib.file_vault import FileVault
@@ -70,7 +70,7 @@ def get_file_vault() -> FileVault:
 def get_prompt_store() -> PromptStore:
     global _prompt_store
     if _prompt_store is None:
-        _prompt_store = PromptStore(BASE_DIR / "prompts")
+        _prompt_store = PromptStore(DIRECTORY_PROMPTS)
     return _prompt_store
 
 

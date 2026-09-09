@@ -6,6 +6,7 @@ import remarkBreaks from "remark-breaks"
 import { cloneElement, isValidElement, memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import { highlightCode } from "@/lib/markdown-syntax-highlighting"
+import { apiOrigin } from "@/lib/api"
 import { createPortal } from "react-dom"
 import { Check, Copy, Globe } from "lucide-react"
 import "katex/dist/katex.min.css"
@@ -282,7 +283,11 @@ const PROSE_COMPONENTS: Components = {
   strong: "strong",
   em: "em",
   del: "del",
-  img: "img",
+  // Backend-emitted image paths (e.g. /mineru/images/...) are root-relative and
+  // resolve against the backend, not whichever origin serves the frontend.
+  img: ({ src, ...props }: any) => (
+    <img src={typeof src === "string" && src.startsWith("/") && !src.startsWith("//") ? `${apiOrigin()}${src}` : src} {...props} />
+  ),
   table: ({ children, ...props }: any) => (
     <div className="overflow-x-auto my-3">
       <table {...props}>{children}</table>

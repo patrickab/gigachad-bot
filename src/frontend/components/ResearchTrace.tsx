@@ -7,7 +7,6 @@ import type { ResearchTraceStep, ResearchTraceProgress } from "@/lib/types"
 interface Props {
   steps?: ResearchTraceStep[]
   progress?: ResearchTraceProgress
-  traceId?: string
   isLive?: boolean
 }
 
@@ -51,7 +50,7 @@ function formatTime(ts: number) {
   return new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
 }
 
-function ResearchTraceInner({ steps = [], progress, traceId, isLive }: Props) {
+function ResearchTraceInner({ steps = [], progress, isLive }: Props) {
   const [expanded, setExpanded] = useState(false)
   const [expandedSteps, setExpandedSteps] = useState<Set<number>>(new Set())
 
@@ -93,9 +92,6 @@ function ResearchTraceInner({ steps = [], progress, traceId, isLive }: Props) {
         )}
         {isLive && !isFinished && (
           <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-ink ml-1" />
-        )}
-        {traceId && (
-                    <span className="text-[9px] text-ink-faint font-mono ml-1 tabular-nums">#{traceId}</span>
         )}
       </button>
 

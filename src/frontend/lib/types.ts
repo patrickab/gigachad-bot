@@ -50,7 +50,6 @@ export interface Message {
   tool_call_id?: string
   tool_calls?: unknown[]
   search_result?: WebSearchResult
-  research_trace_id?: string
   research_steps?: ResearchTraceStep[]
   research_progress?: ResearchTraceProgress
 }

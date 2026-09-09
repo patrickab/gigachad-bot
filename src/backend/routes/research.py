@@ -3,10 +3,8 @@ from collections.abc import AsyncGenerator, Iterator
 import contextlib
 import json
 import os
-from pathlib import Path
 import time
 from typing import Any
-import uuid
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -14,7 +12,6 @@ from sse_starlette.sse import EventSourceResponse
 
 from config import OLLAMA_BASE_URL, SEARX_URL
 from lib.research_config import build_research_config, write_research_config
-from lib.research_trace import ResearchTrace
 
 
 @contextlib.contextmanager
@@ -32,12 +29,6 @@ def _temp_environ(**vals: str | None) -> Iterator[None]:
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v
-
-TRACES_DIR = Path(
-    os.environ.get(
-        "RESEARCH_TRACES_DIR", str(Path(__file__).resolve().parent.parent.parent.parent / "chat_histories" / "research_traces")
-    )
-)
 
 router = APIRouter(prefix="/api", tags=["research"])
 
@@ -102,29 +93,24 @@ class SSEWriter:
         await self.send("error", {"message": message})
 
 
-class TraceLogHandler:
-    def __init__(self, writer: SSEWriter, trace: ResearchTrace):
+class LogHandler:
+    """Forwards gpt-researcher callbacks to the SSE stream."""
+
+    def __init__(self, writer: SSEWriter):
         self.writer = writer
-        self.trace = trace
 
     async def on_tool_start(self, tool_name: str, **kwargs) -> None:
-        self.trace.add_step(tool_name, "tool", kwargs)
         await self.writer.send_step(tool_name, "tool", kwargs)
 
     async def on_agent_action(self, action: str, **kwargs) -> None:
-        details = {"action": action, **kwargs}
-        self.trace.add_step(action, "action", details)
-        await self.writer.send_step(action, "action", details)
+        await self.writer.send_step(action, "action", {"action": action, **kwargs})
 
     async def on_research_step(self, step: str, details: dict = None, **kwargs) -> None:
-        merged = {**(details or {}), **kwargs}
-        self.trace.add_step(step, "research", merged)
-        await self.writer.send_step(step, "research", merged)
+        await self.writer.send_step(step, "research", {**(details or {}), **kwargs})
 
 
-def on_progress_factory(writer: SSEWriter, trace: ResearchTrace):
+def on_progress_factory(writer: SSEWriter):
     def on_progress(progress):
-        trace.update_progress(progress)
         try:
             loop = asyncio.get_running_loop()
             loop.create_task(writer.send_progress(progress))
@@ -147,12 +133,10 @@ async def research(req: ResearchRequest):
         reasoning_effort=req.reasoning_effort,
     )
     config_path = write_research_config(config)
-    run_id = uuid.uuid4().hex[:12]
-    trace = ResearchTrace(query=req.query, run_id=run_id)
     queue: asyncio.Queue = asyncio.Queue()
     writer = SSEWriter(queue)
 
-    log_handler = TraceLogHandler(writer, trace)
+    log_handler = LogHandler(writer)
 
     async def event_generator() -> AsyncGenerator[dict, None]:
         report: str | None = None
@@ -186,7 +170,7 @@ async def research(req: ResearchRequest):
                                 log_handler=log_handler,
                             )
                             _log.info("[research] Starting conduct_research...")
-                            on_progress = on_progress_factory(writer, trace)
+                            on_progress = on_progress_factory(writer)
                             await writer.send_step("start", "research", {"query": req.query, "report_type": req.report_type})
                             await researcher.conduct_research(on_progress=on_progress)
                             _log.info("[research] conduct_research done, writing report...")
@@ -198,9 +182,6 @@ async def research(req: ResearchRequest):
                         with contextlib.suppress(OSError):
                             os.unlink(config_path)
 
-                _log.info("[research] Saving trace...")
-                trace.finish()
-                trace.save(TRACES_DIR)
                 _log.info("[research] Sending result event...")
                 await writer.send_result(report or "", sources, costs)
                 _log.info("[research] Done!")
@@ -232,36 +213,3 @@ async def research(req: ResearchRequest):
                     pass
 
     return EventSourceResponse(event_generator())
-
-
-@router.get("/research-traces")
-async def list_traces() -> dict[str, Any]:
-    TRACES_DIR.mkdir(parents=True, exist_ok=True)
-    traces = []
-    for f in sorted(TRACES_DIR.glob("*.json"), reverse=True):
-        try:
-            data = json.loads(f.read_text())
-            traces.append(
-                {
-                    "run_id": data["run_id"],
-                    "query": data["query"],
-                    "started_at": data["started_at"],
-                    "finished_at": data["finished_at"],
-                    "duration_s": data.get("duration_s"),
-                    "step_count": len(data.get("steps", [])),
-                }
-            )
-        except (json.JSONDecodeError, KeyError):
-            continue
-    return {"traces": traces}
-
-
-@router.get("/research-traces/{run_id}")
-async def get_trace(run_id: str) -> dict[str, Any]:
-    path = TRACES_DIR / f"{run_id}.json"
-    if not path.exists():
-        from fastapi.responses import JSONResponse
-
-        return JSONResponse(status_code=404, content={"error": "Trace not found"})
-    data = json.loads(path.read_text())
-    return data

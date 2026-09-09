@@ -25,7 +25,6 @@ interface ChatMessageProps {
   search_result?: Message["search_result"]
   research_steps?: Message["research_steps"]
   research_progress?: Message["research_progress"]
-  research_trace_id?: string
   isStreaming?: boolean
   attachments?: Attachment[]
   messageIndex?: number
@@ -101,7 +100,7 @@ export function AssistantMessageContent({
   )
 }
 
-function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBranch, search_result, research_steps, research_progress, research_trace_id, isStreaming, attachments, onAttachmentClick, collapsibleUser, onCollapse }: ChatMessageProps) {
+function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBranch, search_result, research_steps, research_progress, isStreaming, attachments, onAttachmentClick, collapsibleUser, onCollapse }: ChatMessageProps) {
   const isUser = role === "user"
   const [copied, setCopied] = useState(false)
 
@@ -170,7 +169,6 @@ function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBran
           <ResearchTrace
             steps={research_steps}
             progress={research_progress}
-            traceId={research_trace_id}
             isLive={isStreaming}
           />
         )}
