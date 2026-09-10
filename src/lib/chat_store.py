@@ -7,7 +7,8 @@ from typing import Any, Callable
 import uuid
 
 from config import DIRECTORY_CHAT_HISTORIES
-from lib.json_io import safe_read_json, safe_write_json
+from lib.data_store import DataStore, DataStorePath, LocalDataStore, Revision
+from lib.json_io import load_json, safe_read_json, safe_write_json
 from lib.safe_path import safe_resolve
 
 PROJECT_JSON = "project.json"
@@ -18,19 +19,20 @@ MEMORY_DIR = "memory"
 class ChatStore:
     """Owns all chat-file reads, writes, deletes, branching, merging, and indexing."""
 
-    def __init__(self, base_dir: Path | None = None) -> None:
-        self._base = (base_dir or DIRECTORY_CHAT_HISTORIES).resolve()
+    def __init__(self, base_dir: Path | None = None, *, data_store: DataStore | None = None) -> None:
+        base_dir = (base_dir or DIRECTORY_CHAT_HISTORIES).resolve()
+        self._base = DataStorePath(data_store or LocalDataStore(base_dir.parent), base_dir.name)
         self._chat_id_index: dict[str, str] | None = None
 
     # ------------------------------------------------------------------
     # Path helpers
     # ------------------------------------------------------------------
 
-    def resolve_path(self, filename: str) -> Path:
+    def resolve_path(self, filename: str) -> DataStorePath:
         """Resolve *filename* under the base directory, rejecting traversal."""
-        return safe_resolve(self._base, filename)
+        return self._base / filename
 
-    def project_dir_for(self, path: Path) -> Path | None:
+    def project_dir_for(self, path: DataStorePath) -> DataStorePath | None:
         """Return the project directory containing *path*, or None if at root."""
         try:
             rel = path.relative_to(self._base)
@@ -87,9 +89,8 @@ class ChatStore:
         return self._load_path(path)
 
     def _load_path(self, path: Path) -> dict[str, Any] | None:
-        try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
+        raw = load_json(path)
+        if raw is None:
             return None
         if isinstance(raw, list):
             return {
@@ -113,16 +114,30 @@ class ChatStore:
             "architecture_graph_contexts": raw.get("architecture_graph_contexts", []),
         }
 
-    def save(self, filename: str, data: dict[str, Any] | None = None, *, title: str | None = None) -> dict[str, str]:
+    def revision(self, filename: str) -> str | None:
+        """Return the opaque revision clients must send with an editable save."""
+        try:
+            _, revision = self._base.store.read_bytes(self.resolve_path(filename).key)
+            return revision.token
+        except FileNotFoundError:
+            return None
+
+    def save(
+        self, filename: str, data: dict[str, Any] | None = None, *, title: str | None = None, expected_revision: str | None = None
+    ) -> dict[str, str]:
         """Write a chat file. Validates chat_id mismatch. Builds payload from *data* and existing."""
         path = self.resolve_path(filename)
         existing = self._load_path(path) if path.exists() else None
         if existing and existing.get("chat_id") and data and data.get("chat_id") and existing["chat_id"] != data["chat_id"]:
             raise ValueError("Chat ID mismatch")
         payload = _build_payload(data, existing, title=title)
-        safe_write_json(path, payload)
+        if expected_revision is None:
+            safe_write_json(path, payload)
+        else:
+            content = json.dumps(payload, indent=2, ensure_ascii=False).encode() + b"\n"
+            self._base.store.write_bytes(path.key, content, expected=Revision(expected_revision))
         self.invalidate_index()
-        return {"status": "ok", "filename": str(filename)}
+        return {"status": "ok", "filename": str(filename), "revision": self.revision(filename) or ""}
 
     # ------------------------------------------------------------------
     # Delete

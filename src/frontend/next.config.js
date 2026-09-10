@@ -6,6 +6,7 @@ const isTauriBuild = !!process.env.TAURI_ENV_PLATFORM;
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: isTauriBuild ? "export" : "standalone",
+  outputFileTracingRoot: __dirname,
   webpack: (config) => {
     config.resolve.alias.canvas = false;
     config.resolve.alias.encoding = false;

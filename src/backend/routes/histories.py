@@ -7,6 +7,7 @@ from backend.routes.architecture_graphs import ArchitectureGraphContextReference
 from backend.routes.deps import get_chat_store
 from backend.routes.files import delete_chat_upload_dir
 from lib.chat_store import ChatStore
+from lib.data_store import StorageConflictError
 
 router = APIRouter(prefix="/api/chat-histories", tags=["histories"])
 
@@ -20,6 +21,7 @@ class SaveRequest(BaseModel):
     branch_message_idx: int | None = None
     children: list[dict[str, Any]] | None = None
     architecture_graph_contexts: list[ArchitectureGraphContextReferenceModel] | None = None
+    expected_revision: str | None = None
 
 
 class RenameRequest(BaseModel):
@@ -61,7 +63,7 @@ async def load_chat_history(filename: str, store: ChatStore = Depends(get_chat_s
     data = store.load(filename)
     if data is None:
         raise HTTPException(status_code=404, detail="Chat history not found")
-    return {**data, "filename": filename}
+    return {**data, "filename": filename, "revision": store.revision(filename)}
 
 
 @router.put("/{filename:path}")
@@ -71,7 +73,11 @@ async def save_chat_history(
     store: ChatStore = Depends(get_chat_store),
 ) -> dict[str, str]:
     try:
-        return store.save(filename, data.model_dump() if data else None)
+        payload = data.model_dump() if data else None
+        expected_revision = payload.pop("expected_revision", None) if payload else None
+        return store.save(filename, payload, expected_revision=expected_revision)
+    except StorageConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
 

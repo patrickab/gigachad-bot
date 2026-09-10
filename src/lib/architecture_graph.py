@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
-import tempfile
 from typing import Any
 
 import yaml
 
 from config import DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS
-from lib.safe_path import safe_resolve
+from lib.data_store import DataStore, LocalDataStore, StorageNotFoundError, read_text, write_text
 
 GRAPH_SUFFIX = ".architecture.yaml"
 
@@ -86,64 +84,70 @@ def parse_graph(content: str) -> dict[str, Any]:
 class ArchitectureGraphStore:
     """Owns canonical graph files and their one-draft-per-graph lifecycle."""
 
-    def __init__(self, directory: Path | None = None) -> None:
-        self._directory = (directory or DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS).expanduser().resolve()
-        self._drafts = self._directory / ".drafts"
+    def __init__(self, directory: Path | None = None, *, data_store: DataStore | None = None) -> None:
+        directory = (directory or DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS).expanduser().resolve()
+        self._legacy_directory = directory if data_store is None else None
+        self._store = data_store or LocalDataStore(directory.parent)
+        self._prefix = directory.name
 
-    def _path(self, name: str, *, draft: bool = False) -> Path:
+    def _key(self, name: str, *, draft: bool = False) -> str:
         if Path(name).name != name or not name.endswith(GRAPH_SUFFIX):
             raise ArchitectureGraphError(f"Graph name must end in {GRAPH_SUFFIX}")
-        return safe_resolve(self._drafts if draft else self._directory, name)
-
-    @staticmethod
-    def _atomic_write(path: Path, content: str) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp_name = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as output:
-                output.write(content)
-            Path(tmp_name).replace(path)
-        except OSError:
-            Path(tmp_name).unlink(missing_ok=True)
-            raise
+        return f"{self._prefix}/.drafts/{name}" if draft else f"{self._prefix}/{name}"
 
     def list_paths(self) -> list[str]:
-        if not self._directory.is_dir():
-            return []
-        paths = sorted(self._directory.glob(f"*{GRAPH_SUFFIX}"), key=lambda path: path.name.lower())
-        return [str(path.resolve()) for path in paths if path.is_file()]
+        keys = sorted(
+            (entry.key for entry in self._store.list(self._prefix) if not entry.is_dir and entry.key.endswith(GRAPH_SUFFIX)), key=str.lower
+        )
+        return [self._display_key(key) for key in keys]
+
+    def _display_key(self, key: str) -> str:
+        if self._legacy_directory is None:
+            return key
+        return str((self._legacy_directory.parent / key).resolve())
 
     def path_for(self, name: str, *, draft: bool = False) -> str:
         """Return a validated canonical/draft path without reading its content."""
-        return str(self._path(name, draft=draft))
+        return self._display_key(self._key(name, draft=draft))
 
     def read(self, name: str, *, draft: bool = False) -> str:
-        path = self._path(name, draft=draft)
-        if not path.is_file():
-            raise ArchitectureGraphNotFound(f"Architecture Graph not found: {name}")
-        return path.read_text(encoding="utf-8")
+        try:
+            content, _ = read_text(self._store, self._key(name, draft=draft))
+            return content
+        except StorageNotFoundError as exc:
+            raise ArchitectureGraphNotFound(f"Architecture Graph not found: {name}") from exc
 
     def write(self, name: str, content: str, *, draft: bool = False) -> str:
         parse_graph(content)
-        path = self._path(name, draft=draft)
-        if draft and not self._path(name).is_file():
+        key = self._key(name, draft=draft)
+        if draft and not self._store.exists(self._key(name)):
             raise ArchitectureGraphNotFound(f"Architecture Graph not found: {name}")
-        self._atomic_write(path, content)
-        return str(path)
+        expected = None
+        try:
+            _, expected = read_text(self._store, key)
+        except StorageNotFoundError:
+            pass
+        write_text(self._store, key, content, expected=expected)
+        return self._display_key(key)
 
     def has_draft(self, name: str) -> bool:
-        return self._path(name, draft=True).is_file()
+        return self._store.exists(self._key(name, draft=True))
 
     def accept_draft(self, name: str) -> str:
-        draft = self._path(name, draft=True)
-        if not draft.is_file():
+        draft = self._key(name, draft=True)
+        if not self._store.exists(draft):
             raise ArchitectureGraphNotFound(f"Architecture Graph draft not found: {name}")
         # Revalidate immediately before publication; drafts are files a user may edit externally.
-        parse_graph(draft.read_text(encoding="utf-8"))
-        destination = self._path(name)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        draft.replace(destination)
-        return str(destination)
+        content, revision = read_text(self._store, draft)
+        parse_graph(content)
+        destination = self._key(name)
+        if self._store.exists(destination):
+            _, current = self._store.read_bytes(destination)
+            self._store.write_bytes(destination, content.encode("utf-8"), expected=current)
+            self._store.delete(draft)
+        else:
+            self._store.move(draft, destination)
+        return self._display_key(destination)
 
     def discard_draft(self, name: str) -> None:
-        self._path(name, draft=True).unlink(missing_ok=True)
+        self._store.delete(self._key(name, draft=True))

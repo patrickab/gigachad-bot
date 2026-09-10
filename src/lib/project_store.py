@@ -2,14 +2,13 @@
 
 from datetime import datetime, timezone
 from pathlib import Path
-import shutil
+import json
 from typing import Any, Callable
 
 from config import DIRECTORY_CHAT_HISTORIES
 from lib.chat_store import META_JSON, PROJECT_JSON, ChatStore
-from lib.json_io import safe_read_json, safe_write_json
+from lib.data_store import DataStore, LocalDataStore, StorageNotFoundError, read_text, write_text
 from lib.naming import slugify
-from lib.safe_path import safe_resolve
 
 
 def _now_iso() -> str:
@@ -19,30 +18,54 @@ def _now_iso() -> str:
 class ProjectStore:
     """Owns all project-catalog reads/writes, slug generation, kanban CRUD, and tab management."""
 
-    def __init__(self, base_dir: Path | None = None, chat_store: ChatStore | None = None) -> None:
-        self._base = (base_dir or DIRECTORY_CHAT_HISTORIES).resolve()
-        self._store = chat_store or ChatStore(base_dir)
+    def __init__(
+        self, base_dir: Path | None = None, chat_store: ChatStore | None = None, *, data_store: DataStore | None = None
+    ) -> None:
+        base_dir = (base_dir or DIRECTORY_CHAT_HISTORIES).resolve()
+        self._data = data_store or LocalDataStore(base_dir.parent)
+        self._prefix = base_dir.name
+        self._store = chat_store or ChatStore(base_dir, data_store=self._data)
 
     # ------------------------------------------------------------------
     # Path helpers
     # ------------------------------------------------------------------
 
-    def _meta_path(self) -> Path:
-        return self._base / META_JSON
+    def _meta_path(self) -> str:
+        return f"{self._prefix}/{META_JSON}"
 
-    def _resolve_project_dir(self, slug: str) -> Path:
-        return safe_resolve(self._base, slug)
+    def _resolve_project_dir(self, slug: str) -> str:
+        if Path(slug).name != slug or not slug:
+            raise ValueError("Invalid project slug")
+        return f"{self._prefix}/{slug}"
+
+    @staticmethod
+    def _json_key(directory: str) -> str:
+        return f"{directory}/{PROJECT_JSON}"
+
+    def _read_json(self, key: str, default: dict[str, Any]) -> dict[str, Any]:
+        try:
+            raw, _ = read_text(self._data, key)
+            data = json.loads(raw)
+            return data if isinstance(data, dict) else default
+        except (StorageNotFoundError, ValueError):
+            return default
+
+    def _write_json(self, key: str, data: dict[str, Any]) -> None:
+        try:
+            _, revision = read_text(self._data, key)
+        except StorageNotFoundError:
+            revision = None
+        write_text(self._data, key, json.dumps(data, indent=2, ensure_ascii=False) + "\n", expected=revision)
 
     # ------------------------------------------------------------------
     # Catalog (projects-meta.json)
     # ------------------------------------------------------------------
 
     def _read_meta(self) -> dict[str, Any]:
-        return safe_read_json(self._meta_path(), {"projects": []})
+        return self._read_json(self._meta_path(), {"projects": []})
 
     def _write_meta(self, meta: dict[str, Any]) -> None:
-        self._base.mkdir(parents=True, exist_ok=True)
-        safe_write_json(self._meta_path(), meta)
+        self._write_json(self._meta_path(), meta)
 
     def _find_entry(self, meta: dict[str, Any], slug: str) -> dict[str, Any] | None:
         for p in meta.get("projects", []):
@@ -63,15 +86,11 @@ class ProjectStore:
     # Project file (project.json)
     # ------------------------------------------------------------------
 
-    def _read_project(self, project_dir: Path) -> dict[str, Any]:
-        return safe_read_json(
-            project_dir / PROJECT_JSON,
-            {"name": project_dir.name, "kanban": [], "tabs": [], "files": []},
-        )
+    def _read_project(self, project_dir: str) -> dict[str, Any]:
+        return self._read_json(self._json_key(project_dir), {"name": Path(project_dir).name, "kanban": [], "tabs": [], "files": []})
 
-    def _write_project(self, project_dir: Path, data: dict[str, Any]) -> None:
-        project_dir.mkdir(parents=True, exist_ok=True)
-        safe_write_json(project_dir / PROJECT_JSON, data)
+    def _write_project(self, project_dir: str, data: dict[str, Any]) -> None:
+        self._write_json(self._json_key(project_dir), data)
 
     # ------------------------------------------------------------------
     # Public API
@@ -108,7 +127,7 @@ class ProjectStore:
         meta = self._read_meta()
         slug = self._unique_slug(meta, slugify(name, fallback="project"))
         project_dir = self._resolve_project_dir(slug)
-        if project_dir.exists():
+        if self._data.exists(project_dir):
             raise ValueError(f"Project already exists: {slug}")
         now = _now_iso()
         entry = {"name": name, "slug": slug, "createdAt": now, "updatedAt": now}
@@ -141,8 +160,8 @@ class ProjectStore:
         if not entry:
             raise FileNotFoundError(f"Project not found: {slug}")
         project_dir = self._resolve_project_dir(slug)
-        if project_dir.exists():
-            shutil.rmtree(project_dir)
+        if self._data.exists(project_dir):
+            self._data.delete(project_dir, recursive=True)
         meta["projects"] = [p for p in meta.get("projects", []) if p.get("slug") != slug]
         self._write_meta(meta)
         return {"status": "ok"}
@@ -243,14 +262,14 @@ class ProjectStore:
         if not self._find_entry(meta, slug):
             raise FileNotFoundError(f"Project not found: {slug}")
         project_dir = self._resolve_project_dir(slug)
-        tab_path = project_dir / filename
+        tab_path = f"{project_dir}/{filename}"
         chat_id_to_clean: str | None = None
-        if tab_path.exists():
-            raw = safe_read_json(tab_path, {})
+        if self._data.exists(tab_path):
+            raw = self._read_json(tab_path, {})
             cid = raw.get("chat_id")
             if isinstance(cid, str):
                 chat_id_to_clean = cid
-            tab_path.unlink()
+            self._data.delete(tab_path)
         self._store.invalidate_index()
         if chat_id_to_clean and cleanup_uploads_fn:
             cleanup_uploads_fn(chat_id_to_clean, slug)

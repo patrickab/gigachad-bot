@@ -42,3 +42,24 @@ https://github.com/user-attachments/assets/57864372-dac2-49f3-97f7-5bceecf53c49
 - Run `uv sync` to install Python dependencies.
 - Run `uv run gigachad-install` to install Node.js into the venv and frontend dependencies.
 - Execute `./run.sh` to start the app (backend on `:8001`, frontend on `:2999`).
+
+### Nextcloud WebDAV storage
+
+By default `GIGACHAD_STORAGE=local` retains the historical
+`~/Nextcloud/linux/Documents` layout. To make the app-owned stores use
+Nextcloud directly (without the desktop client), configure its WebDAV
+**Documents** collection and a Nextcloud app password:
+
+```bash
+export GIGACHAD_STORAGE=webdav
+export GIGACHAD_WEBDAV_URL="https://cloud.example.com/remote.php/dav/files/USER/linux/Documents"
+export GIGACHAD_WEBDAV_USER="USER"
+export GIGACHAD_WEBDAV_PASSWORD="APP_PASSWORD"
+```
+
+Create the app password in Nextcloud's Security settings. Chats, projects,
+memory, prompts, and architecture graphs use one `DataStore` interface and
+logical keys relative to `Documents`; the WebDAV adapter sends ETags on
+revision-aware writes and returns a conflict rather than silently overwriting a
+newer file. External FileVault/Obsidian roots remain external local
+integrations.

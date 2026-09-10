@@ -13,6 +13,8 @@ import re
 
 import yaml
 
+from lib.data_store import DataStore, LocalDataStore, StorageNotFoundError, read_text, write_text
+
 log = logging.getLogger(__name__)
 
 _FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
@@ -36,10 +38,10 @@ def _parse_frontmatter(raw: str) -> tuple[dict[str, object], str]:
 class PromptStore:
     """Reads, resolves, and manages markdown prompt files on disk."""
 
-    def __init__(self, base_dir: Path) -> None:
-        self._base = base_dir
-        self._blocks_dir = base_dir / "_blocks"
-        self._order_file = base_dir / "_order"
+    def __init__(self, base_dir: Path, *, data_store: DataStore | None = None) -> None:
+        base_dir = base_dir.expanduser().resolve()
+        self._store = data_store or LocalDataStore(base_dir.parent)
+        self._prefix = base_dir.name
         self._block_cache: dict[str, str] = {}
         self._prompt_cache: dict[str, tuple[str, str]] = {}  # name -> (resolved_text, filename)
         self._order: list[str] = []
@@ -48,7 +50,11 @@ class PromptStore:
     def reload(self) -> None:
         self._block_cache.clear()
         self._prompt_cache.clear()
-        self._order = self._order_file.read_text(encoding="utf-8").split() if self._order_file.is_file() else []
+        try:
+            order, _ = read_text(self._store, f"{self._prefix}/_order")
+            self._order = order.split()
+        except StorageNotFoundError:
+            self._order = []
         self._load_blocks()
         self._load_prompts()
 
@@ -57,10 +63,12 @@ class PromptStore:
         return (0, self._order.index(stem)) if stem in self._order else (1, stem.lower())
 
     def _load_blocks(self) -> None:
-        if not self._blocks_dir.is_dir():
-            return
-        for f in sorted(self._blocks_dir.glob("*.md")):
-            self._block_cache[f.stem] = f.read_text(encoding="utf-8").strip()
+        prefix = f"{self._prefix}/_blocks"
+        for entry in sorted(self._store.list(prefix), key=lambda item: item.key):
+            if entry.is_dir or not entry.key.endswith(".md"):
+                continue
+            raw, _ = read_text(self._store, entry.key)
+            self._block_cache[Path(entry.key).stem] = raw.strip()
 
     def _resolve(self, body: str) -> str:
         def _repl(m: re.Match[str]) -> str:
@@ -72,12 +80,14 @@ class PromptStore:
         return _INCLUDE_RE.sub(_repl, body)
 
     def _load_prompts(self) -> None:
-        if not self._base.is_dir():
-            return
         parsed = []
-        for f in self._base.glob("*.md"):
-            meta, body = _parse_frontmatter(f.read_text(encoding="utf-8"))
-            parsed.append((self._rank(f.stem), meta, body, f.stem))
+        for entry in self._store.list(self._prefix):
+            if entry.is_dir or not entry.key.endswith(".md"):
+                continue
+            raw, _ = read_text(self._store, entry.key)
+            stem = Path(entry.key).stem
+            meta, body = _parse_frontmatter(raw)
+            parsed.append((self._rank(stem), meta, body, stem))
         for _, meta, body, stem in sorted(parsed):
             name = str(meta.get("name", stem))
             self._prompt_cache[name] = (self._resolve(body).strip(), stem)
@@ -90,24 +100,30 @@ class PromptStore:
 
     def get_raw(self, slug: str) -> str | None:
         """Return the raw (unresolved) file content for a prompt by filename slug."""
-        path = self._base / f"{slug}.md"
-        if not path.is_file():
+        key = f"{self._prefix}/{slug}.md"
+        try:
+            content, _ = read_text(self._store, key)
+        except StorageNotFoundError:
             return None
-        return path.read_text(encoding="utf-8")
+        return content
 
     def save(self, slug: str, content: str) -> str:
         """Write a prompt file and reload. Returns the resolved name."""
-        path = self._base / f"{slug}.md"
-        path.write_text(content, encoding="utf-8")
+        key = f"{self._prefix}/{slug}.md"
+        try:
+            _, revision = read_text(self._store, key)
+        except StorageNotFoundError:
+            revision = None
+        write_text(self._store, key, content, expected=revision)
         self.reload()
         meta, _ = _parse_frontmatter(content)
         return str(meta.get("name", slug))
 
     def delete(self, slug: str) -> bool:
-        path = self._base / f"{slug}.md"
-        if not path.is_file():
+        key = f"{self._prefix}/{slug}.md"
+        if not self._store.exists(key):
             return False
-        path.unlink()
+        self._store.delete(key)
         if slug in self._order:
             self.set_order([s for s in self._order if s != slug])  # reloads
         else:
@@ -116,15 +132,24 @@ class PromptStore:
 
     def set_order(self, slugs: list[str]) -> None:
         """Persist the prompt display order. Slugs not listed fall to the end, alphabetical."""
-        self._order_file.write_text("\n".join(slugs) + "\n", encoding="utf-8")
+        key = f"{self._prefix}/_order"
+        try:
+            _, revision = read_text(self._store, key)
+        except StorageNotFoundError:
+            revision = None
+        write_text(self._store, key, "\n".join(slugs) + "\n", expected=revision)
         self.reload()
 
     def list_prompts(self) -> list[dict[str, object]]:
         """Return metadata for all prompts (for the UI)."""
         parsed = []
-        for f in self._base.glob("*.md"):
-            meta, body = _parse_frontmatter(f.read_text(encoding="utf-8"))
-            parsed.append((self._rank(f.stem), f.stem, meta, body))
+        for entry in self._store.list(self._prefix):
+            if entry.is_dir or not entry.key.endswith(".md"):
+                continue
+            raw, _ = read_text(self._store, entry.key)
+            stem = Path(entry.key).stem
+            meta, body = _parse_frontmatter(raw)
+            parsed.append((self._rank(stem), stem, meta, body))
         return [
             {
                 "slug": stem,

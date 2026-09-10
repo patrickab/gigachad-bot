@@ -8,7 +8,8 @@ from typing import Any, Iterator
 from llm_baseclient.client import LLMClient
 from sse_starlette.sse import EventSourceResponse
 
-from config import DIRECTORY_CHAT_HISTORIES, DIRECTORY_PROMPTS
+from config import DIRECTORY_CHAT_HISTORIES, DIRECTORY_PROMPTS, get_data_store as configured_data_store
+from lib.data_store import DataStore
 from lib.architecture_graph import ArchitectureGraphStore
 from lib.chat_store import ChatStore
 from lib.file_vault import FileVault
@@ -23,6 +24,14 @@ _memory_store: MemoryStore | None = None
 _file_vault: FileVault | None = None
 _prompt_store: PromptStore | None = None
 _architecture_graph_store: ArchitectureGraphStore | None = None
+_data_store: DataStore | None = None
+
+
+def get_data_store() -> DataStore:
+    global _data_store
+    if _data_store is None:
+        _data_store = configured_data_store()
+    return _data_store
 
 
 def get_client() -> LLMClient:
@@ -35,28 +44,28 @@ def get_client() -> LLMClient:
 def get_chat_store() -> ChatStore:
     global _chat_store
     if _chat_store is None:
-        _chat_store = ChatStore(DIRECTORY_CHAT_HISTORIES)
+        _chat_store = ChatStore(DIRECTORY_CHAT_HISTORIES, data_store=get_data_store())
     return _chat_store
 
 
 def get_project_store() -> ProjectStore:
     global _project_store
     if _project_store is None:
-        _project_store = ProjectStore(DIRECTORY_CHAT_HISTORIES, chat_store=get_chat_store())
+        _project_store = ProjectStore(DIRECTORY_CHAT_HISTORIES, chat_store=get_chat_store(), data_store=get_data_store())
     return _project_store
 
 
 def get_architecture_graph_store() -> ArchitectureGraphStore:
     global _architecture_graph_store
     if _architecture_graph_store is None:
-        _architecture_graph_store = ArchitectureGraphStore()
+        _architecture_graph_store = ArchitectureGraphStore(data_store=get_data_store())
     return _architecture_graph_store
 
 
 def get_memory_store() -> MemoryStore:
     global _memory_store
     if _memory_store is None:
-        _memory_store = MemoryStore()
+        _memory_store = MemoryStore(data_store=get_data_store())
     return _memory_store
 
 
@@ -70,7 +79,7 @@ def get_file_vault() -> FileVault:
 def get_prompt_store() -> PromptStore:
     global _prompt_store
     if _prompt_store is None:
-        _prompt_store = PromptStore(DIRECTORY_PROMPTS)
+        _prompt_store = PromptStore(DIRECTORY_PROMPTS, data_store=get_data_store())
     return _prompt_store
 
 

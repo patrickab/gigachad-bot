@@ -25,8 +25,8 @@ from typing import TYPE_CHECKING, Any, Protocol
 import uuid
 
 from config import DIRECTORY_CHAT_HISTORIES, MEMORY_MODEL
+from lib.data_store import DataStore, DataStorePath, LocalDataStore
 from lib.json_io import safe_write_json
-from lib.safe_path import safe_resolve
 
 log = logging.getLogger(__name__)
 
@@ -125,8 +125,9 @@ def _json_from_response(text: str) -> dict[str, Any]:
 class MemoryStore:
     """Owns memory extraction, canonical document updates, and the pending buffer."""
 
-    def __init__(self, base_dir: Path = DIRECTORY_CHAT_HISTORIES) -> None:
-        self.base_dir = base_dir.resolve()
+    def __init__(self, base_dir: Path = DIRECTORY_CHAT_HISTORIES, *, data_store: DataStore | None = None) -> None:
+        base_dir = base_dir.resolve()
+        self.base_dir = DataStorePath(data_store or LocalDataStore(base_dir.parent), base_dir.name)
         self.memory_root = self.base_dir / "memory"
         self.pending_dir = self.memory_root / "pending"
 
@@ -876,10 +877,12 @@ Rules:
     def _global_profile_path(self) -> Path:
         return self.memory_root / "global-profile.md"
 
-    def _project_dir(self, project_slug: str | None) -> Path:
+    def _project_dir(self, project_slug: str | None) -> DataStorePath:
         if not project_slug:
             raise ValueError("Project slug is required")
-        return safe_resolve(self.base_dir, project_slug)
+        if "/" in project_slug or "\\" in project_slug or project_slug in {".", ".."}:
+            raise ValueError("Invalid project slug")
+        return self.base_dir / project_slug
 
     def _project_memory_path(self, project_slug: str | None) -> Path:
         return self._project_dir(project_slug) / PROJECT_MEMORY

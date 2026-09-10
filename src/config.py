@@ -3,6 +3,8 @@ from pathlib import Path
 import shutil
 import sys
 
+from lib.data_store import DataStore, LocalDataStore, WebDavDataStore
+
 # All mutable application data belongs to the backend's storage root.
 # ponytail: one shared workspace for now; user-specific roots can come later.
 REMOTE_ROOT = Path("~/Nextcloud/linux").expanduser()
@@ -45,6 +47,20 @@ DIRECTORY_OUTPUT_DRAWINGS = DOCUMENTS / "Drawings"
 # Canonical, live Architecture Graph documents. Project/canvas/chat features
 # reference files here rather than copying graph state into their own stores.
 DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS = DOCUMENTS / "Architecture_Graphs"
+
+# ``local`` retains the historical filesystem layout. ``webdav`` makes
+# Nextcloud's Documents collection the source of truth without its desktop client.
+STORAGE_BACKEND = os.environ.get("GIGACHAD_STORAGE", "local").lower()
+if STORAGE_BACKEND not in {"local", "webdav"}:
+    raise RuntimeError("GIGACHAD_STORAGE must be 'local' or 'webdav'")
+_data_store: DataStore | None = None
+
+
+def get_data_store() -> DataStore:
+    global _data_store
+    if _data_store is None:
+        _data_store = WebDavDataStore.from_environment() if STORAGE_BACKEND == "webdav" else LocalDataStore(DOCUMENTS)
+    return _data_store
 
 # Vane (Perplexica) web-search sidecar. Single container, SearXNG bundled internally.
 VANE_URL = os.environ.get("VANE_URL", "http://localhost:3001")
@@ -104,19 +120,41 @@ def ensure_directories() -> None:
         # DIRECTORY_PROMPTS is deliberately absent: seed_prompts() copies into it and
         # skips a directory that already exists.
     ]
-    for d in _dirs:
-        d.mkdir(parents=True, exist_ok=True)
-    seed_prompts()
+    if STORAGE_BACKEND == "local":
+        for d in _dirs:
+            d.mkdir(parents=True, exist_ok=True)
+        seed_prompts()
+        return
+    store = get_data_store()
+    for directory in _dirs:
+        store.mkdir(directory.relative_to(DOCUMENTS).as_posix())
+    seed_prompts(store)
 
 
-def seed_prompts() -> None:
+def seed_prompts(store: DataStore | None = None) -> None:
     """Initialize editable prompts once from the shipped defaults.
 
     An existing directory is authoritative, including deleted prompts. Defaults
     remain source assets; all subsequent editor writes go to remote storage.
     """
     source = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent)) / "prompts"
-    if DIRECTORY_PROMPTS.exists() or not source.is_dir():
+    if not source.is_dir():
+        return
+    if store is not None:
+        # The presence of the directory is authoritative, including an empty
+        # one where a user intentionally deleted every prompt.
+        if store.exists("Prompts"):
+            return
+        store.mkdir("Prompts")
+        for path in source.rglob("*"):
+            relative = path.relative_to(source).as_posix()
+            key = f"Prompts/{relative}"
+            if path.is_dir():
+                store.mkdir(key)
+            else:
+                store.write_bytes(key, path.read_bytes())
+        return
+    if DIRECTORY_PROMPTS.exists():
         return
     # Stage then rename: a copy interrupted half-way must not leave a directory
     # that exists (so seeding never runs again) but is missing prompts.

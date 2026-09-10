@@ -14,6 +14,7 @@ export function displayName(m: string): string {
   return m
 }
 
+
 export function groupByProvider(
   models: { ollama: string[]; gemini: string[]; deepseek: string[]; openrouter: string[] } | null
 ): Record<Provider, string[]> {

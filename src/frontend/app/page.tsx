@@ -229,6 +229,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     setTabLabelSlot(document.getElementById(`tab-label-${tab.id}`))
   }, [tab.id])
 
+
   useEffect(() => {
     if (isActive) {
       setActiveFile(tab.historyFile)
