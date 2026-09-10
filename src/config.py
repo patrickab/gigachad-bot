@@ -3,7 +3,7 @@ from pathlib import Path
 import shutil
 import sys
 
-from lib.data_store import DataStore, LocalDataStore, WebDavDataStore
+from lib.data_store import DataStore, LocalDataStore
 
 # All mutable application data belongs to the backend's storage root.
 # ponytail: one shared workspace for now; user-specific roots can come later.
@@ -52,21 +52,23 @@ _data_store: DataStore | None = None
 
 
 def get_data_store() -> DataStore:
-    """Select direct WebDAV when its complete configuration is available."""
+    """Use authoritative local storage; Nextcloud sync runs independently."""
     global _data_store
     if _data_store is None:
-        fallback = LocalDataStore(DOCUMENTS)
-        if WebDavDataStore.configured():
-            _data_store = WebDavDataStore.from_environment(fallback=fallback)
-        else:
-            _data_store = fallback
+        # ponytail: always use local storage; retain optional WebDAV selection below.
+        _data_store = LocalDataStore(DOCUMENTS)
+        # from lib.data_store import WebDavDataStore
+        # if WebDavDataStore.configured():
+        #     _data_store = WebDavDataStore.from_environment(fallback=_data_store)
     return _data_store
 
 
 def get_model_defaults() -> dict[str, str]:
     """Return the editable model defaults, falling back to this module's constants."""
     from lib.model_provider_store import ModelProviderStore
+
     return ModelProviderStore(get_data_store()).load_defaults()
+
 
 # Vane (Perplexica) web-search sidecar. Single container, SearXNG bundled internally.
 VANE_URL = os.environ.get("VANE_URL", "http://localhost:3001")
@@ -82,6 +84,7 @@ SEARX_URL = os.environ.get("SEARX_URL", "http://localhost:8888")
 # spawns one per parse from its own environment — impossible in the frozen
 # desktop sidecar, which excludes the ML stack and requires this to be set.
 MINERU_SERVER_URL = os.environ.get("MINERU_SERVER_URL")
+
 
 def uploads_dir_for(slug: str | None) -> Path:
     """Resolve the uploads directory for a given project slug (or None for non-project)."""

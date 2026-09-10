@@ -19,24 +19,15 @@ def test_storage_uses_local_mirror_without_complete_webdav_environment(monkeypat
     assert store.root == config.DOCUMENTS.resolve()
 
 
-def test_storage_uses_webdav_when_all_credentials_exist(monkeypatch):
+def test_storage_stays_local_when_all_webdav_credentials_exist(monkeypatch):
     for name in ("GIGACHAD_WEBDAV_URL", "GIGACHAD_WEBDAV_USER", "GIGACHAD_WEBDAV_PASSWORD"):
         monkeypatch.setenv(name, "configured")
     _reset_store(monkeypatch)
-    expected = object()
-    fallbacks = []
+    store = config.get_data_store()
 
-    def from_environment(cls, *, fallback):
-        del cls
-        fallbacks.append(fallback)
-        return expected
-
-    monkeypatch.setattr(config.WebDavDataStore, "from_environment", classmethod(from_environment))
-
-    assert config.get_data_store() is expected
-    assert len(fallbacks) == 1
-    assert isinstance(fallbacks[0], LocalDataStore)
-    assert fallbacks[0].root == config.DOCUMENTS.resolve()
+    assert isinstance(store, LocalDataStore)
+    assert store.root == config.DOCUMENTS.resolve()
+    assert config.get_data_store() is store
 
 
 def test_ensure_directories_uses_the_selected_store(monkeypatch):
