@@ -7,7 +7,7 @@ from lib.data_store import DataStore, LocalDataStore
 
 # All mutable application data belongs to the backend's storage root.
 # ponytail: one shared workspace for now; user-specific roots can come later.
-REMOTE_ROOT = Path("~/Nextcloud/linux").expanduser()
+REMOTE_ROOT = Path(os.environ.get("GIGACHAD_BASE_DIR", "~/Nextcloud/linux")).expanduser()
 DOCUMENTS = REMOTE_ROOT / "Documents"
 DIRECTORY_CLOUD = REMOTE_ROOT  # legacy alias, only src/legacy_streamlit still imports it
 

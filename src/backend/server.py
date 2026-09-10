@@ -84,6 +84,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.get("/healthz")
+async def healthz() -> dict[str, str]:
+    return {"status": "ok"}
+
 # Graph routes raise their store's vocabulary; map it to HTTP once here rather than per handler.
 # The subclass is registered first so Starlette's MRO lookup gives not-found a 404, not a 400.
 @app.exception_handler(ArchitectureGraphNotFound)

@@ -1,0 +1,26 @@
+[Unit]
+Description=gigachad-bot FastAPI backend
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=exec
+User=gigachad
+Group=gigachad
+WorkingDirectory=/opt/gigachad-bot
+EnvironmentFile=/etc/gigachad-bot/gigachad-bot.env
+Environment=GIGACHAD_BASE_DIR=/var/lib/gigachad-bot
+StateDirectory=gigachad-bot
+StateDirectoryMode=0750
+ExecStart=/opt/gigachad-bot/.venv/bin/uvicorn src.backend.server:app --host 127.0.0.1 --port 8001
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
