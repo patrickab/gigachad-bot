@@ -1,18 +1,13 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path
-from llm_baseclient.config import (
-    AVAILABLE_MODELS,
-    MODELS_DEEPSEEK,
-    MODELS_GEMINI,
-    discover_ollama_models,
-)
+from llm_baseclient.config import discover_ollama_models
 from pydantic import BaseModel
 
-from config import MODELS_OPENROUTER
+from lib.model_provider_store import ModelProviderStore, providers_for_ui
 from lib.prompt_store import PromptStore
 
-from .deps import get_prompt_store
+from .deps import get_model_provider_store, get_prompt_store
 
 router = APIRouter(prefix="/api", tags=["models"])
 
@@ -21,14 +16,51 @@ Slug = Annotated[str, Path(pattern=r"^[A-Za-z0-9_-]+$")]
 
 
 @router.get("/models")
-async def get_models() -> dict:
+async def get_models(store: ModelProviderStore = Depends(get_model_provider_store)) -> dict:
+    providers = providers_for_ui(store.load())
     return {
-        "all": AVAILABLE_MODELS,
         "ollama": discover_ollama_models(),
-        "gemini": MODELS_GEMINI,
-        "deepseek": MODELS_DEEPSEEK,
-        "openrouter": MODELS_OPENROUTER,
+        "providers": [{"label": label, **provider} for label, provider in providers.items()],
+        "defaults": store.load_defaults(),
     }
+
+
+class ProviderDefinition(BaseModel):
+    litellm_id: str
+    models: list[str]
+
+
+class ProviderCatalog(BaseModel):
+    providers: dict[str, ProviderDefinition]
+
+
+class ModelDefaults(BaseModel):
+    default_model: str
+    small_model: str
+    vision_model: str
+    memory_model: str
+
+
+@router.put("/models/providers")
+async def save_model_providers(
+    body: ProviderCatalog, store: ModelProviderStore = Depends(get_model_provider_store)
+) -> dict:
+    try:
+        providers = store.save({label: provider.model_dump() for label, provider in body.providers.items()})
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    visible = providers_for_ui(providers)
+    return {"ollama": discover_ollama_models(), "providers": [{"label": label, **provider} for label, provider in visible.items()], "defaults": store.load_defaults()}
+
+
+@router.put("/models/defaults")
+async def save_model_defaults(body: ModelDefaults, store: ModelProviderStore = Depends(get_model_provider_store)) -> dict:
+    try:
+        defaults = store.save_defaults(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    providers = providers_for_ui(store.load())
+    return {"ollama": discover_ollama_models(), "providers": [{"label": label, **provider} for label, provider in providers.items()], "defaults": defaults}
 
 
 @router.get("/prompts")

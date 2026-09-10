@@ -16,6 +16,7 @@ from lib.file_vault import FileVault
 from lib.memory_store import MemoryStore
 from lib.project_store import ProjectStore
 from lib.prompt_store import PromptStore
+from lib.model_provider_store import ModelProviderStore
 
 _client: LLMClient | None = None
 _chat_store: ChatStore | None = None
@@ -25,6 +26,7 @@ _file_vault: FileVault | None = None
 _prompt_store: PromptStore | None = None
 _architecture_graph_store: ArchitectureGraphStore | None = None
 _data_store: DataStore | None = None
+_model_provider_store: ModelProviderStore | None = None
 
 
 def get_data_store() -> DataStore:
@@ -81,6 +83,13 @@ def get_prompt_store() -> PromptStore:
     if _prompt_store is None:
         _prompt_store = PromptStore(DIRECTORY_PROMPTS, data_store=get_data_store())
     return _prompt_store
+
+
+def get_model_provider_store() -> ModelProviderStore:
+    global _model_provider_store
+    if _model_provider_store is None:
+        _model_provider_store = ModelProviderStore(get_data_store())
+    return _model_provider_store
 
 
 def shutdown_client() -> None:

@@ -107,6 +107,8 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     webSearch,
     reset,
     models,
+    saveModelProviders,
+    saveModelDefaults,
     prompts,
     setPrompts,
     loadHistory,
@@ -631,6 +633,8 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           ) : researchEnabled ? (
             <ResearchModelsBar
               models={models}
+              onProvidersChange={saveModelProviders}
+              onDefaultsChange={saveModelDefaults}
               fastModel={config.researchFastModel}
               smartModel={config.researchSmartModel}
               strategicModel={config.researchStrategicModel}
@@ -640,7 +644,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
             />
           ) : (
             <div className="flex items-center gap-4">
-              <ModelDropdown models={models} selectedModel={config.selectedModel} onSelect={(m) => onConfigChange({ selectedModel: m })} />
+              <ModelDropdown models={models} selectedModel={config.selectedModel} onSelect={(m) => onConfigChange({ selectedModel: m })} onProvidersChange={saveModelProviders} onDefaultsChange={saveModelDefaults} />
               <div className="w-px h-4 bg-surface-elevated" />
               <ReasoningSelector reasoningEffort={config.reasoningEffort} onReasoningChange={(v) => onConfigChange({ reasoningEffort: v })} />
             </div>

@@ -468,7 +468,7 @@ class ChatStore:
         root_files: list[str] = []
         histories: dict[str, list[str]] = {}
         if self._base.is_dir():
-            for f in sorted(self._base.iterdir()):
+            for f in sorted(self._base.iterdir(), key=lambda path: path.name):
                 if f.name in (PROJECT_JSON, META_JSON):
                     continue
                 if f.is_dir() and f.name.startswith("_"):
@@ -479,7 +479,7 @@ class ChatStore:
                     root_files.append(f.name)
                 elif f.is_dir() and not (f / PROJECT_JSON).exists():
                     histories.setdefault(f.name, [])
-                    for sf in sorted(f.iterdir()):
+                    for sf in sorted(f.iterdir(), key=lambda path: path.name):
                         if sf.is_file() and sf.suffix == ".json" and sf.name != PROJECT_JSON:
                             histories[f.name].append(sf.name)
         return {"files": root_files, "histories": histories}
@@ -503,7 +503,7 @@ class ChatStore:
 
     def _scan_dir_for_meta(self, base: Path, rel_prefix: str = "") -> dict[str, dict[str, Any]]:
         result: dict[str, dict[str, Any]] = {}
-        for f in sorted(base.iterdir()):
+        for f in sorted(base.iterdir(), key=lambda path: path.name):
             if f.name in (PROJECT_JSON, META_JSON):
                 continue
             if f.name.startswith("_"):

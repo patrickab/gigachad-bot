@@ -24,7 +24,7 @@ import re
 from typing import TYPE_CHECKING, Any, Protocol
 import uuid
 
-from config import DIRECTORY_CHAT_HISTORIES, MEMORY_MODEL
+from config import DIRECTORY_CHAT_HISTORIES, get_model_defaults
 from lib.data_store import DataStore, DataStorePath, LocalDataStore
 from lib.json_io import safe_write_json
 
@@ -948,7 +948,7 @@ Rules:
 
         def call(force_json: bool) -> str:
             kwargs: dict[str, Any] = dict(
-                model=MEMORY_MODEL,
+                model=get_model_defaults()["memory_model"],
                 user_msg=user_prompt,
                 user_msg_history=[],
                 system_prompt=system_prompt,

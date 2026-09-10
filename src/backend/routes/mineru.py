@@ -11,7 +11,7 @@ import tempfile
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from config import DIRECTORY_OUTPUT_MINERU, DIRECTORY_OUTPUT_PDF, MINERU_SERVER_URL, SMALL_MODEL
+from config import DIRECTORY_OUTPUT_MINERU, DIRECTORY_OUTPUT_PDF, MINERU_SERVER_URL, get_model_defaults
 from lib.attachment_materialize import mineru_cache_path
 
 from .deps import request_client
@@ -236,7 +236,7 @@ async def parse_single_pdf(
     file: UploadFile = File(...),
     query: str = Form(""),
     backend: str = Form("pipeline"),
-    model: str = Form(SMALL_MODEL),
+    model: str = Form(""),
 ):
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported")
@@ -263,7 +263,7 @@ async def parse_single_pdf(
         try:
             with request_client() as c:
                 response = c.api_query(
-                    model=model,
+                    model=model or get_model_defaults()["small_model"],
                     user_msg=md_content + "\n\n---\n\n" + query_clean,
                     system_prompt="",
                     img=None,
@@ -284,7 +284,7 @@ async def parse_batch_pdfs(
     files: list[UploadFile] = File(...),
     query: str = Form(""),
     backend: str = Form("pipeline"),
-    model: str = Form(SMALL_MODEL),
+    model: str = Form(""),
 ):
     results = []
     shared_md = ""
@@ -317,7 +317,7 @@ async def parse_batch_pdfs(
         try:
             with request_client() as c:
                 response = c.api_query(
-                    model=model,
+                    model=model or get_model_defaults()["small_model"],
                     user_msg=shared_md + "\n\n---\n\n" + query_clean,
                     system_prompt="",
                     img=None,

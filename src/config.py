@@ -62,6 +62,12 @@ def get_data_store() -> DataStore:
         _data_store = WebDavDataStore.from_environment() if STORAGE_BACKEND == "webdav" else LocalDataStore(DOCUMENTS)
     return _data_store
 
+
+def get_model_defaults() -> dict[str, str]:
+    """Return the editable model defaults, falling back to this module's constants."""
+    from lib.model_provider_store import ModelProviderStore
+    return ModelProviderStore(get_data_store()).load_defaults()
+
 # Vane (Perplexica) web-search sidecar. Single container, SearXNG bundled internally.
 VANE_URL = os.environ.get("VANE_URL", "http://localhost:3001")
 # Embedding model Vane uses to rerank sources. Must also be configured in Vane's
@@ -76,18 +82,6 @@ SEARX_URL = os.environ.get("SEARX_URL", "http://localhost:8888")
 # spawns one per parse from its own environment — impossible in the frozen
 # desktop sidecar, which excludes the ML stack and requires this to be set.
 MINERU_SERVER_URL = os.environ.get("MINERU_SERVER_URL")
-
-# --- OpenRouter model definitions ---
-MODELS_OPENROUTER = (
-    [
-        "openrouter/glm-5.2",
-        "openrouter/deepseek-v4-pro",
-        "openrouter/deepseek-v4-flash",
-    ]
-    if os.environ.get("OPENROUTER_API_KEY")
-    else []
-)
-
 
 def uploads_dir_for(slug: str | None) -> Path:
     """Resolve the uploads directory for a given project slug (or None for non-project)."""

@@ -1,4 +1,4 @@
-import type { ArchitectureGraphContextReference, Attachment, BackendConfig, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelsResponse, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage, VaultFile, VaultNode } from "./types"
+import type { ArchitectureGraphContextReference, Attachment, BackendConfig, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelDefaults, ModelProvider, ModelsResponse, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage, VaultFile, VaultNode } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { getApiBase } from "./config"
@@ -90,6 +90,16 @@ function fileForm(file: File | Blob, filename?: string): FormData {
 
 export async function fetchModels(): Promise<ModelsResponse> {
   return request<ModelsResponse>("/models")
+}
+
+export async function saveModelProviders(providers: ModelProvider[]): Promise<ModelsResponse> {
+  return put<ModelsResponse>("/models/providers", {
+    providers: Object.fromEntries(providers.map(({ label, litellm_id, models }) => [label, { litellm_id, models }])),
+  })
+}
+
+export async function saveModelDefaults(defaults: ModelDefaults): Promise<ModelsResponse> {
+  return put<ModelsResponse>("/models/defaults", defaults)
 }
 
 export async function fetchBackendConfig(): Promise<BackendConfig> {

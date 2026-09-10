@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import type React from "react"
-import { fetchModels, fetchPrompts, loadChatHistory as apiLoadChatHistory } from "@/lib/api"
-import type { ChatRequest, Message, ModelsResponse, WebSearchParams, Usage } from "@/lib/types"
+import { fetchModels, fetchPrompts, loadChatHistory as apiLoadChatHistory, saveModelDefaults as saveModelDefaultsRequest, saveModelProviders as saveModelProvidersRequest } from "@/lib/api"
+import type { ChatRequest, Message, ModelDefaults, ModelProvider, ModelsResponse, WebSearchParams, Usage } from "@/lib/types"
 import { useChatStream } from "./useChatStream"
 import { useResearch, type ResearchParams } from "./useResearch"
 import { webSearchFetch, parseWebSearchStream, fetchWebSearchImages, fetchWebSearchVideos, type WebSearchResultItem } from "@/lib/webSearch"
@@ -21,6 +21,8 @@ export interface UseChatReturn {
   research: (params: ResearchParams) => Promise<void>
   webSearch: (params: WebSearchParams) => Promise<void>
   models: ModelsResponse | null
+  saveModelProviders: (providers: ModelProvider[]) => Promise<void>
+  saveModelDefaults: (defaults: ModelDefaults) => Promise<void>
   prompts: Record<string, string>
   setPrompts: React.Dispatch<React.SetStateAction<Record<string, string>>>
   loadHistory: (filename: string) => Promise<{ messages: Message[]; chat_id: string | null; parent_id: string | null; branch_message_idx: number | null }>
@@ -47,6 +49,13 @@ export function useChat(): UseChatReturn {
   useEffect(() => {
     fetchModels().then(setModels).catch(console.error)
     fetchPrompts().then(setPrompts).catch(console.error)
+  }, [])
+
+  const saveModelProviders = useCallback(async (providers: ModelProvider[]) => {
+    setModels(await saveModelProvidersRequest(providers))
+  }, [])
+  const saveModelDefaults = useCallback(async (defaults: ModelDefaults) => {
+    setModels(await saveModelDefaultsRequest(defaults))
   }, [])
 
   const appendMessage = useCallback((msg: Message) => {
@@ -166,6 +175,8 @@ export function useChat(): UseChatReturn {
     research,
     webSearch,
     models,
+    saveModelProviders,
+    saveModelDefaults,
     prompts,
     setPrompts,
     loadHistory,

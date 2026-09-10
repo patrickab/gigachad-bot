@@ -8,3 +8,8 @@ started via `run.sh` or manually by the user, in a terminal they control.
 - If you need to see the app running (UI check, manual test, screenshot),
   ask the user to start it and confirm it's up, then use their already-running
   instance. Do not launch your own copy alongside theirs.
+
+## UI hints
+
+- Never add hover-only hints or native browser tooltips (`title` attributes).
+  Use visible labels or accessible `aria-label`s for icon-only controls.

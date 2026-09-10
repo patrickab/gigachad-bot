@@ -2,11 +2,13 @@
 
 import { useState } from "react"
 import { ChevronDown } from "lucide-react"
-import type { ModelsResponse } from "@/lib/types"
+import type { ModelDefaults, ModelProvider, ModelsResponse } from "@/lib/types"
 import { ModelDropdown } from "./ModelDropdown"
 
 interface ResearchModelsBarProps {
   models: ModelsResponse | null
+  onProvidersChange: (providers: ModelProvider[]) => Promise<void>
+  onDefaultsChange: (defaults: ModelDefaults) => Promise<void>
   fastModel: string
   smartModel: string
   strategicModel: string
@@ -20,6 +22,8 @@ type Tier = (typeof TIERS)[number]
 
 export function ResearchModelsBar({
   models,
+  onProvidersChange,
+  onDefaultsChange,
   fastModel,
   smartModel,
   strategicModel,
@@ -41,6 +45,8 @@ export function ResearchModelsBar({
   return (
     <ModelDropdown
       models={models}
+      onProvidersChange={onProvidersChange}
+      onDefaultsChange={onDefaultsChange}
       selectedModel={selectedModel}
       onSelect={onModelSelect}
       accent="sky"

@@ -68,11 +68,18 @@ export interface ChatRequest {
 }
 
 export interface ModelsResponse {
-  all: string[]
   ollama: string[]
-  gemini: string[]
-  deepseek: string[]
-  openrouter: string[]
+  providers: ModelProvider[]
+  defaults: ModelDefaults
+}
+
+export interface ModelDefaults { default_model: string; small_model: string; vision_model: string; memory_model: string }
+
+export interface ModelProvider {
+  label: string
+  litellm_id: string
+  /** Model name without the provider prefix; the selector sends `litellm_id/model`. */
+  models: string[]
 }
 
 export interface BackendConfig {
@@ -101,8 +108,6 @@ export interface BranchChild {
   chat_id: string
   branch_message_idx: number
 }
-
-export type Provider = "Ollama" | "Gemini" | "DeepSeek" | "OpenRouter"
 
 export interface ResearchRequest {
   query: string
