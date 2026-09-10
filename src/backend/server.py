@@ -38,7 +38,7 @@ from backend.routes.research import router as research_router
 from backend.routes.search import router as search_router
 from backend.routes.search import stop_vane
 from backend.routes.study import router as study_router
-from config import DIRECTORY_CHAT_HISTORIES, DIRECTORY_CHAT_UPLOADS, DIRECTORY_OUTPUT_MINERU, STORAGE_BACKEND, ensure_directories
+from config import DIRECTORY_CHAT_HISTORIES, DIRECTORY_CHAT_UPLOADS, DIRECTORY_OUTPUT_MINERU, ensure_directories
 
 ensure_directories()
 
@@ -113,11 +113,11 @@ app.include_router(projects_router)
 app.include_router(research_router)
 app.include_router(study_router)
 
-if STORAGE_BACKEND == "local":
+if (DIRECTORY_OUTPUT_MINERU / "images").exists():
     app.mount("/mineru/images", StaticFiles(directory=str(DIRECTORY_OUTPUT_MINERU / "images")), name="mineru_images")
-    # Non-project uploads are still served from /chat-uploads for backward compatibility.
-    # Project-scoped uploads are served from /chat-histories/<slug>/_uploads/ (mounted below).
-    if DIRECTORY_CHAT_UPLOADS.exists():
-        app.mount("/chat-uploads", StaticFiles(directory=str(DIRECTORY_CHAT_UPLOADS)), name="chat_uploads")
-    if DIRECTORY_CHAT_HISTORIES.exists():
-        app.mount("/chat-histories", StaticFiles(directory=str(DIRECTORY_CHAT_HISTORIES), html=False), name="chat_histories")
+# Non-project uploads are still served from /chat-uploads for backward compatibility.
+# Project-scoped uploads are served from /chat-histories/<slug>/_uploads/ (mounted below).
+if DIRECTORY_CHAT_UPLOADS.exists():
+    app.mount("/chat-uploads", StaticFiles(directory=str(DIRECTORY_CHAT_UPLOADS)), name="chat_uploads")
+if DIRECTORY_CHAT_HISTORIES.exists():
+    app.mount("/chat-histories", StaticFiles(directory=str(DIRECTORY_CHAT_HISTORIES), html=False), name="chat_histories")

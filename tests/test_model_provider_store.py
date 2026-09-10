@@ -1,10 +1,12 @@
-from lib.data_store import LocalDataStore
+import pytest
+
+from lib.data_store import LocalDataStore, StorageError
 from lib.model_provider_store import MODEL_PROVIDERS_FILE, ModelProviderStore, providers_for_ui
 
 
 def test_provider_catalog_round_trips_yaml_and_rejects_duplicates(tmp_path):
     store = LocalDataStore(tmp_path)
-    catalog = ModelProviderStore(store, fallback_dir=tmp_path / "fallback")
+    catalog = ModelProviderStore(store)
     providers = {"Together": {"litellm_id": "together_ai", "models": ["meta-llama/Llama-3.3-70B"]}}
 
     assert catalog.save(providers) == providers
@@ -19,7 +21,7 @@ def test_provider_catalog_round_trips_yaml_and_rejects_duplicates(tmp_path):
         raise AssertionError("duplicate model names must be rejected")
 
 
-def test_provider_catalog_uses_local_fallback_when_primary_is_unavailable(tmp_path):
+def test_provider_catalog_propagates_primary_store_errors():
     class UnavailableStore:
         def read_bytes(self, key):
             from lib.data_store import StorageError
@@ -29,13 +31,10 @@ def test_provider_catalog_uses_local_fallback_when_primary_is_unavailable(tmp_pa
             from lib.data_store import StorageError
             raise StorageError("offline")
 
-    fallback = tmp_path / "fallback"
-    catalog = ModelProviderStore(UnavailableStore(), fallback_dir=fallback)
+    catalog = ModelProviderStore(UnavailableStore())
 
-    providers = catalog.load()
-
-    assert providers["OpenRouter"]["litellm_id"] == "openrouter"
-    assert (fallback / MODEL_PROVIDERS_FILE).exists()
+    with pytest.raises(StorageError, match="offline"):
+        catalog.load()
 
 
 def test_openai_provider_is_visible_only_with_an_api_key(monkeypatch):

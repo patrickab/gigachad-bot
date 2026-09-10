@@ -48,18 +48,18 @@ DIRECTORY_OUTPUT_DRAWINGS = DOCUMENTS / "Drawings"
 # reference files here rather than copying graph state into their own stores.
 DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS = DOCUMENTS / "Architecture_Graphs"
 
-# ``local`` retains the historical filesystem layout. ``webdav`` makes
-# Nextcloud's Documents collection the source of truth without its desktop client.
-STORAGE_BACKEND = os.environ.get("GIGACHAD_STORAGE", "local").lower()
-if STORAGE_BACKEND not in {"local", "webdav"}:
-    raise RuntimeError("GIGACHAD_STORAGE must be 'local' or 'webdav'")
 _data_store: DataStore | None = None
 
 
 def get_data_store() -> DataStore:
+    """Select direct WebDAV when its complete configuration is available."""
     global _data_store
     if _data_store is None:
-        _data_store = WebDavDataStore.from_environment() if STORAGE_BACKEND == "webdav" else LocalDataStore(DOCUMENTS)
+        fallback = LocalDataStore(DOCUMENTS)
+        if WebDavDataStore.configured():
+            _data_store = WebDavDataStore.from_environment(fallback=fallback)
+        else:
+            _data_store = fallback
     return _data_store
 
 
@@ -114,11 +114,6 @@ def ensure_directories() -> None:
         # DIRECTORY_PROMPTS is deliberately absent: seed_prompts() copies into it and
         # skips a directory that already exists.
     ]
-    if STORAGE_BACKEND == "local":
-        for d in _dirs:
-            d.mkdir(parents=True, exist_ok=True)
-        seed_prompts()
-        return
     store = get_data_store()
     for directory in _dirs:
         store.mkdir(directory.relative_to(DOCUMENTS).as_posix())

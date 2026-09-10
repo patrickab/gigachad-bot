@@ -30,6 +30,10 @@ class StorageConflictError(StorageError):
     """A file changed after the caller read the revision it is trying to save."""
 
 
+class StorageUnavailableError(StorageError):
+    """The remote store cannot currently be reached."""
+
+
 class StorageNotFoundError(StorageError, FileNotFoundError):
     """A requested storage key does not exist."""
 
@@ -290,21 +294,26 @@ class LocalDataStore:
 
 
 class WebDavDataStore:
-    """WebDAV adapter rooted at Nextcloud's Documents collection."""
+    """WebDAV adapter with an optional local Nextcloud mirror fallback."""
 
-    def __init__(self, base_url: str, user: str, password: str) -> None:
+    def __init__(self, base_url: str, user: str, password: str, *, fallback: DataStore | None = None) -> None:
         self._base_url = base_url.rstrip("/")
         token = base64.b64encode(f"{user}:{password}".encode()).decode()
         self._authorization = f"Basic {token}"
+        self._fallback = fallback
 
     @classmethod
-    def from_environment(cls) -> "WebDavDataStore":
+    def configured(cls) -> bool:
+        return all(os.getenv(name) for name in ("GIGACHAD_WEBDAV_URL", "GIGACHAD_WEBDAV_USER", "GIGACHAD_WEBDAV_PASSWORD"))
+
+    @classmethod
+    def from_environment(cls, *, fallback: DataStore | None = None) -> "WebDavDataStore":
         url = os.getenv("GIGACHAD_WEBDAV_URL")
         user = os.getenv("GIGACHAD_WEBDAV_USER")
         password = os.getenv("GIGACHAD_WEBDAV_PASSWORD")
         if not all((url, user, password)):
             raise StorageError("Set GIGACHAD_WEBDAV_URL, _USER, and _PASSWORD for WebDAV storage.")
-        return cls(url, user, password)
+        return cls(url, user, password, fallback=fallback)
 
     def _url(self, key: str, *, allow_empty: bool = False) -> str:
         normalized = validate_key(key, allow_empty=allow_empty)
@@ -323,12 +332,25 @@ class WebDavDataStore:
                 raise StorageNotFoundError(key) from exc
             if exc.code == 412:
                 raise StorageConflictError(f"{key} changed on another device; reload before saving") from exc
+            if 500 <= exc.code < 600:
+                raise StorageUnavailableError(f"WebDAV {method} failed for {key}: HTTP {exc.code}") from exc
             raise StorageError(f"WebDAV {method} failed for {key}: HTTP {exc.code}") from exc
-        except URLError as exc:
-            raise StorageError(f"WebDAV {method} failed for {key}: {exc.reason}") from exc
+        except (URLError, TimeoutError, OSError) as exc:
+            reason = getattr(exc, "reason", exc)
+            raise StorageUnavailableError(f"WebDAV {method} failed for {key}: {reason}") from exc
 
     def read_bytes(self, key: str) -> tuple[bytes, Revision]:
-        body, etag = self._request("GET", key)
+        if self._fallback is not None:
+            try:
+                return self._fallback.read_bytes(key)
+            except StorageNotFoundError:
+                pass
+        try:
+            body, etag = self._request("GET", key)
+        except StorageUnavailableError:
+            if self._fallback is not None:
+                return self._fallback.read_bytes(key)
+            raise
         if not etag:
             raise StorageError(f"WebDAV GET for {key} did not return an ETag")
         return body, Revision(etag)
@@ -336,15 +358,67 @@ class WebDavDataStore:
     def write_bytes(self, key: str, content: bytes, *, expected: Revision | None = None) -> Revision:
         # A caller that has read a file supplies its ETag.  Blind writes are retained
         # for immutable/new binary imports; editable API routes always pass a revision.
-        headers = {"If-Match": expected.token} if expected else {}
-        _, etag = self._request("PUT", key, body=content, headers=headers)
+        try:
+            headers = self._write_headers(key, expected)
+            _, etag = self._request("PUT", key, body=content, headers=headers)
+        except StorageUnavailableError:
+            if self._fallback is not None:
+                return self._fallback.write_bytes(key, content, expected=self._fallback_expected(key, expected))
+            raise
         if etag:
             return Revision(etag)
-        _, revision = self.read_bytes(key)
+        _, revision = self._read_remote(key)
         return revision
 
+    def _read_remote(self, key: str) -> tuple[bytes, Revision]:
+        body, etag = self._request("GET", key)
+        if not etag:
+            raise StorageError(f"WebDAV GET for {key} did not return an ETag")
+        return body, Revision(etag)
+
+    def _write_headers(self, key: str, expected: Revision | None) -> dict[str, str]:
+        if expected is None:
+            return {}
+        if self._fallback is None:
+            return {"If-Match": expected.token}
+        try:
+            cached, cached_revision = self._fallback.read_bytes(key)
+        except StorageNotFoundError:
+            return {"If-Match": expected.token}
+        if cached_revision != expected:
+            return {"If-Match": expected.token}
+        try:
+            remote, remote_etag = self._request("GET", key)
+        except StorageNotFoundError:
+            # The local mirror has a file but the remote does not yet: recreate it.
+            return {}
+        if remote != cached:
+            raise StorageConflictError(f"{key} changed on another device; reload before saving")
+        if not remote_etag:
+            raise StorageError(f"WebDAV GET for {key} did not return an ETag")
+        return {"If-Match": remote_etag}
+
+    def _fallback_expected(self, key: str, expected: Revision | None) -> Revision | None:
+        """Translate a remote ETag to the local revision when falling offline."""
+        if expected is None or self._fallback is None:
+            return None
+        try:
+            _, local_revision = self._fallback.read_bytes(key)
+        except StorageNotFoundError:
+            return None
+        return local_revision
+
     def list(self, prefix: str = "", *, recursive: bool = False) -> list[Entry]:
-        body, _ = self._request("PROPFIND", prefix, headers={"Depth": "infinity" if recursive else "1"}, allow_empty=True)
+        if self._fallback is not None:
+            cached = self._fallback.list(prefix, recursive=recursive)
+            if cached:
+                return cached
+        try:
+            body, _ = self._request("PROPFIND", prefix, headers={"Depth": "infinity" if recursive else "1"}, allow_empty=True)
+        except StorageUnavailableError:
+            if self._fallback is not None:
+                return self._fallback.list(prefix, recursive=recursive)
+            raise
         try:
             root = ET.fromstring(body)
         except ET.ParseError as exc:
@@ -371,13 +445,28 @@ class WebDavDataStore:
         return entries
 
     def exists(self, key: str) -> bool:
+        if self._fallback is not None and self._fallback.exists(key):
+            return True
         try:
             self._request("PROPFIND", key, headers={"Depth": "0"})
         except StorageNotFoundError:
             return False
+        except StorageUnavailableError:
+            if self._fallback is not None:
+                return self._fallback.exists(key)
+            raise
         return True
 
     def mkdir(self, key: str) -> None:
+        try:
+            self._mkdir(key)
+        except StorageUnavailableError:
+            if self._fallback is not None:
+                self._fallback.mkdir(key)
+                return
+            raise
+
+    def _mkdir(self, key: str) -> None:
         try:
             self._request("MKCOL", key)
         except StorageError as exc:
@@ -386,17 +475,33 @@ class WebDavDataStore:
                 raise exc
 
     def delete(self, key: str, *, recursive: bool = False) -> None:
-        del recursive  # WebDAV DELETE handles collections recursively.
         try:
             self._request("DELETE", key)
         except StorageNotFoundError:
             return
+        except StorageUnavailableError:
+            if self._fallback is not None:
+                self._fallback.delete(key, recursive=recursive)
+                return
+            raise
 
     def _copy_or_move(self, method: str, source: str, destination: str) -> None:
         self._request(method, source, headers={"Destination": self._url(destination), "Overwrite": "F"})
 
     def move(self, source: str, destination: str) -> None:
-        self._copy_or_move("MOVE", source, destination)
+        try:
+            self._copy_or_move("MOVE", source, destination)
+        except StorageUnavailableError:
+            if self._fallback is not None:
+                self._fallback.move(source, destination)
+                return
+            raise
 
     def copy(self, source: str, destination: str) -> None:
-        self._copy_or_move("COPY", source, destination)
+        try:
+            self._copy_or_move("COPY", source, destination)
+        except StorageUnavailableError:
+            if self._fallback is not None:
+                self._fallback.copy(source, destination)
+                return
+            raise

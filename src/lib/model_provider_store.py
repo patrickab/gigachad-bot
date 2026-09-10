@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from typing import Any
 
 import yaml
 from llm_baseclient.config import MODELS_DEEPSEEK, MODELS_GEMINI
 
 from config import MEMORY_MODEL, SMALL_MODEL, VISION_MODEL
-from lib.data_store import DataStore, LocalDataStore, StorageError, StorageNotFoundError, read_text, write_text
+from lib.data_store import DataStore, StorageNotFoundError, read_text, write_text
 
 MODEL_PROVIDERS_FILE = "model-providers.yaml"
 MODEL_DEFAULTS_FILE = "model-defaults.yaml"
@@ -40,9 +39,8 @@ def providers_for_ui(providers: dict[str, dict[str, Any]]) -> dict[str, dict[str
 class ModelProviderStore:
     """Persists the editable provider catalog in the configured storage root."""
 
-    def __init__(self, store: DataStore, *, fallback_dir: Path | None = None) -> None:
+    def __init__(self, store: DataStore) -> None:
         self._store = store
-        self._fallback = LocalDataStore(fallback_dir or Path.cwd())
 
     @staticmethod
     def _validate(data: object) -> dict[str, dict[str, Any]]:
@@ -86,25 +84,12 @@ class ModelProviderStore:
             return self._read(self._store)
         except StorageNotFoundError:
             providers = self._validate(DEFAULT_PROVIDERS)
-            try:
-                self._write(self._store, providers)
-            except StorageError:
-                self._write(self._fallback, providers)
+            self._write(self._store, providers)
             return providers
-        except StorageError:
-            try:
-                return self._read(self._fallback)
-            except StorageNotFoundError:
-                providers = self._validate(DEFAULT_PROVIDERS)
-                self._write(self._fallback, providers)
-                return providers
 
     def save(self, providers: object) -> dict[str, dict[str, Any]]:
         cleaned = self._validate(providers)
-        try:
-            self._write(self._store, cleaned)
-        except StorageError:
-            self._write(self._fallback, cleaned)
+        self._write(self._store, cleaned)
         return cleaned
 
     def load_defaults(self) -> dict[str, str]:
@@ -114,13 +99,6 @@ class ModelProviderStore:
             defaults = dict(DEFAULT_MODEL_DEFAULTS)
             self._write_defaults(defaults)
             return defaults
-        except StorageError:
-            try:
-                raw, _ = read_text(self._fallback, MODEL_DEFAULTS_FILE)
-            except StorageNotFoundError:
-                defaults = dict(DEFAULT_MODEL_DEFAULTS)
-                write_text(self._fallback, MODEL_DEFAULTS_FILE, yaml.safe_dump(defaults, sort_keys=False))
-                return defaults
         try:
             defaults = yaml.safe_load(raw) or {}
         except yaml.YAMLError as exc:
@@ -134,10 +112,7 @@ class ModelProviderStore:
             _, revision = read_text(self._store, MODEL_DEFAULTS_FILE)
         except StorageNotFoundError:
             revision = None
-        try:
-            write_text(self._store, MODEL_DEFAULTS_FILE, yaml.safe_dump(defaults, sort_keys=False), expected=revision)
-        except StorageError:
-            write_text(self._fallback, MODEL_DEFAULTS_FILE, yaml.safe_dump(defaults, sort_keys=False))
+        write_text(self._store, MODEL_DEFAULTS_FILE, yaml.safe_dump(defaults, sort_keys=False), expected=revision)
 
     def save_defaults(self, defaults: object) -> dict[str, str]:
         if not isinstance(defaults, dict) or set(defaults) != set(DEFAULT_MODEL_DEFAULTS):
