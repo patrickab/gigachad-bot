@@ -75,16 +75,18 @@ sudo useradd --system --create-home --home-dir /opt/gigachad-bot \
   --shell /usr/bin/nologin gigachad
 sudo install -d -o gigachad -g gigachad -m 0750 /var/lib/gigachad-bot
 sudo -u gigachad git clone <release-repository-url> /opt/gigachad-bot
-sudo -u gigachad sh -lc 'cd /opt/gigachad-bot && uv sync --no-dev --no-group ocr'
+sudo -u gigachad sh -lc 'cd /opt/gigachad-bot && uv sync --python 3.12 --no-dev'
 ```
 
 For an existing service account or checkout, omit the creation/clone command
 that is already satisfied. Do not use `run.sh` in production: it installs
 dependencies, enables reload mode, and starts a development frontend.
 
-The standard backend release excludes the roughly 12 GB local `ocr` group;
-configure `MINERU_SERVER_URL` when OCR is provided by a separately hosted
-MinerU service.
+The production release installs the optional `ocr` group so MinerU parses PDFs
+locally on the server. The roughly 12 GB `ocr` group is a heavyweight GPU/CUDA
+deployment and requires compatible CUDA and GPU resources. Leave
+`MINERU_SERVER_URL` unset for local parsing; set it only when deliberately using
+a remote MinerU service.
 
 All persistent application state belongs below `GIGACHAD_BASE_DIR`. With the
 value below, the backend creates and uses
@@ -134,7 +136,7 @@ SEARX_URL=http://127.0.0.1:8888
 | `OLLAMA_BASE_URL` | When using local models/embeddings | No | Host-local Ollama endpoint. |
 | `VANE_URL` | When using web search | No | Host-local Vane endpoint. |
 | `SEARX_URL` | When using deep research | No | Host-local SearXNG endpoint. |
-| `MINERU_SERVER_URL` | When OCR runs as a separate persistent MinerU service | No | Host-local MinerU API endpoint. If absent, the backend may launch MinerU work itself. |
+| `MINERU_SERVER_URL` | Optional | No | Remote MinerU API endpoint. Leave unset to parse PDFs with the locally installed MinerU runtime; set it only for a deliberate remote MinerU service. |
 | `EMBEDDING_MODEL` | Optional | No | Vane embedding-model identifier. |
 | `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY` | Only for their providers | **Yes** | Provider credentials; keep only in this root-only host file, never in Vercel. |
 
@@ -144,10 +146,10 @@ provider key as a Vercel environment variable. Model-provider choices and other
 application state are persisted under `GIGACHAD_BASE_DIR`, so preserve that
 root across releases.
 
-Ensure any host-managed Ollama, Vane, SearXNG, and MinerU services are started
-before their dependent features are used and listen only on loopback or another
-host-private interface. They are backend dependencies, not separately exposed
-Tailnet services.
+Ensure any host-managed Ollama, Vane, and SearXNG services are started before
+their dependent features are used and listen only on loopback or another
+host-private interface. A separately configured remote MinerU service is also
+a backend dependency, not a separately exposed Tailnet service.
 
 ### Provision the FastAPI systemd service
 
