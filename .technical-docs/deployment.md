@@ -75,12 +75,16 @@ sudo useradd --system --create-home --home-dir /opt/gigachad-bot \
   --shell /usr/bin/nologin gigachad
 sudo install -d -o gigachad -g gigachad -m 0750 /var/lib/gigachad-bot
 sudo -u gigachad git clone <release-repository-url> /opt/gigachad-bot
-sudo -u gigachad sh -lc 'cd /opt/gigachad-bot && uv sync --no-dev'
+sudo -u gigachad sh -lc 'cd /opt/gigachad-bot && uv sync --no-dev --no-group ocr'
 ```
 
 For an existing service account or checkout, omit the creation/clone command
 that is already satisfied. Do not use `run.sh` in production: it installs
 dependencies, enables reload mode, and starts a development frontend.
+
+The standard backend release excludes the roughly 12 GB local `ocr` group;
+configure `MINERU_SERVER_URL` when OCR is provided by a separately hosted
+MinerU service.
 
 All persistent application state belongs below `GIGACHAD_BASE_DIR`. With the
 value below, the backend creates and uses
