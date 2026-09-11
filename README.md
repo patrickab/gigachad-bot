@@ -38,8 +38,11 @@ https://github.com/user-attachments/assets/57864372-dac2-49f3-97f7-5bceecf53c49
 ## Setup
 
 - Clone the repository.
-- Store your `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, or `OPENROUTER_API_KEY` in environment variables.
-
+- Create the private shared runtime configuration at
+  `/home/noob/.config/gigachad-bot/env` before launching the app. It holds
+  provider credentials and local configuration; see the
+  [deployment runbook](.technical-docs/deployment.md#1-prepare-the-private-host)
+  for its strict `KEY=value` format and secrets policy.
 ### Developer launchers
 
 The launchers install the dependencies they own and run in development mode:
@@ -49,6 +52,12 @@ The launchers install the dependencies they own and run in development mode:
 | `./run-frontend.sh` | Run only the local Next.js UI on `:2999`. It installs frontend dependencies first. |
 | `./run-backend.sh` | Run only the local FastAPI backend on `127.0.0.1:8001` with reload enabled. It syncs Python dependencies first. |
 | `./run.sh` | Run both local services; this is the usual full-app developer command. |
+
+Both `run-backend.sh` and `run-frontend.sh` load that one configuration file.
+They never evaluate it as shell code, reject malformed records, and leave
+already-exported environment variables unchanged. This lets development and
+production share configuration and the default Documents store while production
+uses separate code.
 
 For a private Tailnet development endpoint, opt in with
 `./run-backend.sh --tailscale` or `./run.sh --tailscale`. This assumes Tailscale
@@ -60,6 +69,16 @@ systemd, enable Funnel, or provide public access.
 These are developer launchers, not a production deployment method. Production
 uses the systemd backend service and Vercel/Tailscale Serve deployment described
 in [the deployment runbook](.technical-docs/deployment.md).
+
+The development backend and the systemd backend are mutually exclusive: both
+bind `127.0.0.1:8001` and share the same persistent Documents state. Stop one
+before starting the other. The production service runs as `noob` from
+`/home/noob/git/gigachad-bot-prod`, a worktree tracking `origin/master`; its
+full setup and update steps are in the runbook.
+
+The systemd unit carries only `GIGACHAD_ENV_FILE` with that nonsecret path. Its
+production runner invokes the strict `deploy/load-env.sh` loader before it execs
+loopback Uvicorn, so provider values never enter the systemd manager.
 
 ### Nextcloud WebDAV storage
 

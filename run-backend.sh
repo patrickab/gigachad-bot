@@ -21,6 +21,7 @@ case "$#" in
 esac
 
 cd "$root_dir"
+source "$root_dir/deploy/load-env.sh"
 export VANE_URL="${VANE_URL:-http://localhost:3001}"
 
 printf 'Installing backend deps\n'

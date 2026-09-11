@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# Run manually as root after installing the backend in /opt/gigachad-bot.
-# This performs privileged account, /etc, and systemd changes; it never starts the service.
+# Run manually as root after preparing the noob production worktree and environment file.
+# This performs only privileged systemd installation steps; it never starts the service.
 set -euo pipefail
 
 readonly unit_name='gigachad-bot.service'
 readonly unit_source="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/${unit_name}"
 readonly unit_destination="/etc/systemd/system/${unit_name}"
-readonly environment_file='/etc/gigachad-bot/gigachad-bot.env'
-readonly backend='/opt/gigachad-bot/.venv/bin/uvicorn'
+readonly release_worktree='/home/noob/git/gigachad-bot-prod'
+readonly environment_file='/home/noob/.config/gigachad-bot/env'
+readonly backend="${release_worktree}/.venv/bin/uvicorn"
+readonly backend_runner="${release_worktree}/deploy/run-production-backend.sh"
 
 if (( EUID != 0 )); then
     printf 'Run this installer as root.\n' >&2
@@ -15,22 +17,22 @@ if (( EUID != 0 )); then
 fi
 
 if [[ ! -x "$backend" ]]; then
-    printf 'Backend executable is missing: %s\n' "$backend" >&2
+    printf 'Production backend executable is missing: %s\n' "$backend" >&2
+    printf 'Create %s as noob and run: uv sync --python 3.12 --no-dev\n' "$release_worktree" >&2
     exit 1
 fi
 
-getent group gigachad >/dev/null || groupadd --system gigachad
-id --user gigachad >/dev/null 2>&1 || useradd --system --gid gigachad --home-dir /var/lib/gigachad-bot --shell /usr/bin/nologin gigachad
-
-install --directory --owner=root --group=root --mode=0750 /etc/gigachad-bot
-if [[ ! -e "$environment_file" ]]; then
-    install --owner=root --group=root --mode=0600 /dev/null "$environment_file"
-else
-    chown root:root "$environment_file"
-    chmod 0600 "$environment_file"
+if [[ ! -x "$backend_runner" ]]; then
+    printf 'Production backend runner is missing or not executable: %s\n' "$backend_runner" >&2
+    printf 'Update %s as noob so it includes the executable deployment runner.\n' "$release_worktree" >&2
+    exit 1
 fi
 install --owner=root --group=root --mode=0644 "$unit_source" "$unit_destination"
 systemctl daemon-reload
 systemctl enable "$unit_name"
 
-printf 'Set GIGACHAD_CORS_ORIGINS to the Vercel origin(s) in %s, then run: systemctl start %s\n' "$environment_file" "$unit_name"
+if [[ ! -f "$environment_file" ]]; then
+    printf 'Before starting, create %s with the required strict KEY=value runtime settings; the runner loads it directly.\n' "$environment_file" >&2
+else
+    printf 'The service is installed and enabled. Start it when the runtime settings are ready: systemctl start %s\n' "$unit_name"
+fi

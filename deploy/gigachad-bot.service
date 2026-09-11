@@ -7,14 +7,10 @@ StartLimitBurst=5
 
 [Service]
 Type=exec
-User=gigachad
-Group=gigachad
-WorkingDirectory=/opt/gigachad-bot
-EnvironmentFile=/etc/gigachad-bot/gigachad-bot.env
-Environment=GIGACHAD_BASE_DIR=/var/lib/gigachad-bot
-StateDirectory=gigachad-bot
-StateDirectoryMode=0750
-ExecStart=/opt/gigachad-bot/.venv/bin/uvicorn src.backend.server:app --host 127.0.0.1 --port 8001
+User=noob
+WorkingDirectory=/home/noob/git/gigachad-bot-prod
+Environment=GIGACHAD_ENV_FILE=/home/noob/.config/gigachad-bot/env
+ExecStart=/home/noob/git/gigachad-bot-prod/deploy/run-production-backend.sh
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=30s

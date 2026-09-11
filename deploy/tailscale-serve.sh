@@ -7,6 +7,6 @@ if ! command -v tailscale >/dev/null 2>&1; then
     exit 127
 fi
 
-# --bg persists the named HTTPS listener and replaces this exact port/path handler
-# on repeated runs. Tailscale Serve rejects unavailable or unauthenticated daemons.
-exec tailscale serve --bg --https=443 / http://127.0.0.1:8001
+# --bg persists the named HTTPS listener and replaces its handler on repeated runs.
+# Tailscale Serve rejects unavailable or unauthenticated daemons.
+exec tailscale serve --bg --https=443 http://127.0.0.1:8001
