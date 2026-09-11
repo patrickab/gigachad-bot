@@ -1,35 +1,58 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-export VANE_URL="${VANE_URL:-http://localhost:3001}"
+root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+backend_args=()
 
-export PATH="$(pwd)/.venv/bin:$PATH"
+case "$#" in
+    0) ;;
+    1)
+        if [[ "$1" == "--tailscale" ]]; then
+            backend_args=("--tailscale")
+        else
+            printf 'usage: %s [--tailscale]\n' "${BASH_SOURCE[0]}" >&2
+            exit 2
+        fi
+        ;;
+    *)
+        printf 'usage: %s [--tailscale]\n' "${BASH_SOURCE[0]}" >&2
+        exit 2
+        ;;
+esac
 
-echo "Installing backend deps"
-uv sync || exit 1
-
-echo "Installing frontend deps"
-npm --prefix src/frontend install || exit 1
-
-echo "Starting backend on http://127.0.0.1:8001"
-source .venv/bin/activate
-uvicorn src.backend.server:app --host 127.0.0.1 --port 8001 --reload --reload-dir src &
-BACKEND_PID=$!
-
-echo "Starting frontend on http://127.0.0.1:2999"
-npm --prefix src/frontend run dev &
-FRONTEND_PID=$!
+backend_pid=''
+frontend_pid=''
+cleaned_up=false
 
 cleanup() {
-  echo "Shutting down..."
-  for PID in $BACKEND_PID $FRONTEND_PID; do
-    kill -TERM -- "-$PID" 2>/dev/null || kill -TERM "$PID" 2>/dev/null || true
-  done
-  pkill -f "mineru.cli.fast_api" 2>/dev/null || true
-  docker compose -f docker-compose.vane.yml down 2>/dev/null || true
-  wait 2>/dev/null || true
-  echo "Done."
+    if [[ "$cleaned_up" == true ]]; then
+        return
+    fi
+    cleaned_up=true
+
+    printf 'Shutting down...\n'
+    for pid in "$backend_pid" "$frontend_pid"; do
+        if [[ -n "$pid" ]]; then
+            kill -TERM "$pid" 2>/dev/null || true
+        fi
+    done
+    pkill -f "mineru.cli.fast_api" 2>/dev/null || true
+    docker compose -f "$root_dir/docker-compose.vane.yml" down 2>/dev/null || true
+    for pid in "$backend_pid" "$frontend_pid"; do
+        if [[ -n "$pid" ]]; then
+            wait "$pid" 2>/dev/null || true
+        fi
+    done
+    printf 'Done.\n'
 }
 
-trap cleanup INT TERM
+trap cleanup EXIT
+trap 'exit 0' INT TERM
 
-wait
+"$root_dir/run-backend.sh" "${backend_args[@]}" &
+backend_pid=$!
+
+"$root_dir/run-frontend.sh" &
+frontend_pid=$!
+
+wait -n "$backend_pid" "$frontend_pid"

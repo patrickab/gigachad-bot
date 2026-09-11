@@ -39,9 +39,27 @@ https://github.com/user-attachments/assets/57864372-dac2-49f3-97f7-5bceecf53c49
 
 - Clone the repository.
 - Store your `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, or `OPENROUTER_API_KEY` in environment variables.
-- Run `uv sync` to install Python dependencies.
-- Run `uv run gigachad-install` to install Node.js into the venv and frontend dependencies.
-- Execute `./run.sh` to start the app (backend on `:8001`, frontend on `:2999`).
+
+### Developer launchers
+
+The launchers install the dependencies they own and run in development mode:
+
+| Command | Use |
+| --- | --- |
+| `./run-frontend.sh` | Run only the local Next.js UI on `:2999`. It installs frontend dependencies first. |
+| `./run-backend.sh` | Run only the local FastAPI backend on `127.0.0.1:8001` with reload enabled. It syncs Python dependencies first. |
+| `./run.sh` | Run both local services; this is the usual full-app developer command. |
+
+For a private Tailnet development endpoint, opt in with
+`./run-backend.sh --tailscale` or `./run.sh --tailscale`. This assumes Tailscale
+is already installed and the machine is already joined to the intended Tailnet.
+The option configures private Tailscale Serve for the loopback backend only; it
+does not install Tailscale, log in or join a Tailnet, use `sudo`, configure
+systemd, enable Funnel, or provide public access.
+
+These are developer launchers, not a production deployment method. Production
+uses the systemd backend service and Vercel/Tailscale Serve deployment described
+in [the deployment runbook](.technical-docs/deployment.md).
 
 ### Nextcloud WebDAV storage
 
