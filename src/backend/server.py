@@ -82,6 +82,13 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Chrome's Private Network Access check blocks a public origin (e.g. the
+    # Vercel frontend) from fetching a server whose resolved address is in a
+    # private range (Tailscale's CGNAT 100.64.0.0/10) unless the preflight
+    # response explicitly grants it. Only grant it when the allow-list is an
+    # exact set of origins — granting it alongside the wildcard default would
+    # let any public web page reach this unauthenticated backend.
+    allow_private_network="*" not in _cors_origins,
 )
 
 
