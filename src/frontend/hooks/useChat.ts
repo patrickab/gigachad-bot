@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import type React from "react"
-import { fetchModels, fetchPrompts, loadChatHistory as apiLoadChatHistory, saveModelDefaults as saveModelDefaultsRequest, saveModelProviders as saveModelProvidersRequest } from "@/lib/api"
+import { fetchModels, fetchPrompts, saveModelDefaults as saveModelDefaultsRequest, saveModelProviders as saveModelProvidersRequest } from "@/lib/api"
 import type { ChatRequest, Message, ModelDefaults, ModelProvider, ModelsResponse, WebSearchParams, Usage } from "@/lib/types"
 import { useChatStream } from "./useChatStream"
 import { useResearch, type ResearchParams } from "./useResearch"
@@ -25,7 +25,6 @@ export interface UseChatReturn {
   saveModelDefaults: (defaults: ModelDefaults) => Promise<void>
   prompts: Record<string, string>
   setPrompts: React.Dispatch<React.SetStateAction<Record<string, string>>>
-  loadHistory: (filename: string) => Promise<{ messages: Message[]; chat_id: string | null; parent_id: string | null; branch_message_idx: number | null }>
   deleteMessagePair: (index: number) => void
   addMessagePair: (userContent: string, assistantContent: string) => void
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>
@@ -156,14 +155,6 @@ export function useChat(): UseChatReturn {
     setTotalUsage({ prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 })
   }, [setMessages, setTotalUsage])
 
-  const loadHistory = useCallback(async (filename: string) => {
-    try {
-      const data = await apiLoadChatHistory(filename)
-      return { messages: data.messages ?? [], chat_id: data.chat_id ?? null, parent_id: data.parent_id ?? null, branch_message_idx: data.branch_message_idx ?? null }
-    } catch {
-      return { messages: [] as Message[], chat_id: null as string | null, parent_id: null as string | null, branch_message_idx: null as number | null }
-    }
-  }, [])
 
   return {
     messages,
@@ -179,7 +170,6 @@ export function useChat(): UseChatReturn {
     saveModelDefaults,
     prompts,
     setPrompts,
-    loadHistory,
     deleteMessagePair,
     addMessagePair,
     setMessages,

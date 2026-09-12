@@ -1,17 +1,39 @@
 import type { Attachment, ChatRequest, Message } from "./types"
+import { apiOrigin, chatFileUrl, fileViewerRawUrl } from "./api"
 
 export function isImageAttachment(a: Attachment): boolean {
   return a.mime.startsWith("image/")
 }
 
-export function normalizeAttachment(a: Attachment): Attachment {
-  if (a.active !== undefined) return a
-  return { ...a, active: !isImageAttachment(a) }
+// Persisted chat histories store each attachment's `url` as an absolute URL
+// computed against whatever API origin was active at upload time (e.g. an
+// old localhost dev backend) — trusting it verbatim breaks image loads for
+// any client whose API origin now differs. The URL's path+query (upload dir,
+// fileviewer path) is the only reliable locator: chat_id/slug are NOT stable
+// identities, since uploads live under whatever project was active at send
+// time and are never relocated when a chat is moved or branched. So rebase
+// the stored URL onto the current API origin, keeping its path+query intact;
+// only fall back to reconstructing from (chatId, slug) when there's no
+// stored URL to rebase.
+function rebaseOnApiOrigin(url: string): string | null {
+  try {
+    const u = new URL(url)
+    return `${apiOrigin()}${u.pathname}${u.search}`
+  } catch {
+    return null
+  }
 }
 
-export function normalizeMessageAttachments(msg: Message): Message {
+export function normalizeAttachment(a: Attachment, chatId: string | null, slug: string | null): Attachment {
+  const active = a.active !== undefined ? a.active : !isImageAttachment(a)
+  const rebased = a.url ? rebaseOnApiOrigin(a.url) : null
+  const url = rebased ?? (a.vaultPath ? fileViewerRawUrl(a.vaultPath) : chatId ? chatFileUrl(chatId, a.name, slug) : a.url)
+  return { ...a, active, url }
+}
+
+export function normalizeMessageAttachments(msg: Message, chatId: string | null, slug: string | null): Message {
   if (!msg.attachments?.length) return msg
-  const attachments = msg.attachments.map(normalizeAttachment)
+  const attachments = msg.attachments.map((a) => normalizeAttachment(a, chatId, slug))
   return {
     ...msg,
     attachments,

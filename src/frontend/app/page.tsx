@@ -111,7 +111,6 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     saveModelDefaults,
     prompts,
     setPrompts,
-    loadHistory,
     deleteMessagePair,
     addMessagePair,
     setMessages,
@@ -259,7 +258,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     loader.then((data) => {
       if (loadIdRef.current !== loadId) return
       if (data.messages.length > 0) {
-        setMessages(data.messages.map(normalizeMessageAttachments))
+        setMessages(data.messages.map((m) => normalizeMessageAttachments(m, data.chat_id, slug)))
       }
       if (data.chat_id) setChatId(data.chat_id)
       if (data.title) onTitleLoaded(tab.id, data.title)
