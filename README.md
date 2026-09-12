@@ -38,9 +38,16 @@ https://github.com/user-attachments/assets/57864372-dac2-49f3-97f7-5bceecf53c49
 ## Setup
 
 - Clone the repository.
-- Create the private shared runtime configuration at
-  `/home/noob/.config/gigachad-bot/env` before launching the app. It holds
-  provider credentials and local configuration; see the
+- In the deploying user's shell, set:
+
+  ```bash
+  REPO="$HOME/git/gigachad-bot"
+  PROD="$HOME/git/gigachad-bot-prod"
+  ENV="${XDG_CONFIG_HOME:-"$HOME/.config"}/gigachad-bot/env"
+  ```
+
+- Create the private shared runtime configuration at `$ENV` before launching
+  the app. It holds provider credentials and local configuration; see the
   [deployment runbook](.technical-docs/deployment.md#1-prepare-the-private-host)
   for its strict `KEY=value` format and secrets policy.
 ### Developer launchers
@@ -72,13 +79,13 @@ in [the deployment runbook](.technical-docs/deployment.md).
 
 The development backend and the systemd backend are mutually exclusive: both
 bind `127.0.0.1:8001` and share the same persistent Documents state. Stop one
-before starting the other. The production service runs as `noob` from
-`/home/noob/git/gigachad-bot-prod`, a worktree tracking `origin/master`; its
+before starting the other. The production user unit uses systemd's `%h`
+specifier for the deploying user's home directory and assumes `$PROD`; its
 full setup and update steps are in the runbook.
 
-The systemd unit carries only `GIGACHAD_ENV_FILE` with that nonsecret path. Its
-production runner invokes the strict `deploy/load-env.sh` loader before it execs
-loopback Uvicorn, so provider values never enter the systemd manager.
+The unit carries only `GIGACHAD_ENV_FILE` with the nonsecret `$ENV` path. Its
+production runner invokes the strict `deploy/load-env.sh` loader before it
+execs loopback Uvicorn, so provider values never enter the systemd manager.
 
 ### Nextcloud WebDAV storage
 

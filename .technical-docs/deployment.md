@@ -1,9 +1,9 @@
 # Private deployment: Vercel + Tailscale Serve
 
 This runbook deploys the Next.js frontend to Vercel while FastAPI and its local
-runtime stay on one private host. Production runs as the existing `noob` account
-from a code-isolated worktree, but deliberately shares `noob`'s default
-Documents store with development.
+runtime stay on one private host. Production runs from a code-isolated worktree
+while deliberately sharing the deploying user's default Documents store with
+development.
 
 ```text
 Tailnet-enrolled browser ── HTTPS ──> <tailnet-hostname>
@@ -37,6 +37,14 @@ https://<tailnet-hostname>/api
 
 ## 1. Prepare the private host
 
+In the deploying user's shell, define:
+
+```bash
+REPO="$HOME/git/gigachad-bot"
+PROD="$HOME/git/gigachad-bot-prod"
+ENV="${XDG_CONFIG_HOME:-"$HOME/.config"}/gigachad-bot/env"
+```
+
 ### Install and join Tailscale on Arch / Omarchy
 
 Omarchy is Arch-based. Do not use Tailscale's universal installer here: it can
@@ -57,22 +65,21 @@ Funnel.
 
 ### Create the production worktree
 
-Keep the regular checkout at `/home/noob/git/gigachad-bot` for development.
+Keep the regular checkout at `$REPO` for development.
 Create a separate production worktree that tracks `origin/master`:
 
 ```bash
-git -C /home/noob/git/gigachad-bot fetch origin master
-git -C /home/noob/git/gigachad-bot worktree add --track -b production \
-  /home/noob/git/gigachad-bot-prod origin/master
+git -C "$REPO" fetch origin master
+git -C "$REPO" worktree add --track -b production "$PROD" origin/master
 ```
 
 For each reviewed production update, fast-forward that worktree and install its
 production dependencies:
 
 ```bash
-git -C /home/noob/git/gigachad-bot-prod fetch origin master
-git -C /home/noob/git/gigachad-bot-prod merge --ff-only origin/master
-cd /home/noob/git/gigachad-bot-prod && uv sync --python 3.12 --no-dev
+git -C "$PROD" fetch origin master
+git -C "$PROD" merge --ff-only origin/master
+cd "$PROD" && uv sync --python 3.12 --no-dev
 ```
 
 Do not run `run.sh` in production: it installs development dependencies,
@@ -80,27 +87,22 @@ enables reload mode, and starts a development frontend. The production sync
 includes the local OCR runtime. Leave `MINERU_SERVER_URL` unset to parse PDFs
 locally; set it only when intentionally using a remote MinerU service.
 
-Development and production intentionally use the same default Documents tree:
-`/home/noob/Nextcloud/linux/Documents`. Do not configure `GIGACHAD_BASE_DIR` in
-the environment file, service unit, or another production artifact. The
-worktree isolates code, not application state.
+Development and production intentionally use the same default Documents tree.
+Do not configure `GIGACHAD_BASE_DIR` in the environment file, service unit, or
+another production artifact. The worktree isolates code, not application state.
 
 ### Create the shared runtime environment file
 
 There is exactly one private runtime configuration file for both development
-and production:
+and production: `$ENV`.
 
-```text
-/home/noob/.config/gigachad-bot/env
-```
-
-Create its parent directory and protect the file as `noob`:
+Create its parent directory and protect the file as the deploying user:
 
 ```bash
-install -d -m 0700 /home/noob/.config/gigachad-bot
+install -d -m 0700 "$(dirname "$ENV")"
 umask 077
-${EDITOR:?Set EDITOR} /home/noob/.config/gigachad-bot/env
-chmod 0600 /home/noob/.config/gigachad-bot/env
+${EDITOR:?Set EDITOR} "$ENV"
+chmod 0600 "$ENV"
 ```
 
 Its syntax is deliberately strict. Only whitespace-only lines and lines that
@@ -155,29 +157,35 @@ loopback or another host-private interface.
 
 ### Provision the FastAPI systemd service
 
-Install, reload, and enable the repository unit with its privileged installer.
-It validates the tracked production runner and virtual-environment Uvicorn
-executable before installing the unit, and deliberately does not start the
-backend:
+Install, reload, and enable the repository user unit. It validates the tracked
+production runner and virtual-environment Uvicorn executable before installing
+the unit, and deliberately does not start the backend:
 
 ```bash
-sudo /home/noob/git/gigachad-bot-prod/deploy/install-systemd-service.sh
+"$PROD/deploy/install-systemd-service.sh"
+```
+
+To keep the user unit running after logout and start it at boot, enable
+lingering once:
+
+```bash
+loginctl enable-linger "$USER"
 ```
 
 After the shared environment file and production worktree are ready, start it
 explicitly and verify the loopback health endpoint:
 
 ```bash
-sudo systemctl start gigachad-bot.service
-sudo systemctl status gigachad-bot.service
+systemctl --user start gigachad-bot.service
+systemctl --user status gigachad-bot.service
 curl --fail --show-error http://127.0.0.1:8001/healthz
 ```
 
-The unit runs as `noob` from `/home/noob/git/gigachad-bot-prod`. Its only
+The user unit uses systemd's `%h` home-directory specifier. Its only
 environment entry is the nonsecret configuration path:
 
 ```text
-GIGACHAD_ENV_FILE=/home/noob/.config/gigachad-bot/env
+GIGACHAD_ENV_FILE=$ENV
 ```
 
 It has no `EnvironmentFile`. Its `ExecStart` runs
@@ -200,7 +208,7 @@ If the loopback health check fails, inspect the service rather than exposing
 another listener:
 
 ```bash
-sudo journalctl -u gigachad-bot.service -n 100 --no-pager
+journalctl --user -u gigachad-bot.service -n 100 --no-pager
 ```
 
 ## 2. Publish the private HTTPS ingress
@@ -216,7 +224,7 @@ Configure the persistent private HTTPS root proxy with the tracked helper. It
 preserves `/api` and `/healthz`, so no path rewrite is needed:
 
 ```bash
-/home/noob/git/gigachad-bot-prod/deploy/tailscale-serve.sh
+"$PROD/deploy/tailscale-serve.sh"
 tailscale serve status
 ```
 
@@ -267,7 +275,7 @@ only—no `/api`, path, or trailing slash. Restart the backend after changing it
 environment file:
 
 ```bash
-sudo systemctl restart gigachad-bot.service
+systemctl --user restart gigachad-bot.service
 ```
 
 ### Preview deployments and CORS
@@ -294,13 +302,13 @@ For a first deployment or an update:
 
 1. Create or fast-forward the production worktree from `origin/master`, then
    run `uv sync --python 3.12 --no-dev` in it. Do not run `run.sh`.
-2. Confirm `/home/noob/.config/gigachad-bot/env` has the exact production and
-   local CORS origins, host-local dependency URLs, and only the required
-   provider secrets. Leave `GIGACHAD_BASE_DIR` and `MINERU_SERVER_URL` unset.
+2. Confirm `$ENV` has the exact production and local CORS origins, host-local
+   dependency URLs, and only the required provider secrets. Leave
+   `GIGACHAD_BASE_DIR` and `MINERU_SERVER_URL` unset.
 3. Start or restart `gigachad-bot.service` and confirm its loopback health
    check.
-4. Run `/home/noob/git/gigachad-bot-prod/deploy/tailscale-serve.sh` and confirm
-   Tailnet HTTPS health from another enrolled device.
+4. Run `"$PROD/deploy/tailscale-serve.sh"` and confirm Tailnet HTTPS health
+   from another enrolled device.
 5. Configure Vercel's root directory, build settings, and public
    `NEXT_PUBLIC_API_BASE`, then deploy production.
 6. From an enrolled browser, open the Vercel production URL and use the app. A
@@ -352,18 +360,18 @@ rollback so clients retain `https://<tailnet-hostname>/api`.
 1. Stop the backend:
 
    ```bash
-   sudo systemctl stop gigachad-bot.service
+   systemctl --user stop gigachad-bot.service
    ```
 
-2. Restore the last known-good `origin/master` revision in
-   `/home/noob/git/gigachad-bot-prod`, run its matching production sync, and
-   restore the previous shared environment file only if configuration changed.
-   Restore a Documents backup only when the incident requires reverting data;
-   do not overwrite newer user data merely to roll back code.
+2. Restore the last known-good `origin/master` revision in `$PROD`, run its
+   matching production sync, and restore the previous shared environment file
+   only if configuration changed. Restore a Documents backup only when the
+   incident requires reverting data; do not overwrite newer user data merely to
+   roll back code.
 3. Start the backend and repeat loopback and Tailnet health checks:
 
    ```bash
-   sudo systemctl start gigachad-bot.service
+   systemctl --user start gigachad-bot.service
    curl --fail --show-error http://127.0.0.1:8001/healthz
    ```
 
