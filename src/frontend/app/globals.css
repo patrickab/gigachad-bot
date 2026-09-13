@@ -85,7 +85,7 @@
    --inner-highlight-strong: inset 0 1px 0 0 oklch(100% 0 0 / 0.06);
  }
 
-  .light {
+  :root.light {
     --shadow-strength: 0.08;
     --shadow-color: oklch(35% 0.01 85);
   
@@ -227,6 +227,23 @@ p, li {
   --architecture-graph-card: var(--surface-elevated);
   --architecture-graph-card-border: var(--divider-strong);
   --architecture-graph-card-shadow: var(--shadow-sm);
+
+  /* React Flow ships a light default palette independently of the app. Map its
+     variables to role tokens so built-in node and connection UI follows the
+     active theme class too. */
+  --xy-background-color: var(--architecture-graph-canvas);
+  --xy-node-color: var(--ink-muted);
+  --xy-node-border: 1px solid var(--architecture-graph-card-border);
+  --xy-node-background-color: var(--architecture-graph-card);
+  --xy-handle-background-color: var(--ink-muted);
+  --xy-handle-border-color: var(--surface-elevated);
+  --xy-edge-stroke: var(--ink-muted);
+  --xy-edge-stroke-selected: var(--ink);
+  --xy-connectionline-stroke: var(--ink-muted);
+  --xy-selection-background-color: var(--hover-overlay);
+  --xy-selection-border: 1px dotted var(--divider-strong);
+  --xy-edge-label-background-color: var(--surface);
+  --xy-edge-label-color: var(--ink-muted);
   position: relative;
   min-height: 280px;
   height: 100%;
