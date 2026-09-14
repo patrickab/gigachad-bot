@@ -1,6 +1,9 @@
 from typing import Annotated, Any
 
+import litellm
+
 from fastapi import APIRouter, Depends
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
@@ -30,9 +33,24 @@ class ChatRequest(BaseModel):
 
 def _build_kwargs(req: ChatRequest) -> dict[str, Any]:
     kwargs: dict[str, Any] = {"temperature": req.temperature}
-    if req.reasoning_effort and req.reasoning_effort != "none":
+    if req.reasoning_effort and req.reasoning_effort != "none" and _supports_reasoning_effort(req.model):
         kwargs["reasoning_effort"] = req.reasoning_effort
     return kwargs
+
+
+def _supports_reasoning_effort(model: str) -> bool:
+    """Not every provider accepts `reasoning_effort` (e.g. nvidia_nim rejects the
+    param outright, regardless of value, and litellm raises UnsupportedParamsError).
+    Ask litellm's own capability table instead of hardcoding a provider allowlist,
+    so newly supported providers/models pick this up automatically. Fail closed on
+    lookup failure (unrecognized/malformed model string): dropping the param at
+    worst silently ignores a chosen reasoning level, whereas forwarding it blind
+    risks the exact crash this function exists to prevent.
+    """
+    try:
+        return "reasoning_effort" in (litellm.get_supported_openai_params(model=model) or [])
+    except Exception:
+        return False
 
 
 def _resolve_images(c, req: ChatRequest) -> list | None:
@@ -54,7 +72,8 @@ async def chat(req: ChatRequest, memory_store: MemoryStoreDep) -> EventSourceRes
         kwargs = _build_kwargs(req)
         img = _resolve_images(c, req)
         system_prompt = memory_store.augment_system_prompt(req.system_prompt, req.project_slug)
-        chunks = api_query_resilient(
+        chunks = await run_in_threadpool(
+            api_query_resilient,
             c,
             model=req.model,
             user_msg=req.user_msg,
@@ -66,3 +85,4 @@ async def chat(req: ChatRequest, memory_store: MemoryStoreDep) -> EventSourceRes
             **kwargs,
         )
         return sse_event_stream(chunks)
+

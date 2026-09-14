@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
@@ -22,7 +23,8 @@ async def ocr(req: OCRRequest) -> EventSourceResponse:
     with request_client() as c:
         model = req.model or get_model_defaults()["vision_model"]
         img = decode_image(req.img_base64)
-        chunks = api_query_resilient(
+        chunks = await run_in_threadpool(
+            api_query_resilient,
             c,
             model=model,
             user_msg="Extract all text and LaTeX from this image.",
