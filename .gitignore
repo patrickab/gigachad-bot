@@ -12,6 +12,7 @@ src/archive
 .claude*
 .pytest*
 .vscode
+node_modules
 
 # Python virtualenv / linter cache
 .venv
