@@ -27,7 +27,7 @@ vi.mock("@xyflow/react", async () => {
     Background: () => null,
     BaseEdge: () => null,
     Handle: () => null,
-    getSmoothStepPath: () => ["", 0, 0],
+    getBezierPath: () => ["", 0, 0],
     useInternalNode: () => undefined,
     useNodesState: useItemsState,
     useEdgesState: useItemsState,

@@ -267,7 +267,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
         </motion.div>
       )}
 
-      <div className="relative z-20 rounded-2xl border border-divider-strong/60 p-4 transition-all duration-300 [background:color-mix(in_oklab,var(--surface-elevated),var(--ink)_4%)] shadow-[var(--shadow-lg),var(--inner-highlight)] focus-within:border-divider-strong focus-within:shadow-[var(--shadow-lg),var(--inner-highlight-strong)]">
+      {/* Dark mode drops the composer one elevation step (--surface); light mode keeps
+          --surface-elevated, where --surface sits too close to the canvas to read as a panel. */}
+      <div className="relative z-20 rounded-2xl border border-divider-strong/60 p-4 transition-all duration-300 [background:color-mix(in_oklab,var(--surface-elevated),var(--ink)_4%)] dark:[background:color-mix(in_oklab,var(--surface),var(--ink)_4%)] shadow-[var(--shadow-lg),var(--inner-highlight)] focus-within:border-divider-strong focus-within:shadow-[var(--shadow-lg),var(--inner-highlight-strong)]">
           <textarea
             ref={textareaRef}
             rows={1}

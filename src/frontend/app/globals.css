@@ -413,7 +413,8 @@ p, li {
 .architecture-graph-node:hover .architecture-graph-handle,
 .architecture-graph-node-selected .architecture-graph-handle { opacity: 1; }
 
-.architecture-graph-edge { stroke: var(--ink-muted); stroke-width: 1.25; }
+.architecture-graph-edge { stroke: var(--ink-muted); stroke-width: 1.25; transition: stroke-width 100ms ease, stroke 100ms ease; }
+.react-flow__edge:hover .architecture-graph-edge { stroke: var(--ink); stroke-width: 2.5; }
 .architecture-graph-edge-selected { stroke: var(--ink); stroke-width: 1.6; }
 .architecture-graph-edge-label {
   fill: var(--ink-muted);

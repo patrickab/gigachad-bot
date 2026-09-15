@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react"
 import {
   Background, BaseEdge, ConnectionMode, getSmoothStepPath, Handle, MarkerType, Position, ReactFlow, useEdgesState, useInternalNode, useNodesState,
   type Connection, type Edge, type EdgeProps, type InternalNode, type Node, type NodeProps, type OnConnect, type ReactFlowInstance,
@@ -18,7 +18,15 @@ import {
 type GraphFlowNodeData = ArchitectureGraphNode & Record<string, unknown>
 type GraphFlowEdgeData = ArchitectureGraphEdge & Record<string, unknown>
 type GraphFlowNode = Node<GraphFlowNodeData, "architecture-node">
-type GraphFlowEdge = Edge<GraphFlowEdgeData, "architecture-edge">
+type GraphFlowEdge = Edge<GraphFlowEdgeData & { attachment?: EdgeAttachment }, "architecture-edge">
+
+// The subset of a React Flow node the attachment pass needs: stored position
+// plus whatever React Flow has measured so far.
+interface RoutableNode {
+  id: string
+  position: { x: number, y: number }
+  measured?: { width?: number, height?: number }
+}
 
 export interface ArchitectureGraphSurfaceProps {
   graph: ArchitectureGraph
@@ -185,8 +193,8 @@ function ArchitectureNodeCard({ data, selected }: NodeProps<Node<ArchitectureNod
 const DEFAULT_NODE_WIDTH = 224
 const DEFAULT_NODE_HEIGHT = 96
 
-// Pick the side of `node` facing `toward`, returning that side's midpoint —
-// where orthogonal (smoothstep) routing wants to start and end.
+// Pick the side of `node` facing `toward`, returning that side's midpoint. Used
+// until the slot pass below has geometry for both cards.
 function attach(node: InternalNode<GraphFlowNode>, toward: InternalNode<GraphFlowNode>) {
   const { x, y } = node.internals.positionAbsolute
   const w = node.measured.width ?? DEFAULT_NODE_WIDTH
@@ -205,16 +213,96 @@ function attach(node: InternalNode<GraphFlowNode>, toward: InternalNode<GraphFlo
     : { x: x + w / 2, y, position: Position.Top }
 }
 
+// Soft avoidance: connections sharing a card side get their own slot on it
+// instead of all leaving from the midpoint, so their stepped paths run in
+// separate lanes. Lines may still cross — nothing here is a router.
+// ponytail: slots are assigned per side, so two edges in the same lane but
+// attached to different sides can still overlap. Upgrade path if that shows up
+// in practice: a real router (libavoid/ELK) owning the whole diagram.
+const SIDE_SPREAD = 0.68
+
+interface AttachPoint {
+  x: number
+  y: number
+  position: Position
+}
+
+export interface EdgeAttachment {
+  source: AttachPoint
+  target: AttachPoint
+}
+
+interface CardRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+function sideToward(rect: CardRect, toward: CardRect): Position {
+  const dx = toward.x + toward.width / 2 - (rect.x + rect.width / 2)
+  const dy = toward.y + toward.height / 2 - (rect.y + rect.height / 2)
+  // Compare against the card's own aspect so wide cards still prefer left/right.
+  if (Math.abs(dx) * rect.height > Math.abs(dy) * rect.width) return dx > 0 ? Position.Right : Position.Left
+  return dy > 0 ? Position.Bottom : Position.Top
+}
+
+export function edgeAttachments(nodes: readonly RoutableNode[], edges: readonly ArchitectureGraphEdge[]): Map<string, EdgeAttachment> {
+  const rects = new Map<string, CardRect>(nodes.map((node) => [node.id, {
+    x: node.position.x, y: node.position.y,
+    width: node.measured?.width ?? DEFAULT_NODE_WIDTH,
+    height: node.measured?.height ?? DEFAULT_NODE_HEIGHT,
+  }]))
+  const ends = edges.flatMap((edge) => {
+    const source = rects.get(edge.source)
+    const target = rects.get(edge.target)
+    if (!source || !target) return []
+    return [
+      { edgeId: edge.id, role: "source" as const, nodeId: edge.source, rect: source, side: sideToward(source, target), toward: target },
+      { edgeId: edge.id, role: "target" as const, nodeId: edge.target, rect: target, side: sideToward(target, source), toward: source },
+    ]
+  })
+  const groups = new Map<string, typeof ends>()
+  for (const end of ends) {
+    const key = `${end.nodeId}:${end.side}`
+    groups.set(key, [...(groups.get(key) ?? []), end])
+  }
+  const points = new Map<string, AttachPoint>()
+  for (const group of groups.values()) {
+    // Order along the side by where the other card sits, so neighbouring lines
+    // keep their relative order and do not cross just to reach their slot.
+    const horizontal = group[0].side === Position.Top || group[0].side === Position.Bottom
+    const sorted = [...group].sort((a, b) => (horizontal
+      ? a.toward.x + a.toward.width / 2 - (b.toward.x + b.toward.width / 2)
+      : a.toward.y + a.toward.height / 2 - (b.toward.y + b.toward.height / 2)))
+    sorted.forEach((end, index) => {
+      const share = (index + 1) / (sorted.length + 1)
+      const ratio = 0.5 + (share - 0.5) * SIDE_SPREAD
+      const { x, y, width, height } = end.rect
+      points.set(`${end.edgeId}:${end.role}`, end.side === Position.Top ? { x: x + width * ratio, y, position: Position.Top }
+        : end.side === Position.Bottom ? { x: x + width * ratio, y: y + height, position: Position.Bottom }
+        : end.side === Position.Left ? { x, y: y + height * ratio, position: Position.Left }
+        : { x: x + width, y: y + height * ratio, position: Position.Right })
+    })
+  }
+  return new Map(edges.flatMap((edge) => {
+    const source = points.get(`${edge.id}:source`)
+    const target = points.get(`${edge.id}:target`)
+    return source && target ? [[edge.id, { source, target }] as const] : []
+  }))
+}
+
 function ArchitectureEdgePath({ id, source, target, data, selected, markerEnd, markerStart }: EdgeProps<GraphFlowEdge>) {
   const sourceNode = useInternalNode<GraphFlowNode>(source)
   const targetNode = useInternalNode<GraphFlowNode>(target)
   if (!sourceNode || !targetNode) return null
 
-  const from = attach(sourceNode, targetNode)
-  const to = attach(targetNode, sourceNode)
+  const from = data?.attachment?.source ?? attach(sourceNode, targetNode)
+  const to = data?.attachment?.target ?? attach(targetNode, sourceNode)
   const [edgePath, labelX, labelY] = getSmoothStepPath({
     sourceX: from.x, sourceY: from.y, sourcePosition: from.position,
     targetX: to.x, targetY: to.y, targetPosition: to.position,
+    borderRadius: 8,
   })
   return <>
     <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} markerStart={markerStart} className={cn("architecture-graph-edge", selected && "architecture-graph-edge-selected")} />
@@ -233,8 +321,8 @@ function toFlowNodes(nodes: ArchitectureGraphNode[], onNodeChange: ArchitectureN
   }))
 }
 
-function toFlowEdges(edges: ArchitectureGraphEdge[]): GraphFlowEdge[] {
-  return edges.map((edge) => ({ ...edge, type: "architecture-edge", data: edge as GraphFlowEdgeData, markerEnd: { type: MarkerType.ArrowClosed, color: "var(--ink-muted)" }, ...(edge.direction === "bidirectional" ? { markerStart: { type: MarkerType.ArrowClosed, color: "var(--ink-muted)" } } : {}) }))
+function toFlowEdges(edges: ArchitectureGraphEdge[], attachments = new Map<string, EdgeAttachment>()): GraphFlowEdge[] {
+  return edges.map((edge) => ({ ...edge, type: "architecture-edge", data: { ...edge, ...(attachments.has(edge.id) ? { attachment: attachments.get(edge.id) } : {}) }, markerEnd: { type: MarkerType.ArrowClosed, color: "var(--ink-muted)" }, ...(edge.direction === "bidirectional" ? { markerStart: { type: MarkerType.ArrowClosed, color: "var(--ink-muted)" } } : {}) }))
 }
 
 // Fields React Flow owns on a node/edge; the graph never describes them.
@@ -272,9 +360,11 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
   useEffect(() => {
     setNodes((current) => reconcile(current, toFlowNodes(graph.nodes, changeNode)))
   }, [graph.nodes, changeNode, setNodes])
+  // Recomputed from the live node rects, so dragging a card re-slots its edges.
+  const attachments = useMemo(() => edgeAttachments(nodes, graph.edges), [nodes, graph.edges])
   useEffect(() => {
-    setEdges((current) => reconcile(current, toFlowEdges(graph.edges)))
-  }, [graph.edges, setEdges])
+    setEdges((current) => reconcile(current, toFlowEdges(graph.edges, attachments)))
+  }, [graph.edges, attachments, setEdges])
 
   const addNode = useCallback(() => {
     const id = nextArchitectureGraphId("node", graphRef.current.nodes.map((node) => node.id))
@@ -312,10 +402,10 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
     <div className={cn("architecture-graph-surface", className)} style={{ display: "flex", minHeight: 280, height: "100%", flexDirection: "column", overflow: "hidden", borderTop: "1px solid var(--divider)", backgroundColor: "var(--architecture-graph-canvas)" }}>
       <div className="architecture-graph-toolbar" style={{ position: "relative", inset: "auto", zIndex: 5, display: "flex", minHeight: 31, flexShrink: 0, alignItems: "center", gap: 6, borderBottom: "1px solid var(--divider)", padding: "0 10px" }}>
         {!readOnly && <>
-          <button type="button" onClick={addNode} className="architecture-graph-toolbar-symbol" aria-label="Add node" title="Add node"><Plus size={13} /></button>
+          <button type="button" onClick={addNode} className="architecture-graph-toolbar-symbol" aria-label="Add node"><Plus size={13} /></button>
           <span className="architecture-graph-toolbar-delimiter" aria-hidden="true">|</span>
         </>}
-        <button type="button" onClick={fitGraph} className="architecture-graph-toolbar-symbol" aria-label="Fit view" title="Fit view"><Maximize size={13} /></button>
+        <button type="button" onClick={fitGraph} className="architecture-graph-toolbar-symbol" aria-label="Fit view"><Maximize size={13} /></button>
         {onOpenDocument && <button type="button" onClick={onOpenDocument} className="architecture-graph-icon-button" aria-label="Open Architecture Graph document" style={{ display: "grid", width: 26, height: 26, marginLeft: "auto", placeItems: "center", border: 0, borderRadius: 5, background: "transparent", color: "var(--ink-muted)" }}><Maximize size={14} /></button>}
       </div>
       <div style={{ position: "relative", minHeight: 0, flex: 1 }}>
@@ -335,7 +425,7 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
         onNodeDragStop={onNodeDragStop} onConnect={onConnect} onEdgesDelete={onEdgesDelete} onNodesDelete={onNodesDelete}
         nodesDraggable={!readOnly} nodesConnectable={!readOnly} elementsSelectable={!readOnly} deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
         connectionMode={ConnectionMode.Loose}
-        fitView minZoom={0.2} maxZoom={2} panOnScroll selectionOnDrag={false} proOptions={{ hideAttribution: true }}
+        fitView minZoom={0.2} maxZoom={2} panOnScroll selectionOnDrag={false} proOptions={{ hideAttribution: true }} elevateEdgesOnSelect
       >
         <Background gap={22} size={1} color="var(--divider)" />
       </ReactFlow>
