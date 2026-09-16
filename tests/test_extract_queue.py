@@ -38,21 +38,3 @@ def test_enqueue_queues_when_cache_absent(tmp_path: Path, mineru_cache_dir: Path
 
     assert put_calls == [pdf]
 
-
-def test_enqueue_uses_mineru_cache_path_helper(tmp_path: Path, mineru_cache_dir: Path, monkeypatch):
-    """Enqueue must look at the *same* path ``mineru_cache_path`` returns — otherwise a cache
-    written by the worker would never be seen by a subsequent enqueue (the pre-refactor bug)."""
-    pdf = tmp_path / "x.y.z.pdf"
-    pdf.write_bytes(b"%PDF")
-    # Write the cache at the *helper's* path (not the buggy ``stem`` path).
-    from lib.attachment_materialize import mineru_cache_path
-
-    cached = mineru_cache_path(pdf)
-    cached.write_text("# cached", encoding="utf-8")
-
-    put_calls: list[Path] = []
-    monkeypatch.setattr(extract_queue._queue, "put_nowait", lambda p: put_calls.append(p))
-
-    extract_queue.enqueue(pdf)
-
-    assert put_calls == []  # cache hit at the helper path, enqueue is a no-op

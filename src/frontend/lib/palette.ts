@@ -31,7 +31,7 @@ export interface RoleTokens {
   shadowStrength: number
 }
 
-export const dark: RoleTokens = {
+const dark: RoleTokens = {
   ink:             "oklch(95% 0.006 85)",
   inkMuted:        "oklch(72% 0.010 85)",
   inkSubtle:       "oklch(55% 0.010 85)",
@@ -45,7 +45,7 @@ export const dark: RoleTokens = {
   shadowStrength:  0.35,
 }
 
-export const light: RoleTokens = {
+const light: RoleTokens = {
   ink:             "oklch(28% 0.012 85)",
   inkMuted:        "oklch(40% 0.012 85)",
   inkSubtle:       "oklch(50% 0.010 85)",
@@ -59,7 +59,7 @@ export const light: RoleTokens = {
   shadowStrength:  0.08,
 }
 
-export const THEMES = { dark, light } as const
+const THEMES = { dark, light } as const
 
 export type ThemeName = keyof typeof THEMES
 export type ColorToken = Exclude<keyof RoleTokens, "shadowStrength">
@@ -80,10 +80,6 @@ const CSS_VAR: Record<ColorToken, string> = {
 export function activeThemeName(): ThemeName {
   if (typeof document === "undefined") return "dark"
   return document.documentElement.classList.contains("light") ? "light" : "dark"
-}
-
-export function themeFor(name: ThemeName): RoleTokens {
-  return THEMES[name]
 }
 
 /**

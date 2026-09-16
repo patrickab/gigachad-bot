@@ -9,7 +9,7 @@ import { MemoryBoard } from "@/components/MemoryBoard"
 import { computeLineDiff } from "@/lib/diff"
 import type { BoundMemoryActions, MemoryPanelState } from "@/hooks/useCommandBar"
 import type { CategoryDef, MemoryStatus, PreviewMemory, ProposedMemory } from "@/lib/types"
-import { buildBoardSections, formatCategoryHeading } from "@/lib/memoryUtils"
+import { type MemoryRecord, groupByCategoryOrder, formatCategoryHeading } from "@/lib/memoryUtils"
 import { cn } from "@/lib/utils"
 
 const STATUS_STYLES: Record<MemoryStatus, string> = {
@@ -25,7 +25,7 @@ export function renderMemoriesMarkdown(
   title: string,
   categoryOrder?: CategoryDef[],
 ): string {
-  const sections = buildBoardSections(categoryOrder ?? [], memories)
+  const sections = groupByCategoryOrder(categoryOrder ?? [], memories)
   const parts = [`# ${title}`]
   for (const { category, items } of sections) {
     if (items.length === 0) continue
@@ -47,8 +47,6 @@ export interface MemoryPanelProps {
 // ---------------------------------------------------------------------------
 // Shared memory card — editable on click, with optional accept/deny actions
 // ---------------------------------------------------------------------------
-
-type MemoryRecord = ProposedMemory | PreviewMemory
 
 function memoryText(m: MemoryRecord): string {
   return "memory" in m ? m.memory : m.text
@@ -563,8 +561,8 @@ export function MemoryPanel({
         return
       }
       if (candidatesMode) {
-        const globalSections = buildBoardSections(globalCategories, globalMemories)
-        const projectSections = buildBoardSections(projectCategories, projectMemories ?? [])
+        const globalSections = groupByCategoryOrder(globalCategories, globalMemories)
+        const projectSections = groupByCategoryOrder(projectCategories, projectMemories ?? [])
         const firstGlobal = globalSections.find(s => s.items.length > 0)?.items[0]
         const firstProject = projectSections.find(s => s.items.length > 0)?.items[0]
         const nextId = (firstGlobal ?? firstProject)?.id

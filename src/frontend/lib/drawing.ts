@@ -6,7 +6,7 @@ export interface StrokeData {
   width: number
 }
 
-const STROKE_OPTIONS = {
+export const STROKE_OPTIONS = {
   smoothing: 0.5,
   streamline: 0.5,
   simulatePressure: false,
@@ -96,14 +96,6 @@ function drawTexts(ctx: CanvasRenderingContext2D, texts: TextData[], offsetX: nu
     })
     ctx.restore()
   }
-}
-
-export function strokeToPathData(stroke: StrokeData): string {
-  const outline = getStroke(stroke.points, {
-    ...STROKE_OPTIONS,
-    size: stroke.width,
-  })
-  return getSvgPathFromStroke(outline)
 }
 
 // ponytail: fetch + ImageBitmap, not `new Image()` with crossOrigin. API_BASE is a

@@ -1,25 +1,28 @@
+"""The MinerU PDF extraction engine.
+
+Owns the parse call itself plus the lifecycle of the MinerU server processes it
+spawns: a registry of live servers so shutdown can stop them, and a cancel flag
+the batch parsers poll between files.
+
+This is engine code, not route code. It lives in ``lib`` so the background
+extraction queue and the ``files`` route can both drive it without importing
+upward from the route layer.
+"""
+
 import logging
-import os
-import signal
-import sys
-import threading
 from pathlib import Path
 import re
 import shutil
+import sys
 import tempfile
+import threading
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from pydantic import BaseModel
+from fastapi import HTTPException
 
-from config import DIRECTORY_OUTPUT_MINERU, DIRECTORY_OUTPUT_PDF, MINERU_SERVER_URL, get_model_defaults
-from lib.attachment_materialize import mineru_cache_path
-from lib.llm_resilience import api_query_resilient
-
-from .deps import request_client
+from config import DIRECTORY_OUTPUT_MINERU, MINERU_SERVER_URL
+from lib import attachment_materialize
 
 log = logging.getLogger(__name__)
-
-router = APIRouter(prefix="/api/mineru", tags=["mineru"])
 
 _active_servers: list[object] = []
 _active_servers_lock = threading.Lock()
@@ -59,19 +62,7 @@ def unregister_mineru_server(server: object) -> None:
             pass
 
 
-class MineruResult(BaseModel):
-    filename: str
-    output_dir: str
-    markdown_content: str
-    answer: str | None = None
-    query: str | None = None
-
-
-class MineruBatchResponse(BaseModel):
-    results: list[MineruResult]
-
-
-async def _parse_pdf(
+async def parse_pdf(
     pdf_path: str | Path,
     output_dir: str | Path,
     backend: str = "pipeline",
@@ -102,7 +93,7 @@ async def _parse_pdf(
         log.info("MinerU already extracted for %s", stem)
         return extracted_md, images_dir
 
-    global_md = mineru_cache_path(stem)
+    global_md = attachment_materialize.mineru_cache_path(stem)
     if global_md.exists():
         log.info("MinerU already extracted for %s (global cache)", stem)
         shutil.copy2(global_md, extracted_md)
@@ -209,7 +200,7 @@ async def _parse_pdf(
         final_md_path.write_text(md_content, encoding="utf-8")
 
     if output_dir != DIRECTORY_OUTPUT_MINERU:
-        global_md_path = mineru_cache_path(stem)
+        global_md_path = attachment_materialize.mineru_cache_path(stem)
         if not global_md_path.exists():
             shutil.copy2(final_md_path, global_md_path)
             for img in images_dir.iterdir():
@@ -225,115 +216,3 @@ def _detect_backend() -> str:
     if shutil.which("nvidia-smi") is not None:
         return "hybrid-auto-engine"
     return "pipeline"
-
-
-def _rewrite_images_for_frontend(md_content: str) -> str:
-    """Rewrite relative ``images/`` refs to absolute ``/mineru/images/`` URLs."""
-    return re.sub(r"\(images/([^)]+)\)", r"(/mineru/images/\1)", md_content)
-
-
-@router.post("/parse", response_model=MineruResult)
-async def parse_single_pdf(
-    file: UploadFile = File(...),
-    query: str = Form(""),
-    backend: str = Form("pipeline"),
-    model: str = Form(""),
-):
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported")
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmp_path = Path(tmpdir) / file.filename
-        content_b = await file.read()
-        tmp_path.write_bytes(content_b)
-
-        (DIRECTORY_OUTPUT_PDF / file.filename).write_bytes(content_b)
-
-        md_path, _images_dir = await _parse_pdf(tmp_path, DIRECTORY_OUTPUT_MINERU, backend=backend)
-        md_content = md_path.read_text(encoding="utf-8")
-
-    result = MineruResult(
-        filename=file.filename,
-        output_dir=str(DIRECTORY_OUTPUT_MINERU),
-        markdown_content=_rewrite_images_for_frontend(md_content),
-    )
-
-    if query.strip():
-        query_clean = query.strip()
-        result.query = query_clean
-        try:
-            with request_client() as c:
-                response = api_query_resilient(
-                    c,
-                    model=model or get_model_defaults()["small_model"],
-                    user_msg=md_content + "\n\n---\n\n" + query_clean,
-                    system_prompt="",
-                    img=None,
-                    stream=False,
-                )
-                if isinstance(response, Exception):
-                    raise response
-                result.answer = response.choices[0].message.content or ""
-        except Exception:
-            log.exception("LLM query failed for %s", file.filename)
-            result.answer = "(Failed to generate answer)"
-
-    return result
-
-
-@router.post("/parse-batch", response_model=MineruBatchResponse)
-async def parse_batch_pdfs(
-    files: list[UploadFile] = File(...),
-    query: str = Form(""),
-    backend: str = Form("pipeline"),
-    model: str = Form(""),
-):
-    results = []
-    shared_md = ""
-    for file in files:
-        if not file.filename or not file.filename.lower().endswith(".pdf"):
-            raise HTTPException(status_code=400, detail=f"Only PDF files are supported, got: {file.filename}")
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmp_path = Path(tmpdir) / file.filename
-            content_b = await file.read()
-            tmp_path.write_bytes(content_b)
-
-            (DIRECTORY_OUTPUT_PDF / file.filename).write_bytes(content_b)
-
-            md_path, _images_dir = await _parse_pdf(tmp_path, DIRECTORY_OUTPUT_MINERU, backend=backend)
-            md_raw = md_path.read_text(encoding="utf-8")
-            md_content = _rewrite_images_for_frontend(md_raw)
-
-        shared_md += f"\n\n### {file.filename}\n\n{md_raw}"
-        results.append(
-            MineruResult(
-                filename=file.filename,
-                output_dir=str(DIRECTORY_OUTPUT_MINERU),
-                markdown_content=md_content,
-            )
-        )
-
-    query_clean = query.strip()
-    if query_clean:
-        try:
-            with request_client() as c:
-                response = api_query_resilient(
-                    c,
-                    model=model or get_model_defaults()["small_model"],
-                    user_msg=shared_md + "\n\n---\n\n" + query_clean,
-                    system_prompt="",
-                    img=None,
-                    stream=False,
-                )
-                if isinstance(response, Exception):
-                    raise response
-                answer = response.choices[0].message.content or ""
-        except Exception:
-            log.exception("LLM query failed for batch")
-            answer = "(Failed to generate answer)"
-        for r in results:
-            r.query = query_clean
-            r.answer = answer
-
-    return MineruBatchResponse(results=results)

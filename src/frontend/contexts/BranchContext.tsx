@@ -174,17 +174,6 @@ export function useBranches() {
   return ctx
 }
 
-export function useBranchMeta() {
-  const ctx = useContext(BranchContext)
-  return ctx
-}
-
-export function useBranchContext() {
-  const ctx = useContext(BranchContext)
-  if (!ctx) throw new Error("useBranchContext must be inside BranchProvider")
-  return ctx
-}
-
 export function buildChatIdMap(meta: Record<string, BranchMeta>): ChatIdMap {
   const m = new Map<string, string>()
   for (const [k, v] of Object.entries(meta)) {

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
@@ -17,11 +17,6 @@ class OCRRequest(BaseModel):
     model: str = ""
 
 
-class DownscaleRequest(BaseModel):
-    img_base64: str
-    max_tokens: int = 2048
-
-
 @router.post("/ocr")
 async def ocr(req: OCRRequest) -> EventSourceResponse:
     with request_client() as c:
@@ -37,13 +32,3 @@ async def ocr(req: OCRRequest) -> EventSourceResponse:
             stream=True,
         )
         return sse_event_stream(chunks)
-
-
-@router.post("/downscale-image")
-def downscale_image(req: DownscaleRequest) -> dict[str, str]:
-    with request_client() as c:
-        try:
-            result = c.downscale_img(img=req.img_base64, max_tokens=req.max_tokens)
-            return {"img_base64": result}
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))

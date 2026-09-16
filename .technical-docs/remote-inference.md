@@ -13,7 +13,13 @@ on a private server, reached over SSH tunnels — no code changes per deployment
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama endpoint for local-model inference. |
 | `BRAVE_API_KEY` | unset | Secret used by backend web search. |
 | `GIGACHAD_CORS_ORIGINS` | `*` | Comma-separated CORS allow-list for the FastAPI backend. The Tauri shell sets this to its own webview origins; server deployments can restrict it to their public origin. |
-| `GIGACHAD_BASE_DIR` | `.` (CWD) | Root for all runtime data (chat histories, uploads). The desktop app defaults it to the XDG app-data dir (the AppImage mount is read-only) but respects a value exported before launch — set it to the webapp's directory to share one data store. |
+| `GIGACHAD_BASE_DIR` | `~/Nextcloud/linux` | Root for all runtime data (chat histories, uploads, prompts, MinerU output). `src/config.py` expands it into `REMOTE_ROOT`. The desktop app defaults it to the XDG app-data dir (the AppImage mount is read-only) but respects a value exported before launch, so pointing it at the webapp's root shares one data store. |
+
+`GIGACHAD_BASE_DIR` is a development and desktop knob only. `deployment.md` forbids
+setting it in any production artifact (environment file, service unit) because
+development and production deliberately share the same default Documents tree, and the
+worktree is meant to isolate code rather than application state. Override it locally when
+you need a scratch data root, never in a deployed configuration.
 
 ## Hosting MinerU OCR on a remote server
 

@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
 from backend.routes.deps import get_project_store
+from backend.routes.schemas import AttachResult, FileListResponse, FileMeta
 from config import (
     DIRECTORY_CHAT_HISTORIES,
     DIRECTORY_NOTES,
@@ -38,23 +39,6 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
 
-class DocumentMeta(BaseModel):
-    path: str
-    name: str
-    mime: str
-
-
-class DocumentListResponse(BaseModel):
-    documents: list[DocumentMeta]
-
-
-class DocumentAttachResult(BaseModel):
-    name: str
-    mime: str
-    parsedMd: str | None = None
-    content: str | None = None
-
-
 class WriteDocumentRequest(BaseModel):
     slug: str
     name: str
@@ -65,56 +49,44 @@ class AddDocumentRequest(BaseModel):
     path: str
 
 
-def _meta_list(paths: list[str]) -> list[DocumentMeta]:
+def _meta_list(paths: list[str]) -> list[FileMeta]:
     # ponytail: canvas-pasted images stay registered (so /fileviewer can serve them)
     # but never surface as documents — they'd flood the sidebar and the canvas add menu.
-    return [DocumentMeta(**lib_docs.document_meta(p)) for p in paths if not Path(p).name.startswith("pasted-")]
+    return [FileMeta(**lib_docs.document_meta(p)) for p in paths if not Path(p).name.startswith("pasted-")]
 
 
 def _validate_doc_path(store: ProjectStore, path: str) -> Path:
     """Only allow paths the app already knows about (library or any project)."""
-    resolved = Path(path).expanduser().resolve()
-    library = lib_docs.LIBRARY_DIR.resolve()
-    graphs = DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS.resolve()
-    # Drafts are deliberately not generic documents: they are proposal state
-    # until an explicit accept publishes them as canonical graph files.
-    is_canonical_graph = resolved.parent == graphs and resolved.name.endswith(".architecture.yaml")
-    known_paths = {str(Path(candidate).resolve()) for candidate in store.list_all_files()}
-    known = resolved.is_relative_to(library) or is_canonical_graph or str(resolved) in known_paths
-    if not known:
-        raise HTTPException(status_code=403, detail="Unknown document path")
-    if not resolved.is_file():
-        raise HTTPException(status_code=404, detail="Document not found")
-    return resolved
+    try:
+        return lib_docs.resolve_known_path(path, store=store)
+    except lib_docs.PathNotAllowed as exc:
+        if exc.outside_roots:
+            raise HTTPException(status_code=403, detail="Unknown document path") from exc
+        raise HTTPException(status_code=404, detail="Document not found") from exc
 
 
-@router.get("/extract-status")
-async def extract_status():
-    return extract_queue.status()
-
-
-@router.get("", response_model=DocumentListResponse)
+@router.get("", response_model=FileListResponse)
 async def list_documents(slug: str = Query(...), store: ProjectStore = Depends(get_project_store)):
     try:
-        return DocumentListResponse(documents=_meta_list(store.list_files(slug)))
+        return FileListResponse(documents=_meta_list(store.list_files(slug)))
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.get("/all", response_model=DocumentListResponse)
+@router.get("/all", response_model=FileListResponse)
 async def list_all_documents(store: ProjectStore = Depends(get_project_store)):
     graph_paths = [str(path) for path in DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS.glob("*.architecture.yaml") if path.is_file()]
-    return DocumentListResponse(documents=_meta_list(list(dict.fromkeys([*store.list_all_files(), *graph_paths]))))
+    return FileListResponse(documents=_meta_list(list(dict.fromkeys([*store.list_all_files(), *graph_paths]))))
 
 
-@router.get("/notes", response_model=DocumentListResponse)
-async def list_notes() -> DocumentListResponse:
+@router.get("/notes", response_model=FileListResponse)
+async def list_notes() -> FileListResponse:
     """List non-project canvases/notes (DIRECTORY_NOTES)."""
     paths = [str(p) for p in DIRECTORY_NOTES.iterdir() if p.is_file()]
-    return DocumentListResponse(documents=_meta_list(paths))
+    return FileListResponse(documents=_meta_list(paths))
 
 
-@router.post("/write", response_model=DocumentMeta)
+@router.post("/write", response_model=FileMeta)
 async def write_document(
     req: WriteDocumentRequest,
     store: ProjectStore = Depends(get_project_store),
@@ -128,7 +100,7 @@ async def write_document(
     if req.slug == "":
         dest = DIRECTORY_NOTES / safe_name
         dest.write_text(req.content, encoding="utf-8")
-        return DocumentMeta(**lib_docs.document_meta(dest))
+        return FileMeta(**lib_docs.document_meta(dest))
 
     meta = store._read_meta()
     if not store._find_entry(meta, req.slug):
@@ -157,10 +129,10 @@ async def write_document(
         mirror_dir.mkdir(parents=True, exist_ok=True)
         (mirror_dir / safe_name).write_text(req.content, encoding="utf-8")
 
-    return DocumentMeta(**lib_docs.document_meta(dest))
+    return FileMeta(**lib_docs.document_meta(dest))
 
 
-@router.post("/write-binary", response_model=DocumentMeta)
+@router.post("/write-binary", response_model=FileMeta)
 async def write_binary_document(
     file: UploadFile = File(...),
     slug: str = Query(...),
@@ -180,7 +152,7 @@ async def write_binary_document(
     dest = docs_dir / safe_name
     dest.write_bytes(await file.read())
     store.add_file(slug, str(dest.resolve()))
-    return DocumentMeta(**lib_docs.document_meta(dest))
+    return FileMeta(**lib_docs.document_meta(dest))
 
 
 @router.post("/mirror-drawing")
@@ -197,7 +169,7 @@ async def mirror_drawing(file: UploadFile = File(...)):
     return {"status": "ok"}
 
 
-@router.post("/upload", response_model=DocumentMeta)
+@router.post("/upload", response_model=FileMeta)
 async def upload_document(
     file: UploadFile = File(...),
     slug: str = Query(...),
@@ -220,10 +192,10 @@ async def upload_document(
         extract_queue.enqueue(dest)
 
     store.add_file(slug, str(dest))
-    return DocumentMeta(**lib_docs.document_meta(dest))
+    return FileMeta(**lib_docs.document_meta(dest))
 
 
-@router.post("/add", response_model=DocumentMeta)
+@router.post("/add", response_model=FileMeta)
 async def add_document(
     req: AddDocumentRequest,
     slug: str = Query(...),
@@ -235,7 +207,7 @@ async def add_document(
         store.add_file(slug, str(resolved))
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return DocumentMeta(**lib_docs.document_meta(resolved))
+    return FileMeta(**lib_docs.document_meta(resolved))
 
 
 class RegisterUploadRequest(BaseModel):
@@ -243,7 +215,7 @@ class RegisterUploadRequest(BaseModel):
     filename: str
 
 
-@router.post("/register-upload", response_model=DocumentMeta)
+@router.post("/register-upload", response_model=FileMeta)
 async def register_upload(
     req: RegisterUploadRequest,
     slug: str | None = Query(default=None),
@@ -256,7 +228,7 @@ async def register_upload(
     dest = lib_docs.organize_file(src)
     if slug:
         store.add_file(slug, str(dest))
-    return DocumentMeta(**lib_docs.document_meta(dest))
+    return FileMeta(**lib_docs.document_meta(dest))
 
 
 @router.delete("")
@@ -291,7 +263,7 @@ class MoveDocumentRequest(BaseModel):
     to_slug: str = ""
 
 
-@router.post("/move", response_model=DocumentMeta)
+@router.post("/move", response_model=FileMeta)
 async def move_document(
     req: MoveDocumentRequest,
     store: ProjectStore = Depends(get_project_store),
@@ -334,10 +306,10 @@ async def move_document(
     if req.to_slug:
         store.add_file(req.to_slug, str(dest.resolve()))
 
-    return DocumentMeta(**lib_docs.document_meta(dest))
+    return FileMeta(**lib_docs.document_meta(dest))
 
 
-@router.post("/attach", response_model=DocumentAttachResult)
+@router.post("/attach", response_model=AttachResult)
 async def attach_document(
     path: str = Query(...),
     chat_id: str = Query(...),
@@ -352,7 +324,7 @@ async def attach_document(
     dest.write_bytes(resolved.read_bytes())
 
     materialized = materialize(resolved)
-    result = DocumentAttachResult(name=name, mime=materialized.mime, parsedMd=materialized.parsed_md, content=materialized.content)
+    result = AttachResult(name=name, mime=materialized.mime, parsedMd=materialized.parsed_md, content=materialized.content)
 
     if resolved.suffix.lower() == ".pdf":
         try:

@@ -7,7 +7,7 @@ Pipeline (all local-friendly, no vector DB):
    ``DEFAULT_PROJECT_CATEGORIES``. Candidates are buffered to
    ``memory/pending/<review_id>.json``.
 2. user review  – the frontend gates which candidates are accepted.
-3. ``reconcile`` – accepted candidates are merged into the canonical store
+3. ``_reconcile_with_status`` – accepted candidates are merged into the canonical store
    *per category* (1-to-n within a single category bucket), so only memories of
    the same category are ever compared. Unaffected categories are left untouched.
 4. ``commit``   – the canonical JSON + rendered markdown are written.
@@ -136,7 +136,7 @@ class MemoryStore:
     # Public document helpers
     # ------------------------------------------------------------------
 
-    def chat_context(self, project_slug: str | None = None) -> str:
+    def _chat_context(self, project_slug: str | None = None) -> str:
         """Return canonical memory context for runtime chat injection."""
         global_path = self._global_profile_path()
         project_path = self._project_memory_path(project_slug) if project_slug else None
@@ -157,7 +157,7 @@ class MemoryStore:
         return "\n\n".join(parts)
 
     def augment_system_prompt(self, system_prompt: str, project_slug: str | None = None) -> str:
-        memory_context = self.chat_context(project_slug)
+        memory_context = self._chat_context(project_slug)
         if not memory_context:
             return system_prompt
         if not system_prompt.strip():
@@ -193,7 +193,9 @@ class MemoryStore:
         do_global = scope in (None, "global")
         do_project = scope in (None, "project") and bool(project_slug)
 
-        async def run_scope(scope_name: str, guidance: str, categories: list[dict[str, str]], json_path: Path) -> list[ProposedMemory]:
+        async def run_scope(
+            scope_name: str, guidance: str, categories: list[dict[str, str]], json_path: DataStorePath
+        ) -> list[ProposedMemory]:
             start = self._watermark_for(chat_id, scope_name) if chat_id else 0
             tail = messages[start:]
             if not tail:
@@ -301,7 +303,8 @@ Return JSON with this exact shape:
             ]
         else:
             existing = self._read_stored_memories(json_path)
-            updated = await self.reconcile(llm, accepted_memories, existing, scope=scope)
+            reconciled = await self._reconcile_with_status(llm, accepted_memories, existing, scope=scope)
+            updated = [m for m, _ in reconciled]
 
         self._write_stored_memories(json_path, updated)
         md_content = self.render_memories_as_markdown(updated, title, scope=scope, project_slug=project_slug)
@@ -345,17 +348,6 @@ Return JSON with this exact shape:
     # ------------------------------------------------------------------
     # Per-category reconciliation (1-to-n within a single category bucket)
     # ------------------------------------------------------------------
-
-    async def reconcile(
-        self,
-        llm: MemoryLLM,
-        candidates: list[ProposedMemory],
-        existing: list[StoredMemory],
-        scope: str = "global",
-    ) -> list[StoredMemory]:
-        """Merge accepted *candidates* into *existing*, comparing only within a category."""
-        pairs = await self._reconcile_with_status(llm, candidates, existing, scope)
-        return [m for m, _ in pairs]
 
     async def _reconcile_with_status(
         self,
@@ -539,7 +531,7 @@ Return JSON with this exact shape:
     # Pending buffer (replaces the old vector-store staging)
     # ------------------------------------------------------------------
 
-    def _pending_path(self, review_id: str) -> Path:
+    def _pending_path(self, review_id: str) -> DataStorePath:
         safe = re.sub(r"[^A-Za-z0-9_-]", "", review_id)
         return self.pending_dir / f"{safe}.json"
 
@@ -599,7 +591,7 @@ Return JSON with this exact shape:
     # Conversation watermarks (messages already memorized, by chat id + scope)
     # ------------------------------------------------------------------
 
-    def _watermarks_path(self) -> Path:
+    def _watermarks_path(self) -> DataStorePath:
         return self.memory_root / "watermarks.json"
 
     def _read_watermarks(self) -> dict[str, dict[str, int]]:
@@ -637,7 +629,7 @@ Return JSON with this exact shape:
     # Category management
     # ------------------------------------------------------------------
 
-    def _categories_path(self, scope: str, project_slug: str | None) -> "Path":
+    def _categories_path(self, scope: str, project_slug: str | None) -> DataStorePath:
         if scope == "global":
             return self.memory_root / "global-categories.json"
         return self._project_dir(project_slug) / "memory/categories.json"
@@ -777,7 +769,7 @@ Rules:
     # Canonical storage I/O & rendering
     # ------------------------------------------------------------------
 
-    def _read_stored_memories(self, path: "Path") -> list[StoredMemory]:
+    def _read_stored_memories(self, path: DataStorePath) -> list[StoredMemory]:
         if not path.exists():
             return []
         try:
@@ -809,7 +801,7 @@ Rules:
     def _memory_to_dict(m: StoredMemory) -> dict[str, Any]:
         return dict(vars(m))
 
-    def _write_stored_memories(self, path: Path, memories: list[StoredMemory]) -> None:
+    def _write_stored_memories(self, path: DataStorePath, memories: list[StoredMemory]) -> None:
         safe_write_json(path, [vars(m) for m in memories])
 
     def render_memories_as_markdown(
@@ -844,7 +836,7 @@ Rules:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _scope_paths(self, scope: str, project_slug: str | None) -> tuple[Path, Path, str]:
+    def _scope_paths(self, scope: str, project_slug: str | None) -> tuple[DataStorePath, DataStorePath, str]:
         if scope == "global":
             return self.memory_root / "global-profile.json", self._global_profile_path(), "Global Profile"
         return (
@@ -875,7 +867,7 @@ Rules:
         self.memory_root.mkdir(parents=True, exist_ok=True)
         self.pending_dir.mkdir(parents=True, exist_ok=True)
 
-    def _global_profile_path(self) -> Path:
+    def _global_profile_path(self) -> DataStorePath:
         return self.memory_root / "global-profile.md"
 
     def _project_dir(self, project_slug: str | None) -> DataStorePath:
@@ -885,15 +877,15 @@ Rules:
             raise ValueError("Invalid project slug")
         return self.base_dir / project_slug
 
-    def _project_memory_path(self, project_slug: str | None) -> Path:
+    def _project_memory_path(self, project_slug: str | None) -> DataStorePath:
         return self._project_dir(project_slug) / PROJECT_MEMORY
 
-    def _read_existing_doc(self, path: Path) -> str:
+    def _read_existing_doc(self, path: DataStorePath) -> str:
         if not path.exists():
             return ""
         return path.read_text(encoding="utf-8")
 
-    def _write_doc(self, path: Path, content: str) -> None:
+    def _write_doc(self, path: DataStorePath, content: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content.rstrip() + "\n", encoding="utf-8")
 

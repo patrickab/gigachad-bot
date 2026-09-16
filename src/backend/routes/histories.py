@@ -24,11 +24,6 @@ class SaveRequest(BaseModel):
     expected_revision: str | None = None
 
 
-class RenameRequest(BaseModel):
-    old_path: str
-    new_title: str
-
-
 class MkdirRequest(BaseModel):
     parent_path: str
     name: str
@@ -104,14 +99,6 @@ async def orphan_children(filename: str, store: ChatStore = Depends(get_chat_sto
 async def delete_chat_history(filename: str, store: ChatStore = Depends(get_chat_store)) -> dict[str, str]:
     try:
         return store.delete(filename, cleanup_uploads_fn=delete_chat_upload_dir)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Chat history not found")
-
-
-@router.post("/rename")
-async def rename_chat_history(req: RenameRequest, store: ChatStore = Depends(get_chat_store)) -> dict[str, str]:
-    try:
-        return store.rename(req.old_path, req.new_title)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Chat history not found")
 

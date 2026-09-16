@@ -9,7 +9,6 @@ from lib.data_store import DataStore, LocalDataStore
 # ponytail: one shared workspace for now; user-specific roots can come later.
 REMOTE_ROOT = Path(os.environ.get("GIGACHAD_BASE_DIR", "~/Nextcloud/linux")).expanduser()
 DOCUMENTS = REMOTE_ROOT / "Documents"
-DIRECTORY_CLOUD = REMOTE_ROOT  # legacy alias, only src/legacy_streamlit still imports it
 
 # File-vault roots are NOT configured here. They live in
 # chat_histories/file-vault-roots.json (the single source of truth), managed at
@@ -52,14 +51,10 @@ _data_store: DataStore | None = None
 
 
 def get_data_store() -> DataStore:
-    """Use authoritative local storage; Nextcloud sync runs independently."""
+    """Return the authoritative local store rooted at DOCUMENTS."""
     global _data_store
     if _data_store is None:
-        # ponytail: always use local storage; retain optional WebDAV selection below.
         _data_store = LocalDataStore(DOCUMENTS)
-        # from lib.data_store import WebDavDataStore
-        # if WebDavDataStore.configured():
-        #     _data_store = WebDavDataStore.from_environment(fallback=_data_store)
     return _data_store
 
 

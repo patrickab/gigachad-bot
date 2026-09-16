@@ -84,11 +84,3 @@ export function createSSEStream(
     [Symbol.asyncIterator]: () => iterate(),
   }
 }
-
-export async function* readSSEEvents(
-  stream: SSEStreamResult
-): AsyncGenerator<SSEEvent> {
-  for await (const event of stream) {
-    yield event
-  }
-}

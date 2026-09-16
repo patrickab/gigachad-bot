@@ -2,17 +2,16 @@ import asyncio
 import base64
 from contextlib import contextmanager
 import json
-import re
 from typing import Any, Iterator
 
 from llm_baseclient.client import LLMClient
 from sse_starlette.sse import EventSourceResponse
 
-from config import DIRECTORY_CHAT_HISTORIES, DIRECTORY_PROMPTS, get_data_store as configured_data_store
-from lib.data_store import DataStore
+from config import DIRECTORY_CHAT_HISTORIES, DIRECTORY_PROMPTS, get_data_store
 from lib.architecture_graph import ArchitectureGraphStore
 from lib.chat_store import ChatStore
 from lib.file_vault import FileVault
+from lib.image_paths import _DATA_URI_RE
 from lib.memory_store import MemoryStore
 from lib.project_store import ProjectStore
 from lib.prompt_store import PromptStore
@@ -25,15 +24,7 @@ _memory_store: MemoryStore | None = None
 _file_vault: FileVault | None = None
 _prompt_store: PromptStore | None = None
 _architecture_graph_store: ArchitectureGraphStore | None = None
-_data_store: DataStore | None = None
 _model_provider_store: ModelProviderStore | None = None
-
-
-def get_data_store() -> DataStore:
-    global _data_store
-    if _data_store is None:
-        _data_store = configured_data_store()
-    return _data_store
 
 
 def get_client() -> LLMClient:
@@ -112,7 +103,7 @@ def request_client() -> Iterator[LLMClient]:
 def decode_image(base64_data: str | None) -> bytes | None:
     if not base64_data:
         return None
-    match = re.match(r"data:image/\w+;base64,(.+)", base64_data)
+    match = _DATA_URI_RE.match(base64_data)
     if match:
         return base64.b64decode(match.group(1))
     return base64.b64decode(base64_data)
@@ -124,10 +115,9 @@ _SENTINEL = object()
 def sse_event_stream(chunks: Iterator[str] | Iterator[str | dict]) -> EventSourceResponse:
     async def event_stream() -> Any:
         try:
-            loop = asyncio.get_running_loop()
             it = iter(chunks)
             while True:
-                chunk = await loop.run_in_executor(None, lambda: next(it, _SENTINEL))
+                chunk = await asyncio.to_thread(next, it, _SENTINEL)
                 if chunk is _SENTINEL:
                     break
                 if isinstance(chunk, dict):

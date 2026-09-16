@@ -2,7 +2,6 @@
 
 import { Fragment, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence } from "framer-motion"
-import dynamic from "next/dynamic"
 import type { Message, Attachment, WebSearchResult, ProjectDocument } from "@/lib/types"
 import { ChatMessage, AssistantMessageContent } from "./ChatMessage"
 import { ChatInput, type ChatInputHandle } from "./ChatInput"
@@ -14,7 +13,7 @@ import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { cn } from "@/lib/utils"
 import { ElevationProvider, ElevatedContainer } from "./ElevatedContainer"
 
-const PdfViewer = dynamic(() => import("./PdfViewer").then((m) => ({ default: m.PdfViewer })), { ssr: false })
+import { LazyPdfViewer } from "./LazyPdfViewer"
 import { DocumentEditor } from "./DocumentEditor"
 
 // Document/vault/attachment callbacks the sidebar (Context + Documents
@@ -79,7 +78,7 @@ function PdfAttachmentViewer({ url, parsedContent, chatId, slug, pdfWide, onTogg
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 min-h-0">
-        <PdfViewer url={url} isWide={pdfWide} onToggleWide={onTogglePdfWide} />
+        <LazyPdfViewer url={url} isWide={pdfWide} onToggleWide={onTogglePdfWide} />
       </div>
       {parsedContent && (
         <div className="border-t border-divider">
@@ -244,7 +243,7 @@ function DocumentsBody({ documents, slug, onSelect, editingPath, onEdit, onDelet
             )}
             {expanded && !editable && isPdf && (
               <div className="h-[60vh]">
-                <PdfViewer url={fileViewerRawUrl(doc.path)} isWide={pdfWide} onToggleWide={onTogglePdfWide} />
+                <LazyPdfViewer url={fileViewerRawUrl(doc.path)} isWide={pdfWide} onToggleWide={onTogglePdfWide} />
               </div>
             )}
           </div>

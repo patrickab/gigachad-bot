@@ -66,25 +66,3 @@ async def chat(req: ChatRequest, memory_store: MemoryStoreDep) -> EventSourceRes
             **kwargs,
         )
         return sse_event_stream(chunks)
-
-
-@router.post("/chat/nonstream")
-async def chat_nonstream(req: ChatRequest, memory_store: MemoryStoreDep) -> dict[str, Any]:
-    with request_client() as c:
-        kwargs = _build_kwargs(req)
-        img = _resolve_images(c, req)
-        system_prompt = memory_store.augment_system_prompt(req.system_prompt, req.project_slug)
-        response = api_query_resilient(
-            c,
-            model=req.model,
-            user_msg=req.user_msg,
-            user_msg_history=req.messages,
-            system_prompt=system_prompt,
-            img=img,
-            stream=False,
-            **kwargs,
-        )
-        if isinstance(response, Exception):
-            raise response
-        content = response.choices[0].message.content or ""
-        return {"content": content}

@@ -15,10 +15,10 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
 
 from backend.routes.deps import get_file_vault, get_project_store
-from config import DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS, DIRECTORY_NOTES
+from backend.routes.schemas import FileContent
+from config import DIRECTORY_NOTES
 from lib import document_library as lib_docs
 from lib.file_vault import FileVault
 from lib.project_store import ProjectStore
@@ -28,43 +28,27 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/fileviewer", tags=["fileviewer"])
 
 
-class FileTextContent(BaseModel):
-    path: str
-    content: str
-
-
 def _resolve_allowed(path: str, vault: FileVault, store: ProjectStore) -> Path:
-    resolved = Path(path).expanduser().resolve()
-    library = lib_docs.LIBRARY_DIR.resolve()
-    allowed = (
-        resolved.is_relative_to(library)
-        or resolved.is_relative_to(DIRECTORY_NOTES.resolve())
-        or (
-            resolved.parent == DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS.resolve()
-            and resolved.name.endswith(".architecture.yaml")
-        )
-        or vault.contains(resolved)
-        or str(resolved) in {str(Path(p).expanduser().resolve()) for p in store.list_all_files()}
-    )
-    if not allowed:
-        raise HTTPException(status_code=403, detail="Unknown file path")
-    if not resolved.is_file():
-        raise HTTPException(status_code=404, detail="File not found")
-    return resolved
+    try:
+        return lib_docs.resolve_known_path(path, store=store, vault=vault, extra_roots=(DIRECTORY_NOTES,))
+    except lib_docs.PathNotAllowed as exc:
+        if exc.outside_roots:
+            raise HTTPException(status_code=403, detail="Unknown file path") from exc
+        raise HTTPException(status_code=404, detail="File not found") from exc
 
 
-@router.get("/text", response_model=FileTextContent)
+@router.get("/text", response_model=FileContent)
 async def read_text(
     path: str = Query(...),
     vault: FileVault = Depends(get_file_vault),
     store: ProjectStore = Depends(get_project_store),
-) -> FileTextContent:
+) -> FileContent:
     resolved = _resolve_allowed(path, vault, store)
     try:
         content = resolved.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return FileTextContent(path=path, content=content)
+    return FileContent(path=path, content=content)
 
 
 @router.get("/raw")

@@ -1,31 +1,21 @@
-import json
 import logging
 from pathlib import Path
 import shutil
 import tempfile
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
-from pydantic import BaseModel
 
-from backend.routes.mineru import should_cancel
-from config import DIRECTORY_CHAT_HISTORIES, chat_upload_dir, uploads_dir_for
+from backend.routes.schemas import AttachResult
+from config import chat_upload_dir
+from lib.attachment_materialize import materialize
+from lib.document_library import mime_for, organize_file
 from lib.image_paths import delete_downscaled
+from lib.mineru import parse_pdf, should_cancel
 from lib.naming import dedup_filename
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/files", tags=["files"])
-
-
-class UploadResult(BaseModel):
-    name: str
-    mime: str
-    content: str | None = None
-
-
-class ParsedAttachment(BaseModel):
-    name: str
-    parsedMd: str | None = None
 
 
 def delete_chat_upload_dir(chat_id: str, slug: str | None = None) -> None:
@@ -49,7 +39,7 @@ def _classify_mime(mime: str, filename: str | None = None) -> str:
     return "other"
 
 
-@router.post("/upload", response_model=UploadResult)
+@router.post("/upload", response_model=AttachResult)
 async def upload_file(
     file: UploadFile = File(...),
     chat_id: str = Query(...),
@@ -70,7 +60,7 @@ async def upload_file(
     mime = file.content_type or "application/octet-stream"
     kind = _classify_mime(mime, deduped)
 
-    result = UploadResult(name=deduped, mime=mime)
+    result = AttachResult(name=deduped, mime=mime)
 
     if kind == "text":
         try:
@@ -81,7 +71,7 @@ async def upload_file(
     return result
 
 
-@router.post("/parse", response_model=list[ParsedAttachment])
+@router.post("/parse", response_model=list[AttachResult])
 async def parse_attachments(
     filenames: list[str] = Query(...),
     chat_id: str = Query(...),
@@ -91,63 +81,55 @@ async def parse_attachments(
     if not chat_dir.exists():
         raise HTTPException(status_code=404, detail="Chat upload directory not found")
 
-    results: list[ParsedAttachment] = []
+    results: list[AttachResult] = []
     for filename in filenames:
         if should_cancel():
             log.info("Parse cancelled, stopping batch")
             break
 
+        file_mime = mime_for(filename)
         file_path = chat_dir / filename
         if not file_path.exists():
-            results.append(ParsedAttachment(name=filename, parsedMd=None))
+            results.append(AttachResult(name=filename, mime=file_mime))
             continue
 
-        mime = _classify_mime("", filename)
+        kind = _classify_mime("", filename)
         if file_path.suffix.lower() == ".pdf":
-            mime = "pdf"
+            kind = "pdf"
 
-        if mime == "pdf":
-            from lib.attachment_materialize import materialize
-            from lib.document_library import organize_file
-
+        if kind == "pdf":
             cached = materialize(file_path, enqueue_on_miss=False)
             if cached.parsed_md is not None:
                 try:
                     organize_file(file_path)
                 except Exception:
                     log.exception("Failed to organize %s into document library", filename)
-                results.append(ParsedAttachment(name=filename, parsedMd=cached.parsed_md))
+                results.append(AttachResult(name=filename, mime=file_mime, parsedMd=cached.parsed_md))
             else:
-                from backend.routes.mineru import _parse_pdf
-
                 with tempfile.TemporaryDirectory() as tmpdir:
                     tmp_path = Path(tmpdir) / filename
                     tmp_path.write_bytes(file_path.read_bytes())
                     try:
-                        md_path, _images_dir = await _parse_pdf(tmp_path, chat_dir)
+                        md_path, _images_dir = await parse_pdf(tmp_path, chat_dir)
                         try:
                             organize_file(file_path)
                         except Exception:
                             log.exception("Failed to organize %s into document library", filename)
-                        results.append(ParsedAttachment(name=filename, parsedMd=md_path.read_text(encoding="utf-8")))
+                        results.append(
+                            AttachResult(name=filename, mime=file_mime, parsedMd=md_path.read_text(encoding="utf-8"))
+                        )
                     except Exception:
                         log.exception("MinerU parse failed for %s", filename)
-                        results.append(ParsedAttachment(name=filename, parsedMd=None))
-        elif mime == "text":
+                        results.append(AttachResult(name=filename, mime=file_mime))
+        elif kind == "text":
             try:
-                results.append(ParsedAttachment(name=filename, parsedMd=file_path.read_text(encoding="utf-8")))
+                results.append(AttachResult(name=filename, mime=file_mime, parsedMd=file_path.read_text(encoding="utf-8")))
             except UnicodeDecodeError:
-                results.append(ParsedAttachment(name=filename, parsedMd=None))
+                results.append(AttachResult(name=filename, mime=file_mime))
         else:
-            results.append(ParsedAttachment(name=filename, parsedMd=None))
+            results.append(AttachResult(name=filename, mime=file_mime))
 
     return results
-
-
-@router.delete("/chat/{chat_id}")
-async def delete_chat_files(chat_id: str, slug: str | None = Query(default=None)):
-    delete_chat_upload_dir(chat_id, slug)
-    return {"status": "ok"}
 
 
 @router.delete("/chat/{chat_id}/att/{filename:path}")
@@ -161,42 +143,3 @@ async def delete_single_file(chat_id: str, filename: str, slug: str | None = Que
     if md_path.exists():
         md_path.unlink()
     return {"status": "ok"}
-
-
-@router.post("/gc")
-async def gc_orphan_uploads():
-    known_chat_ids: set[tuple[str | None, str]] = set()
-    if DIRECTORY_CHAT_HISTORIES.exists():
-        for f in DIRECTORY_CHAT_HISTORIES.rglob("*.json"):
-            try:
-                data = json.loads(f.read_text(encoding="utf-8"))
-                if isinstance(data, dict) and data.get("chat_id"):
-                    rel = f.relative_to(DIRECTORY_CHAT_HISTORIES)
-                    slug = rel.parts[0] if len(rel.parts) > 1 else None
-                    if slug in ("_uploads", "projects-meta.json"):
-                        continue
-                    if slug and not (DIRECTORY_CHAT_HISTORIES / slug).is_dir():
-                        slug = None
-                    known_chat_ids.add((slug, data["chat_id"]))
-            except Exception:
-                continue
-
-    cleaned = 0
-    for uploads_root in [uploads_dir_for(None)] + [
-        DIRECTORY_CHAT_HISTORIES / slug / "_uploads"
-        for slug_dir in (DIRECTORY_CHAT_HISTORIES.iterdir() if DIRECTORY_CHAT_HISTORIES.exists() else [])
-        if slug_dir.is_dir() and (slug_dir / "_uploads").is_dir()
-        for slug in [slug_dir.name]
-    ]:
-        if not uploads_root.exists():
-            continue
-        slug = None
-        rel = uploads_root.relative_to(DIRECTORY_CHAT_HISTORIES)
-        if len(rel.parts) > 1 and rel.parts[0] not in ("_uploads",):
-            slug = rel.parts[0]
-        for d in uploads_root.iterdir():
-            if d.is_dir() and (slug, d.name) not in known_chat_ids:
-                shutil.rmtree(d)
-                cleaned += 1
-
-    return {"cleaned": cleaned}

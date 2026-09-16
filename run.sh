@@ -2,24 +2,6 @@
 set -euo pipefail
 
 root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-backend_args=()
-
-case "$#" in
-    0) ;;
-    1)
-        if [[ "$1" == "--tailscale" ]]; then
-            backend_args=("--tailscale")
-        else
-            printf 'usage: %s [--tailscale]\n' "${BASH_SOURCE[0]}" >&2
-            exit 2
-        fi
-        ;;
-    *)
-        printf 'usage: %s [--tailscale]\n' "${BASH_SOURCE[0]}" >&2
-        exit 2
-        ;;
-esac
-
 backend_pid=''
 frontend_pid=''
 cleaned_up=false
@@ -48,7 +30,7 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 0' INT TERM
 
-"$root_dir/run-backend.sh" "${backend_args[@]}" &
+"$root_dir/run-backend.sh" "$@" &
 backend_pid=$!
 
 "$root_dir/run-frontend.sh" &

@@ -11,5 +11,5 @@ started via `run.sh` or manually by the user, in a terminal they control.
 
 ## UI hints
 
-- Never add hover-only hints or native browser tooltips (`title` attributes).
-  Use visible labels or accessible `aria-label`s for icon-only controls.
+No hover tooltips. The authoritative rule, including the rendered-markdown exception,
+lives under "Layout Patterns" in `.docs/conventions.md`.

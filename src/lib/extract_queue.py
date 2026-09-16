@@ -9,6 +9,13 @@ import asyncio
 import logging
 from pathlib import Path
 
+from config import DIRECTORY_OUTPUT_MINERU
+
+# ``lib.mineru`` and ``lib.attachment_materialize`` both reach back here, so
+# bind the modules rather than their members and read through them at call time.
+from lib import attachment_materialize
+from lib import mineru
+
 log = logging.getLogger(__name__)
 
 _queue: asyncio.Queue[Path | None] = asyncio.Queue()
@@ -25,14 +32,10 @@ async def _worker() -> None:
             break
         _in_progress = pdf_path
         try:
-            from backend.routes.mineru import _parse_pdf
-            from config import DIRECTORY_OUTPUT_MINERU
-            from lib.attachment_materialize import mineru_cache_path
-
-            cached = mineru_cache_path(pdf_path)
+            cached = attachment_materialize.mineru_cache_path(pdf_path)
             if not cached.is_file():
                 log.info("Extracting %s via MinerU", pdf_path.name)
-                await _parse_pdf(pdf_path, DIRECTORY_OUTPUT_MINERU)
+                await mineru.parse_pdf(pdf_path, DIRECTORY_OUTPUT_MINERU)
                 log.info("Extraction complete: %s", pdf_path.name)
         except Exception:
             log.exception("Background MinerU extraction failed for %s", pdf_path.name)
@@ -43,9 +46,7 @@ async def _worker() -> None:
 
 def enqueue(pdf_path: Path) -> None:
     """Queue a PDF for background extraction. No-op if already cached."""
-    from lib.attachment_materialize import mineru_cache_path
-
-    cached = mineru_cache_path(pdf_path)
+    cached = attachment_materialize.mineru_cache_path(pdf_path)
     if cached.is_file():
         return
     _queue.put_nowait(pdf_path)

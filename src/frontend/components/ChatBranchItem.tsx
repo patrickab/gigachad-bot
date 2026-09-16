@@ -4,7 +4,7 @@ import { GitMerge, Trash2 } from "lucide-react"
 import { useMemo } from "react"
 import { cn } from "@/lib/utils"
 import type { BranchChild, BranchMeta } from "@/lib/types"
-import { useBranchContext, buildChatIdMap, isAncestorOf } from "@/contexts/BranchContext"
+import { useBranches, buildChatIdMap, isAncestorOf } from "@/contexts/BranchContext"
 import { useTree, type VaultTreeItem } from "./VaultTree"
 
 interface Node {
@@ -65,7 +65,7 @@ function groupByPoint(children: Node[]): Point[] {
 }
 
 function BranchTree({ root }: { root: Node }) {
-  const { branchMeta, onFileClick, onMerge, onDelete, activeFile, activeQaIndex } = useBranchContext()
+  const { branchMeta, onFileClick, onMerge, onDelete, activeFile, activeQaIndex } = useBranches()
   const points = groupByPoint(root.children)
   if (points.length === 0) return null
 
@@ -98,7 +98,7 @@ function BranchTree({ root }: { root: Node }) {
 }
 
 function BranchRow({ node }: { node: Node }) {
-  const { onFileClick, onMerge, onDelete, activeFile, activeQaIndex } = useBranchContext()
+  const { onFileClick, onMerge, onDelete, activeFile, activeQaIndex } = useBranches()
   const isActive = activeFile === node.file && activeQaIndex == null
   const hasKids = node.children.length > 0
   const mergeBlocked = node.branchIdx != null && node.parentQaCount > node.branchIdx + 1
@@ -151,7 +151,7 @@ const INDENT_BASE = 8
 const INDENT_STEP = 16
 
 export function ChatBranchItem({ file, label, depth }: ChatBranchItemProps) {
-  const { branchMeta, chatIdMap, onFileClick, onMerge, onDelete, activeFile, activeQaIndex } = useBranchContext()
+  const { branchMeta, chatIdMap, onFileClick, onMerge, onDelete, activeFile, activeQaIndex } = useBranches()
   const { onDragStart } = useTree<string>()
   const bm = branchMeta[file]
   const hasChildren = (bm?.children?.length ?? 0) > 0

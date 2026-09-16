@@ -9,7 +9,6 @@ import uuid
 from config import DIRECTORY_CHAT_HISTORIES
 from lib.data_store import DataStore, DataStorePath, LocalDataStore, Revision
 from lib.json_io import load_json, safe_read_json, safe_write_json
-from lib.safe_path import safe_resolve
 
 PROJECT_JSON = "project.json"
 META_JSON = "projects-meta.json"
@@ -45,7 +44,7 @@ class ChatStore:
             return candidate
         return None
 
-    def slug_for(self, path: Path) -> str | None:
+    def slug_for(self, path: DataStorePath) -> str | None:
         pd = self.project_dir_for(path)
         return pd.name if pd else None
 
@@ -88,7 +87,7 @@ class ChatStore:
         path = self.resolve_path(filename)
         return self._load_path(path)
 
-    def _load_path(self, path: Path) -> dict[str, Any] | None:
+    def _load_path(self, path: DataStorePath) -> dict[str, Any] | None:
         raw = load_json(path)
         if raw is None:
             return None
@@ -159,9 +158,10 @@ class ChatStore:
                 if parent_file:
                     self._remove_child_from_parent(parent_file, data["chat_id"])
         if path.is_dir():
-            import shutil
-
-            shutil.rmtree(str(path))
+            # Delete through the store. A filesystem call such as shutil.rmtree would
+            # resolve the relative storage key against the process working directory
+            # instead of the storage root.
+            self._base.store.delete(path.key, recursive=True)
         else:
             path.unlink()
         self.invalidate_index()
@@ -186,7 +186,7 @@ class ChatStore:
             parent_data["children"] = [c for c in parent_data.get("children", []) if c.get("chat_id") != child_chat_id]
             safe_write_json(parent_path, parent_data)
 
-    def _remove_from_project(self, project_dir: Path | None, filename: str) -> None:
+    def _remove_from_project(self, project_dir: DataStorePath | None, filename: str) -> None:
         if project_dir is None:
             return
         proj_data_path = project_dir / PROJECT_JSON
@@ -203,7 +203,7 @@ class ChatStore:
         root_path = self.resolve_path(filename)
         if not root_path.exists():
             raise FileNotFoundError(filename)
-        to_delete: list[Path] = [root_path]
+        to_delete: list[DataStorePath] = [root_path]
         visited: set[str] = {str(root_path)}
         queue = [root_path]
         while queue:
@@ -306,8 +306,6 @@ class ChatStore:
     def create_directory(self, parent_path: str, name: str) -> dict[str, str]:
         parent = self._base / parent_path if parent_path else self._base
         dir_path = (parent / name).resolve()
-        if not str(dir_path).startswith(str(self._base)):
-            raise ValueError("Invalid path")
         dir_path.mkdir(parents=True, exist_ok=True)
         rel = dir_path.relative_to(self._base)
         return {"status": "ok", "path": str(rel)}
@@ -322,8 +320,6 @@ class ChatStore:
             raise FileNotFoundError(filename)
         src_data = self._load_path(src) or {}
         dst_dir = (self._base / target_dir).resolve() if target_dir else self._base
-        if not str(dst_dir).startswith(str(self._base)):
-            raise ValueError("Invalid target directory")
         dst_dir.mkdir(parents=True, exist_ok=True)
 
         is_root = src_data.get("parent_id") is None
@@ -347,13 +343,7 @@ class ChatStore:
                 if child_target != child_src:
                     child_src.unlink()
 
-        dst = dst_dir / src.name
-        if dst.exists():
-            stem, suffix = src.stem, src.suffix
-            n = 2
-            while dst.exists():
-                dst = dst_dir / f"{stem}-{n}{suffix}"
-                n += 1
+        dst = dst_dir / _unique_filename(dst_dir, src.name)
         new_payload = _build_payload(src_data)
         safe_write_json(dst, new_payload)
         src.unlink()
@@ -493,15 +483,13 @@ class ChatStore:
         for d in dirs.split(","):
             d = d.strip()
             target = (self._base / d).resolve() if d else self._base
-            if not str(target).startswith(str(self._base)):
-                continue
             if not target.exists():
                 continue
             prefix = f"{d}/" if d else ""
             result.update(self._scan_dir_for_meta(target, prefix))
         return result
 
-    def _scan_dir_for_meta(self, base: Path, rel_prefix: str = "") -> dict[str, dict[str, Any]]:
+    def _scan_dir_for_meta(self, base: DataStorePath, rel_prefix: str = "") -> dict[str, dict[str, Any]]:
         result: dict[str, dict[str, Any]] = {}
         for f in sorted(base.iterdir(), key=lambda path: path.name):
             if f.name in (PROJECT_JSON, META_JSON):
@@ -516,7 +504,7 @@ class ChatStore:
                 result.update(self._scan_dir_for_meta(f, sub_prefix))
         return result
 
-    def _extract_meta(self, path: Path) -> dict[str, Any]:
+    def _extract_meta(self, path: DataStorePath) -> dict[str, Any]:
         data = self._load_path(path)
         if data is None:
             return {}
@@ -564,7 +552,7 @@ def _sanitize_title(title: str) -> str:
     return sanitized or "untitled"
 
 
-def _unique_filename(directory: Path, base: str) -> str:
+def _unique_filename(directory: DataStorePath, base: str) -> str:
     target = directory / base
     if not target.exists():
         return base
@@ -595,7 +583,7 @@ def _extract_qa_pairs(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return pairs
 
 
-def _next_branch_filename(parent_path: Path, parent_file: str, base_dir: Path) -> str:
+def _next_branch_filename(parent_path: DataStorePath, parent_file: str, base_dir: DataStorePath) -> str:
     parent_dir = parent_path.parent
     parent_stem = parent_path.stem
 

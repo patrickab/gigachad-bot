@@ -5,7 +5,6 @@ from pydantic import BaseModel
 
 from backend.routes.architecture_graphs import ArchitectureGraphContextReferenceModel
 from backend.routes.deps import get_project_store
-from backend.routes.files import delete_chat_upload_dir
 from lib.project_store import ProjectStore
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -22,12 +21,6 @@ class ProjectTabModel(BaseModel):
     filename: str
     name: str | None = None
     title: str | None = None
-
-
-class ProjectDataModel(BaseModel):
-    name: str
-    kanban: list[KanbanCardModel] = []
-    tabs: list[ProjectTabModel] = []
 
 
 class CreateProjectRequest(BaseModel):
@@ -187,11 +180,3 @@ async def save_project_tab(
         raise _not_found()
     except ValueError as e:
         raise _conflict(str(e))
-
-
-@router.delete("/{slug}/tabs/{filename:path}")
-async def delete_project_tab(slug: str, filename: str, store: ProjectStore = Depends(get_project_store)) -> dict[str, str]:
-    try:
-        return store.delete_tab(slug, filename, cleanup_uploads_fn=delete_chat_upload_dir)
-    except FileNotFoundError:
-        raise _not_found()

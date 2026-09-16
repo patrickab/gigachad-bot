@@ -43,7 +43,7 @@ async function ensureOk(res: Response): Promise<Response> {
   return res
 }
 
-export async function request<T>(path: string, options?: RequestInit): Promise<T> {
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await ensureOk(await fetch(`${getApiBase()}${path}`, options))
   return res.json()
 }
@@ -304,13 +304,6 @@ export async function addFileVaultMountpoint(
   return post(`/filevaults/mountpoints?vault=${encodeURIComponent(vault)}`, { path })
 }
 
-export async function removeFileVaultMountpoint(
-  vault: string,
-  path: string,
-): Promise<{ enabled: boolean; tree: VaultNode[] }> {
-  return del(`/filevaults/mountpoints${toQuery({ vault, path })}`)
-}
-
 export async function readFileVaultRendered(path: string): Promise<string> {
   const data = await request<{ path: string; content: string }>(`/filevaults/rendered?path=${encodeURIComponent(path)}`)
   return data.content
@@ -546,22 +539,6 @@ export async function getCategories(scope: "global" | "project", projectSlug?: s
 
 export async function saveCategories(scope: "global" | "project", categories: CategoryDef[], projectSlug?: string | null): Promise<void> {
   await put("/memory/categories", { scope, categories, project_slug: projectSlug ?? null })
-}
-
-export async function moveMemory(
-  memoryId: string,
-  fromScope: "global" | "project",
-  toScope: "global" | "project",
-  fromProjectSlug?: string | null,
-  toProjectSlug?: string | null,
-): Promise<void> {
-  await post("/memory/move", {
-    memory_id: memoryId,
-    from_scope: fromScope,
-    to_scope: toScope,
-    from_project_slug: fromProjectSlug ?? null,
-    to_project_slug: toProjectSlug ?? null,
-  })
 }
 
 export async function remapOrphanedCategory(

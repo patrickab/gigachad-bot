@@ -1,14 +1,12 @@
 "use client"
 
 import { useCallback, useMemo } from "react"
-import type { CategoryDef, PreviewMemory, ProposedMemory } from "@/lib/types"
-import { buildBoardSections, formatCategoryName, normalizeMemoryCategory } from "@/lib/memoryUtils"
+import type { CategoryDef } from "@/lib/types"
+import { type MemoryRecord, groupByCategoryOrder, formatCategoryName, normalizeMemoryCategory } from "@/lib/memoryUtils"
 import { ElevationProvider, ElevatedContainer } from "@/components/ElevatedContainer"
 import { MemoryCard } from "@/components/MemoryPanel"
 import { useDropZone } from "@/hooks/useDropZone"
 import { cn } from "@/lib/utils"
-
-type MemoryRecord = ProposedMemory | PreviewMemory
 
 const PLACEHOLDER_DELAY_MS = 300
 
@@ -61,7 +59,7 @@ export function MemoryBoard({
   })
 
   const sections = useMemo(
-    () => buildBoardSections(categoryOrder, memories),
+    () => groupByCategoryOrder(categoryOrder, memories),
     [categoryOrder, memories],
   )
 

@@ -1,7 +1,6 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import dynamic from "next/dynamic"
 import { Search, FileText, FileType, Image as ImageIcon, Folder, ChevronRight } from "lucide-react"
 import { fileViewerRawUrl, loadFileViewerText } from "@/lib/api"
 import { LaTeXMarkdown } from "@/components/LaTeXMarkdown"
@@ -10,7 +9,7 @@ import { fuzzyScore } from "@/lib/fuzzy"
 import { buildPathTree, relativeName, type PathTreeNode } from "@/lib/pathTree"
 import { cn } from "@/lib/utils"
 
-const PdfViewer = dynamic(() => import("./PdfViewer").then((m) => ({ default: m.PdfViewer })), { ssr: false })
+import { LazyPdfViewer } from "@/components/LazyPdfViewer"
 
 const RESULT_CAP = 300
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif", "ico"])
@@ -282,7 +281,7 @@ export function FileViewer({
             ) : previewedKind === "image" ? (
               <img src={fileViewerRawUrl(previewed.path)} alt={previewed.label} className="mx-auto max-h-full max-w-full rounded border border-divider object-contain" />
             ) : previewedKind === "pdf" ? (
-              <PdfViewer key={previewed.path} url={fileViewerRawUrl(previewed.path)} />
+              <LazyPdfViewer key={previewed.path} url={fileViewerRawUrl(previewed.path)} />
             ) : preview ? (
               previewedKind === "markdown" ? (
                 <LaTeXMarkdown content={preview} />

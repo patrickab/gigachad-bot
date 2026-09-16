@@ -4,12 +4,11 @@ import { useEffect } from "react"
 import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import { X } from "lucide-react"
-import dynamic from "next/dynamic"
 import { LaTeXMarkdown } from "@/components/LaTeXMarkdown"
 import type { Attachment } from "@/lib/types"
 import { rewriteImages } from "@/lib/api"
 
-const PdfViewer = dynamic(() => import("./PdfViewer").then((m) => ({ default: m.PdfViewer })), { ssr: false })
+import { LazyPdfViewer } from "./LazyPdfViewer"
 
 function PreviewContent({ attachment, chatId, slug }: { attachment: Attachment; chatId: string; slug: string | null }) {
   if (attachment.mime.startsWith("image/")) {
@@ -23,7 +22,7 @@ function PreviewContent({ attachment, chatId, slug }: { attachment: Attachment; 
   if (attachment.mime === "application/pdf") {
     return (
       <div className="flex-1 min-h-0 overflow-hidden">
-        <PdfViewer url={attachment.url} />
+        <LazyPdfViewer url={attachment.url} />
       </div>
     )
   }

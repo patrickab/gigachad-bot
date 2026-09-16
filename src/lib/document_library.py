@@ -7,17 +7,28 @@ paths* so documents may come from arbitrary sources, but the add/upload flow
 copies them here so the library stays self-contained.
 
 This module is pure I/O over the filesystem — it never touches ``project.json``
-(that is ``ProjectStore``'s seam) and never spawns MinerU (that lives in the
-``mineru`` route). Keeping it dependency-free of the route layer lets both
+(that is ``ProjectStore``'s seam) and never spawns MinerU (that lives in
+``lib.mineru``). Keeping it dependency-free of the route layer lets both
 ``files`` and ``documents`` routes reuse it without import cycles.
 """
 
+from collections.abc import Iterable
 import logging
 import mimetypes
 from pathlib import Path
 import shutil
+from typing import TYPE_CHECKING
 
-from config import DIRECTORY_CHAT_HISTORIES, DIRECTORY_OUTPUT_MINERU, DIRECTORY_OUTPUT_PDF
+from config import (
+    DIRECTORY_CHAT_HISTORIES,
+    DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS,
+    DIRECTORY_OUTPUT_MINERU,
+    DIRECTORY_OUTPUT_PDF,
+)
+
+if TYPE_CHECKING:
+    from lib.file_vault import FileVault
+    from lib.project_store import ProjectStore
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +55,53 @@ def document_meta(path: str | Path) -> dict[str, str]:
     """Describe a document for the API: absolute path, display name, MIME."""
     p = Path(path)
     return {"path": str(p), "name": p.name, "mime": mime_for(p)}
+
+
+class PathNotAllowed(Exception):
+    """A user-supplied path is not one the app is willing to serve.
+
+    ``outside_roots`` separates the two rejections callers report differently:
+    True when the path is under none of the allowed roots, False when the root
+    is fine but no file actually lives there.
+    """
+
+    def __init__(self, *, outside_roots: bool) -> None:
+        super().__init__("path outside the allowed roots" if outside_roots else "no file at path")
+        self.outside_roots = outside_roots
+
+
+def resolve_known_path(
+    path: str | Path,
+    *,
+    store: "ProjectStore",
+    vault: "FileVault | None" = None,
+    extra_roots: Iterable[str | Path] = (),
+) -> Path:
+    """Resolve a user-supplied path, rejecting anything outside the allowed roots.
+
+    Allowed are the document library, every path *store* already references and
+    the canonical architecture-graph files, plus whatever the caller opts into:
+    *extra_roots* directory trees and, when given, anything *vault* contains.
+
+    Raises ``PathNotAllowed`` so each caller maps the two rejection reasons onto
+    its own status codes and wording.
+    """
+    resolved = Path(path).expanduser().resolve()
+    roots = [LIBRARY_DIR.resolve(), *(Path(root).resolve() for root in extra_roots)]
+    graphs = DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS.resolve()
+    allowed = (
+        any(resolved.is_relative_to(root) for root in roots)
+        # Graph drafts are deliberately not generic documents: they stay
+        # proposal state until an explicit accept publishes them as canonical.
+        or (resolved.parent == graphs and resolved.name.endswith(".architecture.yaml"))
+        or (vault is not None and vault.contains(resolved))
+        or str(resolved) in {str(Path(known).expanduser().resolve()) for known in store.list_all_files()}
+    )
+    if not allowed:
+        raise PathNotAllowed(outside_roots=True)
+    if not resolved.is_file():
+        raise PathNotAllowed(outside_roots=False)
+    return resolved
 
 
 def organize_file(src: Path) -> Path:

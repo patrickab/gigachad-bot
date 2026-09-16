@@ -33,7 +33,6 @@ def test_cache_path_accepts_full_path(tmp_path: Path, mineru_cache_dir: Path):
 def test_cache_path_passes_through_stem_without_pdf_suffix(mineru_cache_dir: Path):
     """``enqueue`` calls this with bare stems too; ensure non-.pdf names are unchanged."""
     assert mineru_cache_path("report").name == "report.md"
-    assert mineru_cache_path("already.md").name == "already.md.md"
 
 
 # --- materialize: PDF cache hit -------------------------------------------

@@ -40,11 +40,7 @@ def safe_write_json(path: Path | DataStorePath, data: dict[str, Any] | list[Any]
         path.write_text(content)
         return
     path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
-        with open(fd, "w", encoding="utf-8") as f:
-            f.write(content)
-        tmp_path = Path(tmp)
-        tmp_path.replace(path)
-    except OSError:
-        path.write_text(content, encoding="utf-8")
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    with open(fd, "w", encoding="utf-8") as f:
+        f.write(content)
+    Path(tmp).replace(path)

@@ -7,7 +7,6 @@ does not leak into chat, project, prompt, memory, or graph logic.
 
 from __future__ import annotations
 
-import base64
 from dataclasses import dataclass
 import fnmatch
 import hashlib
@@ -16,10 +15,6 @@ from pathlib import Path, PurePosixPath
 import shutil
 import tempfile
 from typing import Protocol
-from urllib.error import HTTPError, URLError
-from urllib.parse import quote
-from urllib.request import Request, urlopen
-import xml.etree.ElementTree as ET
 
 
 class StorageError(RuntimeError):
@@ -28,10 +23,6 @@ class StorageError(RuntimeError):
 
 class StorageConflictError(StorageError):
     """A file changed after the caller read the revision it is trying to save."""
-
-
-class StorageUnavailableError(StorageError):
-    """The remote store cannot currently be reached."""
 
 
 class StorageNotFoundError(StorageError, FileNotFoundError):
@@ -44,7 +35,7 @@ class InvalidStorageKey(ValueError):
 
 @dataclass(frozen=True)
 class Revision:
-    """Opaque content revision; an HTTP ETag for WebDAV and a digest locally."""
+    """Opaque content revision; a digest of the stored bytes."""
 
     token: str
 
@@ -65,7 +56,6 @@ class DataStore(Protocol):
     def mkdir(self, key: str) -> None: ...
     def delete(self, key: str, *, recursive: bool = False) -> None: ...
     def move(self, source: str, destination: str) -> None: ...
-    def copy(self, source: str, destination: str) -> None: ...
 
 
 class DataStorePath:
@@ -171,13 +161,6 @@ class DataStorePath:
         if not missing_ok and not self.exists():
             raise FileNotFoundError(self.key)
         self.store.delete(self.key)
-
-    def replace(self, destination: "DataStorePath") -> "DataStorePath":
-        self.store.move(self.key, destination.key)
-        return destination
-
-    def with_name(self, name: str) -> "DataStorePath":
-        return self.parent / name
 
 
 def read_text(store: DataStore, key: str) -> tuple[str, Revision]:
@@ -292,227 +275,3 @@ class LocalDataStore:
             raise StorageNotFoundError(source)
         dst.parent.mkdir(parents=True, exist_ok=True)
         src.replace(dst)
-
-    def copy(self, source: str, destination: str) -> None:
-        src, dst = self._path(source), self._path(destination)
-        if not src.exists():
-            raise StorageNotFoundError(source)
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        if src.is_dir():
-            shutil.copytree(src, dst, dirs_exist_ok=True)
-        else:
-            shutil.copy2(src, dst)
-
-
-class WebDavDataStore:
-    """WebDAV adapter with an optional local Nextcloud mirror fallback."""
-
-    def __init__(self, base_url: str, user: str, password: str, *, fallback: DataStore | None = None) -> None:
-        self._base_url = base_url.rstrip("/")
-        token = base64.b64encode(f"{user}:{password}".encode()).decode()
-        self._authorization = f"Basic {token}"
-        self._fallback = fallback
-
-    @classmethod
-    def configured(cls) -> bool:
-        return all(os.getenv(name) for name in ("GIGACHAD_WEBDAV_URL", "GIGACHAD_WEBDAV_USER", "GIGACHAD_WEBDAV_PASSWORD"))
-
-    @classmethod
-    def from_environment(cls, *, fallback: DataStore | None = None) -> "WebDavDataStore":
-        url = os.getenv("GIGACHAD_WEBDAV_URL")
-        user = os.getenv("GIGACHAD_WEBDAV_USER")
-        password = os.getenv("GIGACHAD_WEBDAV_PASSWORD")
-        if not all((url, user, password)):
-            raise StorageError("Set GIGACHAD_WEBDAV_URL, _USER, and _PASSWORD for WebDAV storage.")
-        return cls(url, user, password, fallback=fallback)
-
-    def _url(self, key: str, *, allow_empty: bool = False) -> str:
-        normalized = validate_key(key, allow_empty=allow_empty)
-        return self._base_url if not normalized else f"{self._base_url}/{quote(normalized, safe='/')}"
-
-    def _request(self, method: str, key: str, *, body: bytes | None = None, headers: dict[str, str] | None = None, allow_empty: bool = False) -> tuple[bytes, str | None]:
-        request = Request(
-            self._url(key, allow_empty=allow_empty), data=body,
-            headers={"Authorization": self._authorization, **(headers or {})}, method=method,
-        )
-        try:
-            with urlopen(request, timeout=20) as response:  # noqa: S310 -- endpoint is explicit user config.
-                return response.read(), response.headers.get("ETag", response.headers.get("OC-Etag"))
-        except HTTPError as exc:
-            if exc.code == 404:
-                raise StorageNotFoundError(key) from exc
-            if exc.code == 412:
-                raise StorageConflictError(f"{key} changed on another device; reload before saving") from exc
-            if 500 <= exc.code < 600:
-                raise StorageUnavailableError(f"WebDAV {method} failed for {key}: HTTP {exc.code}") from exc
-            raise StorageError(f"WebDAV {method} failed for {key}: HTTP {exc.code}") from exc
-        except (URLError, TimeoutError, OSError) as exc:
-            reason = getattr(exc, "reason", exc)
-            raise StorageUnavailableError(f"WebDAV {method} failed for {key}: {reason}") from exc
-
-    def read_bytes(self, key: str) -> tuple[bytes, Revision]:
-        if self._fallback is not None:
-            try:
-                return self._fallback.read_bytes(key)
-            except StorageNotFoundError:
-                pass
-        try:
-            body, etag = self._request("GET", key)
-        except StorageUnavailableError:
-            if self._fallback is not None:
-                return self._fallback.read_bytes(key)
-            raise
-        if not etag:
-            raise StorageError(f"WebDAV GET for {key} did not return an ETag")
-        return body, Revision(etag)
-
-    def write_bytes(self, key: str, content: bytes, *, expected: Revision | None = None) -> Revision:
-        # A caller that has read a file supplies its ETag.  Blind writes are retained
-        # for immutable/new binary imports; editable API routes always pass a revision.
-        try:
-            headers = self._write_headers(key, expected)
-            _, etag = self._request("PUT", key, body=content, headers=headers)
-        except StorageUnavailableError:
-            if self._fallback is not None:
-                return self._fallback.write_bytes(key, content, expected=self._fallback_expected(key, expected))
-            raise
-        if etag:
-            return Revision(etag)
-        _, revision = self._read_remote(key)
-        return revision
-
-    def _read_remote(self, key: str) -> tuple[bytes, Revision]:
-        body, etag = self._request("GET", key)
-        if not etag:
-            raise StorageError(f"WebDAV GET for {key} did not return an ETag")
-        return body, Revision(etag)
-
-    def _write_headers(self, key: str, expected: Revision | None) -> dict[str, str]:
-        if expected is None:
-            return {}
-        if self._fallback is None:
-            return {"If-Match": expected.token}
-        try:
-            cached, cached_revision = self._fallback.read_bytes(key)
-        except StorageNotFoundError:
-            return {"If-Match": expected.token}
-        if cached_revision != expected:
-            return {"If-Match": expected.token}
-        try:
-            remote, remote_etag = self._request("GET", key)
-        except StorageNotFoundError:
-            # The local mirror has a file but the remote does not yet: recreate it.
-            return {}
-        if remote != cached:
-            raise StorageConflictError(f"{key} changed on another device; reload before saving")
-        if not remote_etag:
-            raise StorageError(f"WebDAV GET for {key} did not return an ETag")
-        return {"If-Match": remote_etag}
-
-    def _fallback_expected(self, key: str, expected: Revision | None) -> Revision | None:
-        """Translate a remote ETag to the local revision when falling offline."""
-        if expected is None or self._fallback is None:
-            return None
-        try:
-            _, local_revision = self._fallback.read_bytes(key)
-        except StorageNotFoundError:
-            return None
-        return local_revision
-
-    def list(self, prefix: str = "", *, recursive: bool = False) -> list[Entry]:
-        if self._fallback is not None:
-            cached = self._fallback.list(prefix, recursive=recursive)
-            if cached:
-                return cached
-        try:
-            body, _ = self._request("PROPFIND", prefix, headers={"Depth": "infinity" if recursive else "1"}, allow_empty=True)
-        except StorageUnavailableError:
-            if self._fallback is not None:
-                return self._fallback.list(prefix, recursive=recursive)
-            raise
-        try:
-            root = ET.fromstring(body)
-        except ET.ParseError as exc:
-            raise StorageError("WebDAV PROPFIND returned invalid XML") from exc
-        namespace = "{DAV:}"
-        base = self._url("", allow_empty=True).rstrip("/")
-        entries: list[Entry] = []
-        for response in root.findall(f"{namespace}response"):
-            href = response.findtext(f"{namespace}href", "").rstrip("/")
-            if href.rstrip("/") == base:
-                continue
-            key = href.split("/", 3)[-1] if href.startswith("/") else href
-            # Nextcloud returns a URL path; keep only its suffix beneath configured base.
-            configured_path = self._base_url.split("://", 1)[-1].split("/", 1)[-1].rstrip("/")
-            if configured_path and configured_path in key:
-                key = key.split(configured_path, 1)[1].strip("/")
-            if not key:
-                continue
-            prop = response.find(f"{namespace}propstat/{namespace}prop")
-            is_dir = prop is not None and prop.find(f"{namespace}resourcetype/{namespace}collection") is not None
-            length = prop.findtext(f"{namespace}getcontentlength") if prop is not None else None
-            etag = prop.findtext(f"{namespace}getetag") if prop is not None else None
-            entries.append(Entry(key, is_dir=is_dir, size=int(length) if length and length.isdigit() else None, revision=Revision(etag) if etag else None))
-        return entries
-
-    def exists(self, key: str) -> bool:
-        if self._fallback is not None and self._fallback.exists(key):
-            return True
-        try:
-            self._request("PROPFIND", key, headers={"Depth": "0"})
-        except StorageNotFoundError:
-            return False
-        except StorageUnavailableError:
-            if self._fallback is not None:
-                return self._fallback.exists(key)
-            raise
-        return True
-
-    def mkdir(self, key: str) -> None:
-        try:
-            self._mkdir(key)
-        except StorageUnavailableError:
-            if self._fallback is not None:
-                self._fallback.mkdir(key)
-                return
-            raise
-
-    def _mkdir(self, key: str) -> None:
-        try:
-            self._request("MKCOL", key)
-        except StorageError as exc:
-            # Nextcloud reports an existing collection as 405; a successful exists check makes this idempotent.
-            if not self.exists(key):
-                raise exc
-
-    def delete(self, key: str, *, recursive: bool = False) -> None:
-        try:
-            self._request("DELETE", key)
-        except StorageNotFoundError:
-            return
-        except StorageUnavailableError:
-            if self._fallback is not None:
-                self._fallback.delete(key, recursive=recursive)
-                return
-            raise
-
-    def _copy_or_move(self, method: str, source: str, destination: str) -> None:
-        self._request(method, source, headers={"Destination": self._url(destination), "Overwrite": "F"})
-
-    def move(self, source: str, destination: str) -> None:
-        try:
-            self._copy_or_move("MOVE", source, destination)
-        except StorageUnavailableError:
-            if self._fallback is not None:
-                self._fallback.move(source, destination)
-                return
-            raise
-
-    def copy(self, source: str, destination: str) -> None:
-        try:
-            self._copy_or_move("COPY", source, destination)
-        except StorageUnavailableError:
-            if self._fallback is not None:
-                self._fallback.copy(source, destination)
-                return
-            raise

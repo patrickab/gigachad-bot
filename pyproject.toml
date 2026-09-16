@@ -73,7 +73,7 @@ ignore = [
 
 [tool.ruff.lint.isort]
 force-sort-within-sections = true
-known-first-party = ["openai_client"]
+known-first-party = ["config", "lib", "backend"]
 section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
 
 # Test files relax annotation/unused-arg rules — pytest fixtures don't need

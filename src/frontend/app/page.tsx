@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import dynamic from "next/dynamic"
 import { Maximize2, Minimize2 } from "lucide-react"
 import { Sidebar } from "@/components/Sidebar"
 import { CommandMenu, type CommandMenuItem } from "@/components/CommandMenu"
@@ -55,7 +54,7 @@ import {
   fileViewerRawUrl,
 } from "@/lib/api"
 
-const PdfViewer = dynamic(() => import("@/components/PdfViewer").then((m) => ({ default: m.PdfViewer })), { ssr: false })
+import { LazyPdfViewer } from "@/components/LazyPdfViewer"
 import type { Attachment, Message } from "@/lib/types"
 import {
   buildAttachedSend,
@@ -720,7 +719,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
                 <span className="truncate text-xs font-medium text-ink">{vault.vaultPdfPath.split("/").pop()}</span>
               </div>
               <div className="min-h-0 flex-1">
-                <PdfViewer url={fileViewerRawUrl(vault.vaultPdfPath)} />
+                <LazyPdfViewer url={fileViewerRawUrl(vault.vaultPdfPath)} />
               </div>
             </div>
           )}

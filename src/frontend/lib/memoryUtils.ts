@@ -1,8 +1,8 @@
 import type { CategoryDef, PreviewMemory, ProposedMemory } from "@/lib/types"
 
-type MemoryRecord = ProposedMemory | PreviewMemory
+export type MemoryRecord = ProposedMemory | PreviewMemory
 
-export type MemorySection = {
+type MemorySection = {
   category: CategoryDef | { name: string; description: string }
   items: MemoryRecord[]
 }
@@ -56,8 +56,6 @@ export function groupByCategoryOrder(
 
   return sections
 }
-
-export const buildBoardSections = groupByCategoryOrder
 
 /** Flatten sections back into a category-ordered memory list. */
 export function sortMemoriesByCategoryOrder(mems: PreviewMemory[], categoryOrder: CategoryDef[]): PreviewMemory[] {

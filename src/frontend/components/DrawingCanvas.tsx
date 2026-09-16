@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import { X, Check, Maximize2, Minimize2, Undo2, Trash2, Pencil } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { getStroke } from "perfect-freehand"
-import { type StrokeData, getSvgPathFromStroke, renderStrokesToJpeg } from "@/lib/drawing"
+import { type StrokeData, STROKE_OPTIONS as BASE_STROKE_OPTIONS, getSvgPathFromStroke, renderStrokesToJpeg } from "@/lib/drawing"
 import { uploadFile as apiUploadFile, chatFileUrl } from "@/lib/api"
 import { activeThemeName, readToken } from "@/lib/palette"
 import type { Attachment } from "@/lib/types"
@@ -14,12 +14,9 @@ import type { Attachment } from "@/lib/types"
 const THIN_WIDTH = 3
 const THICK_WIDTH = 8
 
-const STROKE_OPTIONS = {
-  smoothing: 0.5,
-  streamline: 0.5,
-  simulatePressure: true,
-  last: true,
-} as const
+// Live pen input carries no real pressure, so simulate it here. The shared base
+// in lib/drawing renders already-captured strokes and leaves it off.
+const STROKE_OPTIONS = { ...BASE_STROKE_OPTIONS, simulatePressure: true } as const
 
 function detectTheme(): "dark" | "light" {
   return activeThemeName()

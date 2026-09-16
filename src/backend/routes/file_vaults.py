@@ -1,9 +1,10 @@
 """File-vault routes — the API owns every filesystem access.
 
 The UI never touches a vault directly: it lists files (`/files`), previews one
-(`/file`), and *attaches* a chosen file (`/attach`). Attach is a **live
-reference** — nothing is copied; the returned `path` is stored on the
-Attachment and content is read from (and written back to) the actual file.
+(`/rendered`), writes one (`/file`), and *attaches* a chosen file (`/attach`).
+Attach is a **live reference** — nothing is copied; the returned `path` is
+stored on the Attachment and content is read from (and written back to) the
+actual file.
 """
 
 import logging
@@ -13,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from backend.routes.deps import get_file_vault
+from backend.routes.schemas import AttachResult, FileContent, FileListResponse, FileMeta
 from lib import document_library as lib_docs
 from lib.attachment_materialize import materialize
 from lib.file_vault import FileVault
@@ -50,41 +52,13 @@ class RootBody(BaseModel):
     project: str | None = None
 
 
-class WriteBody(BaseModel):
-    path: str
-    content: str
-
-
-class VaultFileContent(BaseModel):
-    path: str
-    content: str
-
-
-class AttachResult(BaseModel):
-    name: str
-    mime: str
-    path: str
-    content: str | None = None
-    parsedMd: str | None = None
-
-
 @router.get("/files", response_model=VaultListResponse)
 async def list_files(vault: FileVault = Depends(get_file_vault)) -> VaultListResponse:
     return VaultListResponse(enabled=vault.enabled, files=vault.list_files())
 
 
-class ProjectDocumentOut(BaseModel):
-    path: str
-    name: str
-    mime: str
-
-
-class ProjectDocumentsResponse(BaseModel):
-    documents: list[ProjectDocumentOut]
-
-
-@router.get("/project-documents", response_model=ProjectDocumentsResponse)
-async def project_documents(slug: str = Query(...), vault: FileVault = Depends(get_file_vault)) -> ProjectDocumentsResponse:
+@router.get("/project-documents", response_model=FileListResponse)
+async def project_documents(slug: str = Query(...), vault: FileVault = Depends(get_file_vault)) -> FileListResponse:
     """Files from vaults mounted to *slug*, shaped like project documents.
 
     Surfaced so the chat sidebar can list mounted-vault files alongside library
@@ -93,15 +67,15 @@ async def project_documents(slug: str = Query(...), vault: FileVault = Depends(g
     parsed cloud copy takes precedence over the vault original, so the sidebar
     never lists the same PDF twice (vault row + library row).
     """
-    docs: list[ProjectDocumentOut] = []
+    docs: list[FileMeta] = []
     for f in vault.list_files_for_project(slug):
         p = Path(f["path"])
         if p.suffix.lower() == ".pdf":
             library_pdf = lib_docs.LIBRARY_DIR / p.name
             if library_pdf.is_file():
                 p = library_pdf
-        docs.append(ProjectDocumentOut(path=str(p), name=p.name, mime=lib_docs.mime_for(p)))
-    return ProjectDocumentsResponse(documents=docs)
+        docs.append(FileMeta(path=str(p), name=p.name, mime=lib_docs.mime_for(p)))
+    return FileListResponse(documents=docs)
 
 
 @router.get("/tree", response_model=VaultTreeResponse)
@@ -151,16 +125,8 @@ async def remove_mountpoint(
     return VaultTreeResponse(enabled=vault.enabled, tree=vault.tree())
 
 
-@router.get("/file", response_model=VaultFileContent)
-async def read_file(path: str = Query(...), vault: FileVault = Depends(get_file_vault)) -> VaultFileContent:
-    try:
-        return VaultFileContent(path=path, content=vault.read(path))
-    except (FileNotFoundError, ValueError) as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
 @router.post("/file")
-async def write_file(body: WriteBody, vault: FileVault = Depends(get_file_vault)) -> dict[str, bool]:
+async def write_file(body: FileContent, vault: FileVault = Depends(get_file_vault)) -> dict[str, bool]:
     try:
         vault.write(body.path, body.content)
     except (OSError, ValueError) as exc:
@@ -168,11 +134,11 @@ async def write_file(body: WriteBody, vault: FileVault = Depends(get_file_vault)
     return {"ok": True}
 
 
-@router.get("/rendered", response_model=VaultFileContent)
-async def read_rendered(path: str = Query(...), vault: FileVault = Depends(get_file_vault)) -> VaultFileContent:
+@router.get("/rendered", response_model=FileContent)
+async def read_rendered(path: str = Query(...), vault: FileVault = Depends(get_file_vault)) -> FileContent:
     try:
         raw = vault.read(path)
-        return VaultFileContent(path=path, content=vault.resolve_wiki_content(raw, path))
+        return FileContent(path=path, content=vault.resolve_wiki_content(raw, path))
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

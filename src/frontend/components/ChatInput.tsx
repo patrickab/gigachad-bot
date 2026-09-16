@@ -36,6 +36,15 @@ function fileIcon(mime: string) {
   return FileIcon
 }
 
+async function toDataUrl(url: string): Promise<string> {
+  const blob = await (await fetch(url)).blob()
+  return new Promise<string>((resolve) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.readAsDataURL(blob)
+  })
+}
+
 export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({
   chatId,
   onSend,
@@ -141,13 +150,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     if (ocrEnabled) {
       const imgAtt = attachments.find(a => a.mime.startsWith("image/"))
       if (imgAtt && onOCRRequest) {
-        fetch(imgAtt.url)
-          .then(r => r.blob())
-          .then(blob => new Promise<string>((resolve) => {
-            const reader = new FileReader()
-            reader.onload = () => resolve(reader.result as string)
-            reader.readAsDataURL(blob)
-          }))
+        toDataUrl(imgAtt.url)
           .then(b64 => { onOCRRequest(b64); setText(""); clearAttachments(); requestAnimationFrame(() => adjustHeight()) })
           .catch(() => {})
         return
@@ -410,13 +413,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
 
             if (drawingOcrActive) {
               setDrawingOcrActive(false)
-              fetch(att.url)
-                .then(r => r.blob())
-                .then(blob => new Promise<string>(resolve => {
-                  const reader = new FileReader()
-                  reader.onload = () => resolve(reader.result as string)
-                  reader.readAsDataURL(blob)
-                }))
+              toDataUrl(att.url)
                 .then(b64 => setDrawingOcrImage(b64))
                 .catch(() => {})
             } else {

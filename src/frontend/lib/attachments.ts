@@ -75,10 +75,6 @@ export function collectActiveImagePaths(
   return paths
 }
 
-export function deactivateUserImages(attachments: Attachment[]): Attachment[] {
-  return attachments.map((a) => (isImageAttachment(a) ? { ...a, active: false } : a))
-}
-
 // Pure attachment-intake transform. Parses unparsed non-image attachments
 // (via injected `parse`), merges results back, builds the hidden-content block,
 // and assembles the ChatRequest with prior + new image paths. The optimistic
