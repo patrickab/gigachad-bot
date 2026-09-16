@@ -67,7 +67,7 @@ export function CanvasWorkspace({ selected, slug, toolbarSlot, onCloseEditor, on
   useEffect(() => {
     if (selected) return
     const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+      if (e.altKey && e.key === "s") {
         e.preventDefault()
         setSaveOpen(true)
       }

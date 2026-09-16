@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from config import DIRECTORY_OUTPUT_MINERU, DIRECTORY_OUTPUT_PDF, MINERU_SERVER_URL, get_model_defaults
 from lib.attachment_materialize import mineru_cache_path
+from lib.llm_resilience import api_query_resilient
 
 from .deps import request_client
 
@@ -262,7 +263,8 @@ async def parse_single_pdf(
         result.query = query_clean
         try:
             with request_client() as c:
-                response = c.api_query(
+                response = api_query_resilient(
+                    c,
                     model=model or get_model_defaults()["small_model"],
                     user_msg=md_content + "\n\n---\n\n" + query_clean,
                     system_prompt="",
@@ -316,7 +318,8 @@ async def parse_batch_pdfs(
     if query_clean:
         try:
             with request_client() as c:
-                response = c.api_query(
+                response = api_query_resilient(
+                    c,
                     model=model or get_model_defaults()["small_model"],
                     user_msg=shared_md + "\n\n---\n\n" + query_clean,
                     system_prompt="",

@@ -268,6 +268,23 @@ describe("nested canvas file", () => {
   })
 })
 
+describe("project assets", () => {
+  it("loads PDFs and images from the canvas project instead of its parent surface", async () => {
+    api.listProjectDocuments.mockResolvedValueOnce([
+      { path: "proj/documents/reference.pdf", name: "reference.pdf", mime: "application/pdf" },
+      { path: "proj/documents/diagram.png", name: "diagram.png", mime: "image/png" },
+    ])
+    const seen: CanvasDocument[] = []
+    const { container } = render(<Harness seen={seen} slug="proj" />)
+
+    act(() => { toolbar(container)[0]!.click() })
+    await act(async () => {})
+
+    expect(container.textContent).toContain("reference.pdf")
+    expect(container.textContent).toContain("diagram.png")
+  })
+})
+
 describe("cross-canvas stroke transfer", () => {
   const view = (left: number, top: number, scale: number, ox = 0, oy = 0) =>
     ({ rect: { left, top }, scale, offset: { x: ox, y: oy } })

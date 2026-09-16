@@ -205,8 +205,6 @@ export function serializeCanvasDoc(doc: CanvasDocument): string {
 interface CanvasEditorProps {
   doc: CanvasDocument
   onChange: (doc: CanvasDocument) => void
-  availablePdfs?: { path: string; name: string }[]
-  availableImages?: { path: string; name: string }[]
   slug?: string
   onImageAdded?: (path: string) => void
   // When given, the toolbar renders into this external element (e.g. the app
@@ -366,7 +364,7 @@ const StrokeLayer = memo(function StrokeLayer({ strokes, hidden, isDark }: { str
   )
 })
 
-export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, slug, onImageAdded, toolbarSlot, docPath, depth = 0 }: CanvasEditorProps) {
+export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, docPath, depth = 0 }: CanvasEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
 
@@ -423,6 +421,10 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
 
   const [isPanning, setIsPanning] = useState(false)
   const panStart = useRef({ x: 0, y: 0, ox: 0, oy: 0 })
+
+  // Hide the crosshair for pen input without updating state on every move.
+  const [pointerIsPen, setPointerIsPen] = useState(false)
+  const lastPointerTypeRef = useRef<string>("mouse")
 
   const [isDrawing, setIsDrawing] = useState(false)
   // The in-progress stroke lives in a ref and renders imperatively via livePathRef,
@@ -639,12 +641,13 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up) }
   }, [])
 
+  // Some pens report their side button as secondary. Preserve mouse right-click behavior.
   const handleContainerPointerDown = useCallback((e: React.PointerEvent) => {
     if (e.pointerType === "touch" || screenshotMode || selectionMode) return
     // any pointerdown that bubbles this far didn't hit the selection lasso or its
     // handles (they stopPropagation) — so it's "outside" and drops the selection
     clearSelection()
-    if (e.button === 1) {
+    if (e.button === 1 || (e.pointerType === "pen" && e.button === 2)) {
       // pen side button: hold = activate selection mode & start the lasso right on this
       // same press (no lift-and-retouch needed), double-click = activate screenshot mode
       e.preventDefault()
@@ -672,6 +675,10 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
 
   const handleContainerPointerMove = useCallback((e: React.PointerEvent) => {
     if (e.pointerType === "touch") return
+    if (e.pointerType !== lastPointerTypeRef.current) {
+      lastPointerTypeRef.current = e.pointerType
+      setPointerIsPen(e.pointerType === "pen")
+    }
     if (!isPanning) return
     const dx = e.clientX - panStart.current.x
     const dy = e.clientY - panStart.current.y
@@ -682,7 +689,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
 
   const handleContainerPointerUp = useCallback((e: React.PointerEvent) => {
     if (e.pointerType === "touch") return
-    if (e.button === 1) {
+    if (e.button === 1 || (e.pointerType === "pen" && e.button === 2)) {
       clearTimeout(penHoldTimer.current)
       if (penHoldFired.current) { penHoldFired.current = false; return }
       if (penClickPending.current) {
@@ -1144,17 +1151,23 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
     return () => document.removeEventListener("mousedown", handler)
   }, [addMenuOpen])
 
-  // The project's other `.canvas` files, fetched when the menu opens — unlike PDFs and
-  // images the parent has no such list, and it changes outside this component. Only the
-  // outermost editor offers them: a canvas window can hold a file, not hand out more.
+  // Fetch project assets here, rather than from the surface hosting the editor. This
+  // keeps chat and canvas mode on the same data path. Only the outermost editor offers
+  // other canvases, so a canvas window can hold a file without handing out more.
   const [projectCanvases, setProjectCanvases] = useState<{ path: string; name: string }[]>([])
+  const [projectPdfs, setProjectPdfs] = useState<{ path: string; name: string }[]>([])
+  const [projectImages, setProjectImages] = useState<{ path: string; name: string }[]>([])
   const [architectureGraphs, setArchitectureGraphs] = useState<{ path: string; name: string }[]>([])
   useEffect(() => {
-    if (!addMenuOpen || slug == null || depth > 0) return
+    if (!addMenuOpen || slug == null) return
     listProjectDocuments(slug)
-      .then((docs) => setProjectCanvases(docs
-        .filter((d) => d.path.endsWith(".canvas") && d.path !== docPath)
-        .map((d) => ({ path: d.path, name: d.name }))))
+      .then((docs) => {
+        setProjectPdfs(docs.filter((d) => d.mime === "application/pdf").map((d) => ({ path: d.path, name: d.name })))
+        setProjectImages(docs.filter((d) => d.mime.startsWith("image/")).map((d) => ({ path: d.path, name: d.name })))
+        if (depth === 0) setProjectCanvases(docs
+          .filter((d) => d.path.endsWith(".canvas") && d.path !== docPath)
+          .map((d) => ({ path: d.path, name: d.name })))
+      })
       .catch(() => { /* picker just stays empty */ })
   }, [addMenuOpen, slug, depth, docPath])
 
@@ -1456,11 +1469,11 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
               >
                 Page
               </button>
-              {(availableImages ?? []).length > 0 && (
+              {projectImages.length > 0 && (
                 <>
                   <div className="mx-2 my-1 border-t border-divider/50" />
                   <div className="px-3 py-0.5 text-[9px] text-ink-faint uppercase tracking-wider">Images</div>
-                  {availableImages!.map((img) => (
+                  {projectImages.map((img) => (
                     <button
                       key={img.path}
                       onClick={() => addImageFrame(img.path)}
@@ -1472,11 +1485,11 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
                   ))}
                 </>
               )}
-              {(availablePdfs ?? []).length > 0 && (
+              {projectPdfs.length > 0 && (
                 <>
                   <div className="mx-2 my-1 border-t border-divider/50" />
                   <div className="px-3 py-0.5 text-[9px] text-ink-faint uppercase tracking-wider">PDFs</div>
-                  {availablePdfs!.map((pdf) => (
+                  {projectPdfs.map((pdf) => (
                     <button
                       key={pdf.path}
                       onClick={() => addAttachment(pdf.path)}
@@ -1662,7 +1675,7 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
       {/* Canvas area */}
       <div
         ref={containerRef}
-        className={cn("flex-1 min-h-0 overflow-hidden relative", isDrawing ? "cursor-none" : isPanning ? "cursor-grabbing" : "cursor-crosshair")}
+        className={cn("flex-1 min-h-0 overflow-hidden relative", isDrawing || pointerIsPen ? "cursor-none" : isPanning ? "cursor-grabbing" : "cursor-crosshair")}
         style={{ touchAction: "none", WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none" }}
         onPointerDown={handleContainerPointerDown}
         onPointerMove={handleContainerPointerMove}
@@ -1957,8 +1970,6 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
                         path={att.path}
                         slug={slug}
                         depth={depth + 1}
-                        availablePdfs={availablePdfs}
-                        availableImages={availableImages}
                       />
                     ) : (
                       <div className="flex h-full items-center justify-center px-3 text-center text-[10px] text-ink-faint">
@@ -1971,8 +1982,6 @@ export function CanvasEditor({ doc, onChange, availablePdfs, availableImages, sl
                       onChange={(d) => updateNestedCanvas(att.id, d)}
                       slug={slug}
                       depth={depth + 1}
-                      availablePdfs={availablePdfs}
-                      availableImages={availableImages}
                     />
                   )
                 ) : (
@@ -2114,12 +2123,10 @@ function CanvasArchitectureGraph({ path }: { path: string }) {
 // outright — nothing but the path is stored in the canvas holding the window.
 // ponytail: single-writer assumption, same as DocumentEditor. No dirty flag, no
 // conflict detection; add both together if two surfaces ever edit one canvas at once.
-function NestedCanvasFile({ path, slug, depth, availablePdfs, availableImages }: {
+function NestedCanvasFile({ path, slug, depth }: {
   path: string
   slug?: string
   depth: number
-  availablePdfs?: { path: string; name: string }[]
-  availableImages?: { path: string; name: string }[]
 }) {
   const [doc, setDoc] = useState<CanvasDocument | null>(null)
   const savedRef = useRef<string | null>(null)
@@ -2168,8 +2175,6 @@ function NestedCanvasFile({ path, slug, depth, availablePdfs, availableImages }:
       slug={slug}
       depth={depth}
       docPath={path}
-      availablePdfs={availablePdfs}
-      availableImages={availableImages}
     />
   )
 }

@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from lib.image_paths import resolve_chat_image_paths
+from lib.llm_resilience import api_query_resilient
 from lib.memory_store import MemoryStore
 
 from .deps import get_memory_store, request_client, sse_event_stream
@@ -53,7 +54,8 @@ async def chat(req: ChatRequest, memory_store: MemoryStoreDep) -> EventSourceRes
         kwargs = _build_kwargs(req)
         img = _resolve_images(c, req)
         system_prompt = memory_store.augment_system_prompt(req.system_prompt, req.project_slug)
-        chunks = c.api_query(
+        chunks = api_query_resilient(
+            c,
             model=req.model,
             user_msg=req.user_msg,
             user_msg_history=req.messages,
@@ -72,7 +74,8 @@ async def chat_nonstream(req: ChatRequest, memory_store: MemoryStoreDep) -> dict
         kwargs = _build_kwargs(req)
         img = _resolve_images(c, req)
         system_prompt = memory_store.augment_system_prompt(req.system_prompt, req.project_slug)
-        response = c.api_query(
+        response = api_query_resilient(
+            c,
             model=req.model,
             user_msg=req.user_msg,
             user_msg_history=req.messages,

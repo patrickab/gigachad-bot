@@ -124,9 +124,15 @@ class DataStorePath:
         return bool(self.key) and self.store.exists(self.key)
 
     def is_file(self) -> bool:
+        fast = getattr(self.store, "is_file", None)
+        if callable(fast):
+            return fast(self.key)
         return self.exists() and not any(entry.key == self.key and entry.is_dir for entry in self.store.list(self.parent.key))
 
     def is_dir(self) -> bool:
+        fast = getattr(self.store, "is_dir", None)
+        if callable(fast):
+            return fast(self.key)
         return self.exists() and not self.is_file()
 
     def _children(self, recursive: bool) -> list["DataStorePath"]:
@@ -148,11 +154,7 @@ class DataStorePath:
         return self.read_bytes().decode(encoding)
 
     def write_bytes(self, content: bytes) -> None:
-        try:
-            _, revision = self.store.read_bytes(self.key)
-        except StorageNotFoundError:
-            revision = None
-        self.store.write_bytes(self.key, content, expected=revision)
+        self.store.write_bytes(self.key, content)
 
     def write_text(self, content: str, *, encoding: str = "utf-8") -> None:
         self.write_bytes(content.encode(encoding))
@@ -255,9 +257,18 @@ class LocalDataStore:
             if item.is_dir():
                 entries.append(Entry(relative, is_dir=True))
             else:
-                content = item.read_bytes()
-                entries.append(Entry(relative, is_dir=False, size=len(content), revision=self._revision(content)))
+                # Avoid reading every file just to list metadata.
+                stat = item.stat()
+                entries.append(
+                    Entry(relative, is_dir=False, size=stat.st_size, revision=Revision(f"{stat.st_mtime_ns}-{stat.st_size}"))
+                )
         return entries
+
+    def is_file(self, key: str) -> bool:
+        return self._path(key).is_file()
+
+    def is_dir(self, key: str) -> bool:
+        return self._path(key).is_dir()
 
     def exists(self, key: str) -> bool:
         return self._path(key).exists()

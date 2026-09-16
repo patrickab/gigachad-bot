@@ -5,6 +5,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 import streamlit as st
 
+from lib.llm_resilience import api_query_resilient
 from lib.prompts import SYS_OCR_TEXT_EXTRACTION
 from streamlit_helper import (
     EMPTY_PASTE_RESULT,
@@ -30,7 +31,8 @@ def ocr_workspace() -> None:
     client: LLMClient = st.session_state.client
 
     if img != EMPTY_PASTE_RESULT and img is not None:
-        response = client.api_query(
+        response = api_query_resilient(
+            client,
             model=model,
             system_prompt=SYS_OCR_TEXT_EXTRACTION,
             img=img,

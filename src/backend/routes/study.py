@@ -4,6 +4,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from lib.llm_resilience import api_query_resilient
 from lib.prompts.non_user_prompts import SYS_STUDY_ARTICLE, SYS_STUDY_MINDMAP, SYS_STUDY_OVERVIEW
 
 from .deps import request_client
@@ -35,7 +36,8 @@ def _build_user_msg(markdown: str) -> str:
 
 def _sync_llm_call(model: str, system_prompt: str, user_msg: str) -> str:
     with request_client() as c:
-        response = c.api_query(
+        response = api_query_resilient(
+            c,
             model=model,
             user_msg=user_msg,
             user_msg_history=[],

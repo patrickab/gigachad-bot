@@ -6,8 +6,23 @@ import { Document, Page, pdfjs } from "react-pdf"
 import { ChevronsLeftRight, ChevronsRightLeft, Maximize2, Minimize2, Minus, Plus } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import "react-pdf/dist/esm/Page/AnnotationLayer.css"
+import "react-pdf/dist/esm/Page/TextLayer.css"
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs"
+
+// React-PDF logs expected text-layer cancellations as errors. Suppress only that message.
+if (typeof window !== "undefined") {
+  const patchFlag = console.error as typeof console.error & { __pdfTextLayerPatched?: boolean }
+  if (!patchFlag.__pdfTextLayerPatched) {
+    const originalError = console.error.bind(console)
+    const patched = (...args: unknown[]) => {
+      if (typeof args[0] === "string" && args[0].includes("TextLayer task cancelled")) return
+      originalError(...args)
+    }
+    ;(patched as typeof console.error & { __pdfTextLayerPatched?: boolean }).__pdfTextLayerPatched = true
+    console.error = patched
+  }
+}
 
 const RENDER_WIDTH = 900
 const PAGE_GAP = 12
@@ -413,7 +428,7 @@ function PdfViewerInner({
                   }}
                   data-page-number={i + 1}
                 >
-                  <Page pageNumber={i + 1} width={Math.round(renderWidth * zoom)} renderTextLayer={false} />
+                  <Page pageNumber={i + 1} width={Math.round(renderWidth * zoom)} renderTextLayer />
                   <div className="pdf-page-tint absolute inset-0 pointer-events-none" />
                   {(imageRects[i + 1] ?? []).map((r, k) => (
                     <div
@@ -446,6 +461,31 @@ export function PdfViewer({
   onPageAspect?: (ratio: number) => void
 }) {
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const inlineRef = useRef<HTMLDivElement>(null)
+  const overlayRef = useRef<HTMLDivElement | null>(null)
+  const [overlayReady, setOverlayReady] = useState(false)
+
+  // Keep one viewer mounted so fullscreen preserves its scroll and zoom state.
+  useEffect(() => {
+    const el = document.createElement("div")
+    el.className = "fixed inset-0 z-[100] bg-backdrop backdrop-blur-xl transition-opacity duration-150"
+    el.style.opacity = "0"
+    el.style.pointerEvents = "none"
+    document.body.appendChild(el)
+    overlayRef.current = el
+    setOverlayReady(true)
+    return () => {
+      document.body.removeChild(el)
+      overlayRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    const el = overlayRef.current
+    if (!el) return
+    el.style.opacity = isFullscreen ? "1" : "0"
+    el.style.pointerEvents = isFullscreen ? "auto" : "none"
+  }, [isFullscreen, overlayReady])
 
   useEffect(() => {
     if (!isFullscreen) return
@@ -461,33 +501,24 @@ export function PdfViewer({
 
   const toggleFullscreen = useCallback(() => setIsFullscreen((f) => !f), [])
 
-  if (!isFullscreen) {
-    return (
-      <PdfViewerInner
-        url={url}
-        isFullscreen={false}
-        onToggleFullscreen={toggleFullscreen}
-        isWide={isWide}
-        onToggleWide={onToggleWide}
-        fitWidth={fitWidth}
-        onPageAspect={onPageAspect}
-      />
-    )
-  }
+  const inner = (
+    <PdfViewerInner
+      url={url}
+      isFullscreen={isFullscreen}
+      onToggleFullscreen={toggleFullscreen}
+      isWide={isFullscreen ? undefined : isWide}
+      onToggleWide={isFullscreen ? undefined : onToggleWide}
+      fitWidth={isFullscreen ? undefined : fitWidth}
+      onPageAspect={isFullscreen ? undefined : onPageAspect}
+    />
+  )
 
-  return createPortal(
-    <AnimatePresence>
-      <motion.div
-        key="pdf-fullscreen"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.15 }}
-        className="fixed inset-0 z-[100] bg-backdrop backdrop-blur-xl"
-      >
-        <PdfViewerInner url={url} isFullscreen={true} onToggleFullscreen={toggleFullscreen} />
-      </motion.div>
-    </AnimatePresence>,
-    document.body,
+  const portalTarget = isFullscreen ? overlayRef.current : inlineRef.current
+
+  return (
+    <>
+      <div ref={inlineRef} className="contents" />
+      {overlayReady && portalTarget && createPortal(inner, portalTarget)}
+    </>
   )
 }

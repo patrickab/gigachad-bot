@@ -377,6 +377,10 @@ export async function removeDocument(slug: string, path: string): Promise<void> 
   await del(`/documents${toQuery({ slug, path })}`)
 }
 
+export async function moveDocument(path: string, fromSlug: string, toSlug: string): Promise<ProjectDocument> {
+  return post<ProjectDocument>("/documents/move", { path, from_slug: fromSlug, to_slug: toSlug })
+}
+
 export function attachDocument(chatId: string, path: string, slug: string | null = null): Promise<Attachment> {
   return attachFileByPath("documents", chatId, path, slug)
 }

@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from backend.routes.deps import get_project_store
 from config import (
+    DIRECTORY_CHAT_HISTORIES,
     DIRECTORY_NOTES,
     DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS,
     DIRECTORY_OUTPUT_DRAWINGS,
@@ -132,7 +133,8 @@ async def write_document(
     meta = store._read_meta()
     if not store._find_entry(meta, req.slug):
         raise HTTPException(status_code=404, detail="Project not found")
-    docs_dir = store._resolve_project_dir(req.slug) / "documents"
+    # ProjectStore paths are storage keys. Routes write local project documents here.
+    docs_dir = DIRECTORY_CHAT_HISTORIES / req.slug / "documents"
     docs_dir.mkdir(parents=True, exist_ok=True)
 
     dest = docs_dir / safe_name
@@ -142,7 +144,7 @@ async def write_document(
     store.add_file(req.slug, abs_path)
 
     # keep _uploads copies in sync so attached context stays current
-    project_dir = store._resolve_project_dir(req.slug)
+    project_dir = DIRECTORY_CHAT_HISTORIES / req.slug
     for uploads in project_dir.glob("*/_uploads"):
         copy = uploads / safe_name
         if copy.is_file():
@@ -170,7 +172,7 @@ async def write_binary_document(
         raise HTTPException(status_code=404, detail="Project not found")
     if not file.filename:
         raise HTTPException(status_code=400, detail="Missing filename")
-    docs_dir = store._resolve_project_dir(slug) / "documents"
+    docs_dir = DIRECTORY_CHAT_HISTORIES / slug / "documents"
     docs_dir.mkdir(parents=True, exist_ok=True)
     safe_name = Path(file.filename).name
     if not safe_name:
@@ -277,10 +279,62 @@ async def remove_document(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     resolved = Path(path).expanduser().resolve()
-    docs_dir = (store._resolve_project_dir(slug) / "documents").resolve()
+    docs_dir = (DIRECTORY_CHAT_HISTORIES / slug / "documents").resolve()
     if resolved.is_relative_to(docs_dir) and resolved.is_file():
         resolved.unlink()
     return {"status": "ok"}
+
+
+class MoveDocumentRequest(BaseModel):
+    path: str
+    from_slug: str = ""
+    to_slug: str = ""
+
+
+@router.post("/move", response_model=DocumentMeta)
+async def move_document(
+    req: MoveDocumentRequest,
+    store: ProjectStore = Depends(get_project_store),
+):
+    """Move a document (e.g. a canvas) between projects, or to/from the
+    unassigned root notes collection (empty slug = DIRECTORY_NOTES).
+    Physically relocates the file and updates the source/destination
+    project file registries — DIRECTORY_NOTES itself isn't registry-backed."""
+    if req.from_slug == req.to_slug:
+        raise HTTPException(status_code=400, detail="Source and destination are the same")
+
+    resolved = Path(req.path).expanduser().resolve()
+    if req.from_slug == "":
+        known = resolved.is_relative_to(DIRECTORY_NOTES.resolve())
+    else:
+        try:
+            known = str(resolved) in {str(Path(p).resolve()) for p in store.list_files(req.from_slug)}
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not known or not resolved.is_file():
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    if req.to_slug:
+        meta = store._read_meta()
+        if not store._find_entry(meta, req.to_slug):
+            raise HTTPException(status_code=404, detail="Project not found")
+        dest_dir = DIRECTORY_CHAT_HISTORIES / req.to_slug / "documents"
+    else:
+        dest_dir = DIRECTORY_NOTES
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    dest = dest_dir / resolved.name
+    if dest != resolved:
+        if dest.exists():
+            raise HTTPException(status_code=409, detail="A document with that name already exists there")
+        resolved.replace(dest)
+
+    if req.from_slug:
+        store.remove_file(req.from_slug, str(resolved))
+    if req.to_slug:
+        store.add_file(req.to_slug, str(dest.resolve()))
+
+    return DocumentMeta(**lib_docs.document_meta(dest))
 
 
 @router.post("/attach", response_model=DocumentAttachResult)

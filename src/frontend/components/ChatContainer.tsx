@@ -192,9 +192,6 @@ function DocumentsBody({ documents, slug, onSelect, editingPath, onEdit, onDelet
   }
 
   const isEditable = (doc: ProjectDocument) => /\.(md|tex|canvas)$/.test(doc.name)
-  const pdfDocs = documents.filter((d) => d.mime === "application/pdf").map((d) => ({ path: d.path, name: d.name }))
-  const imageDocs = documents.filter((d) => d.mime.startsWith("image/")).map((d) => ({ path: d.path, name: d.name }))
-
   return (
     <div>
       {documents.map((doc) => {
@@ -238,7 +235,7 @@ function DocumentsBody({ documents, slug, onSelect, editingPath, onEdit, onDelet
               )}
             </div>
             {expanded && editable && slug && (
-              <DocumentEditor path={doc.path} slug={slug} onClose={() => onEdit?.(null)} onSaved={onSaved} onLiveContent={onLiveContent} availablePdfs={pdfDocs} availableImages={imageDocs} />
+              <DocumentEditor path={doc.path} slug={slug} onClose={() => onEdit?.(null)} onSaved={onSaved} onLiveContent={onLiveContent} />
             )}
             {expanded && !editable && doc.mime.startsWith("image/") && (
               <div className="p-2 max-h-[60vh] overflow-y-auto">

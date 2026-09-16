@@ -22,8 +22,6 @@ interface DocumentEditorProps {
   onClose: () => void
   onSaved?: (filename?: string, content?: string) => void
   onLiveContent?: (path: string, content: string | null) => void
-  availablePdfs?: { path: string; name: string }[]
-  availableImages?: { path: string; name: string }[]
   overlay?: boolean
   persistOverride?: (content: string) => Promise<void>
   onModeLabel?: (label: string) => void
@@ -99,7 +97,7 @@ function sameCanvasContent(a: CanvasDocument | null, b: CanvasDocument | null): 
   return !!a && !!b && a.frames === b.frames && a.strokes === b.strokes && a.attachments === b.attachments && a.texts === b.texts
 }
 
-function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, availablePdfs, availableImages, overlay, persistOverride, onModeLabel, onNavigate, model, canvasToolbarSlot }: DocumentEditorProps) {
+function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, overlay, persistOverride, onModeLabel, onNavigate, model, canvasToolbarSlot }: DocumentEditorProps) {
   const isCanvas = path.endsWith(".canvas")
   const [content, setContent] = useState<string | null>(null)
   const [renderedContent, setRenderedContent] = useState<string | null>(null)
@@ -378,7 +376,7 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, a
   )
 
   const canvasBody = isCanvas && canvasDoc && (
-    <CanvasEditor doc={canvasDoc} onChange={handleCanvasChange} availablePdfs={availablePdfs} availableImages={availableImages} slug={slug} docPath={path} onImageAdded={() => onSaved?.()} toolbarSlot={canvasToolbarSlot} />
+    <CanvasEditor doc={canvasDoc} onChange={handleCanvasChange} slug={slug} docPath={path} onImageAdded={() => onSaved?.()} toolbarSlot={canvasToolbarSlot} />
   )
 
   const editorBody = textBody || canvasBody

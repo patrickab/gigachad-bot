@@ -27,6 +27,7 @@ import uuid
 from config import DIRECTORY_CHAT_HISTORIES, get_model_defaults
 from lib.data_store import DataStore, DataStorePath, LocalDataStore
 from lib.json_io import safe_write_json
+from lib.llm_resilience import api_query_resilient
 
 log = logging.getLogger(__name__)
 
@@ -956,7 +957,7 @@ Rules:
             )
             if force_json:
                 kwargs["response_format"] = {"type": "json_object"}
-            response = llm.api_query(**kwargs)
+            response = api_query_resilient(llm, **kwargs)
             if isinstance(response, Exception):
                 raise response
             return response.choices[0].message.content or "{}"

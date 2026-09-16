@@ -12,7 +12,7 @@ import { useBranches } from "@/contexts/BranchContext"
 import { useSidebar, type AppSurface } from "@/contexts/SidebarContext"
 import type { BranchMeta, VaultNode, ProjectListItem, ProjectDocument } from "@/lib/types"
 import { ChatBranchItem } from "./ChatBranchItem"
-import { addFileVaultMountpoint, addFileVaultRoot, createDirectory, moveHistoryItem, fileVaultTree, removeFileVaultRoot, listNotes, listProjectDocuments, removeDocument, writeDocument, Vault } from "@/lib/api"
+import { addFileVaultMountpoint, addFileVaultRoot, createDirectory, moveHistoryItem, fileVaultTree, removeFileVaultRoot, listNotes, listProjectDocuments, moveDocument, removeDocument, writeDocument, Vault } from "@/lib/api"
 
 const COLLAPSED_WIDTH = 50
 const EXPANDED_WIDTH = 280
@@ -260,6 +260,16 @@ export function Sidebar({
                 refreshCanvases()
                 setCanvasOpen(true)
                 onCanvasSelect?.(doc.path, scope)
+              }}
+              onMoveElement={async (elementId, targetId) => {
+                const inProject = Object.entries(projectCanvases).find(([, docs]) => docs.some((d) => d.path === elementId))
+                const fromSlug = inProject ? inProject[0] : ""
+                const toSlug = targetId ?? ""
+                if (fromSlug === toSlug) return
+                try {
+                  await moveDocument(elementId, fromSlug, toSlug)
+                  refreshCanvases()
+                } catch { /* conflict or invalid target — leave the tree as-is */ }
               }}
             />
           </div>

@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { X, Check } from "lucide-react"
+import { X, Check, ChevronLeft, ChevronRight } from "lucide-react"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { ConsoleEditor } from "./ConsoleEditor"
+import { EditorSidebar, InlineEditPanel } from "./EditorSidebar"
 import { createOCRStream } from "@/lib/api"
 
 interface OCRPanelProps {
@@ -20,6 +21,9 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
   const [img, setImg] = useState<string | null>(image)
   const [output, setOutput] = useState("")
   const [isStreaming, setIsStreaming] = useState(true)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [sidebarWidth, setSidebarWidth] = useState(340)
+  const [inlineEdit, setInlineEdit] = useState<{ text: string; start: number; end: number; splitPx: number } | null>(null)
   const abortRef = useRef<(() => void) | null>(null)
   const confirmedRef = useRef(false)
 
@@ -28,6 +32,7 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
     setImg(null)
     setOutput("")
     setIsStreaming(false)
+    setInlineEdit(null)
   }, [])
 
   // While awaiting a new image, a pasted image restarts OCR
@@ -103,6 +108,30 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
     return () => document.removeEventListener("keydown", handler)
   }, [doConfirm, onClose, reset])
 
+  const handleSidebarApply = useCallback((newContent: string) => {
+    setOutput(newContent)
+  }, [])
+
+  const handleInlineApply = useCallback((replacement: string) => {
+    if (!inlineEdit) return
+    setOutput(output.substring(0, inlineEdit.start) + replacement + output.substring(inlineEdit.end))
+    setInlineEdit(null)
+  }, [inlineEdit, output])
+
+  const handleInlineEditOpen = useCallback((text: string, start: number, end: number, splitPx: number) => {
+    setInlineEdit({ text, start, end, splitPx })
+  }, [])
+
+  const splitIdx = inlineEdit ? output.indexOf("\n", inlineEdit.end) : -1
+  const splitChar = splitIdx === -1 ? output.length : splitIdx + 1
+  const [topContent, botContent] = inlineEdit
+    ? [output.substring(0, splitChar), output.substring(splitChar)]
+    : ["", ""]
+  const botStart = topContent.split("\n").length
+  const BOT_LINE_H = 19.5  // 0.75rem × 1.625
+  const BOT_PAD = 16       // p-4
+  const botHeight = BOT_PAD + botContent.split("\n").length * BOT_LINE_H + BOT_PAD
+
   return (
     <AnimatePresence>
       <motion.div
@@ -126,6 +155,12 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
           </div>
           <div className="flex items-center gap-1">
             <button
+              onClick={() => setSidebarOpen((v) => !v)}
+              className="rounded p-1.5 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
+            >
+              {sidebarOpen ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
+            </button>
+            <button
               onClick={doConfirm}
               disabled={!output}
               className="flex items-center gap-1.5 rounded-md bg-surface-elevated border border-divider-strong px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-elevated disabled:opacity-30 transition-colors"
@@ -143,44 +178,73 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
         </div>
 
         <div className="flex-1 flex min-h-0">
-          <div className="w-1/2 border-r border-divider/50 flex flex-col min-w-0">
-            <div className="px-3 py-1.5 border-b border-divider/30 text-[10px] text-ink-faint font-medium uppercase tracking-wider">
-              Console
+          <div className="flex-1 min-w-0 flex min-h-0">
+            <div className="w-1/2 border-r border-divider/50 flex flex-col min-w-0">
+              <div className="px-3 py-1.5 border-b border-divider/30 text-[10px] text-ink-faint font-medium uppercase tracking-wider">
+                Console
+              </div>
+              {inlineEdit ? (
+                <div className="relative flex-1 min-h-0 overflow-y-auto">
+                  <div style={{ height: inlineEdit.splitPx }} className="flex flex-col shrink-0 overflow-hidden">
+                    <ConsoleEditor value={topContent} onChange={() => {}} language="latex" readOnly />
+                  </div>
+                  <InlineEditPanel
+                    selectedText={inlineEdit.text}
+                    model={model}
+                    onApply={handleInlineApply}
+                    onClose={() => setInlineEdit(null)}
+                  />
+                  <div style={{ height: botHeight }} className="flex flex-col shrink-0">
+                    <ConsoleEditor value={botContent} onChange={() => {}} language="latex" startLineNumber={botStart} readOnly />
+                  </div>
+                </div>
+              ) : (
+                <ConsoleEditor
+                  value={output}
+                  onChange={setOutput}
+                  language="latex"
+                  placeholder="Waiting for output..."
+                  onInlineEdit={handleInlineEditOpen}
+                />
+              )}
             </div>
-            <ConsoleEditor
-              value={output}
-              onChange={setOutput}
-              language="latex"
-              placeholder="Waiting for output..."
-            />
-          </div>
-          <div className="w-1/2 flex flex-col min-w-0">
-            <div className="px-3 py-1.5 border-b border-divider/30 text-[10px] text-ink-faint font-medium uppercase tracking-wider flex items-center gap-2">
-              Preview
-              <span className="text-ink-faint">(image → LaTeX)</span>
-            </div>
-            <div className="flex-1 overflow-y-auto min-h-0">
-              <div className="p-4 flex flex-col">
-                {output ? (
-                  <div className="rounded-lg border border-divider bg-surface/50 p-4 mb-3">
-                    <LaTeXMarkdown content={output} />
-                  </div>
-                ) : (
-                  <div className="text-xs text-ink-faint italic px-1 mb-3">Preview appears as output streams...</div>
-                )}
-                {img ? (
-                  <div className="rounded-lg border border-divider bg-surface/50 p-1.5">
-                    <img src={img} alt="Source" className="w-full rounded object-contain" />
-                  </div>
-                ) : (
-                  <div className="rounded-lg border border-dashed border-divider-strong bg-surface/30 px-4 py-10 flex flex-col items-center gap-1 text-center">
-                    <span className="text-xs font-medium text-ink-muted">Paste a new image</span>
-                    <span className="text-[10px] text-ink-faint">Ctrl+V — OCR starts automatically</span>
-                  </div>
-                )}
+            <div className="w-1/2 flex flex-col min-w-0">
+              <div className="px-3 py-1.5 border-b border-divider/30 text-[10px] text-ink-faint font-medium uppercase tracking-wider flex items-center gap-2">
+                Preview
+                <span className="text-ink-faint">(image → LaTeX)</span>
+              </div>
+              <div className="flex-1 overflow-y-auto min-h-0">
+                <div className="p-4 flex flex-col">
+                  {output ? (
+                    <div className="rounded-lg border border-divider bg-surface/50 p-4 mb-3">
+                      <LaTeXMarkdown content={output} />
+                    </div>
+                  ) : (
+                    <div className="text-xs text-ink-faint italic px-1 mb-3">Preview appears as output streams...</div>
+                  )}
+                  {img ? (
+                    <div className="rounded-lg border border-divider bg-surface/50 p-1.5">
+                      <img src={img} alt="Source" className="w-full rounded object-contain" />
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-dashed border-divider-strong bg-surface/30 px-4 py-10 flex flex-col items-center gap-1 text-center">
+                      <span className="text-xs font-medium text-ink-muted">Paste a new image</span>
+                      <span className="text-[10px] text-ink-faint">Ctrl+V — OCR starts automatically</span>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
+          {sidebarOpen && (
+            <EditorSidebar
+              content={output}
+              model={model}
+              width={sidebarWidth}
+              onWidthChange={setSidebarWidth}
+              onApply={handleSidebarApply}
+            />
+          )}
         </div>
       </motion.div>
     </AnimatePresence>

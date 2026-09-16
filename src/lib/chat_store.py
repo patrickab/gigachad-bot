@@ -642,7 +642,12 @@ def _build_payload(
     title: str | None = None,
 ) -> dict[str, Any]:
     """Merge chat history fields from *data* and *existing* into a write payload."""
-    payload: dict[str, Any] = {"messages": data.get("messages", []) if data else []}
+    if data and data.get("messages"):
+        payload: dict[str, Any] = {"messages": data["messages"]}
+    elif existing and existing.get("messages") is not None:
+        payload = {"messages": existing["messages"]}
+    else:
+        payload = {"messages": data.get("messages", []) if data else []}
 
     if data and data.get("chat_id"):
         payload["chat_id"] = data["chat_id"]
