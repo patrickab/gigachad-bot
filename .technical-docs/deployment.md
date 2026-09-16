@@ -127,9 +127,7 @@ NEXT_PUBLIC_API_BASE=http://127.0.0.1:8001/api
 
 # Configure only host-local capabilities in use.
 OLLAMA_BASE_URL=http://127.0.0.1:11434
-VANE_URL=http://127.0.0.1:3001
-SEARX_URL=http://127.0.0.1:8888
-# EMBEDDING_MODEL=ollama/bge-m3:latest
+BRAVE_API_KEY=<secret>
 
 # Provider credentials: uncomment only for providers in use.
 # GEMINI_API_KEY=<secret>
@@ -141,19 +139,16 @@ SEARX_URL=http://127.0.0.1:8888
 | --- | --- | --- | --- |
 | `GIGACHAD_CORS_ORIGINS` | Yes | No | Comma-separated exact production and local browser origins. Do not use `*`. |
 | `NEXT_PUBLIC_API_BASE` | For local frontend development | No | Local browser API base; it is intentionally public configuration. |
-| `OLLAMA_BASE_URL` | When using local models or embeddings | No | Host-local Ollama endpoint. |
-| `VANE_URL` | When using web search | No | Host-local Vane endpoint. |
-| `SEARX_URL` | When using deep research | No | Host-local SearXNG endpoint. |
+| `OLLAMA_BASE_URL` | When using local models | No | Host-local Ollama endpoint. |
+| `BRAVE_API_KEY` | When using web search | **Yes** | Brave LLM Context credential. |
 | `MINERU_SERVER_URL` | No | No | Remote MinerU endpoint. Leave unset for required local OCR. |
-| `EMBEDDING_MODEL` | Optional | No | Vane embedding-model identifier. |
 | Provider API keys | Only for their providers | **Yes** | Credentials used by the backend. |
 
 URL and model settings are configuration, not secrets. Provider API keys are
 secrets: keep them only in this `0600` private file; never commit or paste the
 file, put keys in a ticket, or configure them in Vercel. `NEXT_PUBLIC_API_BASE`
-is public browser configuration and is not a secret. Ensure host-managed Ollama,
-Vane, and SearXNG are started before their dependent features and listen only on
-loopback or another host-private interface.
+is public browser configuration and is not a secret. Web search calls Brave from
+the backend, so `BRAVE_API_KEY` never reaches the browser.
 
 ### Provision the FastAPI systemd service
 

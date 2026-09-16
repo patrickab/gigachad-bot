@@ -6,7 +6,7 @@ import { fetchModels, fetchPrompts, saveModelDefaults as saveModelDefaultsReques
 import type { ChatRequest, Message, ModelDefaults, ModelProvider, ModelsResponse, WebSearchParams, Usage } from "@/lib/types"
 import { useChatStream } from "./useChatStream"
 import { useResearch, type ResearchParams } from "./useResearch"
-import { webSearchFetch, parseWebSearchStream, fetchWebSearchImages, fetchWebSearchVideos, type WebSearchResultItem } from "@/lib/webSearch"
+import { webSearchFetch, parseWebSearchStream, type WebSearchResultItem } from "@/lib/webSearch"
 import { createFlushBatcher } from "@/lib/streaming"
 
 export type { ResearchParams }
@@ -87,14 +87,14 @@ export function useChat(): UseChatReturn {
 
     const batch = createFlushBatcher(setMessages, assistantMsg)
 
-    // Sources arrive as a list; build a 1-based citation map so [n] markers resolve.
+    // Source labels arrive before text and remain stable for the saved citation map.
     const setSources = (sources: WebSearchResultItem[]) => {
       assistantMsg.search_result = {
         query: params.query,
         sources,
         images: assistantMsg.search_result?.images ?? [],
         videos: assistantMsg.search_result?.videos ?? [],
-        citationMap: Object.fromEntries(sources.map((s, i) => [String(i + 1), s])),
+        citationMap: Object.fromEntries(sources.map((s, i) => [s.label ?? String(i + 1), s])),
       }
     }
 
@@ -117,21 +117,6 @@ export function useChat(): UseChatReturn {
         }
       }
 
-      // Image/video search are separate Vane endpoints, fired only when toggled on.
-      if (params.images || params.videos) {
-        const [images, videos] = await Promise.all([
-          params.images ? fetchWebSearchImages(params.query, params.model ?? "") : Promise.resolve([]),
-          params.videos ? fetchWebSearchVideos(params.query, params.model ?? "") : Promise.resolve([]),
-        ])
-        assistantMsg.search_result = {
-          query: params.query,
-          sources: assistantMsg.search_result?.sources ?? [],
-          citationMap: assistantMsg.search_result?.citationMap,
-          images,
-          videos,
-        }
-        batch.schedule()
-      }
     } catch (e) {
       if ((e as Error).name === "AbortError") return
       const msg = (e as Error)?.message ?? "Search failed"

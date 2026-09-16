@@ -10,10 +10,8 @@ on a private server, reached over SSH tunnels — no code changes per deployment
 | Variable | Default | Purpose |
 |---|---|---|
 | `MINERU_SERVER_URL` | unset | External MinerU OCR server (`mineru.cli.fast_api`). When unset, the backend spawns one locally per parse from its own Python environment. **Required for OCR in the desktop app** — the frozen sidecar does not bundle the ML stack. |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama endpoint for local-model inference and embeddings. |
-| `EMBEDDING_MODEL` | `ollama/bge-m3:latest` | Embedding model used by Vane reranking. |
-| `VANE_URL` | `http://localhost:3001` | Vane (Perplexica) web-search sidecar. |
-| `SEARX_URL` | `http://localhost:8888` | Standalone SearXNG used by GPT-Researcher. |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama endpoint for local-model inference. |
+| `BRAVE_API_KEY` | unset | Secret used by backend web search. |
 | `GIGACHAD_CORS_ORIGINS` | `*` | Comma-separated CORS allow-list for the FastAPI backend. The Tauri shell sets this to its own webview origins; server deployments can restrict it to their public origin. |
 | `GIGACHAD_BASE_DIR` | `.` (CWD) | Root for all runtime data (chat histories, uploads). The desktop app defaults it to the XDG app-data dir (the AppImage mount is read-only) but respects a value exported before launch — set it to the webapp's directory to share one data store. |
 
@@ -50,7 +48,7 @@ ssh -N -L 11434:127.0.0.1:11434 your-server &
 OLLAMA_BASE_URL=http://127.0.0.1:11434 ./run.sh
 ```
 
-Same pattern applies to `VANE_URL` and `SEARX_URL`.
+Web search uses Brave directly from the backend and requires no local search service.
 
 ## Web vs. desktop build behavior
 

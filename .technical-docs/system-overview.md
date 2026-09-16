@@ -21,16 +21,11 @@ none of them are reimplemented in-repo:
 - **LiteLLM** — the model-provider abstraction. All chat/completions go
   through it, so Gemini, DeepSeek, OpenRouter, and local providers are
   swappable behind one interface (`src/config.py` holds defaults).
-- **Vane** (`VANE_URL`, default `localhost:3001`) — a local sidecar that
-  performs web search on the backend's behalf. `routes/search.py` proxies to
-  it, resolving the user-facing model id to a Vane provider/model id and
-  caching that resolution. Vane itself is backed by a **SearXNG** instance
-  (`SEARX_URL`); DeepSeek is routed through `vane-deepseek-shim.py` because
-  DeepSeek rejects Vane's `json_schema` response format (see
-  `vane-setup.md`).
-- **SearXNG** — also used directly by **GPT-Researcher**, which powers
-  `/api/research` (streams progress/result over SSE, persists JSON traces via
-  `research_trace.py`).
+- **Brave LLM Context** — backend web search retrieves labelled source
+  passages using `BRAVE_API_KEY`, then has the selected model produce a
+  citation-grounded answer. No local search service is required.
+- **GPT-Researcher** powers `/api/research` with its built-in DuckDuckGo
+  retriever and streams progress and results over SSE.
 - **MinerU** — PDF parsing/OCR. `routes/mineru.py` + `ExtractQueue`
   (`extract_queue.py`) manage the parse lifecycle; parsed Markdown backs both
   the "Study" mode (mind map/overview/article generation) and the document

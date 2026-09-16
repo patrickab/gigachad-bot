@@ -36,7 +36,6 @@ from backend.routes.ocr import router as ocr_router
 from backend.routes.projects import router as projects_router
 from backend.routes.research import router as research_router
 from backend.routes.search import router as search_router
-from backend.routes.search import stop_vane
 from backend.routes.study import router as study_router
 from config import DIRECTORY_CHAT_HISTORIES, DIRECTORY_CHAT_UPLOADS, DIRECTORY_OUTPUT_MINERU, ensure_directories
 
@@ -67,7 +66,6 @@ async def lifespan(app: FastAPI):
     yield
     shutdown_client()
     kill_all_mineru_servers()
-    stop_vane()
     await extract_queue.stop()
 
 

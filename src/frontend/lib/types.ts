@@ -150,12 +150,8 @@ export interface ResearchTraceProgress {
 
 export interface WebSearchParams {
   query: string
-  focusMode: string
-  optimizationMode: string
   systemInstructions?: string
   domain?: string
-  images?: boolean
-  videos?: boolean
   model?: string
 }
 

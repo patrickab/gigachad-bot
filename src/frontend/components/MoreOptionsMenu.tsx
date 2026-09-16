@@ -4,7 +4,6 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { MoreHorizontal, BookOpen, Pencil } from "lucide-react"
 import { LLMParams } from "./LLMParams"
-import { PillButton } from "./PillButton"
 import { ParamSlider } from "./ParamSlider"
 import { StyledSelect } from "./StyledSelect"
 import { cn } from "@/lib/utils"
@@ -19,20 +18,6 @@ interface MoreOptionsMenuProps {
   onConfigChange: (config: Partial<TabConfig>) => void
   onEditPrompts?: () => void
 }
-
-const FOCUS_MODES: { value: string; label: string }[] = [
-  { value: "webSearch", label: "Web" },
-  { value: "academicSearch", label: "Academic" },
-  { value: "redditSearch", label: "Reddit" },
-  { value: "youtubeSearch", label: "YouTube" },
-  { value: "wolframAlphaSearch", label: "Wolfram" },
-]
-
-const OPTIMIZATION_MODES: { value: string; label: string }[] = [
-  { value: "speed", label: "Speed" },
-  { value: "balanced", label: "Balanced" },
-  { value: "quality", label: "Quality" },
-]
 
 function Toggle({ on, onChange }: { on: boolean; onChange: () => void }) {
   return (
@@ -152,50 +137,6 @@ export function MoreOptionsMenu({
 
             {searchEnabled && (
               <div className="pt-2 border-t border-divider/50 space-y-3">
-                {/* Focus mode (single-select, authoritative) */}
-                <div className="space-y-1.5">
-                  <div className="text-xs font-medium text-ink-subtle">Focus</div>
-                  <div className="flex flex-wrap gap-1">
-                    {FOCUS_MODES.map((m) => (
-                      <PillButton
-                        key={m.value}
-                        accent="muted"
-                        active={config.searchFocusMode === m.value}
-                        onClick={() => onConfigChange({ searchFocusMode: m.value })}
-                      >
-                        {m.label}
-                      </PillButton>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Optimization mode */}
-                <div className="space-y-1.5">
-                  <div className="text-xs font-medium text-ink-subtle">Optimization</div>
-                  <div className="flex gap-1">
-                    {OPTIMIZATION_MODES.map((m) => (
-                      <PillButton
-                        key={m.value}
-                        accent="muted"
-                        active={config.searchOptimization === m.value}
-                        onClick={() => onConfigChange({ searchOptimization: m.value })}
-                      >
-                        {m.label}
-                      </PillButton>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Image / video search (default off) */}
-                <label className="flex items-center justify-between cursor-pointer">
-                  <span className="text-xs text-ink-subtle">Image search</span>
-                  <Toggle on={config.searchImages} onChange={() => onConfigChange({ searchImages: !config.searchImages })} />
-                </label>
-                <label className="flex items-center justify-between cursor-pointer">
-                  <span className="text-xs text-ink-subtle">Video search</span>
-                  <Toggle on={config.searchVideos} onChange={() => onConfigChange({ searchVideos: !config.searchVideos })} />
-                </label>
-
                 {/* Domain filter helper — prepended verbatim to the query */}
                 <div className="space-y-1">
                   <span className="text-[10px] text-ink-faint">Domain filter</span>

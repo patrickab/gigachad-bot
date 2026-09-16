@@ -70,15 +70,7 @@ def get_model_defaults() -> dict[str, str]:
     return ModelProviderStore(get_data_store()).load_defaults()
 
 
-# Vane (Perplexica) web-search sidecar. Single container, SearXNG bundled internally.
-VANE_URL = os.environ.get("VANE_URL", "http://localhost:3001")
-# Embedding model Vane uses to rerank sources. Must also be configured in Vane's
-# provider settings (bge-m3 served by local Ollama).
-EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "ollama/bge-m3:latest")
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
-# Standalone SearXNG (searxng-settings.yml) — retriever for Deep Research (gpt-researcher).
-# Separate from Vane's internal SearXNG, which is not exposed on a host port.
-SEARX_URL = os.environ.get("SEARX_URL", "http://localhost:8888")
 
 # External MinerU OCR server (mineru.cli.fast_api). When unset, the backend
 # spawns one per parse from its own environment — impossible in the frozen

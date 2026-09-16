@@ -427,7 +427,7 @@ function LaTeXMarkdownInner({
       a({ children, href, title, ...props }: any) {
         const num = String(children)
         const info = citationMap?.[num]
-        if (info && /^\d+$/.test(num)) {
+        if (info) {
           return (
             <CitationPill
               href={info.url}

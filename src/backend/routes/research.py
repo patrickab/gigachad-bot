@@ -10,7 +10,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from config import OLLAMA_BASE_URL, SEARX_URL
+from config import OLLAMA_BASE_URL
 from lib.research_config import build_research_config, write_research_config
 
 
@@ -159,7 +159,6 @@ async def research(req: ResearchRequest):
                         with _temp_environ(
                             OLLAMA_API_BASE=OLLAMA_BASE_URL,
                             OLLAMA_BASE_URL=OLLAMA_BASE_URL,
-                            SEARX_URL=SEARX_URL,
                             REASONING_EFFORT=reasoning,
                         ):
                             _log.info("[research] Creating GPTResearcher...")

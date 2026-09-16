@@ -14,7 +14,7 @@ A minimalist, local-first LLM web interface. Designed for privacy, focus and cus
 - **PDF parsing**: local VLM text extraction via [MinerU](https://github.com/opendatalab/mineru).
 - **Modes**:
   - **Deep Research**: multi-step reports via [GPT-Researcher](https://github.com/assafelovic/gpt-researcher).
-  - **Web Search**: Supports domain filters. Citation-mapped search via [Vane](https://github.com/ItzCrazyKns/Vane)/[SearXNG](https://github.com/searxng/searxng).
+  - **Web Search**: Brave LLM Context search with visible, citation-mapped source labels.
 - **Project Mode**: isolated memory, kanban board, and a per-project document library.
 - **Infinite Canvas**: whiteboard for drawing, pdfs attach to canvas, canvas can be rendered as jpg and attached to chat
 - **Chat branching**: fork a conversation from any message, merge branches back.
@@ -50,6 +50,7 @@ https://github.com/user-attachments/assets/57864372-dac2-49f3-97f7-5bceecf53c49
   the app. It holds provider credentials and local configuration; see the
   [deployment runbook](.technical-docs/deployment.md#1-prepare-the-private-host)
   for its strict `KEY=value` format and secrets policy.
+  Add `BRAVE_API_KEY=<your Brave Search API key>` to enable web search.
 ### Developer launchers
 
 The launchers install the dependencies they own and run in development mode:

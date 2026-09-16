@@ -442,12 +442,8 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       if (searchEnabled) {
         webSearch({
           query: text,
-          focusMode: config.searchFocusMode,
-          optimizationMode: config.searchOptimization,
           systemInstructions: config.searchSystemInstructions,
           domain: config.searchDomain,
-          images: config.searchImages,
-          videos: config.searchVideos,
           model: config.selectedModel || undefined,
         })
       } else if (researchEnabled) {

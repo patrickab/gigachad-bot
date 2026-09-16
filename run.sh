@@ -37,7 +37,6 @@ cleanup() {
         fi
     done
     pkill -f "mineru.cli.fast_api" 2>/dev/null || true
-    docker compose -f "$root_dir/docker-compose.vane.yml" down 2>/dev/null || true
     for pid in "$backend_pid" "$frontend_pid"; do
         if [[ -n "$pid" ]]; then
             wait "$pid" 2>/dev/null || true

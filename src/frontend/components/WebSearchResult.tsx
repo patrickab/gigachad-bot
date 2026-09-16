@@ -40,10 +40,10 @@ function WebSearchResultInner({ content, search_result }: Props) {
     const cm = search_result.citationMap
     if (cm && Object.keys(cm).length) {
       text = text
-        // Vane format: plain [N] citations → convert to markdown links
-        .replace(/\[(\d+)\](?!\()/g, (match, n: string) => {
-          const url = cm[n]?.url
-          return url ? `[${n}](${url})` : match
+        // Brave source labels, and legacy numbered citations, become citation pills.
+        .replace(/\[([a-z0-9][a-z0-9-]*)\](?!\()/gi, (match, label: string) => {
+          const url = cm[label]?.url
+          return url ? `[${label}](${url})` : match
         })
         // Legacy format: [N](#anchor) citations
         .replace(/\[(\d+)\]\(#[^)]*\)/g, (_, n: string) => {

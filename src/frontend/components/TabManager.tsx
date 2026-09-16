@@ -22,10 +22,6 @@ export interface TabConfig {
   researchBreadth: number
   researchReasoning: string
   researchReportType: string
-  searchFocusMode: string
-  searchOptimization: string
-  searchImages: boolean
-  searchVideos: boolean
   searchSystemInstructions: string
   searchDomain: string
 }
@@ -49,10 +45,6 @@ const DEFAULT_CONFIG: TabConfig = {
   researchBreadth: 4,
   researchReasoning: "medium",
   researchReportType: "deep",
-  searchFocusMode: "webSearch",
-  searchOptimization: "balanced",
-  searchImages: false,
-  searchVideos: false,
   searchSystemInstructions: "",
   searchDomain: "",
 }
