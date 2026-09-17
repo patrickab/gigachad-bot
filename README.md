@@ -78,6 +78,10 @@ These are developer launchers, not a production deployment method. Production
 uses the systemd backend and OMP model-source services plus Vercel/Tailscale
 Serve deployment described in [the deployment runbook](.technical-docs/deployment.md).
 
+OMP's gateway token is read once at backend startup and cached for the
+process lifetime: restart `gigachad-bot.service` after installing or
+restarting `gigachad-bot-omp.service`, or OMP model calls will 401.
+
 The development backend and the systemd backend are mutually exclusive: both
 bind `127.0.0.1:8001` and share the same persistent Documents state. Stop one
 before starting the other. The production user unit uses systemd's `%h`
