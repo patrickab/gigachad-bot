@@ -34,9 +34,13 @@ fi
 
 project="gigachad-dev"
 port=8001
+pg_host=127.0.0.1
+pg_port=5432
 if [[ "$profile" == production ]]; then
     project="gigachad-prod"
     port=8002
+    pg_host=127.0.0.2
+    pg_port=5433
 fi
 
 compose() {
@@ -93,7 +97,10 @@ if [[ -z "$POSTGRES_PASSWORD" ]]; then
 fi
 export POSTGRES_PASSWORD
 export PGPASSWORD="$POSTGRES_PASSWORD"
-export GIGACHAD_DATABASE_URL="postgresql://gigachad@127.0.0.1:5432/gigachad"
+export POSTGRES_USER="$(whoami)"
+export POSTGRES_HOST="$pg_host"
+export POSTGRES_PORT="$pg_port"
+export GIGACHAD_DATABASE_URL="postgresql://${POSTGRES_USER}@${pg_host}:${pg_port}/gigachad"
 export GIGACHAD_RUNTIME="$profile"
 
 if ! postgres_is_running; then

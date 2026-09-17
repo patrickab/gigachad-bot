@@ -3,15 +3,15 @@ services:
     image: postgres:17
     environment:
       POSTGRES_DB: gigachad
-      POSTGRES_USER: gigachad
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in the environment}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the environment or .env}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gigachad -d gigachad"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d gigachad"]
       interval: 5s
       timeout: 5s
       retries: 5
     ports:
-      - "127.0.0.1:5432:5432"
+      - "${POSTGRES_HOST:?Set POSTGRES_HOST in the environment}:${POSTGRES_PORT:?Set POSTGRES_PORT in the environment}:5432"
     volumes:
       - gigachad-postgres:/var/lib/postgresql/data
 
