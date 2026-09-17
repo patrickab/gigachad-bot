@@ -4,8 +4,8 @@ from pathlib import Path
 import sys
 from uuid import UUID
 
-import pytest
 from psycopg_pool import ConnectionPool
+import pytest
 
 from lib.db_schema import upgrade
 
@@ -19,17 +19,17 @@ VAULT_NOTE = "vault content that must never be copied\n"
 PROMPT = "# system prompt\n"
 
 EXPECTED_DOCUMENTS = {
-    "Architecture_Graphs/services.yaml",
-    "Prompts/system.md",
-    "chat_history/chat-1.json",
-    "model-providers.yaml",
+    "chat/chat-1.json",
+    "graph/services.yaml",
+    "model/model-providers.yaml",
+    "prompt/system.md",
 }
 EXPECTED_ASSETS = {
-    "Drawings/sketch.excalidraw": "drawing",
+    "attachment/chat/chat-1/notes.txt": "upload",
+    "drawing/sketch.excalidraw": "drawing",
     "Mineru/images/paper-fig1.png": "mineru_image",
     "Mineru/paper.md": "mineru_markdown",
     "PDFs/paper.pdf": "pdf",
-    "chat_history/_uploads/chat-1/notes.txt": "upload",
 }
 
 
@@ -149,7 +149,7 @@ def test_verifier_accepts_a_completed_migration(run, capsys):
 def test_verifier_rejects_a_missing_document(run, postgres_pool, capsys):
     assert run(migrate_main) == 0
     with postgres_pool.connection() as connection, connection.transaction():
-        connection.execute("DELETE FROM documents WHERE key = 'Prompts/system.md'")
+        connection.execute("DELETE FROM documents WHERE key = 'prompt/system.md'")
     capsys.readouterr()
 
     assert run(verify_main) == 1
@@ -203,7 +203,7 @@ def test_changed_source_file_fails_loudly(run, source, postgres_pool, capsys):
     assert "Prompts/system.md" in captured.err
     assert "documents: imported 0, skipped 3, failed 1" in captured.out
     with postgres_pool.connection() as connection:
-        stored = connection.execute("SELECT content FROM documents WHERE key = 'Prompts/system.md'").fetchone()[0]
+        stored = connection.execute("SELECT content FROM documents WHERE key = 'prompt/system.md'").fetchone()[0]
     assert bytes(stored) == PROMPT.encode()
 
 
@@ -254,6 +254,6 @@ def test_empty_user_folders_survive_the_migration(run, source, postgres_pool):
             row[0] for row in connection.execute("SELECT key FROM documents WHERE is_dir ORDER BY key").fetchall()
         ]
 
-    assert markers == ["chat_history/empty-folder", "chat_history/empty-folder/nested"]
+    assert markers == ["chat/empty-folder", "chat/empty-folder/nested"]
     # Markers carry no content, so the verifier must still pass unchanged.
     assert run(verify_main) == 0

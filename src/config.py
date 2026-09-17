@@ -1,33 +1,17 @@
 import os
 from pathlib import Path
-import shutil
 import sys
-
 from uuid import UUID
 
 from psycopg_pool import ConnectionPool
 
-from lib.data_store import DataStore, LocalDataStore
+from lib.data_store import DataStore
+from lib.storage_namespace import PROMPT
 
 # All mutable application data belongs to the backend's storage root.
 # ponytail: one shared workspace for now; user-specific roots can come later.
 REMOTE_ROOT = Path(os.environ.get("GIGACHAD_BASE_DIR", "~/Nextcloud/linux")).expanduser()
 DOCUMENTS = REMOTE_ROOT / "Documents"
-
-# File-vault roots are NOT configured here. They live in
-# chat_histories/file-vault-roots.json (the single source of truth), managed at
-# runtime by FileVault — see src/lib/file_vault.py.
-DIRECTORY_CHAT_HISTORIES = DOCUMENTS / "chat_history"
-DIRECTORY_PROMPTS = DOCUMENTS / "Prompts"
-
-# Uploads directory for non-project chats. Project-scoped uploads live under
-# DIRECTORY_CHAT_HISTORIES / <slug> / "_uploads". Leading underscore keeps the
-# folder visually distinct from chat JSON files when browsing with `ls`.
-DIRECTORY_CHAT_UPLOADS = DIRECTORY_CHAT_HISTORIES / "_uploads"
-
-# Non-project canvases/notes. Leading underscore mirrors DIRECTORY_CHAT_UPLOADS
-# so it stays visually distinct from chat JSON files when browsing with `ls`.
-DIRECTORY_NOTES = DIRECTORY_CHAT_HISTORIES / "_notes"
 
 # --- Application-wide small/fast model defaults ---
 # Used for lightweight tasks like query expansion, where speed matters more than raw capability.
@@ -39,27 +23,12 @@ DEFAULT_TEMPERATURE = 0.2
 DEFAULT_DOWNSCALE_IMAGES = True
 
 # --- MinerU PDF parsing config ---
+# The only application artifacts still mirrored to Nextcloud: PostgreSQL is
+# authoritative for both, this tree exists only so MinerU can parse a real file.
 DIRECTORY_OUTPUT_MINERU = DOCUMENTS / "Mineru"
 DIRECTORY_OUTPUT_PDF = DOCUMENTS / "PDFs"
 
-# Cloud collection of user-created documents, mirrored on save (filename = identity,
-# overwritten on conflict). Per-chat _uploads copies are independent of these.
-DIRECTORY_OUTPUT_MARKDOWN = DOCUMENTS / "Markdown"
-DIRECTORY_OUTPUT_LATEX = DOCUMENTS / "LaTeX"
-DIRECTORY_OUTPUT_DRAWINGS = DOCUMENTS / "Drawings"
-# Canonical, live Architecture Graph documents. Project/canvas/chat features
-# reference files here rather than copying graph state into their own stores.
-DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS = DOCUMENTS / "Architecture_Graphs"
-
-_data_store: DataStore | None = None
 _postgres_pool: ConnectionPool | None = None
-
-
-def storage_mode() -> str:
-    mode = os.environ.get("GIGACHAD_STORE", "local")
-    if mode not in {"local", "postgres"}:
-        raise RuntimeError("GIGACHAD_STORE must be either 'local' or 'postgres'")
-    return mode
 
 
 def get_postgres_pool() -> ConnectionPool:
@@ -69,14 +38,13 @@ def get_postgres_pool() -> ConnectionPool:
         try:
             database_url = os.environ["GIGACHAD_DATABASE_URL"]
         except KeyError as exc:
-            raise RuntimeError("GIGACHAD_DATABASE_URL is required when GIGACHAD_STORE=postgres") from exc
+            raise RuntimeError("GIGACHAD_DATABASE_URL is required") from exc
         _postgres_pool = ConnectionPool(
             database_url,
             min_size=int(os.environ.get("GIGACHAD_PG_POOL_MIN_SIZE", "1")),
             max_size=int(os.environ.get("GIGACHAD_PG_POOL_MAX_SIZE", "10")),
         )
     return _postgres_pool
-
 
 
 def close_postgres_pool() -> None:
@@ -86,28 +54,17 @@ def close_postgres_pool() -> None:
         _postgres_pool.close()
         _postgres_pool = None
 
-def get_data_store(user_id: UUID | None = None, *, device_id: UUID | None = None) -> DataStore:
-    """Return local development storage or an immutable user-scoped Postgres store."""
-    if storage_mode() == "postgres":
-        if user_id is None:
-            raise RuntimeError("A user identity is required for Postgres storage")
-        from lib.postgres_data_store import PostgresDataStore
 
-        return PostgresDataStore(get_postgres_pool(), user_id, device_id=device_id)
+def get_data_store(user_id: UUID, *, device_id: UUID | None = None) -> DataStore:
+    """Return an immutable, user-scoped Postgres store."""
+    from lib.postgres_data_store import PostgresDataStore
 
-    global _data_store
-    if _data_store is None:
-        _data_store = LocalDataStore(DOCUMENTS)
-    return _data_store
+    return PostgresDataStore(get_postgres_pool(), user_id, device_id=device_id)
 
 
 def get_model_defaults() -> dict[str, str]:
     """Return defaults before a request-specific editable store is available."""
-    if storage_mode() == "postgres":
-        return {"small_model": SMALL_MODEL, "memory_model": MEMORY_MODEL, "vision_model": VISION_MODEL}
-    from lib.model_provider_store import ModelProviderStore
-
-    return ModelProviderStore(get_data_store()).load_defaults()
+    return {"small_model": SMALL_MODEL, "memory_model": MEMORY_MODEL, "vision_model": VISION_MODEL}
 
 
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
@@ -118,73 +75,20 @@ OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 MINERU_SERVER_URL = os.environ.get("MINERU_SERVER_URL")
 
 
-def uploads_dir_for(slug: str | None) -> Path:
-    """Resolve the uploads directory for a given project slug (or None for non-project)."""
-    if slug:
-        return DIRECTORY_CHAT_HISTORIES / slug / "_uploads"
-    return DIRECTORY_CHAT_UPLOADS
-
-
-def chat_upload_dir(chat_id: str, slug: str | None = None) -> Path:
-    """Resolve the per-chat upload directory."""
-    return uploads_dir_for(slug) / chat_id
-
-
-def ensure_directories() -> None:
-    """Create filesystem directories only when local storage is authoritative."""
-    if storage_mode() == "postgres":
-        return
-    _dirs = [
-        DIRECTORY_CHAT_HISTORIES,
-        DIRECTORY_OUTPUT_MINERU,
-        DIRECTORY_OUTPUT_MINERU / "images",
-        DIRECTORY_OUTPUT_PDF,
-        DIRECTORY_OUTPUT_MARKDOWN,
-        DIRECTORY_OUTPUT_LATEX,
-        DIRECTORY_OUTPUT_DRAWINGS,
-        DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS,
-        DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS / ".drafts",
-        DIRECTORY_CHAT_UPLOADS,
-        DIRECTORY_NOTES,
-        DIRECTORY_CHAT_HISTORIES / "memory",
-        DIRECTORY_CHAT_HISTORIES / "memory" / "pending",
-        # DIRECTORY_PROMPTS is deliberately absent: seed_prompts() copies into it and
-        # skips a directory that already exists.
-    ]
-    store = get_data_store()
-    for directory in _dirs:
-        store.mkdir(directory.relative_to(DOCUMENTS).as_posix())
-    seed_prompts(store)
-
-
-def seed_prompts(store: DataStore | None = None) -> None:
+def seed_prompts(store: DataStore, *, prefix: str = PROMPT) -> None:
     """Initialize editable prompts once from the shipped defaults.
 
-    An existing directory is authoritative, including deleted prompts. Defaults
-    remain source assets; all subsequent editor writes go to remote storage.
+    An existing collection is authoritative, including deleted prompts. Defaults
+    remain source assets; all subsequent editor writes go to persistent storage.
     """
     source = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent)) / "prompts"
-    if not source.is_dir():
+    if not source.is_dir() or store.exists(prefix):
         return
-    if store is not None:
-        # The presence of the directory is authoritative, including an empty
-        # one where a user intentionally deleted every prompt.
-        if store.exists("Prompts"):
-            return
-        store.mkdir("Prompts")
-        for path in source.rglob("*"):
-            relative = path.relative_to(source).as_posix()
-            key = f"Prompts/{relative}"
-            if path.is_dir():
-                store.mkdir(key)
-            else:
-                store.write_bytes(key, path.read_bytes())
-        return
-    if DIRECTORY_PROMPTS.exists():
-        return
-    # Stage then rename: a copy interrupted half-way must not leave a directory
-    # that exists (so seeding never runs again) but is missing prompts.
-    staged = DIRECTORY_PROMPTS.with_name(DIRECTORY_PROMPTS.name + ".seeding")
-    shutil.rmtree(staged, ignore_errors=True)
-    shutil.copytree(source, staged)
-    staged.rename(DIRECTORY_PROMPTS)
+    store.mkdir(prefix)
+    for path in source.rglob("*"):
+        relative = path.relative_to(source).as_posix()
+        key = f"{prefix}/{relative}"
+        if path.is_dir():
+            store.mkdir(key)
+        else:
+            store.write_bytes(key, path.read_bytes())

@@ -547,11 +547,14 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   const shotStart = useRef<{ x: number; y: number } | null>(null)
 
   // --- Text: drag a box to define where a handwriting-style note goes. A plain click
-  // (no real drag) still drops a default-size box. Clicking an existing note focuses its
-  // textarea and places the cursor natively; a thin top band moves it, corner resizes it. ---
+  // (no real drag) still drops a default-size box. Typing with the canvas focused starts
+  // one at the latest pointer position. Clicking an existing note focuses its textarea
+  // and places the cursor natively; a thin top band moves it, corner resizes it. ---
   const [textMode, setTextMode] = useState(false)
   const [textDragRect, setTextDragRect] = useState<RectDrag | null>(null)
   const textDragStart = useRef<{ x: number; y: number } | null>(null)
+  const lastCanvasPoint = useRef<[number, number] | null>(null)
+  const newTextIds = useRef(new Set<string>())
   const [autoFocusId, setAutoFocusId] = useState<string | null>(null)
 
   const [isDark, setIsDark] = useState(() => activeThemeName() === "dark")
@@ -605,6 +608,14 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     return [(sx - offsetRef.current.x) / scaleRef.current, (sy - offsetRef.current.y) / scaleRef.current]
   }, [])
 
+  const addText = useCallback((x: number, y: number, width = TEXT_DEFAULT_WIDTH, height = TEXT_DEFAULT_HEIGHT, text = "") => {
+    const id = `txt-${Date.now()}`
+    newTextIds.current.add(id)
+    const cur = liveRef.current.doc
+    commit({ ...cur, texts: [...cur.texts, { id, x, y, width, height, text, color, size: TEXT_DEFAULT_SIZE }] })
+    setAutoFocusId(id)
+  }, [color, commit])
+
   // Wheel zoom
   useEffect(() => {
     const el = containerRef.current
@@ -650,9 +661,11 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up) }
   }, [])
 
-  // Some pens report their side button as secondary. Preserve mouse right-click behavior.
   const handleContainerPointerDown = useCallback((e: React.PointerEvent) => {
-    if (e.pointerType === "touch" || screenshotMode || selectionMode) return
+    if (e.pointerType === "touch") return
+    ;(e.currentTarget as HTMLElement).focus({ preventScroll: true })
+    lastCanvasPoint.current = screenToCanvas(e.clientX, e.clientY)
+    if (screenshotMode || selectionMode) return
     // any pointerdown that bubbles this far didn't hit the selection lasso or its
     // handles (they stopPropagation) — so it's "outside" and drops the selection
     clearSelection()
@@ -684,6 +697,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
 
   const handleContainerPointerMove = useCallback((e: React.PointerEvent) => {
     if (e.pointerType === "touch") return
+    lastCanvasPoint.current = screenToCanvas(e.clientX, e.clientY)
     if (e.pointerType !== lastPointerTypeRef.current) {
       lastPointerTypeRef.current = e.pointerType
       setPointerIsPen(e.pointerType === "pen")
@@ -694,7 +708,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     const newOffset = { x: panStart.current.ox + dx, y: panStart.current.oy + dy }
     offsetRef.current = newOffset
     setOffset(newOffset)
-  }, [isPanning])
+  }, [isPanning, screenToCanvas])
 
   const handleContainerPointerUp = useCallback((e: React.PointerEvent) => {
     if (e.pointerType === "touch") return
@@ -1049,11 +1063,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
         const dragW = Math.abs(ex - start.x)
         const dragH = Math.abs(ey - start.y)
         // a plain click (no real drag) gets a default-size box instead of a sliver
-        const width = dragW < MIN_TEXT_WIDTH ? TEXT_DEFAULT_WIDTH : dragW
-        const height = dragH < MIN_TEXT_HEIGHT ? TEXT_DEFAULT_HEIGHT : dragH
-        const id = `txt-${Date.now()}`
-        commit({ ...doc, texts: [...doc.texts, { id, x, y, width, height, text: "", color, size: TEXT_DEFAULT_SIZE }] })
-        setAutoFocusId(id)
+        addText(x, y, dragW < MIN_TEXT_WIDTH ? TEXT_DEFAULT_WIDTH : dragW, dragH < MIN_TEXT_HEIGHT ? TEXT_DEFAULT_HEIGHT : dragH)
       }
       return
     }
@@ -1069,7 +1079,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     redrawLive()
     if (pts.length < 2) return
     commit({ ...doc, strokes: [...doc.strokes, { points: pts, color, width: baseWidth }] })
-  }, [isDrawing, isErasing, color, baseWidth, doc, onChange, cancelLongPress, cancelStraighten, captureScreenshot, finalizeLasso, screenToCanvas, redrawLive, commit])
+  }, [isDrawing, isErasing, color, baseWidth, doc, onChange, cancelLongPress, cancelStraighten, captureScreenshot, finalizeLasso, screenToCanvas, redrawLive, commit, addText])
 
   // --- Undo / Redo ---
   // Selections index into doc.strokes, so a restore that shifts the array would leave
@@ -1147,6 +1157,14 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     document.addEventListener("keydown", esc)
     return () => document.removeEventListener("keydown", esc)
   }, [screenshotMode, selectionMode, textMode, selectedStrokes, clearSelection])
+
+  const handleCanvasKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.ctrlKey || e.metaKey || e.altKey || e.nativeEvent.isComposing || Array.from(e.key).length !== 1) return
+    e.preventDefault()
+    const point = lastCanvasPoint.current
+      ?? screenToCanvas(containerRef.current?.clientWidth ?? 0, containerRef.current?.clientHeight ?? 0)
+    addText(point[0], point[1], TEXT_DEFAULT_WIDTH, TEXT_DEFAULT_HEIGHT, e.key)
+  }, [addText, screenToCanvas])
 
   const nextSize = useCallback(() => {
     setStrokeWidth((w) => w === "thin" ? "medium" : w === "medium" ? "thick" : "thin")
@@ -1688,8 +1706,10 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
       {/* Canvas area */}
       <div
         ref={containerRef}
+        tabIndex={0}
         className={cn("flex-1 min-h-0 overflow-hidden relative", isDrawing || pointerIsPen ? "cursor-none" : isPanning ? "cursor-grabbing" : "cursor-crosshair")}
         style={{ touchAction: "none", WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none" }}
+        onKeyDown={handleCanvasKeyDown}
         onPointerDown={handleContainerPointerDown}
         onPointerMove={handleContainerPointerMove}
         onPointerUp={handleContainerPointerUp}
@@ -2037,7 +2057,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
                   if (!textEdited.current) { textEdited.current = true; if (t.text !== "") snapshot() }
                   onChange({ ...doc, texts: doc.texts.map((x) => x.id === t.id ? { ...x, text: e.target.value } : x) })
                 }}
-                onFocus={() => { textEdited.current = false; setAutoFocusId((cur) => cur === t.id ? null : cur) }}
+                onFocus={() => { textEdited.current = newTextIds.current.delete(t.id); setAutoFocusId((cur) => cur === t.id ? null : cur) }}
                 onBlur={() => dropIfEmptyText(t.id)}
                 onKeyDown={(e) => {
                   e.stopPropagation()

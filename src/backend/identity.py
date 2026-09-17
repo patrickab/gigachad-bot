@@ -8,7 +8,7 @@ from uuid import UUID
 
 from fastapi import Header, HTTPException
 
-from config import get_postgres_pool, storage_mode
+from config import get_postgres_pool
 
 
 @dataclass(frozen=True)
@@ -27,10 +27,8 @@ def _development_login() -> str | None:
 def get_request_identity(
     tailscale_login: str | None = Header(default=None, alias="Tailscale-User-Login"),
     device_id: str | None = Header(default=None, alias="X-Device-Id"),
-) -> RequestIdentity | None:
+) -> RequestIdentity:
     """Resolve a proxy-injected Tailscale login to one database user."""
-    if storage_mode() == "local":
-        return None
     login = tailscale_login or _development_login()
     if not login:
         raise HTTPException(status_code=401, detail="Tailscale identity is required")

@@ -7,7 +7,7 @@ After=network-online.target gigachad-bot-omp.service
 Type=exec
 WorkingDirectory=%h/git/gigachad-bot-prod
 Environment=GIGACHAD_ENV_FILE=%h/.config/gigachad-bot/env
-ExecStart=%h/git/gigachad-bot-prod/deploy/run-production-backend.sh
+ExecStart=%h/git/gigachad-bot-prod/run-backend.sh --prod
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=30s

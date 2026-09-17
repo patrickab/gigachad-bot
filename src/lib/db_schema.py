@@ -99,6 +99,7 @@ def upgrade(url: str) -> list[str]:
                 (step.name, step.checksum),
             )
             applied_names.append(step.name)
+
         return applied_names
 
 

@@ -7,8 +7,6 @@ import psycopg
 from psycopg_pool import ConnectionPool
 import pytest
 
-from fastapi import HTTPException
-
 from backend.identity import RequestIdentity
 from backend.routes.sync import replay_changes, stream_changes
 from backend.sync import CHANNEL, QUEUE_MAXSIZE, ChangeBroker
@@ -178,7 +176,6 @@ async def test_broker_closes_subscriber_that_stops_reading():
 
 async def test_stream_replays_missed_changes_then_live_ones(postgres_pool, database_url, monkeypatch):
     broker = ChangeBroker()
-    monkeypatch.setattr("backend.routes.sync.storage_mode", lambda: "postgres")
     monkeypatch.setattr("backend.routes.sync.get_postgres_pool", lambda: postgres_pool)
     monkeypatch.setattr("backend.routes.sync.get_change_broker", lambda: broker)
     user_id = _user(postgres_pool, "alice@example.test")
@@ -211,15 +208,6 @@ async def test_stream_replays_missed_changes_then_live_ones(postgres_pool, datab
         "version": 2,
         "device_id": None,
     }
-
-
-async def test_stream_rejects_local_storage(monkeypatch):
-    monkeypatch.setattr("backend.routes.sync.storage_mode", lambda: "local")
-
-    with pytest.raises(HTTPException) as exc:
-        await stream_changes(since=0, identity=None)
-
-    assert exc.value.status_code == 501
 
 
 async def test_broker_reconnects_after_its_connection_is_terminated(postgres_pool, database_url):

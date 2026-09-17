@@ -36,7 +36,6 @@ def database_url() -> str:
 
 @pytest.fixture
 def client(database_url, monkeypatch):
-    monkeypatch.setenv("GIGACHAD_STORE", "postgres")
     monkeypatch.setenv("GIGACHAD_DATABASE_URL", database_url)
     import config
 
@@ -113,7 +112,7 @@ def test_attachment_bytes_round_trip_through_the_asset_route(client):
     assert uploaded.status_code == 200
     assert uploaded.json()["name"] == "note.txt"
 
-    logical_path = "chat_history/_uploads/chat-1/note.txt"
+    logical_path = "attachment/chat/chat-1/note.txt"
     served = client.get(f"/api/assets/{logical_path}", headers=alice)
     assert served.status_code == 200
     assert served.content == b"attachment bytes"
@@ -137,8 +136,8 @@ def test_writes_append_a_replayable_change_log(client):
         ).fetchall()
 
     keys = [row[2] for row in rows]
-    assert "Architecture_Graphs/a.architecture.yaml" in keys
-    assert "Architecture_Graphs/b.architecture.yaml" in keys
+    assert "graph/a.architecture.yaml" in keys
+    assert "graph/b.architecture.yaml" in keys
     assert {row[1] for row in rows} == {"document"}
     # Echo suppression needs the writing device on every row.
     assert {str(row[3]) for row in rows} == {device}
@@ -162,7 +161,10 @@ def test_document_editors_read_the_stored_copy_not_the_filesystem(client, tmp_pa
     slug = f"canvas-{uuid4().hex[:8]}"
     assert client.post("/api/projects", json={"name": slug}, headers=alice).status_code == 200
 
-    drawn = '{"version":1,"viewport":{"scale":1,"centerX":0,"centerY":0},"frames":[],"strokes":[{"id":"s1"}],"texts":[],"attachments":[]}'
+    drawn = (
+        '{"version":1,"viewport":{"scale":1,"centerX":0,"centerY":0},'
+        '"frames":[],"strokes":[{"id":"s1"}],"texts":[],"attachments":[]}'
+    )
     written = client.post(
         "/api/documents/write",
         json={"slug": slug, "name": "notes.canvas", "content": drawn},

@@ -1,19 +1,14 @@
 """Backend-neutral storage for application-owned data.
 
-Keys are always relative to the configured Documents root.  Domain stores use
-this module instead of local filesystem paths, so changing the backing store
-does not leak into chat, project, prompt, memory, or graph logic.
+Keys identify logical application artifacts, addressed by database-native
+namespaces.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 import fnmatch
-import hashlib
-import os
-from pathlib import Path, PurePosixPath
-import shutil
-import tempfile
+from pathlib import PurePosixPath
 from typing import Protocol
 
 
@@ -188,93 +183,3 @@ def validate_key(key: str, *, allow_empty: bool = False) -> str:
     if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
         raise InvalidStorageKey("Storage key must be relative and cannot traverse directories")
     return path.as_posix()
-
-
-class LocalDataStore:
-    """Atomic local adapter rooted at one Documents directory."""
-
-    def __init__(self, root: Path) -> None:
-        self.root = root.expanduser().resolve()
-
-    def _path(self, key: str, *, allow_empty: bool = False) -> Path:
-        normalized = validate_key(key, allow_empty=allow_empty)
-        return self.root if not normalized else self.root.joinpath(*normalized.split("/"))
-
-    @staticmethod
-    def _revision(content: bytes) -> Revision:
-        return Revision(hashlib.sha256(content).hexdigest())
-
-    def read_bytes(self, key: str) -> tuple[bytes, Revision]:
-        path = self._path(key)
-        try:
-            content = path.read_bytes()
-        except FileNotFoundError as exc:
-            raise StorageNotFoundError(key) from exc
-        return content, self._revision(content)
-
-    def write_bytes(self, key: str, content: bytes, *, expected: Revision | None = None) -> Revision:
-        path = self._path(key)
-        if expected is not None:
-            try:
-                _, current = self.read_bytes(key)
-            except StorageNotFoundError:
-                raise StorageConflictError(f"{key} was deleted before it could be saved") from None
-            if current != expected:
-                raise StorageConflictError(f"{key} changed on another device; reload before saving")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, temporary = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
-        try:
-            with os.fdopen(fd, "wb") as output:
-                output.write(content)
-            Path(temporary).replace(path)
-        except OSError:
-            Path(temporary).unlink(missing_ok=True)
-            raise
-        return self._revision(content)
-
-    def list(self, prefix: str = "", *, recursive: bool = False) -> list[Entry]:
-        path = self._path(prefix, allow_empty=True)
-        if not path.exists():
-            return []
-        iterator = path.rglob("*") if recursive else path.iterdir()
-        entries: list[Entry] = []
-        for item in iterator:
-            relative = item.relative_to(self.root).as_posix()
-            if item.is_dir():
-                entries.append(Entry(relative, is_dir=True))
-            else:
-                # Avoid reading every file just to list metadata.
-                stat = item.stat()
-                entries.append(
-                    Entry(relative, is_dir=False, size=stat.st_size, revision=Revision(f"{stat.st_mtime_ns}-{stat.st_size}"))
-                )
-        return entries
-
-    def is_file(self, key: str) -> bool:
-        return self._path(key).is_file()
-
-    def is_dir(self, key: str) -> bool:
-        return self._path(key).is_dir()
-
-    def exists(self, key: str) -> bool:
-        return self._path(key).exists()
-
-    def mkdir(self, key: str) -> None:
-        self._path(key).mkdir(parents=True, exist_ok=True)
-
-    def delete(self, key: str, *, recursive: bool = False) -> None:
-        path = self._path(key)
-        if path.is_dir():
-            if recursive:
-                shutil.rmtree(path)
-            else:
-                path.rmdir()
-        else:
-            path.unlink(missing_ok=True)
-
-    def move(self, source: str, destination: str) -> None:
-        src, dst = self._path(source), self._path(destination)
-        if not src.exists():
-            raise StorageNotFoundError(source)
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        src.replace(dst)

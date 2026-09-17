@@ -14,7 +14,7 @@ from lib.data_store import StorageConflictError
 router = APIRouter(prefix="/api/chat-histories", tags=["histories"])
 
 
-def _upload_cleanup(assets: AssetStore | None) -> Callable[[str, str | None], None]:
+def _upload_cleanup(assets: AssetStore) -> Callable[[str, str | None], None]:
     """Bind the request's asset store so chat deletion also purges stored uploads."""
     return lambda chat_id, slug=None: delete_chat_upload_dir(chat_id, slug, assets)
 
@@ -86,7 +86,7 @@ async def save_chat_history(
 
 @router.delete("/cascade/{filename:path}")
 async def cascade_delete(
-    filename: str, store: ChatStore = Depends(get_chat_store), assets: AssetStore | None = Depends(get_asset_store)
+    filename: str, store: ChatStore = Depends(get_chat_store), assets: AssetStore = Depends(get_asset_store)
 ) -> dict[str, Any]:
     try:
         return store.cascade_delete(filename, cleanup_uploads_fn=_upload_cleanup(assets))
@@ -96,7 +96,7 @@ async def cascade_delete(
 
 @router.delete("/orphan/{filename:path}")
 async def orphan_children(
-    filename: str, store: ChatStore = Depends(get_chat_store), assets: AssetStore | None = Depends(get_asset_store)
+    filename: str, store: ChatStore = Depends(get_chat_store), assets: AssetStore = Depends(get_asset_store)
 ) -> dict[str, Any]:
     try:
         return store.orphan(filename, cleanup_uploads_fn=_upload_cleanup(assets))
@@ -108,7 +108,7 @@ async def orphan_children(
 
 @router.delete("/{filename:path}")
 async def delete_chat_history(
-    filename: str, store: ChatStore = Depends(get_chat_store), assets: AssetStore | None = Depends(get_asset_store)
+    filename: str, store: ChatStore = Depends(get_chat_store), assets: AssetStore = Depends(get_asset_store)
 ) -> dict[str, str]:
     try:
         return store.delete(filename, cleanup_uploads_fn=_upload_cleanup(assets))
@@ -146,7 +146,7 @@ async def create_branch(req: BranchRequest, store: ChatStore = Depends(get_chat_
 
 @router.post("/merge")
 async def merge_branch(
-    req: MergeRequest, store: ChatStore = Depends(get_chat_store), assets: AssetStore | None = Depends(get_asset_store)
+    req: MergeRequest, store: ChatStore = Depends(get_chat_store), assets: AssetStore = Depends(get_asset_store)
 ) -> dict[str, Any]:
     try:
         return store.merge(req.child_file, cleanup_uploads_fn=_upload_cleanup(assets))

@@ -12,20 +12,12 @@ This module is pure I/O over the filesystem — it never touches ``project.json`
 ``files`` and ``documents`` routes reuse it without import cycles.
 """
 
-from collections.abc import Iterable
 import logging
 import mimetypes
 from pathlib import Path, PurePosixPath
-import shutil
 from typing import TYPE_CHECKING
 
-from config import (
-    DIRECTORY_CHAT_HISTORIES,
-    DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS,
-    DIRECTORY_OUTPUT_MINERU,
-    DIRECTORY_OUTPUT_PDF,
-    DOCUMENTS,
-)
+from config import DIRECTORY_OUTPUT_PDF, DOCUMENTS
 from lib.data_store import InvalidStorageKey, validate_key
 
 if TYPE_CHECKING:
@@ -100,25 +92,19 @@ def resolve_known_path(
     *,
     store: "ProjectStore",
     vault: "FileVault | None" = None,
-    extra_roots: Iterable[str | Path] = (),
 ) -> Path:
     """Resolve a user-supplied path, rejecting anything outside the allowed roots.
 
-    Allowed are the document library, every path *store* already references and
-    the canonical architecture-graph files, plus whatever the caller opts into:
-    *extra_roots* directory trees and, when given, anything *vault* contains.
+    Allowed are the document library, every path *store* already references, and,
+    when given, anything *vault* contains. Architecture graphs never reach here:
+    they are Postgres-only and resolved by the caller's storage-backed branch first.
 
     Raises ``PathNotAllowed`` so each caller maps the two rejection reasons onto
     its own status codes and wording.
     """
     resolved = Path(path).expanduser().resolve()
-    roots = [LIBRARY_DIR.resolve(), *(Path(root).resolve() for root in extra_roots)]
-    graphs = DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS.resolve()
     allowed = (
-        any(resolved.is_relative_to(root) for root in roots)
-        # Graph drafts are deliberately not generic documents: they stay
-        # proposal state until an explicit accept publishes them as canonical.
-        or (resolved.parent == graphs and resolved.name.endswith(".architecture.yaml"))
+        resolved.is_relative_to(LIBRARY_DIR.resolve())
         or (vault is not None and vault.contains(resolved))
         or str(resolved) in {str(Path(known).expanduser().resolve()) for known in store.list_all_files()}
     )
@@ -140,35 +126,3 @@ def organize_file(src: Path) -> Path:
         dest.write_bytes(src.read_bytes())
     return dest
 
-
-def backfill_pdf_library() -> int:
-    """Recover chat-attached PDFs that never reached the library.
-
-    Historically only the ``/api/mineru`` routes copied raw PDFs into the
-    library; PDFs attached to chats (parsed via ``/api/files``) stayed only in
-    their per-chat ``_uploads`` dir. This one-shot, idempotent pass copies each
-    unique PDF filename from any ``_uploads`` directory into the library — but
-    only when its parsed ``<stem>.md`` already exists in the MinerU cache, so we
-    never resurrect a PDF we never actually parsed.
-    """
-    if not DIRECTORY_CHAT_HISTORIES.exists():
-        return 0
-    LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
-    copied = 0
-    seen: set[str] = set()
-    for pdf in DIRECTORY_CHAT_HISTORIES.rglob("*.pdf"):
-        if "_uploads" not in pdf.parts or not pdf.is_file():
-            continue
-        if pdf.name in seen:
-            continue
-        seen.add(pdf.name)
-        dest = LIBRARY_DIR / pdf.name
-        if dest.exists():
-            continue
-        if not (DIRECTORY_OUTPUT_MINERU / f"{pdf.stem}.md").is_file():
-            continue
-        shutil.copy2(pdf, dest)
-        copied += 1
-    if copied:
-        log.info("Document library backfill: recovered %d PDF(s) into %s", copied, LIBRARY_DIR)
-    return copied

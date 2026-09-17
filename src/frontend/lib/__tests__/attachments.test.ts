@@ -52,7 +52,7 @@ describe("normalizeAttachment", () => {
     const fresh = normalizeAttachment(bare, "chat-123", "my-project")
 
     expect(fresh.url).toBe(
-      "https://gigachad-backend.tail8cc40f.ts.net/api/assets/chat_history/my-project/_uploads/chat-123/image.png",
+      "https://gigachad-backend.tail8cc40f.ts.net/api/assets/attachment/project/my-project/chat/chat-123/image.png",
     )
   })
 

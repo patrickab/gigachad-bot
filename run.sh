@@ -2,6 +2,16 @@
 set -euo pipefail
 
 root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if (($# > 1))
+then
+    printf 'usage: %s [--tailscale]\n' "${BASH_SOURCE[0]}" >&2
+    exit 2
+fi
+if (($# == 1)) && [[ "$1" != "--tailscale" ]]
+then
+    printf 'usage: %s [--tailscale]\n' "${BASH_SOURCE[0]}" >&2
+    exit 2
+fi
 backend_pid=''
 frontend_pid=''
 omp_pid=''

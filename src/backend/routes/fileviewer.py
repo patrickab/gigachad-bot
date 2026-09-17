@@ -24,7 +24,6 @@ from fastapi.responses import FileResponse
 
 from backend.routes.deps import get_document_store, get_file_vault, get_project_store
 from backend.routes.schemas import FileContent
-from config import DIRECTORY_NOTES
 from lib import document_library as lib_docs
 from lib.data_store import DataStore, StorageNotFoundError, read_text
 from lib.file_vault import FileVault
@@ -37,17 +36,15 @@ router = APIRouter(prefix="/api/fileviewer", tags=["fileviewer"])
 
 def _resolve_allowed(path: str, vault: FileVault, store: ProjectStore) -> Path:
     try:
-        return lib_docs.resolve_known_path(path, store=store, vault=vault, extra_roots=(DIRECTORY_NOTES,))
+        return lib_docs.resolve_known_path(path, store=store, vault=vault)
     except lib_docs.PathNotAllowed as exc:
         if exc.outside_roots:
             raise HTTPException(status_code=403, detail="Unknown file path") from exc
         raise HTTPException(status_code=404, detail="File not found") from exc
 
 
-def _stored(path: str, docs: DataStore | None) -> str | None:
+def _stored(path: str, docs: DataStore) -> str | None:
     """The stored logical key for *path*, or None when storage does not hold it."""
-    if docs is None:
-        return None
     key = lib_docs.storage_key(path)
     return key if key is not None and docs.exists(key) else None
 
@@ -57,7 +54,7 @@ async def read_text_content(
     path: str = Query(...),
     vault: FileVault = Depends(get_file_vault),
     store: ProjectStore = Depends(get_project_store),
-    docs: DataStore | None = Depends(get_document_store),
+    docs: DataStore = Depends(get_document_store),
 ) -> FileContent:
     key = _stored(path, docs)
     if key is not None:
@@ -80,7 +77,7 @@ async def read_raw(
     path: str = Query(...),
     vault: FileVault = Depends(get_file_vault),
     store: ProjectStore = Depends(get_project_store),
-    docs: DataStore | None = Depends(get_document_store),
+    docs: DataStore = Depends(get_document_store),
 ) -> Response:
     key = _stored(path, docs)
     if key is not None:

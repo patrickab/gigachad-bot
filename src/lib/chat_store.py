@@ -6,9 +6,9 @@ import re
 from typing import Any, Callable
 import uuid
 
-from config import DIRECTORY_CHAT_HISTORIES
-from lib.data_store import DataStore, DataStorePath, LocalDataStore, Revision
+from lib.data_store import DataStore, DataStorePath, Revision
 from lib.json_io import load_json, safe_read_json, safe_write_json
+from lib.storage_namespace import CHAT
 
 PROJECT_JSON = "project.json"
 META_JSON = "projects-meta.json"
@@ -18,9 +18,8 @@ MEMORY_DIR = "memory"
 class ChatStore:
     """Owns all chat-file reads, writes, deletes, branching, merging, and indexing."""
 
-    def __init__(self, base_dir: Path | None = None, *, data_store: DataStore | None = None) -> None:
-        base_dir = (base_dir or DIRECTORY_CHAT_HISTORIES).resolve()
-        self._base = DataStorePath(data_store or LocalDataStore(base_dir.parent), base_dir.name)
+    def __init__(self, prefix: str = CHAT, *, data_store: DataStore) -> None:
+        self._base = DataStorePath(data_store, prefix)
         self._chat_id_index: dict[str, str] | None = None
 
     # ------------------------------------------------------------------

@@ -7,7 +7,7 @@ development.
 
 ```text
 Tailnet-enrolled browser ── HTTPS ──> <tailnet-hostname>
-                                      Tailscale Serve ──> 127.0.0.1:8001 FastAPI
+                                      Tailscale Serve ──> 127.0.0.1:8002 FastAPI
 Vercel ── serves the Next.js bundle ──> browser
 ```
 
@@ -178,7 +178,7 @@ first automatically; no separate start step is required:
 ```bash
 systemctl --user start gigachad-bot.service
 systemctl --user status gigachad-bot.service gigachad-bot-omp.service
-curl --fail --show-error http://127.0.0.1:8001/healthz
+curl --fail --show-error http://127.0.0.1:8002/healthz
 ```
 
 `gigachad-bot-omp.service` is best-effort: when the `omp` binary or its
@@ -195,21 +195,20 @@ environment entry is the nonsecret configuration path:
 GIGACHAD_ENV_FILE=$ENV
 ```
 
-It has no `EnvironmentFile`. Its `ExecStart` runs
-`deploy/run-production-backend.sh`, whose strict `deploy/load-env.sh` loader
-parses that shared file before it execs loopback Uvicorn. Provider values are
-never parsed or loaded by the systemd manager; only the backend child receives
-them.
+It has no `EnvironmentFile`. Its `ExecStart` runs `run-backend.sh --prod`.
+That runner loads the shared file, starts or reuses the production PostgreSQL
+container, then starts loopback Uvicorn without reload. Provider values are
+never parsed or loaded by the systemd manager, only by the backend child.
 
 It intentionally has neither `--reload` nor a non-loopback host. It retains
 restart handling, a stop timeout, `NoNewPrivileges=true`, `PrivateTmp=true`, and
 `UMask=0077` hardening. Do not bind Uvicorn to `0.0.0.0`, a LAN address, or the
 Tailscale address.
 
-**Only one backend may run at a time.** The development backend and the systemd
-backend both bind `127.0.0.1:8001` and share the same Documents state. Stop the
-systemd service before using a development backend, and stop the development
-backend before starting or restarting the service.
+The development backend runs on `127.0.0.1:8001`; the systemd backend runs on
+`127.0.0.1:8002`. They may run concurrently, and each uses its own isolated
+PostgreSQL container and data volume (`gigachad-dev` vs `gigachad-prod`), so
+their stored data never mixes.
 
 The OMP unit follows the same pattern: no `EnvironmentFile`, only
 `GIGACHAD_ENV_FILE` and an explicit `PATH` covering the mise shims directory
@@ -241,13 +240,13 @@ Configure the persistent private HTTPS root proxy with the tracked helper. It
 preserves `/api` and `/healthz`, so no path rewrite is needed:
 
 ```bash
-"$PROD/deploy/tailscale-serve.sh"
+"$PROD/deploy/tailscale-serve.sh" 8002
 tailscale serve status
 ```
 
-The helper runs exactly `tailscale serve --bg --https=443 http://127.0.0.1:8001`.
+The helper runs exactly `tailscale serve --bg --https=443 http://127.0.0.1:8002`.
 
-The status output should show a proxy to `http://127.0.0.1:8001` available only
+The status output should show a proxy to `http://127.0.0.1:8002` available only
 inside the Tailnet. `--bg` persists the Serve configuration across Tailscale
 restarts and reboots. Use `tailscale serve`, never `tailscale funnel`.
 
@@ -324,7 +323,7 @@ For a first deployment or an update:
    `GIGACHAD_BASE_DIR` and `MINERU_SERVER_URL` unset.
 3. Start or restart `gigachad-bot.service` and confirm its loopback health
    check.
-4. Run `"$PROD/deploy/tailscale-serve.sh"` and confirm Tailnet HTTPS health
+4. Run `"$PROD/deploy/tailscale-serve.sh" 8002` and confirm Tailnet HTTPS health
    from another enrolled device.
 5. Configure Vercel's root directory, build settings, and public
    `NEXT_PUBLIC_API_BASE`, then deploy production.
@@ -364,9 +363,9 @@ by its ACL.
    streaming route; a health check alone does not.
 4. **Persistence.** Create a clearly labelled disposable chat, refresh, and
    reopen it. Its messages must remain. Delete the disposable chat afterwards;
-   it belongs in the shared default Documents tree, not either code worktree.
-5. **Boundary.** Confirm `sudo ss -ltnp '( sport = :8001 )'` shows FastAPI only
-   on `127.0.0.1:8001` and `tailscale serve status` shows the private proxy. Do
+   it belongs to the shared Postgres database, not either code worktree.
+5. **Boundary.** Confirm `sudo ss -ltnp '( sport = :8002 )'` shows FastAPI only
+   on `127.0.0.1:8002` and `tailscale serve status` shows the private proxy. Do
    not test with Funnel.
 
 ## 6. Roll back safely
@@ -389,7 +388,7 @@ rollback so clients retain `https://<tailnet-hostname>/api`.
 
    ```bash
    systemctl --user start gigachad-bot.service
-   curl --fail --show-error http://127.0.0.1:8001/healthz
+   curl --fail --show-error http://127.0.0.1:8002/healthz
    ```
 
 4. In Vercel, promote or redeploy the last known-good deployment and ensure its

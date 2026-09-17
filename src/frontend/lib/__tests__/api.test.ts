@@ -123,7 +123,7 @@ describe("api.ts — json helpers (post/put/patch)", () => {
   it("sends Architecture Graph contexts as live path references", async () => {
     const calls: Call[] = []
     vi.stubGlobal("fetch", fetchRecorder(calls))
-    const contexts = [{ path: "/documents/Architecture_Graphs/checkout.architecture.yaml" }]
+    const contexts = [{ path: "graph/checkout.architecture.yaml" }]
 
     await api.saveChatHistory("chat.json", [], { chatId: "chat-1", architectureGraphContexts: contexts })
 

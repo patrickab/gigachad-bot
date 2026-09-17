@@ -1,17 +1,18 @@
 from typing import Annotated, Any
 
-import litellm
-
 from fastapi import APIRouter, Depends
 from fastapi.concurrency import run_in_threadpool
+import litellm
+from llm_baseclient.client import LLMClient
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
+from lib.asset_store import AssetStore
 from lib.image_paths import resolve_chat_image_paths
 from lib.llm_resilience import api_query_resilient
 from lib.memory_store import MemoryStore
 
-from .deps import get_memory_store, request_client, sse_event_stream
+from .deps import get_asset_store, get_memory_store, request_client, sse_event_stream
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -53,13 +54,14 @@ def _supports_reasoning_effort(model: str) -> bool:
         return False
 
 
-def _resolve_images(c, req: ChatRequest) -> list | None:
+def _resolve_images(c: LLMClient, req: ChatRequest, assets: AssetStore) -> list | None:
     paths = resolve_chat_image_paths(
         c,
         req.chat_id,
         req.project_slug,
         req.img_paths,
         req.downscale_images,
+        assets=assets,
     )
     if not paths:
         return None
@@ -67,10 +69,14 @@ def _resolve_images(c, req: ChatRequest) -> list | None:
 
 
 @router.post("/chat")
-async def chat(req: ChatRequest, memory_store: MemoryStoreDep) -> EventSourceResponse:
+async def chat(
+    req: ChatRequest,
+    memory_store: MemoryStoreDep,
+    assets: Annotated[AssetStore, Depends(get_asset_store)],
+) -> EventSourceResponse:
     with request_client() as c:
         kwargs = _build_kwargs(req)
-        img = _resolve_images(c, req)
+        img = _resolve_images(c, req, assets)
         system_prompt = memory_store.augment_system_prompt(req.system_prompt, req.project_slug)
         chunks = await run_in_threadpool(
             api_query_resilient,

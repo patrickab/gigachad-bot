@@ -47,8 +47,12 @@ def providers_for_ui(providers: dict[str, dict[str, Any]]) -> dict[str, dict[str
 class ModelProviderStore:
     """Persists the editable provider catalog in the configured storage root."""
 
-    def __init__(self, store: DataStore) -> None:
+    def __init__(self, store: DataStore, *, prefix: str = "") -> None:
         self._store = store
+        self._prefix = prefix
+
+    def _key(self, filename: str) -> str:
+        return f"{self._prefix}/{filename}" if self._prefix else filename
 
     @staticmethod
     def _validate(data: object) -> dict[str, dict[str, Any]]:
@@ -82,7 +86,7 @@ class ModelProviderStore:
         return result
 
     def _read(self, store: DataStore) -> dict[str, dict[str, Any]]:
-        raw, _ = read_text(store, MODEL_PROVIDERS_FILE)
+        raw, _ = read_text(store, self._key(MODEL_PROVIDERS_FILE))
         try:
             data = yaml.safe_load(raw) or {}
         except yaml.YAMLError as exc:
@@ -90,11 +94,12 @@ class ModelProviderStore:
         return self._validate(data)
 
     def _write(self, store: DataStore, providers: dict[str, dict[str, Any]]) -> None:
+        key = self._key(MODEL_PROVIDERS_FILE)
         try:
-            _, revision = read_text(store, MODEL_PROVIDERS_FILE)
+            _, revision = read_text(store, key)
         except StorageNotFoundError:
             revision = None
-        write_text(store, MODEL_PROVIDERS_FILE, yaml.safe_dump(providers, allow_unicode=True, sort_keys=False), expected=revision)
+        write_text(store, key, yaml.safe_dump(providers, allow_unicode=True, sort_keys=False), expected=revision)
 
     def load(self) -> dict[str, dict[str, Any]]:
         try:
@@ -111,7 +116,7 @@ class ModelProviderStore:
 
     def load_defaults(self) -> dict[str, str]:
         try:
-            raw, _ = read_text(self._store, MODEL_DEFAULTS_FILE)
+            raw, _ = read_text(self._store, self._key(MODEL_DEFAULTS_FILE))
         except StorageNotFoundError:
             defaults = dict(DEFAULT_MODEL_DEFAULTS)
             self._write_defaults(defaults)
@@ -120,16 +125,20 @@ class ModelProviderStore:
             defaults = yaml.safe_load(raw) or {}
         except yaml.YAMLError as exc:
             raise ValueError("model-defaults.yaml is not valid YAML") from exc
-        if set(defaults) != set(DEFAULT_MODEL_DEFAULTS) or any(not isinstance(value, str) or not value.strip() for value in defaults.values()):
+        invalid = set(defaults) != set(DEFAULT_MODEL_DEFAULTS) or any(
+            not isinstance(value, str) or not value.strip() for value in defaults.values()
+        )
+        if invalid:
             raise ValueError("model-defaults.yaml must define each default model as a non-empty string")
         return defaults
 
     def _write_defaults(self, defaults: dict[str, str]) -> None:
+        key = self._key(MODEL_DEFAULTS_FILE)
         try:
-            _, revision = read_text(self._store, MODEL_DEFAULTS_FILE)
+            _, revision = read_text(self._store, key)
         except StorageNotFoundError:
             revision = None
-        write_text(self._store, MODEL_DEFAULTS_FILE, yaml.safe_dump(defaults, sort_keys=False), expected=revision)
+        write_text(self._store, key, yaml.safe_dump(defaults, sort_keys=False), expected=revision)
 
     def save_defaults(self, defaults: object) -> dict[str, str]:
         if not isinstance(defaults, dict) or set(defaults) != set(DEFAULT_MODEL_DEFAULTS):
@@ -148,7 +157,7 @@ class ModelProviderStore:
         tab alphabetically, so a stale or empty order never hides a tab.
         """
         try:
-            raw, _ = read_text(self._store, MODEL_TAB_ORDER_FILE)
+            raw, _ = read_text(self._store, self._key(MODEL_TAB_ORDER_FILE))
         except StorageNotFoundError:
             return []
         try:
@@ -163,9 +172,10 @@ class ModelProviderStore:
         if not isinstance(order, list) or any(not isinstance(label, str) or not label.strip() for label in order):
             raise ValueError("Tab order must be a list of non-empty labels")
         cleaned = [label.strip() for label in order]
+        key = self._key(MODEL_TAB_ORDER_FILE)
         try:
-            _, revision = read_text(self._store, MODEL_TAB_ORDER_FILE)
+            _, revision = read_text(self._store, key)
         except StorageNotFoundError:
             revision = None
-        write_text(self._store, MODEL_TAB_ORDER_FILE, yaml.safe_dump(cleaned, allow_unicode=True, sort_keys=False), expected=revision)
+        write_text(self._store, key, yaml.safe_dump(cleaned, allow_unicode=True, sort_keys=False), expected=revision)
         return cleaned

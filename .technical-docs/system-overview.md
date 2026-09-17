@@ -33,9 +33,9 @@ none of them are reimplemented in-repo:
   *client* — the torch/CUDA OCR server is excluded, so desktop OCR requires an
   external `mineru.cli.fast_api` instance via `MINERU_SERVER_URL`
   (`remote-inference.md`).
-- **Nextcloud** (or any configured cloud-synced directory) — holds the global
-  document library; user-authored Markdown/LaTeX/drawings are mirrored there
-  from `chat_histories`.
+- **Nextcloud** (or any configured cloud-synced directory): persists PDFs and
+  MinerU inputs/outputs only. PostgreSQL owns every other artifact under
+  database-native namespaces.
 - **Tauri** — the desktop shell only; it has no filesystem authority of its
   own and exists purely to host the exported UI + sidecar.
 

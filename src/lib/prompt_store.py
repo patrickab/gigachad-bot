@@ -1,4 +1,4 @@
-"""Filesystem-backed prompt store.
+"""Prompt store backed by the database-native ``prompt`` namespace.
 
 Reads ``prompts/*.md`` files with YAML frontmatter, resolves ``{{block}}``
 includes from ``prompts/_blocks/*.md``, and exposes a dict-like interface
@@ -13,7 +13,8 @@ import re
 
 import yaml
 
-from lib.data_store import DataStore, LocalDataStore, StorageNotFoundError, read_text, write_text
+from lib.data_store import DataStore, StorageNotFoundError, read_text, write_text
+from lib.storage_namespace import PROMPT
 
 log = logging.getLogger(__name__)
 
@@ -36,12 +37,11 @@ def _parse_frontmatter(raw: str) -> tuple[dict[str, object], str]:
 
 
 class PromptStore:
-    """Reads, resolves, and manages markdown prompt files on disk."""
+    """Reads, resolves, and manages stored prompt definitions."""
 
-    def __init__(self, base_dir: Path, *, data_store: DataStore | None = None) -> None:
-        base_dir = base_dir.expanduser().resolve()
-        self._store = data_store or LocalDataStore(base_dir.parent)
-        self._prefix = base_dir.name
+    def __init__(self, prefix: str = PROMPT, *, data_store: DataStore) -> None:
+        self._store = data_store
+        self._prefix = prefix
         self._block_cache: dict[str, str] = {}
         self._prompt_cache: dict[str, tuple[str, str]] = {}  # name -> (resolved_text, filename)
         self._order: list[str] = []

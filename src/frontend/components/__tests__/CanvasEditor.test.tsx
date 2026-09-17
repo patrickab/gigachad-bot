@@ -13,17 +13,17 @@
  */
 import { useState } from "react"
 import { describe, it, expect, vi } from "vitest"
-import { render, act } from "@testing-library/react"
+import { render, act, fireEvent } from "@testing-library/react"
 
 vi.mock("@/components/PdfViewer", () => ({ PdfViewer: () => null }))
 vi.mock("./PdfViewer", () => ({ PdfViewer: () => null }))
 const api = vi.hoisted(() => ({
   fileViewerRawUrl: (p: string) => `/raw/${p}`,
   writeBinaryDocument: vi.fn(),
-  listProjectDocuments: vi.fn(async () => [{ path: "proj/documents/notes.canvas", name: "notes.canvas", mime: "application/json" }]),
+  listProjectDocuments: vi.fn(async () => [{ path: "project/proj/document/notes.canvas", name: "notes.canvas", mime: "application/json" }]),
   loadFileViewerText: vi.fn(async () => ""),
   listArchitectureGraphs: vi.fn(async () => []),
-  writeDocument: vi.fn(async (_slug: string, _name: string, _content: string) => ({ path: "proj/documents/notes.canvas", name: "notes.canvas", mime: "application/json" })),
+  writeDocument: vi.fn(async (_slug: string, _name: string, _content: string) => ({ path: "project/proj/document/notes.canvas", name: "notes.canvas", mime: "application/json" })),
 }))
 vi.mock("@/lib/api", () => api)
 
@@ -43,7 +43,7 @@ globalThis.ResizeObserver ??= RO as unknown as typeof ResizeObserver
 function Harness({ seen, slug }: { seen: CanvasDocument[]; slug?: string }) {
   const [doc, setDoc] = useState<CanvasDocument>(emptyCanvasDoc())
   seen.push(doc)
-  return <CanvasEditor doc={doc} onChange={setDoc} slug={slug} docPath="proj/documents/host.canvas" />
+  return <CanvasEditor doc={doc} onChange={setDoc} slug={slug} docPath="project/proj/document/host.canvas" />
 }
 
 // toolbar order: [+, undo, redo, size, color, lasso, camera, text]
@@ -199,6 +199,27 @@ describe("canvas history", () => {
   })
 })
 
+describe("keyboard text entry", () => {
+  it("starts one focused text note at the pointer and keeps the first edit undoable as one action", () => {
+    const seen: CanvasDocument[] = []
+    const { container } = render(<Harness seen={seen} />)
+    const surface = container.querySelector("[tabindex=\"0\"]") as HTMLDivElement
+
+    act(() => {
+      fireEvent(surface, new MouseEvent("pointermove", { bubbles: true, clientX: 100, clientY: 50 }))
+      fireEvent.keyDown(surface, { key: "H" })
+    })
+
+    const note = container.querySelector("textarea") as HTMLTextAreaElement
+    expect(latest(seen).texts).toMatchObject([{ x: 200, y: 100, text: "H" }])
+    expect(note).toHaveFocus()
+
+    act(() => { fireEvent.change(note, { target: { value: "Hi" } }) })
+    act(() => { toolbar(container)[1]!.click() })
+    expect(latest(seen).texts).toHaveLength(0)
+  })
+})
+
 describe("nested canvas", () => {
   const addCanvas = (container: HTMLElement) => {
     act(() => { toolbar(container)[0]!.click() })
@@ -254,9 +275,9 @@ describe("nested canvas file", () => {
 
     await openCanvas(container, "notes.canvas")
     const [att] = latest(seen).attachments
-    expect(att).toMatchObject({ kind: "canvas", path: "proj/documents/notes.canvas" })
+    expect(att).toMatchObject({ kind: "canvas", path: "project/proj/document/notes.canvas" })
     expect(att!.canvas).toBeUndefined() // contents stay in the file, not in the host doc
-    expect(api.loadFileViewerText).toHaveBeenCalledWith("proj/documents/notes.canvas")
+    expect(api.loadFileViewerText).toHaveBeenCalledWith("project/proj/document/notes.canvas")
   })
 
   it("writes drawings back to the file when the window closes", async () => {
@@ -282,8 +303,8 @@ describe("nested canvas file", () => {
 describe("project assets", () => {
   it("loads PDFs and images from the canvas project instead of its parent surface", async () => {
     api.listProjectDocuments.mockResolvedValueOnce([
-      { path: "proj/documents/reference.pdf", name: "reference.pdf", mime: "application/pdf" },
-      { path: "proj/documents/diagram.png", name: "diagram.png", mime: "image/png" },
+      { path: "project/proj/document/reference.pdf", name: "reference.pdf", mime: "application/pdf" },
+      { path: "project/proj/document/diagram.png", name: "diagram.png", mime: "image/png" },
     ])
     const seen: CanvasDocument[] = []
     const { container } = render(<Harness seen={seen} slug="proj" />)

@@ -1,15 +1,14 @@
-"""Vault-root registry: ``vault_roots`` rows in Postgres mode, JSON file locally.
+"""Vault-root registry: ``vault_roots`` rows for the authenticated user.
 
-Only the *registry* moves into the database. Vault file contents stay on their
+Only the *registry* lives in the database. Vault file contents stay on their
 external filesystem and must never be copied into ``documents``/``assets``.
 """
 
-import json
 import os
 from uuid import uuid4
 
-import pytest
 from psycopg_pool import ConnectionPool
+import pytest
 
 from lib.db_schema import upgrade
 from lib.file_vault import FileVault, PostgresVaultRootRepository
@@ -71,24 +70,14 @@ def vault_dir(tmp_path):
     return directory
 
 
-@pytest.fixture
-def documents_root(tmp_path, monkeypatch):
-    """Redirect the JSON registry at a throwaway Documents tree so writes are visible."""
-    root = tmp_path / "Documents" / "chat_history"
-    root.mkdir(parents=True)
-    monkeypatch.setattr("lib.file_vault.ROOTS_FILE", root / "file-vault-roots.json")
-    monkeypatch.setattr("lib.file_vault._LEGACY_ROOTS_FILE", root / "obsidian-roots.json")
-    return root
 
-
-def test_add_root_writes_a_row_a_change_and_no_json_file(postgres_pool, vault_dir, documents_root):
+def test_add_root_writes_a_row_and_a_change(postgres_pool, vault_dir):
     vault, user_id, device_id = make_vault(postgres_pool)
 
     vault.add_root(str(vault_dir), project="alpha")
 
     assert rows(postgres_pool) == [(user_id, str(vault_dir.resolve()), "alpha", [])]
     assert changes(postgres_pool) == [(str(vault_dir.resolve()), "write", device_id)]
-    assert list(documents_root.iterdir()) == []
     assert reopen(postgres_pool, user_id).roots() == [str(vault_dir.resolve())]
 
 
@@ -152,29 +141,7 @@ def test_one_user_cannot_remove_another_users_root(postgres_pool, vault_dir, tmp
     assert reopen(postgres_pool, alice_id).roots() == [str(vault_dir.resolve())]
 
 
-def test_local_mode_still_round_trips_through_the_json_file(vault_dir, documents_root, tmp_path):
-    mountpoint = tmp_path / "mnt"
-    mountpoint.mkdir()
-
-    vault = FileVault()
-    vault.add_root(str(vault_dir), project="alpha")
-    vault.add_mountpoint(str(vault_dir), str(mountpoint))
-
-    roots_file = documents_root / "file-vault-roots.json"
-    assert json.loads(roots_file.read_text()) == {
-        "roots": [
-            {
-                "path": str(vault_dir.resolve()),
-                "mountpoints": [str(mountpoint.resolve())],
-                "project": "alpha",
-            }
-        ]
-    }
-    assert FileVault().roots() == [str(vault_dir.resolve())]
-    assert FileVault().mountpoints(str(vault_dir)) == [str(mountpoint.resolve())]
-
-
-def test_vault_file_contents_never_enter_the_database(postgres_pool, vault_dir, documents_root, tmp_path):
+def test_vault_file_contents_never_enter_the_database(postgres_pool, vault_dir, tmp_path):
     before = {path: path.read_bytes() for path in sorted(vault_dir.rglob("*")) if path.is_file()}
     mountpoint = tmp_path / "mnt"
     mountpoint.mkdir()
@@ -192,4 +159,3 @@ def test_vault_file_contents_never_enter_the_database(postgres_pool, vault_dir, 
         assert connection.execute("SELECT count(*) FROM assets").fetchone()[0] == 0
         assert connection.execute("SELECT count(*) FROM documents").fetchone()[0] == 0
     assert {path: path.read_bytes() for path in sorted(vault_dir.rglob("*")) if path.is_file()} == before
-    assert list(documents_root.iterdir()) == []

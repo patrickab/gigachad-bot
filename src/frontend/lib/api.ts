@@ -264,12 +264,14 @@ export function apiOrigin(): string {
   return url.origin
 }
 
-// One URL shape for both storage modes: the backend resolves a logical asset path
-// from the database or, in local mode, from the chat tree on disk.
+// Asset URLs use database-native namespaces. Local filesystem layout is never
+// part of the persisted attachment identity.
 function uploadsBase(chatId: string, slug: string | null): string {
-  const safe = encodeURIComponent(chatId)
-  const prefix = slug ? `chat_history/${encodeURIComponent(slug)}/_uploads` : "chat_history/_uploads"
-  return `${getApiBase()}/assets/${prefix}/${safe}`
+  const chat = encodeURIComponent(chatId)
+  const prefix = slug
+    ? `attachment/project/${encodeURIComponent(slug)}/chat/${chat}`
+    : `attachment/chat/${chat}`
+  return `${getApiBase()}/assets/${prefix}`
 }
 
 export function rewriteImages(content: string, chatId: string, slug: string | null): string {
@@ -461,9 +463,9 @@ export async function writeBinaryDocument(slug: string, filename: string, blob: 
   })
 }
 
-/** Mirror a rendered canvas (.jpg) into the browsable cloud Drawings collection. */
-export async function mirrorDrawing(filename: string, blob: Blob): Promise<void> {
-  await request("/documents/mirror-drawing", { method: "POST", body: fileForm(blob, filename) })
+/** Store a rendered canvas (.jpg) as a database asset. */
+export async function storeDrawing(filename: string, blob: Blob): Promise<void> {
+  await request("/documents/store-drawing", { method: "POST", body: fileForm(blob, filename) })
 }
 
 export async function generateMindmap(messages: { role: string; content: string }[], model: string, prompt: string = ""): Promise<string> {

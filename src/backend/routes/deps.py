@@ -9,24 +9,18 @@ from llm_baseclient.client import LLMClient
 from sse_starlette.sse import EventSourceResponse
 
 from backend.identity import RequestIdentity, get_request_identity
-from config import (
-    DIRECTORY_CHAT_HISTORIES,
-    DIRECTORY_PROMPTS,
-    get_data_store,
-    get_postgres_pool,
-    seed_prompts,
-    storage_mode,
-)
+from config import get_data_store, get_postgres_pool, seed_prompts
 from lib.architecture_graph import ArchitectureGraphStore
 from lib.asset_store import AssetStore
 from lib.chat_store import ChatStore
 from lib.data_store import DataStore
-from lib.file_vault import FileVault
+from lib.file_vault import FileVault, PostgresVaultRootRepository
 from lib.image_paths import _DATA_URI_RE
 from lib.memory_store import MemoryStore
 from lib.model_provider_store import ModelProviderStore
 from lib.project_store import ProjectStore
 from lib.prompt_store import PromptStore
+from lib.storage_namespace import MODEL
 
 _client: LLMClient | None = None
 
@@ -38,56 +32,51 @@ def get_client() -> LLMClient:
     return _client
 
 
-def _store(identity: RequestIdentity | None):
-    return get_data_store(identity.user_id, device_id=identity.device_id) if identity else get_data_store()
-
-
-def get_document_store(identity: RequestIdentity | None = Depends(get_request_identity)) -> DataStore | None:
-    """The request's document store, or None while the filesystem is authoritative."""
-    if storage_mode() == "local" or identity is None:
-        return None
+def _store(identity: RequestIdentity) -> DataStore:
     return get_data_store(identity.user_id, device_id=identity.device_id)
 
 
-def get_asset_store(identity: RequestIdentity | None = Depends(get_request_identity)) -> AssetStore | None:
-    """The request's binary asset store, or None while the filesystem is authoritative."""
-    if storage_mode() == "local" or identity is None:
-        return None
+def get_document_store(identity: RequestIdentity = Depends(get_request_identity)) -> DataStore:
+    return get_data_store(identity.user_id, device_id=identity.device_id)
+
+
+def get_asset_store(identity: RequestIdentity = Depends(get_request_identity)) -> AssetStore:
     return AssetStore(get_postgres_pool(), identity.user_id, device_id=identity.device_id)
 
 
-def get_chat_store(identity: RequestIdentity | None = Depends(get_request_identity)) -> ChatStore:
-    return ChatStore(DIRECTORY_CHAT_HISTORIES, data_store=_store(identity))
+def get_chat_store(identity: RequestIdentity = Depends(get_request_identity)) -> ChatStore:
+    return ChatStore(data_store=_store(identity))
 
 
-def get_project_store(identity: RequestIdentity | None = Depends(get_request_identity)) -> ProjectStore:
+def get_project_store(identity: RequestIdentity = Depends(get_request_identity)) -> ProjectStore:
     data_store = _store(identity)
-    chats = ChatStore(DIRECTORY_CHAT_HISTORIES, data_store=data_store)
-    return ProjectStore(DIRECTORY_CHAT_HISTORIES, chat_store=chats, data_store=data_store)
+    chats = ChatStore(data_store=data_store)
+    return ProjectStore(chat_store=chats, data_store=data_store)
 
 
 def get_architecture_graph_store(
-    identity: RequestIdentity | None = Depends(get_request_identity),
+    identity: RequestIdentity = Depends(get_request_identity),
 ) -> ArchitectureGraphStore:
     return ArchitectureGraphStore(data_store=_store(identity))
 
 
-def get_memory_store(identity: RequestIdentity | None = Depends(get_request_identity)) -> MemoryStore:
+def get_memory_store(identity: RequestIdentity = Depends(get_request_identity)) -> MemoryStore:
     return MemoryStore(data_store=_store(identity))
 
 
-def get_file_vault(_identity: RequestIdentity | None = Depends(get_request_identity)) -> FileVault:
-    return FileVault()
+def get_file_vault(identity: RequestIdentity = Depends(get_request_identity)) -> FileVault:
+    repository = PostgresVaultRootRepository(get_postgres_pool(), identity.user_id, device_id=identity.device_id)
+    return FileVault(repository=repository)
 
 
-def get_prompt_store(identity: RequestIdentity | None = Depends(get_request_identity)) -> PromptStore:
+def get_prompt_store(identity: RequestIdentity = Depends(get_request_identity)) -> PromptStore:
     data_store = _store(identity)
     seed_prompts(data_store)
-    return PromptStore(DIRECTORY_PROMPTS, data_store=data_store)
+    return PromptStore(data_store=data_store)
 
 
-def get_model_provider_store(identity: RequestIdentity | None = Depends(get_request_identity)) -> ModelProviderStore:
-    return ModelProviderStore(_store(identity))
+def get_model_provider_store(identity: RequestIdentity = Depends(get_request_identity)) -> ModelProviderStore:
+    return ModelProviderStore(_store(identity), prefix=MODEL)
 
 
 def shutdown_client() -> None:

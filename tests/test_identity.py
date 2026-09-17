@@ -1,9 +1,9 @@
 import os
 from uuid import uuid4
 
-import pytest
 from fastapi import HTTPException
 from psycopg_pool import ConnectionPool
+import pytest
 
 from backend import identity
 from lib.db_schema import upgrade
@@ -28,7 +28,6 @@ def clean_database(postgres_pool):
 
 @pytest.fixture
 def postgres_identity(monkeypatch, postgres_pool):
-    monkeypatch.setattr(identity, "storage_mode", lambda: "postgres")
     monkeypatch.setattr(identity, "get_postgres_pool", lambda: postgres_pool)
 
 

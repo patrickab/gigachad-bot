@@ -1,20 +1,18 @@
 import logging
 from pathlib import Path, PurePosixPath
-import shutil
 import tempfile
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 
 from backend.routes.deps import get_asset_store
 from backend.routes.schemas import AttachResult
-from config import DOCUMENTS, chat_upload_dir
+from config import DOCUMENTS
 from lib.asset_store import AssetStore
 from lib.attachment_materialize import materialize
 from lib.data_store import InvalidStorageKey, StorageNotFoundError, validate_key
-from lib.document_library import mime_for, organize_file
-from lib.image_paths import delete_downscaled
+from lib.document_library import mime_for
 from lib.mineru import parse_pdf, should_cancel
-from lib.naming import dedup_filename
+from lib.storage_namespace import chat_upload_prefix
 
 log = logging.getLogger(__name__)
 
@@ -22,8 +20,8 @@ router = APIRouter(prefix="/api/files", tags=["files"])
 
 
 def upload_prefix(chat_id: str, slug: str | None) -> str:
-    """Logical asset prefix for one chat's uploads, relative to ``Documents``."""
-    return chat_upload_dir(chat_id, slug).relative_to(DOCUMENTS).as_posix()
+    """Database-native asset namespace for one chat's attachments."""
+    return chat_upload_prefix(chat_id, slug)
 
 
 def _asset_key(prefix: str, filename: str) -> str:
@@ -56,14 +54,9 @@ def _asset_exists(assets: AssetStore, key: str) -> bool:
     return any(asset.logical_path == key for asset in assets.list(key))
 
 
-def delete_chat_upload_dir(chat_id: str, slug: str | None = None, assets: AssetStore | None = None) -> None:
-    if assets is not None:
-        for asset in assets.list(upload_prefix(chat_id, slug)):
-            assets.delete(asset.logical_path)
-        return
-    path = chat_upload_dir(chat_id, slug)
-    if path.exists():
-        shutil.rmtree(path)
+def delete_chat_upload_dir(chat_id: str, slug: str | None, assets: AssetStore) -> None:
+    for asset in assets.list(upload_prefix(chat_id, slug)):
+        assets.delete(asset.logical_path)
 
 
 _TEXT_EXTS = {".csv", ".json", ".yaml", ".yml", ".xml", ".toml", ".ini", ".cfg", ".conf", ".log", ".md", ".rst", ".svg"}
@@ -87,7 +80,7 @@ async def upload_file(
     chat_id: str = Query(...),
     slug: str | None = Query(default=None),
     overwrite: bool = Query(default=False),
-    assets: AssetStore | None = Depends(get_asset_store),
+    assets: AssetStore = Depends(get_asset_store),
 ):
     if not file.filename:
         raise HTTPException(status_code=400, detail="Missing filename")
@@ -95,15 +88,9 @@ async def upload_file(
     content_b = await file.read()
     mime = file.content_type or "application/octet-stream"
 
-    if assets is None:
-        chat_dir = chat_upload_dir(chat_id, slug)
-        chat_dir.mkdir(parents=True, exist_ok=True)
-        deduped = file.filename if overwrite else dedup_filename(chat_dir, file.filename)
-        (chat_dir / deduped).write_bytes(content_b)
-    else:
-        prefix = upload_prefix(chat_id, slug)
-        deduped = file.filename if overwrite else _dedup_asset_name(assets, prefix, file.filename)
-        assets.write("upload", _asset_key(prefix, deduped), content_b, mime=mime)
+    prefix = upload_prefix(chat_id, slug)
+    deduped = file.filename if overwrite else _dedup_asset_name(assets, prefix, file.filename)
+    assets.write("upload", _asset_key(prefix, deduped), content_b, mime=mime)
 
     kind = _classify_mime(mime, deduped)
 
@@ -133,7 +120,7 @@ def _promote_pdf(assets: AssetStore, pdf_path: Path) -> None:
 
 
 async def _parse_assets(assets: AssetStore, filenames: list[str], chat_id: str, slug: str | None) -> list[AttachResult]:
-    """Postgres branch of ``/parse``: bytes come from the store, MinerU works in a temp dir."""
+    """Bytes come from the store, MinerU works in a temp dir."""
     prefix = upload_prefix(chat_id, slug)
     results: list[AttachResult] = []
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -187,64 +174,9 @@ async def parse_attachments(
     filenames: list[str] = Query(...),
     chat_id: str = Query(...),
     slug: str | None = Query(default=None),
-    assets: AssetStore | None = Depends(get_asset_store),
+    assets: AssetStore = Depends(get_asset_store),
 ):
-    if assets is not None:
-        return await _parse_assets(assets, filenames, chat_id, slug)
-
-    chat_dir = chat_upload_dir(chat_id, slug)
-    if not chat_dir.exists():
-        raise HTTPException(status_code=404, detail="Chat upload directory not found")
-
-    results: list[AttachResult] = []
-    for filename in filenames:
-        if should_cancel():
-            log.info("Parse cancelled, stopping batch")
-            break
-
-        file_mime = mime_for(filename)
-        file_path = chat_dir / filename
-        if not file_path.exists():
-            results.append(AttachResult(name=filename, mime=file_mime))
-            continue
-
-        kind = _classify_mime("", filename)
-        if file_path.suffix.lower() == ".pdf":
-            kind = "pdf"
-
-        if kind == "pdf":
-            cached = materialize(file_path, enqueue_on_miss=False)
-            if cached.parsed_md is not None:
-                try:
-                    organize_file(file_path)
-                except Exception:
-                    log.exception("Failed to organize %s into document library", filename)
-                results.append(AttachResult(name=filename, mime=file_mime, parsedMd=cached.parsed_md))
-            else:
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    tmp_path = Path(tmpdir) / filename
-                    tmp_path.write_bytes(file_path.read_bytes())
-                    try:
-                        md_path, _images_dir = await parse_pdf(tmp_path, chat_dir)
-                        try:
-                            organize_file(file_path)
-                        except Exception:
-                            log.exception("Failed to organize %s into document library", filename)
-                        results.append(
-                            AttachResult(name=filename, mime=file_mime, parsedMd=md_path.read_text(encoding="utf-8"))
-                        )
-                    except Exception:
-                        log.exception("MinerU parse failed for %s", filename)
-                        results.append(AttachResult(name=filename, mime=file_mime))
-        elif kind == "text":
-            try:
-                results.append(AttachResult(name=filename, mime=file_mime, parsedMd=file_path.read_text(encoding="utf-8")))
-            except UnicodeDecodeError:
-                results.append(AttachResult(name=filename, mime=file_mime))
-        else:
-            results.append(AttachResult(name=filename, mime=file_mime))
-
-    return results
+    return await _parse_assets(assets, filenames, chat_id, slug)
 
 
 @router.delete("/chat/{chat_id}/att/{filename:path}")
@@ -252,22 +184,11 @@ async def delete_single_file(
     chat_id: str,
     filename: str,
     slug: str | None = Query(default=None),
-    assets: AssetStore | None = Depends(get_asset_store),
+    assets: AssetStore = Depends(get_asset_store),
 ):
-    if assets is not None:
-        key = _asset_key(upload_prefix(chat_id, slug), filename)
-        if not _asset_exists(assets, key):
-            raise HTTPException(status_code=404, detail="File not found")
-        assets.delete(key)
-        assets.delete(_sidecar_key(key))
-        return {"status": "ok"}
-
-    path = chat_upload_dir(chat_id, slug) / filename
-    if not path.exists():
+    key = _asset_key(upload_prefix(chat_id, slug), filename)
+    if not _asset_exists(assets, key):
         raise HTTPException(status_code=404, detail="File not found")
-    path.unlink()
-    delete_downscaled(chat_upload_dir(chat_id, slug), filename)
-    md_path = path.with_name(path.stem + ".md")
-    if md_path.exists():
-        md_path.unlink()
+    assets.delete(key)
+    assets.delete(_sidecar_key(key))
     return {"status": "ok"}

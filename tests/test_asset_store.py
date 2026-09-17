@@ -2,8 +2,8 @@ import hashlib
 import os
 from uuid import uuid4
 
-import pytest
 from psycopg_pool import ConnectionPool
+import pytest
 
 from lib.asset_store import AssetStore
 from lib.data_store import StorageNotFoundError
@@ -138,20 +138,29 @@ def test_each_mutation_appends_a_change_row(postgres_pool):
     ]
 
 
-def test_mirror_writes_asset_bytes_under_root(store, tmp_path):
-    asset = store.write("mineru_image", "mineru/doc/images/0.png", b"\x89PNG\r\n\x1a\nbody")
+def test_mirror_writes_allowed_mineru_asset_bytes_under_root(store, tmp_path):
+    asset = store.write("mineru_image", "Mineru/doc/images/0.png", b"\x89PNG\r\n\x1a\nbody")
 
     path = store.mirror(asset, tmp_path)
 
-    assert path == tmp_path / "mineru" / "doc" / "images" / "0.png"
+    assert path == tmp_path / "Mineru" / "doc" / "images" / "0.png"
     assert path.read_bytes() == b"\x89PNG\r\n\x1a\nbody"
     assert list(path.parent.iterdir()) == [path]
 
 
 def test_mirror_reads_content_back_when_listing_omitted_it(store, tmp_path):
-    store.write("drawing", "drawings/sketch.json", b"{\"ok\":true}")
-    listed = store.list("drawings")[0]
+    store.write("pdf", "PDFs/paper.pdf", b"%PDF-1.7 body")
+    listed = store.list("PDFs")[0]
 
     path = store.mirror(listed, tmp_path)
 
-    assert path.read_bytes() == b"{\"ok\":true}"
+    assert path.read_bytes() == b"%PDF-1.7 body"
+
+
+def test_mirror_rejects_non_pdf_and_non_mineru_assets(store, tmp_path):
+    drawing = store.write("drawing", "drawing/sketch.json", b"{\"ok\":true}")
+
+    with pytest.raises(ValueError, match="Only PDF and MinerU"):
+        store.mirror(drawing, tmp_path)
+
+    assert not tmp_path.exists()

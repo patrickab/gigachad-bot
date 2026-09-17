@@ -8,7 +8,7 @@ readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly worktree="$(cd -- "$script_dir/.." && pwd)"
 readonly unit_dir="${XDG_CONFIG_HOME:-"$HOME/.config"}/systemd/user"
 readonly backend="${worktree}/.venv/bin/uvicorn"
-readonly backend_runner="${script_dir}/run-production-backend.sh"
+readonly backend_runner="${worktree}/run-backend.sh"
 readonly omp_runner="${script_dir}/run-production-omp.sh"
 
 if [[ ! -x $backend ]]; then

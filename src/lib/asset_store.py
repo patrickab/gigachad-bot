@@ -24,6 +24,12 @@ ASSET_KINDS = ("upload", "pdf", "mineru_markdown", "mineru_image", "drawing")
 
 _COLUMNS = "id, kind, logical_path, mime, sha256, size_bytes, version"
 
+_MIRROR_ROOTS = {
+    "pdf": "PDFs",
+    "mineru_markdown": "Mineru",
+    "mineru_image": "Mineru",
+}
+
 
 @dataclass(frozen=True)
 class Asset:
@@ -150,11 +156,15 @@ class AssetStore:
                 self._change(connection, logical_path, None, "delete")
 
     def mirror(self, asset: Asset, root: Path) -> Path:
-        """Atomically write ``asset``'s bytes to ``root / asset.logical_path``.
+        """Atomically write an allowed PDF or MinerU asset beneath *root*.
 
-        Never call this inside a database transaction: it reads missing content
-        back through its own connection and then blocks on disk I/O.
+        Other application state remains database-only. Never call this inside a
+        database transaction: it reads missing content back through its own
+        connection and then blocks on disk I/O.
         """
+        mirror_root = _MIRROR_ROOTS.get(asset.kind)
+        if mirror_root is None or not asset.logical_path.startswith(f"{mirror_root}/"):
+            raise ValueError("Only PDF and MinerU assets may be mirrored to disk")
         content = asset.content if asset.content is not None else self.read_by_id(asset.id).content
         path = root.joinpath(*validate_key(asset.logical_path).split("/"))
         path.parent.mkdir(parents=True, exist_ok=True)

@@ -2,10 +2,9 @@
 
 A user can register several vault roots (an Obsidian vault is just one flavor
 of file vault). The list of roots is the single source of truth for vault
-locations (nothing is configured in ``config.py``): it lives in
-``chat_histories/file-vault-roots.json`` in local mode and in ``vault_roots``
-rows in Postgres mode. With no registry the vault is simply empty until the
-user adds a root.
+locations (nothing is configured in ``config.py``): it lives in ``vault_roots``
+rows for the authenticated user. With no registry the vault is simply empty
+until the user adds a root.
 
 Each root may carry additional **mountpoints** — external directories (e.g. a
 ``/mnt`` drive) attached to that vault. Mountpoint files appear as folder nodes
@@ -32,17 +31,11 @@ from uuid import UUID
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from config import DIRECTORY_CHAT_HISTORIES
-from lib.json_io import safe_read_json, safe_write_json
-
 # Directories that hold app internals (e.g. Obsidian's) or noise rather than files.
 _SKIP_DIRS = {".obsidian", ".trash", ".git", "node_modules"}
 _IMG_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp"})
 # Attachment-compatible file types surfaced by listings.
 VAULT_SUFFIXES = frozenset({".md", ".txt", ".tex", ".pdf"})
-
-ROOTS_FILE = DIRECTORY_CHAT_HISTORIES / "file-vault-roots.json"
-_LEGACY_ROOTS_FILE = DIRECTORY_CHAT_HISTORIES / "obsidian-roots.json"
 
 
 def _is_untitled(name: str) -> bool:
@@ -60,25 +53,8 @@ class VaultRootRepository(Protocol):
         """Replace the registry with *roots* (``path``, ``mountpoints``, optional ``project``)."""
 
 
-class JsonVaultRootRepository:
-    """Local mode: the registry is ``chat_history/file-vault-roots.json``."""
-
-    def __init__(self, roots_file: Path | None = None) -> None:
-        self._roots_file = roots_file or ROOTS_FILE
-
-    def load(self) -> list[object]:
-        source = self._roots_file
-        # One-time migration: fall back to the pre-rename obsidian-roots.json.
-        if not source.is_file() and self._roots_file == ROOTS_FILE and _LEGACY_ROOTS_FILE.is_file():
-            source = _LEGACY_ROOTS_FILE
-        return safe_read_json(source, {"roots": []}).get("roots") or []
-
-    def save(self, roots: list[dict[str, object]]) -> None:
-        safe_write_json(self._roots_file, {"roots": roots})
-
-
 class PostgresVaultRootRepository:
-    """Postgres mode: the registry is ``vault_roots`` rows for one authenticated user.
+    """The registry is ``vault_roots`` rows for one authenticated user.
 
     Stored paths are whatever spelling the caller registered; ``FileVault``
     re-resolves them on load, so a row migrated from another host is resolved
@@ -142,8 +118,8 @@ class PostgresVaultRootRepository:
 class FileVault:
     """All access to the user's file-vault roots goes through this class."""
 
-    def __init__(self, roots_file: Path | None = None, *, repository: VaultRootRepository | None = None) -> None:
-        self._repository = repository or JsonVaultRootRepository(roots_file)
+    def __init__(self, *, repository: VaultRootRepository) -> None:
+        self._repository = repository
         self._roots: list[Path] = []
         self._mountpoints: dict[Path, list[Path]] = defaultdict(list)
         # A root may be mounted to a project (slug) instead of the global Vaults section.

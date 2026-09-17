@@ -21,18 +21,16 @@ from datetime import datetime, timezone
 import json
 import logging
 import re
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import Any, Protocol
 import uuid
 
-from config import DIRECTORY_CHAT_HISTORIES, get_model_defaults
-from lib.data_store import DataStore, DataStorePath, LocalDataStore
+from config import get_model_defaults
+from lib.data_store import DataStore, DataStorePath
 from lib.json_io import safe_write_json
 from lib.llm_resilience import api_query_resilient
+from lib.storage_namespace import MEMORY
 
 log = logging.getLogger(__name__)
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 class MemoryLLM(Protocol):
@@ -126,10 +124,9 @@ def _json_from_response(text: str) -> dict[str, Any]:
 class MemoryStore:
     """Owns memory extraction, canonical document updates, and the pending buffer."""
 
-    def __init__(self, base_dir: Path = DIRECTORY_CHAT_HISTORIES, *, data_store: DataStore | None = None) -> None:
-        base_dir = base_dir.resolve()
-        self.base_dir = DataStorePath(data_store or LocalDataStore(base_dir.parent), base_dir.name)
-        self.memory_root = self.base_dir / "memory"
+    def __init__(self, prefix: str = MEMORY, *, data_store: DataStore) -> None:
+        self.base_dir = DataStorePath(data_store, prefix)
+        self.memory_root = self.base_dir
         self.pending_dir = self.memory_root / "pending"
 
     # ------------------------------------------------------------------
@@ -875,7 +872,7 @@ Rules:
             raise ValueError("Project slug is required")
         if "/" in project_slug or "\\" in project_slug or project_slug in {".", ".."}:
             raise ValueError("Invalid project slug")
-        return self.base_dir / project_slug
+        return self.base_dir / "project" / project_slug
 
     def _project_memory_path(self, project_slug: str | None) -> DataStorePath:
         return self._project_dir(project_slug) / PROJECT_MEMORY

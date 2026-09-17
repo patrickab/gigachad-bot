@@ -23,11 +23,11 @@ from uuid import UUID
 
 from sse_starlette.sse import EventSourceResponse
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 
 from backend.identity import RequestIdentity, get_request_identity
 from backend.sync import get_change_broker
-from config import get_postgres_pool, storage_mode
+from config import get_postgres_pool
 
 router = APIRouter(prefix="/api/sync", tags=["sync"])
 
@@ -57,17 +57,9 @@ def _event(payload: dict) -> dict[str, str]:
 @router.get("/stream")
 async def stream_changes(
     since: int = Query(default=0, ge=0),
-    identity: RequestIdentity | None = Depends(get_request_identity),
+    identity: RequestIdentity = Depends(get_request_identity),
 ) -> EventSourceResponse:
     """Replay missed changes, then stream live ones, for the requesting user only."""
-    if storage_mode() == "local":
-        raise HTTPException(
-            status_code=501,
-            detail="Change streaming requires GIGACHAD_STORE=postgres; local storage keeps no change log",
-        )
-    if identity is None:
-        raise HTTPException(status_code=401, detail="Tailscale identity is required")
-
     user_id = identity.user_id
     broker = get_change_broker()
 

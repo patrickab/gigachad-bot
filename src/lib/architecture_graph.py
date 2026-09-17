@@ -7,16 +7,15 @@ from typing import Any
 
 import yaml
 
-from config import DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS
 from lib.data_store import (
     DataStore,
-    LocalDataStore,
     Revision,
     StorageConflictError,
     StorageNotFoundError,
     read_text,
     write_text,
 )
+from lib.storage_namespace import GRAPH
 
 GRAPH_SUFFIX = ".architecture.yaml"
 
@@ -92,31 +91,28 @@ def parse_graph(content: str) -> dict[str, Any]:
 class ArchitectureGraphStore:
     """Owns canonical graph files and their one-draft-per-graph lifecycle."""
 
-    def __init__(self, directory: Path | None = None, *, data_store: DataStore | None = None) -> None:
-        directory = (directory or DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS).expanduser().resolve()
-        self._legacy_directory = directory if data_store is None else None
-        self._store = data_store or LocalDataStore(directory.parent)
-        self._prefix = directory.name
+    def __init__(self, prefix: str = GRAPH, *, data_store: DataStore) -> None:
+        self._store = data_store
+        self._prefix = prefix
 
     def _key(self, name: str, *, draft: bool = False) -> str:
         if Path(name).name != name or not name.endswith(GRAPH_SUFFIX):
             raise ArchitectureGraphError(f"Graph name must end in {GRAPH_SUFFIX}")
-        return f"{self._prefix}/.drafts/{name}" if draft else f"{self._prefix}/{name}"
+        return f"{self._prefix}/{name}" if not draft else f"{self._prefix}/draft/{name}"
 
     def list_paths(self) -> list[str]:
-        keys = sorted(
-            (entry.key for entry in self._store.list(self._prefix) if not entry.is_dir and entry.key.endswith(GRAPH_SUFFIX)), key=str.lower
+        return sorted(
+            (
+                entry.key
+                for entry in self._store.list(self._prefix)
+                if not entry.is_dir and entry.key.endswith(GRAPH_SUFFIX)
+            ),
+            key=str.lower,
         )
-        return [self._display_key(key) for key in keys]
-
-    def _display_key(self, key: str) -> str:
-        if self._legacy_directory is None:
-            return key
-        return str((self._legacy_directory.parent / key).resolve())
 
     def path_for(self, name: str, *, draft: bool = False) -> str:
         """Return a validated canonical/draft path without reading its content."""
-        return self._display_key(self._key(name, draft=draft))
+        return self._key(name, draft=draft)
 
     def read_with_revision(self, name: str, *, draft: bool = False) -> tuple[str, Revision]:
         """Return graph content plus the revision a later write must supply."""
@@ -142,7 +138,7 @@ class ArchitectureGraphStore:
         if expected is not None and (current is None or current.token != expected):
             raise StorageConflictError(f"{name} changed on another device; reload before saving")
         write_text(self._store, key, content, expected=current)
-        return self._display_key(key)
+        return key
 
     def has_draft(self, name: str) -> bool:
         return self._store.exists(self._key(name, draft=True))
@@ -161,7 +157,7 @@ class ArchitectureGraphStore:
             self._store.delete(draft)
         else:
             self._store.move(draft, destination)
-        return self._display_key(destination)
+        return destination
 
     def discard_draft(self, name: str) -> None:
         self._store.delete(self._key(name, draft=True))

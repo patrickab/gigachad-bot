@@ -7,6 +7,11 @@ if ! command -v tailscale >/dev/null 2>&1; then
     exit 127
 fi
 
+if (($# != 1)); then
+    printf 'usage: %s <port>\n' "${BASH_SOURCE[0]}" >&2
+    exit 2
+fi
+
 # --bg persists the named HTTPS listener and replaces its handler on repeated runs.
 # Tailscale Serve rejects unavailable or unauthenticated daemons.
-exec tailscale serve --bg --https=443 http://127.0.0.1:8001
+exec tailscale serve --bg --https=443 "http://127.0.0.1:${1}"

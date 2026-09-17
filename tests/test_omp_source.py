@@ -1,11 +1,15 @@
 import json
+import os
 from pathlib import Path
+from uuid import uuid4
 
+from psycopg_pool import ConnectionPool
 import pytest
 
 from lib import omp_source
-from lib.data_store import LocalDataStore
+from lib.db_schema import upgrade
 from lib.model_provider_store import ModelProviderStore, providers_for_ui
+from lib.postgres_data_store import PostgresDataStore
 
 
 @pytest.fixture(autouse=True)
@@ -16,6 +20,27 @@ def _isolated_omp(monkeypatch, tmp_path):
     omp_source.reset_cache()
     yield
     omp_source.reset_cache()
+
+
+@pytest.fixture(scope="module")
+def postgres_pool():
+    url = os.environ.get("POSTGRES_TEST_DATABASE_URL")
+    if not url:
+        pytest.skip("POSTGRES_TEST_DATABASE_URL is required for Postgres-backed omp source tests")
+    upgrade(url)
+    pool = ConnectionPool(url, min_size=1, max_size=4)
+    yield pool
+    pool.close()
+
+
+@pytest.fixture
+def postgres_store(postgres_pool):
+    with postgres_pool.connection() as connection, connection.transaction():
+        connection.execute("TRUNCATE changes, assets, vault_roots, devices, documents, users CASCADE")
+        user_id = connection.execute(
+            "INSERT INTO users (tailscale_login) VALUES (%s) RETURNING id", (f"test-{uuid4()}@example.test",)
+        ).fetchone()[0]
+    return PostgresDataStore(postgres_pool, user_id)
 
 
 def _install_omp(tmp_path: Path, token: str | None = None) -> None:
@@ -173,8 +198,8 @@ def test_fetch_catalog_entries_sends_the_gateway_bearer(tmp_path, monkeypatch):
     assert entries[0]["id"] == "anthropic/claude-opus-5"
 
 
-def test_provider_catalog_round_trips_an_omp_source(tmp_path):
-    catalog = ModelProviderStore(LocalDataStore(tmp_path))
+def test_provider_catalog_round_trips_an_omp_source(postgres_store):
+    catalog = ModelProviderStore(postgres_store)
     providers = {
         "OMP": {"litellm_id": "litellm_proxy", "models": ["anthropic/claude-opus-5"], "source": "omp"},
         "Gemini": {"litellm_id": "gemini", "models": ["gemini-3.1-pro"]},
@@ -226,8 +251,8 @@ def test_folding_leaves_a_catalog_without_omp_rows_alone(monkeypatch):
     assert providers_for_ui(stored) is stored
 
 
-def test_provider_catalog_rejects_a_blank_source(tmp_path):
-    catalog = ModelProviderStore(LocalDataStore(tmp_path))
+def test_provider_catalog_rejects_a_blank_source(postgres_store):
+    catalog = ModelProviderStore(postgres_store)
 
     with pytest.raises(ValueError, match="invalid source"):
         catalog.save({"OMP": {"litellm_id": "litellm_proxy", "models": ["anthropic/claude-opus-5"], "source": "  "}})

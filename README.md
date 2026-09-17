@@ -82,11 +82,12 @@ OMP's gateway token is read once at backend startup and cached for the
 process lifetime: restart `gigachad-bot.service` after installing or
 restarting `gigachad-bot-omp.service`, or OMP model calls will 401.
 
-The development backend and the systemd backend are mutually exclusive: both
-bind `127.0.0.1:8001` and share the same persistent Documents state. Stop one
-before starting the other. The production user unit uses systemd's `%h`
-specifier for the deploying user's home directory and assumes `$PROD`; its
-full setup and update steps are in the runbook.
+The development backend runs on `127.0.0.1:8001`; the systemd backend runs on
+`127.0.0.1:8002`. They may run concurrently, each using its own isolated
+PostgreSQL container and data volume (`gigachad-dev` vs `gigachad-prod`). The
+production user unit uses systemd's `%h` specifier for the deploying user's
+home directory and assumes `$PROD`; its full setup and update steps are in
+the runbook.
 
 The unit carries only `GIGACHAD_ENV_FILE` with the nonsecret `$ENV` path. Its
 production runner invokes the strict `deploy/load-env.sh` loader before it

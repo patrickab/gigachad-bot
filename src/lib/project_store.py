@@ -1,14 +1,14 @@
 """Single seam for all project catalog I/O, slug logic, kanban CRUD, and tab management."""
 
 from datetime import datetime, timezone
-from pathlib import Path
 import json
+from pathlib import Path
 from typing import Any, Callable
 
-from config import DIRECTORY_CHAT_HISTORIES
 from lib.chat_store import META_JSON, PROJECT_JSON, ChatStore
-from lib.data_store import DataStore, LocalDataStore, StorageNotFoundError, read_text, write_text
+from lib.data_store import DataStore, StorageNotFoundError, read_text, write_text
 from lib.naming import slugify
+from lib.storage_namespace import CHAT
 
 
 def _now_iso() -> str:
@@ -18,13 +18,10 @@ def _now_iso() -> str:
 class ProjectStore:
     """Owns all project-catalog reads/writes, slug generation, kanban CRUD, and tab management."""
 
-    def __init__(
-        self, base_dir: Path | None = None, chat_store: ChatStore | None = None, *, data_store: DataStore | None = None
-    ) -> None:
-        base_dir = (base_dir or DIRECTORY_CHAT_HISTORIES).resolve()
-        self._data = data_store or LocalDataStore(base_dir.parent)
-        self._prefix = base_dir.name
-        self._store = chat_store or ChatStore(base_dir, data_store=self._data)
+    def __init__(self, prefix: str = CHAT, chat_store: ChatStore | None = None, *, data_store: DataStore) -> None:
+        self._data = data_store
+        self._prefix = prefix
+        self._store = chat_store or ChatStore(prefix, data_store=data_store)
 
     # ------------------------------------------------------------------
     # Path helpers

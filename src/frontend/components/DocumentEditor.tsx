@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
 import { ConsoleEditor } from "./ConsoleEditor"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { CanvasEditor, parseCanvasDoc, serializeCanvasDoc, emptyCanvasDoc, type CanvasDocument } from "./CanvasEditor"
-import { loadFileViewerText, readFileVaultRendered, writeDocument, writeBinaryDocument, mirrorDrawing, fileViewerRawUrl } from "@/lib/api"
+import { loadFileViewerText, readFileVaultRendered, writeDocument, writeBinaryDocument, storeDrawing, fileViewerRawUrl } from "@/lib/api"
 import { renderPageToPng, renderCanvasToJpeg, type EmbedRect } from "@/lib/drawing"
 import { EditorSidebar, InlineEditPanel } from "./EditorSidebar"
 import { ArchitectureGraphEditor } from "./ArchitectureGraphEditor"
@@ -182,8 +182,10 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
   // Apply a remote write only while nothing local is unsaved — otherwise the
   // pending autosave wins (last-write-wins).
   useEffect(() => subscribeToChanges((event) => {
-    if (dirtyRef.current) return
-    if (event.resource_kind !== "document" || event.resource_key !== path) return
+    if (dirtyRef.current || event.resource_kind !== "document") return
+    // PostgreSQL emits a logical key while migrated project metadata may retain
+    // the matching absolute path.
+    if (event.resource_key !== path && !path.endsWith(`/${event.resource_key}`)) return
     loadFromServer()
   }), [path, loadFromServer])
 
@@ -219,8 +221,8 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
     }
     await writeDocument(slug, filename, serialized)
     savedContentRef.current = serialized
-    // mirror the drawing jpeg only when actual content changed — viewport-only
-    // autosaves (pan/zoom) shouldn't re-render and re-upload an image
+    // Store the drawing JPEG only when actual content changed.
+    // Viewport-only autosaves should not re-render and re-upload an image.
     const contentChanged = isCanvas && canvasDoc ? !sameCanvasContent(canvasDoc, savedCanvasRef.current) : false
     if (isCanvas && canvasDoc) savedCanvasRef.current = canvasDoc
     setDirty(false)
@@ -229,7 +231,7 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
       try {
         const imgs = await buildImageEmbeds(canvasDoc)
         const blob = await renderCanvasToJpeg(canvasDoc.strokes, 20, imgs, canvasDoc.texts)
-        await mirrorDrawing(filename.replace(/\.canvas$/, ".jpg"), blob)
+        await storeDrawing(filename.replace(/\.canvas$/, ".jpg"), blob)
       } catch { /* */ }
     }
   }, [slug, filename, isCanvas, canvasDoc, onSaved, buildImageEmbeds, persistOverride])
