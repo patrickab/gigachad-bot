@@ -1,10 +1,13 @@
 import asyncio
 from typing import Annotated
 
+import httpx
+import litellm
 from fastapi import APIRouter, Depends, HTTPException, Path
 from llm_baseclient.config import discover_ollama_models
 from pydantic import BaseModel
 
+from config import OLLAMA_BASE_URL
 from lib import omp_source
 from lib.model_provider_store import ModelProviderStore, providers_for_ui
 from lib.prompt_store import PromptStore
@@ -25,6 +28,35 @@ async def get_models(store: ModelProviderStore = Depends(get_model_provider_stor
         "providers": [{"label": label, **provider} for label, provider in providers.items()],
         "defaults": store.load_defaults(),
     }
+
+
+async def _ollama_supports_reasoning(model: str) -> bool:
+    """Ask the Ollama server itself: LiteLLM's static registry doesn't know
+    locally pulled or Ollama Cloud model tags (`gemma4:31b-cloud`), but
+    `/api/show` reports each model's real capabilities, `thinking` among
+    them, for both local and cloud-proxied models.
+    """
+    try:
+        async with httpx.AsyncClient(base_url=OLLAMA_BASE_URL, timeout=5.0) as client:
+            resp = await client.post("/api/show", json={"model": model})
+            resp.raise_for_status()
+            return "thinking" in (resp.json().get("capabilities") or [])
+    except (httpx.HTTPError, ValueError):
+        return False
+
+
+@router.get("/models/reasoning-support")
+async def get_reasoning_support(model: str) -> dict:
+    """Whether `model` accepts `reasoning_effort`.
+
+    Ollama-served models (`ollama/<tag>`, including Ollama Cloud tags) are
+    checked against the live Ollama server, since those model tags aren't in
+    LiteLLM's static registry. Every other model uses LiteLLM's metadata.
+    Never raises: unknown or unreachable models fall back to `False`.
+    """
+    if model.startswith("ollama/"):
+        return {"supports_reasoning": await _ollama_supports_reasoning(model.removeprefix("ollama/"))}
+    return {"supports_reasoning": litellm.supports_reasoning(model=model)}
 
 
 class ProviderDefinition(BaseModel):

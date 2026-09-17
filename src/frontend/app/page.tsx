@@ -639,8 +639,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           ) : (
             <div className="flex items-center gap-4">
               <ModelDropdown models={models} selectedModel={config.selectedModel} onSelect={(m) => onConfigChange({ selectedModel: m })} onProvidersChange={saveModelProviders} onDefaultsChange={saveModelDefaults} />
-              <div className="w-px h-4 bg-surface-elevated" />
-              <ReasoningSelector reasoningEffort={config.reasoningEffort} onReasoningChange={(v) => onConfigChange({ reasoningEffort: v })} />
+              <ReasoningSelector model={config.selectedModel} reasoningEffort={config.reasoningEffort} onReasoningChange={(v) => onConfigChange({ reasoningEffort: v })} />
             </div>
           )}
 

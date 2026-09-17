@@ -1,4 +1,4 @@
-import type { ArchitectureGraphContextReference, Attachment, BackendConfig, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpCatalog, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage, VaultFile, VaultNode } from "./types"
+import type { ArchitectureGraphContextReference, Attachment, BackendConfig, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpCatalog, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ReasoningSupport, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage, VaultFile, VaultNode } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { getApiBase } from "./config"
@@ -103,6 +103,10 @@ function fileForm(file: File | Blob, filename?: string): FormData {
 
 export async function fetchModels(): Promise<ModelsResponse> {
   return request<ModelsResponse>("/models")
+}
+
+export async function fetchReasoningSupport(model: string): Promise<ReasoningSupport> {
+  return request<ReasoningSupport>(`/models/reasoning-support?model=${encodeURIComponent(model)}`)
 }
 
 export async function saveModelProviders(providers: ModelProvider[]): Promise<ModelsResponse> {

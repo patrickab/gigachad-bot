@@ -73,6 +73,8 @@ export interface ModelsResponse {
   defaults: ModelDefaults
 }
 
+export interface ReasoningSupport { supports_reasoning: boolean }
+
 export interface ModelDefaults { default_model: string; small_model: string; vision_model: string; memory_model: string }
 
 export interface ModelProvider {
