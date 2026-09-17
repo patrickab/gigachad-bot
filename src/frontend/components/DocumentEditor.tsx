@@ -104,6 +104,8 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
   const [renderedContent, setRenderedContent] = useState<string | null>(null)
   const [canvasDoc, setCanvasDoc] = useState<CanvasDocument | null>(null)
   const [dirty, setDirty] = useState(false)
+  const dirtyRef = useRef(dirty)
+  dirtyRef.current = dirty
   const [saving, setSaving] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(!!overlay)
@@ -179,8 +181,6 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
 
   // Apply a remote write only while nothing local is unsaved — otherwise the
   // pending autosave wins (last-write-wins).
-  const dirtyRef = useRef(dirty)
-  dirtyRef.current = dirty
   useEffect(() => subscribeToChanges((event) => {
     if (dirtyRef.current) return
     if (event.resource_kind !== "document" || event.resource_key !== path) return
@@ -243,6 +243,30 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
     return run
   }, [persistNow])
 
+  // A pan/zoom alone must never overwrite another device's stroke: refetch the
+  // current server content and merge only the viewport field into it, instead of
+  // writing back whatever (possibly stale) content this tab last loaded.
+  const persistViewportOnly = useCallback((viewport: CanvasDocument["viewport"]) => {
+    const run = saveChain.current.then(async () => {
+      let latest: CanvasDocument
+      try {
+        const text = await loadFileViewerText(path)
+        latest = text.trim() ? parseCanvasDoc(text) : emptyCanvasDoc()
+      } catch {
+        return
+      }
+      const merged: CanvasDocument = { ...latest, viewport }
+      const serialized = serializeCanvasDoc(merged)
+      if (persistOverride) await persistOverride(serialized)
+      else await writeDocument(slug, filename, serialized)
+      savedContentRef.current = serialized
+      savedCanvasRef.current = merged
+      if (!dirtyRef.current) setCanvasDoc(merged)
+    })
+    saveChain.current = run.catch(() => {})
+    return run
+  }, [path, slug, filename, persistOverride])
+
   const handleSave = useCallback(async () => {
     const serialized = serializeNow()
     if (serialized === null || saving) return
@@ -251,8 +275,10 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
     setSaving(false)
   }, [serializeNow, saving, persist])
 
-  // Canvas autosave fires on any serialized change — strokes, frames, texts,
-  // and viewport — so re-entering restores exactly what was left, view included.
+  // Canvas autosave fires on any serialized change — strokes, frames, texts, and
+  // viewport — so re-entering restores exactly what was left, view included. A
+  // viewport-only change goes through persistViewportOnly so it can never clobber
+  // a concurrent edit from another device.
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => {
     if (!isCanvas || !canvasDoc) return
@@ -262,19 +288,22 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
       // content the chat reads at send time
       const serialized = serializeCanvasDoc(canvasDoc)
       liveRef.current?.(path, serialized)
-      if (serialized !== savedContentRef.current) persist(serialized).catch(() => {})
+      if (serialized === savedContentRef.current) return
+      if (sameCanvasContent(canvasDoc, savedCanvasRef.current)) persistViewportOnly(canvasDoc.viewport).catch(() => {})
+      else persist(serialized).catch(() => {})
     }, 1000)
     return () => clearTimeout(autoSaveTimer.current)
-  }, [isCanvas, canvasDoc, path, persist])
+  }, [isCanvas, canvasDoc, path, persist, persistViewportOnly])
 
   // Leaving the editor flushes a pending autosave immediately — the debounce
   // cleanup alone would drop strokes drawn in the final second.
   const flushRef = useRef<() => void>(() => {})
   flushRef.current = () => {
-    const serialized = isCanvas ? serializeNow() : null
-    if (serialized !== null && serialized !== savedContentRef.current) {
-      persist(serialized).catch(() => {})
-    }
+    if (!isCanvas || !canvasDoc) return
+    const serialized = serializeNow()
+    if (serialized === null || serialized === savedContentRef.current) return
+    if (sameCanvasContent(canvasDoc, savedCanvasRef.current)) persistViewportOnly(canvasDoc.viewport).catch(() => {})
+    else persist(serialized).catch(() => {})
   }
   useEffect(() => () => flushRef.current(), [])
 
