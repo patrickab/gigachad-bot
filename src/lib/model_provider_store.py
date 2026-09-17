@@ -6,18 +6,20 @@ import os
 from typing import Any
 
 import yaml
-from llm_baseclient.config import MODELS_DEEPSEEK, MODELS_GEMINI
 
 from config import MEMORY_MODEL, SMALL_MODEL, VISION_MODEL
+from lib import omp_source
 from lib.data_store import DataStore, StorageNotFoundError, read_text, write_text
 
 MODEL_PROVIDERS_FILE = "model-providers.yaml"
 MODEL_DEFAULTS_FILE = "model-defaults.yaml"
 
-# This is only used to create a first editable catalog. Ollama remains dynamic.
+# Seeds a first editable catalog of provider shells only. Models are the
+# user's choice: an empty list keeps a provider out of the model selector
+# while still offering it under Providers / Models. Ollama remains dynamic.
 DEFAULT_PROVIDERS = {
-    "Gemini": {"litellm_id": "gemini", "models": MODELS_GEMINI},
-    "DeepSeek": {"litellm_id": "deepseek", "models": MODELS_DEEPSEEK},
+    "Gemini": {"litellm_id": "gemini", "models": []},
+    "DeepSeek": {"litellm_id": "deepseek", "models": []},
     "OpenRouter": {"litellm_id": "openrouter", "models": []},
 }
 OPENAI_PROVIDER = {"litellm_id": "openai", "models": ["gpt-5.6"]}
@@ -30,10 +32,15 @@ DEFAULT_MODEL_DEFAULTS = {
 
 
 def providers_for_ui(providers: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Add the OpenAI default only when its LiteLLM credential is available."""
-    if os.environ.get("OPENAI_API_KEY") and "OpenAI" not in providers:
-        return {**providers, "OpenAI": OPENAI_PROVIDER}
-    return providers
+    """Shape the stored catalog for the browser.
+
+    Folds legacy per-login OMP rows into one, and adds the OpenAI default only
+    when its LiteLLM credential is available.
+    """
+    visible = omp_source.fold_provider_rows(providers)
+    if os.environ.get("OPENAI_API_KEY") and "OpenAI" not in visible:
+        return {**visible, "OpenAI": OPENAI_PROVIDER}
+    return visible
 
 
 class ModelProviderStore:
@@ -61,7 +68,16 @@ class ModelProviderStore:
             cleaned = [model.strip().lstrip("/") for model in models]
             if len(cleaned) != len(set(cleaned)):
                 raise ValueError(f"Provider '{label}' contains duplicate models")
-            result[label.strip()] = {"litellm_id": litellm_id.strip(), "models": cleaned}
+            entry: dict[str, Any] = {"litellm_id": litellm_id.strip(), "models": cleaned}
+            # An optional origin marker (today only "omp") so the browser can
+            # group provider rows by where their models came from. Absent for
+            # hand-entered providers, so existing catalogs round-trip byte-wise.
+            source = provider.get("source")
+            if source is not None and (not isinstance(source, str) or not source.strip()):
+                raise ValueError(f"Provider '{label}' has an invalid source")
+            if source:
+                entry["source"] = source.strip()
+            result[label.strip()] = entry
         return result
 
     def _read(self, store: DataStore) -> dict[str, dict[str, Any]]:

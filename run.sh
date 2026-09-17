@@ -4,6 +4,7 @@ set -euo pipefail
 root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 backend_pid=''
 frontend_pid=''
+omp_pid=''
 cleaned_up=false
 
 cleanup() {
@@ -13,13 +14,13 @@ cleanup() {
     cleaned_up=true
 
     printf 'Shutting down...\n'
-    for pid in "$backend_pid" "$frontend_pid"; do
+    for pid in "$backend_pid" "$frontend_pid" "$omp_pid"; do
         if [[ -n "$pid" ]]; then
             kill -TERM "$pid" 2>/dev/null || true
         fi
     done
     pkill -f "mineru.cli.fast_api" 2>/dev/null || true
-    for pid in "$backend_pid" "$frontend_pid"; do
+    for pid in "$backend_pid" "$frontend_pid" "$omp_pid"; do
         if [[ -n "$pid" ]]; then
             wait "$pid" 2>/dev/null || true
         fi
@@ -29,6 +30,13 @@ cleanup() {
 
 trap cleanup EXIT
 trap 'exit 0' INT TERM
+
+# Opt out with GIGACHAD_OMP=0. The script exits quietly when OMP is absent,
+# and the backend hides the OMP model source when its gateway is unreachable.
+if [[ "${GIGACHAD_OMP:-1}" != "0" ]]; then
+    "$root_dir/run-omp.sh" &
+    omp_pid=$!
+fi
 
 "$root_dir/run-backend.sh" "$@" &
 backend_pid=$!

@@ -1,9 +1,11 @@
+import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path
 from llm_baseclient.config import discover_ollama_models
 from pydantic import BaseModel
 
+from lib import omp_source
 from lib.model_provider_store import ModelProviderStore, providers_for_ui
 from lib.prompt_store import PromptStore
 
@@ -28,6 +30,9 @@ async def get_models(store: ModelProviderStore = Depends(get_model_provider_stor
 class ProviderDefinition(BaseModel):
     litellm_id: str
     models: list[str]
+    # Marks where the models came from, e.g. "omp". Absent for hand-entered
+    # providers; the store drops the key rather than persisting a null.
+    source: str | None = None
 
 
 class ProviderCatalog(BaseModel):
@@ -61,6 +66,17 @@ async def save_model_defaults(body: ModelDefaults, store: ModelProviderStore = D
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     providers = providers_for_ui(store.load())
     return {"ollama": discover_ollama_models(), "providers": [{"label": label, **provider} for label, provider in providers.items()], "defaults": defaults}
+
+
+@router.get("/models/omp")
+async def get_omp_models(refresh: bool = False) -> dict:
+    """Providers OMP is logged into, and the models each one can serve.
+
+    Reachability is part of the payload, never an HTTP error: OMP can be
+    installed while its gateway is stopped, and the settings panel renders
+    that difference instead of failing to load.
+    """
+    return await asyncio.to_thread(omp_source.catalog, refresh=refresh)
 
 
 @router.get("/prompts")

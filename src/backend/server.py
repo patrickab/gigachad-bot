@@ -31,6 +31,7 @@ from backend.routes.fileviewer import router as fileviewer_router
 from backend.routes.histories import router as histories_router
 from backend.routes.memory import router as memory_router
 from lib.mineru import kill_all_mineru_servers, reset_cancel
+from lib import omp_source
 from backend.routes.models import router as models_router
 from backend.routes.file_vaults import router as file_vaults_router
 from backend.routes.ocr import router as ocr_router
@@ -64,6 +65,10 @@ signal.signal(signal.SIGINT, _signal_handler)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Must precede the first LiteLLM call: it teaches the `litellm_proxy/`
+    # prefix where the local OMP gateway lives, which is how OMP-sourced
+    # models (including OAuth subscription quota) reach a provider.
+    omp_source.configure_litellm_proxy()
     get_client()
     if storage_mode() == "local":
         get_chat_store(None)

@@ -1,4 +1,4 @@
-import type { ArchitectureGraphContextReference, Attachment, BackendConfig, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelDefaults, ModelProvider, ModelsResponse, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage, VaultFile, VaultNode } from "./types"
+import type { ArchitectureGraphContextReference, Attachment, BackendConfig, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpCatalog, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage, VaultFile, VaultNode } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { getApiBase } from "./config"
@@ -107,8 +107,14 @@ export async function fetchModels(): Promise<ModelsResponse> {
 
 export async function saveModelProviders(providers: ModelProvider[]): Promise<ModelsResponse> {
   return put<ModelsResponse>("/models/providers", {
-    providers: Object.fromEntries(providers.map(({ label, litellm_id, models }) => [label, { litellm_id, models }])),
+    providers: Object.fromEntries(
+      providers.map(({ label, litellm_id, models, source }) => [label, { litellm_id, models, source: source ?? null }]),
+    ),
   })
+}
+
+export async function fetchOmpCatalog(refresh = false): Promise<OmpCatalog> {
+  return request<OmpCatalog>(`/models/omp${refresh ? "?refresh=true" : ""}`)
 }
 
 export async function saveModelDefaults(defaults: ModelDefaults): Promise<ModelsResponse> {

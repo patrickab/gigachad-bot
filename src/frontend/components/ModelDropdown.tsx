@@ -4,8 +4,9 @@ import { AnimatePresence, motion } from "framer-motion"
 import { ArrowLeft, Check, ChevronDown, ChevronRight, MoreHorizontal, Plus, Trash2 } from "lucide-react"
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useClickOutside } from "@/hooks/useClickOutside"
+import { fetchOmpCatalog } from "@/lib/api"
 import { displayName } from "@/lib/models"
-import type { ModelDefaults, ModelProvider, ModelsResponse } from "@/lib/types"
+import type { ModelDefaults, ModelProvider, ModelsResponse, OmpCatalog } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "./Skeleton"
 import { StyledSelect } from "./StyledSelect"
@@ -58,7 +59,7 @@ function ProviderRow({ provider, expanded, onToggle, onAddModel, onDeleteModel, 
   return <div className="group rounded-md hover:bg-surface-elevated">
     <div className="flex items-center">
       <button aria-label={`${expanded ? "Collapse" : "Expand"} ${provider.label}`} onClick={onToggle} className="p-2 text-ink-subtle hover:text-ink">{expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}</button>
-      <button onClick={onToggle} className="min-w-0 flex-1 py-2 text-left"><p className="truncate text-xs text-ink">{provider.label}</p><p className="truncate text-[10px] text-ink-subtle">{provider.litellm_id}/ · {provider.models.length} models</p></button>
+      <button onClick={onToggle} className="min-w-0 flex-1 py-2 text-left"><p className="truncate text-xs text-ink">{provider.label}</p><p className="truncate text-[10px] text-ink-subtle">{provider.source ? `${provider.source} · ` : ""}{provider.litellm_id}/ · {provider.models.length} models</p></button>
       <button aria-label={`Delete ${provider.label}`} onClick={onDeleteProvider} className="mr-1 rounded p-1.5 text-ink-subtle opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100 hover:text-danger"><Trash2 className="h-3.5 w-3.5" /></button>
     </div>
     {expanded && <div className="border-t border-divider px-2 pb-2 pt-1">
@@ -68,7 +69,63 @@ function ProviderRow({ provider, expanded, onToggle, onAddModel, onDeleteModel, 
   </div>
 }
 
-function ProviderSettings({ providers, onChange }: { providers: ModelProvider[]; onChange: (next: ModelProvider[]) => Promise<boolean> }) {
+const OMP_SOURCE = "omp"
+/** One catalog row holds every OMP pick, so the selector shows a single OMP
+ *  tab listing `<omp-provider>/<model>` instead of a tab per login. */
+const OMP_LABEL = "OMP"
+
+/** Picks models out of OMP's own logins, including OAuth subscription plans.
+ *
+ * Every pick lands in the same provider catalog as a hand-entered provider —
+ * one `OMP` row prefixed `litellm_proxy` so LiteLLM routes it at the OMP
+ * gateway — so nothing downstream of the catalog needs to know OMP exists.
+ * The picker still browses by login, because that is how OMP holds
+ * credentials; only the destination row is shared.
+ */
+function OmpSection({ catalog, providers, onChange }: {
+  catalog: OmpCatalog | null
+  providers: ModelProvider[]
+  onChange: (next: ModelProvider[]) => Promise<boolean>
+}) {
+  const [expanded, setExpanded] = useState<string | null>(null)
+  if (!catalog?.installed) return null
+  if (!catalog.online) return <p className="border-t border-divider px-3 py-2 text-[10px] text-ink-subtle">OMP is installed but its gateway is not answering on {catalog.gateway}. Start it with run-omp.sh to add subscription models.</p>
+
+  const ompModels = providers.find((item) => item.label === OMP_LABEL)?.models ?? []
+  const toggle = (modelId: string) => {
+    const existing = providers.find((item) => item.label === OMP_LABEL)
+    if (!existing) return onChange([...providers, { label: OMP_LABEL, litellm_id: catalog.litellm_id, source: OMP_SOURCE, models: [modelId] }])
+    const models = existing.models.includes(modelId) ? existing.models.filter((value) => value !== modelId) : [...existing.models, modelId]
+    return onChange(providers.map((item) => item.label === OMP_LABEL ? { ...item, models } : item))
+  }
+
+  return <div className="border-t border-divider">
+    <p className="px-3 pb-1 pt-2 text-[10px] uppercase tracking-wide text-ink-subtle">From OMP</p>
+    <div className="max-h-64 space-y-0.5 overflow-y-auto p-1.5 pt-0">
+      {catalog.providers.map((provider) => {
+        const picked = provider.models.filter((model) => ompModels.includes(model.id))
+        const open = expanded === provider.id
+        return <div key={provider.id} className="rounded-md hover:bg-surface-elevated">
+          <button onClick={() => setExpanded(open ? null : provider.id)} className="flex w-full items-center">
+            <span className="p-2 text-ink-subtle">{open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}</span>
+            <span className="min-w-0 flex-1 py-2 text-left"><span className="block truncate text-xs text-ink">{provider.label}</span><span className="block truncate text-[10px] text-ink-subtle">{picked.length} of {provider.models.length} added</span></span>
+          </button>
+          {open && <div className="border-t border-divider px-2 pb-2 pt-1">
+            {provider.models.map((model) => {
+              const added = ompModels.includes(model.id)
+              return <button key={model.id} onClick={() => void toggle(model.id)} className={cn("flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-surface-elevated", added ? "text-ink" : "text-ink-muted")}>
+                <span className="min-w-0 truncate">{displayName(model.id)}</span>
+                {added ? <Check className="h-3.5 w-3.5 shrink-0" /> : <Plus className="h-3.5 w-3.5 shrink-0 text-ink-subtle" />}
+              </button>
+            })}
+          </div>}
+        </div>
+      })}
+    </div>
+  </div>
+}
+
+function ProviderSettings({ providers, ompCatalog, onChange }: { providers: ModelProvider[]; ompCatalog: OmpCatalog | null; onChange: (next: ModelProvider[]) => Promise<boolean> }) {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
   const addProvider = async (labelInput: string, litellmIdInput: string) => {
@@ -81,6 +138,7 @@ function ProviderSettings({ providers, onChange }: { providers: ModelProvider[];
       {providers.map((provider) => <ProviderRow key={provider.label} provider={provider} expanded={expanded === provider.label} onToggle={() => setExpanded(expanded === provider.label ? null : provider.label)} onAddModel={(model) => { const value = model.trim(); if (value && !provider.models.includes(value)) void onChange(providers.map((item) => item.label === provider.label ? { ...item, models: [...item.models, value] } : item)) }} onDeleteModel={(model) => void onChange(providers.map((item) => item.label === provider.label ? { ...item, models: item.models.filter((value) => value !== model) } : item))} onDeleteProvider={() => void onChange(providers.filter((item) => item.label !== provider.label))} />)}
       {adding ? <AddProvider onAdd={(label, id) => void addProvider(label, id)} /> : <button onClick={() => setAdding(true)} className="flex w-full items-center gap-1 rounded-md px-2 py-2 text-xs text-ink-muted hover:bg-surface-elevated hover:text-ink"><Plus className="h-3.5 w-3.5" /> Add provider</button>}
     </div>
+    <OmpSection catalog={ompCatalog} providers={providers} onChange={onChange} />
   </>
 }
 
@@ -96,6 +154,7 @@ export function ModelDropdown({ models, selectedModel, onSelect, onProvidersChan
   const [activeTab, setActiveTab] = useState("Ollama")
   const [error, setError] = useState<string | null>(null)
   const [draftDefaults, setDraftDefaults] = useState<ModelDefaults | null>(null)
+  const [ompCatalog, setOmpCatalog] = useState<OmpCatalog | null>(null)
   const pendingDefaults = useRef<ModelDefaults | null>(null)
   const ref = useRef<HTMLDivElement>(null)
   const close = useCallback(() => {
@@ -110,6 +169,13 @@ export function ModelDropdown({ models, selectedModel, onSelect, onProvidersChan
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [panel])
+  // Loaded when the settings panel opens, not on mount: OMP is optional, so
+  // probing its gateway for every chat view would cost a request nobody asked
+  // for. A failed probe stays null and simply hides the section.
+  useEffect(() => {
+    if (panel !== "configure" || ompCatalog) return
+    fetchOmpCatalog().then(setOmpCatalog).catch(() => undefined)
+  }, [panel, ompCatalog])
 
   if (models === null) return <div className="flex flex-col gap-1.5 px-2"><Skeleton className="h-5 w-16" /><Skeleton className="h-3 w-28" /></div>
 
@@ -130,7 +196,7 @@ export function ModelDropdown({ models, selectedModel, onSelect, onProvidersChan
   return <div className="relative z-50 flex flex-col items-start" ref={ref}>
     {children ? children({ open: panel === "models", onToggle: () => panel === "models" ? close() : setPanel("models") }) : trigger}
     <AnimatePresence>{panel && <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.15 }} className={cn("absolute left-0 top-full mt-1 flex w-max min-w-72 flex-col rounded-xl border border-divider bg-surface shadow-[var(--shadow-lg)]", panel === "models" && "overflow-hidden")}>
-      {panel === "configure" ? <><div className="border-b border-divider p-1.5"><div className="flex rounded-lg bg-paper p-0.5"><button aria-label="Back to model selector" onClick={() => setPanel("models")} className="rounded-md px-2 py-1.5 text-ink-subtle hover:bg-surface-elevated hover:text-ink"><ArrowLeft className="h-3.5 w-3.5" /></button><button onClick={() => setSettingsTab("providers")} className={cn("flex-1 rounded-md px-2 py-1.5 text-xs", settingsTab === "providers" ? "bg-surface-elevated text-ink shadow-[var(--shadow-sm)]" : "text-ink-subtle")}>Providers / Models</button><button onClick={() => setSettingsTab("defaults")} className={cn("flex-1 rounded-md px-2 py-1.5 text-xs", settingsTab === "defaults" ? "bg-surface-elevated text-ink shadow-[var(--shadow-sm)]" : "text-ink-subtle")}>Default Models</button></div></div>{settingsTab === "providers" ? <ProviderSettings providers={models.providers} onChange={persist} /> : <DefaultModels defaults={draftDefaults ?? models.defaults} choices={choices} onChange={updateDefaults} />}{error && <p className="px-2 pb-2 text-xs text-danger">{error}</p>}</> : <>
+      {panel === "configure" ? <><div className="border-b border-divider p-1.5"><div className="flex rounded-lg bg-paper p-0.5"><button aria-label="Back to model selector" onClick={() => setPanel("models")} className="rounded-md px-2 py-1.5 text-ink-subtle hover:bg-surface-elevated hover:text-ink"><ArrowLeft className="h-3.5 w-3.5" /></button><button onClick={() => setSettingsTab("providers")} className={cn("flex-1 rounded-md px-2 py-1.5 text-xs", settingsTab === "providers" ? "bg-surface-elevated text-ink shadow-[var(--shadow-sm)]" : "text-ink-subtle")}>Providers / Models</button><button onClick={() => setSettingsTab("defaults")} className={cn("flex-1 rounded-md px-2 py-1.5 text-xs", settingsTab === "defaults" ? "bg-surface-elevated text-ink shadow-[var(--shadow-sm)]" : "text-ink-subtle")}>Default Models</button></div></div>{settingsTab === "providers" ? <ProviderSettings providers={models.providers} ompCatalog={ompCatalog} onChange={persist} /> : <DefaultModels defaults={draftDefaults ?? models.defaults} choices={choices} onChange={updateDefaults} />}{error && <p className="px-2 pb-2 text-xs text-danger">{error}</p>}</> : <>
         <div className="shrink-0 space-y-1.5 border-b border-divider p-1.5">
           {extraTabs && extraTabs.length > 0 && <div className="flex rounded-lg bg-paper p-0.5">{extraTabs.map((tab) => <button key={tab.key} onClick={() => onExtraTabChange?.(tab.key)} className={cn("flex-1 rounded-md px-2 py-1.5 text-xs font-medium capitalize transition-colors", tab.key === activeExtraTab ? "bg-surface-elevated text-ink shadow-[var(--shadow-sm)]" : "text-ink-subtle hover:text-ink")}>{tab.label}</button>)}</div>}
           <div className="flex rounded-lg bg-paper p-0.5">{selectableProviders.map((provider) => <button key={provider.label} onClick={() => setActiveTab(provider.label)} className={cn("flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors", provider.label === active?.label ? "bg-surface-elevated text-ink shadow-[var(--shadow-sm)]" : "text-ink-subtle hover:text-ink")}>{provider.label}</button>)}<button aria-label="Configure providers" onClick={() => setPanel("configure")} className="rounded-md px-1.5 text-ink-subtle hover:bg-surface-elevated hover:text-ink"><MoreHorizontal className="h-4 w-4" /></button></div>

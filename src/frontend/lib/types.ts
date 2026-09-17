@@ -80,6 +80,34 @@ export interface ModelProvider {
   litellm_id: string
   /** Model name without the provider prefix; the selector sends `litellm_id/model`. */
   models: string[]
+  /** Where the models came from. `"omp"` rows were picked from OMP's logins. */
+  source?: string | null
+}
+
+export interface OmpModel {
+  /** Gateway model id, already provider-qualified, e.g. `anthropic/claude-opus-5`. */
+  id: string
+  name: string
+  vision: boolean
+  context_window: number | null
+}
+
+export interface OmpProvider {
+  id: string
+  label: string
+  models: OmpModel[]
+}
+
+export interface OmpCatalog {
+  /** OMP is present on this machine. */
+  installed: boolean
+  /** Its gateway answered, so these models are callable right now. */
+  online: boolean
+  gateway: string
+  /** LiteLLM prefix to build a selector with: `${litellm_id}/${model.id}`. */
+  litellm_id: string
+  providers: OmpProvider[]
+  error: string | null
 }
 
 export interface BackendConfig {

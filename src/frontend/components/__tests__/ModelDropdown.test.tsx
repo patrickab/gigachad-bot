@@ -1,0 +1,97 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import { ModelDropdown } from "@/components/ModelDropdown"
+import type { ModelsResponse, OmpCatalog } from "@/lib/types"
+
+const fetchOmpCatalog = vi.hoisted(() => vi.fn())
+vi.mock("@/lib/api", () => ({ fetchOmpCatalog }))
+
+const models: ModelsResponse = {
+  ollama: ["ollama/gemma4:31b-cloud"],
+  providers: [{ label: "Gemini", litellm_id: "gemini", models: ["gemini-3.1-pro"] }],
+  defaults: { default_model: "ollama/gemma4:31b-cloud", small_model: "ollama/gemma4:31b-cloud", vision_model: "ollama/gemma4:31b-cloud", memory_model: "ollama/gemma4:31b-cloud" },
+}
+
+const onlineCatalog: OmpCatalog = {
+  installed: true,
+  online: true,
+  gateway: "http://127.0.0.1:4000/v1",
+  litellm_id: "litellm_proxy",
+  providers: [{ id: "anthropic", label: "Anthropic", models: [{ id: "anthropic/claude-opus-5", name: "Claude Opus 5", vision: true, context_window: 200000 }] }],
+  error: null,
+}
+
+function openSettings() {
+  fireEvent.click(screen.getByRole("button", { name: "Model" }))
+  fireEvent.click(screen.getByRole("button", { name: "Configure providers" }))
+}
+
+describe("ModelDropdown OMP source", () => {
+  beforeEach(() => {
+    fetchOmpCatalog.mockReset()
+  })
+
+  it("adds a picked OMP model as a proxy-prefixed provider entry", async () => {
+    fetchOmpCatalog.mockResolvedValue(onlineCatalog)
+    const onProvidersChange = vi.fn().mockResolvedValue(undefined)
+    render(<ModelDropdown models={models} selectedModel="" onSelect={vi.fn()} onProvidersChange={onProvidersChange} onDefaultsChange={vi.fn()} />)
+
+    openSettings()
+    fireEvent.click(await screen.findByText("Anthropic"))
+    fireEvent.click(await screen.findByText("claude-opus-5"))
+
+    await waitFor(() => expect(onProvidersChange).toHaveBeenCalled())
+    expect(onProvidersChange.mock.calls[0][0]).toEqual([
+      { label: "Gemini", litellm_id: "gemini", models: ["gemini-3.1-pro"] },
+      { label: "OMP", litellm_id: "litellm_proxy", source: "omp", models: ["anthropic/claude-opus-5"] },
+    ])
+  })
+
+  it("removes an already-picked OMP model instead of duplicating it", async () => {
+    fetchOmpCatalog.mockResolvedValue(onlineCatalog)
+    const onProvidersChange = vi.fn().mockResolvedValue(undefined)
+    const withPick: ModelsResponse = {
+      ...models,
+      providers: [...models.providers, { label: "OMP", litellm_id: "litellm_proxy", source: "omp", models: ["anthropic/claude-opus-5"] }],
+    }
+    render(<ModelDropdown models={withPick} selectedModel="" onSelect={vi.fn()} onProvidersChange={onProvidersChange} onDefaultsChange={vi.fn()} />)
+
+    openSettings()
+    fireEvent.click(await screen.findByText("1 of 1 added"))
+    fireEvent.click(await screen.findByText("claude-opus-5"))
+
+    await waitFor(() => expect(onProvidersChange).toHaveBeenCalled())
+    expect(onProvidersChange.mock.calls[0][0][1].models).toEqual([])
+  })
+
+  it("explains an offline gateway rather than offering models", async () => {
+    fetchOmpCatalog.mockResolvedValue({ ...onlineCatalog, online: false, providers: [], error: "No OMP gateway" })
+    render(<ModelDropdown models={models} selectedModel="" onSelect={vi.fn()} onProvidersChange={vi.fn()} onDefaultsChange={vi.fn()} />)
+
+    openSettings()
+
+    expect(await screen.findByText(/gateway is not answering/)).toBeInTheDocument()
+    expect(screen.queryByText("Anthropic")).not.toBeInTheDocument()
+  })
+
+  it("hides the OMP section when OMP is not installed", async () => {
+    fetchOmpCatalog.mockResolvedValue({ ...onlineCatalog, installed: false, online: false, providers: [] })
+    render(<ModelDropdown models={models} selectedModel="" onSelect={vi.fn()} onProvidersChange={vi.fn()} onDefaultsChange={vi.fn()} />)
+
+    openSettings()
+
+    await waitFor(() => expect(fetchOmpCatalog).toHaveBeenCalled())
+    expect(screen.queryByText("From OMP")).not.toBeInTheDocument()
+  })
+
+  it("only probes the gateway once the settings panel is opened", async () => {
+    fetchOmpCatalog.mockResolvedValue(onlineCatalog)
+    render(<ModelDropdown models={models} selectedModel="" onSelect={vi.fn()} onProvidersChange={vi.fn()} onDefaultsChange={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Model" }))
+    expect(fetchOmpCatalog).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Configure providers" }))
+    await waitFor(() => expect(fetchOmpCatalog).toHaveBeenCalledTimes(1))
+  })
+})
