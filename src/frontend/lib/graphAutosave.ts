@@ -83,7 +83,12 @@ export function useGraphAutosave({
       next.handlers.onSaved?.(next.content)
     })
     // Serialise writes so a slow one cannot land after a newer one.
-    chain.current = run.catch((cause: unknown) => next.handlers.onError?.(cause))
+    chain.current = run.catch((cause: unknown) => {
+      // A rejected write (e.g. a stale revision) must not silently discard the edit.
+      if (!pending.current) pending.current = next
+      setDirty(true)
+      next.handlers.onError?.(cause)
+    })
   }, [clearTimers])
 
   const flushRef = useRef(flush)

@@ -1,4 +1,5 @@
 import { getApiBase } from "./config"
+import { getDeviceId } from "./deviceId"
 
 export interface SSEEvent {
   event: string
@@ -39,9 +40,12 @@ export function createSSEStream(
 ): SSEStreamResult {
   const controller = new AbortController()
 
+  const deviceId = getDeviceId()
+  const headers: Record<string, string> = { "Content-Type": "application/json" }
+  if (deviceId) headers["X-Device-Id"] = deviceId
   const promise = fetch(`${base}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(body),
     signal: controller.signal,
   })

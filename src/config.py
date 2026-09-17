@@ -3,6 +3,10 @@ from pathlib import Path
 import shutil
 import sys
 
+from uuid import UUID
+
+from psycopg_pool import ConnectionPool
+
 from lib.data_store import DataStore, LocalDataStore
 
 # All mutable application data belongs to the backend's storage root.
@@ -48,10 +52,49 @@ DIRECTORY_OUTPUT_DRAWINGS = DOCUMENTS / "Drawings"
 DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS = DOCUMENTS / "Architecture_Graphs"
 
 _data_store: DataStore | None = None
+_postgres_pool: ConnectionPool | None = None
 
 
-def get_data_store() -> DataStore:
-    """Return the authoritative local store rooted at DOCUMENTS."""
+def storage_mode() -> str:
+    mode = os.environ.get("GIGACHAD_STORE", "local")
+    if mode not in {"local", "postgres"}:
+        raise RuntimeError("GIGACHAD_STORE must be either 'local' or 'postgres'")
+    return mode
+
+
+def get_postgres_pool() -> ConnectionPool:
+    """Return the process-wide connection pool for Postgres storage."""
+    global _postgres_pool
+    if _postgres_pool is None:
+        try:
+            database_url = os.environ["GIGACHAD_DATABASE_URL"]
+        except KeyError as exc:
+            raise RuntimeError("GIGACHAD_DATABASE_URL is required when GIGACHAD_STORE=postgres") from exc
+        _postgres_pool = ConnectionPool(
+            database_url,
+            min_size=int(os.environ.get("GIGACHAD_PG_POOL_MIN_SIZE", "1")),
+            max_size=int(os.environ.get("GIGACHAD_PG_POOL_MAX_SIZE", "10")),
+        )
+    return _postgres_pool
+
+
+
+def close_postgres_pool() -> None:
+    """Release database connections during backend shutdown."""
+    global _postgres_pool
+    if _postgres_pool is not None:
+        _postgres_pool.close()
+        _postgres_pool = None
+
+def get_data_store(user_id: UUID | None = None, *, device_id: UUID | None = None) -> DataStore:
+    """Return local development storage or an immutable user-scoped Postgres store."""
+    if storage_mode() == "postgres":
+        if user_id is None:
+            raise RuntimeError("A user identity is required for Postgres storage")
+        from lib.postgres_data_store import PostgresDataStore
+
+        return PostgresDataStore(get_postgres_pool(), user_id, device_id=device_id)
+
     global _data_store
     if _data_store is None:
         _data_store = LocalDataStore(DOCUMENTS)
@@ -59,7 +102,9 @@ def get_data_store() -> DataStore:
 
 
 def get_model_defaults() -> dict[str, str]:
-    """Return the editable model defaults, falling back to this module's constants."""
+    """Return defaults before a request-specific editable store is available."""
+    if storage_mode() == "postgres":
+        return {"small_model": SMALL_MODEL, "memory_model": MEMORY_MODEL, "vision_model": VISION_MODEL}
     from lib.model_provider_store import ModelProviderStore
 
     return ModelProviderStore(get_data_store()).load_defaults()
@@ -86,7 +131,9 @@ def chat_upload_dir(chat_id: str, slug: str | None = None) -> Path:
 
 
 def ensure_directories() -> None:
-    """Create all config-defined directories that the application needs at startup."""
+    """Create filesystem directories only when local storage is authoritative."""
+    if storage_mode() == "postgres":
+        return
     _dirs = [
         DIRECTORY_CHAT_HISTORIES,
         DIRECTORY_OUTPUT_MINERU,

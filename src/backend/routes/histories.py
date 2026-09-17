@@ -1,15 +1,22 @@
+from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from backend.routes.architecture_graphs import ArchitectureGraphContextReferenceModel
-from backend.routes.deps import get_chat_store
+from backend.routes.deps import get_asset_store, get_chat_store
 from backend.routes.files import delete_chat_upload_dir
+from lib.asset_store import AssetStore
 from lib.chat_store import ChatStore
 from lib.data_store import StorageConflictError
 
 router = APIRouter(prefix="/api/chat-histories", tags=["histories"])
+
+
+def _upload_cleanup(assets: AssetStore | None) -> Callable[[str, str | None], None]:
+    """Bind the request's asset store so chat deletion also purges stored uploads."""
+    return lambda chat_id, slug=None: delete_chat_upload_dir(chat_id, slug, assets)
 
 
 class SaveRequest(BaseModel):
@@ -78,17 +85,21 @@ async def save_chat_history(
 
 
 @router.delete("/cascade/{filename:path}")
-async def cascade_delete(filename: str, store: ChatStore = Depends(get_chat_store)) -> dict[str, Any]:
+async def cascade_delete(
+    filename: str, store: ChatStore = Depends(get_chat_store), assets: AssetStore | None = Depends(get_asset_store)
+) -> dict[str, Any]:
     try:
-        return store.cascade_delete(filename, cleanup_uploads_fn=delete_chat_upload_dir)
+        return store.cascade_delete(filename, cleanup_uploads_fn=_upload_cleanup(assets))
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Chat history not found")
 
 
 @router.delete("/orphan/{filename:path}")
-async def orphan_children(filename: str, store: ChatStore = Depends(get_chat_store)) -> dict[str, Any]:
+async def orphan_children(
+    filename: str, store: ChatStore = Depends(get_chat_store), assets: AssetStore | None = Depends(get_asset_store)
+) -> dict[str, Any]:
     try:
-        return store.orphan(filename, cleanup_uploads_fn=delete_chat_upload_dir)
+        return store.orphan(filename, cleanup_uploads_fn=_upload_cleanup(assets))
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Chat history not found")
     except ValueError as e:
@@ -96,9 +107,11 @@ async def orphan_children(filename: str, store: ChatStore = Depends(get_chat_sto
 
 
 @router.delete("/{filename:path}")
-async def delete_chat_history(filename: str, store: ChatStore = Depends(get_chat_store)) -> dict[str, str]:
+async def delete_chat_history(
+    filename: str, store: ChatStore = Depends(get_chat_store), assets: AssetStore | None = Depends(get_asset_store)
+) -> dict[str, str]:
     try:
-        return store.delete(filename, cleanup_uploads_fn=delete_chat_upload_dir)
+        return store.delete(filename, cleanup_uploads_fn=_upload_cleanup(assets))
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Chat history not found")
 
@@ -132,9 +145,11 @@ async def create_branch(req: BranchRequest, store: ChatStore = Depends(get_chat_
 
 
 @router.post("/merge")
-async def merge_branch(req: MergeRequest, store: ChatStore = Depends(get_chat_store)) -> dict[str, Any]:
+async def merge_branch(
+    req: MergeRequest, store: ChatStore = Depends(get_chat_store), assets: AssetStore | None = Depends(get_asset_store)
+) -> dict[str, Any]:
     try:
-        return store.merge(req.child_file, cleanup_uploads_fn=delete_chat_upload_dir)
+        return store.merge(req.child_file, cleanup_uploads_fn=_upload_cleanup(assets))
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Child chat history not found")
     except ValueError as e:

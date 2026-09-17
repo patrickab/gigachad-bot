@@ -13,15 +13,32 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from backend.routes.deps import get_file_vault
+from backend.identity import RequestIdentity, get_request_identity
 from backend.routes.schemas import AttachResult, FileContent, FileListResponse, FileMeta
+from config import get_postgres_pool, storage_mode
 from lib import document_library as lib_docs
 from lib.attachment_materialize import materialize
-from lib.file_vault import FileVault
+from lib.file_vault import FileVault, PostgresVaultRootRepository
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/filevaults", tags=["filevaults"])
+
+
+def get_file_vault(identity: RequestIdentity | None = Depends(get_request_identity)) -> FileVault:
+    """Per-request vault: ``vault_roots`` rows for an identified user, the JSON file locally.
+
+    Vault *file* contents always stay on their external filesystem; only the
+    root registry differs between modes.
+    """
+    # TODO(phase5): deps.get_file_vault still builds a JSON-backed FileVault, so
+    # fileviewer's path validation cannot see a Postgres user's roots. It needs
+    # the same two branches as this function.
+    if storage_mode() == "local" or identity is None:
+        return FileVault()
+    return FileVault(
+        repository=PostgresVaultRootRepository(get_postgres_pool(), identity.user_id, device_id=identity.device_id)
+    )
 
 
 class VaultFile(BaseModel):

@@ -7,6 +7,7 @@ import { type StrokeData, type EmbedRect, getSvgPathFromStroke, renderPageToPng 
 import { createArchitectureGraph, fileViewerRawUrl, writeBinaryDocument, listArchitectureGraphs, listProjectDocuments, loadFileViewerText, readArchitectureGraph, writeArchitectureGraph, writeDocument } from "@/lib/api"
 import { emptyArchitectureGraph, parseArchitectureGraph, serializeArchitectureGraph, type ArchitectureGraph } from "@/lib/architectureGraph"
 import { useGraphAutosave } from "@/lib/graphAutosave"
+import { subscribeToChanges } from "@/lib/syncStream"
 import { activeThemeName } from "@/lib/palette"
 import { cn } from "@/lib/utils"
 import { Plus, Undo2, Redo2, Trash2, Copy, FileType, ImageIcon, X, Camera, CircleDashed, Type, SquarePen, PenLine, Maximize2, Minimize2 } from "lucide-react"
@@ -57,6 +58,14 @@ const STROKE_OPTIONS = {
   simulatePressure: false,
   last: true,
 } as const
+// Preserve the latest position supplied by either coalesced input or pointerup. A
+// captured pen can cross a child or canvas boundary without ending its stroke.
+export function appendStrokePoint(points: number[][], point: number[]): void {
+  const last = points[points.length - 1]
+  if (last?.[0] === point[0] && last[1] === point[1]) return
+  points.push(point)
+}
+
 
 // Stroke objects are immutable once committed, so their outline path and bounds are
 // computed once per object — not on every render, and not on every eraser sample.
@@ -906,7 +915,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     if (screenshotMode) {
       if (e.button !== 0) return
       e.stopPropagation()
-      ;(e.target as Element).setPointerCapture(e.pointerId)
+      ;e.currentTarget.setPointerCapture(e.pointerId)
       const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
       shotStart.current = { x: cx, y: cy }
       setShotRect({ x0: cx, y0: cy, x1: cx, y1: cy })
@@ -915,7 +924,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     if (selectionMode) {
       if (e.button !== 0) return
       e.stopPropagation()
-      ;(e.target as Element).setPointerCapture(e.pointerId)
+      ;e.currentTarget.setPointerCapture(e.pointerId)
       const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
       lassoActive.current = true
       setLassoPoints([[cx, cy]])
@@ -924,7 +933,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     if (textMode) {
       if (e.button !== 0) return
       e.stopPropagation()
-      ;(e.target as Element).setPointerCapture(e.pointerId)
+      ;e.currentTarget.setPointerCapture(e.pointerId)
       const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
       textDragStart.current = { x: cx, y: cy }
       setTextDragRect({ x0: cx, y0: cy, x1: cx, y1: cy })
@@ -935,7 +944,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     if (e.button === 5) { setIsErasing(true); return }
     if (e.button !== 0) return
     e.stopPropagation()
-    ;(e.target as Element).setPointerCapture(e.pointerId)
+    ;e.currentTarget.setPointerCapture(e.pointerId)
     setIsDrawing(true)
     const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
     currentPointsRef.current = [[cx, cy, e.pressure > 0 ? e.pressure : 0.5]]
@@ -1005,7 +1014,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     const native = e.nativeEvent
     for (const ev of native.getCoalescedEvents?.() ?? [native]) {
       const [cx, cy] = screenToCanvas(ev.clientX, ev.clientY)
-      currentPointsRef.current.push([cx, cy, ev.pressure > 0 ? ev.pressure : 0.5])
+      appendStrokePoint(currentPointsRef.current, [cx, cy, ev.pressure > 0 ? ev.pressure : 0.5])
     }
     redrawLive()
   }, [isDrawing, isErasing, screenToCanvas, doc, onChange, cancelLongPress, armStraighten, redrawLive, snapshotOnce])
@@ -1052,6 +1061,10 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     if (!isDrawing) return
     setIsDrawing(false)
     const pts = currentPointsRef.current
+    if (e) {
+      const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
+      appendStrokePoint(pts, [cx, cy, e.pressure > 0 ? e.pressure : 0.5])
+    }
     currentPointsRef.current = []
     redrawLive()
     if (pts.length < 2) return
@@ -1701,7 +1714,8 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
           onPointerDown={handleSvgPointerDown}
           onPointerMove={handleSvgPointerMove}
           onPointerUp={handleSvgPointerUp}
-          onPointerLeave={handleSvgPointerUp}
+          onPointerCancel={handleSvgPointerUp}
+          onLostPointerCapture={handleSvgPointerUp}
         >
           <g transform={`translate(${offset.x},${offset.y}) scale(${scale})`}>
             {/* Frames (pages + images) — the CanvasFrame primitive.
@@ -2095,19 +2109,32 @@ function CanvasArchitectureGraph({ path }: { path: string }) {
   const name = path.split("/").pop() ?? path
   const [graph, setGraph] = useState<ArchitectureGraph | null>(null)
   const write = useCallback((content: string) => writeArchitectureGraph(name, content), [name])
-  const { queue, markSaved } = useGraphAutosave({ key: name, write })
+  const { queue, markSaved, dirty } = useGraphAutosave({ key: name, write })
+
+  const load = useCallback(async () => {
+    const document = await readArchitectureGraph(name)
+    const loaded = parseArchitectureGraph(document.content)
+    markSaved(serializeArchitectureGraph(loaded))
+    setGraph(loaded)
+  }, [name, markSaved])
 
   useEffect(() => {
     let alive = true
     setGraph(null)
-    readArchitectureGraph(name).then((document) => {
-      if (!alive) return
-      const loaded = parseArchitectureGraph(document.content)
-      markSaved(serializeArchitectureGraph(loaded))
-      setGraph(loaded)
-    }).catch(() => { if (alive) setGraph(null) })
+    load().catch(() => { if (alive) setGraph(null) })
     return () => { alive = false }
-  }, [name, markSaved])
+  }, [load])
+
+  // Another device's edit is applied only while nothing is unsaved here, so a
+  // notification can never overwrite a local edit that has not been written yet.
+  const dirtyRef = useRef(dirty)
+  dirtyRef.current = dirty
+
+  useEffect(() => subscribeToChanges((event) => {
+    if (dirtyRef.current) return
+    if (event.resource_kind !== "document" || !event.resource_key.endsWith(`/${name}`)) return
+    load().catch(() => {})
+  }), [name, load])
 
   const onChange = useCallback((next: ArchitectureGraph) => {
     setGraph(next)

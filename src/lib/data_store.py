@@ -176,7 +176,10 @@ def validate_key(key: str, *, allow_empty: bool = False) -> str:
     """Normalize a logical key and reject paths outside the storage root."""
     if not isinstance(key, str):
         raise InvalidStorageKey("Storage key must be a string")
-    normalized = key.replace("\\", "/").strip("/")
+    normalized = key.replace("\\", "/").strip()
+    if PurePosixPath(normalized).is_absolute():
+        raise InvalidStorageKey("Storage key must be relative and cannot traverse directories")
+    normalized = normalized.strip("/")
     if not normalized:
         if allow_empty:
             return ""

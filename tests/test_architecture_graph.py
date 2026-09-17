@@ -1,9 +1,11 @@
 from pathlib import Path
 
+from fastapi import HTTPException, Response
 import pytest
 
 from backend.routes import architecture_graphs
 from lib.architecture_graph import ArchitectureGraphError, ArchitectureGraphStore, parse_graph
+from lib.data_store import StorageConflictError
 
 
 CONTENT = """\
@@ -96,9 +98,42 @@ async def test_graph_route_writes_a_canonical_file_and_associates_project(tmp_pa
     projects = FakeProjects()
     response = await architecture_graphs.create_graph(
         architecture_graphs.CreateGraphRequest(name="checkout.architecture.yaml", content=CONTENT, projectSlug="project"),
+        Response(),
         store,
         projects,
     )
 
     assert response.hasDraft is False
+    assert response.revision
     assert projects.files == [str((tmp_path / "Architecture_Graphs" / "checkout.architecture.yaml").resolve())]
+
+
+async def test_graph_write_requires_a_matching_revision(tmp_path: Path):
+    store = ArchitectureGraphStore(tmp_path / "Architecture_Graphs")
+    name = "checkout.architecture.yaml"
+    store.write(name, CONTENT)
+    edited = CONTENT.replace("Checkout", "Checkout v2")
+    http_response = Response()
+    loaded = await architecture_graphs.read_graph(name, http_response, store)
+
+    assert http_response.headers["ETag"] == loaded.revision
+
+    # A blind overwrite of an existing graph is refused outright.
+    with pytest.raises(HTTPException) as blind:
+        await architecture_graphs.write_graph(
+            name, architecture_graphs.GraphContentRequest(content=edited), Response(), store, None
+        )
+    assert blind.value.status_code == 428
+
+    saved = await architecture_graphs.write_graph(
+        name, architecture_graphs.GraphContentRequest(content=edited), Response(), store, loaded.revision
+    )
+    assert saved.content == edited
+    assert saved.revision != loaded.revision
+
+    # The first client's now-stale revision must not clobber the newer content.
+    with pytest.raises(StorageConflictError):
+        await architecture_graphs.write_graph(
+            name, architecture_graphs.GraphContentRequest(content=CONTENT), Response(), store, loaded.revision
+        )
+    assert store.read(name) == edited

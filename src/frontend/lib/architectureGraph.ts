@@ -36,6 +36,8 @@ export interface ArchitectureGraphDocument {
   path: string
   content: string
   hasDraft: boolean
+  /** Server revision this content was read at; a later write must still match it. */
+  revision: string
 }
 
 export function isArchitectureGraphPath(path: string): boolean {

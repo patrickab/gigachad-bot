@@ -1,6 +1,7 @@
 import type { WebSearchParams } from "./types"
 import { getApiBase } from "./config"
 import { readLines } from "./sse"
+import { getDeviceId } from "./deviceId"
 
 export interface WebSearchResultItem {
   label?: string
@@ -31,9 +32,12 @@ export function applyDomainFilter(query: string, domain: string): string {
 
 export function webSearchFetch(params: WebSearchParams) {
   const controller = new AbortController()
+  const deviceId = getDeviceId()
+  const headers: Record<string, string> = { "Content-Type": "application/json" }
+  if (deviceId) headers["X-Device-Id"] = deviceId
   const promise = fetch(`${getApiBase()}/web-search`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({
       query: applyDomainFilter(params.query, params.domain ?? ""),
       system_instructions: params.systemInstructions ?? "",

@@ -28,7 +28,7 @@ const api = vi.hoisted(() => ({
 vi.mock("@/lib/api", () => api)
 
 import {
-  CanvasEditor, emptyCanvasDoc, parseCanvasDoc, serializeCanvasDoc, polyBounds, resizeBox, scaleStroke, scalePoly, remapAcrossCanvases, inOwnAttachment,
+  CanvasEditor, appendStrokePoint, emptyCanvasDoc, parseCanvasDoc, serializeCanvasDoc, polyBounds, resizeBox, scaleStroke, scalePoly, remapAcrossCanvases, inOwnAttachment,
   type CanvasDocument, type SelBox,
 } from "@/components/CanvasEditor"
 import type { StrokeData } from "@/lib/drawing"
@@ -97,6 +97,17 @@ describe("lasso selection", () => {
     const s = stroke([[0, 0, 0.2], [10, 10, 0.9]])
     const scaled = scaleStroke(s, s.points, box(0, 0, 10, 10), box(5, 5, 20, 20))
     expect(scaled.points).toEqual([[5, 5, 0.2], [25, 25, 0.9]])
+  })
+})
+
+describe("stroke sampling", () => {
+  it("keeps the final pen sample while ignoring a duplicate browser sample", () => {
+    const points = [[10, 20, 0.5]]
+
+    appendStrokePoint(points, [30, 40, 0.7])
+    appendStrokePoint(points, [30, 40, 0.7])
+
+    expect(points).toEqual([[10, 20, 0.5], [30, 40, 0.7]])
   })
 })
 

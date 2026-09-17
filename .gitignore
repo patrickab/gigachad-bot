@@ -17,6 +17,9 @@ node_modules
 .venv
 .ruff_cache
 
+# Local compose credentials
+.env
+
 # Next.js / Node
 .next
 src/frontend/node_modules

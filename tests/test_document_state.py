@@ -1,0 +1,297 @@
+"""Postgres-mode document routes: state lands in the database, not on disk.
+
+The route functions are called directly with explicit request-scoped stores —
+the same objects ``get_document_store``/``get_asset_store`` hand FastAPI — so a
+test needs no HTTP client and no ``GIGACHAD_STORE`` environment fiddling.
+``documents.DOCUMENTS`` is redirected at a tmp_path so the *only* filesystem
+writes a test can produce are the deliberate PDF/drawing mirrors, and anything
+else shows up as an unexpected file under that root.
+"""
+
+from io import BytesIO
+import os
+from uuid import uuid4
+
+from fastapi import HTTPException, UploadFile
+import pytest
+from psycopg_pool import ConnectionPool
+
+from backend.routes import documents as route
+from lib.asset_store import AssetStore
+from lib.chat_store import ChatStore
+from lib.data_store import StorageNotFoundError
+from lib.db_schema import upgrade
+from lib.postgres_data_store import PostgresDataStore
+from lib.project_store import ProjectStore
+
+
+@pytest.fixture(scope="module")
+def postgres_pool():
+    url = os.environ.get("POSTGRES_TEST_DATABASE_URL")
+    if not url:
+        pytest.skip("POSTGRES_TEST_DATABASE_URL is required for document route tests")
+    upgrade(url)
+    pool = ConnectionPool(url, min_size=1, max_size=4)
+    yield pool
+    pool.close()
+
+
+@pytest.fixture(autouse=True)
+def clean_database(postgres_pool):
+    with postgres_pool.connection() as connection, connection.transaction():
+        connection.execute("TRUNCATE changes, assets, vault_roots, devices, documents, users CASCADE")
+
+
+@pytest.fixture(autouse=True)
+def documents_root(tmp_path, monkeypatch):
+    """Point the mirror root at a tmp dir; ``documents.py`` reads it at call time."""
+    root = tmp_path / "Documents"
+    monkeypatch.setattr(route, "DOCUMENTS", root, raising=True)
+    return root
+
+
+def written_files(root):
+    return sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()) if root.exists() else []
+
+
+class Stores:
+    """The three request-scoped stores a documents route is handed, for one user."""
+
+    def __init__(self, pool, login):
+        device_id = uuid4()
+        with pool.connection() as connection, connection.transaction():
+            self.user_id = connection.execute(
+                "INSERT INTO users (tailscale_login) VALUES (%s) RETURNING id", (login,)
+            ).fetchone()[0]
+            connection.execute("INSERT INTO devices (id, user_id) VALUES (%s, %s)", (device_id, self.user_id))
+        self.docs = PostgresDataStore(pool, self.user_id, device_id=device_id)
+        self.assets = AssetStore(pool, self.user_id, device_id=device_id)
+        self.projects = ProjectStore(
+            route.DIRECTORY_CHAT_HISTORIES,
+            chat_store=ChatStore(route.DIRECTORY_CHAT_HISTORIES, data_store=self.docs),
+            data_store=self.docs,
+        )
+
+
+@pytest.fixture
+def alice(postgres_pool):
+    return Stores(postgres_pool, "alice@example.test")
+
+
+@pytest.fixture
+def bob(postgres_pool):
+    return Stores(postgres_pool, "bob@example.test")
+
+
+def upload(name, content):
+    return UploadFile(file=BytesIO(content), filename=name)
+
+
+async def test_writing_a_note_stores_a_document_row_and_touches_no_disk(alice, documents_root):
+    meta = await route.write_document(
+        route.WriteDocumentRequest(slug="", name="idea.md", content="think"), alice.projects, alice.docs, alice.assets
+    )
+
+    assert meta.path == "chat_history/_notes/idea.md"
+    assert meta.name == "idea.md"
+    assert alice.docs.read_bytes("chat_history/_notes/idea.md")[0] == b"think"
+    assert written_files(documents_root) == []
+
+
+async def test_writing_a_project_document_registers_it_and_mirrors_markdown(alice, documents_root):
+    slug = alice.projects.create_project("Thesis")["slug"]
+
+    meta = await route.write_document(
+        route.WriteDocumentRequest(slug=slug, name="spec.md", content="# spec"), alice.projects, alice.docs, alice.assets
+    )
+
+    assert meta.path == f"chat_history/{slug}/documents/spec.md"
+    assert alice.projects.list_files(slug) == [f"chat_history/{slug}/documents/spec.md"]
+    assert alice.docs.read_bytes(f"chat_history/{slug}/documents/spec.md")[0] == b"# spec"
+    # md/tex saves also land in the browsable cloud collection, by name
+    assert alice.docs.read_bytes("Markdown/spec.md")[0] == b"# spec"
+    assert written_files(documents_root) == []
+
+
+async def test_writing_a_document_refreshes_the_chat_upload_copies(alice):
+    slug = alice.projects.create_project("Thesis")["slug"]
+    alice.assets.write("upload", f"chat_history/{slug}/_uploads/chat-1/spec.md", b"stale")
+    alice.assets.write("upload", f"chat_history/{slug}/_uploads/chat-1/other.md", b"untouched")
+
+    await route.write_document(
+        route.WriteDocumentRequest(slug=slug, name="spec.md", content="fresh"), alice.projects, alice.docs, alice.assets
+    )
+
+    assert alice.assets.read(f"chat_history/{slug}/_uploads/chat-1/spec.md").content == b"fresh"
+    assert alice.assets.read(f"chat_history/{slug}/_uploads/chat-1/other.md").content == b"untouched"
+
+
+async def test_writing_a_binary_document_stores_bytes_under_the_project(alice, documents_root):
+    slug = alice.projects.create_project("Thesis")["slug"]
+
+    meta = await route.write_binary_document(upload("scan.pdf", b"%PDF-1.7 raw"), slug, alice.projects, alice.docs)
+
+    assert meta.path == f"chat_history/{slug}/documents/scan.pdf"
+    assert alice.docs.read_bytes(f"chat_history/{slug}/documents/scan.pdf")[0] == b"%PDF-1.7 raw"
+    assert alice.projects.list_files(slug) == [f"chat_history/{slug}/documents/scan.pdf"]
+    assert written_files(documents_root) == []
+
+
+async def test_mirror_drawing_stores_a_drawing_asset_and_a_filesystem_mirror(alice, documents_root):
+    assert await route.mirror_drawing(upload("canvas.jpg", b"\xff\xd8jpeg"), alice.assets) == {"status": "ok"}
+
+    asset = alice.assets.read("Drawings/canvas.jpg")
+    assert (asset.kind, asset.content) == ("drawing", b"\xff\xd8jpeg")
+    assert written_files(documents_root) == ["Drawings/canvas.jpg"]
+    assert (documents_root / "Drawings/canvas.jpg").read_bytes() == b"\xff\xd8jpeg"
+
+
+async def test_upload_promotes_into_the_pdf_library_and_mirrors_it(alice, documents_root, no_enqueue):
+    slug = alice.projects.create_project("Thesis")["slug"]
+
+    meta = await route.upload_document(upload("paper.pdf", b"%PDF-1.7 body"), slug, alice.projects, alice.assets)
+
+    assert meta.path == "PDFs/paper.pdf"
+    asset = alice.assets.read("PDFs/paper.pdf")
+    assert (asset.kind, asset.content) == ("pdf", b"%PDF-1.7 body")
+    assert alice.projects.list_files(slug) == ["PDFs/paper.pdf"]
+    assert written_files(documents_root) == ["PDFs/paper.pdf"]
+    # MinerU needs a real file: the mirror is what gets queued for extraction.
+    assert no_enqueue == [documents_root / "PDFs/paper.pdf"]
+
+
+async def test_register_upload_promotes_a_stored_chat_upload(alice, documents_root):
+    alice.assets.write("upload", "chat_history/_uploads/chat-1/paper.pdf", b"%PDF-1.7 attached")
+
+    meta = await route.register_upload(
+        route.RegisterUploadRequest(chat_id="chat-1", filename="paper.pdf"), None, alice.projects, alice.assets
+    )
+
+    assert meta.path == "PDFs/paper.pdf"
+    assert alice.assets.read("PDFs/paper.pdf").content == b"%PDF-1.7 attached"
+    assert written_files(documents_root) == ["PDFs/paper.pdf"]
+
+
+async def test_register_upload_without_a_stored_upload_is_not_found(alice):
+    with pytest.raises(HTTPException) as exc:
+        await route.register_upload(
+            route.RegisterUploadRequest(chat_id="chat-1", filename="ghost.pdf"), None, alice.projects, alice.assets
+        )
+    assert exc.value.status_code == 404
+
+
+async def test_move_relocates_the_document_key_leaving_nothing_behind(alice):
+    slug = alice.projects.create_project("Thesis")["slug"]
+    await route.write_document(
+        route.WriteDocumentRequest(slug="", name="sketch.canvas", content="{}"), alice.projects, alice.docs, alice.assets
+    )
+
+    meta = await route.move_document(
+        route.MoveDocumentRequest(path="chat_history/_notes/sketch.canvas", from_slug="", to_slug=slug),
+        alice.projects,
+        alice.docs,
+    )
+
+    assert meta.path == f"chat_history/{slug}/documents/sketch.canvas"
+    assert alice.docs.read_bytes(f"chat_history/{slug}/documents/sketch.canvas")[0] == b"{}"
+    assert not alice.docs.exists("chat_history/_notes/sketch.canvas")
+    assert alice.projects.list_files(slug) == [f"chat_history/{slug}/documents/sketch.canvas"]
+
+
+async def test_move_onto_an_existing_name_is_a_conflict(alice):
+    slug = alice.projects.create_project("Thesis")["slug"]
+    for request in (
+        route.WriteDocumentRequest(slug="", name="spec.md", content="note"),
+        route.WriteDocumentRequest(slug=slug, name="spec.md", content="project"),
+    ):
+        await route.write_document(request, alice.projects, alice.docs, alice.assets)
+
+    with pytest.raises(HTTPException) as exc:
+        await route.move_document(
+            route.MoveDocumentRequest(path="chat_history/_notes/spec.md", from_slug="", to_slug=slug),
+            alice.projects,
+            alice.docs,
+        )
+    assert exc.value.status_code == 409
+    assert alice.docs.read_bytes("chat_history/_notes/spec.md")[0] == b"note"
+
+
+async def test_delete_removes_the_note_and_the_project_document(alice):
+    slug = alice.projects.create_project("Thesis")["slug"]
+    await route.write_document(
+        route.WriteDocumentRequest(slug="", name="idea.md", content="x"), alice.projects, alice.docs, alice.assets
+    )
+    await route.write_document(
+        route.WriteDocumentRequest(slug=slug, name="spec.md", content="y"), alice.projects, alice.docs, alice.assets
+    )
+
+    await route.remove_document("", "chat_history/_notes/idea.md", alice.projects, alice.docs)
+    await route.remove_document(slug, f"chat_history/{slug}/documents/spec.md", alice.projects, alice.docs)
+
+    assert not alice.docs.exists("chat_history/_notes/idea.md")
+    assert not alice.docs.exists(f"chat_history/{slug}/documents/spec.md")
+    assert alice.projects.list_files(slug) == []
+    # the cloud mirror is a separate collection and is deliberately kept
+    assert alice.docs.read_bytes("Markdown/spec.md")[0] == b"y"
+
+
+async def test_delete_refuses_to_touch_a_document_outside_the_project_directory(alice):
+    slug = alice.projects.create_project("Thesis")["slug"]
+    await route.write_document(
+        route.WriteDocumentRequest(slug="", name="idea.md", content="x"), alice.projects, alice.docs, alice.assets
+    )
+
+    await route.remove_document(slug, "chat_history/_notes/idea.md", alice.projects, alice.docs)
+
+    assert alice.docs.read_bytes("chat_history/_notes/idea.md")[0] == b"x"
+
+
+async def test_list_notes_returns_the_stored_notes(alice):
+    slug = alice.projects.create_project("Thesis")["slug"]
+    for request in (
+        route.WriteDocumentRequest(slug="", name="one.md", content="1"),
+        route.WriteDocumentRequest(slug="", name="two.canvas", content="2"),
+        route.WriteDocumentRequest(slug=slug, name="hidden.md", content="3"),
+    ):
+        await route.write_document(request, alice.projects, alice.docs, alice.assets)
+
+    listed = await route.list_notes(alice.docs)
+
+    assert sorted(document.path for document in listed.documents) == [
+        "chat_history/_notes/one.md",
+        "chat_history/_notes/two.canvas",
+    ]
+
+
+async def test_another_users_document_is_invisible_and_answers_404(alice, bob):
+    slug = alice.projects.create_project("Thesis")["slug"]
+    meta = await route.write_document(
+        route.WriteDocumentRequest(slug=slug, name="secret.md", content="mine"), alice.projects, alice.docs, alice.assets
+    )
+
+    listed = await route.list_all_documents(bob.projects, bob.docs)
+    assert listed.documents == []
+
+    for call in (
+        route.add_document(route.AddDocumentRequest(path=meta.path), slug, bob.projects, bob.docs, bob.assets),
+        route.attach_document(meta.path, "chat-1", None, bob.projects, bob.docs, bob.assets),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            await call
+        assert exc.value.status_code == 404
+
+    with pytest.raises(StorageNotFoundError):
+        bob.docs.read_bytes(meta.path)
+    assert alice.docs.read_bytes(meta.path)[0] == b"mine"
+
+
+async def test_attaching_a_registered_document_copies_it_into_the_chat_uploads(alice):
+    slug = alice.projects.create_project("Thesis")["slug"]
+    meta = await route.write_document(
+        route.WriteDocumentRequest(slug=slug, name="spec.md", content="# spec"), alice.projects, alice.docs, alice.assets
+    )
+
+    result = await route.attach_document(meta.path, "chat-1", slug, alice.projects, alice.docs, alice.assets)
+
+    assert (result.name, result.mime, result.content) == ("spec.md", "text/markdown", "# spec")
+    assert alice.assets.read(f"chat_history/{slug}/_uploads/chat-1/spec.md").content == b"# spec"

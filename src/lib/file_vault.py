@@ -1,10 +1,11 @@
 """Access seam for file vaults — directories of Attachment-compatible files.
 
 A user can register several vault roots (an Obsidian vault is just one flavor
-of file vault). The list of roots is maintained in
-``chat_histories/file-vault-roots.json`` — the single source of truth for vault
-locations (nothing is configured in ``config.py``). When that file is absent
-the vault is simply empty until the user adds a root.
+of file vault). The list of roots is the single source of truth for vault
+locations (nothing is configured in ``config.py``): it lives in
+``chat_histories/file-vault-roots.json`` in local mode and in ``vault_roots``
+rows in Postgres mode. With no registry the vault is simply empty until the
+user adds a root.
 
 Each root may carry additional **mountpoints** — external directories (e.g. a
 ``/mnt`` drive) attached to that vault. Mountpoint files appear as folder nodes
@@ -24,7 +25,12 @@ from __future__ import annotations
 from collections import defaultdict
 from pathlib import Path
 import re
+from typing import Protocol
 from urllib.parse import quote as _url_quote
+from uuid import UUID
+
+from psycopg.types.json import Jsonb
+from psycopg_pool import ConnectionPool
 
 from config import DIRECTORY_CHAT_HISTORIES
 from lib.json_io import safe_read_json, safe_write_json
@@ -44,11 +50,100 @@ def _is_untitled(name: str) -> bool:
     return Path(name).stem.lower().startswith("untitled")
 
 
-class FileVault:
-    """All access to the user's file-vault roots goes through this class."""
+class VaultRootRepository(Protocol):
+    """Where the *root registry* lives. Vault file contents never pass through here."""
+
+    def load(self) -> list[object]:
+        """Registered roots in registration order, in the JSON config's entry shape."""
+
+    def save(self, roots: list[dict[str, object]]) -> None:
+        """Replace the registry with *roots* (``path``, ``mountpoints``, optional ``project``)."""
+
+
+class JsonVaultRootRepository:
+    """Local mode: the registry is ``chat_history/file-vault-roots.json``."""
 
     def __init__(self, roots_file: Path | None = None) -> None:
         self._roots_file = roots_file or ROOTS_FILE
+
+    def load(self) -> list[object]:
+        source = self._roots_file
+        # One-time migration: fall back to the pre-rename obsidian-roots.json.
+        if not source.is_file() and self._roots_file == ROOTS_FILE and _LEGACY_ROOTS_FILE.is_file():
+            source = _LEGACY_ROOTS_FILE
+        return safe_read_json(source, {"roots": []}).get("roots") or []
+
+    def save(self, roots: list[dict[str, object]]) -> None:
+        safe_write_json(self._roots_file, {"roots": roots})
+
+
+class PostgresVaultRootRepository:
+    """Postgres mode: the registry is ``vault_roots`` rows for one authenticated user.
+
+    Stored paths are whatever spelling the caller registered; ``FileVault``
+    re-resolves them on load, so a row migrated from another host is resolved
+    against *this* host's filesystem.
+    """
+
+    def __init__(self, pool: ConnectionPool, user_id: UUID, *, device_id: UUID | None = None) -> None:
+        self._pool = pool
+        self._user_id = user_id
+        self._device_id = device_id
+
+    def load(self) -> list[object]:
+        with self._pool.connection() as connection:
+            rows = connection.execute(
+                "SELECT path, project_slug, mountpoints FROM vault_roots WHERE user_id = %s ORDER BY created_at, path",
+                (self._user_id,),
+            ).fetchall()
+        return [
+            {"path": path, "mountpoints": list(mountpoints or []), **({"project": slug} if slug else {})}
+            for path, slug, mountpoints in rows
+        ]
+
+    def _change(self, connection, path: str, operation: str) -> None:
+        connection.execute(
+            """
+            INSERT INTO changes (user_id, resource_kind, resource_key, operation, device_id)
+            VALUES (%s, 'vault_root', %s, %s, %s)
+            """,
+            (self._user_id, path, operation, self._device_id),
+        )
+
+    def save(self, roots: list[dict[str, object]]) -> None:
+        # ponytail: whole-registry replace, mirroring the JSON file it replaces —
+        # one statement per root. A user keeps a handful of roots; if that ever
+        # grows, give FileVault per-root add/remove hooks instead of diffing here.
+        paths = [str(root["path"]) for root in roots]
+        with self._pool.connection() as connection, connection.transaction():
+            for root in roots:
+                path = str(root["path"])
+                touched = connection.execute(
+                    """
+                    INSERT INTO vault_roots (user_id, path, project_slug, mountpoints)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (user_id, path) DO UPDATE
+                    SET project_slug = EXCLUDED.project_slug, mountpoints = EXCLUDED.mountpoints
+                    WHERE vault_roots.project_slug IS DISTINCT FROM EXCLUDED.project_slug
+                       OR vault_roots.mountpoints <> EXCLUDED.mountpoints
+                    """,
+                    (self._user_id, path, root.get("project"), Jsonb(root.get("mountpoints") or [])),
+                ).rowcount
+                if touched:
+                    self._change(connection, path, "write")
+            removed = connection.execute(
+                "DELETE FROM vault_roots WHERE user_id = %s AND NOT (path = ANY(%s::text[])) RETURNING path",
+                (self._user_id, paths),
+            ).fetchall()
+            for (path,) in removed:
+                self._change(connection, path, "delete")
+
+
+class FileVault:
+    """All access to the user's file-vault roots goes through this class."""
+
+    def __init__(self, roots_file: Path | None = None, *, repository: VaultRootRepository | None = None) -> None:
+        self._repository = repository or JsonVaultRootRepository(roots_file)
         self._roots: list[Path] = []
         self._mountpoints: dict[Path, list[Path]] = defaultdict(list)
         # A root may be mounted to a project (slug) instead of the global Vaults section.
@@ -56,11 +151,7 @@ class FileVault:
         self._reload()
 
     def _reload(self) -> None:
-        source = self._roots_file
-        # One-time migration: fall back to the pre-rename obsidian-roots.json.
-        if not source.is_file() and self._roots_file == ROOTS_FILE and _LEGACY_ROOTS_FILE.is_file():
-            source = _LEGACY_ROOTS_FILE
-        raw = safe_read_json(source, {"roots": []}).get("roots") or []
+        raw = self._repository.load()
         self._roots = []
         self._mountpoints = defaultdict(list)
         self._project_tags = {}
@@ -86,17 +177,14 @@ class FileVault:
                     self._mountpoints[path].append(resolved_mp)
 
     def _save_roots(self) -> None:
-        payload = {
-            "roots": [
-                {
-                    "path": str(r),
-                    "mountpoints": [str(m) for m in self._mountpoints.get(r, [])],
-                    **({"project": self._project_tags[r]} if r in self._project_tags else {}),
-                }
-                for r in self._roots
-            ]
-        }
-        safe_write_json(self._roots_file, payload)
+        self._repository.save([
+            {
+                "path": str(r),
+                "mountpoints": [str(m) for m in self._mountpoints.get(r, [])],
+                **({"project": self._project_tags[r]} if r in self._project_tags else {}),
+            }
+            for r in self._roots
+        ])
 
     def _all_mountpoints(self) -> list[Path]:
         out: list[Path] = []

@@ -4,27 +4,31 @@ from contextlib import contextmanager
 import json
 from typing import Any, Iterator
 
+from fastapi import Depends
 from llm_baseclient.client import LLMClient
 from sse_starlette.sse import EventSourceResponse
 
-from config import DIRECTORY_CHAT_HISTORIES, DIRECTORY_PROMPTS, get_data_store
+from backend.identity import RequestIdentity, get_request_identity
+from config import (
+    DIRECTORY_CHAT_HISTORIES,
+    DIRECTORY_PROMPTS,
+    get_data_store,
+    get_postgres_pool,
+    seed_prompts,
+    storage_mode,
+)
 from lib.architecture_graph import ArchitectureGraphStore
+from lib.asset_store import AssetStore
 from lib.chat_store import ChatStore
+from lib.data_store import DataStore
 from lib.file_vault import FileVault
 from lib.image_paths import _DATA_URI_RE
 from lib.memory_store import MemoryStore
+from lib.model_provider_store import ModelProviderStore
 from lib.project_store import ProjectStore
 from lib.prompt_store import PromptStore
-from lib.model_provider_store import ModelProviderStore
 
 _client: LLMClient | None = None
-_chat_store: ChatStore | None = None
-_project_store: ProjectStore | None = None
-_memory_store: MemoryStore | None = None
-_file_vault: FileVault | None = None
-_prompt_store: PromptStore | None = None
-_architecture_graph_store: ArchitectureGraphStore | None = None
-_model_provider_store: ModelProviderStore | None = None
 
 
 def get_client() -> LLMClient:
@@ -34,53 +38,56 @@ def get_client() -> LLMClient:
     return _client
 
 
-def get_chat_store() -> ChatStore:
-    global _chat_store
-    if _chat_store is None:
-        _chat_store = ChatStore(DIRECTORY_CHAT_HISTORIES, data_store=get_data_store())
-    return _chat_store
+def _store(identity: RequestIdentity | None):
+    return get_data_store(identity.user_id, device_id=identity.device_id) if identity else get_data_store()
 
 
-def get_project_store() -> ProjectStore:
-    global _project_store
-    if _project_store is None:
-        _project_store = ProjectStore(DIRECTORY_CHAT_HISTORIES, chat_store=get_chat_store(), data_store=get_data_store())
-    return _project_store
+def get_document_store(identity: RequestIdentity | None = Depends(get_request_identity)) -> DataStore | None:
+    """The request's document store, or None while the filesystem is authoritative."""
+    if storage_mode() == "local" or identity is None:
+        return None
+    return get_data_store(identity.user_id, device_id=identity.device_id)
 
 
-def get_architecture_graph_store() -> ArchitectureGraphStore:
-    global _architecture_graph_store
-    if _architecture_graph_store is None:
-        _architecture_graph_store = ArchitectureGraphStore(data_store=get_data_store())
-    return _architecture_graph_store
+def get_asset_store(identity: RequestIdentity | None = Depends(get_request_identity)) -> AssetStore | None:
+    """The request's binary asset store, or None while the filesystem is authoritative."""
+    if storage_mode() == "local" or identity is None:
+        return None
+    return AssetStore(get_postgres_pool(), identity.user_id, device_id=identity.device_id)
 
 
-def get_memory_store() -> MemoryStore:
-    global _memory_store
-    if _memory_store is None:
-        _memory_store = MemoryStore(data_store=get_data_store())
-    return _memory_store
+def get_chat_store(identity: RequestIdentity | None = Depends(get_request_identity)) -> ChatStore:
+    return ChatStore(DIRECTORY_CHAT_HISTORIES, data_store=_store(identity))
 
 
-def get_file_vault() -> FileVault:
-    global _file_vault
-    if _file_vault is None:
-        _file_vault = FileVault()
-    return _file_vault
+def get_project_store(identity: RequestIdentity | None = Depends(get_request_identity)) -> ProjectStore:
+    data_store = _store(identity)
+    chats = ChatStore(DIRECTORY_CHAT_HISTORIES, data_store=data_store)
+    return ProjectStore(DIRECTORY_CHAT_HISTORIES, chat_store=chats, data_store=data_store)
 
 
-def get_prompt_store() -> PromptStore:
-    global _prompt_store
-    if _prompt_store is None:
-        _prompt_store = PromptStore(DIRECTORY_PROMPTS, data_store=get_data_store())
-    return _prompt_store
+def get_architecture_graph_store(
+    identity: RequestIdentity | None = Depends(get_request_identity),
+) -> ArchitectureGraphStore:
+    return ArchitectureGraphStore(data_store=_store(identity))
 
 
-def get_model_provider_store() -> ModelProviderStore:
-    global _model_provider_store
-    if _model_provider_store is None:
-        _model_provider_store = ModelProviderStore(get_data_store())
-    return _model_provider_store
+def get_memory_store(identity: RequestIdentity | None = Depends(get_request_identity)) -> MemoryStore:
+    return MemoryStore(data_store=_store(identity))
+
+
+def get_file_vault(_identity: RequestIdentity | None = Depends(get_request_identity)) -> FileVault:
+    return FileVault()
+
+
+def get_prompt_store(identity: RequestIdentity | None = Depends(get_request_identity)) -> PromptStore:
+    data_store = _store(identity)
+    seed_prompts(data_store)
+    return PromptStore(DIRECTORY_PROMPTS, data_store=data_store)
+
+
+def get_model_provider_store(identity: RequestIdentity | None = Depends(get_request_identity)) -> ModelProviderStore:
+    return ModelProviderStore(_store(identity))
 
 
 def shutdown_client() -> None:

@@ -3,6 +3,7 @@ import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { getApiBase } from "./config"
 import type { ArchitectureGraphDocument } from "./architectureGraph"
+import { getDeviceId } from "./deviceId"
 
 function encodePath(filename: string): string {
   return filename.split("/").map(encodeURIComponent).join("/")
@@ -19,6 +20,16 @@ export function parseHistoryFile(historyFile: string): { slug: string | null; fi
 export function buildHistoryFile(filename: string, slug: string | null): string {
   return slug ? `${slug}/${filename}` : filename
 }
+
+/** Carries the HTTP status so callers can tell a stale-revision rejection from a real failure. */
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message)
+    this.name = "ApiError"
+  }
+}
+
+export const GRAPH_REVISION_CONFLICT = 412
 
 async function ensureOk(res: Response): Promise<Response> {
   if (!res.ok) {
@@ -38,13 +49,15 @@ async function ensureOk(res: Response): Promise<Response> {
     } catch {
       // not json, use status text
     }
-    throw new Error(message)
+    throw new ApiError(message, res.status)
   }
   return res
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await ensureOk(await fetch(`${getApiBase()}${path}`, options))
+  const deviceId = getDeviceId()
+  const headers = { ...(options?.headers as Record<string, string> | undefined), ...(deviceId ? { "X-Device-Id": deviceId } : {}) }
+  const res = await ensureOk(await fetch(`${getApiBase()}${path}`, { ...options, headers }))
   return res.json()
 }
 
@@ -61,16 +74,16 @@ function toQuery(params: Record<string, QueryValue>): string {
   return s ? `?${s}` : ""
 }
 
-function jsonInit(method: string, body: unknown): RequestInit {
-  return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
+function jsonInit(method: string, body: unknown, headers: Record<string, string> = {}): RequestInit {
+  return { method, headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) }
 }
 
 function post<T>(path: string, body: unknown): Promise<T> {
   return request<T>(path, jsonInit("POST", body))
 }
 
-function put<T>(path: string, body: unknown): Promise<T> {
-  return request<T>(path, jsonInit("PUT", body))
+function put<T>(path: string, body: unknown, headers: Record<string, string> = {}): Promise<T> {
+  return request<T>(path, jsonInit("PUT", body, headers))
 }
 
 function patch<T>(path: string, body: unknown): Promise<T> {
@@ -237,14 +250,12 @@ export function apiOrigin(): string {
   return url.origin
 }
 
-function _uploadsPath(chatId: string, slug: string | null): string {
-  const safe = encodeURIComponent(chatId)
-  if (slug) return `/chat-histories/${encodeURIComponent(slug)}/_uploads/${safe}`
-  return `/chat-uploads/${safe}`
-}
-
+// One URL shape for both storage modes: the backend resolves a logical asset path
+// from the database or, in local mode, from the chat tree on disk.
 function uploadsBase(chatId: string, slug: string | null): string {
-  return `${apiOrigin()}${_uploadsPath(chatId, slug)}`
+  const safe = encodeURIComponent(chatId)
+  const prefix = slug ? `chat_history/${encodeURIComponent(slug)}/_uploads` : "chat_history/_uploads"
+  return `${getApiBase()}/assets/${prefix}/${safe}`
 }
 
 export function rewriteImages(content: string, chatId: string, slug: string | null): string {
@@ -387,16 +398,46 @@ export async function listArchitectureGraphs(): Promise<ProjectDocument[]> {
   return data.graphs
 }
 
-export function readArchitectureGraph(name: string): Promise<ArchitectureGraphDocument> {
-  return request<ArchitectureGraphDocument>(`/architecture-graphs/${encodeURIComponent(name)}`)
+// The server rejects a write whose revision is stale, so every reader records the
+// revision it saw. Keeping it here means a graph view needs no revision plumbing.
+const graphRevisions = new Map<string, string>()
+
+export async function readArchitectureGraph(name: string): Promise<ArchitectureGraphDocument> {
+  const document = await request<ArchitectureGraphDocument>(`/architecture-graphs/${encodeURIComponent(name)}`)
+  graphRevisions.set(name, document.revision)
+  return document
 }
 
-export function createArchitectureGraph(name: string, content: string, projectSlug?: string | null): Promise<ArchitectureGraphDocument> {
-  return post<ArchitectureGraphDocument>("/architecture-graphs", { name, content, projectSlug: projectSlug ?? null })
+export async function createArchitectureGraph(name: string, content: string, projectSlug?: string | null): Promise<ArchitectureGraphDocument> {
+  const document = await post<ArchitectureGraphDocument>("/architecture-graphs", { name, content, projectSlug: projectSlug ?? null })
+  graphRevisions.set(name, document.revision)
+  return document
 }
 
-export function writeArchitectureGraph(name: string, content: string): Promise<ArchitectureGraphDocument> {
-  return put<ArchitectureGraphDocument>(`/architecture-graphs/${encodeURIComponent(name)}`, { content })
+function putGraph(name: string, content: string): Promise<ArchitectureGraphDocument> {
+  const revision = graphRevisions.get(name)
+  return put<ArchitectureGraphDocument>(
+    `/architecture-graphs/${encodeURIComponent(name)}`,
+    { content },
+    revision ? { "If-Match": revision } : {},
+  )
+}
+
+export async function writeArchitectureGraph(name: string, content: string): Promise<ArchitectureGraphDocument> {
+  let document: ArchitectureGraphDocument
+  try {
+    document = await putGraph(name, content)
+  } catch (cause) {
+    if (!(cause instanceof ApiError) || cause.status !== GRAPH_REVISION_CONFLICT) throw cause
+    // Another device wrote first. Re-read to learn the current revision, then let
+    // this editor's state win once. ponytail: whole-document last-writer-wins for a
+    // graph edited on two devices at the same second; a per-element merge or a CRDT
+    // is the upgrade path if that becomes a real conflict rather than a rare race.
+    await readArchitectureGraph(name)
+    document = await putGraph(name, content)
+  }
+  graphRevisions.set(name, document.revision)
+  return document
 }
 
 export async function writeBinaryDocument(slug: string, filename: string, blob: Blob): Promise<ProjectDocument> {

@@ -15,7 +15,7 @@ This module is pure I/O over the filesystem — it never touches ``project.json`
 from collections.abc import Iterable
 import logging
 import mimetypes
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import shutil
 from typing import TYPE_CHECKING
 
@@ -24,7 +24,9 @@ from config import (
     DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS,
     DIRECTORY_OUTPUT_MINERU,
     DIRECTORY_OUTPUT_PDF,
+    DOCUMENTS,
 )
+from lib.data_store import InvalidStorageKey, validate_key
 
 if TYPE_CHECKING:
     from lib.file_vault import FileVault
@@ -68,6 +70,29 @@ class PathNotAllowed(Exception):
     def __init__(self, *, outside_roots: bool) -> None:
         super().__init__("path outside the allowed roots" if outside_roots else "no file at path")
         self.outside_roots = outside_roots
+
+
+def storage_key(path: str | Path, *, root: str | Path | None = None) -> str | None:
+    """The logical store key for an app-owned path, or None when it is not one.
+
+    Callers hold one of two spellings for the same file: an absolute path (what the
+    filesystem branch of a route records) or an already-logical key (what the storage
+    branch records). Both map onto the key the DataStore uses. Vault files and anything
+    outside *root* (``DOCUMENTS`` by default) return None — those are live references,
+    never stored copies.
+    """
+    text = str(path)
+    if not text:
+        return None
+    if PurePosixPath(text).is_absolute():
+        try:
+            text = Path(text).resolve().relative_to(Path(root or DOCUMENTS).resolve()).as_posix()
+        except ValueError:
+            return None
+    try:
+        return validate_key(text)
+    except InvalidStorageKey:
+        return None
 
 
 def resolve_known_path(

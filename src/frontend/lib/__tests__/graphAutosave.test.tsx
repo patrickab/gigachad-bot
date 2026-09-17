@@ -116,4 +116,23 @@ describe("useGraphAutosave", () => {
     await advance(AUTOSAVE_DEBOUNCE_MS + 10)
     expect(result.current.dirty).toBe(false)
   })
+
+  it("keeps the edit dirty when the server rejects a stale write", async () => {
+    const write = vi.fn(async (_content: string) => { throw new Error("stale revision") })
+    const onError = vi.fn()
+    const key = freshKey()
+    const { result } = renderHook(() => useGraphAutosave({ key, write, onError }))
+
+    act(() => result.current.queue("a"))
+    await advance(AUTOSAVE_DEBOUNCE_MS)
+
+    expect(write).toHaveBeenCalledWith("a")
+    expect(onError).toHaveBeenCalledTimes(1)
+    expect(result.current.dirty).toBe(true)
+
+    // The rejected content is still pending, so a later flush retries it.
+    act(() => result.current.flush())
+    await advance(1)
+    expect(write).toHaveBeenCalledTimes(2)
+  })
 })

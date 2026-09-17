@@ -3,7 +3,7 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from backend.routes.deps import get_architecture_graph_store, get_project_store
@@ -34,6 +34,7 @@ class GraphResponse(BaseModel):
     path: str
     content: str
     hasDraft: bool
+    revision: str
 
 
 @contextmanager
@@ -47,10 +48,30 @@ def _project_lookup() -> Iterator[None]:
         raise ArchitectureGraphNotFound(str(exc)) from exc
 
 
-def _read_response(store: ArchitectureGraphStore, name: str, *, draft: bool = False) -> GraphResponse:
-    content = store.read(name, draft=draft)
-    path = store.path_for(name, draft=draft)
-    return GraphResponse(name=name, path=path, content=content, hasDraft=store.has_draft(name))
+def _read_response(
+    store: ArchitectureGraphStore, name: str, *, draft: bool = False, response: Response | None = None
+) -> GraphResponse:
+    content, revision = store.read_with_revision(name, draft=draft)
+    if response is not None:
+        response.headers["ETag"] = revision.token
+    return GraphResponse(
+        name=name,
+        path=store.path_for(name, draft=draft),
+        content=content,
+        hasDraft=store.has_draft(name),
+        revision=revision.token,
+    )
+
+
+def _expected_revision(store: ArchitectureGraphStore, name: str, if_match: str | None, *, draft: bool) -> str | None:
+    """Resolve the revision a write must match, refusing a blind overwrite."""
+    try:
+        _, revision = store.read_with_revision(name, draft=draft)
+    except ArchitectureGraphNotFound:
+        return None
+    if if_match is None:
+        raise HTTPException(status_code=428, detail="If-Match is required to overwrite an existing Architecture Graph")
+    return revision.token if if_match == "*" else if_match.strip('"')
 
 
 @router.get("")
@@ -61,6 +82,7 @@ async def list_graphs(store: ArchitectureGraphStore = Depends(get_architecture_g
 @router.post("", response_model=GraphResponse)
 async def create_graph(
     req: CreateGraphRequest,
+    response: Response,
     store: ArchitectureGraphStore = Depends(get_architecture_graph_store),
     projects: ProjectStore = Depends(get_project_store),
 ) -> GraphResponse:
@@ -71,20 +93,26 @@ async def create_graph(
         path = store.write(req.name, req.content)
         if req.projectSlug:
             projects.add_file(req.projectSlug, path)
-    return _read_response(store, req.name)
+    return _read_response(store, req.name, response=response)
 
 
 @router.get("/{name}", response_model=GraphResponse)
-async def read_graph(name: str, store: ArchitectureGraphStore = Depends(get_architecture_graph_store)) -> GraphResponse:
-    return _read_response(store, name)
+async def read_graph(
+    name: str, response: Response, store: ArchitectureGraphStore = Depends(get_architecture_graph_store)
+) -> GraphResponse:
+    return _read_response(store, name, response=response)
 
 
 @router.put("/{name}", response_model=GraphResponse)
 async def write_graph(
-    name: str, req: GraphContentRequest, store: ArchitectureGraphStore = Depends(get_architecture_graph_store)
+    name: str,
+    req: GraphContentRequest,
+    response: Response,
+    store: ArchitectureGraphStore = Depends(get_architecture_graph_store),
+    if_match: str | None = Header(default=None, alias="If-Match"),
 ) -> GraphResponse:
-    store.write(name, req.content)
-    return _read_response(store, name)
+    store.write(name, req.content, expected=_expected_revision(store, name, if_match, draft=False))
+    return _read_response(store, name, response=response)
 
 
 @router.post("/{name}/projects/{slug}")
@@ -111,16 +139,22 @@ async def unassociate_graph(
 
 
 @router.get("/{name}/draft", response_model=GraphResponse)
-async def read_draft(name: str, store: ArchitectureGraphStore = Depends(get_architecture_graph_store)) -> GraphResponse:
-    return _read_response(store, name, draft=True)
+async def read_draft(
+    name: str, response: Response, store: ArchitectureGraphStore = Depends(get_architecture_graph_store)
+) -> GraphResponse:
+    return _read_response(store, name, draft=True, response=response)
 
 
 @router.put("/{name}/draft", response_model=GraphResponse)
 async def write_draft(
-    name: str, req: GraphContentRequest, store: ArchitectureGraphStore = Depends(get_architecture_graph_store)
+    name: str,
+    req: GraphContentRequest,
+    response: Response,
+    store: ArchitectureGraphStore = Depends(get_architecture_graph_store),
+    if_match: str | None = Header(default=None, alias="If-Match"),
 ) -> GraphResponse:
-    store.write(name, req.content, draft=True)
-    return _read_response(store, name, draft=True)
+    store.write(name, req.content, draft=True, expected=_expected_revision(store, name, if_match, draft=True))
+    return _read_response(store, name, draft=True, response=response)
 
 
 @router.post("/{name}/draft/accept", response_model=GraphResponse)

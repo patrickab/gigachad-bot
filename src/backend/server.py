@@ -19,7 +19,9 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.routes.architecture_graphs import router as architecture_graphs_router
+from backend.routes.assets import router as assets_router
 from lib.architecture_graph import ArchitectureGraphError, ArchitectureGraphNotFound
+from lib.data_store import StorageConflictError
 from backend.routes.chat import router as chat_router
 from backend.routes.config import router as config_router
 from backend.routes.deps import get_chat_store, get_client, get_project_store, get_prompt_store, shutdown_client
@@ -36,7 +38,17 @@ from backend.routes.projects import router as projects_router
 from backend.routes.research import router as research_router
 from backend.routes.search import router as search_router
 from backend.routes.study import router as study_router
-from config import DIRECTORY_CHAT_HISTORIES, DIRECTORY_CHAT_UPLOADS, DIRECTORY_OUTPUT_MINERU, ensure_directories
+from backend.routes.sync import router as sync_router
+from backend.sync import get_change_broker
+from lib.db_schema import database_url
+from config import (
+    DIRECTORY_CHAT_HISTORIES,
+    DIRECTORY_CHAT_UPLOADS,
+    DIRECTORY_OUTPUT_MINERU,
+    close_postgres_pool,
+    ensure_directories,
+    storage_mode,
+)
 
 ensure_directories()
 
@@ -53,19 +65,25 @@ signal.signal(signal.SIGINT, _signal_handler)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     get_client()
-    get_chat_store()
-    get_project_store()
-    get_prompt_store()
+    if storage_mode() == "local":
+        get_chat_store(None)
+        get_project_store(None)
+        get_prompt_store(None)
+        from lib.document_library import backfill_pdf_library
+
+        backfill_pdf_library()
     reset_cancel()
-    from lib.document_library import backfill_pdf_library
     from lib import extract_queue
 
-    backfill_pdf_library()
     await extract_queue.start()
+    if storage_mode() == "postgres":
+        await get_change_broker().start(database_url())
     yield
     shutdown_client()
     kill_all_mineru_servers()
     await extract_queue.stop()
+    await get_change_broker().stop()
+    close_postgres_pool()
 
 
 app = FastAPI(title="gigachad-bot", lifespan=lifespan)
@@ -105,11 +123,18 @@ async def _architecture_graph_invalid(_request: Request, exc: Exception) -> JSON
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
+# A stale revision is a precondition failure, not a server error: the client must reload and retry.
+@app.exception_handler(StorageConflictError)
+async def _storage_conflict(_request: Request, exc: Exception) -> JSONResponse:
+    return JSONResponse(status_code=412, content={"detail": str(exc)})
+
+
 app.include_router(chat_router)
 app.include_router(architecture_graphs_router)
 app.include_router(config_router)
 app.include_router(documents_router)
 app.include_router(files_router)
+app.include_router(assets_router)
 app.include_router(fileviewer_router)
 app.include_router(histories_router)
 app.include_router(memory_router)
@@ -120,12 +145,14 @@ app.include_router(ocr_router)
 app.include_router(projects_router)
 app.include_router(research_router)
 app.include_router(study_router)
+app.include_router(sync_router)
 
 if (DIRECTORY_OUTPUT_MINERU / "images").exists():
     app.mount("/mineru/images", StaticFiles(directory=str(DIRECTORY_OUTPUT_MINERU / "images")), name="mineru_images")
-# Non-project uploads are still served from /chat-uploads for backward compatibility.
-# Project-scoped uploads are served from /chat-histories/<slug>/_uploads/ (mounted below).
-if DIRECTORY_CHAT_UPLOADS.exists():
-    app.mount("/chat-uploads", StaticFiles(directory=str(DIRECTORY_CHAT_UPLOADS)), name="chat_uploads")
-if DIRECTORY_CHAT_HISTORIES.exists():
-    app.mount("/chat-histories", StaticFiles(directory=str(DIRECTORY_CHAT_HISTORIES), html=False), name="chat_histories")
+# Attachment bytes are served by GET /api/assets/<logical path> in both modes. These
+# mounts remain only so URLs saved in older local-mode chats keep resolving.
+if storage_mode() == "local":
+    if DIRECTORY_CHAT_UPLOADS.exists():
+        app.mount("/chat-uploads", StaticFiles(directory=str(DIRECTORY_CHAT_UPLOADS)), name="chat_uploads")
+    if DIRECTORY_CHAT_HISTORIES.exists():
+        app.mount("/chat-histories", StaticFiles(directory=str(DIRECTORY_CHAT_HISTORIES), html=False), name="chat_histories")

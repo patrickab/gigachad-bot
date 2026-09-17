@@ -8,7 +8,15 @@ from typing import Any
 import yaml
 
 from config import DIRECTORY_OUTPUT_ARCHITECTURE_GRAPHS
-from lib.data_store import DataStore, LocalDataStore, StorageNotFoundError, read_text, write_text
+from lib.data_store import (
+    DataStore,
+    LocalDataStore,
+    Revision,
+    StorageConflictError,
+    StorageNotFoundError,
+    read_text,
+    write_text,
+)
 
 GRAPH_SUFFIX = ".architecture.yaml"
 
@@ -110,24 +118,30 @@ class ArchitectureGraphStore:
         """Return a validated canonical/draft path without reading its content."""
         return self._display_key(self._key(name, draft=draft))
 
-    def read(self, name: str, *, draft: bool = False) -> str:
+    def read_with_revision(self, name: str, *, draft: bool = False) -> tuple[str, Revision]:
+        """Return graph content plus the revision a later write must supply."""
         try:
-            content, _ = read_text(self._store, self._key(name, draft=draft))
-            return content
+            return read_text(self._store, self._key(name, draft=draft))
         except StorageNotFoundError as exc:
             raise ArchitectureGraphNotFound(f"Architecture Graph not found: {name}") from exc
 
-    def write(self, name: str, content: str, *, draft: bool = False) -> str:
+    def read(self, name: str, *, draft: bool = False) -> str:
+        return self.read_with_revision(name, draft=draft)[0]
+
+    def write(self, name: str, content: str, *, draft: bool = False, expected: str | None = None) -> str:
+        """Write *content*, rejecting a write whose *expected* revision is stale."""
         parse_graph(content)
         key = self._key(name, draft=draft)
         if draft and not self._store.exists(self._key(name)):
             raise ArchitectureGraphNotFound(f"Architecture Graph not found: {name}")
-        expected = None
+        current = None
         try:
-            _, expected = read_text(self._store, key)
+            _, current = read_text(self._store, key)
         except StorageNotFoundError:
             pass
-        write_text(self._store, key, content, expected=expected)
+        if expected is not None and (current is None or current.token != expected):
+            raise StorageConflictError(f"{name} changed on another device; reload before saving")
+        write_text(self._store, key, content, expected=current)
         return self._display_key(key)
 
     def has_draft(self, name: str) -> bool:

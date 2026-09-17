@@ -10,6 +10,7 @@ import {
 } from "@/lib/architectureGraph"
 import { readArchitectureGraph, writeArchitectureGraph } from "@/lib/api"
 import { useGraphAutosave } from "@/lib/graphAutosave"
+import { subscribeToChanges } from "@/lib/syncStream"
 import { cn } from "@/lib/utils"
 
 interface ArchitectureGraphEditorProps {
@@ -38,21 +39,33 @@ export function ArchitectureGraphEditor({ path, overlay = false, onClose, onSave
   const handleError = useCallback(() => setError("Could not save Architecture Graph"), [])
   const { queue, flush, cancel, markSaved, dirty } = useGraphAutosave({ key: name, write, onSaved: handleSaved, onError: handleError })
 
+  const load = useCallback(async () => {
+    const document = await readArchitectureGraph(name)
+    setGraph(parseArchitectureGraph(document.content))
+    setSource(document.content)
+    markSaved(document.content)
+  }, [name, markSaved])
+
   useEffect(() => {
     let active = true
     setGraph(null)
     setError(null)
-    readArchitectureGraph(name).then((document) => {
-      if (!active) return
-      const next = parseArchitectureGraph(document.content)
-      setGraph(next)
-      setSource(document.content)
-      markSaved(document.content)
-    }).catch((cause: unknown) => {
+    load().catch((cause: unknown) => {
       if (active) setError(cause instanceof Error ? cause.message : "Could not load Architecture Graph")
     })
     return () => { active = false }
-  }, [name, markSaved])
+  }, [load])
+
+  // A remote edit only replaces local state when nothing is unsaved here, so a
+  // notification can never discard an edit that has not reached the server yet.
+  const dirtyRef = useRef(dirty)
+  dirtyRef.current = dirty
+
+  useEffect(() => subscribeToChanges((event) => {
+    if (dirtyRef.current) return
+    if (event.resource_kind !== "document" || !event.resource_key.endsWith(`/${name}`)) return
+    load().catch(() => setError("Could not reload Architecture Graph"))
+  }), [name, load])
 
   useEffect(() => {
     if (!overlay) return
