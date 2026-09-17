@@ -1,0 +1,20 @@
+[Unit]
+Description=gigachad-bot OMP model source (auth-broker + auth-gateway)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=exec
+WorkingDirectory=%h/git/gigachad-bot-prod
+Environment=GIGACHAD_ENV_FILE=%h/.config/gigachad-bot/env
+Environment=PATH=%h/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/git/gigachad-bot-prod/deploy/run-production-omp.sh
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=default.target

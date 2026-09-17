@@ -1,7 +1,7 @@
 [Unit]
 Description=gigachad-bot FastAPI backend
-Wants=network-online.target
-After=network-online.target
+Wants=network-online.target gigachad-bot-omp.service
+After=network-online.target gigachad-bot-omp.service
 
 [Service]
 Type=exec

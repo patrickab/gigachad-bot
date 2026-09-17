@@ -75,8 +75,8 @@ does not install Tailscale, log in or join a Tailnet, use `sudo`, configure
 systemd, enable Funnel, or provide public access.
 
 These are developer launchers, not a production deployment method. Production
-uses the systemd backend service and Vercel/Tailscale Serve deployment described
-in [the deployment runbook](.technical-docs/deployment.md).
+uses the systemd backend and OMP model-source services plus Vercel/Tailscale
+Serve deployment described in [the deployment runbook](.technical-docs/deployment.md).
 
 The development backend and the systemd backend are mutually exclusive: both
 bind `127.0.0.1:8001` and share the same persistent Documents state. Stop one

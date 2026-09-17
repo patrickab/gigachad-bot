@@ -150,11 +150,14 @@ file, put keys in a ticket, or configure them in Vercel. `NEXT_PUBLIC_API_BASE`
 is public browser configuration and is not a secret. Web search calls Brave from
 the backend, so `BRAVE_API_KEY` never reaches the browser.
 
-### Provision the FastAPI systemd service
+### Provision the systemd services
 
-Install, reload, and enable the repository user unit. It validates the tracked
-production runner and virtual-environment Uvicorn executable before installing
-the unit, and deliberately does not start the backend:
+Install, reload, and enable both repository user units: the FastAPI backend
+and its optional OMP model-source supervisor (`gigachad-bot-omp.service`,
+running `omp auth-broker serve` and `omp auth-gateway serve` so OMP logins are
+callable as chat models). The installer validates the tracked production
+runners and virtual-environment Uvicorn executable before installing either
+unit, and deliberately does not start them:
 
 ```bash
 "$PROD/deploy/install-systemd-service.sh"
@@ -167,14 +170,23 @@ lingering once:
 loginctl enable-linger "$USER"
 ```
 
-After the shared environment file and production worktree are ready, start it
-explicitly and verify the loopback health endpoint:
+After the shared environment file and production worktree are ready, start the
+backend explicitly and verify the loopback health endpoint. Its `Wants=`/
+`After=` ordering on `gigachad-bot-omp.service` starts the OMP supervisor
+first automatically; no separate start step is required:
 
 ```bash
 systemctl --user start gigachad-bot.service
-systemctl --user status gigachad-bot.service
+systemctl --user status gigachad-bot.service gigachad-bot-omp.service
 curl --fail --show-error http://127.0.0.1:8001/healthz
 ```
+
+`gigachad-bot-omp.service` is best-effort: when the `omp` binary or its
+credential store (`~/.omp/agent/agent.db` by default, override with
+`PI_CONFIG_DIR`) is absent, its runner logs a notice and exits `0` rather than
+failing, and the backend simply hides the OMP model source. It reuses an
+already-listening `auth-broker`/`auth-gateway` instead of starting a second
+one, so it never conflicts with a manually started `omp auth-broker serve`.
 
 The user unit uses systemd's `%h` home-directory specifier. Its only
 environment entry is the nonsecret configuration path:
@@ -199,11 +211,21 @@ backend both bind `127.0.0.1:8001` and share the same Documents state. Stop the
 systemd service before using a development backend, and stop the development
 backend before starting or restarting the service.
 
+The OMP unit follows the same pattern: no `EnvironmentFile`, only
+`GIGACHAD_ENV_FILE` and an explicit `PATH` covering the mise shims directory
+(systemd user units do not inherit a login shell's PATH). Its `ExecStart` runs
+`deploy/run-production-omp.sh`, which loads `$ENV` the same way before it
+execs `run-omp.sh`. Override the loopback bind addresses with
+`GIGACHAD_OMP_BROKER_BIND`/`GIGACHAD_OMP_GATEWAY_BIND` in `$ENV` if the
+defaults (`127.0.0.1:8765`/`127.0.0.1:4000`) collide with something else on
+the host.
+
 If the loopback health check fails, inspect the service rather than exposing
 another listener:
 
 ```bash
 journalctl --user -u gigachad-bot.service -n 100 --no-pager
+journalctl --user -u gigachad-bot-omp.service -n 100 --no-pager
 ```
 
 ## 2. Publish the private HTTPS ingress
