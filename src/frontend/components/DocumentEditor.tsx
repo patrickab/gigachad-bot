@@ -13,6 +13,7 @@ import { renderPageToPng, renderCanvasToJpeg, type EmbedRect } from "@/lib/drawi
 import { EditorSidebar, InlineEditPanel } from "./EditorSidebar"
 import { ArchitectureGraphEditor } from "./ArchitectureGraphEditor"
 import { isArchitectureGraphPath } from "@/lib/architectureGraph"
+import { subscribeToChanges } from "@/lib/syncStream"
 
 type EditorView = "edit" | "preview"
 
@@ -111,6 +112,7 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
   const [sidebarWidth, setSidebarWidth] = useState(340)
   const [inlineEdit, setInlineEdit] = useState<{ text: string; start: number; end: number; splitPx: number } | null>(null)
   const savedContentRef = useRef("")
+  const savedCanvasRef = useRef<CanvasDocument | null>(null)
 
   const filename = path.split("/").pop() ?? path
   const language = editorLanguage(path)
@@ -124,9 +126,10 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
     modeLabelRef.current?.(filename)
   }, [overlay, filename])
 
-  useEffect(() => {
-    setRenderedContent(null)
-    loadFileViewerText(path).then((text) => {
+  // Fetches server content and resets the saved baseline. Used on mount and by
+  // the live-sync subscription below (never runs over an active local edit).
+  const loadFromServer = useCallback(() => {
+    return loadFileViewerText(path).then((text) => {
       if (isCanvas) {
         const doc = text.trim() ? parseCanvasDoc(text) : emptyCanvasDoc()
         setCanvasDoc(doc)
@@ -146,10 +149,15 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
         setContent("")
       }
     })
+  }, [path, isCanvas])
+
+  useEffect(() => {
+    setRenderedContent(null)
+    loadFromServer()
     if (overlay && !isCanvas) {
       readFileVaultRendered(path).then(setRenderedContent).catch(() => {})
     }
-  }, [path, isCanvas, overlay])
+  }, [path, isCanvas, overlay, loadFromServer])
 
   // Serializing a canvas costs O(whole document) — it used to run on every render plus
   // twice per change, so a drag over a big canvas stringified megabytes per pointermove.
@@ -164,12 +172,20 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
     setDirty(v !== savedContentRef.current)
   }, [])
 
-  const savedCanvasRef = useRef<CanvasDocument | null>(null)
-
   const handleCanvasChange = useCallback((doc: CanvasDocument) => {
     setCanvasDoc(doc)
     setDirty(!sameCanvasContent(doc, savedCanvasRef.current))
   }, [])
+
+  // Apply a remote write only while nothing local is unsaved — otherwise the
+  // pending autosave wins (last-write-wins).
+  const dirtyRef = useRef(dirty)
+  dirtyRef.current = dirty
+  useEffect(() => subscribeToChanges((event) => {
+    if (dirtyRef.current) return
+    if (event.resource_kind !== "document" || event.resource_key !== path) return
+    loadFromServer()
+  }), [path, loadFromServer])
 
   const liveRef = useRef(onLiveContent)
   liveRef.current = onLiveContent
