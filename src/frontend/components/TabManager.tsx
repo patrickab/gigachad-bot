@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react"
 import { Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
-// Fallback defaults — overridden at runtime by backend /api/config via SettingsContext.
-const FALLBACK_MODEL = "ollama/gemma4:31b-cloud"
+// Selected model starts blank and is seeded from the backend's configured
+// default chat model (Providers / Models → Defaults) once it loads — see
+// the settings-sync effect in app/page.tsx. Never hardcode a model name here.
 const FALLBACK_TEMPERATURE = 0.2
 import type { SettingsState } from "@/contexts/SettingsContext"
 import type { AppSurface } from "@/contexts/SidebarContext"
@@ -33,7 +34,7 @@ const TAB_CONFIG_KEYS: (keyof TabConfig)[] = [
 ]
 
 const DEFAULT_CONFIG: TabConfig = {
-  selectedModel: FALLBACK_MODEL,
+  selectedModel: "",
   selectedPrompt: null,
   temperature: FALLBACK_TEMPERATURE,
   reasoningEffort: "none",

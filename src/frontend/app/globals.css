@@ -219,6 +219,35 @@ p, li {
   text-wrap: pretty;
 }
 
+/* Range-input thumb: appearance-none drops native rendering entirely in most
+   engines, so both need explicit thumb rules. Uses --paper (the app's
+   lightest/warmest role token) rather than --ink, so the knob reads as a
+   soft highlight on the filled track instead of a stark black dot. */
+.param-slider-thumb::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: var(--paper);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  margin-top: -5px;
+}
+.param-slider-thumb::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 9999px;
+  background: var(--paper);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+}
+.param-slider-thumb::-moz-range-track {
+  background: transparent;
+  border: none;
+}
+
 /* Architecture Graphs deliberately use the app's semantic palette: the graph is
    an embedded document surface, not a second visual language. */
 .architecture-graph-surface {

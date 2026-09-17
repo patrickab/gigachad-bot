@@ -107,6 +107,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     reset,
     models,
     saveModelProviders,
+    saveModelTabOrder,
     saveModelDefaults,
     prompts,
     setPrompts,
@@ -146,6 +147,14 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   const [canvasSel, setCanvasSel] = useState<CanvasSelection | null>(null)
   const [canvasToolbarSlot, setCanvasToolbarSlot] = useState<HTMLElement | null>(null)
   const [canvasFullscreen, setCanvasFullscreen] = useState(false)
+
+  // A brand new tab starts with a blank selectedModel (TabManager.DEFAULT_CONFIG);
+  // seed it from the configured default chat model — the same "Chat" value
+  // shown in the Default Models panel — as soon as it loads. Never hardcode
+  // a fallback model name here.
+  useEffect(() => {
+    if (!config.selectedModel && models?.defaults.default_model) onConfigChange({ selectedModel: models.defaults.default_model })
+  }, [config.selectedModel, models, onConfigChange])
 
   // Leaving canvas mode (or switching tabs) drops fullscreen so the sidebar
   // doesn't stay hidden when the user returns to chat.
@@ -628,6 +637,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
             <ResearchModelsBar
               models={models}
               onProvidersChange={saveModelProviders}
+              onTabOrderChange={saveModelTabOrder}
               onDefaultsChange={saveModelDefaults}
               fastModel={config.researchFastModel}
               smartModel={config.researchSmartModel}
@@ -638,7 +648,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
             />
           ) : (
             <div className="flex items-center gap-4">
-              <ModelDropdown models={models} selectedModel={config.selectedModel} onSelect={(m) => onConfigChange({ selectedModel: m })} onProvidersChange={saveModelProviders} onDefaultsChange={saveModelDefaults} />
+              <ModelDropdown models={models} selectedModel={config.selectedModel} onSelect={(m) => onConfigChange({ selectedModel: m })} onProvidersChange={saveModelProviders} onTabOrderChange={saveModelTabOrder} onDefaultsChange={saveModelDefaults} />
               <ReasoningSelector model={config.selectedModel} reasoningEffort={config.reasoningEffort} onReasoningChange={(v) => onConfigChange({ reasoningEffort: v })} />
             </div>
           )}

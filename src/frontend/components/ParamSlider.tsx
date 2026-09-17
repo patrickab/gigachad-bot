@@ -17,7 +17,7 @@ export function ParamSlider({
   min = 0,
   max = 1,
   step = 0.05,
-  accent = "accent-ink",
+  accent = "param-slider-thumb",
 }: ParamSliderProps) {
   return (
     <div className="space-y-1">

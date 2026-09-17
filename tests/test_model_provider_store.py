@@ -56,3 +56,18 @@ def test_model_defaults_round_trip(tmp_path):
 
     assert catalog.save_defaults(defaults) == defaults
     assert catalog.load_defaults() == defaults
+
+
+def test_tab_order_round_trips_and_rejects_bad_input(tmp_path):
+    catalog = ModelProviderStore(LocalDataStore(tmp_path))
+
+    assert catalog.load_tab_order() == []
+
+    order = ["Ollama", "OMP", "OpenAI"]
+    assert catalog.save_tab_order(order) == order
+    assert catalog.load_tab_order() == order
+
+    with pytest.raises(ValueError, match="list of non-empty labels"):
+        catalog.save_tab_order(["Ollama", ""])
+    with pytest.raises(ValueError, match="list of non-empty labels"):
+        catalog.save_tab_order("Ollama")

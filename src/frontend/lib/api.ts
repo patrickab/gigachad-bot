@@ -117,6 +117,10 @@ export async function saveModelProviders(providers: ModelProvider[]): Promise<Mo
   })
 }
 
+export async function saveModelTabOrder(order: string[]): Promise<ModelsResponse> {
+  return put<ModelsResponse>("/models/tab-order", { order })
+}
+
 export async function fetchOmpCatalog(refresh = false): Promise<OmpCatalog> {
   return request<OmpCatalog>(`/models/omp${refresh ? "?refresh=true" : ""}`)
 }

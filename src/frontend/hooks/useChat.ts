@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import type React from "react"
-import { fetchModels, fetchPrompts, saveModelDefaults as saveModelDefaultsRequest, saveModelProviders as saveModelProvidersRequest } from "@/lib/api"
+import { fetchModels, fetchPrompts, saveModelDefaults as saveModelDefaultsRequest, saveModelProviders as saveModelProvidersRequest, saveModelTabOrder as saveModelTabOrderRequest } from "@/lib/api"
 import type { ChatRequest, Message, ModelDefaults, ModelProvider, ModelsResponse, WebSearchParams, Usage } from "@/lib/types"
 import { useChatStream } from "./useChatStream"
 import { useResearch, type ResearchParams } from "./useResearch"
@@ -22,6 +22,7 @@ export interface UseChatReturn {
   webSearch: (params: WebSearchParams) => Promise<void>
   models: ModelsResponse | null
   saveModelProviders: (providers: ModelProvider[]) => Promise<void>
+  saveModelTabOrder: (order: string[]) => Promise<void>
   saveModelDefaults: (defaults: ModelDefaults) => Promise<void>
   prompts: Record<string, string>
   setPrompts: React.Dispatch<React.SetStateAction<Record<string, string>>>
@@ -52,6 +53,9 @@ export function useChat(): UseChatReturn {
 
   const saveModelProviders = useCallback(async (providers: ModelProvider[]) => {
     setModels(await saveModelProvidersRequest(providers))
+  }, [])
+  const saveModelTabOrder = useCallback(async (order: string[]) => {
+    setModels(await saveModelTabOrderRequest(order))
   }, [])
   const saveModelDefaults = useCallback(async (defaults: ModelDefaults) => {
     setModels(await saveModelDefaultsRequest(defaults))
@@ -152,6 +156,7 @@ export function useChat(): UseChatReturn {
     webSearch,
     models,
     saveModelProviders,
+    saveModelTabOrder,
     saveModelDefaults,
     prompts,
     setPrompts,

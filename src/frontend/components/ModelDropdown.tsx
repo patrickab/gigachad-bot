@@ -1,6 +1,6 @@
 "use client"
 
-import { AnimatePresence, motion } from "framer-motion"
+import { AnimatePresence, motion, Reorder } from "framer-motion"
 import { ArrowLeft, Check, ChevronDown, ChevronRight, MoreHorizontal, Plus, Trash2 } from "lucide-react"
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useClickOutside } from "@/hooks/useClickOutside"
@@ -20,6 +20,7 @@ interface ModelDropdownProps {
   selectedModel: string
   onSelect: (model: string) => void
   onProvidersChange: (providers: ModelProvider[]) => Promise<void>
+  onTabOrderChange?: (order: string[]) => Promise<void>
   onDefaultsChange: (defaults: ModelDefaults) => Promise<void>
   accent?: "sky" | "amber"
   extraTabs?: Tab[]
@@ -148,10 +149,10 @@ function DefaultModels({ defaults, choices, onChange }: { defaults: ModelDefault
   return <div className="space-y-2 p-2">{(Object.keys(labels) as (keyof ModelDefaults)[]).map((key) => <label key={key} className="block"><span className="mb-1 block px-1 text-[10px] text-ink-subtle">{labels[key]}</span><StyledSelect ariaLabel={`${labels[key]} model`} value={defaults[key]} options={options} onChange={(model) => void onChange({ ...defaults, [key]: model })} /></label>)}</div>
 }
 
-export function ModelDropdown({ models, selectedModel, onSelect, onProvidersChange, onDefaultsChange, accent = "sky", extraTabs, activeExtraTab, onExtraTabChange, children }: ModelDropdownProps) {
+export function ModelDropdown({ models, selectedModel, onSelect, onProvidersChange, onTabOrderChange, onDefaultsChange, accent = "sky", extraTabs, activeExtraTab, onExtraTabChange, children }: ModelDropdownProps) {
   const [panel, setPanel] = useState<Panel>(null)
   const [settingsTab, setSettingsTab] = useState<"providers" | "defaults">("providers")
-  const [activeTab, setActiveTab] = useState("Ollama")
+  const [manualTab, setManualTab] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [draftDefaults, setDraftDefaults] = useState<ModelDefaults | null>(null)
   const [ompCatalog, setOmpCatalog] = useState<OmpCatalog | null>(null)
@@ -184,13 +185,30 @@ export function ModelDropdown({ models, selectedModel, onSelect, onProvidersChan
     ...models.providers.map((provider) => ({ label: provider.label, models: provider.models.map((model) => `${provider.litellm_id}/${model}`) })),
   ]
   const selectableProviders = available.filter((provider) => provider.models.length > 0)
+  const tabOrder = models.tab_order
+  // Explicit position from the saved tab order; unlisted tabs (never dragged,
+  // or new since the order was saved) fall to the end, alphabetical — same
+  // rank rule PromptStore uses for prompt display order.
+  const orderedTabs = [...selectableProviders].sort((a, b) => {
+    const ai = tabOrder.indexOf(a.label)
+    const bi = tabOrder.indexOf(b.label)
+    if (ai !== -1 && bi !== -1) return ai - bi
+    if (ai !== -1) return -1
+    if (bi !== -1) return 1
+    return a.label.localeCompare(b.label)
+  })
   const choices = available.flatMap((provider) => provider.models)
-  const active = selectableProviders.find((provider) => provider.label === activeTab) ?? selectableProviders[0]
+  // Opens on whichever provider holds the current selection — falling back
+  // to a manual tab click, then the first tab — so a configured default
+  // model (e.g. an OMP pick) doesn't get stranded behind the Ollama tab.
+  const activeLabel = manualTab ?? orderedTabs.find((provider) => provider.models.includes(selectedModel))?.label ?? orderedTabs[0]?.label
+  const active = orderedTabs.find((provider) => provider.label === activeLabel) ?? orderedTabs[0]
   const persist = async (next: ModelProvider[]) => {
     setError(null)
     try { await onProvidersChange(next); return true } catch (reason) { setError((reason as Error).message || "Could not save providers"); return false }
   }
   const updateDefaults = (defaults: ModelDefaults) => { setDraftDefaults(defaults); pendingDefaults.current = defaults }
+  const reorderTabs = (next: ProviderTab[]) => void onTabOrderChange?.(next.map((provider) => provider.label)).catch((reason) => setError((reason as Error).message || "Could not save tab order"))
   const trigger = <><button onClick={() => panel === "models" ? close() : setPanel("models")} className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium text-ink-muted hover:bg-surface hover:text-ink"><span>Model</span><ChevronDown className="h-3 w-3 text-ink-subtle" /></button>{selectedModel && <span className="max-w-[150px] truncate px-2 text-[10px] italic text-ink-subtle">{displayName(selectedModel)}</span>}</>
 
   return <div className="relative z-50 flex flex-col items-start" ref={ref}>
@@ -199,7 +217,7 @@ export function ModelDropdown({ models, selectedModel, onSelect, onProvidersChan
       {panel === "configure" ? <><div className="border-b border-divider p-1.5"><div className="flex rounded-lg bg-paper p-0.5"><button aria-label="Back to model selector" onClick={() => setPanel("models")} className="rounded-md px-2 py-1.5 text-ink-subtle hover:bg-surface-elevated hover:text-ink"><ArrowLeft className="h-3.5 w-3.5" /></button><button onClick={() => setSettingsTab("providers")} className={cn("flex-1 rounded-md px-2 py-1.5 text-xs", settingsTab === "providers" ? "bg-surface-elevated text-ink shadow-[var(--shadow-sm)]" : "text-ink-subtle")}>Providers / Models</button><button onClick={() => setSettingsTab("defaults")} className={cn("flex-1 rounded-md px-2 py-1.5 text-xs", settingsTab === "defaults" ? "bg-surface-elevated text-ink shadow-[var(--shadow-sm)]" : "text-ink-subtle")}>Default Models</button></div></div>{settingsTab === "providers" ? <ProviderSettings providers={models.providers} ompCatalog={ompCatalog} onChange={persist} /> : <DefaultModels defaults={draftDefaults ?? models.defaults} choices={choices} onChange={updateDefaults} />}{error && <p className="px-2 pb-2 text-xs text-danger">{error}</p>}</> : <>
         <div className="shrink-0 space-y-1.5 border-b border-divider p-1.5">
           {extraTabs && extraTabs.length > 0 && <div className="flex rounded-lg bg-paper p-0.5">{extraTabs.map((tab) => <button key={tab.key} onClick={() => onExtraTabChange?.(tab.key)} className={cn("flex-1 rounded-md px-2 py-1.5 text-xs font-medium capitalize transition-colors", tab.key === activeExtraTab ? "bg-surface-elevated text-ink shadow-[var(--shadow-sm)]" : "text-ink-subtle hover:text-ink")}>{tab.label}</button>)}</div>}
-          <div className="flex rounded-lg bg-paper p-0.5">{selectableProviders.map((provider) => <button key={provider.label} onClick={() => setActiveTab(provider.label)} className={cn("flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors", provider.label === active?.label ? "bg-surface-elevated text-ink shadow-[var(--shadow-sm)]" : "text-ink-subtle hover:text-ink")}>{provider.label}</button>)}<button aria-label="Configure providers" onClick={() => setPanel("configure")} className="rounded-md px-1.5 text-ink-subtle hover:bg-surface-elevated hover:text-ink"><MoreHorizontal className="h-4 w-4" /></button></div>
+          <div className="flex rounded-lg bg-paper p-0.5"><Reorder.Group as="div" axis="x" values={orderedTabs} onReorder={reorderTabs} className="flex flex-1">{orderedTabs.map((provider) => <Reorder.Item as="div" key={provider.label} value={provider} className="flex-1 cursor-grab active:cursor-grabbing"><button onClick={() => setManualTab(provider.label)} className={cn("w-full rounded-md px-2 py-1.5 text-xs font-medium transition-colors", provider.label === active?.label ? "bg-surface-elevated text-ink shadow-[var(--shadow-sm)]" : "text-ink-subtle hover:text-ink")}>{provider.label}</button></Reorder.Item>)}</Reorder.Group><button aria-label="Configure providers" onClick={() => setPanel("configure")} className="rounded-md px-1.5 text-ink-subtle hover:bg-surface-elevated hover:text-ink"><MoreHorizontal className="h-4 w-4" /></button></div>
         </div>
         <div className="space-y-0.5 p-1.5">{active?.models.map((model) => <button key={model} onClick={() => { onSelect(model); close() }} className={cn("flex w-full items-center justify-between rounded-md px-2 py-2 text-sm transition-colors", model === selectedModel ? ACCENT_CLASSES[accent].selected : "text-ink hover:bg-surface-elevated hover:text-ink")}><span className="truncate">{displayName(model)}</span>{model === selectedModel && <Check className={cn("shrink-0", ACCENT_CLASSES[accent].check)} />}</button>)}</div>
       </>}

@@ -71,6 +71,8 @@ export interface ModelsResponse {
   ollama: string[]
   providers: ModelProvider[]
   defaults: ModelDefaults
+  /** Persisted selector-tab display order, e.g. `["Ollama", "OMP", "OpenAI"]`. Tabs missing from it fall to the end. */
+  tab_order: string[]
 }
 
 export interface ReasoningSupport { supports_reasoning: boolean }

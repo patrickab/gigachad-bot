@@ -13,6 +13,7 @@ from lib.data_store import DataStore, StorageNotFoundError, read_text, write_tex
 
 MODEL_PROVIDERS_FILE = "model-providers.yaml"
 MODEL_DEFAULTS_FILE = "model-defaults.yaml"
+MODEL_TAB_ORDER_FILE = "model-tab-order.yaml"
 
 # Seeds a first editable catalog of provider shells only. Models are the
 # user's choice: an empty list keeps a provider out of the model selector
@@ -137,4 +138,34 @@ class ModelProviderStore:
             raise ValueError("Default models must be non-empty strings")
         cleaned = {key: value.strip() for key, value in defaults.items()}
         self._write_defaults(cleaned)
+        return cleaned
+
+    def load_tab_order(self) -> list[str]:
+        """Persisted selector-tab order, e.g. `["Ollama", "OMP", "OpenAI"]`.
+
+        Entries no longer present in the catalog are harmless leftovers; the
+        caller ranks known tabs by position here and appends any unlisted
+        tab alphabetically, so a stale or empty order never hides a tab.
+        """
+        try:
+            raw, _ = read_text(self._store, MODEL_TAB_ORDER_FILE)
+        except StorageNotFoundError:
+            return []
+        try:
+            order = yaml.safe_load(raw) or []
+        except yaml.YAMLError as exc:
+            raise ValueError("model-tab-order.yaml is not valid YAML") from exc
+        if not isinstance(order, list) or any(not isinstance(label, str) or not label.strip() for label in order):
+            raise ValueError("model-tab-order.yaml must be a list of non-empty tab labels")
+        return [label.strip() for label in order]
+
+    def save_tab_order(self, order: object) -> list[str]:
+        if not isinstance(order, list) or any(not isinstance(label, str) or not label.strip() for label in order):
+            raise ValueError("Tab order must be a list of non-empty labels")
+        cleaned = [label.strip() for label in order]
+        try:
+            _, revision = read_text(self._store, MODEL_TAB_ORDER_FILE)
+        except StorageNotFoundError:
+            revision = None
+        write_text(self._store, MODEL_TAB_ORDER_FILE, yaml.safe_dump(cleaned, allow_unicode=True, sort_keys=False), expected=revision)
         return cleaned

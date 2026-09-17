@@ -27,7 +27,7 @@ function Toggle({ on, onChange }: { on: boolean; onChange: () => void }) {
       onClick={onChange}
       className={cn("relative h-5 w-9 rounded-full transition-colors", on ? "bg-ink-muted" : "bg-surface-elevated")}
     >
-      <span className={cn("absolute top-0.5 h-4 w-4 rounded-full bg-ink transition-transform", on ? "left-[18px]" : "left-0.5")} />
+      <span className={cn("absolute top-0.5 h-4 w-4 rounded-full bg-paper shadow-[var(--shadow-sm)] transition-transform", on ? "left-[18px]" : "left-0.5")} />
     </button>
   )
 }
@@ -116,20 +116,10 @@ export function MoreOptionsMenu({
                 <div className="pt-2 border-t border-divider/50">
                   <label className="flex items-center justify-between cursor-pointer">
                     <span className="text-xs text-ink-subtle">Downscale images</span>
-                    <button
-                      role="switch"
-                      aria-checked={config.downscaleImages}
-                      onClick={() => onConfigChange({ downscaleImages: !config.downscaleImages })}
-                      className={cn(
-                        "relative h-5 w-9 rounded-full transition-colors",
-                        config.downscaleImages ? "bg-ink-muted" : "bg-surface-elevated"
-                      )}
-                    >
-                      <span className={cn(
-                        "absolute top-0.5 h-4 w-4 rounded-full bg-ink transition-transform",
-                        config.downscaleImages ? "left-[18px]" : "left-0.5"
-                      )} />
-                    </button>
+                    <Toggle
+                      on={config.downscaleImages}
+                      onChange={() => onConfigChange({ downscaleImages: !config.downscaleImages })}
+                    />
                   </label>
                 </div>
               </>

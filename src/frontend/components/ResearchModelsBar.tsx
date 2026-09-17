@@ -8,6 +8,7 @@ import { ModelDropdown } from "./ModelDropdown"
 interface ResearchModelsBarProps {
   models: ModelsResponse | null
   onProvidersChange: (providers: ModelProvider[]) => Promise<void>
+  onTabOrderChange?: (order: string[]) => Promise<void>
   onDefaultsChange: (defaults: ModelDefaults) => Promise<void>
   fastModel: string
   smartModel: string
@@ -23,6 +24,7 @@ type Tier = (typeof TIERS)[number]
 export function ResearchModelsBar({
   models,
   onProvidersChange,
+  onTabOrderChange,
   onDefaultsChange,
   fastModel,
   smartModel,
@@ -46,6 +48,7 @@ export function ResearchModelsBar({
     <ModelDropdown
       models={models}
       onProvidersChange={onProvidersChange}
+      onTabOrderChange={onTabOrderChange}
       onDefaultsChange={onDefaultsChange}
       selectedModel={selectedModel}
       onSelect={onModelSelect}

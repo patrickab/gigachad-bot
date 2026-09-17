@@ -27,6 +27,7 @@ async def get_models(store: ModelProviderStore = Depends(get_model_provider_stor
         "ollama": discover_ollama_models(),
         "providers": [{"label": label, **provider} for label, provider in providers.items()],
         "defaults": store.load_defaults(),
+        "tab_order": store.load_tab_order(),
     }
 
 
@@ -87,7 +88,7 @@ async def save_model_providers(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     visible = providers_for_ui(providers)
-    return {"ollama": discover_ollama_models(), "providers": [{"label": label, **provider} for label, provider in visible.items()], "defaults": store.load_defaults()}
+    return {"ollama": discover_ollama_models(), "providers": [{"label": label, **provider} for label, provider in visible.items()], "defaults": store.load_defaults(), "tab_order": store.load_tab_order()}
 
 
 @router.put("/models/defaults")
@@ -97,7 +98,21 @@ async def save_model_defaults(body: ModelDefaults, store: ModelProviderStore = D
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     providers = providers_for_ui(store.load())
-    return {"ollama": discover_ollama_models(), "providers": [{"label": label, **provider} for label, provider in providers.items()], "defaults": defaults}
+    return {"ollama": discover_ollama_models(), "providers": [{"label": label, **provider} for label, provider in providers.items()], "defaults": defaults, "tab_order": store.load_tab_order()}
+
+
+class TabOrder(BaseModel):
+    order: list[str]
+
+
+@router.put("/models/tab-order")
+async def save_model_tab_order(body: TabOrder, store: ModelProviderStore = Depends(get_model_provider_store)) -> dict:
+    try:
+        tab_order = store.save_tab_order(body.order)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    providers = providers_for_ui(store.load())
+    return {"ollama": discover_ollama_models(), "providers": [{"label": label, **provider} for label, provider in providers.items()], "defaults": store.load_defaults(), "tab_order": tab_order}
 
 
 @router.get("/models/omp")
