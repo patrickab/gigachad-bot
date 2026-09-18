@@ -1,19 +1,14 @@
 """Generic file-viewer routes backing the reusable ``FileViewer`` primitive.
 
-The frontend ``FileViewer`` is handed a flat list of absolute filepaths and
-previews each by kind: images and PDFs stream their bytes from ``/raw``;
-markdown and unknown (treated as text) files read their content from ``/text``.
+The frontend ``FileViewer`` is handed a flat list of paths and previews each
+by kind: images and PDFs stream their bytes from ``/raw``; markdown and
+unknown (treated as text) files read their content from ``/text``.
 
-App-owned files are read from the request's storage: once Postgres is
-authoritative the on-disk ``Documents`` tree is only a replica, so serving from
-disk would hand every caller the last filesystem write instead of the current
-document. Vault files and other live references have no stored copy and keep
-being read in place.
-
-Every path is validated against the union of places the app legitimately knows
-about — the file vaults, the document library, and any path referenced by a
-project — so this generic reader can never be coaxed into serving an arbitrary
-file off disk.
+App-owned files (documents, canvases, PDFs, MinerU output) are read from the
+request's storage — Postgres is authoritative, so serving from disk would
+hand every caller the last filesystem write instead of the current one. Only
+a live FileVault reference, which was never stored in Postgres, is read off
+disk, and only after storage has been checked and found not to own the path.
 """
 
 import logging
@@ -22,22 +17,21 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import FileResponse
 
-from backend.routes.deps import get_asset_store, get_document_store, get_file_vault, get_project_store
+from backend.routes.deps import get_asset_store, get_document_store, get_file_vault
 from backend.routes.schemas import FileContent
 from lib import document_library as lib_docs
 from lib.asset_store import AssetStore
 from lib.data_store import DataStore, StorageNotFoundError, read_text
 from lib.file_vault import FileVault
-from lib.project_store import ProjectStore
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/fileviewer", tags=["fileviewer"])
 
 
-def _resolve_allowed(path: str, vault: FileVault, store: ProjectStore) -> Path:
+def _resolve_allowed(path: str, vault: FileVault) -> Path:
     try:
-        return lib_docs.resolve_known_path(path, store=store, vault=vault)
+        return lib_docs.resolve_known_path(path, vault=vault)
     except lib_docs.PathNotAllowed as exc:
         if exc.outside_roots:
             raise HTTPException(status_code=403, detail="Unknown file path") from exc
@@ -70,7 +64,6 @@ def _stored_asset(path: str, assets: AssetStore) -> bytes | None:
 async def read_text_content(
     path: str = Query(...),
     vault: FileVault = Depends(get_file_vault),
-    store: ProjectStore = Depends(get_project_store),
     docs: DataStore = Depends(get_document_store),
 ) -> FileContent:
     key = _stored(path, docs)
@@ -81,7 +74,7 @@ async def read_text_content(
             raise HTTPException(status_code=404, detail="File not found") from exc
         return FileContent(path=path, content=content)
 
-    resolved = _resolve_allowed(path, vault, store)
+    resolved = _resolve_allowed(path, vault)
     try:
         content = resolved.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
@@ -93,7 +86,6 @@ async def read_text_content(
 async def read_raw(
     path: str = Query(...),
     vault: FileVault = Depends(get_file_vault),
-    store: ProjectStore = Depends(get_project_store),
     docs: DataStore = Depends(get_document_store),
     assets: AssetStore = Depends(get_asset_store),
 ) -> Response:

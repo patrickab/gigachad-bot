@@ -6,9 +6,8 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 
 from backend.routes.deps import get_asset_store
 from backend.routes.schemas import AttachResult
-from config import DOCUMENTS
 from lib.asset_store import AssetStore
-from lib.attachment_materialize import materialize
+from lib.attachment_materialize import materialize, store_library_output, store_library_pdf
 from lib.data_store import InvalidStorageKey, StorageNotFoundError, validate_key
 from lib.document_library import mime_for
 from lib.mineru import parse_pdf, should_cancel
@@ -104,23 +103,9 @@ async def upload_file(
     elif kind == "pdf":
         # Mirror immediately: a PDF must reach Nextcloud whether or not the
         # user ever sends/parses it, and MinerU needs a real file to read.
-        _promote_pdf(assets, deduped, content_b)
+        store_library_pdf(assets, deduped, content_b)
 
     return result
-
-
-def _promote_pdf(assets: AssetStore, name: str, content: bytes) -> None:
-    """Postgres counterpart of ``organize_file``: the ``pdf`` asset row is authoritative,
-    the ``PDFs/`` copy is only a mirror, so a mirror failure never undoes the write."""
-    try:
-        asset = assets.write("pdf", f"PDFs/{name}", content, mime="application/pdf")
-    except Exception:
-        log.exception("Failed to store %s in the PDF library", name)
-        return
-    try:
-        assets.mirror(asset, DOCUMENTS)
-    except OSError:
-        log.exception("Failed to mirror PDF asset %s", asset.logical_path)
 
 
 async def _parse_assets(assets: AssetStore, filenames: list[str], chat_id: str, slug: str | None) -> list[AttachResult]:
@@ -146,19 +131,18 @@ async def _parse_assets(assets: AssetStore, filenames: list[str], chat_id: str, 
 
             kind = "pdf" if Path(filename).suffix.lower() == ".pdf" else _classify_mime("", filename)
             if kind == "pdf":
-                pdf_path = work / Path(filename).name
-                pdf_path.write_bytes(asset.content or b"")
-                cached = materialize(pdf_path, enqueue_on_miss=False)
-                if cached.parsed_md is not None:
-                    results.append(AttachResult(name=filename, mime=file_mime, parsedMd=cached.parsed_md))
-                    continue
-                try:
-                    md_path, _images_dir = await parse_pdf(pdf_path, work / "mineru")
-                except Exception:
-                    log.exception("MinerU parse failed for %s", filename)
-                    results.append(AttachResult(name=filename, mime=file_mime))
-                    continue
-                parsed_md = md_path.read_text(encoding="utf-8")
+                parsed_md = materialize(filename, asset.content or b"", assets, enqueue_on_miss=False)
+                if parsed_md is None:
+                    pdf_path = work / Path(filename).name
+                    pdf_path.write_bytes(asset.content or b"")
+                    try:
+                        md_path, images_dir = await parse_pdf(pdf_path, work / "mineru")
+                    except Exception:
+                        log.exception("MinerU parse failed for %s", filename)
+                        results.append(AttachResult(name=filename, mime=file_mime))
+                        continue
+                    store_library_output(assets, pdf_path.stem, md_path, images_dir)
+                    parsed_md = md_path.read_text(encoding="utf-8")
                 assets.write("upload", _sidecar_key(key), parsed_md.encode("utf-8"), mime="text/markdown")
                 results.append(AttachResult(name=filename, mime=file_mime, parsedMd=parsed_md))
             elif kind == "text":

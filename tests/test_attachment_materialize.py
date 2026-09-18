@@ -1,126 +1,121 @@
-"""Tests for ``lib.attachment_materialize`` — the shared attach/parse core
-extracted during the refactor.
+"""Tests for ``lib.attachment_materialize`` — the shared attach/parse core.
 
-These cover:
-  - the latent ``Path.stem`` bug the refactor fixes (dotted PDF names like
-    ``paper.v1.pdf`` were truncated to ``paper``; now only ``.pdf`` is stripped).
-  - PDF cache hit returns parsed markdown; cache miss enqueues background
-    extraction by default, and skips enqueueing when ``enqueue_on_miss=False``
-    (the path ``files.parse_attachments`` uses for synchronous parsing).
-  - text/* files are read as utf-8; undecodable files yield ``content=None``
-    instead of raising.
+A PDF's MinerU markdown is cached once per user in Postgres
+(``Mineru/<stem>.md``), not on disk: ``materialize`` must read that row, and
+only ever touch the filesystem to write a Nextcloud mirror (a convenience
+copy, never read back).
 """
 
-from pathlib import Path
+import os
+from uuid import uuid4
 
-from lib.attachment_materialize import Materialized, materialize, mineru_cache_path
+from psycopg_pool import ConnectionPool
+import pytest
 
-# --- mineru_cache_path -----------------------------------------------------
-
-
-def test_cache_path_strips_only_pdf_suffix(mineru_cache_dir: Path):
-    """``Path.stem`` would turn ``paper.v1.pdf`` into ``paper`` — the helper preserves the dotted stem."""
-    assert mineru_cache_path("paper.v1.pdf").name == "paper.v1.md"
-    assert mineru_cache_path("paper v1.2.pdf").name == "paper v1.2.md"
-    assert mineru_cache_path("plain.pdf").name == "plain.md"
+from lib.asset_store import AssetStore
+from lib.attachment_materialize import library_markdown_key, materialize, store_library_output, store_library_pdf
+from lib.db_schema import upgrade
 
 
-def test_cache_path_accepts_full_path(tmp_path: Path, mineru_cache_dir: Path):
-    pdf = tmp_path / "report.v3.pdf"
-    assert mineru_cache_path(pdf).name == "report.v3.md"
+@pytest.fixture(scope="module")
+def postgres_pool():
+    url = os.environ.get("POSTGRES_TEST_DATABASE_URL")
+    if not url:
+        pytest.skip("POSTGRES_TEST_DATABASE_URL is required")
+    upgrade(url)
+    pool = ConnectionPool(url, min_size=1, max_size=4)
+    yield pool
+    pool.close()
 
 
-def test_cache_path_passes_through_stem_without_pdf_suffix(mineru_cache_dir: Path):
-    """``enqueue`` calls this with bare stems too; ensure non-.pdf names are unchanged."""
-    assert mineru_cache_path("report").name == "report.md"
+@pytest.fixture(autouse=True)
+def clean_database(postgres_pool):
+    with postgres_pool.connection() as connection, connection.transaction():
+        connection.execute("TRUNCATE changes, assets, vault_roots, devices, documents, users CASCADE")
 
 
-# --- materialize: PDF cache hit -------------------------------------------
+@pytest.fixture
+def assets(postgres_pool):
+    device_id = uuid4()
+    with postgres_pool.connection() as connection, connection.transaction():
+        user_id = connection.execute(
+            "INSERT INTO users (tailscale_login) VALUES (%s) RETURNING id", ("alice@example.test",)
+        ).fetchone()[0]
+        connection.execute("INSERT INTO devices (id, user_id) VALUES (%s, %s)", (device_id, user_id))
+    return AssetStore(postgres_pool, user_id, device_id=device_id)
 
 
-def test_materialize_pdf_cache_hit_returns_md(tmp_path: Path, mineru_cache_dir: Path, no_enqueue):
-    pdf = tmp_path / "doc.pdf"
-    pdf.write_bytes(b"%PDF-1.4 fake")
-    (mineru_cache_dir / "doc.md").write_text("# cached", encoding="utf-8")
+@pytest.fixture(autouse=True)
+def documents_root(tmp_path, monkeypatch):
+    """Point the Nextcloud mirror root at a tmp dir; the mirror is a
+    convenience copy this module writes but never reads back."""
+    import lib.attachment_materialize as attachment_materialize
 
-    result = materialize(pdf)
+    root = tmp_path / "Documents"
+    monkeypatch.setattr(attachment_materialize, "DOCUMENTS", root, raising=True)
+    return root
 
-    assert isinstance(result, Materialized)
-    assert result.mime == "application/pdf"
-    assert result.parsed_md == "# cached"
-    assert result.content is None
-    # A cache hit must never enqueue — extraction is already done.
+
+def test_store_library_pdf_writes_the_asset_and_mirrors_it(assets, documents_root):
+    asset = store_library_pdf(assets, "paper.pdf", b"%PDF-1.7 body")
+
+    assert (asset.kind, asset.logical_path) == ("pdf", "PDFs/paper.pdf")
+    assert assets.read("PDFs/paper.pdf").content == b"%PDF-1.7 body"
+    assert (documents_root / "PDFs/paper.pdf").read_bytes() == b"%PDF-1.7 body"
+
+
+def test_store_library_pdf_refreshes_the_same_key_on_re_store(assets):
+    store_library_pdf(assets, "paper.pdf", b"first")
+    store_library_pdf(assets, "paper.pdf", b"second")
+
+    assert assets.read("PDFs/paper.pdf").content == b"second"
+    assert len(assets.list("PDFs")) == 1
+
+
+def test_store_library_output_writes_markdown_and_matching_images(tmp_path, assets, documents_root):
+    md_path = tmp_path / "paper.md"
+    md_path.write_text("# extracted", encoding="utf-8")
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    (images_dir / "paper-1.png").write_bytes(b"\x89PNG image one")
+    (images_dir / "paper-2.png").write_bytes(b"\x89PNG image two")
+    (images_dir / "other-1.png").write_bytes(b"\x89PNG unrelated stem")
+
+    store_library_output(assets, "paper", md_path, images_dir)
+
+    assert assets.read(library_markdown_key("paper")).content == b"# extracted"
+    image_paths = sorted(a.logical_path for a in assets.list("Mineru/images/paper"))
+    assert image_paths == ["Mineru/images/paper/paper-1.png", "Mineru/images/paper/paper-2.png"]
+    assert (documents_root / "Mineru/paper.md").read_text(encoding="utf-8") == "# extracted"
+    assert (documents_root / "Mineru/images/paper/paper-1.png").read_bytes() == b"\x89PNG image one"
+
+
+def test_materialize_cache_hit_returns_the_stored_markdown(assets, no_enqueue):
+    assets.write("mineru_markdown", library_markdown_key("paper"), b"# cached", mime="text/markdown")
+
+    result = materialize("paper.pdf", b"%PDF-1.7 body", assets)
+
+    assert result == "# cached"
     assert no_enqueue == []
 
 
-def test_materialize_pdf_cache_miss_enqueues(tmp_path: Path, mineru_cache_dir: Path, no_enqueue):
-    pdf = tmp_path / "unseen.pdf"
-    pdf.write_bytes(b"%PDF-1.4 fake")
+def test_materialize_cache_miss_enqueues_by_default(assets, no_enqueue):
+    result = materialize("unseen.pdf", b"%PDF-1.7 body", assets)
 
-    result = materialize(pdf)
-
-    assert result.parsed_md is None
-    assert no_enqueue == [pdf]
+    assert result is None
+    assert no_enqueue == ["unseen.pdf"]
 
 
-def test_materialize_pdf_cache_miss_no_enqueue_when_disabled(tmp_path: Path, mineru_cache_dir: Path, no_enqueue):
-    """``enqueue_on_miss=False`` is the path used by ``files.parse_attachments`` which parses synchronously."""
-    pdf = tmp_path / "sync.pdf"
-    pdf.write_bytes(b"%PDF-1.4 fake")
+def test_materialize_cache_miss_skips_enqueue_when_disabled(assets, no_enqueue):
+    """``enqueue_on_miss=False`` is the path ``files.parse_attachments`` uses to parse synchronously."""
+    result = materialize("sync.pdf", b"%PDF-1.7 body", assets, enqueue_on_miss=False)
 
-    result = materialize(pdf, enqueue_on_miss=False)
-
-    assert result.parsed_md is None
-    assert no_enqueue == []  # caller handles the miss itself
-
-
-# --- materialize: text files ----------------------------------------------
-
-
-def test_materialize_text_file_reads_utf8(tmp_path: Path, mineru_cache_dir: Path, no_enqueue):
-    txt = tmp_path / "notes.txt"
-    txt.write_text("hello world", encoding="utf-8")
-
-    result = materialize(txt)
-
-    assert result.content == "hello world"
-    assert result.parsed_md is None
+    assert result is None
     assert no_enqueue == []
 
 
-def test_materialize_text_file_non_utf8_returns_none(tmp_path: Path, mineru_cache_dir: Path, no_enqueue):
-    """Refactor preserved the silent-None contract on ``UnicodeDecodeError``."""
-    binary = tmp_path / "binary.txt"
-    binary.write_bytes(b"\xff\xfe\x00\x01 not utf-8")
+def test_materialize_strips_only_the_pdf_suffix(assets, no_enqueue):
+    """A dotted name like ``paper.v1.pdf`` must not be truncated to ``paper`` under ``Path.stem`` semantics."""
+    assets.write("mineru_markdown", library_markdown_key("paper.v1"), b"# v1", mime="text/markdown")
 
-    result = materialize(binary)
-
-    assert result.content is None
-    assert no_enqueue == []
-
-
-def test_materialize_markdown_uses_text_branch(tmp_path: Path, mineru_cache_dir: Path, no_enqueue):
-    md = tmp_path / "spec.md"
-    md.write_text("## heading", encoding="utf-8")
-
-    result = materialize(md)
-
-    assert result.mime == "text/markdown"
-    assert result.content == "## heading"
-
-
-# --- materialize: non-text, non-pdf --------------------------------------
-
-
-def test_materialize_unknown_mime_returns_empty_result(tmp_path: Path, mineru_cache_dir: Path, no_enqueue, monkeypatch):
-    """A binary file (e.g. .png) has no parsed_md and no content; neither branch fires."""
-    img = tmp_path / "pic.png"
-    img.write_bytes(b"\x89PNG\r\n\x1a\n fake png")
-
-    result = materialize(img)
-
-    assert result.parsed_md is None
-    assert result.content is None
-    assert no_enqueue == []
-    # mime_for is suffix-driven; a .png yields image/png.
-    assert result.mime == "image/png"
+    assert materialize("paper.v1.pdf", b"body", assets) == "# v1"

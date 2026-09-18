@@ -17,6 +17,7 @@ from psycopg_pool import ConnectionPool
 import pytest
 
 from backend.routes import documents as route
+from lib import attachment_materialize
 from lib.asset_store import AssetStore
 from lib.chat_store import ChatStore
 from lib.data_store import StorageNotFoundError
@@ -44,9 +45,9 @@ def clean_database(postgres_pool):
 
 @pytest.fixture(autouse=True)
 def documents_root(tmp_path, monkeypatch):
-    """Point the mirror root at a tmp dir; ``documents.py`` reads it at call time."""
+    """Point the mirror root at a tmp dir; ``attachment_materialize.py`` reads it at call time."""
     root = tmp_path / "Documents"
-    monkeypatch.setattr(route, "DOCUMENTS", root, raising=True)
+    monkeypatch.setattr(attachment_materialize, "DOCUMENTS", root, raising=True)
     return root
 
 
@@ -149,8 +150,8 @@ async def test_upload_promotes_into_the_pdf_library_and_mirrors_it(alice, docume
     assert (asset.kind, asset.content) == ("pdf", b"%PDF-1.7 body")
     assert alice.projects.list_files(slug) == ["PDFs/paper.pdf"]
     assert written_files(documents_root) == ["PDFs/paper.pdf"]
-    # MinerU needs a real file: the mirror is what gets queued for extraction.
-    assert no_enqueue == [documents_root / "PDFs/paper.pdf"]
+    # MinerU needs bytes to extract: extraction is queued straight from the upload.
+    assert no_enqueue == ["paper.pdf"]
 
 
 async def test_non_pdf_upload_cannot_enter_the_persisted_pdf_library(alice, documents_root):
@@ -177,7 +178,7 @@ async def test_non_pdf_chat_upload_cannot_enter_the_persisted_pdf_library(alice,
     assert written_files(documents_root) == []
 
 
-async def test_register_upload_promotes_a_stored_chat_upload(alice, documents_root):
+async def test_register_upload_promotes_a_stored_chat_upload(alice, documents_root, no_enqueue):
     alice.assets.write("upload", "attachment/chat/chat-1/paper.pdf", b"%PDF-1.7 attached")
 
     meta = await route.register_upload(
@@ -187,6 +188,7 @@ async def test_register_upload_promotes_a_stored_chat_upload(alice, documents_ro
     assert meta.path == "PDFs/paper.pdf"
     assert alice.assets.read("PDFs/paper.pdf").content == b"%PDF-1.7 attached"
     assert written_files(documents_root) == ["PDFs/paper.pdf"]
+    assert no_enqueue == ["paper.pdf"]
 
 
 async def test_register_upload_without_a_stored_upload_is_not_found(alice):

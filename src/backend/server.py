@@ -16,7 +16,6 @@ if not _litellm_shim.exists():
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 
 from backend.routes.architecture_graphs import router as architecture_graphs_router
 from backend.routes.assets import router as assets_router
@@ -42,10 +41,7 @@ from backend.routes.study import router as study_router
 from backend.routes.sync import router as sync_router
 from backend.sync import get_change_broker
 from lib.db_schema import database_url, upgrade
-from config import (
-    DIRECTORY_OUTPUT_MINERU,
-    close_postgres_pool,
-)
+from config import close_postgres_pool
 
 
 def _signal_handler(signum: int, frame: object) -> None:
@@ -139,5 +135,3 @@ app.include_router(research_router)
 app.include_router(study_router)
 app.include_router(sync_router)
 
-if (DIRECTORY_OUTPUT_MINERU / "images").exists():
-    app.mount("/mineru/images", StaticFiles(directory=str(DIRECTORY_OUTPUT_MINERU / "images")), name="mineru_images")

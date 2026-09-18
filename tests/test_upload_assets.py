@@ -9,6 +9,7 @@ from starlette.datastructures import Headers, UploadFile
 
 from backend.routes import files
 from backend.routes.assets import get_asset
+from lib import attachment_materialize
 from lib.asset_store import AssetStore
 from lib.db_schema import upgrade
 
@@ -48,9 +49,9 @@ def store(postgres_pool):
 
 @pytest.fixture(autouse=True)
 def documents_root(tmp_path, monkeypatch):
-    """Point the Nextcloud mirror root at a tmp dir; ``files.py`` reads it at call time."""
+    """Point the Nextcloud mirror root at a tmp dir; ``attachment_materialize.py`` reads it at call time."""
     root = tmp_path / "Documents"
-    monkeypatch.setattr(files, "DOCUMENTS", root, raising=True)
+    monkeypatch.setattr(attachment_materialize, "DOCUMENTS", root, raising=True)
     return root
 
 

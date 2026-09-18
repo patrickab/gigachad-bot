@@ -274,8 +274,13 @@ function uploadsBase(chatId: string, slug: string | null): string {
   return `${getApiBase()}/assets/${prefix}`
 }
 
-export function rewriteImages(content: string, chatId: string, slug: string | null): string {
-  return content.replace(/\(images\/([^)]+)\)/g, `(${uploadsBase(chatId, slug)}/images/$1)`)
+/** Rewrite MinerU's relative ``images/<name>`` markdown refs to the shared,
+ * per-user library cache keyed by the PDF's stem — the same cache every
+ * attach/parse route reads its markdown from, so images resolve regardless
+ * of whether the PDF arrived via direct upload, library, or vault attach. */
+export function rewriteImages(content: string, pdfName: string): string {
+  const stem = encodeURIComponent(pdfName.replace(/\.pdf$/i, ""))
+  return content.replace(/\(images\/([^)]+)\)/g, `(${getApiBase()}/assets/Mineru/images/${stem}/$1)`)
 }
 
 export function chatFileUrl(chatId: string, filename: string, slug: string | null = null): string {

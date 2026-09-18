@@ -10,7 +10,7 @@ import { rewriteImages } from "@/lib/api"
 
 import { LazyPdfViewer } from "./LazyPdfViewer"
 
-function PreviewContent({ attachment, chatId, slug }: { attachment: Attachment; chatId: string; slug: string | null }) {
+function PreviewContent({ attachment }: { attachment: Attachment }) {
   if (attachment.mime.startsWith("image/")) {
     return (
       <div className="flex items-center justify-center p-6 overflow-auto max-h-[80vh]">
@@ -29,7 +29,7 @@ function PreviewContent({ attachment, chatId, slug }: { attachment: Attachment; 
 
   const content = attachment.parsedMd ?? attachment.content
   if (content) {
-    const rewritten = rewriteImages(content, chatId, slug)
+    const rewritten = rewriteImages(content, attachment.name)
     return (
       <div className="flex-1 min-h-0 overflow-y-auto p-6">
         <div className="max-w-3xl mx-auto">
@@ -96,7 +96,7 @@ export function AttachmentPreview({ attachment, chatId, slug = null, onClose }: 
               <X className="h-4 w-4" />
             </button>
           </div>
-          <PreviewContent attachment={attachment} chatId={chatId} slug={slug} />
+          <PreviewContent attachment={attachment} />
         </motion.div>
       </motion.div>
     </AnimatePresence>,

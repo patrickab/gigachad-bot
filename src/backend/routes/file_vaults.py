@@ -13,11 +13,14 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from backend.routes.deps import get_file_vault
+from backend.routes.deps import get_asset_store, get_file_vault
 from backend.routes.schemas import AttachResult, FileContent, FileListResponse, FileMeta
 from lib import document_library as lib_docs
-from lib.attachment_materialize import materialize
+from lib.asset_store import AssetStore
+from lib.attachment_materialize import materialize, store_library_pdf
+from lib.data_store import StorageNotFoundError
 from lib.file_vault import FileVault
+from lib.storage_namespace import PDFS
 
 log = logging.getLogger(__name__)
 
@@ -58,12 +61,16 @@ async def list_files(vault: FileVault = Depends(get_file_vault)) -> VaultListRes
 
 
 @router.get("/project-documents", response_model=FileListResponse)
-async def project_documents(slug: str = Query(...), vault: FileVault = Depends(get_file_vault)) -> FileListResponse:
+async def project_documents(
+    slug: str = Query(...),
+    vault: FileVault = Depends(get_file_vault),
+    assets: AssetStore = Depends(get_asset_store),
+) -> FileListResponse:
     """Files from vaults mounted to *slug*, shaped like project documents.
 
     Surfaced so the chat sidebar can list mounted-vault files alongside library
     documents. They attach as live references (no copy). A vault PDF whose
-    cloud-library copy already exists is reported at the *library* path — the
+    cloud-library copy already exists is reported at the *library* key — the
     parsed cloud copy takes precedence over the vault original, so the sidebar
     never lists the same PDF twice (vault row + library row).
     """
@@ -71,9 +78,10 @@ async def project_documents(slug: str = Query(...), vault: FileVault = Depends(g
     for f in vault.list_files_for_project(slug):
         p = Path(f["path"])
         if p.suffix.lower() == ".pdf":
-            library_pdf = lib_docs.LIBRARY_DIR / p.name
-            if library_pdf.is_file():
-                p = library_pdf
+            library_key = f"{PDFS}/{p.name}"
+            if assets.list(library_key):
+                docs.append(FileMeta(**lib_docs.document_meta(library_key)))
+                continue
         docs.append(FileMeta(path=str(p), name=p.name, mime=lib_docs.mime_for(p)))
     return FileListResponse(documents=docs)
 
@@ -147,6 +155,7 @@ async def read_rendered(path: str = Query(...), vault: FileVault = Depends(get_f
 async def attach_file(
     path: str = Query(...),
     vault: FileVault = Depends(get_file_vault),
+    assets: AssetStore = Depends(get_asset_store),
 ) -> AttachResult:
     """Attach as a live reference: validate the path, return current content.
 
@@ -154,42 +163,42 @@ async def attach_file(
     refresh content (and pick up a finished PDF extraction).
 
     PDFs are the one exception to the copy-free rule: a vault PDF is *promoted*
-    into the cloud library (``DIRECTORY_OUTPUT_PDF``) on first attach and the
+    into the shared Postgres library (``PDFs/<name>``) on first attach and the
     library copy takes precedence thereafter. This dedupes against any
     same-named PDF already parsed by MinerU, so a vault never shadows the
-    canonical library copy. A library PDF path is also accepted here so the
-    send-time refresh (which re-calls this endpoint with the canonical path)
-    keeps working for promoted PDFs. Non-PDF vault files stay pure live
-    references.
+    canonical library copy. The library's logical key is also accepted here
+    (it is what this endpoint itself returns), so the send-time refresh — which
+    re-calls this endpoint with whatever path it was last given — keeps working
+    for promoted PDFs. Non-PDF vault files stay pure live references.
     """
-    resolved = Path(path).expanduser().resolve()
-    library = lib_docs.LIBRARY_DIR.resolve()
-    in_library = resolved.is_relative_to(library) and resolved.is_file()
-    mime = lib_docs.mime_for(resolved)
+    mime = lib_docs.mime_for(path)
 
-    if resolved.suffix.lower() == ".pdf":
-        if in_library:
-            canonical = resolved
-        else:
+    if Path(path).suffix.lower() == ".pdf":
+        if Path(path).is_absolute():
             try:
                 vault_resolved = vault.resolve(path)
             except (FileNotFoundError, ValueError) as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
-            library_pdf = lib_docs.LIBRARY_DIR / vault_resolved.name
+            name = vault_resolved.name
             # Cloud copy takes precedence if it already exists (don't clobber a
             # possibly-parsed library PDF with a same-named vault file). Otherwise
             # promote the vault PDF into the library — filename is identity, so
-            # this is an overwrite-by-name organize, never a `<name> (n).pdf` dupe.
-            if library_pdf.is_file():
-                canonical = library_pdf
+            # this is an overwrite-by-name, never a "<name> (n).pdf" dupe.
+            if assets.list(f"{PDFS}/{name}"):
+                content = assets.read(f"{PDFS}/{name}").content or b""
             else:
-                try:
-                    canonical = lib_docs.organize_file(vault_resolved)
-                except Exception:
-                    log.exception("Failed to promote vault PDF %s into library", vault_resolved)
-                    canonical = vault_resolved  # fall back to the vault path
-        parsed = materialize(canonical).parsed_md
-        return AttachResult(name=canonical.name, mime=mime, path=str(canonical), parsedMd=parsed)
+                content = vault_resolved.read_bytes()
+                store_library_pdf(assets, name, content)
+        else:
+            # Send-time refresh: `path` is the logical library key this
+            # endpoint returned on first attach.
+            name = Path(path).name
+            try:
+                content = assets.read(f"{PDFS}/{name}").content or b""
+            except StorageNotFoundError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+        parsed = materialize(name, content, assets, enqueue_on_miss=True)
+        return AttachResult(name=name, mime=mime, path=f"{PDFS}/{name}", parsedMd=parsed)
 
     try:
         vault_resolved = vault.resolve(path)

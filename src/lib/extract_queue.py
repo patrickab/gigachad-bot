@@ -2,14 +2,18 @@
 
 Single worker processes PDFs one at a time so MinerU servers don't fight
 for resources. Enqueue at upload or promote-to-context time; extraction
-runs in the background without blocking the response.
+runs in the background without blocking the response. A finished parse is
+persisted into the requesting user's Postgres library cache — the on-disk
+Nextcloud mirror is never read back by the app.
 """
 
 import asyncio
 import logging
+import tempfile
 from pathlib import Path
 
 from config import DIRECTORY_OUTPUT_MINERU
+from lib.asset_store import AssetStore
 
 # ``lib.mineru`` and ``lib.attachment_materialize`` both reach back here, so
 # bind the modules rather than their members and read through them at call time.
@@ -18,44 +22,45 @@ from lib import mineru
 
 log = logging.getLogger(__name__)
 
-_queue: asyncio.Queue[Path | None] = asyncio.Queue()
+_queue: asyncio.Queue[tuple[str, bytes, AssetStore] | None] = asyncio.Queue()
 _worker_task: asyncio.Task | None = None
-_in_progress: Path | None = None
+_in_progress: str | None = None
 
 
 async def _worker() -> None:
     global _in_progress
     while True:
-        pdf_path = await _queue.get()
-        if pdf_path is None:
+        item = await _queue.get()
+        if item is None:
             _queue.task_done()
             break
-        _in_progress = pdf_path
+        name, content, assets = item
+        _in_progress = name
         try:
-            cached = attachment_materialize.mineru_cache_path(pdf_path)
-            if not cached.is_file():
-                log.info("Extracting %s via MinerU", pdf_path.name)
-                await mineru.parse_pdf(pdf_path, DIRECTORY_OUTPUT_MINERU)
-                log.info("Extraction complete: %s", pdf_path.name)
+            log.info("Extracting %s via MinerU", name)
+            with tempfile.TemporaryDirectory() as tmp:
+                pdf_path = Path(tmp) / name
+                pdf_path.write_bytes(content)
+                md_path, images_dir = await mineru.parse_pdf(pdf_path, DIRECTORY_OUTPUT_MINERU)
+                attachment_materialize.store_library_output(assets, pdf_path.stem, md_path, images_dir)
+            log.info("Extraction complete: %s", name)
         except Exception:
-            log.exception("Background MinerU extraction failed for %s", pdf_path.name)
+            log.exception("Background MinerU extraction failed for %s", name)
         finally:
             _in_progress = None
             _queue.task_done()
 
 
-def enqueue(pdf_path: Path) -> None:
-    """Queue a PDF for background extraction. No-op if already cached."""
-    cached = attachment_materialize.mineru_cache_path(pdf_path)
-    if cached.is_file():
-        return
-    _queue.put_nowait(pdf_path)
-    log.info("Queued for extraction: %s (queue depth: %d)", pdf_path.name, _queue.qsize())
+def enqueue(name: str, content: bytes, assets: AssetStore) -> None:
+    """Queue a PDF for background extraction and Postgres persistence."""
+    _queue.put_nowait((name, content, assets))
+    log.info("Queued for extraction: %s (queue depth: %d)", name, _queue.qsize())
+
 
 
 def status() -> dict:
     return {
-        "in_progress": _in_progress.name if _in_progress else None,
+        "in_progress": _in_progress,
         "queued": _queue.qsize(),
     }
 

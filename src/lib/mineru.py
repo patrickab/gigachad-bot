@@ -20,7 +20,6 @@ import threading
 from fastapi import HTTPException
 
 from config import DIRECTORY_OUTPUT_MINERU, MINERU_SERVER_URL
-from lib import attachment_materialize
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +61,13 @@ def unregister_mineru_server(server: object) -> None:
             pass
 
 
+def _global_cache_path(stem: str) -> Path:
+    """Path to the shared, cross-request MinerU markdown cache for one PDF
+    stem. Engine-internal extraction dedup only — never read by a route; the
+    app-facing cache is each user's Postgres ``mineru_markdown`` asset."""
+    return DIRECTORY_OUTPUT_MINERU / f"{stem}.md"
+
+
 async def parse_pdf(
     pdf_path: str | Path,
     output_dir: str | Path,
@@ -93,7 +99,7 @@ async def parse_pdf(
         log.info("MinerU already extracted for %s", stem)
         return extracted_md, images_dir
 
-    global_md = attachment_materialize.mineru_cache_path(stem)
+    global_md = _global_cache_path(stem)
     if global_md.exists():
         log.info("MinerU already extracted for %s (global cache)", stem)
         shutil.copy2(global_md, extracted_md)
@@ -200,7 +206,7 @@ async def parse_pdf(
         final_md_path.write_text(md_content, encoding="utf-8")
 
     if output_dir != DIRECTORY_OUTPUT_MINERU:
-        global_md_path = attachment_materialize.mineru_cache_path(stem)
+        global_md_path = _global_cache_path(stem)
         if not global_md_path.exists():
             # A direct-chat parse's output_dir is a temp dir, so nothing has
             # created the global Nextcloud mirror tree yet — this can be the

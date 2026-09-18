@@ -1,15 +1,16 @@
-"""The document library — a tidy, central home for vault-tree documents.
+"""The document library — a tidy, central home for database-owned artifacts.
 
-Every document a project references lives (by convention) under
-``DIRECTORY_OUTPUT_PDF``, the same directory MinerU already organizes parsed
-PDFs into. Project ``files`` lists in ``project.json`` hold *arbitrary absolute
-paths* so documents may come from arbitrary sources, but the add/upload flow
-copies them here so the library stays self-contained.
+PDFs and MinerU output are Postgres rows (``AssetStore``) mirrored to the
+Nextcloud ``Documents`` tree as a convenience copy for other tools; the app
+itself never reads that mirror back. The one path this module still resolves
+off disk is a ``FileVault`` reference — an external file the user pointed the
+app at directly, which was never stored in Postgres and has no database copy
+to read instead.
 
-This module is pure I/O over the filesystem — it never touches ``project.json``
-(that is ``ProjectStore``'s seam) and never spawns MinerU (that lives in
-``lib.mineru``). Keeping it dependency-free of the route layer lets both
-``files`` and ``documents`` routes reuse it without import cycles.
+This module is pure I/O over paths and mime types — it never touches
+``project.json`` (that is ``ProjectStore``'s seam) and never spawns MinerU
+(that lives in ``lib.mineru``). Keeping it dependency-free of the route layer
+lets both ``files`` and ``documents`` routes reuse it without import cycles.
 """
 
 import logging
@@ -17,16 +18,13 @@ import mimetypes
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
-from config import DIRECTORY_OUTPUT_PDF, DOCUMENTS
+from config import DOCUMENTS
 from lib.data_store import InvalidStorageKey, validate_key
 
 if TYPE_CHECKING:
     from lib.file_vault import FileVault
-    from lib.project_store import ProjectStore
 
 log = logging.getLogger(__name__)
-
-LIBRARY_DIR = DIRECTORY_OUTPUT_PDF
 
 _TEXT_EXTS = {".canvas", ".csv", ".json", ".yaml", ".yml", ".xml", ".toml", ".ini", ".cfg", ".conf", ".log", ".md", ".rst", ".tex", ".txt", ".svg"}
 
@@ -46,7 +44,8 @@ def mime_for(path: str | Path) -> str:
 
 
 def document_meta(path: str | Path) -> dict[str, str]:
-    """Describe a document for the API: absolute path, display name, MIME."""
+    """Describe a document for the API: its path (a database-native logical
+    key, or an absolute path for a live FileVault reference), display name, and MIME."""
     p = Path(path)
     return {"path": str(p), "name": p.name, "mime": mime_for(p)}
 
@@ -87,42 +86,20 @@ def storage_key(path: str | Path, *, root: str | Path | None = None) -> str | No
         return None
 
 
-def resolve_known_path(
-    path: str | Path,
-    *,
-    store: "ProjectStore",
-    vault: "FileVault | None" = None,
-) -> Path:
-    """Resolve a user-supplied path, rejecting anything outside the allowed roots.
+def resolve_known_path(path: str | Path, *, vault: "FileVault | None") -> Path:
+    """Resolve a FileVault-referenced path, rejecting anything outside it.
 
-    Allowed are the document library, every path *store* already references, and,
-    when given, anything *vault* contains. Architecture graphs never reach here:
-    they are Postgres-only and resolved by the caller's storage-backed branch first.
+    The only paths this ever resolves off disk are live FileVault references:
+    external files the user pointed the app at directly, never stored in
+    Postgres. Every app-owned artifact (PDFs, MinerU output, documents,
+    canvases) is read from storage before a caller ever reaches this function.
 
-    Raises ``PathNotAllowed`` so each caller maps the two rejection reasons onto
-    its own status codes and wording.
+    Raises ``PathNotAllowed`` so each caller maps the two rejection reasons
+    onto its own status codes and wording.
     """
     resolved = Path(path).expanduser().resolve()
-    allowed = (
-        resolved.is_relative_to(LIBRARY_DIR.resolve())
-        or (vault is not None and vault.contains(resolved))
-        or str(resolved) in {str(Path(known).expanduser().resolve()) for known in store.list_all_files()}
-    )
-    if not allowed:
+    if vault is None or not vault.contains(resolved):
         raise PathNotAllowed(outside_roots=True)
     if not resolved.is_file():
         raise PathNotAllowed(outside_roots=False)
     return resolved
-
-
-def organize_file(src: Path) -> Path:
-    """Copy *src* into the library under its own name, overwriting any existing
-    file with that name. Filename is the document's identity, so re-promoting the
-    same PDF refreshes the library copy instead of spawning ``<name> (n).pdf``.
-    """
-    LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
-    dest = LIBRARY_DIR / src.name
-    if src.resolve() != dest.resolve():
-        dest.write_bytes(src.read_bytes())
-    return dest
-

@@ -236,11 +236,11 @@ def test_pdf_asset_attachment_serves_from_storage_not_only_disk(client, tmp_path
     resolve it through the assets table: the old fallback resolved a relative
     path against the process's cwd, not the Nextcloud mirror root, and 404'd.
     """
-    import backend.routes.documents as documents_module
+    import lib.attachment_materialize as attachment_materialize
     import lib.document_library as lib_docs
 
     monkeypatch.setattr(lib_docs, "DOCUMENTS", tmp_path)
-    monkeypatch.setattr(documents_module, "DOCUMENTS", tmp_path)
+    monkeypatch.setattr(attachment_materialize, "DOCUMENTS", tmp_path)
 
     alice = headers("alice@example.test", str(uuid4()))
     slug = f"pdf-{uuid4().hex[:8]}"

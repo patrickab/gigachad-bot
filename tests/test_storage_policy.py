@@ -2,10 +2,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
-from fastapi import HTTPException
 import pytest
 
-from backend.routes import deps, documents
+from backend.routes import deps
 from lib.asset_store import Asset, AssetStore
 
 
@@ -34,22 +33,6 @@ def test_only_pdf_and_mineru_assets_can_be_mirrored(tmp_path: Path) -> None:
     files = sorted(path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file())
     assert files == ["PDFs/paper.pdf"]
 
-
-def test_only_pdfs_can_enter_the_persisted_library() -> None:
-    recorded: list[tuple[str, str, bytes, str]] = []
-
-    class Assets:
-        def write(self, kind: str, logical_path: str, content: bytes, *, mime: str) -> Asset:
-            recorded.append((kind, logical_path, content, mime))
-            return make_asset(kind, logical_path, content)
-
-    stored = documents._library_asset(Assets(), "paper.pdf", b"%PDF-1.7")
-
-    assert (stored.kind, stored.logical_path) == ("pdf", "PDFs/paper.pdf")
-    assert recorded == [("pdf", "PDFs/paper.pdf", b"%PDF-1.7", "application/pdf")]
-
-    with pytest.raises(HTTPException, match="Only PDF documents"):
-        documents._library_asset(Assets(), "notes.txt", b"database-only")
 
 
 def test_postgres_vault_roots_use_the_database_repository(monkeypatch) -> None:

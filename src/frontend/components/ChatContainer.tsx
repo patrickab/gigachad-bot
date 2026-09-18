@@ -57,12 +57,12 @@ function AttachmentViewer({ attachment, chatId, slug, onContentChange, pdfWide, 
 
   if (attachment.mime === "application/pdf") {
     const parsedContent = attachment.parsedMd
-    return <PdfAttachmentViewer url={attachment.url} parsedContent={parsedContent} chatId={chatId} slug={slug} pdfWide={pdfWide} onTogglePdfWide={onTogglePdfWide} />
+    return <PdfAttachmentViewer url={attachment.url} parsedContent={parsedContent} name={attachment.name} pdfWide={pdfWide} onTogglePdfWide={onTogglePdfWide} />
   }
 
   const content = attachment.parsedMd ?? attachment.content
   if (content) {
-    const rewritten = rewriteImages(content, chatId, slug)
+    const rewritten = rewriteImages(content, attachment.name)
     return (
       <div className="p-2 max-h-[500px] overflow-y-auto">
         <LaTeXMarkdown content={rewritten} onContentChange={onContentChange} />
@@ -73,7 +73,7 @@ function AttachmentViewer({ attachment, chatId, slug, onContentChange, pdfWide, 
   return <p className="p-2 text-xs text-ink-subtle">No preview available</p>
 }
 
-function PdfAttachmentViewer({ url, parsedContent, chatId, slug, pdfWide, onTogglePdfWide }: { url: string; parsedContent?: string; chatId: string; slug: string | null; pdfWide?: boolean; onTogglePdfWide?: () => void }) {
+function PdfAttachmentViewer({ url, parsedContent, name, pdfWide, onTogglePdfWide }: { url: string; parsedContent?: string; name: string; pdfWide?: boolean; onTogglePdfWide?: () => void }) {
   const [mdOpen, setMdOpen] = useState(false)
   return (
     <div className="flex flex-col h-full">
@@ -91,7 +91,7 @@ function PdfAttachmentViewer({ url, parsedContent, chatId, slug, pdfWide, onTogg
           </button>
           {mdOpen && (
             <div className="p-2 max-h-[40vh] overflow-y-auto border-t border-divider">
-              <LaTeXMarkdown content={rewriteImages(parsedContent, chatId, slug)} />
+              <LaTeXMarkdown content={rewriteImages(parsedContent, name)} />
             </div>
           )}
         </div>

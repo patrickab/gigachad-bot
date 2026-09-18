@@ -31,7 +31,6 @@ async def test_parse_pdf_creates_global_mineru_directories_before_first_copy(tmp
     global_dir = tmp_path / "Nextcloud" / "Mineru"
     assert not global_dir.exists()
     monkeypatch.setattr(mineru, "DIRECTORY_OUTPUT_MINERU", global_dir, raising=True)
-    monkeypatch.setattr(mineru.attachment_materialize, "DIRECTORY_OUTPUT_MINERU", global_dir, raising=True)
 
     from mineru.cli import api_client
 
