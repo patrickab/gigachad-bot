@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 import json
 import os
 import re
+import subprocess
+import sys
 from typing import Any
 from urllib.parse import urlparse
 
@@ -74,7 +76,11 @@ search_query. Do not answer the user's request."""
 # Deliberately one line. Each tool's own `description` carries when to reach for it and its
 # `parameters` carry how to call it, so the system prompt does not restate the catalog. The
 # citation rule travels with the evidence, in the tool result, not in every request.
-TOOL_GUIDANCE = "Call tools yourself when a request needs them; never ask permission and never claim you cannot browse."
+TOOL_GUIDANCE = (
+    "Call tools yourself when a request needs them; never ask permission and never claim you cannot "
+    "browse. A short, vague, or nonsense message is not automatically a lookup request — respond "
+    "normally, or ask what the user means, instead of guessing at what it 'means' via search."
+)
 
 
 class ToolOptions(BaseModel):
@@ -136,20 +142,19 @@ def sources_from_payload(payload: dict) -> list[dict[str, str]]:
             seen_urls.add(url)
             snippets = item.get("snippets", [])
             content = "\n".join(part for part in snippets if isinstance(part, str))
-            sources.append({
-                "label": source_label(url, used_labels),
-                "url": url,
-                "title": item.get("title") if isinstance(item.get("title"), str) else "",
-                "content": content,
-            })
+            sources.append(
+                {
+                    "label": source_label(url, used_labels),
+                    "url": url,
+                    "title": item.get("title") if isinstance(item.get("title"), str) else "",
+                    "content": content,
+                }
+            )
     return sources
 
 
 def evidence_prompt(sources: list[dict[str, str]]) -> str:
-    evidence = "\n\n".join(
-        f"[{source['label']}] {source['title']}\nURL: {source['url']}\n{source['content']}"
-        for source in sources
-    )
+    evidence = "\n\n".join(f"[{source['label']}] {source['title']}\nURL: {source['url']}\n{source['content']}" for source in sources)
     return (
         "Answer using only the supplied web evidence. Cite every factual claim with its "
         "source label in square brackets, for example [arxiv] or [reddit-2]. Never invent "
@@ -273,6 +278,64 @@ async def run_deep_research(query: str, opts: ToolOptions, fallback_model: str) 
                 os.unlink(config_path)
 
 
+# ------------------------------------ Plot execution -------------------------------- #
+
+
+class PlotExecutionError(Exception):
+    """The generated plot code failed to run, timed out, or produced no figure."""
+
+
+PLOT_TIMEOUT_SECONDS = 15.0
+_PLOT_MARKER = "###GIGACHAD_PLOT_JSON###"
+_PLOT_SCRIPT = """
+import numpy as np
+import plotly.express as px
+import plotly.graph_objects as go
+
+{code}
+
+if "fig" not in globals():
+    raise RuntimeError("Plot code must assign the figure to a variable named `fig`.")
+
+print("{marker}")
+print(fig.to_json())
+"""
+
+
+def _run_plot_subprocess(script: str, timeout: float) -> str:
+    """Runs generated plot code with the current interpreter, in its own process.
+
+    This is the only place plot code touches a process boundary — a plain subprocess for now,
+    isolating a crash or hang from the server without extra sandboxing. Swap it for a call into
+    the `agents-in-a-box` rootless-Docker/gVisor runner later: same `(script, timeout) -> stdout`
+    contract, raising `PlotExecutionError` on any failure including a timeout, so `run_plot_code`
+    and the tool body never need to change.
+    """
+    try:
+        proc = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise PlotExecutionError(f"Plot code did not finish within {timeout:.0f}s.")
+    if proc.returncode != 0:
+        raise PlotExecutionError(proc.stderr.strip()[-4000:] or f"exited with status {proc.returncode}")
+    return proc.stdout
+
+
+PLOT_EXECUTOR: Callable[[str, float], str] = _run_plot_subprocess
+
+
+def run_plot_code(code: str) -> dict[str, Any]:
+    """Execute LLM-written Plotly code and return the figure as a JSON-able dict."""
+    script = _PLOT_SCRIPT.format(code=code, marker=_PLOT_MARKER)
+    stdout = PLOT_EXECUTOR(script, PLOT_TIMEOUT_SECONDS)
+    if _PLOT_MARKER not in stdout:
+        raise PlotExecutionError("Plot code produced no figure.")
+    payload = stdout.rsplit(_PLOT_MARKER, 1)[1].strip()
+    try:
+        return json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise PlotExecutionError(f"Figure was not valid JSON: {exc}")
+
+
 # ------------------------------------- Registry ------------------------------------ #
 
 
@@ -325,8 +388,9 @@ def _query_param(description: str) -> dict[str, Any]:
 @register(
     "web_search",
     "Search the live web and return labelled source evidence. Use for current events, fast-moving "
-    "facts, specific documentation, anything the user asks you to look up, and any claim that should "
-    "be cited. Prefer this over answering from memory.",
+    "facts, specific documentation, and any claim that should be cited. Do not use this to guess "
+    "at the meaning of a short, vague, or one-word message like a greeting or test message — only "
+    "search when the user's request clearly needs outside information.",
     _query_param("What to look up, phrased as a self-contained search request."),
 )
 async def _web_search(args: dict[str, Any], ctx: ToolContext) -> ToolOutcome:
@@ -363,6 +427,43 @@ async def _deep_research(args: dict[str, Any], ctx: ToolContext) -> ToolOutcome:
         summary=f"{len(urls)} sources",
         sources=[{"label": source_label(url, set()), "url": url, "title": "", "content": ""} for url in urls],
         detail={"costs": costs, "report": report},
+    )
+
+
+def _code_param(description: str) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {"code": {"type": "string", "description": description}},
+        "required": ["code"],
+    }
+
+
+@register(
+    "plot",
+    "Render an interactive Plotly chart from Python and show it directly in the chat, right where "
+    "the user can see and interact with it. `numpy`, `plotly.graph_objects` (as `go`), and "
+    "`plotly.express` (as `px`) are available; assign the finished figure to a variable named "
+    "`fig`. To let the user explore a parameter's effect (regularization strength, polynomial "
+    "degree, k in k-NN, training epoch, ...), precompute one trace per value and add a slider "
+    "with `fig.update_layout(sliders=[...])`, or use `fig.frames` for a play-through of something "
+    "sequential like gradient descent steps.",
+    _code_param("Self-contained Python that builds a Plotly figure and assigns it to `fig`."),
+)
+async def _plot(args: dict[str, Any], _ctx: ToolContext) -> ToolOutcome:
+    try:
+        figure = await asyncio.to_thread(run_plot_code, args["code"])
+    except PlotExecutionError as exc:
+        return ToolOutcome(
+            content=f"The plot failed to render: {exc}. Fix the code and try again, or explain the failure.",
+            summary="Failed",
+            error=str(exc),
+        )
+    traces = len(figure.get("data", []))
+    return ToolOutcome(
+        content=f"Rendered an interactive plot with {traces} trace(s). The user can already see and "
+        "interact with it — describe what it shows rather than re-listing raw values.",
+        summary=f"{traces} trace{'s' if traces != 1 else ''}",
+        detail={"figure": figure},
     )
 
 
@@ -574,15 +675,19 @@ async def stream_chat_with_tools(
 
     if first.call:
         call = first.call
-        messages.append({
-            "role": "assistant",
-            "content": None,
-            "tool_calls": [{
-                "id": call["id"],
-                "type": "function",
-                "function": {"name": call["name"], "arguments": json.dumps(call["arguments"])},
-            }],
-        })
+        messages.append(
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": call["id"],
+                        "type": "function",
+                        "function": {"name": call["name"], "arguments": json.dumps(call["arguments"])},
+                    }
+                ],
+            }
+        )
         yield ("tool_call", call)
         outcome = await execute_tool(call["name"], call["arguments"], ToolContext(client=client, model=model, opts=opts))
         yield (

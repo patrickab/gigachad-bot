@@ -140,6 +140,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     enabledTools,
     researchEnabled,
     searchEnabled,
+    plotEnabled,
     ocrEnabled,
     toggleResearch,
     toggleSearch,
@@ -299,10 +300,10 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     else if (commandBar.state.phase === "error") onModeLabel("Memory error")
     else if (ocrEnabled) onModeLabel("LaTeX OCR")
     else if (enabledTools.length > 0) {
-      onModeLabel(`Chat · ${[searchEnabled && "search", researchEnabled && "research"].filter(Boolean).join(" + ")}`)
+      onModeLabel(`Chat · ${[searchEnabled && "search", researchEnabled && "research", plotEnabled && "plot"].filter(Boolean).join(" + ")}`)
     }
     else onModeLabel("Chat")
-  }, [commandBar.state.phase, docReviewLoading, commandMemoryCount, enabledTools, researchEnabled, searchEnabled, ocrEnabled, onModeLabel])
+  }, [commandBar.state.phase, docReviewLoading, commandMemoryCount, enabledTools, researchEnabled, searchEnabled, plotEnabled, ocrEnabled, onModeLabel])
 
   useEffect(() => {
     if (!isActive || appMode === "canvas") return

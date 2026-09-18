@@ -3,7 +3,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import { ArrowUp, Loader2, Plus, LayoutGrid, Mic, Search, Globe, Sigma, Square, X, FileText, Image as ImageIcon, File as FileIcon, FileUp, Pencil } from "lucide-react"
+import { ArrowUp, Loader2, Plus, LayoutGrid, LineChart, Mic, Search, Globe, Sigma, Square, X, FileText, Image as ImageIcon, File as FileIcon, FileUp, Pencil } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { uploadFile as apiUploadFile } from "@/lib/api"
 import type { Attachment } from "@/lib/types"
@@ -55,7 +55,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   onCancel,
   slug = null,
 }, ref) {
-  const { researchEnabled, searchEnabled, ocrEnabled, toggleResearch, toggleSearch, toggleOCR } = useModeState()
+  const { researchEnabled, searchEnabled, plotEnabled, ocrEnabled, toggleResearch, toggleSearch, togglePlot, toggleOCR } = useModeState()
   const { ocrModel } = useSettings()
 
   const tools = [
@@ -78,6 +78,16 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       accent: "muted",
       enabled: searchEnabled,
       toggle: toggleSearch,
+    },
+    {
+      id: "plot",
+      label: "Interactive Plot",
+      shortLabel: "Plot",
+      icon: LineChart,
+      color: "text-ink",
+      accent: "muted",
+      enabled: plotEnabled,
+      toggle: togglePlot,
     },
     {
       id: "ocr",

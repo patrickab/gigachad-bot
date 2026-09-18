@@ -2,11 +2,13 @@
 
 import { createContext, useCallback, useContext, useState, type ReactNode } from "react"
 
-/** OCR still hijacks the composer; web search and deep research are tools the model calls itself. */
+/** OCR still hijacks the composer; web search, deep research, and plot are tools the model
+ *  calls itself. */
 export type AppMode = "chat" | "ocr"
 
 export const WEB_SEARCH_TOOL = "web_search"
 export const DEEP_RESEARCH_TOOL = "deep_research"
+export const PLOT_TOOL = "plot"
 
 export interface ModeState {
   mode: AppMode
@@ -15,9 +17,11 @@ export interface ModeState {
   toggleTool: (name: string) => void
   researchEnabled: boolean
   searchEnabled: boolean
+  plotEnabled: boolean
   ocrEnabled: boolean
   toggleResearch: () => void
   toggleSearch: () => void
+  togglePlot: () => void
   toggleOCR: () => void
   setMode: (mode: AppMode) => void
 }
@@ -34,7 +38,7 @@ export function ModeProvider({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<AppMode>("chat")
   // Available by default: "search the web for X" must work without the user first arming a
   // pill. The pills withdraw a tool, they do not hand it out.
-  const [enabledTools, setEnabledTools] = useState<string[]>([WEB_SEARCH_TOOL, DEEP_RESEARCH_TOOL])
+  const [enabledTools, setEnabledTools] = useState<string[]>([WEB_SEARCH_TOOL, DEEP_RESEARCH_TOOL, PLOT_TOOL])
 
   // Tools are independent: enabling search must not disable research, because one turn
   // can legitimately call both.
@@ -44,6 +48,7 @@ export function ModeProvider({ children }: { children: ReactNode }) {
 
   const toggleResearch = useCallback(() => toggleTool(DEEP_RESEARCH_TOOL), [toggleTool])
   const toggleSearch = useCallback(() => toggleTool(WEB_SEARCH_TOOL), [toggleTool])
+  const togglePlot = useCallback(() => toggleTool(PLOT_TOOL), [toggleTool])
 
   const toggleOCR = useCallback(() => {
     setMode((prev) => prev === "ocr" ? "chat" : "ocr")
@@ -55,10 +60,12 @@ export function ModeProvider({ children }: { children: ReactNode }) {
     toggleTool,
     researchEnabled: enabledTools.includes(DEEP_RESEARCH_TOOL),
     searchEnabled: enabledTools.includes(WEB_SEARCH_TOOL),
+    plotEnabled: enabledTools.includes(PLOT_TOOL),
     ocrEnabled: mode === "ocr",
     toggleResearch,
     toggleSearch,
     toggleOCR,
+    togglePlot,
     setMode,
   }
 

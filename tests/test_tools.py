@@ -60,9 +60,7 @@ async def _collect(**overrides: Any) -> list[tuple[str, Any]]:
 @pytest.mark.asyncio
 async def test_tool_free_turn_streams_tokens_only(monkeypatch: pytest.MonkeyPatch) -> None:
     """With tools offered but unused, the turn is an ordinary streamed answer."""
-    monkeypatch.setattr(
-        tools.litellm, "completion", lambda **_: iter([_text_chunk("no "), _text_chunk("tools"), _usage_chunk(7)])
-    )
+    monkeypatch.setattr(tools.litellm, "completion", lambda **_: iter([_text_chunk("no "), _text_chunk("tools"), _usage_chunk(7)]))
 
     usage = {"prompt_tokens": 7, "completion_tokens": 0, "total_tokens": 7}
     assert await _collect() == [("token", "no "), ("token", "tools"), ("usage", usage)]
@@ -195,6 +193,50 @@ async def test_failed_tool_degrades_the_turn_instead_of_the_stream() -> None:
     finally:
         del tools.REGISTRY["explode"]
     assert (outcome.error, outcome.summary) == ("brave is down", "Failed")
+
+
+@pytest.mark.asyncio
+async def test_plot_tool_renders_a_real_figure() -> None:
+    """The plot tool actually executes Plotly code, not a stub — this is the real contract."""
+    ctx = tools.ToolContext(client=ClientStub(), model="m", opts=tools.ToolOptions())
+    code = "import numpy as np\nx = np.linspace(0, 1, 5)\nfig = go.Figure(go.Scatter(x=x, y=x**2))"
+
+    outcome = await tools.execute_tool("plot", {"code": code}, ctx)
+
+    assert outcome.error is None
+    assert outcome.summary == "1 trace"
+    assert len(outcome.detail["figure"]["data"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_plot_tool_reports_a_failure_without_killing_the_turn() -> None:
+    """Code that never assigns `fig` degrades to an error outcome, like any other tool failure."""
+    ctx = tools.ToolContext(client=ClientStub(), model="m", opts=tools.ToolOptions())
+
+    outcome = await tools.execute_tool("plot", {"code": "x = 1"}, ctx)
+
+    assert outcome.summary == "Failed"
+    assert "fig" in (outcome.error or "")
+
+
+def test_plot_executor_is_a_swappable_seam(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`PLOT_EXECUTOR` is the one seam a later containerized runner replaces.
+
+    `run_plot_code` must not know or care whether the swap happened.
+    """
+    calls: list[tuple[str, float]] = []
+
+    def fake_executor(script: str, timeout: float) -> str:
+        calls.append((script, timeout))
+        return f'{tools._PLOT_MARKER}\n{{"data": [], "layout": {{}}, "frames": null}}'
+
+    monkeypatch.setattr(tools, "PLOT_EXECUTOR", fake_executor)
+
+    figure = tools.run_plot_code("fig = go.Figure()")
+
+    assert figure == {"data": [], "layout": {}, "frames": None}
+    assert calls[0][1] == tools.PLOT_TIMEOUT_SECONDS
+    assert "fig = go.Figure()" in calls[0][0]
 
 
 def _chat_app(monkeypatch: pytest.MonkeyPatch) -> Any:

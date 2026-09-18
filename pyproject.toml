@@ -11,6 +11,8 @@ dependencies = [
     "llm-baseclient @ git+https://github.com/patrickab/llm-baseclient.git@main",
     "mineru>=3.4.3",
     "nodeenv>=1.10.0",
+    "numpy>=2.0.0",
+    "plotly>=6.0.0",
     "psycopg[binary,pool]>=3.2",
     "python-multipart>=0.0.32",
     "pyyaml>=6.0",

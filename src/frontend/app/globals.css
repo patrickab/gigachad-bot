@@ -827,6 +827,24 @@ code {
   display: none;
 }
 
+/* Plotly's modebar is plain DOM (not shadow DOM), styled to match the app instead of its
+   default white toolbar. `config.displayModeBar: "hover"` (PlotElement.tsx) keeps it hidden
+   until interaction; this only covers its colors when it does appear. */
+.js-plotly-plot .modebar {
+  background: var(--surface-elevated) !important;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+}
+.js-plotly-plot .modebar-btn path {
+  fill: var(--ink-muted);
+}
+.js-plotly-plot .modebar-btn:hover path {
+  fill: var(--ink);
+}
+.js-plotly-plot .modebar-btn.active path {
+  fill: var(--ink);
+}
+
 /* Assistant message sits between page bg and full surface — the color-mix signature
    dynamically adapts: in dark mode it leans toward surface; in light mode it leans
    toward paper. Both inherit the parent's polarity. */
