@@ -4,7 +4,7 @@ import { memo, useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { getStroke } from "perfect-freehand"
 import { type StrokeData, type EmbedRect, getSvgPathFromStroke, renderPageToPng } from "@/lib/drawing"
-import { createArchitectureGraph, fileViewerRawUrl, writeBinaryDocument, listArchitectureGraphs, listProjectDocuments, loadFileViewerText, readArchitectureGraph, writeArchitectureGraph, writeDocument } from "@/lib/api"
+import { createArchitectureGraph, fileViewerRawUrl, writeBinaryDocument, listArchitectureGraphs, listProjectDocuments, loadFileViewerText, readArchitectureGraph, writeArchitectureGraph, writeDocument, ApiError } from "@/lib/api"
 import { emptyArchitectureGraph, parseArchitectureGraph, serializeArchitectureGraph, type ArchitectureGraph } from "@/lib/architectureGraph"
 import { useGraphAutosave } from "@/lib/graphAutosave"
 import { subscribeToChanges } from "@/lib/syncStream"
@@ -2176,6 +2176,8 @@ function NestedCanvasFile({ path, slug, depth }: {
   depth: number
 }) {
   const [doc, setDoc] = useState<CanvasDocument | null>(null)
+  const [loadError, setLoadError] = useState(false)
+  const [retryToken, setRetryToken] = useState(0)
   const savedRef = useRef<string | null>(null)
   const liveRef = useRef<CanvasDocument | null>(null)
   liveRef.current = doc
@@ -2183,15 +2185,27 @@ function NestedCanvasFile({ path, slug, depth }: {
   useEffect(() => {
     let alive = true
     setDoc(null)
+    setLoadError(false)
     savedRef.current = null
     loadFileViewerText(path).then((text) => {
       if (!alive) return
       const loaded = text.trim() ? parseCanvasDoc(text) : emptyCanvasDoc()
       savedRef.current = serializeCanvasDoc(loaded)
       setDoc(loaded)
-    }).catch(() => { if (alive) setDoc(emptyCanvasDoc()) })
+    }).catch((err) => {
+      if (!alive) return
+      // A confirmed-missing file (never written) legitimately starts blank. Any
+      // other failure must not silently arm the autosave over real stored
+      // content — leave doc/savedRef null so `save()`'s guard keeps it inert.
+      if (err instanceof ApiError && err.status === 404) {
+        setDoc(emptyCanvasDoc())
+        savedRef.current = serializeCanvasDoc(emptyCanvasDoc())
+        return
+      }
+      setLoadError(true)
+    })
     return () => { alive = false }
-  }, [path])
+  }, [path, retryToken])
 
   const save = useCallback(() => {
     const live = liveRef.current
@@ -2214,6 +2228,16 @@ function NestedCanvasFile({ path, slug, depth }: {
   // drawn in the last second.
   useEffect(() => () => save(), [save])
 
+  if (loadError) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 text-[10px] text-ink-faint">
+        <span>Failed to load. Stored content was left untouched.</span>
+        <button onClick={() => setRetryToken((n) => n + 1)} className="rounded px-2 py-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors">
+          Retry
+        </button>
+      </div>
+    )
+  }
   if (!doc) return <div className="flex h-full items-center justify-center text-[10px] text-ink-faint">Loading…</div>
   return (
     <CanvasEditor

@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { DocumentEditor } from "@/components/DocumentEditor"
 
@@ -9,6 +9,13 @@ const api = vi.hoisted(() => ({
   writeBinaryDocument: vi.fn(),
   storeDrawing: vi.fn(),
   fileViewerRawUrl: vi.fn(),
+  ApiError: class ApiError extends Error {
+    status: number
+    constructor(message: string, status: number) {
+      super(message)
+      this.status = status
+    }
+  },
 }))
 
 const sync = vi.hoisted(() => {
@@ -49,5 +56,44 @@ describe("DocumentEditor live canvas sync", () => {
     })
 
     await waitFor(() => expect(screen.getByTestId("canvas")).toHaveTextContent("remote"))
+  })
+})
+
+describe("DocumentEditor fail-closed loading", () => {
+  beforeEach(() => {
+    api.loadFileViewerText.mockReset()
+    api.writeDocument.mockReset()
+  })
+
+  it("does not silently blank a canvas when the initial load fails", async () => {
+    api.loadFileViewerText.mockRejectedValueOnce(new api.ApiError("boom", 500))
+
+    render(<DocumentEditor path="project/project/document/notes.canvas" slug="project" onClose={vi.fn()} />)
+
+    await screen.findByText(/Failed to load/i)
+    expect(screen.queryByTestId("canvas")).not.toBeInTheDocument()
+    expect(api.writeDocument).not.toHaveBeenCalled()
+  })
+
+  it("recovers real content on retry after a failed load", async () => {
+    api.loadFileViewerText
+      .mockRejectedValueOnce(new api.ApiError("boom", 500))
+      .mockResolvedValueOnce(JSON.stringify({ version: 1, frames: [], strokes: [{ points: [["real"]] }], attachments: [], texts: [] }))
+
+    render(<DocumentEditor path="project/project/document/notes.canvas" slug="project" onClose={vi.fn()} />)
+    await screen.findByText(/Failed to load/i)
+
+    fireEvent.click(screen.getByText("Retry"))
+
+    await waitFor(() => expect(screen.getByTestId("canvas")).toHaveTextContent("real"))
+    expect(api.writeDocument).not.toHaveBeenCalled()
+  })
+
+  it("still starts a genuinely new canvas blank on a confirmed 404", async () => {
+    api.loadFileViewerText.mockRejectedValueOnce(new api.ApiError("not found", 404))
+
+    render(<DocumentEditor path="note/fresh.canvas" slug="" onClose={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByTestId("canvas")).toHaveTextContent("empty"))
   })
 })

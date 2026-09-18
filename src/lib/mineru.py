@@ -202,10 +202,15 @@ async def parse_pdf(
     if output_dir != DIRECTORY_OUTPUT_MINERU:
         global_md_path = attachment_materialize.mineru_cache_path(stem)
         if not global_md_path.exists():
+            # A direct-chat parse's output_dir is a temp dir, so nothing has
+            # created the global Nextcloud mirror tree yet — this can be the
+            # very first PDF processed since the backend started.
+            global_images_dir = DIRECTORY_OUTPUT_MINERU / "images"
+            global_images_dir.mkdir(parents=True, exist_ok=True)
             shutil.copy2(final_md_path, global_md_path)
             for img in images_dir.iterdir():
                 if img.is_file() and img.name.startswith(stem):
-                    shutil.copy2(img, DIRECTORY_OUTPUT_MINERU / "images" / img.name)
+                    shutil.copy2(img, global_images_dir / img.name)
 
     return final_md_path, images_dir
 

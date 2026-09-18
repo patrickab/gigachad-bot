@@ -22,9 +22,10 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import FileResponse
 
-from backend.routes.deps import get_document_store, get_file_vault, get_project_store
+from backend.routes.deps import get_asset_store, get_document_store, get_file_vault, get_project_store
 from backend.routes.schemas import FileContent
 from lib import document_library as lib_docs
+from lib.asset_store import AssetStore
 from lib.data_store import DataStore, StorageNotFoundError, read_text
 from lib.file_vault import FileVault
 from lib.project_store import ProjectStore
@@ -47,6 +48,22 @@ def _stored(path: str, docs: DataStore) -> str | None:
     """The stored logical key for *path*, or None when storage does not hold it."""
     key = lib_docs.storage_key(path)
     return key if key is not None and docs.exists(key) else None
+
+
+def _stored_asset(path: str, assets: AssetStore) -> bytes | None:
+    """Binary asset bytes for *path* (PDFs, MinerU output), or None when the asset store does not hold it.
+
+    PDFs and MinerU assets live in the ``assets`` table, not ``documents``: their logical
+    path (e.g. ``PDFs/foo.pdf``) is the same key ``document_meta`` hands back to the
+    frontend, so it must be tried here too, not just the on-disk mirror.
+    """
+    key = lib_docs.storage_key(path)
+    if key is None:
+        return None
+    try:
+        return assets.read(key).content
+    except StorageNotFoundError:
+        return None
 
 
 @router.get("/text", response_model=FileContent)
@@ -78,6 +95,7 @@ async def read_raw(
     vault: FileVault = Depends(get_file_vault),
     store: ProjectStore = Depends(get_project_store),
     docs: DataStore = Depends(get_document_store),
+    assets: AssetStore = Depends(get_asset_store),
 ) -> Response:
     key = _stored(path, docs)
     if key is not None:
@@ -88,6 +106,14 @@ async def read_raw(
         return Response(
             content=content,
             media_type=lib_docs.mime_for(key),
+            headers={"Content-Disposition": "inline"},
+        )
+
+    asset_content = _stored_asset(path, assets)
+    if asset_content is not None:
+        return Response(
+            content=asset_content,
+            media_type=lib_docs.mime_for(path),
             headers={"Content-Disposition": "inline"},
         )
 

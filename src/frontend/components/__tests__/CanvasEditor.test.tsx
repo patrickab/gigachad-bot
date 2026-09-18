@@ -24,6 +24,13 @@ const api = vi.hoisted(() => ({
   loadFileViewerText: vi.fn(async () => ""),
   listArchitectureGraphs: vi.fn(async () => []),
   writeDocument: vi.fn(async (_slug: string, _name: string, _content: string) => ({ path: "project/proj/document/notes.canvas", name: "notes.canvas", mime: "application/json" })),
+  ApiError: class ApiError extends Error {
+    status: number
+    constructor(message: string, status: number) {
+      super(message)
+      this.status = status
+    }
+  },
 }))
 vi.mock("@/lib/api", () => api)
 
@@ -297,6 +304,23 @@ describe("nested canvas file", () => {
     const [slug, name, written] = api.writeDocument.mock.calls.at(-1)!
     expect([slug, name]).toEqual(["proj", "notes.canvas"])
     expect(parseCanvasDoc(written).frames).toHaveLength(1)
+  })
+
+  it("does not overwrite the file when its window fails to load", async () => {
+    api.writeDocument.mockClear()
+    api.loadFileViewerText.mockRejectedValueOnce(new api.ApiError("boom", 500))
+    const seen: CanvasDocument[] = []
+    const { container } = render(<Harness seen={seen} slug="proj" />)
+
+    await openCanvas(container, "notes.canvas")
+    const window_ = container.querySelector("[data-canvas-attachment]") as HTMLElement
+    expect(window_.textContent).toMatch(/Failed to load/i)
+
+    // closing would normally flush a save — it must stay inert since nothing loaded
+    const close = Array.from(container.querySelectorAll("button")).find((b) => b.closest("[data-canvas-attachment]") === null && b.querySelector("svg.lucide-x"))!
+    act(() => { close.click() })
+
+    expect(api.writeDocument).not.toHaveBeenCalled()
   })
 })
 

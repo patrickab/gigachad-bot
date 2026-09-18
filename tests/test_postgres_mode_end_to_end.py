@@ -228,3 +228,47 @@ def test_embedded_canvas_images_come_from_storage(client, tmp_path, monkeypatch)
     assert served.status_code == 200
     assert served.content == pasted
     assert client.get(f"/api/fileviewer/raw?path={key}", headers=alice).content == pasted
+
+
+def test_pdf_asset_attachment_serves_from_storage_not_only_disk(client, tmp_path, monkeypatch):
+    """A canvas PDF attachment's path is the *relative* asset key ``document_meta``
+    hands back (``PDFs/<name>``), not an absolute filesystem path. ``/raw`` must
+    resolve it through the assets table: the old fallback resolved a relative
+    path against the process's cwd, not the Nextcloud mirror root, and 404'd.
+    """
+    import backend.routes.documents as documents_module
+    import lib.document_library as lib_docs
+
+    monkeypatch.setattr(lib_docs, "DOCUMENTS", tmp_path)
+    monkeypatch.setattr(documents_module, "DOCUMENTS", tmp_path)
+
+    alice = headers("alice@example.test", str(uuid4()))
+    slug = f"pdf-{uuid4().hex[:8]}"
+    assert client.post("/api/projects", json={"name": slug}, headers=alice).status_code == 200
+
+    pdf_bytes = b"%PDF-1.7 fake pdf body"
+    uploaded = client.post(
+        "/api/files/upload",
+        params={"chat_id": "chat-1", "slug": slug},
+        files={"file": ("exercise.pdf", pdf_bytes, "application/pdf")},
+        headers=alice,
+    )
+    assert uploaded.status_code == 200
+
+    registered = client.post(
+        "/api/documents/register-upload",
+        params={"slug": slug},
+        json={"chat_id": "chat-1", "filename": "exercise.pdf"},
+        headers=alice,
+    )
+    assert registered.status_code == 200
+    key = registered.json()["path"]
+    assert key == "PDFs/exercise.pdf"
+
+    # The mirror write is a convenience copy, not the source of truth: remove it so
+    # a pass can only mean the assets table served the bytes.
+    (tmp_path / key).unlink()
+
+    served = client.get(f"/api/fileviewer/raw?path={key}", headers=alice)
+    assert served.status_code == 200
+    assert served.content == pdf_bytes

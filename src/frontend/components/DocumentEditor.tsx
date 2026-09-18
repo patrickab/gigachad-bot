@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
 import { ConsoleEditor } from "./ConsoleEditor"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { CanvasEditor, parseCanvasDoc, serializeCanvasDoc, emptyCanvasDoc, type CanvasDocument } from "./CanvasEditor"
-import { loadFileViewerText, readFileVaultRendered, writeDocument, writeBinaryDocument, storeDrawing, fileViewerRawUrl } from "@/lib/api"
+import { loadFileViewerText, readFileVaultRendered, writeDocument, writeBinaryDocument, storeDrawing, fileViewerRawUrl, ApiError } from "@/lib/api"
 import { renderPageToPng, renderCanvasToJpeg, type EmbedRect } from "@/lib/drawing"
 import { EditorSidebar, InlineEditPanel } from "./EditorSidebar"
 import { ArchitectureGraphEditor } from "./ArchitectureGraphEditor"
@@ -103,6 +103,7 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
   const [content, setContent] = useState<string | null>(null)
   const [renderedContent, setRenderedContent] = useState<string | null>(null)
   const [canvasDoc, setCanvasDoc] = useState<CanvasDocument | null>(null)
+  const [loadError, setLoadError] = useState(false)
   const [dirty, setDirty] = useState(false)
   const dirtyRef = useRef(dirty)
   dirtyRef.current = dirty
@@ -132,6 +133,7 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
   // the live-sync subscription below (never runs over an active local edit).
   const loadFromServer = useCallback(() => {
     return loadFileViewerText(path).then((text) => {
+      setLoadError(false)
       if (isCanvas) {
         const doc = text.trim() ? parseCanvasDoc(text) : emptyCanvasDoc()
         setCanvasDoc(doc)
@@ -141,15 +143,25 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
         setContent(text)
         savedContentRef.current = text
       }
-    }).catch(() => {
-      if (isCanvas) {
-        const doc = emptyCanvasDoc()
-        setCanvasDoc(doc)
-        savedContentRef.current = serializeCanvasDoc(doc)
-        savedCanvasRef.current = doc
-      } else {
-        setContent("")
+    }).catch((err) => {
+      // A confirmed-missing document (never written) legitimately starts blank.
+      // Any other failure (network blip, 500, auth) must NOT silently replace
+      // real content with an empty, autosave-armed document — the debounced
+      // autosave would overwrite the real stored content a second later.
+      if (err instanceof ApiError && err.status === 404) {
+        setLoadError(false)
+        if (isCanvas) {
+          const doc = emptyCanvasDoc()
+          setCanvasDoc(doc)
+          savedContentRef.current = serializeCanvasDoc(doc)
+          savedCanvasRef.current = doc
+        } else {
+          setContent("")
+          savedContentRef.current = ""
+        }
+        return
       }
+      setLoadError(true)
     })
   }, [path, isCanvas])
 
@@ -374,6 +386,17 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
   const handleInlineEditOpen = useCallback((text: string, start: number, end: number, splitPx: number) => {
     setInlineEdit({ text, start, end, splitPx })
   }, [])
+
+  if (loadError) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-2 py-6 text-xs text-ink-faint">
+        <span>Failed to load this document. Its stored content was left untouched.</span>
+        <button onClick={() => loadFromServer()} className="rounded px-2 py-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors">
+          Retry
+        </button>
+      </div>
+    )
+  }
 
   const loaded = isCanvas ? canvasDoc !== null : content !== null
   if (!loaded) {

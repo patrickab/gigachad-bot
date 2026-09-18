@@ -101,17 +101,21 @@ async def upload_file(
             result.content = content_b.decode("utf-8")
         except UnicodeDecodeError:
             result.content = None
+    elif kind == "pdf":
+        # Mirror immediately: a PDF must reach Nextcloud whether or not the
+        # user ever sends/parses it, and MinerU needs a real file to read.
+        _promote_pdf(assets, deduped, content_b)
 
     return result
 
 
-def _promote_pdf(assets: AssetStore, pdf_path: Path) -> None:
+def _promote_pdf(assets: AssetStore, name: str, content: bytes) -> None:
     """Postgres counterpart of ``organize_file``: the ``pdf`` asset row is authoritative,
     the ``PDFs/`` copy is only a mirror, so a mirror failure never undoes the write."""
     try:
-        asset = assets.write("pdf", f"PDFs/{pdf_path.name}", pdf_path.read_bytes(), mime="application/pdf")
+        asset = assets.write("pdf", f"PDFs/{name}", content, mime="application/pdf")
     except Exception:
-        log.exception("Failed to store %s in the PDF library", pdf_path.name)
+        log.exception("Failed to store %s in the PDF library", name)
         return
     try:
         assets.mirror(asset, DOCUMENTS)
@@ -120,7 +124,9 @@ def _promote_pdf(assets: AssetStore, pdf_path: Path) -> None:
 
 
 async def _parse_assets(assets: AssetStore, filenames: list[str], chat_id: str, slug: str | None) -> list[AttachResult]:
-    """Bytes come from the store, MinerU works in a temp dir."""
+    """Bytes come from the store, MinerU works in a temp dir. The PDF library
+    row and its Nextcloud mirror are already written at upload time
+    (``upload_file``); this only needs a real file for MinerU to read."""
     prefix = upload_prefix(chat_id, slug)
     results: list[AttachResult] = []
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -144,7 +150,6 @@ async def _parse_assets(assets: AssetStore, filenames: list[str], chat_id: str, 
                 pdf_path.write_bytes(asset.content or b"")
                 cached = materialize(pdf_path, enqueue_on_miss=False)
                 if cached.parsed_md is not None:
-                    _promote_pdf(assets, pdf_path)
                     results.append(AttachResult(name=filename, mime=file_mime, parsedMd=cached.parsed_md))
                     continue
                 try:
@@ -155,7 +160,6 @@ async def _parse_assets(assets: AssetStore, filenames: list[str], chat_id: str, 
                     continue
                 parsed_md = md_path.read_text(encoding="utf-8")
                 assets.write("upload", _sidecar_key(key), parsed_md.encode("utf-8"), mime="text/markdown")
-                _promote_pdf(assets, pdf_path)
                 results.append(AttachResult(name=filename, mime=file_mime, parsedMd=parsed_md))
             elif kind == "text":
                 try:

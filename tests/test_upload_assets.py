@@ -46,6 +46,14 @@ def store(postgres_pool):
     return make_store(postgres_pool)
 
 
+@pytest.fixture(autouse=True)
+def documents_root(tmp_path, monkeypatch):
+    """Point the Nextcloud mirror root at a tmp dir; ``files.py`` reads it at call time."""
+    root = tmp_path / "Documents"
+    monkeypatch.setattr(files, "DOCUMENTS", root, raising=True)
+    return root
+
+
 def upload(content: bytes, filename: str, mime: str) -> UploadFile:
     return UploadFile(file=io.BytesIO(content), filename=filename, headers=Headers({"content-type": mime}))
 
@@ -166,3 +174,19 @@ def test_asset_route_rejects_traversal(store):
 
     assert raised.value.status_code == 404
 
+
+async def test_pdf_chat_upload_mirrors_to_nextcloud_immediately(store, documents_root):
+    """A PDF must reach Nextcloud on upload, whether or not it is ever sent/parsed
+    afterward — deferring the mirror to a successful ``/files/parse`` left an
+    uploaded-but-unsent (or unparseable) PDF without any Nextcloud copy."""
+    await files.upload_file(
+        file=upload(b"%PDF-1.7 body", "paper.pdf", "application/pdf"),
+        chat_id="chat-9",
+        slug=None,
+        overwrite=False,
+        assets=store,
+    )
+
+    asset = store.read("PDFs/paper.pdf")
+    assert (asset.kind, asset.content) == ("pdf", b"%PDF-1.7 body")
+    assert (documents_root / "PDFs" / "paper.pdf").read_bytes() == b"%PDF-1.7 body"
