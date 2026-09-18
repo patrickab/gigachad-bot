@@ -84,6 +84,7 @@ trap cleanup EXIT
 trap interrupt INT TERM
 
 cd "$root_dir"
+source "$HOME/.secrets"
 source "$root_dir/deploy/load-env.sh"
 
 if [[ "$profile" == production ]]; then
@@ -101,7 +102,16 @@ export POSTGRES_USER="$(whoami)"
 export POSTGRES_HOST="$pg_host"
 export POSTGRES_PORT="$pg_port"
 export GIGACHAD_DATABASE_URL="postgresql://${POSTGRES_USER}@${pg_host}:${pg_port}/gigachad"
-export GIGACHAD_RUNTIME="$profile"
+
+# Production sits behind Tailscale Serve, which injects the requesting login.
+# Development binds loopback only, so headerless requests are trusted as the
+# local user. Set explicitly so an inherited value can never relax production.
+if [[ "$profile" == production ]]; then
+    export GIGACHAD_ENV=production
+else
+    export GIGACHAD_ENV=development
+    export GIGACHAD_DEV_USER="$(whoami)"
+fi
 
 if ! postgres_is_running; then
     printf 'Starting PostgreSQL container for %s\n' "$profile"

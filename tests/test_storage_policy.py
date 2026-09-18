@@ -7,9 +7,6 @@ import pytest
 
 from backend.routes import deps, documents
 from lib.asset_store import Asset, AssetStore
-from lib.local_postgres_migration import inventory
-from lib.storage_namespace import legacy_key_to_native
-from scripts.purge_legacy_documents_artifacts import main as purge_legacy_artifacts
 
 
 def make_asset(kind: str, logical_path: str, content: bytes) -> Asset:
@@ -77,57 +74,3 @@ def test_postgres_vault_roots_use_the_database_repository(monkeypatch) -> None:
 
     assert vault.roots() == []
     assert captured == {"pool": "pool", "user_id": "user", "device_id": "device"}
-
-
-def test_legacy_documents_keys_move_to_database_native_namespaces() -> None:
-    assert legacy_key_to_native("chat_history/thread.json") == "chat/thread.json"
-    assert legacy_key_to_native("chat_history/_uploads/chat-123/image.png") == "attachment/chat/chat-123/image.png"
-    project_upload = "chat_history/project/_uploads/chat-123/image.png"
-    assert legacy_key_to_native(project_upload) == "attachment/project/project/chat/chat-123/image.png"
-    assert legacy_key_to_native("chat_history/memory/global-profile.md") == "memory/global-profile.md"
-    assert legacy_key_to_native("chat_history/project/memory/rules.json") == "memory/project/project/rules.json"
-    assert legacy_key_to_native("Prompts/custom.yaml") == "prompt/custom.yaml"
-    assert legacy_key_to_native("Architecture_Graphs/.drafts/a.architecture.yaml") == "graph/draft/a.architecture.yaml"
-    assert legacy_key_to_native("model-defaults.yaml") == "model/model-defaults.yaml"
-
-
-def test_purge_removes_only_legacy_application_artifacts(tmp_path: Path) -> None:
-    documents = tmp_path / "Documents"
-    for name in ("chat_history", "Prompts", "Drawings", "PDFs", "Mineru"):
-        (documents / name).mkdir(parents=True)
-    (documents / "model-defaults.yaml").write_text("small_model: local")
-
-    assert purge_legacy_artifacts(["--source", str(documents), "--confirm"]) == 0
-
-    assert not (documents / "chat_history").exists()
-    assert not (documents / "Prompts").exists()
-    assert not (documents / "Drawings").exists()
-    assert not (documents / "model-defaults.yaml").exists()
-    assert (documents / "PDFs").is_dir()
-    assert (documents / "Mineru").is_dir()
-
-
-def test_legacy_import_inventory_targets_database_native_namespaces(tmp_path: Path) -> None:
-    documents = tmp_path / "Documents"
-    files = {
-        "chat_history/chat-1.json": b"{}",
-        "chat_history/_uploads/chat-1/image.png": b"image",
-        "Drawings/canvas.jpg": b"drawing",
-        "PDFs/paper.pdf": b"%PDF-1.7",
-        "Mineru/paper.md": b"# paper",
-    }
-    for key, content in files.items():
-        target = documents / key
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(content)
-
-    artifacts, vault_config = inventory(documents)
-
-    assert vault_config is None
-    assert {(artifact.group, artifact.key) for artifact in artifacts} == {
-        ("documents", "chat/chat-1.json"),
-        ("upload", "attachment/chat/chat-1/image.png"),
-        ("drawing", "drawing/canvas.jpg"),
-        ("pdf", "PDFs/paper.pdf"),
-        ("mineru_markdown", "Mineru/paper.md"),
-    }

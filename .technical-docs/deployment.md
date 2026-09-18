@@ -91,10 +91,10 @@ Development and production intentionally use the same default Documents tree.
 Do not configure `GIGACHAD_BASE_DIR` in the environment file, service unit, or
 another production artifact. The worktree isolates code, not application state.
 
-### Create the shared runtime environment file
+### Create the shared runtime configuration file
 
-There is exactly one private runtime configuration file for both development
-and production: `$ENV`.
+There is one shared, nonsecret runtime configuration file for both development
+and production: `$ENV`. Backend credentials stay in `~/.secrets`.
 
 Create its parent directory and protect the file as the deploying user:
 
@@ -109,11 +109,10 @@ Its syntax is deliberately strict. Only whitespace-only lines and lines that
 begin with `#` are ignored. Every other line must be `NAME=value`, where `NAME`
 is a shell variable name; values are literal and untrimmed, and may contain
 `=`. Do not use `export`, shell quotes, command substitution, variable
-expansion, or any other shell syntax. The shared loader used by both developer
-launchers rejects every malformed record and never sources or evaluates this
-file. It loads only variables absent from the inherited environment, so an
-already-exported value takes precedence; duplicate non-inherited names resolve
-in file order.
+expansion, or any other shell syntax. The backend runner first sources
+`~/.secrets`, then its shared loader rejects malformed records and never
+sources or evaluates this configuration file. It loads only variables absent
+from the inherited environment, so credentials in `~/.secrets` take precedence.
 
 Use this as a starting file, substituting real values before use:
 
@@ -127,12 +126,6 @@ NEXT_PUBLIC_API_BASE=http://127.0.0.1:8001/api
 
 # Configure only host-local capabilities in use.
 OLLAMA_BASE_URL=http://127.0.0.1:11434
-BRAVE_API_KEY=<secret>
-
-# Provider credentials: uncomment only for providers in use.
-# GEMINI_API_KEY=<secret>
-# OPENROUTER_API_KEY=<secret>
-# OPENAI_API_KEY=<secret>
 ```
 
 | Variable | Required | Secret? | Purpose |
@@ -140,14 +133,14 @@ BRAVE_API_KEY=<secret>
 | `GIGACHAD_CORS_ORIGINS` | Yes | No | Comma-separated exact production and local browser origins. Do not use `*`. |
 | `NEXT_PUBLIC_API_BASE` | For local frontend development | No | Local browser API base; it is intentionally public configuration. |
 | `OLLAMA_BASE_URL` | When using local models | No | Host-local Ollama endpoint. |
-| `BRAVE_API_KEY` | When using web search | **Yes** | Brave LLM Context credential. |
 | `MINERU_SERVER_URL` | No | No | Remote MinerU endpoint. Leave unset for required local OCR. |
-| Provider API keys | Only for their providers | **Yes** | Credentials used by the backend. |
 
-URL and model settings are configuration, not secrets. Provider API keys are
-secrets: keep them only in this `0600` private file; never commit or paste the
-file, put keys in a ticket, or configure them in Vercel. `NEXT_PUBLIC_API_BASE`
-is public browser configuration and is not a secret. Web search calls Brave from
+URL and model settings are configuration, not secrets. Keep every backend
+credential—including `POSTGRES_PASSWORD_DEV`, `POSTGRES_PASSWORD_PROD`,
+`BRAVE_API_KEY`, and provider API keys—only in `~/.secrets` as
+`export NAME=value` records. The backend runner sources it directly, so
+provider values never enter the systemd manager. `NEXT_PUBLIC_API_BASE` is
+public browser configuration and is not a secret. Web search calls Brave from
 the backend, so `BRAVE_API_KEY` never reaches the browser.
 
 ### Provision the systemd services
@@ -195,10 +188,11 @@ environment entry is the nonsecret configuration path:
 GIGACHAD_ENV_FILE=$ENV
 ```
 
-It has no `EnvironmentFile`. Its `ExecStart` runs `run-backend.sh --prod`.
-That runner loads the shared file, starts or reuses the production PostgreSQL
-container, then starts loopback Uvicorn without reload. Provider values are
-never parsed or loaded by the systemd manager, only by the backend child.
+It has no `EnvironmentFile`. Its `ExecStart` runs `run-backend.sh --prod`,
+which sources `~/.secrets`, loads the shared nonsecret configuration file,
+starts or reuses the production PostgreSQL container, then starts loopback
+Uvicorn without reload. Provider values are never parsed or loaded by the
+systemd manager, only by the backend child.
 
 It intentionally has neither `--reload` nor a non-loopback host. It retains
 restart handling, a stop timeout, `NoNewPrivileges=true`, `PrivateTmp=true`, and

@@ -163,4 +163,4 @@ def test_mirror_rejects_non_pdf_and_non_mineru_assets(store, tmp_path):
     with pytest.raises(ValueError, match="Only PDF and MinerU"):
         store.mirror(drawing, tmp_path)
 
-    assert not tmp_path.exists()
+    assert list(tmp_path.iterdir()) == []
