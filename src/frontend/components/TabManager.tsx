@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react"
+import { createContext, useCallback, useContext, useEffect, useImperativeHandle, useRef, useState } from "react"
 import { Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 // Selected model starts blank and is seeded from the backend's configured
@@ -9,6 +9,15 @@ import { cn } from "@/lib/utils"
 const FALLBACK_TEMPERATURE = 0.2
 import type { SettingsState } from "@/contexts/SettingsContext"
 import type { AppSurface } from "@/contexts/SidebarContext"
+
+// Tabs stay mounted in the background (CSS-hidden below, not unmounted), so key
+// listeners deep in a tab's content must check this instead of firing for whichever
+// tab happens to be frontmost. Provided per-tab in the render loop below.
+const TabActiveContext = createContext(true)
+export const TabActiveProvider = TabActiveContext.Provider
+export function useTabActive(): boolean {
+  return useContext(TabActiveContext)
+}
 
 export interface TabConfig {
   selectedModel: string
@@ -351,11 +360,13 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
               className="h-full"
               style={{ display: isActive ? undefined : "none" }}
             >
-              {renderContent(tab, hook, isActive, (config) => {
-                setTabs((prev) => prev.map((t) => t.id === tab.id ? { ...t, config: { ...t.config, ...config } } : t))
-              }, (mode) => {
-                setTabs((prev) => prev.map((t) => t.id === tab.id ? { ...t, appMode: mode } : t))
-              })}
+              <TabActiveProvider value={isActive}>
+                {renderContent(tab, hook, isActive, (config) => {
+                  setTabs((prev) => prev.map((t) => t.id === tab.id ? { ...t, config: { ...t.config, ...config } } : t))
+                }, (mode) => {
+                  setTabs((prev) => prev.map((t) => t.id === tab.id ? { ...t, appMode: mode } : t))
+                })}
+              </TabActiveProvider>
             </div>
           )
         })}

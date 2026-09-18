@@ -161,13 +161,13 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   }, [appMode, isActive])
 
   useEffect(() => {
-    if (!canvasFullscreen) return
+    if (!isActive || !canvasFullscreen) return
     const esc = (e: KeyboardEvent) => {
       if (e.key === "Escape") { e.preventDefault(); setCanvasFullscreen(false) }
     }
     document.addEventListener("keydown", esc)
     return () => document.removeEventListener("keydown", esc)
-  }, [canvasFullscreen])
+  }, [isActive, canvasFullscreen])
 
   const commandBar = useCommandBar()
   const { globalCategories, projectCategories } = useMemoryCategories(activeProject)

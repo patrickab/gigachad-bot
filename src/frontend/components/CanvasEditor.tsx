@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils"
 import { Plus, Undo2, Redo2, Trash2, Copy, FileType, ImageIcon, X, Camera, CircleDashed, Type, SquarePen, PenLine, Maximize2, Minimize2 } from "lucide-react"
 import { PdfViewer } from "./PdfViewer"
 import { ArchitectureGraphSurface } from "./ArchitectureGraphSurface"
+import { useTabActive } from "./TabManager"
 
 const A4_W = 794
 const A4_H = 1123
@@ -375,6 +376,8 @@ const StrokeLayer = memo(function StrokeLayer({ strokes, hidden, isDark }: { str
 
 export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, docPath, depth = 0 }: CanvasEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  // gates the window/document key listeners below to the frontmost tab
+  const active = useTabActive()
   const svgRef = useRef<SVGSVGElement>(null)
 
   // latest doc/onChange for the long-lived window drag listeners and for history
@@ -654,12 +657,13 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   // --- Pan (middle mouse or space+drag) ---
   const spaceDown = useRef(false)
   useEffect(() => {
+    if (!active) return
     const down = (e: KeyboardEvent) => { if (e.code === "Space" && !e.repeat) spaceDown.current = true }
     const up = (e: KeyboardEvent) => { if (e.code === "Space") spaceDown.current = false }
     window.addEventListener("keydown", down)
     window.addEventListener("keyup", up)
     return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up) }
-  }, [])
+  }, [active])
 
   const handleContainerPointerDown = useCallback((e: React.PointerEvent) => {
     if (e.pointerType === "touch") return
@@ -1106,6 +1110,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   }, [redoStack, restore])
 
   useEffect(() => {
+    if (!active) return
     const handler = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return
       const key = e.key.toLowerCase() // shift uppercases it, so Ctrl+Shift+Z arrives as "Z"
@@ -1121,7 +1126,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     }
     window.addEventListener("keydown", handler)
     return () => window.removeEventListener("keydown", handler)
-  }, [undo, redo])
+  }, [undo, redo, active])
 
   // One history snapshot per focus session of a text note, so typing a sentence is
   // one undo step, not one per keystroke. The first keystroke into a freshly created
@@ -1323,9 +1328,8 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
 
   useEffect(() => {
     const handler = (e: ClipboardEvent) => {
-      // every canvas window listens on `window`; only the outermost may act, or one
-      // paste imports the clipboard image once per open window
-      if (!slug || depth > 0) return
+      // every canvas window listens on `window`; only the outermost, active one may act
+      if (!active || !slug || depth > 0) return
       const items = e.clipboardData?.items
       if (!items) return
       for (const item of items) {
@@ -1345,7 +1349,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     }
     window.addEventListener("paste", handler)
     return () => window.removeEventListener("paste", handler)
-  }, [slug, depth, pointAtCenter, addImageFrameAt, onImageAdded])
+  }, [active, slug, depth, pointAtCenter, addImageFrameAt, onImageAdded])
 
   // --- Shared move / resize for frames + attachments + text notes ---
   const dragRef = useRef<{

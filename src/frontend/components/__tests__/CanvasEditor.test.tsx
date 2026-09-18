@@ -14,6 +14,7 @@
 import { useState } from "react"
 import { describe, it, expect, vi } from "vitest"
 import { render, act, fireEvent } from "@testing-library/react"
+import { TabActiveProvider } from "@/components/TabManager"
 
 vi.mock("@/components/PdfViewer", () => ({ PdfViewer: () => null }))
 vi.mock("./PdfViewer", () => ({ PdfViewer: () => null }))
@@ -47,10 +48,14 @@ class RO {
 }
 globalThis.ResizeObserver ??= RO as unknown as typeof ResizeObserver
 
-function Harness({ seen, slug }: { seen: CanvasDocument[]; slug?: string }) {
+function Harness({ seen, slug, active = true }: { seen: CanvasDocument[]; slug?: string; active?: boolean }) {
   const [doc, setDoc] = useState<CanvasDocument>(emptyCanvasDoc())
   seen.push(doc)
-  return <CanvasEditor doc={doc} onChange={setDoc} slug={slug} docPath="project/proj/document/host.canvas" />
+  return (
+    <TabActiveProvider value={active}>
+      <CanvasEditor doc={doc} onChange={setDoc} slug={slug} docPath="project/proj/document/host.canvas" />
+    </TabActiveProvider>
+  )
 }
 
 // toolbar order: [+, undo, redo, size, color, lasso, camera, text]
@@ -203,6 +208,42 @@ describe("canvas history", () => {
 
     addPage(container)
     expect(toolbar(container)[2]!).toBeDisabled()
+  })
+})
+
+// Backgrounded canvas tabs stay mounted and must ignore keys meant for another tab.
+describe("background tab isolation", () => {
+  const press = (key: string) => act(() => {
+    window.dispatchEvent(new KeyboardEvent("keydown", { key, ctrlKey: true, bubbles: true }))
+  })
+
+  it("ignores Ctrl+Z from a backgrounded canvas tab", () => {
+    const seen: CanvasDocument[] = []
+    const { container } = render(<Harness seen={seen} active={false} />)
+
+    addPage(container)
+    expect(latest(seen).frames).toHaveLength(1)
+
+    press("z")
+    expect(latest(seen).frames).toHaveLength(1) // still there — the tab isn't active
+  })
+
+  it("ignores a paste meant for another tab", async () => {
+    api.writeBinaryDocument.mockResolvedValue({ path: "project/proj/document/pasted.png", name: "pasted.png", mime: "image/png" })
+    const file = new File(["fake"], "pasted.png", { type: "image/png" })
+    const item = { type: "image/png", getAsFile: () => file }
+    const dispatchPaste = () => act(() => {
+      window.dispatchEvent(Object.assign(new Event("paste", { bubbles: true, cancelable: true }), { clipboardData: { items: [item] } }))
+    })
+
+    const seen: CanvasDocument[] = []
+    render(<Harness seen={seen} slug="proj" active={false} />)
+    dispatchPaste()
+    expect(api.writeBinaryDocument).not.toHaveBeenCalled()
+
+    render(<Harness seen={seen} slug="proj" active />)
+    dispatchPaste()
+    expect(api.writeBinaryDocument).toHaveBeenCalledTimes(1)
   })
 })
 
