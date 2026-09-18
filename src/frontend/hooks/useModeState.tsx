@@ -2,18 +2,16 @@
 
 import { createContext, useCallback, useContext, useState, type ReactNode } from "react"
 
-export type AppMode = "chat" | "research" | "search" | "ocr" | "study"
+export type AppMode = "chat" | "research" | "search" | "ocr"
 
 export interface ModeState {
   mode: AppMode
   researchEnabled: boolean
   searchEnabled: boolean
   ocrEnabled: boolean
-  studyEnabled: boolean
   toggleResearch: () => void
   toggleSearch: () => void
   toggleOCR: () => void
-  toggleStudy: () => void
   setMode: (mode: AppMode) => void
 }
 
@@ -40,20 +38,14 @@ export function ModeProvider({ children }: { children: ReactNode }) {
     setMode((prev) => prev === "ocr" ? "chat" : "ocr")
   }, [])
 
-  const toggleStudy = useCallback(() => {
-    setMode((prev) => prev === "study" ? "chat" : "study")
-  }, [])
-
   const value: ModeState = {
     mode,
     researchEnabled: mode === "research",
     searchEnabled: mode === "search",
     ocrEnabled: mode === "ocr",
-    studyEnabled: mode === "study",
     toggleResearch,
     toggleSearch,
     toggleOCR,
-    toggleStudy,
     setMode,
   }
 

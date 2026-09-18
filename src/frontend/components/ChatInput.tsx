@@ -3,7 +3,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import { ArrowUp, Loader2, Plus, LayoutGrid, Mic, Search, Globe, Sigma, Square, X, FileText, Image as ImageIcon, File as FileIcon, BookOpen, FileUp, Pencil } from "lucide-react"
+import { ArrowUp, Loader2, Plus, LayoutGrid, Mic, Search, Globe, Sigma, Square, X, FileText, Image as ImageIcon, File as FileIcon, FileUp, Pencil } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { uploadFile as apiUploadFile } from "@/lib/api"
 import type { Attachment } from "@/lib/types"
@@ -55,7 +55,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   onCancel,
   slug = null,
 }, ref) {
-  const { researchEnabled, searchEnabled, ocrEnabled, studyEnabled, toggleResearch, toggleSearch, toggleOCR, toggleStudy } = useModeState()
+  const { researchEnabled, searchEnabled, ocrEnabled, toggleResearch, toggleSearch, toggleOCR } = useModeState()
   const { ocrModel } = useSettings()
 
   const tools = [
@@ -88,16 +88,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       accent: "muted",
       enabled: ocrEnabled,
       toggle: toggleOCR,
-    },
-    {
-      id: "study",
-      label: "PDF Study",
-      shortLabel: "Study",
-      icon: BookOpen,
-      color: "text-ink",
-      accent: "muted",
-      enabled: studyEnabled,
-      toggle: toggleStudy,
     },
   ]
 

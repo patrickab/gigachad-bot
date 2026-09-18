@@ -1,4 +1,4 @@
-import type { ArchitectureGraphContextReference, Attachment, BackendConfig, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpCatalog, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ReasoningSupport, ResearchRequest, StudyProcessRequest, StudyProcessResponse, Usage, VaultFile, VaultNode } from "./types"
+import type { ArchitectureGraphContextReference, Attachment, BackendConfig, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpCatalog, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ReasoningSupport, ResearchRequest, Usage, VaultFile, VaultNode } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { getApiBase } from "./config"
@@ -476,10 +476,6 @@ export async function storeDrawing(filename: string, blob: Blob): Promise<void> 
 export async function generateMindmap(messages: { role: string; content: string }[], model: string, prompt: string = ""): Promise<string> {
   const data = await post<{ mindmap: string }>("/study/mindmap", { messages, model, prompt })
   return data.mindmap
-}
-
-export async function processStudyPdf(req: StudyProcessRequest): Promise<StudyProcessResponse> {
-  return post<StudyProcessResponse>("/study/process", req)
 }
 
 export async function listProjects(): Promise<ProjectListItem[]> {

@@ -2,7 +2,7 @@
 
 import { useCallback, useState, type Dispatch, type SetStateAction } from "react"
 import type { Tab } from "@/components/TabManager"
-import { updateLastMsg as updateLastAssistant } from "@/hooks/useStudyHandler"
+import { updateLastMsg as updateLastAssistant } from "@/lib/utils"
 import {
   saveChatHistory as apiSaveChatHistory,
   buildHistoryFile,

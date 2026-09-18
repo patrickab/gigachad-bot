@@ -5,33 +5,13 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from lib.llm_resilience import api_query_resilient
-from lib.prompts.non_user_prompts import SYS_STUDY_ARTICLE, SYS_STUDY_MINDMAP, SYS_STUDY_OVERVIEW
+from lib.prompts.non_user_prompts import SYS_STUDY_MINDMAP
 
 from .deps import request_client
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/study", tags=["study"])
-
-
-class StudyProcessRequest(BaseModel):
-    markdown: str
-    filename: str
-    model: str
-
-
-class StudyProcessResponse(BaseModel):
-    filename: str
-    mindmap: str
-    overview: str
-    article: str
-
-
-def _build_user_msg(markdown: str) -> str:
-    return (
-        "Below is the raw markdown extracted from a PDF. Produce the requested artifact as specified in the system prompt.\n\n"
-        "<raw_markdown>\n" + markdown + "\n</raw_markdown>"
-    )
 
 
 def _sync_llm_call(model: str, system_prompt: str, user_msg: str) -> str:
@@ -56,41 +36,6 @@ async def _llm_call(model: str, system_prompt: str, user_msg: str) -> str:
     except Exception:
         log.exception("LLM call failed (model=%s, sys_prompt_len=%d)", model, len(system_prompt))
         raise HTTPException(status_code=500, detail="LLM call failed")
-
-
-@router.post("/process", response_model=StudyProcessResponse)
-async def process_pdf(req: StudyProcessRequest) -> StudyProcessResponse:
-    """Accept markdown extracted from a PDF, run three parallel LLM calls (learning goals, overview, article)."""
-    user_msg = _build_user_msg(req.markdown)
-
-    async def run_mindmap() -> str:
-        content = await _llm_call(req.model, SYS_STUDY_MINDMAP, user_msg)
-        return content.strip()
-
-    async def run_overview() -> str:
-        content = await _llm_call(req.model, SYS_STUDY_OVERVIEW, user_msg)
-        return content.strip()
-
-    async def run_article() -> str:
-        content = await _llm_call(req.model, SYS_STUDY_ARTICLE, user_msg)
-        return content.strip()
-
-    try:
-        mindmap, overview, article = await asyncio.gather(
-            run_mindmap(), run_overview(), run_article(),
-        )
-    except HTTPException:
-        raise
-    except Exception:
-        log.exception("Study artifact generation failed")
-        raise HTTPException(status_code=500, detail="Artifact generation failed")
-
-    return StudyProcessResponse(
-        filename=req.filename,
-        mindmap=mindmap,
-        overview=overview,
-        article=article,
-    )
 
 
 class MindmapRequest(BaseModel):

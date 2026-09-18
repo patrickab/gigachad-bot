@@ -35,11 +35,12 @@ vi.mock("@/lib/api", () => ({
   generateMindmap: (...a: any[]) => impls.generateMindmap(...a),
 }))
 
-vi.mock("@/hooks/useStudyHandler", () => ({
+vi.mock("@/lib/utils", () => ({
+  cn: (...a: unknown[]) => a.filter(Boolean).join(" "),
   updateLastMsg: (
-    setMessages: React.Dispatch<React.SetStateAction<any[]>>,
-    updater: (m: any) => any,
-  ) => setMessages((prev: any[]) => {
+    setMessages: React.Dispatch<React.SetStateAction<Record<string, unknown>[]>>,
+    updater: (m: Record<string, unknown>) => Record<string, unknown>,
+  ) => setMessages((prev: Record<string, unknown>[]) => {
     const copy = [...prev]
     const last = copy[copy.length - 1]
     if (last?.role === "assistant") copy[copy.length - 1] = updater(last)

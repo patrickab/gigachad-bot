@@ -42,7 +42,7 @@ import { SidebarProvider, type AppSurface } from "@/contexts/SidebarContext"
 import { MemoryViewerProvider } from "@/contexts/MemoryViewerContext"
 import { MemoryViewer } from "@/components/MemoryViewer"
 import { DesktopBackendProvider } from "@/components/DesktopBackendProvider"
-import { handleStudyPdf, updateLastMsg as updateLastAssistant } from "@/hooks/useStudyHandler"
+import { updateLastMsg as updateLastAssistant } from "@/lib/utils"
 import {
   loadChatHistory as apiLoadChatHistory,
   parseFiles,
@@ -132,11 +132,9 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     researchEnabled,
     searchEnabled,
     ocrEnabled,
-    studyEnabled,
     toggleResearch,
     toggleSearch,
     toggleOCR,
-    toggleStudy,
   } = useModeState()
 
   const settings = useSettings()
@@ -293,9 +291,8 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     else if (researchEnabled) onModeLabel("Deep Research")
     else if (searchEnabled) onModeLabel("Search")
     else if (ocrEnabled) onModeLabel("LaTeX OCR")
-    else if (studyEnabled) onModeLabel("PDF Study")
     else onModeLabel("Chat")
-  }, [commandBar.state.phase, docReviewLoading, commandMemoryCount, researchEnabled, searchEnabled, ocrEnabled, studyEnabled, onModeLabel])
+  }, [commandBar.state.phase, docReviewLoading, commandMemoryCount, researchEnabled, searchEnabled, ocrEnabled, onModeLabel])
 
   useEffect(() => {
     if (!isActive || appMode === "canvas") return
@@ -405,12 +402,6 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         if (attachments.length > 0) return
       }
 
-      if (studyEnabled && attachments.some(a => a.mime === "application/pdf")) {
-        await handleStudyPdf(text, attachments, chatId, config.selectedModel, setMessages, activeProject)
-        toggleStudy()
-        return
-      }
-
       if (attachments.length > 0) {
         const activeAttachments = attachments.map((a) => ({ ...a, active: true }))
         setMessages(prev => [
@@ -469,7 +460,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         })
       }
     },
-    [searchEnabled, researchEnabled, studyEnabled, chatId, branchMessageIdx, activeProject, config, send, research, webSearch, setMessages, toggleStudy, commandBar.submitCommand, messages, vault.openVaultPicker, modals.handleMindmapSubmit, modals.setMindmapAttachments, modals.setMindmapModalOpen],
+    [searchEnabled, researchEnabled, chatId, branchMessageIdx, activeProject, config, send, research, webSearch, setMessages, commandBar.submitCommand, messages, vault.openVaultPicker, modals.handleMindmapSubmit, modals.setMindmapAttachments, modals.setMindmapModalOpen],
   )
 
   const handleRegenerate = useCallback(

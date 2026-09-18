@@ -195,18 +195,6 @@ export interface WebSearchResult {
   citationMap?: Record<string, WebSearchResultItem>
 }
 
-export interface StudyProcessRequest {
-  markdown: string
-  filename: string
-  model: string
-}
-
-export interface StudyProcessResponse {
-  filename: string
-  mindmap: string
-  overview: string
-  article: string
-}
 
 export type KanbanColumnId = "backlog" | "doing" | "done"
 
