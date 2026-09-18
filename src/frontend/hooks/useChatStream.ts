@@ -4,7 +4,7 @@ import { useCallback, useRef, useState } from "react"
 import { createChatStream } from "@/lib/api"
 import { deactivateSentImages } from "@/lib/attachments"
 import { createFlushBatcher } from "@/lib/streaming"
-import type { ChatRequest, Message, Usage } from "@/lib/types"
+import type { ChatRequest, Message, ToolCallRecord, Usage } from "@/lib/types"
 
 export interface UseChatStreamReturn {
   messages: Message[]
@@ -52,6 +52,16 @@ export function useChatStream(): UseChatStreamReturn {
         for await (const event of stream) {
           if (event.event === "token") {
             assistantMsg.content += event.data
+            batch.schedule()
+          } else if (event.event === "tool_call") {
+            const call = JSON.parse(event.data) as { id: string; name: string; arguments: Record<string, unknown> }
+            assistantMsg.tool_calls = [...(assistantMsg.tool_calls ?? []), { ...call, status: "running" }]
+            batch.schedule()
+          } else if (event.event === "tool_result") {
+            const result = JSON.parse(event.data) as Omit<ToolCallRecord, "arguments" | "status">
+            assistantMsg.tool_calls = (assistantMsg.tool_calls ?? []).map((c) =>
+              c.id === result.id ? { ...c, ...result, status: result.error ? "error" : "done" } : c
+            )
             batch.schedule()
           } else if (event.event === "usage") {
             const turn: Usage = JSON.parse(event.data)

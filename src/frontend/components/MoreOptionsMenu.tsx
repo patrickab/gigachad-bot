@@ -2,14 +2,16 @@
 
 import { useState, useEffect, useRef, useCallback } from "react"
 import { AnimatePresence, motion } from "framer-motion"
-import { MoreHorizontal, BookOpen, Pencil } from "lucide-react"
+import { ChevronDown, MoreHorizontal, BookOpen, Pencil } from "lucide-react"
 import { LLMParams } from "./LLMParams"
 import { ParamSlider } from "./ParamSlider"
 import { StyledSelect } from "./StyledSelect"
 import { cn } from "@/lib/utils"
 import { REASONING_LEVELS, STORAGE_KEY_TRANSPARENT_BG } from "@/lib/config"
+import { displayName } from "@/lib/models"
 import { useClickOutside } from "@/hooks/useClickOutside"
 import { useModeState } from "@/hooks/useModeState"
+import type { ModelsResponse } from "@/lib/types"
 import type { TabConfig } from "@/components/TabManager"
 
 interface MoreOptionsMenuProps {
@@ -17,6 +19,9 @@ interface MoreOptionsMenuProps {
   config: TabConfig
   onConfigChange: (config: Partial<TabConfig>) => void
   onEditPrompts?: () => void
+  /** Populates the research model-tier selects; the chat model picker owns
+   *  its own copy and stays in the topbar. */
+  models: ModelsResponse | null
 }
 
 function Toggle({ on, onChange }: { on: boolean; onChange: () => void }) {
@@ -37,9 +42,11 @@ export function MoreOptionsMenu({
   config,
   onConfigChange,
   onEditPrompts,
+  models,
 }: MoreOptionsMenuProps) {
   const { researchEnabled, searchEnabled } = useModeState()
   const [open, setOpen] = useState(false)
+  const [researchOpen, setResearchOpen] = useState(false)
   const [transparentBg, setTransparentBg] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -58,6 +65,15 @@ export function MoreOptionsMenu({
     try { localStorage.setItem(STORAGE_KEY_TRANSPARENT_BG, next ? "1" : "0") } catch {}
     document.documentElement.classList.toggle("transparent-bg", next)
   }
+  // Same flattening ModelDropdown uses: Ollama plus every configured
+  // provider, qualified as `litellm_id/model` so the tiers can pick any
+  // model the chat picker can, without pulling in its provider-editing UI.
+  const modelChoices: { value: string; label: string }[] = models
+    ? [models.ollama, ...models.providers.map((p) => p.models.map((m) => `${p.litellm_id}/${m}`))]
+        .flat()
+        .map((id) => ({ value: id, label: displayName(id) }))
+    : []
+
 
   return (
     <div className="relative z-50" ref={ref}>
@@ -82,8 +98,8 @@ export function MoreOptionsMenu({
               <Toggle on={transparentBg} onChange={toggleTransparentBg} />
             </label>
 
-            {!researchEnabled && (
-              <>
+            {/* Chat settings always apply: a tool call happens inside a normal chat turn. */}
+            <>
                 {/* System Prompt */}
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
@@ -123,7 +139,6 @@ export function MoreOptionsMenu({
                   </label>
                 </div>
               </>
-            )}
 
             {searchEnabled && (
               <div className="pt-2 border-t border-divider/50 space-y-3">
@@ -155,51 +170,75 @@ export function MoreOptionsMenu({
             )}
 
             {researchEnabled && config.researchDepth !== undefined && (
-              <div className="pt-2 border-t border-divider/50 space-y-3">
-                <div className="flex items-center gap-2 text-xs font-medium text-ink">
-                  <span className="h-1.5 w-1.5 rounded-full bg-ink" />
-                  Research Parameters
-                </div>
-                <ParamSlider
-                  label="Depth"
-                  value={config.researchDepth}
-                  onChange={(v) => onConfigChange({ researchDepth: v })}
-                  min={1}
-                  max={4}
-                  step={1}
-                  accent="accent-ink"
-                />
-                <ParamSlider
-                  label="Breadth"
-                  value={config.researchBreadth}
-                  onChange={(v) => onConfigChange({ researchBreadth: v })}
-                  min={2}
-                  max={6}
-                  step={1}
-                  accent="accent-ink"
-                />
-                <div className="space-y-1">
-                  <span className="text-[10px] text-ink-faint">Reasoning effort</span>
-                  <StyledSelect
-                    options={REASONING_LEVELS.map((l) => ({
-                      value: l,
-                      label: l === "none" ? "None" : l.charAt(0).toUpperCase() + l.slice(1),
-                    }))}
-                    value={config.researchReasoning}
-                    onChange={(v) => onConfigChange({ researchReasoning: v })}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <span className="text-[10px] text-ink-faint">Report type</span>
-                  <StyledSelect
-                    options={[
-                      { value: "deep", label: "Deep (recursive)" },
-                      { value: "research_report", label: "Standard (single-pass)" },
-                    ]}
-                    value={config.researchReportType}
-                    onChange={(v) => onConfigChange({ researchReportType: v })}
-                  />
-                </div>
+              <div className="pt-2 border-t border-divider/50">
+                <button
+                  type="button"
+                  onClick={() => setResearchOpen((o) => !o)}
+                  aria-expanded={researchOpen}
+                  className="flex w-full items-center justify-between gap-2 text-xs font-medium text-ink"
+                >
+                  <span className="flex items-center gap-2">
+                    <span className="h-1.5 w-1.5 rounded-full bg-ink" />
+                    Deep Research
+                  </span>
+                  <ChevronDown className={cn("h-3.5 w-3.5 text-ink-faint transition-transform", researchOpen && "rotate-180")} />
+                </button>
+                {researchOpen && (
+                  <div className="space-y-3 pt-3">
+                    <ParamSlider
+                      label="Depth"
+                      value={config.researchDepth}
+                      onChange={(v) => onConfigChange({ researchDepth: v })}
+                      min={1}
+                      max={4}
+                      step={1}
+                      accent="accent-ink"
+                    />
+                    <ParamSlider
+                      label="Breadth"
+                      value={config.researchBreadth}
+                      onChange={(v) => onConfigChange({ researchBreadth: v })}
+                      min={2}
+                      max={6}
+                      step={1}
+                      accent="accent-ink"
+                    />
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-ink-faint">Reasoning effort</span>
+                      <StyledSelect
+                        options={REASONING_LEVELS.map((l) => ({
+                          value: l,
+                          label: l === "none" ? "None" : l.charAt(0).toUpperCase() + l.slice(1),
+                        }))}
+                        value={config.researchReasoning}
+                        onChange={(v) => onConfigChange({ researchReasoning: v })}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-ink-faint">Fast model</span>
+                      <StyledSelect options={modelChoices} value={config.researchFastModel} onChange={(v) => onConfigChange({ researchFastModel: v })} />
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-ink-faint">Smart model</span>
+                      <StyledSelect options={modelChoices} value={config.researchSmartModel} onChange={(v) => onConfigChange({ researchSmartModel: v })} />
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-ink-faint">Strategic model</span>
+                      <StyledSelect options={modelChoices} value={config.researchStrategicModel} onChange={(v) => onConfigChange({ researchStrategicModel: v })} />
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-ink-faint">Report type</span>
+                      <StyledSelect
+                        options={[
+                          { value: "deep", label: "Deep (recursive)" },
+                          { value: "research_report", label: "Standard (single-pass)" },
+                        ]}
+                        value={config.researchReportType}
+                        onChange={(v) => onConfigChange({ researchReportType: v })}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </motion.div>

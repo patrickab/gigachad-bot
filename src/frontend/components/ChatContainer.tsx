@@ -15,6 +15,7 @@ import { ElevationProvider, ElevatedContainer } from "./ElevatedContainer"
 
 import { LazyPdfViewer } from "./LazyPdfViewer"
 import { DocumentEditor } from "./DocumentEditor"
+import { ToolCallElement } from "./ToolCallElement"
 
 // Document/vault/attachment callbacks the sidebar (Context + Documents
 // elements) needs but ChatContainer itself never touches — provided by
@@ -943,6 +944,13 @@ export function ChatContainer({
                           collapsibleUser
                           onCollapse={() => togglePair(globalIndex)}
                         />
+                        {/* Same optic as the answer below: the tool call is a peer of the
+                            response inside the pair, not a decoration on it. */}
+                        {assistant.tool_calls?.map((call) => (
+                          <ElevatedContainer key={call.id} className="mx-5 mb-5 rounded-lg border border-divider/30 overflow-hidden">
+                            <ToolCallElement call={call} />
+                          </ElevatedContainer>
+                        ))}
                         <ElevatedContainer className="mx-5 mb-5 rounded-lg border border-divider/30 overflow-hidden">
                           <ChatMessage
                             role="assistant"
@@ -950,6 +958,7 @@ export function ChatContainer({
                             search_result={assistant.search_result}
                             research_steps={assistant.research_steps}
                             research_progress={assistant.research_progress}
+                            tool_calls={assistant.tool_calls}
                             isStreaming={isStreaming}
                             index={globalIndex}
                             onDelete={onDeletePair}

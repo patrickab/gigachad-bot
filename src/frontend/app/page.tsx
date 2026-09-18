@@ -12,7 +12,6 @@ import { ModelDropdown } from "@/components/ModelDropdown"
 import { MoreOptionsMenu } from "@/components/MoreOptionsMenu"
 import { PromptEditor } from "@/components/PromptEditor"
 import { ReasoningSelector } from "@/components/ReasoningSelector"
-import { ResearchModelsBar } from "@/components/ResearchModelsBar"
 import { ThemeToggle } from "@/components/ThemeToggle"
 import { OCRPanel } from "@/components/OCRPanel"
 import { SaveChatModal } from "@/components/SaveChatModal"
@@ -63,7 +62,7 @@ import {
   normalizeMessageAttachments,
 } from "@/lib/attachments"
 
-function defaultSendParams(config: TabConfig, prompts: Record<string, string>, overrides: Record<string, unknown> = {}) {
+function defaultSendParams(config: TabConfig, prompts: Record<string, string>, enabledTools: string[] = []) {
   return {
     model: config.selectedModel,
     system_prompt: config.selectedPrompt ? (prompts[config.selectedPrompt] ?? "") : "",
@@ -71,7 +70,18 @@ function defaultSendParams(config: TabConfig, prompts: Record<string, string>, o
     reasoning_effort: config.reasoningEffort === "none" ? null : config.reasoningEffort,
     downscale_images: config.downscaleImages,
     img_paths: [] as string[],
-    ...overrides,
+    tools: enabledTools,
+    tool_options: {
+      search_system_instructions: config.searchSystemInstructions ?? "",
+      search_domain: config.searchDomain ?? "",
+      research_fast_model: config.researchFastModel ?? "",
+      research_smart_model: config.researchSmartModel ?? "",
+      research_strategic_model: config.researchStrategicModel ?? "",
+      research_depth: config.researchDepth,
+      research_breadth: config.researchBreadth,
+      research_reasoning: config.researchReasoning === "none" ? null : config.researchReasoning,
+      research_report_type: config.researchReportType,
+    },
   }
 }
 
@@ -102,8 +112,6 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     send,
     regenerateAt,
     cancel,
-    research,
-    webSearch,
     reset,
     models,
     saveModelProviders,
@@ -129,6 +137,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   } = useBranches()
 
   const {
+    enabledTools,
     researchEnabled,
     searchEnabled,
     ocrEnabled,
@@ -288,11 +297,12 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     else if (commandBar.state.phase === "composing") onModeLabel("Updating memory docs", true)
     else if (commandBar.state.phase === "doc-review") onModeLabel("Review memory docs", docReviewLoading)
     else if (commandBar.state.phase === "error") onModeLabel("Memory error")
-    else if (researchEnabled) onModeLabel("Deep Research")
-    else if (searchEnabled) onModeLabel("Search")
     else if (ocrEnabled) onModeLabel("LaTeX OCR")
+    else if (enabledTools.length > 0) {
+      onModeLabel(`Chat · ${[searchEnabled && "search", researchEnabled && "research"].filter(Boolean).join(" + ")}`)
+    }
     else onModeLabel("Chat")
-  }, [commandBar.state.phase, docReviewLoading, commandMemoryCount, researchEnabled, searchEnabled, ocrEnabled, onModeLabel])
+  }, [commandBar.state.phase, docReviewLoading, commandMemoryCount, enabledTools, researchEnabled, searchEnabled, ocrEnabled, onModeLabel])
 
   useEffect(() => {
     if (!isActive || appMode === "canvas") return
@@ -398,9 +408,8 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         return
       }
 
-      if (searchEnabled || researchEnabled) {
-        if (attachments.length > 0) return
-      }
+      // Tools no longer hijack the composer: attachments and tool calling coexist, the
+      // model decides whether a turn needs a tool.
 
       if (attachments.length > 0) {
         const activeAttachments = attachments.map((a) => ({ ...a, active: true }))
@@ -419,7 +428,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
             chatId,
             slug: activeProject,
             downscaleImages: config.downscaleImages,
-            baseParams: defaultSendParams(config, prompts),
+            baseParams: defaultSendParams(config, prompts, enabledTools),
           }, parseFiles, attachFileVaultFile)
         } catch {
           updateLastAssistant(setMessages, m => ({ ...m, content: "Failed to parse attached documents. You can try again or re-upload the file." }))
@@ -438,29 +447,15 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         return
       }
 
-      if (searchEnabled) {
-        webSearch({
-          query: text,
-          systemInstructions: config.searchSystemInstructions,
-          domain: config.searchDomain,
-          model: config.selectedModel || undefined,
-        })
-      } else if (researchEnabled) {
-        research({
-          query: text, fastModel: config.researchFastModel, smartModel: config.researchSmartModel, strategicModel: config.researchStrategicModel,
-          depth: config.researchDepth, breadth: config.researchBreadth, reasoningEffort: config.researchReasoning, reportType: config.researchReportType,
-        })
-      } else {
-        send({
-          ...defaultSendParams(config, prompts),
-          chat_id: chatId,
-          user_msg: text,
-          img_paths: collectActiveImagePaths(messages),
-          project_slug: activeProject,
-        })
-      }
+      send({
+        ...defaultSendParams(config, prompts, enabledTools),
+        chat_id: chatId,
+        user_msg: text,
+        img_paths: collectActiveImagePaths(messages),
+        project_slug: activeProject,
+      })
     },
-    [searchEnabled, researchEnabled, chatId, branchMessageIdx, activeProject, config, send, research, webSearch, setMessages, commandBar.submitCommand, messages, vault.openVaultPicker, modals.handleMindmapSubmit, modals.setMindmapAttachments, modals.setMindmapModalOpen],
+    [enabledTools, chatId, branchMessageIdx, activeProject, config, send, setMessages, commandBar.submitCommand, messages, vault.openVaultPicker, modals.handleMindmapSubmit, modals.setMindmapAttachments, modals.setMindmapModalOpen],
   )
 
   const handleRegenerate = useCallback(
@@ -477,7 +472,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         const fallbackPrompt = userMsg.content.trim() ? userMsg.content : "Please review the attached document and provide a summary."
         const llmMsg = hidden ? `${hidden}\n\n${fallbackPrompt}` : fallbackPrompt
         await regenerateAt(globalIndex, {
-          ...defaultSendParams(config, prompts),
+          ...defaultSendParams(config, prompts, enabledTools),
           chat_id: chatId,
           user_msg: llmMsg,
           img_paths: collectActiveImagePaths(messages, { userIndex: globalIndex }),
@@ -488,14 +483,14 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       }
 
       await regenerateAt(globalIndex, {
-        ...defaultSendParams(config, prompts),
+        ...defaultSendParams(config, prompts, enabledTools),
         chat_id: chatId,
         user_msg: userMsg.content,
         img_paths: collectActiveImagePaths(messages, { userIndex: globalIndex }),
         project_slug: activeProject,
       })
     },
-    [isStreaming, messages, regenerateAt, config, prompts, activeProject, chatId],
+    [isStreaming, messages, regenerateAt, config, prompts, activeProject, chatId, enabledTools],
   )
 
   const handleToggleAttachmentActive = useCallback((messageIndex: number, attachmentName: string) => {
@@ -624,19 +619,6 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         <header className="h-[60px] shrink-0 flex items-center px-4 gap-4 z-40 border-b border-divider/50 bg-paper/80 backdrop-blur-xl">
           {appMode === "canvas" ? (
             <div ref={setCanvasToolbarSlot} className="flex-1 min-w-0 flex items-center" />
-          ) : researchEnabled ? (
-            <ResearchModelsBar
-              models={models}
-              onProvidersChange={saveModelProviders}
-              onTabOrderChange={saveModelTabOrder}
-              onDefaultsChange={saveModelDefaults}
-              fastModel={config.researchFastModel}
-              smartModel={config.researchSmartModel}
-              strategicModel={config.researchStrategicModel}
-              onFastModelChange={(m) => onConfigChange({ researchFastModel: m })}
-              onSmartModelChange={(m) => onConfigChange({ researchSmartModel: m })}
-              onStrategicModelChange={(m) => onConfigChange({ researchStrategicModel: m })}
-            />
           ) : (
             <div className="flex items-center gap-4">
               <ModelDropdown models={models} selectedModel={config.selectedModel} onSelect={(m) => onConfigChange({ selectedModel: m })} onProvidersChange={saveModelProviders} onTabOrderChange={saveModelTabOrder} onDefaultsChange={saveModelDefaults} />
@@ -657,7 +639,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
             )}
             {appMode !== "canvas" && <TokenCounter usage={totalUsage} />}
             <ThemeToggle />
-            <MoreOptionsMenu prompts={prompts} config={config} onConfigChange={onConfigChange} onEditPrompts={() => modals.setPromptEditorOpen(true)} />
+            <MoreOptionsMenu prompts={prompts} config={config} onConfigChange={onConfigChange} onEditPrompts={() => modals.setPromptEditorOpen(true)} models={models} />
           </div>
         </header>
         <div className="flex-1 overflow-hidden relative transition-opacity duration-200">

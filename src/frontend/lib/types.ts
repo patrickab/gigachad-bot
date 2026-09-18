@@ -42,13 +42,28 @@ export interface ArchitectureGraphContextReference {
   path: string
 }
 
+/** A tool invocation the model made on its own, rendered as its own chat element.
+ *  Unlike a QA pair it has no user turn: it is produced mid-answer and belongs to the
+ *  assistant message it interrupted, so pair indexing and branching stay untouched. */
+export interface ToolCallRecord {
+  id: string
+  name: string
+  arguments: Record<string, unknown>
+  status: "running" | "done" | "error"
+  /** Short result headline, e.g. "8 sources". */
+  summary?: string
+  sources?: WebSearchResultItem[]
+  detail?: Record<string, unknown>
+  error?: string | null
+}
+
 export interface Message {
   role: "user" | "assistant" | "system" | "tool"
   content: string
   attachments?: Attachment[]
   hiddenContent?: string
   tool_call_id?: string
-  tool_calls?: unknown[]
+  tool_calls?: ToolCallRecord[]
   search_result?: WebSearchResult
   research_steps?: ResearchTraceStep[]
   research_progress?: ResearchTraceProgress
@@ -65,6 +80,21 @@ export interface ChatRequest {
   downscale_images?: boolean
   messages?: { role: string; content: string }[]
   project_slug?: string | null
+  /** Tool names the model may call this turn. Empty or absent means a tool-free completion. */
+  tools?: string[]
+  tool_options?: ToolOptions
+}
+
+/** Tool settings the browser already owns as tab config, forwarded per request. */
+export interface ToolOptions {
+  search_system_instructions?: string
+  research_fast_model?: string
+  research_smart_model?: string
+  research_strategic_model?: string
+  research_depth?: number
+  research_breadth?: number
+  research_reasoning?: string | null
+  research_report_type?: string
 }
 
 export interface ModelsResponse {

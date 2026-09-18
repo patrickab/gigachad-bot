@@ -2,7 +2,7 @@ import asyncio
 import base64
 from contextlib import contextmanager
 import json
-from typing import Any, Iterator
+from typing import Any, AsyncIterator, Iterator
 
 from fastapi import Depends
 from llm_baseclient.client import LLMClient
@@ -122,6 +122,20 @@ def sse_event_stream(chunks: Iterator[str] | Iterator[str | dict]) -> EventSourc
                     yield {"event": "token", "data": chunk}
             yield {"event": "done", "data": ""}
         except Exception as e:
+            yield {"event": "error", "data": str(e)}
+
+    return EventSourceResponse(event_stream())
+
+
+def sse_tool_event_stream(events: AsyncIterator[tuple[str, Any]]) -> EventSourceResponse:
+    """Forward a tool-loop event stream. `token` data stays raw text, everything else is JSON."""
+
+    async def event_stream() -> Any:
+        try:
+            async for name, data in events:
+                yield {"event": name, "data": data if isinstance(data, str) else json.dumps(data)}
+            yield {"event": "done", "data": ""}
+        except Exception as e:  # noqa: BLE001 - a failed turn must reach the UI as an error event
             yield {"event": "error", "data": str(e)}
 
     return EventSourceResponse(event_stream())

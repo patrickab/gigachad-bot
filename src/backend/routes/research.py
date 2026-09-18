@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import AsyncGenerator, Iterator
+from collections.abc import AsyncGenerator
 import contextlib
 import json
 import os
@@ -12,27 +12,14 @@ from sse_starlette.sse import EventSourceResponse
 
 from config import OLLAMA_BASE_URL
 from lib.research_config import build_research_config, write_research_config
-
-
-@contextlib.contextmanager
-def _temp_environ(**vals: str | None) -> Iterator[None]:
-    """Set env vars for the block, restore originals on exit."""
-    old = {k: os.environ.get(k) for k in vals}
-    for k, v in vals.items():
-        if v is not None:
-            os.environ[k] = v
-    try:
-        yield
-    finally:
-        for k, v in old.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
+from lib.tools import RESEARCH_ENV_LOCK, temp_environ
 
 router = APIRouter(prefix="/api", tags=["research"])
 
-_env_lock = asyncio.Lock()
+# Shared with the deep_research chat tool: GPT-Researcher reads process environment
+# during a run, so both runners must serialize on the same lock.
+_env_lock = RESEARCH_ENV_LOCK
+_temp_environ = temp_environ
 
 
 class ResearchRequest(BaseModel):

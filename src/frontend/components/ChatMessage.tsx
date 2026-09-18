@@ -25,6 +25,9 @@ interface ChatMessageProps {
   search_result?: Message["search_result"]
   research_steps?: Message["research_steps"]
   research_progress?: Message["research_progress"]
+  /** Not rendered here — ChatContainer owns the tool element. Only suppresses the
+   *  "Processing…" placeholder while a tool is still running. */
+  tool_calls?: Message["tool_calls"]
   isStreaming?: boolean
   attachments?: Attachment[]
   messageIndex?: number
@@ -100,7 +103,7 @@ export function AssistantMessageContent({
   )
 }
 
-function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBranch, search_result, research_steps, research_progress, isStreaming, attachments, onAttachmentClick, collapsibleUser, onCollapse }: ChatMessageProps) {
+function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBranch, search_result, research_steps, research_progress, tool_calls: toolCalls, isStreaming, attachments, onAttachmentClick, collapsibleUser, onCollapse }: ChatMessageProps) {
   const isUser = role === "user"
   const [copied, setCopied] = useState(false)
 
@@ -159,7 +162,7 @@ function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBran
             <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-ink" aria-hidden="true" />
             {content}
           </span>
-        ) : isStreaming ? (
+        ) : isStreaming && !toolCalls?.some((c) => c.status === "running") ? (
           <span role="status" className="inline-flex items-center gap-2 text-ink text-sm">
             <Loader2 className="h-3.5 w-3.5 animate-spin text-ink-faint" aria-hidden="true" />
             <span>Processing…</span>

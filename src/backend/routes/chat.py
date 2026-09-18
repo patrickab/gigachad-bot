@@ -11,8 +11,9 @@ from lib.asset_store import AssetStore
 from lib.image_paths import resolve_chat_image_paths
 from lib.llm_resilience import api_query_resilient
 from lib.memory_store import MemoryStore
+from lib.tools import ToolOptions, stream_chat_with_tools
 
-from .deps import get_asset_store, get_memory_store, request_client, sse_event_stream
+from .deps import get_asset_store, get_memory_store, request_client, sse_event_stream, sse_tool_event_stream
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -30,6 +31,9 @@ class ChatRequest(BaseModel):
     downscale_images: bool = True
     messages: list[dict[str, str]] = []
     project_slug: str | None = None
+    """Tool names the model may call this turn. Empty means a plain, tool-free completion."""
+    tools: list[str] = []
+    tool_options: ToolOptions = ToolOptions()
 
 
 def _build_kwargs(req: ChatRequest) -> dict[str, Any]:
@@ -78,6 +82,23 @@ async def chat(
         kwargs = _build_kwargs(req)
         img = _resolve_images(c, req, assets)
         system_prompt = memory_store.augment_system_prompt(req.system_prompt, req.project_slug)
+        if req.tools:
+            # The tool loop owns its own model calls, so it needs the client to outlive this
+            # `with` block; `request_client` only guards conversation state, which the loop
+            # never touches (it passes an explicit message list on every call).
+            return sse_tool_event_stream(
+                stream_chat_with_tools(
+                    client=c,
+                    model=req.model,
+                    user_msg=req.user_msg,
+                    history=req.messages,
+                    system_prompt=system_prompt,
+                    img=img,
+                    enabled=req.tools,
+                    opts=req.tool_options,
+                    **kwargs,
+                )
+            )
         chunks = await run_in_threadpool(
             api_query_resilient,
             c,

@@ -176,6 +176,11 @@ export function createChatStream(req: ChatRequest): SSEStreamResult {
     messages: req.messages ?? [],
     project_slug: req.project_slug ?? null,
   }
+
+  if (req.tools?.length) {
+    body.tools = req.tools
+    body.tool_options = req.tool_options ?? {}
+  }
   if (req.reasoning_effort) body.reasoning_effort = req.reasoning_effort
 
   return createSSEStream("/chat", body)
