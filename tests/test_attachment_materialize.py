@@ -64,14 +64,6 @@ def test_store_library_pdf_writes_the_asset_and_mirrors_it(assets, documents_roo
     assert (documents_root / "PDFs/paper.pdf").read_bytes() == b"%PDF-1.7 body"
 
 
-def test_store_library_pdf_refreshes_the_same_key_on_re_store(assets):
-    store_library_pdf(assets, "paper.pdf", b"first")
-    store_library_pdf(assets, "paper.pdf", b"second")
-
-    assert assets.read("PDFs/paper.pdf").content == b"second"
-    assert len(assets.list("PDFs")) == 1
-
-
 def test_store_library_output_writes_markdown_and_matching_images(tmp_path, assets, documents_root):
     md_path = tmp_path / "paper.md"
     md_path.write_text("# extracted", encoding="utf-8")

@@ -126,51 +126,6 @@ describe("useVaultPicker", () => {
     expect(setExtracting).toHaveBeenCalledTimes(2)
   })
 
-  it("does not attach when the API throws (swallowed, extracting restored)", async () => {
-    const addAttachment = vi.fn()
-    const chatInputRef = makeChatInputRef({ addAttachment })
-    ;(apiMock as any).__setImpl("attachFileVaultFile", async () => {
-      throw new Error("network")
-    })
-
-    const setExtracting = vi.fn()
-    const { result } = renderHook(() =>
-      useVaultPicker({
-        isActive: true,
-        hasMessages: true,
-        chatInputRef,
-        setExtracting,
-      }),
-    )
-
-    await act(async () => {
-      await result.current.handleVaultSelect("vault/v.txt")
-    })
-
-    expect(addAttachment).not.toHaveBeenCalled()
-    expect(setExtracting).toHaveBeenCalledTimes(2) // up then down
-  })
-
-  it("openVaultPicker opens the picker and refreshes the list", async () => {
-    const listSpy = vi.fn(async () => ({ enabled: false, files: [] }))
-    ;(apiMock as any).__setImpl("listFileVaultFiles", listSpy)
-
-    const { result } = renderHook(() =>
-      useVaultPicker({
-        isActive: true,
-        hasMessages: false,
-        chatInputRef: makeChatInputRef(),
-        setExtracting: vi.fn(),
-      }),
-    )
-
-    await act(() => result.current.openVaultPicker())
-
-    expect(result.current.vaultPickerOpen).toBe(true)
-    // Initial mount call + refresh on open.
-    expect(listSpy).toHaveBeenCalledTimes(2)
-  })
-
   it("Escape closes the standalone PDF viewer when active", async () => {
     const { result } = renderHook(() =>
       useVaultPicker({

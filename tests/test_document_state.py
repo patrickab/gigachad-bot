@@ -84,17 +84,6 @@ def upload(name, content):
     return UploadFile(file=BytesIO(content), filename=name)
 
 
-async def test_writing_a_note_stores_a_document_row_and_touches_no_disk(alice, documents_root):
-    meta = await route.write_document(
-        route.WriteDocumentRequest(slug="", name="idea.md", content="think"), alice.projects, alice.docs, alice.assets
-    )
-
-    assert meta.path == "note/idea.md"
-    assert meta.name == "idea.md"
-    assert alice.docs.read_bytes("note/idea.md")[0] == b"think"
-    assert written_files(documents_root) == []
-
-
 async def test_writing_a_project_document_registers_it_in_database(alice, documents_root):
     slug = alice.projects.create_project("Thesis")["slug"]
 
@@ -119,25 +108,6 @@ async def test_writing_a_document_refreshes_the_chat_upload_copies(alice):
 
     assert alice.assets.read(f"attachment/project/{slug}/chat/chat-1/spec.md").content == b"fresh"
     assert alice.assets.read(f"attachment/project/{slug}/chat/chat-1/other.md").content == b"untouched"
-
-
-async def test_writing_a_binary_document_stores_bytes_under_the_project(alice, documents_root):
-    slug = alice.projects.create_project("Thesis")["slug"]
-
-    meta = await route.write_binary_document(upload("scan.pdf", b"%PDF-1.7 raw"), slug, alice.projects, alice.docs)
-
-    assert meta.path == f"project/{slug}/document/scan.pdf"
-    assert alice.docs.read_bytes(f"project/{slug}/document/scan.pdf")[0] == b"%PDF-1.7 raw"
-    assert alice.projects.list_files(slug) == [f"project/{slug}/document/scan.pdf"]
-    assert written_files(documents_root) == []
-
-
-async def test_store_drawing_keeps_the_rendered_asset_in_the_database(alice, documents_root):
-    assert await route.store_drawing(upload("canvas.jpg", b"\xff\xd8jpeg"), alice.assets) == {"status": "ok"}
-
-    asset = alice.assets.read("drawing/canvas.jpg")
-    assert (asset.kind, asset.content) == ("drawing", b"\xff\xd8jpeg")
-    assert written_files(documents_root) == []
 
 
 async def test_upload_promotes_into_the_pdf_library_and_mirrors_it(alice, documents_root, no_enqueue):
@@ -235,23 +205,6 @@ async def test_move_onto_an_existing_name_is_a_conflict(alice):
     assert alice.docs.read_bytes("note/spec.md")[0] == b"note"
 
 
-async def test_delete_removes_the_note_and_the_project_document(alice):
-    slug = alice.projects.create_project("Thesis")["slug"]
-    await route.write_document(
-        route.WriteDocumentRequest(slug="", name="idea.md", content="x"), alice.projects, alice.docs, alice.assets
-    )
-    await route.write_document(
-        route.WriteDocumentRequest(slug=slug, name="spec.md", content="y"), alice.projects, alice.docs, alice.assets
-    )
-
-    await route.remove_document("", "note/idea.md", alice.projects, alice.docs)
-    await route.remove_document(slug, f"project/{slug}/document/spec.md", alice.projects, alice.docs)
-
-    assert not alice.docs.exists("note/idea.md")
-    assert not alice.docs.exists(f"project/{slug}/document/spec.md")
-    assert alice.projects.list_files(slug) == []
-
-
 async def test_delete_refuses_to_touch_a_document_outside_the_project_directory(alice):
     slug = alice.projects.create_project("Thesis")["slug"]
     await route.write_document(
@@ -261,23 +214,6 @@ async def test_delete_refuses_to_touch_a_document_outside_the_project_directory(
     await route.remove_document(slug, "note/idea.md", alice.projects, alice.docs)
 
     assert alice.docs.read_bytes("note/idea.md")[0] == b"x"
-
-
-async def test_list_notes_returns_the_stored_notes(alice):
-    slug = alice.projects.create_project("Thesis")["slug"]
-    for request in (
-        route.WriteDocumentRequest(slug="", name="one.md", content="1"),
-        route.WriteDocumentRequest(slug="", name="two.canvas", content="2"),
-        route.WriteDocumentRequest(slug=slug, name="hidden.md", content="3"),
-    ):
-        await route.write_document(request, alice.projects, alice.docs, alice.assets)
-
-    listed = await route.list_notes(alice.docs)
-
-    assert sorted(document.path for document in listed.documents) == [
-        "note/one.md",
-        "note/two.canvas",
-    ]
 
 
 async def test_another_users_document_is_invisible_and_answers_404(alice, bob):

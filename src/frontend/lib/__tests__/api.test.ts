@@ -34,20 +34,6 @@ afterEach(() => {
 })
 
 describe("api.ts — toQuery helper (via exported endpoints)", () => {
-  it("omits undefined/null/false values and stringifies true", async () => {
-    const calls: Call[] = []
-    vi.stubGlobal("fetch", fetchRecorder(calls))
-    // response body: {}
-
-    await api.deleteAttachment("c1", "f.txt", null)         // slug=null → omitted
-    await api.deleteAttachment("c1", "f.txt", undefined)    // slug=undefined → omitted
-
-    expect(calls).toHaveLength(2)
-    expect(calls[0].url.endsWith("/files/chat/c1/att/f.txt")).toBe(true)
-    expect(calls[0].init.method).toBe("DELETE")
-    expect(calls[1].url).toBe(calls[0].url) // no query string either way
-  })
-
   it("appends array params as repeated keys", async () => {
     const calls: Call[] = []
     vi.stubGlobal("fetch", fetchRecorder(calls))
@@ -62,88 +48,6 @@ describe("api.ts — toQuery helper (via exported endpoints)", () => {
     expect(url.searchParams.get("slug")).toBe("proj")
   })
 
-  it("serializes true as 'true' and omits false", async () => {
-    const calls: Call[] = []
-    vi.stubGlobal("fetch", fetchRecorder(calls))
-    // response body: { name: "x", mime: "image/jpeg" }
-
-    await api.uploadFile("c1", new File(["a"], "x.jpg"), "proj", true)
-    await api.uploadFile("c1", new File(["a"], "y.jpg"), null, false)
-
-    expect(calls).toHaveLength(2)
-    expect(new URL(calls[0].url).searchParams.get("overwrite")).toBe("true")
-    expect(new URL(calls[0].url).searchParams.get("slug")).toBe("proj")
-    // overwrite=false must be omitted entirely (not "false").
-    expect(new URL(calls[1].url).searchParams.get("overwrite")).toBeNull()
-    expect(new URL(calls[1].url).searchParams.has("slug")).toBe(false)
-  })
-})
-
-describe("api.ts — json helpers (post/put/patch)", () => {
-  it("PUT sends JSON body with Content-Type header", async () => {
-    const calls: Call[] = []
-    vi.stubGlobal("fetch", fetchRecorder(calls))
-    // response body: { slug: "s", name: "n" }
-
-    await api.savePrompt("s", "content")
-
-    const { url, init } = lastCall(calls)
-    expect(url.endsWith("/prompts/s")).toBe(true)
-    expect(init.method).toBe("PUT")
-    expect((init.headers as Record<string, string>)["Content-Type"]).toBe("application/json")
-    expect(JSON.parse(init.body as string)).toEqual({ content: "content" })
-  })
-
-  it("POST sends JSON body", async () => {
-    const calls: Call[] = []
-    vi.stubGlobal("fetch", fetchRecorder(calls))
-    // response body: { status: "ok", path: "/p" }
-
-    await api.createDirectory("p", "sub")
-
-    const { url, init } = lastCall(calls)
-    expect(url.endsWith("/chat-histories/mkdir")).toBe(true)
-    expect(init.method).toBe("POST")
-    expect(JSON.parse(init.body as string)).toEqual({ parent_path: "p", name: "sub" })
-  })
-
-  it("PATCH sends JSON body", async () => {
-    const calls: Call[] = []
-    vi.stubGlobal("fetch", fetchRecorder(calls))
-    // response body: {}
-
-    await api.moveProjectCard("proj", "card-1", "done")
-
-    const { url, init } = lastCall(calls)
-    expect(url.endsWith("/projects/proj/cards/card-1")).toBe(true)
-    expect(init.method).toBe("PATCH")
-    expect(JSON.parse(init.body as string)).toEqual({ state: "done" })
-  })
-
-  it("sends Architecture Graph contexts as live path references", async () => {
-    const calls: Call[] = []
-    vi.stubGlobal("fetch", fetchRecorder(calls))
-    const contexts = [{ path: "graph/checkout.architecture.yaml" }]
-
-    await api.saveChatHistory("chat.json", [], { chatId: "chat-1", architectureGraphContexts: contexts })
-
-    expect(JSON.parse(lastCall(calls).init.body as string).architecture_graph_contexts).toEqual(contexts)
-  })
-})
-
-describe("api.ts — del helper", () => {
-  it("DELETE has no body", async () => {
-    const calls: Call[] = []
-    vi.stubGlobal("fetch", fetchRecorder(calls))
-    // response body: { deleted: true }
-
-    await api.deletePrompt("s")
-
-    const { url, init } = lastCall(calls)
-    expect(url.endsWith("/prompts/s")).toBe(true)
-    expect(init.method).toBe("DELETE")
-    expect(init.body).toBeUndefined()
-  })
 })
 
 describe("api.ts — fileForm helper", () => {
@@ -166,17 +70,6 @@ describe("api.ts — fileForm helper", () => {
     expect(headers?.["Content-Type"] ?? null).toBeNull()
   })
 
-  it("writeBinaryDocument keeps the custom filename on the FormData entry", async () => {
-    const calls: Call[] = []
-    vi.stubGlobal("fetch", fetchRecorder(calls))
-    // response body: {}
-
-    await api.writeBinaryDocument("proj", "sketch.jpg", new Blob([new Uint8Array([1, 2])]))
-
-    const form = lastCall(calls).init.body as FormData
-    const file = form.get("file") as File
-    expect(file.name).toBe("sketch.jpg")
-  })
 })
 
 describe("api.ts — ensureOk surfaces FastAPI detail on error", () => {

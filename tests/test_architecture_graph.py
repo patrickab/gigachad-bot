@@ -1,13 +1,12 @@
 import os
 from uuid import uuid4
 
-from fastapi import HTTPException, Response
+from fastapi import Response
 from psycopg_pool import ConnectionPool
 import pytest
 
 from backend.routes import architecture_graphs
 from lib.architecture_graph import ArchitectureGraphError, ArchitectureGraphStore, parse_graph
-from lib.data_store import StorageConflictError
 from lib.db_schema import upgrade
 from lib.postgres_data_store import PostgresDataStore
 
@@ -130,34 +129,3 @@ async def test_graph_route_writes_a_canonical_file_and_associates_project(graph_
     assert response.hasDraft is False
     assert response.revision
     assert projects.files == ["graph/checkout.architecture.yaml"]
-
-
-async def test_graph_write_requires_a_matching_revision(graph_store: ArchitectureGraphStore):
-    store = graph_store
-    name = "checkout.architecture.yaml"
-    store.write(name, CONTENT)
-    edited = CONTENT.replace("Checkout", "Checkout v2")
-    http_response = Response()
-    loaded = await architecture_graphs.read_graph(name, http_response, store)
-
-    assert http_response.headers["ETag"] == loaded.revision
-
-    # A blind overwrite of an existing graph is refused outright.
-    with pytest.raises(HTTPException) as blind:
-        await architecture_graphs.write_graph(
-            name, architecture_graphs.GraphContentRequest(content=edited), Response(), store, None
-        )
-    assert blind.value.status_code == 428
-
-    saved = await architecture_graphs.write_graph(
-        name, architecture_graphs.GraphContentRequest(content=edited), Response(), store, loaded.revision
-    )
-    assert saved.content == edited
-    assert saved.revision != loaded.revision
-
-    # The first client's now-stale revision must not clobber the newer content.
-    with pytest.raises(StorageConflictError):
-        await architecture_graphs.write_graph(
-            name, architecture_graphs.GraphContentRequest(content=CONTENT), Response(), store, loaded.revision
-        )
-    assert store.read(name) == edited

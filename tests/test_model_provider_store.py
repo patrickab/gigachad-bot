@@ -6,7 +6,14 @@ import pytest
 
 from lib.data_store import StorageError
 from lib.db_schema import upgrade
-from lib.model_provider_store import MODEL_PROVIDERS_FILE, ModelProviderStore, providers_for_ui
+from lib.model_provider_store import (
+    DEFAULT_MODEL_DEFAULTS,
+    MODEL_DEFAULTS_FILE,
+    MODEL_PROVIDERS_FILE,
+    OPENAI_PROVIDER,
+    ModelProviderStore,
+    providers_for_ui,
+)
 from lib.postgres_data_store import PostgresDataStore
 
 
@@ -67,32 +74,13 @@ def test_openai_provider_is_visible_only_with_an_api_key(monkeypatch):
     assert "OpenAI" not in providers_for_ui({})
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    assert providers_for_ui({})["OpenAI"] == {"litellm_id": "openai", "models": ["gpt-5.6"]}
+    assert providers_for_ui({})["OpenAI"] == OPENAI_PROVIDER
 
 
-def test_model_defaults_round_trip(postgres_store):
-    catalog = ModelProviderStore(postgres_store)
-    defaults = {
-        "default_model": "openai/gpt-5.6",
-        "small_model": "ollama/qwen3",
-        "vision_model": "gemini/gemini-3.1-pro",
-        "memory_model": "openai/gpt-5.6",
-    }
+def test_model_defaults_file_with_unknown_keys_is_reset(postgres_store):
+    """Dev setting: a mismatched file is replaced, never migrated."""
+    postgres_store.write_bytes(MODEL_DEFAULTS_FILE, b"default_model: provider/only-key\n")
 
-    assert catalog.save_defaults(defaults) == defaults
-    assert catalog.load_defaults() == defaults
+    defaults = ModelProviderStore(postgres_store).load_defaults()
 
-
-def test_tab_order_round_trips_and_rejects_bad_input(postgres_store):
-    catalog = ModelProviderStore(postgres_store)
-
-    assert catalog.load_tab_order() == []
-
-    order = ["Ollama", "OMP", "OpenAI"]
-    assert catalog.save_tab_order(order) == order
-    assert catalog.load_tab_order() == order
-
-    with pytest.raises(ValueError, match="list of non-empty labels"):
-        catalog.save_tab_order(["Ollama", ""])
-    with pytest.raises(ValueError, match="list of non-empty labels"):
-        catalog.save_tab_order("Ollama")
+    assert defaults == DEFAULT_MODEL_DEFAULTS

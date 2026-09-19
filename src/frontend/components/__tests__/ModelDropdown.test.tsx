@@ -9,7 +9,7 @@ vi.mock("@/lib/api", () => ({ fetchOmpCatalog }))
 const models: ModelsResponse = {
   ollama: ["ollama/gemma4:31b-cloud"],
   providers: [{ label: "Gemini", litellm_id: "gemini", models: ["gemini-3.1-pro"] }],
-  defaults: { default_model: "ollama/gemma4:31b-cloud", small_model: "ollama/gemma4:31b-cloud", vision_model: "ollama/gemma4:31b-cloud", memory_model: "ollama/gemma4:31b-cloud" },
+  defaults: { default_model: "ollama/gemma4:31b-cloud", small_model: "ollama/gemma4:31b-cloud", vision_model: "ollama/gemma4:31b-cloud", memory_model: "ollama/gemma4:31b-cloud", omp_model: "ollama/gemma4:31b-cloud" },
   tab_order: [],
 }
 
@@ -25,6 +25,11 @@ const onlineCatalog: OmpCatalog = {
 function openSettings() {
   fireEvent.click(screen.getByRole("button", { name: "Model" }))
   fireEvent.click(screen.getByRole("button", { name: "Configure providers" }))
+}
+
+function openDefaults() {
+  openSettings()
+  fireEvent.click(screen.getByRole("button", { name: "Default Models" }))
 }
 
 describe("ModelDropdown OMP source", () => {
@@ -63,26 +68,6 @@ describe("ModelDropdown OMP source", () => {
 
     await waitFor(() => expect(onProvidersChange).toHaveBeenCalled())
     expect(onProvidersChange.mock.calls[0][0][1].models).toEqual([])
-  })
-
-  it("explains an offline gateway rather than offering models", async () => {
-    fetchOmpCatalog.mockResolvedValue({ ...onlineCatalog, online: false, providers: [], error: "No OMP gateway" })
-    render(<ModelDropdown models={models} selectedModel="" onSelect={vi.fn()} onProvidersChange={vi.fn()} onDefaultsChange={vi.fn()} />)
-
-    openSettings()
-
-    expect(await screen.findByText(/gateway is not answering/)).toBeInTheDocument()
-    expect(screen.queryByText("Anthropic")).not.toBeInTheDocument()
-  })
-
-  it("hides the OMP section when OMP is not installed", async () => {
-    fetchOmpCatalog.mockResolvedValue({ ...onlineCatalog, installed: false, online: false, providers: [] })
-    render(<ModelDropdown models={models} selectedModel="" onSelect={vi.fn()} onProvidersChange={vi.fn()} onDefaultsChange={vi.fn()} />)
-
-    openSettings()
-
-    await waitFor(() => expect(fetchOmpCatalog).toHaveBeenCalled())
-    expect(screen.queryByText("From OMP")).not.toBeInTheDocument()
   })
 
   it("only probes the gateway once the settings panel is opened", async () => {

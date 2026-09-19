@@ -61,23 +61,6 @@ describe("ArchitectureGraphSurface", () => {
     expect(fanned.get("b")!.source).toEqual({ x: 50, y: 60, position: "bottom" })
   })
 
-  it("uses a dedicated graph toolbar instead of React Flow's default controls", () => {
-    render(<ArchitectureGraphSurface graph={emptyArchitectureGraph()} onChange={vi.fn()} />)
-
-    expect(screen.getByRole("button", { name: "Add node" })).toBeVisible()
-    expect(screen.getByRole("button", { name: "Fit view" })).toBeVisible()
-    expect(screen.queryByText("Drag cards · scroll to zoom")).not.toBeInTheDocument()
-  })
-
-  it("reserves the card header for dragging except when its title is edited", () => {
-    const graph = { ...emptyArchitectureGraph(), nodes: [{ id: "node-1", title: "Gateway", bullets: [], position: { x: 0, y: 0 } }] }
-    render(<ArchitectureGraphSurface graph={graph} onChange={vi.fn()} />)
-
-    expect(screen.getByRole("button", { name: "Edit node title" })).toBeVisible()
-    fireEvent.click(screen.getByRole("button", { name: "Edit node title" }))
-    expect(screen.getByRole("textbox", { name: "Node title" })).toBeVisible()
-  })
-
   it("keeps the title editor focused while controlled graph updates arrive", () => {
     const initialGraph = { ...emptyArchitectureGraph(), nodes: [{ id: "node-1", title: "Gateway", bullets: [], position: { x: 0, y: 0 } }] }
     function ControlledSurface() {

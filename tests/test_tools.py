@@ -5,7 +5,11 @@ from typing import Any
 
 import pytest
 
+from config import MODEL_DEFAULT_KEYS, TEST_MODEL
 from lib import tools
+from lib.agent_sandbox_adapter import SandboxScriptError
+from lib.image_paths import PromptImage
+from lib.sandbox_service import SandboxToolResult
 
 
 class ClientStub:
@@ -30,6 +34,33 @@ class ClientStub:
         return messages
 
 
+def test_source_label_extracts_a_stable_hostname_label() -> None:
+    assert tools.source_label("https://www.example.com/article", set()) == "example"
+
+
+class SandboxServiceStub:
+    def __init__(self, stdout: str, script_stdout: str | None = None) -> None:
+        self.model = TEST_MODEL
+        self.stdout = stdout
+        self.script_stdout = script_stdout
+        self.calls: list[dict[str, Any]] = []
+        self.scripts: list[str] = []
+
+    async def invoke(self, **kwargs: Any) -> SandboxToolResult:
+        self.calls.append(kwargs)
+        return SandboxToolResult("completed", "hidden transcript", "manifest", True)
+
+    async def run_script(self, script: str, **_kwargs: Any) -> str:
+        self.scripts.append(script)
+        if self.script_stdout is None:
+            raise SandboxScriptError("ModuleNotFoundError: no such module")
+        return self.script_stdout
+
+    def output_texts(self, _result: SandboxToolResult, *, media_type: str = "text/plain") -> tuple[str, ...]:
+        assert media_type == tools._PLOTLY_MEDIA_TYPE
+        return (self.stdout,)
+
+
 def _text_chunk(text: str) -> SimpleNamespace:
     return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=text, tool_calls=None))], usage=None)
 
@@ -46,7 +77,7 @@ def _usage_chunk(total: int) -> SimpleNamespace:
 async def _collect(**overrides: Any) -> list[tuple[str, Any]]:
     kwargs: dict[str, Any] = {
         "client": ClientStub(),
-        "model": "openai/gpt-4o",
+        "model": TEST_MODEL,
         "user_msg": "who won?",
         "history": [],
         "system_prompt": "be terse",
@@ -176,7 +207,7 @@ async def test_unknown_tool_names_are_never_offered(monkeypatch: pytest.MonkeyPa
 @pytest.mark.asyncio
 async def test_failed_tool_degrades_the_turn_instead_of_the_stream() -> None:
     """Argument validation and unknown names are contained by the dispatcher, not each tool."""
-    ctx = tools.ToolContext(client=ClientStub(), model="m", opts=tools.ToolOptions())
+    ctx = tools.ToolContext(client=ClientStub(), model=TEST_MODEL, opts=tools.ToolOptions())
 
     outcome = await tools.execute_tool("web_search", {"query": " "}, ctx)
     assert outcome.error == "Missing argument: `query`."
@@ -195,48 +226,105 @@ async def test_failed_tool_degrades_the_turn_instead_of_the_stream() -> None:
     assert (outcome.error, outcome.summary) == ("brave is down", "Failed")
 
 
-@pytest.mark.asyncio
-async def test_plot_tool_renders_a_real_figure() -> None:
-    """The plot tool actually executes Plotly code, not a stub — this is the real contract."""
-    ctx = tools.ToolContext(client=ClientStub(), model="m", opts=tools.ToolOptions())
-    code = "import numpy as np\nx = np.linspace(0, 1, 5)\nfig = go.Figure(go.Scatter(x=x, y=x**2))"
+def _script_reply(script: str) -> SimpleNamespace:
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=script))])
 
-    outcome = await tools.execute_tool("plot", {"code": code}, ctx)
+
+@pytest.mark.asyncio
+async def test_sandbox_plot_fast_path_runs_one_generated_script(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A self-contained chart needs one model call and one disposable execution, not a coding agent."""
+    sandbox = SandboxServiceStub("unused", script_stdout='{"data": [{"type": "bar"}], "layout": {}}')
+    fenced = "```python\nprint(fig.to_json())\n```"
+    seen: list[str] = []
+
+    def reply(*_args: Any, **kwargs: Any) -> SimpleNamespace:
+        seen.append(kwargs["model"])
+        return _script_reply(fenced)
+
+    monkeypatch.setattr(tools, "api_query_resilient", reply)
+    ctx = tools.ToolContext(
+        client=ClientStub(),
+        model=TEST_MODEL,
+        opts=tools.ToolOptions(),
+        chat_id="chat-1",
+        tool_call_id="call-1",
+        sandbox_service=sandbox,
+        small_model="provider/small-model",
+    )
+
+    outcome = await tools.execute_tool("sandbox_plot", {"brief": "Plot the trend"}, ctx)
+
+    assert outcome.summary == "1 trace"
+    assert outcome.detail == {
+        "figure": {"data": [{"type": "bar"}], "layout": {}},
+        "brief": "Plot the trend",
+        "script": "print(fig.to_json())",
+    }
+    assert sandbox.scripts == ["print(fig.to_json())"]
+    assert sandbox.calls == []  # The agent path stayed unused.
+    assert seen == ["provider/small-model"]  # The user's small / fast default writes the script.
+
+
+@pytest.mark.asyncio
+async def test_sandbox_plot_falls_back_to_the_agent_when_the_script_keeps_failing(monkeypatch: pytest.MonkeyPatch) -> None:
+    sandbox = SandboxServiceStub('{"data": [{"type": "scatter"}], "layout": {}}', script_stdout=None)
+    monkeypatch.setattr(tools, "api_query_resilient", lambda *_args, **_kwargs: _script_reply("print(fig.to_json())"))
+    ctx = tools.ToolContext(
+        client=ClientStub(),
+        model=TEST_MODEL,
+        opts=tools.ToolOptions(),
+        chat_id="chat-1",
+        tool_call_id="call-1",
+        sandbox_service=sandbox,
+    )
+
+    outcome = await tools.execute_tool("sandbox_plot", {"brief": "Plot the trend"}, ctx)
+
+    assert outcome.error is None
+    assert len(sandbox.scripts) == 2  # One repair attempt, then hand over.
+    assert [call["scope"] for call in sandbox.calls] == ["sandbox_plot"]
+
+
+@pytest.mark.asyncio
+async def test_sandbox_plot_with_images_uses_the_agent_path() -> None:
+    """Only the agent path can see prompt images, so image briefs skip the fast path."""
+    sandbox = SandboxServiceStub('{"data": [{"type": "scatter"}], "layout": {}, "frames": null}')
+    ctx = tools.ToolContext(
+        client=ClientStub(),
+        model=TEST_MODEL,
+        opts=tools.ToolOptions(),
+        chat_id="chat-1",
+        tool_call_id="call-1",
+        prompt_images=(PromptImage("photo.png", b"image"),),
+        sandbox_service=sandbox,
+    )
+
+    outcome = await tools.execute_tool("sandbox_plot", {"brief": "Plot the trend"}, ctx)
 
     assert outcome.error is None
     assert outcome.summary == "1 trace"
-    assert len(outcome.detail["figure"]["data"]) == 1
+    assert outcome.detail["brief"] == "Plot the trend"
+    assert outcome.detail["script"] == ""
+    assert "transcript" not in outcome.content
+    assert sandbox.scripts == []
+    # The images must reach the agent under the plot scope. Tuning knobs like
+    # thinking/lean are deliberately not pinned.
+    assert len(sandbox.calls) == 1
+    assert sandbox.calls[0]["scope"] == "sandbox_plot"
+    assert sandbox.calls[0]["prompt"] == "Plot the trend"
+    assert sandbox.calls[0]["prompt_images"] == (PromptImage("photo.png", b"image"),)
 
 
 @pytest.mark.asyncio
-async def test_plot_tool_reports_a_failure_without_killing_the_turn() -> None:
-    """Code that never assigns `fig` degrades to an error outcome, like any other tool failure."""
-    ctx = tools.ToolContext(client=ClientStub(), model="m", opts=tools.ToolOptions())
+async def test_sandbox_plot_invalid_output_fails_without_exposing_transcript() -> None:
+    sandbox = SandboxServiceStub("not json")
+    ctx = tools.ToolContext(client=ClientStub(), model=TEST_MODEL, opts=tools.ToolOptions(), sandbox_service=sandbox)
 
-    outcome = await tools.execute_tool("plot", {"code": "x = 1"}, ctx)
+    outcome = await tools.execute_tool("sandbox_plot", {"brief": "Plot the trend"}, ctx)
 
-    assert outcome.summary == "Failed"
-    assert "fig" in (outcome.error or "")
-
-
-def test_plot_executor_is_a_swappable_seam(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`PLOT_EXECUTOR` is the one seam a later containerized runner replaces.
-
-    `run_plot_code` must not know or care whether the swap happened.
-    """
-    calls: list[tuple[str, float]] = []
-
-    def fake_executor(script: str, timeout: float) -> str:
-        calls.append((script, timeout))
-        return f'{tools._PLOT_MARKER}\n{{"data": [], "layout": {{}}, "frames": null}}'
-
-    monkeypatch.setattr(tools, "PLOT_EXECUTOR", fake_executor)
-
-    figure = tools.run_plot_code("fig = go.Figure()")
-
-    assert figure == {"data": [], "layout": {}, "frames": None}
-    assert calls[0][1] == tools.PLOT_TIMEOUT_SECONDS
-    assert "fig = go.Figure()" in calls[0][0]
+    assert (outcome.summary, outcome.error) == ("Failed", "invalid_figure")
+    # The stub's transcript is what must not reach the model, so assert on that exact text.
+    assert "hidden transcript" not in outcome.content
 
 
 def _chat_app(monkeypatch: pytest.MonkeyPatch) -> Any:
@@ -252,6 +340,10 @@ def _chat_app(monkeypatch: pytest.MonkeyPatch) -> Any:
         augment_system_prompt=lambda prompt, slug: prompt  # noqa: ARG005 - signature parity
     )
     app.dependency_overrides[chat_route.get_asset_store] = lambda: None
+    app.dependency_overrides[chat_route.get_sandbox_service] = lambda: None
+    app.dependency_overrides[chat_route.get_model_provider_store] = lambda: SimpleNamespace(
+        load_defaults=lambda: {key: TEST_MODEL for key in MODEL_DEFAULT_KEYS}
+    )
     return app
 
 
@@ -299,7 +391,7 @@ def test_chat_route_streams_tool_events_over_sse(monkeypatch: pytest.MonkeyPatch
     response = client.post(
         "/api/chat",
         json={
-            "model": "openai/gpt-4o",
+            "model": TEST_MODEL,
             "chat_id": "c1",
             "user_msg": "search the web for cheesecake recipes",
             "tools": ["web_search"],
@@ -311,3 +403,50 @@ def test_chat_route_streams_tool_events_over_sse(monkeypatch: pytest.MonkeyPatch
     assert [name for name, _ in events] == ["tool_call", "tool_result", "token", "done"]
     assert '"name": "web_search"' in events[0][1]
     assert events[2][1] == "Try [ap]"
+
+
+@pytest.mark.asyncio
+async def test_workspace_agent_result_carries_sandbox_state_to_the_browser(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only sandbox-backed tools attach a `sandbox` payload; ordinary tools leave it null."""
+    rounds = [
+        iter([_tool_chunk(0, "call_1", "workspace_agent", '{"prompt": "write a script"}')]),
+        iter([_text_chunk("OK")]),
+    ]
+    monkeypatch.setattr(tools.litellm, "completion", lambda **_: rounds.pop(0))
+
+    events = await _collect(
+        enabled=["workspace_agent"], chat_id="chat-1", sandbox_service=SandboxServiceStub("unused")
+    )
+    (result,) = [data for name, data in events if name == "tool_result"]
+
+    assert result["name"] == "workspace_agent"
+    assert result["sandbox"]["status"] == "completed"
+    assert result["sandbox"]["workspace_changed"] is True
+
+    rounds = [
+        iter([_tool_chunk(0, "call_2", "web_search", '{"query": "x"}')]),
+        iter([_text_chunk("OK")]),
+    ]
+
+    async def fake_execute(*_: Any, **__: Any) -> tools.ToolOutcome:
+        return tools.ToolOutcome(content="evidence", summary="1 sources")
+
+    monkeypatch.setattr(tools, "execute_tool", fake_execute)
+
+    events = await _collect(enabled=["web_search"], chat_id="chat-1", sandbox_service=SandboxServiceStub("unused"))
+    (result,) = [data for name, data in events if name == "tool_result"]
+
+    assert result["sandbox"] is None
+
+
+@pytest.mark.asyncio
+async def test_workspace_agent_without_a_sandbox_service_degrades_instead_of_raising() -> None:
+    """A missing sandbox must become a tool error the model can talk about, never a dead stream."""
+    ctx = tools.ToolContext(
+        client=ClientStub(), model=TEST_MODEL, opts=tools.ToolOptions(), chat_id="chat-1", sandbox_service=None
+    )
+
+    outcome = await tools.execute_tool("workspace_agent", {"prompt": "do work"}, ctx)
+
+    assert outcome.error is not None
+    assert outcome.content

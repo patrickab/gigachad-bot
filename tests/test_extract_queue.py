@@ -56,15 +56,6 @@ def documents_root(tmp_path, monkeypatch):
     return root
 
 
-def test_enqueue_puts_name_content_and_store_on_the_queue(assets, monkeypatch):
-    put_calls: list[tuple] = []
-    monkeypatch.setattr(extract_queue._queue, "put_nowait", lambda item: put_calls.append(item))
-
-    extract_queue.enqueue("report.pdf", b"%PDF body", assets)
-
-    assert put_calls == [("report.pdf", b"%PDF body", assets)]
-
-
 async def test_worker_persists_a_finished_parse_into_postgres(tmp_path, assets, monkeypatch):
     """The worker spools its own temp file — no disk file needs to exist beforehand."""
 

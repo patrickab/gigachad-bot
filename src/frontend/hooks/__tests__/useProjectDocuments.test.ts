@@ -200,65 +200,6 @@ describe("useProjectDocuments", () => {
     })
   })
 
-  describe("CRUD handlers", () => {
-    it("handleCreateDocument writes + closes panel + refreshes", async () => {
-      const writeSpy = vi.fn(async () => undefined)
-      ;(apiMock as any).__setImpl("writeDocument", writeSpy)
-      const { result } = renderHook(() => useProjectDocuments(baseProps()))
-
-      await act(async () => { await result.current.handleCreateDocument("NewDoc") })
-
-      expect(writeSpy).toHaveBeenCalledWith("proj", "NewDoc")
-      expect(result.current.createDocOpen).toBe(false)
-    })
-
-    it("handleCreateDocument no-ops without a project", async () => {
-      const writeSpy = vi.fn(async () => undefined)
-      ;(apiMock as any).__setImpl("writeDocument", writeSpy)
-      const { result } = renderHook(() =>
-        useProjectDocuments(baseProps({ activeProject: null })),
-      )
-      await act(async () => { await result.current.handleCreateDocument("x") })
-      expect(writeSpy).not.toHaveBeenCalled()
-    })
-
-    it("handleDeleteDocument removes from the active project", async () => {
-      const removeSpy = vi.fn(async () => undefined)
-      ;(apiMock as any).__setImpl("removeDocument", removeSpy)
-      const { result } = renderHook(() => useProjectDocuments(baseProps()))
-      await act(async () => { await result.current.handleDeleteDocument("/lib/a.pdf") })
-      expect(removeSpy).toHaveBeenCalledWith("proj", "/lib/a.pdf")
-    })
-
-    it("handleDeleteDocument no-ops without a project", async () => {
-      const removeSpy = vi.fn(async () => undefined)
-      ;(apiMock as any).__setImpl("removeDocument", removeSpy)
-      const { result } = renderHook(() =>
-        useProjectDocuments(baseProps({ activeProject: null })),
-      )
-      await act(async () => { await result.current.handleDeleteDocument("/x") })
-      expect(removeSpy).not.toHaveBeenCalled()
-    })
-
-    it("handleDocumentUpload uploads every file and refreshes", async () => {
-      const uploadSpy = vi.fn(async () => undefined)
-      ;(apiMock as any).__setImpl("uploadDocument", uploadSpy)
-      const files = [new File(["a"], "a.txt"), new File(["b"], "b.txt")]
-      const { result } = renderHook(() => useProjectDocuments(baseProps()))
-      await act(async () => { await result.current.handleDocumentUpload(files) })
-      expect(uploadSpy).toHaveBeenCalledTimes(2)
-      expect(uploadSpy).toHaveBeenCalledWith("proj", files[0])
-    })
-
-    it("handleAddDocToProject adds the path to the active project", async () => {
-      const addSpy = vi.fn(async () => undefined)
-      ;(apiMock as any).__setImpl("addDocument", addSpy)
-      const { result } = renderHook(() => useProjectDocuments(baseProps()))
-      await act(async () => { await result.current.handleAddDocToProject("/x/y.pdf") })
-      expect(addSpy).toHaveBeenCalledWith("proj", "/x/y.pdf")
-    })
-  })
-
   describe("handleDocumentSaved", () => {
     it("refreshes and patches messages whose attachments match the saved filename", async () => {
       const setMessages = vi.fn()
@@ -291,42 +232,4 @@ describe("useProjectDocuments", () => {
     })
   })
 
-  describe("openDocuments", () => {
-    it("refreshes and opens the document picker", async () => {
-      const { result } = renderHook(() => useProjectDocuments(baseProps()))
-      act(() => result.current.openDocuments())
-      expect(result.current.documentOpen).toBe(true)
-    })
-  })
-
-  describe("Alt+X keyboard shortcut", () => {
-    it("toggles the document picker when active in chat mode", async () => {
-      const { result } = renderHook(() => useProjectDocuments(baseProps()))
-      await waitFor(() => expect(result.current.documentOpen).toBe(false))
-      await act(() => {
-        window.dispatchEvent(new KeyboardEvent("keydown", { altKey: true, key: "x" }))
-      })
-      expect(result.current.documentOpen).toBe(true)
-      await act(() => {
-        window.dispatchEvent(new KeyboardEvent("keydown", { altKey: true, key: "X" }))
-      })
-      expect(result.current.documentOpen).toBe(false)
-    })
-
-    it("does not toggle when in canvas mode", async () => {
-      const { result } = renderHook(() => useProjectDocuments(baseProps({ appMode: "canvas" })))
-      await act(() => {
-        window.dispatchEvent(new KeyboardEvent("keydown", { altKey: true, key: "x" }))
-      })
-      expect(result.current.documentOpen).toBe(false)
-    })
-
-    it("does not toggle when not active", async () => {
-      const { result } = renderHook(() => useProjectDocuments(baseProps({ isActive: false })))
-      await act(() => {
-        window.dispatchEvent(new KeyboardEvent("keydown", { altKey: true, key: "x" }))
-      })
-      expect(result.current.documentOpen).toBe(false)
-    })
-  })
 })

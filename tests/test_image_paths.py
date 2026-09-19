@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from lib.image_paths import resolve_chat_image_paths
+from lib.image_paths import resolve_chat_image_paths, resolve_sandbox_prompt_images
 
 
 class AssetStoreStub:
@@ -39,18 +39,12 @@ def test_resolve_chat_images_reads_postgres_upload_without_nextcloud_copy() -> N
     assert assets.read_keys == ["attachment/chat/chat-123/diagram.png"]
 
 
-def test_resolve_chat_images_downscales_postgres_bytes_without_nextcloud_copy() -> None:
+def test_resolve_sandbox_images_forwards_only_owned_image_uploads() -> None:
     assets = AssetStoreStub("attachment/chat/chat-123/diagram.png", b"image-bytes")
-    client = ImageClientStub()
+    assets.asset.kind = "upload"
+    assets.asset.mime = "image/png"
 
-    resolved = resolve_chat_image_paths(
-        client=client,
-        chat_id="chat-123",
-        slug=None,
-        filenames=["diagram.png"],
-        downscale=True,
-        assets=assets,
-    )
+    resolved = resolve_sandbox_prompt_images("chat-123", None, ["diagram.png", "../host-path.png"], assets)
 
-    assert resolved == ["data:image/jpeg;base64,cmVzaXplZA=="]
-    assert client.downscale_input == b"image-bytes"
+    assert [(image.filename, image.content) for image in resolved] == [("diagram.png", b"image-bytes")]
+    assert assets.read_keys == ["attachment/chat/chat-123/diagram.png"]

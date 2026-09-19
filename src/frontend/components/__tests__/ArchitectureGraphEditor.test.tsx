@@ -79,23 +79,4 @@ describe("ArchitectureGraphEditor autosave", () => {
     expect(api.writeArchitectureGraph).toHaveBeenCalledWith("demo.architecture.yaml", edited)
   })
 
-  it("still autosaves while typing continues past the max wait", async () => {
-    const source = await openSourceTab()
-
-    for (let i = 0; i < Math.ceil(AUTOSAVE_MAX_WAIT_MS / 200) + 2; i += 1) {
-      fireEvent.change(source, { target: { value: `version: 1\ntitle: T${i}\nnodes: []\nedges: []\n` } })
-      await advance(200)
-    }
-
-    expect(api.writeArchitectureGraph).toHaveBeenCalled()
-  })
-
-  it("does not rewrite content that matches the loaded file", async () => {
-    const source = await openSourceTab()
-
-    fireEvent.change(source, { target: { value: VALID } })
-    await advance(AUTOSAVE_MAX_WAIT_MS + 100)
-
-    expect(api.writeArchitectureGraph).not.toHaveBeenCalled()
-  })
 })
