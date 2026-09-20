@@ -88,17 +88,32 @@ export function PlotElement({ figure }: PlotElementProps) {
     const grid = style.getPropertyValue("--divider").trim()
     const sansFont = style.getPropertyValue("--font-sans").trim() || "system-ui, sans-serif"
     const axisDefaults = { gridcolor: grid, zerolinecolor: grid, linecolor: grid }
+    const themedAxes = Object.fromEntries(
+      Object.entries(modelLayout)
+        .filter(([key, value]) => /^(?:x|y)axis\d*$/.test(key) && value && typeof value === "object")
+        .map(([key, value]) => [key, { ...(value as Record<string, unknown>), ...axisDefaults }]),
+    )
+    const modelScene = modelLayout.scene as Record<string, unknown> | undefined
     return {
       margin: { t: 32, r: 16, b: 40, l: 48 },
       colorway: isLight ? LIGHT_COLORWAY : DARK_COLORWAY,
       ...modelLayout,
+      ...themedAxes,
       autosize: false,
       paper_bgcolor: "transparent",
       plot_bgcolor: "transparent",
-      font: { color: ink, family: sansFont, size: 12, ...(modelLayout.font as Record<string, unknown> | undefined) },
-      xaxis: { ...axisDefaults, ...(modelLayout.xaxis as Record<string, unknown> | undefined) },
-      yaxis: { ...axisDefaults, ...(modelLayout.yaxis as Record<string, unknown> | undefined) },
+      font: { ...(modelLayout.font as Record<string, unknown> | undefined), color: ink, family: sansFont, size: 12 },
+      xaxis: { ...(modelLayout.xaxis as Record<string, unknown> | undefined), ...axisDefaults },
+      yaxis: { ...(modelLayout.yaxis as Record<string, unknown> | undefined), ...axisDefaults },
       legend: { bgcolor: "transparent", ...(modelLayout.legend as Record<string, unknown> | undefined) },
+      scene: {
+        ...modelScene,
+        aspectmode: modelScene?.aspectmode ?? "cube",
+        bgcolor: "transparent",
+        xaxis: { ...(modelScene?.xaxis as Record<string, unknown> | undefined), ...axisDefaults },
+        yaxis: { ...(modelScene?.yaxis as Record<string, unknown> | undefined), ...axisDefaults },
+        zaxis: { ...(modelScene?.zaxis as Record<string, unknown> | undefined), ...axisDefaults },
+      },
       hoverlabel: {
         bgcolor: surfaceElevated,
         bordercolor: grid,

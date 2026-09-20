@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { ToolCallRecord } from "@/lib/types"
 
 const plotCalls = vi.hoisted(() => vi.fn())
+const codeBlockCalls = vi.hoisted(() => vi.fn())
 
 vi.mock("@/components/PlotElement", () => ({
   PlotElement: ({ figure }: { figure: unknown }) => {
@@ -11,22 +12,31 @@ vi.mock("@/components/PlotElement", () => ({
   },
 }))
 
+vi.mock("@/components/CodeBlock", () => ({
+  CodeBlock: ({ codeString, language }: { codeString: string; language: string }) => {
+    codeBlockCalls(codeString, language)
+    return <div data-testid="code-block">{codeString}</div>
+  },
+}))
+
 import { ToolCallElement } from "@/components/ToolCallElement"
 
 const sandboxPlotCall: ToolCallRecord = {
   id: "plot-1",
   name: "sandbox_plot",
-  arguments: { brief: "Compare the two trends" },
+  arguments: { code: "print(fig.to_json())" },
   status: "done",
   detail: {
     brief: "- Compare the two trends\n- Focus on the widening gap",
     figure: { data: [{ type: "scatter" }] },
+    script: "fig = go.Figure()\nprint(fig.to_json())",
   },
 }
 
 describe("ToolCallElement sandbox plots", () => {
   beforeEach(() => {
     plotCalls.mockReset()
+    codeBlockCalls.mockReset()
   })
 
   it("keeps the chart visible while the briefing disclosure toggles", () => {
@@ -43,6 +53,21 @@ describe("ToolCallElement sandbox plots", () => {
     expect(briefing).toHaveAttribute("aria-expanded", "true")
     expect(screen.getByText(/Compare the two trends/)).toBeInTheDocument()
     expect(screen.getByTestId("plot")).toBeInTheDocument()
+  })
+
+  it("keeps the script hidden until the code disclosure toggles", () => {
+    render(<ToolCallElement call={sandboxPlotCall} />)
+
+    expect(codeBlockCalls).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("code-block")).not.toBeInTheDocument()
+
+    const code = screen.getByRole("button", { name: "Code" })
+    expect(code).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(code)
+
+    expect(code).toHaveAttribute("aria-expanded", "true")
+    expect(codeBlockCalls).toHaveBeenCalledWith(sandboxPlotCall.detail!.script, "python")
+    expect(screen.getByTestId("code-block")).toBeInTheDocument()
   })
 
   it("retains the argument disclosure for other tools", () => {

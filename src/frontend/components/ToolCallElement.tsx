@@ -5,6 +5,7 @@ import { ChevronDown, Loader2, Wrench } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { TOOL_META } from "@/hooks/useModeState"
 import type { PlotFigure, SandboxToolResultRecord, ToolCallRecord, ToolSource } from "@/lib/types"
+import { CodeBlock } from "./CodeBlock"
 import { PlotElement } from "./PlotElement"
 import { SandboxOutputElement } from "./SandboxOutputElement"
 
@@ -17,7 +18,7 @@ interface ToolCallElementProps {
  *  catches a name this build no longer knows (an older saved chat). */
 type Presentation =
   | { family: "sources"; sources: ToolSource[]; costs: number | null }
-  | { family: "plot"; figure: PlotFigure | null; brief: string | null }
+  | { family: "plot"; figure: PlotFigure | null; brief: string | null; script: string | null }
   | { family: "workspace"; sandbox: SandboxToolResultRecord | null }
   | { family: "generic" }
 
@@ -33,7 +34,12 @@ function presentationOf(call: ToolCallRecord): Presentation {
         costs: typeof call.detail?.costs === "number" ? call.detail.costs : null,
       }
     case "sandbox_plot":
-      return { family: "plot", figure: call.detail?.figure ?? null, brief: call.detail?.brief ?? null }
+      return {
+        family: "plot",
+        figure: call.detail?.figure ?? null,
+        brief: call.detail?.brief ?? null,
+        script: call.detail?.script ?? null,
+      }
     case "workspace_agent":
       return { family: "workspace", sandbox: call.sandbox ?? null }
     default:
@@ -51,6 +57,7 @@ function primaryArgument(args: Record<string, unknown>): string {
 function ToolCallElementInner({ call }: ToolCallElementProps) {
   const [open, setOpen] = useState(false)
   const [briefOpen, setBriefOpen] = useState(false)
+  const [codeOpen, setCodeOpen] = useState(false)
   const shown = presentationOf(call)
   // Unknown saved names have no metadata; they keep the raw name and a neutral icon.
   const meta = TOOL_META[call.name]
@@ -131,6 +138,20 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
         {shown.figure && (
           <div className="px-6 pb-5 pl-[3.25rem]">
             <PlotElement figure={shown.figure} />
+          </div>
+        )}
+        {shown.script && (
+          <div className="px-6 pb-3 pl-[3.25rem]">
+            <button
+              type="button"
+              onClick={() => setCodeOpen((isOpen) => !isOpen)}
+              aria-expanded={codeOpen}
+              className="flex items-center gap-1 text-xs font-medium text-ink-subtle"
+            >
+              <ChevronDown className={cn("h-4 w-4 transition-transform", codeOpen && "rotate-180")} aria-hidden="true" />
+              <span>Code</span>
+            </button>
+            {codeOpen && <div className="mt-2"><CodeBlock codeString={shown.script} language="python" /></div>}
           </div>
         )}
         {/* The plot header has no disclosure, so a failed run states its error inline. */}

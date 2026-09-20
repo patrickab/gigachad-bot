@@ -1,3 +1,4 @@
+# ruff: noqa
 """Create interactive Plotly figures through the fast or persistent sandbox path."""
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from lib.llm_resilience import api_query_resilient
 from lib.sandbox_service import SandboxService
 from lib.toolcalling import ToolOutcome
 
-__all__ = ["PLOTLY_MEDIA_TYPE", "PlotContext", "create_sandbox_plot"]
+__all__ = ["PLOTLY_MEDIA_TYPE", "PlotContext", "create_sandbox_plot", "sandbox_plot_dependencies"]
 
 logger = logging.getLogger(__name__)
 
@@ -28,14 +29,15 @@ PLOTLY_MEDIA_TYPE = "application/vnd.plotly.v1+json"
 class PlotContext(Protocol):
     client: LLMClient
     model: str
-    small_model: str
+    user_msg: str
     sandbox_service: SandboxService | None
     chat_id: str
     tool_call_id: str
     prompt_images: tuple[PromptImage, ...]
+    history: tuple[dict[str, Any], ...]
 
 
-def _sandbox_plot_dependencies() -> str:
+def sandbox_plot_dependencies() -> str:
     """Read the packages installed by the sandbox-plot dependency extra."""
     pyproject_path = Path(__file__).resolve().parents[2] / "pyproject.toml"
     with pyproject_path.open("rb") as pyproject:
@@ -51,7 +53,7 @@ calls, revise that same file rather than starting elsewhere. Use the dependencie
 script to inspect and correct the chart before finishing.
 
 # Available Dependencies
-{_sandbox_plot_dependencies()}
+{sandbox_plot_dependencies()}
 
 # Figure requirements
 - Use numpy as np, plotly.express as px, and plotly.graph_objects as go.
@@ -71,43 +73,87 @@ Once `plot.json` is written, stop. Reply with one short sentence and no further 
 """
 
 _FAST_PLOT_SYSTEM = f"""\
+
 # Task
-Write one Python script that builds a single Plotly figure for the chart brief.
+
+The user is a visual learner and wants to understand a new concept. Optimize for visual understanding
+
+- Write a self-contained Python script that creates a visually appealing didactic Plotly figure for the user's request.
+- Prefer well-behaved, nontrivial examples with meaningful spatial structure. This creates illustrative examples.
+- Never use unnecessary symmetry, singularities, extreme values, or discontinuities in illustrative examples unless they are essential to the concept.
+
+- Optimize the plot for visual understanding and visual appeal.
 
 # Available dependencies
-{_sandbox_plot_dependencies()}
+{sandbox_plot_dependencies()}
 
-# Requirements
-- Assign the final Plotly figure to `fig`.
-- Use a clear title, labelled axes, and a concise legend. Prefer Plasma for continuous colour scales.
-- Do not set figure width, height, or autosize: the chart renders in a narrow chat card.
-- The script runs offline with no network and no input files. Derive or define any data it needs.
-- End with `print(fig.to_json())` and print nothing else.
+# Figure design
 
-Reply with the script only: no prose, no explanation, no code fences.
+- Use color schemes consistently across related panels.
+- For unrelated panels, use distinct, complementary colors.
+- Center titles and give the main title slightly more emphasis.
+- Ensure sufficient spacing between text and plots, avoid excessive whitespace.
+- For central variables, formulas, and values use clean, MathJax-safe LaTeX.
+
+- For related views, use consistent ranges, aspect ratios, and visual encoding.
+- Use concise titles/descriptions and readable axis labels with units where relevant.
+- Use subplots when they make a comparison/concept-decomposition clearer.
+
+- Do not mix unrelated color scales unless required by the data.
+- Never hardcode the page background, because the host provides theme-aware background and typography.
+
+# Script and output
+- Assign the final figure to fig.
+- Add concise imperative comments where appropriate for improving understandability for the user.
+- End with print(fig.to_json()) and print nothing else.
+- Return only the script, without prose or Markdown fences.
 """
 
-_SCRIPT_FENCE = re.compile(r"\A```(?:python)?\s*\n(?P<body>.*?)\n?```\s*\Z", re.DOTALL)
+_REPAIR_SYSTEM = """\
+Fix the broken Plotly script. Keep the chart it was meant to draw, assign the figure to `fig`, and
+end with `print(fig.to_json())` printing nothing else. Reply with the corrected script only: no
+prose, no explanation, no code fences.
+"""
+
+_SCRIPT_FENCE = re.compile(r"```(?:python)?[^\S\n]*\n(?P<body>.*?)\n?```", re.DOTALL)
 
 
 def _plot_script(text: str) -> str:
-    """Take the script out of a model reply that may still be fenced."""
-    match = _SCRIPT_FENCE.match(text.strip())
-    return (match.group("body") if match else text).strip()
+    """Take the fenced script when the model fences it, otherwise the whole reply."""
+    match = _SCRIPT_FENCE.search(text)
+    return match.group("body").strip() if match else text.strip()
 
 
-def _generate_plot_script(context: PlotContext, brief: str, previous_error: str = "") -> str:
-    request = brief if not previous_error else f"{brief}\n\n# Previous attempt failed\n{previous_error}\n\nReturn a corrected script."
+def _completion_text(context: PlotContext, user_msg: str, system_prompt: str, **kwargs: object) -> str:
+    """Run one blocking completion, surfacing a returned Exception as a raised one."""
     response = api_query_resilient(
         context.client,
-        user_msg=request,
-        user_msg_history=[],
-        system_prompt=_FAST_PLOT_SYSTEM,
-        model=context.small_model or context.model,
+        user_msg=user_msg,
+        system_prompt=system_prompt,
+        model=context.model,
+        **kwargs,
     )
     if isinstance(response, Exception):
         raise response
-    return _plot_script(response.choices[0].message.content or "")
+    return response.choices[0].message.content or ""
+
+
+def _generate_plot(context: PlotContext) -> str:
+    """Ask the chat model for the plot script, guided by the styling prompt."""
+    return _plot_script(
+        _completion_text(
+            context,
+            context.user_msg,
+            _FAST_PLOT_SYSTEM,
+            user_msg_history=list(context.history),
+        )
+    )
+
+
+def _repair_plot_script(context: PlotContext, script: str, error: str) -> str:
+    """Ask for a corrected script, given the broken one and what the sandbox reported."""
+    request = f"# Script\n{script}\n\n# Error\n{error}"
+    return _plot_script(_completion_text(context, request, _REPAIR_SYSTEM))
 
 
 def _figure_from_sandbox_outputs(outputs: tuple[str, ...]) -> dict[str, Any] | None:
@@ -121,27 +167,28 @@ def _figure_from_sandbox_outputs(outputs: tuple[str, ...]) -> dict[str, Any] | N
     return None
 
 
-async def _fast_plot(context: PlotContext, brief: str) -> tuple[dict[str, Any], str] | None:
-    """Generate and execute a disposable plot, or hand off to the persistent agent."""
-    error = ""
-    for _attempt in range(2):
-        try:
-            script = await asyncio.to_thread(_generate_plot_script, context, brief, error)
-            figure = json.loads(await context.sandbox_service.run_script(script))
-            if not isinstance(figure, dict) or not isinstance(figure.get("data"), list):
-                raise ValueError("script did not print a Plotly figure")
-            return figure, script
-        except (SandboxScriptError, ValueError, json.JSONDecodeError) as exc:
-            error = str(exc)[-2000:]
-            logger.info("fast plot attempt failed: %s", error)
-        except Exception:
-            logger.exception("fast plot generation failed")
-            return None
+async def _fast_plot(context: PlotContext) -> tuple[dict[str, Any], str] | None:
+    """Generate and execute a disposable plot, repairing a broken script once."""
+    try:
+        script = await asyncio.to_thread(_generate_plot, context)
+        for attempt in range(2):
+            try:
+                figure = json.loads(await context.sandbox_service.run_script(script))
+                if not isinstance(figure, dict) or not isinstance(figure.get("data"), list):
+                    raise ValueError("script did not print a Plotly figure")
+                return figure, script
+            except (SandboxScriptError, ValueError, json.JSONDecodeError) as exc:
+                error = str(exc)[-2000:]
+                logger.info("fast plot attempt failed: %s", error)
+            if attempt == 0:
+                script = await asyncio.to_thread(_repair_plot_script, context, script, error)
+    except Exception:
+        logger.exception("fast plot generation failed")
     return None
 
 
-async def create_sandbox_plot(brief: str, context: PlotContext) -> ToolOutcome:
-    """Create a Plotly figure, preferring the fast path for self-contained briefs."""
+async def create_sandbox_plot(context: PlotContext) -> ToolOutcome:
+    """Create a Plotly figure, then hand the answer round the code that drew it."""
     if context.sandbox_service is None:
         return ToolOutcome(
             content="The sandbox plot tool is not configured.",
@@ -151,14 +198,14 @@ async def create_sandbox_plot(brief: str, context: PlotContext) -> ToolOutcome:
 
     script = ""
     # Route prompt images through the agent, which alone can see them.
-    fast = None if context.prompt_images else await _fast_plot(context, brief)
+    fast = None if context.prompt_images else await _fast_plot(context)
     if fast is not None:
         figure, script = fast
     else:
         result = await context.sandbox_service.invoke(
             chat_id=context.chat_id,
             tool_call_id=context.tool_call_id,
-            prompt=brief,
+            prompt=context.user_msg,
             prompt_images=context.prompt_images,
             append_system=_SANDBOX_PLOT_APPEND_SYSTEM,
             scope="sandbox_plot",
@@ -175,14 +222,23 @@ async def create_sandbox_plot(brief: str, context: PlotContext) -> ToolOutcome:
 
     if figure is None:
         return ToolOutcome(
-            content="The sandbox plot did not produce a valid figure. Explain that briefly or try a clearer chart brief.",
+            content="The sandbox plot did not produce a valid figure. Explain that briefly or offer a simpler chart.",
             summary="Failed",
             error="invalid_figure",
         )
 
     traces = len(figure.get("data", [])) if isinstance(figure.get("data"), list) else 0
+    # The code is the model's only view of the chart, so describe it rather than re-run it.
+    seen = (
+        f"The chart rendered and the user can already see it ({traces} trace(s)). "
+        "This is the code that drew it. Describe what the user is looking at, including the colours "
+        "and the features that stand out. Do not repeat the code or offer to run it.\n\n"
+        f"```python\n{script}\n```"
+        if script
+        else f"Rendered an interactive plot with {traces} trace(s). The user can already see and interact with it."
+    )
     return ToolOutcome(
-        content=f"Rendered an interactive plot with {traces} trace(s). The user can already see and interact with it.",
+        content=seen,
         summary=f"{traces} trace{'s' if traces != 1 else ''}",
-        detail={"figure": figure, "brief": brief, "script": script},
+        detail={"figure": figure, "script": script},
     )

@@ -33,6 +33,14 @@ describe("PlotElement", () => {
     plotProps.length = 0
     resizeObservers.length = 0
     vi.stubGlobal("ResizeObserver", TestResizeObserver)
+    vi.stubGlobal("getComputedStyle", () => ({
+      getPropertyValue: (property: string) => ({
+        "--ink": "#1a1816",
+        "--surface-elevated": "#f5f0e8",
+        "--divider": "#d8d0c4",
+        "--font-sans": "Inter",
+      })[property] ?? "",
+    }))
   })
 
   afterEach(() => {
@@ -58,10 +66,40 @@ describe("PlotElement", () => {
       height: 300,
       autosize: false,
       hovermode: false,
+      scene: { aspectmode: "cube" },
       title: { text: "Host controlled" },
     })
 
     act(() => resizeObservers[0]!.resize(800))
     expect(plotProps.at(-1)!.layout).toMatchObject({ width: 800, height: 480, autosize: false })
+  })
+
+  it("keeps model-provided grid and scene chrome aligned with the active theme", () => {
+    render(
+      <PlotElement
+        figure={{
+          data: [],
+          layout: {
+            xaxis: { gridcolor: "white" },
+            xaxis2: { gridcolor: "white" },
+            scene: { bgcolor: "black", xaxis: { gridcolor: "white" } },
+          },
+        }}
+      />,
+    )
+
+    act(() => resizeObservers[0]!.resize(480))
+
+    expect(plotProps.at(-1)!.layout).toMatchObject({
+      paper_bgcolor: "transparent",
+      plot_bgcolor: "transparent",
+      font: { color: "#1a1816", family: "Inter" },
+      xaxis: { gridcolor: "#d8d0c4", zerolinecolor: "#d8d0c4", linecolor: "#d8d0c4" },
+      xaxis2: { gridcolor: "#d8d0c4", zerolinecolor: "#d8d0c4", linecolor: "#d8d0c4" },
+      scene: {
+        bgcolor: "transparent",
+        xaxis: { gridcolor: "#d8d0c4", zerolinecolor: "#d8d0c4", linecolor: "#d8d0c4" },
+      },
+    })
   })
 })

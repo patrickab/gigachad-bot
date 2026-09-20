@@ -50,6 +50,8 @@ class ToolContext:
     tool_call_id: str = ""
     prompt_images: tuple[PromptImage, ...] = ()
     small_model: str = ""
+    history: tuple[dict[str, Any], ...] = ()
+    user_msg: str = ""
 
 
 def _single_text_parameter(name: str, description: str, *, max_length: int | None = None) -> dict[str, Any]:
@@ -105,8 +107,8 @@ async def _deep_research(args: dict[str, Any], context: ToolContext) -> ToolOutc
         detail={"costs": costs, "report": report},
     )
 
-async def _sandbox_plot(args: dict[str, Any], context: ToolContext) -> ToolOutcome:
-    return await create_sandbox_plot(args["brief"], context)
+async def _sandbox_plot(_args: dict[str, Any], context: ToolContext) -> ToolOutcome:
+    return await create_sandbox_plot(context)
 
 
 async def _workspace_agent(args: dict[str, Any], context: ToolContext) -> ToolOutcome:
@@ -157,12 +159,9 @@ BUILTIN_TOOLS: ToolCatalog[ToolContext] = ToolCatalog(
         ToolDefinition(
             "sandbox_plot",
             "Create or revise an interactive Plotly chart in a persistent, chat-scoped sandbox workspace. "
-            "Use when the user asks for a chart, graph, or visual data analysis. Give a concise chart brief.",
-            _single_text_parameter(
-                "brief",
-                "Concise, self-contained instructions for the chart to create or revise.",
-                max_length=12000,
-            ),
+            "Use when the user asks for a chart, graph, or visual data analysis. Takes no arguments: the "
+            "conversation already carries the request.",
+            {"type": "object", "additionalProperties": False, "properties": {}},
             _sandbox_plot,
         ),
         ToolDefinition(
@@ -209,6 +208,8 @@ async def stream_chat_with_tools(
             tool_call_id=tool_call_id,
             prompt_images=prompt_images,
             small_model=small_model,
+            history=tuple(history),
+            user_msg=user_msg,
         )
 
     async for event in stream_tool_turn(

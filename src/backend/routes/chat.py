@@ -82,6 +82,8 @@ def _resolve_images(c: LLMClient, req: ChatRequest, assets: AssetStore) -> list 
     return paths if len(paths) > 1 else paths[0]
 
 
+
+
 @router.post("/chat")
 async def chat(
     req: ChatRequest,

@@ -285,8 +285,12 @@ async def test_arguments_outside_the_declared_schema_are_refused() -> None:
     outcome = await tools.BUILTIN_TOOLS.execute("web_search", {"query": "q", "site": "example.com"}, ctx)
     assert (outcome.error, outcome.summary) == ("Unknown argument: `site`.", "Rejected")
 
-    outcome = await tools.BUILTIN_TOOLS.execute("sandbox_plot", {"brief": "x" * 12001}, ctx)
-    assert (outcome.error, outcome.summary) == ("Argument too long: `brief`.", "Rejected")
+    outcome = await tools.BUILTIN_TOOLS.execute("sandbox_plot", {"code": "x"}, ctx)
+    assert (outcome.error, outcome.summary) == ("Unknown argument: `code`.", "Rejected")
+
+    # No declared properties means no arguments to reject: the call reaches the handler.
+    outcome = await tools.BUILTIN_TOOLS.execute("sandbox_plot", {}, ctx)
+    assert (outcome.summary, outcome.error) == ("Unavailable", "sandbox_service_unavailable")
 
     outcome = await tools.BUILTIN_TOOLS.execute("web_search", {"query": {"nested": "object"}}, ctx)
     assert outcome.error == "Invalid argument: `query` must be a string."
@@ -298,17 +302,20 @@ def _script_reply(script: str) -> SimpleNamespace:
 
 
 @pytest.mark.asyncio
-async def test_sandbox_plot_fast_path_runs_one_generated_script(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A self-contained chart needs one model call and one disposable execution, not a coding agent."""
+async def test_sandbox_plot_fast_path_hands_the_answer_round_the_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The chat model writes the script, then reads it back as the tool result."""
     sandbox = SandboxServiceStub("unused", script_stdout='{"data": [{"type": "bar"}], "layout": {}}')
     fenced = "```python\nprint(fig.to_json())\n```"
-    seen: list[str] = []
+    calls: list[dict[str, Any]] = []
 
     def reply(*_args: Any, **kwargs: Any) -> SimpleNamespace:
-        seen.append(kwargs["model"])
+        calls.append(kwargs)
         return _script_reply(fenced)
 
     monkeypatch.setattr(sandbox_plot, "api_query_resilient", reply)
+    history = ({"role": "user", "content": "earlier turn"}, {"role": "assistant", "content": "earlier reply"})
     ctx = tools.ToolContext(
         client=ClientStub(),
         model=TEST_MODEL,
@@ -317,26 +324,56 @@ async def test_sandbox_plot_fast_path_runs_one_generated_script(monkeypatch: pyt
         tool_call_id="call-1",
         sandbox_service=sandbox,
         small_model="provider/small-model",
+        history=history,
+        user_msg="Plot the trend",
     )
 
-    outcome = await tools.BUILTIN_TOOLS.execute("sandbox_plot", {"brief": "Plot the trend"}, ctx)
+    outcome = await tools.BUILTIN_TOOLS.execute("sandbox_plot", {}, ctx)
 
     assert outcome.summary == "1 trace"
     assert outcome.detail == {
         "figure": {"data": [{"type": "bar"}], "layout": {}},
-        "brief": "Plot the trend",
         "script": "print(fig.to_json())",
     }
+    assert "print(fig.to_json())" in outcome.content  # The code is the model's view of the chart.
+    assert "1 trace(s)" in outcome.content
     assert sandbox.scripts == ["print(fig.to_json())"]
     assert sandbox.calls == []  # The agent path stayed unused.
-    assert seen == ["provider/small-model"]  # The user's small / fast default writes the script.
+    assert len(calls) == 1
+    assert calls[0]["model"] == TEST_MODEL  # The chat model writes the script, not the small model.
+    assert calls[0]["user_msg"] == "Plot the trend"
+    assert calls[0]["user_msg_history"] == list(history)
+    assert "dependencies" in calls[0]["system_prompt"].lower()
 
 
 @pytest.mark.asyncio
-async def test_sandbox_plot_repairs_fast_script_once_before_using_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_sandbox_plot_treats_an_unfenced_reply_as_the_whole_script(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A model that forgets the fence still plots, and its code still reaches the answer round."""
+    sandbox = SandboxServiceStub("unused", script_stdout='{"data": [{"type": "bar"}], "layout": {}}')
+    monkeypatch.setattr(sandbox_plot, "api_query_resilient", lambda *_a, **_k: _script_reply("print(fig.to_json())"))
+    ctx = tools.ToolContext(
+        client=ClientStub(),
+        model=TEST_MODEL,
+        opts=tools.ToolOptions(),
+        chat_id="chat-1",
+        tool_call_id="call-1",
+        sandbox_service=sandbox,
+        user_msg="Plot the trend",
+    )
+
+    outcome = await tools.BUILTIN_TOOLS.execute("sandbox_plot", {}, ctx)
+
+    assert sandbox.scripts == ["print(fig.to_json())"]
+    assert "print(fig.to_json())" in outcome.content
+
+
+@pytest.mark.asyncio
+async def test_sandbox_plot_repairs_fast_script_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     sandbox = SandboxServiceStub("unused")
     generation_calls: list[dict[str, Any]] = []
-    replies = iter([_script_reply("broken script"), _script_reply("repaired script")])
+    replies = iter([_script_reply("```python\nbroken script\n```"), _script_reply("repaired script")])
 
     def reply(*_args: Any, **kwargs: Any) -> SimpleNamespace:
         generation_calls.append(kwargs)
@@ -358,18 +395,20 @@ async def test_sandbox_plot_repairs_fast_script_once_before_using_agent(monkeypa
         tool_call_id="call-1",
         sandbox_service=sandbox,
         small_model="provider/small-model",
+        user_msg="Plot the trend",
     )
 
-    outcome = await tools.BUILTIN_TOOLS.execute("sandbox_plot", {"brief": "Plot the trend"}, ctx)
+    outcome = await tools.BUILTIN_TOOLS.execute("sandbox_plot", {}, ctx)
 
     assert (outcome.summary, outcome.error) == ("1 trace", None)
     assert outcome.detail["script"] == "repaired script"
+    assert "repaired script" in outcome.content  # The answer round sees the code that actually ran.
     assert sandbox.scripts == ["broken script", "repaired script"]
     assert sandbox.calls == []
     assert len(generation_calls) == 2
     assert generation_calls[0]["user_msg"] == "Plot the trend"
     assert "repairable script failure" in generation_calls[1]["user_msg"]
-    assert [call["model"] for call in generation_calls] == ["provider/small-model", "provider/small-model"]
+    assert [call["model"] for call in generation_calls] == [TEST_MODEL, TEST_MODEL]
 
 
 @pytest.mark.asyncio
@@ -392,15 +431,16 @@ async def test_sandbox_plot_generation_exception_hands_off_without_repair(
         tool_call_id="call-1",
         sandbox_service=sandbox,
         small_model="provider/small-model",
+        user_msg="Plot the trend",
     )
 
-    outcome = await tools.BUILTIN_TOOLS.execute("sandbox_plot", {"brief": "Plot the trend"}, ctx)
+    outcome = await tools.BUILTIN_TOOLS.execute("sandbox_plot", {}, ctx)
 
     assert (outcome.summary, outcome.error) == ("1 trace", None)
     assert outcome.detail["script"] == ""
     assert sandbox.scripts == []
     assert len(generation_calls) == 1
-    assert generation_calls[0]["model"] == "provider/small-model"
+    assert generation_calls[0]["model"] == TEST_MODEL
     assert [call["scope"] for call in sandbox.calls] == ["sandbox_plot"]
 
 
@@ -415,19 +455,28 @@ async def test_sandbox_plot_falls_back_to_the_agent_when_the_script_keeps_failin
         chat_id="chat-1",
         tool_call_id="call-1",
         sandbox_service=sandbox,
+        user_msg="Plot the trend",
     )
 
-    outcome = await tools.BUILTIN_TOOLS.execute("sandbox_plot", {"brief": "Plot the trend"}, ctx)
+    outcome = await tools.BUILTIN_TOOLS.execute("sandbox_plot", {}, ctx)
 
     assert outcome.error is None
     assert len(sandbox.scripts) == 2  # One repair attempt, then hand over.
     assert [call["scope"] for call in sandbox.calls] == ["sandbox_plot"]
+    assert sandbox.calls[0]["prompt"] == "Plot the trend"
 
 
 @pytest.mark.asyncio
-async def test_sandbox_plot_with_images_uses_the_agent_path() -> None:
-    """Only the agent path can see prompt images, so image briefs skip the fast path."""
+async def test_sandbox_plot_with_images_uses_the_agent_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only the agent path can see prompt images, so image requests skip the fast path."""
     sandbox = SandboxServiceStub('{"data": [{"type": "scatter"}], "layout": {}, "frames": null}')
+    completions: list[dict[str, Any]] = []
+
+    def reply(*_args: Any, **kwargs: Any) -> SimpleNamespace:
+        completions.append(kwargs)
+        return _script_reply("print(fig.to_json())")
+
+    monkeypatch.setattr(sandbox_plot, "api_query_resilient", reply)
     ctx = tools.ToolContext(
         client=ClientStub(),
         model=TEST_MODEL,
@@ -436,16 +485,16 @@ async def test_sandbox_plot_with_images_uses_the_agent_path() -> None:
         tool_call_id="call-1",
         prompt_images=(PromptImage("photo.png", b"image"),),
         sandbox_service=sandbox,
+        user_msg="Plot the trend",
     )
 
-    outcome = await tools.BUILTIN_TOOLS.execute("sandbox_plot", {"brief": "Plot the trend"}, ctx)
+    outcome = await tools.BUILTIN_TOOLS.execute("sandbox_plot", {}, ctx)
 
     assert outcome.error is None
     assert outcome.summary == "1 trace"
-    assert outcome.detail["brief"] == "Plot the trend"
-    assert outcome.detail["script"] == ""
+    assert outcome.detail == {"figure": {"data": [{"type": "scatter"}], "layout": {}, "frames": None}, "script": ""}
     assert "transcript" not in outcome.content
-    assert sandbox.scripts == []
+    assert (sandbox.scripts, completions) == ([], [])
     # The images must reach the agent under the plot scope. Tuning knobs like
     # thinking/lean are deliberately not pinned.
     assert len(sandbox.calls) == 1
@@ -459,7 +508,7 @@ async def test_sandbox_plot_invalid_output_fails_without_exposing_transcript() -
     sandbox = SandboxServiceStub("not json")
     ctx = tools.ToolContext(client=ClientStub(), model=TEST_MODEL, opts=tools.ToolOptions(), sandbox_service=sandbox)
 
-    outcome = await tools.BUILTIN_TOOLS.execute("sandbox_plot", {"brief": "Plot the trend"}, ctx)
+    outcome = await tools.BUILTIN_TOOLS.execute("sandbox_plot", {}, ctx)
 
     assert (outcome.summary, outcome.error) == ("Failed", "invalid_figure")
     # The stub's transcript is what must not reach the model, so assert on that exact text.
@@ -477,7 +526,7 @@ async def test_sandbox_plot_runner_failure_reports_its_own_error_not_invalid_fig
     )
     ctx = tools.ToolContext(client=ClientStub(), model=TEST_MODEL, opts=tools.ToolOptions(), sandbox_service=sandbox)
 
-    outcome = await tools.BUILTIN_TOOLS.execute("sandbox_plot", {"brief": "Plot the trend"}, ctx)
+    outcome = await tools.BUILTIN_TOOLS.execute("sandbox_plot", {}, ctx)
 
     assert outcome.error == "runner_error"
     assert outcome.summary == "The workspace agent could not complete this run."
@@ -559,6 +608,8 @@ def test_chat_route_streams_tool_events_over_sse(monkeypatch: pytest.MonkeyPatch
     assert [name for name, _ in events] == ["tool_call", "tool_result", "token", "done"]
     assert '"name": "web_search"' in events[0][1]
     assert events[2][1] == "Try [ap]"
+
+
 
 
 @pytest.mark.asyncio

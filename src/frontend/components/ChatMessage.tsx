@@ -113,6 +113,14 @@ function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBran
       setTimeout(() => setCopied(false), 1500)
     })
   }
+  function handleNativeCopy(e: React.ClipboardEvent<HTMLDivElement>) {
+    const selectedText = window.getSelection()?.toString()
+    const renderedText = e.currentTarget.innerText ?? e.currentTarget.textContent ?? ""
+    if (!selectedText || selectedText.trim() !== renderedText.trim()) return
+    e.preventDefault()
+    e.clipboardData.setData("text/plain", content)
+  }
+
 
   const isResearchRunning = !isUser && isStreaming && research_steps && research_steps.length > 0
   const canRegenerate = !isUser && onRegenerate && !isStreaming && !search_result && !(research_steps && research_steps.length > 0)
@@ -143,7 +151,7 @@ function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBran
         {isUser ? (
           <>
             {content && (
-              <div className="text-ink">
+              <div className="text-ink" onCopy={handleNativeCopy}>
                 <LaTeXMarkdown content={content} />
               </div>
             )}
