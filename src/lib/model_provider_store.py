@@ -7,7 +7,7 @@ from typing import Any
 
 import yaml
 
-from config import MEMORY_MODEL, SMALL_MODEL, VISION_MODEL
+from config import MODEL_DEFAULT_KEYS, TEST_MODEL
 from lib import omp_source
 from lib.data_store import DataStore, StorageNotFoundError, read_text, write_text
 
@@ -24,12 +24,8 @@ DEFAULT_PROVIDERS = {
     "OpenRouter": {"litellm_id": "openrouter", "models": []},
 }
 OPENAI_PROVIDER = {"litellm_id": "openai", "models": ["gpt-5.6"]}
-DEFAULT_MODEL_DEFAULTS = {
-    "default_model": SMALL_MODEL,
-    "small_model": SMALL_MODEL,
-    "vision_model": VISION_MODEL,
-    "memory_model": MEMORY_MODEL,
-}
+# Seed values only: the user picks real models in the model selector, and those are authoritative.
+DEFAULT_MODEL_DEFAULTS = dict.fromkeys(MODEL_DEFAULT_KEYS, TEST_MODEL)
 
 
 def providers_for_ui(providers: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -115,21 +111,23 @@ class ModelProviderStore:
         return cleaned
 
     def load_defaults(self) -> dict[str, str]:
+        """Return the stored defaults, resetting any file that does not match the current keys."""
         try:
             raw, _ = read_text(self._store, self._key(MODEL_DEFAULTS_FILE))
-        except StorageNotFoundError:
-            defaults = dict(DEFAULT_MODEL_DEFAULTS)
-            self._write_defaults(defaults)
-            return defaults
-        try:
             defaults = yaml.safe_load(raw) or {}
+        except StorageNotFoundError:
+            defaults = {}
         except yaml.YAMLError as exc:
             raise ValueError("model-defaults.yaml is not valid YAML") from exc
-        invalid = set(defaults) != set(DEFAULT_MODEL_DEFAULTS) or any(
-            not isinstance(value, str) or not value.strip() for value in defaults.values()
+        usable = (
+            isinstance(defaults, dict)
+            and set(defaults) == set(DEFAULT_MODEL_DEFAULTS)
+            and all(isinstance(value, str) and value.strip() for value in defaults.values())
         )
-        if invalid:
-            raise ValueError("model-defaults.yaml must define each default model as a non-empty string")
+        if usable:
+            return defaults
+        defaults = dict(DEFAULT_MODEL_DEFAULTS)
+        self._write_defaults(defaults)
         return defaults
 
     def _write_defaults(self, defaults: dict[str, str]) -> None:

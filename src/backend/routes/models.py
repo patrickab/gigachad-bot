@@ -1,9 +1,9 @@
 import asyncio
 from typing import Annotated
 
+from fastapi import APIRouter, Depends, HTTPException, Path
 import httpx
 import litellm
-from fastapi import APIRouter, Depends, HTTPException, Path
 from llm_baseclient.config import discover_ollama_models
 from pydantic import BaseModel
 
@@ -77,7 +77,7 @@ class ModelDefaults(BaseModel):
     small_model: str
     vision_model: str
     memory_model: str
-
+    omp_model: str
 
 @router.put("/models/providers")
 async def save_model_providers(

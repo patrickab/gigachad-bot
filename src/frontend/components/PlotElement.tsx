@@ -1,7 +1,7 @@
 "use client"
 
 import dynamic from "next/dynamic"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 export interface PlotFigure {
   data?: unknown[]
@@ -11,7 +11,7 @@ export interface PlotFigure {
 
 // Plotly touches `window` and is sizable (a few hundred KB minified even with the
 // "dist-min" bundle), so it must load lazily, client-only, and only for chats that
-// actually call the `plot` tool — never in the server bundle or an idle chat's payload.
+// actually call the `sandbox_plot` tool — never in the server bundle or an idle chat's payload.
 const Plot = dynamic(
   async () => {
     const [{ default: createPlotlyComponent }, { default: Plotly }] = await Promise.all([
@@ -37,26 +37,49 @@ const COLORWAY_HUES = [250, 25, 150, 320, 200, 60]
 const DARK_COLORWAY = COLORWAY_HUES.map((h) => `oklch(72% 0.11 ${h})`)
 const LIGHT_COLORWAY = COLORWAY_HUES.map((h) => `oklch(52% 0.13 ${h})`)
 
-/** Renders a figure the `plot` tool produced. All styling here is defaults only — every value
- *  sits behind a spread of `figure.layout` (or, per-axis/font/etc., merged with the model's own
- *  sub-keys winning), so a figure that already sets its own colors, fonts, or template renders
- *  unchanged. The tool's prompt and the model's expected `fig` shape are untouched; this only
- *  answers "what does an unstyled figure look like by default", the same job `plotly.io.templates`
- *  does, just matching this app's tokens instead of a stock template. */
+function chartHeightFor(width: number) {
+  return Math.min(560, Math.max(300, Math.round(width * 0.6)))
+}
+
+/** Renders a figure the `sandbox_plot` tool produced. Theme values remain defaults the model can
+ *  override; dimensions and hover behavior are controlled by the chat host. */
 export function PlotElement({ figure }: PlotElementProps) {
+  const hostRef = useRef<HTMLDivElement>(null)
+  const [hostWidth, setHostWidth] = useState(0)
   // `getComputedStyle` below reads CSS custom properties once; toggling the `.light` class on
   // <html> doesn't re-run this component (nothing in its own props/state changed), so without
   // this the figure keeps the palette it was born with, colorway included. `themeTick` gives the
   // memo below a dependency that actually changes when the theme does.
   const [themeTick, setThemeTick] = useState(0)
+
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+
+    const updateWidth = (width: number) => setHostWidth((current) => {
+      const next = Math.round(width)
+      return next > 0 && next !== current ? next : current
+    })
+    const observer = new ResizeObserver(([entry]) => updateWidth(entry?.contentRect.width ?? host.clientWidth))
+    observer.observe(host)
+    updateWidth(host.clientWidth)
+    return () => observer.disconnect()
+  }, [])
+
   useEffect(() => {
     const observer = new MutationObserver(() => setThemeTick((t) => t + 1))
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] })
     return () => observer.disconnect()
   }, [])
 
+  const dimensions = useMemo(
+    () => hostWidth > 0 ? { width: hostWidth, height: chartHeightFor(hostWidth) } : null,
+    [hostWidth],
+  )
+
   const layout = useMemo(() => {
-    if (typeof window === "undefined") return figure.layout ?? {}
+    const { autosize: _autosize, height: _height, width: _width, ...modelLayout } = figure.layout ?? {}
+    if (typeof window === "undefined") return modelLayout
     const root = document.documentElement
     const style = getComputedStyle(root)
     const isLight = root.classList.contains("light")
@@ -68,33 +91,37 @@ export function PlotElement({ figure }: PlotElementProps) {
     return {
       margin: { t: 32, r: 16, b: 40, l: 48 },
       colorway: isLight ? LIGHT_COLORWAY : DARK_COLORWAY,
-      ...figure.layout,
-      autosize: true,
+      ...modelLayout,
+      autosize: false,
       paper_bgcolor: "transparent",
       plot_bgcolor: "transparent",
-      font: { color: ink, family: sansFont, size: 12, ...(figure.layout?.font as Record<string, unknown> | undefined) },
-      xaxis: { ...axisDefaults, ...(figure.layout?.xaxis as Record<string, unknown> | undefined) },
-      yaxis: { ...axisDefaults, ...(figure.layout?.yaxis as Record<string, unknown> | undefined) },
-      legend: { bgcolor: "transparent", ...(figure.layout?.legend as Record<string, unknown> | undefined) },
+      font: { color: ink, family: sansFont, size: 12, ...(modelLayout.font as Record<string, unknown> | undefined) },
+      xaxis: { ...axisDefaults, ...(modelLayout.xaxis as Record<string, unknown> | undefined) },
+      yaxis: { ...axisDefaults, ...(modelLayout.yaxis as Record<string, unknown> | undefined) },
+      legend: { bgcolor: "transparent", ...(modelLayout.legend as Record<string, unknown> | undefined) },
       hoverlabel: {
         bgcolor: surfaceElevated,
         bordercolor: grid,
         font: { color: ink, family: sansFont },
-        ...(figure.layout?.hoverlabel as Record<string, unknown> | undefined),
+        ...(modelLayout.hoverlabel as Record<string, unknown> | undefined),
       },
+      hovermode: false,
+      width: dimensions?.width,
+      height: dimensions?.height,
     }
-  }, [figure.layout, themeTick])
+  }, [dimensions, figure.layout, themeTick])
 
   return (
-    <div className="w-full overflow-hidden rounded-lg">
-      <Plot
-        data={figure.data ?? []}
-        layout={layout}
-        frames={figure.frames}
-        config={{ responsive: true, displaylogo: false, displayModeBar: "hover" }}
-        useResizeHandler
-        style={{ width: "100%", height: "420px" }}
-      />
+    <div ref={hostRef} className="w-full overflow-hidden rounded-lg">
+      {dimensions && (
+        <Plot
+          data={figure.data ?? []}
+          layout={layout}
+          frames={figure.frames}
+          config={{ responsive: false, displaylogo: false, displayModeBar: "hover" }}
+          style={{ width: "100%", height: `${dimensions.height}px` }}
+        />
+      )}
     </div>
   )
 }

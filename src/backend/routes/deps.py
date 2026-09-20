@@ -1,8 +1,12 @@
 import asyncio
 import base64
+from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
+import hashlib
 import json
-from typing import Any, AsyncIterator, Iterator
+import os
+import re
+from typing import Any
 
 from fastapi import Depends
 from llm_baseclient.client import LLMClient
@@ -10,17 +14,20 @@ from sse_starlette.sse import EventSourceResponse
 
 from backend.identity import RequestIdentity, get_request_identity
 from config import get_data_store, get_postgres_pool, seed_prompts
+from lib.agent_sandbox_adapter import AgentSandboxRunnerAdapter, FakeSandboxRunner, SandboxRunner
 from lib.architecture_graph import ArchitectureGraphStore
 from lib.asset_store import AssetStore
 from lib.chat_store import ChatStore
 from lib.data_store import DataStore
 from lib.file_vault import FileVault, PostgresVaultRootRepository
-from lib.image_paths import _DATA_URI_RE
 from lib.memory_store import MemoryStore
 from lib.model_provider_store import ModelProviderStore
 from lib.project_store import ProjectStore
 from lib.prompt_store import PromptStore
+from lib.sandbox_service import SandboxRuntimeState, SandboxService
 from lib.storage_namespace import MODEL
+
+_DATA_URI_RE = re.compile(r"data:image/\w+;base64,(.+)")
 
 _client: LLMClient | None = None
 
@@ -48,6 +55,36 @@ def get_chat_store(identity: RequestIdentity = Depends(get_request_identity)) ->
     return ChatStore(data_store=_store(identity))
 
 
+_sandbox_runner: SandboxRunner | None = None
+# Keep runtime state beyond request scope until chat save.
+_sandbox_runtime = SandboxRuntimeState()
+
+
+def get_sandbox_runner() -> SandboxRunner:
+    global _sandbox_runner
+    if _sandbox_runner is None:
+        use_fake = os.environ.get("GIGACHAD_SANDBOX_EXECUTION", "1").lower() in {"0", "false", "no"}
+        use_fake = use_fake or os.environ.get("GIGACHAD_SANDBOX_FAKE", "").lower() in {"1", "true", "yes"}
+        _sandbox_runner = FakeSandboxRunner() if use_fake else AgentSandboxRunnerAdapter()
+    return _sandbox_runner
+
+
+def get_sandbox_service(identity: RequestIdentity = Depends(get_request_identity)) -> SandboxService:
+    data_store = _store(identity)
+    assets = AssetStore(get_postgres_pool(), identity.user_id, device_id=identity.device_id)
+    slot_prefix = hashlib.sha256(str(identity.user_id).encode("utf-8")).hexdigest()[:16]
+    defaults = get_model_provider_store(identity).load_defaults()
+    return SandboxService(
+        data_store=data_store,
+        asset_store=assets,
+        runner=get_sandbox_runner(),
+        runtime_state=_sandbox_runtime,
+        model=defaults["omp_model"],
+        profile="gigachad",
+        slot_prefix=slot_prefix,
+    )
+
+
 def get_project_store(identity: RequestIdentity = Depends(get_request_identity)) -> ProjectStore:
     data_store = _store(identity)
     chats = ChatStore(data_store=data_store)
@@ -61,7 +98,8 @@ def get_architecture_graph_store(
 
 
 def get_memory_store(identity: RequestIdentity = Depends(get_request_identity)) -> MemoryStore:
-    return MemoryStore(data_store=_store(identity))
+    defaults = get_model_provider_store(identity).load_defaults()
+    return MemoryStore(data_store=_store(identity), model=defaults["memory_model"])
 
 
 def get_file_vault(identity: RequestIdentity = Depends(get_request_identity)) -> FileVault:

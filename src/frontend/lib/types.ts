@@ -42,19 +42,102 @@ export interface ArchitectureGraphContextReference {
   path: string
 }
 
+/** The tools this build can actually offer the model. */
+export type ToolName = "web_search" | "deep_research" | "sandbox_plot" | "workspace_agent"
+
+/** A name read back from a saved chat. Widened past `ToolName` so old chats still render,
+ *  while only `ToolName` may be sent as an offered tool. */
+export type ToolCallName = ToolName | (string & {})
+
+/** A cited source as it reaches the browser: the backend strips the model-only evidence
+ *  `content` from every source before emitting the result event. */
+export interface ToolSource {
+  label?: string
+  title: string
+  url: string
+}
+
+/** Plotly figure JSON exactly as `fig.to_json()` writes it; Plotly validates the interior. */
+export interface PlotFigure {
+  data?: unknown[]
+  layout?: Record<string, unknown>
+  frames?: unknown[]
+}
+
+export interface WebSearchDetail {
+  /** The planned query actually sent to Brave, not the model's raw argument. */
+  search_query?: string
+}
+
+export interface DeepResearchDetail {
+  costs?: number
+  report?: string
+}
+
+export interface SandboxPlotDetail {
+  figure?: PlotFigure
+  brief?: string
+  script?: string
+}
+
+/** Per-tool detail, flattened: one record holds whichever tool ran, and saved chats may carry
+ *  keys this build no longer writes. */
+export type ToolCallDetail = WebSearchDetail & DeepResearchDetail & SandboxPlotDetail & Record<string, unknown>
+
+/** `tool_call` SSE payload: the call the model made, before it runs. */
+export interface ToolCallStarted {
+  id: string
+  name: ToolName
+  arguments: Record<string, unknown>
+}
+
+/** `tool_result` SSE payload: every field is always present on the wire. It carries no
+ *  arguments or status — the browser keeps the arguments it already has and derives status. */
+export interface ToolCallResult {
+  id: string
+  name: ToolName
+  /** Short result headline, e.g. "8 sources". */
+  summary: string
+  sources: ToolSource[]
+  detail: ToolCallDetail
+  error: string | null
+  sandbox: SandboxToolResultRecord | null
+}
+
 /** A tool invocation the model made on its own, rendered as its own chat element.
  *  Unlike a QA pair it has no user turn: it is produced mid-answer and belongs to the
  *  assistant message it interrupted, so pair indexing and branching stay untouched. */
 export interface ToolCallRecord {
   id: string
-  name: string
+  name: ToolCallName
   arguments: Record<string, unknown>
   status: "running" | "done" | "error"
-  /** Short result headline, e.g. "8 sources". */
   summary?: string
-  sources?: WebSearchResultItem[]
-  detail?: Record<string, unknown>
+  sources?: ToolSource[]
+  detail?: ToolCallDetail
   error?: string | null
+  sandbox?: SandboxToolResultRecord | null
+}
+
+export interface SandboxAssetRef {
+  sha256: string
+  media_type: string
+  size_bytes: number
+  asset_path: string
+}
+
+export interface SandboxOutputRecord {
+  display_id: string | null
+  title: string | null
+  mime_bundle: Record<string, SandboxAssetRef>
+  text: string | null
+}
+
+export interface SandboxToolResultRecord {
+  status: "completed" | "failed" | "cancelled"
+  manifest_id: string | null
+  workspace_changed: boolean
+  outputs: SandboxOutputRecord[]
 }
 
 export interface Message {
@@ -81,13 +164,14 @@ export interface ChatRequest {
   messages?: { role: string; content: string }[]
   project_slug?: string | null
   /** Tool names the model may call this turn. Empty or absent means a tool-free completion. */
-  tools?: string[]
+  tools?: ToolName[]
   tool_options?: ToolOptions
 }
 
 /** Tool settings the browser already owns as tab config, forwarded per request. */
 export interface ToolOptions {
   search_system_instructions?: string
+  search_domain?: string
   research_fast_model?: string
   research_smart_model?: string
   research_strategic_model?: string
@@ -107,7 +191,7 @@ export interface ModelsResponse {
 
 export interface ReasoningSupport { supports_reasoning: boolean }
 
-export interface ModelDefaults { default_model: string; small_model: string; vision_model: string; memory_model: string }
+export interface ModelDefaults { default_model: string; small_model: string; vision_model: string; memory_model: string; omp_model: string }
 
 export interface ModelProvider {
   label: string

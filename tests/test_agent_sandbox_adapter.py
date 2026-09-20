@@ -1,119 +1,134 @@
 import hashlib
-import io
 from pathlib import Path
-import tarfile
 
+from agent_sandbox import PythonScriptError, SandboxInvocation, SandboxManifest, SandboxRun
+from agent_sandbox.manifest import Execution, Outputs, WorkspaceRef
 import pytest
 
 from config import TEST_MODEL
-from lib.agent_sandbox_adapter import (
-    AgentSandboxRunnerAdapter,
-    AssetRef,
-    FakeSandboxRunner,
-    SandboxInvocation,
-    SandboxStateRecord,
-)
-from lib.image_paths import PromptImage
+from lib.agent_sandbox_adapter import AgentSandboxRunnerAdapter, FakeSandboxRunner, SandboxScriptError
 
-# The model id is caller-supplied configuration; these tests only check it is forwarded.
 SANDBOX_MODEL = TEST_MODEL
 
 
-def test_real_adapter_promotes_plot_json_from_workspace_archive() -> None:
-    content = b'{"data": [], "layout": {}}'
-    archive_bytes = io.BytesIO()
-    with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
-        entry = tarfile.TarInfo("plot.json")
-        entry.size = len(content)
-        archive.addfile(entry, io.BytesIO(content))
+def _manifest(workspace_sha256: str, *, manifest_id: str = "next-manifest") -> SandboxManifest:
+    return SandboxManifest(
+        schema_version=1,
+        manifest_id=manifest_id,
+        profile="test",
+        runtime_fingerprint="test",
+        workspace=WorkspaceRef(snapshot_asset_id=None, sha256=workspace_sha256),
+        outputs=Outputs(events_asset_id=None, artifacts=()),
+        omp_sessions={},
+        execution=Execution(run_id="call-2", status="completed", exit_code=0, created_at=""),
+    )
 
-    output, assets = AgentSandboxRunnerAdapter._plot_output(archive_bytes.getvalue())
 
-    assert output is not None
-    ref = output.mime_bundle["application/vnd.plotly.v1+json"]
-    assert assets == {ref.sha256: content}
+class SandboxStub:
+    def __init__(self, result: SandboxRun) -> None:
+        self.result = result
+        self.invocations: list[SandboxInvocation] = []
+        self.script_calls: list[tuple[str, str, float, str]] = []
+
+    def run(self, invocation: SandboxInvocation) -> SandboxRun:
+        self.invocations.append(invocation)
+        return self.result
+
+    def run_python_script(self, interpreter: str, script: str, timeout: float, *, profile_name: str) -> str:
+        self.script_calls.append((interpreter, script, timeout, profile_name))
+        return "script output"
 
 
 @pytest.mark.asyncio
-async def test_real_adapter_restores_archive_captures_workspace_and_releases(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from agent_sandbox.invocation import SandboxRun as ExternalRun
-    from agent_sandbox.manifest import Execution, Outputs, SandboxManifest, WorkspaceRef
-    from agent_sandbox.outputs import StreamEvent
+async def test_adapter_bridges_native_invocations_through_one_injected_sandbox(tmp_path: Path) -> None:
+    capture = tmp_path / "capture.tar"
+    capture.write_bytes(b"captured workspace")
+    native_run = SandboxRun(
+        status="completed",
+        summary="done",
+        next_manifest=_manifest(hashlib.sha256(capture.read_bytes()).hexdigest()),
+        outputs=(),
+        workspace_changed=True,
+        capture_path=str(capture),
+    )
+    sandbox = SandboxStub(native_run)
+    adapter = AgentSandboxRunnerAdapter(sandbox)  # type: ignore[arg-type]
+    invocation = SandboxInvocation(
+        slot_key="isolated-chat",
+        profile_name="test",
+        prompt="trivial OMP command",
+        run_id="call-2",
+        model=SANDBOX_MODEL,
+        thinking="medium",
+    )
 
-    prior_bytes = b"previous workspace"
-    next_bytes = b"next workspace"
-    capture = tmp_path / "captured.tar"
-    capture.write_bytes(next_bytes)
-    calls = []
-    restored_bytes = []
+    assert await adapter.run(invocation) is native_run
+    assert await adapter.run_script("print('ok')", profile="test", interpreter="venv", timeout=12.0) == "script output"
+    assert sandbox.invocations == [invocation]
+    assert sandbox.script_calls == [("venv", "print('ok')", 12.0, "test")]
 
-    def fake_run(external_invocation):
-        calls.append(external_invocation)
-        restored_bytes.append(Path(external_invocation.workspace_archive_path).read_bytes())
-        return ExternalRun(
-            status="completed",
-            summary="done",
-            next_manifest=SandboxManifest(
-                schema_version=1,
-                manifest_id="next-manifest",
-                profile="test",
-                runtime_fingerprint="test",
-                workspace=WorkspaceRef(snapshot_asset_id=None, sha256=hashlib.sha256(next_bytes).hexdigest()),
-                outputs=Outputs(events_asset_id=None, artifacts=()),
-                omp_sessions={},
-                execution=Execution(run_id="call-2", status="completed", exit_code=0, created_at=""),
-            ),
-            outputs=(StreamEvent(name="stdout", text="workspace restored"),),
-            workspace_changed=True,
-            capture_path=str(capture),
-        )
+    native_run.release()
+    assert not capture.exists()
 
-    monkeypatch.setattr("agent_sandbox.invocation.run", fake_run)
-    adapter = AgentSandboxRunnerAdapter()
-    prior_ref = AssetRef(hashlib.sha256(prior_bytes).hexdigest(), "application/x-tar", len(prior_bytes))
-    result = await adapter.run(
+
+@pytest.mark.asyncio
+async def test_adapter_maps_native_script_errors(tmp_path: Path) -> None:
+    capture = tmp_path / "capture.tar"
+    capture.write_bytes(b"captured workspace")
+    native_run = SandboxRun(
+        status="completed",
+        summary="done",
+        next_manifest=_manifest(hashlib.sha256(capture.read_bytes()).hexdigest()),
+        outputs=(),
+        workspace_changed=True,
+        capture_path=str(capture),
+    )
+    sandbox = SandboxStub(native_run)
+
+    def fail_script(*_args, **_kwargs) -> str:
+        raise PythonScriptError("native detail")
+
+    sandbox.run_python_script = fail_script  # type: ignore[method-assign]
+    with pytest.raises(SandboxScriptError, match="native detail"):
+        await AgentSandboxRunnerAdapter(sandbox).run_script("bad", profile="test", interpreter="venv", timeout=1.0)  # type: ignore[arg-type]
+
+    native_run.release()
+
+
+@pytest.mark.asyncio
+async def test_fake_runner_returns_a_native_capture_lease() -> None:
+    runner = FakeSandboxRunner()
+    result = await runner.run(
         SandboxInvocation(
-            slot_key="isolated-chat",
-            run_id="call-2",
-            profile="test",
+            slot_key="fake-chat",
+            profile_name="test",
+            prompt="create",
+            run_id="call-1",
             model=SANDBOX_MODEL,
             thinking="medium",
-            prompt="trivial OMP command",
-            prior_manifest=SandboxStateRecord(version=1, workspace=prior_ref),
-            prior_assets={prior_ref.sha256: prior_bytes},
-            prompt_images=(PromptImage("photo.png", b"image-bytes"),),
-            append_system="follow the caller's policy",
         )
     )
 
-    assert calls[0].workspace_archive_path is not None
-    assert restored_bytes == [prior_bytes]
-    assert calls[0].active_manifest is not None
-    assert calls[0].prompt_images == (("photo.png", b"image-bytes"),)
-    assert calls[0].model == SANDBOX_MODEL
-    assert calls[0].thinking == "medium"
-    assert calls[0].append_system == "follow the caller's policy"
-    assert result.manifest.workspace is not None
-    assert result.manifest.workspace.sha256 == hashlib.sha256(next_bytes).hexdigest()
-    assert result.new_assets[result.manifest.workspace.sha256] == next_bytes
-    assert result.outputs[0].text == "workspace restored"
-    output_ref = result.outputs[0].mime_bundle["text/plain"]
-    assert output_ref.sha256 == hashlib.sha256(b"workspace restored").hexdigest()
-    assert result.new_assets[output_ref.sha256] == b"workspace restored"
+    capture = Path(result.capture_path)
+    assert result.next_manifest.workspace.snapshot_asset_id is None
     assert capture.exists()
-    assert not Path(calls[0].workspace_archive_path).exists()
-    assert result.release is not None
+    assert result.read_workspace_file("workspace.txt") == b"> create\n"
+
     result.release()
     assert not capture.exists()
 
 
-def test_sandbox_dependency_uses_real_runner_unless_explicitly_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sandbox_dependency_reuses_one_native_runner_until_application_restart(monkeypatch: pytest.MonkeyPatch) -> None:
     from backend.routes import deps
 
     monkeypatch.setattr(deps, "_sandbox_runner", None)
     monkeypatch.delenv("GIGACHAD_SANDBOX_EXECUTION", raising=False)
     monkeypatch.delenv("GIGACHAD_SANDBOX_FAKE", raising=False)
-    assert isinstance(deps.get_sandbox_runner(), AgentSandboxRunnerAdapter)
+
+    first = deps.get_sandbox_runner()
+    assert isinstance(first, AgentSandboxRunnerAdapter)
+    assert deps.get_sandbox_runner() is first
+    assert first._sandbox is not None
 
     monkeypatch.setattr(deps, "_sandbox_runner", None)
     monkeypatch.setenv("GIGACHAD_SANDBOX_FAKE", "true")

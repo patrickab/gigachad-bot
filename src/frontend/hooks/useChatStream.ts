@@ -3,8 +3,14 @@
 import { useCallback, useRef, useState } from "react"
 import { createChatStream } from "@/lib/api"
 import { deactivateSentImages } from "@/lib/attachments"
-import { createFlushBatcher } from "@/lib/streaming"
-import type { ChatRequest, Message, ToolCallRecord, Usage } from "@/lib/types"
+import {
+  addUsage,
+  applyChatStreamEvent,
+  createFlushBatcher,
+  decodeChatStreamEvent,
+  settleRunningToolCalls,
+} from "@/lib/streaming"
+import type { ChatRequest, Message, Usage } from "@/lib/types"
 
 export interface UseChatStreamReturn {
   messages: Message[]
@@ -44,43 +50,35 @@ export function useChatStream(): UseChatStreamReturn {
       setIsStreaming(true)
 
       const batch = createFlushBatcher(setMessages, assistantMsg)
+      // Every exit from the loop below settles the tool cards still marked running.
+      let unresolvedReason = "Stream ended before the tool returned"
 
       try {
         const stream = createChatStream({ ...req, messages: history })
         abortRef.current = stream.abort
 
         for await (const event of stream) {
-          if (event.event === "token") {
-            assistantMsg.content += event.data
-            batch.schedule()
-          } else if (event.event === "tool_call") {
-            const call = JSON.parse(event.data) as { id: string; name: string; arguments: Record<string, unknown> }
-            assistantMsg.tool_calls = [...(assistantMsg.tool_calls ?? []), { ...call, status: "running" }]
-            batch.schedule()
-          } else if (event.event === "tool_result") {
-            const result = JSON.parse(event.data) as Omit<ToolCallRecord, "arguments" | "status">
-            assistantMsg.tool_calls = (assistantMsg.tool_calls ?? []).map((c) =>
-              c.id === result.id ? { ...c, ...result, status: result.error ? "error" : "done" } : c
-            )
-            batch.schedule()
-          } else if (event.event === "usage") {
-            const turn: Usage = JSON.parse(event.data)
-            setTotalUsage((prev) => ({
-              prompt_tokens: prev.prompt_tokens + turn.prompt_tokens,
-              completion_tokens: prev.completion_tokens + turn.completion_tokens,
-              total_tokens: prev.total_tokens + turn.total_tokens,
-            }))
-          } else if (event.event === "done") {
-            break
-          } else if (event.event === "error") {
-            assistantMsg.content += `\n\nError: ${event.data}`
-            batch.schedule()
+          const decoded = decodeChatStreamEvent(event)
+          if (!decoded) continue
+          if (decoded.kind === "usage") {
+            setTotalUsage((prev) => addUsage(prev, decoded.usage))
+            continue
+          }
+          if (decoded.kind === "done") break
+          applyChatStreamEvent(assistantMsg, decoded)
+          batch.schedule()
+          // An error event is the turn's last content: append it, then stop reading.
+          if (decoded.kind === "error") {
+            unresolvedReason = decoded.message
             break
           }
         }
       } catch (e) {
-        if ((e as Error).name === "AbortError") return
+        // Abort and transport failure are both swallowed: the turn keeps what it streamed.
+        const err = e as Error
+        unresolvedReason = err.name === "AbortError" ? "Cancelled" : err.message || "Stream failed"
       } finally {
+        settleRunningToolCalls(assistantMsg, unresolvedReason)
         batch.final()
         setMessages((prev) => deactivateSentImages(prev, req.img_paths))
         setIsStreaming(false)

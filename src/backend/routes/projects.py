@@ -4,8 +4,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from backend.routes.architecture_graphs import ArchitectureGraphContextReferenceModel
-from backend.routes.deps import get_project_store
+from backend.routes.deps import get_asset_store, get_project_store, get_sandbox_service
+from backend.routes.histories import cleanup_after_delete
+from lib.asset_store import AssetStore
 from lib.project_store import ProjectStore
+from lib.sandbox_service import SandboxService
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -110,9 +113,16 @@ async def update_project(slug: str, req: UpdateProjectRequest, store: ProjectSto
 
 
 @router.delete("/{slug}")
-async def delete_project(slug: str, store: ProjectStore = Depends(get_project_store)) -> dict[str, str]:
+async def delete_project(
+    slug: str,
+    store: ProjectStore = Depends(get_project_store),
+    assets: AssetStore = Depends(get_asset_store),
+    sandbox_service: SandboxService = Depends(get_sandbox_service),
+) -> dict[str, str]:
     try:
-        return store.delete_project(slug)
+        return await cleanup_after_delete(
+            assets, sandbox_service, lambda cleanup: store.delete_project(slug, cleanup_uploads_fn=cleanup)
+        )
     except FileNotFoundError:
         raise _not_found()
 
@@ -173,9 +183,13 @@ async def save_project_tab(
     filename: str,
     data: SaveTabRequest,
     store: ProjectStore = Depends(get_project_store),
+    sandbox_service: SandboxService = Depends(get_sandbox_service),
 ) -> dict[str, str]:
     try:
-        return store.save_tab(slug, filename, data.model_dump())
+        result = store.save_tab(slug, filename, data.model_dump())
+        if data.chat_id:
+            await sandbox_service.checkpoint(chat_id=data.chat_id)
+        return result
     except FileNotFoundError:
         raise _not_found()
     except ValueError as e:

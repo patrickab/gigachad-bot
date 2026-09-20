@@ -1,5 +1,7 @@
+from pathlib import PurePosixPath
 import re
 
+from agent_sandbox import PromptImage
 from llm_baseclient.client import LLMClient
 
 from lib.asset_store import AssetStore
@@ -8,6 +10,19 @@ from lib.storage_namespace import chat_upload
 
 _DEFAULT_MAX_TOKENS = 2048
 _DATA_URI_RE = re.compile(r"data:image/\w+;base64,(.+)")
+
+
+def resolve_sandbox_prompt_images(chat_id: str, slug: str | None, filenames: list[str], assets: AssetStore) -> tuple[PromptImage, ...]:
+    """Read only this user's chat uploads for the workspace agent."""
+    images: list[PromptImage] = []
+    for name in filenames:
+        try:
+            asset = assets.read(chat_upload(chat_id, name, slug))
+        except (StorageNotFoundError, ValueError):
+            continue
+        if asset.kind == "upload" and asset.mime.startswith("image/") and asset.content is not None:
+            images.append(PromptImage(PurePosixPath(asset.logical_path).name, asset.content))
+    return tuple(images)
 
 
 def _read_image_asset(assets: AssetStore, chat_id: str, slug: str | None, name: str) -> bytes | None:
@@ -37,4 +52,3 @@ def resolve_chat_image_paths(
             continue
         images.append(client.downscale_img(content, max_tokens=max_tokens) if downscale else content)
     return images
-

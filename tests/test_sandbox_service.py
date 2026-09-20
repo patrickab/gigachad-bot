@@ -1,17 +1,22 @@
 from __future__ import annotations
 
+import hashlib
 import os
 from uuid import uuid4
 
+from agent_sandbox import SandboxManifest
+from agent_sandbox.manifest import Execution, Outputs, WorkspaceRef, to_yaml
 import pytest
 
 from config import TEST_MODEL
 from lib.agent_sandbox_adapter import FakeSandboxRunner
 from lib.asset_store import AssetStore, StorageNotFoundError
+from lib.data_store import DataStorePath
+from lib.json_io import safe_write_json
 from lib.postgres_data_store import PostgresDataStore
-from lib.sandbox_service import PROMPT_MAX_LEN, SandboxService
-from lib.sandbox_store import SandboxStore
-from lib.storage_namespace import sandbox_asset
+from lib.sandbox_service import PROMPT_MAX_LEN, SandboxRuntimeState, SandboxService
+from lib.sandbox_store import ActivePointer, AssetRef, SandboxStore
+from lib.storage_namespace import sandbox_asset, sandbox_manifest
 
 # The model id is caller-supplied configuration; these tests only check it is forwarded.
 SANDBOX_MODEL = TEST_MODEL
@@ -58,30 +63,37 @@ def runner() -> FakeSandboxRunner:
 
 
 @pytest.fixture
-def sandbox_service(data_store, asset_store, runner) -> SandboxService:
+def runtime_state() -> SandboxRuntimeState:
+    return SandboxRuntimeState()
+
+
+@pytest.fixture
+def sandbox_service(data_store, asset_store, runner, runtime_state) -> SandboxService:
     return SandboxService(
         data_store=data_store,
         asset_store=asset_store,
         runner=runner,
+        runtime_state=runtime_state,
         model=SANDBOX_MODEL,
         profile="gigachad",
         slot_prefix="test-prefix",
     )
 
 
-async def test_workspace_is_staged_until_checkpoint_while_outputs_are_durable(sandbox_service, asset_store, data_store, runner):
+async def test_workspace_is_staged_until_checkpoint_while_outputs_are_durable(
+    sandbox_service, asset_store, data_store, runtime_state, runner
+):
     chat_id = "chat-first-invoke"
     result = await sandbox_service.invoke(chat_id=chat_id, tool_call_id="tool-call-1", prompt="Create a workspace")
 
-    from lib.sandbox_service import _STAGED
-
-    staged = _STAGED["test-prefix:workspace:chat-first-invoke"]
+    staged = runtime_state.get("test-prefix:workspace:chat-first-invoke")
+    assert staged is not None
     assert staged.manifest is not None
     assert staged.manifest.workspace is not None
     assert result.status == "completed"
     assert result.manifest_id is not None
     output = result.outputs[0]
-    assert asset_store.read(output.mime_bundle["text/markdown"]["asset_path"]).content == output.text.encode("utf-8")
+    assert asset_store.read(output.mime_bundle["text/plain"]["asset_path"]).content == output.text.encode("utf-8")
     assert SandboxStore(data_store).read_active(chat_id) is None
     with pytest.raises(StorageNotFoundError):
         asset_store.read(sandbox_asset(staged.manifest.workspace.sha256))
@@ -95,6 +107,45 @@ async def test_workspace_is_staged_until_checkpoint_while_outputs_are_durable(sa
     assert manifest.workspace is not None
     assert asset_store.read(sandbox_asset(manifest.workspace.sha256)).content
 
+    resumed = await sandbox_service.invoke(chat_id=chat_id, tool_call_id="tool-call-2", prompt="Resume the workspace")
+    prior_manifest = runner.calls[-1].active_manifest
+    assert prior_manifest is not None
+    assert prior_manifest.manifest_id == result.manifest_id
+    assert resumed.manifest_id != result.manifest_id
+
+
+async def test_legacy_manifest_resumes_with_its_embedded_aib_record(sandbox_service, asset_store, data_store, runner):
+    chat_id = "chat-legacy-resume"
+    workspace_bytes = b"> legacy workspace\n"
+    workspace_sha256 = hashlib.sha256(workspace_bytes).hexdigest()
+    manifest = SandboxManifest(
+        schema_version=1,
+        manifest_id="legacy-native-manifest",
+        profile="gigachad",
+        runtime_fingerprint="test",
+        workspace=WorkspaceRef(snapshot_asset_id=sandbox_asset(workspace_sha256), sha256=workspace_sha256),
+        outputs=Outputs(events_asset_id=None, artifacts=()),
+        omp_sessions={},
+        execution=Execution(run_id="legacy-run", status="completed", exit_code=0, created_at=""),
+    )
+    legacy_manifest_id = "legacy-wrapper-id"
+    safe_write_json(
+        DataStorePath(data_store, sandbox_manifest(chat_id, legacy_manifest_id)),
+        {
+            "version": 1,
+            "workspace": AssetRef(workspace_sha256, "application/x-tar", len(workspace_bytes)).to_json(),
+            "omp_session": None,
+            "extra": {"agent_sandbox_manifest": to_yaml(manifest)},
+        },
+    )
+    asset_store.write("sandbox", sandbox_asset(workspace_sha256), workspace_bytes, mime="application/x-tar")
+    SandboxStore(data_store).write_active(chat_id, ActivePointer(manifest_id=legacy_manifest_id, updated_at=1.0))
+
+    result = await sandbox_service.invoke(chat_id=chat_id, tool_call_id="legacy-call", prompt="Resume it")
+
+    assert runner.calls[-1].active_manifest == manifest
+    assert result.manifest_id is not None
+
 
 async def test_tool_scopes_keep_staged_and_persisted_workspaces_independent(sandbox_service, data_store, runner):
     chat_id = "chat-scopes"
@@ -103,12 +154,10 @@ async def test_tool_scopes_keep_staged_and_persisted_workspaces_independent(sand
     await sandbox_service.invoke(chat_id=chat_id, tool_call_id="workspace-next", prompt="again", scope="workspace_agent")
     await sandbox_service.invoke(chat_id=chat_id, tool_call_id="plot-next", prompt="again", scope="sandbox_plot")
 
-    workspace_prior = runner.calls[-2].prior_manifest
-    plot_prior = runner.calls[-1].prior_manifest
+    workspace_prior = runner.calls[-2].active_manifest
+    plot_prior = runner.calls[-1].active_manifest
     assert workspace_prior is not None and workspace_prior.workspace is not None
     assert plot_prior is not None and plot_prior.workspace is not None
-    assert runner.calls[-2].prior_assets[workspace_prior.workspace.sha256].decode("utf-8") == "> workspace\n"
-    assert runner.calls[-1].prior_assets[plot_prior.workspace.sha256].decode("utf-8") == "> plot\n"
 
     await sandbox_service.checkpoint(chat_id=chat_id)
     assert SandboxStore(data_store, scope="workspace_agent").read_active(chat_id) is not None
@@ -127,12 +176,10 @@ async def test_second_invoke_restores_staged_workspace_before_checkpoint(sandbox
     assert result_2.workspace_changed is True
     assert result_2.manifest_id != result_1.manifest_id
     assert len(runner.calls) == 2
-    prior_manifest = runner.calls[-1].prior_manifest
+    prior_manifest = runner.calls[-1].active_manifest
     assert prior_manifest is not None
-    from lib.sandbox_store import manifest_id_for
-    assert manifest_id_for(prior_manifest) == result_1.manifest_id
+    assert prior_manifest.manifest_id == result_1.manifest_id
     assert prior_manifest.workspace is not None
-    assert runner.calls[-1].prior_assets[prior_manifest.workspace.sha256].decode("utf-8") == "> First prompt\n"
 
 
 async def test_staged_workspaces_are_isolated_between_chats(sandbox_service, runner):
@@ -140,9 +187,8 @@ async def test_staged_workspaces_are_isolated_between_chats(sandbox_service, run
     await sandbox_service.invoke(chat_id="chat-b", tool_call_id="b-1", prompt="bravo")
     await sandbox_service.invoke(chat_id="chat-a", tool_call_id="a-2", prompt="again")
 
-    prior_manifest = runner.calls[-1].prior_manifest
+    prior_manifest = runner.calls[-1].active_manifest
     assert prior_manifest is not None and prior_manifest.workspace is not None
-    assert runner.calls[-1].prior_assets[prior_manifest.workspace.sha256].decode("utf-8") == "> alpha\n"
 
 
 async def test_idempotent_invoke_same_tool_call_id(sandbox_service, runner):

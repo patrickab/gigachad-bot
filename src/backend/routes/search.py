@@ -1,7 +1,7 @@
 """Citation-grounded web search backed by Brave LLM Context.
 
-The standalone Web Search mode. Retrieval, query planning, source labelling, and the
-evidence prompt live in `lib/tools.py`, shared verbatim with the `web_search` chat tool.
+The standalone Web Search mode shares planning, retrieval, source labelling, and
+evidence construction with the chat tool through `lib.web_search`.
 """
 
 from __future__ import annotations
@@ -9,15 +9,17 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 import json
+from typing import Annotated
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 import httpx
 from pydantic import BaseModel
 
-from backend.routes.deps import request_client
+from backend.routes.deps import get_model_provider_store, request_client
 from lib.llm_resilience import api_query_resilient
-from lib.tools import brave_sources, evidence_prompt, plan_query
+from lib.model_provider_store import ModelProviderStore
+from lib.web_search import brave_sources, evidence_prompt, plan_query
 
 router = APIRouter(prefix="/api", tags=["search"])
 
@@ -28,9 +30,9 @@ class WebSearchRequest(BaseModel):
     model: str = ""
 
 
-def _plan(raw_query: str) -> tuple[str, dict[str, int]]:
+def _plan(raw_query: str, model: str) -> tuple[str, dict[str, int]]:
     with request_client() as client:
-        return plan_query(client, raw_query)
+        return plan_query(client, raw_query, model)
 
 
 def _event(event_type: str, **data: object) -> str:
@@ -38,7 +40,10 @@ def _event(event_type: str, **data: object) -> str:
 
 
 @router.post("/web-search")
-async def web_search(req: WebSearchRequest) -> StreamingResponse:
+async def web_search(
+    req: WebSearchRequest,
+    store: Annotated[ModelProviderStore, Depends(get_model_provider_store)],
+) -> StreamingResponse:
     if not req.model:
         async def missing_model() -> AsyncIterator[str]:
             yield _event("error", data="No chat model selected for web search.")
@@ -46,7 +51,8 @@ async def web_search(req: WebSearchRequest) -> StreamingResponse:
 
     async def event_stream() -> AsyncIterator[str]:
         try:
-            search_query, search_profile = await asyncio.to_thread(_plan, req.query)
+            planner_model = store.load_defaults()["small_model"]
+            search_query, search_profile = await asyncio.to_thread(_plan, req.query, planner_model)
             sources = await brave_sources(search_query, search_profile)
             if not sources:
                 yield _event("error", data="Brave found no usable source content for this query.")

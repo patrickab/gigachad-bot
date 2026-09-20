@@ -1,14 +1,13 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from config import get_model_defaults
+from lib.llm_resilience import api_query_resilient
+from lib.model_provider_store import ModelProviderStore
 from lib.prompts.internal import SYS_OCR_TEXT_EXTRACTION
 
-from lib.llm_resilience import api_query_resilient
-
-from .deps import decode_image, request_client, sse_event_stream
+from .deps import decode_image, get_model_provider_store, request_client, sse_event_stream
 
 router = APIRouter(prefix="/api", tags=["ocr"])
 
@@ -19,9 +18,9 @@ class OCRRequest(BaseModel):
 
 
 @router.post("/ocr")
-async def ocr(req: OCRRequest) -> EventSourceResponse:
+async def ocr(req: OCRRequest, store: ModelProviderStore = Depends(get_model_provider_store)) -> EventSourceResponse:
     with request_client() as c:
-        model = req.model or get_model_defaults()["vision_model"]
+        model = req.model or store.load_defaults()["vision_model"]
         img = decode_image(req.img_base64)
         chunks = await run_in_threadpool(
             api_query_resilient,

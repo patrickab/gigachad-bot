@@ -355,6 +355,10 @@ export function fileViewerRawUrl(path: string): string {
   return `${getApiBase()}/fileviewer/raw?path=${encodeURIComponent(path)}`
 }
 
+export function sandboxAssetUrl(assetPath: string): string {
+  return `${getApiBase()}/assets/${encodePath(assetPath)}`
+}
+
 /** Read a file's text content (markdown / unknown-treated-as-text). */
 export async function loadFileViewerText(path: string): Promise<string> {
   const data = await request<{ path: string; content: string }>(`/fileviewer/text?path=${encodeURIComponent(path)}`)

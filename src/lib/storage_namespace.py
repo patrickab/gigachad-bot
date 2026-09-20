@@ -22,7 +22,7 @@ MEMORY = "memory"
 MODEL = "model"
 PDFS = "PDFs"
 MINERU = "Mineru"
-
+SANDBOX = "sandbox"
 
 def _part(value: str, label: str) -> str:
     try:
@@ -63,3 +63,39 @@ def chat_upload(chat_id: str, name: str, slug: str | None = None) -> str:
 
 def asset_filename(key: str) -> str:
     return PurePosixPath(validate_key(key)).name
+
+
+def sandbox_scope(scope: str) -> str:
+    return _part(scope, "sandbox scope")
+
+
+def sandbox_prefix(chat_id: str, scope: str = "workspace") -> str:
+    return f"{SANDBOX}/{_part(chat_id, 'chat ID')}/{sandbox_scope(scope)}"
+
+
+def sandbox_slot(chat_id: str, scope: str = "workspace") -> str:
+    return f"{sandbox_prefix(chat_id, scope)}/slot.json"
+
+
+def sandbox_active(chat_id: str, scope: str = "workspace") -> str:
+    return f"{sandbox_prefix(chat_id, scope)}/active.json"
+
+
+def sandbox_run(chat_id: str, tool_call_id: str, scope: str = "workspace") -> str:
+    return f"{sandbox_prefix(chat_id, scope)}/runs/{_part(tool_call_id, 'tool call ID')}.json"
+
+
+def sandbox_run_prefix(chat_id: str, scope: str = "workspace") -> str:
+    return f"{sandbox_prefix(chat_id, scope)}/runs"
+
+
+def sandbox_manifest(chat_id: str, manifest_id: str, scope: str = "workspace") -> str:
+    return f"{sandbox_prefix(chat_id, scope)}/manifests/{_part(manifest_id, 'manifest ID')}.json"
+
+
+def sandbox_manifest_prefix(chat_id: str, scope: str = "workspace") -> str:
+    return f"{sandbox_prefix(chat_id, scope)}/manifests"
+
+
+def sandbox_asset(sha256: str) -> str:
+    return f"{SANDBOX}/assets/{_part(sha256, 'asset sha256')}"

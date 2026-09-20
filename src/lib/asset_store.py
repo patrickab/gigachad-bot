@@ -20,7 +20,7 @@ from psycopg_pool import ConnectionPool
 from lib.data_store import StorageNotFoundError, validate_key
 from lib.document_library import mime_for
 
-ASSET_KINDS = ("upload", "pdf", "mineru_markdown", "mineru_image", "drawing")
+ASSET_KINDS = ("upload", "pdf", "mineru_markdown", "mineru_image", "drawing", "sandbox")
 
 _COLUMNS = "id, kind, logical_path, mime, sha256, size_bytes, version"
 

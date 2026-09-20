@@ -151,17 +151,32 @@ class ProjectStore:
         self._write_meta(meta)
         return {"name": entry["name"], "slug": entry["slug"]}
 
-    def delete_project(self, slug: str) -> dict[str, str]:
+    def delete_project(self, slug: str, *, cleanup_uploads_fn: Callable[[str, str | None], None] | None = None) -> dict[str, str]:
         meta = self._read_meta()
         entry = self._find_entry(meta, slug)
         if not entry:
             raise FileNotFoundError(f"Project not found: {slug}")
         project_dir = self._resolve_project_dir(slug)
         if self._data.exists(project_dir):
+            if cleanup_uploads_fn:
+                for chat_id in self._chat_ids_in(project_dir):
+                    cleanup_uploads_fn(chat_id, slug)
             self._data.delete(project_dir, recursive=True)
+            self._store.invalidate_index()
         meta["projects"] = [p for p in meta.get("projects", []) if p.get("slug") != slug]
         self._write_meta(meta)
         return {"status": "ok"}
+
+    def _chat_ids_in(self, project_dir: str) -> list[str]:
+        """Chat IDs of every tab file under a project, for cleanup before the directory is removed."""
+        chat_ids: list[str] = []
+        for item in self._data.list(project_dir, recursive=True):
+            if item.is_dir or not item.key.endswith(".json") or Path(item.key).name in (PROJECT_JSON, META_JSON):
+                continue
+            chat_id = self._read_json(item.key, {}).get("chat_id")
+            if isinstance(chat_id, str) and chat_id:
+                chat_ids.append(chat_id)
+        return chat_ids
 
     def update_project_state(self, slug: str, kanban: list[dict[str, Any]], tabs: list[dict[str, Any]]) -> dict[str, Any]:
         meta = self._read_meta()

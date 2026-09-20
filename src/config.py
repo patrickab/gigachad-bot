@@ -13,12 +13,13 @@ from lib.storage_namespace import PROMPT
 REMOTE_ROOT = Path(os.environ.get("GIGACHAD_BASE_DIR", "~/Nextcloud/linux")).expanduser()
 DOCUMENTS = REMOTE_ROOT / "Documents"
 
-# --- Application-wide small/fast model defaults ---
-# Used for lightweight tasks like query expansion, where speed matters more than raw capability.
+# --- Model configuration ---
+# The user-editable defaults in `model-defaults.yaml` are the single source of truth for every
+# model the app uses. Nothing here may name a production model.
 # Provider-prefixed models route through LiteLLM; unprefixed models are treated as Ollama by callers.
-SMALL_MODEL = "ollama/gemma4:31b-cloud"
-MEMORY_MODEL = "gemini/gemini-3.1-flash-lite"
-VISION_MODEL = "ollama/gemma4:31b-cloud"
+MODEL_DEFAULT_KEYS = ("default_model", "small_model", "vision_model", "memory_model", "omp_model")
+# Every test runs against this model, and it seeds a store that has no defaults yet.
+TEST_MODEL = "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free"
 DEFAULT_TEMPERATURE = 0.2
 DEFAULT_DOWNSCALE_IMAGES = True
 
@@ -60,11 +61,6 @@ def get_data_store(user_id: UUID, *, device_id: UUID | None = None) -> DataStore
     from lib.postgres_data_store import PostgresDataStore
 
     return PostgresDataStore(get_postgres_pool(), user_id, device_id=device_id)
-
-
-def get_model_defaults() -> dict[str, str]:
-    """Return defaults before a request-specific editable store is available."""
-    return {"small_model": SMALL_MODEL, "memory_model": MEMORY_MODEL, "vision_model": VISION_MODEL}
 
 
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")

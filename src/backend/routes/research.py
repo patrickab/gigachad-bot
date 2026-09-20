@@ -11,8 +11,7 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from config import OLLAMA_BASE_URL
-from lib.research_config import build_research_config, write_research_config
-from lib.tools import RESEARCH_ENV_LOCK, temp_environ
+from lib.research import RESEARCH_ENV_LOCK, build_research_config, temp_environ, write_research_config
 
 router = APIRouter(prefix="/api", tags=["research"])
 
@@ -193,9 +192,7 @@ async def research(req: ResearchRequest):
         finally:
             if not task.done():
                 task.cancel()
-                try:
+                with contextlib.suppress(asyncio.CancelledError):
                     await task
-                except asyncio.CancelledError:
-                    pass
 
     return EventSourceResponse(event_generator())

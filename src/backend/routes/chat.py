@@ -8,12 +8,22 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from lib.asset_store import AssetStore
-from lib.image_paths import resolve_chat_image_paths
+from lib.image_paths import resolve_chat_image_paths, resolve_sandbox_prompt_images
 from lib.llm_resilience import api_query_resilient
 from lib.memory_store import MemoryStore
+from lib.model_provider_store import ModelProviderStore
+from lib.sandbox_service import SandboxService
 from lib.tools import ToolOptions, stream_chat_with_tools
 
-from .deps import get_asset_store, get_memory_store, request_client, sse_event_stream, sse_tool_event_stream
+from .deps import (
+    get_asset_store,
+    get_memory_store,
+    get_model_provider_store,
+    get_sandbox_service,
+    request_client,
+    sse_event_stream,
+    sse_tool_event_stream,
+)
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -77,11 +87,19 @@ async def chat(
     req: ChatRequest,
     memory_store: MemoryStoreDep,
     assets: Annotated[AssetStore, Depends(get_asset_store)],
+    sandbox_service: Annotated[SandboxService, Depends(get_sandbox_service)],
+    models: Annotated[ModelProviderStore, Depends(get_model_provider_store)],
 ) -> EventSourceResponse:
     with request_client() as c:
+        model_defaults = models.load_defaults()
         kwargs = _build_kwargs(req)
         img = _resolve_images(c, req, assets)
         system_prompt = memory_store.augment_system_prompt(req.system_prompt, req.project_slug)
+        prompt_images = (
+            resolve_sandbox_prompt_images(req.chat_id, req.project_slug, req.img_paths, assets)
+            if {"workspace_agent", "sandbox_plot"}.intersection(req.tools)
+            else ()
+        )
         if req.tools:
             # The tool loop owns its own model calls, so it needs the client to outlive this
             # `with` block; `request_client` only guards conversation state, which the loop
@@ -96,6 +114,10 @@ async def chat(
                     img=img,
                     enabled=req.tools,
                     opts=req.tool_options,
+                    chat_id=req.chat_id,
+                    sandbox_service=sandbox_service,
+                    prompt_images=prompt_images,
+                    small_model=model_defaults["small_model"],
                     **kwargs,
                 )
             )

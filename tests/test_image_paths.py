@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+from agent_sandbox import PromptImage
+
 from lib.image_paths import resolve_chat_image_paths, resolve_sandbox_prompt_images
 
 
@@ -46,5 +48,6 @@ def test_resolve_sandbox_images_forwards_only_owned_image_uploads() -> None:
 
     resolved = resolve_sandbox_prompt_images("chat-123", None, ["diagram.png", "../host-path.png"], assets)
 
+    assert isinstance(resolved[0], PromptImage)
     assert [(image.filename, image.content) for image in resolved] == [("diagram.png", b"image-bytes")]
     assert assets.read_keys == ["attachment/chat/chat-123/diagram.png"]

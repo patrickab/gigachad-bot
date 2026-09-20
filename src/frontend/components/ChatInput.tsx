@@ -3,12 +3,12 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import { ArrowUp, Loader2, Plus, LayoutGrid, LineChart, Mic, Search, Globe, Sigma, Square, X, FileText, Image as ImageIcon, File as FileIcon, FileUp, Pencil } from "lucide-react"
+import { ArrowUp, Loader2, Plus, LayoutGrid, Mic, Sigma, Square, X, FileText, Image as ImageIcon, File as FileIcon, FileUp, Pencil } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { uploadFile as apiUploadFile } from "@/lib/api"
 import type { Attachment } from "@/lib/types"
 import { useClickOutside } from "@/hooks/useClickOutside"
-import { useModeState } from "@/hooks/useModeState"
+import { TOOLS, useModeState } from "@/hooks/useModeState"
 import { useSettings } from "@/contexts/SettingsContext"
 import { PillButton } from "./PillButton"
 import { DrawingCanvas } from "./DrawingCanvas"
@@ -55,47 +55,24 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   onCancel,
   slug = null,
 }, ref) {
-  const { researchEnabled, searchEnabled, plotEnabled, ocrEnabled, toggleResearch, toggleSearch, togglePlot, toggleOCR } = useModeState()
+  const { enabledTools, toggleTool, ocrEnabled, toggleOCR } = useModeState()
   const { ocrModel } = useSettings()
 
-  const tools = [
-    {
-      id: "research",
-      label: "Deep Research",
-      shortLabel: "Research",
-      icon: Search,
-      color: "text-ink",
-      accent: "muted",
-      enabled: researchEnabled,
-      toggle: toggleResearch,
-    },
-    {
-      id: "search",
-      label: "Web Search",
-      shortLabel: "Search",
-      icon: Globe,
-      color: "text-ink",
-      accent: "muted",
-      enabled: searchEnabled,
-      toggle: toggleSearch,
-    },
-    {
-      id: "plot",
-      label: "Interactive Plot",
-      shortLabel: "Plot",
-      icon: LineChart,
-      color: "text-ink",
-      accent: "muted",
-      enabled: plotEnabled,
-      toggle: togglePlot,
-    },
+  // OCR is a composer mode, not a model tool, so it rides alongside the tool table as its own entry.
+  const entries = [
+    ...TOOLS.map((tool) => ({
+      id: tool.name,
+      label: tool.selectorLabel,
+      shortLabel: tool.shortLabel,
+      icon: tool.icon,
+      enabled: enabledTools.includes(tool.name),
+      toggle: () => toggleTool(tool.name),
+    })),
     {
       id: "ocr",
       label: "LaTeX OCR",
       shortLabel: "LaTeX",
       icon: Sigma,
-      color: "text-ink",
-      accent: "muted",
       enabled: ocrEnabled,
       toggle: toggleOCR,
     },
@@ -328,10 +305,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                   </div>
                 )}
               </div>
-              {tools.filter(t => t.enabled).map(t => (
+              {entries.filter(t => t.enabled).map(t => (
                 <PillButton
                   key={t.id}
-                  accent={t.accent as any}
+                  accent="muted"
                   active
                   onClick={() => t.toggle()}
                   icon={<t.icon className="h-3 w-3" />}
@@ -355,13 +332,13 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                 </button>
                 {showTools && (
                   <div className="absolute bottom-full right-0 mb-2 w-56 rounded-xl border border-divider bg-paper p-2 shadow-[var(--shadow-xl)]">
-                    {tools.filter(t => !t.enabled).map(t => (
+                    {entries.filter(t => !t.enabled).map(t => (
                       <button
                         key={t.id}
                         onClick={() => { t.toggle(); setShowTools(false) }}
                         className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-ink hover:bg-surface-elevated/50 transition-colors"
                       >
-                        <t.icon className={cn("h-3.5 w-3.5", t.color)} />{t.label}
+                        <t.icon className="h-3.5 w-3.5 text-ink" />{t.label}
                       </button>
                     ))}
                   </div>

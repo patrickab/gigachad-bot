@@ -32,7 +32,7 @@ import type { Tab, TabManagerHandle } from "@/components/TabManager"
 import { ProjectDashboard } from "@/components/ProjectDashboard"
 import { TokenCounter } from "@/components/TokenCounter"
 import { useChat } from "@/hooks/useChat"
-import { useModeState, ModeProvider } from "@/hooks/useModeState"
+import { TOOLS, useModeState, ModeProvider } from "@/hooks/useModeState"
 import { useSettings, SettingsProvider } from "@/contexts/SettingsContext"
 import { useProject, ProjectProvider } from "@/contexts/ProjectContext"
 import { useBranches } from "@/contexts/BranchContext"
@@ -54,7 +54,7 @@ import {
 } from "@/lib/api"
 
 import { LazyPdfViewer } from "@/components/LazyPdfViewer"
-import type { Attachment, Message } from "@/lib/types"
+import type { Attachment, Message, ToolName } from "@/lib/types"
 import {
   buildAttachedSend,
   buildHiddenContent,
@@ -62,7 +62,7 @@ import {
   normalizeMessageAttachments,
 } from "@/lib/attachments"
 
-function defaultSendParams(config: TabConfig, prompts: Record<string, string>, enabledTools: string[] = []) {
+function defaultSendParams(config: TabConfig, prompts: Record<string, string>, enabledTools: ToolName[] = []) {
   return {
     model: config.selectedModel,
     system_prompt: config.selectedPrompt ? (prompts[config.selectedPrompt] ?? "") : "",
@@ -138,12 +138,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
 
   const {
     enabledTools,
-    researchEnabled,
-    searchEnabled,
-    plotEnabled,
     ocrEnabled,
-    toggleResearch,
-    toggleSearch,
     toggleOCR,
   } = useModeState()
 
@@ -300,10 +295,10 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     else if (commandBar.state.phase === "error") onModeLabel("Memory error")
     else if (ocrEnabled) onModeLabel("LaTeX OCR")
     else if (enabledTools.length > 0) {
-      onModeLabel(`Chat · ${[searchEnabled && "search", researchEnabled && "research", plotEnabled && "plot"].filter(Boolean).join(" + ")}`)
+      onModeLabel(`Chat · ${TOOLS.filter(t => enabledTools.includes(t.name)).map(t => t.shortLabel.toLowerCase()).join(" + ")}`)
     }
     else onModeLabel("Chat")
-  }, [commandBar.state.phase, docReviewLoading, commandMemoryCount, enabledTools, researchEnabled, searchEnabled, plotEnabled, ocrEnabled, onModeLabel])
+  }, [commandBar.state.phase, docReviewLoading, commandMemoryCount, enabledTools, ocrEnabled, onModeLabel])
 
   useEffect(() => {
     if (!isActive || appMode === "canvas") return

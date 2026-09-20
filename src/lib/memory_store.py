@@ -24,7 +24,6 @@ import re
 from typing import Any, Protocol
 import uuid
 
-from config import get_model_defaults
 from lib.data_store import DataStore, DataStorePath
 from lib.json_io import safe_write_json
 from lib.llm_resilience import api_query_resilient
@@ -124,7 +123,9 @@ def _json_from_response(text: str) -> dict[str, Any]:
 class MemoryStore:
     """Owns memory extraction, canonical document updates, and the pending buffer."""
 
-    def __init__(self, prefix: str = MEMORY, *, data_store: DataStore) -> None:
+    def __init__(self, prefix: str = MEMORY, *, data_store: DataStore, model: str) -> None:
+        # The user's stored default is authoritative; nothing here may name a model.
+        self.model = model
         self.base_dir = DataStorePath(data_store, prefix)
         self.memory_root = self.base_dir
         self.pending_dir = self.memory_root / "pending"
@@ -938,7 +939,7 @@ Rules:
 
         def call(force_json: bool) -> str:
             kwargs: dict[str, Any] = dict(
-                model=get_model_defaults()["memory_model"],
+                model=self.model,
                 user_msg=user_prompt,
                 user_msg_history=[],
                 system_prompt=system_prompt,

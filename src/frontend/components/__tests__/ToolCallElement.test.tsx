@@ -55,4 +55,20 @@ describe("ToolCallElement sandbox plots", () => {
     expect(tool).toHaveAttribute("aria-expanded", "true")
     expect(screen.getByText("query")).toBeInTheDocument()
   })
+
+  it("surfaces a failed plot's error without a disclosure to open", () => {
+    render(<ToolCallElement call={{ id: "plot-2", name: "sandbox_plot", arguments: { brief: "Plot it" }, status: "error", error: "Kernel died" }} />)
+
+    expect(screen.getByText("Kernel died")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /interactive plot/i })).not.toBeInTheDocument()
+  })
+
+  it("renders an unknown saved tool name as a generic call", () => {
+    render(<ToolCallElement call={{ id: "legacy-1", name: "legacy_tool", arguments: { topic: "archived" }, status: "done" }} />)
+
+    const tool = screen.getByRole("button", { name: /legacy_tool/i })
+    fireEvent.click(tool)
+
+    expect(screen.getByText("topic")).toBeInTheDocument()
+  })
 })
