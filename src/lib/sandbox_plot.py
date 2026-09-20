@@ -228,14 +228,18 @@ async def create_sandbox_plot(context: PlotContext) -> ToolOutcome:
         )
 
     traces = len(figure.get("data", [])) if isinstance(figure.get("data"), list) else 0
-    # The code is the model's only view of the chart, so describe it rather than re-run it.
+    # The code is the model's only view of the chart, so give it a focused explanation brief.
     seen = (
         f"The chart rendered and the user can already see it ({traces} trace(s)). "
-        "This is the code that drew it. Describe what the user is looking at, including the colours "
-        "and the features that stand out. Do not repeat the code or offer to run it.\n\n"
+        "Give an extremely concise companion explanation, ideally one or two sentences: explain how the "
+        "underlying concept works and how the graphic encodes that mechanism. Make the minimal graphic easier "
+        "to grasp. Do not explain the code, narrate visible elements, list colours, restate labels or data, "
+        "or repeat what the graphic plainly shows.\n\n"
         f"```python\n{script}\n```"
         if script
-        else f"Rendered an interactive plot with {traces} trace(s). The user can already see and interact with it."
+        else f"Rendered an interactive plot with {traces} trace(s). The user can already see and interact with it. "
+        "Give an extremely concise companion explanation of how the concept works and how the graphic encodes it. "
+        "Do not explain code or restate the visible chart."
     )
     return ToolOutcome(
         content=seen,

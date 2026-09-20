@@ -338,6 +338,9 @@ async def test_sandbox_plot_fast_path_hands_the_answer_round_the_code(
     }
     assert "print(fig.to_json())" in outcome.content  # The code is the model's view of the chart.
     assert "1 trace(s)" in outcome.content
+    assert "underlying concept works" in outcome.content
+    assert "how the graphic encodes" in outcome.content
+    assert "Do not explain the code" in outcome.content
     assert sandbox.scripts == ["print(fig.to_json())"]
     assert sandbox.calls == []  # The agent path stayed unused.
     assert len(calls) == 1
