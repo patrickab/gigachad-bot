@@ -468,6 +468,9 @@ async def test_sandbox_plot_falls_back_to_the_agent_when_the_script_keeps_failin
     assert len(sandbox.scripts) == 2  # One repair attempt, then hand over.
     assert [call["scope"] for call in sandbox.calls] == ["sandbox_plot"]
     assert sandbox.calls[0]["prompt"] == "Plot the trend"
+    append_system = sandbox.calls[0]["append_system"]
+    assert "layered, skimmable Markdown explanation" in append_system
+    assert "`$...$` inline and `$$...$$`" in append_system
 
 
 @pytest.mark.asyncio

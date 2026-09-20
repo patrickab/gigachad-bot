@@ -69,7 +69,10 @@ JSON or implementation details in your final response. For example:
 with open("plot.json", "w") as output:
     output.write(fig.to_json())
 ```
-Once `plot.json` is written, stop. Reply with one short sentence and no further tool calls.
+Once `plot.json` is written, stop. Reply with a concise, layered, skimmable Markdown explanation: lead
+with the essential takeaway, then add only the few details needed to support quick understanding. When
+math helps, use proper Markdown LaTeX: `$...$` inline and `$$...$$` for display equations. Make no
+further tool calls.
 """
 
 _FAST_PLOT_SYSTEM = f"""\
