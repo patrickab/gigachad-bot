@@ -661,7 +661,6 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
               focusKey={focusKey}
               isActive={isActive}
               branchMessageIdx={branchMessageIdx}
-              onOCRRequest={setOCRImage}
               chatInputRef={chatInputRef}
               slug={activeProject}
               chatMaxWidth={chatMaxWidth}

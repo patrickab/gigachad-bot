@@ -120,6 +120,7 @@ async def chat(
                     sandbox_service=sandbox_service,
                     prompt_images=prompt_images,
                     small_model=model_defaults["small_model"],
+                    vision_model=model_defaults["vision_model"],
                     **kwargs,
                 )
             )

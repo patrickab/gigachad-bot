@@ -3,7 +3,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
-import { ArrowUp, Loader2, Plus, LayoutGrid, Mic, Sigma, Square, X, FileText, Image as ImageIcon, File as FileIcon, FileUp, Pencil } from "lucide-react"
+import { ArrowUp, Loader2, Plus, LayoutGrid, Mic, Square, X, FileText, Image as ImageIcon, File as FileIcon, FileUp, Pencil } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { uploadFile as apiUploadFile } from "@/lib/api"
 import type { Attachment } from "@/lib/types"
@@ -18,7 +18,6 @@ import { ToolMenuItem, ToolMenuSection } from "./ToolMenuItem"
 interface ChatInputProps {
   chatId: string
   onSend: (text: string, attachments: Attachment[]) => void
-  onOCRRequest?: (imageDataUrl: string) => void
   disabled?: boolean
   extracting?: boolean
   isStreaming?: boolean
@@ -48,17 +47,15 @@ async function toDataUrl(url: string): Promise<string> {
 export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({
   chatId,
   onSend,
-  onOCRRequest,
   disabled,
   extracting,
   isStreaming,
   onCancel,
   slug = null,
 }, ref) {
-  const { enabledTools, toggleTool, ocrEnabled, toggleOCR } = useModeState()
+  const { enabledTools, toggleTool } = useModeState()
   const { ocrModel } = useSettings()
 
-  // OCR is a composer mode, not a model tool, so the menu renders it as its own section.
   const toolEntries = TOOLS.map((tool) => ({
     id: tool.name,
     label: tool.selectorLabel,
@@ -66,15 +63,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     enabled: enabledTools.includes(tool.name),
     toggle: () => toggleTool(tool.name),
   }))
-  const modeEntries = [
-    {
-      id: "ocr",
-      label: "LaTeX OCR",
-      icon: Sigma,
-      enabled: ocrEnabled,
-      toggle: toggleOCR,
-    },
-  ]
 
   const [text, setText] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -122,20 +110,11 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const handleSubmit = useCallback(() => {
     const trimmed = text.trim()
     if (!trimmed && attachments.length === 0) return
-    if (ocrEnabled) {
-      const imgAtt = attachments.find(a => a.mime.startsWith("image/"))
-      if (imgAtt && onOCRRequest) {
-        toDataUrl(imgAtt.url)
-          .then(b64 => { onOCRRequest(b64); setText(""); clearAttachments(); requestAnimationFrame(() => adjustHeight()) })
-          .catch(() => {})
-        return
-      }
-    }
     onSend(trimmed || "", attachments)
     setText("")
     clearAttachments()
     requestAnimationFrame(() => adjustHeight())
-  }, [text, attachments, onSend, onOCRRequest, ocrEnabled, clearAttachments, adjustHeight])
+  }, [text, attachments, onSend, clearAttachments, adjustHeight])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey && !isStreaming && !extracting) { e.preventDefault(); handleSubmit() }
@@ -324,11 +303,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                         <ToolMenuItem key={t.id} icon={t.icon} label={t.label} active={t.enabled} onClick={t.toggle} />
                       ))}
                     </ToolMenuSection>
-                    <ToolMenuSection title="Modes">
-                      {modeEntries.map(t => (
-                        <ToolMenuItem key={t.id} icon={t.icon} label={t.label} active={t.enabled} onClick={t.toggle} />
-                      ))}
-                    </ToolMenuSection>
+
                   </div>
                 )}
               </div>

@@ -496,7 +496,6 @@ interface ChatContainerProps {
   className?: string
   slug?: string | null
   chatMaxWidth?: number
-  onOCRRequest?: (image: string) => void
   extracting?: boolean
   chatInputRef?: React.RefObject<ChatInputHandle | null>
 }
@@ -517,7 +516,6 @@ export function ChatContainer({
   className,
   slug = null,
   chatMaxWidth,
-  onOCRRequest,
   extracting,
   chatInputRef,
 }: ChatContainerProps) {
@@ -993,7 +991,6 @@ export function ChatContainer({
               ref={chatInputRef}
               chatId={chatId}
               onSend={handleSend}
-              onOCRRequest={onOCRRequest}
               disabled={isStreaming || extracting}
               extracting={extracting}
               isStreaming={isStreaming}

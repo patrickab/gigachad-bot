@@ -8,6 +8,7 @@ import type { PlotFigure, SandboxToolResultRecord, ToolCallRecord, ToolSource } 
 import { CodeBlock } from "./CodeBlock"
 import { PlotElement } from "./PlotElement"
 import { SandboxOutputElement } from "./SandboxOutputElement"
+import { LaTeXMarkdown } from "./LaTeXMarkdown"
 
 interface ToolCallElementProps {
   call: ToolCallRecord
@@ -19,6 +20,7 @@ interface ToolCallElementProps {
 type Presentation =
   | { family: "sources"; sources: ToolSource[]; costs: number | null }
   | { family: "plot"; figure: PlotFigure | null; brief: string | null; script: string | null }
+  | { family: "mindmap"; content: string | null }
   | { family: "workspace"; sandbox: SandboxToolResultRecord | null }
   | { family: "generic" }
 
@@ -40,6 +42,8 @@ function presentationOf(call: ToolCallRecord): Presentation {
         brief: call.detail?.brief ?? null,
         script: call.detail?.script ?? null,
       }
+    case "mindmap":
+      return { family: "mindmap", content: typeof call.detail?.mindmap === "string" ? call.detail.mindmap : null }
     case "workspace_agent":
       return { family: "workspace", sandbox: call.sandbox ?? null }
     default:
@@ -77,16 +81,14 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
   // Unknown saved names have no metadata; they keep the raw name and a neutral icon.
   const meta = TOOL_META[call.name]
   const Icon = meta?.icon ?? Wrench
-  // A plot's figure is its headline, so the header carries neither argument nor disclosure.
-  const argument = shown.family === "plot" ? "" : primaryArgument(call.arguments)
+  // A plot or mind map is its own headline, so the header carries neither argument nor disclosure.
+  const argument = shown.family === "plot" || shown.family === "mindmap" ? "" : primaryArgument(call.arguments)
   const status = runningStage?.label ?? (call.status === "running" ? "running" : call.status === "error" ? "failed" : call.summary)
 
   const header = <>
     <div className="mt-0.5 shrink-0">
       <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-surface-elevated">
-        {call.status === "running"
-          ? <Loader2 className="h-3.5 w-3.5 animate-spin text-ink-muted" aria-hidden="true" />
-          : <Icon className={cn("h-3.5 w-3.5", call.status === "error" ? "text-danger" : "text-ink")} aria-hidden="true" />}
+        <Icon className={cn("h-3.5 w-3.5", call.status === "error" ? "text-danger" : "text-ink")} aria-hidden="true" />
       </div>
     </div>
     <div className="min-w-0 flex-1 flex flex-col">
@@ -153,6 +155,12 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
 
       {stageTimeline}
 
+
+      {shown.family === "mindmap" && (
+        <div className="px-6 pb-5 pl-[3.25rem]">
+          {shown.content ? <LaTeXMarkdown content={shown.content} /> : call.error ? <p className="text-xs text-danger">{call.error}</p> : null}
+        </div>
+      )}
       {shown.family === "plot" && <>
         {shown.brief && (
           <div className="px-6 pb-3 pl-[3.25rem]">

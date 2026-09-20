@@ -660,3 +660,51 @@ async def test_workspace_agent_without_a_sandbox_service_degrades_instead_of_rai
 
     assert outcome.error is not None
     assert outcome.content
+
+
+@pytest.mark.asyncio
+async def test_mindmap_tool_returns_a_renderable_markmap(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def fake_query(_client: Any, **kwargs: Any) -> Any:
+        calls.append(kwargs)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="```markmap\n# Topic\n```"))])
+
+    monkeypatch.setattr(tools, "api_query_resilient", fake_query)
+    context = tools.ToolContext(
+        client=ClientStub(),
+        model=TEST_MODEL,
+        opts=tools.ToolOptions(),
+        history=({"role": "assistant", "content": "Prior explanation"},),
+        user_msg="Make a mind map",
+    )
+
+    outcome = await tools.BUILTIN_TOOLS.execute("mindmap", {}, context)
+
+    assert outcome.detail["mindmap"] == "```markmap\n# Topic\n```"
+    assert "<transcript>" in calls[0]["user_msg"]
+    assert calls[0]["stream"] is False
+
+
+@pytest.mark.asyncio
+async def test_latex_ocr_tool_uses_the_vision_model_for_attached_images(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def fake_query(_client: Any, **kwargs: Any) -> Any:
+        calls.append(kwargs)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="$a^2 + b^2 = c^2$"))])
+
+    monkeypatch.setattr(tools, "api_query_resilient", fake_query)
+    context = tools.ToolContext(
+        client=ClientStub(),
+        model=TEST_MODEL,
+        vision_model="provider/vision",
+        opts=tools.ToolOptions(),
+        img=b"image-bytes",
+    )
+
+    outcome = await tools.BUILTIN_TOOLS.execute("latex_ocr", {}, context)
+
+    assert outcome.detail["text"] == "$a^2 + b^2 = c^2$"
+    assert calls[0]["model"] == "provider/vision"
+    assert calls[0]["img"] == b"image-bytes"

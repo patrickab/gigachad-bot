@@ -11,6 +11,9 @@ from agent_sandbox import PromptImage
 from llm_baseclient.client import LLMClient
 from pydantic import BaseModel, Field
 
+from lib.llm_resilience import api_query_resilient
+from lib.prompts.internal import SYS_OCR_TEXT_EXTRACTION
+from lib.prompts.non_user_prompts import SYS_STUDY_MINDMAP
 from lib.research import run_deep_research
 from lib.sandbox_plot import create_sandbox_plot
 from lib.sandbox_service import SandboxService
@@ -52,6 +55,8 @@ class ToolContext:
     small_model: str = ""
     history: tuple[dict[str, Any], ...] = ()
     user_msg: str = ""
+    img: Any = None
+    vision_model: str = ""
     progress: Callable[[str], None] | None = None
 
     def with_progress(self, progress: Callable[[str], None]) -> ToolContext:
@@ -152,6 +157,53 @@ async def _workspace_agent(args: dict[str, Any], context: ToolContext) -> ToolOu
     )
 
 
+def _response_text(response: Any) -> str:
+    return response.choices[0].message.content or ""
+
+
+async def _mindmap(_args: dict[str, Any], context: ToolContext) -> ToolOutcome:
+    context.stage("Creating mind map")
+    transcript = "\n".join(
+        f"[{message.get('role', 'user')}]: {message.get('content', '')}"
+        for message in (*context.history, {"role": "user", "content": context.user_msg})
+    )
+    content = await asyncio.to_thread(
+        api_query_resilient,
+        context.client,
+        model=context.model,
+        user_msg="Produce a mind map from this conversation.\n\n<transcript>\n" + transcript + "\n</transcript>",
+        user_msg_history=[],
+        system_prompt=SYS_STUDY_MINDMAP,
+        img=None,
+        stream=False,
+    )
+    mindmap = _response_text(content).strip()
+    return ToolOutcome(content=mindmap, summary="Mind map ready", detail={"mindmap": mindmap})
+
+
+async def _latex_ocr(_args: dict[str, Any], context: ToolContext) -> ToolOutcome:
+    if context.img is None:
+        return ToolOutcome(
+            content="LaTeX OCR needs an attached image.",
+            summary="No image attached",
+            error="Attach an image before requesting LaTeX OCR.",
+        )
+    context.stage("Extracting text and LaTeX")
+    response = await asyncio.to_thread(
+        api_query_resilient,
+        context.client,
+        model=context.vision_model or context.model,
+        user_msg="Extract all text and LaTeX from this image.",
+        user_msg_history=[],
+        system_prompt=SYS_OCR_TEXT_EXTRACTION,
+        img=context.img,
+        temperature=0.1,
+        stream=False,
+    )
+    text = _response_text(response).strip()
+    return ToolOutcome(content=text, summary="Text extracted", detail={"text": text})
+
+
 BUILTIN_TOOLS: ToolCatalog[ToolContext] = ToolCatalog(
     (
         ToolDefinition(
@@ -177,6 +229,20 @@ BUILTIN_TOOLS: ToolCatalog[ToolContext] = ToolCatalog(
             "conversation already carries the request.",
             {"type": "object", "additionalProperties": False, "properties": {}},
             _sandbox_plot,
+        ),
+        ToolDefinition(
+            "mindmap",
+            "Create a visual mind map of the current conversation when the user asks to organize, map, or visualize its ideas. "
+            "Takes no arguments because the conversation already supplies the material.",
+            {"type": "object", "additionalProperties": False, "properties": {}},
+            _mindmap,
+        ),
+        ToolDefinition(
+            "latex_ocr",
+            "Extract exact Markdown text and LaTeX from the attached image. Use only when an image is attached and the user "
+            "asks to transcribe, read, or extract equations from it. Takes no arguments.",
+            {"type": "object", "additionalProperties": False, "properties": {}},
+            _latex_ocr,
         ),
         ToolDefinition(
             "workspace_agent",
@@ -208,6 +274,7 @@ async def stream_chat_with_tools(
     sandbox_service: SandboxService | None = None,
     prompt_images: tuple[PromptImage, ...] = (),
     small_model: str = "",
+    vision_model: str = "",
     **kwargs: Any,
 ) -> AsyncIterator[tuple[str, Any]]:
     """Bind request dependencies, then stream one optional tool call and the answer."""
@@ -224,6 +291,8 @@ async def stream_chat_with_tools(
             small_model=small_model,
             history=tuple(history),
             user_msg=user_msg,
+            img=img,
+            vision_model=vision_model,
         )
 
     async for event in stream_tool_turn(

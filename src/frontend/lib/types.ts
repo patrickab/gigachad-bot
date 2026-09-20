@@ -43,7 +43,7 @@ export interface ArchitectureGraphContextReference {
 }
 
 /** The tools this build can actually offer the model. */
-export type ToolName = "web_search" | "deep_research" | "sandbox_plot" | "workspace_agent"
+export type ToolName = "web_search" | "deep_research" | "sandbox_plot" | "mindmap" | "latex_ocr" | "workspace_agent"
 
 /** A name read back from a saved chat. Widened past `ToolName` so old chats still render,
  *  while only `ToolName` may be sent as an offered tool. */
