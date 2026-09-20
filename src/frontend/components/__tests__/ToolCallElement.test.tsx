@@ -96,4 +96,20 @@ describe("ToolCallElement sandbox plots", () => {
 
     expect(screen.getByText("topic")).toBeInTheDocument()
   })
+
+  it("shows each stage status and its decimal duration", () => {
+    render(<ToolCallElement call={{
+      id: "search-stages",
+      name: "web_search",
+      arguments: { query: "stages" },
+      status: "done",
+      stages: [
+        { id: "stage-1", label: "Planning search", status: "done", started_at: 1, duration: 0.2 },
+        { id: "stage-2", label: "Searching sources", status: "done", started_at: 1.2, duration: 1.4 },
+      ],
+    }} />)
+
+    expect(screen.getByText("0.2s").parentElement).toHaveTextContent(/0\.2s\s*Planning search/)
+    expect(screen.getByText("1.4s").parentElement).toHaveTextContent(/1\.4s\s*Searching sources/)
+  })
 })

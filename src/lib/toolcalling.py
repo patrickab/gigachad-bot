@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 import json
+import time
 from typing import Any, Generic, TypeVar
 from uuid import uuid4
 
@@ -30,6 +31,21 @@ class ToolOutcome:
     detail: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
     sandbox: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class ToolStage:
+    """One browser-visible unit of a tool's work."""
+
+    label: str
+
+
+@dataclass(frozen=True)
+class ToolProgress:
+    """A snapshot of a tool's stage timeline, safe to send over SSE."""
+
+    id: str
+    stages: tuple[dict[str, Any], ...]
 
 
 @dataclass(frozen=True)
@@ -106,6 +122,40 @@ class ToolCatalog(Generic[ContextT]):
         except Exception as exc:  # noqa: BLE001
             message = str(exc) or exc.__class__.__name__
             return ToolOutcome(content=f"The {name} tool failed: {message}", summary="Failed", error=message)
+
+    async def execute_with_progress(
+        self, name: str, args: dict[str, Any], context: ContextT, *, enabled: Iterable[str] | None = None
+    ) -> AsyncIterator[ToolProgress | ToolOutcome]:
+        """Execute a tool while forwarding the optional stage hook on its context."""
+        stages: list[dict[str, Any]] = []
+        progress_queue: asyncio.Queue[ToolProgress] = asyncio.Queue()
+
+        def report(label: str) -> None:
+            now = time.time()
+            if stages and stages[-1]["status"] == "running":
+                stages[-1]["status"] = "done"
+                stages[-1]["duration"] = now - stages[-1]["started_at"]
+            stages.append(
+                {"id": f"stage-{len(stages) + 1}", "label": label, "status": "running", "started_at": now, "duration": 0.0}
+            )
+            progress_queue.put_nowait(ToolProgress(id="", stages=tuple(dict(stage) for stage in stages)))
+
+        report("Preparing")
+        with_progress = getattr(context, "with_progress", None)
+        progress_context = with_progress(report) if callable(with_progress) else context
+        task = asyncio.create_task(self.execute(name, args, progress_context, enabled=enabled))
+        while not task.done():
+            try:
+                yield await asyncio.wait_for(progress_queue.get(), timeout=0.05)
+            except TimeoutError:
+                continue
+        outcome = await task
+        now = time.time()
+        if stages and stages[-1]["status"] == "running":
+            stages[-1]["status"] = "error" if outcome.error else "done"
+            stages[-1]["duration"] = now - stages[-1]["started_at"]
+        yield ToolProgress(id="", stages=tuple(dict(stage) for stage in stages))
+        yield outcome
 
     def _contains(self, name: str) -> bool:
         return name in self._by_name
@@ -300,7 +350,13 @@ async def stream_tool_turn(
             }
         )
         yield ("tool_call", call)
-        outcome = await catalog.execute(call["name"], call["arguments"], context_for_call(call["id"]), enabled=enabled)
+        async for execution_event in catalog.execute_with_progress(
+            call["name"], call["arguments"], context_for_call(call["id"]), enabled=enabled
+        ):
+            if isinstance(execution_event, ToolProgress):
+                yield ("tool_progress", {"id": call["id"], "stages": execution_event.stages})
+                continue
+            outcome = execution_event
         yield (
             "tool_result",
             {

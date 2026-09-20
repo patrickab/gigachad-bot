@@ -1,6 +1,6 @@
 import type React from "react"
 import type { SSEEvent } from "./sse"
-import type { Message, ToolCallRecord, ToolCallResult, ToolCallStarted, Usage } from "./types"
+import type { Message, ToolCallProgress, ToolCallRecord, ToolCallResult, ToolCallStarted, Usage } from "./types"
 
 const FLUSH_MS = 60
 
@@ -62,6 +62,7 @@ export function createFlushBatcher(
 export type ChatStreamEvent =
   | { kind: "token"; text: string }
   | { kind: "tool_call"; started: ToolCallStarted }
+  | { kind: "tool_progress"; progress: ToolCallProgress }
   | { kind: "tool_result"; result: ToolCallResult }
   | { kind: "usage"; usage: Usage }
   | { kind: "done" }
@@ -77,6 +78,8 @@ export function decodeChatStreamEvent(event: SSEEvent): ChatStreamEvent | null {
       return { kind: "tool_call", started: JSON.parse(event.data) as ToolCallStarted }
     case "tool_result":
       return { kind: "tool_result", result: JSON.parse(event.data) as ToolCallResult }
+    case "tool_progress":
+      return { kind: "tool_progress", progress: JSON.parse(event.data) as ToolCallProgress }
     case "usage":
       return { kind: "usage", usage: JSON.parse(event.data) as Usage }
     case "done":
@@ -106,11 +109,18 @@ function withToolCallResult(
   )
 }
 
+function withToolCallProgress(
+  calls: ToolCallRecord[] | undefined,
+  progress: ToolCallProgress,
+): ToolCallRecord[] {
+  return (calls ?? []).map((call) => call.id === progress.id ? { ...call, stages: progress.stages } : call)
+}
+
 /** The events that fold into the trailing assistant message. `usage` and `done`
  *  stay with the caller: one lands in React state, the other only ends the loop. */
 export type MessageStreamEvent = Extract<
   ChatStreamEvent,
-  { kind: "token" | "tool_call" | "tool_result" | "error" }
+  { kind: "token" | "tool_call" | "tool_progress" | "tool_result" | "error" }
 >
 
 // Mutates `msg` in place; createFlushBatcher publishes the copy.
@@ -125,6 +135,9 @@ export function applyChatStreamEvent(msg: Message, event: MessageStreamEvent): v
     case "tool_result":
       msg.tool_calls = withToolCallResult(msg.tool_calls, event.result)
       break
+    case "tool_progress":
+      msg.tool_calls = withToolCallProgress(msg.tool_calls, event.progress)
+      break
     case "error":
       msg.content += `\n\nError: ${event.message}`
       break
@@ -138,8 +151,19 @@ export function applyChatStreamEvent(msg: Message, event: MessageStreamEvent): v
 export function settleRunningToolCalls(msg: Message, reason: string): void {
   const calls = msg.tool_calls
   if (!calls?.some((call) => call.status === "running")) return
+  const now = Date.now() / 1_000
   msg.tool_calls = calls.map((call) =>
-    call.status === "running" ? { ...call, status: "error", summary: reason, error: reason } : call
+    call.status === "running"
+      ? {
+          ...call,
+          status: "error",
+          summary: reason,
+          error: reason,
+          stages: call.stages?.map((stage) => stage.status === "running"
+            ? { ...stage, status: "error", duration: Math.max(stage.duration, now - stage.started_at) }
+            : stage),
+        }
+      : call
   )
 }
 

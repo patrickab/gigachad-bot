@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass, replace
 from typing import Any
 
 from agent_sandbox import PromptImage
@@ -52,6 +52,15 @@ class ToolContext:
     small_model: str = ""
     history: tuple[dict[str, Any], ...] = ()
     user_msg: str = ""
+    progress: Callable[[str], None] | None = None
+
+    def with_progress(self, progress: Callable[[str], None]) -> ToolContext:
+        return replace(self, progress=progress)
+
+    def stage(self, label: str) -> None:
+        if self.progress is not None:
+            self.progress(label)
+
 
 
 def _single_text_parameter(name: str, description: str, *, max_length: int | None = None) -> dict[str, Any]:
@@ -67,11 +76,13 @@ def _single_text_parameter(name: str, description: str, *, max_length: int | Non
 
 
 async def _web_search(args: dict[str, Any], context: ToolContext) -> ToolOutcome:
+    context.stage("Planning search")
     planner_model = context.small_model or context.model
     search_query, profile = await asyncio.to_thread(plan_query, context.client, args["query"], planner_model)
     domain = context.opts.search_domain.strip()
     if domain:
         search_query = f"{domain} {search_query}"
+    context.stage("Searching sources")
     sources = await brave_sources(search_query, profile)
     if not sources:
         return ToolOutcome(
@@ -89,6 +100,7 @@ async def _web_search(args: dict[str, Any], context: ToolContext) -> ToolOutcome
 
 
 async def _deep_research(args: dict[str, Any], context: ToolContext) -> ToolOutcome:
+    context.stage("Researching sources")
     report, urls, costs = await run_deep_research(
         args["query"],
         fast_model=context.opts.research_fast_model,
@@ -108,6 +120,7 @@ async def _deep_research(args: dict[str, Any], context: ToolContext) -> ToolOutc
     )
 
 async def _sandbox_plot(_args: dict[str, Any], context: ToolContext) -> ToolOutcome:
+    context.stage("Generating chart")
     return await create_sandbox_plot(context)
 
 
@@ -118,6 +131,7 @@ async def _workspace_agent(args: dict[str, Any], context: ToolContext) -> ToolOu
             summary="Unavailable",
             error="sandbox_service_unavailable",
         )
+    context.stage("Running workspace agent")
     result = await context.sandbox_service.invoke(
         chat_id=context.chat_id,
         tool_call_id=context.tool_call_id,

@@ -84,6 +84,20 @@ export interface SandboxPlotDetail {
  *  keys this build no longer writes. */
 export type ToolCallDetail = WebSearchDetail & DeepResearchDetail & SandboxPlotDetail & Record<string, unknown>
 
+export interface ToolStage {
+  id: string
+  label: string
+  status: "running" | "done" | "error"
+  started_at: number
+  duration: number
+}
+
+/** `tool_progress` SSE payload: an updated timeline for a running tool. */
+export interface ToolCallProgress {
+  id: string
+  stages: ToolStage[]
+}
+
 /** `tool_call` SSE payload: the call the model made, before it runs. */
 export interface ToolCallStarted {
   id: string
@@ -117,6 +131,7 @@ export interface ToolCallRecord {
   detail?: ToolCallDetail
   error?: string | null
   sandbox?: SandboxToolResultRecord | null
+  stages?: ToolStage[]
 }
 
 export interface SandboxAssetRef {

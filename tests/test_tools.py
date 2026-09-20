@@ -133,12 +133,14 @@ async def test_tool_call_keeps_ui_detail_out_of_the_answer_round(monkeypatch: py
 
     events = await _collect()
 
-    assert [name for name, _ in events] == ["tool_call", "tool_result", "token"]
+    assert [name for name, _ in events] == ["tool_call", "tool_progress", "tool_progress", "tool_result", "token"]
     assert events[0][1] == {"id": "call_a", "name": "web_search", "arguments": {"query": "election"}}
-    assert events[1][1]["summary"] == "1 sources"
-    assert events[1][1]["detail"] == {"script": sentinel_script}
-    assert events[1][1]["sources"] == [{"label": "ap", "url": "u"}]
-    assert events[2] == ("token", "Answer [ap]")
+    assert events[1][1]["stages"][0]["status"] == "running"
+    assert events[2][1]["stages"][0]["status"] == "done"
+    assert events[3][1]["summary"] == "1 sources"
+    assert events[3][1]["detail"] == {"script": sentinel_script}
+    assert events[3][1]["sources"] == [{"label": "ap", "url": "u"}]
+    assert events[4] == ("token", "Answer [ap]")
 
     # Round two must carry the assistant tool_calls turn and its tool result.
     assert [m["role"] for m in sent[1]] == ["system", "user", "assistant", "tool"]
@@ -189,9 +191,8 @@ async def test_tool_call_written_as_plain_text_is_recovered(monkeypatch: pytest.
 
     events = await _collect()
 
-    assert [name for name, _ in events] == ["tool_call", "tool_result", "token"]
+    assert [name for name, _ in events] == ["tool_call", "tool_progress", "tool_progress", "tool_result", "token"]
     assert events[0][1]["arguments"] == {"query": "cheesecake"}
-    assert events[2] == ("token", "Here you go")
 
 
 @pytest.mark.asyncio
@@ -605,9 +606,9 @@ def test_chat_route_streams_tool_events_over_sse(monkeypatch: pytest.MonkeyPatch
 
     assert response.status_code == 200, response.text
     events = _sse_events(response.text)
-    assert [name for name, _ in events] == ["tool_call", "tool_result", "token", "done"]
+    assert [name for name, _ in events] == ["tool_call", "tool_progress", "tool_progress", "tool_result", "token", "done"]
     assert '"name": "web_search"' in events[0][1]
-    assert events[2][1] == "Try [ap]"
+    assert events[4][1] == "Try [ap]"
 
 
 

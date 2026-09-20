@@ -1,6 +1,6 @@
 "use client"
 
-import { memo, useState } from "react"
+import { memo, useEffect, useState } from "react"
 import { ChevronDown, Loader2, Wrench } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { TOOL_META } from "@/hooks/useModeState"
@@ -52,6 +52,13 @@ function primaryArgument(args: Record<string, unknown>): string {
   return typeof value === "string" ? value : ""
 }
 
+function stageDuration(stage: NonNullable<ToolCallRecord["stages"]>[number], now: number): string {
+  const seconds = stage.status === "running"
+    ? Math.max(stage.duration, now / 1_000 - stage.started_at)
+    : stage.duration
+  return `${seconds.toFixed(1)}s`
+}
+
 /** Sits between the question and the answer, wearing the same container optic as the
  *  assistant response: same row layout, same avatar, same type scale. */
 function ToolCallElementInner({ call }: ToolCallElementProps) {
@@ -59,12 +66,20 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
   const [briefOpen, setBriefOpen] = useState(false)
   const [codeOpen, setCodeOpen] = useState(false)
   const shown = presentationOf(call)
+  const [now, setNow] = useState(() => Date.now())
+  const stages = call.stages ?? []
+  const runningStage = stages.find((stage) => stage.status === "running")
+  useEffect(() => {
+    if (!runningStage) return
+    const timer = window.setInterval(() => setNow(Date.now()), 100)
+    return () => window.clearInterval(timer)
+  }, [runningStage])
   // Unknown saved names have no metadata; they keep the raw name and a neutral icon.
   const meta = TOOL_META[call.name]
   const Icon = meta?.icon ?? Wrench
   // A plot's figure is its headline, so the header carries neither argument nor disclosure.
   const argument = shown.family === "plot" ? "" : primaryArgument(call.arguments)
-  const status = call.status === "running" ? "running" : call.status === "error" ? "failed" : call.summary
+  const status = runningStage?.label ?? (call.status === "running" ? "running" : call.status === "error" ? "failed" : call.summary)
 
   const header = <>
     <div className="mt-0.5 shrink-0">
@@ -80,6 +95,22 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
     </div>
     {status && <span className="mt-1 shrink-0 text-[10px] tabular-nums text-ink-faint">{status}</span>}
   </>
+
+  const stageTimeline = stages.length > 0 && (
+    <ol className="space-y-1 border-t border-divider/30 px-6 py-3 pl-[4.5rem]">
+      {stages.map((stage) => (
+        <li key={stage.id} className="flex items-center gap-2 text-[10px]">
+          <span className="flex h-3 w-3 shrink-0 items-center justify-center">
+            {stage.status === "running" && <Loader2 className="h-3 w-3 animate-spin text-ink-faint" aria-hidden="true" />}
+          </span>
+          <span className="shrink-0 tabular-nums text-ink-faint">{stageDuration(stage, now)}</span>
+          <span className={cn("truncate", stage.status === "running" ? "text-ink" : stage.status === "error" ? "text-danger" : "text-ink-muted")}>
+            {stage.status === "error" ? "Failed" : stage.label}
+          </span>
+        </li>
+      ))}
+    </ol>
+  )
 
   const familyDetails = shown.family === "sources" ? <>
     {shown.costs !== null && <p className="text-[10px] tabular-nums text-ink-faint">cost ${shown.costs.toFixed(4)}</p>}
@@ -119,6 +150,8 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
           <ChevronDown className={cn("mt-1 h-4 w-4 shrink-0 text-ink-faint transition-transform", open && "rotate-180")} aria-hidden="true" />
         </button>
       )}
+
+      {stageTimeline}
 
       {shown.family === "plot" && <>
         {shown.brief && (

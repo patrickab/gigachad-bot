@@ -64,6 +64,10 @@ describe("useChatStream", () => {
     createChatStream.mockReturnValue(stream([
       event("token", "Before "),
       event("tool_call", { id: "call-1", name: "web_search", arguments: { query: "cats" } }),
+      event("tool_progress", {
+        id: "call-1",
+        stages: [{ id: "stage-1", label: "Planning search", status: "done", started_at: 1, duration: 0.2 }],
+      }),
       event("token", "after"),
       event("tool_result", {
         id: "call-1",
@@ -94,6 +98,7 @@ describe("useChatStream", () => {
           summary: "1 source",
           detail: { query: "cats" },
           error: null,
+          stages: [{ id: "stage-1", label: "Planning search", status: "done", started_at: 1, duration: 0.2 }],
         }],
       },
     ])
@@ -165,6 +170,10 @@ describe("useChatStream", () => {
   it("leaves no running tool record when the turn is aborted", async () => {
     const { result: parkedResult, parked } = parkedStream([
       event("tool_call", { id: "call-1", name: "sandbox_plot", arguments: { code: "plot()" } }),
+      event("tool_progress", {
+        id: "call-1",
+        stages: [{ id: "stage-1", label: "Generating chart", status: "running", started_at: Date.now() / 1_000, duration: 0 }],
+      }),
     ])
     createChatStream.mockReturnValue(parkedResult)
     const { result } = renderHook(() => useChatStream())
@@ -179,6 +188,7 @@ describe("useChatStream", () => {
     const calls = result.current.messages[1].tool_calls
     expect(calls).toHaveLength(1)
     expect(calls?.[0]).toMatchObject({ id: "call-1", status: "error", error: "Cancelled" })
+    expect(calls?.[0].stages?.[0]).toMatchObject({ status: "error" })
     expect(calls?.every(call => call.status !== "running")).toBe(true)
   })
 
