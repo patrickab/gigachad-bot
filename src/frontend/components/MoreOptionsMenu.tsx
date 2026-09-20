@@ -44,7 +44,7 @@ export function MoreOptionsMenu({
   onEditPrompts,
   models,
 }: MoreOptionsMenuProps) {
-  const { researchEnabled, searchEnabled } = useModeState()
+  const { researchEnabled } = useModeState()
   const [open, setOpen] = useState(false)
   const [researchOpen, setResearchOpen] = useState(false)
   const [transparentBg, setTransparentBg] = useState(false)
@@ -140,34 +140,6 @@ export function MoreOptionsMenu({
                 </div>
               </>
 
-            {searchEnabled && (
-              <div className="pt-2 border-t border-divider/50 space-y-3">
-                {/* Domain filter helper — prepended verbatim to the query */}
-                <div className="space-y-1">
-                  <span className="text-[10px] text-ink-faint">Domain filter</span>
-                  <input
-                    value={config.searchDomain}
-                    onChange={(e) => onConfigChange({ searchDomain: e.target.value })}
-                    placeholder="site:nature.com -reddit.com"
-                    spellCheck={false}
-                    className="w-full rounded-md border border-divider bg-surface px-2 py-1 text-xs text-ink placeholder:text-ink-faint outline-none focus:border-divider-strong"
-                  />
-                </div>
-
-                {/* System instructions */}
-                <div className="space-y-1">
-                  <span className="text-[10px] text-ink-faint">System instructions</span>
-                  <textarea
-                    value={config.searchSystemInstructions}
-                    onChange={(e) => onConfigChange({ searchSystemInstructions: e.target.value })}
-                    placeholder="Optional guidance for the answer…"
-                    rows={2}
-                    spellCheck={false}
-                    className="w-full resize-none rounded-md border border-divider bg-surface px-2 py-1 text-xs text-ink placeholder:text-ink-faint outline-none focus:border-divider-strong"
-                  />
-                </div>
-              </div>
-            )}
 
             {researchEnabled && config.researchDepth !== undefined && (
               <div className="pt-2 border-t border-divider/50">
@@ -235,6 +207,28 @@ export function MoreOptionsMenu({
                         ]}
                         value={config.researchReportType}
                         onChange={(v) => onConfigChange({ researchReportType: v })}
+                      />
+                    </div>
+                    {/* Search guidance is only used by the deep-research tool. */}
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-ink-faint">Domain filter</span>
+                      <input
+                        value={config.searchDomain}
+                        onChange={(e) => onConfigChange({ searchDomain: e.target.value })}
+                        placeholder="site:nature.com -reddit.com"
+                        spellCheck={false}
+                        className="w-full rounded-md border border-divider bg-surface px-2 py-1 text-xs text-ink placeholder:text-ink-faint outline-none focus:border-divider-strong"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-ink-faint">System instructions</span>
+                      <textarea
+                        value={config.searchSystemInstructions}
+                        onChange={(e) => onConfigChange({ searchSystemInstructions: e.target.value })}
+                        placeholder="Optional guidance for the answer…"
+                        rows={2}
+                        spellCheck={false}
+                        className="w-full resize-none rounded-md border border-divider bg-surface px-2 py-1 text-xs text-ink placeholder:text-ink-faint outline-none focus:border-divider-strong"
                       />
                     </div>
                   </div>
