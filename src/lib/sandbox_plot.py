@@ -165,11 +165,13 @@ async def create_sandbox_plot(brief: str, context: PlotContext) -> ToolOutcome:
             thinking="low",
             lean=True,
         )
-        figure = (
-            _figure_from_sandbox_outputs(context.sandbox_service.output_texts(result, media_type=PLOTLY_MEDIA_TYPE))
-            if result.status == "completed"
-            else None
-        )
+        if result.status != "completed":
+            return ToolOutcome(
+                content="The sandbox could not run: it failed before producing a figure. Explain that briefly.",
+                summary=result.summary or "Failed",
+                error=result.error or "sandbox_runner_error",
+            )
+        figure = _figure_from_sandbox_outputs(context.sandbox_service.output_texts(result, media_type=PLOTLY_MEDIA_TYPE))
 
     if figure is None:
         return ToolOutcome(

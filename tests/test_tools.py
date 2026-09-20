@@ -39,16 +39,17 @@ def test_source_label_extracts_a_stable_hostname_label() -> None:
 
 
 class SandboxServiceStub:
-    def __init__(self, stdout: str, script_stdout: str | None = None) -> None:
+    def __init__(self, stdout: str, script_stdout: str | None = None, invoke_result: SandboxToolResult | None = None) -> None:
         self.model = TEST_MODEL
         self.stdout = stdout
         self.script_stdout = script_stdout
+        self.invoke_result = invoke_result
         self.calls: list[dict[str, Any]] = []
         self.scripts: list[str] = []
 
     async def invoke(self, **kwargs: Any) -> SandboxToolResult:
         self.calls.append(kwargs)
-        return SandboxToolResult("completed", "hidden transcript", "manifest", True)
+        return self.invoke_result or SandboxToolResult("completed", "hidden transcript", "manifest", True)
 
     async def run_script(self, script: str, **_kwargs: Any) -> str:
         self.scripts.append(script)
@@ -231,9 +232,7 @@ async def test_failed_tool_degrades_the_turn_instead_of_the_stream() -> None:
     async def boom(_args: dict[str, Any], _ctx: tools.ToolContext) -> toolcalling.ToolOutcome:
         raise RuntimeError("brave is down")
 
-    catalog = toolcalling.ToolCatalog(
-        [toolcalling.ToolDefinition("explode", "d", {"type": "object", "properties": {}}, boom)]
-    )
+    catalog = toolcalling.ToolCatalog([toolcalling.ToolDefinition("explode", "d", {"type": "object", "properties": {}}, boom)])
     outcome = await catalog.execute("explode", {}, ctx)
     assert (outcome.error, outcome.summary) == ("brave is down", "Failed")
 
@@ -467,6 +466,23 @@ async def test_sandbox_plot_invalid_output_fails_without_exposing_transcript() -
     assert "hidden transcript" not in outcome.content
 
 
+@pytest.mark.asyncio
+async def test_sandbox_plot_runner_failure_reports_its_own_error_not_invalid_figure() -> None:
+    """A sandbox that never ran (e.g. runtime failure) must not be reported as a bad figure."""
+    sandbox = SandboxServiceStub(
+        "not json",
+        invoke_result=SandboxToolResult(
+            "failed", "The workspace agent could not complete this run.", None, False, error="runner_error"
+        ),
+    )
+    ctx = tools.ToolContext(client=ClientStub(), model=TEST_MODEL, opts=tools.ToolOptions(), sandbox_service=sandbox)
+
+    outcome = await tools.BUILTIN_TOOLS.execute("sandbox_plot", {"brief": "Plot the trend"}, ctx)
+
+    assert outcome.error == "runner_error"
+    assert outcome.summary == "The workspace agent could not complete this run."
+
+
 def _chat_app(monkeypatch: pytest.MonkeyPatch) -> Any:
     """The real /api/chat router, with only the provider call and identity faked out."""
     from fastapi import FastAPI
@@ -554,9 +570,7 @@ async def test_workspace_agent_result_carries_sandbox_state_to_the_browser(monke
     ]
     monkeypatch.setattr(toolcalling.litellm, "completion", lambda **_: rounds.pop(0))
 
-    events = await _collect(
-        enabled=["workspace_agent"], chat_id="chat-1", sandbox_service=SandboxServiceStub("unused")
-    )
+    events = await _collect(enabled=["workspace_agent"], chat_id="chat-1", sandbox_service=SandboxServiceStub("unused"))
     (result,) = [data for name, data in events if name == "tool_result"]
 
     assert result["name"] == "workspace_agent"
@@ -582,9 +596,7 @@ async def test_workspace_agent_result_carries_sandbox_state_to_the_browser(monke
 @pytest.mark.asyncio
 async def test_workspace_agent_without_a_sandbox_service_degrades_instead_of_raising() -> None:
     """A missing sandbox must become a tool error the model can talk about, never a dead stream."""
-    ctx = tools.ToolContext(
-        client=ClientStub(), model=TEST_MODEL, opts=tools.ToolOptions(), chat_id="chat-1", sandbox_service=None
-    )
+    ctx = tools.ToolContext(client=ClientStub(), model=TEST_MODEL, opts=tools.ToolOptions(), chat_id="chat-1", sandbox_service=None)
 
     outcome = await tools.BUILTIN_TOOLS.execute("workspace_agent", {"prompt": "do work"}, ctx)
 

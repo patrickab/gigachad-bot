@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useCallback, useContext, useState, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react"
 import { Globe, LineChart, Search, Terminal, type LucideIcon } from "lucide-react"
 import type { ToolName } from "@/lib/types"
 
@@ -33,6 +33,8 @@ export const TOOLS: readonly ToolMeta[] = [
 /** Keyed for lookup by a saved call's name, which an older chat may no longer match. */
 export const TOOL_META: Partial<Record<string, ToolMeta>> = Object.fromEntries(TOOLS.map((tool) => [tool.name, tool]))
 
+const TOOLS_STORAGE_KEY = "gigachad-enabled-tools"
+
 export interface ModeState {
   mode: AppMode
   /** Tool names the model may call on the next send. */
@@ -57,6 +59,23 @@ export function useModeState(): ModeState {
 export function ModeProvider({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<AppMode>("chat")
   const [enabledTools, setEnabledTools] = useState<ToolName[]>(() => TOOLS.filter((tool) => tool.defaultEnabled).map((tool) => tool.name))
+
+  // Restored once on mount so the first paint uses the safe defaults above; a per-browser
+  // choice, matching every other composer preference (theme, transparent background).
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(TOOLS_STORAGE_KEY)
+      if (saved) {
+        const names = JSON.parse(saved) as string[]
+        const valid = new Set(TOOLS.map((tool) => tool.name))
+        setEnabledTools(names.filter((name): name is ToolName => valid.has(name as ToolName)))
+      }
+    } catch { /* corrupt or unavailable storage — keep defaults */ }
+  }, [])
+
+  useEffect(() => {
+    try { window.localStorage.setItem(TOOLS_STORAGE_KEY, JSON.stringify(enabledTools)) } catch { /* quota */ }
+  }, [enabledTools])
 
   // Tools are independent: enabling one must not disable another, because a chat can call a
   // different tool on every turn.
