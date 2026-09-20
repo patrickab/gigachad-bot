@@ -32,7 +32,7 @@ import type { Tab, TabManagerHandle } from "@/components/TabManager"
 import { ProjectDashboard } from "@/components/ProjectDashboard"
 import { TokenCounter } from "@/components/TokenCounter"
 import { useChat } from "@/hooks/useChat"
-import { TOOLS, useModeState, ModeProvider } from "@/hooks/useModeState"
+import { useModeState, ModeProvider } from "@/hooks/useModeState"
 import { useSettings, SettingsProvider } from "@/contexts/SettingsContext"
 import { useProject, ProjectProvider } from "@/contexts/ProjectContext"
 import { useBranches } from "@/contexts/BranchContext"
@@ -294,11 +294,8 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     else if (commandBar.state.phase === "doc-review") onModeLabel("Review memory docs", docReviewLoading)
     else if (commandBar.state.phase === "error") onModeLabel("Memory error")
     else if (ocrEnabled) onModeLabel("LaTeX OCR")
-    else if (enabledTools.length > 0) {
-      onModeLabel(`Chat · ${TOOLS.filter(t => enabledTools.includes(t.name)).map(t => t.shortLabel.toLowerCase()).join(" + ")}`)
-    }
     else onModeLabel("Chat")
-  }, [commandBar.state.phase, docReviewLoading, commandMemoryCount, enabledTools, ocrEnabled, onModeLabel])
+  }, [commandBar.state.phase, docReviewLoading, commandMemoryCount, ocrEnabled, onModeLabel])
 
   useEffect(() => {
     if (!isActive || appMode === "canvas") return

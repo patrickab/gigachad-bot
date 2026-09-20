@@ -74,6 +74,25 @@ describe("PlotElement", () => {
     expect(plotProps.at(-1)!.layout).toMatchObject({ width: 800, height: 480, autosize: false })
   })
 
+  it("allocates a chart-height slice for each subplot row", () => {
+    render(
+      <PlotElement
+        figure={{
+          data: [],
+          layout: {
+            yaxis: { domain: [0.55, 1] },
+            yaxis2: { domain: [0.55, 1] },
+            yaxis3: { domain: [0, 0.45] },
+            yaxis4: { domain: [0, 0.45] },
+          },
+        }}
+      />,
+    )
+
+    act(() => resizeObservers[0]!.resize(480))
+    expect(plotProps.at(-1)!.layout).toMatchObject({ width: 480, height: 600 })
+  })
+
   it("keeps model-provided grid and scene chrome aligned with the active theme", () => {
     render(
       <PlotElement

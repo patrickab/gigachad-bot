@@ -37,8 +37,22 @@ const COLORWAY_HUES = [250, 25, 150, 320, 200, 60]
 const DARK_COLORWAY = COLORWAY_HUES.map((h) => `oklch(72% 0.11 ${h})`)
 const LIGHT_COLORWAY = COLORWAY_HUES.map((h) => `oklch(52% 0.13 ${h})`)
 
-function chartHeightFor(width: number) {
-  return Math.min(560, Math.max(300, Math.round(width * 0.6)))
+function subplotRowsFor(layout: Record<string, unknown> | undefined) {
+  const gridRows = (layout?.grid as Record<string, unknown> | undefined)?.rows
+  if (typeof gridRows === "number" && Number.isInteger(gridRows) && gridRows > 0) return gridRows
+
+  const domains = Object.entries(layout ?? {})
+    .filter(([key, value]) => /^yaxis\d*$/.test(key) && value && typeof value === "object")
+    .map(([, axis]) => (axis as Record<string, unknown>).domain)
+    .filter((domain): domain is [number, number] => Array.isArray(domain)
+      && domain.length === 2
+      && domain.every((value) => typeof value === "number"))
+    .map(([start, end]) => `${start}:${end}`)
+  return Math.max(1, new Set(domains).size)
+}
+
+function chartHeightFor(width: number, rows: number) {
+  return Math.min(560, Math.max(300, Math.round(width * 0.6))) * rows
 }
 
 /** Renders a figure the `sandbox_plot` tool produced. Theme values remain defaults the model can
@@ -72,9 +86,10 @@ export function PlotElement({ figure }: PlotElementProps) {
     return () => observer.disconnect()
   }, [])
 
+  const subplotRows = useMemo(() => subplotRowsFor(figure.layout), [figure.layout])
   const dimensions = useMemo(
-    () => hostWidth > 0 ? { width: hostWidth, height: chartHeightFor(hostWidth) } : null,
-    [hostWidth],
+    () => hostWidth > 0 ? { width: hostWidth, height: chartHeightFor(hostWidth, subplotRows) } : null,
+    [hostWidth, subplotRows],
   )
 
   const layout = useMemo(() => {
