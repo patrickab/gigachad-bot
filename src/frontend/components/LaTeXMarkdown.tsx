@@ -3,7 +3,7 @@
 import { Streamdown, defaultRemarkPlugins, type Components } from "streamdown"
 import { createMathPlugin } from "@streamdown/math"
 import remarkBreaks from "remark-breaks"
-import { cloneElement, isValidElement, memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { cloneElement, isValidElement, memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { cn } from "@/lib/utils"
 import { highlightCode } from "@/lib/markdown-syntax-highlighting"
 import { apiOrigin } from "@/lib/api"
@@ -351,12 +351,14 @@ function LaTeXMarkdownInner({
   streaming,
   compact,
   onContentChange,
+  style,
 }: {
   content: string
   citationMap?: Record<string, { title: string; url: string; content: string }>
   streaming?: boolean
   compact?: boolean
   onContentChange?: (newContent: string) => void
+  style?: CSSProperties
 }) {
   const processed = useMemo(() => normalizeMathDelimiters(content), [content])
 
@@ -432,7 +434,7 @@ function LaTeXMarkdownInner({
   }, [citationMap, onContentChange, handleToggle])
 
   return (
-    <div className={cn("text-[13px] leading-relaxed", compact ? "markdown-body-compact" : "markdown-body")}>
+    <div className={cn("text-[13px] leading-relaxed", compact ? "markdown-body-compact" : "markdown-body")} style={style}>
       <Streamdown
         mode={streaming ? "streaming" : "static"}
         isAnimating={false}

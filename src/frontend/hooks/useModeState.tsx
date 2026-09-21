@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react"
-import { Globe, LineChart, Network, Search, Sigma, Terminal, type LucideIcon } from "lucide-react"
+import { Globe, LineChart, Network, Search, Sigma, Terminal, Workflow, type LucideIcon } from "lucide-react"
 import type { ToolName } from "@/lib/types"
 
 /** OCR still hijacks the composer; web search, deep research, and sandbox plots are tools the
@@ -27,6 +27,7 @@ export const TOOLS: readonly ToolMeta[] = [
   { name: "deep_research", selectorLabel: "Deep Research", shortLabel: "Research", cardLabel: "Deep research", icon: Search, defaultEnabled: true },
   { name: "web_search", selectorLabel: "Web Search", shortLabel: "Search", cardLabel: "Web search", icon: Globe, defaultEnabled: true },
   { name: "sandbox_plot", selectorLabel: "Interactive Plot", shortLabel: "Plot", cardLabel: "Interactive plot", icon: LineChart, defaultEnabled: true },
+  { name: "diagram", selectorLabel: "Diagram", shortLabel: "Diagram", cardLabel: "Diagram", icon: Workflow, defaultEnabled: true },
   { name: "mindmap", selectorLabel: "Mind Map", shortLabel: "Mind map", cardLabel: "Mind map", icon: Network, defaultEnabled: false },
   { name: "latex_ocr", selectorLabel: "LaTeX OCR", shortLabel: "LaTeX OCR", cardLabel: "LaTeX OCR", icon: Sigma, defaultEnabled: false },
   { name: "workspace_agent", selectorLabel: "Workspace Agent", shortLabel: "Workspace", cardLabel: "Workspace agent", icon: Terminal, defaultEnabled: false },

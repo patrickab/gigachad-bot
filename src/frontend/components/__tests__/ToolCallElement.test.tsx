@@ -19,6 +19,15 @@ vi.mock("@/components/CodeBlock", () => ({
   },
 }))
 
+const markdownCalls = vi.hoisted(() => vi.fn())
+
+vi.mock("@/components/LaTeXMarkdown", () => ({
+  LaTeXMarkdown: ({ content }: { content: string }) => {
+    markdownCalls(content)
+    return <div data-testid="mermaid-diagram">{content}</div>
+  },
+}))
+
 import { ToolCallElement } from "@/components/ToolCallElement"
 
 const sandboxPlotCall: ToolCallRecord = {
@@ -37,6 +46,7 @@ describe("ToolCallElement sandbox plots", () => {
   beforeEach(() => {
     plotCalls.mockReset()
     codeBlockCalls.mockReset()
+    markdownCalls.mockReset()
   })
 
   it("keeps the chart visible while the briefing disclosure toggles", () => {
@@ -70,6 +80,20 @@ describe("ToolCallElement sandbox plots", () => {
     expect(screen.getByTestId("code-block")).toBeInTheDocument()
   })
 
+
+  it("renders Mermaid source directly in a diagram tool call", () => {
+    render(<ToolCallElement call={{
+      id: "diagram-1",
+      name: "diagram",
+      arguments: {},
+      status: "done",
+      detail: { mermaid: "flowchart LR\nA --> B" },
+    }} />)
+
+    expect(markdownCalls).toHaveBeenCalledWith("```mermaid\nflowchart LR\nA --> B\n```")
+    expect(screen.getByTestId("mermaid-diagram")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^diagram$/i })).not.toBeInTheDocument()
+  })
   it("retains the argument disclosure for other tools", () => {
     render(<ToolCallElement call={{ id: "search-1", name: "web_search", arguments: { query: "plotly docs" }, status: "done" }} />)
 

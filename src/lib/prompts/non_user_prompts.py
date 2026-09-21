@@ -34,3 +34,20 @@ Return ONLY a fenced markmap code block. No prose before or after.
 - Use logical grouping, not source order
 - Scale detail to the material's complexity — simple documents get fewer branches, dense ones get more
 """
+
+SYS_DIAGRAM_MERMAID = """
+# Role
+You create clear, compact Mermaid diagrams.
+
+# Task
+Turn the supplied conversation into the diagram the user requested.
+
+# Format
+Return ONLY one fenced `mermaid` code block. No prose before or after.
+
+# Rules
+- Choose the smallest Mermaid diagram type that communicates the request.
+- For flowcharts, use concise node labels and stable simple identifiers.
+- Do not use links, click handlers, HTML, styling directives, theme directives, or Mermaid initialization blocks.
+- Produce valid Mermaid syntax that renders without external assets.
+"""

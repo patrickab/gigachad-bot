@@ -4,7 +4,7 @@ import { memo, useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { getStroke } from "perfect-freehand"
 import { type StrokeData, type EmbedRect, getSvgPathFromStroke, renderPageToPng } from "@/lib/drawing"
-import { createArchitectureGraph, fileViewerRawUrl, writeBinaryDocument, listArchitectureGraphs, listProjectDocuments, loadFileViewerText, readArchitectureGraph, writeArchitectureGraph, writeDocument, ApiError } from "@/lib/api"
+import { createArchitectureGraph, fileViewerRawUrl, writeBinaryDocument, listArchitectureGraphs, listNotes, listProjectDocuments, loadFileViewerText, readArchitectureGraph, writeArchitectureGraph, writeDocument, ApiError } from "@/lib/api"
 import { emptyArchitectureGraph, parseArchitectureGraph, serializeArchitectureGraph, type ArchitectureGraph } from "@/lib/architectureGraph"
 import { useGraphAutosave } from "@/lib/graphAutosave"
 import { subscribeToChanges } from "@/lib/syncStream"
@@ -13,6 +13,8 @@ import { cn } from "@/lib/utils"
 import { Plus, Undo2, Redo2, Trash2, Copy, FileType, ImageIcon, X, Camera, CircleDashed, Type, SquarePen, PenLine, Maximize2, Minimize2 } from "lucide-react"
 import { PdfViewer } from "./PdfViewer"
 import { ArchitectureGraphSurface } from "./ArchitectureGraphSurface"
+import { LaTeXMarkdown } from "./LaTeXMarkdown"
+import { PlotElement, type PlotFigure } from "./PlotElement"
 import { useTabActive } from "./TabManager"
 
 const A4_W = 794
@@ -129,7 +131,7 @@ export interface CanvasFrame {
 
 export interface CanvasAttachment {
   id: string
-  kind: "pdf" | "canvas" | "architecture-graph"
+  kind: "pdf" | "canvas" | "architecture-graph" | "document"
   path?: string // pdf source; nested canvases have none
   canvas?: CanvasDocument // nested canvas contents (kind === "canvas")
   x: number
@@ -549,16 +551,15 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   const [shotRect, setShotRect] = useState<RectDrag | null>(null)
   const shotStart = useRef<{ x: number; y: number } | null>(null)
 
-  // --- Text: drag a box to define where a handwriting-style note goes. A plain click
-  // (no real drag) still drops a default-size box. Typing with the canvas focused starts
-  // one at the latest pointer position. Clicking an existing note focuses its textarea
-  // and places the cursor natively; a thin top band moves it, corner resizes it. ---
+  // --- Text: notes render as Markdown when unfocused. Enter switches from source
+  // to formatted content, while clicking the rendered note reopens its textarea. ---
   const [textMode, setTextMode] = useState(false)
   const [textDragRect, setTextDragRect] = useState<RectDrag | null>(null)
   const textDragStart = useRef<{ x: number; y: number } | null>(null)
   const lastCanvasPoint = useRef<[number, number] | null>(null)
   const newTextIds = useRef(new Set<string>())
   const [autoFocusId, setAutoFocusId] = useState<string | null>(null)
+  const [editingTextId, setEditingTextId] = useState<string | null>(null)
 
   const [isDark, setIsDark] = useState(() => activeThemeName() === "dark")
   useEffect(() => {
@@ -617,6 +618,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     const cur = liveRef.current.doc
     commit({ ...cur, texts: [...cur.texts, { id, x, y, width, height, text, color, size: TEXT_DEFAULT_SIZE }] })
     setAutoFocusId(id)
+    setEditingTextId(id)
   }, [color, commit])
 
   // Wheel zoom
@@ -1199,10 +1201,16 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   const [projectPdfs, setProjectPdfs] = useState<{ path: string; name: string }[]>([])
   const [projectImages, setProjectImages] = useState<{ path: string; name: string }[]>([])
   const [architectureGraphs, setArchitectureGraphs] = useState<{ path: string; name: string }[]>([])
+  const [documents, setDocuments] = useState<{ path: string; name: string }[]>([])
   useEffect(() => {
-    if (!addMenuOpen || slug == null) return
-    listProjectDocuments(slug)
+    if (!addMenuOpen) return
+    const load = slug ? listProjectDocuments(slug) : listNotes()
+    load
       .then((docs) => {
+        setDocuments(docs
+          .filter((d) => d.path.endsWith(".md") || d.path.endsWith(".plot.json"))
+          .map((d) => ({ path: d.path, name: d.name })))
+        if (!slug) return
         setProjectPdfs(docs.filter((d) => d.mime === "application/pdf").map((d) => ({ path: d.path, name: d.name })))
         setProjectImages(docs.filter((d) => d.mime.startsWith("image/")).map((d) => ({ path: d.path, name: d.name })))
         if (depth === 0) setProjectCanvases(docs
@@ -1211,11 +1219,6 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
       })
       .catch(() => { /* picker just stays empty */ })
   }, [addMenuOpen, slug, depth, docPath])
-
-  useEffect(() => {
-    if (!addMenuOpen || depth > 0) return
-    listArchitectureGraphs().then((graphs) => setArchitectureGraphs(graphs)).catch(() => { /* picker just stays empty */ })
-  }, [addMenuOpen, depth])
 
   const pointAtCenter = useCallback((w: number, aspect: number) => {
     const el = containerRef.current
@@ -1279,6 +1282,15 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     const { cx, cy } = pointAtCenter(DEFAULT_GRAPH_WIDTH, DEFAULT_GRAPH_HEIGHT / DEFAULT_GRAPH_WIDTH)
     commit({ ...doc, attachments: [...doc.attachments, {
       id: `ag-${Date.now()}`, kind: "architecture-graph", path, x: cx, y: cy, width: DEFAULT_GRAPH_WIDTH, height: DEFAULT_GRAPH_HEIGHT,
+    }] })
+    setAddMenuOpen(false)
+  }, [doc, commit, pointAtCenter])
+
+  const addDocumentAttachment = useCallback((path: string) => {
+    if (doc.attachments.some((attachment) => attachment.path === path)) { setAddMenuOpen(false); return }
+    const { cx, cy } = pointAtCenter(DEFAULT_GRAPH_WIDTH, DEFAULT_GRAPH_HEIGHT / DEFAULT_GRAPH_WIDTH)
+    commit({ ...doc, attachments: [...doc.attachments, {
+      id: `doc-${Date.now()}`, kind: "document", path, x: cx, y: cy, width: DEFAULT_GRAPH_WIDTH, height: DEFAULT_GRAPH_HEIGHT,
     }] })
     setAddMenuOpen(false)
   }, [doc, commit, pointAtCenter])
@@ -1445,7 +1457,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
           : { ...f, x: d.origX + dx, y: d.origY + dy }) })
       } else if (d.target === "attachment") {
         change({ ...cur, attachments: cur.attachments.map((a) => a.id !== d.id ? a
-          : d.mode === "resize" ? a.kind === "architecture-graph"
+          : d.mode === "resize" ? (a.kind === "architecture-graph" || a.kind === "document")
             ? { ...a, width: Math.max(minW, d.origW + dx), height: Math.max(MIN_GRAPH_HEIGHT, d.origH + dy) }
             : { ...a, width: Math.max(minW, d.origW + dx) }
           : { ...a, x: d.origX + dx, y: d.origY + dy }) })
@@ -1537,6 +1549,22 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
                     >
                       <FileType className="h-3 w-3 shrink-0 text-ink-faint" />
                       <span className="truncate">{pdf.name}</span>
+                    </button>
+                  ))}
+                </>
+              )}
+              {documents.length > 0 && (
+                <>
+                  <div className="mx-2 my-1 border-t border-divider/50" />
+                  <div className="px-3 py-0.5 text-[9px] text-ink-faint uppercase tracking-wider">Documents</div>
+                  {documents.map((docItem) => (
+                    <button
+                      key={docItem.path}
+                      onClick={() => addDocumentAttachment(docItem.path)}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink hover:bg-hover transition-colors truncate"
+                    >
+                      <FileType className="h-3 w-3 shrink-0 text-ink-faint" />
+                      <span className="truncate">{docItem.name}</span>
                     </button>
                   ))}
                 </>
@@ -1948,8 +1976,9 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
           const screenY = att.y * scale + offset.y
           const nested = att.kind === "canvas"
           const architectureGraph = att.kind === "architecture-graph"
+          const isDocument = att.kind === "document"
           const aspect = nested ? CANVAS_ASPECT : (aspects[att.id] ?? FALLBACK_ASPECT)
-          const name = att.path?.split("/").pop() ?? (architectureGraph ? "Architecture Graph" : nested ? "Canvas" : "PDF")
+          const name = att.path?.split("/").pop() ?? (architectureGraph ? "Architecture Graph" : nested ? "Canvas" : isDocument ? "Document" : "PDF")
           // Visible size follows canvas zoom, but layout width only follows the
           // settled zoom (capped at what PdfViewer will actually rasterize); the
           // CSS transform bridges the difference. Mid-gesture that means pure
@@ -1959,7 +1988,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
           // out at screen size instead (transform 1); PDFs keep the trick for sharpness.
           const screenW = att.width * scale
           const screenH = (att.height ?? att.width * CANVAS_ASPECT) * scale
-          const layoutW = nested || architectureGraph ? screenW : Math.min(att.width * settledScale, PDF_LAYOUT_CAP)
+          const layoutW = nested || architectureGraph || isDocument ? screenW : Math.min(att.width * settledScale, PDF_LAYOUT_CAP)
           // Fullscreen only restyles this same wrapper — moving the window elsewhere in
           // the tree would remount the editor inside it and lose whatever it holds.
           const full = fullscreenId === att.id
@@ -1972,7 +2001,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
               )}
               style={full
                 ? { inset: 0, transform: "none" }
-                : architectureGraph
+                : architectureGraph || isDocument
                   ? { left: screenX, top: screenY, width: screenW, height: screenH, transform: "none" }
                 : { left: screenX, top: screenY, width: layoutW, transform: `scale(${screenW / layoutW})`, transformOrigin: "top left" }}
             >
@@ -2001,11 +2030,13 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
               <div
                 data-canvas-attachment
                 className={cn(full && "flex-1 min-h-0")}
-                style={{ height: full ? undefined : architectureGraph ? screenH - 31 : layoutW * aspect }}
+                style={{ height: full ? undefined : architectureGraph || isDocument ? screenH - 31 : layoutW * aspect }}
                 onPointerDown={(e) => e.stopPropagation()}
               >
                 {architectureGraph ? (
                   <CanvasArchitectureGraph path={att.path!} />
+                ) : isDocument ? (
+                  <CanvasDocumentAttachment path={att.path!} />
                 ) : nested ? (
                   att.path ? (
                     depth < MAX_NEST_DEPTH ? (
@@ -2048,44 +2079,64 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
           )
         })}
 
-        {/* Text notes — the CanvasText primitive. A draggable/resizable box with a real
-            textarea inside, so clicking always focuses natively at the click position.
-            Rasterized (word-wrapped, clipped) into export, unlike CanvasAttachment. */}
+        {/* Text notes render their Markdown until clicked, then expose the source textarea.
+            They remain rasterized as source text in canvas exports. */}
         {doc.texts.map((t) => {
           const screenX = t.x * scale + offset.x
           const screenY = t.y * scale + offset.y
           const screenW = t.width * scale
           const screenH = t.height * scale
           const band = 6
+          const editing = t.id === editingTextId
           return (
             <div key={t.id} className="absolute group/text" style={{ left: screenX, top: screenY, width: screenW, height: screenH }}>
-              <textarea
-                autoFocus={t.id === autoFocusId}
-                value={t.text}
-                onChange={(e) => {
-                  if (!textEdited.current) { textEdited.current = true; if (t.text !== "") snapshot() }
-                  onChange({ ...doc, texts: doc.texts.map((x) => x.id === t.id ? { ...x, text: e.target.value } : x) })
-                }}
-                onFocus={() => { textEdited.current = newTextIds.current.delete(t.id); setAutoFocusId((cur) => cur === t.id ? null : cur) }}
-                onBlur={() => dropIfEmptyText(t.id)}
-                onKeyDown={(e) => {
-                  e.stopPropagation()
-                  if (e.key === "Enter" && !(e.ctrlKey || e.metaKey)) {
-                    e.preventDefault()
-                    ;(e.target as HTMLTextAreaElement).blur()
-                  } else if (e.key === "Escape") {
-                    e.preventDefault()
-                    ;(e.target as HTMLTextAreaElement).blur()
-                  }
-                }}
-                onPointerDown={(e) => e.stopPropagation()}
-                className="absolute inset-0 resize-none bg-transparent outline-none border border-transparent focus:border-dashed focus:border-divider-strong rounded px-1"
-                style={{
-                  fontSize: t.size * scale,
-                  lineHeight: 1.2,
-                  color: inkColor(t.color, isDark),
-                }}
-              />
+              {editing ? (
+                <textarea
+                  autoFocus={t.id === autoFocusId}
+                  value={t.text}
+                  onChange={(e) => {
+                    if (!textEdited.current) { textEdited.current = true; if (t.text !== "") snapshot() }
+                    onChange({ ...doc, texts: doc.texts.map((x) => x.id === t.id ? { ...x, text: e.target.value } : x) })
+                  }}
+                  onFocus={() => {
+                    textEdited.current = newTextIds.current.delete(t.id)
+                    setAutoFocusId((cur) => cur === t.id ? null : cur)
+                  }}
+                  onBlur={() => {
+                    setEditingTextId(null)
+                    dropIfEmptyText(t.id)
+                  }}
+                  onKeyDown={(e) => {
+                    e.stopPropagation()
+                    if (e.key === "Enter" && !(e.ctrlKey || e.metaKey)) {
+                      e.preventDefault()
+                      ;(e.target as HTMLTextAreaElement).blur()
+                    } else if (e.key === "Escape") {
+                      e.preventDefault()
+                      ;(e.target as HTMLTextAreaElement).blur()
+                    }
+                  }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  className="absolute inset-0 resize-none bg-transparent outline-none border border-transparent focus:border-dashed focus:border-divider-strong rounded px-1"
+                  style={{
+                    fontSize: t.size * scale,
+                    lineHeight: 1.2,
+                    color: inkColor(t.color, isDark),
+                  }}
+                />
+              ) : (
+                <div
+                  className="absolute inset-0 cursor-text overflow-auto rounded px-1 py-0.5"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    if ((e.target as HTMLElement).closest("a")) return
+                    setEditingTextId(t.id)
+                    setAutoFocusId(t.id)
+                  }}
+                >
+                  <LaTeXMarkdown content={t.text} style={{ fontSize: t.size * scale, color: inkColor(t.color, isDark) }} />
+                </div>
+              )}
               {/* top drag-band (move) — thin sliver above the textarea, dim until hover */}
               <div
                 className="absolute inset-x-0 top-0 opacity-0 group-hover/text:opacity-60 hover:!opacity-100 transition-opacity bg-[var(--ink-faint)] rounded-t"
@@ -2177,6 +2228,46 @@ function CanvasArchitectureGraph({ path }: { path: string }) {
 
   if (!graph) return <div className="flex h-full items-center justify-center text-[10px] text-ink-faint">Loading Architecture Graph…</div>
   return <ArchitectureGraphSurface graph={graph} onChange={onChange} className="h-full" />
+}
+
+// A document attachment is a read-only view of a generated chat artifact — a Mermaid
+// or markmap note rendered through the shared markdown renderer, or a Plotly figure
+// through the shared plot renderer. Sized and laid out like an Architecture Graph
+// (fixed viewport, no CSS zoom scaling) since neither renderer tolerates a transform
+// squeeze.
+type DocumentAttachmentState =
+  | { status: "loading" }
+  | { status: "markdown"; content: string }
+  | { status: "plot"; figure: PlotFigure }
+  | { status: "error"; message: string }
+
+function CanvasDocumentAttachment({ path }: { path: string }) {
+  const [state, setState] = useState<DocumentAttachmentState>({ status: "loading" })
+
+  useEffect(() => {
+    let alive = true
+    setState({ status: "loading" })
+    loadFileViewerText(path).then((text) => {
+      if (!alive) return
+      if (path.endsWith(".plot.json")) {
+        try {
+          const figure = JSON.parse(text)
+          if (!figure || typeof figure !== "object" || Array.isArray(figure)) throw new Error("Invalid figure")
+          setState({ status: "plot", figure: figure as PlotFigure })
+        } catch {
+          setState({ status: "error", message: "Malformed plot document" })
+        }
+      } else {
+        setState({ status: "markdown", content: text })
+      }
+    }).catch(() => { if (alive) setState({ status: "error", message: "Failed to load document" }) })
+    return () => { alive = false }
+  }, [path])
+
+  if (state.status === "loading") return <div className="flex h-full items-center justify-center text-[10px] text-ink-faint">Loading…</div>
+  if (state.status === "error") return <div className="flex h-full items-center justify-center px-3 text-center text-[10px] text-ink-faint">{state.message}</div>
+  if (state.status === "plot") return <div className="h-full overflow-auto p-2"><PlotElement figure={state.figure} /></div>
+  return <div className="h-full overflow-auto p-3 text-[12px]"><LaTeXMarkdown content={state.content} /></div>
 }
 
 // A canvas window bound to an existing project `.canvas` file: loads it on open,

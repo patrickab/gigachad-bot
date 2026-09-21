@@ -687,6 +687,66 @@ async def test_mindmap_tool_returns_a_renderable_markmap(monkeypatch: pytest.Mon
 
 
 @pytest.mark.asyncio
+async def test_diagram_tool_returns_mermaid_source_for_the_tool_card(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def fake_query(_client: Any, **kwargs: Any) -> Any:
+        calls.append(kwargs)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="```diagram\nflowchart LR\nA --> B\n```"))])
+
+    monkeypatch.setattr(tools, "api_query_resilient", fake_query)
+    context = tools.ToolContext(
+        client=ClientStub(),
+        model=TEST_MODEL,
+        opts=tools.ToolOptions(),
+        history=({"role": "assistant", "content": "Prior explanation"},),
+        user_msg="Make a diagram",
+    )
+
+    outcome = await tools.BUILTIN_TOOLS.execute("diagram", {}, context)
+
+    assert outcome.detail["mermaid"] == "flowchart LR\nA --> B"
+    assert "Do not create, return, or repeat Mermaid or any other diagram." in outcome.content
+    assert "extremely concise companion explanation" not in outcome.content
+    assert "skimmable Markdown layout" not in outcome.content
+    assert "```mermaid\nflowchart LR\nA --> B\n```" in outcome.content
+    assert "<transcript>" in calls[0]["user_msg"]
+    assert calls[0]["system_prompt"] == tools.SYS_DIAGRAM_MERMAID
+    assert "significantly reduce the text needed" in tools.BUILTIN_TOOLS.specs(["diagram"])[0]["function"]["description"]
+
+
+@pytest.mark.asyncio
+async def test_diagram_answer_round_keeps_main_system_prompt_and_rendered_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    rounds = [
+        iter([_tool_chunk(0, "diagram_a", "diagram", "{}")]),
+        iter([_text_chunk("The explanation appears below the diagram.")]),
+    ]
+    sent: list[list[dict[str, Any]]] = []
+
+    def fake_completion(**kwargs: Any) -> Any:
+        sent.append(kwargs["messages"])
+        return rounds.pop(0)
+
+    def fake_query(_client: Any, **_kwargs: Any) -> Any:
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="```mermaid\nflowchart LR\nA --> B\n```"))])
+
+    monkeypatch.setattr(toolcalling.litellm, "completion", fake_completion)
+    monkeypatch.setattr(tools, "api_query_resilient", fake_query)
+
+    events = await _collect(
+        user_msg="Show the request lifecycle",
+        system_prompt="Follow the main system prompt.",
+        enabled=["diagram"],
+    )
+
+    assert [name for name, _ in events][-2:] == ["tool_result", "token"]
+    assert events[-1] == ("token", "The explanation appears below the diagram.")
+    assert "Follow the main system prompt." in sent[1][0]["content"]
+    assert "```mermaid\nflowchart LR\nA --> B\n```" in sent[1][3]["content"]
+    assert "Do not create, return, or repeat Mermaid" in sent[1][3]["content"]
+
+
+@pytest.mark.asyncio
 async def test_latex_ocr_tool_uses_the_vision_model_for_attached_images(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, Any]] = []
 

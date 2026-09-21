@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, replace
 from typing import Any
@@ -13,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from lib.llm_resilience import api_query_resilient
 from lib.prompts.internal import SYS_OCR_TEXT_EXTRACTION
-from lib.prompts.non_user_prompts import SYS_STUDY_MINDMAP
+from lib.prompts.non_user_prompts import SYS_DIAGRAM_MERMAID, SYS_STUDY_MINDMAP
 from lib.research import run_deep_research
 from lib.sandbox_plot import create_sandbox_plot
 from lib.sandbox_service import SandboxService
@@ -157,8 +158,40 @@ async def _workspace_agent(args: dict[str, Any], context: ToolContext) -> ToolOu
     )
 
 
+_FENCED_CODE = re.compile(r"```[^\n]*\n(?P<body>.*?)\n?```", re.DOTALL)
+
+
 def _response_text(response: Any) -> str:
     return response.choices[0].message.content or ""
+
+
+async def _diagram(_args: dict[str, Any], context: ToolContext) -> ToolOutcome:
+    context.stage("Creating diagram")
+    transcript = "\n".join(
+        f"[{message.get('role', 'user')}]: {message.get('content', '')}"
+        for message in (*context.history, {"role": "user", "content": context.user_msg})
+    )
+    response = await asyncio.to_thread(
+        api_query_resilient,
+        context.client,
+        model=context.model,
+        user_msg="Create a Mermaid diagram from this conversation.\n\n<transcript>\n" + transcript + "\n</transcript>",
+        user_msg_history=[],
+        system_prompt=SYS_DIAGRAM_MERMAID,
+        img=None,
+        stream=False,
+    )
+    content = _response_text(response).strip()
+    if match := _FENCED_CODE.fullmatch(content):
+        content = match.group("body").strip()
+    if not content:
+        raise ValueError("The diagram generator returned no Mermaid source.")
+    seen = (
+        "The Mermaid diagram rendered above this response and the user can already see it. Do not create, "
+        "return, or repeat Mermaid or any other diagram.\n\n"
+        f"```mermaid\n{content}\n```"
+    )
+    return ToolOutcome(content=seen, summary="Diagram ready", detail={"mermaid": content})
 
 
 async def _mindmap(_args: dict[str, Any], context: ToolContext) -> ToolOutcome:
@@ -229,6 +262,15 @@ BUILTIN_TOOLS: ToolCatalog[ToolContext] = ToolCatalog(
             "conversation already carries the request.",
             {"type": "object", "additionalProperties": False, "properties": {}},
             _sandbox_plot,
+        ),
+        ToolDefinition(
+            "diagram",
+            "Create a Mermaid diagram directly in the chat. Use whenever the user asks for a diagram, "
+            "flowchart, sequence diagram, process map, architecture diagram, or visual relationship map. "
+            "It may also be used whenever a diagram would significantly reduce the text needed to answer "
+            "the user's request. Takes no arguments because the conversation already supplies the request.",
+            {"type": "object", "additionalProperties": False, "properties": {}},
+            _diagram,
         ),
         ToolDefinition(
             "mindmap",

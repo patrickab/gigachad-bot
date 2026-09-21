@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest"
 
 import { getApiBase, setApiBase } from "@/lib/config"
-import { normalizeAttachment, normalizeMessageAttachments } from "@/lib/attachments"
+import { normalizeAttachment, normalizeMessageAttachments, toolArtifactDocument } from "@/lib/attachments"
 import type { Attachment, Message } from "@/lib/types"
 
 const originalApiBase = getApiBase()
@@ -79,5 +79,34 @@ describe("normalizeMessageAttachments", () => {
     expect(normalized.attachments?.[0].url).toBe(
       "https://gigachad-backend.tail8cc40f.ts.net/chat-uploads/chat-123/image.png",
     )
+  })
+})
+
+describe("toolArtifactDocument", () => {
+  it("creates reusable Mermaid, mindmap, and Plotly documents", () => {
+    expect(toolArtifactDocument({
+      id: "diagram/a",
+      name: "diagram",
+      arguments: {},
+      status: "done",
+      detail: { mermaid: "flowchart LR\nA --> B" },
+    })).toEqual({
+      name: "diagram-diagram-a.md",
+      content: "# Mermaid diagram\n\n```mermaid\nflowchart LR\nA --> B\n```\n",
+    })
+    expect(toolArtifactDocument({
+      id: "mindmap-1",
+      name: "mindmap",
+      arguments: {},
+      status: "done",
+      detail: { mindmap: "```markmap\n# Topic\n```" },
+    })).toEqual({ name: "mindmap-mindmap-1.md", content: "```markmap\n# Topic\n```" })
+    expect(toolArtifactDocument({
+      id: "plot-1",
+      name: "sandbox_plot",
+      arguments: {},
+      status: "done",
+      detail: { figure: { data: [{ type: "bar" }] } },
+    })).toEqual({ name: "sandbox_plot-plot-1.plot.json", content: '{\n  "data": [\n    {\n      "type": "bar"\n    }\n  ]\n}' })
   })
 })

@@ -51,6 +51,7 @@ import {
   attachFileVaultFile,
   writeFileVaultFile,
   fileViewerRawUrl,
+  writeDocument,
 } from "@/lib/api"
 
 import { LazyPdfViewer } from "@/components/LazyPdfViewer"
@@ -60,6 +61,7 @@ import {
   buildHiddenContent,
   collectActiveImagePaths,
   normalizeMessageAttachments,
+  toolArtifactDocument,
 } from "@/lib/attachments"
 
 function defaultSendParams(config: TabConfig, prompts: Record<string, string>, enabledTools: ToolName[] = []) {
@@ -207,6 +209,16 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     setExtracting,
     setMessages,
   })
+
+  const persistToolArtifacts = useCallback(async (completedMessages: Message[]) => {
+    const artifacts = (completedMessages.at(-1)?.tool_calls ?? []).flatMap((call) => {
+      const artifact = toolArtifactDocument(call)
+      return artifact ? [artifact] : []
+    })
+    if (artifacts.length === 0) return
+    await Promise.allSettled(artifacts.map((artifact) => writeDocument(activeProject ?? "", artifact.name, artifact.content)))
+    docs.refreshDocuments()
+  }, [activeProject, docs.refreshDocuments])
 
   // branchMessageIdx is read/written from the memory keydown shortcut, the
   // command bar, handleSend's memorize dispatch, and the history-load effect
@@ -437,7 +449,10 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         })
 
         const completion = await send(request, true)
-        if (completion) void modals.handleAutosave(completion.messages, completion.usage)
+        if (completion) {
+          await persistToolArtifacts(completion.messages)
+          void modals.handleAutosave(completion.messages, completion.usage)
+        }
         return
       }
 
@@ -448,9 +463,12 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         img_paths: collectActiveImagePaths(messages),
         project_slug: activeProject,
       })
-      if (completion) void modals.handleAutosave(completion.messages, completion.usage)
+      if (completion) {
+        await persistToolArtifacts(completion.messages)
+        void modals.handleAutosave(completion.messages, completion.usage)
+      }
     },
-    [enabledTools, chatId, branchMessageIdx, activeProject, config, send, setMessages, commandBar.submitCommand, messages, vault.openVaultPicker, modals.handleMindmapSubmit, modals.handleAutosave, modals.setMindmapAttachments, modals.setMindmapModalOpen],
+    [enabledTools, chatId, branchMessageIdx, activeProject, config, send, setMessages, commandBar.submitCommand, messages, vault.openVaultPicker, modals.handleMindmapSubmit, modals.handleAutosave, modals.setMindmapAttachments, modals.setMindmapModalOpen, persistToolArtifacts],
   )
 
   const handleRegenerate = useCallback(
@@ -474,7 +492,10 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           downscale_images: config.downscaleImages,
           project_slug: activeProject,
         })
-        if (completion) void modals.handleAutosave(completion.messages, completion.usage)
+        if (completion) {
+          await persistToolArtifacts(completion.messages)
+          void modals.handleAutosave(completion.messages, completion.usage)
+        }
         return
       }
 
@@ -485,9 +506,12 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         img_paths: collectActiveImagePaths(messages, { userIndex: globalIndex }),
         project_slug: activeProject,
       })
-      if (completion) void modals.handleAutosave(completion.messages, completion.usage)
+      if (completion) {
+        await persistToolArtifacts(completion.messages)
+        void modals.handleAutosave(completion.messages, completion.usage)
+      }
     },
-    [isStreaming, messages, regenerateAt, config, prompts, activeProject, chatId, enabledTools, modals.handleAutosave],
+    [isStreaming, messages, regenerateAt, config, prompts, activeProject, chatId, enabledTools, modals.handleAutosave, persistToolArtifacts],
   )
 
   const handleToggleAttachmentActive = useCallback((messageIndex: number, attachmentName: string) => {

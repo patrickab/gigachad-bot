@@ -18,12 +18,25 @@ import { TabActiveProvider } from "@/components/TabManager"
 
 vi.mock("@/components/PdfViewer", () => ({ PdfViewer: () => null }))
 vi.mock("./PdfViewer", () => ({ PdfViewer: () => null }))
+vi.mock("@/components/LaTeXMarkdown", () => ({
+  LaTeXMarkdown: ({ content }: { content: string }) => <div data-testid="document-markdown">{content}</div>,
+}))
+vi.mock("./LaTeXMarkdown", () => ({
+  LaTeXMarkdown: ({ content }: { content: string }) => <div data-testid="document-markdown">{content}</div>,
+}))
+vi.mock("@/components/PlotElement", () => ({
+  PlotElement: ({ figure }: { figure: unknown }) => <div data-testid="document-plot">{JSON.stringify(figure)}</div>,
+}))
+vi.mock("./PlotElement", () => ({
+  PlotElement: ({ figure }: { figure: unknown }) => <div data-testid="document-plot">{JSON.stringify(figure)}</div>,
+}))
 const api = vi.hoisted(() => ({
   fileViewerRawUrl: (p: string) => `/raw/${p}`,
   writeBinaryDocument: vi.fn(),
   listProjectDocuments: vi.fn(async () => [{ path: "project/proj/document/notes.canvas", name: "notes.canvas", mime: "application/json" }]),
   loadFileViewerText: vi.fn(async () => ""),
   listArchitectureGraphs: vi.fn(async () => []),
+  listNotes: vi.fn(async () => [] as { path: string; name: string; mime: string }[]),
   writeDocument: vi.fn(async (_slug: string, _name: string, _content: string) => ({ path: "project/proj/document/notes.canvas", name: "notes.canvas", mime: "application/json" })),
   ApiError: class ApiError extends Error {
     status: number
@@ -276,13 +289,29 @@ describe("keyboard text entry", () => {
     const note = container.querySelector("textarea") as HTMLTextAreaElement
 
     act(() => { fireEvent.keyDown(note, { key: "Enter" }) })
-    expect(note).not.toHaveFocus()
+    expect(container.querySelector("textarea")).toBeNull()
 
-    act(() => { note.focus() })
-    expect(fireEvent.keyDown(note, { key: "Enter", ctrlKey: true })).toBe(true)
-    expect(note).toHaveFocus()
-    act(() => { fireEvent.change(note, { target: { value: "H\nI" } }) })
+    const preview = container.querySelector("[data-testid=\"document-markdown\"]") as HTMLElement
+    act(() => { fireEvent.click(preview) })
+    const reopened = container.querySelector("textarea") as HTMLTextAreaElement
+    expect(reopened).toHaveFocus()
+    expect(fireEvent.keyDown(reopened, { key: "Enter", ctrlKey: true })).toBe(true)
+    expect(reopened).toHaveFocus()
+    act(() => { fireEvent.change(reopened, { target: { value: "H\nI" } }) })
     expect(latest(seen).texts[0]!.text).toBe("H\nI")
+  })
+
+  it("renders Markdown after leaving a text note", () => {
+    const seen: CanvasDocument[] = []
+    const { container } = render(<Harness seen={seen} />)
+    const surface = container.querySelector("[tabindex=\"0\"]") as HTMLDivElement
+
+    act(() => { fireEvent.keyDown(surface, { key: "H" }) })
+    const note = container.querySelector("textarea") as HTMLTextAreaElement
+    act(() => { fireEvent.change(note, { target: { value: "**bold**" } }) })
+    act(() => { fireEvent.keyDown(note, { key: "Enter" }) })
+
+    expect(container.querySelector("[data-testid=\"document-markdown\"]")).toHaveTextContent("**bold**")
   })
 })
 
@@ -397,6 +426,63 @@ describe("project assets", () => {
 
     expect(container.textContent).toContain("reference.pdf")
     expect(container.textContent).toContain("diagram.png")
+  })
+})
+
+describe("document attachments", () => {
+  it("lists a generated markdown artifact and adds it as a document attachment", async () => {
+    api.listProjectDocuments.mockResolvedValueOnce([
+      { path: "project/proj/document/summary.md", name: "summary.md", mime: "text/markdown" },
+    ])
+    api.loadFileViewerText.mockResolvedValueOnce("# Summary\n\nGenerated notes.")
+    const seen: CanvasDocument[] = []
+    const { container } = render(<Harness seen={seen} slug="proj" />)
+
+    act(() => { toolbar(container)[0]!.click() })
+    await act(async () => {})
+
+    const item = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "summary.md")
+    expect(item).toBeTruthy()
+    act(() => { item!.click() })
+
+    expect(latest(seen).attachments).toHaveLength(1)
+    expect(latest(seen).attachments[0]!.kind).toBe("document")
+    expect(latest(seen).attachments[0]!.path).toBe("project/proj/document/summary.md")
+
+    await act(async () => {})
+    expect(container.textContent).toContain("Generated notes.")
+  })
+
+  it("lists notes-scoped artifacts when the canvas has no project slug", async () => {
+    api.listNotes.mockResolvedValueOnce([
+      { path: "note/chart.plot.json", name: "chart.plot.json", mime: "application/json" },
+    ])
+    const seen: CanvasDocument[] = []
+    const { container } = render(<Harness seen={seen} />)
+
+    act(() => { toolbar(container)[0]!.click() })
+    await act(async () => {})
+
+    expect(container.textContent).toContain("chart.plot.json")
+    expect(api.listProjectDocuments).not.toHaveBeenCalledWith(undefined)
+  })
+
+  it("shows a readable failure state for malformed or invalid plot documents", async () => {
+    api.listProjectDocuments.mockResolvedValueOnce([
+      { path: "project/proj/document/broken.plot.json", name: "broken.plot.json", mime: "application/json" },
+    ])
+    api.loadFileViewerText.mockResolvedValueOnce("null")
+    const seen: CanvasDocument[] = []
+    const { container } = render(<Harness seen={seen} slug="proj" />)
+
+    act(() => { toolbar(container)[0]!.click() })
+    await act(async () => {})
+    const item = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "broken.plot.json")
+    act(() => { item!.click() })
+    await act(async () => {})
+
+    expect(latest(seen).attachments[0]!.kind).toBe("document")
+    expect(container.textContent).toContain("Malformed plot document")
   })
 })
 

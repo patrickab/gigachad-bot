@@ -14,12 +14,13 @@ interface ToolCallElementProps {
   call: ToolCallRecord
 }
 
-/** How a call is drawn once its name has been read. Four families cover every tool: `sources`
- *  cites what it read, `plot` shows a figure, `workspace` reports a sandbox run, and `generic`
- *  catches a name this build no longer knows (an older saved chat). */
+/** How a call is drawn once its name has been read. Families cover every tool: `sources`
+ * cites what it read, `plot` shows a figure, `diagram` renders Mermaid, `workspace` reports a
+ * sandbox run, and `generic` catches a name this build no longer knows (an older saved chat). */
 type Presentation =
   | { family: "sources"; sources: ToolSource[]; costs: number | null }
   | { family: "plot"; figure: PlotFigure | null; brief: string | null; script: string | null }
+  | { family: "diagram"; mermaid: string | null }
   | { family: "mindmap"; content: string | null }
   | { family: "workspace"; sandbox: SandboxToolResultRecord | null }
   | { family: "generic" }
@@ -42,6 +43,8 @@ function presentationOf(call: ToolCallRecord): Presentation {
         brief: call.detail?.brief ?? null,
         script: call.detail?.script ?? null,
       }
+    case "diagram":
+      return { family: "diagram", mermaid: typeof call.detail?.mermaid === "string" ? call.detail.mermaid : null }
     case "mindmap":
       return { family: "mindmap", content: typeof call.detail?.mindmap === "string" ? call.detail.mindmap : null }
     case "workspace_agent":
@@ -81,8 +84,8 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
   // Unknown saved names have no metadata; they keep the raw name and a neutral icon.
   const meta = TOOL_META[call.name]
   const Icon = meta?.icon ?? Wrench
-  // A plot or mind map is its own headline, so the header carries neither argument nor disclosure.
-  const argument = shown.family === "plot" || shown.family === "mindmap" ? "" : primaryArgument(call.arguments)
+  // A plot, diagram, or mind map is its own headline, so the header carries neither argument nor disclosure.
+  const argument = shown.family === "plot" || shown.family === "diagram" || shown.family === "mindmap" ? "" : primaryArgument(call.arguments)
   const status = runningStage?.label ?? (call.status === "running" ? "running" : call.status === "error" ? "failed" : call.summary)
 
   const header = <>
@@ -137,7 +140,7 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
 
   return (
     <div className="text-ink">
-      {shown.family === "plot" ? (
+      {shown.family === "plot" || shown.family === "diagram" ? (
         <div className="flex w-full items-start gap-3 px-6 py-5 text-left">
           {header}
         </div>
@@ -159,6 +162,11 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
       {shown.family === "mindmap" && (
         <div className="px-6 pb-5 pl-[3.25rem]">
           {shown.content ? <LaTeXMarkdown content={shown.content} /> : call.error ? <p className="text-xs text-danger">{call.error}</p> : null}
+        </div>
+      )}
+      {shown.family === "diagram" && (
+        <div className="px-6 pb-5 pl-[3.25rem]">
+          {shown.mermaid ? <LaTeXMarkdown content={`\`\`\`mermaid\n${shown.mermaid}\n\`\`\``} /> : call.error ? <p className="text-xs text-danger">{call.error}</p> : null}
         </div>
       )}
       {shown.family === "plot" && <>
@@ -195,7 +203,7 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
             {codeOpen && <div className="mt-2"><CodeBlock codeString={shown.script} language="python" /></div>}
           </div>
         )}
-        {/* The plot header has no disclosure, so a failed run states its error inline. */}
+        {/* Plots and diagrams have no disclosure, so a failed run states its error inline. */}
         {call.error && <p className="px-6 pb-5 pl-[3.25rem] text-xs text-danger">{call.error}</p>}
       </>}
 
@@ -212,7 +220,7 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
         </div>
       )}
 
-      {open && shown.family !== "plot" && (
+      {open && shown.family !== "plot" && shown.family !== "diagram" && (
         <div className="space-y-2 px-6 pb-5 pl-[4.5rem]">
           <dl className="space-y-1">
             {Object.entries(call.arguments).map(([key, value]) => (

@@ -43,7 +43,7 @@ export interface ArchitectureGraphContextReference {
 }
 
 /** The tools this build can actually offer the model. */
-export type ToolName = "web_search" | "deep_research" | "sandbox_plot" | "mindmap" | "latex_ocr" | "workspace_agent"
+export type ToolName = "web_search" | "deep_research" | "sandbox_plot" | "diagram" | "mindmap" | "latex_ocr" | "workspace_agent"
 
 /** A name read back from a saved chat. Widened past `ToolName` so old chats still render,
  *  while only `ToolName` may be sent as an offered tool. */
@@ -80,9 +80,13 @@ export interface SandboxPlotDetail {
   script?: string
 }
 
+export interface DiagramDetail {
+  mermaid?: string
+}
+
 /** Per-tool detail, flattened: one record holds whichever tool ran, and saved chats may carry
  *  keys this build no longer writes. */
-export type ToolCallDetail = WebSearchDetail & DeepResearchDetail & SandboxPlotDetail & Record<string, unknown>
+export type ToolCallDetail = WebSearchDetail & DeepResearchDetail & SandboxPlotDetail & DiagramDetail & Record<string, unknown>
 
 export interface ToolStage {
   id: string

@@ -1,6 +1,33 @@
-import type { Attachment, ChatRequest, Message } from "./types"
+import type { Attachment, ChatRequest, Message, ToolCallRecord } from "./types"
 import { apiOrigin, chatFileUrl, fileViewerRawUrl } from "./api"
 
+
+export interface ToolArtifactDocument {
+  name: string
+  content: string
+}
+
+function artifactName(call: ToolCallRecord, extension: string): string {
+  const id = call.id.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "generated"
+  return `${call.name}-${id}${extension}`
+}
+
+/** Turn a renderable chat-tool result into a normal document for later reuse. */
+export function toolArtifactDocument(call: ToolCallRecord): ToolArtifactDocument | null {
+  if (call.name === "diagram" && typeof call.detail?.mermaid === "string") {
+    return {
+      name: artifactName(call, ".md"),
+      content: `# Mermaid diagram\n\n\`\`\`mermaid\n${call.detail.mermaid}\n\`\`\`\n`,
+    }
+  }
+  if (call.name === "mindmap" && typeof call.detail?.mindmap === "string") {
+    return { name: artifactName(call, ".md"), content: call.detail.mindmap }
+  }
+  if (call.name === "sandbox_plot" && call.detail?.figure && typeof call.detail.figure === "object") {
+    return { name: artifactName(call, ".plot.json"), content: JSON.stringify(call.detail.figure, null, 2) }
+  }
+  return null
+}
 export function isImageAttachment(a: Attachment): boolean {
   return a.mime.startsWith("image/")
 }
