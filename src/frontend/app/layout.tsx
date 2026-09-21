@@ -1,7 +1,7 @@
 import type { Metadata } from "next"
 import { Outfit } from "next/font/google"
 import { JetBrains_Mono } from "next/font/google"
-import { Caveat } from "next/font/google"
+import { Architects_Daughter } from "next/font/google"
 import "./globals.css"
 
 const outfit = Outfit({
@@ -18,11 +18,11 @@ const jetbrainsMono = JetBrains_Mono({
   weight: ["400", "500"],
 })
 
-const caveat = Caveat({
+const architectsDaughter = Architects_Daughter({
   subsets: ["latin"],
   variable: "--font-handwriting",
   display: "swap",
-  weight: ["500", "600"],
+  weight: ["400"],
 })
 
 export const metadata: Metadata = {
@@ -62,7 +62,7 @@ const NO_TOUCH_CONTEXTMENU_SCRIPT = `
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning className={`${outfit.variable} ${jetbrainsMono.variable} ${caveat.variable}`}>
+    <html lang="en" suppressHydrationWarning className={`${outfit.variable} ${jetbrainsMono.variable} ${architectsDaughter.variable}`}>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         <script dangerouslySetInnerHTML={{ __html: NO_TOUCH_CONTEXTMENU_SCRIPT }} />

@@ -251,6 +251,8 @@ p, li {
 /* Architecture Graphs deliberately use the app's semantic palette: the graph is
    an embedded document surface, not a second visual language. */
 .architecture-graph-surface {
+  font-family: var(--font-handwriting), cursive;
+
   /* Use the app's actual elevation levels — no graph-specific colour system. */
   --architecture-graph-canvas: var(--paper);
   --architecture-graph-card: var(--surface-elevated);
@@ -406,8 +408,8 @@ p, li {
   color: var(--ink);
   padding: 0;
   font: inherit;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 400;
   line-height: 1.35;
 }
 .architecture-graph-title-input { display: block; flex: 1; width: 100%; padding: 0; text-align: center; }
@@ -426,7 +428,7 @@ p, li {
 
 .architecture-graph-node-body { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 2px; padding: 7px 10px 8px; overflow-y: auto; }
 .architecture-graph-bullet-row { display: flex; align-items: flex-start; gap: 6px; }
-.architecture-graph-bullet-marker { flex-shrink: 0; font: inherit; font-size: 11px; line-height: 1.5; color: var(--ink-muted); }
+.architecture-graph-bullet-marker { flex-shrink: 0; font: inherit; font-size: 13px; line-height: 1.5; color: var(--ink-muted); }
 .architecture-graph-bullet-input {
   display: block;
   box-sizing: border-box;
@@ -440,7 +442,7 @@ p, li {
   background: transparent;
   color: var(--ink-muted);
   font: inherit;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.5;
 }
 .architecture-graph-bullet-input::-webkit-resizer { display: none; }
@@ -468,7 +470,7 @@ p, li {
 .architecture-graph-path-handle:focus-visible { outline: 2px solid var(--divider-strong); outline-offset: 2px; }
 .architecture-graph-edge-label {
   fill: var(--ink-muted);
-  font-size: 11px;
+  font-size: 13px;
   paint-order: stroke;
   stroke: var(--surface);
   stroke-width: 5px;

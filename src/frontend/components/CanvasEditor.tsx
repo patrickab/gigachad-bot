@@ -1717,7 +1717,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
         ref={containerRef}
         tabIndex={0}
         className={cn("flex-1 min-h-0 overflow-hidden relative", isDrawing || pointerIsPen ? "cursor-none" : isPanning ? "cursor-grabbing" : "cursor-crosshair")}
-        style={{ touchAction: "none", WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none" }}
+        style={{ touchAction: "none", WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none", fontFamily: "var(--font-handwriting), cursive" }}
         onKeyDown={handleCanvasKeyDown}
         onPointerDown={handleContainerPointerDown}
         onPointerMove={handleContainerPointerMove}
@@ -2075,7 +2075,6 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
                 onPointerDown={(e) => e.stopPropagation()}
                 className="absolute inset-0 resize-none bg-transparent outline-none border border-transparent focus:border-dashed focus:border-divider-strong rounded px-1"
                 style={{
-                  fontFamily: "var(--font-handwriting), cursive",
                   fontSize: t.size * scale,
                   lineHeight: 1.2,
                   color: inkColor(t.color, isDark),
