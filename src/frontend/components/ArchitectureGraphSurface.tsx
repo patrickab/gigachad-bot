@@ -7,7 +7,7 @@ import {
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import rough from "roughjs"
-import { Circle, Diamond, Maximize, PenLine, Plus, RotateCcw, Square, Trash2 } from "lucide-react"
+import { Maximize, PenLine, Plus, RotateCcw, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useTabActive } from "./TabManager"
 import {
@@ -77,12 +77,6 @@ function nodeSketchPaths(shape: ArchitectureGraphNodeShape, width: number, heigh
   const d = `M ${radius} 1 H ${width - radius} Q ${width - 1} 1 ${width - 1} ${radius} V ${height - radius} Q ${width - 1} ${height - 1} ${width - radius} ${height - 1} H ${radius} Q 1 ${height - 1} 1 ${height - radius} V ${radius} Q 1 1 ${radius} 1 Z`
   return roughPaths(d, seed, strokeWidth)
 }
-
-const NODE_SHAPES: Array<{ value: ArchitectureGraphNodeShape, icon: typeof Square, label: string }> = [
-  { value: "rectangle", icon: Square, label: "Rectangle" },
-  { value: "ellipse", icon: Circle, label: "Ellipse" },
-  { value: "diamond", icon: Diamond, label: "Diamond" },
-]
 
 interface DrawnShapeResult {
   shape: ArchitectureGraphNodeShape
@@ -326,13 +320,6 @@ function ArchitectureNodeCard({ data, selected }: NodeProps<Node<ArchitectureNod
         ) : (
           <span role="button" tabIndex={0} aria-label="Edit node title" onClick={() => setEditingTitle(true)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setEditingTitle(true) } }} className="architecture-graph-title architecture-graph-title-display" style={{ color: "var(--ink-muted)" }}>{data.title || "Untitled node"}</span>
         )}
-        <div className="architecture-graph-shape-picker nodrag">
-          {NODE_SHAPES.map(({ value, icon: Icon, label }) => (
-            <button key={value} type="button" aria-label={`Use ${label} shape`} aria-pressed={shape === value} onClick={() => data.onChange(data.id, { shape: value })} className={cn("architecture-graph-shape-button", shape === value && "architecture-graph-shape-button-active")}>
-              <Icon size={12} />
-            </button>
-          ))}
-        </div>
       </div>
       <div className="architecture-graph-node-body nowheel">
         {bulletDrafts.map((text, index) => (
