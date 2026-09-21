@@ -1165,6 +1165,11 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
 
   const handleCanvasKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.ctrlKey || e.metaKey || e.altKey || e.nativeEvent.isComposing || Array.from(e.key).length !== 1) return
+    const target = e.target as HTMLElement
+    // Only the bare canvas surface should turn typing into a new text note.
+    // Any nested editable (architecture graph fields, modals, contenteditable) keeps its keystrokes.
+    if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable) return
+
     e.preventDefault()
     const point = lastCanvasPoint.current
       ?? screenToCanvas(containerRef.current?.clientWidth ?? 0, containerRef.current?.clientHeight ?? 0)
