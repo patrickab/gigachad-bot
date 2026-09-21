@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from math import isfinite
+
 from pathlib import Path
 from typing import Any
 
@@ -34,11 +36,18 @@ def _require_string(value: Any, field: str) -> str:
     return value
 
 
+def _require_finite_number(value: Any, field: str) -> int | float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value):
+        raise ArchitectureGraphError(f"{field} must be a finite number")
+    return value
+
+
 def validate_graph(data: Any) -> dict[str, Any]:
     """Validate the intentionally small v1 graph schema and return *data*."""
     if not isinstance(data, dict):
         raise ArchitectureGraphError("Architecture Graph must be a YAML mapping")
-    if data.get("version") != 1:
+    version = data.get("version")
+    if isinstance(version, bool) or version != 1:
         raise ArchitectureGraphError("version must be 1")
     _require_string(data.get("title"), "title")
     nodes = data.get("nodes")
@@ -59,8 +68,10 @@ def validate_graph(data: Any) -> dict[str, Any]:
         if not isinstance(bullets, list) or not all(isinstance(bullet, str) for bullet in bullets):
             raise ArchitectureGraphError(f"nodes[{index}].bullets must be a list of strings")
         position = node.get("position")
-        if not isinstance(position, dict) or not all(isinstance(position.get(axis), (int, float)) for axis in ("x", "y")):
-            raise ArchitectureGraphError(f"nodes[{index}].position must contain numeric x and y")
+        if not isinstance(position, dict):
+            raise ArchitectureGraphError(f"nodes[{index}].position must be a mapping")
+        for axis in ("x", "y"):
+            _require_finite_number(position.get(axis), f"nodes[{index}].position.{axis}")
     edge_ids: set[str] = set()
     for index, edge in enumerate(edges):
         if not isinstance(edge, dict):
@@ -77,6 +88,11 @@ def validate_graph(data: Any) -> dict[str, Any]:
             raise ArchitectureGraphError(f"edges[{index}].direction must be one-way or bidirectional")
         if "label" in edge and not isinstance(edge["label"], str):
             raise ArchitectureGraphError(f"edges[{index}].label must be a string")
+        if "path" in edge:
+            path = edge["path"]
+            if not isinstance(path, dict):
+                raise ArchitectureGraphError(f"edges[{index}].path must be a mapping")
+            _require_finite_number(path.get("bend"), f"edges[{index}].path.bend")
     return data
 
 

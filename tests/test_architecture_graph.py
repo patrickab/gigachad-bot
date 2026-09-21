@@ -29,6 +29,7 @@ edges:
     target: payments
     direction: one-way
     label: Create payment
+    path: { bend: 30 }
 """
 
 
@@ -74,6 +75,7 @@ def test_store_writes_lists_and_promotes_a_valid_draft(graph_store: Architecture
     [
         (CONTENT.replace("target: payments", "target: missing"), "unknown node"),
         (CONTENT.replace("direction: one-way", "direction: perhaps"), "one-way or bidirectional"),
+        (CONTENT.replace("path: { bend: 30 }", "path: { bend: left }"), "path.bend must be a finite number"),
     ],
 )
 def test_parse_graph_rejects_invalid_relationships(content: str, message: str):

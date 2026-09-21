@@ -15,6 +15,10 @@ export interface ArchitectureGraphNode {
 }
 
 export type ArchitectureGraphEdgeDirection = "one-way" | "bidirectional"
+export interface ArchitectureGraphEdgePath {
+  /** Signed distance in canvas units from the connection chord's midpoint. */
+  bend: number
+}
 
 export interface ArchitectureGraphEdge {
   id: string
@@ -22,6 +26,8 @@ export interface ArchitectureGraphEdge {
   target: string
   direction: ArchitectureGraphEdgeDirection
   label?: string
+  /** Optional relative bend; omitted connections render as a straight line. */
+  path?: ArchitectureGraphEdgePath
 }
 
 export interface ArchitectureGraph {
@@ -104,7 +110,12 @@ export function validateArchitectureGraph(value: unknown): ArchitectureGraph {
     if (!nodeIds.has(source) || !nodeIds.has(target)) throw new Error(`edges[${index}] references a missing node`)
     if (edge.direction !== "one-way" && edge.direction !== "bidirectional") throw new Error(`edges[${index}].direction must be one-way or bidirectional`)
     if (edge.label !== undefined && typeof edge.label !== "string") throw new Error(`edges[${index}].label must be a string`)
-    return { id, source, target, direction: edge.direction as ArchitectureGraphEdgeDirection, ...(edge.label?.trim() ? { label: edge.label.trim() } : {}) }
+    let path: ArchitectureGraphEdgePath | undefined
+    if (edge.path !== undefined) {
+      const value = record(edge.path, `edges[${index}].path`)
+      path = { bend: number(value.bend, `edges[${index}].path.bend`) }
+    }
+    return { id, source, target, direction: edge.direction as ArchitectureGraphEdgeDirection, ...(edge.label?.trim() ? { label: edge.label.trim() } : {}), ...(path ? { path } : {}) }
   })
 
   return { version: ARCHITECTURE_GRAPH_VERSION, title: text(graph.title, "title"), nodes, edges }
