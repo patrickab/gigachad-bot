@@ -369,7 +369,7 @@ p, li {
 }
 
 .architecture-graph-node {
-  width: 224px;
+  height: 100%;
   border-radius: 8px;
   background: var(--architecture-graph-card);
   box-shadow: var(--shadow-sm);
@@ -409,7 +409,7 @@ p, li {
 }
 .architecture-graph-title:focus-visible { outline: 2px solid var(--divider-strong); outline-offset: 2px; }
 
-.architecture-graph-node-body { display: flex; flex-direction: column; gap: 2px; padding: 7px 10px 8px; }
+.architecture-graph-node-body { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 2px; padding: 7px 10px 8px; overflow-y: auto; }
 .architecture-graph-bullet-row { display: flex; align-items: flex-start; gap: 6px; }
 .architecture-graph-bullet-marker { flex-shrink: 0; font: inherit; font-size: 11px; line-height: 1.5; color: var(--ink-muted); }
 .architecture-graph-bullet-input {
@@ -429,6 +429,31 @@ p, li {
   line-height: 1.5;
 }
 .architecture-graph-bullet-input::-webkit-resizer { display: none; }
+.architecture-graph-shape-picker {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+  margin-left: auto;
+  opacity: 0.35;
+  transition: opacity 150ms ease;
+}
+.architecture-graph-node:hover .architecture-graph-shape-picker,
+.architecture-graph-node:focus-within .architecture-graph-shape-picker,
+.architecture-graph-node-selected .architecture-graph-shape-picker { opacity: 1; }
+.architecture-graph-shape-button {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink-muted);
+  transition: background-color 150ms ease, color 150ms ease;
+}
+.architecture-graph-shape-button:hover { background: var(--hover-overlay); color: var(--ink); }
+.architecture-graph-shape-button:focus-visible { outline: 2px solid var(--divider-strong); outline-offset: 2px; }
+.architecture-graph-shape-button-active { color: var(--ink); background: var(--hover-overlay-strong); }
 
 .architecture-graph-handle {
   width: 6px !important;

@@ -72,6 +72,14 @@ def validate_graph(data: Any) -> dict[str, Any]:
             raise ArchitectureGraphError(f"nodes[{index}].position must be a mapping")
         for axis in ("x", "y"):
             _require_finite_number(position.get(axis), f"nodes[{index}].position.{axis}")
+        if "shape" in node and node["shape"] not in {"rectangle", "ellipse", "diamond"}:
+            raise ArchitectureGraphError(f"nodes[{index}].shape must be rectangle, ellipse, or diamond")
+        for dimension in ("width", "height"):
+            if dimension not in node:
+                continue
+            value = _require_finite_number(node[dimension], f"nodes[{index}].{dimension}")
+            if value <= 0:
+                raise ArchitectureGraphError(f"nodes[{index}].{dimension} must be greater than 0")
     edge_ids: set[str] = set()
     for index, edge in enumerate(edges):
         if not isinstance(edge, dict):

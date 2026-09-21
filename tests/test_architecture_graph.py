@@ -19,6 +19,9 @@ nodes:
     bullets:
       - Validates carts
     position: { x: 80, y: 160 }
+    shape: diamond
+    width: 240
+    height: 160
   - id: payments
     title: Payments
     bullets: []
@@ -76,6 +79,8 @@ def test_store_writes_lists_and_promotes_a_valid_draft(graph_store: Architecture
         (CONTENT.replace("target: payments", "target: missing"), "unknown node"),
         (CONTENT.replace("direction: one-way", "direction: perhaps"), "one-way or bidirectional"),
         (CONTENT.replace("path: { bend: 30 }", "path: { bend: left }"), "path.bend must be a finite number"),
+        (CONTENT.replace("shape: diamond", "shape: hexagon"), "shape must be rectangle, ellipse, or diamond"),
+        (CONTENT.replace("width: 240", "width: 0"), "width must be greater than 0"),
     ],
 )
 def test_parse_graph_rejects_invalid_relationships(content: str, message: str):

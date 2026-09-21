@@ -7,11 +7,18 @@ export interface ArchitectureGraphPosition {
   y: number
 }
 
+export type ArchitectureGraphNodeShape = "rectangle" | "ellipse" | "diamond"
+
 export interface ArchitectureGraphNode {
   id: string
   title: string
   bullets: string[]
   position: ArchitectureGraphPosition
+  /** Omitted means "rectangle", the original and most common shape. */
+  shape?: ArchitectureGraphNodeShape
+  /** Omitted means the surface picks its own default size. */
+  width?: number
+  height?: number
 }
 
 export type ArchitectureGraphEdgeDirection = "one-way" | "bidirectional"
@@ -91,11 +98,24 @@ export function validateArchitectureGraph(value: unknown): ArchitectureGraph {
     if (!Array.isArray(node.bullets) || node.bullets.some((bullet) => typeof bullet !== "string")) {
       throw new Error(`nodes[${index}].bullets must be an array of strings`)
     }
+    const shapeValue = node.shape
+    if (shapeValue !== undefined && shapeValue !== "rectangle" && shapeValue !== "ellipse" && shapeValue !== "diamond") {
+      throw new Error(`nodes[${index}].shape must be rectangle, ellipse, or diamond`)
+    }
+    const size: Partial<Pick<ArchitectureGraphNode, "width" | "height">> = {}
+    for (const dimension of ["width", "height"] as const) {
+      if (node[dimension] === undefined) continue
+      const value = number(node[dimension], `nodes[${index}].${dimension}`)
+      if (value <= 0) throw new Error(`nodes[${index}].${dimension} must be greater than 0`)
+      size[dimension] = value
+    }
     return {
       id,
       title: text(node.title, `nodes[${index}].title`),
       bullets: node.bullets.map((bullet) => bullet.trim()).filter(Boolean),
       position: { x: number(position.x, `nodes[${index}].position.x`), y: number(position.y, `nodes[${index}].position.y`) },
+      ...(shapeValue ? { shape: shapeValue as ArchitectureGraphNodeShape } : {}),
+      ...size,
     }
   })
 

@@ -26,6 +26,7 @@ vi.mock("@xyflow/react", async () => {
     })}{children}</div>,
     Background: () => null,
     BaseEdge: () => null,
+    NodeResizer: () => null,
     Handle: () => null,
     getBezierPath: () => ["", 0, 0],
     useInternalNode: () => undefined,
