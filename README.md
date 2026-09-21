@@ -79,9 +79,17 @@ The option configures private Tailscale Serve for the loopback backend only; it
 does not install Tailscale, log in or join a Tailnet, use `sudo`, configure
 systemd, enable Funnel, or provide public access.
 
-These are developer launchers, not a production deployment method. Production
-uses the systemd backend and OMP model-source services plus Vercel/Tailscale
-Serve deployment described in [the deployment runbook](.technical-docs/deployment.md).
+These are developer launchers, not a production deployment method. The deployment
+runbook currently describes a Vercel/Tailscale setup. Update it to serve the UI
+on the private origin before using it for a browser-portable production deployment.
+
+### Private deployment browser compatibility
+
+Serve the production UI and `/api` from the same private Tailscale HTTPS origin.
+Use a relative production API base (`/api`), not a public Vercel UI that calls a
+Tailscale/private API directly. Firefox-family browsers classify that as
+local-network access, so CORS and per-browser permission grants are not a
+durable fix.
 
 OMP's gateway token is read once at backend startup and cached for the
 process lifetime: restart `gigachad-bot.service` after installing or

@@ -13,3 +13,4 @@ started via `run.sh` or manually by the user, in a terminal they control.
 
 No hover tooltips. The authoritative rule, including the rendered-markdown exception,
 lives under "Layout Patterns" in `.docs/conventions.md`.
+

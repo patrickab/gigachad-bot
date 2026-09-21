@@ -234,10 +234,10 @@ async def create_sandbox_plot(context: PlotContext) -> ToolOutcome:
     # The code is the model's only view of the chart, so give it a focused explanation brief.
     seen = (
         f"The chart rendered and the user can already see it ({traces} trace(s)). "
-        "Give an extremely concise companion explanation, ideally one or two sentences: explain how the "
-        "underlying concept works and how the graphic encodes that mechanism. Make the minimal graphic easier "
-        "to grasp. Do not explain the code, narrate visible elements, list colours, restate labels or data, "
-        "or repeat what the graphic plainly shows.\n\n"
+        "Give an extremely concise companion explanation: explain how the"
+        "underlying concept works and how the graphic encodes that mechanism. Make the graphic easier to grasp."
+        "Do not explain every little detail - focus on whats important for the user to understand."
+        "Use layered, skimmable layout with clean markdown-flavored latex.\n\n"
         f"```python\n{script}\n```"
         if script
         else f"Rendered an interactive plot with {traces} trace(s). The user can already see and interact with it. "

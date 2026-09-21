@@ -67,7 +67,6 @@ class ToolContext:
             self.progress(label)
 
 
-
 def _single_text_parameter(name: str, description: str, *, max_length: int | None = None) -> dict[str, Any]:
     value: dict[str, Any] = {"type": "string", "minLength": 1, "description": description}
     if max_length is not None:
@@ -123,6 +122,7 @@ async def _deep_research(args: dict[str, Any], context: ToolContext) -> ToolOutc
         sources=[{"label": source_label(url, set()), "url": url, "title": "", "content": ""} for url in urls],
         detail={"costs": costs, "report": report},
     )
+
 
 async def _sandbox_plot(_args: dict[str, Any], context: ToolContext) -> ToolOutcome:
     context.stage("Generating chart")
