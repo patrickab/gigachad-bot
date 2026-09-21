@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 
+type MockImplementation = (...args: never[]) => unknown
+
 const { impls } = vi.hoisted(() => ({
   impls: {
     saveChatHistory: async () => undefined,
@@ -12,27 +14,27 @@ const { impls } = vi.hoisted(() => ({
       return { slug: null, filename: historyFile }
     },
     generateMindmap: async () => "# mindmap\n- a\n",
-  } as Record<string, (...a: any[]) => any>,
+  } as Record<string, MockImplementation>,
 }))
 
 vi.mock("@/lib/api", () => ({
-  __setImpl: (k: string, fn: any) => { impls[k] = fn },
+  __setImpl: (key: string, fn: MockImplementation) => { impls[key] = fn },
   __resetImpls: () => {
     impls.saveChatHistory = async () => undefined
     impls.saveProjectTab = async () => undefined
-    impls.buildHistoryFile = (f: string, s: string | null) => (s ? `${s}/${f}` : f)
-    impls.parseHistoryFile = (h: string) => {
-      const p = h.split("/")
-      if (p.length > 1) return { slug: p[0], filename: p.slice(1).join("/") }
-      return { slug: null, filename: h }
+    impls.buildHistoryFile = (filename: string, slug: string | null) => (slug ? `${slug}/${filename}` : filename)
+    impls.parseHistoryFile = (historyFile: string) => {
+      const parts = historyFile.split("/")
+      if (parts.length > 1) return { slug: parts[0], filename: parts.slice(1).join("/") }
+      return { slug: null, filename: historyFile }
     }
     impls.generateMindmap = async () => "# mindmap\n- a\n"
   },
-  saveChatHistory: (...a: any[]) => impls.saveChatHistory(...a),
-  saveProjectTab: (...a: any[]) => impls.saveProjectTab(...a),
-  buildHistoryFile: (...a: any[]) => impls.buildHistoryFile(...a),
-  parseHistoryFile: (...a: any[]) => impls.parseHistoryFile(...a),
-  generateMindmap: (...a: any[]) => impls.generateMindmap(...a),
+  saveChatHistory: (...args: never[]) => impls.saveChatHistory(...args),
+  saveProjectTab: (...args: never[]) => impls.saveProjectTab(...args),
+  buildHistoryFile: (...args: never[]) => impls.buildHistoryFile(...args),
+  parseHistoryFile: (...args: never[]) => impls.parseHistoryFile(...args),
+  generateMindmap: (...args: never[]) => impls.generateMindmap(...args),
 }))
 
 vi.mock("@/lib/utils", () => ({
@@ -48,10 +50,20 @@ vi.mock("@/lib/utils", () => ({
   }),
 }))
 
+
 import * as apiMock from "@/lib/api"
 import { useChatModals } from "@/hooks/useChatModals"
 import { renderHook, act } from "@testing-library/react"
 import type { Tab } from "@/components/TabManager"
+import type { Message } from "@/lib/types"
+
+interface ApiMockControls {
+  __setImpl(key: string, fn: MockImplementation): void
+  __resetImpls(): void
+}
+
+// The test-only mock controls are injected by vi.mock rather than the production module.
+const apiMockControls = apiMock as unknown as ApiMockControls
 
 function makeTab(over: Partial<Tab> = {}): Tab {
   return {
@@ -60,20 +72,84 @@ function makeTab(over: Partial<Tab> = {}): Tab {
     chatId: "chat-1",
     historyFile: null,
     title: null,
-    config: {} as any,
+    config: {} as Tab["config"],
     appMode: "chat",
     ...over,
   }
 }
 
-beforeEach(() => (apiMock as any).__resetImpls())
+beforeEach(() => apiMockControls.__resetImpls())
 afterEach(() => vi.useRealTimers())
 
 describe("useChatModals", () => {
+  describe("handleAutosave", () => {
+    it("persists a completed response for a saved chat", async () => {
+      const saveSpy = vi.fn(async () => undefined)
+      const refreshAll = vi.fn(async () => undefined)
+      apiMockControls.__setImpl("saveChatHistory", saveSpy)
+      const completedMessages = [
+        { role: "user" as const, content: "q" },
+        { role: "assistant" as const, content: "a" },
+      ]
+      const usage = { prompt_tokens: 3, completion_tokens: 5, total_tokens: 8 }
+
+      const { result } = renderHook(() =>
+        useChatModals({
+          tab: makeTab({ historyFile: "saved.json", title: "Saved" }),
+          activeProject: null,
+          messages: [],
+          chatId: "c",
+          hasUsage: undefined,
+          selectedModel: "m",
+          refreshAll,
+          onHistoryFileChanged: vi.fn(),
+          setMessages: vi.fn(),
+        }),
+      )
+
+      await act(async () => { await result.current.handleAutosave(completedMessages, usage) })
+
+      expect(saveSpy).toHaveBeenCalledWith("saved.json", completedMessages, {
+        chatId: "c",
+        title: "Saved",
+        usage,
+      })
+      expect(refreshAll).toHaveBeenCalledOnce()
+    })
+
+    it("skips an unsaved chat", async () => {
+      const saveSpy = vi.fn(async () => undefined)
+      apiMockControls.__setImpl("saveChatHistory", saveSpy)
+      const { result } = renderHook(() =>
+        useChatModals({
+          tab: makeTab(),
+          activeProject: null,
+          messages: [],
+          chatId: "c",
+          hasUsage: undefined,
+          selectedModel: "m",
+          refreshAll: async () => {},
+          onHistoryFileChanged: vi.fn(),
+          setMessages: vi.fn(),
+        }),
+      )
+
+      await act(async () => {
+        await result.current.handleAutosave([{ role: "assistant", content: "a" }], {
+          prompt_tokens: 0,
+          completion_tokens: 1,
+          total_tokens: 1,
+        })
+      })
+
+      expect(saveSpy).not.toHaveBeenCalled()
+    })
+  })
+
   describe("handleMindmapSubmit", () => {
     it("appends user + placeholder assistant, then replaces with mindmap on success", async () => {
       const genSpy = vi.fn(async () => "# mindmap result")
-      ;(apiMock as any).__setImpl("generateMindmap", genSpy)
+      apiMockControls.__setImpl("generateMindmap", genSpy)
       const setMessages = vi.fn()
 
       const { result } = renderHook(() =>
@@ -97,7 +173,7 @@ describe("useChatModals", () => {
       // Two setMessages calls: append user+placeholder, then updateLastMsg.
       expect(setMessages).toHaveBeenCalledTimes(2)
       // First call adds the user message and the generating placeholder.
-      const firstCall = setMessages.mock.calls[0][0] as (prev: any[]) => any[]
+      const firstCall = setMessages.mock.calls[0][0] as (prev: Message[]) => Message[]
       expect(firstCall([{ role: "user", content: "q" }])).toEqual([
         { role: "user", content: "q" },
         { role: "user", content: "Provide a mindmap. summarize" },
@@ -114,7 +190,7 @@ describe("useChatModals", () => {
 
     it("no-ops when there are no messages", async () => {
       const genSpy = vi.fn(async () => "# x")
-      ;(apiMock as any).__setImpl("generateMindmap", genSpy)
+      apiMockControls.__setImpl("generateMindmap", genSpy)
 
       const { result } = renderHook(() =>
         useChatModals({
@@ -135,7 +211,7 @@ describe("useChatModals", () => {
     })
 
     it("writes a failure message to the last assistant message when generation throws", async () => {
-      ;(apiMock as any).__setImpl("generateMindmap", async () => { throw new Error("boom") })
+      apiMockControls.__setImpl("generateMindmap", async () => { throw new Error("boom") })
       const setMessages = vi.fn()
 
       const { result } = renderHook(() =>
@@ -155,7 +231,7 @@ describe("useChatModals", () => {
       await act(async () => { await result.current.handleMindmapSubmit("", []) })
 
       // Last setMessages call (updateLastMsg) sets the failure message.
-      const lastCall = setMessages.mock.calls.at(-1)![0] as (prev: any[]) => any[]
+      const lastCall = setMessages.mock.calls.at(-1)![0] as (prev: Message[]) => Message[]
       const out = lastCall([{ role: "user", content: "q" }, { role: "assistant", content: "Generating mind map…" }])
       expect(out.at(-1)!.content).toBe("Mind map generation failed.")
     })

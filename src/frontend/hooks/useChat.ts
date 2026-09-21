@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import type React from "react"
 import { fetchModels, fetchPrompts, saveModelDefaults as saveModelDefaultsRequest, saveModelProviders as saveModelProvidersRequest, saveModelTabOrder as saveModelTabOrderRequest } from "@/lib/api"
 import type { ChatRequest, Message, ModelDefaults, ModelProvider, ModelsResponse, WebSearchParams, Usage } from "@/lib/types"
-import { useChatStream } from "./useChatStream"
+import { useChatStream, type ChatStreamCompletion } from "./useChatStream"
 import { useResearch, type ResearchParams } from "./useResearch"
 import { webSearchFetch, parseWebSearchStream, type WebSearchResultItem } from "@/lib/webSearch"
 import { createFlushBatcher } from "@/lib/streaming"
@@ -14,8 +14,8 @@ export type { ResearchParams }
 export interface UseChatReturn {
   messages: Message[]
   isStreaming: boolean
-  send: (req: ChatRequest, skipAddMessages?: boolean) => Promise<void>
-  regenerateAt: (userIndex: number, req: ChatRequest) => Promise<void>
+  send: (req: ChatRequest, skipAddMessages?: boolean) => Promise<ChatStreamCompletion | null>
+  regenerateAt: (userIndex: number, req: ChatRequest) => Promise<ChatStreamCompletion | null>
   cancel: () => void
   reset: () => Promise<void>
   research: (params: ResearchParams) => Promise<void>

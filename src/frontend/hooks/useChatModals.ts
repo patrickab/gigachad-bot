@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useState, type Dispatch, type SetStateAction } from "react"
+import { useCallback, useRef, useState, type Dispatch, type SetStateAction } from "react"
 import type { Tab } from "@/components/TabManager"
 import { updateLastMsg as updateLastAssistant } from "@/lib/utils"
 import {
@@ -37,20 +37,32 @@ export function useChatModals({
   const [mindmapModalOpen, setMindmapModalOpen] = useState(false)
   const [mindmapAttachments, setMindmapAttachments] = useState<Attachment[]>([])
   const [promptEditorOpen, setPromptEditorOpen] = useState(false)
+  const autosaveRef = useRef(Promise.resolve())
 
   const isTitled = !!tab.historyFile
 
-  const handleQuickSave = useCallback(async () => {
+  const saveHistory = useCallback(async (messagesToSave: Message[], usage: Usage | undefined) => {
     if (!tab.historyFile) return
     const { slug, filename } = parseHistoryFile(tab.historyFile)
     const title = tab.title ?? filename.replace(".json", "")
     if (slug && slug === activeProject) {
-      await saveProjectTab(activeProject!, filename, messages, { chatId, tabName: tab.name ?? undefined, title, usage: hasUsage })
+      await saveProjectTab(activeProject, filename, messagesToSave, { chatId, tabName: tab.name ?? undefined, title, usage })
     } else {
-      await apiSaveChatHistory(tab.historyFile, messages, { chatId, title, usage: hasUsage })
+      await apiSaveChatHistory(tab.historyFile, messagesToSave, { chatId, title, usage })
     }
     await refreshAll()
-  }, [tab.historyFile, tab.title, tab.name, activeProject, messages, chatId, hasUsage, refreshAll])
+  }, [tab.historyFile, tab.title, tab.name, activeProject, chatId, refreshAll])
+
+  const handleQuickSave = useCallback(async () => {
+    await saveHistory(messages, hasUsage)
+  }, [saveHistory, messages, hasUsage])
+
+  const handleAutosave = useCallback((messagesToSave: Message[], usage: Usage) => {
+    if (!tab.historyFile) return Promise.resolve()
+    const queued = autosaveRef.current.catch(() => {}).then(() => saveHistory(messagesToSave, usage))
+    autosaveRef.current = queued
+    return queued.catch(() => {})
+  }, [tab.historyFile, saveHistory])
 
   const handleSaveSubmit = useCallback(async (name: string) => {
     const newFilename = name + ".json"
@@ -100,6 +112,7 @@ export function useChatModals({
     saveModalOpen,
     setSaveModalOpen,
     handleQuickSave,
+    handleAutosave,
     handleSaveSubmit,
     mindmapModalOpen,
     setMindmapModalOpen,

@@ -436,19 +436,21 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           return copy
         })
 
-        send(request, true)
+        const completion = await send(request, true)
+        if (completion) void modals.handleAutosave(completion.messages, completion.usage)
         return
       }
 
-      send({
+      const completion = await send({
         ...defaultSendParams(config, prompts, enabledTools),
         chat_id: chatId,
         user_msg: text,
         img_paths: collectActiveImagePaths(messages),
         project_slug: activeProject,
       })
+      if (completion) void modals.handleAutosave(completion.messages, completion.usage)
     },
-    [enabledTools, chatId, branchMessageIdx, activeProject, config, send, setMessages, commandBar.submitCommand, messages, vault.openVaultPicker, modals.handleMindmapSubmit, modals.setMindmapAttachments, modals.setMindmapModalOpen],
+    [enabledTools, chatId, branchMessageIdx, activeProject, config, send, setMessages, commandBar.submitCommand, messages, vault.openVaultPicker, modals.handleMindmapSubmit, modals.handleAutosave, modals.setMindmapAttachments, modals.setMindmapModalOpen],
   )
 
   const handleRegenerate = useCallback(
@@ -464,7 +466,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         const hidden = userMsg.hiddenContent ?? buildHiddenContent(attachments)
         const fallbackPrompt = userMsg.content.trim() ? userMsg.content : "Please review the attached document and provide a summary."
         const llmMsg = hidden ? `${hidden}\n\n${fallbackPrompt}` : fallbackPrompt
-        await regenerateAt(globalIndex, {
+        const completion = await regenerateAt(globalIndex, {
           ...defaultSendParams(config, prompts, enabledTools),
           chat_id: chatId,
           user_msg: llmMsg,
@@ -472,18 +474,20 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           downscale_images: config.downscaleImages,
           project_slug: activeProject,
         })
+        if (completion) void modals.handleAutosave(completion.messages, completion.usage)
         return
       }
 
-      await regenerateAt(globalIndex, {
+      const completion = await regenerateAt(globalIndex, {
         ...defaultSendParams(config, prompts, enabledTools),
         chat_id: chatId,
         user_msg: userMsg.content,
         img_paths: collectActiveImagePaths(messages, { userIndex: globalIndex }),
         project_slug: activeProject,
       })
+      if (completion) void modals.handleAutosave(completion.messages, completion.usage)
     },
-    [isStreaming, messages, regenerateAt, config, prompts, activeProject, chatId, enabledTools],
+    [isStreaming, messages, regenerateAt, config, prompts, activeProject, chatId, enabledTools, modals.handleAutosave],
   )
 
   const handleToggleAttachmentActive = useCallback((messageIndex: number, attachmentName: string) => {

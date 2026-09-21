@@ -12,11 +12,16 @@ import {
 } from "@/lib/streaming"
 import type { ChatRequest, Message, Usage } from "@/lib/types"
 
+export interface ChatStreamCompletion {
+  messages: Message[]
+  usage: Usage
+}
+
 export interface UseChatStreamReturn {
   messages: Message[]
   isStreaming: boolean
-  send: (req: ChatRequest, skipAddMessages?: boolean) => Promise<void>
-  regenerateAt: (userIndex: number, req: ChatRequest) => Promise<void>
+  send: (req: ChatRequest, skipAddMessages?: boolean) => Promise<ChatStreamCompletion | null>
+  regenerateAt: (userIndex: number, req: ChatRequest) => Promise<ChatStreamCompletion | null>
   cancel: () => void
   deleteMessagePair: (index: number) => void
   addMessagePair: (userContent: string, assistantContent: string) => void
@@ -39,19 +44,24 @@ function buildHistory(msgs: Message[]): { role: string; content: string }[] {
 
 export function useChatStream(): UseChatStreamReturn {
   const [messages, setMessages] = useState<Message[]>([])
-  const [isStreaming, setIsStreaming] = useState(false)
   const [totalUsage, setTotalUsage] = useState<Usage>({ prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 })
+  const [isStreaming, setIsStreaming] = useState(false)
   const abortRef = useRef<(() => void) | null>(null)
   const messagesRef = useRef(messages)
+  const totalUsageRef = useRef(totalUsage)
   messagesRef.current = messages
+  totalUsageRef.current = totalUsage
 
   const streamAssistantReply = useCallback(
-    async (req: ChatRequest, history: { role: string; content: string }[], assistantMsg: Message) => {
+    async (req: ChatRequest, history: { role: string; content: string }[], assistantMsg: Message): Promise<ChatStreamCompletion | null> => {
       setIsStreaming(true)
 
       const batch = createFlushBatcher(setMessages, assistantMsg)
       // Every exit from the loop below settles the tool cards still marked running.
       let unresolvedReason = "Stream ended before the tool returned"
+      let completed = false
+      let usage = totalUsageRef.current
+      let finalMessages: Message[] | null = null
 
       try {
         const stream = createChatStream({ ...req, messages: history })
@@ -61,10 +71,15 @@ export function useChatStream(): UseChatStreamReturn {
           const decoded = decodeChatStreamEvent(event)
           if (!decoded) continue
           if (decoded.kind === "usage") {
-            setTotalUsage((prev) => addUsage(prev, decoded.usage))
+            usage = addUsage(usage, decoded.usage)
+            totalUsageRef.current = usage
+            setTotalUsage(usage)
             continue
           }
-          if (decoded.kind === "done") break
+          if (decoded.kind === "done") {
+            completed = true
+            break
+          }
           applyChatStreamEvent(assistantMsg, decoded)
           batch.schedule()
           // An error event is the turn's last content: append it, then stop reading.
@@ -80,10 +95,20 @@ export function useChatStream(): UseChatStreamReturn {
       } finally {
         settleRunningToolCalls(assistantMsg, unresolvedReason)
         batch.final()
-        setMessages((prev) => deactivateSentImages(prev, req.img_paths))
+        const current = messagesRef.current
+        if (current.at(-1)?.role === "assistant") {
+          finalMessages = deactivateSentImages(
+            [...current.slice(0, -1), { ...assistantMsg }],
+            req.img_paths,
+          )
+          messagesRef.current = finalMessages
+          setMessages(finalMessages)
+        }
         setIsStreaming(false)
         abortRef.current = null
       }
+
+      return completed && finalMessages ? { messages: finalMessages, usage } : null
     },
     []
   )
@@ -103,7 +128,7 @@ export function useChatStream(): UseChatStreamReturn {
       }
 
       const history = buildHistory(messagesRef.current.slice(0, -1))
-      await streamAssistantReply(req, history, assistantMsg)
+      return streamAssistantReply(req, history, assistantMsg)
     },
     [streamAssistantReply]
   )
@@ -112,7 +137,7 @@ export function useChatStream(): UseChatStreamReturn {
     async (userIndex: number, req: ChatRequest) => {
       const current = messagesRef.current
       const userMsg = current[userIndex]
-      if (!userMsg || userMsg.role !== "user") return
+      if (!userMsg || userMsg.role !== "user") return null
 
       const assistantMsg: Message = { role: "assistant", content: "" }
       const truncated = current.slice(0, userIndex + 1)
@@ -121,7 +146,7 @@ export function useChatStream(): UseChatStreamReturn {
       setMessages(next)
 
       const history = buildHistory(truncated)
-      await streamAssistantReply(req, history, assistantMsg)
+      return streamAssistantReply(req, history, assistantMsg)
     },
     [streamAssistantReply]
   )

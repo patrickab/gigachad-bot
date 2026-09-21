@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { useChatStream } from "@/hooks/useChatStream"
+import { useChatStream, type ChatStreamCompletion } from "@/hooks/useChatStream"
 import type { ChatRequest } from "@/lib/types"
 import type { SSEEvent, SSEStreamResult } from "@/lib/sse"
 
@@ -80,9 +80,10 @@ describe("useChatStream", () => {
       event("done", ""),
     ]))
     const { result } = renderHook(() => useChatStream())
+    let completion: ChatStreamCompletion | null = null
 
     await act(async () => {
-      await result.current.send(request("Find cats"))
+      completion = await result.current.send(request("Find cats"))
     })
 
     expect(result.current.messages).toEqual([
@@ -106,6 +107,10 @@ describe("useChatStream", () => {
       prompt_tokens: 11,
       completion_tokens: 7,
       total_tokens: 18,
+    })
+    expect(completion).toEqual({
+      messages: result.current.messages,
+      usage: result.current.totalUsage,
     })
   })
 
@@ -177,14 +182,16 @@ describe("useChatStream", () => {
     ])
     createChatStream.mockReturnValue(parkedResult)
     const { result } = renderHook(() => useChatStream())
+    let completion: ChatStreamCompletion | null = null
 
     await act(async () => {
       const sent = result.current.send(request("Plot it"))
       await parked
       result.current.cancel()
-      await sent
+      completion = await sent
     })
 
+    expect(completion).toBeNull()
     const calls = result.current.messages[1].tool_calls
     expect(calls).toHaveLength(1)
     expect(calls?.[0]).toMatchObject({ id: "call-1", status: "error", error: "Cancelled" })
