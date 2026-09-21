@@ -2,7 +2,7 @@ import type { ComponentType, ReactNode } from "react"
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { useState } from "react"
 import { describe, expect, it, vi } from "vitest"
-import { ArchitectureGraphSurface, edgeAttachments } from "@/components/ArchitectureGraphSurface"
+import { ArchitectureGraphSurface, classifyDrawnShape, edgeAttachments } from "@/components/ArchitectureGraphSurface"
 import { emptyArchitectureGraph, type ArchitectureGraph } from "@/lib/architectureGraph"
 
 vi.mock("@xyflow/react", async () => {
@@ -104,5 +104,47 @@ describe("ArchitectureGraphSurface", () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe("classifyDrawnShape", () => {
+  const perimeter = (points: Array<[number, number]>, steps = 8) => {
+    const out: Array<{ x: number, y: number }> = []
+    for (let i = 0; i < points.length; i += 1) {
+      const [ax, ay] = points[i]
+      const [bx, by] = points[(i + 1) % points.length]
+      for (let s = 0; s < steps; s += 1) out.push({ x: ax + (bx - ax) * (s / steps), y: ay + (by - ay) * (s / steps) })
+    }
+    return out
+  }
+
+  it("recognizes a rough rectangle", () => {
+    const points = perimeter([[0, 0], [100, 0], [100, 60], [0, 60]])
+    const result = classifyDrawnShape(points)
+    expect(result?.shape).toBe("rectangle")
+    expect(result?.box).toEqual({ x: 0, y: 0, width: 100, height: 60 })
+  })
+
+  it("recognizes a diamond", () => {
+    const points = perimeter([[50, 0], [100, 30], [50, 60], [0, 30]])
+    expect(classifyDrawnShape(points)?.shape).toBe("diamond")
+  })
+
+  it("recognizes an ellipse", () => {
+    const points = Array.from({ length: 40 }, (_, i) => {
+      const angle = (i / 40) * Math.PI * 2
+      return { x: 50 + Math.cos(angle) * 50, y: 30 + Math.sin(angle) * 30 }
+    })
+    expect(classifyDrawnShape(points)?.shape).toBe("ellipse")
+  })
+
+  it("rejects an open stroke", () => {
+    const points = Array.from({ length: 10 }, (_, i) => ({ x: i * 10, y: 0 }))
+    expect(classifyDrawnShape(points)).toBeNull()
+  })
+
+  it("rejects a stroke smaller than the minimum draw size", () => {
+    const points = perimeter([[0, 0], [10, 0], [10, 10], [0, 10]])
+    expect(classifyDrawnShape(points)).toBeNull()
   })
 })

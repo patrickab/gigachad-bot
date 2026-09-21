@@ -7,7 +7,7 @@ import {
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import rough from "roughjs"
-import { Circle, Diamond, Maximize, Plus, RotateCcw, Square, Trash2 } from "lucide-react"
+import { Circle, Diamond, Maximize, PenLine, Plus, RotateCcw, Square, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
   nextArchitectureGraphId,
@@ -83,6 +83,67 @@ const NODE_SHAPES: Array<{ value: ArchitectureGraphNodeShape, icon: typeof Squar
   { value: "diamond", icon: Diamond, label: "Diamond" },
 ]
 
+interface DrawnShapeResult {
+  shape: ArchitectureGraphNodeShape
+  box: { x: number, y: number, width: number, height: number }
+}
+
+// A small, self-contained recognizer (not ported from Excalidraw's, which has
+// its own generic-shape math): fit a drawn stroke's points against a
+// rectangle, a diamond, and an ellipse inscribed in its bounding box, and
+// pick whichever the points sit closest to. Rectangle is the forgiving
+// fallback, since a rough freehand box is the most common intent.
+const MIN_DRAW_SIZE = 30
+const MAX_OPEN_GAP_RATIO = 0.3
+const SHAPE_FIT_TOLERANCE = 0.35
+
+function pointToSegmentDistance(p: { x: number, y: number }, a: { x: number, y: number }, b: { x: number, y: number }): number {
+  const length = Math.hypot(b.x - a.x, b.y - a.y) || 1
+  return Math.abs((b.x - a.x) * (a.y - p.y) - (a.x - p.x) * (b.y - a.y)) / length
+}
+
+export function classifyDrawnShape(points: Array<{ x: number, y: number }>): DrawnShapeResult | null {
+  if (points.length < 3) return null
+  const xs = points.map((p) => p.x)
+  const ys = points.map((p) => p.y)
+  const minX = Math.min(...xs), maxX = Math.max(...xs)
+  const minY = Math.min(...ys), maxY = Math.max(...ys)
+  const width = maxX - minX
+  const height = maxY - minY
+  if (Math.max(width, height) < MIN_DRAW_SIZE) return null
+
+  let pathLength = 0
+  for (let index = 1; index < points.length; index += 1) pathLength += Math.hypot(points[index].x - points[index - 1].x, points[index].y - points[index - 1].y)
+  const gap = Math.hypot(points[points.length - 1].x - points[0].x, points[points.length - 1].y - points[0].y)
+  if (pathLength === 0 || gap / pathLength > MAX_OPEN_GAP_RATIO) return null // an open stroke is not a closed shape
+
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2
+  const halfWidth = width / 2 || 1, halfHeight = height / 2 || 1
+  const diamondEdges: Array<[{ x: number, y: number }, { x: number, y: number }]> = [
+    [{ x: cx, y: minY }, { x: maxX, y: cy }], [{ x: maxX, y: cy }, { x: cx, y: maxY }],
+    [{ x: cx, y: maxY }, { x: minX, y: cy }], [{ x: minX, y: cy }, { x: cx, y: minY }],
+  ]
+
+  let rectError = 0, diamondError = 0, ellipseError = 0
+  for (const p of points) {
+    const toRectEdge = Math.min(Math.abs(p.x - minX), Math.abs(p.x - maxX)) / halfWidth
+    const toRectEdgeY = Math.min(Math.abs(p.y - minY), Math.abs(p.y - maxY)) / halfHeight
+    rectError += Math.min(toRectEdge, toRectEdgeY)
+    diamondError += Math.min(...diamondEdges.map(([a, b]) => pointToSegmentDistance(p, a, b))) / Math.min(halfWidth, halfHeight)
+    const r = Math.hypot((p.x - cx) / halfWidth, (p.y - cy) / halfHeight)
+    ellipseError += Math.abs(r - 1)
+  }
+  const fits: Array<[ArchitectureGraphNodeShape, number]> = [
+    ["rectangle", rectError / points.length],
+    ["diamond", diamondError / points.length],
+    ["ellipse", ellipseError / points.length],
+  ]
+  fits.sort((a, b) => a[1] - b[1])
+  const [bestShape, bestError] = fits[0]
+  const shape = bestError <= SHAPE_FIT_TOLERANCE ? bestShape : "rectangle"
+  return { shape, box: { x: minX, y: minY, width, height } }
+}
+
 // Structural styling stays inline: React Flow must measure a real box even if
 // the stylesheet chunk has not loaded yet. The visible border is an SVG sketch.
 const cardStyle: CSSProperties = {
@@ -112,6 +173,9 @@ interface PendingFocus {
 const DRAFT_COMMIT_MS = 300
 const DEFAULT_NODE_WIDTH = 224
 const DEFAULT_NODE_HEIGHT = 96
+// Minimum on-screen size a drawn stroke's bounding box must reach to register,
+// independent of canvas zoom.
+const DRAW_MIN_SCREEN_SIZE = 30
 // New nodes spawn at a 3:2 width:height ratio.
 const NEW_NODE_WIDTH = 240
 const NEW_NODE_HEIGHT = 160
@@ -542,6 +606,58 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
     const node: ArchitectureGraphNode = { id, title: "New node", bullets: [], position: { x: 100 + graphRef.current.nodes.length * 28, y: 100 + graphRef.current.nodes.length * 28 }, width: NEW_NODE_WIDTH, height: NEW_NODE_HEIGHT }
     emit({ nodes: [...graphRef.current.nodes, node] })
   }, [emit])
+  const commitDrawnShape = useCallback((shape: ArchitectureGraphNodeShape, box: { x: number, y: number, width: number, height: number }) => {
+    const id = nextArchitectureGraphId("node", graphRef.current.nodes.map((node) => node.id))
+    const node: ArchitectureGraphNode = { id, title: "New node", bullets: [], position: { x: box.x, y: box.y }, shape, width: Math.max(80, Math.round(box.width)), height: Math.max(48, Math.round(box.height)) }
+    emit({ nodes: [...graphRef.current.nodes, node] })
+  }, [emit])
+  const [drawMode, setDrawMode] = useState(false)
+  useEffect(() => {
+    if (!drawMode) return
+    const onKeyDown = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") setDrawMode(false) }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [drawMode])
+  // Points accumulate in a ref so every pointer sample doesn't re-render the
+  // whole surface; the preview only syncs to state once per animation frame.
+  const drawPointsRef = useRef<Array<{ x: number, y: number }>>([])
+  const drawFrameRef = useRef<number | null>(null)
+  const [drawPreview, setDrawPreview] = useState<Array<{ x: number, y: number }> | null>(null)
+  const drawOriginRef = useRef({ left: 0, top: 0 })
+  useEffect(() => () => { if (drawFrameRef.current !== null) cancelAnimationFrame(drawFrameRef.current) }, [])
+  const onDrawPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId)
+    const rect = event.currentTarget.getBoundingClientRect()
+    drawOriginRef.current = { left: rect.left, top: rect.top }
+    drawPointsRef.current = [{ x: event.clientX, y: event.clientY }]
+    setDrawPreview(drawPointsRef.current)
+  }, [])
+  const onDrawPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (drawPointsRef.current.length === 0) return
+    drawPointsRef.current.push({ x: event.clientX, y: event.clientY })
+    if (drawFrameRef.current !== null) return
+    drawFrameRef.current = requestAnimationFrame(() => {
+      drawFrameRef.current = null
+      setDrawPreview([...drawPointsRef.current])
+    })
+  }, [])
+  // Zoom-independent: the size gate runs on screen pixels, before the points
+  // are converted to flow space (where a low zoom would shrink the gesture
+  // needed to register and a high zoom would inflate it).
+  const finishDraw = useCallback((commit: boolean) => {
+    if (drawFrameRef.current !== null) { cancelAnimationFrame(drawFrameRef.current); drawFrameRef.current = null }
+    const points = drawPointsRef.current
+    drawPointsRef.current = []
+    setDrawPreview(null)
+    if (!commit || !flow || points.length === 0) return
+    const xs = points.map((p) => p.x)
+    const ys = points.map((p) => p.y)
+    if (Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) < DRAW_MIN_SCREEN_SIZE) return
+    const result = classifyDrawnShape(points.map((p) => flow.screenToFlowPosition(p)))
+    if (result) { commitDrawnShape(result.shape, result.box); setDrawMode(false) }
+  }, [flow, commitDrawnShape])
+  const onDrawPointerUp = useCallback(() => finishDraw(true), [finishDraw])
+  const onDrawPointerCancel = useCallback(() => finishDraw(false), [finishDraw])
   const onNodeDragStop = useCallback((_event: MouseEvent | TouchEvent, moved: GraphFlowNode) => {
     emit({ nodes: graphRef.current.nodes.map((node) => node.id === moved.id ? { ...node, position: moved.position } : node) })
   }, [emit])
@@ -574,6 +690,7 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
       <div className="architecture-graph-toolbar" style={{ position: "relative", inset: "auto", zIndex: 5, display: "flex", minHeight: 31, flexShrink: 0, alignItems: "center", gap: 6, borderBottom: "1px solid var(--divider)", padding: "0 10px" }}>
         {!readOnly && <>
           <button type="button" onClick={addNode} className="architecture-graph-toolbar-symbol" aria-label="Add node"><Plus size={13} /></button>
+          <button type="button" onClick={() => setDrawMode((current) => !current)} aria-pressed={drawMode} className={cn("architecture-graph-toolbar-symbol", drawMode && "architecture-graph-toolbar-symbol-active")} aria-label="Draw a shape"><PenLine size={13} /></button>
           <span className="architecture-graph-toolbar-delimiter" aria-hidden="true">|</span>
         </>}
         <button type="button" onClick={fitGraph} className="architecture-graph-toolbar-symbol" aria-label="Fit view"><Maximize size={13} /></button>
@@ -589,6 +706,24 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
         {selectedEdge.path && <button type="button" className="architecture-graph-icon-button" onClick={() => updateSelectedEdge({ path: undefined })} aria-label="Reset connection path"><RotateCcw size={14} /></button>}
         <button type="button" className="architecture-graph-icon-button architecture-graph-delete" onClick={deleteSelectedEdge} aria-label="Delete connection"><Trash2 size={14} /></button>
       </div>}
+      {drawMode && !readOnly && (
+        <div
+          className="architecture-graph-draw-overlay"
+          onPointerDown={onDrawPointerDown}
+          onPointerMove={onDrawPointerMove}
+          onPointerUp={onDrawPointerUp}
+          onPointerCancel={onDrawPointerCancel}
+        >
+          {drawPreview && drawPreview.length > 1 && (
+            <svg className="architecture-graph-draw-preview" aria-hidden="true">
+              <path
+                d={`M ${drawPreview.map((p) => `${p.x - drawOriginRef.current.left} ${p.y - drawOriginRef.current.top}`).join(" L ")}`}
+                fill="none"
+              />
+            </svg>
+          )}
+        </div>
+      )}
       <ReactFlow<GraphFlowNode, GraphFlowEdge>
         nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
         onInit={setFlow}

@@ -353,7 +353,12 @@ p, li {
   transition: color 150ms ease, background-color 150ms ease;
 }
 .architecture-graph-toolbar-symbol:hover { background: var(--hover-overlay); color: var(--ink); }
+.architecture-graph-toolbar-symbol.architecture-graph-toolbar-symbol-active { background: var(--hover-overlay-strong); color: var(--ink); }
 .architecture-graph-toolbar-symbol:focus-visible { outline: 2px solid var(--divider-strong); outline-offset: 2px; }
+
+.architecture-graph-draw-overlay { position: absolute; inset: 0; z-index: 6; cursor: crosshair; touch-action: none; }
+.architecture-graph-draw-preview { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.architecture-graph-draw-preview path { stroke: var(--ink-muted); stroke-width: 1.5; stroke-dasharray: 4 3; stroke-linecap: round; stroke-linejoin: round; }
 
 .architecture-graph-toolbar-delimiter { color: var(--ink-muted); font-size: 12px; line-height: 1; user-select: none; }
 
