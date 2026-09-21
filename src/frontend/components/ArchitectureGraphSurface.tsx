@@ -150,17 +150,23 @@ const cardStyle: CSSProperties = {
   transition: "box-shadow 150ms ease",
 }
 
-// Non-rectangle shapes clip their card fill to the sketch outline, drop the
-// rectangular shadow, and pad enough that text stays inside the largest
-// axis-aligned box the outline can hold (diamonds need much more than ellipses).
-const CONTENT_CLIP: Record<ArchitectureGraphNodeShape, CSSProperties> = {
+// Clips the card fill to the sketch outline; unpadded so its own center is
+// always exactly the shape's geometric center (bounding-box center for both
+// diamond and ellipse).
+const SHAPE_CLIP: Record<ArchitectureGraphNodeShape, CSSProperties> = {
   rectangle: { borderRadius: 8 },
-  ellipse: { borderRadius: "50%", padding: "10% 15%" },
-  diamond: { clipPath: "polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)", padding: "26% 28%" },
+  ellipse: { borderRadius: "50%" },
+  diamond: { clipPath: "polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)" },
 }
 // Rectangle nodes keep a left-aligned header/body split, since a box reads
 // naturally as a titled container. Round shapes have no flat top edge for a
-// header bar to sit on, so their title and bullets center as one plain block.
+// header bar to sit on: their title and bullets shrink-wrap into one plain
+// block, grid-centered on the clip's center, capped so it stays inside the
+// largest axis-aligned box each outline can actually hold.
+const CENTERED_CONTENT_MAX: Partial<Record<ArchitectureGraphNodeShape, CSSProperties>> = {
+  ellipse: { maxWidth: "70%", maxHeight: "80%" },
+  diamond: { maxWidth: "44%", maxHeight: "48%" },
+}
 const CENTERED_SHAPES = new Set<ArchitectureGraphNodeShape>(["ellipse", "diamond"])
 
 interface PendingFocus {
@@ -319,7 +325,8 @@ function ArchitectureNodeCard({ data, selected }: NodeProps<Node<ArchitectureNod
       </svg>
       <Handle id="top" type="target" position={Position.Top} className="architecture-graph-handle" style={handleStyle} />
       <Handle id="left" type="target" position={Position.Left} className="architecture-graph-handle" style={handleStyle} />
-      <div style={{ position: "relative", height: "100%", display: "flex", flexDirection: "column", justifyContent: centered ? "center" : undefined, overflow: "hidden", backgroundColor: "var(--surface-elevated)", ...CONTENT_CLIP[shape] }}>
+      <div style={{ position: "relative", height: "100%", display: "grid", overflow: "hidden", backgroundColor: "var(--surface-elevated)", ...SHAPE_CLIP[shape] }}>
+      <div style={centered ? { display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, justifySelf: "center", alignSelf: "center", ...CENTERED_CONTENT_MAX[shape] } : { display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, width: "100%", height: "100%" }}>
       <div className={cn("architecture-graph-node-titlebar architecture-graph-node-header drag-handle", centered && "architecture-graph-node-titlebar-plain")} style={{ borderBottomColor: centered ? "transparent" : border, backgroundColor: centered ? "transparent" : "var(--surface)" }}>
         {editingTitle ? (
           <input ref={titleRef} autoFocus aria-label="Node title" value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} onFocus={() => { titleFocusedRef.current = true }} onBlur={() => { titleFocusedRef.current = false; commitTitle(); setEditingTitle(false) }} onKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); event.currentTarget.blur(); if (bulletDrafts.length === 0) setBulletDrafts([""]); focusBullet(0, 0) }} onPointerDown={(event) => event.stopPropagation()} className="nodrag architecture-graph-title architecture-graph-title-input" style={{ color: "var(--ink-muted)" }} />
@@ -345,6 +352,7 @@ function ArchitectureNodeCard({ data, selected }: NodeProps<Node<ArchitectureNod
             />
           </div>
         ))}
+      </div>
       </div>
       </div>
       <Handle id="right" type="source" position={Position.Right} className="architecture-graph-handle" style={handleStyle} />

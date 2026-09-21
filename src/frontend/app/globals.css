@@ -367,18 +367,18 @@ p, li {
   min-height: 28px;
   flex-shrink: 0;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   border-bottom: 1px solid color-mix(in oklab, var(--divider) 65%, transparent);
   padding: 3px 9px;
+  text-align: center;
   user-select: none;
 }
 .architecture-graph-node-titlebar-plain {
   min-height: 0;
-  justify-content: center;
   padding: 0 0 2px;
-  text-align: center;
 }
-.architecture-graph-node-titlebar-plain .architecture-graph-title-display { white-space: normal; text-align: center; }
+.architecture-graph-node-titlebar-plain .architecture-graph-title-display { white-space: normal; }
 .architecture-graph-node-body-plain { flex: 0 0 auto; overflow: visible; align-items: center; text-align: center; }
 .architecture-graph-node-body-plain .architecture-graph-bullet-row { justify-content: center; }
 .architecture-graph-node-body-plain .architecture-graph-bullet-input { text-align: center; }
@@ -410,7 +410,7 @@ p, li {
   font-weight: 600;
   line-height: 1.35;
 }
-.architecture-graph-title-input { display: block; flex: 1; width: 100%; padding: 0; }
+.architecture-graph-title-input { display: block; flex: 1; width: 100%; padding: 0; text-align: center; }
 .architecture-graph-title-display {
   display: inline-block;
   flex: 0 1 auto;
@@ -418,7 +418,7 @@ p, li {
   cursor: text;
   overflow: hidden;
   padding: 0;
-  text-align: left;
+  text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
