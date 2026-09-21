@@ -372,6 +372,16 @@ p, li {
   padding: 3px 9px;
   user-select: none;
 }
+.architecture-graph-node-titlebar-plain {
+  min-height: 0;
+  justify-content: center;
+  padding: 0 0 2px;
+  text-align: center;
+}
+.architecture-graph-node-titlebar-plain .architecture-graph-title-display { white-space: normal; text-align: center; }
+.architecture-graph-node-body-plain { flex: 0 0 auto; overflow: visible; align-items: center; text-align: center; }
+.architecture-graph-node-body-plain .architecture-graph-bullet-row { justify-content: center; }
+.architecture-graph-node-body-plain .architecture-graph-bullet-input { text-align: center; }
 
 .architecture-graph-node {
   height: 100%;
