@@ -81,3 +81,20 @@ describe("ArchitectureGraphEditor autosave", () => {
   })
 
 })
+
+describe("ArchitectureGraphEditor undo/redo", () => {
+  it("undoes and redoes a Diagram-view edit with Ctrl+Z / Ctrl+Shift+Z", async () => {
+    api.readArchitectureGraph.mockResolvedValue({ name: "demo.architecture.yaml", path: "/graphs/demo.architecture.yaml", content: VALID, hasDraft: false })
+    render(<ArchitectureGraphEditor path="/graphs/demo.architecture.yaml" onClose={vi.fn()} />)
+    await act(async () => { await Promise.resolve() })
+
+    fireEvent.click(screen.getByRole("button", { name: "Add node" }))
+    expect(screen.getByText("New node")).toBeInTheDocument()
+
+    fireEvent.keyDown(document, { key: "z", ctrlKey: true })
+    expect(screen.queryByText("New node")).not.toBeInTheDocument()
+
+    fireEvent.keyDown(document, { key: "z", ctrlKey: true, shiftKey: true })
+    expect(screen.getByText("New node")).toBeInTheDocument()
+  })
+})

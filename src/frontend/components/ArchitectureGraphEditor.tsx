@@ -1,9 +1,10 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Download, Save, Upload, X } from "lucide-react"
+import { Download, Redo2, Save, Undo2, Upload, X } from "lucide-react"
 import { ArchitectureGraphSurface } from "./ArchitectureGraphSurface"
 import { MermaidImportModal } from "./MermaidImportModal"
+import { useTabActive } from "./TabManager"
 import {
   parseArchitectureGraph,
   serializeArchitectureGraph,
@@ -25,6 +26,10 @@ interface ArchitectureGraphEditorProps {
 
 type View = "diagram" | "source"
 
+// Undo/redo covers Diagram-view edits only, as whole-document YAML snapshots.
+// Source-view typing already has the textarea's own undo, and snapshotting
+// per keystroke there would make history nearly useless.
+const HISTORY_LIMIT = 50
 // Edits autosave: the surface commits drafts as you type, and this view debounces
 // them to disk with a bounded max wait so sustained typing still reaches the file.
 export function ArchitectureGraphEditor({ path, overlay = false, onClose, onSaved, onModeLabel }: ArchitectureGraphEditorProps) {
@@ -41,21 +46,24 @@ export function ArchitectureGraphEditor({ path, overlay = false, onClose, onSave
   const handleError = useCallback(() => setError("Could not save Architecture Graph"), [])
   const { queue, flush, cancel, markSaved, dirty } = useGraphAutosave({ key: name, write, onSaved: handleSaved, onError: handleError })
 
+  const active = useTabActive()
   const load = useCallback(async () => {
     const document = await readArchitectureGraph(name)
     setGraph(parseArchitectureGraph(document.content))
     setSource(document.content)
     markSaved(document.content)
+    setUndoStack([])
+    setRedoStack([])
   }, [name, markSaved])
 
   useEffect(() => {
-    let active = true
+    let stillMounted = true
     setGraph(null)
     setError(null)
     load().catch((cause: unknown) => {
-      if (active) setError(cause instanceof Error ? cause.message : "Could not load Architecture Graph")
+      if (stillMounted) setError(cause instanceof Error ? cause.message : "Could not load Architecture Graph")
     })
-    return () => { active = false }
+    return () => { stillMounted = false }
   }, [load])
 
   // A remote edit only replaces local state when nothing is unsaved here, so a
@@ -74,8 +82,43 @@ export function ArchitectureGraphEditor({ path, overlay = false, onClose, onSave
     onModeLabel?.(name)
   }, [name, onModeLabel, overlay])
 
+  const [undoStack, setUndoStack] = useState<string[]>([])
+  const [redoStack, setRedoStack] = useState<string[]>([])
+  const sourceRef = useRef(source)
+  sourceRef.current = source
+  const restoreSource = useCallback((nextSource: string) => {
+    try {
+      const next = parseArchitectureGraph(nextSource)
+      setGraph(next)
+      setSource(nextSource)
+      setError(null)
+      queue(nextSource)
+    } catch {
+      // History only ever stores previously-valid content; nothing to recover from.
+    }
+  }, [queue])
+  const undo = useCallback(() => {
+    if (undoStack.length === 0) return
+    const previous = undoStack[undoStack.length - 1]!
+    const current = sourceRef.current
+    setUndoStack((stack) => stack.slice(0, -1))
+    setRedoStack((stack) => [...stack, current])
+    restoreSource(previous)
+  }, [undoStack, restoreSource])
+  const redo = useCallback(() => {
+    if (redoStack.length === 0) return
+    const next = redoStack[redoStack.length - 1]!
+    const current = sourceRef.current
+    setRedoStack((stack) => stack.slice(0, -1))
+    setUndoStack((stack) => [...stack, current].slice(-HISTORY_LIMIT))
+    restoreSource(next)
+  }, [redoStack, restoreSource])
+
   const applyGraph = useCallback((next: ArchitectureGraph) => {
     const nextSource = serializeArchitectureGraph(next)
+    const previous = sourceRef.current
+    setUndoStack((stack) => [...stack, previous].slice(-HISTORY_LIMIT))
+    setRedoStack([])
     setGraph(next)
     setSource(nextSource)
     setError(null)
@@ -102,6 +145,7 @@ export function ArchitectureGraphEditor({ path, overlay = false, onClose, onSave
 
   const handleSourceChange = useCallback((nextSource: string) => {
     setSource(nextSource)
+    setRedoStack([])
     try {
       const next = parseArchitectureGraph(nextSource)
       setGraph(next)
@@ -139,11 +183,20 @@ export function ArchitectureGraphEditor({ path, overlay = false, onClose, onSave
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
         event.preventDefault()
         handleSave()
+        return
+      }
+      if (!active) return
+      // Text fields (Source textarea, node title, connection label) keep their own native undo.
+      const tag = (event.target as HTMLElement | null)?.tagName
+      if (tag === "TEXTAREA" || tag === "INPUT") return
+      if ((event.ctrlKey || event.metaKey) && (event.key.toLowerCase() === "z" || event.key.toLowerCase() === "y")) {
+        event.preventDefault()
+        if (event.key.toLowerCase() === "y" || event.shiftKey) redo(); else undo()
       }
     }
     document.addEventListener("keydown", onKeyDown)
     return () => document.removeEventListener("keydown", onKeyDown)
-  }, [handleSave])
+  }, [handleSave, undo, redo, active])
 
   if (!graph) {
     return <div className="flex min-h-[280px] items-center justify-center text-xs text-ink-faint">{error ?? "Loading Architecture Graph..."}</div>
@@ -168,6 +221,8 @@ export function ArchitectureGraphEditor({ path, overlay = false, onClose, onSave
           ))}
         </div>
         {dirty && <span className="text-[10px] text-ink-faint">saving…</span>}
+        <button type="button" onClick={undo} disabled={undoStack.length === 0} className="rounded p-1 text-ink-subtle hover:bg-hover hover:text-ink disabled:opacity-30" aria-label="Undo"><Undo2 className="h-3.5 w-3.5" /></button>
+        <button type="button" onClick={redo} disabled={redoStack.length === 0} className="rounded p-1 text-ink-subtle hover:bg-hover hover:text-ink disabled:opacity-30" aria-label="Redo"><Redo2 className="h-3.5 w-3.5" /></button>
         <button type="button" onClick={() => setMermaidOpen(true)} className="rounded p-1 text-ink-subtle hover:bg-hover hover:text-ink" aria-label="Import from Mermaid"><Upload className="h-3.5 w-3.5" /></button>
         <button type="button" onClick={handleMermaidExport} className="rounded p-1 text-ink-subtle hover:bg-hover hover:text-ink" aria-label="Copy as Mermaid">
           {mermaidCopied ? <span className="text-[10px] text-ink-muted">Copied</span> : <Download className="h-3.5 w-3.5" />}
