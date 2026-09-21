@@ -2070,7 +2070,13 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
                 onBlur={() => dropIfEmptyText(t.id)}
                 onKeyDown={(e) => {
                   e.stopPropagation()
-                  if (e.key === "Escape") { e.preventDefault(); (e.target as HTMLTextAreaElement).blur() }
+                  if (e.key === "Enter" && !(e.ctrlKey || e.metaKey)) {
+                    e.preventDefault()
+                    ;(e.target as HTMLTextAreaElement).blur()
+                  } else if (e.key === "Escape") {
+                    e.preventDefault()
+                    ;(e.target as HTMLTextAreaElement).blur()
+                  }
                 }}
                 onPointerDown={(e) => e.stopPropagation()}
                 className="absolute inset-0 resize-none bg-transparent outline-none border border-transparent focus:border-dashed focus:border-divider-strong rounded px-1"

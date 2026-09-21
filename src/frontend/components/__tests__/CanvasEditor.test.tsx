@@ -266,6 +266,24 @@ describe("keyboard text entry", () => {
     act(() => { toolbar(container)[1]!.click() })
     expect(latest(seen).texts).toHaveLength(0)
   })
+
+  it("closes text notes with Enter while Ctrl+Enter keeps the native line break", () => {
+    const seen: CanvasDocument[] = []
+    const { container } = render(<Harness seen={seen} />)
+    const surface = container.querySelector("[tabindex=\"0\"]") as HTMLDivElement
+
+    act(() => { fireEvent.keyDown(surface, { key: "H" }) })
+    const note = container.querySelector("textarea") as HTMLTextAreaElement
+
+    act(() => { fireEvent.keyDown(note, { key: "Enter" }) })
+    expect(note).not.toHaveFocus()
+
+    act(() => { note.focus() })
+    expect(fireEvent.keyDown(note, { key: "Enter", ctrlKey: true })).toBe(true)
+    expect(note).toHaveFocus()
+    act(() => { fireEvent.change(note, { target: { value: "H\nI" } }) })
+    expect(latest(seen).texts[0]!.text).toBe("H\nI")
+  })
 })
 
 describe("nested canvas", () => {
