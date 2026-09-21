@@ -9,6 +9,7 @@ import "@xyflow/react/dist/style.css"
 import rough from "roughjs"
 import { Circle, Diamond, Maximize, PenLine, Plus, RotateCcw, Square, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useTabActive } from "./TabManager"
 import {
   nextArchitectureGraphId,
   type ArchitectureGraph,
@@ -179,6 +180,22 @@ const DRAW_MIN_SCREEN_SIZE = 30
 // New nodes spawn at a 3:2 width:height ratio.
 const NEW_NODE_WIDTH = 240
 const NEW_NODE_HEIGHT = 160
+// Drag/resize commits round to this grid, so autosaved positions stay stable
+// pixel values instead of accumulating sub-pixel drift across edit sessions.
+export const GRID_SIZE = 8
+export const snapToGrid = (value: number) => Math.round(value / GRID_SIZE) * GRID_SIZE
+
+// Clones selected nodes with fresh ids, offset diagonally so the copies read
+// as new objects rather than sitting exactly on top of the originals.
+export function duplicateNodes(existing: ArchitectureGraphNode[], selectedIds: ReadonlySet<string>): ArchitectureGraphNode[] {
+  const clones: ArchitectureGraphNode[] = []
+  for (const node of existing) {
+    if (!selectedIds.has(node.id)) continue
+    const id = nextArchitectureGraphId("node", [...existing, ...clones].map((candidate) => candidate.id))
+    clones.push({ ...node, id, position: { x: snapToGrid(node.position.x + GRID_SIZE * 3), y: snapToGrid(node.position.y + GRID_SIZE * 3) } })
+  }
+  return clones
+}
 
 function ArchitectureNodeCard({ data, selected }: NodeProps<Node<ArchitectureNodeData, "architecture-node">>) {
   const [hovered, setHovered] = useState(false)
@@ -292,7 +309,11 @@ function ArchitectureNodeCard({ data, selected }: NodeProps<Node<ArchitectureNod
   }, [editingTitle])
   return (
     <div ref={cardRef} className={cn("architecture-graph-node", selected && "architecture-graph-node-selected")} style={{ ...cardStyle, backgroundColor: "transparent", boxShadow: shape === "rectangle" ? "var(--architecture-graph-card-shadow)" : "none" }} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
-      <NodeResizer isVisible={!!selected} minWidth={80} minHeight={48} color="var(--ink-muted)" onResizeEnd={(_event, params) => data.onChange(data.id, { width: params.width, height: params.height, position: { x: params.x, y: params.y } })} />
+      <NodeResizer isVisible={!!selected} minWidth={80} minHeight={48} color="var(--ink-muted)" onResizeEnd={(_event, params) => {
+        const x = snapToGrid(params.x)
+        const y = snapToGrid(params.y)
+        data.onChange(data.id, { width: snapToGrid(params.x + params.width) - x, height: snapToGrid(params.y + params.height) - y, position: { x, y } })
+      }} />
       <svg className="architecture-graph-node-sketch" viewBox={`0 0 ${cardSize.width} ${cardSize.height}`} aria-hidden="true" focusable="false" style={{ position: "absolute", zIndex: 1, inset: 0, width: "100%", height: "100%", overflow: "visible", color: "var(--ink-muted)", pointerEvents: "none" }}>
         {nodeSketch.map((path, index) => <path key={index} d={path.d} fill="none" stroke="currentColor" strokeWidth={path.strokeWidth} />)}
       </svg>
@@ -574,6 +595,7 @@ function reconcile<T extends { id: string }>(current: T[], next: T[]): T[] {
 }
 
 export function ArchitectureGraphSurface({ graph, onChange, className, readOnly = false, onOpenDocument }: ArchitectureGraphSurfaceProps) {
+  const active = useTabActive()
   const graphRef = useRef(graph)
   graphRef.current = graph
   const emit = useCallback((patch: Partial<ArchitectureGraph>) => onChange({ ...graphRef.current, ...patch }), [onChange])
@@ -658,8 +680,32 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
   }, [flow, commitDrawnShape])
   const onDrawPointerUp = useCallback(() => finishDraw(true), [finishDraw])
   const onDrawPointerCancel = useCallback(() => finishDraw(false), [finishDraw])
+  const duplicateSelectedNodes = useCallback(() => {
+    const selectedIds = new Set(nodes.filter((node) => node.selected).map((node) => node.id))
+    if (selectedIds.size === 0) return
+    const clones = duplicateNodes(graphRef.current.nodes, selectedIds)
+    if (clones.length === 0) return
+    const cloneIds = new Set(clones.map((clone) => clone.id))
+    emit({ nodes: [...graphRef.current.nodes, ...clones] })
+    // Select the copies, not the originals, so repeated Ctrl+D walks diagonally
+    // instead of stacking every clone on the same spot.
+    setNodes((current) => current.map((node) => ({ ...node, selected: cloneIds.has(node.id) })))
+  }, [nodes, emit, setNodes])
+  useEffect(() => {
+    if (readOnly || !active) return
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "d") return
+      const tag = (event.target as HTMLElement | null)?.tagName
+      if (tag === "INPUT" || tag === "TEXTAREA") return
+      event.preventDefault()
+      duplicateSelectedNodes()
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [readOnly, active, duplicateSelectedNodes])
   const onNodeDragStop = useCallback((_event: MouseEvent | TouchEvent, moved: GraphFlowNode) => {
-    emit({ nodes: graphRef.current.nodes.map((node) => node.id === moved.id ? { ...node, position: moved.position } : node) })
+    const position = { x: snapToGrid(moved.position.x), y: snapToGrid(moved.position.y) }
+    emit({ nodes: graphRef.current.nodes.map((node) => node.id === moved.id ? { ...node, position } : node) })
   }, [emit])
   const onConnect: OnConnect = useCallback((connection: Connection) => {
     if (!connection.source || !connection.target || connection.source === connection.target) return

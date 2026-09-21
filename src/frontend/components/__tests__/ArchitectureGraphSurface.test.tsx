@@ -2,7 +2,7 @@ import type { ComponentType, ReactNode } from "react"
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { useState } from "react"
 import { describe, expect, it, vi } from "vitest"
-import { ArchitectureGraphSurface, classifyDrawnShape, edgeAttachments } from "@/components/ArchitectureGraphSurface"
+import { ArchitectureGraphSurface, classifyDrawnShape, duplicateNodes, edgeAttachments, snapToGrid } from "@/components/ArchitectureGraphSurface"
 import { emptyArchitectureGraph, type ArchitectureGraph } from "@/lib/architectureGraph"
 
 vi.mock("@xyflow/react", async () => {
@@ -146,5 +146,32 @@ describe("classifyDrawnShape", () => {
   it("rejects a stroke smaller than the minimum draw size", () => {
     const points = perimeter([[0, 0], [10, 0], [10, 10], [0, 10]])
     expect(classifyDrawnShape(points)).toBeNull()
+  })
+})
+
+describe("snapToGrid", () => {
+  it("rounds to the nearest 8px grid step", () => {
+    expect(snapToGrid(13)).toBe(16)
+    expect(snapToGrid(11)).toBe(8)
+    expect(snapToGrid(0)).toBe(0)
+  })
+})
+
+describe("duplicateNodes", () => {
+  it("clones only the selected nodes with fresh ids and an offset position", () => {
+    const nodes = [
+      { id: "node-1", title: "A", bullets: [], position: { x: 100, y: 100 } },
+      { id: "node-2", title: "B", bullets: [], position: { x: 300, y: 100 } },
+    ]
+    const clones = duplicateNodes(nodes, new Set(["node-1"]))
+    expect(clones).toHaveLength(1)
+    expect(clones[0].id).not.toBe("node-1")
+    expect(clones[0].title).toBe("A")
+    expect(clones[0].position).toEqual({ x: 128, y: 128 })
+  })
+
+  it("returns no clones when nothing is selected", () => {
+    const nodes = [{ id: "node-1", title: "A", bullets: [], position: { x: 0, y: 0 } }]
+    expect(duplicateNodes(nodes, new Set())).toEqual([])
   })
 })
