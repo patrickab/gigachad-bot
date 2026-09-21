@@ -914,7 +914,7 @@ export function ChatContainer({
                         <div className="overflow-hidden">
                           <div className="px-5 pb-4">
                             {assistant.content && (
-                              <ElevatedContainer className="rounded-lg border border-divider/30 overflow-hidden">
+                              <ElevatedContainer className="rounded-lg border border-divider overflow-hidden">
                                 <div className="px-4 py-3">
                                   <div className="text-xs font-medium text-ink-subtle mb-1">Assistant</div>
                         <div className="max-h-[25vh] overflow-y-auto text-ink-muted">
@@ -945,11 +945,11 @@ export function ChatContainer({
                         {/* Same optic as the answer below: the tool call is a peer of the
                             response inside the pair, not a decoration on it. */}
                         {assistant.tool_calls?.map((call) => (
-                          <ElevatedContainer key={call.id} className="mx-5 mb-5 rounded-lg border border-divider/30 overflow-hidden">
+                          <ElevatedContainer key={call.id} className="mx-5 mb-5 rounded-lg border border-divider overflow-hidden">
                             <ToolCallElement call={call} />
                           </ElevatedContainer>
                         ))}
-                        <ElevatedContainer className="mx-5 mb-5 rounded-lg border border-divider/30 overflow-hidden">
+                        <ElevatedContainer className="mx-5 mb-5 rounded-lg border border-divider overflow-hidden">
                           <ChatMessage
                             role="assistant"
                             content={assistant.content}

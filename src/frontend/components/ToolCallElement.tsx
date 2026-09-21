@@ -87,7 +87,7 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
 
   const header = <>
     <div className="mt-0.5 shrink-0">
-      <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-surface-elevated">
+      <div className="flex h-7 w-7 items-center justify-center rounded-xl border border-divider bg-surface-elevated">
         <Icon className={cn("h-3.5 w-3.5", call.status === "error" ? "text-danger" : "text-ink")} aria-hidden="true" />
       </div>
     </div>
@@ -99,7 +99,7 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
   </>
 
   const stageTimeline = stages.length > 0 && (
-    <ol className="space-y-1 border-t border-divider/30 px-6 py-3 pl-[4.5rem]">
+    <ol className="space-y-1 border-t border-divider px-6 py-3 pl-[4.5rem]">
       {stages.map((stage) => (
         <li key={stage.id} className="flex items-center gap-2 text-[10px]">
           <span className="flex h-3 w-3 shrink-0 items-center justify-center">
