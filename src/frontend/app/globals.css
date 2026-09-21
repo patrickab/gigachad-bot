@@ -381,7 +381,8 @@ p, li {
   padding: 0 0 2px;
 }
 .architecture-graph-node-titlebar-plain .architecture-graph-title-display { white-space: normal; }
-.architecture-graph-node-body-plain { flex: 0 0 auto; overflow: visible; align-items: center; text-align: center; }
+.architecture-graph-node-body-plain { flex: 0 0 auto; padding: 0; overflow: visible; align-items: center; text-align: center; }
+.architecture-graph-node-body-plain .architecture-graph-bullet-row:first-child { margin-top: 4px; }
 .architecture-graph-node-body-plain .architecture-graph-bullet-row { justify-content: center; }
 .architecture-graph-node-body-plain .architecture-graph-bullet-input { text-align: center; }
 

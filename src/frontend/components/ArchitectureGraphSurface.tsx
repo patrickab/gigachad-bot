@@ -185,6 +185,13 @@ const DRAW_MIN_SCREEN_SIZE = 30
 // New nodes spawn at a 3:2 width:height ratio.
 const NEW_NODE_WIDTH = 240
 const NEW_NODE_HEIGHT = 160
+// Resize floor; rectangles can't shrink below their heading's own width (see
+// the title-measurement effect below), which raises this per-node.
+const NODE_MIN_WIDTH = 80
+const NODE_MIN_HEIGHT = 48
+// Horizontal room the title bar needs beyond the heading text itself: its own
+// padding plus a little slack so the caret has room while editing.
+const TITLE_WIDTH_SLACK = 28
 // Drag/resize commits round to this grid, so autosaved positions stay stable
 // pixel values instead of accumulating sub-pixel drift across edit sessions.
 export const GRID_SIZE = 8
@@ -288,6 +295,19 @@ function ArchitectureNodeCard({ data, selected }: NodeProps<Node<ArchitectureNod
   const border = "color-mix(in srgb, var(--ink-muted), transparent 68%)"
   const shape: ArchitectureGraphNodeShape = data.shape ?? "rectangle"
   const centered = CENTERED_SHAPES.has(shape)
+  // Rectangles truncate a heading that's wider than the card with an ellipsis;
+  // measuring it lets the heading act as a resize floor instead. Diamonds and
+  // ellipses already wrap onto a second line, so they keep the plain floor.
+  const titleMeasureRef = useRef<HTMLSpanElement>(null)
+  const [titleWidth, setTitleWidth] = useState(0)
+  useLayoutEffect(() => {
+    setTitleWidth(titleMeasureRef.current?.offsetWidth ?? 0)
+  }, [titleDraft])
+  const minNodeWidth = shape === "rectangle" ? Math.max(NODE_MIN_WIDTH, Math.ceil(titleWidth) + TITLE_WIDTH_SLACK) : NODE_MIN_WIDTH
+  useEffect(() => {
+    const current = data.width ?? DEFAULT_NODE_WIDTH
+    if (minNodeWidth > current) data.onChange(data.id, { width: minNodeWidth })
+  }, [minNodeWidth, data.width, data.id, data.onChange])
   const nodeSketch = useMemo(
     () => nodeSketchPaths(shape, cardSize.width, cardSize.height, roughSeed(data.id), selected ? 1.65 : hovered ? 1.5 : 1.3),
     [shape, cardSize, data.id, hovered, selected],
@@ -315,11 +335,12 @@ function ArchitectureNodeCard({ data, selected }: NodeProps<Node<ArchitectureNod
   }, [editingTitle])
   return (
     <div ref={cardRef} className={cn("architecture-graph-node", selected && "architecture-graph-node-selected")} style={{ ...cardStyle, backgroundColor: "transparent", boxShadow: shape === "rectangle" ? "var(--architecture-graph-card-shadow)" : "none" }} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
-      <NodeResizer isVisible={!!selected} minWidth={80} minHeight={48} color="var(--ink-muted)" onResizeEnd={(_event, params) => {
+      <NodeResizer isVisible={!!selected} minWidth={minNodeWidth} minHeight={NODE_MIN_HEIGHT} color="var(--ink-muted)" onResizeEnd={(_event, params) => {
         const x = snapToGrid(params.x)
         const y = snapToGrid(params.y)
         data.onChange(data.id, { width: snapToGrid(params.x + params.width) - x, height: snapToGrid(params.y + params.height) - y, position: { x, y } })
       }} />
+      <span ref={titleMeasureRef} aria-hidden="true" className="architecture-graph-title" style={{ position: "absolute", visibility: "hidden", whiteSpace: "nowrap", left: -9999 }}>{titleDraft || "Untitled node"}</span>
       <svg className="architecture-graph-node-sketch" viewBox={`0 0 ${cardSize.width} ${cardSize.height}`} aria-hidden="true" focusable="false" style={{ position: "absolute", zIndex: 1, inset: 0, width: "100%", height: "100%", overflow: "visible", color: "var(--ink-muted)", pointerEvents: "none" }}>
         {nodeSketch.map((path, index) => <path key={index} d={path.d} fill="none" stroke="currentColor" strokeWidth={path.strokeWidth} />)}
       </svg>
