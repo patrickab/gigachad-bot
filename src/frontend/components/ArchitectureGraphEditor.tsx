@@ -1,13 +1,15 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Save, X } from "lucide-react"
+import { Download, Save, Upload, X } from "lucide-react"
 import { ArchitectureGraphSurface } from "./ArchitectureGraphSurface"
+import { MermaidImportModal } from "./MermaidImportModal"
 import {
   parseArchitectureGraph,
   serializeArchitectureGraph,
   type ArchitectureGraph,
 } from "@/lib/architectureGraph"
+import { graphToMermaidFlowchart, parseMermaidFlowchart } from "@/lib/mermaidGraph"
 import { readArchitectureGraph, writeArchitectureGraph } from "@/lib/api"
 import { useGraphAutosave } from "@/lib/graphAutosave"
 import { subscribeToChanges } from "@/lib/syncStream"
@@ -79,6 +81,24 @@ export function ArchitectureGraphEditor({ path, overlay = false, onClose, onSave
     setError(null)
     queue(nextSource)
   }, [queue])
+  const [mermaidOpen, setMermaidOpen] = useState(false)
+  const [mermaidCopied, setMermaidCopied] = useState(false)
+  const handleMermaidImport = useCallback((mermaidSource: string): string | null => {
+    try {
+      applyGraph(parseMermaidFlowchart(mermaidSource, graph?.title ?? name))
+      setMermaidOpen(false)
+      return null
+    } catch (cause) {
+      return cause instanceof Error ? cause.message : "Invalid Mermaid flowchart"
+    }
+  }, [applyGraph, graph?.title, name])
+  const handleMermaidExport = useCallback(() => {
+    if (!graph) return
+    navigator.clipboard?.writeText(graphToMermaidFlowchart(graph)).then(() => {
+      setMermaidCopied(true)
+      setTimeout(() => setMermaidCopied(false), 1500)
+    })
+  }, [graph])
 
   const handleSourceChange = useCallback((nextSource: string) => {
     setSource(nextSource)
@@ -148,9 +168,14 @@ export function ArchitectureGraphEditor({ path, overlay = false, onClose, onSave
           ))}
         </div>
         {dirty && <span className="text-[10px] text-ink-faint">saving…</span>}
+        <button type="button" onClick={() => setMermaidOpen(true)} className="rounded p-1 text-ink-subtle hover:bg-hover hover:text-ink" aria-label="Import from Mermaid"><Upload className="h-3.5 w-3.5" /></button>
+        <button type="button" onClick={handleMermaidExport} className="rounded p-1 text-ink-subtle hover:bg-hover hover:text-ink" aria-label="Copy as Mermaid">
+          {mermaidCopied ? <span className="text-[10px] text-ink-muted">Copied</span> : <Download className="h-3.5 w-3.5" />}
+        </button>
         <button type="button" onClick={handleSave} className="rounded p-1 text-ink-subtle hover:bg-hover hover:text-ink" aria-label="Save Architecture Graph"><Save className="h-3.5 w-3.5" /></button>
         <button type="button" onClick={onClose} className="rounded p-1 text-ink-subtle hover:bg-hover hover:text-danger" aria-label="Close"><X className="h-3.5 w-3.5" /></button>
       </header>
+      <MermaidImportModal open={mermaidOpen} onClose={() => setMermaidOpen(false)} onImport={handleMermaidImport} />
       {error && <p className="shrink-0 border-b border-divider bg-surface px-3 py-1.5 text-xs text-danger" role="alert">{error}</p>}
       <div className="min-h-0 flex-1">
         {view === "diagram" ? (
