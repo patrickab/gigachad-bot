@@ -4,7 +4,6 @@ import { useCallback, useRef, useState } from "react"
 import { createChatStream } from "@/lib/api"
 import { deactivateSentImages } from "@/lib/attachments"
 import {
-  addUsage,
   applyChatStreamEvent,
   createFlushBatcher,
   decodeChatStreamEvent,
@@ -71,7 +70,7 @@ export function useChatStream(): UseChatStreamReturn {
           const decoded = decodeChatStreamEvent(event)
           if (!decoded) continue
           if (decoded.kind === "usage") {
-            usage = addUsage(usage, decoded.usage)
+            usage = decoded.usage
             totalUsageRef.current = usage
             setTotalUsage(usage)
             continue

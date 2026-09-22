@@ -167,10 +167,3 @@ export function settleRunningToolCalls(msg: Message, reason: string): void {
   )
 }
 
-export function addUsage(prev: Usage, turn: Usage): Usage {
-  return {
-    prompt_tokens: prev.prompt_tokens + turn.prompt_tokens,
-    completion_tokens: prev.completion_tokens + turn.completion_tokens,
-    total_tokens: prev.total_tokens + turn.total_tokens,
-  }
-}

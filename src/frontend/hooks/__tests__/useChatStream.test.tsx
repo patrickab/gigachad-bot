@@ -114,6 +114,32 @@ describe("useChatStream", () => {
     })
   })
 
+  it("keeps usage for the current request instead of accumulating prior turns", async () => {
+    createChatStream
+      .mockReturnValueOnce(stream([
+        event("token", "First answer"),
+        event("usage", { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 }),
+        event("done", ""),
+      ]))
+      .mockReturnValueOnce(stream([
+        event("token", "Second answer"),
+        event("usage", { prompt_tokens: 29, completion_tokens: 13, total_tokens: 42 }),
+        event("done", ""),
+      ]))
+    const { result } = renderHook(() => useChatStream())
+
+    await act(async () => {
+      await result.current.send(request("First question"))
+      await result.current.send(request("Second question"))
+    })
+
+    expect(result.current.totalUsage).toEqual({
+      prompt_tokens: 29,
+      completion_tokens: 13,
+      total_tokens: 42,
+    })
+  })
+
   it("sends only user and assistant text as history on a later turn", async () => {
     const detailSentinel = "DETAIL_SENTINEL"
     const sourceSentinel = "SOURCE_SENTINEL"
