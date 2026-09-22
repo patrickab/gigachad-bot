@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useMemo, useState, type Dispatch, type RefObject, type SetStateAction } from "react"
 import type { ChatInputHandle } from "@/components/ChatInput"
 import type { AppSurface } from "@/contexts/SidebarContext"
+import { parseCanvasDoc, type CanvasAttachment, type CanvasDocument, type CanvasFrame } from "@/components/CanvasEditor"
 import {
   addDocument,
   attachDocument,
   attachFileVaultFile,
+  fileViewerRawUrl,
   listAllDocuments,
   listProjectDocuments,
   listProjectVaultDocuments,
@@ -17,8 +19,23 @@ import {
   writeDocument,
 } from "@/lib/api"
 import { buildHiddenContent } from "@/lib/attachments"
-import { renderCanvasToJpeg } from "@/lib/drawing"
+import { renderCanvasToJpeg, type EmbedRect } from "@/lib/drawing"
 import type { Message, ProjectDocument } from "@/lib/types"
+ 
+const IMAGE_RENDER_EXCLUDED_ATTACHMENT_KINDS: Partial<Record<CanvasAttachment["kind"], true>> = { pdf: true }
+const FALLBACK_ASPECT = 1.3
+
+function imageEmbed(path: string, { x, y, width, height }: Pick<CanvasFrame | CanvasAttachment, "x" | "y" | "width"> & { height?: number }): EmbedRect {
+  return { url: fileViewerRawUrl(path), x, y, width, aspect: height ? height / width : FALLBACK_ASPECT }
+}
+function renderableCanvasImages({ frames = [], attachments = [] }: Partial<Pick<CanvasDocument, "frames" | "attachments">>): EmbedRect[] {
+  return [
+    ...frames.filter((frame) => frame.kind === "image" && frame.path).map((frame) => imageEmbed(frame.path!, frame)),
+    ...attachments
+      .filter((attachment) => attachment.path && !IMAGE_RENDER_EXCLUDED_ATTACHMENT_KINDS[attachment.kind])
+      .map((attachment) => imageEmbed(attachment.path!, attachment)),
+  ]
+}
 
 export function useProjectDocuments({
   isActive,
@@ -83,9 +100,12 @@ export function useProjectDocuments({
       try {
         const live = liveCanvasRef.current
         const text = live?.path === path ? live.content : await loadFileViewerText(path)
-        const doc = text.trim() ? JSON.parse(text) : null
-        if (!doc?.strokes?.length && !doc?.texts?.length) return
-        const blob = await renderCanvasToJpeg(doc.strokes ?? [], 20, [], doc.texts ?? [])
+        const doc = text.trim() ? parseCanvasDoc(text) : null
+        const strokes = doc?.strokes ?? []
+        const texts = doc?.texts ?? []
+        const images = doc ? renderableCanvasImages(doc) : []
+        if (!doc || (!strokes.length && !texts.length && images.length === 0)) return
+        const blob = await renderCanvasToJpeg(strokes, 20, images, texts)
         const name = path.split("/").pop()!.replace(/\.canvas$/, ".jpg")
         const file = new File([blob], name, { type: "image/jpeg" })
         const att = await uploadFile(chatId, file, activeProject, true)

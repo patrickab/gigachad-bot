@@ -41,6 +41,7 @@ vi.mock("@/lib/api", () => ({
   uploadFile: (...a: any[]) => impls.uploadFile(...a),
   attachDocument: (...a: any[]) => impls.attachDocument(...a),
   attachFileVaultFile: (...a: any[]) => impls.attachFileVaultFile(...a),
+  fileViewerRawUrl: (path: string) => `raw:${path}`,
   loadFileViewerText: (...a: any[]) => impls.loadFileViewerText(...a),
 }))
 
@@ -151,8 +152,28 @@ describe("useProjectDocuments", () => {
       expect(addAttachment).toHaveBeenCalledOnce()
     })
 
+    it("renders image attachments but excludes PDFs from a canvas JPEG", async () => {
+      const liveCanvasRef = makeLiveCanvasRef("/lib/x.canvas", JSON.stringify({
+        version: 1,
+        strokes: [],
+        texts: [],
+        frames: [],
+        attachments: [
+          { kind: "document", path: "/lib/plot.png", x: 10, y: 20, width: 30, height: 60 },
+          { kind: "pdf", path: "/lib/source.pdf", x: 40, y: 50, width: 70 },
+        ],
+      }))
+      const { result } = renderHook(() => useProjectDocuments(baseProps({ liveCanvasRef })))
+
+      await act(async () => { await result.current.handleDocumentSelect("/lib/x.canvas") })
+
+      expect(renderCanvasToJpeg).toHaveBeenCalledWith([], 20, [
+        { url: "raw:/lib/plot.png", x: 10, y: 20, width: 30, aspect: 2 },
+      ], [])
+    })
+
     it("renders a .canvas file to jpeg and uploads it (prefers live canvas content)", async () => {
-      const liveCanvasRef = makeLiveCanvasRef("/lib/x.canvas", '{"strokes":[1],"texts":[]}')
+      const liveCanvasRef = makeLiveCanvasRef("/lib/x.canvas", '{"version":1,"strokes":[1],"texts":[]}')
       const addAttachment = vi.fn()
       const chatInputRef = makeChatInputRef({ addAttachment })
       const uploadFile = vi.fn(async () => ({ name: "x.jpg", mime: "image/jpeg", url: "u", active: true }))
