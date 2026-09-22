@@ -109,10 +109,27 @@ async function loadImage(url: string): Promise<ImageBitmap> {
   return createImageBitmap(await res.blob())
 }
 
+interface LoadedEmbed extends EmbedRect {
+  image: ImageBitmap
+}
+
+async function loadEmbeds(images: EmbedRect[]): Promise<LoadedEmbed[]> {
+  const loaded = await Promise.all(images.map(async (embed) => {
+    try {
+      const image = await loadImage(embed.url)
+      return { ...embed, image, aspect: image.height / image.width }
+    } catch (err) {
+      console.warn("canvas export: skipping image", embed.url, err)
+      return null
+    }
+  }))
+  return loaded.filter((embed): embed is LoadedEmbed => embed !== null)
+}
+
 // Render images + strokes onto a 2x canvas, translating by (offsetX, offsetY).
 async function drawCanvas(
   strokes: StrokeData[],
-  images: EmbedRect[],
+  images: LoadedEmbed[],
   w: number,
   h: number,
   offsetX: number,
@@ -131,13 +148,10 @@ async function drawCanvas(
   ctx.fillRect(0, 0, w, h)
   // draw images first (below strokes)
   for (const embed of images) {
-    try {
-      const img = await loadImage(embed.url)
-      const dx = embed.x - offsetX
-      const dy = embed.y - offsetY
-      const dh = embed.width * embed.aspect
-      ctx.drawImage(img, dx, dy, embed.width, dh)
-    } catch (err) { console.warn("canvas export: skipping image", embed.url, err) }
+    const dx = embed.x - offsetX
+    const dy = embed.y - offsetY
+    const dh = embed.width * embed.aspect
+    ctx.drawImage(embed.image, dx, dy, embed.width, dh)
   }
   for (const stroke of strokes) {
     const outline = getStroke(
@@ -198,15 +212,17 @@ export async function renderPageToPng(
   images: EmbedRect[] = [],
   texts: TextData[] = [],
 ): Promise<Uint8Array> {
-  const canvas = images.length > 0 || texts.length > 0
-    ? await drawCanvas(strokes, images, pageW, pageH, pageX, pageY, "#ffffff", texts)
+  const loadedImages = await loadEmbeds(images)
+  const canvas = loadedImages.length > 0 || texts.length > 0
+    ? await drawCanvas(strokes, loadedImages, pageW, pageH, pageX, pageY, "#ffffff", texts)
     : drawStrokes(strokes, pageW, pageH, pageX, pageY, "#ffffff")
   const blob = await canvasToBlob(canvas, "image/png")
   return new Uint8Array(await blob.arrayBuffer())
 }
 
 export async function renderCanvasToJpeg(strokes: StrokeData[], padding = 20, images: EmbedRect[] = [], texts: TextData[] = []): Promise<Blob> {
-  if (strokes.length === 0 && images.length === 0 && texts.length === 0) return Promise.reject(new Error("Nothing to render"))
+  const loadedImages = await loadEmbeds(images)
+  if (strokes.length === 0 && loadedImages.length === 0 && texts.length === 0) return Promise.reject(new Error("Nothing to render"))
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
   for (const s of strokes) {
     for (const p of s.points) {
@@ -216,7 +232,7 @@ export async function renderCanvasToJpeg(strokes: StrokeData[], padding = 20, im
       if (p[1]! > maxY) maxY = p[1]!
     }
   }
-  for (const img of images) {
+  for (const img of loadedImages) {
     if (img.x < minX) minX = img.x
     if (img.y < minY) minY = img.y
     if (img.x + img.width > maxX) maxX = img.x + img.width
@@ -230,8 +246,8 @@ export async function renderCanvasToJpeg(strokes: StrokeData[], padding = 20, im
   }
   const w = maxX - minX + padding * 2
   const h = maxY - minY + padding * 2
-  const canvas = images.length > 0 || texts.length > 0
-    ? await drawCanvas(strokes, images, w, h, minX - padding, minY - padding, "#ffffff", texts)
+  const canvas = loadedImages.length > 0 || texts.length > 0
+    ? await drawCanvas(strokes, loadedImages, w, h, minX - padding, minY - padding, "#ffffff", texts)
     : drawStrokes(strokes, w, h, minX - padding, minY - padding, "#ffffff")
   return canvasToBlob(canvas, "image/jpeg", 0.92)
 }

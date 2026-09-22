@@ -138,6 +138,7 @@ export interface CanvasAttachment {
   y: number
   width: number
   height?: number // Architecture Graphs own their viewport height; legacy attachments retain their aspect
+  page?: number // selected PDF page, persisted with the canvas
 }
 
 // CanvasText = handwriting-style note in a resizable box. Rasterized into export
@@ -1092,7 +1093,15 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   // them pointing at the wrong strokes — both directions drop the selection.
   const restore = useCallback((target: CanvasDocument) => {
     const cur = liveRef.current.doc
-    liveRef.current.onChange({ ...target, viewport: cur.viewport })
+    const pagesByAttachment = new Map(cur.attachments.map((attachment) => [attachment.id, attachment.page]))
+    liveRef.current.onChange({
+      ...target,
+      attachments: target.attachments.map((attachment) => {
+        const page = pagesByAttachment.get(attachment.id)
+        return page === undefined ? attachment : { ...attachment, page }
+      }),
+      viewport: cur.viewport,
+    })
     clearSelection()
     return cur
   }, [clearSelection])
@@ -1312,6 +1321,14 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   const updateNestedCanvas = useCallback((id: string, nested: CanvasDocument) => {
     const cur = liveRef.current.doc
     applyChange({ ...cur, attachments: cur.attachments.map((a) => a.id === id ? { ...a, canvas: nested } : a) })
+  }, [applyChange])
+
+  // PDF scrolling is navigation, not an edit, so it persists without creating an undo step.
+  const updatePdfPage = useCallback((id: string, page: number) => {
+    const cur = liveRef.current.doc
+    const attachment = cur.attachments.find((a) => a.id === id)
+    if (!attachment || attachment.page === page) return
+    applyChange({ ...cur, attachments: cur.attachments.map((a) => a.id === id ? { ...a, page } : a) })
   }, [applyChange])
 
   // Which attachment window, if any, is blown up over the whole surface. Exiting drops
@@ -2062,6 +2079,8 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
                   <PdfViewer
                     url={fileViewerRawUrl(att.path!)}
                     onPageAspect={(r) => setAspect(att.id, r)}
+                    initialPage={att.page}
+                    onPageChange={(page) => updatePdfPage(att.id, page)}
                   />
                 )}
               </div>

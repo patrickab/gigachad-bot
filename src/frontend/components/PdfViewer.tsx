@@ -95,6 +95,8 @@ function PdfViewerInner({
   onToggleWide,
   fitWidth,
   onPageAspect,
+  initialPage = 1,
+  onPageChange,
 }: {
   url: string
   isFullscreen: boolean
@@ -105,6 +107,8 @@ function PdfViewerInner({
   // fit exactly one page. Otherwise it fills its parent in both dimensions.
   fitWidth?: boolean
   onPageAspect?: (ratio: number) => void
+  initialPage?: number
+  onPageChange?: (page: number) => void
 }) {
   const [numPages, setNumPages] = useState<number | null>(null)
   const [imageRects, setImageRects] = useState<Record<number, ImageRect[]>>({})
@@ -119,6 +123,11 @@ function PdfViewerInner({
   const [controlsVisible, setControlsVisible] = useState(false)
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
+  const restoredPageUrlRef = useRef<string | null>(null)
+  const pageRef = useRef(1)
+  const onPageChangeRef = useRef(onPageChange)
+  onPageChangeRef.current = onPageChange
+  const pageRefs = useRef(new Map<number, HTMLDivElement>())
 
   // measure the parent-controlled dimension — debounced so resizing doesn't re-render every frame
   useEffect(() => {
@@ -275,6 +284,11 @@ function PdfViewerInner({
     [onPageAspect],
   )
 
+  useLayoutEffect(() => {
+    restoredPageUrlRef.current = null
+    pageRef.current = 1
+  }, [url])
+
   // Page is rendered at the available width (minus scrollbar gutter), capped at
   // RENDER_WIDTH. In fitWidth mode the box height is derived to show one page.
   let renderWidth = RENDER_WIDTH
@@ -314,6 +328,33 @@ function PdfViewerInner({
     el.scrollLeft *= renderWidth / prev
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reposition only when the width actually changes
   }, [renderWidth])
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    const page = Math.min(numPages ?? 1, Math.max(1, initialPage))
+    const firstPageEl = pageRefs.current.get(1)
+    const pageEl = pageRefs.current.get(page)
+    if (!el || !ready || !firstPageEl || !pageEl || restoredPageUrlRef.current === url) return
+    // offsetTop is in the scroller's layout coordinate system, unlike client rects
+    // after the canvas scales this attachment with CSS.
+    el.scrollTop = pageEl.offsetTop - firstPageEl.offsetTop
+    pageRef.current = page
+    restoredPageUrlRef.current = url
+  }, [ready, url, initialPage, numPages, renderWidth, zoom, pageAspect])
+
+  const trackVisiblePage = useCallback(() => {
+    const el = scrollRef.current
+    if (!el || numPages == null) return
+    const top = el.getBoundingClientRect().top + 1
+    let page = 1
+    for (const [number, pageEl] of pageRefs.current) {
+      if (pageEl.getBoundingClientRect().top > top) break
+      page = number
+    }
+    if (page === pageRef.current) return
+    pageRef.current = page
+    onPageChangeRef.current?.(page)
+  }, [numPages])
 
   const zoomLabel = `${Math.round(zoom * 100)}%`
 
@@ -405,6 +446,7 @@ function PdfViewerInner({
         ref={scrollRef}
         className="flex-1 min-h-0 overflow-auto focus:outline-none"
         tabIndex={0}
+        onScroll={trackVisiblePage}
         // overflow-anchor off: the width-change effect above owns the scroll
         // position; native scroll anchoring would apply a second correction
         style={{ overflowAnchor: "none", ...(fitWidth ? { scrollSnapType: "y proximity" as const } : undefined) }}
@@ -415,6 +457,10 @@ function PdfViewerInner({
               {Array.from({ length: numPages! }, (_, i) => (
                 <div
                   key={i}
+                  ref={(el) => {
+                    if (el) pageRefs.current.set(i + 1, el)
+                    else pageRefs.current.delete(i + 1)
+                  }}
                   className="pdf-page relative"
                   // minHeight floor: react-pdf pages collapse to a tiny placeholder
                   // while re-rasterizing, which caves in scrollHeight and clamps
@@ -453,12 +499,16 @@ export function PdfViewer({
   onToggleWide,
   fitWidth,
   onPageAspect,
+  initialPage,
+  onPageChange,
 }: {
   url: string
   isWide?: boolean
   onToggleWide?: () => void
   fitWidth?: boolean
   onPageAspect?: (ratio: number) => void
+  initialPage?: number
+  onPageChange?: (page: number) => void
 }) {
   const [isFullscreen, setIsFullscreen] = useState(false)
   const inlineRef = useRef<HTMLDivElement>(null)
@@ -510,6 +560,8 @@ export function PdfViewer({
       onToggleWide={isFullscreen ? undefined : onToggleWide}
       fitWidth={isFullscreen ? undefined : fitWidth}
       onPageAspect={isFullscreen ? undefined : onPageAspect}
+      initialPage={initialPage}
+      onPageChange={onPageChange}
     />
   )
 

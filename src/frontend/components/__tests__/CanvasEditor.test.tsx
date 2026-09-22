@@ -16,8 +16,14 @@ import { describe, it, expect, vi } from "vitest"
 import { render, act, fireEvent } from "@testing-library/react"
 import { TabActiveProvider } from "@/components/TabManager"
 
-vi.mock("@/components/PdfViewer", () => ({ PdfViewer: () => null }))
-vi.mock("./PdfViewer", () => ({ PdfViewer: () => null }))
+vi.mock("@/components/PdfViewer", () => ({
+  PdfViewer: ({ initialPage = 1, onPageChange }: { initialPage?: number; onPageChange?: (page: number) => void }) =>
+    <button type="button" data-testid="pdf-viewer" onClick={() => onPageChange?.(4)}>{initialPage}</button>,
+}))
+vi.mock("./PdfViewer", () => ({
+  PdfViewer: ({ initialPage = 1, onPageChange }: { initialPage?: number; onPageChange?: (page: number) => void }) =>
+    <button type="button" data-testid="pdf-viewer" onClick={() => onPageChange?.(4)}>{initialPage}</button>,
+}))
 vi.mock("@/components/LaTeXMarkdown", () => ({
   LaTeXMarkdown: ({ content }: { content: string }) => <div data-testid="document-markdown">{content}</div>,
 }))
@@ -61,8 +67,8 @@ class RO {
 }
 globalThis.ResizeObserver ??= RO as unknown as typeof ResizeObserver
 
-function Harness({ seen, slug, active = true }: { seen: CanvasDocument[]; slug?: string; active?: boolean }) {
-  const [doc, setDoc] = useState<CanvasDocument>(emptyCanvasDoc())
+function Harness({ seen, slug, active = true, initialDoc = emptyCanvasDoc() }: { seen: CanvasDocument[]; slug?: string; active?: boolean; initialDoc?: CanvasDocument }) {
+  const [doc, setDoc] = useState<CanvasDocument>(initialDoc)
   seen.push(doc)
   return (
     <TabActiveProvider value={active}>
@@ -409,6 +415,30 @@ describe("nested canvas file", () => {
     act(() => { close.click() })
 
     expect(api.writeDocument).not.toHaveBeenCalled()
+  })
+})
+
+describe("PDF attachments", () => {
+  it("persists the selected page and restores it when reopening", () => {
+    const doc: CanvasDocument = {
+      ...emptyCanvasDoc(),
+      attachments: [{ id: "pdf-1", kind: "pdf", path: "project/proj/document/reference.pdf", x: 0, y: 0, width: 500 }],
+    }
+    const seen: CanvasDocument[] = []
+    const { container } = render(<Harness seen={seen} initialDoc={doc} />)
+    const viewer = container.querySelector("[data-testid=\"pdf-viewer\"]") as HTMLButtonElement
+
+    expect(viewer).toHaveTextContent("1")
+    act(() => { viewer.click() })
+    expect(latest(seen).attachments[0]!.page).toBe(4)
+
+    addPage(container)
+    act(() => { toolbar(container)[1]!.click() })
+    expect(latest(seen).attachments[0]!.page).toBe(4)
+
+    const restored = parseCanvasDoc(serializeCanvasDoc(latest(seen)))
+    const reopened = render(<Harness seen={[]} initialDoc={restored} />)
+    expect(reopened.container.querySelector("[data-testid=\"pdf-viewer\"]")).toHaveTextContent("4")
   })
 })
 
