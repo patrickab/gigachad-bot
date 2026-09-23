@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react"
-import { Globe, LineChart, Network, Search, Sigma, Terminal, Workflow, type LucideIcon } from "lucide-react"
+import { Globe, LineChart, Network, NotebookPen, Search, Sigma, Terminal, Workflow, type LucideIcon } from "lucide-react"
 import type { ToolName } from "@/lib/types"
 
 /** OCR still hijacks the composer; web search, deep research, and sandbox plots are tools the
@@ -33,8 +33,23 @@ export const TOOLS: readonly ToolMeta[] = [
   { name: "workspace_agent", selectorLabel: "Workspace Agent", shortLabel: "Workspace", cardLabel: "Workspace agent", icon: Terminal, defaultEnabled: false },
 ]
 
+/** Jupyter mode: server-backed per-chat state, never offered through `tools` — the backend
+ *  injects the notebook_edit tool itself whenever a notebook exists. The entry is keyed so
+ *  saved notebook_edit calls render like any other tool; the composer menu row lives here
+ *  too, next to the labels it shares. */
+export const NOTEBOOK_TOOL_META: ToolMeta = {
+  name: "notebook_edit",
+  selectorLabel: "Jupyter Mode",
+  shortLabel: "Notebook",
+  cardLabel: "Notebook",
+  icon: NotebookPen,
+  defaultEnabled: false,
+}
+
 /** Keyed for lookup by a saved call's name, which an older chat may no longer match. */
-export const TOOL_META: Partial<Record<string, ToolMeta>> = Object.fromEntries(TOOLS.map((tool) => [tool.name, tool]))
+export const TOOL_META: Partial<Record<string, ToolMeta>> = Object.fromEntries(
+  [...TOOLS, NOTEBOOK_TOOL_META].map((tool) => [tool.name, tool]),
+)
 
 const TOOLS_STORAGE_KEY = "gigachad-enabled-tools"
 
@@ -49,6 +64,10 @@ export interface ModeState {
   ocrEnabled: boolean
   toggleOCR: () => void
   setMode: (mode: AppMode) => void
+  /** Chat whose notebook has been activated; the sidebar reads this to show the notebook
+   *  element. Null means no notebook (or activation was reset by a chat switch). */
+  notebookChatId: string | null
+  setNotebookChatId: (chatId: string | null) => void
 }
 
 const ModeContext = createContext<ModeState | null>(null)
@@ -65,6 +84,10 @@ export function ModeProvider({ children }: { children: ReactNode }) {
 
   // Restored once on mount so the first paint uses the safe defaults above; a per-browser
   // choice, matching every other composer preference (theme, transparent background).
+  // Notebook activation is per chat and server-backed, so it lives in state rather than
+  // localStorage; the composer resets it whenever chatId changes.
+  const [notebookChatId, setNotebookChatId] = useState<string | null>(null)
+
   useEffect(() => {
     try {
       const saved = window.localStorage.getItem(TOOLS_STORAGE_KEY)
@@ -99,7 +122,10 @@ export function ModeProvider({ children }: { children: ReactNode }) {
     ocrEnabled: mode === "ocr",
     toggleOCR,
     setMode,
+    notebookChatId,
+    setNotebookChatId,
   }
+
 
   return (
     <ModeContext.Provider value={value}>

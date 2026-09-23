@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react"
+import { ApiError } from "@/lib/api"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { ToolCallRecord } from "@/lib/types"
 
@@ -26,6 +27,17 @@ vi.mock("@/components/LaTeXMarkdown", () => ({
     markdownCalls(content)
     return <div data-testid="mermaid-diagram">{content}</div>
   },
+}))
+
+const saveNotebookCalls = vi.hoisted(() => vi.fn())
+
+vi.mock("@/lib/api", () => ({
+  ApiError: class ApiError extends Error {
+    constructor(message: string, readonly status: number) {
+      super(message)
+    }
+  },
+  saveNotebook: (...args: unknown[]) => saveNotebookCalls(...args),
 }))
 
 import { ToolCallElement } from "@/components/ToolCallElement"
@@ -136,4 +148,78 @@ describe("ToolCallElement sandbox plots", () => {
     expect(screen.getByText("0.2s").parentElement).toHaveTextContent(/0\.2s\s*Planning search/)
     expect(screen.getByText("1.4s").parentElement).toHaveTextContent(/1\.4s\s*Searching sources/)
   })
+})
+
+const notebookEditCall: ToolCallRecord = {
+  id: "nb-1",
+  name: "notebook_edit",
+  arguments: { prompt: "swap the second cell and add one" },
+  status: "done",
+  detail: {
+    before: "# %%\na = 1\n\n# %%\nb = 2\n",
+    after: "# %%\na = 1\n\n# %%\nx = 9\n\n# %%\nz = 0\n",
+    outputs: { preserved: [{ type: "stdout", text: "old result" }] },
+    revision_id: "rev-7",
+  },
+}
+
+describe("ToolCallElement notebook edits", () => {
+  beforeEach(() => {
+    codeBlockCalls.mockReset()
+    saveNotebookCalls.mockReset()
+  })
+
+  it("renders the notebook card collapsed with cell counts, not the diff", () => {
+    render(<ToolCallElement call={notebookEditCall} chatId="chat-1" />)
+
+    expect(screen.getByText("Notebook updated · +1 ~1 −0")).toBeInTheDocument()
+    expect(screen.queryByTestId("code-block")).not.toBeInTheDocument()
+    expect(codeBlockCalls).not.toHaveBeenCalled()
+  })
+
+  it("expands into the highlighted line diff with + and − lines", () => {
+    render(<ToolCallElement call={notebookEditCall} chatId="chat-1" />)
+
+    const expander = screen.getByRole("button", { name: /Notebook updated/ })
+    expect(expander).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(expander)
+
+    expect(expander).toHaveAttribute("aria-expanded", "true")
+    expect(codeBlockCalls).toHaveBeenCalledTimes(1)
+    const [codeString, language] = codeBlockCalls.mock.calls[0]
+    expect(language).toBe("diff")
+    expect(codeString).toContain("- b = 2")
+    expect(codeString).toContain("+ x = 9")
+    expect(codeString).toContain("+ z = 0")
+    expect(screen.getByText("Undo")).toBeInTheDocument()
+  })
+
+
+  it("undo PUTs the pre-edit source at the tool call's revision", async () => {
+    saveNotebookCalls.mockResolvedValue({ revision_id: "rev-8" })
+    render(<ToolCallElement call={notebookEditCall} chatId="chat-1" />)
+
+    fireEvent.click(screen.getByRole("button", { name: /Notebook updated/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }))
+
+    expect(saveNotebookCalls).toHaveBeenCalledWith(
+      "chat-1",
+      "# %%\na = 1\n\n# %%\nb = 2\n",
+      { preserved: [{ type: "stdout", text: "old result" }] },
+      "rev-7",
+    )
+  })
+
+  it("disables undo after a 409 stale-revision rejection", async () => {
+    saveNotebookCalls.mockRejectedValue(new ApiError("Stale notebook revision", 409))
+    render(<ToolCallElement call={notebookEditCall} chatId="chat-1" />)
+
+    fireEvent.click(screen.getByRole("button", { name: /Notebook updated/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }))
+
+    const stale = await screen.findByRole("button", { name: /stale revision/ })
+    expect(stale).toBeDisabled()
+    expect(screen.getByText(/notebook changed elsewhere/i)).toBeInTheDocument()
+  })
+
 })

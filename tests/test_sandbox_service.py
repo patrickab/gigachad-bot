@@ -4,7 +4,7 @@ import hashlib
 import os
 from uuid import uuid4
 
-from agent_sandbox import SandboxManifest
+from agent_sandbox import SandboxManifest, SandboxRun
 from agent_sandbox.manifest import Execution, Outputs, WorkspaceRef, to_yaml
 import pytest
 
@@ -301,3 +301,209 @@ async def test_delete_chat_state_preserves_shared_assets(sandbox_service, asset_
     for path in asset_paths_1:
         asset = asset_store.read(path)
         assert asset.content is not None
+
+
+async def test_notebook_staged_only_until_checkpoint(
+    sandbox_service, asset_store, data_store, runtime_state, runner
+):
+    chat_id = "chat-notebook-staged"
+    source = '# %% [markdown]\n# Title\n\n# %%\nprint("hi")\n'
+    outputs = {"cells": [{"outputs": [{"text": "hi"}]}]}
+
+    await sandbox_service.stage_notebook(chat_id, "rev-1", source, outputs)
+
+    # Staged reads work and nothing is durable yet.
+    notebook = await sandbox_service.read_notebook(chat_id)
+    assert notebook == {"revision_id": "rev-1", "source": source, "outputs": outputs}
+    assert SandboxStore(data_store, scope="notebook").read_notebook_pointer(chat_id) is None
+    assert SandboxStore(data_store, scope="notebook").read_run(chat_id, "rev-1") is None
+    staged_slot = "test-prefix:notebook:" + chat_id
+    staged = runtime_state.get(staged_slot)
+    assert staged is not None
+    for sha256 in staged.output_shas:
+        with pytest.raises(StorageNotFoundError):
+            asset_store.read(sandbox_asset(sha256))
+
+    # A fresh service over the same stores (restart simulation) sees nothing.
+    fresh = SandboxService(
+        data_store=data_store,
+        asset_store=asset_store,
+        runner=runner,
+        runtime_state=SandboxRuntimeState(),
+        model=SANDBOX_MODEL,
+        profile="gigachad",
+        slot_prefix="test-prefix",
+    )
+    assert await fresh.read_notebook(chat_id) is None
+
+    await sandbox_service.checkpoint(chat_id=chat_id)
+    assert await fresh.read_notebook(chat_id) == {"revision_id": "rev-1", "source": source, "outputs": outputs}
+
+
+
+async def test_notebook_delete_chat_state_removes_assets(sandbox_service, asset_store, data_store):
+    chat_id = "chat-notebook-delete"
+    source = "# %%\nprint('x')\n"
+    outputs = {"cells": [{"outputs": []}]}
+
+    await sandbox_service.stage_notebook(chat_id, "rev-3", source, outputs)
+    await sandbox_service.checkpoint(chat_id=chat_id)
+
+    store = SandboxStore(data_store, scope="notebook")
+    record = store.read_run(chat_id, "rev-3")
+    assert record is not None and record.result is not None
+    asset_paths = [
+        ref["asset_path"]
+        for output in record.result["outputs"]
+        for ref in output["mime_bundle"].values()
+    ]
+    assert len(asset_paths) == 2
+    for path in asset_paths:
+        assert asset_store.read(path).content is not None
+
+    await sandbox_service.delete_chat_state(chat_id=chat_id)
+
+    assert store.read_notebook_pointer(chat_id) is None
+    assert store.read_run(chat_id, "rev-3") is None
+    for path in asset_paths:
+        with pytest.raises(StorageNotFoundError):
+            asset_store.read(path)
+
+
+async def test_notebook_does_not_disturb_workspace_scopes(sandbox_service, data_store, runner):
+    chat_id = "chat-notebook-mixed"
+
+    result = await sandbox_service.invoke(chat_id=chat_id, tool_call_id="ws-call", prompt="Build a workspace")
+    await sandbox_service.stage_notebook(chat_id, "rev-4", "# %%\nprint(1)\n", {"cells": []})
+    await sandbox_service.checkpoint(chat_id=chat_id)
+
+    assert SandboxStore(data_store).read_active(chat_id) is not None
+    assert result.manifest_id is not None
+    manifest = SandboxStore(data_store).read_manifest(chat_id, result.manifest_id)
+    assert manifest.workspace is not None
+    assert SandboxStore(data_store, scope="notebook").read_notebook_pointer(chat_id) is not None
+
+
+class FakeSeededRunner:
+    """Return a capture containing a caller-named result file, recording each invocation."""
+
+    def __init__(self, result_name: str, result_bytes: bytes) -> None:
+        self.result_name = result_name
+        self.result_bytes = result_bytes
+        self.calls: list = []
+        self.seed_archives: list[bytes] = []
+
+    async def run_script(self, script: str, *, profile: str, interpreter: str, timeout: float) -> str:
+        raise AssertionError("run_seeded never runs scripts")
+
+    async def run(self, invocation) -> "SandboxRun":
+        import io as _io
+        import os as _os
+        import tarfile as _tarfile
+        import tempfile as _tempfile
+
+        self.calls.append(invocation)
+        # Snapshot the seed archive while the service still exposes it on disk.
+        with open(invocation.workspace_archive_path, "rb") as seed_file:
+            self.seed_archives.append(seed_file.read())
+        archive_bytes = _io.BytesIO()
+        with _tarfile.open(fileobj=archive_bytes, mode="w") as archive:
+            member = _tarfile.TarInfo(self.result_name)
+            member.size = len(self.result_bytes)
+            archive.addfile(member, _io.BytesIO(self.result_bytes))
+        fd, capture_path = _tempfile.mkstemp(prefix="test-seeded-", suffix=".tar")
+        with _os.fdopen(fd, "wb") as capture:
+            capture.write(archive_bytes.getvalue())
+        manifest = SandboxManifest(
+            schema_version=1,
+            manifest_id=f"seeded-{invocation.run_id}",
+            profile=invocation.profile_name,
+            runtime_fingerprint="fake",
+            workspace=WorkspaceRef(snapshot_asset_id=None, sha256=hashlib.sha256(archive_bytes.getvalue()).hexdigest()),
+            outputs=Outputs(events_asset_id=None, artifacts=()),
+            omp_sessions={},
+            execution=Execution(run_id=invocation.run_id, status="completed", exit_code=0, created_at=""),
+        )
+        return SandboxRun(
+            status="completed",
+            summary="edited the notebook",
+            next_manifest=manifest,
+            outputs=(),
+            workspace_changed=True,
+            capture_path=capture_path,
+        )
+
+
+def _seed_files(seed_archives: list[bytes]) -> dict[str, bytes]:
+    """Extract {name: content} from the first seeded tar snapshot."""
+    import io as _io
+    import tarfile as _tarfile
+
+    files: dict[str, bytes] = {}
+    with _tarfile.open(fileobj=_io.BytesIO(seed_archives[0]), mode="r:") as archive:
+        for member in archive:
+            source = archive.extractfile(member)
+            assert source is not None
+            files[member.name] = source.read()
+    return files
+
+
+async def test_run_seeded_builds_a_fresh_notebook_agent_run(sandbox_service, runtime_state):
+    """The invocation is seed-only: no manifest, a correct sha, and notebook-scoped slot."""
+    import hashlib as _hashlib
+    import os as _os
+
+    seeded_runner = FakeSeededRunner("notebook.py", b"# %%\nprint('new')\n")
+    sandbox_service._runner = seeded_runner  # noqa: SLF001 - swap in the seeded fake
+    chat_id = "chat-run-seeded"
+    files = {
+        "notebook.py": b"# %%\nprint('old')\n",
+        "conversation.md": b"# Conversation (reference only)\n",
+    }
+
+    summary, result_bytes = await sandbox_service.run_seeded(
+        chat_id=chat_id,
+        tool_call_id="tool-call-seed",
+        files=files,
+        prompt="add a cell",
+        append_system="# rules",
+    )
+
+    assert summary == "edited the notebook"
+    assert result_bytes == b"# %%\nprint('new')\n"
+    (invocation,) = seeded_runner.calls
+    assert invocation.active_manifest is None
+    assert invocation.run_id == "tool-call-seed"
+    assert invocation.slot_key == f"test-prefix:notebook:{chat_id}"
+    assert invocation.append_system == "# rules"
+    assert invocation.thinking == "low"
+    assert invocation.lean is True
+    assert invocation.model == SANDBOX_MODEL
+
+    # The seed archive matches the declared sha and carries exactly the requested files.
+    archive_bytes = seeded_runner.seed_archives[0]
+    assert invocation.workspace_archive_sha256 == _hashlib.sha256(archive_bytes).hexdigest()
+    assert _seed_files(seeded_runner.seed_archives) == files
+
+    # No workspace manifest is staged and no durable pointer appears: only bytes matter.
+    assert runtime_state.get(f"test-prefix:notebook:{chat_id}") is None
+    assert not _os.path.exists(invocation.workspace_archive_path)
+
+
+
+async def test_run_seeded_missing_result_file_raises(sandbox_service):
+    """A capture without the named result file surfaces as a contained error."""
+    seeded_runner = FakeSeededRunner("other.py", b"unrelated")
+    sandbox_service._runner = seeded_runner  # noqa: SLF001
+
+    with pytest.raises(Exception):
+        await sandbox_service.run_seeded(
+            chat_id="chat-seeded-missing",
+            tool_call_id="tool-call-missing",
+            files={"notebook.py": b"# %%\n"},
+            prompt="edit",
+        )
+
+    (invocation,) = seeded_runner.calls
+    import os as _os
+    assert not _os.path.exists(invocation.workspace_archive_path)

@@ -4,6 +4,9 @@ import { memo, useEffect, useState } from "react"
 import { ChevronDown, Loader2, Wrench } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { TOOL_META } from "@/hooks/useModeState"
+import { ApiError, saveNotebook, type NotebookOutputs } from "@/lib/api"
+import { computeLineDiff } from "@/lib/diff"
+import { notebookDiff } from "@/lib/notebook"
 import type { PlotFigure, SandboxToolResultRecord, ToolCallRecord, ToolSource } from "@/lib/types"
 import { CodeBlock } from "./CodeBlock"
 import { PlotElement } from "./PlotElement"
@@ -12,17 +15,25 @@ import { LaTeXMarkdown } from "./LaTeXMarkdown"
 
 interface ToolCallElementProps {
   call: ToolCallRecord
+  /** Chat the call belongs to; the notebook card needs it to PUT an undo. */
+  chatId?: string
+  /** Fired by the notebook card's "Open notebook" button; absent hides the button. */
+  onOpenNotebook?: () => void
+  /** Refreshes the sidebar after a successful notebook undo. */
+  onNotebookChanged?: () => void
 }
 
 /** How a call is drawn once its name has been read. Families cover every tool: `sources`
  * cites what it read, `plot` shows a figure, `diagram` renders Mermaid, `workspace` reports a
- * sandbox run, and `generic` catches a name this build no longer knows (an older saved chat). */
+ * sandbox run, `notebook` diffs a notebook edit, and `generic` catches a name this build no
+ * longer knows (an older saved chat). */
 type Presentation =
   | { family: "sources"; sources: ToolSource[]; costs: number | null }
   | { family: "plot"; figure: PlotFigure | null; brief: string | null; script: string | null }
   | { family: "diagram"; mermaid: string | null }
   | { family: "mindmap"; content: string | null }
   | { family: "workspace"; sandbox: SandboxToolResultRecord | null }
+  | { family: "notebook"; before: string; after: string; outputs: NotebookOutputs; revisionId: string }
   | { family: "generic" }
 
 /** The only place a tool name is read. Another citing tool joins the `sources` case; nothing
@@ -49,6 +60,16 @@ function presentationOf(call: ToolCallRecord): Presentation {
       return { family: "mindmap", content: typeof call.detail?.mindmap === "string" ? call.detail.mindmap : null }
     case "workspace_agent":
       return { family: "workspace", sandbox: call.sandbox ?? null }
+    case "notebook_edit":
+      return {
+        family: "notebook",
+        before: typeof call.detail?.before === "string" ? call.detail.before : "",
+        after: typeof call.detail?.after === "string" ? call.detail.after : "",
+        outputs: typeof call.detail?.outputs === "object" && call.detail.outputs !== null && !Array.isArray(call.detail.outputs)
+          ? call.detail.outputs as NotebookOutputs
+          : {},
+        revisionId: typeof call.detail?.revision_id === "string" ? call.detail.revision_id : "",
+      }
     default:
       return { family: "generic" }
   }
@@ -66,9 +87,88 @@ function stageDuration(stage: NonNullable<ToolCallRecord["stages"]>[number], now
   return `${seconds.toFixed(1)}s`
 }
 
+/** Collapsed-by-default diff card for a notebook edit: one line of cell counts on
+ *  top, the highlighted line diff plus undo behind the disclosure. */
+function NotebookDiffCard({
+  before,
+  after,
+  outputs,
+  revisionId,
+  chatId,
+  onOpenNotebook,
+  onNotebookChanged,
+}: { before: string; after: string; outputs: NotebookOutputs; revisionId: string } & Pick<ToolCallElementProps, "chatId" | "onOpenNotebook" | "onNotebookChanged">) {
+  const [diffOpen, setDiffOpen] = useState(false)
+  const [undoState, setUndoState] = useState<"idle" | "saving" | "stale" | "failed" | "undone">("idle")
+  const counts = notebookDiff(before, after)
+
+  // Re-PUT the pre-edit source at the revision the edit produced. A 409 means the
+  // notebook moved on since, so the undo is refused rather than clobbering it.
+  const handleUndo = async () => {
+    if (!chatId || undoState === "saving" || undoState === "undone") return
+    setUndoState("saving")
+    try {
+      await saveNotebook(chatId, before, outputs, revisionId)
+      onNotebookChanged?.()
+      setUndoState("undone")
+    } catch (err) {
+      setUndoState(err instanceof ApiError && err.status === 409 ? "stale" : "failed")
+    }
+  }
+
+  return (
+    <div className="space-y-2 px-6 pb-5 pl-[3.25rem]">
+      <button
+        type="button"
+        onClick={() => setDiffOpen((isOpen) => !isOpen)}
+        aria-expanded={diffOpen}
+        className="flex items-center gap-1 text-xs font-medium text-ink-subtle"
+      >
+        <ChevronDown className={cn("h-4 w-4 transition-transform", diffOpen && "rotate-180")} aria-hidden="true" />
+        <span>
+          Notebook updated · +{counts.added} ~{counts.modified} −{counts.removed}
+        </span>
+      </button>
+      {diffOpen && (
+        <>
+          <CodeBlock codeString={computeLineDiff(before, after)} language="diff" />
+          <div className="flex items-center gap-3">
+            {onOpenNotebook && (
+              <button
+                type="button"
+                onClick={onOpenNotebook}
+                className="rounded-md border border-divider px-2 py-1 text-[10px] font-medium text-ink-subtle hover:text-ink"
+              >
+                Open notebook
+              </button>
+            )}
+            {undoState === "undone" ? (
+              <span className="text-[10px] text-ink-faint">Notebook restored</span>
+            ) : (
+              <button
+                type="button"
+                onClick={handleUndo}
+                disabled={!chatId || undoState === "saving" || undoState === "stale"}
+                className="rounded-md border border-divider px-2 py-1 text-[10px] font-medium text-ink-subtle hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {undoState === "saving" ? "Undoing…" : undoState === "stale" ? "Undo (stale revision)" : undoState === "failed" ? "Retry undo" : "Undo"}
+              </button>
+            )}
+            {(undoState === "stale" || undoState === "failed") && (
+              <span className="text-[10px] text-danger">
+                {undoState === "stale" ? "The notebook changed elsewhere; undo is unavailable." : "Undo failed; try again."}
+              </span>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 /** Sits between the question and the answer, wearing the same container optic as the
  *  assistant response: same row layout, same avatar, same type scale. */
-function ToolCallElementInner({ call }: ToolCallElementProps) {
+function ToolCallElementInner({ call, chatId, onOpenNotebook, onNotebookChanged }: ToolCallElementProps) {
   const [open, setOpen] = useState(false)
   const [briefOpen, setBriefOpen] = useState(false)
   const [codeOpen, setCodeOpen] = useState(false)
@@ -206,6 +306,18 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
         {/* Plots and diagrams have no disclosure, so a failed run states its error inline. */}
         {call.error && <p className="px-6 pb-5 pl-[3.25rem] text-xs text-danger">{call.error}</p>}
       </>}
+
+      {shown.family === "notebook" && call.status !== "running" && (
+        <NotebookDiffCard
+          before={shown.before}
+          after={shown.after}
+          outputs={shown.outputs}
+          revisionId={shown.revisionId}
+          chatId={chatId}
+          onOpenNotebook={onOpenNotebook}
+          onNotebookChanged={onNotebookChanged}
+        />
+      )}
 
       {/* Outputs describe a finished run; while running the header spinner is the whole story. */}
       {shown.family === "workspace" && call.status !== "running" && (

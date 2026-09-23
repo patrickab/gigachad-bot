@@ -1,4 +1,5 @@
 import type { ArchitectureGraphContextReference, Attachment, BackendConfig, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpCatalog, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ReasoningSupport, ResearchRequest, Usage, VaultFile, VaultNode } from "./types"
+import type { PlotFigure } from "../components/PlotElement"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { getApiBase } from "./config"
@@ -620,4 +621,41 @@ export async function remapOrphanedCategory(
     remaining_categories: remainingCategories,
     project_slug: projectSlug ?? null,
   })
+}
+
+// --- Notebook API ---
+
+/** One renderable cell output record, shaped by the notebook run harness. */
+export interface NotebookCellOutput {
+  type: "stdout" | "result" | "error" | "plotly"
+  text?: string
+  figure?: PlotFigure
+}
+
+/** Sidecar outputs keyed by sha256 of the cell source (backend contract). */
+export type NotebookOutputs = Record<string, NotebookCellOutput[]>
+
+export interface NotebookSnapshot {
+  source: string
+  outputs: NotebookOutputs
+  revision_id: string
+}
+
+export interface NotebookRunResult {
+  revision_id: string
+  outputs: NotebookOutputs
+}
+
+export async function fetchNotebook(chatId: string): Promise<NotebookSnapshot> {
+  return request<NotebookSnapshot>(`/notebook/${encodeURIComponent(chatId)}`)
+}
+
+/** PUT with optimistic concurrency: a stale baseRevision rejects with ApiError 409. */
+export async function saveNotebook(chatId: string, source: string, outputs: NotebookOutputs, baseRevision: string): Promise<{ revision_id: string }> {
+  return put(`/notebook/${encodeURIComponent(chatId)}`, { source, outputs, base_revision: baseRevision })
+}
+
+/** Runs the first `upto` cells; returns the merged sidecar and new revision. */
+export async function runNotebook(chatId: string, upto: number): Promise<NotebookRunResult> {
+  return post<NotebookRunResult>(`/notebook/${encodeURIComponent(chatId)}/run`, { upto })
 }

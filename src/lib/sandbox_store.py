@@ -24,6 +24,7 @@ from lib.storage_namespace import (
     sandbox_manifest_prefix,
     sandbox_prefix,
     sandbox_run,
+    sandbox_notebook_pointer,
     sandbox_run_prefix,
     sandbox_scope,
     sandbox_slot,
@@ -63,6 +64,11 @@ class ActivePointer:
     updated_at: float
     last_completed_run_id: str | None = None
     result: dict[str, Any] | None = None
+
+@dataclass(frozen=True)
+class NotebookPointer:
+    revision_id: str
+    updated_at: float
 
 
 @dataclass(frozen=True)
@@ -154,6 +160,13 @@ class SandboxStore:
 
     def _write_slot(self, chat_id: str, record: SlotRecord) -> None:
         safe_write_json(DataStorePath(self._store, sandbox_slot(chat_id, self._scope)), asdict(record))
+
+    def read_notebook_pointer(self, chat_id: str) -> NotebookPointer | None:
+        data = load_json(DataStorePath(self._store, sandbox_notebook_pointer(chat_id, self._scope)))
+        return NotebookPointer(**data) if isinstance(data, dict) else None
+
+    def write_notebook_pointer(self, chat_id: str, pointer: NotebookPointer) -> None:
+        safe_write_json(DataStorePath(self._store, sandbox_notebook_pointer(chat_id, self._scope)), asdict(pointer))
 
     def read_active(self, chat_id: str) -> ActivePointer | None:
         data = load_json(DataStorePath(self._store, sandbox_active(chat_id, self._scope)))

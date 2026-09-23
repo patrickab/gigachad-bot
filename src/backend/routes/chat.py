@@ -46,11 +46,25 @@ class ChatRequest(BaseModel):
     tool_options: ToolOptions = ToolOptions()
 
 
+NOTEBOOK_TOOL = "notebook_edit"
+NOTEBOOK_PROMPT_CAP = 8000
+
+
 def _build_kwargs(req: ChatRequest) -> dict[str, Any]:
     kwargs: dict[str, Any] = {"temperature": req.temperature}
     if req.reasoning_effort and req.reasoning_effort != "none" and _supports_reasoning_effort(req.model):
         kwargs["reasoning_effort"] = req.reasoning_effort
     return kwargs
+
+
+def _notebook_prompt_block(notebook: dict[str, Any]) -> str:
+    """Capped notebook source block appended to the system prompt."""
+    source = notebook.get("source") or ""
+    if len(source) > NOTEBOOK_PROMPT_CAP:
+        source = source[:NOTEBOOK_PROMPT_CAP] + "\n… (truncated)"
+    return f"\n\n# Current notebook\n{source}"
+
+
 
 
 def _supports_reasoning_effort(model: str) -> bool:
@@ -97,12 +111,18 @@ async def chat(
         kwargs = _build_kwargs(req)
         img = _resolve_images(c, req, assets)
         system_prompt = memory_store.augment_system_prompt(req.system_prompt, req.project_slug)
+        notebook = await sandbox_service.read_notebook(req.chat_id) if sandbox_service else None
+        enabled_tools = list(req.tools)
+        if notebook is not None:
+            system_prompt += _notebook_prompt_block(notebook)
+            if NOTEBOOK_TOOL not in enabled_tools:
+                enabled_tools.append(NOTEBOOK_TOOL)
         prompt_images = (
             resolve_sandbox_prompt_images(req.chat_id, req.project_slug, req.img_paths, assets)
-            if {"workspace_agent", "sandbox_plot"}.intersection(req.tools)
+            if {"workspace_agent", "sandbox_plot"}.intersection(enabled_tools)
             else ()
         )
-        if req.tools:
+        if enabled_tools:
             # The tool loop owns its own model calls, so it needs the client to outlive this
             # `with` block; `request_client` only guards conversation state, which the loop
             # never touches (it passes an explicit message list on every call).
@@ -113,8 +133,8 @@ async def chat(
                     user_msg=req.user_msg,
                     history=req.messages,
                     system_prompt=system_prompt,
+                    enabled=enabled_tools,
                     img=img,
-                    enabled=req.tools,
                     opts=req.tool_options,
                     chat_id=req.chat_id,
                     sandbox_service=sandbox_service,

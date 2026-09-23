@@ -32,6 +32,7 @@ from backend.routes.memory import router as memory_router
 from lib.mineru import kill_all_mineru_servers, reset_cancel
 from lib import omp_source
 from backend.routes.models import router as models_router
+from backend.routes.notebook import router as notebook_router
 from backend.routes.file_vaults import router as file_vaults_router
 from backend.routes.ocr import router as ocr_router
 from backend.routes.projects import router as projects_router
@@ -133,5 +134,6 @@ app.include_router(ocr_router)
 app.include_router(projects_router)
 app.include_router(research_router)
 app.include_router(study_router)
+app.include_router(notebook_router)
 app.include_router(sync_router)
 

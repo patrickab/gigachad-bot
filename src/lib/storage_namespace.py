@@ -80,6 +80,9 @@ def sandbox_slot(chat_id: str, scope: str = "workspace") -> str:
 def sandbox_active(chat_id: str, scope: str = "workspace") -> str:
     return f"{sandbox_prefix(chat_id, scope)}/active.json"
 
+def sandbox_notebook_pointer(chat_id: str, scope: str = "notebook") -> str:
+    return f"{sandbox_prefix(chat_id, scope)}/notebook.json"
+
 
 def sandbox_run(chat_id: str, tool_call_id: str, scope: str = "workspace") -> str:
     return f"{sandbox_prefix(chat_id, scope)}/runs/{_part(tool_call_id, 'tool call ID')}.json"

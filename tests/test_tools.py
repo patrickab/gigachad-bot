@@ -768,3 +768,141 @@ async def test_latex_ocr_tool_uses_the_vision_model_for_attached_images(monkeypa
     assert outcome.detail["text"] == "$a^2 + b^2 = c^2$"
     assert calls[0]["model"] == "provider/vision"
     assert calls[0]["img"] == b"image-bytes"
+
+
+class NotebookSandboxStub:
+    """Serve one notebook revision and record the seeded run that rewrites it."""
+
+    def __init__(self, source: str, result_bytes: bytes, *, summary: str = "rewrote notebook") -> None:
+        self.notebook = {"revision_id": "rev-old", "source": source, "outputs": {"cells": []}}
+        self.result_bytes = result_bytes
+        self.summary = summary
+        self.seeded_calls: list[dict[str, Any]] = []
+        self.staged: list[tuple[str, str, str, dict[str, Any]]] = []
+        self.stage_options: list[dict[str, Any]] = []
+
+    async def read_notebook(self, chat_id: str) -> dict[str, Any] | None:
+        return self.notebook
+
+    async def run_seeded(self, **kwargs: Any) -> tuple[str, bytes]:
+        self.seeded_calls.append(kwargs)
+        return self.summary, self.result_bytes
+
+    async def stage_notebook(self, chat_id: str, revision_id: str, source: str, outputs: dict[str, Any], **kwargs: Any) -> None:
+        self.staged.append((chat_id, revision_id, source, outputs))
+        self.stage_options.append(kwargs)
+
+
+@pytest.mark.asyncio
+async def test_notebook_edit_seeds_agent_and_stages_returned_bytes() -> None:
+    """The handler seeds the current notebook plus conversation, then stages the result verbatim."""
+    old_source = "# %% [markdown]\n# Title\n\n# %%\nprint('old')\n"
+    new_source = "# %% [markdown]\n# Title\n\n# %%\nprint('new')\n\n# %%\nprint('added')\n"
+    sandbox = NotebookSandboxStub(old_source, new_source.encode("utf-8"))
+    context = tools.ToolContext(
+        client=ClientStub(),
+        model=TEST_MODEL,
+        opts=tools.ToolOptions(),
+        chat_id="chat-1",
+        sandbox_service=sandbox,
+        tool_call_id="call-42",
+        history=({"role": "user", "content": "earlier turn"},),
+        user_msg="fix the notebook",
+    )
+
+    outcome = await tools.BUILTIN_TOOLS.execute("notebook_edit", {"prompt": "rename the printed value"}, context)
+
+    # The seeded run carries the current notebook, the conversation, and the tool-call revision.
+    (seed,) = sandbox.seeded_calls
+    assert seed["chat_id"] == "chat-1"
+    assert seed["tool_call_id"] == "call-42"
+    assert seed["prompt"] == "rename the printed value"
+    assert seed["files"]["notebook.py"] == old_source.encode("utf-8")
+    conversation = seed["files"]["conversation.md"].decode("utf-8")
+    assert "earlier turn" in conversation
+    assert "fix the notebook" in conversation
+    assert tools._NOTEBOOK_APPEND_SYSTEM == seed["append_system"]
+
+    # The staged revision is exactly the returned bytes, keyed to the tool call.
+    (chat_id, revision_id, staged_source, staged_outputs) = sandbox.staged[0]
+    assert (chat_id, revision_id, staged_source) == ("chat-1", "call-42", new_source)
+    assert staged_outputs == {"cells": []}
+    assert sandbox.stage_options == [{"expected_revision": "rev-old"}]
+
+    assert outcome.error is None
+    assert outcome.summary == "Notebook updated"
+    assert outcome.detail["before"] == old_source
+    assert outcome.detail["after"] == new_source
+    assert outcome.detail["outputs"] == {"cells": []}
+    assert "user can already see it" in outcome.content
+
+
+@pytest.mark.asyncio
+async def test_notebook_edit_without_a_notebook_degrades_instead_of_raising() -> None:
+    """A chat with no notebook becomes a model-visible error, never a dead tool call."""
+    sandbox = NotebookSandboxStub("# %%\n", b"unused")
+    sandbox.notebook = None
+    context = tools.ToolContext(
+        client=ClientStub(),
+        model=TEST_MODEL,
+        opts=tools.ToolOptions(),
+        chat_id="chat-1",
+        sandbox_service=sandbox,
+        tool_call_id="call-43",
+    )
+
+    outcome = await tools.BUILTIN_TOOLS.execute("notebook_edit", {"prompt": "edit"}, context)
+
+    assert outcome.error == "notebook_missing"
+    assert sandbox.seeded_calls == []
+    assert sandbox.staged == []
+
+
+@pytest.mark.asyncio
+async def test_notebook_edit_without_a_sandbox_service_degrades_instead_of_raising() -> None:
+    """A missing sandbox must become a tool error the model can talk about, never a dead stream."""
+    context = tools.ToolContext(client=ClientStub(), model=TEST_MODEL, opts=tools.ToolOptions(), chat_id="chat-1", sandbox_service=None)
+
+    outcome = await tools.BUILTIN_TOOLS.execute("notebook_edit", {"prompt": "edit"}, context)
+
+    assert outcome.error == "sandbox_service_unavailable"
+    assert outcome.content
+
+
+@pytest.mark.asyncio
+async def test_notebook_edit_unchanged_result_reports_no_change() -> None:
+    """An agent that returns the same notebook is reported, not staged as a new revision."""
+    source = "# %%\nprint('same')\n"
+    sandbox = NotebookSandboxStub(source, source.encode("utf-8"))
+    context = tools.ToolContext(
+        client=ClientStub(),
+        model=TEST_MODEL,
+        opts=tools.ToolOptions(),
+        chat_id="chat-1",
+        sandbox_service=sandbox,
+        tool_call_id="call-44",
+    )
+
+    outcome = await tools.BUILTIN_TOOLS.execute("notebook_edit", {"prompt": "edit"}, context)
+
+    assert outcome.error == "notebook_unchanged"
+    assert sandbox.staged == []
+
+
+@pytest.mark.asyncio
+async def test_notebook_edit_unreadable_result_is_contained() -> None:
+    """Bytes that are not UTF-8 become a failed outcome instead of a staged garbage revision."""
+    sandbox = NotebookSandboxStub("# %%\n", b"\xff\xfe not utf8")
+    context = tools.ToolContext(
+        client=ClientStub(),
+        model=TEST_MODEL,
+        opts=tools.ToolOptions(),
+        chat_id="chat-1",
+        sandbox_service=sandbox,
+        tool_call_id="call-45",
+    )
+
+    outcome = await tools.BUILTIN_TOOLS.execute("notebook_edit", {"prompt": "edit"}, context)
+
+    assert outcome.error == "invalid_notebook"
+    assert sandbox.staged == []

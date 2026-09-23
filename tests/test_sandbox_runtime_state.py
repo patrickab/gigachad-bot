@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 import hashlib
 import io
 from pathlib import Path
@@ -23,72 +22,12 @@ import pytest
 
 from config import TEST_MODEL
 from lib.agent_sandbox_adapter import FakeSandboxRunner
-from lib.data_store import Entry, Revision, StorageNotFoundError
+from lib.data_store import StorageNotFoundError
+from tests._memory_stores import MemoryAssetStore, MemoryDataStore
 from lib.sandbox_service import MAX_OUTPUTS, SandboxRuntimeState, SandboxService
 from lib.sandbox_store import ActivePointer, SandboxStore
 from lib.storage_namespace import sandbox_asset
 
-
-class MemoryDataStore:
-    def __init__(self) -> None:
-        self._documents: dict[str, bytes] = {}
-
-    def read_bytes(self, key: str) -> tuple[bytes, Revision]:
-        try:
-            content = self._documents[key]
-        except KeyError as exc:
-            raise StorageNotFoundError(key) from exc
-        return content, Revision(hashlib.sha256(content).hexdigest())
-
-    def write_bytes(self, key: str, content: bytes, *, expected: Revision | None = None) -> Revision:
-        del expected
-        self._documents[key] = content
-        return Revision(hashlib.sha256(content).hexdigest())
-
-    def list(self, prefix: str = "", *, recursive: bool = False) -> list[Entry]:
-        del recursive
-        scope = f"{prefix}/" if prefix else ""
-        return [Entry(key=key, is_dir=False, size=len(value)) for key, value in self._documents.items() if key.startswith(scope)]
-
-    def exists(self, key: str) -> bool:
-        return key in self._documents
-
-    def mkdir(self, key: str) -> None:
-        del key
-
-    def delete(self, key: str, *, recursive: bool = False) -> None:
-        del recursive
-        for existing in [k for k in self._documents if k == key or k.startswith(f"{key}/")]:
-            del self._documents[existing]
-
-    def move(self, source: str, destination: str) -> None:
-        self._documents[destination] = self._documents.pop(source)
-
-
-@dataclass(frozen=True)
-class _Asset:
-    content: bytes
-
-
-class MemoryAssetStore:
-    def __init__(self) -> None:
-        self._assets: dict[str, bytes] = {}
-
-    def read(self, key: str) -> _Asset:
-        try:
-            return _Asset(self._assets[key])
-        except KeyError as exc:
-            raise StorageNotFoundError(key) from exc
-
-    def list(self, key: str) -> list[str]:
-        return [key] if key in self._assets else []
-
-    def write(self, kind: str, key: str, content: bytes, *, mime: str) -> None:
-        del kind, mime
-        self._assets[key] = content
-
-    def delete(self, key: str) -> None:
-        self._assets.pop(key, None)
 
 
 def _service(data_store: MemoryDataStore, assets: MemoryAssetStore, runtime: SandboxRuntimeState) -> SandboxService:

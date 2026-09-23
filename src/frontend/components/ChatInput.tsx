@@ -5,10 +5,10 @@ import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import { ArrowUp, Loader2, Plus, LayoutGrid, Mic, Square, X, FileText, Image as ImageIcon, File as FileIcon, FileUp, Pencil } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { uploadFile as apiUploadFile } from "@/lib/api"
+import { ApiError, saveNotebook, uploadFile as apiUploadFile } from "@/lib/api"
 import type { Attachment } from "@/lib/types"
 import { useClickOutside } from "@/hooks/useClickOutside"
-import { TOOLS, useModeState } from "@/hooks/useModeState"
+import { NOTEBOOK_TOOL_META, TOOLS, useModeState } from "@/hooks/useModeState"
 import { useSettings } from "@/contexts/SettingsContext"
 import { DrawingCanvas } from "./DrawingCanvas"
 import { OCRPanel } from "./OCRPanel"
@@ -28,6 +28,9 @@ interface ChatInputProps {
 export interface ChatInputHandle {
   addAttachment: (att: Attachment) => void
 }
+
+/** One markdown cell: exactly what activation writes to claim the first notebook revision. */
+const STARTER_NOTEBOOK_SOURCE = "# %% [markdown]\n# Notebook\n"
 
 function fileIcon(mime: string) {
   if (mime.startsWith("image/")) return ImageIcon
@@ -53,7 +56,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   onCancel,
   slug = null,
 }, ref) {
-  const { enabledTools, toggleTool } = useModeState()
+  const { enabledTools, toggleTool, notebookChatId, setNotebookChatId } = useModeState()
   const { ocrModel } = useSettings()
 
   const toolEntries = TOOLS.map((tool) => ({
@@ -63,6 +66,33 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     enabled: enabledTools.includes(tool.name),
     toggle: () => toggleTool(tool.name),
   }))
+
+  // Jupyter mode activation. The generation invalidates stale responses after a
+  // chat switch, while the ref makes repeated clicks idempotent in one chat.
+  const notebookStartingRef = useRef(false)
+  const notebookGenerationRef = useRef(0)
+  const notebookChatRef = useRef(chatId)
+  if (notebookChatRef.current !== chatId) {
+    notebookChatRef.current = chatId
+    notebookGenerationRef.current += 1
+    notebookStartingRef.current = false
+  }
+  const notebookActive = notebookChatId === chatId
+  const activateNotebook = useCallback(() => {
+    if (notebookActive || notebookStartingRef.current) return
+    const generation = notebookGenerationRef.current
+    notebookStartingRef.current = true
+    saveNotebook(chatId, STARTER_NOTEBOOK_SOURCE, {}, "")
+      .then(() => {
+        if (generation === notebookGenerationRef.current) setNotebookChatId(chatId)
+      })
+      .catch((err) => {
+        if (generation === notebookGenerationRef.current && err instanceof ApiError && err.status === 409) setNotebookChatId(chatId)
+      })
+      .finally(() => {
+        if (generation === notebookGenerationRef.current) notebookStartingRef.current = false
+      })
+  }, [chatId, notebookActive, setNotebookChatId])
 
   const [text, setText] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -302,6 +332,12 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                       {toolEntries.map(t => (
                         <ToolMenuItem key={t.id} icon={t.icon} label={t.label} active={t.enabled} onClick={t.toggle} />
                       ))}
+                      <ToolMenuItem
+                        icon={NOTEBOOK_TOOL_META.icon}
+                        label={NOTEBOOK_TOOL_META.selectorLabel}
+                        active={notebookActive}
+                        onClick={activateNotebook}
+                      />
                     </ToolMenuSection>
 
                   </div>

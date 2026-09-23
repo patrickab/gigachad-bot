@@ -6,12 +6,14 @@ import type { Message, Attachment, WebSearchResult, ProjectDocument } from "@/li
 import { ChatMessage, AssistantMessageContent } from "./ChatMessage"
 import { ChatInput, type ChatInputHandle } from "./ChatInput"
 import { ChatSidebar, type ChatSidebarElementConfig } from "./ChatSidebar"
-import { rewriteImages, fileViewerRawUrl } from "@/lib/api"
+import { fetchNotebook, rewriteImages, fileViewerRawUrl } from "@/lib/api"
 
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronsLeftRight, ChevronsRightLeft, FilePlus, FileText, FileType, FolderOpen, Globe, GitFork, Image as ImageIcon, Library, Plus, User, X } from "lucide-react"
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronsLeftRight, ChevronsRightLeft, FilePlus, FileText, FileType, FolderOpen, Globe, GitFork, Image as ImageIcon, Library, NotebookPen, Plus, User, X } from "lucide-react"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { cn } from "@/lib/utils"
 import { ElevationProvider, ElevatedContainer } from "./ElevatedContainer"
+import { useModeState } from "@/hooks/useModeState"
+import { NotebookView } from "./NotebookView"
 
 import { LazyPdfViewer } from "./LazyPdfViewer"
 import { DocumentEditor } from "./DocumentEditor"
@@ -344,6 +346,8 @@ export function useSidebarElements({
   onElementOpenChange,
   pdfWide,
   onTogglePdfWide,
+  notebookActive,
+  notebookRefreshKey,
 }: {
   chatId: string
   slug: string | null
@@ -357,6 +361,10 @@ export function useSidebarElements({
   onElementOpenChange: (id: string, open: boolean) => void
   pdfWide?: boolean
   onTogglePdfWide?: () => void
+  /** Jupyter mode toggled on for this chat — show the notebook element even
+   * before its first fetch confirms the notebook on the server. */
+  notebookActive?: boolean
+  notebookRefreshKey?: string
 }): ChatSidebarElementConfig[] {
   const {
     onToggleAttachmentActive,
@@ -376,6 +384,18 @@ export function useSidebarElements({
     onEditVaultDocument,
   } = useContext(ChatSidebarContext)
 
+  // NotebookView reports GET confirmations; the flag survives a mode reset.
+  const [notebookExists, setNotebookExists] = useState(false)
+  const handleNotebookExists = useCallback((exists: boolean) => setNotebookExists(exists), [])
+  useEffect(() => {
+    let cancelled = false
+    setNotebookExists(false)
+    fetchNotebook(chatId).then(
+      () => { if (!cancelled) setNotebookExists(true) },
+      () => { if (!cancelled) setNotebookExists(false) },
+    )
+    return () => { cancelled = true }
+  }, [chatId])
   return useMemo(() => {
   const elements: ChatSidebarElementConfig[] = []
 
@@ -451,6 +471,24 @@ export function useSidebarElements({
     })
   }
 
+  if (notebookActive || notebookExists) {
+    elements.push({
+      id: "notebook",
+      icon: NotebookPen,
+      title: "Notebook",
+      open: isElementOpen("notebook"),
+      onOpenChange: (o) => onElementOpenChange("notebook", o),
+      body: (
+        <NotebookView
+          chatId={chatId}
+          exists={notebookActive || notebookExists}
+          refreshKey={notebookRefreshKey}
+          onOpenNotebookChanged={handleNotebookExists}
+        />
+      ),
+    })
+  }
+
   if (lastSearchResult) {
     const seen = new Set<string>()
     const sources = lastSearchResult.sources.filter((s) => !seen.has(s.url) && seen.add(s.url))
@@ -474,6 +512,7 @@ export function useSidebarElements({
     editingDocPath, onEditDocument, onDeleteDocument, onDocumentSaved,
     isElementOpen, onElementOpenChange, pdfWide, onTogglePdfWide,
     liveCanvasRef, vaultPaths, vaultEditingPath, onEditVaultDocument,
+    notebookActive, notebookRefreshKey, notebookExists, handleNotebookExists,
   ])
 }
 
@@ -523,6 +562,19 @@ export function ChatContainer({
   const [editingDocPath, setEditingDocPath] = useState<string | null>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isPinnedToBottomRef = useRef(true)
+  const { notebookChatId } = useModeState()
+  const [notebookRefresh, setNotebookRefresh] = useState(0)
+  const notebookRevision = useMemo(() => {
+    for (const message of [...messages].reverse()) {
+      for (const call of [...(message.tool_calls ?? [])].reverse()) {
+        if (call.name === "notebook_edit" && typeof call.detail?.revision_id === "string") return call.detail.revision_id
+      }
+    }
+    return ""
+  }, [messages])
+  const notebookActive =
+    notebookChatId === chatId ||
+    messages.some((message) => message.tool_calls?.some((call) => call.name === "notebook_edit"))
 
   const lastSearchResult = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -812,6 +864,8 @@ export function ChatContainer({
     onElementOpenChange,
     pdfWide,
     onTogglePdfWide: togglePdfWide,
+    notebookActive,
+    notebookRefreshKey: `${notebookRevision}:${notebookRefresh}`,
   })
 
   const hasSidebarContent = sidebarElements.length > 0
@@ -946,7 +1000,12 @@ export function ChatContainer({
                             response inside the pair, not a decoration on it. */}
                         {assistant.tool_calls?.map((call) => (
                           <ElevatedContainer key={call.id} className="mx-5 mb-5 rounded-lg border border-divider overflow-hidden">
-                            <ToolCallElement call={call} />
+                            <ToolCallElement
+                              call={call}
+                              chatId={chatId}
+                              onOpenNotebook={() => { onElementOpenChange("notebook", true); setContextOpen(true) }}
+                              onNotebookChanged={() => setNotebookRefresh((value) => value + 1)}
+                            />
                           </ElevatedContainer>
                         ))}
                         <ElevatedContainer className="mx-5 mb-5 rounded-lg border border-divider overflow-hidden">

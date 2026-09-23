@@ -7,6 +7,7 @@ after the corresponding chat history has been saved.
 from __future__ import annotations
 
 import asyncio
+import io
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
 import hashlib
@@ -14,6 +15,7 @@ import json
 import logging
 import os
 import tempfile
+import tarfile
 import time
 from typing import Any, Literal, cast
 
@@ -24,7 +26,7 @@ from agent_sandbox.outputs import DisplayDataEvent, ErrorEvent, ExecuteResultEve
 from lib.agent_sandbox_adapter import SandboxRunner
 from lib.asset_store import AssetStore
 from lib.data_store import DataStore, StorageNotFoundError
-from lib.sandbox_store import RunRecord, SandboxStore
+from lib.sandbox_store import NotebookPointer, RunRecord, SandboxStore
 from lib.storage_namespace import sandbox_asset, sandbox_scope
 
 logger = logging.getLogger(__name__)
@@ -37,7 +39,8 @@ MAX_INLINE_TEXT_CHARS = 8000
 DEFAULT_SANDBOX_SCOPE = "workspace"
 WORKSPACE_AGENT_SCOPE = "workspace_agent"
 SANDBOX_PLOT_SCOPE = "sandbox_plot"
-KNOWN_SANDBOX_SCOPES = (DEFAULT_SANDBOX_SCOPE, WORKSPACE_AGENT_SCOPE, SANDBOX_PLOT_SCOPE)
+NOTEBOOK_SCOPE = "notebook"
+KNOWN_SANDBOX_SCOPES = (DEFAULT_SANDBOX_SCOPE, WORKSPACE_AGENT_SCOPE, SANDBOX_PLOT_SCOPE, NOTEBOOK_SCOPE)
 
 
 class SandboxServiceError(RuntimeError):
@@ -46,6 +49,9 @@ class SandboxServiceError(RuntimeError):
 
 class SandboxBusyError(SandboxServiceError):
     pass
+
+class NotebookRevisionConflict(SandboxServiceError):
+    """Raised when a stage targets a revision the chat has already moved past."""
 
 
 @dataclass(frozen=True)
@@ -211,6 +217,99 @@ class SandboxService:
     async def run_script(self, script: str, *, interpreter: str = "venv", timeout: float = SCRIPT_TIMEOUT_SECONDS) -> str:
         """Run one throwaway script with no workspace or secrets."""
         return await self._runner.run_script(script, profile=self._profile, interpreter=interpreter, timeout=timeout)
+
+    async def run_seeded(
+        self,
+        *,
+        chat_id: str,
+        tool_call_id: str,
+        files: dict[str, bytes],
+        prompt: str,
+        append_system: str | None = None,
+        thinking: Literal["low", "medium"] = "low",
+        lean: bool = True,
+        result_path: str = "notebook.py",
+    ) -> tuple[str, bytes]:
+        """Run one fresh seeded agent and return (summary, result file bytes).
+
+        Unlike `invoke`, no workspace manifest is tracked or persisted: the
+        caller only consumes the named result file from the run's capture.
+        """
+        chat_id = _validate_chat_id(chat_id)
+        archive_bytes = io.BytesIO()
+        with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
+            for name, content in files.items():
+                member = tarfile.TarInfo(name)
+                member.size = len(content)
+                archive.addfile(member, io.BytesIO(content))
+        archive_sha256 = hashlib.sha256(archive_bytes.getvalue()).hexdigest()
+
+        fd, archive_path = tempfile.mkstemp(prefix="gigachad-notebook-seed-", suffix=".tar")
+        try:
+            with os.fdopen(fd, "wb") as archive_file:
+                archive_file.write(archive_bytes.getvalue())
+        except BaseException:
+            with suppress(FileNotFoundError):
+                os.unlink(archive_path)
+            raise
+
+        run: SandboxRun | None = None
+        runner_task: asyncio.Task[SandboxRun] | None = None
+        try:
+            invocation = SandboxInvocation(
+                slot_key=self._slot_key(chat_id, NOTEBOOK_SCOPE),
+                profile_name=self._profile,
+                prompt=_normalize_prompt(prompt),
+                run_id=tool_call_id,
+                active_manifest=None,
+                workspace_archive_path=archive_path,
+                workspace_archive_sha256=archive_sha256,
+                model=self._model,
+                thinking=thinking,
+                append_system=append_system,
+                lean=lean,
+            )
+            runner_task = asyncio.create_task(self._runner.run(invocation))
+            run = await asyncio.shield(runner_task)
+            summary = run.summary
+            result_bytes = run.read_workspace_file(result_path)
+        except asyncio.CancelledError:
+            if runner_task is not None and run is None:
+                runner_task.add_done_callback(lambda task, path=archive_path: self._release_cancelled_run(task, path))
+            else:
+                self._release_run_and_unlink(run, archive_path)
+            raise
+        except Exception:  # noqa: BLE001 - surface one contained error for this tool call
+            self._release_run_and_unlink(run, archive_path)
+            logger.exception("seeded sandbox run %s failed for slot %s", tool_call_id, chat_id)
+            raise
+        else:
+            self._release_run_and_unlink(run, archive_path)
+            return summary, result_bytes
+
+    @staticmethod
+    def _release_run_and_unlink(run: SandboxRun | None, archive_path: str | None) -> None:
+        if run is not None:
+            try:
+                run.release()
+            except Exception:  # noqa: BLE001 - cleanup must not mask the carried result
+                logger.exception("seeded sandbox run release failed")
+        if archive_path is not None:
+            with suppress(FileNotFoundError):
+                os.unlink(archive_path)
+
+    @classmethod
+    def _release_cancelled_run(cls, task: asyncio.Task[SandboxRun], archive_path: str | None) -> None:
+        try:
+            run = task.result()
+        except BaseException:
+            logger.exception("cancelled seeded sandbox runner failed")
+        else:
+            cls._release_run_and_unlink(run, archive_path)
+            return
+        if archive_path is not None:
+            with suppress(FileNotFoundError):
+                os.unlink(archive_path)
 
     async def invoke(
         self,
@@ -494,6 +593,8 @@ class SandboxService:
                         runs=staged.runs,
                         latest_run_id=staged.last_completed_run_id,
                     )
+                elif state_scope == NOTEBOOK_SCOPE:
+                    self._checkpoint_notebook(chat_id, store, staged)
                 self._runtime.pop(slot_key)
 
     def _persist_assets(self, assets: dict[str, bytes], media_types: dict[str, str]) -> None:
@@ -516,6 +617,121 @@ class SandboxService:
             if media_type == "text/plain" and output.text:
                 texts.append(output.text)
         return tuple(texts)
+
+    async def stage_notebook(
+        self, chat_id: str, revision_id: str, source: str, outputs: dict[str, Any], *, expected_revision: str | None = None
+    ) -> None:
+        """Stage a chat-scoped notebook revision; checkpoint makes it durable."""
+        chat_id = _validate_chat_id(chat_id)
+        revision_id = revision_id.strip()
+        # Reject path-carrying ids here, not at checkpoint time when a chat save already succeeded.
+        if not revision_id or "/" in revision_id or ".." in revision_id:
+            raise ValueError("revision_id must be a path-free identifier")
+        slot_key = self._slot_key(chat_id, NOTEBOOK_SCOPE)
+
+        source_output, source_assets = self._make_output_record(
+            display_id=None,
+            title="Notebook source",
+            bundle={"application/x-ipynb+json": source.encode("utf-8")},
+            text=None,
+        )
+        outputs_output, outputs_assets = self._make_output_record(
+            display_id=None,
+            title="Notebook outputs",
+            bundle={"application/json": json.dumps(outputs, sort_keys=True).encode("utf-8")},
+            text=None,
+        )
+        record = RunRecord(
+            tool_call_id=revision_id,
+            status="completed",
+            started_at=time.time(),
+            finished_at=time.time(),
+            manifest_id=None,
+            result={
+                "status": "completed",
+                "summary": "Notebook revision staged.",
+                "manifest_id": None,
+                "workspace_changed": False,
+                "outputs": [source_output.to_json(), outputs_output.to_json()],
+                "error": None,
+                "notebook": {
+                    "source_sha256": source_output.mime_bundle["application/x-ipynb+json"]["sha256"],
+                    "outputs_sha256": outputs_output.mime_bundle["application/json"]["sha256"],
+                },
+            },
+        )
+
+        lock = await self._runtime.lock(slot_key)
+        async with lock:
+            if expected_revision is not None:
+                current = self._current_notebook_locked(chat_id, slot_key)
+                if (current or {}).get("revision_id", "") != expected_revision:
+                    raise NotebookRevisionConflict(expected_revision)
+            staged = self._runtime.stage(slot_key)
+            staged.assets.update(source_assets)
+            staged.assets.update(outputs_assets)
+            staged.output_shas.update(source_assets)
+            staged.output_shas.update(outputs_assets)
+            staged.runs[revision_id] = record
+            staged.last_completed_run_id = revision_id
+
+    async def read_notebook(self, chat_id: str) -> dict[str, Any] | None:
+        """Return the staged or durably pointed notebook revision, if any."""
+        chat_id = _validate_chat_id(chat_id)
+        slot_key = self._slot_key(chat_id, NOTEBOOK_SCOPE)
+
+        lock = await self._runtime.lock(slot_key)
+        async with lock:
+            return self._current_notebook_locked(chat_id, slot_key)
+
+    def _current_notebook_locked(self, chat_id: str, slot_key: str) -> dict[str, Any] | None:
+        """Resolve the current revision; the caller must hold the notebook slot lock."""
+        store = self._store_for(NOTEBOOK_SCOPE)
+        staged = self._runtime.get(slot_key)
+        if staged is not None and staged.last_completed_run_id is not None:
+            return self._read_notebook_record(staged.runs[staged.last_completed_run_id], staged)
+        pointer = store.read_notebook_pointer(chat_id)
+        if pointer is None:
+            return None
+        record = store.read_run(chat_id, pointer.revision_id)
+        if record is None:
+            return None
+        return self._read_notebook_record(record, None)
+
+    def _read_notebook_record(self, record: RunRecord, staged: _StagedState | None) -> dict[str, Any] | None:
+        """Resolve a notebook run record into its revision content."""
+        meta = (record.result or {}).get("notebook") or {}
+        source_sha256 = meta.get("source_sha256")
+        outputs_sha256 = meta.get("outputs_sha256")
+        if not source_sha256 or not outputs_sha256:
+            return None
+
+        def content(sha256: str) -> bytes:
+            staged_bytes = staged.assets.get(sha256) if staged is not None else None
+            if staged_bytes is not None:
+                return staged_bytes
+            return self._assets.read(sandbox_asset(sha256)).content
+
+        return {
+            "revision_id": record.tool_call_id,
+            "source": content(source_sha256).decode("utf-8"),
+            "outputs": json.loads(content(outputs_sha256)),
+        }
+
+    def _checkpoint_notebook(self, chat_id: str, store: SandboxStore, staged: _StagedState) -> None:
+        """Persist staged notebook assets, run records, and the revision pointer."""
+        media_types = {
+            ref["sha256"]: ref["media_type"]
+            for record in staged.runs.values()
+            for output in (record.result or {}).get("outputs", [])
+            for ref in output.get("mime_bundle", {}).values()
+        }
+        self._persist_assets(staged.assets, media_types)
+        for record in staged.runs.values():
+            store.write_run(chat_id, record)
+        latest = staged.runs.get(staged.last_completed_run_id or "")
+        if latest is not None:
+            store.write_notebook_pointer(chat_id, NotebookPointer(revision_id=latest.tool_call_id, updated_at=time.time()))
 
     async def delete_chat_state(self, *, chat_id: str, scope: str | None = None) -> None:
         chat_id = _validate_chat_id(chat_id)
