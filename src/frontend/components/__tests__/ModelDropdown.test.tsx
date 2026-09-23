@@ -100,6 +100,23 @@ describe("ModelDropdown OMP source", () => {
     expect(labels).toEqual(["DeepSeek", "Ollama", "Gemini"])
   })
 
+  it("sorts models alphabetically within each provider tab", async () => {
+    fetchOmpCatalog.mockResolvedValue({ ...onlineCatalog, installed: false })
+    const unsorted: ModelsResponse = {
+      ...models,
+      ollama: ["ollama/zulu", "ollama/alpha"],
+      providers: [{ label: "Gemini", litellm_id: "gemini", models: ["zeta", "alpha"] }],
+    }
+    render(<ModelDropdown models={unsorted} selectedModel="" onSelect={vi.fn()} onProvidersChange={vi.fn()} onDefaultsChange={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Model" }))
+    fireEvent.click(screen.getByRole("button", { name: "Ollama" }))
+    expect(screen.getAllByRole("button").filter((button) => ["alpha", "zulu"].includes(button.textContent ?? "")).map((button) => button.textContent)).toEqual(["alpha", "zulu"])
+
+    fireEvent.click(screen.getByRole("button", { name: "Gemini" }))
+    expect(screen.getAllByRole("button").filter((button) => ["alpha", "zeta"].includes(button.textContent ?? "")).map((button) => button.textContent)).toEqual(["alpha", "zeta"])
+  })
+
   it("opens on the provider tab holding the currently selected model, not Ollama", async () => {
     fetchOmpCatalog.mockResolvedValue({ ...onlineCatalog, installed: false })
     const withGemini: ModelsResponse = {

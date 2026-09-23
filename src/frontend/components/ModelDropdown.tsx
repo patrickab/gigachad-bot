@@ -181,8 +181,8 @@ export function ModelDropdown({ models, selectedModel, onSelect, onProvidersChan
   if (models === null) return <div className="flex flex-col gap-1.5 px-2"><Skeleton className="h-5 w-16" /><Skeleton className="h-3 w-28" /></div>
 
   const available: ProviderTab[] = [
-    { label: "Ollama", models: models.ollama },
-    ...models.providers.map((provider) => ({ label: provider.label, models: provider.models.map((model) => `${provider.litellm_id}/${model}`) })),
+    { label: "Ollama", models: [...models.ollama].sort((a, b) => displayName(a).localeCompare(displayName(b))) },
+    ...models.providers.map((provider) => ({ label: provider.label, models: provider.models.map((model) => `${provider.litellm_id}/${model}`).sort((a, b) => displayName(a).localeCompare(displayName(b))) })),
   ]
   const selectableProviders = available.filter((provider) => provider.models.length > 0)
   const tabOrder = models.tab_order
