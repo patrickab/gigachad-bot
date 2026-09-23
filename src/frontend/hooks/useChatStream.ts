@@ -37,6 +37,8 @@ function buildHistory(msgs: Message[]): { role: string; content: string }[] {
       if (m.role === "user" && m.hiddenContent) {
         content = m.hiddenContent + "\n\n" + content
       }
+      const mindmap = m.tool_calls?.find(call => call.name === "mindmap")?.detail?.mindmap
+      if (typeof mindmap === "string") content = [content, mindmap].filter(Boolean).join("\n\n")
       return { role: m.role, content }
     })
 }

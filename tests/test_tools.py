@@ -149,6 +149,22 @@ async def test_tool_call_keeps_ui_detail_out_of_the_answer_round(monkeypatch: py
     assert source_evidence not in str(sent[1])
 
 
+
+@pytest.mark.asyncio
+async def test_mindmap_tool_result_does_not_trigger_an_assistant_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The rendered tool card is the complete mind map response."""
+    rounds = [iter([_tool_chunk(0, "call_mindmap", "mindmap", "{}")])]
+    monkeypatch.setattr(toolcalling.litellm, "completion", lambda **_: rounds.pop(0))
+
+    async def fake_execute(*_: Any, **__: Any) -> toolcalling.ToolOutcome:
+        return toolcalling.ToolOutcome(content="```markmap\n# Topic\n```", summary="Mind map ready")
+
+    monkeypatch.setattr(tools.BUILTIN_TOOLS, "execute", fake_execute)
+
+    events = await _collect(enabled=["mindmap"])
+
+    assert [name for name, _ in events] == ["tool_call", "tool_progress", "tool_progress", "tool_result"]
+    assert rounds == []
 @pytest.mark.asyncio
 async def test_exactly_one_tool_call_per_turn(monkeypatch: pytest.MonkeyPatch) -> None:
     """A model that keeps calling tools gets exactly one, then a round with no tools offered."""

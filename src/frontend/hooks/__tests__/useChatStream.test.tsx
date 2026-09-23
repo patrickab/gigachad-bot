@@ -140,6 +140,42 @@ describe("useChatStream", () => {
     })
   })
 
+  it("sends the rendered mindmap as assistant context without duplicating it in chat", async () => {
+    const mindmap = "```markmap\n# Topic\n```"
+    createChatStream
+      .mockReturnValueOnce(stream([
+        event("tool_call", { id: "call-mindmap", name: "mindmap", arguments: {} }),
+        event("tool_result", {
+          id: "call-mindmap",
+          name: "mindmap",
+          summary: "Mind map ready",
+          detail: { mindmap },
+          error: null,
+        }),
+        event("done", ""),
+      ]))
+      .mockReturnValueOnce(stream([
+        event("token", "Second answer"),
+        event("done", ""),
+      ]))
+    const { result } = renderHook(() => useChatStream())
+
+    await act(async () => {
+      await result.current.send(request("Create a mind map"))
+    })
+    expect(result.current.messages[1].content).toBe("")
+
+    await act(async () => {
+      await result.current.send(request("Follow up"))
+    })
+
+    expect(createChatStream.mock.calls[1][0].messages).toEqual([
+      { role: "user", content: "Create a mind map" },
+      { role: "assistant", content: mindmap },
+      { role: "user", content: "Follow up" },
+    ])
+  })
+
   it("sends only user and assistant text as history on a later turn", async () => {
     const detailSentinel = "DETAIL_SENTINEL"
     const sourceSentinel = "SOURCE_SENTINEL"

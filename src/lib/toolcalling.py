@@ -369,21 +369,22 @@ async def stream_tool_turn(
                 "sandbox": outcome.sandbox,
             },
         )
-        messages.append({"role": "tool", "tool_call_id": call["id"], "content": outcome.content})
+        if call["name"] != "mindmap":
+            messages.append({"role": "tool", "tool_call_id": call["id"], "content": outcome.content})
 
-        answer = _Round()
-        async for event in _run_round(
-            client=client,
-            model=model,
-            messages=messages,
-            specs=None,
-            catalog=catalog,
-            kwargs=kwargs,
-            out=answer,
-        ):
-            yield event
-        for key, value in answer.usage.items():
-            usage_total[key] += value
+            answer = _Round()
+            async for event in _run_round(
+                client=client,
+                model=model,
+                messages=messages,
+                specs=None,
+                catalog=catalog,
+                kwargs=kwargs,
+                out=answer,
+            ):
+                yield event
+            for key, value in answer.usage.items():
+                usage_total[key] += value
 
     if any(usage_total.values()):
         yield ("usage", usage_total)
