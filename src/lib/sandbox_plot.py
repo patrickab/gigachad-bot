@@ -143,12 +143,14 @@ def _completion_text(context: PlotContext, user_msg: str, system_prompt: str, **
 
 def _generate_plot(context: PlotContext) -> str:
     """Ask the chat model for the plot script, guided by the styling prompt."""
+    images = [image.content for image in context.prompt_images]
     return _plot_script(
         _completion_text(
             context,
             context.user_msg,
             _FAST_PLOT_SYSTEM,
             user_msg_history=list(context.history),
+            img=images or None,
         )
     )
 
@@ -200,8 +202,7 @@ async def create_sandbox_plot(context: PlotContext) -> ToolOutcome:
         )
 
     script = ""
-    # Route prompt images through the agent, which alone can see them.
-    fast = None if context.prompt_images else await _fast_plot(context)
+    fast = await _fast_plot(context)
     if fast is not None:
         figure, script = fast
     else:
