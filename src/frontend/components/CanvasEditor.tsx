@@ -15,6 +15,7 @@ import { PdfViewer } from "./PdfViewer"
 import { ArchitectureGraphSurface } from "./ArchitectureGraphSurface"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { PlotElement, type PlotFigure } from "./PlotElement"
+import { cameraToOffset, embeddedViewportSize, nestedEmbeddingScale, offsetToCamera, screenToWorld, zoomCamera, type EmbeddingScale, type ZoomAnchor } from "./InfiniteViewport"
 import { useTabActive } from "./TabManager"
 
 const A4_W = 794
@@ -140,6 +141,8 @@ export interface CanvasAttachment {
   height?: number // Architecture Graphs own their viewport height; legacy attachments retain their aspect
   title?: string // user label, independent of the backing document filename
   page?: number // selected PDF page, persisted with the canvas
+  // Nested canvases default to screen-stable so their content has an independent zoom.
+  embeddingScale?: EmbeddingScale
 }
 
 // CanvasText = handwriting-style note in a resizable box. Rasterized into export
@@ -231,15 +234,9 @@ interface CanvasEditorProps {
   // canvas window stops opening its file, so a cycle (A embeds B, B embeds A) can't
   // recurse forever.
   depth?: number
+  zoomAnchor?: ZoomAnchor
 }
 
-// convert between center (canvas-space point at view center) and offset (SVG translate)
-function centerToOffset(cx: number, cy: number, s: number, w: number, h: number) {
-  return { x: w / 2 - cx * s, y: h / 2 - cy * s }
-}
-function offsetToCenter(ox: number, oy: number, s: number, w: number, h: number) {
-  return { cx: (w / 2 - ox) / s, cy: (h / 2 - oy) / s }
-}
 
 // shortest distance from (px,py) to segment (ax,ay)-(bx,by) — straight strokes (e.g.
 // straightened lines) can be as sparse as 2 points, so the eraser must hit-test the
@@ -378,7 +375,7 @@ const StrokeLayer = memo(function StrokeLayer({ strokes, hidden, isDark }: { str
   )
 })
 
-export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, docPath, depth = 0 }: CanvasEditorProps) {
+export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, docPath, depth = 0, zoomAnchor = depth > 0 ? "viewport-center" : "cursor" }: CanvasEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   // gates the window/document key listeners below to the frontmost tab
   const active = useTabActive()
@@ -405,27 +402,23 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     if (!el) return
     const apply = () => {
       const vp = doc.viewport
-      const cx = vp?.centerX ?? 0
-      const cy = vp?.centerY ?? 0
-      const s = vp?.scale ?? 0.5
-      const o = centerToOffset(cx, cy, s, el.clientWidth, el.clientHeight)
+      const camera = { scale: vp?.scale ?? 0.5, centerX: vp?.centerX ?? 0, centerY: vp?.centerY ?? 0 }
+      const o = cameraToOffset(camera, { width: el.clientWidth, height: el.clientHeight })
       offsetRef.current = o
-      scaleRef.current = s
+      scaleRef.current = camera.scale
       setOffset(o)
-      setScale(s)
+      setScale(camera.scale)
       restoredRef.current = true
     }
     apply()
     const ro = new ResizeObserver(() => {
       if (!restoredRef.current) return
-      // A nested window is sized by its host's zoom, so re-centering would slide its ink
-      // on every host zoom step — the two views must be independent. Anchor the top-left
-      // instead: the ink stays put and the box reveals more or less of it. Top-level
-      // canvases keep centering; there the container only resizes with the browser window.
+      // A screen-stable nested frame may change layout as its parent zooms. Keeping its
+      // top-left fixed preserves the child's independent view. Top-level canvases keep
+      // their world center fixed across browser resizes.
       if (depth > 0) return
-      // re-derive offset from current center so resize keeps the same canvas point centered
-      const { cx, cy } = offsetToCenter(offsetRef.current.x, offsetRef.current.y, scaleRef.current, el.clientWidth, el.clientHeight)
-      const o = centerToOffset(cx, cy, scaleRef.current, el.clientWidth, el.clientHeight)
+      const camera = offsetToCamera(offsetRef.current, scaleRef.current, { width: el.clientWidth, height: el.clientHeight })
+      const o = cameraToOffset(camera, { width: el.clientWidth, height: el.clientHeight })
       offsetRef.current = o
       setOffset(o)
     })
@@ -598,20 +591,20 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   const persistViewport = useCallback((s: number, o: { x: number; y: number }) => {
     const el = containerRef.current
     if (!el) return
-    const { cx, cy } = offsetToCenter(o.x, o.y, s, el.clientWidth, el.clientHeight)
+    const camera = offsetToCamera(o, s, { width: el.clientWidth, height: el.clientHeight })
     const { doc: cur, onChange: change } = liveRef.current
     const vp = cur.viewport
-    if (vp && vp.scale === s && Math.abs(vp.centerX - cx) < 0.5 && Math.abs(vp.centerY - cy) < 0.5) return
-    change({ ...cur, viewport: { scale: s, centerX: cx, centerY: cy } })
+    if (vp && vp.scale === camera.scale && Math.abs(vp.centerX - camera.centerX) < 0.5 && Math.abs(vp.centerY - camera.centerY) < 0.5) return
+    change({ ...cur, viewport: camera })
   }, [])
 
   const screenToCanvas = useCallback((clientX: number, clientY: number): [number, number] => {
     const el = containerRef.current
     if (!el) return [0, 0]
     const rect = el.getBoundingClientRect()
-    const sx = clientX - rect.left
-    const sy = clientY - rect.top
-    return [(sx - offsetRef.current.x) / scaleRef.current, (sy - offsetRef.current.y) / scaleRef.current]
+    const camera = offsetToCamera(offsetRef.current, scaleRef.current, { width: el.clientWidth, height: el.clientHeight })
+    const point = screenToWorld({ x: clientX - rect.left, y: clientY - rect.top }, camera, { width: el.clientWidth, height: el.clientHeight })
+    return [point.x, point.y]
   }, [])
 
   const addText = useCallback((x: number, y: number, width = TEXT_DEFAULT_WIDTH, height = TEXT_DEFAULT_HEIGHT, text = "") => {
@@ -631,22 +624,22 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
       if (inOwnAttachment(e.target, el)) return
       e.preventDefault()
       const rect = el.getBoundingClientRect()
-      const mx = e.clientX - rect.left
-      const my = e.clientY - rect.top
+      const current = offsetToCamera(offsetRef.current, scaleRef.current, { width: el.clientWidth, height: el.clientHeight })
       const factor = e.deltaY < 0 ? 1.08 : 1 / 1.08
-      const prev = scaleRef.current
-      const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, prev * factor))
-      const ratio = next / prev
-      const newOx = mx - (mx - offsetRef.current.x) * ratio
-      const newOy = my - (my - offsetRef.current.y) * ratio
-      scaleRef.current = next
-      offsetRef.current = { x: newOx, y: newOy }
-      setScale(next)
-      setOffset({ x: newOx, y: newOy })
+      const nextScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, current.scale * factor))
+      const camera = zoomCamera(current, nextScale / current.scale, { width: el.clientWidth, height: el.clientHeight }, zoomAnchor, {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+      })
+      const nextOffset = cameraToOffset(camera, { width: el.clientWidth, height: el.clientHeight })
+      scaleRef.current = camera.scale
+      offsetRef.current = nextOffset
+      setScale(camera.scale)
+      setOffset(nextOffset)
     }
     el.addEventListener("wheel", onWheel, { passive: false })
     return () => el.removeEventListener("wheel", onWheel)
-  }, [])
+  }, [zoomAnchor])
 
   // Save viewport on idle
   const viewportTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -810,16 +803,17 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
       const [a, b] = [...touches.values()]
       const rect = el.getBoundingClientRect()
       const newDist = Math.hypot(a!.x - b!.x, a!.y - b!.y)
-      const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, t.scale * (newDist / t.dist)))
-      const scaleRatio = next / t.scale
+      const nextScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, t.scale * (newDist / t.dist)))
       const mx = (a!.x + b!.x) / 2 - rect.left
       const my = (a!.y + b!.y) / 2 - rect.top
-      const newOx = t.cx - (t.cx - t.ox) * scaleRatio + (mx - t.cx)
-      const newOy = t.cy - (t.cy - t.oy) * scaleRatio + (my - t.cy)
-      scaleRef.current = next
-      offsetRef.current = { x: newOx, y: newOy }
-      setScale(next)
-      setOffset({ x: newOx, y: newOy })
+      const current = offsetToCamera({ x: t.ox, y: t.oy }, t.scale, { width: el.clientWidth, height: el.clientHeight })
+      const camera = zoomCamera(current, nextScale / t.scale, { width: el.clientWidth, height: el.clientHeight }, zoomAnchor, { x: t.cx, y: t.cy })
+      const offset = cameraToOffset(camera, { width: el.clientWidth, height: el.clientHeight })
+      const nextOffset = { x: offset.x + mx - t.cx, y: offset.y + my - t.cy }
+      scaleRef.current = camera.scale
+      offsetRef.current = nextOffset
+      setScale(camera.scale)
+      setOffset(nextOffset)
     }
     const onUp = (e: PointerEvent) => {
       if (e.pointerType !== "touch") return
@@ -838,7 +832,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
       window.removeEventListener("pointerup", onUp)
       window.removeEventListener("pointercancel", onUp)
     }
-  }, [])
+  }, [zoomAnchor])
 
   // Attachments scale with canvas zoom, but re-rendering the PDF at every zoom
   // frame re-rasterizes all pages (flicker). Instead the gesture scales them as
@@ -1283,7 +1277,9 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   // inline in the parent document.
   const addCanvasWindow = useCallback(() => {
     const { cx, cy } = pointAtCenter(DEFAULT_CANVAS_WIDTH, CANVAS_ASPECT)
-    commit({ ...doc, attachments: [...doc.attachments, { id: `cv-${Date.now()}`, kind: "canvas", canvas: emptyCanvasDoc(), x: cx, y: cy, width: DEFAULT_CANVAS_WIDTH }] })
+    commit({ ...doc, attachments: [...doc.attachments, {
+      id: `cv-${Date.now()}`, kind: "canvas", canvas: emptyCanvasDoc(), x: cx, y: cy, width: DEFAULT_CANVAS_WIDTH, embeddingScale: "screen-stable",
+    }] })
     setAddMenuOpen(false)
   }, [doc, commit, pointAtCenter])
 
@@ -1292,7 +1288,9 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   const addCanvasFile = useCallback((path: string) => {
     if (doc.attachments.some((a) => a.path === path)) { setAddMenuOpen(false); return }
     const { cx, cy } = pointAtCenter(DEFAULT_CANVAS_WIDTH, CANVAS_ASPECT)
-    commit({ ...doc, attachments: [...doc.attachments, { id: `cv-${Date.now()}`, kind: "canvas", path, x: cx, y: cy, width: DEFAULT_CANVAS_WIDTH }] })
+    commit({ ...doc, attachments: [...doc.attachments, {
+      id: `cv-${Date.now()}`, kind: "canvas", path, x: cx, y: cy, width: DEFAULT_CANVAS_WIDTH, embeddingScale: "screen-stable",
+    }] })
     setAddMenuOpen(false)
   }, [doc, commit, pointAtCenter])
 
@@ -1419,15 +1417,20 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   const dragRef = useRef<{
     id: string; target: "frame" | "attachment" | "text"; mode: "move" | "resize"
     startX: number; startY: number; origX: number; origY: number; origW: number; origH: number
+    resizeScale: number
   } | null>(null)
 
   const startInteraction = useCallback((id: string, target: "frame" | "attachment" | "text", mode: "move" | "resize", clientX: number, clientY: number) => {
     const list = target === "frame" ? liveRef.current.doc.frames : target === "attachment" ? liveRef.current.doc.attachments : liveRef.current.doc.texts
     const item = list.find((e) => e.id === id)
     if (!item) return
+    const attachment = target === "attachment" ? item as CanvasAttachment : null
+    const resizeScale = attachment?.kind === "canvas" && nestedEmbeddingScale(attachment.embeddingScale) === "screen-stable"
+      ? 1
+      : scaleRef.current
     dragRef.current = {
       id, target, mode, startX: clientX, startY: clientY, origX: item.x, origY: item.y,
-      origW: "width" in item ? item.width : 0, origH: "height" in item ? (item.height ?? 0) : 0,
+      origW: "width" in item ? item.width : 0, origH: "height" in item ? (item.height ?? 0) : 0, resizeScale,
     }
   }, [])
 
@@ -1492,26 +1495,28 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
       }
       const d = dragRef.current
       if (!d) return
-      const dx = (e.clientX - d.startX) / scaleRef.current
-      const dy = (e.clientY - d.startY) / scaleRef.current
-      if (dx === 0 && dy === 0) return
+      const moveDx = (e.clientX - d.startX) / scaleRef.current
+      const moveDy = (e.clientY - d.startY) / scaleRef.current
+      const resizeDx = (e.clientX - d.startX) / d.resizeScale
+      const resizeDy = (e.clientY - d.startY) / d.resizeScale
+      if (moveDx === 0 && moveDy === 0) return
       snapshotOnce()
       const { doc: cur, onChange: change } = liveRef.current
       const minW = d.target === "frame" ? MIN_FRAME_WIDTH : MIN_ATTACH_WIDTH
       if (d.target === "frame") {
         change({ ...cur, frames: cur.frames.map((f) => f.id !== d.id ? f
-          : d.mode === "resize" ? { ...f, width: Math.max(minW, d.origW + dx) }
-          : { ...f, x: d.origX + dx, y: d.origY + dy }) })
+          : d.mode === "resize" ? { ...f, width: Math.max(minW, d.origW + resizeDx) }
+          : { ...f, x: d.origX + moveDx, y: d.origY + moveDy }) })
       } else if (d.target === "attachment") {
         change({ ...cur, attachments: cur.attachments.map((a) => a.id !== d.id ? a
           : d.mode === "resize" ? (a.kind === "architecture-graph" || a.kind === "document")
-            ? { ...a, width: Math.max(minW, d.origW + dx), height: Math.max(MIN_GRAPH_HEIGHT, d.origH + dy) }
-            : { ...a, width: Math.max(minW, d.origW + dx) }
-          : { ...a, x: d.origX + dx, y: d.origY + dy }) })
+            ? { ...a, width: Math.max(minW, d.origW + resizeDx), height: Math.max(MIN_GRAPH_HEIGHT, d.origH + resizeDy) }
+            : { ...a, width: Math.max(minW, d.origW + resizeDx) }
+          : { ...a, x: d.origX + moveDx, y: d.origY + moveDy }) })
       } else {
         change({ ...cur, texts: cur.texts.map((t) => t.id !== d.id ? t
-          : d.mode === "resize" ? { ...t, width: Math.max(MIN_TEXT_WIDTH, d.origW + dx), height: Math.max(MIN_TEXT_HEIGHT, d.origH + dy) }
-          : { ...t, x: d.origX + dx, y: d.origY + dy }) })
+          : d.mode === "resize" ? { ...t, width: Math.max(MIN_TEXT_WIDTH, d.origW + resizeDx), height: Math.max(MIN_TEXT_HEIGHT, d.origH + resizeDy) }
+          : { ...t, x: d.origX + moveDx, y: d.origY + moveDy }) })
       }
     }
     const onUp = (e: PointerEvent) => {
@@ -2026,15 +2031,14 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
           const isDocument = att.kind === "document"
           const aspect = nested ? CANVAS_ASPECT : (aspects[att.id] ?? FALLBACK_ASPECT)
           const name = att.title ?? att.path?.split("/").pop() ?? (architectureGraph ? "Architecture Graph" : nested ? "Canvas" : isDocument ? "Document" : "PDF")
-          // Visible size follows canvas zoom, but layout width only follows the
-          // settled zoom (capped at what PdfViewer will actually rasterize); the
-          // CSS transform bridges the difference. Mid-gesture that means pure
-          // bitmap scaling, at rest transform ≈ 1 and the PDF is sharp.
-          // ponytail: a nested canvas must not sit under a CSS transform — its pointer
-          // math works in layout px, so a scaled wrapper offsets every stroke. It lays
-          // out at screen size instead (transform 1); PDFs keep the trick for sharpness.
-          const screenW = att.width * scale
-          const screenH = (att.height ?? att.width * CANVAS_ASPECT) * scale
+          // PDFs rasterize through a settled layout size. Interactive viewport frames
+          // use their actual screen size so pointer coordinates stay exact.
+          const contentHeight = att.height ?? att.width * CANVAS_ASPECT
+          const viewportSize = nested
+            ? embeddedViewportSize({ width: att.width, height: contentHeight }, scale, nestedEmbeddingScale(att.embeddingScale))
+            : { width: att.width * scale, height: contentHeight * scale }
+          const screenW = viewportSize.width
+          const screenH = viewportSize.height
           const layoutW = nested || architectureGraph || isDocument ? screenW : Math.min(att.width * settledScale, PDF_LAYOUT_CAP)
           // Fullscreen only restyles this same wrapper — moving the window elsewhere in
           // the tree would remount the editor inside it and lose whatever it holds.

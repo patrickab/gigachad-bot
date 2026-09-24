@@ -337,6 +337,7 @@ describe("nested canvas", () => {
     addCanvas(container)
     const [att] = latest(seen).attachments
     expect(att!.kind).toBe("canvas")
+    expect(att!.embeddingScale).toBe("screen-stable")
     expect(att!.canvas).toEqual(emptyCanvasDoc())
   })
 
@@ -359,6 +360,7 @@ describe("nested canvas", () => {
     addPage(container.querySelector("[data-canvas-attachment]") as HTMLElement)
 
     const reloaded = parseCanvasDoc(serializeCanvasDoc(latest(seen)))
+    expect(reloaded.attachments[0]!.embeddingScale).toBe("screen-stable")
     expect(reloaded.attachments[0]!.canvas!.frames).toHaveLength(1)
   })
 })
