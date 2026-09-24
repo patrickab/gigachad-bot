@@ -127,7 +127,7 @@ export interface CanvasEmbedRect {
   aspect: number
 }
 async function loadEmbeds(images: EmbedRect[]): Promise<LoadedEmbed[]> {
-  const loaded = await Promise.all(images.map(async (embed) => {
+  const loaded: Array<LoadedEmbed | null> = await Promise.all(images.map(async (embed): Promise<LoadedEmbed | null> => {
     try {
       const image = await loadImage(embed.url)
       return { ...embed, image, aspect: image.height / image.width }
