@@ -114,6 +114,39 @@ describe("useChatStream", () => {
     })
   })
 
+  it("publishes the first token before the response finishes", async () => {
+    let markFirstToken!: () => void
+    let finish!: () => void
+    const firstToken = new Promise<void>((resolve) => { markFirstToken = resolve })
+    const responseFinished = new Promise<void>((resolve) => { finish = resolve })
+    const now = vi.spyOn(performance, "now").mockReturnValue(0)
+    createChatStream.mockReturnValue({
+      abort: vi.fn(),
+      async *[Symbol.asyncIterator]() {
+        yield event("token", "First")
+        markFirstToken()
+        await responseFinished
+        yield event("token", " second")
+        yield event("done", "")
+      },
+    })
+    const { result } = renderHook(() => useChatStream())
+    let send: Promise<ChatStreamCompletion | null>
+
+    try {
+      await act(async () => {
+        send = result.current.send(request("Stream this"))
+        await firstToken
+      })
+      expect(result.current.messages.at(-1)).toEqual({ role: "assistant", content: "First" })
+
+      finish()
+      await act(async () => { await send })
+    } finally {
+      now.mockRestore()
+    }
+  })
+
   it("keeps usage for the current request instead of accumulating prior turns", async () => {
     createChatStream
       .mockReturnValueOnce(stream([

@@ -2,29 +2,17 @@ import type React from "react"
 import type { SSEEvent } from "./sse"
 import type { Message, ToolCallProgress, ToolCallRecord, ToolCallResult, ToolCallStarted, Usage } from "./types"
 
-const FLUSH_MS = 60
-
-// Coalesces in-place mutations of the trailing assistant `msg` into setMessages
-// calls at most every FLUSH_MS. Both useChatStream and useChat.webSearch
-// accumulate tokens onto that message and call schedule() per event; final()
-// guarantees the last state lands. Single home for the flush plumbing both
-// callers used to duplicate verbatim.
+// Publish every SSE event immediately. Delaying state updates turns short and fast
+// responses into a single final render, which is indistinguishable from no streaming.
 export function createFlushBatcher(
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>,
   msg: Message,
 ) {
-  let lastFlush = 0
-  let pending = false
-  let timer: ReturnType<typeof setTimeout> | null = null
-  // The trailing assistant message this batcher owns: `msg` itself until the first
-  // flush, then the copy that flush published. A newer turn replaces the tail with a
-  // message this batcher never published, so a late flush from an abandoned stream
-  // finds a foreign tail and publishes nothing.
+  // `msg` remains the mutable accumulator. `owned` tracks the copy React last
+  // received so an abandoned stream cannot overwrite a newer assistant message.
   let owned: Message = msg
 
   const flush = () => {
-    pending = false
-    lastFlush = performance.now()
     const published = { ...msg }
     const expected = owned
     // Advance before the updater runs: React invokes it later, and may invoke it twice.
@@ -39,18 +27,10 @@ export function createFlushBatcher(
   }
 
   const schedule = () => {
-    if (pending) return
-    const delay = Math.max(0, FLUSH_MS - (performance.now() - lastFlush))
-    if (delay <= 0) {
-      flush()
-      return
-    }
-    pending = true
-    timer = setTimeout(flush, delay)
+    flush()
   }
 
   const final = () => {
-    if (timer) clearTimeout(timer)
     flush()
   }
 
