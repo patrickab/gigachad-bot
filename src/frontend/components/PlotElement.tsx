@@ -14,6 +14,8 @@ export interface PlotFigure {
 // actually call the `sandbox_plot` tool — never in the server bundle or an idle chat's payload.
 const Plot = dynamic(
   async () => {
+    // Plotly detects the global at initialization, so MathJax must load first.
+    await import("mathjax/es5/tex-svg.js")
     const [{ default: createPlotlyComponent }, { default: Plotly }] = await Promise.all([
       import("react-plotly.js/factory"),
       import("plotly.js-dist-min"),
