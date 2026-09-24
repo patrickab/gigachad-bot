@@ -3,7 +3,7 @@
 import { Streamdown, defaultRemarkPlugins, type Components } from "streamdown"
 import { createMathPlugin } from "@streamdown/math"
 import remarkBreaks from "remark-breaks"
-import { cloneElement, isValidElement, memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
+import { cloneElement, isValidElement, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { cn } from "@/lib/utils"
 import { highlightCode } from "@/lib/markdown-syntax-highlighting"
 import { apiOrigin } from "@/lib/api"
@@ -121,12 +121,30 @@ function MermaidDiagram({ code }: { code: string }) {
   )
 }
 
+const MIN_MARKMAP_SCALE = 0.5
+const CANVAS_MARKMAP_PADDING = 24
+
 function MarkmapDiagram({ code }: { code: string }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
   const mmRef = useRef<any>(null)
   const [failed, setFailed] = useState(false)
   const themeVersion = useThemeVersion()
+  const [canvasViewportHeight, setCanvasViewportHeight] = useState<number | null>(null)
+  const renderedRef = useRef<{ code: string; themeVersion: number } | null>(null)
+
+  // A generated document sits under Streamdown's auto-sized <pre>/<code> wrappers.
+  // Measure the canvas attachment itself so the map owns its complete viewport, not
+  // the wrapper's 400px fallback.
+  useLayoutEffect(() => {
+    const attachment = containerRef.current?.closest<HTMLElement>("[data-canvas-attachment]")
+    if (!attachment) return
+    const measure = () => setCanvasViewportHeight(Math.max(0, attachment.clientHeight - CANVAS_MARKMAP_PADDING))
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(attachment)
+    return () => observer.disconnect()
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -135,6 +153,8 @@ function MarkmapDiagram({ code }: { code: string }) {
         const { Transformer } = await import("markmap-lib")
         const { Markmap } = await import("markmap-view")
         if (cancelled || !containerRef.current) return
+        if (containerRef.current.closest("[data-canvas-attachment]") && canvasViewportHeight === null) return
+        if (renderedRef.current?.code === code && renderedRef.current.themeVersion === themeVersion) return
 
         const transformer = new Transformer()
         const { root } = transformer.transform(code)
@@ -142,7 +162,7 @@ function MarkmapDiagram({ code }: { code: string }) {
         if (!svgRef.current) {
           const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
           svg.style.width = "100%"
-          svg.style.height = "400px"
+          svg.style.height = "100%"
           containerRef.current.appendChild(svg)
           svgRef.current = svg
         }
@@ -152,7 +172,8 @@ function MarkmapDiagram({ code }: { code: string }) {
         const ink = isLight ? "#1c1917" : isGlass ? "rgba(255,255,255,0.85)" : "#d4d4d8"
         const linkColor = isLight ? "#a8a29e" : isGlass ? "rgba(255,255,255,0.2)" : "#3f3f46"
 
-        // autoFit: false — markmap calls fit() internally when true, unguarded; we call it ourselves below, wrapped.
+        // Markmap's native drag and wheel controls make this a real viewport. Fit only
+        // new content. A canvas resize must preserve the user's pan and zoom.
         if (mmRef.current) {
           await mmRef.current.setData(root)
         } else {
@@ -161,12 +182,20 @@ function MarkmapDiagram({ code }: { code: string }) {
             duration: 300,
             paddingX: 16,
             initialExpandLevel: -1,
+            zoom: true,
+            pan: true,
             color: () => linkColor,
           })
           await mmRef.current.setData(root)
         }
-        if (cancelled) return
-        try { await mmRef.current.fit() } catch {}
+        if (renderedRef.current?.code !== code) {
+          try {
+            await mmRef.current.fit()
+            const scale = (svgRef.current as (SVGSVGElement & { __zoom?: { k?: number } })).__zoom?.k ?? 1
+            if (scale < MIN_MARKMAP_SCALE) await mmRef.current.rescale(MIN_MARKMAP_SCALE / scale)
+          } catch {}
+        }
+        renderedRef.current = { code, themeVersion }
 
         // text recolors on theme switch; link color is baked at create (minor)
         svgRef.current.style.setProperty("--markmap-text-color", ink)
@@ -175,10 +204,10 @@ function MarkmapDiagram({ code }: { code: string }) {
       }
     })()
     return () => { cancelled = true }
-  }, [code, themeVersion])
+  }, [code, themeVersion, canvasViewportHeight])
 
   if (failed) return <CodeBlock codeString={code} language="markdown" />
-  return <div ref={containerRef} className="my-3 overflow-hidden rounded-md" />
+  return <div ref={containerRef} className="my-3 overflow-hidden rounded-md" style={{ height: canvasViewportHeight === null ? "var(--markmap-height, 400px)" : `${canvasViewportHeight}px` }} />
 }
 
 const REMARK_PLUGINS = [...Object.values(defaultRemarkPlugins), remarkBreaks]
