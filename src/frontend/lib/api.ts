@@ -415,6 +415,10 @@ export async function moveDocument(path: string, fromSlug: string, toSlug: strin
   return post<ProjectDocument>("/documents/move", { path, from_slug: fromSlug, to_slug: toSlug })
 }
 
+export async function renameDocument(slug: string, path: string, name: string): Promise<ProjectDocument> {
+  return post<ProjectDocument>("/documents/rename", { slug, path, name })
+}
+
 export function attachDocument(chatId: string, path: string, slug: string | null = null): Promise<Attachment> {
   return attachFileByPath("documents", chatId, path, slug)
 }
@@ -467,6 +471,13 @@ export async function writeArchitectureGraph(name: string, content: string): Pro
     document = await putGraph(name, content)
   }
   graphRevisions.set(name, document.revision)
+  return document
+}
+
+export async function renameArchitectureGraph(name: string, newName: string): Promise<ArchitectureGraphDocument> {
+  const document = await post<ArchitectureGraphDocument>(`/architecture-graphs/${encodeURIComponent(name)}/rename`, { name: newName })
+  graphRevisions.delete(name)
+  graphRevisions.set(document.name, document.revision)
   return document
 }
 

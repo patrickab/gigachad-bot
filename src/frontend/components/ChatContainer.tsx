@@ -31,6 +31,7 @@ export interface ChatSidebarContextValue {
   onOpenDocuments?: () => void
   onCreateDocument?: () => void
   onDeleteDocument?: (path: string) => void
+  onRenameDocument?: (path: string, name: string) => void | Promise<void>
   onDocumentSaved?: (filename?: string, content?: string) => void
   liveCanvasRef?: React.MutableRefObject<{ path: string; content: string } | null>
   vaultPaths?: Set<string>
@@ -182,7 +183,121 @@ function ContextBody({
   )
 }
 
-function DocumentsBody({ documents, slug, onSelect, editingPath, onEdit, onDelete, onSaved, onLiveContent, pdfWide, onTogglePdfWide, vaultPaths, vaultEditingPath, onEditVault }: { documents: ProjectDocument[]; slug: string | null; onSelect?: (path: string) => void; editingPath?: string | null; onEdit?: (path: string | null) => void; onDelete?: (path: string) => void; onSaved?: (filename?: string, content?: string) => void; onLiveContent?: (path: string, content: string | null) => void; pdfWide?: boolean; onTogglePdfWide?: () => void; vaultPaths?: Set<string>; vaultEditingPath?: string | null; onEditVault?: (path: string | null) => void }) {
+function DocumentRow({ doc, slug, onSelect, editingPath, onEdit, onDelete, onRename, onSaved, onLiveContent, pdfWide, onTogglePdfWide, isVault, vaultEditingPath, onEditVault }: {
+  doc: ProjectDocument
+  slug: string | null
+  onSelect?: (path: string) => void
+  editingPath?: string | null
+  onEdit?: (path: string | null) => void
+  onDelete?: (path: string) => void
+  onRename?: (path: string, name: string) => void | Promise<void>
+  onSaved?: (filename?: string, content?: string) => void
+  onLiveContent?: (path: string, content: string | null) => void
+  pdfWide?: boolean
+  onTogglePdfWide?: () => void
+  isVault: boolean
+  vaultEditingPath?: string | null
+  onEditVault?: (path: string | null) => void
+}) {
+  const [editingTitle, setEditingTitle] = useState(false)
+  const selectTimer = useRef<number | undefined>(undefined)
+  const cancelRename = useRef(false)
+  const isPdf = doc.mime === "application/pdf"
+  const vaultText = isVault && !isPdf
+  const editable = /\.(md|tex|canvas)$/.test(doc.name) && !vaultText
+  const expanded = editingPath === doc.path || (vaultText && vaultEditingPath === doc.path)
+  const Icon = isPdf ? FileType : FileText
+
+  useEffect(() => () => window.clearTimeout(selectTimer.current), [])
+
+  const select = useCallback(() => {
+    window.clearTimeout(selectTimer.current)
+    selectTimer.current = window.setTimeout(() => onSelect?.(doc.path), 180)
+  }, [doc.path, onSelect])
+
+  const startRename = useCallback((event: React.MouseEvent) => {
+    event.stopPropagation()
+    if (isVault) return
+    window.clearTimeout(selectTimer.current)
+    setEditingTitle(true)
+  }, [isVault])
+
+  const finishRename = useCallback((name: string) => {
+    setEditingTitle(false)
+    if (cancelRename.current) {
+      cancelRename.current = false
+      return
+    }
+    if (name.trim() && name !== doc.name) void onRename?.(doc.path, name)
+  }, [doc.name, doc.path, onRename])
+
+  return (
+    <div className="border-b border-divider/50">
+      <div className="flex items-center gap-1 px-2 py-2 hover:bg-surface/50 transition-colors">
+        <button
+          type="button"
+          onClick={() => {
+            if (vaultText) onEditVault?.(expanded ? null : doc.path)
+            else onEdit?.(expanded ? null : doc.path)
+          }}
+          className="rounded p-0.5 text-ink-faint hover:text-ink hover:bg-surface-elevated transition-colors shrink-0"
+        >
+          {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        </button>
+        <Icon className="h-3.5 w-3.5 shrink-0 text-ink-faint" />
+        {editingTitle ? (
+          <input
+            autoFocus
+            defaultValue={doc.name}
+            onClick={(event) => event.stopPropagation()}
+            onBlur={(event) => finishRename(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur()
+              if (event.key === "Escape") {
+                cancelRename.current = true
+                event.currentTarget.blur()
+              }
+            }}
+            className="min-w-0 flex-1 bg-transparent text-[11px] font-medium text-ink outline-none"
+            aria-label={`Rename ${doc.name}`}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={select}
+            className="min-w-0 flex-1 text-left text-ink-muted hover:text-ink transition-colors"
+          >
+            <span className="block truncate text-[11px] font-medium" onDoubleClick={startRename}>{doc.name}</span>
+          </button>
+        )}
+        {!isVault && (
+          <button
+            type="button"
+            onClick={() => onDelete?.(doc.path)}
+            className="rounded p-0.5 text-ink-faint hover:text-danger hover:bg-surface-elevated transition-colors shrink-0"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
+      </div>
+      {expanded && editable && slug && (
+        <DocumentEditor path={doc.path} slug={slug} onClose={() => onEdit?.(null)} onSaved={onSaved} onLiveContent={onLiveContent} />
+      )}
+      {expanded && !editable && doc.mime.startsWith("image/") && (
+        <div className="p-2 max-h-[60vh] overflow-y-auto">
+          <img src={fileViewerRawUrl(doc.path)} alt={doc.name} className="max-w-full rounded border border-divider" />
+        </div>
+      )}
+      {expanded && !editable && isPdf && (
+        <div className="h-[60vh]">
+          <LazyPdfViewer url={fileViewerRawUrl(doc.path)} isWide={pdfWide} onToggleWide={onTogglePdfWide} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DocumentsBody({ documents, slug, onSelect, editingPath, onEdit, onDelete, onRename, onSaved, onLiveContent, pdfWide, onTogglePdfWide, vaultPaths, vaultEditingPath, onEditVault }: { documents: ProjectDocument[]; slug: string | null; onSelect?: (path: string) => void; editingPath?: string | null; onEdit?: (path: string | null) => void; onDelete?: (path: string) => void; onRename?: (path: string, name: string) => void | Promise<void>; onSaved?: (filename?: string, content?: string) => void; onLiveContent?: (path: string, content: string | null) => void; pdfWide?: boolean; onTogglePdfWide?: () => void; vaultPaths?: Set<string>; vaultEditingPath?: string | null; onEditVault?: (path: string | null) => void }) {
   if (documents.length === 0) {
     return (
       <div className="flex items-center justify-center py-6 text-xs text-ink-faint">
@@ -191,65 +306,27 @@ function DocumentsBody({ documents, slug, onSelect, editingPath, onEdit, onDelet
     )
   }
 
-  const isEditable = (doc: ProjectDocument) => /\.(md|tex|canvas)$/.test(doc.name)
   return (
     <div>
-      {documents.map((doc) => {
-        const Icon = doc.mime === "application/pdf" ? FileType : FileText
-        const isVault = vaultPaths?.has(doc.path) ?? false
-        const isPdf = doc.mime === "application/pdf"
-        // Vault PDFs inline-preview like library PDFs; only vault *text* docs
-        // (.md/.tex/.txt) route to the vault-editor overlay (onEditVault).
-        const vaultText = isVault && !isPdf
-        const editable = isEditable(doc) && !vaultText
-        const expanded = editingPath === doc.path || (vaultText && vaultEditingPath === doc.path)
-        return (
-          <div key={doc.path} className="border-b border-divider/50">
-            <div className="flex items-center gap-1 px-2 py-2 hover:bg-surface/50 transition-colors">
-              <button
-                type="button"
-                onClick={() => {
-                  if (vaultText) onEditVault?.(expanded ? null : doc.path)
-                  else onEdit?.(expanded ? null : doc.path)
-                }}
-                className="rounded p-0.5 text-ink-faint hover:text-ink hover:bg-surface-elevated transition-colors shrink-0"
-              >
-                {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-              </button>
-              <button
-                type="button"
-                onClick={() => onSelect?.(doc.path)}
-                className="flex min-w-0 flex-1 items-center gap-2 text-left text-ink-muted hover:text-ink transition-colors"
-              >
-                <Icon className="h-3.5 w-3.5 shrink-0 text-ink-faint" />
-                <span className="min-w-0 flex-1 truncate text-[11px] font-medium">{doc.name}</span>
-              </button>
-              {!isVault && (
-                <button
-                  type="button"
-                  onClick={() => onDelete?.(doc.path)}
-                  className="rounded p-0.5 text-ink-faint hover:text-danger hover:bg-surface-elevated transition-colors shrink-0"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              )}
-            </div>
-            {expanded && editable && slug && (
-              <DocumentEditor path={doc.path} slug={slug} onClose={() => onEdit?.(null)} onSaved={onSaved} onLiveContent={onLiveContent} />
-            )}
-            {expanded && !editable && doc.mime.startsWith("image/") && (
-              <div className="p-2 max-h-[60vh] overflow-y-auto">
-                <img src={fileViewerRawUrl(doc.path)} alt={doc.name} className="max-w-full rounded border border-divider" />
-              </div>
-            )}
-            {expanded && !editable && isPdf && (
-              <div className="h-[60vh]">
-                <LazyPdfViewer url={fileViewerRawUrl(doc.path)} isWide={pdfWide} onToggleWide={onTogglePdfWide} />
-              </div>
-            )}
-          </div>
-        )
-      })}
+      {documents.map((doc) => (
+        <DocumentRow
+          key={doc.path}
+          doc={doc}
+          slug={slug}
+          onSelect={onSelect}
+          editingPath={editingPath}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          onRename={onRename}
+          onSaved={onSaved}
+          onLiveContent={onLiveContent}
+          pdfWide={pdfWide}
+          onTogglePdfWide={onTogglePdfWide}
+          isVault={vaultPaths?.has(doc.path) ?? false}
+          vaultEditingPath={vaultEditingPath}
+          onEditVault={onEditVault}
+        />
+      ))}
     </div>
   )
 }
@@ -369,6 +446,7 @@ export function useSidebarElements({
     onOpenDocuments,
     onCreateDocument,
     onDeleteDocument,
+    onRenameDocument,
     onDocumentSaved,
     liveCanvasRef,
     vaultPaths,
@@ -446,7 +524,7 @@ export function useSidebarElements({
       open: isElementOpen("documents"),
       onOpenChange: (o) => onElementOpenChange("documents", o),
       body: (
-        <DocumentsBody documents={docs} slug={slug} onSelect={onSelectDocument} editingPath={editingDocPath} onEdit={onEditDocument} onDelete={onDeleteDocument} onSaved={onDocumentSaved} onLiveContent={liveCanvasRef ? (p, c) => { liveCanvasRef.current = c !== null ? { path: p, content: c } : null } : undefined} pdfWide={pdfWide} onTogglePdfWide={onTogglePdfWide} vaultPaths={vaultPaths} vaultEditingPath={vaultEditingPath} onEditVault={onEditVaultDocument} />
+        <DocumentsBody documents={docs} slug={slug} onSelect={onSelectDocument} editingPath={editingDocPath} onEdit={onEditDocument} onDelete={onDeleteDocument} onRename={onRenameDocument} onSaved={onDocumentSaved} onLiveContent={liveCanvasRef ? (p, c) => { liveCanvasRef.current = c !== null ? { path: p, content: c } : null } : undefined} pdfWide={pdfWide} onTogglePdfWide={onTogglePdfWide} vaultPaths={vaultPaths} vaultEditingPath={vaultEditingPath} onEditVault={onEditVaultDocument} />
       ),
     })
   }
@@ -471,7 +549,7 @@ export function useSidebarElements({
     onToggleAttachmentActive, onRemoveAttachment, onAttachmentContentChange,
     lastSearchResult, vaultEnabled, onOpenVault,
     documents, onSelectDocument, onOpenDocuments, onCreateDocument,
-    editingDocPath, onEditDocument, onDeleteDocument, onDocumentSaved,
+    editingDocPath, onEditDocument, onDeleteDocument, onRenameDocument, onDocumentSaved,
     isElementOpen, onElementOpenChange, pdfWide, onTogglePdfWide,
     liveCanvasRef, vaultPaths, vaultEditingPath, onEditVaultDocument,
   ])

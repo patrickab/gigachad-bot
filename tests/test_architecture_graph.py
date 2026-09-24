@@ -73,6 +73,20 @@ def test_store_writes_lists_and_promotes_a_valid_draft(graph_store: Architecture
     assert not store.has_draft(name)
 
 
+def test_store_rename_moves_the_canonical_graph_and_its_draft(graph_store: ArchitectureGraphStore):
+    store = graph_store
+    store.write("checkout.architecture.yaml", CONTENT)
+    store.write("checkout.architecture.yaml", CONTENT.replace("Checkout\n", "Renamed checkout\n"), draft=True)
+
+    path = store.rename("checkout.architecture.yaml", "system.architecture.yaml")
+
+    assert path == "graph/system.architecture.yaml"
+    assert store.read("system.architecture.yaml") == CONTENT
+    assert store.has_draft("system.architecture.yaml")
+    with pytest.raises(FileNotFoundError):
+        store.read("checkout.architecture.yaml")
+
+
 @pytest.mark.parametrize(
     ("content", "message"),
     [
@@ -111,6 +125,9 @@ class FakeProjects:
             raise FileNotFoundError(slug)
         return self.files
 
+    def list_projects(self) -> list[dict[str, str]]:
+        return [{"slug": "project"}]
+
     def add_file(self, slug: str, path: str) -> list[str]:
         self.list_files(slug)
         if path not in self.files:
@@ -136,3 +153,26 @@ async def test_graph_route_writes_a_canonical_file_and_associates_project(graph_
     assert response.hasDraft is False
     assert response.revision
     assert projects.files == ["graph/checkout.architecture.yaml"]
+
+
+async def test_graph_route_renames_the_canonical_file_and_project_reference(graph_store: ArchitectureGraphStore):
+    store = graph_store
+    projects = FakeProjects()
+    await architecture_graphs.create_graph(
+        architecture_graphs.CreateGraphRequest(name="checkout.architecture.yaml", content=CONTENT, projectSlug="project"),
+        Response(),
+        store,
+        projects,
+    )
+
+    response = await architecture_graphs.rename_graph(
+        "checkout.architecture.yaml",
+        architecture_graphs.RenameGraphRequest(name="system"),
+        Response(),
+        store,
+        projects,
+    )
+
+    assert response.path == "graph/system.architecture.yaml"
+    assert store.read("system.architecture.yaml") == CONTENT
+    assert projects.files == ["graph/system.architecture.yaml"]

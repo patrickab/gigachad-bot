@@ -164,6 +164,24 @@ class ArchitectureGraphStore:
         write_text(self._store, key, content, expected=current)
         return key
 
+    def rename(self, name: str, new_name: str) -> str:
+        source = self._key(name)
+        destination = self._key(new_name)
+        if not self._store.exists(source):
+            raise ArchitectureGraphNotFound(f"Architecture Graph not found: {name}")
+        if source == destination:
+            return source
+        if self._store.exists(destination):
+            raise ArchitectureGraphError(f"Architecture Graph already exists: {new_name}")
+        draft_source = self._key(name, draft=True)
+        draft_destination = self._key(new_name, draft=True)
+        if self._store.exists(draft_source) and self._store.exists(draft_destination):
+            raise ArchitectureGraphError(f"Architecture Graph draft already exists: {new_name}")
+        self._store.move(source, destination)
+        if self._store.exists(draft_source):
+            self._store.move(draft_source, draft_destination)
+        return destination
+
     def has_draft(self, name: str) -> bool:
         return self._store.exists(self._key(name, draft=True))
 

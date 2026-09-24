@@ -13,7 +13,7 @@
  */
 import { useState } from "react"
 import { describe, it, expect, vi } from "vitest"
-import { render, act, fireEvent } from "@testing-library/react"
+import { render, act, fireEvent, waitFor } from "@testing-library/react"
 import { TabActiveProvider } from "@/components/TabManager"
 
 vi.mock("@/components/PdfViewer", () => ({
@@ -44,6 +44,8 @@ const api = vi.hoisted(() => ({
   listArchitectureGraphs: vi.fn(async () => []),
   listNotes: vi.fn(async () => [] as { path: string; name: string; mime: string }[]),
   writeDocument: vi.fn(async (_slug: string, _name: string, _content: string) => ({ path: "project/proj/document/notes.canvas", name: "notes.canvas", mime: "application/json" })),
+  renameDocument: vi.fn(async (_slug: string, _path: string, name: string) => ({ path: `project/proj/document/${name}.md`, name: `${name}.md`, mime: "text/markdown" })),
+  renameArchitectureGraph: vi.fn(async (_name: string, name: string) => ({ path: `graph/${name}.architecture.yaml`, name: `${name}.architecture.yaml`, content: "", hasDraft: false, revision: "r" })),
   ApiError: class ApiError extends Error {
     status: number
     constructor(message: string, status: number) {
@@ -481,6 +483,34 @@ describe("document attachments", () => {
 
     await act(async () => {})
     expect(container.textContent).toContain("Generated notes.")
+  })
+
+  it("renames the backing document for document and Architecture Graph header edits", async () => {
+    const seen: CanvasDocument[] = []
+    const initialDoc: CanvasDocument = {
+      version: 1, frames: [], strokes: [], texts: [],
+      attachments: [
+        { id: "mindmap", kind: "document", path: "project/proj/document/mindmap.md", x: 0, y: 0, width: 720, height: 480 },
+        { id: "graph", kind: "architecture-graph", path: "graph/system.architecture.yaml", x: 0, y: 500, width: 720, height: 480 },
+      ],
+    }
+    const { container, getByText } = render(<Harness seen={seen} slug="proj" initialDoc={initialDoc} />)
+
+    fireEvent.doubleClick(getByText("mindmap.md"))
+    let input = container.querySelector("input")!
+    fireEvent.change(input, { target: { value: "Research map" } })
+    fireEvent.blur(input)
+    await waitFor(() => expect(latest(seen).attachments[0]).toMatchObject({
+      path: "project/proj/document/Research map.md", title: "Research map",
+    }))
+
+    fireEvent.doubleClick(getByText("system.architecture.yaml"))
+    input = container.querySelector("input")!
+    fireEvent.change(input, { target: { value: "System design" } })
+    fireEvent.blur(input)
+    await waitFor(() => expect(latest(seen).attachments[1]).toMatchObject({
+      path: "graph/System design.architecture.yaml", title: "System design",
+    }))
   })
 
   it("lists notes-scoped artifacts when the canvas has no project slug", async () => {

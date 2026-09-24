@@ -187,6 +187,46 @@ async def test_move_relocates_the_document_key_leaving_nothing_behind(alice):
     assert alice.projects.list_files(slug) == [f"project/{slug}/document/sketch.canvas"]
 
 
+
+async def test_rename_keeps_project_document_content_and_extension(alice):
+    slug = alice.projects.create_project("Thesis")["slug"]
+    await route.write_document(
+        route.WriteDocumentRequest(slug=slug, name="mindmap.md", content="# Mind map"), alice.projects, alice.docs, alice.assets
+    )
+
+    meta = await route.rename_document(
+        route.RenameDocumentRequest(path=f"project/{slug}/document/mindmap.md", slug=slug, name="Research map"),
+        alice.projects,
+        alice.docs,
+        alice.assets,
+    )
+
+    assert meta.path == f"project/{slug}/document/Research map.md"
+    assert alice.docs.read_bytes(meta.path)[0] == b"# Mind map"
+    assert not alice.docs.exists(f"project/{slug}/document/mindmap.md")
+    assert alice.projects.list_files(slug) == [meta.path]
+
+
+async def test_rename_keeps_pdf_content_and_updates_every_project_reference(alice, documents_root, no_enqueue):
+    first = alice.projects.create_project("First")["slug"]
+    second = alice.projects.create_project("Second")["slug"]
+    original = await route.upload_document(upload("source.pdf", b"%PDF-1.7 body"), first, alice.projects, alice.assets)
+    await route.add_document(route.AddDocumentRequest(path=original.path), second, alice.projects, alice.docs, alice.assets)
+
+    renamed = await route.rename_document(
+        route.RenameDocumentRequest(path=original.path, slug=first, name="renamed"),
+        alice.projects,
+        alice.docs,
+        alice.assets,
+    )
+
+    assert renamed.path == "PDFs/renamed.pdf"
+    assert alice.assets.read(renamed.path).content == b"%PDF-1.7 body"
+    assert not any(asset.logical_path == original.path for asset in alice.assets.list())
+    assert alice.projects.list_files(first) == [renamed.path]
+    assert alice.projects.list_files(second) == [renamed.path]
+    assert written_files(documents_root) == ["PDFs/renamed.pdf"]
+
 async def test_move_onto_an_existing_name_is_a_conflict(alice):
     slug = alice.projects.create_project("Thesis")["slug"]
     for request in (

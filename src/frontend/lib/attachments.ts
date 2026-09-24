@@ -28,6 +28,7 @@ export function toolArtifactDocument(call: ToolCallRecord): ToolArtifactDocument
   }
   return null
 }
+
 export function isImageAttachment(a: Attachment): boolean {
   return a.mime.startsWith("image/")
 }

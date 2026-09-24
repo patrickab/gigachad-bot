@@ -17,6 +17,7 @@ that mirror back. All other application state remains database-only.
 """
 
 import logging
+from config import DOCUMENTS
 from pathlib import Path, PurePosixPath
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
@@ -27,7 +28,7 @@ from backend.routes.schemas import AttachResult, FileListResponse, FileMeta
 from lib import document_library as lib_docs
 from lib.asset_store import Asset, AssetStore
 from lib.attachment_materialize import materialize, store_library_pdf
-from lib.data_store import DataStore, DataStorePath, StorageNotFoundError, validate_key, write_text
+from lib.data_store import DataStore, DataStorePath, StorageConflictError, StorageNotFoundError, validate_key, write_text
 from lib.project_store import ProjectStore
 from lib.storage_namespace import (
     ATTACHMENT,
@@ -60,6 +61,13 @@ class WriteDocumentRequest(BaseModel):
 
 class AddDocumentRequest(BaseModel):
     path: str
+
+
+
+class RenameDocumentRequest(BaseModel):
+    slug: str
+    path: str
+    name: str
 
 
 def _meta_list(paths: list[str]) -> list[FileMeta]:
@@ -378,6 +386,83 @@ async def move_document(
         store.add_file(req.to_slug, dest)
 
     return FileMeta(**lib_docs.document_meta(dest))
+
+
+@router.post("/rename", response_model=FileMeta)
+async def rename_document(
+    req: RenameDocumentRequest,
+    store: ProjectStore = Depends(get_project_store),
+    docs: DataStore = Depends(get_document_store),
+    assets: AssetStore = Depends(get_asset_store),
+):
+    """Rename a database-owned document, retaining its content and project links."""
+    try:
+        key = validate_key(req.path)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Document not found") from None
+
+    if req.slug:
+        try:
+            known = key in set(store.list_files(req.slug))
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        prefix = _project_docs_key(req.slug)
+    else:
+        known = _under(key, KEY_NOTES)
+        prefix = KEY_NOTES
+    if not known:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    name = Path(req.name).name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Document name is required")
+    suffix = "".join(Path(PurePosixPath(key).name).suffixes)
+    if suffix and not name.endswith(suffix):
+        name += suffix
+
+    if DataStorePath(docs, key).is_file():
+        if not _under(key, prefix):
+            raise HTTPException(status_code=404, detail="Document not found")
+        destination = f"{prefix}/{name}"
+        if destination == key:
+            return FileMeta(**lib_docs.document_meta(key))
+        if docs.exists(destination):
+            raise HTTPException(status_code=409, detail="A document with that name already exists there")
+        docs.move(key, destination)
+        if req.slug:
+            store.remove_file(req.slug, key)
+            store.add_file(req.slug, destination)
+        return FileMeta(**lib_docs.document_meta(destination))
+
+    if not _under(key, KEY_PDFS):
+        raise HTTPException(status_code=404, detail="Document not found")
+    try:
+        asset = assets.read(key)
+    except StorageNotFoundError:
+        raise HTTPException(status_code=404, detail="Document not found") from None
+    if asset.kind != "pdf":
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    destination = f"{KEY_PDFS}/{name}"
+    if destination == key:
+        return FileMeta(**lib_docs.document_meta(key))
+    try:
+        renamed = assets.move(key, destination)
+    except StorageConflictError as exc:
+        raise HTTPException(status_code=409, detail="A document with that name already exists there") from exc
+
+    # Keep Nextcloud's convenience mirror aligned with the database authority.
+    Path(DOCUMENTS, *key.split("/")).unlink(missing_ok=True)
+    try:
+        assets.mirror(renamed, DOCUMENTS)
+    except OSError:
+        log.exception("Failed to mirror renamed PDF %s into Nextcloud", destination)
+    for project in store.list_projects():
+        slug = project["slug"]
+        if key in store.list_files(slug):
+            store.remove_file(slug, key)
+            store.add_file(slug, destination)
+    return FileMeta(**lib_docs.document_meta(destination))
 
 
 @router.post("/attach", response_model=AttachResult)

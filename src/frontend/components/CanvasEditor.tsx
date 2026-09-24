@@ -4,7 +4,7 @@ import { memo, useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { getStroke } from "perfect-freehand"
 import { type StrokeData, type EmbedRect, getSvgPathFromStroke, renderPageToPng } from "@/lib/drawing"
-import { createArchitectureGraph, fileViewerRawUrl, writeBinaryDocument, listArchitectureGraphs, listNotes, listProjectDocuments, loadFileViewerText, readArchitectureGraph, writeArchitectureGraph, writeDocument, ApiError } from "@/lib/api"
+import { createArchitectureGraph, fileViewerRawUrl, writeBinaryDocument, listArchitectureGraphs, listNotes, listProjectDocuments, loadFileViewerText, readArchitectureGraph, writeArchitectureGraph, writeDocument, renameArchitectureGraph, renameDocument, ApiError } from "@/lib/api"
 import { emptyArchitectureGraph, parseArchitectureGraph, serializeArchitectureGraph, type ArchitectureGraph } from "@/lib/architectureGraph"
 import { useGraphAutosave } from "@/lib/graphAutosave"
 import { subscribeToChanges } from "@/lib/syncStream"
@@ -138,6 +138,7 @@ export interface CanvasAttachment {
   y: number
   width: number
   height?: number // Architecture Graphs own their viewport height; legacy attachments retain their aspect
+  title?: string // user label, independent of the backing document filename
   page?: number // selected PDF page, persisted with the canvas
 }
 
@@ -1331,6 +1332,26 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     applyChange({ ...cur, attachments: cur.attachments.map((a) => a.id === id ? { ...a, page } : a) })
   }, [applyChange])
 
+  const [editingAttachmentId, setEditingAttachmentId] = useState<string | null>(null)
+  const updateAttachmentTitle = useCallback(async (id: string, nextTitle: string) => {
+    const attachment = liveRef.current.doc.attachments.find((a) => a.id === id)
+    const title = nextTitle.trim()
+    setEditingAttachmentId(null)
+    if (!attachment || !title || attachment.title === title) return
+    if (!attachment.path) {
+      const cur = liveRef.current.doc
+      applyChange({ ...cur, attachments: cur.attachments.map((a) => a.id === id ? { ...a, title } : a) })
+      return
+    }
+    try {
+      const renamed = attachment.kind === "architecture-graph"
+        ? await renameArchitectureGraph(attachment.path.split("/").pop()!, title)
+        : await renameDocument(slug ?? "", attachment.path, title)
+      const cur = liveRef.current.doc
+      applyChange({ ...cur, attachments: cur.attachments.map((a) => a.id === id ? { ...a, path: renamed.path, title } : a) })
+    } catch { /* the stored name stays authoritative when rename fails */ }
+  }, [applyChange, slug])
+
   // Which attachment window, if any, is blown up over the whole surface. Exiting drops
   // straight back onto the canvas that holds it.
   const [fullscreenId, setFullscreenId] = useState<string | null>(null)
@@ -1995,7 +2016,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
           const architectureGraph = att.kind === "architecture-graph"
           const isDocument = att.kind === "document"
           const aspect = nested ? CANVAS_ASPECT : (aspects[att.id] ?? FALLBACK_ASPECT)
-          const name = att.path?.split("/").pop() ?? (architectureGraph ? "Architecture Graph" : nested ? "Canvas" : isDocument ? "Document" : "PDF")
+          const name = att.title ?? att.path?.split("/").pop() ?? (architectureGraph ? "Architecture Graph" : nested ? "Canvas" : isDocument ? "Document" : "PDF")
           // Visible size follows canvas zoom, but layout width only follows the
           // settled zoom (capped at what PdfViewer will actually rasterize); the
           // CSS transform bridges the difference. Mid-gesture that means pure
@@ -2030,7 +2051,26 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
                 onPointerDown={(e) => { e.stopPropagation(); if (!full) startInteraction(att.id, "attachment", "move", e.clientX, e.clientY) }}
               >
                 {nested ? <SquarePen className="h-3 w-3 text-ink-faint shrink-0" /> : <FileType className="h-3 w-3 text-ink-faint shrink-0" />}
-                <span className="flex-1 min-w-0 truncate text-[10px] font-medium text-ink-muted">{name}</span>
+                {editingAttachmentId === att.id ? (
+                  <input
+                    autoFocus
+                    defaultValue={name}
+                    className="flex-1 min-w-0 bg-transparent text-[10px] font-medium text-ink outline-none select-text"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onBlur={(e) => updateAttachmentTitle(att.id, e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") updateAttachmentTitle(att.id, e.currentTarget.value)
+                      if (e.key === "Escape") setEditingAttachmentId(null)
+                    }}
+                  />
+                ) : (
+                  <span
+                    className="flex-1 min-w-0 truncate text-[10px] font-medium text-ink-muted"
+                    onDoubleClick={(e) => { e.stopPropagation(); setEditingAttachmentId(att.id) }}
+                  >
+                    {name}
+                  </span>
+                )}
                 <button
                   onClick={(e) => { e.stopPropagation(); setFullscreenId(full ? null : att.id) }}
                   className="rounded p-0.5 text-ink-faint hover:text-ink transition-colors shrink-0"

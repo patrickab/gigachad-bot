@@ -13,6 +13,8 @@ const { impls } = vi.hoisted(() => ({
     attachDocument: async () => ({ name: "d", mime: "text/plain", url: "u", active: true }),
     attachFileVaultFile: async () => ({ name: "v", mime: "text/plain", url: "u", active: true }),
     loadFileViewerText: async () => "",
+    renameDocument: async () => ({ path: "project/proj/document/renamed.md", name: "renamed.md", mime: "text/markdown" }),
+    renameArchitectureGraph: async () => ({ path: "graph/renamed.architecture.yaml", name: "renamed.architecture.yaml" }),
   } as Record<string, (...a: any[]) => any>,
 }))
 
@@ -30,6 +32,8 @@ vi.mock("@/lib/api", () => ({
     impls.attachDocument = async () => ({ name: "d", mime: "text/plain", url: "u", active: true })
     impls.attachFileVaultFile = async () => ({ name: "v", mime: "text/plain", url: "u", active: true })
     impls.loadFileViewerText = async () => ""
+    impls.renameDocument = async () => ({ path: "project/proj/document/renamed.md", name: "renamed.md", mime: "text/markdown" })
+    impls.renameArchitectureGraph = async () => ({ path: "graph/renamed.architecture.yaml", name: "renamed.architecture.yaml" })
   },
   listProjectDocuments: (...a: any[]) => impls.listProjectDocuments(...a),
   listProjectVaultDocuments: (...a: any[]) => impls.listProjectVaultDocuments(...a),
@@ -43,6 +47,8 @@ vi.mock("@/lib/api", () => ({
   attachFileVaultFile: (...a: any[]) => impls.attachFileVaultFile(...a),
   fileViewerRawUrl: (path: string) => `raw:${path}`,
   loadFileViewerText: (...a: any[]) => impls.loadFileViewerText(...a),
+  renameDocument: (...a: any[]) => impls.renameDocument(...a),
+  renameArchitectureGraph: (...a: any[]) => impls.renameArchitectureGraph(...a),
 }))
 
 vi.mock("@/lib/drawing", () => ({
@@ -218,6 +224,21 @@ describe("useProjectDocuments", () => {
 
       // Functional update called twice: n => n+1 then n => n-1.
       expect(setExtracting).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  describe("handleRenameDocument", () => {
+    it("renames a project document through the database API and refreshes the lists", async () => {
+      const renameDocument = vi.fn(async () => ({ path: "project/proj/document/renamed.md", name: "renamed.md", mime: "text/markdown" }))
+      ;(apiMock as any).__setImpl("renameDocument", renameDocument)
+      const listProjectDocuments = vi.fn(async () => [])
+      ;(apiMock as any).__setImpl("listProjectDocuments", listProjectDocuments)
+      const { result } = renderHook(() => useProjectDocuments(baseProps()))
+
+      await act(async () => { await result.current.handleRenameDocument("project/proj/document/original.md", "renamed") })
+
+      expect(renameDocument).toHaveBeenCalledWith("proj", "project/proj/document/original.md", "renamed")
+      expect(listProjectDocuments).toHaveBeenCalledTimes(2)
     })
   })
 

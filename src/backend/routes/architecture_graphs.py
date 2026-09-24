@@ -29,6 +29,12 @@ class CreateGraphRequest(GraphContentRequest):
     projectSlug: str | None = None
 
 
+
+
+class RenameGraphRequest(BaseModel):
+    name: str
+
+
 class GraphResponse(BaseModel):
     name: str
     path: str
@@ -113,6 +119,36 @@ async def write_graph(
 ) -> GraphResponse:
     store.write(name, req.content, expected=_expected_revision(store, name, if_match, draft=False))
     return _read_response(store, name, response=response)
+
+
+@router.post("/{name}/rename", response_model=GraphResponse)
+async def rename_graph(
+    name: str,
+    req: RenameGraphRequest,
+    response: Response,
+    store: ArchitectureGraphStore = Depends(get_architecture_graph_store),
+    projects: ProjectStore = Depends(get_project_store),
+) -> GraphResponse:
+    new_name = req.name.strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="Architecture Graph name is required")
+    if not new_name.endswith(".architecture.yaml"):
+        new_name += ".architecture.yaml"
+    try:
+        old_path = store.path_for(name)
+        new_path = store.rename(name, new_name)
+    except ArchitectureGraphNotFound:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    if old_path != new_path:
+        for project in projects.list_projects():
+            slug = project["slug"]
+            if old_path in projects.list_files(slug):
+                projects.remove_file(slug, old_path)
+                projects.add_file(slug, new_path)
+    return _read_response(store, new_name, response=response)
 
 
 @router.post("/{name}/projects/{slug}")

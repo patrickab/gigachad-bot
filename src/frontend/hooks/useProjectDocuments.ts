@@ -16,8 +16,11 @@ import {
   removeDocument,
   uploadDocument,
   uploadFile,
+  renameArchitectureGraph,
+  renameDocument,
   writeDocument,
 } from "@/lib/api"
+import { isArchitectureGraphPath } from "@/lib/architectureGraph"
 import { buildHiddenContent } from "@/lib/attachments"
 import { renderCanvasToJpeg, type EmbedRect } from "@/lib/drawing"
 import type { Message, ProjectDocument } from "@/lib/types"
@@ -182,6 +185,18 @@ export function useProjectDocuments({
     } catch { }
   }, [activeProject, refreshDocuments])
 
+  const handleRenameDocument = useCallback(async (path: string, name: string) => {
+    if (!activeProject || vaultDocPaths.has(path)) return
+    try {
+      if (isArchitectureGraphPath(path)) {
+        await renameArchitectureGraph(path.split("/").pop()!, name)
+      } else {
+        await renameDocument(activeProject, path, name)
+      }
+      refreshDocuments()
+    } catch { /* the stored name stays authoritative when rename fails */ }
+  }, [activeProject, vaultDocPaths, refreshDocuments])
+
   useEffect(() => {
     if (!isActive || appMode === "canvas") return
     const onKey = (e: KeyboardEvent) => {
@@ -213,6 +228,7 @@ export function useProjectDocuments({
     handleDeleteDocument,
     handleDocumentSaved,
     handleDocumentUpload,
+    handleRenameDocument,
     handleAddDocToProject,
   }
 }

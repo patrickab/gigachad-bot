@@ -215,7 +215,6 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       const artifact = toolArtifactDocument(call)
       return artifact ? [artifact] : []
     })
-    if (artifacts.length === 0) return
     await Promise.allSettled(artifacts.map((artifact) => writeDocument(activeProject ?? "", artifact.name, artifact.content)))
     docs.refreshDocuments()
   }, [activeProject, docs.refreshDocuments])
@@ -569,6 +568,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     onOpenDocuments: activeProject ? docs.openDocuments : undefined,
     onCreateDocument: activeProject ? () => docs.setCreateDocOpen(true) : undefined,
     onDeleteDocument: docs.handleDeleteDocument,
+    onRenameDocument: docs.handleRenameDocument,
     onDocumentSaved: docs.handleDocumentSaved,
     liveCanvasRef,
     vaultPaths: docs.vaultDocPaths,
@@ -577,8 +577,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   }), [
     handleRemoveAttachment, handleToggleAttachmentActive, handleAttachmentContentChange,
     vault.vaultEnabled, vault.openVaultPicker, vault.vaultEditPath, vault.setVaultEditPath,
-    docs.mergedDocuments, docs.handleDocumentSelect, docs.openDocuments, docs.setCreateDocOpen,
-    docs.handleDeleteDocument, docs.handleDocumentSaved, docs.vaultDocPaths,
+    docs.handleDeleteDocument, docs.handleRenameDocument, docs.handleDocumentSaved, docs.vaultDocPaths,
     activeProject,
   ])
 

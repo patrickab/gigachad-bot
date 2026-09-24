@@ -109,4 +109,5 @@ describe("toolArtifactDocument", () => {
       detail: { figure: { data: [{ type: "bar" }] } },
     })).toEqual({ name: "sandbox_plot-plot-1.plot.json", content: '{\n  "data": [\n    {\n      "type": "bar"\n    }\n  ]\n}' })
   })
+
 })

@@ -221,6 +221,34 @@ journalctl --user -u gigachad-bot.service -n 100 --no-pager
 journalctl --user -u gigachad-bot-omp.service -n 100 --no-pager
 ```
 
+### Provision the code sandbox
+
+The workspace agent and image-based plot requests run OMP inside
+[Agents-in-a-box](https://github.com/patrickab/Agents-in-a-box) (rootless
+Docker + gVisor). `pyproject.toml` resolves it at `../Agents-in-a-box`, so clone
+it next to both `$REPO` and `$PROD`, then run its setup once per host:
+
+```bash
+git clone git@github.com:patrickab/Agents-in-a-box.git "$HOME/git/Agents-in-a-box"
+cd "$HOME/git/Agents-in-a-box"
+uv sync
+./scripts/setup_agent_sandbox.sh
+uv run agent-sandbox doctor --profile gigachad
+```
+
+`setup_agent_sandbox.sh` installs rootless Docker and `runsc`, builds the
+image, and runs `scripts/setup_host_services.sh`. That script makes Ollama
+reachable from sandbox containers at `10.200.200.1:11434` through a persistent
+`lo` alias and a user socket proxy, while Ollama itself stays bound to
+`127.0.0.1`. On a host that already has the sandbox, run only
+`./scripts/setup_host_services.sh`.
+
+`src/agent_sandbox/profiles/gigachad.yaml` holds absolute host paths: the OMP
+executable (mount the binary, not a `mise` shim), the Python interpreters, and
+`~/.omp`. Adjust them for a different user or layout. Doctor must pass every
+check. Restart `gigachad-bot.service` after changing Agents-in-a-box, because
+the backend imports it at startup.
+
 ## 2. Publish the private HTTPS ingress
 
 On the backend host, inspect any existing Serve configuration before changing
@@ -315,13 +343,15 @@ For a first deployment or an update:
 2. Confirm `$ENV` has the exact production and local CORS origins, host-local
    dependency URLs, and only the required provider secrets. Leave
    `GIGACHAD_BASE_DIR` and `MINERU_SERVER_URL` unset.
-3. Start or restart `gigachad-bot.service` and confirm its loopback health
+3. On a new host, provision the code sandbox (see above) and confirm
+   `agent-sandbox doctor --profile gigachad` passes.
+4. Start or restart `gigachad-bot.service` and confirm its loopback health
    check.
-4. Run `"$PROD/deploy/tailscale-serve.sh" 8002` and confirm Tailnet HTTPS health
+5. Run `"$PROD/deploy/tailscale-serve.sh" 8002` and confirm Tailnet HTTPS health
    from another enrolled device.
-5. Configure Vercel's root directory, build settings, and public
+6. Configure Vercel's root directory, build settings, and public
    `NEXT_PUBLIC_API_BASE`, then deploy production.
-6. From an enrolled browser, open the Vercel production URL and use the app. A
+7. From an enrolled browser, open the Vercel production URL and use the app. A
    browser outside the Tailnet cannot reach its API by design.
 
 Before an update that could affect stored state, take a non-destructive backup
