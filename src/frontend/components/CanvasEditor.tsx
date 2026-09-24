@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { getStroke } from "perfect-freehand"
-import { type StrokeData, type EmbedRect, getSvgPathFromStroke, renderPageToPng } from "@/lib/drawing"
+import { type StrokeData, type EmbedRect, type CanvasEmbedRect, getSvgPathFromStroke, renderPageToPng } from "@/lib/drawing"
 import { createArchitectureGraph, fileViewerRawUrl, writeBinaryDocument, listArchitectureGraphs, listNotes, listProjectDocuments, loadFileViewerText, readArchitectureGraph, writeArchitectureGraph, writeDocument, renameArchitectureGraph, renameDocument, ApiError } from "@/lib/api"
 import { emptyArchitectureGraph, parseArchitectureGraph, serializeArchitectureGraph, type ArchitectureGraph } from "@/lib/architectureGraph"
 import { useGraphAutosave } from "@/lib/graphAutosave"
@@ -923,12 +923,21 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     const images: EmbedRect[] = doc.frames
       .filter((f) => f.kind === "image" && f.path)
       .map((f) => ({ url: fileViewerRawUrl(f.path!), x: f.x, y: f.y, width: f.width, aspect: aspectFor(f) }))
+    const pdfPages: CanvasEmbedRect[] = Array.from(
+      containerRef.current?.querySelectorAll<HTMLCanvasElement>("[data-canvas-attachment] .react-pdf__Page__canvas") ?? [],
+    ).flatMap((image) => {
+      const rect = image.getBoundingClientRect()
+      if (rect.width === 0 || rect.height === 0) return []
+      const [x, y] = screenToCanvas(rect.left, rect.top)
+      const [right, bottom] = screenToCanvas(rect.right, rect.bottom)
+      return [{ image, x, y, width: right - x, aspect: (bottom - y) / (right - x) }]
+    })
     try {
-      const pngBytes = await renderPageToPng(doc.strokes, x, y, w, h, images, doc.texts)
+      const pngBytes = await renderPageToPng(doc.strokes, x, y, w, h, images, doc.texts, pdfPages)
       const blob = new Blob([pngBytes.buffer as ArrayBuffer], { type: "image/png" })
       await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })])
     } catch { /* clipboard write can fail without permission — silently drop */ }
-  }, [doc.frames, doc.strokes, doc.texts, aspectFor])
+  }, [doc.frames, doc.strokes, doc.texts, aspectFor, screenToCanvas])
 
   // --- Drawing (on SVG) ---
   const handleSvgPointerDown = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
@@ -2032,10 +2041,10 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
           const full = fullscreenId === att.id
           return (
             <div
-              key={att.id}
               className={cn(
                 "absolute flex flex-col border border-divider-strong rounded-lg overflow-hidden bg-paper shadow-[var(--shadow-lg)]",
                 full && "z-20",
+                screenshotMode && "pointer-events-none",
               )}
               style={full
                 ? { inset: 0, transform: "none" }

@@ -442,6 +442,18 @@ describe("PDF attachments", () => {
     const reopened = render(<Harness seen={[]} initialDoc={restored} />)
     expect(reopened.container.querySelector("[data-testid=\"pdf-viewer\"]")).toHaveTextContent("4")
   })
+
+  it("lets screenshot drags pass through a PDF attachment", () => {
+    const doc: CanvasDocument = {
+      ...emptyCanvasDoc(),
+      attachments: [{ id: "pdf-1", kind: "pdf", path: "project/proj/document/reference.pdf", x: 0, y: 0, width: 500 }],
+    }
+    const { container } = render(<Harness seen={[]} initialDoc={doc} />)
+
+    act(() => { toolbar(container)[6]!.click() })
+
+    expect(container.querySelector("[data-canvas-attachment]")?.parentElement).toHaveClass("pointer-events-none")
+  })
 })
 
 describe("project assets", () => {

@@ -109,10 +109,23 @@ async function loadImage(url: string): Promise<ImageBitmap> {
   return createImageBitmap(await res.blob())
 }
 
-interface LoadedEmbed extends EmbedRect {
-  image: ImageBitmap
+interface LoadedEmbed {
+  x: number
+  y: number
+  width: number
+  aspect: number
+  image: CanvasImageSource
 }
 
+// A rendered PDF page already lives in a same-origin canvas. Reuse that decoded
+// bitmap for whiteboard screenshots instead of fetching and rendering its source again.
+export interface CanvasEmbedRect {
+  image: CanvasImageSource
+  x: number
+  y: number
+  width: number
+  aspect: number
+}
 async function loadEmbeds(images: EmbedRect[]): Promise<LoadedEmbed[]> {
   const loaded = await Promise.all(images.map(async (embed) => {
     try {
@@ -211,8 +224,9 @@ export async function renderPageToPng(
   pageH: number,
   images: EmbedRect[] = [],
   texts: TextData[] = [],
+  canvasImages: CanvasEmbedRect[] = [],
 ): Promise<Uint8Array> {
-  const loadedImages = await loadEmbeds(images)
+  const loadedImages = [...await loadEmbeds(images), ...canvasImages]
   const canvas = loadedImages.length > 0 || texts.length > 0
     ? await drawCanvas(strokes, loadedImages, pageW, pageH, pageX, pageY, "#ffffff", texts)
     : drawStrokes(strokes, pageW, pageH, pageX, pageY, "#ffffff")
