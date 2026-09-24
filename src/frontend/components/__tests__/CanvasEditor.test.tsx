@@ -456,6 +456,27 @@ describe("PDF attachments", () => {
 
     expect(container.querySelector("[data-canvas-attachment]")?.parentElement).toHaveClass("pointer-events-none")
   })
+
+  it("shows the screenshot selection over a PDF attachment", async () => {
+    const doc: CanvasDocument = {
+      ...emptyCanvasDoc(),
+      attachments: [{ id: "pdf-1", kind: "pdf", path: "project/proj/document/reference.pdf", x: 0, y: 0, width: 500 }],
+    }
+    const { container } = render(<Harness seen={[]} initialDoc={doc} />)
+    act(() => { toolbar(container)[6]!.click() })
+    const surface = container.querySelectorAll("svg.absolute.inset-0.w-full.h-full")[1] as SVGSVGElement
+    surface.setPointerCapture = vi.fn()
+
+    act(() => {
+      fireEvent(surface, new MouseEvent("pointerdown", { bubbles: true, button: 0, clientX: 10, clientY: 10 }))
+      fireEvent(surface, new MouseEvent("pointermove", { bubbles: true, clientX: 50, clientY: 40 }))
+    })
+
+    await waitFor(() => expect(container.querySelector("[data-testid=\"screenshot-selection\"]")).toBeTruthy())
+    const attachment = container.querySelector("[data-canvas-attachment]")!.parentElement!
+    const selection = container.querySelector("[data-testid=\"screenshot-selection\"]")!
+    expect(attachment.compareDocumentPosition(selection) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+  })
 })
 
 describe("project assets", () => {

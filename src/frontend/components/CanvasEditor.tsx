@@ -545,6 +545,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   const [screenshotMode, setScreenshotMode] = useState(false)
   const [shotRect, setShotRect] = useState<RectDrag | null>(null)
   const shotStart = useRef<{ x: number; y: number } | null>(null)
+  const screenshotSequence = useRef(0)
 
   // --- Text: notes render as Markdown when unfocused. Enter switches from source
   // to formatted content, while clicking the rendered note reopens its textarea. ---
@@ -914,6 +915,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     const w = Math.abs(rect.x1 - rect.x0)
     const h = Math.abs(rect.y1 - rect.y0)
     if (w < 4 || h < 4) return
+    const sequence = ++screenshotSequence.current
     const images: EmbedRect[] = doc.frames
       .filter((f) => f.kind === "image" && f.path)
       .map((f) => ({ url: fileViewerRawUrl(f.path!), x: f.x, y: f.y, width: f.width, aspect: aspectFor(f) }))
@@ -928,6 +930,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     })
     try {
       const pngBytes = await renderPageToPng(doc.strokes, x, y, w, h, images, doc.texts, pdfPages)
+      if (sequence !== screenshotSequence.current) return
       const blob = new Blob([pngBytes.buffer as ArrayBuffer], { type: "image/png" })
       await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })])
     } catch { /* clipboard write can fail without permission — silently drop */ }
@@ -1055,11 +1058,13 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
       return
     }
     if (shotStart.current) {
+      const start = shotStart.current
       shotStart.current = null
-      setShotRect((rect) => {
-        if (rect) captureScreenshot(rect)
-        return null
-      })
+      setShotRect(null)
+      if (e) {
+        const [x1, y1] = screenToCanvas(e.clientX, e.clientY)
+        captureScreenshot({ x0: start.x, y0: start.y, x1, y1 })
+      }
       setScreenshotMode(false)
       return
     }
@@ -1972,16 +1977,6 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
                 style={{ pointerEvents: "none" }}
               />
             )}
-            {/* Rubber-band rect — screenshot capture area */}
-            {shotRect && (
-              <rect
-                x={Math.min(shotRect.x0, shotRect.x1)} y={Math.min(shotRect.y0, shotRect.y1)}
-                width={Math.abs(shotRect.x1 - shotRect.x0)} height={Math.abs(shotRect.y1 - shotRect.y0)}
-                fill="var(--ink)" fillOpacity={0.06}
-                stroke="var(--ink)" strokeWidth={1.5 / scale} strokeDasharray={`${5 / scale} ${3 / scale}`}
-                style={{ pointerEvents: "none" }}
-              />
-            )}
             {/* Rubber-band rect — text box being dragged out */}
             {textDragRect && (
               <rect
@@ -2150,6 +2145,20 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
             </div>
           )
         })}
+
+        {/* Screenshot selection belongs above live attachments so it remains visible while dragging over a PDF. */}
+        {shotRect && (
+          <div
+            data-testid="screenshot-selection"
+            className="absolute z-10 pointer-events-none border-[1.5px] border-dashed border-ink bg-ink/5"
+            style={{
+              left: Math.min(shotRect.x0, shotRect.x1) * scale + offset.x,
+              top: Math.min(shotRect.y0, shotRect.y1) * scale + offset.y,
+              width: Math.abs(shotRect.x1 - shotRect.x0) * scale,
+              height: Math.abs(shotRect.y1 - shotRect.y0) * scale,
+            }}
+          />
+        )}
 
         {/* Text notes render their Markdown until clicked, then expose the source textarea.
             They remain rasterized as source text in canvas exports. */}
