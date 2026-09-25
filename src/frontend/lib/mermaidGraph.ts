@@ -34,7 +34,8 @@ function labelToTitleAndBullets(label: string): { title: string, bullets: string
 }
 
 function titleAndBulletsToLabel(node: ArchitectureGraphNode): string {
-  return escapeMermaidLabel([node.title, ...node.bullets.map((bullet) => `• ${bullet}`)].join("<br/>"))
+  // An empty title would leave `[]` or shift the first bullet into the title slot on re-import.
+  return escapeMermaidLabel([node.title || "Untitled node", ...node.bullets.map((bullet) => `• ${bullet}`)].join("<br/>"))
 }
 
 function shapeBrackets(shape: ArchitectureGraphNodeShape | undefined, label: string): string {

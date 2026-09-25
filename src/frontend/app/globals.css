@@ -248,38 +248,46 @@ p, li {
   border: none;
 }
 
-/* Architecture Graphs deliberately use the app's semantic palette: the graph is
-   an embedded document surface, not a second visual language. */
+/* Architecture Graphs read as a pen sketch on the app's own paper: a strong
+   ink for outlines and titles, a softer pencil for connections and notes, and
+   a fill that only just lifts a shape off the canvas. In dark mode that makes
+   chalk on a board rather than grey UI cards. */
 .architecture-graph-surface {
   font-family: var(--font-handwriting), cursive;
 
-  /* Use the app's actual elevation levels — no graph-specific colour system. */
-  --architecture-graph-canvas: var(--paper);
-  --architecture-graph-card: var(--surface-elevated);
-  --architecture-graph-card-border: var(--divider-strong);
-  --architecture-graph-card-shadow: var(--shadow-sm);
+  --sketch-canvas: var(--paper);
+  --sketch-ink: oklch(88% 0.012 83);
+  --sketch-ink-soft: oklch(70% 0.012 83);
+  --sketch-fill: color-mix(in oklab, var(--ink) 5%, var(--paper));
+  --sketch-grid: color-mix(in oklab, var(--ink) 14%, transparent);
 
   /* React Flow ships a light default palette independently of the app. Map its
-     variables to role tokens so built-in node and connection UI follows the
-     active theme class too. */
-  --xy-background-color: var(--architecture-graph-canvas);
-  --xy-node-color: var(--ink-muted);
-  --xy-node-border: 1px solid var(--architecture-graph-card-border);
-  --xy-node-background-color: var(--architecture-graph-card);
-  --xy-handle-background-color: var(--ink-muted);
-  --xy-handle-border-color: var(--surface-elevated);
-  --xy-edge-stroke: var(--ink-muted);
-  --xy-edge-stroke-selected: var(--ink);
-  --xy-connectionline-stroke: var(--ink-muted);
+     variables to the sketch tokens so built-in node and connection UI follows
+     the active theme class too. */
+  --xy-background-color: var(--sketch-canvas);
+  --xy-node-color: var(--sketch-ink);
+  --xy-node-border: 1px solid var(--sketch-ink-soft);
+  --xy-node-background-color: var(--sketch-fill);
+  --xy-handle-background-color: var(--sketch-ink-soft);
+  --xy-handle-border-color: var(--sketch-canvas);
+  --xy-edge-stroke: var(--sketch-ink-soft);
+  --xy-edge-stroke-selected: var(--sketch-ink);
+  --xy-connectionline-stroke: var(--sketch-ink-soft);
   --xy-selection-background-color: var(--hover-overlay);
   --xy-selection-border: 1px dotted var(--divider-strong);
-  --xy-edge-label-background-color: var(--surface);
-  --xy-edge-label-color: var(--ink-muted);
+  --xy-edge-label-background-color: var(--sketch-canvas);
+  --xy-edge-label-color: var(--sketch-ink-soft);
   position: relative;
   min-height: 280px;
   height: 100%;
   overflow: hidden;
-  background: var(--architecture-graph-canvas);
+  background: var(--sketch-canvas);
+}
+.light .architecture-graph-surface {
+  --sketch-ink: oklch(32% 0.014 85);
+  --sketch-ink-soft: oklch(48% 0.012 85);
+  --sketch-fill: var(--surface-elevated);
+  --sketch-grid: color-mix(in oklab, var(--ink) 18%, transparent);
 }
 
 .architecture-graph-toolbar {
@@ -360,19 +368,17 @@ p, li {
 
 .architecture-graph-draw-overlay { position: absolute; inset: 0; z-index: 6; cursor: crosshair; touch-action: none; }
 .architecture-graph-draw-preview { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
-.architecture-graph-draw-preview path { stroke: var(--ink-muted); stroke-width: 1.5; stroke-dasharray: 4 3; stroke-linecap: round; stroke-linejoin: round; }
+.architecture-graph-draw-preview path { stroke: var(--sketch-ink-soft); stroke-width: 1.5; stroke-dasharray: 4 3; stroke-linecap: round; stroke-linejoin: round; }
 
 .architecture-graph-toolbar-delimiter { color: var(--ink-muted); font-size: 12px; line-height: 1; user-select: none; }
 
 .architecture-graph-node-titlebar {
   display: flex;
-  min-height: 28px;
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border-bottom: 1px solid color-mix(in oklab, var(--divider) 65%, transparent);
-  padding: 3px 9px;
+  padding: 8px 12px 0;
   text-align: center;
   user-select: none;
 }
@@ -386,17 +392,9 @@ p, li {
 .architecture-graph-node-body-plain .architecture-graph-bullet-row { justify-content: center; }
 .architecture-graph-node-body-plain .architecture-graph-bullet-input { text-align: center; }
 
-.architecture-graph-node {
-  height: 100%;
-  border-radius: 8px;
-  background: var(--architecture-graph-card);
-  box-shadow: var(--shadow-sm);
-}
-.architecture-graph-node-sketch { color: var(--ink-muted); }
-
-.architecture-graph-node-selected {
-  box-shadow: var(--architecture-graph-card-shadow);
-}
+.architecture-graph-node { height: 100%; }
+.architecture-graph-node-sketch { color: var(--sketch-ink); }
+.architecture-graph-node-fill { fill: var(--sketch-fill); }
 .architecture-graph-node-header { cursor: grab; }
 .architecture-graph-node-header:active { cursor: grabbing; }
 .architecture-graph-title {
@@ -406,7 +404,7 @@ p, li {
   border: 0;
   outline: 0;
   background: transparent;
-  color: var(--ink);
+  color: var(--sketch-ink);
   padding: 0;
   font: inherit;
   font-size: 14px;
@@ -427,9 +425,9 @@ p, li {
 }
 .architecture-graph-title:focus-visible { outline: 2px solid var(--divider-strong); outline-offset: 2px; }
 
-.architecture-graph-node-body { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 2px; padding: 7px 10px 8px; overflow-y: auto; }
+.architecture-graph-node-body { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 2px; padding: 4px 12px 8px; overflow-y: auto; }
 .architecture-graph-bullet-row { display: flex; align-items: flex-start; gap: 6px; }
-.architecture-graph-bullet-marker { flex-shrink: 0; font: inherit; font-size: 13px; line-height: 1.5; color: var(--ink-muted); }
+.architecture-graph-bullet-marker { flex-shrink: 0; font: inherit; font-size: 13px; line-height: 1.5; color: var(--sketch-ink-soft); }
 .architecture-graph-bullet-input {
   display: block;
   box-sizing: border-box;
@@ -441,7 +439,7 @@ p, li {
   border: 0;
   outline: 0;
   background: transparent;
-  color: var(--ink-muted);
+  color: var(--sketch-ink-soft);
   font: inherit;
   font-size: 13px;
   line-height: 1.5;
@@ -451,29 +449,29 @@ p, li {
 .architecture-graph-handle {
   width: 6px !important;
   height: 6px !important;
-  border: 1px solid var(--surface-elevated) !important;
-  background: var(--ink-muted) !important;
+  border: 1px solid var(--sketch-canvas) !important;
+  background: var(--sketch-ink-soft) !important;
   opacity: 0;
   transition: opacity 150ms ease;
 }
 .architecture-graph-node:hover .architecture-graph-handle,
 .architecture-graph-node-selected .architecture-graph-handle { opacity: 1; }
 
-.architecture-graph-edge { color: var(--ink-muted); transition: color 100ms ease; }
-.react-flow__edge:hover .architecture-graph-edge { color: var(--ink); }
-.architecture-graph-edge-selected { color: var(--ink); }
+.architecture-graph-edge { color: var(--sketch-ink-soft); transition: color 100ms ease; }
+.react-flow__edge:hover .architecture-graph-edge { color: var(--sketch-ink); }
+.architecture-graph-edge-selected { color: var(--sketch-ink); }
 .architecture-graph-path-handle {
-  fill: var(--surface-elevated);
-  stroke: var(--ink);
+  fill: var(--sketch-canvas);
+  stroke: var(--sketch-ink);
   stroke-width: 1.5;
   cursor: move;
 }
 .architecture-graph-path-handle:focus-visible { outline: 2px solid var(--divider-strong); outline-offset: 2px; }
 .architecture-graph-edge-label {
-  fill: var(--ink-muted);
+  fill: var(--sketch-ink-soft);
   font-size: 13px;
   paint-order: stroke;
-  stroke: var(--surface);
+  stroke: var(--sketch-canvas);
   stroke-width: 5px;
   stroke-linejoin: round;
 }

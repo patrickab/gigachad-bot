@@ -63,7 +63,9 @@ def validate_graph(data: Any) -> dict[str, Any]:
         if node_id in node_ids:
             raise ArchitectureGraphError(f"duplicate node id: {node_id}")
         node_ids.add(node_id)
-        _require_string(node.get("title"), f"nodes[{index}].title")
+        # May be empty: a freshly created node is untitled until the user types.
+        if not isinstance(node.get("title"), str):
+            raise ArchitectureGraphError(f"nodes[{index}].title must be a string")
         bullets = node.get("bullets", [])
         if not isinstance(bullets, list) or not all(isinstance(bullet, str) for bullet in bullets):
             raise ArchitectureGraphError(f"nodes[{index}].bullets must be a list of strings")

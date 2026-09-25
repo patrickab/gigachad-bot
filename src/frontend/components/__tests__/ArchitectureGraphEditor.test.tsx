@@ -89,12 +89,16 @@ describe("ArchitectureGraphEditor undo/redo", () => {
     await act(async () => { await Promise.resolve() })
 
     fireEvent.click(screen.getByRole("button", { name: "Add node" }))
-    expect(screen.getByText("New node")).toBeInTheDocument()
+    // A new node opens empty, straight into title editing.
+    expect(screen.getByRole("textbox", { name: "Node title" })).toHaveFocus()
+    expect(screen.getByRole("textbox", { name: "Node title" })).toHaveValue("")
 
     fireEvent.keyDown(document, { key: "z", ctrlKey: true })
-    expect(screen.queryByText("New node")).not.toBeInTheDocument()
+    expect(screen.queryByRole("textbox", { name: "Node title" })).not.toBeInTheDocument()
 
+    // Redo restores the node without re-entering edit mode: the auto-edit is one-time.
     fireEvent.keyDown(document, { key: "z", ctrlKey: true, shiftKey: true })
-    expect(screen.getByText("New node")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Edit node title" })).toHaveTextContent("Untitled node")
+    expect(screen.queryByRole("textbox", { name: "Node title" })).not.toBeInTheDocument()
   })
 })

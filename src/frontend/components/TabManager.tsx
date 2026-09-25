@@ -271,6 +271,11 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
     setModeLabels((prev) => (prev[id] === label ? prev : { ...prev, [id]: label }))
     setModeLoading((prev) => (prev[id] === loading ? prev : { ...prev, [id]: loading }))
   }, [])
+  // One stable label callback per tab. Consumers list it as an effect dependency,
+  // so a fresh closure per render re-fires them all, and two producers in one
+  // tab (the chat mode label plus an open document's filename) then overwrite
+  // each other forever.
+  const modeLabelHooks = useRef(new Map<string, (label: string, loading?: boolean) => void>())
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent, id: string, value: string) => {
@@ -353,7 +358,11 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
       <div className="flex-1 min-h-0 overflow-hidden relative">
         {tabs.map((tab) => {
           const isActive = tab.id === activeTab
-          const hook = (label: string, loading?: boolean) => updateModeLabel(tab.id, label, loading)
+          let hook = modeLabelHooks.current.get(tab.id)
+          if (!hook) {
+            hook = (label: string, loading?: boolean) => updateModeLabel(tab.id, label, loading)
+            modeLabelHooks.current.set(tab.id, hook)
+          }
           return (
             <div
               key={tab.id}

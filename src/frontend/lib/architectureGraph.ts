@@ -95,6 +95,8 @@ export function validateArchitectureGraph(value: unknown): ArchitectureGraph {
     if (nodeIds.has(id)) throw new Error(`Duplicate node id: ${id}`)
     nodeIds.add(id)
     const position = record(node.position, `nodes[${index}].position`)
+    // May be empty: a freshly created node is untitled until the user types.
+    if (typeof node.title !== "string") throw new Error(`nodes[${index}].title must be a string`)
     if (!Array.isArray(node.bullets) || node.bullets.some((bullet) => typeof bullet !== "string")) {
       throw new Error(`nodes[${index}].bullets must be an array of strings`)
     }
@@ -111,7 +113,7 @@ export function validateArchitectureGraph(value: unknown): ArchitectureGraph {
     }
     return {
       id,
-      title: text(node.title, `nodes[${index}].title`),
+      title: node.title.trim(),
       bullets: node.bullets.map((bullet) => bullet.trim()).filter(Boolean),
       position: { x: number(position.x, `nodes[${index}].position.x`), y: number(position.y, `nodes[${index}].position.y`) },
       ...(shapeValue ? { shape: shapeValue as ArchitectureGraphNodeShape } : {}),

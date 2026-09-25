@@ -70,6 +70,25 @@ describe("ArchitectureGraphSurface", () => {
     expect(fanned.get("b")!.source).toEqual({ x: 50, y: 60, position: "bottom" })
   })
 
+  it("attaches connections to the drawn outline of round shapes, not their bounding box", () => {
+    const edge = (id: string, source: string, target: string) => ({ id, source, target, direction: "one-way" as const })
+    const nodes = [
+      { id: "diamond", position: { x: 0, y: 0 }, measured: { width: 100, height: 100 }, data: { shape: "diamond" as const } },
+      { id: "ellipse", position: { x: 400, y: 0 }, measured: { width: 200, height: 100 }, data: { shape: "ellipse" as const } },
+      { id: "below", position: { x: 0, y: 300 }, measured: { width: 100, height: 60 } },
+    ]
+    // Three connections share the diamond's bottom side: off-center slots must
+    // land on its slanted edges, not in the empty box corner below them.
+    const attachments = edgeAttachments(nodes, [edge("a", "diamond", "below"), edge("b", "diamond", "below"), edge("c", "diamond", "below"), edge("d", "diamond", "ellipse")])
+    for (const id of ["a", "b", "c"]) {
+      const { x, y } = attachments.get(id)!.source
+      expect(Math.abs(x - 50) / 50 + Math.abs(y - 50) / 50).toBeCloseTo(1)
+    }
+    expect(attachments.get("a")!.source.y).toBeLessThan(100)
+    const { x, y } = attachments.get("d")!.target
+    expect(((x - 500) / 100) ** 2 + ((y - 50) / 50) ** 2).toBeCloseTo(1)
+  })
+
   it("keeps the title editor focused while controlled graph updates arrive", () => {
     const initialGraph = { ...emptyArchitectureGraph(), nodes: [{ id: "node-1", title: "Gateway", bullets: [], position: { x: 0, y: 0 } }] }
     function ControlledSurface() {

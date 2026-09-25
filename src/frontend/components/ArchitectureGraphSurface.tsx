@@ -28,12 +28,13 @@ interface GraphFlowEdgeData extends ArchitectureGraphEdge, Record<string, unknow
 type GraphFlowNode = Node<GraphFlowNodeData, "architecture-node">
 type GraphFlowEdge = Edge<GraphFlowEdgeData, "architecture-edge">
 
-// The subset of a React Flow node the attachment pass needs: stored position
-// plus whatever React Flow has measured so far.
+// The subset of a React Flow node the attachment pass needs: stored position,
+// whatever React Flow has measured so far, and the outline to attach to.
 interface RoutableNode {
   id: string
   position: { x: number, y: number }
   measured?: { width?: number, height?: number }
+  data?: { shape?: ArchitectureGraphNodeShape }
 }
 
 export interface ArchitectureGraphSurfaceProps {
@@ -46,6 +47,8 @@ export interface ArchitectureGraphSurfaceProps {
 
 interface ArchitectureNodeData extends ArchitectureGraphNode, Record<string, unknown> {
   onChange: (id: string, patch: Partial<Pick<ArchitectureGraphNode, "title" | "bullets" | "shape" | "width" | "height" | "position">>) => void
+  /** True exactly once, for the node the user just created. */
+  claimAutoEdit?: (id: string) => boolean
 }
 
 // Rough.js is the same seeded, multi-stroke renderer Excalidraw uses. Stable
@@ -58,16 +61,21 @@ function roughSeed(id: string): number {
   return (hash >>> 0) || 1
 }
 
-function roughPaths(d: string, seed: number, strokeWidth = 1.35) {
+// Connections draw as a single wobbly line: rough.js's doubled stroke reads as
+// jitter at edge scale rather than pencil.
+function edgeSketchPaths(d: string, seed: number, strokeWidth: number) {
   return roughGenerator.toPaths(roughGenerator.path(d, {
-    seed, roughness: 1.25, bowing: 1, stroke: "currentColor", strokeWidth, preserveVertices: true,
+    seed, roughness: 1, bowing: 1, stroke: "currentColor", strokeWidth, preserveVertices: true, disableMultiStroke: true,
   }))
 }
 
 // Mirrors Excalidraw's generic shapes: a rounded rectangle path, plus rough.js's
-// own ellipse and polygon generators for circle/diamond form factors.
+// own ellipse and polygon generators for circle/diamond form factors. The fill
+// is sketched by rough.js too, so it follows the outline's wobble instead of
+// sitting under it as a perfect CSS shape. rough.js only echoes `fill` back on
+// the fill path; the actual colour comes from CSS so it tracks the theme.
 function nodeSketchPaths(shape: ArchitectureGraphNodeShape, width: number, height: number, seed: number, strokeWidth: number) {
-  const options = { seed, roughness: 1.25, bowing: 1, stroke: "currentColor", strokeWidth, preserveVertices: true }
+  const options = { seed, roughness: 1, bowing: 1, stroke: "currentColor", strokeWidth, preserveVertices: true, fill: "sketch", fillStyle: "solid" }
   if (shape === "ellipse") return roughGenerator.toPaths(roughGenerator.ellipse(width / 2, height / 2, width, height, options))
   if (shape === "diamond") {
     const points: [number, number][] = [[width / 2, 0], [width, height / 2], [width / 2, height], [0, height / 2]]
@@ -75,7 +83,7 @@ function nodeSketchPaths(shape: ArchitectureGraphNodeShape, width: number, heigh
   }
   const radius = Math.max(0, Math.min(9, (width - 2) / 2, (height - 2) / 2))
   const d = `M ${radius} 1 H ${width - radius} Q ${width - 1} 1 ${width - 1} ${radius} V ${height - radius} Q ${width - 1} ${height - 1} ${width - radius} ${height - 1} H ${radius} Q 1 ${height - 1} 1 ${height - radius} V ${radius} Q 1 1 ${radius} 1 Z`
-  return roughPaths(d, seed, strokeWidth)
+  return roughGenerator.toPaths(roughGenerator.path(d, options))
 }
 
 interface DrawnShapeResult {
@@ -147,10 +155,10 @@ const cardStyle: CSSProperties = {
   position: "relative",
   overflow: "visible",
   border: 0,
-  transition: "box-shadow 150ms ease",
+  backgroundColor: "transparent",
 }
 
-// Clips the card fill to the sketch outline; unpadded so its own center is
+// Clips card content to the sketch outline; unpadded so its own center is
 // always exactly the shape's geometric center (bounding-box center for both
 // diamond and ellipse).
 const SHAPE_CLIP: Record<ArchitectureGraphNodeShape, CSSProperties> = {
@@ -163,11 +171,10 @@ const SHAPE_CLIP: Record<ArchitectureGraphNodeShape, CSSProperties> = {
 // header bar to sit on: their title and bullets shrink-wrap into one plain
 // block, grid-centered on the clip's center, capped so it stays inside the
 // largest axis-aligned box each outline can actually hold.
-const CENTERED_CONTENT_MAX: Partial<Record<ArchitectureGraphNodeShape, CSSProperties>> = {
-  ellipse: { maxWidth: "70%", maxHeight: "80%" },
-  diamond: { maxWidth: "44%", maxHeight: "48%" },
+const CENTERED_CONTENT_FRACTION: Partial<Record<ArchitectureGraphNodeShape, { width: number, height: number }>> = {
+  ellipse: { width: 0.7, height: 0.8 },
+  diamond: { width: 0.44, height: 0.48 },
 }
-const CENTERED_SHAPES = new Set<ArchitectureGraphNodeShape>(["ellipse", "diamond"])
 
 interface PendingFocus {
   index: number
@@ -292,9 +299,9 @@ function ArchitectureNodeCard({ data, selected }: NodeProps<Node<ArchitectureNod
     const id = setTimeout(() => commitBulletsRef.current(), DRAFT_COMMIT_MS)
     return () => clearTimeout(id)
   }, [bulletDrafts])
-  const border = "color-mix(in srgb, var(--ink-muted), transparent 68%)"
   const shape: ArchitectureGraphNodeShape = data.shape ?? "rectangle"
-  const centered = CENTERED_SHAPES.has(shape)
+  const contentFraction = CENTERED_CONTENT_FRACTION[shape]
+  const centered = contentFraction !== undefined
   // Rectangles truncate a heading that's wider than the card with an ellipsis;
   // measuring it lets the heading act as a resize floor instead. Diamonds and
   // ellipses already wrap onto a second line, so they keep the plain floor.
@@ -304,19 +311,27 @@ function ArchitectureNodeCard({ data, selected }: NodeProps<Node<ArchitectureNod
     setTitleWidth(titleMeasureRef.current?.offsetWidth ?? 0)
   }, [titleDraft])
   const minNodeWidth = shape === "rectangle" ? Math.max(NODE_MIN_WIDTH, Math.ceil(titleWidth) + TITLE_WIDTH_SLACK) : NODE_MIN_WIDTH
+  // Auto-fit: the content's natural height is a floor for the card. The card
+  // grows when text stops fitting and never shrinks on its own, so a size the
+  // user chose sticks until the text actually needs more room.
+  const contentRef = useRef<HTMLDivElement>(null)
+  const titlebarRef = useRef<HTMLDivElement>(null)
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const resizingRef = useRef(false)
+  const [fitHeight, setFitHeight] = useState(NODE_MIN_HEIGHT)
   useEffect(() => {
     const current = data.width ?? DEFAULT_NODE_WIDTH
     if (minNodeWidth > current) data.onChange(data.id, { width: minNodeWidth })
   }, [minNodeWidth, data.width, data.id, data.onChange])
-  const nodeSketch = useMemo(
-    () => nodeSketchPaths(shape, cardSize.width, cardSize.height, roughSeed(data.id), selected ? 1.65 : hovered ? 1.5 : 1.3),
-    [shape, cardSize, data.id, hovered, selected],
-  )
+  const nodeSketch = useMemo(() => {
+    const paths = nodeSketchPaths(shape, cardSize.width, cardSize.height, roughSeed(data.id), selected ? 1.9 : hovered ? 1.7 : 1.5)
+    return { fills: paths.filter((path) => path.fill !== "none"), strokes: paths.filter((path) => path.fill === "none") }
+  }, [shape, cardSize, data.id, hovered, selected])
   const controlsVisible = hovered || selected
-  // Always interactive so pen/touch (no hover state) can tap a handle; opacity still fades
-  // in on mouse hover/selection for a decluttered look, but never blocks the tap target.
-  const controlStyle = { opacity: controlsVisible ? 1 : 0.35, pointerEvents: "auto" as const }
-  const handleStyle = { ...controlStyle, background: "var(--ink-muted)", borderColor: "var(--surface-elevated)" }
+  // Hidden at rest so a sketch stays a sketch. Still always interactive, so
+  // pen/touch (no hover state) can tap a handle; a tap that selects the node
+  // reveals them.
+  const controlStyle = { opacity: controlsVisible ? 1 : 0, pointerEvents: "auto" as const }
   // Drop refs for removed rows so the autosize pass cannot touch an unmounted textarea.
   bulletRefs.current.length = bulletDrafts.length
   useEffect(() => {
@@ -327,35 +342,72 @@ function ArchitectureNodeCard({ data, selected }: NodeProps<Node<ArchitectureNod
         textarea.style.height = "auto"
         textarea.style.height = `${textarea.scrollHeight}px`
       }
+      const content = contentRef.current
+      const titlebar = titlebarRef.current
+      const body = bodyRef.current
+      if (!content || !titlebar || !body) return
+      let needed: number
+      if (contentFraction) {
+        // Round shapes shrink-wrap their content into a capped box, so the
+        // content's full height maps back to the card through that cap.
+        needed = content.scrollHeight / contentFraction.height
+      } else {
+        // The rectangle body stretches to fill the card, so its own height says
+        // nothing about its content: add the rows up instead.
+        const style = getComputedStyle(body)
+        const rows = Array.from(body.children, (row) => (row as HTMLElement).offsetHeight)
+        needed = titlebar.offsetHeight + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
+          + rows.reduce((sum, height) => sum + height, 0) + (parseFloat(style.rowGap) || 0) * Math.max(0, rows.length - 1)
+      }
+      const fit = Math.max(NODE_MIN_HEIGHT, Math.ceil(needed / GRID_SIZE) * GRID_SIZE)
+      setFitHeight(fit)
+      // Legacy nodes without a stored height already grow with their content.
+      if (resizingRef.current || data.height === undefined || fit <= data.height) return
+      // Round shapes also widen a little, so their text rewraps into a fuller
+      // shape instead of stretching into a tall sliver.
+      const width = data.width ?? DEFAULT_NODE_WIDTH
+      data.onChange(data.id, contentFraction
+        ? { height: fit, width: Math.ceil(width * Math.sqrt(fit / data.height) / GRID_SIZE) * GRID_SIZE }
+        : { height: fit })
     })
     return () => cancelAnimationFrame(id)
-  }, [bulletDrafts])
+  }, [bulletDrafts, titleDraft, editingTitle, cardSize, contentFraction, data.height, data.width, data.id, data.onChange])
+  useLayoutEffect(() => {
+    if (data.claimAutoEdit?.(data.id)) setEditingTitle(true)
+    // Mount only: a freshly created node claims its one-time edit, nothing else does.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   useLayoutEffect(() => {
     if (editingTitle && titleRef.current && document.activeElement !== titleRef.current) titleRef.current.focus()
   }, [editingTitle])
   return (
-    <div ref={cardRef} className={cn("architecture-graph-node", selected && "architecture-graph-node-selected")} style={{ ...cardStyle, backgroundColor: "transparent", boxShadow: shape === "rectangle" ? "var(--architecture-graph-card-shadow)" : "none" }} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
-      <NodeResizer isVisible={!!selected} minWidth={minNodeWidth} minHeight={NODE_MIN_HEIGHT} color="var(--ink-muted)" onResizeEnd={(_event, params) => {
+    <div ref={cardRef} className={cn("architecture-graph-node", selected && "architecture-graph-node-selected")} style={cardStyle} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+      <NodeResizer isVisible={!!selected} minWidth={minNodeWidth} minHeight={fitHeight} color="var(--ink-muted)" onResizeStart={() => { resizingRef.current = true }} onResizeEnd={(_event, params) => {
+        resizingRef.current = false
         const x = snapToGrid(params.x)
         const y = snapToGrid(params.y)
         data.onChange(data.id, { width: snapToGrid(params.x + params.width) - x, height: snapToGrid(params.y + params.height) - y, position: { x, y } })
       }} />
       <span ref={titleMeasureRef} aria-hidden="true" className="architecture-graph-title" style={{ position: "absolute", visibility: "hidden", whiteSpace: "nowrap", left: -9999 }}>{titleDraft || "Untitled node"}</span>
-      <svg className="architecture-graph-node-sketch" viewBox={`0 0 ${cardSize.width} ${cardSize.height}`} aria-hidden="true" focusable="false" style={{ position: "absolute", zIndex: 1, inset: 0, width: "100%", height: "100%", overflow: "visible", color: "var(--ink-muted)", pointerEvents: "none" }}>
-        {nodeSketch.map((path, index) => <path key={index} d={path.d} fill="none" stroke="currentColor" strokeWidth={path.strokeWidth} />)}
+      {/* Fill sits under the content (a later positioned sibling); the outline sits on top. */}
+      <svg viewBox={`0 0 ${cardSize.width} ${cardSize.height}`} aria-hidden="true" focusable="false" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", overflow: "visible", pointerEvents: "none" }}>
+        {nodeSketch.fills.map((path, index) => <path key={index} d={path.d} className="architecture-graph-node-fill" stroke="none" />)}
       </svg>
-      <Handle id="top" type="target" position={Position.Top} className="architecture-graph-handle" style={handleStyle} />
-      <Handle id="left" type="target" position={Position.Left} className="architecture-graph-handle" style={handleStyle} />
-      <div style={{ position: "relative", height: "100%", display: "grid", overflow: "hidden", backgroundColor: "var(--surface-elevated)", ...SHAPE_CLIP[shape] }}>
-      <div style={centered ? { display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, justifySelf: "center", alignSelf: "center", ...CENTERED_CONTENT_MAX[shape] } : { display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, width: "100%", height: "100%" }}>
-      <div className={cn("architecture-graph-node-titlebar architecture-graph-node-header drag-handle", centered && "architecture-graph-node-titlebar-plain")} style={{ borderBottomColor: centered ? "transparent" : border, backgroundColor: centered ? "transparent" : "var(--surface)" }}>
+      <svg className="architecture-graph-node-sketch" viewBox={`0 0 ${cardSize.width} ${cardSize.height}`} aria-hidden="true" focusable="false" style={{ position: "absolute", zIndex: 1, inset: 0, width: "100%", height: "100%", overflow: "visible", pointerEvents: "none" }}>
+        {nodeSketch.strokes.map((path, index) => <path key={index} d={path.d} fill="none" stroke="currentColor" strokeWidth={path.strokeWidth} />)}
+      </svg>
+      <Handle id="top" type="target" position={Position.Top} className="architecture-graph-handle" style={controlStyle} />
+      <Handle id="left" type="target" position={Position.Left} className="architecture-graph-handle" style={controlStyle} />
+      <div style={{ position: "relative", height: "100%", display: "grid", overflow: "hidden", ...SHAPE_CLIP[shape] }}>
+      <div ref={contentRef} style={contentFraction ? { display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, justifySelf: "center", alignSelf: "center", maxWidth: `${contentFraction.width * 100}%`, maxHeight: `${contentFraction.height * 100}%` } : { display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, width: "100%", height: "100%" }}>
+      <div ref={titlebarRef} className={cn("architecture-graph-node-titlebar architecture-graph-node-header drag-handle", centered && "architecture-graph-node-titlebar-plain")}>
         {editingTitle ? (
-          <input ref={titleRef} autoFocus aria-label="Node title" value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} onFocus={() => { titleFocusedRef.current = true }} onBlur={() => { titleFocusedRef.current = false; commitTitle(); setEditingTitle(false) }} onKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); event.currentTarget.blur(); if (bulletDrafts.length === 0) setBulletDrafts([""]); focusBullet(0, 0) }} onPointerDown={(event) => event.stopPropagation()} className="nodrag architecture-graph-title architecture-graph-title-input" style={{ color: "var(--ink-muted)" }} />
+          <input ref={titleRef} autoFocus aria-label="Node title" value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} onFocus={() => { titleFocusedRef.current = true }} onBlur={() => { titleFocusedRef.current = false; commitTitle(); setEditingTitle(false) }} onKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); event.currentTarget.blur(); if (bulletDrafts.length === 0) setBulletDrafts([""]); focusBullet(0, 0) }} onPointerDown={(event) => event.stopPropagation()} className="nodrag architecture-graph-title architecture-graph-title-input" />
         ) : (
-          <span role="button" tabIndex={0} aria-label="Edit node title" onClick={() => setEditingTitle(true)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setEditingTitle(true) } }} className="architecture-graph-title architecture-graph-title-display" style={{ color: "var(--ink-muted)" }}>{data.title || "Untitled node"}</span>
+          <span role="button" tabIndex={0} aria-label="Edit node title" onClick={() => setEditingTitle(true)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setEditingTitle(true) } }} className="architecture-graph-title architecture-graph-title-display">{data.title || "Untitled node"}</span>
         )}
       </div>
-      <div className={cn("architecture-graph-node-body nowheel", centered && "architecture-graph-node-body-plain")}>
+      <div ref={bodyRef} className={cn("architecture-graph-node-body nowheel", centered && "architecture-graph-node-body-plain")}>
         {bulletDrafts.map((text, index) => (
           <div key={index} className="architecture-graph-bullet-row">
             {!centered && <span className="architecture-graph-bullet-marker" aria-hidden="true">—</span>}
@@ -369,15 +421,15 @@ function ArchitectureNodeCard({ data, selected }: NodeProps<Node<ArchitectureNod
               onBlur={() => { bulletsFocusedRef.current = false; commitBullets() }}
               className="nodrag architecture-graph-bullet-input"
               rows={1}
-              style={{ color: "var(--ink-muted)", resize: "none" }}
+              style={{ resize: "none" }}
             />
           </div>
         ))}
       </div>
       </div>
       </div>
-      <Handle id="right" type="source" position={Position.Right} className="architecture-graph-handle" style={handleStyle} />
-      <Handle id="bottom" type="source" position={Position.Bottom} className="architecture-graph-handle" style={handleStyle} />
+      <Handle id="right" type="source" position={Position.Right} className="architecture-graph-handle" style={controlStyle} />
+      <Handle id="bottom" type="source" position={Position.Bottom} className="architecture-graph-handle" style={controlStyle} />
     </div>
   )
 }
@@ -388,22 +440,15 @@ function ArchitectureNodeCard({ data, selected }: NodeProps<Node<ArchitectureNod
 
 // Pick the side of `node` facing `toward`, returning that side's midpoint. Used
 // until the slot pass below has geometry for both cards.
-function attach(node: InternalNode<GraphFlowNode>, toward: InternalNode<GraphFlowNode>) {
-  const { x, y } = node.internals.positionAbsolute
-  const w = node.measured.width ?? DEFAULT_NODE_WIDTH
-  const h = node.measured.height ?? DEFAULT_NODE_HEIGHT
-  const target = toward.internals.positionAbsolute
-  const dx = target.x + (toward.measured.width ?? DEFAULT_NODE_WIDTH) / 2 - (x + w / 2)
-  const dy = target.y + (toward.measured.height ?? DEFAULT_NODE_HEIGHT) / 2 - (y + h / 2)
-  // Compare against the card's own aspect so wide cards still prefer left/right.
-  if (Math.abs(dx) * h > Math.abs(dy) * w) {
-    return dx > 0
-      ? { x: x + w, y: y + h / 2, position: Position.Right }
-      : { x, y: y + h / 2, position: Position.Left }
-  }
-  return dy > 0
-    ? { x: x + w / 2, y: y + h, position: Position.Bottom }
-    : { x: x + w / 2, y, position: Position.Top }
+function attach(node: InternalNode<GraphFlowNode>, toward: InternalNode<GraphFlowNode>): AttachPoint {
+  const rect = (item: InternalNode<GraphFlowNode>): CardRect => ({
+    ...item.internals.positionAbsolute,
+    width: item.measured.width ?? DEFAULT_NODE_WIDTH,
+    height: item.measured.height ?? DEFAULT_NODE_HEIGHT,
+    shape: item.data.shape,
+  })
+  const own = rect(node)
+  return slotPoint(own, sideToward(own, rect(toward)), 0.5)
 }
 
 // Soft avoidance: connections sharing a card side get their own slot on it
@@ -430,6 +475,28 @@ interface CardRect {
   y: number
   width: number
   height: number
+  shape?: ArchitectureGraphNodeShape
+}
+
+// A slot on the bounding box's side. Round shapes don't fill their box, so for
+// them the slot only picks a direction: the endpoint slides along the ray from
+// the shape's center through the slot until it meets the actual outline.
+function slotPoint(rect: CardRect, side: Position, ratio: number): AttachPoint {
+  const { x, y, width, height, shape } = rect
+  const onBox = side === Position.Top ? { x: x + width * ratio, y }
+    : side === Position.Bottom ? { x: x + width * ratio, y: y + height }
+    : side === Position.Left ? { x, y: y + height * ratio }
+    : { x: x + width, y: y + height * ratio }
+  if (!shape || shape === "rectangle") return { ...onBox, position: side }
+  const a = width / 2
+  const b = height / 2
+  const dx = onBox.x - (x + a)
+  const dy = onBox.y - (y + b)
+  // How far past the outline the box point sits, in units of the outline:
+  // ellipse (dx/a)² + (dy/b)² = 1, diamond |dx|/a + |dy|/b = 1.
+  const reach = shape === "ellipse" ? Math.hypot(dx / a, dy / b) : Math.abs(dx) / a + Math.abs(dy) / b
+  if (!(reach > 0)) return { ...onBox, position: side }
+  return { x: x + a + dx / reach, y: y + b + dy / reach, position: side }
 }
 
 function sideToward(rect: CardRect, toward: CardRect): Position {
@@ -445,6 +512,7 @@ export function edgeAttachments(nodes: readonly RoutableNode[], edges: readonly 
     x: node.position.x, y: node.position.y,
     width: node.measured?.width ?? DEFAULT_NODE_WIDTH,
     height: node.measured?.height ?? DEFAULT_NODE_HEIGHT,
+    shape: node.data?.shape,
   }]))
   const ends = edges.flatMap((edge) => {
     const source = rects.get(edge.source)
@@ -471,11 +539,7 @@ export function edgeAttachments(nodes: readonly RoutableNode[], edges: readonly 
     sorted.forEach((end, index) => {
       const share = (index + 1) / (sorted.length + 1)
       const ratio = 0.5 + (share - 0.5) * SIDE_SPREAD
-      const { x, y, width, height } = end.rect
-      points.set(`${end.edgeId}:${end.role}`, end.side === Position.Top ? { x: x + width * ratio, y, position: Position.Top }
-        : end.side === Position.Bottom ? { x: x + width * ratio, y: y + height, position: Position.Bottom }
-        : end.side === Position.Left ? { x, y: y + height * ratio, position: Position.Left }
-        : { x: x + width, y: y + height * ratio, position: Position.Right })
+      points.set(`${end.edgeId}:${end.role}`, slotPoint(end.rect, end.side, ratio))
     })
   }
   return new Map(edges.flatMap((edge) => {
@@ -521,7 +585,7 @@ function ArchitectureEdgePath({ id, source, target, data, selected }: EdgeProps<
   }, [sourceNode, targetNode, data?.attachment, data?.direction, data?.path?.bend, dragBend])
 
   const sketch = useMemo(
-    () => geometry ? roughPaths(`${geometry.edgePath} ${geometry.arrows}`, roughSeed(id), selected ? 1.6 : 1.3) : [],
+    () => geometry ? edgeSketchPaths(`${geometry.edgePath} ${geometry.arrows}`, roughSeed(id), selected ? 1.6 : 1.3) : [],
     [geometry, id, selected],
   )
 
@@ -572,13 +636,13 @@ function ArchitectureEdgePath({ id, source, target, data, selected }: EdgeProps<
 const nodeTypes = { "architecture-node": ArchitectureNodeCard }
 const edgeTypes = { "architecture-edge": ArchitectureEdgePath }
 
-function toFlowNodes(nodes: ArchitectureGraphNode[], onNodeChange: ArchitectureNodeData["onChange"]): GraphFlowNode[] {
+function toFlowNodes(nodes: ArchitectureGraphNode[], onNodeChange: ArchitectureNodeData["onChange"], claimAutoEdit?: ArchitectureNodeData["claimAutoEdit"]): GraphFlowNode[] {
   return nodes.map((node) => ({
     id: node.id, type: "architecture-node", position: node.position, dragHandle: ".architecture-graph-node-header",
     // Height is left unset for legacy nodes without an explicit height, so they
     // keep growing with their content instead of being clamped to a default.
     style: { width: node.width ?? DEFAULT_NODE_WIDTH, ...(node.height !== undefined ? { height: node.height } : {}) },
-    data: { ...node, onChange: onNodeChange },
+    data: { ...node, onChange: onNodeChange, claimAutoEdit },
   }))
 }
 
@@ -624,6 +688,15 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
   const changeNode = useCallback((id: string, patch: Partial<Pick<ArchitectureGraphNode, "title" | "bullets" | "shape" | "width" | "height" | "position">>) => {
     emit({ nodes: graphRef.current.nodes.map((node) => node.id === id ? { ...node, ...patch } : node) })
   }, [emit])
+  // The node just created by the toolbar or a drawn shape opens straight into
+  // title editing. Claimed once on mount, so a later remount of the same node
+  // (tab switch, reload) doesn't grab focus again.
+  const autoEditIdRef = useRef<string | null>(null)
+  const claimAutoEdit = useCallback((id: string) => {
+    if (autoEditIdRef.current !== id) return false
+    autoEditIdRef.current = null
+    return true
+  }, [])
   const [flow, setFlow] = useState<ReactFlowInstance<GraphFlowNode, GraphFlowEdge> | null>(null)
   const changeEdgePath = useCallback((id: string, path?: ArchitectureGraphEdgePath) => {
     emit({ edges: graphRef.current.edges.map((edge) => edge.id === id ? { ...edge, path } : edge) })
@@ -633,12 +706,12 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
     onPathChange: changeEdgePath,
     toFlowPoint,
   }, [changeEdgePath, readOnly, toFlowPoint])
-  const [nodes, setNodes, onNodesChange] = useNodesState<GraphFlowNode>(toFlowNodes(graph.nodes, changeNode))
+  const [nodes, setNodes, onNodesChange] = useNodesState<GraphFlowNode>(toFlowNodes(graph.nodes, changeNode, readOnly ? undefined : claimAutoEdit))
   const [edges, setEdges, onEdgesChange] = useEdgesState<GraphFlowEdge>(toFlowEdges(graph.edges, new Map(), edgeRuntime))
 
   useEffect(() => {
-    setNodes((current) => reconcile(current, toFlowNodes(graph.nodes, changeNode)))
-  }, [graph.nodes, changeNode, setNodes])
+    setNodes((current) => reconcile(current, toFlowNodes(graph.nodes, changeNode, readOnly ? undefined : claimAutoEdit)))
+  }, [graph.nodes, changeNode, claimAutoEdit, readOnly, setNodes])
   // Recomputed from the live node rects, so dragging a card re-slots its edges.
   const attachments = useMemo(() => edgeAttachments(nodes, graph.edges), [nodes, graph.edges])
   useEffect(() => {
@@ -647,12 +720,14 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
 
   const addNode = useCallback(() => {
     const id = nextArchitectureGraphId("node", graphRef.current.nodes.map((node) => node.id))
-    const node: ArchitectureGraphNode = { id, title: "New node", bullets: [], position: { x: 100 + graphRef.current.nodes.length * 28, y: 100 + graphRef.current.nodes.length * 28 }, width: NEW_NODE_WIDTH, height: NEW_NODE_HEIGHT }
+    const node: ArchitectureGraphNode = { id, title: "", bullets: [], position: { x: 100 + graphRef.current.nodes.length * 28, y: 100 + graphRef.current.nodes.length * 28 }, width: NEW_NODE_WIDTH, height: NEW_NODE_HEIGHT }
+    autoEditIdRef.current = id
     emit({ nodes: [...graphRef.current.nodes, node] })
   }, [emit])
   const commitDrawnShape = useCallback((shape: ArchitectureGraphNodeShape, box: { x: number, y: number, width: number, height: number }) => {
     const id = nextArchitectureGraphId("node", graphRef.current.nodes.map((node) => node.id))
-    const node: ArchitectureGraphNode = { id, title: "New node", bullets: [], position: { x: box.x, y: box.y }, shape, width: Math.max(80, Math.round(box.width)), height: Math.max(48, Math.round(box.height)) }
+    const node: ArchitectureGraphNode = { id, title: "", bullets: [], position: { x: box.x, y: box.y }, shape, width: Math.max(80, Math.round(box.width)), height: Math.max(48, Math.round(box.height)) }
+    autoEditIdRef.current = id
     emit({ nodes: [...graphRef.current.nodes, node] })
   }, [emit])
   const [drawMode, setDrawMode] = useState(false)
@@ -698,7 +773,9 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
     const ys = points.map((p) => p.y)
     if (Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) < DRAW_MIN_SCREEN_SIZE) return
     const result = classifyDrawnShape(points.map((p) => flow.screenToFlowPosition(p)))
-    if (result) { commitDrawnShape(result.shape, result.box); setDrawMode(false) }
+    // Draw mode stays on so several shapes can be sketched in a row; Escape or
+    // the pen button ends it.
+    if (result) commitDrawnShape(result.shape, result.box)
   }, [flow, commitDrawnShape])
   const onDrawPointerUp = useCallback(() => finishDraw(true), [finishDraw])
   const onDrawPointerCancel = useCallback(() => finishDraw(false), [finishDraw])
@@ -808,7 +885,7 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
         connectionMode={ConnectionMode.Loose}
         fitView minZoom={0.2} maxZoom={2} zoomOnScroll={false} panOnScroll selectionOnDrag={false} proOptions={{ hideAttribution: true }} elevateEdgesOnSelect
       >
-        <Background gap={22} size={1} color="var(--divider)" />
+        <Background gap={22} size={1} color="var(--sketch-grid)" />
       </ReactFlow>
       </div>
     </div>
