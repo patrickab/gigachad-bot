@@ -46,6 +46,7 @@ const api = vi.hoisted(() => ({
   listNotes: vi.fn(async () => [] as { path: string; name: string; mime: string }[]),
   writeDocument: vi.fn(async (_slug: string, _name: string, _content: string) => ({ path: "project/proj/document/notes.canvas", name: "notes.canvas", mime: "application/json" })),
   renameDocument: vi.fn(async (_slug: string, _path: string, name: string) => ({ path: `project/proj/document/${name}.md`, name: `${name}.md`, mime: "text/markdown" })),
+  removeDocument: vi.fn(async (_slug: string, _path: string) => undefined),
   renameArchitectureGraph: vi.fn(async (_name: string, name: string) => ({ path: `graph/${name}.architecture.yaml`, name: `${name}.architecture.yaml`, content: "", hasDraft: false, revision: "r" })),
   ApiError: class ApiError extends Error {
     status: number
@@ -428,7 +429,6 @@ describe("nested canvas", () => {
     addCanvas(container)
     const [att] = latest(seen).attachments
     expect(att!.kind).toBe("canvas")
-    expect(att!.embeddingScale).toBe("screen-stable")
     expect(att!.canvas).toEqual(emptyCanvasDoc())
   })
 
@@ -451,7 +451,6 @@ describe("nested canvas", () => {
     addPage(container.querySelector("[data-canvas-attachment]") as HTMLElement)
 
     const reloaded = parseCanvasDoc(serializeCanvasDoc(latest(seen)))
-    expect(reloaded.attachments[0]!.embeddingScale).toBe("screen-stable")
     expect(reloaded.attachments[0]!.canvas!.frames).toHaveLength(1)
   })
 })
@@ -635,6 +634,63 @@ describe("document attachments", () => {
     await waitFor(() => expect(latest(seen).attachments[1]).toMatchObject({
       path: "graph/System design.architecture.yaml", title: "System design",
     }))
+  })
+
+  it("renames and deletes documents from the add menu, keeping canvas attachments in step", async () => {
+    api.listProjectDocuments.mockResolvedValueOnce([
+      { path: "project/proj/document/sandbox_plot-toolu_1.plot.json", name: "sandbox_plot-toolu_1.plot.json", mime: "application/json" },
+      { path: "project/proj/document/diagram-toolu_2.md", name: "diagram-toolu_2.md", mime: "text/markdown" },
+    ])
+    api.renameDocument.mockResolvedValueOnce({ path: "project/proj/document/Loss.plot.json", name: "Loss.plot.json", mime: "application/json" })
+    const seen: CanvasDocument[] = []
+    const initialDoc: CanvasDocument = {
+      version: 1, frames: [], strokes: [], texts: [],
+      attachments: [
+        { id: "plot", kind: "document", path: "project/proj/document/sandbox_plot-toolu_1.plot.json", x: 0, y: 0, width: 720, height: 480 },
+        { id: "diagram", kind: "document", path: "project/proj/document/diagram-toolu_2.md", x: 0, y: 500, width: 720, height: 480 },
+      ],
+    }
+    const { container, getByLabelText } = render(<Harness seen={seen} slug="proj" initialDoc={initialDoc} />)
+
+    act(() => { toolbar(container)[0]!.click() })
+    await act(async () => {})
+
+    fireEvent.click(getByLabelText("Rename sandbox_plot-toolu_1.plot.json"))
+    const input = getByLabelText("New name for sandbox_plot-toolu_1.plot.json") as HTMLInputElement
+    fireEvent.change(input, { target: { value: "Loss" } })
+    fireEvent.blur(input)
+    await waitFor(() => expect(container.textContent).toContain("Loss.plot.json"))
+    expect(api.renameDocument).toHaveBeenLastCalledWith("proj", "project/proj/document/sandbox_plot-toolu_1.plot.json", "Loss")
+    expect(latest(seen).attachments[0]!.path).toBe("project/proj/document/Loss.plot.json")
+
+    fireEvent.click(getByLabelText("Delete diagram-toolu_2.md"))
+    await waitFor(() => expect(latest(seen).attachments.map((a) => a.id)).toEqual(["plot"]))
+    expect(api.removeDocument).toHaveBeenCalledWith("proj", "project/proj/document/diagram-toolu_2.md")
+  })
+
+  it("lays plots out at a zoom-independent width and hides them only while a zoom gesture runs", async () => {
+    api.loadFileViewerText.mockResolvedValueOnce(JSON.stringify({ data: [] }))
+    const seen: CanvasDocument[] = []
+    const initialDoc: CanvasDocument = {
+      version: 1, frames: [], strokes: [], texts: [],
+      attachments: [{ id: "plot", kind: "document", path: "project/proj/document/p.plot.json", x: 0, y: 0, width: 480, height: 320 }],
+    }
+    const { container, getByTestId } = render(<Harness seen={seen} slug="proj" initialDoc={initialDoc} />)
+    await act(async () => {})
+    const frame = () => getByTestId("document-plot").parentElement!
+    const layoutWidth = frame().style.width
+    expect(parseFloat(layoutWidth)).toBeGreaterThanOrEqual(960)
+    expect(frame().style.visibility).toBe("")
+
+    vi.useFakeTimers()
+    const canvas = container.querySelector<HTMLElement>("[tabindex='0']")!
+    act(() => { canvas.dispatchEvent(new WheelEvent("wheel", { deltaY: -100, bubbles: true, cancelable: true })) })
+    expect(frame().style.visibility).toBe("hidden")
+    expect(frame().style.width).toBe(layoutWidth)
+
+    act(() => { vi.advanceTimersByTime(300) })
+    expect(frame().style.visibility).toBe("")
+    vi.useRealTimers()
   })
 
   it("lists notes-scoped artifacts when the canvas has no project slug", async () => {

@@ -143,6 +143,26 @@ describe("ArchitectureGraphSurface", () => {
     expect(flow.zoomIn).toHaveBeenCalledOnce()
     expect(flow.zoomOut).not.toHaveBeenCalled()
   })
+
+  it("refits the graph when its host maximizes it, but not when it restores", async () => {
+    flow.fitView.mockClear()
+    const nextFrames = () => act(async () => {
+      const { promise, resolve } = Promise.withResolvers<void>()
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      await promise
+    })
+    const { rerender } = render(<ArchitectureGraphSurface graph={emptyArchitectureGraph()} onChange={() => {}} />)
+    await nextFrames()
+    expect(flow.fitView).not.toHaveBeenCalled()
+
+    rerender(<ArchitectureGraphSurface graph={emptyArchitectureGraph()} onChange={() => {}} autoFit />)
+    await nextFrames()
+    expect(flow.fitView).toHaveBeenCalledOnce()
+
+    rerender(<ArchitectureGraphSurface graph={emptyArchitectureGraph()} onChange={() => {}} autoFit={false} />)
+    await nextFrames()
+    expect(flow.fitView).toHaveBeenCalledOnce()
+  })
 })
 
 describe("classifyDrawnShape", () => {

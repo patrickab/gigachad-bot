@@ -1,7 +1,7 @@
 "use client"
 
 import dynamic from "next/dynamic"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { memo, useEffect, useMemo, useRef, useState } from "react"
 
 export interface PlotFigure {
   data?: unknown[]
@@ -57,9 +57,15 @@ function chartHeightFor(width: number, rows: number) {
   return Math.min(560, Math.max(300, Math.round(width * 0.6))) * rows
 }
 
+// react-plotly calls `Plotly.react` whenever `data`, `layout` or `config` changes identity,
+// so these must stay module-level: an inline object redraws every plot on every host render.
+const PLOT_CONFIG = { responsive: false, displaylogo: false, displayModeBar: "hover" } as const
+const NO_TRACES: unknown[] = []
+
 /** Renders a figure the `sandbox_plot` tool produced. Theme values remain defaults the model can
- *  override; dimensions and hover behavior are controlled by the chat host. */
-export function PlotElement({ figure }: PlotElementProps) {
+ *  override; dimensions and hover behavior are controlled by the chat host. Memoized: canvas
+ *  pan/zoom re-renders its host every frame while the figure stays the same object. */
+export const PlotElement = memo(function PlotElement({ figure }: PlotElementProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const [hostWidth, setHostWidth] = useState(0)
   // `getComputedStyle` below reads CSS custom properties once; toggling the `.light` class on
@@ -147,13 +153,13 @@ export function PlotElement({ figure }: PlotElementProps) {
     <div ref={hostRef} className="w-full overflow-hidden rounded-lg">
       {dimensions && (
         <Plot
-          data={figure.data ?? []}
+          data={figure.data ?? NO_TRACES}
           layout={layout}
           frames={figure.frames}
-          config={{ responsive: false, displaylogo: false, displayModeBar: "hover" }}
+          config={PLOT_CONFIG}
           style={{ width: "100%", height: `${dimensions.height}px` }}
         />
       )}
     </div>
   )
-}
+})

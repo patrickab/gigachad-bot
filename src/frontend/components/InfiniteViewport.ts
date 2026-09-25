@@ -1,3 +1,5 @@
+import { createContext } from "react"
+
 export interface ViewportPoint {
   x: number
   y: number
@@ -15,7 +17,6 @@ export interface InfiniteViewportCamera {
 }
 
 export type ZoomAnchor = "cursor" | "viewport-center"
-export type EmbeddingScale = "inherit" | "screen-stable"
 
 export function cameraToOffset(camera: InfiniteViewportCamera, viewport: ViewportSize): ViewportPoint {
   return {
@@ -66,13 +67,17 @@ export function zoomCamera(
   }
 }
 
-// A screen-stable frame counteracts its parent's scale at the frame boundary.
-// Its parent-world position still follows the parent camera.
-export function embeddedViewportSize(size: ViewportSize, parentScale: number, embeddingScale: EmbeddingScale): ViewportSize {
-  if (embeddingScale === "screen-stable") return size
-  return { width: size.width * parentScale, height: size.height * parentScale }
+// Carries a view across a change of its frame size and, for an embedded view,
+// its host's zoom. The world point at the frame's center stays at the center,
+// and the scale is multiplied by `factor`, so an embedded canvas magnifies
+// with its host like any other object on it while still showing the same view.
+export function reframeCamera(offset: ViewportPoint, scale: number, previous: ViewportSize, next: ViewportSize, factor = 1): { offset: ViewportPoint, scale: number } {
+  const camera = offsetToCamera(offset, scale, previous)
+  const scaled = { ...camera, scale: camera.scale * factor }
+  return { offset: cameraToOffset(scaled, next), scale: scaled.scale }
 }
 
-export function nestedEmbeddingScale(embeddingScale: EmbeddingScale | undefined): EmbeddingScale {
-  return embeddingScale ?? "screen-stable"
-}
+// Effective zoom of the canvas an embedded viewport sits in (1 outside a canvas).
+// Renderers deep inside an attachment (e.g. a markmap inside a markdown document)
+// read it to magnify with their host the way nested canvases and graphs do.
+export const HostScaleContext = createContext(1)

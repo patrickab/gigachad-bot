@@ -1,22 +1,22 @@
 "use client"
 
-import { memo, useCallback, useEffect, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { getStroke } from "perfect-freehand"
 import { type StrokeData, type EmbedRect, type CanvasEmbedRect, getSvgPathFromStroke, renderPageToPng } from "@/lib/drawing"
-import { createArchitectureGraph, fileViewerRawUrl, writeBinaryDocument, listArchitectureGraphs, listNotes, listProjectDocuments, loadFileViewerText, readArchitectureGraph, writeArchitectureGraph, renameArchitectureGraph, renameDocument } from "@/lib/api"
+import { createArchitectureGraph, fileViewerRawUrl, writeBinaryDocument, listArchitectureGraphs, listNotes, listProjectDocuments, loadFileViewerText, readArchitectureGraph, writeArchitectureGraph, renameArchitectureGraph, renameDocument, removeDocument } from "@/lib/api"
 import { emptyArchitectureGraph, parseArchitectureGraph, serializeArchitectureGraph, type ArchitectureGraph } from "@/lib/architectureGraph"
 import { useGraphAutosave } from "@/lib/graphAutosave"
 import { useCollaborativeCanvas } from "@/hooks/useCollaborativeCanvas"
 import { subscribeToChanges } from "@/lib/syncStream"
 import { activeThemeName } from "@/lib/palette"
 import { cn } from "@/lib/utils"
-import { Plus, Undo2, Redo2, Trash2, Copy, FileType, ImageIcon, X, Camera, CircleDashed, Type, SquarePen, PenLine, Maximize2, Minimize2 } from "lucide-react"
+import { Plus, Undo2, Redo2, Trash2, Copy, FileType, ImageIcon, X, Camera, CircleDashed, Type, SquarePen, PenLine, Pencil, Maximize2, Minimize2 } from "lucide-react"
 import { PdfViewer } from "./PdfViewer"
 import { ArchitectureGraphSurface } from "./ArchitectureGraphSurface"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { PlotElement, type PlotFigure } from "./PlotElement"
-import { cameraToOffset, embeddedViewportSize, nestedEmbeddingScale, offsetToCamera, screenToWorld, zoomCamera, type EmbeddingScale, type ZoomAnchor } from "./InfiniteViewport"
+import { cameraToOffset, HostScaleContext, offsetToCamera, reframeCamera, screenToWorld, zoomCamera, type ZoomAnchor } from "./InfiniteViewport"
 import { useTabActive } from "./TabManager"
 
 const A4_W = 794
@@ -50,6 +50,7 @@ const STRAIGHTEN_HOLD_MS = 500 // hold the pen still mid-stroke to snap it into 
 const PEN_TOUCH_SUPPRESS_MS = 700 // touch gestures stay suppressed this long after the last pen event (hover included)
 const ZOOM_SETTLE_MS = 250 // attachments re-rasterize at full resolution this long after the zoom stops changing
 const PDF_LAYOUT_CAP = 916 // PdfViewer caps rendering at 900px + scrollbar gutter — wider layout gains no resolution
+const PLOT_MIN_LAYOUT_WIDTH = 960 // plots lay out at least this wide and scale down, so legends/titles never collide
 const STRAIGHTEN_MOVE_TOLERANCE = 5 // px of client movement that resets the "holding still" timer
 const HISTORY_LIMIT = 50 // undo depth
 const LASSO_COVERAGE = 0.6 // fraction of a stroke's points that must fall inside the lasso to select it
@@ -141,8 +142,6 @@ export interface CanvasAttachment {
   height?: number // Architecture Graphs own their viewport height; legacy attachments retain their aspect
   title?: string // user label, independent of the backing document filename
   page?: number // selected PDF page, persisted with the canvas
-  // Nested canvases default to screen-stable so their content has an independent zoom.
-  embeddingScale?: EmbeddingScale
 }
 
 // CanvasText = handwriting-style note in a resizable box. Rasterized into export
@@ -300,9 +299,11 @@ function migrateStrokes(strokes: LegacyStroke[] | undefined): StrokeData[] {
 }
 
 function migrateAttachment(attachment: CanvasAttachment): CanvasAttachment {
-  return attachment.kind === "canvas" && attachment.canvas
-    ? { ...attachment, canvas: migrate(attachment.canvas) }
-    : attachment
+  // Nested frames once carried an `embeddingScale` mode; they now always scale with their host.
+  const { embeddingScale: _dropped, ...rest } = attachment as CanvasAttachment & { embeddingScale?: unknown }
+  return rest.kind === "canvas" && rest.canvas
+    ? { ...rest, canvas: migrate(rest.canvas) }
+    : rest
 }
 
 // backfills width/height for text notes saved under the earlier point-text model
@@ -356,6 +357,10 @@ interface CanvasEditorProps {
   // recurse forever.
   depth?: number
   zoomAnchor?: ZoomAnchor
+  // Effective zoom of the canvas embedding this one (1 at the top level). The
+  // embedded view magnifies with it, so zooming the host scales the nested
+  // content along with its frame instead of revealing more or less of it.
+  hostScale?: number
 }
 
 
@@ -496,7 +501,7 @@ const StrokeLayer = memo(function StrokeLayer({ strokes, hidden, isDark }: { str
   )
 })
 
-export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, docPath, depth = 0, zoomAnchor = depth > 0 ? "viewport-center" : "cursor" }: CanvasEditorProps) {
+export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, docPath, depth = 0, zoomAnchor = depth > 0 ? "viewport-center" : "cursor", hostScale = 1 }: CanvasEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   // gates the window/document key listeners below to the frontmost tab
   const active = useTabActive()
@@ -507,7 +512,8 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   liveRef.current = { doc, onChange }
   const restoredRef = useRef(false)
 
-  const initScale = doc.viewport?.scale ?? 0.5
+  // `scale` is the effective on-screen scale: the canvas's own zoom times its host's.
+  const initScale = (doc.viewport?.scale ?? 0.5) * hostScale
   // offset is derived once the container mounts; fall back to a reasonable default
   const [scale, setScale] = useState(initScale)
   const [offset, setOffset] = useState({ x: 40, y: 40 })
@@ -515,6 +521,9 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   const offsetRef = useRef(offset)
   scaleRef.current = scale
   offsetRef.current = offset
+  const hostScaleRef = useRef(hostScale)
+  // Frame size the current offset was computed for; resizes re-project from it.
+  const viewportSizeRef = useRef({ width: 0, height: 0 })
 
   // Restore a legacy viewport once on mount; camera movement stays device-local.
   useEffect(() => {
@@ -522,7 +531,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     if (!el) return
     const apply = () => {
       const vp = doc.viewport
-      const camera = { scale: vp?.scale ?? 0.5, centerX: vp?.centerX ?? 0, centerY: vp?.centerY ?? 0 }
+      const camera = { scale: (vp?.scale ?? 0.5) * hostScaleRef.current, centerX: vp?.centerX ?? 0, centerY: vp?.centerY ?? 0 }
       const o = cameraToOffset(camera, { width: el.clientWidth, height: el.clientHeight })
       offsetRef.current = o
       scaleRef.current = camera.scale
@@ -531,22 +540,41 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
       restoredRef.current = true
     }
     apply()
+    viewportSizeRef.current = { width: el.clientWidth, height: el.clientHeight }
     const ro = new ResizeObserver(() => {
-      if (!restoredRef.current) return
-      // A screen-stable nested frame may change layout as its parent zooms. Keeping its
-      // top-left fixed preserves the child's independent view. Top-level canvases keep
-      // their world center fixed across browser resizes.
-      if (depth > 0) return
-      const camera = offsetToCamera(offsetRef.current, scaleRef.current, { width: el.clientWidth, height: el.clientHeight })
-      const o = cameraToOffset(camera, { width: el.clientWidth, height: el.clientHeight })
-      offsetRef.current = o
-      setOffset(o)
+      const next = { width: el.clientWidth, height: el.clientHeight }
+      const previous = viewportSizeRef.current
+      if (!restoredRef.current || (next.width === previous.width && next.height === previous.height)) return
+      // Keep the world point at the viewport's center fixed across resizes: the
+      // browser window for a top-level canvas, fullscreen or a resize drag for a
+      // nested one. Pinning the top-left instead would slide the middle away.
+      const view = reframeCamera(offsetRef.current, scaleRef.current, previous, next)
+      viewportSizeRef.current = next
+      offsetRef.current = view.offset
+      setOffset(view.offset)
     })
     ro.observe(el)
     return () => ro.disconnect()
   // Camera state is local after initialization.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Host zoom: the frame has already been resized by the same factor, so scale
+  // the view with it around the center. Runs before the ResizeObserver sees the
+  // new size and records it, so the resize isn't applied a second time.
+  useLayoutEffect(() => {
+    const factor = hostScale / hostScaleRef.current
+    hostScaleRef.current = hostScale
+    const el = containerRef.current
+    if (factor === 1 || !el || !restoredRef.current) return
+    const next = { width: el.clientWidth, height: el.clientHeight }
+    const view = reframeCamera(offsetRef.current, scaleRef.current, viewportSizeRef.current, next, factor)
+    viewportSizeRef.current = next
+    offsetRef.current = view.offset
+    scaleRef.current = view.scale
+    setOffset(view.offset)
+    setScale(view.scale)
+  }, [hostScale])
 
   const [isPanning, setIsPanning] = useState(false)
   const panStart = useRef({ x: 0, y: 0, ox: 0, oy: 0 })
@@ -746,7 +774,8 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
       const rect = el.getBoundingClientRect()
       const current = offsetToCamera(offsetRef.current, scaleRef.current, { width: el.clientWidth, height: el.clientHeight })
       const factor = e.deltaY < 0 ? 1.08 : 1 / 1.08
-      const nextScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, current.scale * factor))
+      // Clamp the canvas's own zoom; its host's zoom rides on top of it.
+      const nextScale = Math.min(MAX_SCALE * hostScaleRef.current, Math.max(MIN_SCALE * hostScaleRef.current, current.scale * factor))
       const camera = zoomCamera(current, nextScale / current.scale, { width: el.clientWidth, height: el.clientHeight }, zoomAnchor, {
         x: e.clientX - rect.left,
         y: e.clientY - rect.top,
@@ -914,7 +943,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
       const [a, b] = [...touches.values()]
       const rect = el.getBoundingClientRect()
       const newDist = Math.hypot(a!.x - b!.x, a!.y - b!.y)
-      const nextScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, t.scale * (newDist / t.dist)))
+      const nextScale = Math.min(MAX_SCALE * hostScaleRef.current, Math.max(MIN_SCALE * hostScaleRef.current, t.scale * (newDist / t.dist)))
       const mx = (a!.x + b!.x) / 2 - rect.left
       const my = (a!.y + b!.y) / 2 - rect.top
       const current = offsetToCamera({ x: t.ox, y: t.oy }, t.scale, { width: el.clientWidth, height: el.clientHeight })
@@ -1394,7 +1423,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   const addCanvasWindow = useCallback(() => {
     const { cx, cy } = pointAtCenter(DEFAULT_CANVAS_WIDTH, CANVAS_ASPECT)
     commit({ ...doc, attachments: [...doc.attachments, {
-      id: canvasEntityId(), kind: "canvas", canvas: emptyCanvasDoc(), x: cx, y: cy, width: DEFAULT_CANVAS_WIDTH, embeddingScale: "screen-stable",
+      id: canvasEntityId(), kind: "canvas", canvas: emptyCanvasDoc(), x: cx, y: cy, width: DEFAULT_CANVAS_WIDTH,
     }] })
     setAddMenuOpen(false)
   }, [doc, commit, pointAtCenter])
@@ -1405,7 +1434,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     if (doc.attachments.some((a) => a.path === path)) { setAddMenuOpen(false); return }
     const { cx, cy } = pointAtCenter(DEFAULT_CANVAS_WIDTH, CANVAS_ASPECT)
     commit({ ...doc, attachments: [...doc.attachments, {
-      id: canvasEntityId(), kind: "canvas", path, x: cx, y: cy, width: DEFAULT_CANVAS_WIDTH, embeddingScale: "screen-stable",
+      id: canvasEntityId(), kind: "canvas", path, x: cx, y: cy, width: DEFAULT_CANVAS_WIDTH,
     }] })
     setAddMenuOpen(false)
   }, [doc, commit, pointAtCenter])
@@ -1475,6 +1504,39 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     } catch { /* the stored name stays authoritative when rename fails */ }
   }, [applyChange, slug])
 
+  // Documents in the add menu (generated tool artifacts included) are renamed and
+  // deleted in place. Attachments on this canvas follow the file: a rename repoints
+  // them, a delete drops them, since the document cannot come back through undo.
+  const [renamingDocPath, setRenamingDocPath] = useState<string | null>(null)
+  const cancelDocRename = useRef(false)
+
+  const renameMenuDocument = useCallback(async (path: string, currentName: string, nextName: string) => {
+    setRenamingDocPath(null)
+    if (cancelDocRename.current) { cancelDocRename.current = false; return }
+    const name = nextName.trim()
+    if (!name || name === currentName) return
+    try {
+      const renamed = await renameDocument(slug ?? "", path, name)
+      setDocuments((docs) => docs.map((d) => d.path === path ? { path: renamed.path, name: renamed.name } : d))
+      const cur = liveRef.current.doc
+      if (cur.attachments.some((a) => a.path === path)) {
+        applyChange({ ...cur, attachments: cur.attachments.map((a) => a.path === path ? { ...a, path: renamed.path } : a) })
+      }
+    } catch { /* the stored name stays authoritative when rename fails */ }
+  }, [applyChange, slug])
+
+  const deleteMenuDocument = useCallback(async (path: string) => {
+    try {
+      await removeDocument(slug ?? "", path)
+    } catch { return }
+    setDocuments((docs) => docs.filter((d) => d.path !== path))
+    const cur = liveRef.current.doc
+    const gone = cur.attachments.filter((a) => a.path === path).map((a) => a.id)
+    if (gone.length === 0) return
+    applyChange({ ...cur, attachments: cur.attachments.filter((a) => a.path !== path) })
+    setFullscreenId((id) => (id && gone.includes(id) ? null : id))
+  }, [applyChange, slug])
+
   // Which attachment window, if any, is blown up over the whole surface. Exiting drops
   // straight back onto the canvas that holds it.
   const [fullscreenId, setFullscreenId] = useState<string | null>(null)
@@ -1533,20 +1595,15 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   const dragRef = useRef<{
     id: string; target: "frame" | "attachment" | "text"; mode: "move" | "resize"
     startX: number; startY: number; origX: number; origY: number; origW: number; origH: number
-    resizeScale: number
   } | null>(null)
 
   const startInteraction = useCallback((id: string, target: "frame" | "attachment" | "text", mode: "move" | "resize", clientX: number, clientY: number) => {
     const list = target === "frame" ? liveRef.current.doc.frames : target === "attachment" ? liveRef.current.doc.attachments : liveRef.current.doc.texts
     const item = list.find((e) => e.id === id)
     if (!item) return
-    const attachment = target === "attachment" ? item as CanvasAttachment : null
-    const resizeScale = attachment?.kind === "canvas" && nestedEmbeddingScale(attachment.embeddingScale) === "screen-stable"
-      ? 1
-      : scaleRef.current
     dragRef.current = {
       id, target, mode, startX: clientX, startY: clientY, origX: item.x, origY: item.y,
-      origW: "width" in item ? item.width : 0, origH: "height" in item ? (item.height ?? 0) : 0, resizeScale,
+      origW: "width" in item ? item.width : 0, origH: "height" in item ? (item.height ?? 0) : 0,
     }
   }, [])
 
@@ -1611,28 +1668,26 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
       }
       const d = dragRef.current
       if (!d) return
-      const moveDx = (e.clientX - d.startX) / scaleRef.current
-      const moveDy = (e.clientY - d.startY) / scaleRef.current
-      const resizeDx = (e.clientX - d.startX) / d.resizeScale
-      const resizeDy = (e.clientY - d.startY) / d.resizeScale
-      if (moveDx === 0 && moveDy === 0) return
+      const dx = (e.clientX - d.startX) / scaleRef.current
+      const dy = (e.clientY - d.startY) / scaleRef.current
+      if (dx === 0 && dy === 0) return
       snapshotOnce()
       const cur = liveRef.current.doc
       const minW = d.target === "frame" ? MIN_FRAME_WIDTH : MIN_ATTACH_WIDTH
       if (d.target === "frame") {
         applyChange({ ...cur, frames: cur.frames.map((f) => f.id !== d.id ? f
-          : d.mode === "resize" ? { ...f, width: Math.max(minW, d.origW + resizeDx) }
-          : { ...f, x: d.origX + moveDx, y: d.origY + moveDy }) })
+          : d.mode === "resize" ? { ...f, width: Math.max(minW, d.origW + dx) }
+          : { ...f, x: d.origX + dx, y: d.origY + dy }) })
       } else if (d.target === "attachment") {
         applyChange({ ...cur, attachments: cur.attachments.map((a) => a.id !== d.id ? a
           : d.mode === "resize" ? (a.kind === "architecture-graph" || a.kind === "document")
-            ? { ...a, width: Math.max(minW, d.origW + resizeDx), height: Math.max(MIN_GRAPH_HEIGHT, d.origH + resizeDy) }
-            : { ...a, width: Math.max(minW, d.origW + resizeDx) }
-          : { ...a, x: d.origX + moveDx, y: d.origY + moveDy }) })
+            ? { ...a, width: Math.max(minW, d.origW + dx), height: Math.max(MIN_GRAPH_HEIGHT, d.origH + dy) }
+            : { ...a, width: Math.max(minW, d.origW + dx) }
+          : { ...a, x: d.origX + dx, y: d.origY + dy }) })
       } else {
         applyChange({ ...cur, texts: cur.texts.map((t) => t.id !== d.id ? t
-          : d.mode === "resize" ? { ...t, width: Math.max(MIN_TEXT_WIDTH, d.origW + resizeDx), height: Math.max(MIN_TEXT_HEIGHT, d.origH + resizeDy) }
-          : { ...t, x: d.origX + moveDx, y: d.origY + moveDy }) })
+          : d.mode === "resize" ? { ...t, width: Math.max(MIN_TEXT_WIDTH, d.origW + dx), height: Math.max(MIN_TEXT_HEIGHT, d.origH + dy) }
+          : { ...t, x: d.origX + dx, y: d.origY + dy }) })
       }
     }
     const onUp = (e: PointerEvent) => {
@@ -1727,14 +1782,46 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
                   <div className="mx-2 my-1 border-t border-divider/50" />
                   <div className="px-3 py-0.5 text-[9px] text-ink-faint uppercase tracking-wider">Documents</div>
                   {documents.map((docItem) => (
-                    <button
-                      key={docItem.path}
-                      onClick={() => addDocumentAttachment(docItem.path)}
-                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink hover:bg-hover transition-colors truncate"
-                    >
-                      <FileType className="h-3 w-3 shrink-0 text-ink-faint" />
-                      <span className="truncate">{docItem.name}</span>
-                    </button>
+                    <div key={docItem.path} className="flex items-center gap-1 pr-2 hover:bg-hover transition-colors">
+                      {renamingDocPath === docItem.path ? (
+                        <div className="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5">
+                          <FileType className="h-3 w-3 shrink-0 text-ink-faint" />
+                          <input
+                            autoFocus
+                            defaultValue={docItem.name}
+                            aria-label={`New name for ${docItem.name}`}
+                            className="min-w-0 flex-1 bg-transparent text-[11px] text-ink outline-none"
+                            onBlur={(e) => { void renameMenuDocument(docItem.path, docItem.name, e.currentTarget.value) }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") e.currentTarget.blur()
+                              if (e.key === "Escape") { cancelDocRename.current = true; e.currentTarget.blur() }
+                            }}
+                          />
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => addDocumentAttachment(docItem.path)}
+                          className="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink transition-colors"
+                        >
+                          <FileType className="h-3 w-3 shrink-0 text-ink-faint" />
+                          <span className="truncate">{docItem.name}</span>
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setRenamingDocPath(docItem.path)}
+                        aria-label={`Rename ${docItem.name}`}
+                        className="rounded p-0.5 text-ink-faint hover:text-ink transition-colors shrink-0"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                      <button
+                        onClick={() => { void deleteMenuDocument(docItem.path) }}
+                        aria-label={`Delete ${docItem.name}`}
+                        className="rounded p-0.5 text-ink-faint hover:text-danger transition-colors shrink-0"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
                   ))}
                 </>
               )}
@@ -1895,7 +1982,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
           <Type className="h-3.5 w-3.5" />
         </button>
         <div className="flex-1" />
-        <span className="text-[10px] text-ink-faint tabular-nums">{Math.round(scale * 100)}%</span>
+        <span className="text-[10px] text-ink-faint tabular-nums">{Math.round(scale / hostScale * 100)}%</span>
         {isErasing && <span className="text-[10px] text-ink-faint ml-1">(eraser)</span>}
         {screenshotMode && <span className="text-[10px] text-ink-faint ml-1">(drag to capture)</span>}
         {selectionMode && <span className="text-[10px] text-ink-faint ml-1">(draw a lasso to select)</span>}
@@ -2141,17 +2228,15 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
           // PDFs rasterize through a settled layout size. Interactive viewport frames
           // use their actual screen size so pointer coordinates stay exact.
           const contentHeight = att.height ?? att.width * CANVAS_ASPECT
-          const viewportSize = nested
-            ? embeddedViewportSize({ width: att.width, height: contentHeight }, scale, nestedEmbeddingScale(att.embeddingScale))
-            : { width: att.width * scale, height: contentHeight * scale }
-          const screenW = viewportSize.width
-          const screenH = viewportSize.height
+          const screenW = att.width * scale
+          const screenH = contentHeight * scale
           const layoutW = nested || architectureGraph || isDocument ? screenW : Math.min(att.width * settledScale, PDF_LAYOUT_CAP)
           // Fullscreen only restyles this same wrapper — moving the window elsewhere in
           // the tree would remount the editor inside it and lose whatever it holds.
           const full = fullscreenId === att.id
           return (
             <div
+              key={att.id}
               className={cn(
                 "absolute flex flex-col border border-divider-strong rounded-lg overflow-hidden bg-paper shadow-[var(--shadow-lg)]",
                 full && "z-20",
@@ -2211,9 +2296,14 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
                 onPointerDown={(e) => e.stopPropagation()}
               >
                 {architectureGraph ? (
-                  <CanvasArchitectureGraph path={att.path!} />
+                  <CanvasArchitectureGraph path={att.path!} maximized={full} hostScale={scale} />
                 ) : isDocument ? (
-                  <CanvasDocumentAttachment path={att.path!} />
+                  <CanvasDocumentAttachment
+                    path={att.path!}
+                    hostScale={scale}
+                    plotFrame={full ? null : { width: Math.max(att.width * settledScale, PLOT_MIN_LAYOUT_WIDTH), scale: screenW / Math.max(att.width * settledScale, PLOT_MIN_LAYOUT_WIDTH) }}
+                    collapsed={!full && scale !== settledScale}
+                  />
                 ) : nested ? (
                   att.path ? (
                     depth < MAX_NEST_DEPTH ? (
@@ -2221,6 +2311,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
                         path={att.path}
                         slug={slug}
                         depth={depth + 1}
+                        hostScale={scale}
                       />
                     ) : (
                       <div className="flex h-full items-center justify-center px-3 text-center text-[10px] text-ink-faint">
@@ -2233,6 +2324,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
                       onChange={(d) => updateNestedCanvas(att.id, d)}
                       slug={slug}
                       depth={depth + 1}
+                      hostScale={scale}
                     />
                   )
                 ) : (
@@ -2383,7 +2475,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
 // A graph attachment owns only its canvas-local frame; graph content continues to
 // live in the canonical YAML file. It is deliberately rendered at real layout size:
 // CSS scaling would desynchronise React Flow's handles from the pointer.
-function CanvasArchitectureGraph({ path }: { path: string }) {
+function CanvasArchitectureGraph({ path, maximized, hostScale }: { path: string, maximized: boolean, hostScale: number }) {
   const name = path.split("/").pop() ?? path
   const [graph, setGraph] = useState<ArchitectureGraph | null>(null)
   const write = useCallback((content: string) => writeArchitectureGraph(name, content), [name])
@@ -2420,21 +2512,28 @@ function CanvasArchitectureGraph({ path }: { path: string }) {
   }, [queue])
 
   if (!graph) return <div className="flex h-full items-center justify-center text-[10px] text-ink-faint">Loading Architecture Graph…</div>
-  return <ArchitectureGraphSurface graph={graph} onChange={onChange} className="h-full" />
+  return <ArchitectureGraphSurface graph={graph} onChange={onChange} className="h-full" autoFit={maximized} hostScale={hostScale} />
 }
 
 // A document attachment is a read-only view of a generated chat artifact — a Mermaid
 // or markmap note rendered through the shared markdown renderer, or a Plotly figure
-// through the shared plot renderer. Sized and laid out like an Architecture Graph
-// (fixed viewport, no CSS zoom scaling) since neither renderer tolerates a transform
-// squeeze.
+// through the shared plot renderer. Markdown is laid out at screen size like an
+// Architecture Graph. A plot instead lays out at a zoom-independent width wide enough
+// to avoid overlapping labels, is CSS-scaled into its window, and collapses while a
+// zoom gesture runs: Plotly then redraws at most once per settled zoom, not per frame.
 type DocumentAttachmentState =
   | { status: "loading" }
   | { status: "markdown"; content: string }
   | { status: "plot"; figure: PlotFigure }
   | { status: "error"; message: string }
 
-function CanvasDocumentAttachment({ path }: { path: string }) {
+function CanvasDocumentAttachment({ path, hostScale, plotFrame, collapsed }: {
+  path: string
+  hostScale: number
+  /** Layout width (px) and CSS scale for a plot; null renders it at its window size (fullscreen). */
+  plotFrame: { width: number; scale: number } | null
+  collapsed: boolean
+}) {
   const [state, setState] = useState<DocumentAttachmentState>({ status: "loading" })
 
   useEffect(() => {
@@ -2459,15 +2558,36 @@ function CanvasDocumentAttachment({ path }: { path: string }) {
 
   if (state.status === "loading") return <div className="flex h-full items-center justify-center text-[10px] text-ink-faint">Loading…</div>
   if (state.status === "error") return <div className="flex h-full items-center justify-center px-3 text-center text-[10px] text-ink-faint">{state.message}</div>
-  if (state.status === "plot") return <div className="h-full overflow-auto p-2"><PlotElement figure={state.figure} /></div>
-  return <div className="h-full overflow-auto p-3 text-[12px]"><LaTeXMarkdown content={state.content} /></div>
+  if (state.status === "plot") {
+    if (!plotFrame) return <div className="h-full overflow-auto p-2"><PlotElement figure={state.figure} /></div>
+    return (
+      <div className="relative h-full overflow-hidden">
+        <div
+          className="overflow-auto p-2"
+          style={{
+            width: plotFrame.width,
+            height: `${100 / plotFrame.scale}%`,
+            transform: `scale(${plotFrame.scale})`,
+            transformOrigin: "top left",
+            visibility: collapsed ? "hidden" : undefined,
+          }}
+        >
+          <PlotElement figure={state.figure} />
+        </div>
+        {collapsed && <div className="absolute inset-0 flex items-center justify-center text-[10px] text-ink-faint">Plot</div>}
+      </div>
+    )
+  }
+  // Markdown can hold a markmap, which is its own viewport and magnifies with the canvas.
+  return <div className="h-full overflow-auto p-3 text-[12px]"><HostScaleContext.Provider value={hostScale}><LaTeXMarkdown content={state.content} /></HostScaleContext.Provider></div>
 }
 
 // A file-backed window is another view onto the same canvas collaboration owner.
-function NestedCanvasFile({ path, slug, depth }: {
+function NestedCanvasFile({ path, slug, depth, hostScale }: {
   path: string
   slug?: string
   depth: number
+  hostScale: number
 }) {
   const { document, replace, status, retry } = useCollaborativeCanvas(path)
 
@@ -2490,6 +2610,7 @@ function NestedCanvasFile({ path, slug, depth }: {
       onChange={replace}
       slug={slug}
       depth={depth}
+      hostScale={hostScale}
       docPath={path}
     />
   )

@@ -3,10 +3,11 @@
 import { Streamdown, defaultRemarkPlugins, type Components } from "streamdown"
 import { createMathPlugin } from "@streamdown/math"
 import remarkBreaks from "remark-breaks"
-import { cloneElement, isValidElement, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react"
+import { cloneElement, isValidElement, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { cn } from "@/lib/utils"
 import { highlightCode } from "@/lib/markdown-syntax-highlighting"
 import { apiOrigin } from "@/lib/api"
+import { HostScaleContext, offsetToCamera } from "./InfiniteViewport"
 import { createPortal } from "react-dom"
 import { Check, Copy, Globe } from "lucide-react"
 import { CodeBlock } from "./CodeBlock"
@@ -145,6 +146,42 @@ function MarkmapDiagram({ code }: { code: string }) {
     observer.observe(attachment)
     return () => observer.disconnect()
   }, [])
+
+  // The map is a viewport pinned to its top-left corner, like React Flow. Keep
+  // the world point at its center in the center when the frame resizes, and
+  // when it sits in a canvas, magnify it with the canvas's zoom so the frame
+  // shows the same view as the canvas zooms, just bigger or smaller.
+  const hostScale = useContext(HostScaleContext)
+  const hostScaleRef = useRef(hostScale)
+  const viewportSizeRef = useRef({ width: 0, height: 0 })
+  const reframe = useCallback((factor: number) => {
+    const container = containerRef.current
+    if (!container) return
+    const next = { width: container.clientWidth, height: container.clientHeight }
+    const previous = viewportSizeRef.current
+    viewportSizeRef.current = next
+    const mm = mmRef.current
+    const transform = (svgRef.current as (SVGSVGElement & { __zoom?: { k: number, x: number, y: number } }) | null)?.__zoom
+    if (!mm || !transform || previous.width === 0 || previous.height === 0) return
+    const camera = offsetToCamera({ x: transform.x, y: transform.y }, transform.k, previous)
+    mm.zoom.scaleTo(mm.svg, camera.scale * factor)
+    mm.zoom.translateTo(mm.svg, camera.centerX, camera.centerY, [next.width / 2, next.height / 2])
+  }, [])
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container || typeof ResizeObserver === "undefined") return
+    const observer = new ResizeObserver(() => {
+      const { width, height } = viewportSizeRef.current
+      if (container.clientWidth !== width || container.clientHeight !== height) reframe(1)
+    })
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [reframe])
+  useLayoutEffect(() => {
+    const factor = hostScale / hostScaleRef.current
+    hostScaleRef.current = hostScale
+    if (factor !== 1) reframe(factor)
+  }, [hostScale, reframe])
 
   useEffect(() => {
     let cancelled = false

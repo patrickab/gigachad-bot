@@ -10,6 +10,7 @@ import rough from "roughjs"
 import { Maximize, PenLine, Plus, RotateCcw, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useTabActive } from "./TabManager"
+import { reframeCamera } from "./InfiniteViewport"
 import {
   nextArchitectureGraphId,
   type ArchitectureGraph,
@@ -43,6 +44,10 @@ export interface ArchitectureGraphSurfaceProps {
   className?: string
   readOnly?: boolean
   onOpenDocument?: () => void
+  /** Each time this turns true, the view refits the whole graph to the frame (e.g. when its host maximizes it). */
+  autoFit?: boolean
+  /** Zoom of the canvas embedding this graph (1 when standalone); the graph magnifies with it. */
+  hostScale?: number
 }
 
 interface ArchitectureNodeData extends ArchitectureGraphNode, Record<string, unknown> {
@@ -378,7 +383,19 @@ function ArchitectureNodeCard({ data, selected }: NodeProps<Node<ArchitectureNod
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   useLayoutEffect(() => {
-    if (editingTitle && titleRef.current && document.activeElement !== titleRef.current) titleRef.current.focus()
+    if (!editingTitle) return
+    // React Flow keeps a new node visibility:hidden until it has measured it,
+    // and a hidden input silently refuses focus, so retry for a few frames.
+    let frame = 0
+    let attempts = 0
+    const focusTitle = () => {
+      const input = titleRef.current
+      if (!input || document.activeElement === input) return
+      input.focus()
+      if (document.activeElement !== input && attempts++ < 10) frame = requestAnimationFrame(focusTitle)
+    }
+    focusTitle()
+    return () => cancelAnimationFrame(frame)
   }, [editingTitle])
   return (
     <div ref={cardRef} className={cn("architecture-graph-node", selected && "architecture-graph-node-selected")} style={cardStyle} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
@@ -680,7 +697,7 @@ function reconcile<T extends { id: string }>(current: T[], next: T[]): T[] {
   })
 }
 
-export function ArchitectureGraphSurface({ graph, onChange, className, readOnly = false, onOpenDocument }: ArchitectureGraphSurfaceProps) {
+export function ArchitectureGraphSurface({ graph, onChange, className, readOnly = false, onOpenDocument, autoFit = false, hostScale = 1 }: ArchitectureGraphSurfaceProps) {
   const active = useTabActive()
   const graphRef = useRef(graph)
   graphRef.current = graph
@@ -771,7 +788,16 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
     if (!commit || !flow || points.length === 0) return
     const xs = points.map((p) => p.x)
     const ys = points.map((p) => p.y)
-    if (Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) < DRAW_MIN_SCREEN_SIZE) return
+    if (Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) < DRAW_MIN_SCREEN_SIZE) {
+      // A tap, not a stroke: tapping a node while drawing edits its text, so
+      // writing into a shape never requires leaving draw mode first.
+      const hit = document.elementsFromPoint(points[0].x, points[0].y).find((element) => element.closest(".react-flow__node"))
+      const node = hit?.closest(".react-flow__node")
+      const field = hit instanceof HTMLTextAreaElement || hit instanceof HTMLInputElement ? hit : node?.querySelector<HTMLInputElement>(".architecture-graph-title-input")
+      if (field) field.focus()
+      else node?.querySelector<HTMLElement>(".architecture-graph-title-display")?.click()
+      return
+    }
     const result = classifyDrawnShape(points.map((p) => flow.screenToFlowPosition(p)))
     // Draw mode stays on so several shapes can be sketched in a row; Escape or
     // the pen button ends it.
@@ -829,15 +855,59 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
     emit({ edges: graphRef.current.edges.filter((edge) => edge.id !== selectedEdgeId) })
   }, [emit, selectedEdgeId])
   const fitGraph = useCallback(() => flow?.fitView({ padding: 0.22, duration: 180 }), [flow])
+  useEffect(() => {
+    if (!autoFit) return
+    // Two frames: the host's new size has to be laid out and picked up by React
+    // Flow's own size observer before a fit can use it.
+    let frame = requestAnimationFrame(() => { frame = requestAnimationFrame(() => { void fitGraph() }) })
+    return () => cancelAnimationFrame(frame)
+    // Refit on the transition to true only, not whenever the flow instance changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoFit])
   const zoomGraphAtCenter = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
     if (!flow || event.deltaY === 0) return
     event.preventDefault()
     event.stopPropagation()
     void (event.deltaY < 0 ? flow.zoomIn() : flow.zoomOut())
   }, [flow])
+  // React Flow pins its viewport to the top-left corner, so when the frame
+  // resizes (fullscreen, a resize drag) the view's middle would drift. Both
+  // this and host zoom re-project from the size the current viewport was set
+  // for, keeping whatever sat in the center before in the center after.
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const viewportSizeRef = useRef({ width: 0, height: 0 })
+  const hostScaleRef = useRef(hostScale)
+  const reframe = useCallback((factor: number) => {
+    const el = viewportRef.current
+    if (!el || !flow) return
+    const next = { width: el.clientWidth, height: el.clientHeight }
+    const { x, y, zoom } = flow.getViewport()
+    const view = reframeCamera({ x, y }, zoom, viewportSizeRef.current, next, factor)
+    viewportSizeRef.current = next
+    void flow.setViewport({ ...view.offset, zoom: view.scale })
+  }, [flow])
+  useEffect(() => {
+    const el = viewportRef.current
+    if (!el || !flow || typeof ResizeObserver === "undefined") return
+    viewportSizeRef.current = { width: el.clientWidth, height: el.clientHeight }
+    const observer = new ResizeObserver(() => {
+      const { width, height } = viewportSizeRef.current
+      if (el.clientWidth !== width || el.clientHeight !== height) reframe(1)
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [flow, reframe])
+  // Embedded in a canvas, the frame grows and shrinks with the host's zoom;
+  // magnify the graph by the same factor so the frame shows the same view,
+  // just bigger or smaller. Runs before the ResizeObserver sees the new size.
+  useLayoutEffect(() => {
+    const factor = hostScale / hostScaleRef.current
+    hostScaleRef.current = hostScale
+    if (factor !== 1) reframe(factor)
+  }, [hostScale, reframe])
 
   return (
-    <div className={cn("architecture-graph-surface", className)} style={{ display: "flex", minHeight: 280, height: "100%", flexDirection: "column", overflow: "hidden", borderTop: "1px solid var(--divider)", backgroundColor: "var(--architecture-graph-canvas)" }}>
+    <div className={cn("architecture-graph-surface", className)} style={{ display: "flex", minHeight: 280, height: "100%", flexDirection: "column", overflow: "hidden", borderTop: "1px solid var(--divider)", backgroundColor: "var(--sketch-canvas)" }}>
       <div className="architecture-graph-toolbar" style={{ position: "relative", inset: "auto", zIndex: 5, display: "flex", minHeight: 31, flexShrink: 0, alignItems: "center", gap: 6, borderBottom: "1px solid var(--divider)", padding: "0 10px" }}>
         {!readOnly && <>
           <button type="button" onClick={addNode} className="architecture-graph-toolbar-symbol" aria-label="Add node"><Plus size={13} /></button>
@@ -847,7 +917,7 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
         <button type="button" onClick={fitGraph} className="architecture-graph-toolbar-symbol" aria-label="Fit view"><Maximize size={13} /></button>
         {onOpenDocument && <button type="button" onClick={onOpenDocument} className="architecture-graph-icon-button" aria-label="Open Architecture Graph document" style={{ display: "grid", width: 26, height: 26, marginLeft: "auto", placeItems: "center", border: 0, borderRadius: 5, background: "transparent", color: "var(--ink-muted)" }}><Maximize size={14} /></button>}
       </div>
-      <div onWheelCapture={zoomGraphAtCenter} style={{ position: "relative", minHeight: 0, flex: 1 }}>
+      <div ref={viewportRef} onWheelCapture={zoomGraphAtCenter} style={{ position: "relative", minHeight: 0, flex: 1 }}>
       {!readOnly && selectedEdge && <div className="architecture-graph-edge-editor">
         <input aria-label="Connection label" value={selectedEdge.label ?? ""} placeholder="Connection label" onChange={(event) => updateSelectedEdge({ label: event.target.value })} />
         <select aria-label="Connection direction" value={selectedEdge.direction} onChange={(event) => updateSelectedEdge({ direction: event.target.value as ArchitectureGraphEdge["direction"] })}>
@@ -883,7 +953,7 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
         onNodeDragStop={onNodeDragStop} onConnect={onConnect} onEdgesDelete={onEdgesDelete} onNodesDelete={onNodesDelete}
         nodesDraggable={!readOnly} nodesConnectable={!readOnly} elementsSelectable={!readOnly} deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
         connectionMode={ConnectionMode.Loose}
-        fitView minZoom={0.2} maxZoom={2} zoomOnScroll={false} panOnScroll selectionOnDrag={false} proOptions={{ hideAttribution: true }} elevateEdgesOnSelect
+        fitView minZoom={0.2 * hostScale} maxZoom={2 * hostScale} zoomOnScroll={false} panOnScroll selectionOnDrag={false} proOptions={{ hideAttribution: true }} elevateEdgesOnSelect
       >
         <Background gap={22} size={1} color="var(--sketch-grid)" />
       </ReactFlow>

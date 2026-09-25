@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { embeddedViewportSize, nestedEmbeddingScale, screenToWorld, zoomCamera, type InfiniteViewportCamera, type ViewportSize } from "@/components/InfiniteViewport"
+import { reframeCamera, screenToWorld, zoomCamera, type InfiniteViewportCamera, type ViewportSize } from "@/components/InfiniteViewport"
 
 const viewport: ViewportSize = { width: 800, height: 600 }
 
@@ -26,11 +26,19 @@ describe("InfiniteViewport", () => {
     expect(after.y).toBeCloseTo(before.y)
   })
 
-  it("counteracts parent scale for screen-stable nested viewports", () => {
-    const size = { width: 600, height: 420 }
+  it("keeps the center and magnifies the view when an embedded frame follows its host's zoom", () => {
+    const offset = { x: 130, y: -40 }
+    const scale = 0.8
+    const next = { width: viewport.width * 1.5, height: viewport.height * 1.5 }
+    const before = { x: (viewport.width / 2 - offset.x) / scale, y: (viewport.height / 2 - offset.y) / scale }
 
-    expect(embeddedViewportSize(size, 2, "screen-stable")).toEqual(size)
-    expect(embeddedViewportSize(size, 2, "inherit")).toEqual({ width: 1200, height: 840 })
-    expect(nestedEmbeddingScale(undefined)).toBe("screen-stable")
+    const view = reframeCamera(offset, scale, viewport, next, 1.5)
+    const after = { x: (next.width / 2 - view.offset.x) / view.scale, y: (next.height / 2 - view.offset.y) / view.scale }
+
+    expect(view.scale).toBeCloseTo(1.2)
+    expect(after.x).toBeCloseTo(before.x)
+    expect(after.y).toBeCloseTo(before.y)
+    // Same world span across the frame: the view is unchanged, only magnified.
+    expect(next.width / view.scale).toBeCloseTo(viewport.width / scale)
   })
 })
