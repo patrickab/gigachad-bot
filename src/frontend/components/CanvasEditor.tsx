@@ -4,9 +4,10 @@ import { memo, useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { getStroke } from "perfect-freehand"
 import { type StrokeData, type EmbedRect, type CanvasEmbedRect, getSvgPathFromStroke, renderPageToPng } from "@/lib/drawing"
-import { createArchitectureGraph, fileViewerRawUrl, writeBinaryDocument, listArchitectureGraphs, listNotes, listProjectDocuments, loadFileViewerText, readArchitectureGraph, writeArchitectureGraph, writeDocument, renameArchitectureGraph, renameDocument, ApiError } from "@/lib/api"
+import { createArchitectureGraph, fileViewerRawUrl, writeBinaryDocument, listArchitectureGraphs, listNotes, listProjectDocuments, loadFileViewerText, readArchitectureGraph, writeArchitectureGraph, renameArchitectureGraph, renameDocument } from "@/lib/api"
 import { emptyArchitectureGraph, parseArchitectureGraph, serializeArchitectureGraph, type ArchitectureGraph } from "@/lib/architectureGraph"
 import { useGraphAutosave } from "@/lib/graphAutosave"
+import { useCollaborativeCanvas } from "@/hooks/useCollaborativeCanvas"
 import { subscribeToChanges } from "@/lib/syncStream"
 import { activeThemeName } from "@/lib/palette"
 import { cn } from "@/lib/utils"
@@ -28,7 +29,6 @@ const DEFAULT_CANVAS_WIDTH = 600 // nested canvas window default width (canvas u
 const CANVAS_ASPECT = 0.7 // nested canvas windows have no intrinsic aspect — fix one
 const DEFAULT_GRAPH_WIDTH = 720
 const DEFAULT_GRAPH_HEIGHT = 480
-const NESTED_SAVE_MS = 1000 // quiet time before a file-backed canvas window writes back
 const MAX_NEST_DEPTH = 2 // canvas windows stop opening files here, so A→B→A can't recurse
 const MIN_FRAME_WIDTH = 120
 const MIN_ATTACH_WIDTH = 200
@@ -51,7 +51,7 @@ const PEN_TOUCH_SUPPRESS_MS = 700 // touch gestures stay suppressed this long af
 const ZOOM_SETTLE_MS = 250 // attachments re-rasterize at full resolution this long after the zoom stops changing
 const PDF_LAYOUT_CAP = 916 // PdfViewer caps rendering at 900px + scrollbar gutter — wider layout gains no resolution
 const STRAIGHTEN_MOVE_TOLERANCE = 5 // px of client movement that resets the "holding still" timer
-const HISTORY_LIMIT = 50 // undo depth — whole-doc snapshots, so this is the memory knob
+const HISTORY_LIMIT = 50 // undo depth
 const LASSO_COVERAGE = 0.6 // fraction of a stroke's points that must fall inside the lasso to select it
 const SELECTION_MIN = 24 // canvas units — selection box can be squeezed no smaller
 const COPY_OFFSET_PX = 24 // screen px a duplicated selection is nudged by, so it reads as a new object
@@ -171,6 +171,105 @@ export function emptyCanvasDoc(): CanvasDocument {
   return { version: 1, frames: [], strokes: [], attachments: [], texts: [] }
 }
 
+type CanvasEntityCollection = "frames" | "strokes" | "attachments" | "texts"
+type CanvasEntity = CanvasFrame | StrokeData | CanvasAttachment | CanvasText
+
+interface CanvasHistoryChange {
+  collection: CanvasEntityCollection
+  id: string
+  before: CanvasEntity | null
+  after: CanvasEntity | null
+  beforeIndex: number
+  afterIndex: number
+}
+
+interface CanvasHistoryEntry {
+  before: CanvasDocument
+  after: CanvasDocument | null // null until the gesture's first write
+}
+
+const canvasEntityCollections: CanvasEntityCollection[] = ["frames", "strokes", "attachments", "texts"]
+
+function canvasEntities(doc: CanvasDocument, collection: CanvasEntityCollection): CanvasEntity[] {
+  return doc[collection] as CanvasEntity[]
+}
+
+function comparableEntity(collection: CanvasEntityCollection, entity: CanvasEntity | null): unknown {
+  if (!entity || collection !== "attachments") return entity
+  const { page: _page, ...withoutPage } = entity as CanvasAttachment
+  return withoutPage
+}
+
+function sameHistoryEntity(collection: CanvasEntityCollection, a: CanvasEntity | null, b: CanvasEntity | null): boolean {
+  return JSON.stringify(comparableEntity(collection, a)) === JSON.stringify(comparableEntity(collection, b))
+}
+
+function historyChanges(before: CanvasDocument, after: CanvasDocument): CanvasHistoryChange[] {
+  const changes: CanvasHistoryChange[] = []
+  for (const collection of canvasEntityCollections) {
+    const beforeItems = canvasEntities(before, collection)
+    const afterItems = canvasEntities(after, collection)
+    if (beforeItems === afterItems) continue
+    const beforeById = new Map(beforeItems.map((entity, index) => [entity.id, { entity, index }]))
+    const afterById = new Map(afterItems.map((entity, index) => [entity.id, { entity, index }]))
+    for (const id of new Set([...beforeById.keys(), ...afterById.keys()])) {
+      const previous = beforeById.get(id)
+      const next = afterById.get(id)
+      if (previous?.entity !== next?.entity && !sameHistoryEntity(collection, previous?.entity ?? null, next?.entity ?? null)) {
+        changes.push({
+          collection,
+          id,
+          before: previous?.entity ?? null,
+          after: next?.entity ?? null,
+          beforeIndex: previous?.index ?? -1,
+          afterIndex: next?.index ?? -1,
+        })
+      }
+    }
+  }
+  return changes
+}
+
+function restoreHistory(doc: CanvasDocument, changes: CanvasHistoryChange[], direction: "undo" | "redo"): CanvasDocument {
+  let restored: CanvasDocument | null = null
+  for (const collection of canvasEntityCollections) {
+    const collectionChanges = changes.filter((change) => change.collection === collection)
+    if (collectionChanges.length === 0) continue
+    const changesById = new Map(collectionChanges.map((change) => [change.id, change]))
+    const current = canvasEntities(doc, collection)
+    const items = current.flatMap((entity) => {
+      const change = changesById.get(entity.id)
+      if (!change) return [entity]
+      const expected = direction === "undo" ? change.after : change.before
+      const replacement = direction === "undo" ? change.before : change.after
+      if (!sameHistoryEntity(collection, entity, expected)) return [entity]
+      if (!replacement) return []
+      // PDF page changes are navigation, never a conflicting artwork edit.
+      if (collection === "attachments") {
+        const page = (entity as CanvasAttachment).page
+        return [{ ...(replacement as CanvasAttachment), ...(page === undefined ? {} : { page }) }]
+      }
+      return [replacement]
+    })
+    for (const change of collectionChanges
+      .filter((change) => (direction === "undo" ? change.after : change.before) === null)
+      .sort((a, b) => (direction === "undo" ? a.beforeIndex : a.afterIndex) - (direction === "undo" ? b.beforeIndex : b.afterIndex))) {
+      const replacement = direction === "undo" ? change.before : change.after
+      if (!replacement || items.some((entity) => entity.id === change.id)) continue
+      const index = direction === "undo" ? change.beforeIndex : change.afterIndex
+      items.splice(Math.max(0, Math.min(index, items.length)), 0, replacement)
+    }
+    if (items.length === current.length && items.every((entity, index) => entity === current[index])) continue
+    const target: CanvasDocument = restored ?? { ...doc }
+    restored = target
+    if (collection === "frames") target.frames = items as CanvasFrame[]
+    else if (collection === "strokes") target.strokes = items as StrokeData[]
+    else if (collection === "attachments") target.attachments = items as CanvasAttachment[]
+    else target.texts = items as CanvasText[]
+  }
+  return restored ?? doc
+}
+
 // Stable fallback for a nested canvas saved without contents — a fresh object per
 // render would reset the nested editor's identity on every parent re-render.
 const EMPTY_NESTED = emptyCanvasDoc()
@@ -179,16 +278,31 @@ const EMPTY_NESTED = emptyCanvasDoc()
 type LegacyEmbed = { id: string; path: string; x: number; y: number; width: number }
 // earlier point-text model saved notes without width/height
 type LegacyText = Omit<CanvasText, "width" | "height"> & { width?: number; height?: number }
+type LegacyStroke = Omit<StrokeData, "id"> & { id?: string }
 type LegacyDoc = {
   version: 1
   viewport?: CanvasDocument["viewport"]
-  strokes?: StrokeData[]
+  strokes?: LegacyStroke[]
   frames?: CanvasFrame[]
   attachments?: CanvasAttachment[]
   texts?: LegacyText[]
   pages?: { id: string; x: number; y: number }[]
   pdfEmbeds?: LegacyEmbed[]
   imageEmbeds?: LegacyEmbed[]
+}
+
+function canvasEntityId(): string {
+  return crypto.randomUUID()
+}
+
+function migrateStrokes(strokes: LegacyStroke[] | undefined): StrokeData[] {
+  return (strokes ?? []).map((stroke) => stroke.id ? stroke as StrokeData : { ...stroke, id: canvasEntityId() })
+}
+
+function migrateAttachment(attachment: CanvasAttachment): CanvasAttachment {
+  return attachment.kind === "canvas" && attachment.canvas
+    ? { ...attachment, canvas: migrate(attachment.canvas) }
+    : attachment
 }
 
 // backfills width/height for text notes saved under the earlier point-text model
@@ -198,13 +312,20 @@ function migrateTexts(texts: LegacyText[] | undefined): CanvasText[] {
 
 function migrate(d: LegacyDoc): CanvasDocument {
   if (Array.isArray(d.frames)) {
-    return { version: 1, viewport: d.viewport, frames: d.frames, strokes: d.strokes ?? [], attachments: d.attachments ?? [], texts: migrateTexts(d.texts) }
+    return {
+      version: 1,
+      viewport: d.viewport,
+      frames: d.frames,
+      strokes: migrateStrokes(d.strokes),
+      attachments: (d.attachments ?? []).map(migrateAttachment),
+      texts: migrateTexts(d.texts),
+    }
   }
   const frames: CanvasFrame[] = []
   for (const p of d.pages ?? []) frames.push({ id: p.id, kind: "page", x: p.x, y: p.y, width: A4_W })
   for (const im of d.imageEmbeds ?? []) frames.push({ id: im.id, kind: "image", x: im.x, y: im.y, width: im.width, path: im.path })
   const attachments: CanvasAttachment[] = (d.pdfEmbeds ?? []).map((e) => ({ id: e.id, kind: "pdf", x: e.x, y: e.y, width: e.width, path: e.path }))
-  return { version: 1, viewport: d.viewport, frames, strokes: d.strokes ?? [], attachments, texts: migrateTexts(d.texts) }
+  return { version: 1, viewport: d.viewport, frames, strokes: migrateStrokes(d.strokes), attachments, texts: migrateTexts(d.texts) }
 }
 
 export function parseCanvasDoc(text: string): CanvasDocument {
@@ -369,7 +490,7 @@ const StrokeLayer = memo(function StrokeLayer({ strokes, hidden, isDark }: { str
       {strokes.map((stroke, i) => {
         if (hidden?.has(i)) return null
         const d = strokePath(stroke)
-        return d ? <path key={i} d={d} fill={inkColor(stroke.color, isDark)} /> : null
+        return d ? <path key={stroke.id} d={d} fill={inkColor(stroke.color, isDark)} /> : null
       })}
     </>
   )
@@ -384,6 +505,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   // latest doc/onChange for the long-lived window drag listeners and for history
   const liveRef = useRef({ doc, onChange })
   liveRef.current = { doc, onChange }
+  const restoredRef = useRef(false)
 
   const initScale = doc.viewport?.scale ?? 0.5
   // offset is derived once the container mounts; fall back to a reasonable default
@@ -394,9 +516,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   scaleRef.current = scale
   offsetRef.current = offset
 
-  // on mount (and, top-level only, on resize) recompute offset from the stored center so
-  // the same canvas point stays centered regardless of container dimensions
-  const restoredRef = useRef(false)
+  // Restore a legacy viewport once on mount; camera movement stays device-local.
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
@@ -424,7 +544,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     })
     ro.observe(el)
     return () => ro.disconnect()
-  // only re-run on mount, not on doc changes (viewport is persisted separately)
+  // Camera state is local after initialization.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -447,25 +567,35 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   const [colorOpen, setColorOpen] = useState(false)
   const colorRef = useRef<HTMLDivElement>(null)
 
-  // --- History: whole-doc snapshots, so frame/attachment deletes, moves, resizes,
-  // erases and text edits are all undoable — not just strokes. `viewport` is excluded
-  // on restore (a view concern; undoing shouldn't teleport the camera). ---
-  const [undoStack, setUndoStack] = useState<CanvasDocument[]>([])
-  const [redoStack, setRedoStack] = useState<CanvasDocument[]>([])
+  // History records one entry per local gesture: the doc before it and its latest write.
+  // Undo/redo diff the two and replay only that delta against the live document, so
+  // remote entities (and later remote edits) stay intact — and a drag costs nothing extra
+  // per pointermove.
+  const [undoStack, setUndoStack] = useState<CanvasHistoryEntry[]>([])
+  const [redoStack, setRedoStack] = useState<CanvasHistoryEntry[]>([])
+  const gestureRef = useRef<CanvasHistoryEntry | null>(null)
 
-  // Push the pre-change doc. Call once per user gesture, before its first onChange.
-  // `prev` must be read here, not inside the updater — updaters run during the next
-  // render, by which point liveRef already holds the post-change doc.
+  // Opens a gesture. `before` must be read here, not inside a setState updater — updaters
+  // run during the next render, by which point liveRef already holds the post-change doc.
   const snapshot = useCallback(() => {
-    const prev = liveRef.current.doc
-    setUndoStack((s) => [...s, prev].slice(-HISTORY_LIMIT))
+    gestureRef.current = { before: liveRef.current.doc, after: null }
     setRedoStack([])
+  }, [])
+
+  const finishHistory = useCallback(() => {
+    gestureRef.current = null
   }, [])
 
   // Writing through this keeps `liveRef` in step within the same tick: two mutations can
   // land back to back before React re-renders (a cross-canvas stroke drop removes here
   // and adds there), and the second must not read the pre-first document.
   const applyChange = useCallback((next: CanvasDocument) => {
+    const gesture = gestureRef.current
+    if (gesture) {
+      // the gesture's first write puts it on the stack; later writes only move its end
+      if (!gesture.after) setUndoStack((stack) => [...stack, gesture].slice(-HISTORY_LIMIT))
+      gesture.after = next
+    }
     liveRef.current.doc = next
     liveRef.current.onChange(next)
   }, [])
@@ -474,7 +604,8 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   const commit = useCallback((next: CanvasDocument) => {
     snapshot()
     applyChange(next)
-  }, [snapshot, applyChange])
+    finishHistory()
+  }, [snapshot, applyChange, finishHistory])
 
   // A drag fires onChange on every pointermove, so it must snapshot only once — and
   // only on the move that actually changes something, so a click that moves nothing
@@ -585,20 +716,6 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     if (close) setColorOpen(false)
   }, [])
 
-  // Reads the doc through liveRef so this stays identity-stable: depending on `doc`
-  // meant every document change re-armed the save timer, which then wrote a new doc,
-  // which re-armed the timer — a 2Hz mutate/re-render loop that ran for as long as a
-  // canvas was open. The no-op guard stops a write when the view hasn't actually moved.
-  const persistViewport = useCallback((s: number, o: { x: number; y: number }) => {
-    const el = containerRef.current
-    if (!el) return
-    const camera = offsetToCamera(o, s, { width: el.clientWidth, height: el.clientHeight })
-    const { doc: cur, onChange: change } = liveRef.current
-    const vp = cur.viewport
-    if (vp && vp.scale === camera.scale && Math.abs(vp.centerX - camera.centerX) < 0.5 && Math.abs(vp.centerY - camera.centerY) < 0.5) return
-    change({ ...cur, viewport: camera })
-  }, [])
-
   const screenToCanvas = useCallback((clientX: number, clientY: number): [number, number] => {
     const el = containerRef.current
     if (!el) return [0, 0]
@@ -609,13 +726,15 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   }, [])
 
   const addText = useCallback((x: number, y: number, width = TEXT_DEFAULT_WIDTH, height = TEXT_DEFAULT_HEIGHT, text = "") => {
-    const id = `txt-${Date.now()}`
+    const id = canvasEntityId()
     newTextIds.current.add(id)
     const cur = liveRef.current.doc
-    commit({ ...cur, texts: [...cur.texts, { id, x, y, width, height, text, color, size: TEXT_DEFAULT_SIZE }] })
+    // The gesture stays open until the note blurs, so what is typed into it undoes together with its creation.
+    snapshot()
+    applyChange({ ...cur, texts: [...cur.texts, { id, x, y, width, height, text, color, size: TEXT_DEFAULT_SIZE }] })
     setAutoFocusId(id)
     setEditingTextId(id)
-  }, [color, commit])
+  }, [color, snapshot, applyChange])
 
   // Wheel zoom
   useEffect(() => {
@@ -642,15 +761,6 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     return () => el.removeEventListener("wheel", onWheel)
   }, [zoomAnchor])
 
-  // Save viewport on idle
-  const viewportTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  useEffect(() => {
-    clearTimeout(viewportTimer.current)
-    viewportTimer.current = setTimeout(() => {
-      persistViewport(scale, offset)
-    }, 500)
-    return () => clearTimeout(viewportTimer.current)
-  }, [scale, offset, persistViewport])
 
   // --- Pan (middle mouse or space+drag) ---
   const spaceDown = useRef(false)
@@ -1021,7 +1131,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
       })
       if (updated.length !== doc.strokes.length) {
         snapshotOnce()
-        onChange({ ...doc, strokes: updated })
+        applyChange({ ...doc, strokes: updated })
       }
       return
     }
@@ -1045,7 +1155,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
       appendStrokePoint(currentPointsRef.current, [cx, cy, ev.pressure > 0 ? ev.pressure : 0.5])
     }
     redrawLive()
-  }, [isDrawing, isErasing, screenToCanvas, doc, onChange, cancelLongPress, armStraighten, redrawLive, snapshotOnce])
+  }, [isDrawing, isErasing, screenToCanvas, doc, cancelLongPress, armStraighten, redrawLive, snapshotOnce, applyChange])
 
   const handleSvgPointerUp = useCallback((e?: React.PointerEvent<SVGSVGElement>) => {
     cancelLongPress()
@@ -1083,7 +1193,12 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
       }
       return
     }
-    if (isErasing) { setIsErasing(false); return }
+    if (isErasing) {
+      setIsErasing(false)
+      finishHistory()
+      gestureSnapped.current = false
+      return
+    }
     if (!isDrawing) return
     setIsDrawing(false)
     const pts = currentPointsRef.current
@@ -1094,40 +1209,35 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     currentPointsRef.current = []
     redrawLive()
     if (pts.length < 2) return
-    commit({ ...doc, strokes: [...doc.strokes, { points: pts, color, width: baseWidth }] })
-  }, [isDrawing, isErasing, color, baseWidth, doc, onChange, cancelLongPress, cancelStraighten, captureScreenshot, finalizeLasso, screenToCanvas, redrawLive, commit, addText])
+    commit({ ...doc, strokes: [...doc.strokes, { id: canvasEntityId(), points: pts, color, width: baseWidth }] })
+  }, [isDrawing, isErasing, color, baseWidth, doc, cancelLongPress, cancelStraighten, captureScreenshot, finalizeLasso, screenToCanvas, redrawLive, commit, addText, finishHistory])
 
   // --- Undo / Redo ---
   // Selections index into doc.strokes, so a restore that shifts the array would leave
   // them pointing at the wrong strokes — both directions drop the selection.
-  const restore = useCallback((target: CanvasDocument) => {
-    const cur = liveRef.current.doc
-    const pagesByAttachment = new Map(cur.attachments.map((attachment) => [attachment.id, attachment.page]))
-    liveRef.current.onChange({
-      ...target,
-      attachments: target.attachments.map((attachment) => {
-        const page = pagesByAttachment.get(attachment.id)
-        return page === undefined ? attachment : { ...attachment, page }
-      }),
-      viewport: cur.viewport,
-    })
-    clearSelection()
-    return cur
-  }, [clearSelection])
-
   const undo = useCallback(() => {
-    if (undoStack.length === 0) return
-    const cur = restore(undoStack[undoStack.length - 1]!)
-    setUndoStack((s) => s.slice(0, -1))
-    setRedoStack((s) => [...s, cur])
-  }, [undoStack, restore])
+    const entry = undoStack[undoStack.length - 1]
+    if (!entry?.after) return
+    finishHistory()
+    const current = liveRef.current.doc
+    const restored = restoreHistory(current, historyChanges(entry.before, entry.after), "undo")
+    if (restored !== current) applyChange(restored)
+    setUndoStack((stack) => stack.slice(0, -1))
+    setRedoStack((stack) => [...stack, entry])
+    clearSelection()
+  }, [undoStack, applyChange, finishHistory, clearSelection])
 
   const redo = useCallback(() => {
-    if (redoStack.length === 0) return
-    const cur = restore(redoStack[redoStack.length - 1]!)
-    setRedoStack((s) => s.slice(0, -1))
-    setUndoStack((s) => [...s, cur].slice(-HISTORY_LIMIT))
-  }, [redoStack, restore])
+    const entry = redoStack[redoStack.length - 1]
+    if (!entry?.after) return
+    finishHistory()
+    const current = liveRef.current.doc
+    const restored = restoreHistory(current, historyChanges(entry.before, entry.after), "redo")
+    if (restored !== current) applyChange(restored)
+    setRedoStack((stack) => stack.slice(0, -1))
+    setUndoStack((stack) => [...stack, entry].slice(-HISTORY_LIMIT))
+    clearSelection()
+  }, [redoStack, applyChange, finishHistory, clearSelection])
 
   useEffect(() => {
     if (!active) return
@@ -1148,20 +1258,21 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     return () => window.removeEventListener("keydown", handler)
   }, [undo, redo, active])
 
-  // One history snapshot per focus session of a text note, so typing a sentence is
-  // one undo step, not one per keystroke. The first keystroke into a freshly created
-  // (empty) box is skipped — the creation snapshot already covers it.
+  // One history gesture per focus session of a text note, closed on blur, so typing a
+  // sentence is one undo step, not one per keystroke. A freshly created box opens no new
+  // one — its creation gesture (from addText) stays open and covers the typing.
   const textEdited = useRef(false)
 
   // Removes a text note if its content is blank — called on blur so an
   // untouched or fully-cleared box doesn't linger as an empty artifact.
   const dropIfEmptyText = useCallback((id: string) => {
-    const { doc: cur, onChange: change } = liveRef.current
+    const cur = liveRef.current.doc
     const item = cur.texts.find((t) => t.id === id)
     if (item && item.text.trim() === "") {
-      change({ ...cur, texts: cur.texts.filter((t) => t.id !== id) })
+      applyChange({ ...cur, texts: cur.texts.filter((t) => t.id !== id) })
     }
-  }, [])
+    finishHistory()
+  }, [applyChange, finishHistory])
 
   // Escape cancels an in-progress screenshot/selection-drawing/text-box-drag, or drops the current stroke selection
   useEffect(() => {
@@ -1252,11 +1363,11 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     const pages = doc.frames.filter((f) => f.kind === "page")
     const last = pages[pages.length - 1]
     const newX = last ? last.x + last.width + PAGE_GAP : 0
-    commit({ ...doc, frames: [...doc.frames, { id: `p-${Date.now()}`, kind: "page", x: newX, y: last?.y ?? 0, width: A4_W }] })
+    commit({ ...doc, frames: [...doc.frames, { id: canvasEntityId(), kind: "page", x: newX, y: last?.y ?? 0, width: A4_W }] })
   }, [doc, commit])
 
   const addImageFrameAt = useCallback((path: string, x: number, y: number) => {
-    commit({ ...doc, frames: [...doc.frames, { id: `img-${Date.now()}`, kind: "image", x, y, width: DEFAULT_IMAGE_WIDTH, path }] })
+    commit({ ...doc, frames: [...doc.frames, { id: canvasEntityId(), kind: "image", x, y, width: DEFAULT_IMAGE_WIDTH, path }] })
   }, [doc, commit])
 
   const addImageFrame = useCallback((path: string) => {
@@ -1274,7 +1385,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   const addAttachment = useCallback((path: string) => {
     if (doc.attachments.some((a) => a.path === path)) { setAddMenuOpen(false); return }
     const { cx, cy } = pointAtCenter(DEFAULT_PDF_WIDTH, FALLBACK_ASPECT)
-    commit({ ...doc, attachments: [...doc.attachments, { id: `pdf-${Date.now()}`, kind: "pdf", path, x: cx, y: cy, width: DEFAULT_PDF_WIDTH }] })
+    commit({ ...doc, attachments: [...doc.attachments, { id: canvasEntityId(), kind: "pdf", path, x: cx, y: cy, width: DEFAULT_PDF_WIDTH }] })
     setAddMenuOpen(false)
   }, [doc, commit, pointAtCenter])
 
@@ -1283,18 +1394,18 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   const addCanvasWindow = useCallback(() => {
     const { cx, cy } = pointAtCenter(DEFAULT_CANVAS_WIDTH, CANVAS_ASPECT)
     commit({ ...doc, attachments: [...doc.attachments, {
-      id: `cv-${Date.now()}`, kind: "canvas", canvas: emptyCanvasDoc(), x: cx, y: cy, width: DEFAULT_CANVAS_WIDTH, embeddingScale: "screen-stable",
+      id: canvasEntityId(), kind: "canvas", canvas: emptyCanvasDoc(), x: cx, y: cy, width: DEFAULT_CANVAS_WIDTH, embeddingScale: "screen-stable",
     }] })
     setAddMenuOpen(false)
   }, [doc, commit, pointAtCenter])
 
-  // Same window, but bound to an existing project canvas: it loads, autosaves and
-  // flushes on close by itself (`NestedCanvasFile`), so nothing of it lands in this doc.
+  // A referenced canvas stores only its placement here; its document is owned by its
+  // own collaboration hook in NestedCanvasFile.
   const addCanvasFile = useCallback((path: string) => {
     if (doc.attachments.some((a) => a.path === path)) { setAddMenuOpen(false); return }
     const { cx, cy } = pointAtCenter(DEFAULT_CANVAS_WIDTH, CANVAS_ASPECT)
     commit({ ...doc, attachments: [...doc.attachments, {
-      id: `cv-${Date.now()}`, kind: "canvas", path, x: cx, y: cy, width: DEFAULT_CANVAS_WIDTH, embeddingScale: "screen-stable",
+      id: canvasEntityId(), kind: "canvas", path, x: cx, y: cy, width: DEFAULT_CANVAS_WIDTH, embeddingScale: "screen-stable",
     }] })
     setAddMenuOpen(false)
   }, [doc, commit, pointAtCenter])
@@ -1303,7 +1414,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     if (doc.attachments.some((attachment) => attachment.path === path)) { setAddMenuOpen(false); return }
     const { cx, cy } = pointAtCenter(DEFAULT_GRAPH_WIDTH, DEFAULT_GRAPH_HEIGHT / DEFAULT_GRAPH_WIDTH)
     commit({ ...doc, attachments: [...doc.attachments, {
-      id: `ag-${Date.now()}`, kind: "architecture-graph", path, x: cx, y: cy, width: DEFAULT_GRAPH_WIDTH, height: DEFAULT_GRAPH_HEIGHT,
+      id: canvasEntityId(), kind: "architecture-graph", path, x: cx, y: cy, width: DEFAULT_GRAPH_WIDTH, height: DEFAULT_GRAPH_HEIGHT,
     }] })
     setAddMenuOpen(false)
   }, [doc, commit, pointAtCenter])
@@ -1312,7 +1423,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     if (doc.attachments.some((attachment) => attachment.path === path)) { setAddMenuOpen(false); return }
     const { cx, cy } = pointAtCenter(DEFAULT_GRAPH_WIDTH, DEFAULT_GRAPH_HEIGHT / DEFAULT_GRAPH_WIDTH)
     commit({ ...doc, attachments: [...doc.attachments, {
-      id: `doc-${Date.now()}`, kind: "document", path, x: cx, y: cy, width: DEFAULT_GRAPH_WIDTH, height: DEFAULT_GRAPH_HEIGHT,
+      id: canvasEntityId(), kind: "document", path, x: cx, y: cy, width: DEFAULT_GRAPH_WIDTH, height: DEFAULT_GRAPH_HEIGHT,
     }] })
     setAddMenuOpen(false)
   }, [doc, commit, pointAtCenter])
@@ -1468,7 +1579,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     const copies = [...selectedStrokes]
       .map((i) => cur.strokes[i])
       .filter((s): s is StrokeData => Boolean(s))
-      .map((s) => ({ ...s, points: s.points.map((p) => [p[0]! + off, p[1]! + off, p[2] ?? 0.5]) }))
+      .map((s) => ({ ...s, id: canvasEntityId(), points: s.points.map((p) => [p[0]! + off, p[1]! + off, p[2] ?? 0.5]) }))
     if (copies.length === 0) return
     commit({ ...cur, strokes: [...cur.strokes, ...copies] })
     setSelectedStrokes(new Set(copies.map((_, k) => cur.strokes.length + k)))
@@ -1506,20 +1617,20 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
       const resizeDy = (e.clientY - d.startY) / d.resizeScale
       if (moveDx === 0 && moveDy === 0) return
       snapshotOnce()
-      const { doc: cur, onChange: change } = liveRef.current
+      const cur = liveRef.current.doc
       const minW = d.target === "frame" ? MIN_FRAME_WIDTH : MIN_ATTACH_WIDTH
       if (d.target === "frame") {
-        change({ ...cur, frames: cur.frames.map((f) => f.id !== d.id ? f
+        applyChange({ ...cur, frames: cur.frames.map((f) => f.id !== d.id ? f
           : d.mode === "resize" ? { ...f, width: Math.max(minW, d.origW + resizeDx) }
           : { ...f, x: d.origX + moveDx, y: d.origY + moveDy }) })
       } else if (d.target === "attachment") {
-        change({ ...cur, attachments: cur.attachments.map((a) => a.id !== d.id ? a
+        applyChange({ ...cur, attachments: cur.attachments.map((a) => a.id !== d.id ? a
           : d.mode === "resize" ? (a.kind === "architecture-graph" || a.kind === "document")
             ? { ...a, width: Math.max(minW, d.origW + resizeDx), height: Math.max(MIN_GRAPH_HEIGHT, d.origH + resizeDy) }
             : { ...a, width: Math.max(minW, d.origW + resizeDx) }
           : { ...a, x: d.origX + moveDx, y: d.origY + moveDy }) })
       } else {
-        change({ ...cur, texts: cur.texts.map((t) => t.id !== d.id ? t
+        applyChange({ ...cur, texts: cur.texts.map((t) => t.id !== d.id ? t
           : d.mode === "resize" ? { ...t, width: Math.max(MIN_TEXT_WIDTH, d.origW + resizeDx), height: Math.max(MIN_TEXT_HEIGHT, d.origH + resizeDy) }
           : { ...t, x: d.origX + moveDx, y: d.origY + moveDy }) })
       }
@@ -1549,6 +1660,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
       dragRef.current = null
       selDragRef.current = null
       gestureSnapped.current = false
+      finishHistory()
     }
     window.addEventListener("pointermove", onMove)
     window.addEventListener("pointerup", onUp)
@@ -1556,7 +1668,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
       window.removeEventListener("pointermove", onMove)
       window.removeEventListener("pointerup", onUp)
     }
-  }, [snapshotOnce, commit, clearSelection])
+  }, [snapshotOnce, commit, clearSelection, applyChange, finishHistory])
 
   // Bounds of the frozen lasso — positions the resize handle and the action buttons
   const selectionBounds = selectionLasso ? polyBounds(selectionLasso) : null
@@ -2177,7 +2289,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
                   value={t.text}
                   onChange={(e) => {
                     if (!textEdited.current) { textEdited.current = true; if (t.text !== "") snapshot() }
-                    onChange({ ...doc, texts: doc.texts.map((x) => x.id === t.id ? { ...x, text: e.target.value } : x) })
+                    applyChange({ ...doc, texts: doc.texts.map((x) => x.id === t.id ? { ...x, text: e.target.value } : x) })
                   }}
                   onFocus={() => {
                     textEdited.current = newTextIds.current.delete(t.id)
@@ -2351,84 +2463,31 @@ function CanvasDocumentAttachment({ path }: { path: string }) {
   return <div className="h-full overflow-auto p-3 text-[12px]"><LaTeXMarkdown content={state.content} /></div>
 }
 
-// A canvas window bound to an existing project `.canvas` file: loads it on open,
-// writes back a second after you stop drawing, flushes on close. It owns the file
-// outright — nothing but the path is stored in the canvas holding the window.
-// ponytail: single-writer assumption, same as DocumentEditor. No dirty flag, no
-// conflict detection; add both together if two surfaces ever edit one canvas at once.
+// A file-backed window is another view onto the same canvas collaboration owner.
 function NestedCanvasFile({ path, slug, depth }: {
   path: string
   slug?: string
   depth: number
 }) {
-  const [doc, setDoc] = useState<CanvasDocument | null>(null)
-  const [loadError, setLoadError] = useState(false)
-  const [retryToken, setRetryToken] = useState(0)
-  const savedRef = useRef<string | null>(null)
-  const liveRef = useRef<CanvasDocument | null>(null)
-  liveRef.current = doc
+  const { document, replace, status, retry } = useCollaborativeCanvas(path)
 
-  useEffect(() => {
-    let alive = true
-    setDoc(null)
-    setLoadError(false)
-    savedRef.current = null
-    loadFileViewerText(path).then((text) => {
-      if (!alive) return
-      const loaded = text.trim() ? parseCanvasDoc(text) : emptyCanvasDoc()
-      savedRef.current = serializeCanvasDoc(loaded)
-      setDoc(loaded)
-    }).catch((err) => {
-      if (!alive) return
-      // A confirmed-missing file (never written) legitimately starts blank. Any
-      // other failure must not silently arm the autosave over real stored
-      // content — leave doc/savedRef null so `save()`'s guard keeps it inert.
-      if (err instanceof ApiError && err.status === 404) {
-        setDoc(emptyCanvasDoc())
-        savedRef.current = serializeCanvasDoc(emptyCanvasDoc())
-        return
-      }
-      setLoadError(true)
-    })
-    return () => { alive = false }
-  }, [path, retryToken])
-
-  const save = useCallback(() => {
-    const live = liveRef.current
-    // savedRef is null until the load lands — writing before that would persist an
-    // empty document over the real one
-    if (!live || !slug || savedRef.current === null) return
-    const serialized = serializeCanvasDoc(live)
-    if (serialized === savedRef.current) return
-    savedRef.current = serialized
-    writeDocument(slug, path.split("/").pop()!, serialized).catch(() => {})
-  }, [slug, path])
-
-  useEffect(() => {
-    if (!doc) return
-    const t = setTimeout(save, NESTED_SAVE_MS)
-    return () => clearTimeout(t)
-  }, [doc, save])
-
-  // Closing the window unmounts us; the debounce cleanup alone would drop whatever was
-  // drawn in the last second.
-  useEffect(() => () => save(), [save])
-
-  if (loadError) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 text-[10px] text-ink-faint">
-        <span>Failed to load. Stored content was left untouched.</span>
-        <button onClick={() => setRetryToken((n) => n + 1)} className="rounded px-2 py-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors">
-          Retry
-        </button>
-      </div>
-    )
+  if (!document) {
+    if (status === "error") {
+      return (
+        <div className="flex h-full flex-col items-center justify-center gap-2 text-[10px] text-ink-faint">
+          <span>Failed to load this canvas.</span>
+          <button onClick={retry} className="rounded px-2 py-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors">
+            Retry
+          </button>
+        </div>
+      )
+    }
+    return <div className="flex h-full items-center justify-center text-[10px] text-ink-faint">Loading…</div>
   }
-  if (!doc) return <div className="flex h-full items-center justify-center text-[10px] text-ink-faint">Loading…</div>
   return (
     <CanvasEditor
-      doc={doc}
-      onChange={setDoc}
+      doc={document}
+      onChange={replace}
       slug={slug}
       depth={depth}
       docPath={path}

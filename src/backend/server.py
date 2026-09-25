@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from backend.routes.architecture_graphs import router as architecture_graphs_router
+from backend.routes.canvases import router as canvases_router
 from backend.routes.assets import router as assets_router
 from lib.architecture_graph import ArchitectureGraphError, ArchitectureGraphNotFound
 from lib.data_store import StorageConflictError
@@ -134,4 +135,5 @@ app.include_router(projects_router)
 app.include_router(research_router)
 app.include_router(study_router)
 app.include_router(sync_router)
+app.include_router(canvases_router)
 

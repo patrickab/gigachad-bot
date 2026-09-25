@@ -4,17 +4,18 @@
  *
  * History used to be a stroke-only stack: deleting a frame, moving anything or
  * erasing was unrecoverable, and Ctrl+Z after one of those silently ate an
- * unrelated stroke. It is now whole-doc snapshots.
+ * unrelated stroke. It now records only entities touched by a local gesture, so
+ * undo/redo leave remote additions and later remote changes alone.
  *
- * The subtle failure this guards is snapshot ordering: the pre-change doc must be
- * captured when the mutation is dispatched, NOT inside the setState updater — those
- * run during the next render, after liveRef already points at the post-change doc,
- * which would make every undo a no-op.
+ * The pre-change document must be captured when the mutation is dispatched, NOT
+ * inside the setState updater — those run during the next render, after liveRef
+ * already points at the post-change document, which would make undo a no-op.
  */
 import { useState } from "react"
 import { describe, it, expect, vi } from "vitest"
 import { render, act, fireEvent, waitFor } from "@testing-library/react"
 import { TabActiveProvider } from "@/components/TabManager"
+import type { CanvasDocument } from "@/components/CanvasEditor"
 
 vi.mock("@/components/PdfViewer", () => ({
   PdfViewer: ({ initialPage = 1, onPageChange }: { initialPage?: number; onPageChange?: (page: number) => void }) =>
@@ -56,9 +57,30 @@ const api = vi.hoisted(() => ({
 }))
 vi.mock("@/lib/api", () => api)
 
+const collaboration = vi.hoisted(() => {
+  const replace = vi.fn()
+  const retry = vi.fn()
+  return {
+    replace,
+    retry,
+    useCollaborativeCanvas: vi.fn<() => {
+      document: CanvasDocument | null
+      replace: typeof replace
+      retry: typeof retry
+      status: string
+    }>(() => ({
+      document: { version: 1, frames: [], strokes: [], attachments: [], texts: [] },
+      replace,
+      retry,
+      status: "ready",
+    })),
+  }
+})
+vi.mock("@/hooks/useCollaborativeCanvas", () => collaboration)
+
 import {
   CanvasEditor, appendStrokePoint, emptyCanvasDoc, parseCanvasDoc, serializeCanvasDoc, polyBounds, resizeBox, scaleStroke, scalePoly, remapAcrossCanvases, inOwnAttachment,
-  type CanvasDocument, type SelBox,
+  type SelBox,
 } from "@/components/CanvasEditor"
 import type { StrokeData } from "@/lib/drawing"
 
@@ -79,6 +101,34 @@ function Harness({ seen, slug, active = true, initialDoc = emptyCanvasDoc() }: {
   )
 }
 
+function CollaborativeHarness({ seen }: { seen: CanvasDocument[] }) {
+  const [doc, setDoc] = useState<CanvasDocument>(emptyCanvasDoc())
+  seen.push(doc)
+  return (
+    <TabActiveProvider value={true}>
+      <CanvasEditor doc={doc} onChange={setDoc} docPath="project/proj/document/host.canvas" />
+      <button
+        type="button"
+        onClick={() => setDoc((current) => ({
+          ...current,
+          frames: [...current.frames, { id: "remote-frame", kind: "page", x: 100, y: 100, width: 794 }],
+        }))}
+      >
+        Remote add
+      </button>
+      <button
+        type="button"
+        onClick={() => setDoc((current) => ({
+          ...current,
+          frames: current.frames.map((frame) => frame.id === "remote-frame" ? frame : { ...frame, width: 999 }),
+        }))}
+      >
+        Remote update
+      </button>
+    </TabActiveProvider>
+  )
+}
+
 // toolbar order: [+, undo, redo, size, color, lasso, camera, text]
 const toolbar = (c: HTMLElement) => Array.from(c.querySelectorAll("button"))
 const latest = (seen: CanvasDocument[]) => seen[seen.length - 1]!
@@ -90,7 +140,7 @@ function addPage(container: HTMLElement) {
 }
 
 describe("lasso selection", () => {
-  const stroke = (pts: number[][], width = 4): StrokeData => ({ points: pts, color: "#000", width })
+  const stroke = (pts: number[][], width = 4): StrokeData => ({ id: crypto.randomUUID(), points: pts, color: "#000", width })
   const box = (x: number, y: number, w: number, h: number): SelBox => ({ x, y, w, h })
 
   it("bounds the lasso shape", () => {
@@ -144,6 +194,24 @@ describe("stroke sampling", () => {
   })
 })
 
+describe("canvas schema", () => {
+  it("assigns UUIDs to legacy strokes while preserving existing IDs", () => {
+    const doc = parseCanvasDoc(JSON.stringify({
+      version: 1,
+      frames: [],
+      strokes: [
+        { points: [[0, 0]], color: "#000", width: 2 },
+        { id: "kept", points: [[1, 1]], color: "#000", width: 2 },
+      ],
+      attachments: [],
+      texts: [],
+    }))
+
+    expect(doc.strokes[0]!.id).toMatch(/^[0-9a-f-]{36}$/)
+    expect(doc.strokes[1]!.id).toBe("kept")
+  })
+})
+
 describe("canvas history", () => {
   it("undoes a frame add — not just strokes", () => {
     const seen: CanvasDocument[] = []
@@ -162,6 +230,29 @@ describe("canvas history", () => {
 
     act(() => { toolbar(container)[2]!.click() }) // redo
     expect(latest(seen).frames).toHaveLength(1)
+  })
+
+  it("does not undo or redo entities added or changed remotely after a local gesture", () => {
+    const seen: CanvasDocument[] = []
+    const { container, getByText } = render(<CollaborativeHarness seen={seen} />)
+
+    addPage(container)
+    act(() => { fireEvent.click(getByText("Remote add")) })
+    act(() => { fireEvent.click(getByText("Remote update")) })
+
+    act(() => { toolbar(container)[1]!.click() })
+    expect(latest(seen).frames).toHaveLength(2)
+    expect(latest(seen).frames).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "remote-frame" }),
+      expect.objectContaining({ width: 999 }),
+    ]))
+
+    act(() => { toolbar(container)[2]!.click() })
+    expect(latest(seen).frames).toHaveLength(2)
+    expect(latest(seen).frames).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "remote-frame" }),
+      expect.objectContaining({ width: 999 }),
+    ]))
   })
 
   it("stacks and unwinds multiple mutations in order", () => {
@@ -368,10 +459,9 @@ describe("nested canvas", () => {
 describe("nested canvas file", () => {
   const openCanvas = async (container: HTMLElement, name: string) => {
     act(() => { toolbar(container)[0]!.click() })
-    await act(async () => {}) // the picker fetches the project's canvases on open
+    await act(async () => {})
     const item = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === name)!
     act(() => { item.click() })
-    await act(async () => {}) // …and the window loads the file it points at
   }
 
   it("opens a project canvas as a window holding only its path", async () => {
@@ -381,43 +471,42 @@ describe("nested canvas file", () => {
     await openCanvas(container, "notes.canvas")
     const [att] = latest(seen).attachments
     expect(att).toMatchObject({ kind: "canvas", path: "project/proj/document/notes.canvas" })
-    expect(att!.canvas).toBeUndefined() // contents stay in the file, not in the host doc
-    expect(api.loadFileViewerText).toHaveBeenCalledWith("project/proj/document/notes.canvas")
+    expect(att!.canvas).toBeUndefined()
+    expect(collaboration.useCollaborativeCanvas).toHaveBeenCalledWith("project/proj/document/notes.canvas")
   })
 
-  it("writes drawings back to the file when the window closes", async () => {
-    api.writeDocument.mockClear()
+  it("keeps a loaded nested canvas mounted through a transient sync error", async () => {
+    collaboration.replace.mockClear()
+    collaboration.useCollaborativeCanvas.mockReturnValueOnce({
+      document: emptyCanvasDoc(),
+      replace: collaboration.replace,
+      retry: collaboration.retry,
+      status: "error",
+    })
     const seen: CanvasDocument[] = []
     const { container } = render(<Harness seen={seen} slug="proj" />)
 
     await openCanvas(container, "notes.canvas")
-    const window_ = container.querySelector("[data-canvas-attachment]") as HTMLElement
-    addPage(window_)
-    expect(latest(seen).attachments[0]!.canvas).toBeUndefined() // still not in the host
+    addPage(container.querySelector("[data-canvas-attachment]") as HTMLElement)
 
-    // closing flushes before the autosave debounce would have fired
-    const close = Array.from(container.querySelectorAll("button")).find((b) => b.closest("[data-canvas-attachment]") === null && b.querySelector("svg.lucide-x"))!
-    act(() => { close.click() })
-
-    const [slug, name, written] = api.writeDocument.mock.calls.at(-1)!
-    expect([slug, name]).toEqual(["proj", "notes.canvas"])
-    expect(parseCanvasDoc(written).frames).toHaveLength(1)
+    expect(collaboration.replace).toHaveBeenCalledWith(expect.objectContaining({
+      frames: [expect.objectContaining({ id: expect.stringMatching(/^[0-9a-f-]{36}$/) })],
+    }))
   })
 
-  it("does not overwrite the file when its window fails to load", async () => {
+  it("does not fall back to generic writes when collaboration loading fails", async () => {
     api.writeDocument.mockClear()
-    api.loadFileViewerText.mockRejectedValueOnce(new api.ApiError("boom", 500))
+    collaboration.useCollaborativeCanvas.mockReturnValueOnce({
+      document: null,
+      replace: collaboration.replace,
+      retry: collaboration.retry,
+      status: "error",
+    })
     const seen: CanvasDocument[] = []
     const { container } = render(<Harness seen={seen} slug="proj" />)
 
     await openCanvas(container, "notes.canvas")
-    const window_ = container.querySelector("[data-canvas-attachment]") as HTMLElement
-    expect(window_.textContent).toMatch(/Failed to load/i)
-
-    // closing would normally flush a save — it must stay inert since nothing loaded
-    const close = Array.from(container.querySelectorAll("button")).find((b) => b.closest("[data-canvas-attachment]") === null && b.querySelector("svg.lucide-x"))!
-    act(() => { close.click() })
-
+    expect(container.querySelector("[data-canvas-attachment]")!.textContent).toMatch(/Failed to load/i)
     expect(api.writeDocument).not.toHaveBeenCalled()
   })
 })
@@ -590,7 +679,7 @@ describe("cross-canvas stroke transfer", () => {
     // sits at client (100+10*2+5, 50+10*2+5) = (125, 75)
     const from = view(100, 50, 2, 5, 5)
     const to = view(25, 25, 1, 0, 0)
-    const moved = remapAcrossCanvases({ points: [[10, 10]], color: "#000", width: 4 }, from, to)
+    const moved = remapAcrossCanvases({ id: crypto.randomUUID(), points: [[10, 10]], color: "#000", width: 4 }, from, to)
     expect(moved.points[0]!.slice(0, 2)).toEqual([100, 50]) // 125-25, 75-25 at scale 1
     expect(moved.width).toBe(8) // half the zoom means twice the units for the same px
     expect(moved.color).toBe("#000")
@@ -598,7 +687,7 @@ describe("cross-canvas stroke transfer", () => {
 
   it("is a no-op between identical views", () => {
     const v = view(40, 40, 1.5, 12, -8)
-    const s: StrokeData = { points: [[3, 4, 0.7], [9, 1, 0.2]], color: "#f00", width: 2 }
+    const s: StrokeData = { id: crypto.randomUUID(), points: [[3, 4, 0.7], [9, 1, 0.2]], color: "#f00", width: 2 }
     expect(remapAcrossCanvases(s, v, v)).toEqual(s)
   })
 })

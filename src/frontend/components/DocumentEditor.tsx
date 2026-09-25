@@ -13,6 +13,7 @@ import { renderPageToPng, renderCanvasToJpeg, type EmbedRect } from "@/lib/drawi
 import { EditorSidebar, InlineEditPanel } from "./EditorSidebar"
 import { ArchitectureGraphEditor } from "./ArchitectureGraphEditor"
 import { isArchitectureGraphPath } from "@/lib/architectureGraph"
+import { useCollaborativeCanvas } from "@/hooks/useCollaborativeCanvas"
 import { subscribeToChanges } from "@/lib/syncStream"
 
 type EditorView = "edit" | "preview"
@@ -91,249 +92,72 @@ function ResizableEditor({ children }: { children: React.ReactNode }) {
   )
 }
 
-// Canvas content identity, ignoring viewport. Every canvas mutation is an immutable
-// spread, so comparing the four array references is exact — and O(1), where stringifying
-// the whole document to diff it was the most expensive thing happening during a drag.
-function sameCanvasContent(a: CanvasDocument | null, b: CanvasDocument | null): boolean {
-  return !!a && !!b && a.frames === b.frames && a.strokes === b.strokes && a.attachments === b.attachments && a.texts === b.texts
+async function canvasImageEmbeds(doc: CanvasDocument): Promise<EmbedRect[]> {
+  return Promise.all(doc.frames.filter((f) => f.kind === "image" && f.path).map(async (f) => {
+    const url = fileViewerRawUrl(f.path!)
+    let aspect = 1
+    try {
+      const img = new Image()
+      img.crossOrigin = "anonymous"
+      await new Promise<void>((resolve, reject) => { img.onload = () => resolve(); img.onerror = reject; img.src = url })
+      if (img.naturalWidth > 0) aspect = img.naturalHeight / img.naturalWidth
+    } catch { /* */ }
+    return { url, x: f.x, y: f.y, width: f.width, aspect }
+  }))
 }
 
-function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, overlay, persistOverride, onModeLabel, onNavigate, model, canvasToolbarSlot }: DocumentEditorProps) {
-  const isCanvas = path.endsWith(".canvas")
-  const [content, setContent] = useState<string | null>(null)
-  const [renderedContent, setRenderedContent] = useState<string | null>(null)
-  const [canvasDoc, setCanvasDoc] = useState<CanvasDocument | null>(null)
-  const [loadError, setLoadError] = useState(false)
-  const [dirty, setDirty] = useState(false)
-  const dirtyRef = useRef(dirty)
-  dirtyRef.current = dirty
-  const [saving, setSaving] = useState(false)
-  const [exporting, setExporting] = useState(false)
-  const [isFullscreen, setIsFullscreen] = useState(!!overlay)
-  const [view, setView] = useState<EditorView>("edit")
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [sidebarWidth, setSidebarWidth] = useState(340)
-  const [inlineEdit, setInlineEdit] = useState<{ text: string; start: number; end: number; splitPx: number } | null>(null)
-  const savedContentRef = useRef("")
-  const savedCanvasRef = useRef<CanvasDocument | null>(null)
-
+// Database canvases: the collaboration hook owns loading and saving.
+function CanvasDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, overlay, onModeLabel, canvasToolbarSlot }: DocumentEditorProps) {
+  const { document: canvasDocument, replace, status, retry } = useCollaborativeCanvas(path)
   const filename = path.split("/").pop() ?? path
-  const language = editorLanguage(path)
+  const [exporting, setExporting] = useState(false)
+  const liveContentRef = useRef(onLiveContent)
+  liveContentRef.current = onLiveContent
+  // Only local edits refresh the drawing JPEG — otherwise every open client would
+  // re-render and upload it for each remote change.
+  const drawnRef = useRef(false)
 
-  // Overlay claims the tab label while mounted. Ref-stable to avoid re-render loops
-  // (onModeLabel is an inline arrow that changes identity every render).
-  const modeLabelRef = useRef(onModeLabel)
-  useEffect(() => { modeLabelRef.current = onModeLabel }, [onModeLabel])
+  const handleChange = useCallback((next: CanvasDocument) => {
+    drawnRef.current = true
+    replace(next)
+  }, [replace])
+
+  // The one serialization per quiet second feeds the live content the chat reads at send time.
   useEffect(() => {
-    if (!overlay) return
-    modeLabelRef.current?.(filename)
-  }, [overlay, filename])
+    if (!canvasDocument) return
+    const timer = setTimeout(() => {
+      liveContentRef.current?.(path, serializeCanvasDoc(canvasDocument))
+      const { strokes, texts, frames } = canvasDocument
+      if (!drawnRef.current || (strokes.length === 0 && texts.length === 0 && !frames.some((f) => f.kind === "image"))) return
+      drawnRef.current = false
+      canvasImageEmbeds(canvasDocument)
+        .then((imgs) => renderCanvasToJpeg(strokes, 20, imgs, texts))
+        .then((blob) => storeDrawing(filename.replace(/\.canvas$/, ".jpg"), blob))
+        .catch(() => {})
+    }, 1000)
+    return () => clearTimeout(timer)
+  }, [path, filename, canvasDocument])
 
-  // Fetches server content and resets the saved baseline. Used on mount and by
-  // the live-sync subscription below (never runs over an active local edit).
-  const loadFromServer = useCallback(() => {
-    return loadFileViewerText(path).then((text) => {
-      setLoadError(false)
-      if (isCanvas) {
-        const doc = text.trim() ? parseCanvasDoc(text) : emptyCanvasDoc()
-        setCanvasDoc(doc)
-        savedContentRef.current = serializeCanvasDoc(doc)
-        savedCanvasRef.current = doc
-      } else {
-        setContent(text)
-        savedContentRef.current = text
-      }
-    }).catch((err) => {
-      // A confirmed-missing document (never written) legitimately starts blank.
-      // Any other failure (network blip, 500, auth) must NOT silently replace
-      // real content with an empty, autosave-armed document — the debounced
-      // autosave would overwrite the real stored content a second later.
-      if (err instanceof ApiError && err.status === 404) {
-        setLoadError(false)
-        if (isCanvas) {
-          const doc = emptyCanvasDoc()
-          setCanvasDoc(doc)
-          savedContentRef.current = serializeCanvasDoc(doc)
-          savedCanvasRef.current = doc
-        } else {
-          setContent("")
-          savedContentRef.current = ""
-        }
-        return
-      }
-      setLoadError(true)
-    })
-  }, [path, isCanvas])
-
-  useEffect(() => {
-    setRenderedContent(null)
-    loadFromServer()
-    if (overlay && !isCanvas) {
-      readFileVaultRendered(path).then(setRenderedContent).catch(() => {})
-    }
-  }, [path, isCanvas, overlay, loadFromServer])
-
-  // Serializing a canvas costs O(whole document) — it used to run on every render plus
-  // twice per change, so a drag over a big canvas stringified megabytes per pointermove.
-  // Now it is pulled on demand (save, export) or once per debounce window, never in render.
-  const serializeNow = useCallback(
-    () => (isCanvas ? (canvasDoc ? serializeCanvasDoc(canvasDoc) : null) : content),
-    [isCanvas, canvasDoc, content],
-  )
-
-  const handleTextChange = useCallback((v: string) => {
-    setContent(v)
-    setDirty(v !== savedContentRef.current)
-  }, [])
-
-  const handleCanvasChange = useCallback((doc: CanvasDocument) => {
-    setCanvasDoc(doc)
-    setDirty(!sameCanvasContent(doc, savedCanvasRef.current))
-  }, [])
-
-  // Apply a remote write only while nothing local is unsaved — otherwise the
-  // pending autosave wins (last-write-wins).
-  useEffect(() => subscribeToChanges((event) => {
-    if (dirtyRef.current || event.resource_kind !== "document") return
-    // PostgreSQL emits a logical key while migrated project metadata may retain
-    // the matching absolute path.
-    if (event.resource_key !== path && !path.endsWith(`/${event.resource_key}`)) return
-    loadFromServer()
-  }), [path, loadFromServer])
-
-  const liveRef = useRef(onLiveContent)
-  liveRef.current = onLiveContent
-  useEffect(() => {
-    return () => { liveRef.current?.(path, null) }
+  useEffect(() => () => {
+    liveContentRef.current?.(path, null)
   }, [path])
 
-  const buildImageEmbeds = useCallback(async (doc: CanvasDocument): Promise<EmbedRect[]> => {
-    const images = doc.frames.filter((f) => f.kind === "image" && f.path)
-    if (images.length === 0) return []
-    return Promise.all(images.map(async (f) => {
-      const url = fileViewerRawUrl(f.path!)
-      let aspect = 1
-      try {
-        const img = new Image()
-        img.crossOrigin = "anonymous"
-        await new Promise<void>((resolve, reject) => { img.onload = () => resolve(); img.onerror = reject; img.src = url })
-        if (img.naturalWidth > 0) aspect = img.naturalHeight / img.naturalWidth
-      } catch { /* */ }
-      return { url, x: f.x, y: f.y, width: f.width, aspect }
-    }))
-  }, [])
-
-  const persistNow = useCallback(async (serialized: string) => {
-    if (persistOverride) {
-      await persistOverride(serialized)
-      savedContentRef.current = serialized
-      setDirty(false)
-      onSaved?.(filename, serialized)
-      return
-    }
-    await writeDocument(slug, filename, serialized)
-    savedContentRef.current = serialized
-    // Store the drawing JPEG only when actual content changed.
-    // Viewport-only autosaves should not re-render and re-upload an image.
-    const contentChanged = isCanvas && canvasDoc ? !sameCanvasContent(canvasDoc, savedCanvasRef.current) : false
-    if (isCanvas && canvasDoc) savedCanvasRef.current = canvasDoc
-    setDirty(false)
-    onSaved?.(filename, serialized)
-    if (isCanvas && canvasDoc && contentChanged && (canvasDoc.strokes.length > 0 || canvasDoc.texts.length > 0 || canvasDoc.frames.some((f) => f.kind === "image"))) {
-      try {
-        const imgs = await buildImageEmbeds(canvasDoc)
-        const blob = await renderCanvasToJpeg(canvasDoc.strokes, 20, imgs, canvasDoc.texts)
-        await storeDrawing(filename.replace(/\.canvas$/, ".jpg"), blob)
-      } catch { /* */ }
-    }
-  }, [slug, filename, isCanvas, canvasDoc, onSaved, buildImageEmbeds, persistOverride])
-
-  // Saves are chained so an earlier slow write can never resolve after — and
-  // silently clobber — a newer one. Matters now that every stroke persists.
-  const saveChain = useRef(Promise.resolve())
-  const persist = useCallback((serialized: string) => {
-    const run = saveChain.current.then(() => persistNow(serialized))
-    saveChain.current = run.catch(() => {})
-    return run
-  }, [persistNow])
-
-  // A pan/zoom alone must never overwrite another device's stroke: refetch the
-  // current server content and merge only the viewport field into it, instead of
-  // writing back whatever (possibly stale) content this tab last loaded.
-  const persistViewportOnly = useCallback((viewport: CanvasDocument["viewport"]) => {
-    const run = saveChain.current.then(async () => {
-      let latest: CanvasDocument
-      try {
-        const text = await loadFileViewerText(path)
-        latest = text.trim() ? parseCanvasDoc(text) : emptyCanvasDoc()
-      } catch {
-        return
-      }
-      const merged: CanvasDocument = { ...latest, viewport }
-      const serialized = serializeCanvasDoc(merged)
-      if (persistOverride) await persistOverride(serialized)
-      else await writeDocument(slug, filename, serialized)
-      savedContentRef.current = serialized
-      savedCanvasRef.current = merged
-      if (!dirtyRef.current) setCanvasDoc(merged)
-    })
-    saveChain.current = run.catch(() => {})
-    return run
-  }, [path, slug, filename, persistOverride])
-
-  const handleSave = useCallback(async () => {
-    const serialized = serializeNow()
-    if (serialized === null || saving) return
-    setSaving(true)
-    try { await persist(serialized) } catch { /* */ }
-    setSaving(false)
-  }, [serializeNow, saving, persist])
-
-  // Canvas autosave fires on any serialized change — strokes, frames, texts, and
-  // viewport — so re-entering restores exactly what was left, view included. A
-  // viewport-only change goes through persistViewportOnly so it can never clobber
-  // a concurrent edit from another device.
-  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => {
-    if (!isCanvas || !canvasDoc) return
-    clearTimeout(autoSaveTimer.current)
-    autoSaveTimer.current = setTimeout(() => {
-      // the one serialization per quiet second — it feeds both the write and the live
-      // content the chat reads at send time
-      const serialized = serializeCanvasDoc(canvasDoc)
-      liveRef.current?.(path, serialized)
-      if (serialized === savedContentRef.current) return
-      if (sameCanvasContent(canvasDoc, savedCanvasRef.current)) persistViewportOnly(canvasDoc.viewport).catch(() => {})
-      else persist(serialized).catch(() => {})
-    }, 1000)
-    return () => clearTimeout(autoSaveTimer.current)
-  }, [isCanvas, canvasDoc, path, persist, persistViewportOnly])
-
-  // Leaving the editor flushes a pending autosave immediately — the debounce
-  // cleanup alone would drop strokes drawn in the final second.
-  const flushRef = useRef<() => void>(() => {})
-  flushRef.current = () => {
-    if (!isCanvas || !canvasDoc) return
-    const serialized = serializeNow()
-    if (serialized === null || serialized === savedContentRef.current) return
-    if (sameCanvasContent(canvasDoc, savedCanvasRef.current)) persistViewportOnly(canvasDoc.viewport).catch(() => {})
-    else persist(serialized).catch(() => {})
-  }
-  useEffect(() => () => flushRef.current(), [])
+    if (overlay) onModeLabel?.(filename)
+  }, [overlay, filename, onModeLabel])
 
   const handleExportPdf = useCallback(async () => {
-    if (!isCanvas || !canvasDoc || exporting) return
-    const pages = canvasDoc.frames.filter((f) => f.kind === "page")
+    if (!canvasDocument || exporting) return
+    const pages = canvasDocument.frames.filter((f) => f.kind === "page")
     if (pages.length === 0) return
     setExporting(true)
     try {
-      if (dirty) { const serialized = serializeNow(); if (serialized !== null) await persist(serialized) }
-      const { PDFDocument } = await import("pdf-lib")
+      const { PDFDocument } = await import("pdf-lib") // lazy: heavy, and only needed on export
       const A4_ASPECT = 1123 / 794
-      const imgs = await buildImageEmbeds(canvasDoc)
+      const imgs = await canvasImageEmbeds(canvasDocument)
       const pdfDoc = await PDFDocument.create()
       for (const page of pages) {
-        const pngBytes = await renderPageToPng(canvasDoc.strokes, page.x, page.y, page.width, page.width * A4_ASPECT, imgs, canvasDoc.texts)
+        const pngBytes = await renderPageToPng(canvasDocument.strokes, page.x, page.y, page.width, page.width * A4_ASPECT, imgs, canvasDocument.texts)
         const img = await pdfDoc.embedPng(pngBytes)
         const pdfPage = pdfDoc.addPage([595.28, 841.89])
         pdfPage.drawImage(img, { x: 0, y: 0, width: 595.28, height: 841.89 })
@@ -344,17 +168,206 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
       onSaved?.()
     } catch { /* */ }
     setExporting(false)
-  }, [isCanvas, canvasDoc, exporting, dirty, serializeNow, slug, filename, persist, onSaved, buildImageEmbeds])
+  }, [canvasDocument, exporting, slug, filename, onSaved])
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
-        e.preventDefault()
+    if (!overlay) return
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault()
+        onClose()
+      }
+    }
+    document.addEventListener("keydown", handler)
+    return () => document.removeEventListener("keydown", handler)
+  }, [overlay, onClose])
+
+  if (!canvasDocument) {
+    if (status === "error") {
+      return (
+        <div className="flex flex-col items-center justify-center gap-2 py-6 text-xs text-ink-faint">
+          <span>Failed to load this canvas. Its stored content was left untouched.</span>
+          <button onClick={retry} className="rounded px-2 py-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors">
+            Retry
+          </button>
+        </div>
+      )
+    }
+    return <div className="flex items-center justify-center py-6 text-xs text-ink-faint">Loading...</div>
+  }
+
+  const editor = (
+    <>
+      {status === "error" && (
+        <div role="status" className="flex items-center justify-between gap-2 px-3 py-1 text-[10px] text-ink-faint border-b border-divider/50">
+          <span>Canvas sync interrupted. Changes will retry automatically.</span>
+          <button onClick={retry} className="rounded px-1.5 py-0.5 text-ink-subtle hover:text-ink hover:bg-hover transition-colors">Retry</button>
+        </div>
+      )}
+      <CanvasEditor
+        doc={canvasDocument}
+        onChange={handleChange}
+        slug={slug}
+        docPath={path}
+        onImageAdded={() => onSaved?.()}
+        toolbarSlot={canvasToolbarSlot}
+      />
+    </>
+  )
+  if (overlay) return <div className="absolute inset-0 z-30 flex flex-col bg-paper">{editor}</div>
+  return (
+    <ResizableEditor>
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-divider/50 shrink-0">
+        <span className="text-[11px] font-medium text-ink truncate">{filename}</span>
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            onClick={handleExportPdf}
+            disabled={exporting || !canvasDocument.frames.some((f) => f.kind === "page")}
+            className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors"
+          >
+            {exporting
+              ? <span className="h-3.5 w-3.5 block animate-spin rounded-full border-2 border-ink-faint border-t-ink" />
+              : <Download className="h-3.5 w-3.5" />}
+          </button>
+          <button onClick={onClose} className="rounded p-1 text-ink-subtle hover:text-danger transition-colors">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+      {editor}
+    </ResizableEditor>
+  )
+}
+
+// Text documents, and vault canvases (persisted through `persistOverride`).
+function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, overlay, persistOverride, onModeLabel, onNavigate, model, canvasToolbarSlot }: DocumentEditorProps) {
+  const isCanvas = path.endsWith(".canvas")
+  const [content, setContent] = useState<string | null>(null)
+  const [renderedContent, setRenderedContent] = useState<string | null>(null)
+  const [canvasDoc, setCanvasDoc] = useState<CanvasDocument | null>(null)
+  const [loadError, setLoadError] = useState(false)
+  const [dirty, setDirty] = useState(false)
+  const dirtyRef = useRef(dirty)
+  dirtyRef.current = dirty
+  const [saving, setSaving] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(!!overlay)
+  const [view, setView] = useState<EditorView>("edit")
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [sidebarWidth, setSidebarWidth] = useState(340)
+  const [inlineEdit, setInlineEdit] = useState<{ text: string; start: number; end: number; splitPx: number } | null>(null)
+  const savedContentRef = useRef("")
+
+  const filename = path.split("/").pop() ?? path
+  const language = editorLanguage(path)
+
+  const modeLabelRef = useRef(onModeLabel)
+  useEffect(() => { modeLabelRef.current = onModeLabel }, [onModeLabel])
+  useEffect(() => {
+    if (overlay) modeLabelRef.current?.(filename)
+  }, [overlay, filename])
+
+  const loadFromServer = useCallback(() => {
+    const apply = (text: string) => {
+      setLoadError(false)
+      if (isCanvas) {
+        const doc = text.trim() ? parseCanvasDoc(text) : emptyCanvasDoc()
+        setCanvasDoc(doc)
+        savedContentRef.current = serializeCanvasDoc(doc)
+      } else {
+        setContent(text)
+        savedContentRef.current = text
+      }
+    }
+    // A confirmed-missing document legitimately starts blank. Any other failure must
+    // not arm a save of blank content over the real stored content.
+    return loadFileViewerText(path).then(apply).catch((err) => {
+      if (err instanceof ApiError && err.status === 404) apply("")
+      else setLoadError(true)
+    })
+  }, [path, isCanvas])
+
+  useEffect(() => {
+    setRenderedContent(null)
+    loadFromServer()
+    if (overlay && !isCanvas) readFileVaultRendered(path).then(setRenderedContent).catch(() => {})
+  }, [path, isCanvas, overlay, loadFromServer])
+
+  const handleTextChange = useCallback((value: string) => {
+    setContent(value)
+    setDirty(value !== savedContentRef.current)
+  }, [])
+
+  const handleCanvasChange = useCallback((doc: CanvasDocument) => {
+    setCanvasDoc(doc)
+    setDirty(true)
+  }, [])
+
+  useEffect(() => subscribeToChanges((event) => {
+    if (dirtyRef.current || event.resource_kind !== "document") return
+    if (event.resource_key !== path && !path.endsWith(`/${event.resource_key}`)) return
+    loadFromServer()
+  }), [path, loadFromServer])
+
+  const liveRef = useRef(onLiveContent)
+  liveRef.current = onLiveContent
+  useEffect(() => () => { liveRef.current?.(path, null) }, [path])
+
+  const persistNow = useCallback(async (next: string) => {
+    if (persistOverride) await persistOverride(next)
+    else await writeDocument(slug, filename, next)
+    savedContentRef.current = next
+    setDirty(false)
+    onSaved?.(filename, next)
+  }, [slug, filename, onSaved, persistOverride])
+
+  // Saves are chained so an earlier slow write can never resolve after — and
+  // silently clobber — a newer one.
+  const saveChain = useRef(Promise.resolve())
+  const persist = useCallback((next: string) => {
+    const run = saveChain.current.then(() => persistNow(next))
+    saveChain.current = run.catch(() => {})
+    return run
+  }, [persistNow])
+
+  const handleSave = useCallback(async () => {
+    const next = isCanvas ? (canvasDoc ? serializeCanvasDoc(canvasDoc) : null) : content
+    if (next === null || saving) return
+    setSaving(true)
+    try { await persist(next) } catch { /* */ }
+    setSaving(false)
+  }, [isCanvas, canvasDoc, content, saving, persist])
+
+  // Canvas autosave: the one serialization per quiet second feeds both the write and
+  // the live content the chat reads at send time.
+  useEffect(() => {
+    if (!canvasDoc) return
+    const timer = setTimeout(() => {
+      const serialized = serializeCanvasDoc(canvasDoc)
+      liveRef.current?.(path, serialized)
+      if (serialized !== savedContentRef.current) persist(serialized).catch(() => {})
+    }, 1000)
+    return () => clearTimeout(timer)
+  }, [canvasDoc, path, persist])
+
+  // Leaving the editor flushes a pending autosave immediately — the debounce
+  // cleanup alone would drop strokes drawn in the final second.
+  const flushRef = useRef<() => void>(() => {})
+  flushRef.current = () => {
+    if (!canvasDoc) return
+    const serialized = serializeCanvasDoc(canvasDoc)
+    if (serialized !== savedContentRef.current) persist(serialized).catch(() => {})
+  }
+  useEffect(() => () => flushRef.current(), [])
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === "s") {
+        event.preventDefault()
         handleSave()
       }
-      if (e.key === "Escape") {
-        if (overlay) { e.preventDefault(); onClose() }
-        else if (isFullscreen) { e.preventDefault(); setIsFullscreen(false) }
+      if (event.key === "Escape") {
+        if (overlay) { event.preventDefault(); onClose() }
+        else if (isFullscreen) { event.preventDefault(); setIsFullscreen(false) }
       }
     }
     document.addEventListener("keydown", handler)
@@ -398,8 +411,7 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
     )
   }
 
-  const loaded = isCanvas ? canvasDoc !== null : content !== null
-  if (!loaded) {
+  if (isCanvas ? canvasDoc === null : content === null) {
     return <div className="flex items-center justify-center py-6 text-xs text-ink-faint">Loading...</div>
   }
 
@@ -414,7 +426,7 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
   const BOT_PAD = 16       // p-4
   const botHeight = BOT_PAD + botContent.split("\n").length * BOT_LINE_H + BOT_PAD
 
-  const textBody = content !== null && !isCanvas && (
+  const textBody = content !== null && (
     // When inline-edit is active the div becomes a plain scroll viewport so the
     // user can scroll through the whole document with the panel inserted inline.
     <div className={`relative flex-1 min-h-0 group/editor${inlineEdit && model ? " overflow-y-auto" : " flex flex-col"}`}>
@@ -444,12 +456,9 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
       )}
     </div>
   )
-
-  const canvasBody = isCanvas && canvasDoc && (
-    <CanvasEditor doc={canvasDoc} onChange={handleCanvasChange} slug={slug} docPath={path} onImageAdded={() => onSaved?.()} toolbarSlot={canvasToolbarSlot} />
-  )
-
-  const editorBody = textBody || canvasBody
+  const editorBody = canvasDoc
+    ? <CanvasEditor doc={canvasDoc} onChange={handleCanvasChange} slug={slug} docPath={path} onImageAdded={() => onSaved?.()} toolbarSlot={canvasToolbarSlot} />
+    : textBody
 
   // Inline chrome (sidebar documents): filename, save, fullscreen, close.
   const chrome = !overlay && (
@@ -462,17 +471,6 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
         <button onClick={handleSave} disabled={!dirty || saving} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors">
           <Save className="h-3.5 w-3.5" />
         </button>
-        {isCanvas && (
-          <button
-            onClick={handleExportPdf}
-            disabled={exporting || !canvasDoc || !canvasDoc.frames.some((f) => f.kind === "page")}
-            className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors"
-          >
-            {exporting
-              ? <span className="h-3.5 w-3.5 block animate-spin rounded-full border-2 border-ink-faint border-t-ink" />
-              : <Download className="h-3.5 w-3.5" />}
-          </button>
-        )}
         <button onClick={() => setIsFullscreen((f) => !f)} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors">
           {isFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
         </button>
@@ -546,5 +544,6 @@ export function DocumentEditor(props: DocumentEditorProps) {
   if (isArchitectureGraphPath(props.path)) {
     return <ArchitectureGraphEditor path={props.path} overlay={props.overlay} onClose={props.onClose} onSaved={props.onSaved} onModeLabel={props.onModeLabel} />
   }
+  if (props.path.endsWith(".canvas") && !props.persistOverride) return <CanvasDocumentEditor {...props} />
   return <StandardDocumentEditor {...props} />
 }

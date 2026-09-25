@@ -1,22 +1,30 @@
 import type { ComponentType, ReactNode } from "react"
 import { act, fireEvent, render, screen } from "@testing-library/react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { describe, expect, it, vi } from "vitest"
 import { ArchitectureGraphSurface, classifyDrawnShape, duplicateNodes, edgeAttachments, snapToGrid } from "@/components/ArchitectureGraphSurface"
 import { emptyArchitectureGraph, type ArchitectureGraph } from "@/lib/architectureGraph"
 
-vi.mock("@xyflow/react", async () => {
-  const { useState } = await import("react")
+const flow = vi.hoisted(() => ({
+  fitView: vi.fn(),
+  zoomIn: vi.fn(),
+  zoomOut: vi.fn(),
+}))
+
+vi.mock("@xyflow/react", () => {
   // Mirrors React Flow's own useNodesState/useEdgesState: plain state plus a change handler.
   const useItemsState = <T,>(initial: T) => {
     const [items, setItems] = useState(initial)
     return [items, setItems, vi.fn()] as const
   }
   return {
-    ReactFlow: ({ children, nodes = [], nodeTypes = {} }: { children: ReactNode; nodes?: Array<{ id: string; type?: string; data: Record<string, unknown> }>; nodeTypes?: Record<string, ComponentType<{ data: Record<string, unknown>; selected: boolean }>> }) => <div data-testid="flow">{nodes.map((node) => {
-      const NodeType = node.type ? nodeTypes[node.type] : undefined
-      return NodeType ? <NodeType key={node.id} data={node.data} selected={false} /> : null
-    })}{children}</div>,
+    ReactFlow: ({ children, nodes = [], nodeTypes = {}, onInit }: { children: ReactNode; nodes?: Array<{ id: string; type?: string; data: Record<string, unknown> }>; nodeTypes?: Record<string, ComponentType<{ data: Record<string, unknown>; selected: boolean }>>; onInit?: (instance: typeof flow) => void }) => {
+      useEffect(() => { onInit?.(flow) }, [onInit])
+      return <div data-testid="flow">{nodes.map((node) => {
+        const NodeType = node.type ? nodeTypes[node.type] : undefined
+        return NodeType ? <NodeType key={node.id} data={node.data} selected={false} /> : null
+      })}{children}</div>
+    },
     Background: () => null,
     BaseEdge: () => null,
     NodeResizer: () => null,
@@ -104,6 +112,17 @@ describe("ArchitectureGraphSurface", () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it("zooms from the viewport center on wheel", () => {
+    flow.zoomIn.mockClear()
+    flow.zoomOut.mockClear()
+
+    render(<ArchitectureGraphSurface graph={emptyArchitectureGraph()} onChange={() => {}} />)
+    fireEvent.wheel(screen.getByTestId("flow"), { deltaY: -100 })
+
+    expect(flow.zoomIn).toHaveBeenCalledOnce()
+    expect(flow.zoomOut).not.toHaveBeenCalled()
   })
 })
 

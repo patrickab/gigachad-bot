@@ -3,6 +3,7 @@ import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { getApiBase } from "./config"
 import type { ArchitectureGraphDocument } from "./architectureGraph"
+import type { CanvasDocument } from "@/components/CanvasEditor"
 import { getDeviceId } from "./deviceId"
 
 function encodePath(filename: string): string {
@@ -30,6 +31,28 @@ export class ApiError extends Error {
 }
 
 export const GRAPH_REVISION_CONFLICT = 412
+
+export type CanvasEntity = "stroke" | "frame" | "attachment" | "text"
+
+export interface CanvasMutation {
+  mutationId: string
+  kind: "upsert" | "delete"
+  entity: CanvasEntity
+  id: string
+  value?: Record<string, unknown>
+}
+
+export interface CanvasAcceptedBatch {
+  canvasKey: string
+  revision: number
+  mutations: CanvasMutation[]
+}
+
+/** A canonical materialized canvas: every entity carries a stable `id`. */
+export interface CanvasSnapshot {
+  revision: number
+  document: CanvasDocument
+}
 
 async function ensureOk(res: Response): Promise<Response> {
   if (!res.ok) {
@@ -363,6 +386,20 @@ export function sandboxAssetUrl(assetPath: string): string {
 export async function loadFileViewerText(path: string): Promise<string> {
   const data = await request<{ path: string; content: string }>(`/fileviewer/text?path=${encodeURIComponent(path)}`)
   return data.content
+}
+
+/** Canvas snapshots carry their durable mutation revision for gapless stream resume. */
+export async function loadCanvasSnapshot(canvasKey: string): Promise<CanvasSnapshot> {
+  return request<CanvasSnapshot>(`/canvases/${encodePath(canvasKey)}`)
+}
+
+/** Resolves with the revision holding these mutations; the stream delivers their content. */
+export async function submitCanvasMutations(canvasKey: string, mutations: CanvasMutation[]): Promise<{ revision: number }> {
+  return post<{ revision: number }>(`/canvases/${encodePath(canvasKey)}/mutations`, { mutations })
+}
+
+export function canvasMutationStreamUrl(canvasKey: string, sinceRevision: number): string {
+  return `${getApiBase()}/canvases/${encodePath(canvasKey)}/stream${toQuery({ sinceRevision })}`
 }
 
 /** Materialise a file at *path* into the chat's upload dir as an Attachment. */

@@ -179,7 +179,8 @@ describe("useProjectDocuments", () => {
     })
 
     it("renders a .canvas file to jpeg and uploads it (prefers live canvas content)", async () => {
-      const liveCanvasRef = makeLiveCanvasRef("/lib/x.canvas", '{"version":1,"strokes":[1],"texts":[]}')
+      const stroke = { id: "s1", points: [[0, 0]], color: "#000", width: 2 }
+      const liveCanvasRef = makeLiveCanvasRef("/lib/x.canvas", JSON.stringify({ version: 1, strokes: [stroke], texts: [] }))
       const addAttachment = vi.fn()
       const chatInputRef = makeChatInputRef({ addAttachment })
       const uploadFile = vi.fn(async () => ({ name: "x.jpg", mime: "image/jpeg", url: "u", active: true }))
@@ -192,7 +193,7 @@ describe("useProjectDocuments", () => {
       await act(async () => { await result.current.handleDocumentSelect("/lib/x.canvas") })
 
       // live canvas content was used, not loadFileViewerText.
-      expect(renderCanvasToJpeg).toHaveBeenCalledWith([1], 20, [], [])
+      expect(renderCanvasToJpeg).toHaveBeenCalledWith([stroke], 20, [], [])
       expect(uploadFile).toHaveBeenCalledWith("c1", expect.any(File), "proj", true)
       expect(addAttachment).toHaveBeenCalledOnce()
     })

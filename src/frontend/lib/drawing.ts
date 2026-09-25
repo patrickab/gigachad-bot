@@ -1,6 +1,7 @@
 import { getStroke } from "perfect-freehand"
 
 export interface StrokeData {
+  id: string
   points: number[][]
   color: string
   width: number

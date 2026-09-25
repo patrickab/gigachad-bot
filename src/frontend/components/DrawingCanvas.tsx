@@ -145,7 +145,7 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
     }
     setStrokes((prev) => [
       ...prev,
-      { points: currentPoints, color, width: baseWidth },
+      { id: crypto.randomUUID(), points: currentPoints, color, width: baseWidth },
     ])
     setCurrentPoints([])
   }, [isDrawing, isErasing, currentPoints, color, baseWidth])

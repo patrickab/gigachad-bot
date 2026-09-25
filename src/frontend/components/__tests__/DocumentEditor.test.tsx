@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { DocumentEditor } from "@/components/DocumentEditor"
 
@@ -28,72 +28,63 @@ const sync = vi.hoisted(() => {
 
 vi.mock("@/lib/api", () => api)
 vi.mock("@/lib/syncStream", () => ({ subscribeToChanges: sync.subscribeToChanges }))
+const collaboration = vi.hoisted(() => ({
+  useCollaborativeCanvas: vi.fn(),
+  replace: vi.fn(),
+  retry: vi.fn(),
+}))
+
+vi.mock("@/hooks/useCollaborativeCanvas", () => collaboration)
 vi.mock("@/components/CanvasEditor", () => ({
-  CanvasEditor: ({ doc }: { doc: { strokes: Array<{ points: string[][] }> } }) => <output data-testid="canvas">{doc.strokes[0]?.points[0]?.[0] ?? "empty"}</output>,
+  CanvasEditor: ({ doc, onChange }: { doc: { strokes: Array<{ id: string; points: string[][] }> }; onChange: (next: unknown) => void }) => (
+    <button type="button" data-testid="canvas" onClick={() => onChange({ ...doc, strokes: [] })}>
+      {doc.strokes[0]?.points[0]?.[0] ?? "empty"}
+    </button>
+  ),
   emptyCanvasDoc: () => ({ version: 1, frames: [], strokes: [], attachments: [], texts: [] }),
   parseCanvasDoc: JSON.parse,
   serializeCanvasDoc: JSON.stringify,
 }))
 
-describe("DocumentEditor live canvas sync", () => {
+describe("DocumentEditor canvas collaboration", () => {
   beforeEach(() => {
-    api.loadFileViewerText.mockReset()
-    sync.subscribeToChanges.mockClear()
+    collaboration.replace.mockReset()
+    collaboration.retry.mockReset()
+    collaboration.useCollaborativeCanvas.mockReturnValue({
+      document: { version: 1, frames: [], strokes: [{ id: "stroke-1", points: [["remote"]], color: "#000", width: 2 }], attachments: [], texts: [] },
+      replace: collaboration.replace,
+      retry: collaboration.retry,
+      status: "ready",
+    })
   })
 
-  it("reloads an open database-native path from its logical change key", async () => {
-    const key = "project/project/document/notes.canvas"
-    const absolutePath = key
-    api.loadFileViewerText
-      .mockResolvedValueOnce(JSON.stringify({ version: 1, frames: [], strokes: [], attachments: [], texts: [] }))
-      .mockResolvedValueOnce(JSON.stringify({ version: 1, frames: [], strokes: [{ points: [["remote"]] }], attachments: [], texts: [] }))
+  it("keeps vault canvases on the file-viewer load and persistOverride save path", async () => {
+    api.loadFileViewerText.mockResolvedValueOnce(JSON.stringify({ version: 1, frames: [], strokes: [{ id: "s", points: [["vault"]], color: "#000", width: 2 }], attachments: [], texts: [] }))
+    const persistOverride = vi.fn().mockResolvedValue(undefined)
+    const { unmount } = render(<DocumentEditor path="notes/sketch.canvas" slug="" overlay persistOverride={persistOverride} onClose={vi.fn()} />)
 
-    render(<DocumentEditor path={absolutePath} slug="project" onClose={vi.fn()} />)
-    await screen.findByTestId("canvas")
+    expect(await screen.findByTestId("canvas")).toHaveTextContent("vault")
+    expect(collaboration.useCollaborativeCanvas).not.toHaveBeenCalledWith("notes/sketch.canvas")
 
-    await act(async () => {
-      sync.emit({ seq: 42, resource_kind: "document", resource_key: key, version: 2, device_id: "other-device" })
+    fireEvent.click(screen.getByTestId("canvas"))
+    unmount() // leaving flushes the pending autosave
+    await waitFor(() => expect(persistOverride).toHaveBeenCalledWith(expect.stringContaining("\"strokes\":[]")))
+    expect(api.writeDocument).not.toHaveBeenCalled()
+  })
+
+  it("keeps a loaded canvas mounted when sync is transiently unavailable", async () => {
+    collaboration.useCollaborativeCanvas.mockReturnValue({
+      document: { version: 1, frames: [], strokes: [{ id: "stroke-1", points: [["remote"]], color: "#000", width: 2 }], attachments: [], texts: [] },
+      replace: collaboration.replace,
+      retry: collaboration.retry,
+      status: "error",
     })
 
-    await waitFor(() => expect(screen.getByTestId("canvas")).toHaveTextContent("remote"))
-  })
-})
-
-describe("DocumentEditor fail-closed loading", () => {
-  beforeEach(() => {
-    api.loadFileViewerText.mockReset()
-    api.writeDocument.mockReset()
-  })
-
-  it("does not silently blank a canvas when the initial load fails", async () => {
-    api.loadFileViewerText.mockRejectedValueOnce(new api.ApiError("boom", 500))
-
     render(<DocumentEditor path="project/project/document/notes.canvas" slug="project" onClose={vi.fn()} />)
 
-    await screen.findByText(/Failed to load/i)
-    expect(screen.queryByTestId("canvas")).not.toBeInTheDocument()
-    expect(api.writeDocument).not.toHaveBeenCalled()
-  })
-
-  it("recovers real content on retry after a failed load", async () => {
-    api.loadFileViewerText
-      .mockRejectedValueOnce(new api.ApiError("boom", 500))
-      .mockResolvedValueOnce(JSON.stringify({ version: 1, frames: [], strokes: [{ points: [["real"]] }], attachments: [], texts: [] }))
-
-    render(<DocumentEditor path="project/project/document/notes.canvas" slug="project" onClose={vi.fn()} />)
-    await screen.findByText(/Failed to load/i)
-
+    expect(await screen.findByTestId("canvas")).toHaveTextContent("remote")
+    expect(screen.getByRole("status")).toHaveTextContent("Canvas sync interrupted")
     fireEvent.click(screen.getByText("Retry"))
-
-    await waitFor(() => expect(screen.getByTestId("canvas")).toHaveTextContent("real"))
-    expect(api.writeDocument).not.toHaveBeenCalled()
-  })
-
-  it("still starts a genuinely new canvas blank on a confirmed 404", async () => {
-    api.loadFileViewerText.mockRejectedValueOnce(new api.ApiError("not found", 404))
-
-    render(<DocumentEditor path="note/fresh.canvas" slug="" onClose={vi.fn()} />)
-
-    await waitFor(() => expect(screen.getByTestId("canvas")).toHaveTextContent("empty"))
+    expect(collaboration.retry).toHaveBeenCalledOnce()
   })
 })

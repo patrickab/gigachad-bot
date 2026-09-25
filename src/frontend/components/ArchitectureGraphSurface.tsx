@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react"
 import {
   Background, BaseEdge, ConnectionMode, Handle, NodeResizer, Position, ReactFlow, useEdgesState, useInternalNode, useNodesState,
   type Connection, type Edge, type EdgeProps, type InternalNode, type Node, type NodeProps, type OnConnect, type ReactFlowInstance,
@@ -752,6 +752,12 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
     emit({ edges: graphRef.current.edges.filter((edge) => edge.id !== selectedEdgeId) })
   }, [emit, selectedEdgeId])
   const fitGraph = useCallback(() => flow?.fitView({ padding: 0.22, duration: 180 }), [flow])
+  const zoomGraphAtCenter = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
+    if (!flow || event.deltaY === 0) return
+    event.preventDefault()
+    event.stopPropagation()
+    void (event.deltaY < 0 ? flow.zoomIn() : flow.zoomOut())
+  }, [flow])
 
   return (
     <div className={cn("architecture-graph-surface", className)} style={{ display: "flex", minHeight: 280, height: "100%", flexDirection: "column", overflow: "hidden", borderTop: "1px solid var(--divider)", backgroundColor: "var(--architecture-graph-canvas)" }}>
@@ -764,7 +770,7 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
         <button type="button" onClick={fitGraph} className="architecture-graph-toolbar-symbol" aria-label="Fit view"><Maximize size={13} /></button>
         {onOpenDocument && <button type="button" onClick={onOpenDocument} className="architecture-graph-icon-button" aria-label="Open Architecture Graph document" style={{ display: "grid", width: 26, height: 26, marginLeft: "auto", placeItems: "center", border: 0, borderRadius: 5, background: "transparent", color: "var(--ink-muted)" }}><Maximize size={14} /></button>}
       </div>
-      <div style={{ position: "relative", minHeight: 0, flex: 1 }}>
+      <div onWheelCapture={zoomGraphAtCenter} style={{ position: "relative", minHeight: 0, flex: 1 }}>
       {!readOnly && selectedEdge && <div className="architecture-graph-edge-editor">
         <input aria-label="Connection label" value={selectedEdge.label ?? ""} placeholder="Connection label" onChange={(event) => updateSelectedEdge({ label: event.target.value })} />
         <select aria-label="Connection direction" value={selectedEdge.direction} onChange={(event) => updateSelectedEdge({ direction: event.target.value as ArchitectureGraphEdge["direction"] })}>
@@ -800,7 +806,7 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
         onNodeDragStop={onNodeDragStop} onConnect={onConnect} onEdgesDelete={onEdgesDelete} onNodesDelete={onNodesDelete}
         nodesDraggable={!readOnly} nodesConnectable={!readOnly} elementsSelectable={!readOnly} deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
         connectionMode={ConnectionMode.Loose}
-        fitView minZoom={0.2} maxZoom={2} panOnScroll selectionOnDrag={false} proOptions={{ hideAttribution: true }} elevateEdgesOnSelect
+        fitView minZoom={0.2} maxZoom={2} zoomOnScroll={false} panOnScroll selectionOnDrag={false} proOptions={{ hideAttribution: true }} elevateEdgesOnSelect
       >
         <Background gap={22} size={1} color="var(--divider)" />
       </ReactFlow>
