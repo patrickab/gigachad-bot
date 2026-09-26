@@ -194,6 +194,54 @@ describe("stroke sampling", () => {
     expect(points).toEqual([[10, 20, 0.5], [30, 40, 0.7]])
   })
 })
+describe("stroke pointer ownership", () => {
+  it("ignores a different pointer ending an active stroke", () => {
+    const seen: CanvasDocument[] = []
+    const { container } = render(<Harness seen={seen} />)
+    const surface = container.querySelectorAll("svg.absolute.inset-0.w-full.h-full")[1] as SVGSVGElement
+    surface.setPointerCapture = vi.fn()
+
+    const pointer = (type: string, pointerId: number, clientX: number, clientY: number) => {
+      const event = new MouseEvent(type, { bubbles: true, button: 0, clientX, clientY })
+      Object.defineProperty(event, "pointerId", { value: pointerId })
+      return event
+    }
+    act(() => {
+      fireEvent(surface, pointer("pointerdown", 1, 10, 10))
+      fireEvent(surface, pointer("pointerup", 2, 900, 1000))
+    })
+
+    expect(latest(seen).strokes).toHaveLength(0)
+
+    act(() => {
+      fireEvent(surface, pointer("pointerup", 1, 20, 20))
+    })
+
+    expect(latest(seen).strokes).toHaveLength(1)
+    expect(latest(seen).strokes[0]!.points.at(-1)?.slice(0, 2)).toEqual([40, 40])
+  })
+})
+
+describe("stroke capture loss", () => {
+  it("does not append a synthetic origin point after pointer capture is lost", () => {
+    const seen: CanvasDocument[] = []
+    const { container } = render(<Harness seen={seen} />)
+    const surface = container.querySelectorAll("svg.absolute.inset-0.w-full.h-full")[1] as SVGSVGElement
+    surface.setPointerCapture = vi.fn()
+    const pointer = (type: string, clientX: number, clientY: number) => {
+      const event = new MouseEvent(type, { bubbles: true, button: 0, clientX, clientY })
+      Object.defineProperty(event, "pointerId", { value: 1 })
+      return event
+    }
+
+    act(() => { fireEvent(surface, pointer("pointerdown", 10, 10)) })
+    act(() => { fireEvent(surface, pointer("pointermove", 20, 20)) })
+    act(() => { fireEvent(surface, pointer("lostpointercapture", 0, 0)) })
+
+    expect(latest(seen).strokes).toHaveLength(1)
+    expect(latest(seen).strokes[0]!.points.at(-1)?.slice(0, 2)).toEqual([40, 40])
+  })
+})
 
 describe("canvas schema", () => {
   it("assigns UUIDs to legacy strokes while preserving existing IDs", () => {

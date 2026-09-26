@@ -588,6 +588,9 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   // so a pointermove never triggers a React re-render of the whole editor.
   const currentPointsRef = useRef<number[][]>([])
   const livePathRef = useRef<SVGPathElement>(null)
+  // Pointer capture can still deliver a late event from another active device. Only
+  // the pointer that began a stroke may extend or finish it.
+  const drawingPointerId = useRef<number | null>(null)
   const [isErasing, setIsErasing] = useState(false)
   const [strokeWidth, setStrokeWidth] = useState<StrokeSize>("thin")
   const [color, setColor] = useState("#000000")
@@ -1027,6 +1030,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
       const [cx, cy] = screenToCanvas(clientX, clientY)
       setIsDrawing(false)
       currentPointsRef.current = []
+      drawingPointerId.current = null
       redrawLive()
       cancelStraighten()
       setContextMenu({ screenX: clientX, screenY: clientY, canvasX: cx, canvasY: cy })
@@ -1115,6 +1119,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     setIsDrawing(true)
     const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
     currentPointsRef.current = [[cx, cy, e.pressure > 0 ? e.pressure : 0.5]]
+    drawingPointerId.current = e.pointerId
     redrawLive()
     // the long-press context menu (incl. "Paste image") is a touch/mouse affordance —
     // a pen stroke that pauses mid-draw must never be mistaken for a long-press
@@ -1164,7 +1169,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
       }
       return
     }
-    if (!isDrawing) return
+    if (!isDrawing || e.pointerId !== drawingPointerId.current) return
     if (straightened.current) {
       const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
       currentPointsRef.current = [currentPointsRef.current[0]!, [cx, cy, e.pressure > 0 ? e.pressure : 0.5]]
@@ -1228,14 +1233,18 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
       gestureSnapped.current = false
       return
     }
-    if (!isDrawing) return
+    if (!isDrawing || (e && e.pointerId !== drawingPointerId.current)) return
     setIsDrawing(false)
     const pts = currentPointsRef.current
-    if (e) {
+    // pointercancel and lostpointercapture do not carry a usable final position.
+    // Appending their default (often 0, 0) coordinate creates a diagonal to the
+    // canvas origin. The most recent move sample is the safe final point instead.
+    if (e?.type === "pointerup") {
       const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
       appendStrokePoint(pts, [cx, cy, e.pressure > 0 ? e.pressure : 0.5])
     }
     currentPointsRef.current = []
+    drawingPointerId.current = null
     redrawLive()
     if (pts.length < 2) return
     commit({ ...doc, strokes: [...doc.strokes, { id: canvasEntityId(), points: pts, color, width: baseWidth }] })
@@ -2455,6 +2464,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
                 // discard the tiny hold-dot stroke
                 setIsDrawing(false)
                 currentPointsRef.current = []
+                drawingPointerId.current = null
                 redrawLive()
                 cancelStraighten()
                 pasteImageAtPoint(canvasX, canvasY)
