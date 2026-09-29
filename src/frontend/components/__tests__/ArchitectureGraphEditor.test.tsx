@@ -98,7 +98,7 @@ describe("ArchitectureGraphEditor undo/redo", () => {
 
     // Redo restores the node without re-entering edit mode: the auto-edit is one-time.
     fireEvent.keyDown(document, { key: "z", ctrlKey: true, shiftKey: true })
-    expect(screen.getByRole("button", { name: "Edit node title" })).toHaveTextContent("Untitled node")
+    expect(screen.getByRole("button", { name: "Edit node title" })).toBeEmptyDOMElement()
     expect(screen.queryByRole("textbox", { name: "Node title" })).not.toBeInTheDocument()
   })
 })

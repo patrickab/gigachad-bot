@@ -387,16 +387,15 @@ p, li {
   padding: 0 0 2px;
 }
 .architecture-graph-node-titlebar-plain .architecture-graph-title-display { white-space: normal; }
-.architecture-graph-node-body-plain { flex: 0 0 auto; padding: 0; overflow: visible; align-items: center; text-align: center; }
+.architecture-graph-node-body.architecture-graph-node-body-plain { flex: 0 0 auto; padding: 0; overflow: visible; align-items: stretch; text-align: center; }
 .architecture-graph-node-body-plain .architecture-graph-bullet-row:first-child { margin-top: 4px; }
 .architecture-graph-node-body-plain .architecture-graph-bullet-row { justify-content: center; }
 .architecture-graph-node-body-plain .architecture-graph-bullet-input { text-align: center; }
 
-.architecture-graph-node { height: 100%; }
+.architecture-graph-node { height: 100%; cursor: grab; }
+.architecture-graph-node:active { cursor: grabbing; }
 .architecture-graph-node-sketch { color: var(--sketch-ink); }
 .architecture-graph-node-fill { fill: var(--sketch-fill); }
-.architecture-graph-node-header { cursor: grab; }
-.architecture-graph-node-header:active { cursor: grabbing; }
 .architecture-graph-title {
   display: block;
   box-sizing: border-box;
@@ -416,6 +415,8 @@ p, li {
   display: inline-block;
   flex: 0 1 auto;
   max-width: 100%;
+  min-width: 24px;
+  min-height: 1.35em;
   cursor: text;
   overflow: hidden;
   padding: 0;
@@ -425,7 +426,7 @@ p, li {
 }
 .architecture-graph-title:focus-visible { outline: 2px solid var(--divider-strong); outline-offset: 2px; }
 
-.architecture-graph-node-body { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 2px; padding: 4px 12px 8px; overflow-y: auto; }
+.architecture-graph-node-body { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 2px; padding: 4px 12px 8px; overflow: hidden; }
 .architecture-graph-bullet-row { display: flex; align-items: flex-start; gap: 6px; }
 .architecture-graph-bullet-marker { flex-shrink: 0; font: inherit; font-size: 13px; line-height: 1.5; color: var(--sketch-ink-soft); }
 .architecture-graph-bullet-input {
@@ -436,6 +437,8 @@ p, li {
   min-height: 17px;
   overflow: hidden;
   resize: none !important;
+  overflow-wrap: normal;
+  word-break: normal;
   border: 0;
   outline: 0;
   background: transparent;

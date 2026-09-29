@@ -2305,7 +2305,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
                 onPointerDown={(e) => e.stopPropagation()}
               >
                 {architectureGraph ? (
-                  <CanvasArchitectureGraph path={att.path!} maximized={full} hostScale={scale} />
+                  <CanvasArchitectureGraph path={att.path!} maximized={full} hostScale={full ? 1 : scale} />
                 ) : isDocument ? (
                   <CanvasDocumentAttachment
                     path={att.path!}

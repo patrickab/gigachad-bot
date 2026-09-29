@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react"
 import {
   Background, BaseEdge, ConnectionMode, Handle, NodeResizer, Position, ReactFlow, useEdgesState, useInternalNode, useNodesState,
-  type Connection, type Edge, type EdgeProps, type InternalNode, type Node, type NodeProps, type OnConnect, type ReactFlowInstance,
+  type Connection, type Edge, type EdgeProps, type InternalNode, type Node, type NodeChange, type NodeProps, type OnConnect, type ReactFlowInstance,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import rough from "roughjs"
@@ -286,6 +286,17 @@ function ArchitectureNodeCard({ data, selected }: NodeProps<Node<ArchitectureNod
       next.splice(index - 1, 2, next[index - 1] + next[index])
       setBulletDrafts(next)
       focusBullet(index - 1, mergeAt)
+    } else if ((event.key === "ArrowUp" || event.key === "ArrowDown") && !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey) {
+      // Inside a wrapped bullet the arrow moves the caret between visual lines;
+      // only when the browser leaves the caret where it was (first/last line) do we hop rows.
+      const before = textarea.selectionStart
+      const target = index + (event.key === "ArrowUp" ? -1 : 1)
+      requestAnimationFrame(() => {
+        if (!textarea.isConnected || textarea.selectionStart !== before || textarea.selectionEnd !== before) return
+        if (target < 0) { setEditingTitle(true); return }
+        if (target >= bulletDrafts.length) return
+        focusBullet(target, Math.min(before, bulletDrafts[target].length))
+      })
     }
   }
   // Commit drafts while typing too, so autosave never persists a stale node. The
@@ -316,9 +327,9 @@ function ArchitectureNodeCard({ data, selected }: NodeProps<Node<ArchitectureNod
     setTitleWidth(titleMeasureRef.current?.offsetWidth ?? 0)
   }, [titleDraft])
   const minNodeWidth = shape === "rectangle" ? Math.max(NODE_MIN_WIDTH, Math.ceil(titleWidth) + TITLE_WIDTH_SLACK) : NODE_MIN_WIDTH
-  // Auto-fit: the content's natural height is a floor for the card. The card
-  // grows when text stops fitting and never shrinks on its own, so a size the
-  // user chose sticks until the text actually needs more room.
+  // Auto-fit: the content's natural size is a floor for the card. The card
+  // grows when text stops fitting (vertically or horizontally) and never
+  // shrinks on its own, so a size the user chose sticks until the text needs more.
   const contentRef = useRef<HTMLDivElement>(null)
   const titlebarRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -366,14 +377,23 @@ function ArchitectureNodeCard({ data, selected }: NodeProps<Node<ArchitectureNod
       }
       const fit = Math.max(NODE_MIN_HEIGHT, Math.ceil(needed / GRID_SIZE) * GRID_SIZE)
       setFitHeight(fit)
-      // Legacy nodes without a stored height already grow with their content.
-      if (resizingRef.current || data.height === undefined || fit <= data.height) return
-      // Round shapes also widen a little, so their text rewraps into a fuller
-      // shape instead of stretching into a tall sliver.
+      if (resizingRef.current) return
+      // A word wider than the text box can't wrap, so it clips; widen the card
+      // until it fits. Round shapes only expose a fraction of their width to text.
+      const title = titlebar.firstElementChild as HTMLElement | null
+      const titleOverflow = contentFraction && title ? title.scrollWidth - title.clientWidth : 0
+      const overflowX = bulletRefs.current.reduce((most, textarea) => textarea ? Math.max(most, textarea.scrollWidth - textarea.clientWidth) : most, titleOverflow)
       const width = data.width ?? DEFAULT_NODE_WIDTH
-      data.onChange(data.id, contentFraction
-        ? { height: fit, width: Math.ceil(width * Math.sqrt(fit / data.height) / GRID_SIZE) * GRID_SIZE }
-        : { height: fit })
+      const nextWidth = overflowX > 0 ? Math.ceil((width + overflowX / (contentFraction?.width ?? 1)) / GRID_SIZE) * GRID_SIZE : width
+      // Legacy nodes without a stored height already grow with their content.
+      const growHeight = data.height !== undefined && fit > data.height
+      if (!growHeight && nextWidth === width) return
+      // Round shapes also widen a little when they grow taller, so their text
+      // rewraps into a fuller shape instead of stretching into a tall sliver.
+      data.onChange(data.id, {
+        ...(growHeight ? { height: fit } : {}),
+        ...(contentFraction && growHeight ? { width: Math.max(nextWidth, Math.ceil(width * Math.sqrt(fit / data.height!) / GRID_SIZE) * GRID_SIZE) } : nextWidth !== width ? { width: nextWidth } : {}),
+      })
     })
     return () => cancelAnimationFrame(id)
   }, [bulletDrafts, titleDraft, editingTitle, cardSize, contentFraction, data.height, data.width, data.id, data.onChange])
@@ -405,7 +425,7 @@ function ArchitectureNodeCard({ data, selected }: NodeProps<Node<ArchitectureNod
         const y = snapToGrid(params.y)
         data.onChange(data.id, { width: snapToGrid(params.x + params.width) - x, height: snapToGrid(params.y + params.height) - y, position: { x, y } })
       }} />
-      <span ref={titleMeasureRef} aria-hidden="true" className="architecture-graph-title" style={{ position: "absolute", visibility: "hidden", whiteSpace: "nowrap", left: -9999 }}>{titleDraft || "Untitled node"}</span>
+      <span ref={titleMeasureRef} aria-hidden="true" className="architecture-graph-title" style={{ position: "absolute", visibility: "hidden", whiteSpace: "nowrap", left: -9999 }}>{titleDraft}</span>
       {/* Fill sits under the content (a later positioned sibling); the outline sits on top. */}
       <svg viewBox={`0 0 ${cardSize.width} ${cardSize.height}`} aria-hidden="true" focusable="false" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", overflow: "visible", pointerEvents: "none" }}>
         {nodeSketch.fills.map((path, index) => <path key={index} d={path.d} className="architecture-graph-node-fill" stroke="none" />)}
@@ -416,12 +436,12 @@ function ArchitectureNodeCard({ data, selected }: NodeProps<Node<ArchitectureNod
       <Handle id="top" type="target" position={Position.Top} className="architecture-graph-handle" style={controlStyle} />
       <Handle id="left" type="target" position={Position.Left} className="architecture-graph-handle" style={controlStyle} />
       <div style={{ position: "relative", height: "100%", display: "grid", overflow: "hidden", ...SHAPE_CLIP[shape] }}>
-      <div ref={contentRef} style={contentFraction ? { display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, justifySelf: "center", alignSelf: "center", maxWidth: `${contentFraction.width * 100}%`, maxHeight: `${contentFraction.height * 100}%` } : { display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, width: "100%", height: "100%" }}>
-      <div ref={titlebarRef} className={cn("architecture-graph-node-titlebar architecture-graph-node-header drag-handle", centered && "architecture-graph-node-titlebar-plain")}>
+      <div ref={contentRef} style={contentFraction ? { display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, justifySelf: "center", alignSelf: "center", width: `${contentFraction.width * 100}%`, maxHeight: `${contentFraction.height * 100}%` } : { display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, width: "100%", height: "100%" }}>
+      <div ref={titlebarRef} className={cn("architecture-graph-node-titlebar", centered && "architecture-graph-node-titlebar-plain")}>
         {editingTitle ? (
-          <input ref={titleRef} autoFocus aria-label="Node title" value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} onFocus={() => { titleFocusedRef.current = true }} onBlur={() => { titleFocusedRef.current = false; commitTitle(); setEditingTitle(false) }} onKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); event.currentTarget.blur(); if (bulletDrafts.length === 0) setBulletDrafts([""]); focusBullet(0, 0) }} onPointerDown={(event) => event.stopPropagation()} className="nodrag architecture-graph-title architecture-graph-title-input" />
+          <input ref={titleRef} autoFocus aria-label="Node title" value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} onFocus={() => { titleFocusedRef.current = true }} onBlur={() => { titleFocusedRef.current = false; commitTitle(); setEditingTitle(false) }} onKeyDown={(event) => { if (event.key === "ArrowDown" && bulletDrafts.length > 0) { event.preventDefault(); event.currentTarget.blur(); focusBullet(0, 0); return } if (event.key !== "Enter") return; event.preventDefault(); event.currentTarget.blur(); if (bulletDrafts.length === 0) setBulletDrafts([""]); focusBullet(0, 0) }} onPointerDown={(event) => event.stopPropagation()} className="nodrag architecture-graph-title architecture-graph-title-input" />
         ) : (
-          <span role="button" tabIndex={0} aria-label="Edit node title" onClick={() => setEditingTitle(true)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setEditingTitle(true) } }} className="architecture-graph-title architecture-graph-title-display">{data.title || "Untitled node"}</span>
+          <span role="button" tabIndex={0} aria-label="Edit node title" onClick={() => setEditingTitle(true)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setEditingTitle(true) } }} className="architecture-graph-title architecture-graph-title-display">{data.title}</span>
         )}
       </div>
       <div ref={bodyRef} className={cn("architecture-graph-node-body nowheel", centered && "architecture-graph-node-body-plain")}>
@@ -566,13 +586,15 @@ export function edgeAttachments(nodes: readonly RoutableNode[], edges: readonly 
   }))
 }
 
+// A crisp filled triangle: the sketchy shaft carries the hand-drawn feel, while
+// a rough-stroked chevron read as scribble at this size.
 function arrowHeadPath(tip: { x: number, y: number }, from: { x: number, y: number }): string {
   const angle = Math.atan2(tip.y - from.y, tip.x - from.x)
-  const size = 10
-  const wing = 0.58
+  const size = 12
+  const wing = 0.4
   const left = { x: tip.x - Math.cos(angle - wing) * size, y: tip.y - Math.sin(angle - wing) * size }
   const right = { x: tip.x - Math.cos(angle + wing) * size, y: tip.y - Math.sin(angle + wing) * size }
-  return `M ${left.x} ${left.y} L ${tip.x} ${tip.y} L ${right.x} ${right.y}`
+  return `M ${left.x} ${left.y} L ${tip.x} ${tip.y} L ${right.x} ${right.y} Z`
 }
 
 function ArchitectureEdgePath({ id, source, target, data, selected }: EdgeProps<GraphFlowEdge>) {
@@ -602,7 +624,7 @@ function ArchitectureEdgePath({ id, source, target, data, selected }: EdgeProps<
   }, [sourceNode, targetNode, data?.attachment, data?.direction, data?.path?.bend, dragBend])
 
   const sketch = useMemo(
-    () => geometry ? edgeSketchPaths(`${geometry.edgePath} ${geometry.arrows}`, roughSeed(id), selected ? 1.6 : 1.3) : [],
+    () => geometry ? edgeSketchPaths(geometry.edgePath, roughSeed(id), selected ? 2 : 1.7) : [],
     [geometry, id, selected],
   )
 
@@ -644,7 +666,8 @@ function ArchitectureEdgePath({ id, source, target, data, selected }: EdgeProps<
 
   return <>
     <BaseEdge id={id} path={geometry.edgePath} interactionWidth={20} style={{ stroke: "transparent" }} />
-    {sketch.map((path, index) => <path key={index} d={path.d} fill="none" stroke="currentColor" strokeWidth={path.strokeWidth} className={cn("architecture-graph-edge", selected && "architecture-graph-edge-selected")} pointerEvents="none" />)}
+    {sketch.map((path, index) => <path key={index} d={path.d} fill="none" stroke="currentColor" strokeWidth={path.strokeWidth} strokeLinecap="round" className={cn("architecture-graph-edge", selected && "architecture-graph-edge-selected")} pointerEvents="none" />)}
+    <path d={geometry.arrows} fill="currentColor" stroke="currentColor" strokeWidth={1.5} strokeLinejoin="round" className={cn("architecture-graph-edge", selected && "architecture-graph-edge-selected")} pointerEvents="none" />
     {data?.label && <text x={pathPoint.x} y={pathPoint.y - 12} className="architecture-graph-edge-label" textAnchor="middle" dominantBaseline="central">{data.label}</text>}
     {selected && data?.onPathChange && <circle cx={pathPoint.x} cy={pathPoint.y} r={6} role="button" tabIndex={0} aria-label="Adjust connection curve" aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight" className="architecture-graph-path-handle nodrag nopan" onPointerDown={startDrag} onKeyDown={nudge} />}
   </>
@@ -655,7 +678,7 @@ const edgeTypes = { "architecture-edge": ArchitectureEdgePath }
 
 function toFlowNodes(nodes: ArchitectureGraphNode[], onNodeChange: ArchitectureNodeData["onChange"], claimAutoEdit?: ArchitectureNodeData["claimAutoEdit"]): GraphFlowNode[] {
   return nodes.map((node) => ({
-    id: node.id, type: "architecture-node", position: node.position, dragHandle: ".architecture-graph-node-header",
+    id: node.id, type: "architecture-node", position: node.position,
     // Height is left unset for legacy nodes without an explicit height, so they
     // keep growing with their content instead of being clamped to a default.
     style: { width: node.width ?? DEFAULT_NODE_WIDTH, ...(node.height !== undefined ? { height: node.height } : {}) },
@@ -855,8 +878,21 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
     emit({ edges: graphRef.current.edges.filter((edge) => edge.id !== selectedEdgeId) })
   }, [emit, selectedEdgeId])
   const fitGraph = useCallback(() => flow?.fitView({ padding: 0.22, duration: 180 }), [flow])
+  // Nodes measure and auto-grow after the first fit, which would leave the
+  // graph cropped. Until the user takes the camera, keep refitting as sizes settle.
+  const followFitRef = useRef(true)
+  const followTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+  useEffect(() => () => clearTimeout(followTimerRef.current), [])
+  const takeCamera = useCallback(() => { followFitRef.current = false }, [])
+  const handleNodesChange = useCallback((changes: NodeChange<GraphFlowNode>[]) => {
+    onNodesChange(changes)
+    if (!followFitRef.current || !changes.some((change) => change.type === "dimensions")) return
+    clearTimeout(followTimerRef.current)
+    followTimerRef.current = setTimeout(() => { if (followFitRef.current) void flow?.fitView({ padding: 0.22 }) }, 120)
+  }, [onNodesChange, flow])
   useEffect(() => {
     if (!autoFit) return
+    followFitRef.current = true
     // Two frames: the host's new size has to be laid out and picked up by React
     // Flow's own size observer before a fit can use it.
     let frame = requestAnimationFrame(() => { frame = requestAnimationFrame(() => { void fitGraph() }) })
@@ -866,10 +902,11 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
   }, [autoFit])
   const zoomGraphAtCenter = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
     if (!flow || event.deltaY === 0) return
+    takeCamera()
     event.preventDefault()
     event.stopPropagation()
     void (event.deltaY < 0 ? flow.zoomIn() : flow.zoomOut())
-  }, [flow])
+  }, [flow, takeCamera])
   // React Flow pins its viewport to the top-left corner, so when the frame
   // resizes (fullscreen, a resize drag) the view's middle would drift. Both
   // this and host zoom re-project from the size the current viewport was set
@@ -907,7 +944,7 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
   }, [hostScale, reframe])
 
   return (
-    <div className={cn("architecture-graph-surface", className)} style={{ display: "flex", minHeight: 280, height: "100%", flexDirection: "column", overflow: "hidden", borderTop: "1px solid var(--divider)", backgroundColor: "var(--sketch-canvas)" }}>
+    <div className={cn("architecture-graph-surface", className)} style={{ display: "flex", minHeight: 0, height: "100%", flexDirection: "column", overflow: "hidden", borderTop: "1px solid var(--divider)", backgroundColor: "var(--sketch-canvas)" }}>
       <div className="architecture-graph-toolbar" style={{ position: "relative", inset: "auto", zIndex: 5, display: "flex", minHeight: 31, flexShrink: 0, alignItems: "center", gap: 6, borderBottom: "1px solid var(--divider)", padding: "0 10px" }}>
         {!readOnly && <>
           <button type="button" onClick={addNode} className="architecture-graph-toolbar-symbol" aria-label="Add node"><Plus size={13} /></button>
@@ -948,8 +985,10 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
       <ReactFlow<GraphFlowNode, GraphFlowEdge>
         nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
         onInit={setFlow}
-        onNodesChange={onNodesChange}
+        onNodesChange={handleNodesChange}
         onEdgesChange={onEdgesChange}
+        onNodeDragStart={takeCamera} onNodeClick={takeCamera} onPaneClick={takeCamera}
+        onMoveStart={(event) => { if (event) takeCamera() }}
         onNodeDragStop={onNodeDragStop} onConnect={onConnect} onEdgesDelete={onEdgesDelete} onNodesDelete={onNodesDelete}
         nodesDraggable={!readOnly} nodesConnectable={!readOnly} elementsSelectable={!readOnly} deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
         connectionMode={ConnectionMode.Loose}
