@@ -144,6 +144,14 @@ def decode_image(base64_data: str | None) -> bytes | None:
 
 
 _SENTINEL = object()
+_SSE_HEADERS = {
+    # Some reverse proxies otherwise buffer a small SSE response until the model
+    # finishes. Vision providers commonly have larger first-token gaps, exposing
+    # that buffering as an apparently non-streaming reply.
+    "Cache-Control": "no-cache, no-transform",
+    "X-Accel-Buffering": "no",
+}
+
 
 
 def sse_event_stream(chunks: Iterator[str] | Iterator[str | dict]) -> EventSourceResponse:
@@ -162,7 +170,7 @@ def sse_event_stream(chunks: Iterator[str] | Iterator[str | dict]) -> EventSourc
         except Exception as e:
             yield {"event": "error", "data": str(e)}
 
-    return EventSourceResponse(event_stream())
+    return EventSourceResponse(event_stream(), headers=_SSE_HEADERS)
 
 
 def sse_tool_event_stream(events: AsyncIterator[tuple[str, Any]]) -> EventSourceResponse:
@@ -175,5 +183,4 @@ def sse_tool_event_stream(events: AsyncIterator[tuple[str, Any]]) -> EventSource
             yield {"event": "done", "data": ""}
         except Exception as e:  # noqa: BLE001 - a failed turn must reach the UI as an error event
             yield {"event": "error", "data": str(e)}
-
-    return EventSourceResponse(event_stream())
+    return EventSourceResponse(event_stream(), headers=_SSE_HEADERS)

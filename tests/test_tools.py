@@ -627,10 +627,31 @@ def test_chat_route_streams_tool_events_over_sse(monkeypatch: pytest.MonkeyPatch
     )
 
     assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-cache, no-transform"
+    assert response.headers["x-accel-buffering"] == "no"
     events = _sse_events(response.text)
     assert [name for name, _ in events] == ["tool_call", "tool_progress", "tool_progress", "tool_result", "token", "done"]
     assert '"name": "web_search"' in events[0][1]
     assert events[4][1] == "Try [ap]"
+
+def test_chat_route_streams_plain_turn_without_proxy_buffering(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The ordinary chat path uses the same unbuffered SSE contract as tool turns."""
+    from fastapi.testclient import TestClient
+
+    from backend.routes import chat as chat_route
+
+    monkeypatch.setattr(chat_route, "_resolve_images", lambda *_, **__: None)
+    monkeypatch.setattr(chat_route, "api_query_resilient", lambda *_, **__: iter(["First", " answer"]))
+
+    response = TestClient(_chat_app(monkeypatch)).post(
+        "/api/chat",
+        json={"model": TEST_MODEL, "chat_id": "c1", "user_msg": "hello"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-cache, no-transform"
+    assert response.headers["x-accel-buffering"] == "no"
+    assert _sse_events(response.text) == [("token", "First"), ("token", " answer"), ("done", "")]
 
 
 
