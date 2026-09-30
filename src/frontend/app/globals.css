@@ -367,7 +367,7 @@ p, li {
 .architecture-graph-toolbar-symbol:focus-visible { outline: 2px solid var(--divider-strong); outline-offset: 2px; }
 
 .architecture-graph-draw-overlay { position: absolute; inset: 0; z-index: 6; cursor: crosshair; touch-action: none; }
-.architecture-graph-draw-preview { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.architecture-graph-draw-preview { position: absolute; inset: 0; z-index: 7; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .architecture-graph-draw-preview path { stroke: var(--sketch-ink-soft); stroke-width: 1.5; stroke-dasharray: 4 3; stroke-linecap: round; stroke-linejoin: round; }
 
 .architecture-graph-toolbar-delimiter { color: var(--ink-muted); font-size: 12px; line-height: 1; user-select: none; }
@@ -449,14 +449,33 @@ p, li {
 }
 .architecture-graph-bullet-input::-webkit-resizer { display: none; }
 
+/* 20px invisible hit area around an 8px dot: a handle is easy to grab and to drop onto. */
 .architecture-graph-handle {
-  width: 6px !important;
-  height: 6px !important;
-  border: 1px solid var(--sketch-canvas) !important;
-  background: var(--sketch-ink-soft) !important;
+  width: 20px !important;
+  height: 20px !important;
+  border: 0 !important;
+  background: transparent !important;
   opacity: 0;
+  cursor: crosshair;
   transition: opacity 150ms ease;
 }
+.architecture-graph-handle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  box-sizing: border-box;
+  width: 8px;
+  height: 8px;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--sketch-canvas);
+  border-radius: 50%;
+  background: var(--sketch-ink-soft);
+  transition: width 100ms ease, height 100ms ease;
+  pointer-events: none;
+}
+.architecture-graph-handle:hover::after,
+.architecture-graph-handle.connectingto::after { width: 12px; height: 12px; }
 .architecture-graph-node:hover .architecture-graph-handle,
 .architecture-graph-node-selected .architecture-graph-handle { opacity: 1; }
 
@@ -477,6 +496,19 @@ p, li {
   stroke: var(--sketch-canvas);
   stroke-width: 5px;
   stroke-linejoin: round;
+}
+.architecture-graph-edge-label-input {
+  width: 100%;
+  height: 24px;
+  border: 1px solid var(--divider-strong);
+  border-radius: var(--radius-sm);
+  outline: 0;
+  background: var(--sketch-canvas);
+  color: var(--sketch-ink-soft);
+  padding: 0 6px;
+  font: inherit;
+  font-size: 13px;
+  text-align: center;
 }
 
 .architecture-graph-surface .react-flow__controls {

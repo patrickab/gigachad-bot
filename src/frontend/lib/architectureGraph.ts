@@ -22,8 +22,13 @@ export interface ArchitectureGraphNode {
 }
 
 export type ArchitectureGraphEdgeDirection = "one-way" | "bidirectional"
+export type ArchitectureGraphEdgeStyle = "curved" | "elbow"
 export interface ArchitectureGraphEdgePath {
-  /** Signed distance in canvas units from the connection chord's midpoint. */
+  /**
+   * Curved: perpendicular offset of the curve from the chord midpoint.
+   * Elbow: offset of the middle lane from its default midpoint.
+   * Canvas units either way, so it only makes sense for the graph's own edge style.
+   */
   bend: number
 }
 
@@ -33,7 +38,7 @@ export interface ArchitectureGraphEdge {
   target: string
   direction: ArchitectureGraphEdgeDirection
   label?: string
-  /** Optional relative bend; omitted connections render as a straight line. */
+  /** Optional bend; omitted connections use the default route. */
   path?: ArchitectureGraphEdgePath
 }
 
@@ -42,6 +47,8 @@ export interface ArchitectureGraph {
   title: string
   nodes: ArchitectureGraphNode[]
   edges: ArchitectureGraphEdge[]
+  /** Omitted means "curved", the original look, so older files render unchanged. */
+  edgeStyle?: ArchitectureGraphEdgeStyle
 }
 
 export interface ArchitectureGraphDocument {
@@ -62,6 +69,7 @@ export const emptyArchitectureGraph = (title = "Untitled architecture"): Archite
   title,
   nodes: [],
   edges: [],
+  edgeStyle: "elbow",
 })
 
 function text(value: unknown, field: string): string {
@@ -140,7 +148,8 @@ export function validateArchitectureGraph(value: unknown): ArchitectureGraph {
     return { id, source, target, direction: edge.direction as ArchitectureGraphEdgeDirection, ...(edge.label?.trim() ? { label: edge.label.trim() } : {}), ...(path ? { path } : {}) }
   })
 
-  return { version: ARCHITECTURE_GRAPH_VERSION, title: text(graph.title, "title"), nodes, edges }
+  if (graph.edgeStyle !== undefined && graph.edgeStyle !== "curved" && graph.edgeStyle !== "elbow") throw new Error("edgeStyle must be curved or elbow")
+  return { version: ARCHITECTURE_GRAPH_VERSION, title: text(graph.title, "title"), nodes, edges, ...(graph.edgeStyle === "elbow" ? { edgeStyle: "elbow" as const } : {}) }
 }
 
 export function parseArchitectureGraph(source: string): ArchitectureGraph {

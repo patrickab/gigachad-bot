@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react"
 import {
   Background, BaseEdge, ConnectionMode, Handle, NodeResizer, Position, ReactFlow, useEdgesState, useInternalNode, useNodesState,
-  type Connection, type Edge, type EdgeProps, type InternalNode, type Node, type NodeChange, type NodeProps, type OnConnect, type ReactFlowInstance,
+  type Connection, type Edge, type EdgeProps, type InternalNode, type Node, type NodeChange, type NodeProps, type OnConnect, type OnConnectEnd, type ReactFlowInstance,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import rough from "roughjs"
-import { Maximize, PenLine, Plus, RotateCcw, Trash2 } from "lucide-react"
+import { CircleDashed, CornerDownRight, Maximize, Plus, RotateCcw, Trash2 } from "lucide-react"
+import { useTwoFingerGesture } from "@/hooks/useTwoFingerGesture"
+import { pointInPolygon } from "@/lib/drawing"
 import { cn } from "@/lib/utils"
 import { useTabActive } from "./TabManager"
 import { reframeCamera } from "./InfiniteViewport"
@@ -16,6 +18,7 @@ import {
   type ArchitectureGraph,
   type ArchitectureGraphEdge,
   type ArchitectureGraphEdgePath,
+  type ArchitectureGraphEdgeStyle,
   type ArchitectureGraphNode,
   type ArchitectureGraphNodeShape,
 } from "@/lib/architectureGraph"
@@ -24,7 +27,9 @@ type GraphFlowNodeData = ArchitectureGraphNode & Record<string, unknown>
 interface GraphFlowEdgeData extends ArchitectureGraphEdge, Record<string, unknown> {
   attachment?: EdgeAttachment
   onPathChange?: (id: string, path?: ArchitectureGraphEdgePath) => void
+  onLabelChange?: (id: string, label: string) => void
   toFlowPoint?: (x: number, y: number) => { x: number, y: number } | undefined
+  edgeStyle?: ArchitectureGraphEdgeStyle
 }
 type GraphFlowNode = Node<GraphFlowNodeData, "architecture-node">
 type GraphFlowEdge = Edge<GraphFlowEdgeData, "architecture-edge">
@@ -66,8 +71,8 @@ function roughSeed(id: string): number {
   return (hash >>> 0) || 1
 }
 
-// Connections draw as a single wobbly line: rough.js's doubled stroke reads as
-// jitter at edge scale rather than pencil.
+// Curved connections draw as a single wobbly line: rough.js's doubled stroke
+// reads as jitter at edge scale rather than pencil. Elbow connections stay crisp.
 function edgeSketchPaths(d: string, seed: number, strokeWidth: number) {
   return roughGenerator.toPaths(roughGenerator.path(d, {
     seed, roughness: 1, bowing: 1, stroke: "currentColor", strokeWidth, preserveVertices: true, disableMultiStroke: true,
@@ -586,11 +591,51 @@ export function edgeAttachments(nodes: readonly RoutableNode[], edges: readonly 
   }))
 }
 
-// A crisp filled triangle: the sketchy shaft carries the hand-drawn feel, while
-// a rough-stroked chevron read as scribble at this size.
-function arrowHeadPath(tip: { x: number, y: number }, from: { x: number, y: number }): string {
+// Orthogonal connector, like a flowchart: leave each card perpendicular to its
+// side. Facing sides give a Z whose middle lane `bend` shifts along the axis;
+// perpendicular sides give a single L. Corners are rounded.
+const CORNER_RADIUS = 8
+
+interface Point { x: number, y: number }
+
+function orthogonalRoute(from: AttachPoint, to: AttachPoint, bend: number) {
+  const horizontal = (side: Position) => side === Position.Left || side === Position.Right
+  let axis: "x" | "y" | null = null
+  let raw: Point[]
+  if (horizontal(from.position) && horizontal(to.position)) {
+    const lane = (from.x + to.x) / 2 + bend
+    raw = [from, { x: lane, y: from.y }, { x: lane, y: to.y }, to]
+    axis = "x"
+  } else if (!horizontal(from.position) && !horizontal(to.position)) {
+    const lane = (from.y + to.y) / 2 + bend
+    raw = [from, { x: from.x, y: lane }, { x: to.x, y: lane }, to]
+    axis = "y"
+  } else {
+    raw = [from, horizontal(from.position) ? { x: to.x, y: from.y } : { x: from.x, y: to.y }, to]
+  }
+  const points = raw.filter((point, index) => index === 0 || Math.hypot(point.x - raw[index - 1].x, point.y - raw[index - 1].y) > 0.01)
+  let d = `M ${points[0].x} ${points[0].y}`
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const prev = points[index - 1]
+    const corner = points[index]
+    const next = points[index + 1]
+    const before = Math.hypot(corner.x - prev.x, corner.y - prev.y)
+    const after = Math.hypot(next.x - corner.x, next.y - corner.y)
+    const radius = Math.min(CORNER_RADIUS, before / 2, after / 2)
+    d += ` L ${corner.x - (corner.x - prev.x) / before * radius} ${corner.y - (corner.y - prev.y) / before * radius}`
+      + ` Q ${corner.x} ${corner.y} ${corner.x + (next.x - corner.x) / after * radius} ${corner.y + (next.y - corner.y) / after * radius}`
+  }
+  const last = points[points.length - 1]
+  d += ` L ${last.x} ${last.y}`
+  // The lane is only draggable on a Z; the handle rides its middle segment.
+  const draggable = axis !== null && points.length === 4
+  const handle = draggable ? { x: (points[1].x + points[2].x) / 2, y: (points[1].y + points[2].y) / 2 } : null
+  return { points, d, axis: draggable ? axis : null, handle }
+}
+
+function arrowHeadPath(tip: Point, from: Point): string {
   const angle = Math.atan2(tip.y - from.y, tip.x - from.x)
-  const size = 12
+  const size = 10
   const wing = 0.4
   const left = { x: tip.x - Math.cos(angle - wing) * size, y: tip.y - Math.sin(angle - wing) * size }
   const right = { x: tip.x - Math.cos(angle + wing) * size, y: tip.y - Math.sin(angle + wing) * size }
@@ -603,42 +648,72 @@ function ArchitectureEdgePath({ id, source, target, data, selected }: EdgeProps<
   const [dragBend, setDragBend] = useState<number | null>(null)
   const stopDragRef = useRef<(() => void) | null>(null)
   useEffect(() => () => stopDragRef.current?.(), [])
+  const [editingLabel, setEditingLabel] = useState(false)
+  useEffect(() => { if (!selected) setEditingLabel(false) }, [selected])
 
-  // Bend is stored relative to the chord (endpoint-to-endpoint line), not as an
-  // absolute point, so it stays correct as the chord moves when nodes drag.
+  // Curved: `bend` is relative to the chord (endpoint-to-endpoint line), not an
+  // absolute point. Elbow: it is the Z's middle-lane offset along its axis. Both
+  // stay correct as nodes drag.
+  const elbow = data?.edgeStyle === "elbow"
   const geometry = useMemo(() => {
     if (!sourceNode || !targetNode) return null
     const from = data?.attachment?.source ?? attach(sourceNode, targetNode)
     const to = data?.attachment?.target ?? attach(targetNode, sourceNode)
+    const bend = dragBend ?? data?.path?.bend ?? 0
+    const bidirectional = data?.direction === "bidirectional"
+    if (elbow) {
+      const route = orthogonalRoute(from, to, bend)
+      const { points } = route
+      const laneBase = route.axis ? (from[route.axis] + to[route.axis]) / 2 : 0
+      const axis = route.axis
+      return {
+        rough: false,
+        edgePath: route.d,
+        arrows: `${arrowHeadPath(points[points.length - 1], points[points.length - 2] ?? from)}${bidirectional ? ` ${arrowHeadPath(points[0], points[1] ?? to)}` : ""}`,
+        handle: route.handle,
+        labelPoint: route.handle ?? points[Math.floor(points.length / 2)],
+        project: (point: Point) => axis ? point[axis] - laneBase : null,
+        nudge: (key: string) => axis === "x" ? (key === "ArrowRight" ? 1 : key === "ArrowLeft" ? -1 : null)
+          : axis === "y" ? (key === "ArrowDown" ? 1 : key === "ArrowUp" ? -1 : null) : null,
+        keys: axis === "x" ? "ArrowLeft ArrowRight" : "ArrowUp ArrowDown",
+      }
+    }
     const mid = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 }
     const length = Math.hypot(to.x - from.x, to.y - from.y) || 1
     const normal = { x: -(to.y - from.y) / length, y: (to.x - from.x) / length }
-    const bend = dragBend ?? data?.path?.bend ?? 0
     // A quadratic Bézier does not pass through its control point, so the
     // control sits twice as far out as the point the user actually sees.
     const pathPoint = { x: mid.x + normal.x * bend, y: mid.y + normal.y * bend }
     const control = { x: mid.x + normal.x * bend * 2, y: mid.y + normal.y * bend * 2 }
-    const edgePath = `M ${from.x} ${from.y} Q ${control.x} ${control.y} ${to.x} ${to.y}`
-    const arrows = `${arrowHeadPath(to, control)}${data?.direction === "bidirectional" ? ` ${arrowHeadPath(from, control)}` : ""}`
-    return { mid, normal, pathPoint, edgePath, arrows }
-  }, [sourceNode, targetNode, data?.attachment, data?.direction, data?.path?.bend, dragBend])
+    return {
+      rough: true,
+      edgePath: `M ${from.x} ${from.y} Q ${control.x} ${control.y} ${to.x} ${to.y}`,
+      arrows: `${arrowHeadPath(to, control)}${bidirectional ? ` ${arrowHeadPath(from, control)}` : ""}`,
+      handle: pathPoint,
+      labelPoint: pathPoint,
+      project: (point: Point) => (point.x - mid.x) * normal.x + (point.y - mid.y) * normal.y,
+      nudge: (key: string) => key === "ArrowUp" || key === "ArrowRight" ? 1 : key === "ArrowDown" || key === "ArrowLeft" ? -1 : null,
+      keys: "ArrowUp ArrowDown ArrowLeft ArrowRight",
+    }
+  }, [sourceNode, targetNode, elbow, data?.attachment, data?.direction, data?.path?.bend, dragBend])
 
   const sketch = useMemo(
-    () => geometry ? edgeSketchPaths(geometry.edgePath, roughSeed(id), selected ? 2 : 1.7) : [],
+    () => geometry?.rough ? edgeSketchPaths(geometry.edgePath, roughSeed(id), selected ? 2 : 1.7) : [],
     [geometry, id, selected],
   )
 
   if (!geometry) return null
-  const { pathPoint } = geometry
+  const { labelPoint, handle } = geometry
 
   const startDrag = (event: ReactPointerEvent<SVGCircleElement>) => {
     event.preventDefault()
     event.stopPropagation()
-    const { mid, normal } = geometry
+    const { project } = geometry
     const move = (pointer: PointerEvent) => {
       const point = data?.toFlowPoint?.(pointer.clientX, pointer.clientY)
       if (!point) return
-      setDragBend((point.x - mid.x) * normal.x + (point.y - mid.y) * normal.y)
+      const value = project(point)
+      if (value !== null) setDragBend(value)
     }
     const stop = () => {
       window.removeEventListener("pointermove", move)
@@ -657,19 +732,24 @@ function ArchitectureEdgePath({ id, source, target, data, selected }: EdgeProps<
   }
   const nudge = (event: KeyboardEvent<SVGCircleElement>) => {
     const step = event.shiftKey ? 10 : 1
-    const sign = event.key === "ArrowUp" || event.key === "ArrowRight" ? 1
-      : event.key === "ArrowDown" || event.key === "ArrowLeft" ? -1 : null
+    const sign = geometry.nudge(event.key)
     if (sign === null) return
     event.preventDefault()
     data?.onPathChange?.(id, { bend: (data?.path?.bend ?? 0) + sign * step })
   }
 
   return <>
-    <BaseEdge id={id} path={geometry.edgePath} interactionWidth={20} style={{ stroke: "transparent" }} />
-    {sketch.map((path, index) => <path key={index} d={path.d} fill="none" stroke="currentColor" strokeWidth={path.strokeWidth} strokeLinecap="round" className={cn("architecture-graph-edge", selected && "architecture-graph-edge-selected")} pointerEvents="none" />)}
-    <path d={geometry.arrows} fill="currentColor" stroke="currentColor" strokeWidth={1.5} strokeLinejoin="round" className={cn("architecture-graph-edge", selected && "architecture-graph-edge-selected")} pointerEvents="none" />
-    {data?.label && <text x={pathPoint.x} y={pathPoint.y - 12} className="architecture-graph-edge-label" textAnchor="middle" dominantBaseline="central">{data.label}</text>}
-    {selected && data?.onPathChange && <circle cx={pathPoint.x} cy={pathPoint.y} r={6} role="button" tabIndex={0} aria-label="Adjust connection curve" aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight" className="architecture-graph-path-handle nodrag nopan" onPointerDown={startDrag} onKeyDown={nudge} />}
+    <g onDoubleClick={() => { if (data?.onLabelChange) setEditingLabel(true) }}>
+      <BaseEdge id={id} path={geometry.edgePath} interactionWidth={20} style={{ stroke: "transparent" }} />
+    </g>
+    {geometry.rough
+      ? sketch.map((path, index) => <path key={index} d={path.d} fill="none" stroke="currentColor" strokeWidth={path.strokeWidth} strokeLinecap="round" className={cn("architecture-graph-edge", selected && "architecture-graph-edge-selected")} pointerEvents="none" />)
+      : <path d={geometry.edgePath} fill="none" stroke="currentColor" strokeWidth={selected ? 2 : 1.6} strokeLinecap="round" strokeLinejoin="round" className={cn("architecture-graph-edge", selected && "architecture-graph-edge-selected")} pointerEvents="none" />}
+    <path d={geometry.arrows} fill="currentColor" stroke="currentColor" strokeWidth={1.2} strokeLinejoin="round" className={cn("architecture-graph-edge", selected && "architecture-graph-edge-selected")} pointerEvents="none" />
+    {selected && editingLabel && data?.onLabelChange
+      ? <foreignObject x={labelPoint.x - 70} y={labelPoint.y - 26} width={140} height={24} overflow="visible"><input autoFocus aria-label="Connection label" value={data.label ?? ""} placeholder="Label" onChange={(event) => data.onLabelChange?.(id, event.target.value)} onBlur={() => setEditingLabel(false)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === "Escape") { event.preventDefault(); setEditingLabel(false) } }} className="architecture-graph-edge-label-input nodrag nopan nowheel" /></foreignObject>
+      : data?.label && <text x={labelPoint.x} y={labelPoint.y - 12} className="architecture-graph-edge-label" textAnchor="middle" dominantBaseline="central">{data.label}</text>}
+    {selected && handle && data?.onPathChange && <circle cx={handle.x} cy={handle.y} r={6} role="button" tabIndex={0} aria-label="Adjust connection curve" aria-keyshortcuts={geometry.keys} className="architecture-graph-path-handle nodrag nopan" onPointerDown={startDrag} onKeyDown={nudge} />}
   </>
 }
 
@@ -688,14 +768,15 @@ function toFlowNodes(nodes: ArchitectureGraphNode[], onNodeChange: ArchitectureN
 
 interface EdgeRuntime {
   onPathChange?: GraphFlowEdgeData["onPathChange"]
+  onLabelChange?: GraphFlowEdgeData["onLabelChange"]
   toFlowPoint?: GraphFlowEdgeData["toFlowPoint"]
 }
 
-function toFlowEdges(edges: ArchitectureGraphEdge[], attachments = new Map<string, EdgeAttachment>(), runtime: EdgeRuntime = {}): GraphFlowEdge[] {
+function toFlowEdges(edges: ArchitectureGraphEdge[], edgeStyle: ArchitectureGraphEdgeStyle | undefined, attachments = new Map<string, EdgeAttachment>(), runtime: EdgeRuntime = {}): GraphFlowEdge[] {
   return edges.map((edge) => ({
     ...edge,
     type: "architecture-edge",
-    data: { ...edge, ...runtime, ...(attachments.has(edge.id) ? { attachment: attachments.get(edge.id) } : {}) },
+    data: { ...edge, ...runtime, ...(edgeStyle ? { edgeStyle } : {}), ...(attachments.has(edge.id) ? { attachment: attachments.get(edge.id) } : {}) },
   }))
 }
 
@@ -741,13 +822,17 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
   const changeEdgePath = useCallback((id: string, path?: ArchitectureGraphEdgePath) => {
     emit({ edges: graphRef.current.edges.map((edge) => edge.id === id ? { ...edge, path } : edge) })
   }, [emit])
+  const changeEdgeLabel = useCallback((id: string, label: string) => {
+    emit({ edges: graphRef.current.edges.map((edge) => edge.id === id ? { ...edge, label } : edge) })
+  }, [emit])
   const toFlowPoint = useCallback((x: number, y: number) => flow?.screenToFlowPosition({ x, y }), [flow])
   const edgeRuntime = useMemo<EdgeRuntime>(() => readOnly ? {} : {
     onPathChange: changeEdgePath,
+    onLabelChange: changeEdgeLabel,
     toFlowPoint,
-  }, [changeEdgePath, readOnly, toFlowPoint])
+  }, [changeEdgePath, changeEdgeLabel, readOnly, toFlowPoint])
   const [nodes, setNodes, onNodesChange] = useNodesState<GraphFlowNode>(toFlowNodes(graph.nodes, changeNode, readOnly ? undefined : claimAutoEdit))
-  const [edges, setEdges, onEdgesChange] = useEdgesState<GraphFlowEdge>(toFlowEdges(graph.edges, new Map(), edgeRuntime))
+  const [edges, setEdges, onEdgesChange] = useEdgesState<GraphFlowEdge>(toFlowEdges(graph.edges, graph.edgeStyle, new Map(), edgeRuntime))
 
   useEffect(() => {
     setNodes((current) => reconcile(current, toFlowNodes(graph.nodes, changeNode, readOnly ? undefined : claimAutoEdit)))
@@ -755,8 +840,8 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
   // Recomputed from the live node rects, so dragging a card re-slots its edges.
   const attachments = useMemo(() => edgeAttachments(nodes, graph.edges), [nodes, graph.edges])
   useEffect(() => {
-    setEdges((current) => reconcile(current, toFlowEdges(graph.edges, attachments, edgeRuntime)))
-  }, [graph.edges, attachments, edgeRuntime, setEdges])
+    setEdges((current) => reconcile(current, toFlowEdges(graph.edges, graph.edgeStyle, attachments, edgeRuntime)))
+  }, [graph.edges, graph.edgeStyle, attachments, edgeRuntime, setEdges])
 
   const addNode = useCallback(() => {
     const id = nextArchitectureGraphId("node", graphRef.current.nodes.map((node) => node.id))
@@ -770,13 +855,15 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
     autoEditIdRef.current = id
     emit({ nodes: [...graphRef.current.nodes, node] })
   }, [emit])
-  const [drawMode, setDrawMode] = useState(false)
+  // Dragging on empty canvas always sketches a shape, so nodes and connections
+  // stay directly editable. "Lasso" is the one opt-in tool: it selects nodes.
+  const [lasso, setLasso] = useState(false)
   useEffect(() => {
-    if (!drawMode) return
-    const onKeyDown = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") setDrawMode(false) }
+    if (!lasso) return
+    const onKeyDown = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") setLasso(false) }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [drawMode])
+  }, [lasso])
   // Points accumulate in a ref so every pointer sample doesn't re-render the
   // whole surface; the preview only syncs to state once per animation frame.
   const drawPointsRef = useRef<Array<{ x: number, y: number }>>([])
@@ -784,14 +871,14 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
   const [drawPreview, setDrawPreview] = useState<Array<{ x: number, y: number }> | null>(null)
   const drawOriginRef = useRef({ left: 0, top: 0 })
   useEffect(() => () => { if (drawFrameRef.current !== null) cancelAnimationFrame(drawFrameRef.current) }, [])
-  const onDrawPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    event.currentTarget.setPointerCapture(event.pointerId)
-    const rect = event.currentTarget.getBoundingClientRect()
+  const startDraw = useCallback((point: { clientX: number, clientY: number }) => {
+    const rect = viewportRef.current?.getBoundingClientRect()
+    if (!rect) return
     drawOriginRef.current = { left: rect.left, top: rect.top }
-    drawPointsRef.current = [{ x: event.clientX, y: event.clientY }]
+    drawPointsRef.current = [{ x: point.clientX, y: point.clientY }]
     setDrawPreview(drawPointsRef.current)
   }, [])
-  const onDrawPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+  const onDrawPointerMove = useCallback((event: { clientX: number, clientY: number }) => {
     if (drawPointsRef.current.length === 0) return
     drawPointsRef.current.push({ x: event.clientX, y: event.clientY })
     if (drawFrameRef.current !== null) return
@@ -811,23 +898,49 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
     if (!commit || !flow || points.length === 0) return
     const xs = points.map((p) => p.x)
     const ys = points.map((p) => p.y)
-    if (Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) < DRAW_MIN_SCREEN_SIZE) {
-      // A tap, not a stroke: tapping a node while drawing edits its text, so
-      // writing into a shape never requires leaving draw mode first.
-      const hit = document.elementsFromPoint(points[0].x, points[0].y).find((element) => element.closest(".react-flow__node"))
-      const node = hit?.closest(".react-flow__node")
-      const field = hit instanceof HTMLTextAreaElement || hit instanceof HTMLInputElement ? hit : node?.querySelector<HTMLInputElement>(".architecture-graph-title-input")
-      if (field) field.focus()
-      else node?.querySelector<HTMLElement>(".architecture-graph-title-display")?.click()
+    const tap = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) < DRAW_MIN_SCREEN_SIZE
+    if (lasso) {
+      // A tap clears the selection; a loop selects every node whose centre it encloses.
+      const polygon = tap ? [] : points.map((p): [number, number] => { const at = flow.screenToFlowPosition(p); return [at.x, at.y] })
+      const picked = new Set(nodes.filter((node) => pointInPolygon(
+        node.position.x + (node.measured?.width ?? DEFAULT_NODE_WIDTH) / 2,
+        node.position.y + (node.measured?.height ?? DEFAULT_NODE_HEIGHT) / 2,
+        polygon,
+      )).map((node) => node.id))
+      setNodes((current) => current.map((node) => ({ ...node, selected: picked.has(node.id) })))
+      setEdges((current) => current.map((edge) => ({ ...edge, selected: false })))
+      // Leave the tool once something is caught: the overlay would otherwise
+      // swallow the drag that moves the selection.
+      if (picked.size > 0) setLasso(false)
       return
     }
+    // A tap is not a stroke: the pane click handler deselects.
+    if (tap) return
     const result = classifyDrawnShape(points.map((p) => flow.screenToFlowPosition(p)))
-    // Draw mode stays on so several shapes can be sketched in a row; Escape or
-    // the pen button ends it.
     if (result) commitDrawnShape(result.shape, result.box)
-  }, [flow, commitDrawnShape])
+  }, [flow, commitDrawnShape, lasso, nodes, setNodes, setEdges])
   const onDrawPointerUp = useCallback(() => finishDraw(true), [finishDraw])
   const onDrawPointerCancel = useCallback(() => finishDraw(false), [finishDraw])
+  const onLassoPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId)
+    startDraw(event)
+  }, [startDraw])
+  // Left mouse or pen draws, like the plain canvas; touch never draws. Window
+  // listeners, not pointer capture: the pane still receives its click.
+  const onPanePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (readOnly || lasso || event.pointerType === "touch" || event.button !== 0 || !(event.target as Element).classList.contains("react-flow__pane")) return
+    startDraw(event)
+    const cleanup = () => {
+      window.removeEventListener("pointermove", onDrawPointerMove)
+      window.removeEventListener("pointerup", up)
+      window.removeEventListener("pointercancel", cancel)
+    }
+    const up = () => { cleanup(); finishDraw(true) }
+    const cancel = () => { cleanup(); finishDraw(false) }
+    window.addEventListener("pointermove", onDrawPointerMove)
+    window.addEventListener("pointerup", up)
+    window.addEventListener("pointercancel", cancel)
+  }, [readOnly, lasso, startDraw, onDrawPointerMove, finishDraw])
   const duplicateSelectedNodes = useCallback(() => {
     const selectedIds = new Set(nodes.filter((node) => node.selected).map((node) => node.id))
     if (selectedIds.size === 0) return
@@ -860,6 +973,21 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
     const id = nextArchitectureGraphId("edge", graphRef.current.edges.map((edge) => edge.id))
     const edge: ArchitectureGraphEdge = { id, source: connection.source, target: connection.target, direction: "one-way" }
     emit({ edges: [...graphRef.current.edges, edge] })
+  }, [emit])
+  // A drop that missed every handle still connects when it lands anywhere on
+  // another node, so the target never needs pixel-precise aim.
+  const onConnectEnd: OnConnectEnd = useCallback((event, state) => {
+    if (state.isValid || !state.fromNode) return
+    const point = "changedTouches" in event ? event.changedTouches[0] : event
+    if (!point) return
+    const nodeEl = document.elementsFromPoint(point.clientX, point.clientY).find((el) => el.classList.contains("react-flow__node"))
+    const target = nodeEl?.getAttribute("data-id")
+    if (target) onConnect({ source: state.fromNode.id, target, sourceHandle: null, targetHandle: null })
+  }, [onConnect])
+  // Saved bends mean different things per style (chord offset vs lane offset), so a switch clears them all.
+  const toggleEdgeStyle = useCallback(() => {
+    const { edges, edgeStyle } = graphRef.current
+    emit({ edgeStyle: edgeStyle === "elbow" ? "curved" : "elbow", edges: edges.map(({ path: _path, ...edge }) => edge) })
   }, [emit])
   const onEdgesDelete = useCallback((deleted: Edge[]) => emit({ edges: graphRef.current.edges.filter((edge) => !deleted.some((item) => item.id === edge.id)) }), [emit])
   const onNodesDelete = useCallback((deleted: Node[]) => {
@@ -914,6 +1042,15 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
   const viewportRef = useRef<HTMLDivElement>(null)
   const viewportSizeRef = useRef({ width: 0, height: 0 })
   const hostScaleRef = useRef(hostScale)
+  // Two-finger pinch + pan: the same hook every canvas uses.
+  useTwoFingerGesture(viewportRef, {
+    enabled: !readOnly && !!flow,
+    begin: () => { followFitRef.current = false; return flow!.getViewport() },
+    update: (start, { ratio, cx, cy, mx, my }) => {
+      const zoom = Math.min(2 * hostScale, Math.max(0.2 * hostScale, start.zoom * ratio))
+      flow!.setViewport({ x: mx - (cx - start.x) / start.zoom * zoom, y: my - (cy - start.y) / start.zoom * zoom, zoom })
+    },
+  })
   const reframe = useCallback((factor: number) => {
     const el = viewportRef.current
     if (!el || !flow) return
@@ -948,15 +1085,15 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
       <div className="architecture-graph-toolbar" style={{ position: "relative", inset: "auto", zIndex: 5, display: "flex", minHeight: 31, flexShrink: 0, alignItems: "center", gap: 6, borderBottom: "1px solid var(--divider)", padding: "0 10px" }}>
         {!readOnly && <>
           <button type="button" onClick={addNode} className="architecture-graph-toolbar-symbol" aria-label="Add node"><Plus size={13} /></button>
-          <button type="button" onClick={() => setDrawMode((current) => !current)} aria-pressed={drawMode} className={cn("architecture-graph-toolbar-symbol", drawMode && "architecture-graph-toolbar-symbol-active")} aria-label="Draw a shape"><PenLine size={13} /></button>
+          <button type="button" onClick={() => setLasso((current) => !current)} aria-pressed={lasso} className={cn("architecture-graph-toolbar-symbol", lasso && "architecture-graph-toolbar-symbol-active")} aria-label="Lasso select"><CircleDashed size={13} /></button>
+          <button type="button" onClick={toggleEdgeStyle} aria-pressed={graph.edgeStyle === "elbow"} className={cn("architecture-graph-toolbar-symbol", graph.edgeStyle === "elbow" && "architecture-graph-toolbar-symbol-active")} aria-label="Elbow connections"><CornerDownRight size={13} /></button>
           <span className="architecture-graph-toolbar-delimiter" aria-hidden="true">|</span>
         </>}
         <button type="button" onClick={fitGraph} className="architecture-graph-toolbar-symbol" aria-label="Fit view"><Maximize size={13} /></button>
         {onOpenDocument && <button type="button" onClick={onOpenDocument} className="architecture-graph-icon-button" aria-label="Open Architecture Graph document" style={{ display: "grid", width: 26, height: 26, marginLeft: "auto", placeItems: "center", border: 0, borderRadius: 5, background: "transparent", color: "var(--ink-muted)" }}><Maximize size={14} /></button>}
       </div>
-      <div ref={viewportRef} onWheelCapture={zoomGraphAtCenter} style={{ position: "relative", minHeight: 0, flex: 1 }}>
+      <div ref={viewportRef} onWheelCapture={zoomGraphAtCenter} onPointerDown={onPanePointerDown} onContextMenu={(event) => event.preventDefault()} style={{ position: "relative", minHeight: 0, flex: 1 }}>
       {!readOnly && selectedEdge && <div className="architecture-graph-edge-editor">
-        <input aria-label="Connection label" value={selectedEdge.label ?? ""} placeholder="Connection label" onChange={(event) => updateSelectedEdge({ label: event.target.value })} />
         <select aria-label="Connection direction" value={selectedEdge.direction} onChange={(event) => updateSelectedEdge({ direction: event.target.value as ArchitectureGraphEdge["direction"] })}>
           <option value="one-way">One-way</option>
           <option value="bidirectional">Bidirectional</option>
@@ -964,23 +1101,14 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
         {selectedEdge.path && <button type="button" className="architecture-graph-icon-button" onClick={() => updateSelectedEdge({ path: undefined })} aria-label="Reset connection path"><RotateCcw size={14} /></button>}
         <button type="button" className="architecture-graph-icon-button architecture-graph-delete" onClick={deleteSelectedEdge} aria-label="Delete connection"><Trash2 size={14} /></button>
       </div>}
-      {drawMode && !readOnly && (
+      {lasso && !readOnly && (
         <div
           className="architecture-graph-draw-overlay"
-          onPointerDown={onDrawPointerDown}
+          onPointerDown={onLassoPointerDown}
           onPointerMove={onDrawPointerMove}
           onPointerUp={onDrawPointerUp}
           onPointerCancel={onDrawPointerCancel}
-        >
-          {drawPreview && drawPreview.length > 1 && (
-            <svg className="architecture-graph-draw-preview" aria-hidden="true">
-              <path
-                d={`M ${drawPreview.map((p) => `${p.x - drawOriginRef.current.left} ${p.y - drawOriginRef.current.top}`).join(" L ")}`}
-                fill="none"
-              />
-            </svg>
-          )}
-        </div>
+        />
       )}
       <ReactFlow<GraphFlowNode, GraphFlowEdge>
         nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
@@ -989,13 +1117,21 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
         onEdgesChange={onEdgesChange}
         onNodeDragStart={takeCamera} onNodeClick={takeCamera} onPaneClick={takeCamera}
         onMoveStart={(event) => { if (event) takeCamera() }}
-        onNodeDragStop={onNodeDragStop} onConnect={onConnect} onEdgesDelete={onEdgesDelete} onNodesDelete={onNodesDelete}
+        onNodeDragStop={onNodeDragStop} onConnect={onConnect} onConnectEnd={onConnectEnd} connectionRadius={48} onEdgesDelete={onEdgesDelete} onNodesDelete={onNodesDelete}
         nodesDraggable={!readOnly} nodesConnectable={!readOnly} elementsSelectable={!readOnly} deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
         connectionMode={ConnectionMode.Loose}
-        fitView minZoom={0.2 * hostScale} maxZoom={2 * hostScale} zoomOnScroll={false} panOnScroll selectionOnDrag={false} proOptions={{ hideAttribution: true }} elevateEdgesOnSelect
+        panOnDrag={readOnly ? true : [1, 2]} zoomOnPinch={readOnly} fitView minZoom={0.2 * hostScale} maxZoom={2 * hostScale} zoomOnScroll={false} zoomOnDoubleClick={false} panOnScroll selectionOnDrag={false} proOptions={{ hideAttribution: true }} elevateEdgesOnSelect
       >
         <Background gap={22} size={1} color="var(--sketch-grid)" />
       </ReactFlow>
+      {drawPreview && drawPreview.length > 1 && (
+        <svg className="architecture-graph-draw-preview" aria-hidden="true">
+          <path
+            d={`M ${drawPreview.map((p) => `${p.x - drawOriginRef.current.left} ${p.y - drawOriginRef.current.top}`).join(" L ")}`}
+            fill="none" strokeDasharray={lasso ? "6 4" : undefined}
+          />
+        </svg>
+      )}
       </div>
     </div>
   )

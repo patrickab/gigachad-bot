@@ -21,6 +21,13 @@ describe("Architecture Graph YAML", () => {
     expect(() => parseArchitectureGraph(source)).toThrow("path.bend must be a finite number")
   })
 
+  it("keeps an elbow edge style, treats a missing one as curved, and rejects unknown styles", () => {
+    const base = { ...emptyArchitectureGraph("T"), nodes: [], edges: [] }
+    expect(parseArchitectureGraph(serializeArchitectureGraph(base)).edgeStyle).toBe("elbow")
+    expect(parseArchitectureGraph(serializeArchitectureGraph({ ...base, edgeStyle: "curved" })).edgeStyle).toBeUndefined()
+    expect(() => parseArchitectureGraph("version: 1\ntitle: T\nnodes: []\nedges: []\nedgeStyle: wavy\n")).toThrow("edgeStyle must be curved or elbow")
+  })
+
   it("drops legacy size metadata so height follows content", () => {
     const graph = parseArchitectureGraph("version: 1\ntitle: Test\nnodes:\n  - id: api\n    title: API\n    bullets: []\n    position: { x: 0, y: 0 }\n    size: { width: 320, height: 180 }\nedges: []\n")
     expect(graph.nodes[0]).not.toHaveProperty("size")

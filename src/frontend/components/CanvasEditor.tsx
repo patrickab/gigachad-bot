@@ -3,11 +3,12 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { getStroke } from "perfect-freehand"
-import { type StrokeData, type EmbedRect, type CanvasEmbedRect, getSvgPathFromStroke, renderPageToPng } from "@/lib/drawing"
+import { type StrokeData, type EmbedRect, type CanvasEmbedRect, getSvgPathFromStroke, pointInPolygon, renderPageToPng } from "@/lib/drawing"
 import { createArchitectureGraph, fileViewerRawUrl, writeBinaryDocument, listArchitectureGraphs, listNotes, listProjectDocuments, loadFileViewerText, readArchitectureGraph, writeArchitectureGraph, renameArchitectureGraph, renameDocument, removeDocument } from "@/lib/api"
 import { emptyArchitectureGraph, parseArchitectureGraph, serializeArchitectureGraph, type ArchitectureGraph } from "@/lib/architectureGraph"
 import { useGraphAutosave } from "@/lib/graphAutosave"
 import { useCollaborativeCanvas } from "@/hooks/useCollaborativeCanvas"
+import { useTwoFingerGesture } from "@/hooks/useTwoFingerGesture"
 import { subscribeToChanges } from "@/lib/syncStream"
 import { activeThemeName } from "@/lib/palette"
 import { cn } from "@/lib/utils"
@@ -47,7 +48,6 @@ const TEXT_DEFAULT_HEIGHT = 80
 const MIN_TEXT_WIDTH = 80
 const MIN_TEXT_HEIGHT = 40
 const STRAIGHTEN_HOLD_MS = 500 // hold the pen still mid-stroke to snap it into a straight line
-const PEN_TOUCH_SUPPRESS_MS = 700 // touch gestures stay suppressed this long after the last pen event (hover included)
 const ZOOM_SETTLE_MS = 250 // attachments re-rasterize at full resolution this long after the zoom stops changing
 const PDF_LAYOUT_CAP = 916 // PdfViewer caps rendering at 900px + scrollbar gutter — wider layout gains no resolution
 const PLOT_MIN_LAYOUT_WIDTH = 960 // plots lay out at least this wide and scale down, so legends/titles never collide
@@ -373,17 +373,6 @@ function distToSegment(px: number, py: number, ax: number, ay: number, bx: numbe
   const lenSq = dx * dx + dy * dy
   const t = lenSq === 0 ? 0 : Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq))
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy))
-}
-
-// ray-casting point-in-polygon test — used by the lasso selection tool
-function pointInPolygon(x: number, y: number, poly: [number, number][]): boolean {
-  let inside = false
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const [xi, yi] = poly[i]!
-    const [xj, yj] = poly[j]!
-    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside
-  }
-  return inside
 }
 
 // --- Selection ------------------------------------------------------------
@@ -831,7 +820,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
       }, PEN_HOLD_MS)
       return
     }
-    if (e.button === 0 && spaceDown.current) {
+    if ((e.button === 0 && spaceDown.current) || (e.button === 2 && e.pointerType === "mouse")) {
       e.preventDefault()
       setIsPanning(true)
       panStart.current = { x: e.clientX, y: e.clientY, ox: offsetRef.current.x, oy: offsetRef.current.y }
@@ -890,92 +879,26 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     }
   }, [doc.strokes])
 
-  // --- Two-finger touch: pinch-zoom + pan. Implemented with pointer events, not
-  // TouchEvents — some Linux browsers (Firefox) never deliver TouchEvents even
-  // though touch pointer events fire fine. ---
-  const touchRef = useRef<{ dist: number; cx: number; cy: number; scale: number; ox: number; oy: number } | null>(null)
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
-    const touches = new Map<number, { x: number; y: number }>()
-
-    // Palm rejection: touch gestures are suppressed while the pen is in contact
-    // and for PEN_TOUCH_SUPPRESS_MS after any pen event, hover included — the
-    // palm lands just before the tip touches and lingers after it lifts. A pen
-    // hover with no buttons also clears the contact flag, so a missed pointerup
-    // can never leave touch permanently disabled. Capture phase so a
-    // stopPropagation in some handler can't hide pen events from us.
-    let penContact = false
-    let penLastSeen = 0
-    const onPen = (e: PointerEvent) => {
-      if (e.pointerType !== "pen") return
-      penLastSeen = performance.now()
-      penContact = e.type === "pointerdown" || (e.type === "pointermove" && e.buttons !== 0)
-      if (penContact && (touchRef.current || touches.size > 0)) { touchRef.current = null; touches.clear() }
-    }
-    const penEvents = ["pointerdown", "pointermove", "pointerup", "pointercancel"] as const
-    penEvents.forEach((t) => window.addEventListener(t, onPen, true))
-    const penNear = () => penContact || performance.now() - penLastSeen < PEN_TOUCH_SUPPRESS_MS
-
-    const beginGesture = () => {
-      const [a, b] = [...touches.values()]
-      const rect = el.getBoundingClientRect()
-      touchRef.current = {
-        dist: Math.hypot(a!.x - b!.x, a!.y - b!.y),
-        cx: (a!.x + b!.x) / 2 - rect.left,
-        cy: (a!.y + b!.y) / 2 - rect.top,
-        scale: scaleRef.current,
-        ox: offsetRef.current.x,
-        oy: offsetRef.current.y,
-      }
-    }
-    const onDown = (e: PointerEvent) => {
-      if (e.pointerType !== "touch" || penNear()) return
-      // fingers that land in a nested window belong to that window's pinch/pan, not ours
-      if (inOwnAttachment(e.target, el)) return
-      touches.set(e.pointerId, { x: e.clientX, y: e.clientY })
-      touchRef.current = null
-      if (touches.size === 2) beginGesture()
-    }
-    const onMove = (e: PointerEvent) => {
-      if (e.pointerType !== "touch" || !touches.has(e.pointerId)) return
-      if (penNear()) { touches.clear(); touchRef.current = null; return }
-      touches.set(e.pointerId, { x: e.clientX, y: e.clientY })
-      const t = touchRef.current
-      if (!t || touches.size !== 2) return
-      const [a, b] = [...touches.values()]
-      const rect = el.getBoundingClientRect()
-      const newDist = Math.hypot(a!.x - b!.x, a!.y - b!.y)
-      const nextScale = Math.min(MAX_SCALE * hostScaleRef.current, Math.max(MIN_SCALE * hostScaleRef.current, t.scale * (newDist / t.dist)))
-      const mx = (a!.x + b!.x) / 2 - rect.left
-      const my = (a!.y + b!.y) / 2 - rect.top
-      const current = offsetToCamera({ x: t.ox, y: t.oy }, t.scale, { width: el.clientWidth, height: el.clientHeight })
-      const camera = zoomCamera(current, nextScale / t.scale, { width: el.clientWidth, height: el.clientHeight }, zoomAnchor, { x: t.cx, y: t.cy })
-      const offset = cameraToOffset(camera, { width: el.clientWidth, height: el.clientHeight })
-      const nextOffset = { x: offset.x + mx - t.cx, y: offset.y + my - t.cy }
+  // --- Two-finger touch: pinch-zoom + pan (shared hook). Fingers that land in a
+  // nested window belong to that window's pinch/pan, not ours. ---
+  useTwoFingerGesture(containerRef, {
+    ignoreTarget: (target) => !!containerRef.current && inOwnAttachment(target, containerRef.current),
+    begin: () => ({ scale: scaleRef.current, ox: offsetRef.current.x, oy: offsetRef.current.y }),
+    update: (t, { ratio, cx, cy, mx, my }) => {
+      const el = containerRef.current
+      if (!el) return
+      const size = { width: el.clientWidth, height: el.clientHeight }
+      const nextScale = Math.min(MAX_SCALE * hostScaleRef.current, Math.max(MIN_SCALE * hostScaleRef.current, t.scale * ratio))
+      const current = offsetToCamera({ x: t.ox, y: t.oy }, t.scale, size)
+      const camera = zoomCamera(current, nextScale / t.scale, size, zoomAnchor, { x: cx, y: cy })
+      const offset = cameraToOffset(camera, size)
+      const nextOffset = { x: offset.x + mx - cx, y: offset.y + my - cy }
       scaleRef.current = camera.scale
       offsetRef.current = nextOffset
       setScale(camera.scale)
       setOffset(nextOffset)
-    }
-    const onUp = (e: PointerEvent) => {
-      if (e.pointerType !== "touch") return
-      touches.delete(e.pointerId)
-      touchRef.current = null
-    }
-
-    el.addEventListener("pointerdown", onDown)
-    el.addEventListener("pointermove", onMove)
-    window.addEventListener("pointerup", onUp)
-    window.addEventListener("pointercancel", onUp)
-    return () => {
-      penEvents.forEach((t) => window.removeEventListener(t, onPen, true))
-      el.removeEventListener("pointerdown", onDown)
-      el.removeEventListener("pointermove", onMove)
-      window.removeEventListener("pointerup", onUp)
-      window.removeEventListener("pointercancel", onUp)
-    }
-  }, [zoomAnchor])
+    },
+  })
 
   // Attachments scale with canvas zoom, but re-rendering the PDF at every zoom
   // frame re-rasterizes all pages (flicker). Instead the gesture scales them as
