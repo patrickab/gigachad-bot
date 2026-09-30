@@ -820,7 +820,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
       }, PEN_HOLD_MS)
       return
     }
-    if ((e.button === 0 && spaceDown.current) || (e.button === 2 && e.pointerType === "mouse")) {
+    if ((e.button === 0 && (spaceDown.current || e.pointerType === "mouse")) || (e.button === 2 && e.pointerType === "mouse")) {
       e.preventDefault()
       setIsPanning(true)
       panStart.current = { x: e.clientX, y: e.clientY, ox: offsetRef.current.x, oy: offsetRef.current.y }
@@ -1035,6 +1035,8 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     }
     // drawing/erasing directly on the canvas counts as "outside" the selection
     clearSelection()
+    // The mouse never draws: its drag falls through to the container and pans.
+    if (e.pointerType === "mouse") return
     if (e.button === 5) { setIsErasing(true); return }
     if (e.button !== 0) return
     e.stopPropagation()
@@ -1932,7 +1934,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
       <div
         ref={containerRef}
         tabIndex={0}
-        className={cn("flex-1 min-h-0 overflow-hidden relative", isDrawing || pointerIsPen ? "cursor-none" : isPanning ? "cursor-grabbing" : "cursor-crosshair")}
+        className={cn("flex-1 min-h-0 overflow-hidden relative", isDrawing || pointerIsPen ? "cursor-none" : isPanning ? "cursor-grabbing" : textMode || selectionMode || screenshotMode ? "cursor-crosshair" : "cursor-grab")}
         style={{ touchAction: "none", WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none", fontFamily: "var(--font-handwriting), cursive" }}
         onKeyDown={handleCanvasKeyDown}
         onPointerDown={handleContainerPointerDown}

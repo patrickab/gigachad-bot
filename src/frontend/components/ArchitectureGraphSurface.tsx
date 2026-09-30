@@ -928,7 +928,9 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
   // Left mouse or pen draws, like the plain canvas; touch never draws. Window
   // listeners, not pointer capture: the pane still receives its click.
   const onPanePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (readOnly || lasso || event.pointerType === "touch" || event.button !== 0 || !(event.target as Element).classList.contains("react-flow__pane")) return
+    if (readOnly || lasso || event.pointerType !== "pen" || event.button !== 0 || !(event.target as Element).classList.contains("react-flow__pane")) return
+    // Stops the pen's compatibility mousedown, which would also start React Flow's pan.
+    event.preventDefault()
     startDraw(event)
     const cleanup = () => {
       window.removeEventListener("pointermove", onDrawPointerMove)
@@ -1120,7 +1122,7 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
         onNodeDragStop={onNodeDragStop} onConnect={onConnect} onConnectEnd={onConnectEnd} connectionRadius={48} onEdgesDelete={onEdgesDelete} onNodesDelete={onNodesDelete}
         nodesDraggable={!readOnly} nodesConnectable={!readOnly} elementsSelectable={!readOnly} deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
         connectionMode={ConnectionMode.Loose}
-        panOnDrag={readOnly ? true : [1, 2]} zoomOnPinch={readOnly} fitView minZoom={0.2 * hostScale} maxZoom={2 * hostScale} zoomOnScroll={false} zoomOnDoubleClick={false} panOnScroll selectionOnDrag={false} proOptions={{ hideAttribution: true }} elevateEdgesOnSelect
+        panOnDrag={[0, 1, 2]} zoomOnPinch={readOnly} fitView minZoom={0.2 * hostScale} maxZoom={2 * hostScale} zoomOnScroll={false} zoomOnDoubleClick={false} panOnScroll selectionOnDrag={false} proOptions={{ hideAttribution: true }} elevateEdgesOnSelect
       >
         <Background gap={22} size={1} color="var(--sketch-grid)" />
       </ReactFlow>
