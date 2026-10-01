@@ -11,8 +11,8 @@ import { CanvasEditor, parseCanvasDoc, serializeCanvasDoc, emptyCanvasDoc, type 
 import { loadFileViewerText, readFileVaultRendered, writeDocument, writeBinaryDocument, storeDrawing, fileViewerRawUrl, ApiError } from "@/lib/api"
 import { renderPageToPng, renderCanvasToJpeg, type EmbedRect } from "@/lib/drawing"
 import { EditorSidebar, InlineEditPanel } from "./EditorSidebar"
-import { ArchitectureGraphEditor } from "./ArchitectureGraphEditor"
-import { isArchitectureGraphPath } from "@/lib/architectureGraph"
+import { ArchitectureDiagramEditor } from "./ArchitectureDiagramEditor"
+import { isArchitectureDiagramPath } from "@/lib/architectureDiagram"
 import { useCollaborativeCanvas } from "@/hooks/useCollaborativeCanvas"
 import { subscribeToChanges } from "@/lib/syncStream"
 
@@ -541,8 +541,8 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
 }
 
 export function DocumentEditor(props: DocumentEditorProps) {
-  if (isArchitectureGraphPath(props.path)) {
-    return <ArchitectureGraphEditor path={props.path} overlay={props.overlay} onClose={props.onClose} onSaved={props.onSaved} onModeLabel={props.onModeLabel} />
+  if (isArchitectureDiagramPath(props.path)) {
+    return <ArchitectureDiagramEditor path={props.path} overlay={props.overlay} onClose={props.onClose} onSaved={props.onSaved} onModeLabel={props.onModeLabel} />
   }
   if (props.path.endsWith(".canvas") && !props.persistOverride) return <CanvasDocumentEditor {...props} />
   return <StandardDocumentEditor {...props} />

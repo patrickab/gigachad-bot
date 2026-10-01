@@ -1,4 +1,4 @@
-"""Persistence and validation for canonical Architecture Graph YAML documents."""
+"""Persistence and validation for canonical Architecture Diagram YAML documents."""
 
 from __future__ import annotations
 
@@ -22,86 +22,86 @@ from lib.storage_namespace import GRAPH
 GRAPH_SUFFIX = ".architecture.yaml"
 
 
-class ArchitectureGraphError(ValueError):
+class ArchitectureDiagramError(ValueError):
     """Raised when graph input is malformed or names an unsafe graph file."""
 
 
-class ArchitectureGraphNotFound(ArchitectureGraphError, FileNotFoundError):
+class ArchitectureDiagramNotFound(ArchitectureDiagramError, FileNotFoundError):
     """Raised when a named graph or draft does not exist. Also a FileNotFoundError, so filesystem-contract callers keep working."""
 
 
 def _require_string(value: Any, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
-        raise ArchitectureGraphError(f"{field} must be a non-empty string")
+        raise ArchitectureDiagramError(f"{field} must be a non-empty string")
     return value
 
 
 def _require_finite_number(value: Any, field: str) -> int | float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value):
-        raise ArchitectureGraphError(f"{field} must be a finite number")
+        raise ArchitectureDiagramError(f"{field} must be a finite number")
     return value
 
 
 def validate_graph(data: Any) -> dict[str, Any]:
     """Validate the intentionally small v1 graph schema and return *data*."""
     if not isinstance(data, dict):
-        raise ArchitectureGraphError("Architecture Graph must be a YAML mapping")
+        raise ArchitectureDiagramError("Architecture Diagram must be a YAML mapping")
     version = data.get("version")
     if isinstance(version, bool) or version != 1:
-        raise ArchitectureGraphError("version must be 1")
+        raise ArchitectureDiagramError("version must be 1")
     _require_string(data.get("title"), "title")
     nodes = data.get("nodes")
     edges = data.get("edges")
     if not isinstance(nodes, list) or not isinstance(edges, list):
-        raise ArchitectureGraphError("nodes and edges must be lists")
+        raise ArchitectureDiagramError("nodes and edges must be lists")
 
     node_ids: set[str] = set()
     for index, node in enumerate(nodes):
         if not isinstance(node, dict):
-            raise ArchitectureGraphError(f"nodes[{index}] must be a mapping")
+            raise ArchitectureDiagramError(f"nodes[{index}] must be a mapping")
         node_id = _require_string(node.get("id"), f"nodes[{index}].id")
         if node_id in node_ids:
-            raise ArchitectureGraphError(f"duplicate node id: {node_id}")
+            raise ArchitectureDiagramError(f"duplicate node id: {node_id}")
         node_ids.add(node_id)
         # May be empty: a freshly created node is untitled until the user types.
         if not isinstance(node.get("title"), str):
-            raise ArchitectureGraphError(f"nodes[{index}].title must be a string")
+            raise ArchitectureDiagramError(f"nodes[{index}].title must be a string")
         bullets = node.get("bullets", [])
         if not isinstance(bullets, list) or not all(isinstance(bullet, str) for bullet in bullets):
-            raise ArchitectureGraphError(f"nodes[{index}].bullets must be a list of strings")
+            raise ArchitectureDiagramError(f"nodes[{index}].bullets must be a list of strings")
         position = node.get("position")
         if not isinstance(position, dict):
-            raise ArchitectureGraphError(f"nodes[{index}].position must be a mapping")
+            raise ArchitectureDiagramError(f"nodes[{index}].position must be a mapping")
         for axis in ("x", "y"):
             _require_finite_number(position.get(axis), f"nodes[{index}].position.{axis}")
         if "shape" in node and node["shape"] not in {"rectangle", "ellipse", "diamond"}:
-            raise ArchitectureGraphError(f"nodes[{index}].shape must be rectangle, ellipse, or diamond")
+            raise ArchitectureDiagramError(f"nodes[{index}].shape must be rectangle, ellipse, or diamond")
         for dimension in ("width", "height"):
             if dimension not in node:
                 continue
             value = _require_finite_number(node[dimension], f"nodes[{index}].{dimension}")
             if value <= 0:
-                raise ArchitectureGraphError(f"nodes[{index}].{dimension} must be greater than 0")
+                raise ArchitectureDiagramError(f"nodes[{index}].{dimension} must be greater than 0")
     edge_ids: set[str] = set()
     for index, edge in enumerate(edges):
         if not isinstance(edge, dict):
-            raise ArchitectureGraphError(f"edges[{index}] must be a mapping")
+            raise ArchitectureDiagramError(f"edges[{index}] must be a mapping")
         edge_id = _require_string(edge.get("id"), f"edges[{index}].id")
         if edge_id in edge_ids:
-            raise ArchitectureGraphError(f"duplicate edge id: {edge_id}")
+            raise ArchitectureDiagramError(f"duplicate edge id: {edge_id}")
         edge_ids.add(edge_id)
         for field in ("source", "target"):
             endpoint = _require_string(edge.get(field), f"edges[{index}].{field}")
             if endpoint not in node_ids:
-                raise ArchitectureGraphError(f"edges[{index}].{field} references unknown node: {endpoint}")
+                raise ArchitectureDiagramError(f"edges[{index}].{field} references unknown node: {endpoint}")
         if edge.get("direction") not in {"one-way", "bidirectional"}:
-            raise ArchitectureGraphError(f"edges[{index}].direction must be one-way or bidirectional")
+            raise ArchitectureDiagramError(f"edges[{index}].direction must be one-way or bidirectional")
         if "label" in edge and not isinstance(edge["label"], str):
-            raise ArchitectureGraphError(f"edges[{index}].label must be a string")
+            raise ArchitectureDiagramError(f"edges[{index}].label must be a string")
         if "path" in edge:
             path = edge["path"]
             if not isinstance(path, dict):
-                raise ArchitectureGraphError(f"edges[{index}].path must be a mapping")
+                raise ArchitectureDiagramError(f"edges[{index}].path must be a mapping")
             _require_finite_number(path.get("bend"), f"edges[{index}].path.bend")
     return data
 
@@ -110,11 +110,11 @@ def parse_graph(content: str) -> dict[str, Any]:
     try:
         parsed = yaml.safe_load(content)
     except yaml.YAMLError as exc:
-        raise ArchitectureGraphError(f"Invalid YAML: {exc}") from exc
+        raise ArchitectureDiagramError(f"Invalid YAML: {exc}") from exc
     return validate_graph(parsed)
 
 
-class ArchitectureGraphStore:
+class ArchitectureDiagramStore:
     """Owns canonical graph files and their one-draft-per-graph lifecycle."""
 
     def __init__(self, prefix: str = GRAPH, *, data_store: DataStore) -> None:
@@ -123,7 +123,7 @@ class ArchitectureGraphStore:
 
     def _key(self, name: str, *, draft: bool = False) -> str:
         if Path(name).name != name or not name.endswith(GRAPH_SUFFIX):
-            raise ArchitectureGraphError(f"Graph name must end in {GRAPH_SUFFIX}")
+            raise ArchitectureDiagramError(f"Graph name must end in {GRAPH_SUFFIX}")
         return f"{self._prefix}/{name}" if not draft else f"{self._prefix}/draft/{name}"
 
     def list_paths(self) -> list[str]:
@@ -145,7 +145,7 @@ class ArchitectureGraphStore:
         try:
             return read_text(self._store, self._key(name, draft=draft))
         except StorageNotFoundError as exc:
-            raise ArchitectureGraphNotFound(f"Architecture Graph not found: {name}") from exc
+            raise ArchitectureDiagramNotFound(f"Architecture Diagram not found: {name}") from exc
 
     def read(self, name: str, *, draft: bool = False) -> str:
         return self.read_with_revision(name, draft=draft)[0]
@@ -155,7 +155,7 @@ class ArchitectureGraphStore:
         parse_graph(content)
         key = self._key(name, draft=draft)
         if draft and not self._store.exists(self._key(name)):
-            raise ArchitectureGraphNotFound(f"Architecture Graph not found: {name}")
+            raise ArchitectureDiagramNotFound(f"Architecture Diagram not found: {name}")
         current = None
         try:
             _, current = read_text(self._store, key)
@@ -170,15 +170,15 @@ class ArchitectureGraphStore:
         source = self._key(name)
         destination = self._key(new_name)
         if not self._store.exists(source):
-            raise ArchitectureGraphNotFound(f"Architecture Graph not found: {name}")
+            raise ArchitectureDiagramNotFound(f"Architecture Diagram not found: {name}")
         if source == destination:
             return source
         if self._store.exists(destination):
-            raise ArchitectureGraphError(f"Architecture Graph already exists: {new_name}")
+            raise ArchitectureDiagramError(f"Architecture Diagram already exists: {new_name}")
         draft_source = self._key(name, draft=True)
         draft_destination = self._key(new_name, draft=True)
         if self._store.exists(draft_source) and self._store.exists(draft_destination):
-            raise ArchitectureGraphError(f"Architecture Graph draft already exists: {new_name}")
+            raise ArchitectureDiagramError(f"Architecture Diagram draft already exists: {new_name}")
         self._store.move(source, destination)
         if self._store.exists(draft_source):
             self._store.move(draft_source, draft_destination)
@@ -190,7 +190,7 @@ class ArchitectureGraphStore:
     def accept_draft(self, name: str) -> str:
         draft = self._key(name, draft=True)
         if not self._store.exists(draft):
-            raise ArchitectureGraphNotFound(f"Architecture Graph draft not found: {name}")
+            raise ArchitectureDiagramNotFound(f"Architecture Diagram draft not found: {name}")
         # Revalidate immediately before publication; drafts are files a user may edit externally.
         content, revision = read_text(self._store, draft)
         parse_graph(content)

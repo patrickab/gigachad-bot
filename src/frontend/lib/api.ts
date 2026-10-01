@@ -1,8 +1,8 @@
-import type { ArchitectureGraphContextReference, Attachment, BackendConfig, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpCatalog, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ReasoningSupport, ResearchRequest, Usage, VaultFile, VaultNode } from "./types"
+import type { ArchitectureDiagramContextReference, Attachment, BackendConfig, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpCatalog, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ReasoningSupport, ResearchRequest, Usage, VaultFile, VaultNode } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { getApiBase } from "./config"
-import type { ArchitectureGraphDocument } from "./architectureGraph"
+import type { ArchitectureDiagramDocument } from "./architectureDiagram"
 import type { CanvasDocument } from "@/components/CanvasEditor"
 import { getDeviceId } from "./deviceId"
 
@@ -218,7 +218,7 @@ export async function fetchBranchMeta(dirs?: string[]): Promise<Record<string, B
   return request(`/chat-histories/branch-meta${params}`)
 }
 
-export async function loadChatHistory(filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null; title: string | null; usage: Usage | null; parent_id: string | null; branch_message_idx: number | null; children: BranchMeta["children"]; architecture_graph_contexts: ArchitectureGraphContextReference[] }> {
+export async function loadChatHistory(filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null; title: string | null; usage: Usage | null; parent_id: string | null; branch_message_idx: number | null; children: BranchMeta["children"]; architecture_graph_contexts: ArchitectureDiagramContextReference[] }> {
   return request(`/chat-histories/${filename}`)
 }
 
@@ -230,7 +230,7 @@ export interface SaveChatHistoryOptions {
   parentId?: string | null
   branchMessageIdx?: number | null
   children?: BranchMeta["children"] | null
-  architectureGraphContexts?: ArchitectureGraphContextReference[] | null
+  architectureDiagramContexts?: ArchitectureDiagramContextReference[] | null
 }
 
 export async function saveChatHistory(filename: string, messages: Message[] = [], opts: SaveChatHistoryOptions = {}): Promise<{ status: string; filename: string }> {
@@ -238,7 +238,7 @@ export async function saveChatHistory(filename: string, messages: Message[] = []
   if (opts.parentId !== undefined) body.parent_id = opts.parentId
   if (opts.branchMessageIdx !== undefined) body.branch_message_idx = opts.branchMessageIdx
   if (opts.children !== undefined) body.children = opts.children
-  if (opts.architectureGraphContexts !== undefined) body.architecture_graph_contexts = opts.architectureGraphContexts
+  if (opts.architectureDiagramContexts !== undefined) body.architecture_graph_contexts = opts.architectureDiagramContexts
   return put(`/chat-histories/${filename}`, body)
 }
 
@@ -464,8 +464,8 @@ export async function writeDocument(slug: string, name: string, content: string 
   return post<ProjectDocument>("/documents/write", { slug, name, content })
 }
 
-export async function listArchitectureGraphs(): Promise<ProjectDocument[]> {
-  const data = await request<{ graphs: ProjectDocument[] }>("/architecture-graphs")
+export async function listArchitectureDiagrams(): Promise<ProjectDocument[]> {
+  const data = await request<{ graphs: ProjectDocument[] }>("/architecture-diagrams")
   return data.graphs
 }
 
@@ -473,29 +473,29 @@ export async function listArchitectureGraphs(): Promise<ProjectDocument[]> {
 // revision it saw. Keeping it here means a graph view needs no revision plumbing.
 const graphRevisions = new Map<string, string>()
 
-export async function readArchitectureGraph(name: string): Promise<ArchitectureGraphDocument> {
-  const document = await request<ArchitectureGraphDocument>(`/architecture-graphs/${encodeURIComponent(name)}`)
+export async function readArchitectureDiagram(name: string): Promise<ArchitectureDiagramDocument> {
+  const document = await request<ArchitectureDiagramDocument>(`/architecture-diagrams/${encodeURIComponent(name)}`)
   graphRevisions.set(name, document.revision)
   return document
 }
 
-export async function createArchitectureGraph(name: string, content: string, projectSlug?: string | null): Promise<ArchitectureGraphDocument> {
-  const document = await post<ArchitectureGraphDocument>("/architecture-graphs", { name, content, projectSlug: projectSlug ?? null })
+export async function createArchitectureDiagram(name: string, content: string, projectSlug?: string | null): Promise<ArchitectureDiagramDocument> {
+  const document = await post<ArchitectureDiagramDocument>("/architecture-diagrams", { name, content, projectSlug: projectSlug ?? null })
   graphRevisions.set(name, document.revision)
   return document
 }
 
-function putGraph(name: string, content: string): Promise<ArchitectureGraphDocument> {
+function putGraph(name: string, content: string): Promise<ArchitectureDiagramDocument> {
   const revision = graphRevisions.get(name)
-  return put<ArchitectureGraphDocument>(
-    `/architecture-graphs/${encodeURIComponent(name)}`,
+  return put<ArchitectureDiagramDocument>(
+    `/architecture-diagrams/${encodeURIComponent(name)}`,
     { content },
     revision ? { "If-Match": revision } : {},
   )
 }
 
-export async function writeArchitectureGraph(name: string, content: string): Promise<ArchitectureGraphDocument> {
-  let document: ArchitectureGraphDocument
+export async function writeArchitectureDiagram(name: string, content: string): Promise<ArchitectureDiagramDocument> {
+  let document: ArchitectureDiagramDocument
   try {
     document = await putGraph(name, content)
   } catch (cause) {
@@ -504,15 +504,15 @@ export async function writeArchitectureGraph(name: string, content: string): Pro
     // this editor's state win once. ponytail: whole-document last-writer-wins for a
     // graph edited on two devices at the same second; a per-element merge or a CRDT
     // is the upgrade path if that becomes a real conflict rather than a rare race.
-    await readArchitectureGraph(name)
+    await readArchitectureDiagram(name)
     document = await putGraph(name, content)
   }
   graphRevisions.set(name, document.revision)
   return document
 }
 
-export async function renameArchitectureGraph(name: string, newName: string): Promise<ArchitectureGraphDocument> {
-  const document = await post<ArchitectureGraphDocument>(`/architecture-graphs/${encodeURIComponent(name)}/rename`, { name: newName })
+export async function renameArchitectureDiagram(name: string, newName: string): Promise<ArchitectureDiagramDocument> {
+  const document = await post<ArchitectureDiagramDocument>(`/architecture-diagrams/${encodeURIComponent(name)}/rename`, { name: newName })
   graphRevisions.delete(name)
   graphRevisions.set(document.name, document.revision)
   return document
@@ -574,16 +574,16 @@ export interface SaveProjectTabOptions {
   tabName?: string
   title?: string
   usage?: Usage
-  architectureGraphContexts?: ArchitectureGraphContextReference[] | null
+  architectureDiagramContexts?: ArchitectureDiagramContextReference[] | null
 }
 
 export async function saveProjectTab(name: string, filename: string, messages: Message[], opts: SaveProjectTabOptions = {}): Promise<{ status: string }> {
   const body: Record<string, unknown> = { filename, messages, chat_id: opts.chatId ?? null, tab_name: opts.tabName ?? null, title: opts.title ?? null, usage: opts.usage ?? null }
-  if (opts.architectureGraphContexts !== undefined) body.architecture_graph_contexts = opts.architectureGraphContexts
+  if (opts.architectureDiagramContexts !== undefined) body.architecture_graph_contexts = opts.architectureDiagramContexts
   return put(`/projects/${encodeURIComponent(name)}/tabs/${encodeURIComponent(filename)}`, body)
 }
 
-export async function loadProjectTab(name: string, filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null; title: string | null; usage: Usage | null; parent_id: string | null; branch_message_idx: number | null; architecture_graph_contexts: ArchitectureGraphContextReference[] }> {
+export async function loadProjectTab(name: string, filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null; title: string | null; usage: Usage | null; parent_id: string | null; branch_message_idx: number | null; architecture_graph_contexts: ArchitectureDiagramContextReference[] }> {
   return request(`/chat-histories/${encodeURIComponent(name)}/${encodeURIComponent(filename)}`)
 }
 

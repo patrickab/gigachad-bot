@@ -16,11 +16,11 @@ import {
   removeDocument,
   uploadDocument,
   uploadFile,
-  renameArchitectureGraph,
+  renameArchitectureDiagram,
   renameDocument,
   writeDocument,
 } from "@/lib/api"
-import { isArchitectureGraphPath } from "@/lib/architectureGraph"
+import { isArchitectureDiagramPath } from "@/lib/architectureDiagram"
 import { buildHiddenContent } from "@/lib/attachments"
 import { renderCanvasToJpeg, type EmbedRect } from "@/lib/drawing"
 import type { Message, ProjectDocument } from "@/lib/types"
@@ -188,8 +188,8 @@ export function useProjectDocuments({
   const handleRenameDocument = useCallback(async (path: string, name: string) => {
     if (!activeProject || vaultDocPaths.has(path)) return
     try {
-      if (isArchitectureGraphPath(path)) {
-        await renameArchitectureGraph(path.split("/").pop()!, name)
+      if (isArchitectureDiagramPath(path)) {
+        await renameArchitectureDiagram(path.split("/").pop()!, name)
       } else {
         await renameDocument(activeProject, path, name)
       }

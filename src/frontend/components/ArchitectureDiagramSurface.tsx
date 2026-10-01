@@ -14,22 +14,22 @@ import { cn } from "@/lib/utils"
 import { useTabActive } from "./TabManager"
 import { reframeCamera } from "./InfiniteViewport"
 import {
-  nextArchitectureGraphId,
-  type ArchitectureGraph,
-  type ArchitectureGraphEdge,
-  type ArchitectureGraphEdgePath,
-  type ArchitectureGraphEdgeStyle,
-  type ArchitectureGraphNode,
-  type ArchitectureGraphNodeShape,
-} from "@/lib/architectureGraph"
+  nextArchitectureDiagramId,
+  type ArchitectureDiagram,
+  type ArchitectureDiagramEdge,
+  type ArchitectureDiagramEdgePath,
+  type ArchitectureDiagramEdgeStyle,
+  type ArchitectureDiagramNode,
+  type ArchitectureDiagramNodeShape,
+} from "@/lib/architectureDiagram"
 
-type GraphFlowNodeData = ArchitectureGraphNode & Record<string, unknown>
-interface GraphFlowEdgeData extends ArchitectureGraphEdge, Record<string, unknown> {
+type GraphFlowNodeData = ArchitectureDiagramNode & Record<string, unknown>
+interface GraphFlowEdgeData extends ArchitectureDiagramEdge, Record<string, unknown> {
   attachment?: EdgeAttachment
-  onPathChange?: (id: string, path?: ArchitectureGraphEdgePath) => void
+  onPathChange?: (id: string, path?: ArchitectureDiagramEdgePath) => void
   onLabelChange?: (id: string, label: string) => void
   toFlowPoint?: (x: number, y: number) => { x: number, y: number } | undefined
-  edgeStyle?: ArchitectureGraphEdgeStyle
+  edgeStyle?: ArchitectureDiagramEdgeStyle
 }
 type GraphFlowNode = Node<GraphFlowNodeData, "architecture-node">
 type GraphFlowEdge = Edge<GraphFlowEdgeData, "architecture-edge">
@@ -40,12 +40,12 @@ interface RoutableNode {
   id: string
   position: { x: number, y: number }
   measured?: { width?: number, height?: number }
-  data?: { shape?: ArchitectureGraphNodeShape }
+  data?: { shape?: ArchitectureDiagramNodeShape }
 }
 
-export interface ArchitectureGraphSurfaceProps {
-  graph: ArchitectureGraph
-  onChange: (graph: ArchitectureGraph) => void
+export interface ArchitectureDiagramSurfaceProps {
+  graph: ArchitectureDiagram
+  onChange: (graph: ArchitectureDiagram) => void
   className?: string
   readOnly?: boolean
   onOpenDocument?: () => void
@@ -55,8 +55,8 @@ export interface ArchitectureGraphSurfaceProps {
   hostScale?: number
 }
 
-interface ArchitectureNodeData extends ArchitectureGraphNode, Record<string, unknown> {
-  onChange: (id: string, patch: Partial<Pick<ArchitectureGraphNode, "title" | "bullets" | "shape" | "width" | "height" | "position">>) => void
+interface ArchitectureNodeData extends ArchitectureDiagramNode, Record<string, unknown> {
+  onChange: (id: string, patch: Partial<Pick<ArchitectureDiagramNode, "title" | "bullets" | "shape" | "width" | "height" | "position">>) => void
   /** True exactly once, for the node the user just created. */
   claimAutoEdit?: (id: string) => boolean
 }
@@ -84,7 +84,7 @@ function edgeSketchPaths(d: string, seed: number, strokeWidth: number) {
 // is sketched by rough.js too, so it follows the outline's wobble instead of
 // sitting under it as a perfect CSS shape. rough.js only echoes `fill` back on
 // the fill path; the actual colour comes from CSS so it tracks the theme.
-function nodeSketchPaths(shape: ArchitectureGraphNodeShape, width: number, height: number, seed: number, strokeWidth: number) {
+function nodeSketchPaths(shape: ArchitectureDiagramNodeShape, width: number, height: number, seed: number, strokeWidth: number) {
   const options = { seed, roughness: 1, bowing: 1, stroke: "currentColor", strokeWidth, preserveVertices: true, fill: "sketch", fillStyle: "solid" }
   if (shape === "ellipse") return roughGenerator.toPaths(roughGenerator.ellipse(width / 2, height / 2, width, height, options))
   if (shape === "diamond") {
@@ -97,7 +97,7 @@ function nodeSketchPaths(shape: ArchitectureGraphNodeShape, width: number, heigh
 }
 
 interface DrawnShapeResult {
-  shape: ArchitectureGraphNodeShape
+  shape: ArchitectureDiagramNodeShape
   box: { x: number, y: number, width: number, height: number }
 }
 
@@ -146,7 +146,7 @@ export function classifyDrawnShape(points: Array<{ x: number, y: number }>): Dra
     const r = Math.hypot((p.x - cx) / halfWidth, (p.y - cy) / halfHeight)
     ellipseError += Math.abs(r - 1)
   }
-  const fits: Array<[ArchitectureGraphNodeShape, number]> = [
+  const fits: Array<[ArchitectureDiagramNodeShape, number]> = [
     ["rectangle", rectError / points.length],
     ["diamond", diamondError / points.length],
     ["ellipse", ellipseError / points.length],
@@ -171,7 +171,7 @@ const cardStyle: CSSProperties = {
 // Clips card content to the sketch outline; unpadded so its own center is
 // always exactly the shape's geometric center (bounding-box center for both
 // diamond and ellipse).
-const SHAPE_CLIP: Record<ArchitectureGraphNodeShape, CSSProperties> = {
+const SHAPE_CLIP: Record<ArchitectureDiagramNodeShape, CSSProperties> = {
   rectangle: { borderRadius: 8 },
   ellipse: { borderRadius: "50%" },
   diamond: { clipPath: "polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)" },
@@ -181,7 +181,7 @@ const SHAPE_CLIP: Record<ArchitectureGraphNodeShape, CSSProperties> = {
 // header bar to sit on: their title and bullets shrink-wrap into one plain
 // block, grid-centered on the clip's center, capped so it stays inside the
 // largest axis-aligned box each outline can actually hold.
-const CENTERED_CONTENT_FRACTION: Partial<Record<ArchitectureGraphNodeShape, { width: number, height: number }>> = {
+const CENTERED_CONTENT_FRACTION: Partial<Record<ArchitectureDiagramNodeShape, { width: number, height: number }>> = {
   ellipse: { width: 0.7, height: 0.8 },
   diamond: { width: 0.44, height: 0.48 },
 }
@@ -216,11 +216,11 @@ export const snapToGrid = (value: number) => Math.round(value / GRID_SIZE) * GRI
 
 // Clones selected nodes with fresh ids, offset diagonally so the copies read
 // as new objects rather than sitting exactly on top of the originals.
-export function duplicateNodes(existing: ArchitectureGraphNode[], selectedIds: ReadonlySet<string>): ArchitectureGraphNode[] {
-  const clones: ArchitectureGraphNode[] = []
+export function duplicateNodes(existing: ArchitectureDiagramNode[], selectedIds: ReadonlySet<string>): ArchitectureDiagramNode[] {
+  const clones: ArchitectureDiagramNode[] = []
   for (const node of existing) {
     if (!selectedIds.has(node.id)) continue
-    const id = nextArchitectureGraphId("node", [...existing, ...clones].map((candidate) => candidate.id))
+    const id = nextArchitectureDiagramId("node", [...existing, ...clones].map((candidate) => candidate.id))
     clones.push({ ...node, id, position: { x: snapToGrid(node.position.x + GRID_SIZE * 3), y: snapToGrid(node.position.y + GRID_SIZE * 3) } })
   }
   return clones
@@ -320,7 +320,7 @@ function ArchitectureNodeCard({ data, selected }: NodeProps<Node<ArchitectureNod
     const id = setTimeout(() => commitBulletsRef.current(), DRAFT_COMMIT_MS)
     return () => clearTimeout(id)
   }, [bulletDrafts])
-  const shape: ArchitectureGraphNodeShape = data.shape ?? "rectangle"
+  const shape: ArchitectureDiagramNodeShape = data.shape ?? "rectangle"
   const contentFraction = CENTERED_CONTENT_FRACTION[shape]
   const centered = contentFraction !== undefined
   // Rectangles truncate a heading that's wider than the card with an ellipsis;
@@ -423,36 +423,36 @@ function ArchitectureNodeCard({ data, selected }: NodeProps<Node<ArchitectureNod
     return () => cancelAnimationFrame(frame)
   }, [editingTitle])
   return (
-    <div ref={cardRef} className={cn("architecture-graph-node", selected && "architecture-graph-node-selected")} style={cardStyle} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+    <div ref={cardRef} className={cn("architecture-diagram-node", selected && "architecture-diagram-node-selected")} style={cardStyle} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
       <NodeResizer isVisible={!!selected} minWidth={minNodeWidth} minHeight={fitHeight} color="var(--ink-muted)" onResizeStart={() => { resizingRef.current = true }} onResizeEnd={(_event, params) => {
         resizingRef.current = false
         const x = snapToGrid(params.x)
         const y = snapToGrid(params.y)
         data.onChange(data.id, { width: snapToGrid(params.x + params.width) - x, height: snapToGrid(params.y + params.height) - y, position: { x, y } })
       }} />
-      <span ref={titleMeasureRef} aria-hidden="true" className="architecture-graph-title" style={{ position: "absolute", visibility: "hidden", whiteSpace: "nowrap", left: -9999 }}>{titleDraft}</span>
+      <span ref={titleMeasureRef} aria-hidden="true" className="architecture-diagram-title" style={{ position: "absolute", visibility: "hidden", whiteSpace: "nowrap", left: -9999 }}>{titleDraft}</span>
       {/* Fill sits under the content (a later positioned sibling); the outline sits on top. */}
       <svg viewBox={`0 0 ${cardSize.width} ${cardSize.height}`} aria-hidden="true" focusable="false" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", overflow: "visible", pointerEvents: "none" }}>
-        {nodeSketch.fills.map((path, index) => <path key={index} d={path.d} className="architecture-graph-node-fill" stroke="none" />)}
+        {nodeSketch.fills.map((path, index) => <path key={index} d={path.d} className="architecture-diagram-node-fill" stroke="none" />)}
       </svg>
-      <svg className="architecture-graph-node-sketch" viewBox={`0 0 ${cardSize.width} ${cardSize.height}`} aria-hidden="true" focusable="false" style={{ position: "absolute", zIndex: 1, inset: 0, width: "100%", height: "100%", overflow: "visible", pointerEvents: "none" }}>
+      <svg className="architecture-diagram-node-sketch" viewBox={`0 0 ${cardSize.width} ${cardSize.height}`} aria-hidden="true" focusable="false" style={{ position: "absolute", zIndex: 1, inset: 0, width: "100%", height: "100%", overflow: "visible", pointerEvents: "none" }}>
         {nodeSketch.strokes.map((path, index) => <path key={index} d={path.d} fill="none" stroke="currentColor" strokeWidth={path.strokeWidth} />)}
       </svg>
-      <Handle id="top" type="target" position={Position.Top} className="architecture-graph-handle" style={controlStyle} />
-      <Handle id="left" type="target" position={Position.Left} className="architecture-graph-handle" style={controlStyle} />
+      <Handle id="top" type="target" position={Position.Top} className="architecture-diagram-handle" style={controlStyle} />
+      <Handle id="left" type="target" position={Position.Left} className="architecture-diagram-handle" style={controlStyle} />
       <div style={{ position: "relative", height: "100%", display: "grid", overflow: "hidden", ...SHAPE_CLIP[shape] }}>
       <div ref={contentRef} style={contentFraction ? { display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, justifySelf: "center", alignSelf: "center", width: `${contentFraction.width * 100}%`, maxHeight: `${contentFraction.height * 100}%` } : { display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, width: "100%", height: "100%" }}>
-      <div ref={titlebarRef} className={cn("architecture-graph-node-titlebar", centered && "architecture-graph-node-titlebar-plain")}>
+      <div ref={titlebarRef} className={cn("architecture-diagram-node-titlebar", centered && "architecture-diagram-node-titlebar-plain")}>
         {editingTitle ? (
-          <input ref={titleRef} autoFocus aria-label="Node title" value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} onFocus={() => { titleFocusedRef.current = true }} onBlur={() => { titleFocusedRef.current = false; commitTitle(); setEditingTitle(false) }} onKeyDown={(event) => { if (event.key === "ArrowDown" && bulletDrafts.length > 0) { event.preventDefault(); event.currentTarget.blur(); focusBullet(0, 0); return } if (event.key !== "Enter") return; event.preventDefault(); event.currentTarget.blur(); if (bulletDrafts.length === 0) setBulletDrafts([""]); focusBullet(0, 0) }} onPointerDown={(event) => event.stopPropagation()} className="nodrag architecture-graph-title architecture-graph-title-input" />
+          <input ref={titleRef} autoFocus aria-label="Node title" value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} onFocus={() => { titleFocusedRef.current = true }} onBlur={() => { titleFocusedRef.current = false; commitTitle(); setEditingTitle(false) }} onKeyDown={(event) => { if (event.key === "ArrowDown" && bulletDrafts.length > 0) { event.preventDefault(); event.currentTarget.blur(); focusBullet(0, 0); return } if (event.key !== "Enter") return; event.preventDefault(); event.currentTarget.blur(); if (bulletDrafts.length === 0) setBulletDrafts([""]); focusBullet(0, 0) }} onPointerDown={(event) => event.stopPropagation()} className="nodrag architecture-diagram-title architecture-diagram-title-input" />
         ) : (
-          <span role="button" tabIndex={0} aria-label="Edit node title" onClick={() => setEditingTitle(true)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setEditingTitle(true) } }} className="architecture-graph-title architecture-graph-title-display">{data.title}</span>
+          <span role="button" tabIndex={0} aria-label="Edit node title" onClick={() => setEditingTitle(true)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setEditingTitle(true) } }} className="architecture-diagram-title architecture-diagram-title-display">{data.title}</span>
         )}
       </div>
-      <div ref={bodyRef} className={cn("architecture-graph-node-body nowheel", centered && "architecture-graph-node-body-plain")}>
+      <div ref={bodyRef} className={cn("architecture-diagram-node-body nowheel", centered && "architecture-diagram-node-body-plain")}>
         {bulletDrafts.map((text, index) => (
-          <div key={index} className="architecture-graph-bullet-row">
-            {!centered && <span className="architecture-graph-bullet-marker" aria-hidden="true">—</span>}
+          <div key={index} className="architecture-diagram-bullet-row">
+            {!centered && <span className="architecture-diagram-bullet-marker" aria-hidden="true">—</span>}
             <textarea
               ref={(el) => { bulletRefs.current[index] = el }}
               aria-label="Node bullet"
@@ -461,7 +461,7 @@ function ArchitectureNodeCard({ data, selected }: NodeProps<Node<ArchitectureNod
               onKeyDown={(event) => handleBulletKeyDown(event, index)}
               onFocus={() => { bulletsFocusedRef.current = true }}
               onBlur={() => { bulletsFocusedRef.current = false; commitBullets() }}
-              className="nodrag architecture-graph-bullet-input"
+              className="nodrag architecture-diagram-bullet-input"
               rows={1}
               style={{ resize: "none" }}
             />
@@ -470,8 +470,8 @@ function ArchitectureNodeCard({ data, selected }: NodeProps<Node<ArchitectureNod
       </div>
       </div>
       </div>
-      <Handle id="right" type="source" position={Position.Right} className="architecture-graph-handle" style={controlStyle} />
-      <Handle id="bottom" type="source" position={Position.Bottom} className="architecture-graph-handle" style={controlStyle} />
+      <Handle id="right" type="source" position={Position.Right} className="architecture-diagram-handle" style={controlStyle} />
+      <Handle id="bottom" type="source" position={Position.Bottom} className="architecture-diagram-handle" style={controlStyle} />
     </div>
   )
 }
@@ -517,7 +517,7 @@ interface CardRect {
   y: number
   width: number
   height: number
-  shape?: ArchitectureGraphNodeShape
+  shape?: ArchitectureDiagramNodeShape
 }
 
 // A slot on the bounding box's side. Round shapes don't fill their box, so for
@@ -549,7 +549,7 @@ function sideToward(rect: CardRect, toward: CardRect): Position {
   return dy > 0 ? Position.Bottom : Position.Top
 }
 
-export function edgeAttachments(nodes: readonly RoutableNode[], edges: readonly ArchitectureGraphEdge[]): Map<string, EdgeAttachment> {
+export function edgeAttachments(nodes: readonly RoutableNode[], edges: readonly ArchitectureDiagramEdge[]): Map<string, EdgeAttachment> {
   const rects = new Map<string, CardRect>(nodes.map((node) => [node.id, {
     x: node.position.x, y: node.position.y,
     width: node.measured?.width ?? DEFAULT_NODE_WIDTH,
@@ -743,20 +743,20 @@ function ArchitectureEdgePath({ id, source, target, data, selected }: EdgeProps<
       <BaseEdge id={id} path={geometry.edgePath} interactionWidth={20} style={{ stroke: "transparent" }} />
     </g>
     {geometry.rough
-      ? sketch.map((path, index) => <path key={index} d={path.d} fill="none" stroke="currentColor" strokeWidth={path.strokeWidth} strokeLinecap="round" className={cn("architecture-graph-edge", selected && "architecture-graph-edge-selected")} pointerEvents="none" />)
-      : <path d={geometry.edgePath} fill="none" stroke="currentColor" strokeWidth={selected ? 2 : 1.6} strokeLinecap="round" strokeLinejoin="round" className={cn("architecture-graph-edge", selected && "architecture-graph-edge-selected")} pointerEvents="none" />}
-    <path d={geometry.arrows} fill="currentColor" stroke="currentColor" strokeWidth={1.2} strokeLinejoin="round" className={cn("architecture-graph-edge", selected && "architecture-graph-edge-selected")} pointerEvents="none" />
+      ? sketch.map((path, index) => <path key={index} d={path.d} fill="none" stroke="currentColor" strokeWidth={path.strokeWidth} strokeLinecap="round" className={cn("architecture-diagram-edge", selected && "architecture-diagram-edge-selected")} pointerEvents="none" />)
+      : <path d={geometry.edgePath} fill="none" stroke="currentColor" strokeWidth={selected ? 2 : 1.6} strokeLinecap="round" strokeLinejoin="round" className={cn("architecture-diagram-edge", selected && "architecture-diagram-edge-selected")} pointerEvents="none" />}
+    <path d={geometry.arrows} fill="currentColor" stroke="currentColor" strokeWidth={1.2} strokeLinejoin="round" className={cn("architecture-diagram-edge", selected && "architecture-diagram-edge-selected")} pointerEvents="none" />
     {selected && editingLabel && data?.onLabelChange
-      ? <foreignObject x={labelPoint.x - 70} y={labelPoint.y - 26} width={140} height={24} overflow="visible"><input autoFocus aria-label="Connection label" value={data.label ?? ""} placeholder="Label" onChange={(event) => data.onLabelChange?.(id, event.target.value)} onBlur={() => setEditingLabel(false)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === "Escape") { event.preventDefault(); setEditingLabel(false) } }} className="architecture-graph-edge-label-input nodrag nopan nowheel" /></foreignObject>
-      : data?.label && <text x={labelPoint.x} y={labelPoint.y - 12} className="architecture-graph-edge-label" textAnchor="middle" dominantBaseline="central">{data.label}</text>}
-    {selected && handle && data?.onPathChange && <circle cx={handle.x} cy={handle.y} r={6} role="button" tabIndex={0} aria-label="Adjust connection curve" aria-keyshortcuts={geometry.keys} className="architecture-graph-path-handle nodrag nopan" onPointerDown={startDrag} onKeyDown={nudge} />}
+      ? <foreignObject x={labelPoint.x - 70} y={labelPoint.y - 26} width={140} height={24} overflow="visible"><input autoFocus aria-label="Connection label" value={data.label ?? ""} placeholder="Label" onChange={(event) => data.onLabelChange?.(id, event.target.value)} onBlur={() => setEditingLabel(false)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === "Escape") { event.preventDefault(); setEditingLabel(false) } }} className="architecture-diagram-edge-label-input nodrag nopan nowheel" /></foreignObject>
+      : data?.label && <text x={labelPoint.x} y={labelPoint.y - 12} className="architecture-diagram-edge-label" textAnchor="middle" dominantBaseline="central">{data.label}</text>}
+    {selected && handle && data?.onPathChange && <circle cx={handle.x} cy={handle.y} r={6} role="button" tabIndex={0} aria-label="Adjust connection curve" aria-keyshortcuts={geometry.keys} className="architecture-diagram-path-handle nodrag nopan" onPointerDown={startDrag} onKeyDown={nudge} />}
   </>
 }
 
 const nodeTypes = { "architecture-node": ArchitectureNodeCard }
 const edgeTypes = { "architecture-edge": ArchitectureEdgePath }
 
-function toFlowNodes(nodes: ArchitectureGraphNode[], onNodeChange: ArchitectureNodeData["onChange"], claimAutoEdit?: ArchitectureNodeData["claimAutoEdit"]): GraphFlowNode[] {
+function toFlowNodes(nodes: ArchitectureDiagramNode[], onNodeChange: ArchitectureNodeData["onChange"], claimAutoEdit?: ArchitectureNodeData["claimAutoEdit"]): GraphFlowNode[] {
   return nodes.map((node) => ({
     id: node.id, type: "architecture-node", position: node.position,
     // Height is left unset for legacy nodes without an explicit height, so they
@@ -772,7 +772,7 @@ interface EdgeRuntime {
   toFlowPoint?: GraphFlowEdgeData["toFlowPoint"]
 }
 
-function toFlowEdges(edges: ArchitectureGraphEdge[], edgeStyle: ArchitectureGraphEdgeStyle | undefined, attachments = new Map<string, EdgeAttachment>(), runtime: EdgeRuntime = {}): GraphFlowEdge[] {
+function toFlowEdges(edges: ArchitectureDiagramEdge[], edgeStyle: ArchitectureDiagramEdgeStyle | undefined, attachments = new Map<string, EdgeAttachment>(), runtime: EdgeRuntime = {}): GraphFlowEdge[] {
   return edges.map((edge) => ({
     ...edge,
     type: "architecture-edge",
@@ -801,12 +801,12 @@ function reconcile<T extends { id: string }>(current: T[], next: T[]): T[] {
   })
 }
 
-export function ArchitectureGraphSurface({ graph, onChange, className, readOnly = false, onOpenDocument, autoFit = false, hostScale = 1 }: ArchitectureGraphSurfaceProps) {
+export function ArchitectureDiagramSurface({ graph, onChange, className, readOnly = false, onOpenDocument, autoFit = false, hostScale = 1 }: ArchitectureDiagramSurfaceProps) {
   const active = useTabActive()
   const graphRef = useRef(graph)
   graphRef.current = graph
-  const emit = useCallback((patch: Partial<ArchitectureGraph>) => onChange({ ...graphRef.current, ...patch }), [onChange])
-  const changeNode = useCallback((id: string, patch: Partial<Pick<ArchitectureGraphNode, "title" | "bullets" | "shape" | "width" | "height" | "position">>) => {
+  const emit = useCallback((patch: Partial<ArchitectureDiagram>) => onChange({ ...graphRef.current, ...patch }), [onChange])
+  const changeNode = useCallback((id: string, patch: Partial<Pick<ArchitectureDiagramNode, "title" | "bullets" | "shape" | "width" | "height" | "position">>) => {
     emit({ nodes: graphRef.current.nodes.map((node) => node.id === id ? { ...node, ...patch } : node) })
   }, [emit])
   // The node just created by the toolbar or a drawn shape opens straight into
@@ -819,7 +819,7 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
     return true
   }, [])
   const [flow, setFlow] = useState<ReactFlowInstance<GraphFlowNode, GraphFlowEdge> | null>(null)
-  const changeEdgePath = useCallback((id: string, path?: ArchitectureGraphEdgePath) => {
+  const changeEdgePath = useCallback((id: string, path?: ArchitectureDiagramEdgePath) => {
     emit({ edges: graphRef.current.edges.map((edge) => edge.id === id ? { ...edge, path } : edge) })
   }, [emit])
   const changeEdgeLabel = useCallback((id: string, label: string) => {
@@ -844,14 +844,14 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
   }, [graph.edges, graph.edgeStyle, attachments, edgeRuntime, setEdges])
 
   const addNode = useCallback(() => {
-    const id = nextArchitectureGraphId("node", graphRef.current.nodes.map((node) => node.id))
-    const node: ArchitectureGraphNode = { id, title: "", bullets: [], position: { x: 100 + graphRef.current.nodes.length * 28, y: 100 + graphRef.current.nodes.length * 28 }, width: NEW_NODE_WIDTH, height: NEW_NODE_HEIGHT }
+    const id = nextArchitectureDiagramId("node", graphRef.current.nodes.map((node) => node.id))
+    const node: ArchitectureDiagramNode = { id, title: "", bullets: [], position: { x: 100 + graphRef.current.nodes.length * 28, y: 100 + graphRef.current.nodes.length * 28 }, width: NEW_NODE_WIDTH, height: NEW_NODE_HEIGHT }
     autoEditIdRef.current = id
     emit({ nodes: [...graphRef.current.nodes, node] })
   }, [emit])
-  const commitDrawnShape = useCallback((shape: ArchitectureGraphNodeShape, box: { x: number, y: number, width: number, height: number }) => {
-    const id = nextArchitectureGraphId("node", graphRef.current.nodes.map((node) => node.id))
-    const node: ArchitectureGraphNode = { id, title: "", bullets: [], position: { x: box.x, y: box.y }, shape, width: Math.max(80, Math.round(box.width)), height: Math.max(48, Math.round(box.height)) }
+  const commitDrawnShape = useCallback((shape: ArchitectureDiagramNodeShape, box: { x: number, y: number, width: number, height: number }) => {
+    const id = nextArchitectureDiagramId("node", graphRef.current.nodes.map((node) => node.id))
+    const node: ArchitectureDiagramNode = { id, title: "", bullets: [], position: { x: box.x, y: box.y }, shape, width: Math.max(80, Math.round(box.width)), height: Math.max(48, Math.round(box.height)) }
     autoEditIdRef.current = id
     emit({ nodes: [...graphRef.current.nodes, node] })
   }, [emit])
@@ -943,37 +943,59 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
     window.addEventListener("pointerup", up)
     window.addEventListener("pointercancel", cancel)
   }, [readOnly, lasso, startDraw, onDrawPointerMove, finishDraw])
-  const duplicateSelectedNodes = useCallback(() => {
-    const selectedIds = new Set(nodes.filter((node) => node.selected).map((node) => node.id))
-    if (selectedIds.size === 0) return
-    const clones = duplicateNodes(graphRef.current.nodes, selectedIds)
+  // Adds clones to the graph and selects them, not the originals, so repeated
+  // Ctrl+D / Ctrl+V walks diagonally instead of stacking on the same spot.
+  const addClones = useCallback((clones: ArchitectureDiagramNode[]) => {
     if (clones.length === 0) return
     const cloneIds = new Set(clones.map((clone) => clone.id))
     emit({ nodes: [...graphRef.current.nodes, ...clones] })
-    // Select the copies, not the originals, so repeated Ctrl+D walks diagonally
-    // instead of stacking every clone on the same spot.
     setNodes((current) => current.map((node) => ({ ...node, selected: cloneIds.has(node.id) })))
-  }, [nodes, emit, setNodes])
+  }, [emit, setNodes])
+  const duplicateSelectedNodes = useCallback(() => {
+    const selectedIds = new Set(nodes.filter((node) => node.selected).map((node) => node.id))
+    if (selectedIds.size > 0) addClones(duplicateNodes(graphRef.current.nodes, selectedIds))
+  }, [nodes, addClones])
+  // Snapshot, not ids: a paste still works after the originals are edited or deleted.
+  const clipboardRef = useRef<ArchitectureDiagramNode[]>([])
+  const copySelectedNodes = useCallback(() => {
+    const selectedIds = new Set(nodes.filter((node) => node.selected).map((node) => node.id))
+    if (selectedIds.size === 0) return false
+    clipboardRef.current = graphRef.current.nodes.filter((node) => selectedIds.has(node.id))
+    return true
+  }, [nodes])
+  const pasteNodes = useCallback(() => {
+    const copied = clipboardRef.current
+    if (copied.length === 0) return false
+    const live = new Set(graphRef.current.nodes.map((node) => node.id))
+    const clones = duplicateNodes([...graphRef.current.nodes, ...copied.filter((node) => !live.has(node.id))], new Set(copied.map((node) => node.id)))
+    // The next paste offsets from this one.
+    clipboardRef.current = clones
+    addClones(clones)
+    return true
+  }, [addClones])
   useEffect(() => {
     if (readOnly || !active) return
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "d") return
+      if (!(event.ctrlKey || event.metaKey)) return
+      const key = event.key.toLowerCase()
+      if (key !== "d" && key !== "c" && key !== "v") return
       const tag = (event.target as HTMLElement | null)?.tagName
       if (tag === "INPUT" || tag === "TEXTAREA") return
-      event.preventDefault()
-      duplicateSelectedNodes()
+      if (key === "d") { event.preventDefault(); duplicateSelectedNodes() }
+      else if (key === "c") { if (copySelectedNodes()) event.preventDefault() }
+      else if (pasteNodes()) event.preventDefault()
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [readOnly, active, duplicateSelectedNodes])
+  }, [readOnly, active, duplicateSelectedNodes, copySelectedNodes, pasteNodes])
   const onNodeDragStop = useCallback((_event: MouseEvent | TouchEvent, moved: GraphFlowNode) => {
     const position = { x: snapToGrid(moved.position.x), y: snapToGrid(moved.position.y) }
     emit({ nodes: graphRef.current.nodes.map((node) => node.id === moved.id ? { ...node, position } : node) })
   }, [emit])
   const onConnect: OnConnect = useCallback((connection: Connection) => {
     if (!connection.source || !connection.target || connection.source === connection.target) return
-    const id = nextArchitectureGraphId("edge", graphRef.current.edges.map((edge) => edge.id))
-    const edge: ArchitectureGraphEdge = { id, source: connection.source, target: connection.target, direction: "one-way" }
+    const id = nextArchitectureDiagramId("edge", graphRef.current.edges.map((edge) => edge.id))
+    const edge: ArchitectureDiagramEdge = { id, source: connection.source, target: connection.target, direction: "one-way" }
     emit({ edges: [...graphRef.current.edges, edge] })
   }, [emit])
   // A drop that missed every handle still connects when it lands anywhere on
@@ -999,7 +1021,7 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
   // React Flow owns selection; the inspector just follows it.
   const selectedEdgeId = edges.find((edge) => edge.selected)?.id
   const selectedEdge = graph.edges.find((edge) => edge.id === selectedEdgeId)
-  const updateSelectedEdge = useCallback((patch: Partial<Pick<ArchitectureGraphEdge, "label" | "direction" | "path">>) => {
+  const updateSelectedEdge = useCallback((patch: Partial<Pick<ArchitectureDiagramEdge, "label" | "direction" | "path">>) => {
     if (!selectedEdgeId) return
     emit({ edges: graphRef.current.edges.map((edge) => edge.id === selectedEdgeId ? { ...edge, ...patch } : edge) })
   }, [emit, selectedEdgeId])
@@ -1083,29 +1105,29 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
   }, [hostScale, reframe])
 
   return (
-    <div className={cn("architecture-graph-surface", className)} style={{ display: "flex", minHeight: 0, height: "100%", flexDirection: "column", overflow: "hidden", borderTop: "1px solid var(--divider)", backgroundColor: "var(--sketch-canvas)" }}>
-      <div className="architecture-graph-toolbar" style={{ position: "relative", inset: "auto", zIndex: 5, display: "flex", minHeight: 31, flexShrink: 0, alignItems: "center", gap: 6, borderBottom: "1px solid var(--divider)", padding: "0 10px" }}>
+    <div className={cn("architecture-diagram-surface", className)} style={{ display: "flex", minHeight: 0, height: "100%", flexDirection: "column", overflow: "hidden", borderTop: "1px solid var(--divider)", backgroundColor: "var(--sketch-canvas)" }}>
+      <div className="architecture-diagram-toolbar" style={{ position: "relative", inset: "auto", zIndex: 5, display: "flex", minHeight: 31, flexShrink: 0, alignItems: "center", gap: 6, borderBottom: "1px solid var(--divider)", padding: "0 10px" }}>
         {!readOnly && <>
-          <button type="button" onClick={addNode} className="architecture-graph-toolbar-symbol" aria-label="Add node"><Plus size={13} /></button>
-          <button type="button" onClick={() => setLasso((current) => !current)} aria-pressed={lasso} className={cn("architecture-graph-toolbar-symbol", lasso && "architecture-graph-toolbar-symbol-active")} aria-label="Lasso select"><CircleDashed size={13} /></button>
-          <button type="button" onClick={toggleEdgeStyle} aria-pressed={graph.edgeStyle === "elbow"} className={cn("architecture-graph-toolbar-symbol", graph.edgeStyle === "elbow" && "architecture-graph-toolbar-symbol-active")} aria-label="Elbow connections"><CornerDownRight size={13} /></button>
-          <span className="architecture-graph-toolbar-delimiter" aria-hidden="true">|</span>
+          <button type="button" onClick={addNode} className="architecture-diagram-toolbar-symbol" aria-label="Add node"><Plus size={13} /></button>
+          <button type="button" onClick={() => setLasso((current) => !current)} aria-pressed={lasso} className={cn("architecture-diagram-toolbar-symbol", lasso && "architecture-diagram-toolbar-symbol-active")} aria-label="Lasso select"><CircleDashed size={13} /></button>
+          <button type="button" onClick={toggleEdgeStyle} aria-pressed={graph.edgeStyle === "elbow"} className={cn("architecture-diagram-toolbar-symbol", graph.edgeStyle === "elbow" && "architecture-diagram-toolbar-symbol-active")} aria-label="Elbow connections"><CornerDownRight size={13} /></button>
+          <span className="architecture-diagram-toolbar-delimiter" aria-hidden="true">|</span>
         </>}
-        <button type="button" onClick={fitGraph} className="architecture-graph-toolbar-symbol" aria-label="Fit view"><Maximize size={13} /></button>
-        {onOpenDocument && <button type="button" onClick={onOpenDocument} className="architecture-graph-icon-button" aria-label="Open Architecture Graph document" style={{ display: "grid", width: 26, height: 26, marginLeft: "auto", placeItems: "center", border: 0, borderRadius: 5, background: "transparent", color: "var(--ink-muted)" }}><Maximize size={14} /></button>}
+        <button type="button" onClick={fitGraph} className="architecture-diagram-toolbar-symbol" aria-label="Fit view"><Maximize size={13} /></button>
+        {onOpenDocument && <button type="button" onClick={onOpenDocument} className="architecture-diagram-icon-button" aria-label="Open Architecture Diagram document" style={{ display: "grid", width: 26, height: 26, marginLeft: "auto", placeItems: "center", border: 0, borderRadius: 5, background: "transparent", color: "var(--ink-muted)" }}><Maximize size={14} /></button>}
       </div>
       <div ref={viewportRef} onWheelCapture={zoomGraphAtCenter} onPointerDown={onPanePointerDown} onContextMenu={(event) => event.preventDefault()} style={{ position: "relative", minHeight: 0, flex: 1 }}>
-      {!readOnly && selectedEdge && <div className="architecture-graph-edge-editor">
-        <select aria-label="Connection direction" value={selectedEdge.direction} onChange={(event) => updateSelectedEdge({ direction: event.target.value as ArchitectureGraphEdge["direction"] })}>
+      {!readOnly && selectedEdge && <div className="architecture-diagram-edge-editor">
+        <select aria-label="Connection direction" value={selectedEdge.direction} onChange={(event) => updateSelectedEdge({ direction: event.target.value as ArchitectureDiagramEdge["direction"] })}>
           <option value="one-way">One-way</option>
           <option value="bidirectional">Bidirectional</option>
         </select>
-        {selectedEdge.path && <button type="button" className="architecture-graph-icon-button" onClick={() => updateSelectedEdge({ path: undefined })} aria-label="Reset connection path"><RotateCcw size={14} /></button>}
-        <button type="button" className="architecture-graph-icon-button architecture-graph-delete" onClick={deleteSelectedEdge} aria-label="Delete connection"><Trash2 size={14} /></button>
+        {selectedEdge.path && <button type="button" className="architecture-diagram-icon-button" onClick={() => updateSelectedEdge({ path: undefined })} aria-label="Reset connection path"><RotateCcw size={14} /></button>}
+        <button type="button" className="architecture-diagram-icon-button architecture-diagram-delete" onClick={deleteSelectedEdge} aria-label="Delete connection"><Trash2 size={14} /></button>
       </div>}
       {lasso && !readOnly && (
         <div
-          className="architecture-graph-draw-overlay"
+          className="architecture-diagram-draw-overlay"
           onPointerDown={onLassoPointerDown}
           onPointerMove={onDrawPointerMove}
           onPointerUp={onDrawPointerUp}
@@ -1127,7 +1149,7 @@ export function ArchitectureGraphSurface({ graph, onChange, className, readOnly 
         <Background gap={22} size={1} color="var(--sketch-grid)" />
       </ReactFlow>
       {drawPreview && drawPreview.length > 1 && (
-        <svg className="architecture-graph-draw-preview" aria-hidden="true">
+        <svg className="architecture-diagram-draw-preview" aria-hidden="true">
           <path
             d={`M ${drawPreview.map((p) => `${p.x - drawOriginRef.current.left} ${p.y - drawOriginRef.current.top}`).join(" L ")}`}
             fill="none" strokeDasharray={lasso ? "6 4" : undefined}

@@ -42,12 +42,12 @@ const api = vi.hoisted(() => ({
   writeBinaryDocument: vi.fn(),
   listProjectDocuments: vi.fn(async () => [{ path: "project/proj/document/notes.canvas", name: "notes.canvas", mime: "application/json" }]),
   loadFileViewerText: vi.fn(async () => ""),
-  listArchitectureGraphs: vi.fn(async () => []),
+  listArchitectureDiagrams: vi.fn(async () => []),
   listNotes: vi.fn(async () => [] as { path: string; name: string; mime: string }[]),
   writeDocument: vi.fn(async (_slug: string, _name: string, _content: string) => ({ path: "project/proj/document/notes.canvas", name: "notes.canvas", mime: "application/json" })),
   renameDocument: vi.fn(async (_slug: string, _path: string, name: string) => ({ path: `project/proj/document/${name}.md`, name: `${name}.md`, mime: "text/markdown" })),
   removeDocument: vi.fn(async (_slug: string, _path: string) => undefined),
-  renameArchitectureGraph: vi.fn(async (_name: string, name: string) => ({ path: `graph/${name}.architecture.yaml`, name: `${name}.architecture.yaml`, content: "", hasDraft: false, revision: "r" })),
+  renameArchitectureDiagram: vi.fn(async (_name: string, name: string) => ({ path: `graph/${name}.architecture.yaml`, name: `${name}.architecture.yaml`, content: "", hasDraft: false, revision: "r" })),
   ApiError: class ApiError extends Error {
     status: number
     constructor(message: string, status: number) {
@@ -656,7 +656,7 @@ describe("document attachments", () => {
     expect(container.textContent).toContain("Generated notes.")
   })
 
-  it("renames the backing document for document and Architecture Graph header edits", async () => {
+  it("renames the backing document for document and Architecture Diagram header edits", async () => {
     const seen: CanvasDocument[] = []
     const initialDoc: CanvasDocument = {
       version: 1, frames: [], strokes: [], texts: [],

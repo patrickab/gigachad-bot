@@ -1,45 +1,45 @@
 import { describe, expect, it } from "vitest"
-import { emptyArchitectureGraph, parseArchitectureGraph, serializeArchitectureGraph } from "@/lib/architectureGraph"
+import { emptyArchitectureDiagram, parseArchitectureDiagram, serializeArchitectureDiagram } from "@/lib/architectureDiagram"
 
-describe("Architecture Graph YAML", () => {
+describe("Architecture Diagram YAML", () => {
   it("round-trips the portable graph shape", () => {
     const nodes = [
       { id: "api", title: "API", bullets: ["validates carts"], position: { x: 10, y: 20 }, shape: "diamond" as const, width: 240, height: 160 },
       { id: "db", title: "Database", bullets: [], position: { x: 300, y: 120 } },
     ]
     const edges = [{ id: "writes", source: "api", target: "db", direction: "one-way" as const, path: { bend: 40 } }]
-    const graph = { ...emptyArchitectureGraph("Checkout"), nodes, edges }
-    expect(parseArchitectureGraph(serializeArchitectureGraph(graph))).toEqual(graph)
+    const graph = { ...emptyArchitectureDiagram("Checkout"), nodes, edges }
+    expect(parseArchitectureDiagram(serializeArchitectureDiagram(graph))).toEqual(graph)
   })
 
   it("rejects dangling connections", () => {
-    expect(() => parseArchitectureGraph("version: 1\ntitle: Test\nnodes: []\nedges:\n  - id: e\n    source: missing\n    target: missing\n    direction: one-way\n")).toThrow("missing node")
+    expect(() => parseArchitectureDiagram("version: 1\ntitle: Test\nnodes: []\nedges:\n  - id: e\n    source: missing\n    target: missing\n    direction: one-way\n")).toThrow("missing node")
   })
 
   it("rejects a malformed connection bend", () => {
     const source = "version: 1\ntitle: Test\nnodes:\n  - id: a\n    title: A\n    bullets: []\n    position: { x: 0, y: 0 }\n  - id: b\n    title: B\n    bullets: []\n    position: { x: 10, y: 10 }\nedges:\n  - id: e\n    source: a\n    target: b\n    direction: one-way\n    path: { bend: nope }\n"
-    expect(() => parseArchitectureGraph(source)).toThrow("path.bend must be a finite number")
+    expect(() => parseArchitectureDiagram(source)).toThrow("path.bend must be a finite number")
   })
 
   it("keeps an elbow edge style, treats a missing one as curved, and rejects unknown styles", () => {
-    const base = { ...emptyArchitectureGraph("T"), nodes: [], edges: [] }
-    expect(parseArchitectureGraph(serializeArchitectureGraph(base)).edgeStyle).toBe("elbow")
-    expect(parseArchitectureGraph(serializeArchitectureGraph({ ...base, edgeStyle: "curved" })).edgeStyle).toBeUndefined()
-    expect(() => parseArchitectureGraph("version: 1\ntitle: T\nnodes: []\nedges: []\nedgeStyle: wavy\n")).toThrow("edgeStyle must be curved or elbow")
+    const base = { ...emptyArchitectureDiagram("T"), nodes: [], edges: [] }
+    expect(parseArchitectureDiagram(serializeArchitectureDiagram(base)).edgeStyle).toBe("elbow")
+    expect(parseArchitectureDiagram(serializeArchitectureDiagram({ ...base, edgeStyle: "curved" })).edgeStyle).toBeUndefined()
+    expect(() => parseArchitectureDiagram("version: 1\ntitle: T\nnodes: []\nedges: []\nedgeStyle: wavy\n")).toThrow("edgeStyle must be curved or elbow")
   })
 
   it("drops legacy size metadata so height follows content", () => {
-    const graph = parseArchitectureGraph("version: 1\ntitle: Test\nnodes:\n  - id: api\n    title: API\n    bullets: []\n    position: { x: 0, y: 0 }\n    size: { width: 320, height: 180 }\nedges: []\n")
+    const graph = parseArchitectureDiagram("version: 1\ntitle: Test\nnodes:\n  - id: api\n    title: API\n    bullets: []\n    position: { x: 0, y: 0 }\n    size: { width: 320, height: 180 }\nedges: []\n")
     expect(graph.nodes[0]).not.toHaveProperty("size")
   })
 
   it("rejects an unknown node shape", () => {
     const source = "version: 1\ntitle: Test\nnodes:\n  - id: a\n    title: A\n    bullets: []\n    position: { x: 0, y: 0 }\n    shape: hexagon\nedges: []\n"
-    expect(() => parseArchitectureGraph(source)).toThrow("shape must be rectangle, ellipse, or diamond")
+    expect(() => parseArchitectureDiagram(source)).toThrow("shape must be rectangle, ellipse, or diamond")
   })
 
   it("rejects a non-positive node width", () => {
     const source = "version: 1\ntitle: Test\nnodes:\n  - id: a\n    title: A\n    bullets: []\n    position: { x: 0, y: 0 }\n    width: 0\nedges: []\n"
-    expect(() => parseArchitectureGraph(source)).toThrow("width must be greater than 0")
+    expect(() => parseArchitectureDiagram(source)).toThrow("width must be greater than 0")
   })
 })

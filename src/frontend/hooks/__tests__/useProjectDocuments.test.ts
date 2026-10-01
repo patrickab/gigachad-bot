@@ -14,7 +14,7 @@ const { impls } = vi.hoisted(() => ({
     attachFileVaultFile: async () => ({ name: "v", mime: "text/plain", url: "u", active: true }),
     loadFileViewerText: async () => "",
     renameDocument: async () => ({ path: "project/proj/document/renamed.md", name: "renamed.md", mime: "text/markdown" }),
-    renameArchitectureGraph: async () => ({ path: "graph/renamed.architecture.yaml", name: "renamed.architecture.yaml" }),
+    renameArchitectureDiagram: async () => ({ path: "graph/renamed.architecture.yaml", name: "renamed.architecture.yaml" }),
   } as Record<string, (...a: any[]) => any>,
 }))
 
@@ -33,7 +33,7 @@ vi.mock("@/lib/api", () => ({
     impls.attachFileVaultFile = async () => ({ name: "v", mime: "text/plain", url: "u", active: true })
     impls.loadFileViewerText = async () => ""
     impls.renameDocument = async () => ({ path: "project/proj/document/renamed.md", name: "renamed.md", mime: "text/markdown" })
-    impls.renameArchitectureGraph = async () => ({ path: "graph/renamed.architecture.yaml", name: "renamed.architecture.yaml" })
+    impls.renameArchitectureDiagram = async () => ({ path: "graph/renamed.architecture.yaml", name: "renamed.architecture.yaml" })
   },
   listProjectDocuments: (...a: any[]) => impls.listProjectDocuments(...a),
   listProjectVaultDocuments: (...a: any[]) => impls.listProjectVaultDocuments(...a),
@@ -48,7 +48,7 @@ vi.mock("@/lib/api", () => ({
   fileViewerRawUrl: (path: string) => `raw:${path}`,
   loadFileViewerText: (...a: any[]) => impls.loadFileViewerText(...a),
   renameDocument: (...a: any[]) => impls.renameDocument(...a),
-  renameArchitectureGraph: (...a: any[]) => impls.renameArchitectureGraph(...a),
+  renameArchitectureDiagram: (...a: any[]) => impls.renameArchitectureDiagram(...a),
 }))
 
 vi.mock("@/lib/drawing", () => ({

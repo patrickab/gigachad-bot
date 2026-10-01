@@ -2,21 +2,21 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Download, Redo2, Save, Undo2, Upload, X } from "lucide-react"
-import { ArchitectureGraphSurface } from "./ArchitectureGraphSurface"
+import { ArchitectureDiagramSurface } from "./ArchitectureDiagramSurface"
 import { MermaidImportModal } from "./MermaidImportModal"
 import { useTabActive } from "./TabManager"
 import {
-  parseArchitectureGraph,
-  serializeArchitectureGraph,
-  type ArchitectureGraph,
-} from "@/lib/architectureGraph"
+  parseArchitectureDiagram,
+  serializeArchitectureDiagram,
+  type ArchitectureDiagram,
+} from "@/lib/architectureDiagram"
 import { graphToMermaidFlowchart, parseMermaidFlowchart } from "@/lib/mermaidGraph"
-import { readArchitectureGraph, writeArchitectureGraph } from "@/lib/api"
+import { readArchitectureDiagram, writeArchitectureDiagram } from "@/lib/api"
 import { useGraphAutosave } from "@/lib/graphAutosave"
 import { subscribeToChanges } from "@/lib/syncStream"
 import { cn } from "@/lib/utils"
 
-interface ArchitectureGraphEditorProps {
+interface ArchitectureDiagramEditorProps {
   path: string
   overlay?: boolean
   onClose: () => void
@@ -32,24 +32,24 @@ type View = "diagram" | "source"
 const HISTORY_LIMIT = 50
 // Edits autosave: the surface commits drafts as you type, and this view debounces
 // them to disk with a bounded max wait so sustained typing still reaches the file.
-export function ArchitectureGraphEditor({ path, overlay = false, onClose, onSaved, onModeLabel }: ArchitectureGraphEditorProps) {
+export function ArchitectureDiagramEditor({ path, overlay = false, onClose, onSaved, onModeLabel }: ArchitectureDiagramEditorProps) {
   const name = path.split("/").pop() ?? path
-  const [graph, setGraph] = useState<ArchitectureGraph | null>(null)
+  const [graph, setGraph] = useState<ArchitectureDiagram | null>(null)
   const [source, setSource] = useState("")
   const [view, setView] = useState<View>("diagram")
   const [error, setError] = useState<string | null>(null)
   const onSavedRef = useRef(onSaved)
   onSavedRef.current = onSaved
 
-  const write = useCallback((content: string) => writeArchitectureGraph(name, content), [name])
+  const write = useCallback((content: string) => writeArchitectureDiagram(name, content), [name])
   const handleSaved = useCallback((content: string) => onSavedRef.current?.(name, content), [name])
-  const handleError = useCallback(() => setError("Could not save Architecture Graph"), [])
+  const handleError = useCallback(() => setError("Could not save Architecture Diagram"), [])
   const { queue, flush, cancel, markSaved, dirty } = useGraphAutosave({ key: name, write, onSaved: handleSaved, onError: handleError })
 
   const active = useTabActive()
   const load = useCallback(async () => {
-    const document = await readArchitectureGraph(name)
-    setGraph(parseArchitectureGraph(document.content))
+    const document = await readArchitectureDiagram(name)
+    setGraph(parseArchitectureDiagram(document.content))
     setSource(document.content)
     markSaved(document.content)
     setUndoStack([])
@@ -61,7 +61,7 @@ export function ArchitectureGraphEditor({ path, overlay = false, onClose, onSave
     setGraph(null)
     setError(null)
     load().catch((cause: unknown) => {
-      if (stillMounted) setError(cause instanceof Error ? cause.message : "Could not load Architecture Graph")
+      if (stillMounted) setError(cause instanceof Error ? cause.message : "Could not load Architecture Diagram")
     })
     return () => { stillMounted = false }
   }, [load])
@@ -74,7 +74,7 @@ export function ArchitectureGraphEditor({ path, overlay = false, onClose, onSave
   useEffect(() => subscribeToChanges((event) => {
     if (dirtyRef.current) return
     if (event.resource_kind !== "document" || !event.resource_key.endsWith(`/${name}`)) return
-    load().catch(() => setError("Could not reload Architecture Graph"))
+    load().catch(() => setError("Could not reload Architecture Diagram"))
   }), [name, load])
 
   useEffect(() => {
@@ -88,7 +88,7 @@ export function ArchitectureGraphEditor({ path, overlay = false, onClose, onSave
   sourceRef.current = source
   const restoreSource = useCallback((nextSource: string) => {
     try {
-      const next = parseArchitectureGraph(nextSource)
+      const next = parseArchitectureDiagram(nextSource)
       setGraph(next)
       setSource(nextSource)
       setError(null)
@@ -114,8 +114,8 @@ export function ArchitectureGraphEditor({ path, overlay = false, onClose, onSave
     restoreSource(next)
   }, [redoStack, restoreSource])
 
-  const applyGraph = useCallback((next: ArchitectureGraph) => {
-    const nextSource = serializeArchitectureGraph(next)
+  const applyGraph = useCallback((next: ArchitectureDiagram) => {
+    const nextSource = serializeArchitectureDiagram(next)
     const previous = sourceRef.current
     setUndoStack((stack) => [...stack, previous].slice(-HISTORY_LIMIT))
     setRedoStack([])
@@ -147,28 +147,28 @@ export function ArchitectureGraphEditor({ path, overlay = false, onClose, onSave
     setSource(nextSource)
     setRedoStack([])
     try {
-      const next = parseArchitectureGraph(nextSource)
+      const next = parseArchitectureDiagram(nextSource)
       setGraph(next)
       setError(null)
       queue(nextSource)
     } catch (cause) {
       // Keep the broken buffer editable; the file keeps its last valid content.
       cancel()
-      setError(cause instanceof Error ? cause.message : "Invalid Architecture Graph YAML")
+      setError(cause instanceof Error ? cause.message : "Invalid Architecture Diagram YAML")
     }
   }, [queue, cancel])
 
   const handleSave = useCallback(() => {
     try {
-      const next = parseArchitectureGraph(source)
-      const normalized = serializeArchitectureGraph(next)
+      const next = parseArchitectureDiagram(source)
+      const normalized = serializeArchitectureDiagram(next)
       setGraph(next)
       setSource(normalized)
       setError(null)
       queue(normalized)
       flush()
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Invalid Architecture Graph YAML")
+      setError(cause instanceof Error ? cause.message : "Invalid Architecture Diagram YAML")
     }
   }, [queue, flush, source])
 
@@ -199,14 +199,14 @@ export function ArchitectureGraphEditor({ path, overlay = false, onClose, onSave
   }, [handleSave, undo, redo, active])
 
   if (!graph) {
-    return <div className="flex min-h-[280px] items-center justify-center text-xs text-ink-faint">{error ?? "Loading Architecture Graph..."}</div>
+    return <div className="flex min-h-[280px] items-center justify-center text-xs text-ink-faint">{error ?? "Loading Architecture Diagram..."}</div>
   }
 
   return (
     <div className={cn("flex min-h-[360px] min-w-0 flex-col bg-paper", overlay && "absolute inset-0 z-30")}>
       <header className="flex h-10 shrink-0 items-center gap-3 border-b border-divider px-3">
         <span className="min-w-0 flex-1 truncate text-xs font-semibold text-ink">{name}</span>
-        <div className="flex items-center gap-1" role="tablist" aria-label="Architecture Graph view">
+        <div className="flex items-center gap-1" role="tablist" aria-label="Architecture Diagram view">
           {(["diagram", "source"] as const).map((candidate) => (
             <button
               key={candidate}
@@ -227,17 +227,17 @@ export function ArchitectureGraphEditor({ path, overlay = false, onClose, onSave
         <button type="button" onClick={handleMermaidExport} className="rounded p-1 text-ink-subtle hover:bg-hover hover:text-ink" aria-label="Copy as Mermaid">
           {mermaidCopied ? <span className="text-[10px] text-ink-muted">Copied</span> : <Download className="h-3.5 w-3.5" />}
         </button>
-        <button type="button" onClick={handleSave} className="rounded p-1 text-ink-subtle hover:bg-hover hover:text-ink" aria-label="Save Architecture Graph"><Save className="h-3.5 w-3.5" /></button>
+        <button type="button" onClick={handleSave} className="rounded p-1 text-ink-subtle hover:bg-hover hover:text-ink" aria-label="Save Architecture Diagram"><Save className="h-3.5 w-3.5" /></button>
         <button type="button" onClick={onClose} className="rounded p-1 text-ink-subtle hover:bg-hover hover:text-danger" aria-label="Close"><X className="h-3.5 w-3.5" /></button>
       </header>
       <MermaidImportModal open={mermaidOpen} onClose={() => setMermaidOpen(false)} onImport={handleMermaidImport} />
       {error && <p className="shrink-0 border-b border-divider bg-surface px-3 py-1.5 text-xs text-danger" role="alert">{error}</p>}
       <div className="min-h-0 flex-1">
         {view === "diagram" ? (
-          <ArchitectureGraphSurface graph={graph} onChange={applyGraph} className="h-full" />
+          <ArchitectureDiagramSurface graph={graph} onChange={applyGraph} className="h-full" />
         ) : (
           <textarea
-            aria-label="Architecture Graph YAML source"
+            aria-label="Architecture Diagram YAML source"
             value={source}
             onChange={(event) => handleSourceChange(event.target.value)}
             spellCheck={false}

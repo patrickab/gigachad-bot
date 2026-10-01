@@ -1,4 +1,4 @@
-// Converts between the canonical Architecture Graph model and a deliberately
+// Converts between the canonical Architecture Diagram model and a deliberately
 // narrow Mermaid flowchart subset: one `flowchart <direction>` header, node
 // declarations using `[]`/`()`/`(())`/`{}` shapes, and `-->`/`<-->` edges with
 // optional `|label|` and an optional Mermaid v11 `id@` explicit edge id.
@@ -9,14 +9,14 @@
 // Upgrade path if broader compatibility is needed: parse through Mermaid's
 // own `mermaidAPI`/`FlowDB` instead of this regex-based reader.
 import {
-  ARCHITECTURE_GRAPH_VERSION,
-  nextArchitectureGraphId,
-  validateArchitectureGraph,
-  type ArchitectureGraph,
-  type ArchitectureGraphEdge,
-  type ArchitectureGraphNode,
-  type ArchitectureGraphNodeShape,
-} from "./architectureGraph"
+  ARCHITECTURE_DIAGRAM_VERSION,
+  nextArchitectureDiagramId,
+  validateArchitectureDiagram,
+  type ArchitectureDiagram,
+  type ArchitectureDiagramEdge,
+  type ArchitectureDiagramNode,
+  type ArchitectureDiagramNodeShape,
+} from "./architectureDiagram"
 
 function escapeMermaidLabel(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/[[\]{}|]/g, (char) => `#${char.charCodeAt(0)};`)
@@ -33,12 +33,12 @@ function labelToTitleAndBullets(label: string): { title: string, bullets: string
   return { title, bullets: rest.map((line) => line.replace(/^[•-]\s*/, "")) }
 }
 
-function titleAndBulletsToLabel(node: ArchitectureGraphNode): string {
+function titleAndBulletsToLabel(node: ArchitectureDiagramNode): string {
   // An empty title would leave `[]` or shift the first bullet into the title slot on re-import.
   return escapeMermaidLabel([node.title || "Untitled node", ...node.bullets.map((bullet) => `• ${bullet}`)].join("<br/>"))
 }
 
-function shapeBrackets(shape: ArchitectureGraphNodeShape | undefined, label: string): string {
+function shapeBrackets(shape: ArchitectureDiagramNodeShape | undefined, label: string): string {
   if (shape === "ellipse") return `((${label}))`
   if (shape === "diamond") return `{${label}}`
   return `[${label}]`
@@ -46,7 +46,7 @@ function shapeBrackets(shape: ArchitectureGraphNodeShape | undefined, label: str
 
 interface ParsedToken {
   id: string
-  shape?: ArchitectureGraphNodeShape
+  shape?: ArchitectureDiagramNodeShape
   label?: string
 }
 
@@ -88,14 +88,14 @@ function parseEdgeLine(line: string): ParsedEdgeLine | null {
 
 const HEADER = /^(?:flowchart|graph)\s+(TB|TD|BT|LR|RL)$/i
 
-/** Parses the supported Mermaid flowchart subset into a validated Architecture Graph. */
-export function parseMermaidFlowchart(source: string, title = "Imported flowchart"): ArchitectureGraph {
+/** Parses the supported Mermaid flowchart subset into a validated Architecture Diagram. */
+export function parseMermaidFlowchart(source: string, title = "Imported flowchart"): ArchitectureDiagram {
   const lines = source.split("\n").map((line) => line.replace(/^\s*%%.*/, "").trim()).filter(Boolean)
   const header = lines[0]?.match(HEADER)
   if (!header) throw new Error("Only a 'flowchart <direction>' or 'graph <direction>' header is supported")
 
-  const nodes = new Map<string, ArchitectureGraphNode>()
-  const edges: ArchitectureGraphEdge[] = []
+  const nodes = new Map<string, ArchitectureDiagramNode>()
+  const edges: ArchitectureDiagramEdge[] = []
   const edgeIds = new Set<string>()
 
   const ensureNode = (token: ParsedToken) => {
@@ -118,7 +118,7 @@ export function parseMermaidFlowchart(source: string, title = "Imported flowchar
       if (!source || !target) throw new Error(`Unsupported Mermaid syntax: ${line}`)
       ensureNode(source)
       ensureNode(target)
-      const id = edgeLine.edgeId ?? nextArchitectureGraphId("edge", edgeIds)
+      const id = edgeLine.edgeId ?? nextArchitectureDiagramId("edge", edgeIds)
       if (edgeIds.has(id)) throw new Error(`Duplicate edge id: ${id}`)
       edgeIds.add(id)
       edges.push({
@@ -138,11 +138,11 @@ export function parseMermaidFlowchart(source: string, title = "Imported flowchar
     position: { x: (index % columns) * 280, y: Math.floor(index / columns) * 200 },
   }))
 
-  return validateArchitectureGraph({ version: ARCHITECTURE_GRAPH_VERSION, title, nodes: positioned, edges })
+  return validateArchitectureDiagram({ version: ARCHITECTURE_DIAGRAM_VERSION, title, nodes: positioned, edges })
 }
 
-/** Serializes an Architecture Graph as a Mermaid flowchart, preserving ids, shapes, and labels. */
-export function graphToMermaidFlowchart(graph: ArchitectureGraph): string {
+/** Serializes an Architecture Diagram as a Mermaid flowchart, preserving ids, shapes, and labels. */
+export function graphToMermaidFlowchart(graph: ArchitectureDiagram): string {
   const lines = ["flowchart TB"]
   for (const node of graph.nodes) lines.push(`    ${node.id}${shapeBrackets(node.shape, titleAndBulletsToLabel(node))}`)
   for (const edge of graph.edges) {

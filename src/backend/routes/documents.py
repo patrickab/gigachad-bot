@@ -84,7 +84,7 @@ def _known_key(store: ProjectStore, path: str) -> str:
     """The logical key for *path*, 404 when it is not one the app knows about.
 
     Allow-list includes the document library, any document a project
-    references, and canonical architecture graphs, expressed in logical keys.
+    references, and canonical architecture diagrams, expressed in logical keys.
     Logical keys cannot escape their application namespace, and anything unknown
     answers 404 so another user's documents stay undiscoverable.
     """

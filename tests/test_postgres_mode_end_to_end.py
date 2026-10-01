@@ -58,27 +58,27 @@ def headers(login: str, device_id: str | None = None) -> dict[str, str]:
 
 
 def test_unidentified_request_is_rejected(client):
-    assert client.get("/api/architecture-graphs").status_code == 401
+    assert client.get("/api/architecture-diagrams").status_code == 401
 
 
 def test_graph_lifecycle_is_revision_checked_and_user_scoped(client):
     alice = headers("alice@example.test", str(uuid4()))
     bob = headers("bob@example.test", str(uuid4()))
 
-    created = client.post("/api/architecture-graphs", json={"name": "checkout.architecture.yaml", "content": GRAPH}, headers=alice)
+    created = client.post("/api/architecture-diagrams", json={"name": "checkout.architecture.yaml", "content": GRAPH}, headers=alice)
     assert created.status_code == 200
     revision = created.json()["revision"]
 
-    read = client.get("/api/architecture-graphs/checkout.architecture.yaml", headers=alice)
+    read = client.get("/api/architecture-diagrams/checkout.architecture.yaml", headers=alice)
     assert read.status_code == 200
     assert read.headers["ETag"] == revision
 
     edited = GRAPH.replace("Checkout", "Checkout v2")
-    blind = client.put("/api/architecture-graphs/checkout.architecture.yaml", json={"content": edited}, headers=alice)
+    blind = client.put("/api/architecture-diagrams/checkout.architecture.yaml", json={"content": edited}, headers=alice)
     assert blind.status_code == 428
 
     saved = client.put(
-        "/api/architecture-graphs/checkout.architecture.yaml",
+        "/api/architecture-diagrams/checkout.architecture.yaml",
         json={"content": edited},
         headers={**alice, "If-Match": revision},
     )
@@ -86,16 +86,16 @@ def test_graph_lifecycle_is_revision_checked_and_user_scoped(client):
     assert saved.json()["content"] == edited
 
     stale = client.put(
-        "/api/architecture-graphs/checkout.architecture.yaml",
+        "/api/architecture-diagrams/checkout.architecture.yaml",
         json={"content": GRAPH},
         headers={**alice, "If-Match": revision},
     )
     assert stale.status_code == 412
-    assert client.get("/api/architecture-graphs/checkout.architecture.yaml", headers=alice).json()["content"] == edited
+    assert client.get("/api/architecture-diagrams/checkout.architecture.yaml", headers=alice).json()["content"] == edited
 
     # Bob shares the key namespace but not the data.
-    assert client.get("/api/architecture-graphs", headers=bob).json() == {"graphs": []}
-    assert client.get("/api/architecture-graphs/checkout.architecture.yaml", headers=bob).status_code == 404
+    assert client.get("/api/architecture-diagrams", headers=bob).json() == {"graphs": []}
+    assert client.get("/api/architecture-diagrams/checkout.architecture.yaml", headers=bob).status_code == 404
 
 
 def test_attachment_bytes_round_trip_through_the_asset_route(client):
@@ -125,8 +125,8 @@ def test_attachment_bytes_round_trip_through_the_asset_route(client):
 def test_writes_append_a_replayable_change_log(client):
     device = str(uuid4())
     alice = headers("alice@example.test", device)
-    client.post("/api/architecture-graphs", json={"name": "a.architecture.yaml", "content": GRAPH}, headers=alice)
-    client.post("/api/architecture-graphs", json={"name": "b.architecture.yaml", "content": GRAPH}, headers=alice)
+    client.post("/api/architecture-diagrams", json={"name": "a.architecture.yaml", "content": GRAPH}, headers=alice)
+    client.post("/api/architecture-diagrams", json={"name": "b.architecture.yaml", "content": GRAPH}, headers=alice)
 
     import config
 

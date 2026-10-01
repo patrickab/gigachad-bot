@@ -37,8 +37,8 @@ export interface ProjectDocument {
   mime: string
 }
 
-/** A live Architecture Graph reference promoted to a chat's active context. */
-export interface ArchitectureGraphContextReference {
+/** A live Architecture Diagram reference promoted to a chat's active context. */
+export interface ArchitectureDiagramContextReference {
   path: string
 }
 

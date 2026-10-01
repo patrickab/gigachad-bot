@@ -1,14 +1,14 @@
 import type { ComponentType, ReactNode } from "react"
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { ArchitectureGraphEditor } from "@/components/ArchitectureGraphEditor"
+import { ArchitectureDiagramEditor } from "@/components/ArchitectureDiagramEditor"
 import { AUTOSAVE_DEBOUNCE_MS, AUTOSAVE_MAX_WAIT_MS } from "@/lib/graphAutosave"
 
 const VALID = "version: 1\ntitle: Test graph\nnodes: []\nedges: []\n"
 
 const api = vi.hoisted(() => ({
-  readArchitectureGraph: vi.fn(),
-  writeArchitectureGraph: vi.fn(async () => ({})),
+  readArchitectureDiagram: vi.fn(),
+  writeArchitectureDiagram: vi.fn(async () => ({})),
 }))
 
 vi.mock("@/lib/api", () => api)
@@ -39,21 +39,21 @@ vi.mock("@xyflow/react", async () => {
 })
 
 async function openSourceTab(name = "demo.architecture.yaml") {
-  api.readArchitectureGraph.mockResolvedValue({ name, path: `/graphs/${name}`, content: VALID, hasDraft: false })
-  render(<ArchitectureGraphEditor path={`/graphs/${name}`} onClose={vi.fn()} />)
+  api.readArchitectureDiagram.mockResolvedValue({ name, path: `/graphs/${name}`, content: VALID, hasDraft: false })
+  render(<ArchitectureDiagramEditor path={`/graphs/${name}`} onClose={vi.fn()} />)
   await act(async () => { await Promise.resolve() })
   fireEvent.click(screen.getByRole("tab", { name: "Source" }))
-  return screen.getByRole("textbox", { name: "Architecture Graph YAML source" })
+  return screen.getByRole("textbox", { name: "Architecture Diagram YAML source" })
 }
 
 const advance = async (ms: number) => {
   await act(async () => { await vi.advanceTimersByTimeAsync(ms) })
 }
 
-describe("ArchitectureGraphEditor autosave", () => {
+describe("ArchitectureDiagramEditor autosave", () => {
   beforeEach(() => {
     vi.useFakeTimers()
-    api.writeArchitectureGraph.mockClear()
+    api.writeArchitectureDiagram.mockClear()
   })
   afterEach(() => vi.useRealTimers())
 
@@ -63,7 +63,7 @@ describe("ArchitectureGraphEditor autosave", () => {
     fireEvent.change(source, { target: { value: "version: 1\ntitle: [broken" } })
     await advance(AUTOSAVE_MAX_WAIT_MS * 2)
 
-    expect(api.writeArchitectureGraph).not.toHaveBeenCalled()
+    expect(api.writeArchitectureDiagram).not.toHaveBeenCalled()
     expect(screen.getByRole("alert")).toBeInTheDocument()
     // The broken text stays editable rather than snapping back.
     expect(source).toHaveValue("version: 1\ntitle: [broken")
@@ -76,16 +76,16 @@ describe("ArchitectureGraphEditor autosave", () => {
     fireEvent.change(source, { target: { value: edited } })
     await advance(AUTOSAVE_DEBOUNCE_MS + 10)
 
-    expect(api.writeArchitectureGraph).toHaveBeenCalledTimes(1)
-    expect(api.writeArchitectureGraph).toHaveBeenCalledWith("demo.architecture.yaml", edited)
+    expect(api.writeArchitectureDiagram).toHaveBeenCalledTimes(1)
+    expect(api.writeArchitectureDiagram).toHaveBeenCalledWith("demo.architecture.yaml", edited)
   })
 
 })
 
-describe("ArchitectureGraphEditor undo/redo", () => {
+describe("ArchitectureDiagramEditor undo/redo", () => {
   it("undoes and redoes a Diagram-view edit with Ctrl+Z / Ctrl+Shift+Z", async () => {
-    api.readArchitectureGraph.mockResolvedValue({ name: "demo.architecture.yaml", path: "/graphs/demo.architecture.yaml", content: VALID, hasDraft: false })
-    render(<ArchitectureGraphEditor path="/graphs/demo.architecture.yaml" onClose={vi.fn()} />)
+    api.readArchitectureDiagram.mockResolvedValue({ name: "demo.architecture.yaml", path: "/graphs/demo.architecture.yaml", content: VALID, hasDraft: false })
+    render(<ArchitectureDiagramEditor path="/graphs/demo.architecture.yaml" onClose={vi.fn()} />)
     await act(async () => { await Promise.resolve() })
 
     fireEvent.click(screen.getByRole("button", { name: "Add node" }))

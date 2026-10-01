@@ -5,8 +5,8 @@ from fastapi import Response
 from psycopg_pool import ConnectionPool
 import pytest
 
-from backend.routes import architecture_graphs
-from lib.architecture_graph import ArchitectureGraphError, ArchitectureGraphStore, parse_graph
+from backend.routes import architecture_diagrams
+from lib.architecture_diagram import ArchitectureDiagramError, ArchitectureDiagramStore, parse_graph
 from lib.db_schema import upgrade
 from lib.postgres_data_store import PostgresDataStore
 
@@ -40,7 +40,7 @@ edges:
 def postgres_pool():
     url = os.environ.get("POSTGRES_TEST_DATABASE_URL")
     if not url:
-        pytest.skip("POSTGRES_TEST_DATABASE_URL is required for Postgres-backed architecture graph tests")
+        pytest.skip("POSTGRES_TEST_DATABASE_URL is required for Postgres-backed architecture diagram tests")
     upgrade(url)
     pool = ConnectionPool(url, min_size=1, max_size=4)
     yield pool
@@ -48,16 +48,16 @@ def postgres_pool():
 
 
 @pytest.fixture
-def graph_store(postgres_pool) -> ArchitectureGraphStore:
+def graph_store(postgres_pool) -> ArchitectureDiagramStore:
     with postgres_pool.connection() as connection, connection.transaction():
         connection.execute("TRUNCATE changes, assets, vault_roots, devices, documents, users CASCADE")
         user_id = connection.execute(
             "INSERT INTO users (tailscale_login) VALUES (%s) RETURNING id", (f"test-{uuid4()}@example.test",)
         ).fetchone()[0]
-    return ArchitectureGraphStore(data_store=PostgresDataStore(postgres_pool, user_id))
+    return ArchitectureDiagramStore(data_store=PostgresDataStore(postgres_pool, user_id))
 
 
-def test_store_writes_lists_and_promotes_a_valid_draft(graph_store: ArchitectureGraphStore):
+def test_store_writes_lists_and_promotes_a_valid_draft(graph_store: ArchitectureDiagramStore):
     store = graph_store
     name = "checkout.architecture.yaml"
 
@@ -73,7 +73,7 @@ def test_store_writes_lists_and_promotes_a_valid_draft(graph_store: Architecture
     assert not store.has_draft(name)
 
 
-def test_store_rename_moves_the_canonical_graph_and_its_draft(graph_store: ArchitectureGraphStore):
+def test_store_rename_moves_the_canonical_graph_and_its_draft(graph_store: ArchitectureDiagramStore):
     store = graph_store
     store.write("checkout.architecture.yaml", CONTENT)
     store.write("checkout.architecture.yaml", CONTENT.replace("Checkout\n", "Renamed checkout\n"), draft=True)
@@ -98,19 +98,19 @@ def test_store_rename_moves_the_canonical_graph_and_its_draft(graph_store: Archi
     ],
 )
 def test_parse_graph_rejects_invalid_relationships(content: str, message: str):
-    with pytest.raises(ArchitectureGraphError, match=message):
+    with pytest.raises(ArchitectureDiagramError, match=message):
         parse_graph(content)
 
 
-def test_store_rejects_traversal_and_non_graph_names(graph_store: ArchitectureGraphStore):
+def test_store_rejects_traversal_and_non_graph_names(graph_store: ArchitectureDiagramStore):
     store = graph_store
-    with pytest.raises(ArchitectureGraphError):
+    with pytest.raises(ArchitectureDiagramError):
         store.write("../outside.architecture.yaml", CONTENT)
-    with pytest.raises(ArchitectureGraphError):
+    with pytest.raises(ArchitectureDiagramError):
         store.write("checkout.yaml", CONTENT)
 
 
-def test_draft_requires_an_existing_canonical_graph(graph_store: ArchitectureGraphStore):
+def test_draft_requires_an_existing_canonical_graph(graph_store: ArchitectureDiagramStore):
     store = graph_store
     with pytest.raises(FileNotFoundError):
         store.write("checkout.architecture.yaml", CONTENT, draft=True)
@@ -140,11 +140,11 @@ class FakeProjects:
         return self.files
 
 
-async def test_graph_route_writes_a_canonical_file_and_associates_project(graph_store: ArchitectureGraphStore):
+async def test_graph_route_writes_a_canonical_file_and_associates_project(graph_store: ArchitectureDiagramStore):
     store = graph_store
     projects = FakeProjects()
-    response = await architecture_graphs.create_graph(
-        architecture_graphs.CreateGraphRequest(name="checkout.architecture.yaml", content=CONTENT, projectSlug="project"),
+    response = await architecture_diagrams.create_graph(
+        architecture_diagrams.CreateGraphRequest(name="checkout.architecture.yaml", content=CONTENT, projectSlug="project"),
         Response(),
         store,
         projects,
@@ -155,19 +155,19 @@ async def test_graph_route_writes_a_canonical_file_and_associates_project(graph_
     assert projects.files == ["graph/checkout.architecture.yaml"]
 
 
-async def test_graph_route_renames_the_canonical_file_and_project_reference(graph_store: ArchitectureGraphStore):
+async def test_graph_route_renames_the_canonical_file_and_project_reference(graph_store: ArchitectureDiagramStore):
     store = graph_store
     projects = FakeProjects()
-    await architecture_graphs.create_graph(
-        architecture_graphs.CreateGraphRequest(name="checkout.architecture.yaml", content=CONTENT, projectSlug="project"),
+    await architecture_diagrams.create_graph(
+        architecture_diagrams.CreateGraphRequest(name="checkout.architecture.yaml", content=CONTENT, projectSlug="project"),
         Response(),
         store,
         projects,
     )
 
-    response = await architecture_graphs.rename_graph(
+    response = await architecture_diagrams.rename_graph(
         "checkout.architecture.yaml",
-        architecture_graphs.RenameGraphRequest(name="system"),
+        architecture_diagrams.RenameGraphRequest(name="system"),
         Response(),
         store,
         projects,

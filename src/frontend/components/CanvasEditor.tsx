@@ -4,8 +4,8 @@ import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 
 import { createPortal } from "react-dom"
 import { getStroke } from "perfect-freehand"
 import { type StrokeData, type EmbedRect, type CanvasEmbedRect, getSvgPathFromStroke, pointInPolygon, renderPageToPng } from "@/lib/drawing"
-import { createArchitectureGraph, fileViewerRawUrl, writeBinaryDocument, listArchitectureGraphs, listNotes, listProjectDocuments, loadFileViewerText, readArchitectureGraph, writeArchitectureGraph, renameArchitectureGraph, renameDocument, removeDocument } from "@/lib/api"
-import { emptyArchitectureGraph, parseArchitectureGraph, serializeArchitectureGraph, type ArchitectureGraph } from "@/lib/architectureGraph"
+import { createArchitectureDiagram, fileViewerRawUrl, writeBinaryDocument, listArchitectureDiagrams, listNotes, listProjectDocuments, loadFileViewerText, readArchitectureDiagram, writeArchitectureDiagram, renameArchitectureDiagram, renameDocument, removeDocument } from "@/lib/api"
+import { emptyArchitectureDiagram, parseArchitectureDiagram, serializeArchitectureDiagram, type ArchitectureDiagram } from "@/lib/architectureDiagram"
 import { useGraphAutosave } from "@/lib/graphAutosave"
 import { useCollaborativeCanvas } from "@/hooks/useCollaborativeCanvas"
 import { useTwoFingerGesture } from "@/hooks/useTwoFingerGesture"
@@ -14,7 +14,7 @@ import { activeThemeName } from "@/lib/palette"
 import { cn } from "@/lib/utils"
 import { Plus, Undo2, Redo2, Trash2, Copy, FileType, ImageIcon, X, Camera, CircleDashed, Type, SquarePen, PenLine, Pencil, Maximize2, Minimize2 } from "lucide-react"
 import { PdfViewer } from "./PdfViewer"
-import { ArchitectureGraphSurface } from "./ArchitectureGraphSurface"
+import { ArchitectureDiagramSurface } from "./ArchitectureDiagramSurface"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { PlotElement, type PlotFigure } from "./PlotElement"
 import { cameraToOffset, HostScaleContext, offsetToCamera, reframeCamera, screenToWorld, zoomCamera, type ZoomAnchor } from "./InfiniteViewport"
@@ -139,7 +139,7 @@ export interface CanvasAttachment {
   x: number
   y: number
   width: number
-  height?: number // Architecture Graphs own their viewport height; legacy attachments retain their aspect
+  height?: number // Architecture Diagrams own their viewport height; legacy attachments retain their aspect
   title?: string // user label, independent of the backing document filename
   page?: number // selected PDF page, persisted with the canvas
 }
@@ -1261,7 +1261,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     if (e.ctrlKey || e.metaKey || e.altKey || e.nativeEvent.isComposing || Array.from(e.key).length !== 1) return
     const target = e.target as HTMLElement
     // Only the bare canvas surface should turn typing into a new text note.
-    // Any nested editable (architecture graph fields, modals, contenteditable) keeps its keystrokes.
+    // Any nested editable (architecture diagram fields, modals, contenteditable) keeps its keystrokes.
     if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable) return
 
     e.preventDefault()
@@ -1292,7 +1292,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   const [projectCanvases, setProjectCanvases] = useState<{ path: string; name: string }[]>([])
   const [projectPdfs, setProjectPdfs] = useState<{ path: string; name: string }[]>([])
   const [projectImages, setProjectImages] = useState<{ path: string; name: string }[]>([])
-  const [architectureGraphs, setArchitectureGraphs] = useState<{ path: string; name: string }[]>([])
+  const [architectureDiagrams, setArchitectureDiagrams] = useState<{ path: string; name: string }[]>([])
   const [documents, setDocuments] = useState<{ path: string; name: string }[]>([])
   useEffect(() => {
     if (!addMenuOpen) return
@@ -1373,7 +1373,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     setAddMenuOpen(false)
   }, [doc, commit, pointAtCenter])
 
-  const addArchitectureGraph = useCallback((path: string) => {
+  const addArchitectureDiagram = useCallback((path: string) => {
     if (doc.attachments.some((attachment) => attachment.path === path)) { setAddMenuOpen(false); return }
     const { cx, cy } = pointAtCenter(DEFAULT_GRAPH_WIDTH, DEFAULT_GRAPH_HEIGHT / DEFAULT_GRAPH_WIDTH)
     commit({ ...doc, attachments: [...doc.attachments, {
@@ -1391,17 +1391,17 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     setAddMenuOpen(false)
   }, [doc, commit, pointAtCenter])
 
-  const createArchitectureGraphWindow = useCallback(async () => {
-    const title = window.prompt("Architecture Graph name")?.trim()
+  const createArchitectureDiagramWindow = useCallback(async () => {
+    const title = window.prompt("Architecture Diagram name")?.trim()
     if (!title) return
     const stem = title.replace(/\.architecture\.yaml$/, "").trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "")
     if (!stem) return
     const name = `${stem}.architecture.yaml`
     try {
-      const created = await createArchitectureGraph(name, serializeArchitectureGraph(emptyArchitectureGraph(title)), slug)
-      addArchitectureGraph(created.path)
+      const created = await createArchitectureDiagram(name, serializeArchitectureDiagram(emptyArchitectureDiagram(title)), slug)
+      addArchitectureDiagram(created.path)
     } catch { /* name already exists or graph storage unavailable */ }
-  }, [addArchitectureGraph, slug])
+  }, [addArchitectureDiagram, slug])
 
   // ponytail: nested edits bypass the parent's history — the nested editor has its own
   // undo/redo, and snapshotting the whole parent per nested stroke would be absurd.
@@ -1431,7 +1431,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     }
     try {
       const renamed = attachment.kind === "architecture-graph"
-        ? await renameArchitectureGraph(attachment.path.split("/").pop()!, title)
+        ? await renameArchitectureDiagram(attachment.path.split("/").pop()!, title)
         : await renameDocument(slug ?? "", attachment.path, title)
       const cur = liveRef.current.doc
       applyChange({ ...cur, attachments: cur.attachments.map((a) => a.id === id ? { ...a, path: renamed.path, title } : a) })
@@ -1761,20 +1761,20 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
               )}
               <div className="mx-2 my-1 border-t border-divider/50" />
               {/* section label only earns its place once there is a list under it */}
-              {architectureGraphs.length > 0 && (
-                <div className="px-3 py-0.5 text-[9px] text-ink-faint uppercase tracking-wider">Architecture Graphs</div>
+              {architectureDiagrams.length > 0 && (
+                <div className="px-3 py-0.5 text-[9px] text-ink-faint uppercase tracking-wider">Architecture Diagrams</div>
               )}
               <button
-                onClick={createArchitectureGraphWindow}
+                onClick={createArchitectureDiagramWindow}
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink hover:bg-hover transition-colors"
               >
                 <Plus className="h-3 w-3 shrink-0 text-ink-faint" />
-                <span>New Architecture Graph</span>
+                <span>New Architecture Diagram</span>
               </button>
-              {architectureGraphs.map((graph) => (
+              {architectureDiagrams.map((graph) => (
                 <button
                   key={graph.path}
-                  onClick={() => addArchitectureGraph(graph.path)}
+                  onClick={() => addArchitectureDiagram(graph.path)}
                   className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink hover:bg-hover transition-colors truncate"
                 >
                   <FileType className="h-3 w-3 shrink-0 text-ink-faint" />
@@ -2155,16 +2155,16 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
           const screenX = att.x * scale + offset.x
           const screenY = att.y * scale + offset.y
           const nested = att.kind === "canvas"
-          const architectureGraph = att.kind === "architecture-graph"
+          const architectureDiagram = att.kind === "architecture-graph"
           const isDocument = att.kind === "document"
           const aspect = nested ? CANVAS_ASPECT : (aspects[att.id] ?? FALLBACK_ASPECT)
-          const name = att.title ?? att.path?.split("/").pop() ?? (architectureGraph ? "Architecture Graph" : nested ? "Canvas" : isDocument ? "Document" : "PDF")
+          const name = att.title ?? att.path?.split("/").pop() ?? (architectureDiagram ? "Architecture Diagram" : nested ? "Canvas" : isDocument ? "Document" : "PDF")
           // PDFs rasterize through a settled layout size. Interactive viewport frames
           // use their actual screen size so pointer coordinates stay exact.
           const contentHeight = att.height ?? att.width * CANVAS_ASPECT
           const screenW = att.width * scale
           const screenH = contentHeight * scale
-          const layoutW = nested || architectureGraph || isDocument ? screenW : Math.min(att.width * settledScale, PDF_LAYOUT_CAP)
+          const layoutW = nested || architectureDiagram || isDocument ? screenW : Math.min(att.width * settledScale, PDF_LAYOUT_CAP)
           // Fullscreen only restyles this same wrapper — moving the window elsewhere in
           // the tree would remount the editor inside it and lose whatever it holds.
           const full = fullscreenId === att.id
@@ -2178,7 +2178,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
               )}
               style={full
                 ? { inset: 0, transform: "none" }
-                : architectureGraph || isDocument
+                : architectureDiagram || isDocument
                   ? { left: screenX, top: screenY, width: screenW, height: screenH, transform: "none" }
                 : { left: screenX, top: screenY, width: layoutW, transform: `scale(${screenW / layoutW})`, transformOrigin: "top left" }}
             >
@@ -2226,11 +2226,11 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
               <div
                 data-canvas-attachment
                 className={cn(full && "flex-1 min-h-0")}
-                style={{ height: full ? undefined : architectureGraph || isDocument ? screenH - 31 : layoutW * aspect }}
+                style={{ height: full ? undefined : architectureDiagram || isDocument ? screenH - 31 : layoutW * aspect }}
                 onPointerDown={(e) => e.stopPropagation()}
               >
-                {architectureGraph ? (
-                  <CanvasArchitectureGraph path={att.path!} maximized={full} hostScale={full ? 1 : scale} />
+                {architectureDiagram ? (
+                  <CanvasArchitectureDiagram path={att.path!} maximized={full} hostScale={full ? 1 : scale} />
                 ) : isDocument ? (
                   <CanvasDocumentAttachment
                     path={att.path!}
@@ -2410,16 +2410,16 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
 // A graph attachment owns only its canvas-local frame; graph content continues to
 // live in the canonical YAML file. It is deliberately rendered at real layout size:
 // CSS scaling would desynchronise React Flow's handles from the pointer.
-function CanvasArchitectureGraph({ path, maximized, hostScale }: { path: string, maximized: boolean, hostScale: number }) {
+function CanvasArchitectureDiagram({ path, maximized, hostScale }: { path: string, maximized: boolean, hostScale: number }) {
   const name = path.split("/").pop() ?? path
-  const [graph, setGraph] = useState<ArchitectureGraph | null>(null)
-  const write = useCallback((content: string) => writeArchitectureGraph(name, content), [name])
+  const [graph, setGraph] = useState<ArchitectureDiagram | null>(null)
+  const write = useCallback((content: string) => writeArchitectureDiagram(name, content), [name])
   const { queue, markSaved, dirty } = useGraphAutosave({ key: name, write })
 
   const load = useCallback(async () => {
-    const document = await readArchitectureGraph(name)
-    const loaded = parseArchitectureGraph(document.content)
-    markSaved(serializeArchitectureGraph(loaded))
+    const document = await readArchitectureDiagram(name)
+    const loaded = parseArchitectureDiagram(document.content)
+    markSaved(serializeArchitectureDiagram(loaded))
     setGraph(loaded)
   }, [name, markSaved])
 
@@ -2441,19 +2441,19 @@ function CanvasArchitectureGraph({ path, maximized, hostScale }: { path: string,
     load().catch(() => {})
   }), [name, load])
 
-  const onChange = useCallback((next: ArchitectureGraph) => {
+  const onChange = useCallback((next: ArchitectureDiagram) => {
     setGraph(next)
-    queue(serializeArchitectureGraph(next))
+    queue(serializeArchitectureDiagram(next))
   }, [queue])
 
-  if (!graph) return <div className="flex h-full items-center justify-center text-[10px] text-ink-faint">Loading Architecture Graph…</div>
-  return <ArchitectureGraphSurface graph={graph} onChange={onChange} className="h-full" autoFit={maximized} hostScale={hostScale} />
+  if (!graph) return <div className="flex h-full items-center justify-center text-[10px] text-ink-faint">Loading Architecture Diagram…</div>
+  return <ArchitectureDiagramSurface graph={graph} onChange={onChange} className="h-full" autoFit={maximized} hostScale={hostScale} />
 }
 
 // A document attachment is a read-only view of a generated chat artifact — a Mermaid
 // or markmap note rendered through the shared markdown renderer, or a Plotly figure
 // through the shared plot renderer. Markdown is laid out at screen size like an
-// Architecture Graph. A plot instead lays out at a zoom-independent width wide enough
+// Architecture Diagram. A plot instead lays out at a zoom-independent width wide enough
 // to avoid overlapping labels, is CSS-scaled into its window, and collapses while a
 // zoom gesture runs: Plotly then redraws at most once per settled zoom, not per frame.
 type DocumentAttachmentState =

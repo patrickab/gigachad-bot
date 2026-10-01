@@ -17,10 +17,10 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.routes.architecture_graphs import router as architecture_graphs_router
+from backend.routes.architecture_diagrams import router as architecture_diagrams_router
 from backend.routes.canvases import router as canvases_router
 from backend.routes.assets import router as assets_router
-from lib.architecture_graph import ArchitectureGraphError, ArchitectureGraphNotFound
+from lib.architecture_diagram import ArchitectureDiagramError, ArchitectureDiagramNotFound
 from lib.data_store import StorageConflictError
 from backend.routes.chat import router as chat_router
 from backend.routes.config import router as config_router
@@ -102,13 +102,13 @@ async def healthz() -> dict[str, str]:
 
 # Graph routes raise their store's vocabulary; map it to HTTP once here rather than per handler.
 # The subclass is registered first so Starlette's MRO lookup gives not-found a 404, not a 400.
-@app.exception_handler(ArchitectureGraphNotFound)
-async def _architecture_graph_not_found(_request: Request, exc: Exception) -> JSONResponse:
+@app.exception_handler(ArchitectureDiagramNotFound)
+async def _architecture_diagram_not_found(_request: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=404, content={"detail": str(exc)})
 
 
-@app.exception_handler(ArchitectureGraphError)
-async def _architecture_graph_invalid(_request: Request, exc: Exception) -> JSONResponse:
+@app.exception_handler(ArchitectureDiagramError)
+async def _architecture_diagram_invalid(_request: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
@@ -119,7 +119,7 @@ async def _storage_conflict(_request: Request, exc: Exception) -> JSONResponse:
 
 
 app.include_router(chat_router)
-app.include_router(architecture_graphs_router)
+app.include_router(architecture_diagrams_router)
 app.include_router(config_router)
 app.include_router(documents_router)
 app.include_router(files_router)

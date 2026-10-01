@@ -1,29 +1,29 @@
 import { parse, stringify } from "yaml"
 
-export const ARCHITECTURE_GRAPH_VERSION = 1
+export const ARCHITECTURE_DIAGRAM_VERSION = 1
 
-export interface ArchitectureGraphPosition {
+export interface ArchitectureDiagramPosition {
   x: number
   y: number
 }
 
-export type ArchitectureGraphNodeShape = "rectangle" | "ellipse" | "diamond"
+export type ArchitectureDiagramNodeShape = "rectangle" | "ellipse" | "diamond"
 
-export interface ArchitectureGraphNode {
+export interface ArchitectureDiagramNode {
   id: string
   title: string
   bullets: string[]
-  position: ArchitectureGraphPosition
+  position: ArchitectureDiagramPosition
   /** Omitted means "rectangle", the original and most common shape. */
-  shape?: ArchitectureGraphNodeShape
+  shape?: ArchitectureDiagramNodeShape
   /** Omitted means the surface picks its own default size. */
   width?: number
   height?: number
 }
 
-export type ArchitectureGraphEdgeDirection = "one-way" | "bidirectional"
-export type ArchitectureGraphEdgeStyle = "curved" | "elbow"
-export interface ArchitectureGraphEdgePath {
+export type ArchitectureDiagramEdgeDirection = "one-way" | "bidirectional"
+export type ArchitectureDiagramEdgeStyle = "curved" | "elbow"
+export interface ArchitectureDiagramEdgePath {
   /**
    * Curved: perpendicular offset of the curve from the chord midpoint.
    * Elbow: offset of the middle lane from its default midpoint.
@@ -32,26 +32,26 @@ export interface ArchitectureGraphEdgePath {
   bend: number
 }
 
-export interface ArchitectureGraphEdge {
+export interface ArchitectureDiagramEdge {
   id: string
   source: string
   target: string
-  direction: ArchitectureGraphEdgeDirection
+  direction: ArchitectureDiagramEdgeDirection
   label?: string
   /** Optional bend; omitted connections use the default route. */
-  path?: ArchitectureGraphEdgePath
+  path?: ArchitectureDiagramEdgePath
 }
 
-export interface ArchitectureGraph {
-  version: typeof ARCHITECTURE_GRAPH_VERSION
+export interface ArchitectureDiagram {
+  version: typeof ARCHITECTURE_DIAGRAM_VERSION
   title: string
-  nodes: ArchitectureGraphNode[]
-  edges: ArchitectureGraphEdge[]
+  nodes: ArchitectureDiagramNode[]
+  edges: ArchitectureDiagramEdge[]
   /** Omitted means "curved", the original look, so older files render unchanged. */
-  edgeStyle?: ArchitectureGraphEdgeStyle
+  edgeStyle?: ArchitectureDiagramEdgeStyle
 }
 
-export interface ArchitectureGraphDocument {
+export interface ArchitectureDiagramDocument {
   name: string
   path: string
   content: string
@@ -60,12 +60,12 @@ export interface ArchitectureGraphDocument {
   revision: string
 }
 
-export function isArchitectureGraphPath(path: string): boolean {
+export function isArchitectureDiagramPath(path: string): boolean {
   return path.endsWith(".architecture.yaml")
 }
 
-export const emptyArchitectureGraph = (title = "Untitled architecture"): ArchitectureGraph => ({
-  version: ARCHITECTURE_GRAPH_VERSION,
+export const emptyArchitectureDiagram = (title = "Untitled architecture"): ArchitectureDiagram => ({
+  version: ARCHITECTURE_DIAGRAM_VERSION,
   title,
   nodes: [],
   edges: [],
@@ -88,9 +88,9 @@ function number(value: unknown, field: string): number {
 }
 
 /** Validates the compact, portable v1 graph document used by both Source and Diagram views. */
-export function validateArchitectureGraph(value: unknown): ArchitectureGraph {
-  const graph = record(value, "Architecture Graph")
-  if (graph.version !== ARCHITECTURE_GRAPH_VERSION) throw new Error(`version must be ${ARCHITECTURE_GRAPH_VERSION}`)
+export function validateArchitectureDiagram(value: unknown): ArchitectureDiagram {
+  const graph = record(value, "Architecture Diagram")
+  if (graph.version !== ARCHITECTURE_DIAGRAM_VERSION) throw new Error(`version must be ${ARCHITECTURE_DIAGRAM_VERSION}`)
   const nodesValue = graph.nodes
   const edgesValue = graph.edges
   if (!Array.isArray(nodesValue)) throw new Error("nodes must be an array")
@@ -112,7 +112,7 @@ export function validateArchitectureGraph(value: unknown): ArchitectureGraph {
     if (shapeValue !== undefined && shapeValue !== "rectangle" && shapeValue !== "ellipse" && shapeValue !== "diamond") {
       throw new Error(`nodes[${index}].shape must be rectangle, ellipse, or diamond`)
     }
-    const size: Partial<Pick<ArchitectureGraphNode, "width" | "height">> = {}
+    const size: Partial<Pick<ArchitectureDiagramNode, "width" | "height">> = {}
     for (const dimension of ["width", "height"] as const) {
       if (node[dimension] === undefined) continue
       const value = number(node[dimension], `nodes[${index}].${dimension}`)
@@ -124,7 +124,7 @@ export function validateArchitectureGraph(value: unknown): ArchitectureGraph {
       title: node.title.trim(),
       bullets: node.bullets.map((bullet) => bullet.trim()).filter(Boolean),
       position: { x: number(position.x, `nodes[${index}].position.x`), y: number(position.y, `nodes[${index}].position.y`) },
-      ...(shapeValue ? { shape: shapeValue as ArchitectureGraphNodeShape } : {}),
+      ...(shapeValue ? { shape: shapeValue as ArchitectureDiagramNodeShape } : {}),
       ...size,
     }
   })
@@ -140,31 +140,31 @@ export function validateArchitectureGraph(value: unknown): ArchitectureGraph {
     if (!nodeIds.has(source) || !nodeIds.has(target)) throw new Error(`edges[${index}] references a missing node`)
     if (edge.direction !== "one-way" && edge.direction !== "bidirectional") throw new Error(`edges[${index}].direction must be one-way or bidirectional`)
     if (edge.label !== undefined && typeof edge.label !== "string") throw new Error(`edges[${index}].label must be a string`)
-    let path: ArchitectureGraphEdgePath | undefined
+    let path: ArchitectureDiagramEdgePath | undefined
     if (edge.path !== undefined) {
       const value = record(edge.path, `edges[${index}].path`)
       path = { bend: number(value.bend, `edges[${index}].path.bend`) }
     }
-    return { id, source, target, direction: edge.direction as ArchitectureGraphEdgeDirection, ...(edge.label?.trim() ? { label: edge.label.trim() } : {}), ...(path ? { path } : {}) }
+    return { id, source, target, direction: edge.direction as ArchitectureDiagramEdgeDirection, ...(edge.label?.trim() ? { label: edge.label.trim() } : {}), ...(path ? { path } : {}) }
   })
 
   if (graph.edgeStyle !== undefined && graph.edgeStyle !== "curved" && graph.edgeStyle !== "elbow") throw new Error("edgeStyle must be curved or elbow")
-  return { version: ARCHITECTURE_GRAPH_VERSION, title: text(graph.title, "title"), nodes, edges, ...(graph.edgeStyle === "elbow" ? { edgeStyle: "elbow" as const } : {}) }
+  return { version: ARCHITECTURE_DIAGRAM_VERSION, title: text(graph.title, "title"), nodes, edges, ...(graph.edgeStyle === "elbow" ? { edgeStyle: "elbow" as const } : {}) }
 }
 
-export function parseArchitectureGraph(source: string): ArchitectureGraph {
+export function parseArchitectureDiagram(source: string): ArchitectureDiagram {
   try {
-    return validateArchitectureGraph(parse(source))
+    return validateArchitectureDiagram(parse(source))
   } catch (error) {
-    throw new Error(error instanceof Error ? error.message : "Invalid Architecture Graph YAML")
+    throw new Error(error instanceof Error ? error.message : "Invalid Architecture Diagram YAML")
   }
 }
 
-export function serializeArchitectureGraph(graph: ArchitectureGraph): string {
-  return stringify(validateArchitectureGraph(graph), { lineWidth: 0 })
+export function serializeArchitectureDiagram(graph: ArchitectureDiagram): string {
+  return stringify(validateArchitectureDiagram(graph), { lineWidth: 0 })
 }
 
-export function nextArchitectureGraphId(prefix: "node" | "edge", existing: Iterable<string>): string {
+export function nextArchitectureDiagramId(prefix: "node" | "edge", existing: Iterable<string>): string {
   const ids = new Set(existing)
   let suffix = 1
   while (ids.has(`${prefix}-${suffix}`)) suffix += 1

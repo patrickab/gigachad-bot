@@ -2,8 +2,8 @@ import type { ComponentType, ReactNode } from "react"
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { useEffect, useState } from "react"
 import { describe, expect, it, vi } from "vitest"
-import { ArchitectureGraphSurface, classifyDrawnShape, duplicateNodes, edgeAttachments, snapToGrid } from "@/components/ArchitectureGraphSurface"
-import { emptyArchitectureGraph, type ArchitectureGraph } from "@/lib/architectureGraph"
+import { ArchitectureDiagramSurface, classifyDrawnShape, duplicateNodes, edgeAttachments, snapToGrid } from "@/components/ArchitectureDiagramSurface"
+import { emptyArchitectureDiagram, type ArchitectureDiagram } from "@/lib/architectureDiagram"
 
 const flow = vi.hoisted(() => ({
   fitView: vi.fn(),
@@ -39,7 +39,7 @@ vi.mock("@xyflow/react", () => {
   }
 })
 
-describe("ArchitectureGraphSurface", () => {
+describe("ArchitectureDiagramSurface", () => {
   it("gives connections sharing a card side their own slot on it", () => {
     const nodes = [
       { id: "left", position: { x: 0, y: 0 }, measured: { width: 100, height: 60 } },
@@ -90,10 +90,10 @@ describe("ArchitectureGraphSurface", () => {
   })
 
   it("keeps the title editor focused while controlled graph updates arrive", () => {
-    const initialGraph = { ...emptyArchitectureGraph(), nodes: [{ id: "node-1", title: "Gateway", bullets: [], position: { x: 0, y: 0 } }] }
+    const initialGraph = { ...emptyArchitectureDiagram(), nodes: [{ id: "node-1", title: "Gateway", bullets: [], position: { x: 0, y: 0 } }] }
     function ControlledSurface() {
-      const [graph, setGraph] = useState<ArchitectureGraph>(initialGraph)
-      return <ArchitectureGraphSurface graph={graph} onChange={setGraph} />
+      const [graph, setGraph] = useState<ArchitectureDiagram>(initialGraph)
+      return <ArchitectureDiagramSurface graph={graph} onChange={setGraph} />
     }
 
     render(<ControlledSurface />)
@@ -108,11 +108,11 @@ describe("ArchitectureGraphSurface", () => {
   it("commits an in-progress title to the graph without disturbing the caret", async () => {
     vi.useFakeTimers()
     try {
-      const initialGraph = { ...emptyArchitectureGraph(), nodes: [{ id: "node-1", title: "Gateway", bullets: [], position: { x: 0, y: 0 } }] }
+      const initialGraph = { ...emptyArchitectureDiagram(), nodes: [{ id: "node-1", title: "Gateway", bullets: [], position: { x: 0, y: 0 } }] }
       const seen = vi.fn()
       function ControlledSurface() {
-        const [graph, setGraph] = useState<ArchitectureGraph>(initialGraph)
-        return <ArchitectureGraphSurface graph={graph} onChange={(next) => { seen(next); setGraph(next) }} />
+        const [graph, setGraph] = useState<ArchitectureDiagram>(initialGraph)
+        return <ArchitectureDiagramSurface graph={graph} onChange={(next) => { seen(next); setGraph(next) }} />
       }
 
       render(<ControlledSurface />)
@@ -137,7 +137,7 @@ describe("ArchitectureGraphSurface", () => {
     flow.zoomIn.mockClear()
     flow.zoomOut.mockClear()
 
-    render(<ArchitectureGraphSurface graph={emptyArchitectureGraph()} onChange={() => {}} />)
+    render(<ArchitectureDiagramSurface graph={emptyArchitectureDiagram()} onChange={() => {}} />)
     fireEvent.wheel(screen.getByTestId("flow"), { deltaY: -100 })
 
     expect(flow.zoomIn).toHaveBeenCalledOnce()
@@ -151,15 +151,15 @@ describe("ArchitectureGraphSurface", () => {
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
       await promise
     })
-    const { rerender } = render(<ArchitectureGraphSurface graph={emptyArchitectureGraph()} onChange={() => {}} />)
+    const { rerender } = render(<ArchitectureDiagramSurface graph={emptyArchitectureDiagram()} onChange={() => {}} />)
     await nextFrames()
     expect(flow.fitView).not.toHaveBeenCalled()
 
-    rerender(<ArchitectureGraphSurface graph={emptyArchitectureGraph()} onChange={() => {}} autoFit />)
+    rerender(<ArchitectureDiagramSurface graph={emptyArchitectureDiagram()} onChange={() => {}} autoFit />)
     await nextFrames()
     expect(flow.fitView).toHaveBeenCalledOnce()
 
-    rerender(<ArchitectureGraphSurface graph={emptyArchitectureGraph()} onChange={() => {}} autoFit={false} />)
+    rerender(<ArchitectureDiagramSurface graph={emptyArchitectureDiagram()} onChange={() => {}} autoFit={false} />)
     await nextFrames()
     expect(flow.fitView).toHaveBeenCalledOnce()
   })
