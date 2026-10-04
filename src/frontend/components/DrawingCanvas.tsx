@@ -217,14 +217,14 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
                 )}
               </div>
               <div className="flex items-center gap-1">
-                <button
+                <button aria-label="Undo stroke"
                   onClick={handleUndo}
                   disabled={strokes.length === 0}
                   className="rounded p-1.5 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors"
                 >
                   <Undo2 className="h-4 w-4" />
                 </button>
-                <button
+                <button aria-label="Clear drawing"
                   onClick={handleClear}
                   disabled={strokes.length === 0}
                   className="rounded p-1.5 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors"
@@ -244,13 +244,14 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
                   {strokeWidth === "thin" ? "Thin" : "Thick"}
                 </button>
                 <button
+                  aria-label={isMaximized ? "Restore drawing window" : "Maximize drawing window"}
                   onClick={() => setIsMaximized((m) => !m)}
                   className="rounded p-1.5 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
                 >
                   {isMaximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
                 </button>
                 <div className="w-px h-4 bg-divider-strong mx-1" />
-                <button
+                <button aria-label="Close drawing"
                   onClick={onClose}
                   className="rounded p-1.5 text-ink-subtle hover:text-danger transition-colors"
                 >

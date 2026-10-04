@@ -59,6 +59,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   // trigger an effect-driven re-invocation loop in `TabManager`.
   const projectDataRef = useRef<ProjectData | null>(null)
   useEffect(() => { projectDataRef.current = projectData }, [projectData])
+  // Deletes commit after an undo window; they must see the project open at commit time, not at click time.
+  const activeProjectRef = useRef<string | null>(null)
+  useEffect(() => { activeProjectRef.current = activeProject }, [activeProject])
 
   const runGuarded = useCallback(
     async <T,>(fn: (project: string) => Promise<T>): Promise<T | null> => {
@@ -108,13 +111,13 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
 
   const deleteProject = useCallback(async (name: string) => {
     await apiDeleteProject(name)
-    if (activeProject === name) {
+    if (activeProjectRef.current === name) {
       bumpVersion()
       setActiveProject(null)
       setProjectData(null)
     }
     await refreshProjects()
-  }, [activeProject, refreshProjects, bumpVersion])
+  }, [refreshProjects, bumpVersion])
 
   const addCard = useCallback(async (title: string, description: string, state: string = "backlog") => {
     const card = await runGuarded((p) => apiAddProjectCard(p, title, description, state))

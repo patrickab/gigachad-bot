@@ -41,6 +41,7 @@ import { SidebarProvider, type AppSurface } from "@/contexts/SidebarContext"
 import { MemoryViewerProvider } from "@/contexts/MemoryViewerContext"
 import { MemoryViewer } from "@/components/MemoryViewer"
 import { DesktopBackendProvider } from "@/components/DesktopBackendProvider"
+import { UndoDeleteProvider, useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { updateLastMsg as updateLastAssistant } from "@/lib/utils"
 import {
   loadChatHistory as apiLoadChatHistory,
@@ -127,6 +128,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     totalUsage,
     setTotalUsage,
   } = useChat()
+  const { schedule: scheduleDelete } = useUndoDelete()
 
   const {
     refreshAll,
@@ -190,6 +192,9 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   const liveCanvasRef = useRef<{ path: string; content: string } | null>(null)
   const [ocrImage, setOCRImage] = useState<string | null>(null)
   const [chatId, setChatId] = useState(() => tab.chatId)
+  // Undo restores run up to six seconds later; they must not patch a different chat loaded into this tab meanwhile.
+  const chatIdRef = useRef(chatId)
+  useEffect(() => { chatIdRef.current = chatId }, [chatId])
   const [extracting, setExtracting] = useState(0)
 
   const vault = useVaultPicker({
@@ -528,20 +533,44 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   }, [setMessages])
 
   const handleRemoveAttachment = useCallback((messageIndex: number, attachmentName: string) => {
-    setMessages(prev => {
+    const original = messages[messageIndex]
+    const att = original?.attachments?.find(a => a.name === attachmentName)
+    if (!original || !att) return
+    const scheduledChat = chatId
+    const patch = (attachments: Attachment[], hiddenContent: string | undefined) => setMessages(prev => {
+      if (chatIdRef.current !== scheduledChat || !prev[messageIndex]?.attachments) return prev
       const copy = [...prev]
-      const msg = copy[messageIndex]
-      if (msg?.attachments) {
-        const att = msg.attachments.find(a => a.name === attachmentName)
-        // Vault refs have no upload copy — and the source file must never be deleted.
-        if (att && !att.vaultPath) deleteAttachment(chatId, attachmentName, activeProject).catch(() => { })
-        const remaining = msg.attachments.filter(a => a.name !== attachmentName)
-        const hiddenContent = buildHiddenContent(remaining) || undefined
-        copy[messageIndex] = { ...msg, attachments: remaining, hiddenContent }
-      }
+      copy[messageIndex] = { ...prev[messageIndex], attachments, hiddenContent }
       return copy
     })
-  }, [setMessages, chatId, activeProject])
+    const remaining = original.attachments!.filter(a => a.name !== attachmentName)
+    // Removed from the chat (and from what the model sees) at once; the upload goes after the undo window.
+    patch(remaining, buildHiddenContent(remaining) || undefined)
+    scheduleDelete(
+      `attachment:${chatId}:${messageIndex}:${attachmentName}`,
+      attachmentName,
+      async () => {
+        // Vault refs have no upload copy — and the source file must never be deleted.
+        if (!att.vaultPath) await deleteAttachment(chatId, attachmentName, activeProject)
+      },
+      () => patch(original.attachments!, original.hiddenContent),
+    )
+  }, [messages, setMessages, chatId, activeProject, scheduleDelete])
+
+  // Nothing to commit: the pair leaves the chat (and what the model sees) at once; Undo puts it back.
+  const handleDeletePair = useCallback((index: number) => {
+    const user = messages[index]
+    const assistant = messages[index + 1]
+    if (!user || !assistant) return
+    deleteMessagePair(index)
+    const scheduledChat = chatId
+    scheduleDelete(`pair:${chatId}:${index}`, "message pair", async () => {}, () => setMessages((current) => {
+      if (chatIdRef.current !== scheduledChat) return current
+      const copy = [...current]
+      copy.splice(index, 0, user, assistant)
+      return copy
+    }))
+  }, [messages, deleteMessagePair, setMessages, chatId, scheduleDelete])
 
   const handleAttachmentContentChange = useCallback((messageIndex: number, attachmentName: string, newContent: string) => {
     setMessages(prev => {
@@ -565,6 +594,8 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     onOpenVault: vault.openVaultPicker,
     documents: docs.mergedDocuments,
     onSelectDocument: docs.handleDocumentSelect,
+    onAttachArchitecture: docs.handleAttachArchitecture,
+    architectureError: docs.architectureError,
     onOpenDocuments: activeProject ? docs.openDocuments : undefined,
     onCreateDocument: activeProject ? () => docs.setCreateDocOpen(true) : undefined,
     onDeleteDocument: docs.handleDeleteDocument,
@@ -574,11 +605,13 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     vaultPaths: docs.vaultDocPaths,
     vaultEditingPath: vault.vaultEditPath,
     onEditVaultDocument: vault.setVaultEditPath,
+    editorModel: config.selectedModel,
   }), [
     handleRemoveAttachment, handleToggleAttachmentActive, handleAttachmentContentChange,
     vault.vaultEnabled, vault.openVaultPicker, vault.vaultEditPath, vault.setVaultEditPath,
     docs.handleDeleteDocument, docs.handleRenameDocument, docs.handleDocumentSaved, docs.vaultDocPaths,
-    activeProject,
+    docs.handleAttachArchitecture, docs.architectureError,
+    activeProject, config.selectedModel,
   ])
 
   const handleCascadeDelete = useCallback(async (filename: string) => {
@@ -651,6 +684,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           <div className="flex items-center gap-2">
             {appMode === "canvas" && (
               <button
+                aria-label={canvasFullscreen ? "Exit canvas fullscreen" : "Enter canvas fullscreen"}
                 onClick={() => setCanvasFullscreen((f) => !f)}
                 className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
               >
@@ -671,6 +705,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
               onCloseEditor={() => setCanvasSel(null)}
               onCreated={setCanvasSel}
               onModeLabel={onModeLabel}
+              editorModel={config.selectedModel}
             />
           ) : (
           <ChatSidebarProvider value={sidebarContext}>
@@ -678,10 +713,10 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
               chatId={chatId}
               messages={messages}
               isStreaming={isStreaming}
+              onDeletePair={handleDeletePair}
               extracting={extracting > 0}
               onSend={handleSend}
               onCancel={cancel}
-              onDeletePair={deleteMessagePair}
               onRegenerate={handleRegenerate}
               onBranch={tab.historyFile ? handleBranch : undefined}
               focusQaIndex={focusQaIndex}
@@ -897,9 +932,11 @@ export default function Home() {
     <DesktopBackendProvider>
       <SettingsProvider>
         <ProjectProvider>
+          <UndoDeleteProvider>
           <div id="main-content" className="h-dvh">
             <AppContent />
           </div>
+          </UndoDeleteProvider>
         </ProjectProvider>
       </SettingsProvider>
     </DesktopBackendProvider>

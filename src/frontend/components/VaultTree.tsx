@@ -286,7 +286,7 @@ export function VaultTree<T>({
               )}
             </button>
             {(onPlusClick || onAddVault || onAddFolder) && (
-              <button
+              <button aria-label={`${plusTitle ?? "Add item"}`}
                 onClick={(e) => { e.stopPropagation(); handlePlus() }}
                 className="p-1 rounded text-ink-subtle hover:text-ink hover:bg-surface transition-colors"
               >
@@ -428,7 +428,7 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
         </button>
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
           {isVault && !item.mounted && onMemoryClick && (
-            <button
+            <button aria-label={`Open memory for ${item.label}`}
               onClick={(e) => { e.stopPropagation(); onMemoryClick(item.id) }}
               className="p-0.5 rounded text-ink-faint hover:text-ink transition-colors"
             >
@@ -436,7 +436,7 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
             </button>
           )}
           {onAddFolder && (
-            <button
+            <button aria-label={`Add folder to ${item.label}`}
               onClick={(e) => {
                 e.stopPropagation()
                 setCreateMode("folder")
@@ -449,7 +449,7 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
             </button>
           )}
           {isVault && item.mountable && onAddMountpoint && (
-            <button
+            <button aria-label={`Add mountpoint to ${item.label}`}
               onClick={(e) => {
                 e.stopPropagation()
                 setCreateMode("mountpoint")
@@ -463,7 +463,7 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
             </button>
           )}
           {onVaultDelete && (
-            <button
+            <button aria-label={`${item.mounted ? "Unmount" : "Delete"} ${item.label}`}
               onClick={(e) => { e.stopPropagation(); onVaultDelete(item.id) }}
               className="p-0.5 rounded text-ink-faint hover:text-danger transition-colors"
             >
@@ -544,7 +544,7 @@ function ElementNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number
         </button>
           {onElementDelete && !item.isSystem && (
           <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button
+            <button aria-label={`Delete ${item.label}`}
               onClick={() => onElementDelete(item)}
               className="p-0.5 rounded text-ink-faint hover:text-danger transition-colors shrink-0"
             >

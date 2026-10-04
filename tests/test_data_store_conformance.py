@@ -66,6 +66,22 @@ def test_stale_write_rejects_deleted_key(store: DataStore):
         store.write_bytes("state.json", b"two", expected=revision)
 
 
+def test_write_many_is_all_or_nothing(store: DataStore):
+    first = store.write_bytes("ws/a.c4", b"a1")
+    second = store.write_bytes("ws/b.c4", b"b1")
+    store.write_bytes("ws/b.c4", b"b2", expected=second)
+
+    with pytest.raises(StorageConflictError):
+        store.write_many([("ws/a.c4", b"a2", first), ("ws/new.json", b"{}", None), ("ws/b.c4", b"b3", second)])
+
+    assert store.read_bytes("ws/a.c4")[0] == b"a1"
+    assert not store.exists("ws/new.json")
+
+    current = store.read_bytes("ws/b.c4")[1]
+    store.write_many([("ws/a.c4", b"a2", first), ("ws/b.c4", b"b3", current)])
+    assert [store.read_bytes(key)[0] for key in ("ws/a.c4", "ws/b.c4")] == [b"a2", b"b3"]
+
+
 def test_list_reports_direct_children_and_recursive_descendants(store: DataStore):
     store.write_bytes("parent/one.txt", b"1")
     store.write_bytes("parent/nested/two.txt", b"22")

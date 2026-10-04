@@ -212,7 +212,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                   )}
                   <span className="max-w-[160px] truncate text-xs text-ink">{att.name}</span>
                 </div>
-                <button
+                <button aria-label={`Remove ${att.name}`}
                   onClick={() => removeAttachment(att.name)}
                   className="absolute -right-1 -top-1 rounded-full bg-surface-elevated p-0.5 text-ink-muted hover:text-danger"
                 >
@@ -248,7 +248,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             <div className="flex items-center gap-1">
               <input ref={fileRef} type="file" accept="image/*,application/pdf,.md,.txt,.csv,.json,.xml,.yaml,.yml,.toml,.rst,.log,.py,.js,.ts,.jsx,.tsx,.css,.html,.sh,.bash,.zsh,.go,.rs,.java,.c,.cpp,.h,.hpp,.rb,.php,.sql,.r,.tex,.bib" multiple onChange={handleFileSelect} className="hidden" />
               <div className="relative" ref={attachMenuRef}>
-                <button
+                <button aria-label="Add attachment"
                   onClick={() => setShowAttachMenu(!showAttachMenu)}
                   disabled={disabled}
                   className={cn(
@@ -285,7 +285,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             </div>
             <div className="flex items-center gap-1">
               <div className="relative" ref={toolsRef}>
-                <button
+                <button aria-label="Toggle tools"
                   onClick={() => setShowTools(!showTools)}
                   disabled={disabled}
                   className={cn(
@@ -307,7 +307,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                   </div>
                 )}
               </div>
-              <button
+              <button aria-label={`${isListening ? "Stop listening" : "Start listening"}`}
                 onClick={toggleListening}
                 disabled={disabled}
                 className={cn(
@@ -327,11 +327,11 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                   <Square className="h-4 w-4 fill-current" />
                 </button>
               ) : extracting ? (
-                <button disabled className="rounded-full p-2.5 bg-surface-elevated text-ink-subtle">
+                <button aria-label="Extracting attachment" disabled className="rounded-full p-2.5 bg-surface-elevated text-ink-subtle">
                   <Loader2 className="h-4 w-4 animate-spin" />
                 </button>
               ) : (
-                <button
+                <button aria-label="Send message"
                   onClick={handleSubmit}
                   disabled={disabled || !canSend}
                   className={cn(

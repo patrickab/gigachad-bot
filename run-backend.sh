@@ -6,6 +6,7 @@ profile=development
 tailscale=false
 postgres_started=false
 backend_pid=''
+c4_pid=''
 
 usage() {
     printf 'usage: %s [--prod] [--tailscale]\n' "${BASH_SOURCE[0]}" >&2
@@ -34,11 +35,13 @@ fi
 
 project="gigachad-dev"
 port=8001
+c4_port=8011
 pg_host=127.0.0.1
 pg_port=5432
 if [[ "$profile" == production ]]; then
     project="gigachad-prod"
     port=8002
+    c4_port=8012
     pg_host=127.0.0.2
     pg_port=5433
 fi
@@ -60,23 +63,28 @@ stop_postgres() {
     fi
 }
 
+stop_children() {
+    local pid
+    for pid in "$backend_pid" "$c4_pid"; do
+        if [[ -n "$pid" ]]; then
+            kill -TERM "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+        fi
+    done
+    backend_pid=''
+    c4_pid=''
+}
+
 cleanup() {
     local status=$?
     trap - EXIT INT TERM
-    if [[ -n "$backend_pid" ]]; then
-        kill -TERM "$backend_pid" 2>/dev/null || true
-        wait "$backend_pid" 2>/dev/null || true
-    fi
+    stop_children
     stop_postgres
     exit "$status"
 }
 
 interrupt() {
-    if [[ -n "$backend_pid" ]]; then
-        kill -TERM "$backend_pid" 2>/dev/null || true
-        wait "$backend_pid" 2>/dev/null || true
-        backend_pid=''
-    fi
+    stop_children
     exit 0
 }
 
@@ -124,6 +132,17 @@ if [[ "$profile" == development ]]; then
     uv sync
 fi
 export PATH="$root_dir/.venv/bin:$PATH"
+if [[ "$profile" == development || ! -d "$root_dir/src/c4/node_modules" ]]; then
+    printf 'Installing C4 service dependencies\n'
+    npm ci --prefix "$root_dir/src/c4" --no-audit --no-fund
+fi
+
+# The C4 service parses and edits LikeC4 sources for the architecture routes.
+# Loopback only, stateless, owned by this script's lifetime.
+printf 'Starting C4 service on http://127.0.0.1:%s\n' "$c4_port"
+C4_SERVICE_HOST=127.0.0.1 C4_SERVICE_PORT="$c4_port" node "$root_dir/src/c4/server.ts" &
+c4_pid=$!
+export C4_SERVICE_URL="http://127.0.0.1:${c4_port}"
 
 if [[ "$tailscale" == true ]]; then
     printf 'Configuring Tailnet-only HTTPS ingress\n'

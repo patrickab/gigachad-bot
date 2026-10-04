@@ -20,11 +20,13 @@ interface CanvasWorkspaceProps {
   onCloseEditor: () => void
   onCreated: (sel: CanvasSelection) => void
   onModeLabel?: (label: string) => void
+  /** Model behind the document editor's LLM features (assistant sidebar, inline edit). */
+  editorModel?: string
 }
 
 const SCRATCH_STORAGE_KEY = "scratch-canvas-doc"
 
-export function CanvasWorkspace({ selected, slug, toolbarSlot, onCloseEditor, onCreated, onModeLabel }: CanvasWorkspaceProps) {
+export function CanvasWorkspace({ selected, slug, toolbarSlot, onCloseEditor, onCreated, onModeLabel, editorModel }: CanvasWorkspaceProps) {
   // The scratch canvas shown by default — no backing file until the user saves
   // it, so it lives in localStorage: every change persists, and leaving canvas
   // mode (which unmounts this component) loses nothing.
@@ -97,13 +99,15 @@ export function CanvasWorkspace({ selected, slug, toolbarSlot, onCloseEditor, on
         canvasToolbarSlot={toolbarSlot}
         onClose={onCloseEditor}
         onModeLabel={onModeLabel}
+        model={editorModel}
       />
     )
   }
 
   return (
     <div className="relative h-full">
-      <CanvasEditor doc={doc} onChange={setDoc} toolbarSlot={toolbarSlot} />
+      {/* The scratch canvas belongs to the open project (it is saved there too), so it offers that project's documents and architecture. */}
+      <CanvasEditor doc={doc} onChange={setDoc} slug={slug ?? undefined} toolbarSlot={toolbarSlot} />
       <SaveChatModal
         open={saveOpen}
         onClose={() => setSaveOpen(false)}

@@ -1,8 +1,8 @@
-import type { ArchitectureDiagramContextReference, Attachment, BackendConfig, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpCatalog, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ReasoningSupport, ResearchRequest, Usage, VaultFile, VaultNode } from "./types"
+import type { Attachment, BackendConfig, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpCatalog, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ReasoningSupport, ResearchRequest, Usage, VaultFile, VaultNode } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { getApiBase } from "./config"
-import type { ArchitectureDiagramDocument } from "./architectureDiagram"
+import type { ArchitectureOperation, ArchitectureWorkspace } from "./architecture"
 import type { CanvasDocument } from "@/components/CanvasEditor"
 import { getDeviceId } from "./deviceId"
 
@@ -29,8 +29,6 @@ export class ApiError extends Error {
     this.name = "ApiError"
   }
 }
-
-export const GRAPH_REVISION_CONFLICT = 412
 
 export type CanvasEntity = "stroke" | "frame" | "attachment" | "text"
 
@@ -218,7 +216,7 @@ export async function fetchBranchMeta(dirs?: string[]): Promise<Record<string, B
   return request(`/chat-histories/branch-meta${params}`)
 }
 
-export async function loadChatHistory(filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null; title: string | null; usage: Usage | null; parent_id: string | null; branch_message_idx: number | null; children: BranchMeta["children"]; architecture_graph_contexts: ArchitectureDiagramContextReference[] }> {
+export async function loadChatHistory(filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null; title: string | null; usage: Usage | null; parent_id: string | null; branch_message_idx: number | null; children: BranchMeta["children"] }> {
   return request(`/chat-histories/${filename}`)
 }
 
@@ -230,7 +228,6 @@ export interface SaveChatHistoryOptions {
   parentId?: string | null
   branchMessageIdx?: number | null
   children?: BranchMeta["children"] | null
-  architectureDiagramContexts?: ArchitectureDiagramContextReference[] | null
 }
 
 export async function saveChatHistory(filename: string, messages: Message[] = [], opts: SaveChatHistoryOptions = {}): Promise<{ status: string; filename: string }> {
@@ -238,7 +235,6 @@ export async function saveChatHistory(filename: string, messages: Message[] = []
   if (opts.parentId !== undefined) body.parent_id = opts.parentId
   if (opts.branchMessageIdx !== undefined) body.branch_message_idx = opts.branchMessageIdx
   if (opts.children !== undefined) body.children = opts.children
-  if (opts.architectureDiagramContexts !== undefined) body.architecture_graph_contexts = opts.architectureDiagramContexts
   return put(`/chat-histories/${filename}`, body)
 }
 
@@ -464,58 +460,35 @@ export async function writeDocument(slug: string, name: string, content: string 
   return post<ProjectDocument>("/documents/write", { slug, name, content })
 }
 
-export async function listArchitectureDiagrams(): Promise<ProjectDocument[]> {
-  const data = await request<{ graphs: ProjectDocument[] }>("/architecture-diagrams")
-  return data.graphs
+// Architecture writes carry no revision. Structured operations are revalidated
+// against the server's current model: one that no longer fits is rejected with a
+// 400 and a reason. A source save replaces the file with the supplied text,
+// whatever it held meanwhile, provided the model then parses without errors.
+const architecturePath = (slug: string) => `/architecture/${encodeURIComponent(slug)}`
+
+/** The whole model: every view, with saved positions applied; empty for a project without an architecture. */
+export function readArchitecture(slug: string): Promise<ArchitectureWorkspace> {
+  return request<ArchitectureWorkspace>(architecturePath(slug))
 }
 
-// The server rejects a write whose revision is stale, so every reader records the
-// revision it saw. Keeping it here means a graph view needs no revision plumbing.
-const graphRevisions = new Map<string, string>()
-
-export async function readArchitectureDiagram(name: string): Promise<ArchitectureDiagramDocument> {
-  const document = await request<ArchitectureDiagramDocument>(`/architecture-diagrams/${encodeURIComponent(name)}`)
-  graphRevisions.set(name, document.revision)
-  return document
+/** `file` is the editing window's source, where top-level elements drawn there are written; null for ops that name their own file, e.g. creating a package. */
+export function applyArchitectureOperations(slug: string, ops: ArchitectureOperation[], file: string | null): Promise<ArchitectureWorkspace> {
+  return post<ArchitectureWorkspace>(`${architecturePath(slug)}/ops`, { ops, file })
 }
 
-export async function createArchitectureDiagram(name: string, content: string, projectSlug?: string | null): Promise<ArchitectureDiagramDocument> {
-  const document = await post<ArchitectureDiagramDocument>("/architecture-diagrams", { name, content, projectSlug: projectSlug ?? null })
-  graphRevisions.set(name, document.revision)
-  return document
+/** Replaces `path` with `content`; rejected unless the model then parses without errors. */
+export function writeArchitectureSource(slug: string, path: string, content: string): Promise<ArchitectureWorkspace> {
+  return put<ArchitectureWorkspace>(`${architecturePath(slug)}/source`, { path, content })
 }
 
-function putGraph(name: string, content: string): Promise<ArchitectureDiagramDocument> {
-  const revision = graphRevisions.get(name)
-  return put<ArchitectureDiagramDocument>(
-    `/architecture-diagrams/${encodeURIComponent(name)}`,
-    { content },
-    revision ? { "If-Match": revision } : {},
-  )
+/** Adds a source file exactly as named, empty: for writing `.c4` by hand. */
+export function createArchitectureSource(slug: string, path: string): Promise<ArchitectureWorkspace> {
+  return post<ArchitectureWorkspace>(`${architecturePath(slug)}/source`, { path })
 }
 
-export async function writeArchitectureDiagram(name: string, content: string): Promise<ArchitectureDiagramDocument> {
-  let document: ArchitectureDiagramDocument
-  try {
-    document = await putGraph(name, content)
-  } catch (cause) {
-    if (!(cause instanceof ApiError) || cause.status !== GRAPH_REVISION_CONFLICT) throw cause
-    // Another device wrote first. Re-read to learn the current revision, then let
-    // this editor's state win once. ponytail: whole-document last-writer-wins for a
-    // graph edited on two devices at the same second; a per-element merge or a CRDT
-    // is the upgrade path if that becomes a real conflict rather than a rare race.
-    await readArchitectureDiagram(name)
-    document = await putGraph(name, content)
-  }
-  graphRevisions.set(name, document.revision)
-  return document
-}
-
-export async function renameArchitectureDiagram(name: string, newName: string): Promise<ArchitectureDiagramDocument> {
-  const document = await post<ArchitectureDiagramDocument>(`/architecture-diagrams/${encodeURIComponent(name)}/rename`, { name: newName })
-  graphRevisions.delete(name)
-  graphRevisions.set(document.name, document.revision)
-  return document
+/** Deletes the files together, rejected while the remaining files still use what they declare. */
+export function deleteArchitectureSources(slug: string, paths: string[]): Promise<ArchitectureWorkspace> {
+  return del<ArchitectureWorkspace>(`${architecturePath(slug)}/source${toQuery({ path: paths })}`)
 }
 
 export async function writeBinaryDocument(slug: string, filename: string, blob: Blob): Promise<ProjectDocument> {
@@ -574,16 +547,14 @@ export interface SaveProjectTabOptions {
   tabName?: string
   title?: string
   usage?: Usage
-  architectureDiagramContexts?: ArchitectureDiagramContextReference[] | null
 }
 
 export async function saveProjectTab(name: string, filename: string, messages: Message[], opts: SaveProjectTabOptions = {}): Promise<{ status: string }> {
   const body: Record<string, unknown> = { filename, messages, chat_id: opts.chatId ?? null, tab_name: opts.tabName ?? null, title: opts.title ?? null, usage: opts.usage ?? null }
-  if (opts.architectureDiagramContexts !== undefined) body.architecture_graph_contexts = opts.architectureDiagramContexts
   return put(`/projects/${encodeURIComponent(name)}/tabs/${encodeURIComponent(filename)}`, body)
 }
 
-export async function loadProjectTab(name: string, filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null; title: string | null; usage: Usage | null; parent_id: string | null; branch_message_idx: number | null; architecture_graph_contexts: ArchitectureDiagramContextReference[] }> {
+export async function loadProjectTab(name: string, filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null; title: string | null; usage: Usage | null; parent_id: string | null; branch_message_idx: number | null }> {
   return request(`/chat-histories/${encodeURIComponent(name)}/${encodeURIComponent(filename)}`)
 }
 

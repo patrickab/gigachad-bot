@@ -280,6 +280,7 @@ function AsciiDiagram({ codeString }: { codeString: string }) {
         <code>{codeString}</code>
       </pre>
       <button
+        aria-label="Copy diagram"
         onClick={handleCopy}
         className="absolute top-2 right-2 rounded p-1 opacity-0 transition-opacity group-hover/code:opacity-100 hover:bg-surface-elevated/60 text-ink-subtle hover:text-ink"
       >

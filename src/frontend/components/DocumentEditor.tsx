@@ -8,11 +8,10 @@ import { cn } from "@/lib/utils"
 import { ConsoleEditor } from "./ConsoleEditor"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { CanvasEditor, parseCanvasDoc, serializeCanvasDoc, emptyCanvasDoc, type CanvasDocument } from "./CanvasEditor"
-import { loadFileViewerText, readFileVaultRendered, writeDocument, writeBinaryDocument, storeDrawing, fileViewerRawUrl, ApiError } from "@/lib/api"
+import { loadFileViewerText, readFileVaultRendered, writeArchitectureSource, writeDocument, writeBinaryDocument, storeDrawing, fileViewerRawUrl, ApiError } from "@/lib/api"
 import { renderPageToPng, renderCanvasToJpeg, type EmbedRect } from "@/lib/drawing"
 import { EditorSidebar, InlineEditPanel } from "./EditorSidebar"
-import { ArchitectureDiagramEditor } from "./ArchitectureDiagramEditor"
-import { isArchitectureDiagramPath } from "@/lib/architectureDiagram"
+import { architectureSlug, architectureSource, isArchitecturePath } from "@/lib/architecture"
 import { useCollaborativeCanvas } from "@/hooks/useCollaborativeCanvas"
 import { subscribeToChanges } from "@/lib/syncStream"
 
@@ -34,6 +33,7 @@ interface DocumentEditorProps {
 
 function editorLanguage(path: string): string {
   if (path.endsWith(".tex")) return "latex"
+  if (path.endsWith(".c4")) return "likec4"
   return "markdown"
 }
 
@@ -221,6 +221,7 @@ function CanvasDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, ove
         <span className="text-[11px] font-medium text-ink truncate">{filename}</span>
         <div className="flex items-center gap-1 shrink-0">
           <button
+            aria-label="Export PDF"
             onClick={handleExportPdf}
             disabled={exporting || !canvasDocument.frames.some((f) => f.kind === "page")}
             className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors"
@@ -229,7 +230,7 @@ function CanvasDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, ove
               ? <span className="h-3.5 w-3.5 block animate-spin rounded-full border-2 border-ink-faint border-t-ink" />
               : <Download className="h-3.5 w-3.5" />}
           </button>
-          <button onClick={onClose} className="rounded p-1 text-ink-subtle hover:text-danger transition-colors">
+          <button aria-label="Close document" onClick={onClose} className="rounded p-1 text-ink-subtle hover:text-danger transition-colors">
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
@@ -468,13 +469,13 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
         {dirty && <span className="text-[10px] text-ink-faint">(modified)</span>}
       </div>
       <div className="flex items-center gap-1 shrink-0">
-        <button onClick={handleSave} disabled={!dirty || saving} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors">
+        <button aria-label="Save document" onClick={handleSave} disabled={!dirty || saving} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors">
           <Save className="h-3.5 w-3.5" />
         </button>
-        <button onClick={() => setIsFullscreen((f) => !f)} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors">
+        <button aria-label={isFullscreen ? "Exit document fullscreen" : "Enter document fullscreen"} onClick={() => setIsFullscreen((f) => !f)} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors">
           {isFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
         </button>
-        <button onClick={onClose} className="rounded p-1 text-ink-subtle hover:text-danger transition-colors">
+        <button aria-label="Close document" onClick={onClose} className="rounded p-1 text-ink-subtle hover:text-danger transition-colors">
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
@@ -493,6 +494,7 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
           {editorBody}
           {model && !isCanvas && (
             <button
+              aria-label={sidebarOpen ? "Hide assistant" : "Show assistant"}
               onClick={() => setSidebarOpen(v => !v)}
               className="absolute top-2 right-3 z-10 p-1 rounded text-ink-subtle hover:text-ink hover:bg-surface/80 transition-colors"
             >
@@ -541,8 +543,12 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
 }
 
 export function DocumentEditor(props: DocumentEditorProps) {
-  if (isArchitectureDiagramPath(props.path)) {
-    return <ArchitectureDiagramEditor path={props.path} overlay={props.overlay} onClose={props.onClose} onSaved={props.onSaved} onModeLabel={props.onModeLabel} />
+  // A workspace's `.c4` source edits like any text file; the save goes through the
+  // architecture route, which refuses text that no longer parses into a model.
+  if (isArchitecturePath(props.path)) {
+    const slug = architectureSlug(props.path)
+    const file = architectureSource(props.path)
+    return <StandardDocumentEditor {...props} persistOverride={async (content) => { await writeArchitectureSource(slug, file, content) }} />
   }
   if (props.path.endsWith(".canvas") && !props.persistOverride) return <CanvasDocumentEditor {...props} />
   return <StandardDocumentEditor {...props} />

@@ -130,7 +130,7 @@ function CategoriesPanel({
           {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
           Categories ({categories.length})
         </button>
-        <button onClick={() => { setExpanded(true); setAddingCat(true) }} disabled={disabled}
+        <button aria-label="Add category" onClick={() => { setExpanded(true); setAddingCat(true) }} disabled={disabled}
           className="rounded-md p-1 text-ink-subtle hover:bg-hover hover:text-ink disabled:opacity-40 transition-colors">
           <Plus className="h-3.5 w-3.5" />
         </button>
@@ -381,7 +381,7 @@ function MemoryViewerInner({
                 <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider text-ink-faint">
                   <ScopeIcon className="h-3 w-3" />Memories
                 </div>
-                <button onClick={() => setAdding((v) => !v)} disabled={isLocked}
+                <button aria-label="Add memory" onClick={() => setAdding((v) => !v)} disabled={isLocked}
                   className="rounded-md p-1 text-ink-subtle hover:bg-hover hover:text-ink disabled:opacity-40 transition-colors">
                   <Plus className="h-3.5 w-3.5" />
                 </button>

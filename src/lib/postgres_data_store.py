@@ -53,40 +53,47 @@ class PostgresDataStore:
             raise StorageNotFoundError(key)
         return bytes(row[0]), self._revision(row[1])
 
-    def write_bytes(self, key: str, content: bytes, *, expected: Revision | None = None) -> Revision:
+    def _write(self, connection, key: str, content: bytes, expected: Revision | None) -> Revision:
         key = validate_key(key)
-        with self._pool.connection() as connection, connection.transaction():
-            if expected is None:
-                row = connection.execute(
-                    """
-                    INSERT INTO documents (user_id, key, content, is_dir)
-                    VALUES (%s, %s, %s, false)
-                    ON CONFLICT (user_id, key) DO UPDATE
-                    SET content = EXCLUDED.content, is_dir = false,
-                        version = documents.version + 1, updated_at = now()
-                    RETURNING version
-                    """,
-                    (self._user_id, key, content),
-                ).fetchone()
-            else:
-                try:
-                    expected_version = int(expected.token)
-                except ValueError as exc:
-                    raise StorageConflictError(f"Invalid revision for {key}") from exc
-                row = connection.execute(
-                    """
-                    UPDATE documents
-                    SET content = %s, is_dir = false, version = version + 1, updated_at = now()
-                    WHERE user_id = %s AND key = %s AND NOT is_dir AND version = %s
-                    RETURNING version
-                    """,
-                    (content, self._user_id, key, expected_version),
-                ).fetchone()
-                if row is None:
-                    raise StorageConflictError(f"{key} changed on another device; reload before saving")
-            version = row[0]
-            self._change(connection, key, version, "write")
+        if expected is None:
+            row = connection.execute(
+                """
+                INSERT INTO documents (user_id, key, content, is_dir)
+                VALUES (%s, %s, %s, false)
+                ON CONFLICT (user_id, key) DO UPDATE
+                SET content = EXCLUDED.content, is_dir = false,
+                    version = documents.version + 1, updated_at = now()
+                RETURNING version
+                """,
+                (self._user_id, key, content),
+            ).fetchone()
+        else:
+            try:
+                expected_version = int(expected.token)
+            except ValueError as exc:
+                raise StorageConflictError(f"Invalid revision for {key}") from exc
+            row = connection.execute(
+                """
+                UPDATE documents
+                SET content = %s, is_dir = false, version = version + 1, updated_at = now()
+                WHERE user_id = %s AND key = %s AND NOT is_dir AND version = %s
+                RETURNING version
+                """,
+                (content, self._user_id, key, expected_version),
+            ).fetchone()
+            if row is None:
+                raise StorageConflictError(f"{key} changed on another device; reload before saving")
+        version = row[0]
+        self._change(connection, key, version, "write")
         return self._revision(version)
+
+    def write_bytes(self, key: str, content: bytes, *, expected: Revision | None = None) -> Revision:
+        with self._pool.connection() as connection, connection.transaction():
+            return self._write(connection, key, content, expected)
+
+    def write_many(self, writes: list[tuple[str, bytes, Revision | None]]) -> list[Revision]:
+        with self._pool.connection() as connection, connection.transaction():
+            return [self._write(connection, key, content, expected) for key, content, expected in writes]
 
     def list(self, prefix: str = "", *, recursive: bool = False) -> list[Entry]:
         prefix = validate_key(prefix, allow_empty=True)

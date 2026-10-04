@@ -3,7 +3,6 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from backend.routes.architecture_diagrams import ArchitectureDiagramContextReferenceModel
 from backend.routes.deps import get_asset_store, get_project_store, get_sandbox_service
 from backend.routes.histories import cleanup_after_delete
 from lib.asset_store import AssetStore
@@ -53,7 +52,6 @@ class SaveTabRequest(BaseModel):
     parent_id: str | None = None
     branch_message_idx: int | None = None
     children: list[dict[str, Any]] | None = None
-    architecture_graph_contexts: list[ArchitectureDiagramContextReferenceModel] | None = None
     filename: str
     tab_name: str | None = None
 

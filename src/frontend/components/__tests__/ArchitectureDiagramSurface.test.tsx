@@ -2,14 +2,21 @@ import type { ComponentType, ReactNode } from "react"
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { useEffect, useState } from "react"
 import { describe, expect, it, vi } from "vitest"
-import { ArchitectureDiagramSurface, classifyDrawnShape, duplicateNodes, edgeAttachments, snapToGrid } from "@/components/ArchitectureDiagramSurface"
-import { emptyArchitectureDiagram, type ArchitectureDiagram } from "@/lib/architectureDiagram"
+import { ArchitectureDiagramSurface, drawnBox, duplicateNodes, edgeAttachments, type ArchitectureDiagramSurfaceProps } from "@/components/ArchitectureDiagramSurface"
+import { isDraft, type DiagramGraph, type DiagramNode } from "@/lib/architecture"
+
+const node = (id: string, title: string, position = { x: 0, y: 0 }, extra: Partial<DiagramNode> = {}): DiagramNode =>
+  ({ id, title, bullets: [], kind: "system", parent: null, compound: false, position, ...extra })
+const emptyGraph: DiagramGraph = { nodes: [], edges: [] }
+const Surface = (props: Omit<ArchitectureDiagramSurfaceProps, "edgeStyle" | "onEdgeStyleChange"> & Partial<ArchitectureDiagramSurfaceProps>) =>
+  <ArchitectureDiagramSurface edgeStyle="elbow" onEdgeStyleChange={() => {}} {...props} />
 
 const flow = vi.hoisted(() => ({
   fitView: vi.fn(),
-  zoomIn: vi.fn(),
-  zoomOut: vi.fn(),
+  screenToFlowPosition: (point: { x: number, y: number }) => point,
 }))
+// The surface's Delete-key handler, as React Flow would call it.
+const deleteKey = vi.hoisted(() => ({ onBeforeDelete: null as null | ((doomed: { nodes: Array<{ id: string, selected: boolean }>, edges: Array<{ id: string, selected: boolean }> }) => Promise<boolean>) }))
 
 vi.mock("@xyflow/react", () => {
   // Mirrors React Flow's own useNodesState/useEdgesState: plain state plus a change handler.
@@ -18,35 +25,141 @@ vi.mock("@xyflow/react", () => {
     return [items, setItems, vi.fn()] as const
   }
   return {
-    ReactFlow: ({ children, nodes = [], nodeTypes = {}, onInit }: { children: ReactNode; nodes?: Array<{ id: string; type?: string; data: Record<string, unknown> }>; nodeTypes?: Record<string, ComponentType<{ data: Record<string, unknown>; selected: boolean }>>; onInit?: (instance: typeof flow) => void }) => {
+    ReactFlow: ({ children, nodes = [], nodeTypes = {}, onInit, onBeforeDelete }: { children: ReactNode; nodes?: Array<{ id: string; type?: string; selected?: boolean; data: Record<string, unknown> }>; nodeTypes?: Record<string, ComponentType<{ data: Record<string, unknown>; selected: boolean }>>; onInit?: (instance: typeof flow) => void; onBeforeDelete?: typeof deleteKey.onBeforeDelete }) => {
+      deleteKey.onBeforeDelete = onBeforeDelete ?? null
       useEffect(() => { onInit?.(flow) }, [onInit])
-      return <div data-testid="flow">{nodes.map((node) => {
+      return <div data-testid="flow" className="react-flow__pane">{nodes.map((node) => {
         const NodeType = node.type ? nodeTypes[node.type] : undefined
-        return NodeType ? <NodeType key={node.id} data={node.data} selected={false} /> : null
+        return NodeType ? <div key={node.id} className={node.selected ? "react-flow__node selected" : "react-flow__node"}><NodeType data={node.data} selected={!!node.selected} /></div> : null
       })}{children}</div>
     },
     Background: () => null,
     BaseEdge: () => null,
     NodeResizer: () => null,
     Handle: () => null,
-    getSmoothStepPath: () => ["", 0, 0],
     useInternalNode: () => undefined,
     useNodesState: useItemsState,
     useEdgesState: useItemsState,
-    MarkerType: { ArrowClosed: "arrowclosed" },
-    ConnectionMode: { Strict: "strict", Loose: "loose" },
+    ConnectionMode: { Loose: "loose" },
     Position: { Top: "top", Left: "left", Right: "right", Bottom: "bottom" },
   }
 })
 
 describe("ArchitectureDiagramSurface", () => {
+  it("draws with the pen into a card that is not activated, and in a saved view nowhere else", async () => {
+    const onChange = vi.fn()
+    render(<Surface graph={{ nodes: [node("bank", "Bank")], edges: [] }} onChange={onChange} topLevelDrawing={false} />)
+    const loop = (start: Element, x: number, y: number) => {
+      // jsdom has no PointerEvent, so the pen is a mouse event that says it is a pen.
+      const down = new MouseEvent("pointerdown", { bubbles: true, button: 0, clientX: x, clientY: y })
+      Object.defineProperty(down, "pointerType", { value: "pen" })
+      start.dispatchEvent(down)
+      for (const [dx, dy] of [[180, 0], [180, 70], [0, 70], [2, 2]]) window.dispatchEvent(new MouseEvent("pointermove", { clientX: x + dx!, clientY: y + dy! }))
+      window.dispatchEvent(new MouseEvent("pointerup"))
+    }
+
+    loop(screen.getByTestId("flow"), 600, 600)
+    expect(onChange).not.toHaveBeenCalled()
+
+    loop(screen.getByLabelText("Edit node title").closest(".architecture-diagram-node")!, 10, 10)
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ nodes: [expect.objectContaining({ id: "bank" }), expect.objectContaining({ parent: "bank" })] }))
+    // Lets the stroke's click guard expire, as it does a tick after the pen lifts.
+    await act(() => new Promise((resolve) => setTimeout(resolve)))
+  })
+
+  it("in a saved view, the Delete key and the corner X take nodes out of the view but connections still leave the model", async () => {
+    const onChange = vi.fn()
+    const onRemoveFromView = vi.fn()
+    const graph: DiagramGraph = { nodes: [node("shop", "Shop"), node("bank", "Bank")], edges: [{ id: "shop->bank", source: "shop", target: "bank", relations: ["r1"] }] }
+    render(<Surface graph={graph} onChange={onChange} onRemoveFromView={onRemoveFromView} />)
+
+    await act(() => deleteKey.onBeforeDelete!({ nodes: [{ id: "bank", selected: true }], edges: [{ id: "shop->bank", selected: true }] }))
+    expect(onRemoveFromView).toHaveBeenCalledWith(["bank"])
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ nodes: graph.nodes, edges: [] }))
+
+    fireEvent.mouseEnter(screen.getAllByLabelText("Edit node title")[0]!.closest(".architecture-diagram-node")!)
+    fireEvent.click(screen.getByLabelText("Remove from view"))
+    expect(onRemoveFromView).toHaveBeenLastCalledWith(["shop"])
+    expect(screen.queryByLabelText("Delete element")).toBeNull()
+  })
+
+  it("in a package view, the corner X deletes the element from the model", () => {
+    const onChange = vi.fn()
+    const graph: DiagramGraph = { nodes: [node("shop", "Shop"), node("bank", "Bank")], edges: [] }
+    render(<Surface graph={graph} onChange={onChange} />)
+
+    fireEvent.mouseEnter(screen.getAllByLabelText("Edit node title")[1]!.closest(".architecture-diagram-node")!)
+    fireEvent.click(screen.getByLabelText("Delete element"))
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ nodes: [graph.nodes[0]] }))
+  })
+
+  it("changes an activated node's kind from its kind label", () => {
+    const onChange = vi.fn()
+    const graph: DiagramGraph = { nodes: [node("shop", "Shop"), node("shop.db", "DB", { x: 0, y: 0 }, { kind: "container", parent: "shop" })], edges: [] }
+    render(<Surface graph={graph} onChange={onChange} select="shop.db" kinds={["component", "container", "database", "system"]} />)
+
+    const label = screen.getAllByLabelText("Kind")[1]!
+    expect(label.textContent).toBe("container")
+    fireEvent.click(label)
+    fireEvent.click(screen.getByRole("option", { name: "database" }))
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ nodes: [graph.nodes[0], { ...graph.nodes[1], kind: "database" }] }))
+  })
+
+  it("writes a heading, then bullets, and commits them together once Enter on an empty bullet leaves the card", () => {
+    const onChange = vi.fn()
+    render(<Surface graph={{ nodes: [node("~draft-1", "")], edges: [] }} onChange={onChange} />)
+    const committed = () => onChange.mock.calls.some(([graph]) => (graph as DiagramGraph).nodes.some((candidate) => candidate.title))
+
+    fireEvent.click(screen.getByLabelText("Edit node title"))
+    const title = screen.getByLabelText("Node title")
+    fireEvent.change(title, { target: { value: "Ledger" } })
+    fireEvent.keyDown(title, { key: "Enter" })
+    const first = screen.getByLabelText("Node bullet")
+    expect(document.activeElement).toBe(first)
+    fireEvent.change(first, { target: { value: "books" } })
+    fireEvent.keyDown(first, { key: "Enter" })
+    const second = screen.getAllByLabelText("Node bullet")[1]!
+    expect(document.activeElement).toBe(second)
+    // Still inside the card: a new node must not become an element mid-edit.
+    expect(committed()).toBe(false)
+
+    act(() => { fireEvent.keyDown(second, { key: "Enter" }) })
+    expect(document.activeElement).not.toBe(second)
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ nodes: [expect.objectContaining({ id: "~draft-1", title: "Ledger", bullets: ["books"] })] }))
+  })
+
+  it("starts a new bullet when the space below the bullets is clicked, and drops it again if left empty", () => {
+    render(<Surface graph={{ nodes: [node("shop", "Shop", { x: 0, y: 0 }, { bullets: ["sells"] })], edges: [] }} onChange={() => {}} />)
+    fireEvent.click(screen.getByLabelText("Node bullet").closest(".architecture-diagram-node-body")!)
+    const bullets = screen.getAllByLabelText("Node bullet") as HTMLTextAreaElement[]
+    expect(bullets.map((bullet) => bullet.value)).toEqual(["sells", ""])
+    expect(document.activeElement).toBe(bullets[1])
+
+    act(() => { bullets[1]!.blur() })
+    expect((screen.getAllByLabelText("Node bullet") as HTMLTextAreaElement[]).map((bullet) => bullet.value)).toEqual(["sells"])
+  })
+
+  it("switches connections to curved from the overflow menu, dropping every saved bend", () => {
+    const onChange = vi.fn()
+    const onEdgeStyleChange = vi.fn()
+    const graph: DiagramGraph = { nodes: [node("shop", "Shop"), node("bank", "Bank")], edges: [{ id: "shop->bank", source: "shop", target: "bank", relations: ["r1"], path: { bend: 12 } }] }
+    render(<Surface graph={graph} onChange={onChange} onEdgeStyleChange={onEdgeStyleChange} />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Connection style" }))
+    expect(screen.getByRole("menuitemradio", { name: "Angled edges" })).toHaveAttribute("aria-checked", "true")
+
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Curved edges" }))
+    expect(onEdgeStyleChange).toHaveBeenCalledWith("curved")
+    expect(onChange).toHaveBeenCalledWith({ ...graph, edges: [{ id: "shop->bank", source: "shop", target: "bank", relations: ["r1"] }] })
+  })
+
   it("gives connections sharing a card side their own slot on it", () => {
     const nodes = [
       { id: "left", position: { x: 0, y: 0 }, measured: { width: 100, height: 60 } },
       { id: "right", position: { x: 300, y: 0 }, measured: { width: 100, height: 60 } },
       { id: "below", position: { x: 300, y: 300 }, measured: { width: 100, height: 60 } },
     ]
-    const edge = (id: string, source: string, target: string) => ({ id, source, target, direction: "one-way" as const })
+    const edge = (id: string, source: string, target: string) => ({ id, source, target, relations: [] })
 
     // A lone connection still leaves from the side midpoint.
     const single = edgeAttachments(nodes, [edge("a", "left", "right")])
@@ -70,78 +183,56 @@ describe("ArchitectureDiagramSurface", () => {
     expect(fanned.get("b")!.source).toEqual({ x: 50, y: 60, position: "bottom" })
   })
 
-  it("attaches connections to the drawn outline of round shapes, not their bounding box", () => {
-    const edge = (id: string, source: string, target: string) => ({ id, source, target, direction: "one-way" as const })
-    const nodes = [
-      { id: "diamond", position: { x: 0, y: 0 }, measured: { width: 100, height: 100 }, data: { shape: "diamond" as const } },
-      { id: "ellipse", position: { x: 400, y: 0 }, measured: { width: 200, height: 100 }, data: { shape: "ellipse" as const } },
-      { id: "below", position: { x: 0, y: 300 }, measured: { width: 100, height: 60 } },
-    ]
-    // Three connections share the diamond's bottom side: off-center slots must
-    // land on its slanted edges, not in the empty box corner below them.
-    const attachments = edgeAttachments(nodes, [edge("a", "diamond", "below"), edge("b", "diamond", "below"), edge("c", "diamond", "below"), edge("d", "diamond", "ellipse")])
-    for (const id of ["a", "b", "c"]) {
-      const { x, y } = attachments.get(id)!.source
-      expect(Math.abs(x - 50) / 50 + Math.abs(y - 50) / 50).toBeCloseTo(1)
-    }
-    expect(attachments.get("a")!.source.y).toBeLessThan(100)
-    const { x, y } = attachments.get("d")!.target
-    expect(((x - 500) / 100) ** 2 + ((y - 50) / 50) ** 2).toBeCloseTo(1)
-  })
-
-  it("keeps the title editor focused while controlled graph updates arrive", () => {
-    const initialGraph = { ...emptyArchitectureDiagram(), nodes: [{ id: "node-1", title: "Gateway", bullets: [], position: { x: 0, y: 0 } }] }
-    function ControlledSurface() {
-      const [graph, setGraph] = useState<ArchitectureDiagram>(initialGraph)
-      return <ArchitectureDiagramSurface graph={graph} onChange={setGraph} />
-    }
-
-    render(<ControlledSurface />)
+  it("keeps the title being edited when the graph is updated from outside", () => {
+    const { rerender } = render(<Surface graph={{ nodes: [node("gateway", "Gateway")], edges: [] }} onChange={() => {}} />)
     fireEvent.click(screen.getByRole("button", { name: "Edit node title" }))
     const title = screen.getByRole("textbox", { name: "Node title" })
     fireEvent.change(title, { target: { value: "Gateway API" } })
 
+    rerender(<Surface graph={{ nodes: [node("gateway", "Edge gateway"), node("bank", "Bank")], edges: [] }} onChange={() => {}} />)
     expect(title).toHaveFocus()
     expect(title).toHaveValue("Gateway API")
   })
 
-  it("commits an in-progress title to the graph without disturbing the caret", async () => {
+  it("pastes the copied node as it was when copied, as a new draft", () => {
+    const onChange = vi.fn()
+    const original = node("api", "API", { x: 96, y: 96 }, { bullets: ["serves"], width: 240, height: 160 })
+    const { rerender } = render(<Surface graph={{ nodes: [original], edges: [] }} onChange={onChange} select="api" />)
+    fireEvent.keyDown(window, { key: "c", ctrlKey: true })
+
+    const edited = { ...original, title: "Edited", bullets: [], position: { x: 400, y: 400 }, width: 320 }
+    rerender(<Surface graph={{ nodes: [edited], edges: [] }} onChange={onChange} select="api" />)
+    fireEvent.keyDown(window, { key: "v", ctrlKey: true })
+
+    const [kept, pasted] = (onChange.mock.lastCall![0] as DiagramGraph).nodes
+    expect(kept).toEqual(edited)
+    const { id, ...copy } = pasted!
+    expect(isDraft(id)).toBe(true)
+    expect(copy).toEqual({ title: "API", bullets: ["serves"], kind: "system", parent: null, compound: false, position: { x: 120, y: 120 }, width: 240, height: 160 })
+  })
+
+  it("commits a title once, when editing ends, not on every keystroke", async () => {
     vi.useFakeTimers()
     try {
-      const initialGraph = { ...emptyArchitectureDiagram(), nodes: [{ id: "node-1", title: "Gateway", bullets: [], position: { x: 0, y: 0 } }] }
       const seen = vi.fn()
       function ControlledSurface() {
-        const [graph, setGraph] = useState<ArchitectureDiagram>(initialGraph)
-        return <ArchitectureDiagramSurface graph={graph} onChange={(next) => { seen(next); setGraph(next) }} />
+        const [graph, setGraph] = useState<DiagramGraph>({ nodes: [node("gateway", "Gateway")], edges: [] })
+        return <Surface graph={graph} onChange={(next) => { seen(next); setGraph(next) }} />
       }
 
       render(<ControlledSurface />)
       fireEvent.click(screen.getByRole("button", { name: "Edit node title" }))
-      const title = screen.getByRole("textbox", { name: "Node title" }) as HTMLInputElement
+      const title = screen.getByRole("textbox", { name: "Node title" })
       fireEvent.change(title, { target: { value: "Gateway API" } })
-      title.setSelectionRange(7, 7)
+      // Every graph change is a model edit, so a pause in typing must not send one.
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+      expect(seen.mock.calls.some(([graph]) => graph.nodes[0].title === "Gateway API")).toBe(false)
 
-      // Autosave depends on typed text reaching the graph before any blur.
-      await act(async () => { await vi.advanceTimersByTimeAsync(400) })
-
+      fireEvent.blur(title)
       expect(seen.mock.calls.at(-1)?.[0].nodes[0].title).toBe("Gateway API")
-      expect(title).toHaveFocus()
-      expect(title).toHaveValue("Gateway API")
-      expect(title.selectionStart).toBe(7)
     } finally {
       vi.useRealTimers()
     }
-  })
-
-  it("zooms from the viewport center on wheel", () => {
-    flow.zoomIn.mockClear()
-    flow.zoomOut.mockClear()
-
-    render(<ArchitectureDiagramSurface graph={emptyArchitectureDiagram()} onChange={() => {}} />)
-    fireEvent.wheel(screen.getByTestId("flow"), { deltaY: -100 })
-
-    expect(flow.zoomIn).toHaveBeenCalledOnce()
-    expect(flow.zoomOut).not.toHaveBeenCalled()
   })
 
   it("refits the graph when its host maximizes it, but not when it restores", async () => {
@@ -151,21 +242,21 @@ describe("ArchitectureDiagramSurface", () => {
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
       await promise
     })
-    const { rerender } = render(<ArchitectureDiagramSurface graph={emptyArchitectureDiagram()} onChange={() => {}} />)
+    const { rerender } = render(<Surface graph={emptyGraph} onChange={() => {}} />)
     await nextFrames()
     expect(flow.fitView).not.toHaveBeenCalled()
 
-    rerender(<ArchitectureDiagramSurface graph={emptyArchitectureDiagram()} onChange={() => {}} autoFit />)
+    rerender(<Surface graph={emptyGraph} onChange={() => {}} autoFit />)
     await nextFrames()
     expect(flow.fitView).toHaveBeenCalledOnce()
 
-    rerender(<ArchitectureDiagramSurface graph={emptyArchitectureDiagram()} onChange={() => {}} autoFit={false} />)
+    rerender(<Surface graph={emptyGraph} onChange={() => {}} autoFit={false} />)
     await nextFrames()
     expect(flow.fitView).toHaveBeenCalledOnce()
   })
 })
 
-describe("classifyDrawnShape", () => {
+describe("drawnBox", () => {
   const perimeter = (points: Array<[number, number]>, steps = 8) => {
     const out: Array<{ x: number, y: number }> = []
     for (let i = 0; i < points.length; i += 1) {
@@ -176,60 +267,33 @@ describe("classifyDrawnShape", () => {
     return out
   }
 
-  it("recognizes a rough rectangle", () => {
-    const points = perimeter([[0, 0], [100, 0], [100, 60], [0, 60]])
-    const result = classifyDrawnShape(points)
-    expect(result?.shape).toBe("rectangle")
-    expect(result?.box).toEqual({ x: 0, y: 0, width: 100, height: 60 })
-  })
-
-  it("recognizes a diamond", () => {
-    const points = perimeter([[50, 0], [100, 30], [50, 60], [0, 30]])
-    expect(classifyDrawnShape(points)?.shape).toBe("diamond")
-  })
-
-  it("recognizes an ellipse", () => {
-    const points = Array.from({ length: 40 }, (_, i) => {
-      const angle = (i / 40) * Math.PI * 2
-      return { x: 50 + Math.cos(angle) * 50, y: 30 + Math.sin(angle) * 30 }
-    })
-    expect(classifyDrawnShape(points)?.shape).toBe("ellipse")
+  it("turns any closed loop into its bounding box", () => {
+    expect(drawnBox(perimeter([[0, 0], [100, 0], [100, 60], [0, 60]]))).toEqual({ x: 0, y: 0, width: 100, height: 60 })
+    expect(drawnBox(perimeter([[50, 0], [100, 30], [50, 60], [0, 30]]))).toEqual({ x: 0, y: 0, width: 100, height: 60 })
   })
 
   it("rejects an open stroke", () => {
     const points = Array.from({ length: 10 }, (_, i) => ({ x: i * 10, y: 0 }))
-    expect(classifyDrawnShape(points)).toBeNull()
+    expect(drawnBox(points)).toBeNull()
   })
 
   it("rejects a stroke smaller than the minimum draw size", () => {
-    const points = perimeter([[0, 0], [10, 0], [10, 10], [0, 10]])
-    expect(classifyDrawnShape(points)).toBeNull()
-  })
-})
-
-describe("snapToGrid", () => {
-  it("rounds to the nearest 8px grid step", () => {
-    expect(snapToGrid(13)).toBe(16)
-    expect(snapToGrid(11)).toBe(8)
-    expect(snapToGrid(0)).toBe(0)
+    expect(drawnBox(perimeter([[0, 0], [10, 0], [10, 10], [0, 10]]))).toBeNull()
   })
 })
 
 describe("duplicateNodes", () => {
-  it("clones only the selected nodes with fresh ids and an offset position", () => {
-    const nodes = [
-      { id: "node-1", title: "A", bullets: [], position: { x: 100, y: 100 } },
-      { id: "node-2", title: "B", bullets: [], position: { x: 300, y: 100 } },
-    ]
-    const clones = duplicateNodes(nodes, new Set(["node-1"]))
-    expect(clones).toHaveLength(1)
-    expect(clones[0].id).not.toBe("node-1")
+  it("clones nodes as titled drafts at an offset position, with ids free of the graph and of each other", () => {
+    const nodes = [node("api", "A", { x: 100, y: 100 }), node("db", "B", { x: 300, y: 100 })]
+    const clones = duplicateNodes(nodes, ["api", "db", "~draft-1"])
+    // A draft id makes the copy a new element rather than a second view of `api`.
+    expect(clones.map((clone) => isDraft(clone.id))).toEqual([true, true])
+    expect(new Set([...clones.map((clone) => clone.id), "~draft-1"]).size).toBe(3)
     expect(clones[0].title).toBe("A")
     expect(clones[0].position).toEqual({ x: 128, y: 128 })
   })
 
-  it("returns no clones when nothing is selected", () => {
-    const nodes = [{ id: "node-1", title: "A", bullets: [], position: { x: 0, y: 0 } }]
-    expect(duplicateNodes(nodes, new Set())).toEqual([])
+  it("skips compounds, whose children would not come along", () => {
+    expect(duplicateNodes([node("shop", "Shop", { x: 0, y: 0 }, { compound: true })], ["shop"])).toEqual([])
   })
 })

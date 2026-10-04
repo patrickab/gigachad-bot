@@ -15,6 +15,7 @@ import { useState } from "react"
 import { describe, it, expect, vi } from "vitest"
 import { render, act, fireEvent, waitFor } from "@testing-library/react"
 import { TabActiveProvider } from "@/components/TabManager"
+import { UndoDeleteProvider } from "@/contexts/UndoDeleteContext"
 import type { CanvasDocument } from "@/components/CanvasEditor"
 
 vi.mock("@/components/PdfViewer", () => ({
@@ -37,17 +38,23 @@ vi.mock("@/components/PlotElement", () => ({
 vi.mock("./PlotElement", () => ({
   PlotElement: ({ figure }: { figure: unknown }) => <div data-testid="document-plot">{JSON.stringify(figure)}</div>,
 }))
+// The architecture window and the text editor have their own tests; here they only report what the canvas hands them.
+vi.mock("@/components/ArchitectureWindow", () => ({
+  ArchitectureWindow: ({ path, onNavigate }: { path: string; onNavigate: (path: string) => void }) =>
+    <button type="button" data-testid="architecture-window" onClick={() => onNavigate("graph/proj/backend/backend.c4")}>{path}</button>,
+}))
+vi.mock("@/components/DocumentEditor", () => ({
+  DocumentEditor: ({ path }: { path: string }) => <div data-testid="text-editor">{path}</div>,
+}))
 const api = vi.hoisted(() => ({
   fileViewerRawUrl: (p: string) => `/raw/${p}`,
   writeBinaryDocument: vi.fn(),
   listProjectDocuments: vi.fn(async () => [{ path: "project/proj/document/notes.canvas", name: "notes.canvas", mime: "application/json" }]),
   loadFileViewerText: vi.fn(async () => ""),
-  listArchitectureDiagrams: vi.fn(async () => []),
   listNotes: vi.fn(async () => [] as { path: string; name: string; mime: string }[]),
   writeDocument: vi.fn(async (_slug: string, _name: string, _content: string) => ({ path: "project/proj/document/notes.canvas", name: "notes.canvas", mime: "application/json" })),
   renameDocument: vi.fn(async (_slug: string, _path: string, name: string) => ({ path: `project/proj/document/${name}.md`, name: `${name}.md`, mime: "text/markdown" })),
   removeDocument: vi.fn(async (_slug: string, _path: string) => undefined),
-  renameArchitectureDiagram: vi.fn(async (_name: string, name: string) => ({ path: `graph/${name}.architecture.yaml`, name: `${name}.architecture.yaml`, content: "", hasDraft: false, revision: "r" })),
   ApiError: class ApiError extends Error {
     status: number
     constructor(message: string, status: number) {
@@ -84,6 +91,7 @@ import {
   type SelBox,
 } from "@/components/CanvasEditor"
 import type { StrokeData } from "@/lib/drawing"
+import { CanvasWorkspace } from "@/components/CanvasWorkspace"
 
 class RO {
   observe() {}
@@ -96,9 +104,11 @@ function Harness({ seen, slug, active = true, initialDoc = emptyCanvasDoc() }: {
   const [doc, setDoc] = useState<CanvasDocument>(initialDoc)
   seen.push(doc)
   return (
-    <TabActiveProvider value={active}>
-      <CanvasEditor doc={doc} onChange={setDoc} slug={slug} docPath="project/proj/document/host.canvas" />
-    </TabActiveProvider>
+    <UndoDeleteProvider>
+      <TabActiveProvider value={active}>
+        <CanvasEditor doc={doc} onChange={setDoc} slug={slug} docPath="project/proj/document/host.canvas" />
+      </TabActiveProvider>
+    </UndoDeleteProvider>
   )
 }
 
@@ -106,6 +116,7 @@ function CollaborativeHarness({ seen }: { seen: CanvasDocument[] }) {
   const [doc, setDoc] = useState<CanvasDocument>(emptyCanvasDoc())
   seen.push(doc)
   return (
+    <UndoDeleteProvider>
     <TabActiveProvider value={true}>
       <CanvasEditor doc={doc} onChange={setDoc} docPath="project/proj/document/host.canvas" />
       <button
@@ -127,6 +138,7 @@ function CollaborativeHarness({ seen }: { seen: CanvasDocument[] }) {
         Remote update
       </button>
     </TabActiveProvider>
+    </UndoDeleteProvider>
   )
 }
 
@@ -656,13 +668,49 @@ describe("document attachments", () => {
     expect(container.textContent).toContain("Generated notes.")
   })
 
-  it("renames the backing document for document and Architecture Diagram header edits", async () => {
+  it("adds an Architecture window that remembers the file it moves to", async () => {
+    const seen: CanvasDocument[] = []
+    const { container, getByTestId } = render(<Harness seen={seen} slug="proj" />)
+
+    act(() => { toolbar(container)[0]!.click() })
+    await act(async () => {})
+    act(() => { Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Architecture")!.click() })
+    expect(latest(seen).attachments[0]).toMatchObject({ kind: "architecture-graph", path: "graph/proj/" })
+
+    act(() => { getByTestId("architecture-window").click() })
+    expect(latest(seen).attachments[0]!.path).toBe("graph/proj/backend/backend.c4")
+  })
+
+  it("offers the open project's architecture on the unsaved scratch canvas, and says how to get one without a project", async () => {
+    const workspace = (slug: string | null) => (
+      <UndoDeleteProvider>
+        <TabActiveProvider value={true}>
+          <CanvasWorkspace selected={null} slug={slug} toolbarSlot={null} onCloseEditor={() => {}} onCreated={() => {}} />
+        </TabActiveProvider>
+      </UndoDeleteProvider>
+    )
+    const menuButtons = async (container: HTMLElement) => {
+      act(() => { toolbar(container)[0]!.click() })
+      await act(async () => {})
+      return Array.from(container.querySelectorAll("button")).map((b) => b.textContent)
+    }
+
+    const withProject = render(workspace("proj"))
+    expect(await menuButtons(withProject.container)).toContain("Architecture")
+    withProject.unmount()
+
+    const without = render(workspace(null))
+    expect(await menuButtons(without.container)).not.toContain("Architecture")
+    expect(without.container.textContent).toContain("Architecture: open a project canvas")
+  })
+
+  it("renames a document's file on a header edit, but only retitles an architecture window", async () => {
     const seen: CanvasDocument[] = []
     const initialDoc: CanvasDocument = {
       version: 1, frames: [], strokes: [], texts: [],
       attachments: [
         { id: "mindmap", kind: "document", path: "project/proj/document/mindmap.md", x: 0, y: 0, width: 720, height: 480 },
-        { id: "graph", kind: "architecture-graph", path: "graph/system.architecture.yaml", x: 0, y: 500, width: 720, height: 480 },
+        { id: "graph", kind: "architecture-graph", path: "graph/proj/model.c4", x: 0, y: 500, width: 720, height: 480 },
       ],
     }
     const { container, getByText } = render(<Harness seen={seen} slug="proj" initialDoc={initialDoc} />)
@@ -675,13 +723,15 @@ describe("document attachments", () => {
       path: "project/proj/document/Research map.md", title: "Research map",
     }))
 
-    fireEvent.doubleClick(getByText("system.architecture.yaml"))
+    api.renameDocument.mockClear()
+    fireEvent.doubleClick(getByText("Architecture"))
     input = container.querySelector("input")!
     fireEvent.change(input, { target: { value: "System design" } })
     fireEvent.blur(input)
     await waitFor(() => expect(latest(seen).attachments[1]).toMatchObject({
-      path: "graph/System design.architecture.yaml", title: "System design",
+      path: "graph/proj/model.c4", title: "System design",
     }))
+    expect(api.renameDocument).not.toHaveBeenCalled()
   })
 
   it("renames and deletes documents from the add menu, keeping canvas attachments in step", async () => {
@@ -698,7 +748,7 @@ describe("document attachments", () => {
         { id: "diagram", kind: "document", path: "project/proj/document/diagram-toolu_2.md", x: 0, y: 500, width: 720, height: 480 },
       ],
     }
-    const { container, getByLabelText } = render(<Harness seen={seen} slug="proj" initialDoc={initialDoc} />)
+    const { container, getByLabelText, queryByLabelText, getByText } = render(<Harness seen={seen} slug="proj" initialDoc={initialDoc} />)
 
     act(() => { toolbar(container)[0]!.click() })
     await act(async () => {})
@@ -711,9 +761,22 @@ describe("document attachments", () => {
     expect(api.renameDocument).toHaveBeenLastCalledWith("proj", "project/proj/document/sandbox_plot-toolu_1.plot.json", "Loss")
     expect(latest(seen).attachments[0]!.path).toBe("project/proj/document/Loss.plot.json")
 
+    // Deleting hides the row at once; the request and the attachment removal wait for the undo window.
     fireEvent.click(getByLabelText("Delete diagram-toolu_2.md"))
-    await waitFor(() => expect(latest(seen).attachments.map((a) => a.id)).toEqual(["plot"]))
+    expect(queryByLabelText("Delete diagram-toolu_2.md")).toBeNull()
+    expect(api.removeDocument).not.toHaveBeenCalled()
+    fireEvent.click(getByText("Undo"))
+    expect(queryByLabelText("Delete diagram-toolu_2.md")).not.toBeNull()
+
+    vi.useFakeTimers()
+    try {
+      fireEvent.click(getByLabelText("Delete diagram-toolu_2.md"))
+      await act(async () => { vi.advanceTimersByTime(6000) })
+    } finally {
+      vi.useRealTimers()
+    }
     expect(api.removeDocument).toHaveBeenCalledWith("proj", "project/proj/document/diagram-toolu_2.md")
+    expect(latest(seen).attachments.map((a) => a.id)).toEqual(["plot"])
   })
 
   it("lays plots out at a zoom-independent width and hides them only while a zoom gesture runs", async () => {

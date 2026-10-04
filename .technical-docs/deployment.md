@@ -204,6 +204,15 @@ The development backend runs on `127.0.0.1:8001`; the systemd backend runs on
 PostgreSQL container and data volume (`gigachad-dev` vs `gigachad-prod`), so
 their stored data never mixes.
 
+`run-backend.sh` also starts the LikeC4 service (`node src/c4/server.ts`) that
+parses and edits architecture workspaces, on `127.0.0.1:8011` (dev) or
+`127.0.0.1:8012` (systemd), and points the backend at it through
+`C4_SERVICE_URL`. It is stateless, loopback-only, and stopped with the backend.
+Development installs its dependencies on every start; production installs them
+only when `src/c4/node_modules` is missing, so run
+`npm ci --prefix src/c4` after an update that changes `src/c4/package-lock.json`.
+Without it, the architecture routes answer 503 and everything else keeps working.
+
 The OMP unit follows the same pattern: no `EnvironmentFile`, only
 `GIGACHAD_ENV_FILE` and an explicit `PATH` covering the mise shims directory
 (systemd user units do not inherit a login shell's PATH). Its `ExecStart` runs

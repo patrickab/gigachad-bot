@@ -89,7 +89,7 @@ export function AttachmentPreview({ attachment, chatId, slug = null, onClose }: 
         >
           <div className="flex items-center justify-between px-4 py-2 border-b border-divider/50 shrink-0">
             <span className="text-xs font-medium text-ink truncate">{attachment.name}</span>
-            <button
+            <button aria-label="Close attachment preview"
               onClick={onClose}
               className="rounded p-1.5 text-ink-subtle hover:text-ink hover:bg-surface-elevated transition-colors"
             >

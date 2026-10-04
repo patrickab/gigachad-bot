@@ -155,6 +155,7 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
           </div>
           <div className="flex items-center gap-1">
             <button
+              aria-label={sidebarOpen ? "Hide OCR sidebar" : "Show OCR sidebar"}
               onClick={() => setSidebarOpen((v) => !v)}
               className="rounded p-1.5 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
             >
@@ -168,7 +169,7 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
               <Check className="h-3 w-3" />
               Confirm
             </button>
-            <button
+            <button aria-label="Close OCR panel"
               onClick={onClose}
               className="p-1.5 text-ink-subtle hover:text-ink transition-colors"
             >

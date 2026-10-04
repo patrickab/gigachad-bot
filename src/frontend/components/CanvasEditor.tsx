@@ -1,20 +1,20 @@
 "use client"
 
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { getStroke } from "perfect-freehand"
 import { type StrokeData, type EmbedRect, type CanvasEmbedRect, getSvgPathFromStroke, pointInPolygon, renderPageToPng } from "@/lib/drawing"
-import { createArchitectureDiagram, fileViewerRawUrl, writeBinaryDocument, listArchitectureDiagrams, listNotes, listProjectDocuments, loadFileViewerText, readArchitectureDiagram, writeArchitectureDiagram, renameArchitectureDiagram, renameDocument, removeDocument } from "@/lib/api"
-import { emptyArchitectureDiagram, parseArchitectureDiagram, serializeArchitectureDiagram, type ArchitectureDiagram } from "@/lib/architectureDiagram"
-import { useGraphAutosave } from "@/lib/graphAutosave"
+import { fileViewerRawUrl, writeBinaryDocument, listNotes, listProjectDocuments, loadFileViewerText, renameDocument, removeDocument } from "@/lib/api"
+import type { EdgeStyle } from "@/lib/architecture"
 import { useCollaborativeCanvas } from "@/hooks/useCollaborativeCanvas"
+import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { useTwoFingerGesture } from "@/hooks/useTwoFingerGesture"
-import { subscribeToChanges } from "@/lib/syncStream"
 import { activeThemeName } from "@/lib/palette"
 import { cn } from "@/lib/utils"
-import { Plus, Undo2, Redo2, Trash2, Copy, FileType, ImageIcon, X, Camera, CircleDashed, Type, SquarePen, PenLine, Pencil, Maximize2, Minimize2 } from "lucide-react"
+import { Plus, Undo2, Redo2, Trash2, Copy, FileType, ImageIcon, X, Camera, CircleDashed, Type, SquarePen, PenLine, Pencil, Maximize2, Minimize2, Network } from "lucide-react"
 import { PdfViewer } from "./PdfViewer"
-import { ArchitectureDiagramSurface } from "./ArchitectureDiagramSurface"
+import { ArchitectureWindow } from "./ArchitectureWindow"
+import { DocumentEditor } from "./DocumentEditor"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { PlotElement, type PlotFigure } from "./PlotElement"
 import { cameraToOffset, HostScaleContext, offsetToCamera, reframeCamera, screenToWorld, zoomCamera, type ZoomAnchor } from "./InfiniteViewport"
@@ -142,6 +142,7 @@ export interface CanvasAttachment {
   height?: number // Architecture Diagrams own their viewport height; legacy attachments retain their aspect
   title?: string // user label, independent of the backing document filename
   page?: number // selected PDF page, persisted with the canvas
+  edgeStyle?: EdgeStyle // architecture windows: how connections are drawn; LikeC4 has no such setting
 }
 
 // CanvasText = handwriting-style note in a resizable box. Rasterized into export
@@ -1292,7 +1293,6 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   const [projectCanvases, setProjectCanvases] = useState<{ path: string; name: string }[]>([])
   const [projectPdfs, setProjectPdfs] = useState<{ path: string; name: string }[]>([])
   const [projectImages, setProjectImages] = useState<{ path: string; name: string }[]>([])
-  const [architectureDiagrams, setArchitectureDiagrams] = useState<{ path: string; name: string }[]>([])
   const [documents, setDocuments] = useState<{ path: string; name: string }[]>([])
   useEffect(() => {
     if (!addMenuOpen) return
@@ -1373,14 +1373,16 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     setAddMenuOpen(false)
   }, [doc, commit, pointAtCenter])
 
-  const addArchitectureDiagram = useCallback((path: string) => {
-    if (doc.attachments.some((attachment) => attachment.path === path)) { setAddMenuOpen(false); return }
+  // A project has one architecture; each window browses it through its own tree,
+  // opening on the first package.
+  const addArchitectureWindow = useCallback(() => {
+    if (!slug) return
     const { cx, cy } = pointAtCenter(DEFAULT_GRAPH_WIDTH, DEFAULT_GRAPH_HEIGHT / DEFAULT_GRAPH_WIDTH)
     commit({ ...doc, attachments: [...doc.attachments, {
-      id: canvasEntityId(), kind: "architecture-graph", path, x: cx, y: cy, width: DEFAULT_GRAPH_WIDTH, height: DEFAULT_GRAPH_HEIGHT,
+      id: canvasEntityId(), kind: "architecture-graph", path: `graph/${slug}/`, x: cx, y: cy, width: DEFAULT_GRAPH_WIDTH, height: DEFAULT_GRAPH_HEIGHT,
     }] })
     setAddMenuOpen(false)
-  }, [doc, commit, pointAtCenter])
+  }, [doc, commit, pointAtCenter, slug])
 
   const addDocumentAttachment = useCallback((path: string) => {
     if (doc.attachments.some((attachment) => attachment.path === path)) { setAddMenuOpen(false); return }
@@ -1391,31 +1393,14 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     setAddMenuOpen(false)
   }, [doc, commit, pointAtCenter])
 
-  const createArchitectureDiagramWindow = useCallback(async () => {
-    const title = window.prompt("Architecture Diagram name")?.trim()
-    if (!title) return
-    const stem = title.replace(/\.architecture\.yaml$/, "").trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "")
-    if (!stem) return
-    const name = `${stem}.architecture.yaml`
-    try {
-      const created = await createArchitectureDiagram(name, serializeArchitectureDiagram(emptyArchitectureDiagram(title)), slug)
-      addArchitectureDiagram(created.path)
-    } catch { /* name already exists or graph storage unavailable */ }
-  }, [addArchitectureDiagram, slug])
-
-  // ponytail: nested edits bypass the parent's history — the nested editor has its own
+  // Navigation, window state and titles (the tree's file, the PDF page, the connection style) persist without an undo step.
+  // ponytail: nested canvas edits bypass the parent's history too — the nested editor has its own
   // undo/redo, and snapshotting the whole parent per nested stroke would be absurd.
-  const updateNestedCanvas = useCallback((id: string, nested: CanvasDocument) => {
-    const cur = liveRef.current.doc
-    applyChange({ ...cur, attachments: cur.attachments.map((a) => a.id === id ? { ...a, canvas: nested } : a) })
-  }, [applyChange])
-
-  // PDF scrolling is navigation, not an edit, so it persists without creating an undo step.
-  const updatePdfPage = useCallback((id: string, page: number) => {
+  const patchAttachment = useCallback((id: string, patch: Partial<CanvasAttachment>) => {
     const cur = liveRef.current.doc
     const attachment = cur.attachments.find((a) => a.id === id)
-    if (!attachment || attachment.page === page) return
-    applyChange({ ...cur, attachments: cur.attachments.map((a) => a.id === id ? { ...a, page } : a) })
+    if (!attachment || Object.entries(patch).every(([key, value]) => attachment[key as keyof CanvasAttachment] === value)) return
+    applyChange({ ...cur, attachments: cur.attachments.map((a) => a.id === id ? { ...a, ...patch } : a) })
   }, [applyChange])
 
   const [editingAttachmentId, setEditingAttachmentId] = useState<string | null>(null)
@@ -1424,23 +1409,18 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     const title = nextTitle.trim()
     setEditingAttachmentId(null)
     if (!attachment || !title || attachment.title === title) return
-    if (!attachment.path) {
-      const cur = liveRef.current.doc
-      applyChange({ ...cur, attachments: cur.attachments.map((a) => a.id === id ? { ...a, title } : a) })
-      return
-    }
+    // Architecture sources have no rename, so renaming an architecture window only retitles the window.
+    if (!attachment.path || attachment.kind === "architecture-graph") { patchAttachment(id, { title }); return }
     try {
-      const renamed = attachment.kind === "architecture-graph"
-        ? await renameArchitectureDiagram(attachment.path.split("/").pop()!, title)
-        : await renameDocument(slug ?? "", attachment.path, title)
-      const cur = liveRef.current.doc
-      applyChange({ ...cur, attachments: cur.attachments.map((a) => a.id === id ? { ...a, path: renamed.path, title } : a) })
+      const renamed = await renameDocument(slug ?? "", attachment.path, title)
+      patchAttachment(id, { path: renamed.path, title })
     } catch { /* the stored name stays authoritative when rename fails */ }
-  }, [applyChange, slug])
+  }, [patchAttachment, slug])
 
   // Documents in the add menu (generated tool artifacts included) are renamed and
   // deleted in place. Attachments on this canvas follow the file: a rename repoints
-  // them, a delete drops them, since the document cannot come back through undo.
+  // them; a delete hides the row during its undo window and drops them once it
+  // commits, since the file is then gone for good.
   const [renamingDocPath, setRenamingDocPath] = useState<string | null>(null)
   const cancelDocRename = useRef(false)
 
@@ -1459,17 +1439,19 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     } catch { /* the stored name stays authoritative when rename fails */ }
   }, [applyChange, slug])
 
-  const deleteMenuDocument = useCallback(async (path: string) => {
-    try {
+  const { schedule: scheduleDelete, pending: deletePending } = useUndoDelete()
+  const deleteMenuDocument = useCallback((path: string) => {
+    const name = path.split("/").pop() ?? path
+    scheduleDelete(`canvas-document:${slug ?? ""}:${path}`, name, async () => {
       await removeDocument(slug ?? "", path)
-    } catch { return }
-    setDocuments((docs) => docs.filter((d) => d.path !== path))
-    const cur = liveRef.current.doc
-    const gone = cur.attachments.filter((a) => a.path === path).map((a) => a.id)
-    if (gone.length === 0) return
-    applyChange({ ...cur, attachments: cur.attachments.filter((a) => a.path !== path) })
-    setFullscreenId((id) => (id && gone.includes(id) ? null : id))
-  }, [applyChange, slug])
+      setDocuments((docs) => docs.filter((d) => d.path !== path))
+      const cur = liveRef.current.doc
+      const gone = cur.attachments.filter((a) => a.path === path).map((a) => a.id)
+      if (gone.length === 0) return
+      applyChange({ ...cur, attachments: cur.attachments.filter((a) => a.path !== path) })
+      setFullscreenId((id) => (id && gone.includes(id) ? null : id))
+    })
+  }, [applyChange, scheduleDelete, slug])
 
   // Which attachment window, if any, is blown up over the whole surface. Exiting drops
   // straight back onto the canvas that holds it.
@@ -1665,7 +1647,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   const toolbar = (
       <div className={cn("flex items-center gap-1 shrink-0 min-w-0", toolbarSlot ? "flex-1" : "px-2 py-1.5 border-b border-divider/50")}>
         <div className="relative" ref={addMenuRef}>
-          <button
+          <button aria-label="Add to canvas"
             onClick={() => setAddMenuOpen((o) => !o)}
             className="flex items-center gap-1 rounded px-2 py-1 text-[10px] font-medium text-ink-muted hover:text-ink hover:bg-hover transition-colors"
           >
@@ -1715,7 +1697,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
                 <>
                   <div className="mx-2 my-1 border-t border-divider/50" />
                   <div className="px-3 py-0.5 text-[9px] text-ink-faint uppercase tracking-wider">Documents</div>
-                  {documents.map((docItem) => (
+                  {documents.filter((docItem) => !deletePending(`canvas-document:${slug ?? ""}:${docItem.path}`)).map((docItem) => (
                     <div key={docItem.path} className="flex items-center gap-1 pr-2 hover:bg-hover transition-colors">
                       {renamingDocPath === docItem.path ? (
                         <div className="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5">
@@ -1749,7 +1731,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
                         <Pencil className="h-3 w-3" />
                       </button>
                       <button
-                        onClick={() => { void deleteMenuDocument(docItem.path) }}
+                        onClick={() => deleteMenuDocument(docItem.path)}
                         aria-label={`Delete ${docItem.name}`}
                         className="rounded p-0.5 text-ink-faint hover:text-danger transition-colors shrink-0"
                       >
@@ -1760,27 +1742,21 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
                 </>
               )}
               <div className="mx-2 my-1 border-t border-divider/50" />
-              {/* section label only earns its place once there is a list under it */}
-              {architectureDiagrams.length > 0 && (
-                <div className="px-3 py-0.5 text-[9px] text-ink-faint uppercase tracking-wider">Architecture Diagrams</div>
-              )}
-              <button
-                onClick={createArchitectureDiagramWindow}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink hover:bg-hover transition-colors"
-              >
-                <Plus className="h-3 w-3 shrink-0 text-ink-faint" />
-                <span>New Architecture Diagram</span>
-              </button>
-              {architectureDiagrams.map((graph) => (
+              {slug ? (
                 <button
-                  key={graph.path}
-                  onClick={() => addArchitectureDiagram(graph.path)}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink hover:bg-hover transition-colors truncate"
+                  onClick={addArchitectureWindow}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink hover:bg-hover transition-colors"
                 >
-                  <FileType className="h-3 w-3 shrink-0 text-ink-faint" />
-                  <span className="truncate">{graph.name.replace(/\.architecture\.yaml$/, "")}</span>
+                  <Network className="h-3 w-3 shrink-0 text-ink-faint" />
+                  <span className="truncate">Architecture</span>
                 </button>
-              ))}
+              ) : (
+                // An architecture belongs to a project; say how to get one instead of hiding the entry.
+                <div className="flex items-center gap-2 px-3 py-1.5 text-[11px] text-ink-faint">
+                  <Network className="h-3 w-3 shrink-0" />
+                  <span>Architecture: open a project canvas</span>
+                </div>
+              )}
               <div className="mx-2 my-1 border-t border-divider/50" />
               <div className="px-3 py-0.5 text-[9px] text-ink-faint uppercase tracking-wider">Canvases</div>
               <button
@@ -1804,7 +1780,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
           )}
         </div>
         <div className="w-px h-4 bg-divider/50 mx-0.5" />
-        <button
+        <button aria-label="Undo"
           onClick={undo}
           disabled={undoStack.length === 0}
           className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors"
@@ -1812,7 +1788,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
           <Undo2 className="h-3.5 w-3.5" />
         </button>
         <div className="w-px h-4 bg-divider/50 mx-0.5" />
-        <button
+        <button aria-label="Redo"
           onClick={redo}
           disabled={redoStack.length === 0}
           className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors"
@@ -1820,7 +1796,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
           <Redo2 className="h-3.5 w-3.5" />
         </button>
         <div className="w-px h-4 bg-divider/50 mx-0.5" />
-        <button
+        <button aria-label="Change pen width"
           onClick={nextSize}
           className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
         >
@@ -1885,7 +1861,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
           )}
         </div>
         <div className="w-px h-4 bg-divider/50 mx-0.5" />
-        <button
+        <button aria-label="Select on canvas"
           onClick={() => { setSelectionMode((v) => !v); setScreenshotMode(false); setTextMode(false) }}
           className={cn(
             "rounded p-1 transition-colors",
@@ -1895,7 +1871,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
           <CircleDashed className="h-3.5 w-3.5" />
         </button>
         <div className="w-px h-4 bg-divider/50 mx-0.5" />
-        <button
+        <button aria-label="Capture canvas"
           onClick={() => { setScreenshotMode((v) => !v); setSelectionMode(false); setTextMode(false) }}
           className={cn(
             "rounded p-1 transition-colors",
@@ -1905,7 +1881,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
           <Camera className="h-3.5 w-3.5" />
         </button>
         <div className="w-px h-4 bg-divider/50 mx-0.5" />
-        <button
+        <button aria-label="Add text to canvas"
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => { setTextMode((v) => !v); setSelectionMode(false); setScreenshotMode(false) }}
           className={cn(
@@ -2132,14 +2108,14 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
               top: selectionBounds.y * scale + offset.y - 6,
             }}
           >
-            <button
+            <button aria-label="Copy selection"
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => { e.stopPropagation(); copySelection() }}
               className="rounded-full p-1 bg-paper border border-divider-strong text-ink-faint hover:text-ink shadow-[var(--shadow-lg)] transition-colors"
             >
               <Copy className="h-3 w-3" />
             </button>
-            <button
+            <button aria-label="Delete selection"
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => { e.stopPropagation(); deleteSelection() }}
               className="rounded-full p-1 bg-paper border border-divider-strong text-ink-faint hover:text-danger shadow-[var(--shadow-lg)] transition-colors"
@@ -2158,7 +2134,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
           const architectureDiagram = att.kind === "architecture-graph"
           const isDocument = att.kind === "document"
           const aspect = nested ? CANVAS_ASPECT : (aspects[att.id] ?? FALLBACK_ASPECT)
-          const name = att.title ?? att.path?.split("/").pop() ?? (architectureDiagram ? "Architecture Diagram" : nested ? "Canvas" : isDocument ? "Document" : "PDF")
+          const name = att.title ?? (architectureDiagram ? "Architecture" : att.path?.split("/").pop()) ?? (nested ? "Canvas" : isDocument ? "Document" : "PDF")
           // PDFs rasterize through a settled layout size. Interactive viewport frames
           // use their actual screen size so pointer coordinates stay exact.
           const contentHeight = att.height ?? att.width * CANVAS_ASPECT
@@ -2211,12 +2187,13 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
                   </span>
                 )}
                 <button
+                  aria-label={full ? `Restore ${name}` : `Expand ${name}`}
                   onClick={(e) => { e.stopPropagation(); setFullscreenId(full ? null : att.id) }}
                   className="rounded p-0.5 text-ink-faint hover:text-ink transition-colors shrink-0"
                 >
                   {full ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
                 </button>
-                <button
+                <button aria-label="Remove attachment"
                   onClick={(e) => { e.stopPropagation(); removeAttachment(att.id) }}
                   className="rounded p-0.5 text-ink-faint hover:text-danger transition-colors shrink-0"
                 >
@@ -2230,7 +2207,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
                 onPointerDown={(e) => e.stopPropagation()}
               >
                 {architectureDiagram ? (
-                  <CanvasArchitectureDiagram path={att.path!} maximized={full} hostScale={full ? 1 : scale} />
+                  <ArchitectureWindow path={att.path!} maximized={full} hostScale={full ? 1 : scale} edgeStyle={att.edgeStyle} onEdgeStyleChange={(edgeStyle) => patchAttachment(att.id, { edgeStyle })} onNavigate={(path) => patchAttachment(att.id, { path })} />
                 ) : isDocument ? (
                   <CanvasDocumentAttachment
                     path={att.path!}
@@ -2255,7 +2232,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
                   ) : (
                     <CanvasEditor
                       doc={att.canvas ?? EMPTY_NESTED}
-                      onChange={(d) => updateNestedCanvas(att.id, d)}
+                      onChange={(d) => patchAttachment(att.id, { canvas: d })}
                       slug={slug}
                       depth={depth + 1}
                       hostScale={scale}
@@ -2266,7 +2243,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
                     url={fileViewerRawUrl(att.path!)}
                     onPageAspect={(r) => setAspect(att.id, r)}
                     initialPage={att.page}
-                    onPageChange={(page) => updatePdfPage(att.id, page)}
+                    onPageChange={(page) => patchAttachment(att.id, { page })}
                   />
                 )}
               </div>
@@ -2405,49 +2382,6 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
       </div>
     </div>
   )
-}
-
-// A graph attachment owns only its canvas-local frame; graph content continues to
-// live in the canonical YAML file. It is deliberately rendered at real layout size:
-// CSS scaling would desynchronise React Flow's handles from the pointer.
-function CanvasArchitectureDiagram({ path, maximized, hostScale }: { path: string, maximized: boolean, hostScale: number }) {
-  const name = path.split("/").pop() ?? path
-  const [graph, setGraph] = useState<ArchitectureDiagram | null>(null)
-  const write = useCallback((content: string) => writeArchitectureDiagram(name, content), [name])
-  const { queue, markSaved, dirty } = useGraphAutosave({ key: name, write })
-
-  const load = useCallback(async () => {
-    const document = await readArchitectureDiagram(name)
-    const loaded = parseArchitectureDiagram(document.content)
-    markSaved(serializeArchitectureDiagram(loaded))
-    setGraph(loaded)
-  }, [name, markSaved])
-
-  useEffect(() => {
-    let alive = true
-    setGraph(null)
-    load().catch(() => { if (alive) setGraph(null) })
-    return () => { alive = false }
-  }, [load])
-
-  // Another device's edit is applied only while nothing is unsaved here, so a
-  // notification can never overwrite a local edit that has not been written yet.
-  const dirtyRef = useRef(dirty)
-  dirtyRef.current = dirty
-
-  useEffect(() => subscribeToChanges((event) => {
-    if (dirtyRef.current) return
-    if (event.resource_kind !== "document" || !event.resource_key.endsWith(`/${name}`)) return
-    load().catch(() => {})
-  }), [name, load])
-
-  const onChange = useCallback((next: ArchitectureDiagram) => {
-    setGraph(next)
-    queue(serializeArchitectureDiagram(next))
-  }, [queue])
-
-  if (!graph) return <div className="flex h-full items-center justify-center text-[10px] text-ink-faint">Loading Architecture Diagram…</div>
-  return <ArchitectureDiagramSurface graph={graph} onChange={onChange} className="h-full" autoFit={maximized} hostScale={hostScale} />
 }
 
 // A document attachment is a read-only view of a generated chat artifact — a Mermaid

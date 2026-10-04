@@ -15,7 +15,6 @@ from sse_starlette.sse import EventSourceResponse
 from backend.identity import RequestIdentity, get_request_identity
 from config import get_data_store, get_postgres_pool, seed_prompts
 from lib.agent_sandbox_adapter import AgentSandboxRunnerAdapter, FakeSandboxRunner, SandboxRunner
-from lib.architecture_diagram import ArchitectureDiagramStore
 from lib.asset_store import AssetStore
 from lib.chat_store import ChatStore
 from lib.data_store import DataStore
@@ -89,12 +88,6 @@ def get_project_store(identity: RequestIdentity = Depends(get_request_identity))
     data_store = _store(identity)
     chats = ChatStore(data_store=data_store)
     return ProjectStore(chat_store=chats, data_store=data_store)
-
-
-def get_architecture_diagram_store(
-    identity: RequestIdentity = Depends(get_request_identity),
-) -> ArchitectureDiagramStore:
-    return ArchitectureDiagramStore(data_store=_store(identity))
 
 
 def get_memory_store(identity: RequestIdentity = Depends(get_request_identity)) -> MemoryStore:

@@ -10,12 +10,20 @@ import { SidebarElement } from "./SidebarElement"
 import { useProject } from "@/contexts/ProjectContext"
 import { useBranches } from "@/contexts/BranchContext"
 import { useSidebar, type AppSurface } from "@/contexts/SidebarContext"
+import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import type { BranchMeta, VaultNode, ProjectListItem, ProjectDocument } from "@/lib/types"
 import { ChatBranchItem } from "./ChatBranchItem"
 import { addFileVaultMountpoint, addFileVaultRoot, createDirectory, moveHistoryItem, fileVaultTree, removeFileVaultRoot, listNotes, listProjectDocuments, moveDocument, removeDocument, writeDocument, Vault } from "@/lib/api"
 
 const COLLAPSED_WIDTH = 50
 const EXPANDED_WIDTH = 280
+
+/** Drops tree rows whose deletion is pending, at any depth; a hidden folder hides its children. */
+function hidePending<T>(items: VaultTreeItem<T>[], hidden: (item: VaultTreeItem<T>) => boolean): VaultTreeItem<T>[] {
+  return items.filter((item) => !hidden(item)).map((item) => item.children
+    ? { ...item, children: hidePending(item.children, hidden) }
+    : item)
+}
 
 interface SidebarProps {
   onOpenChat: (filename: string, qaIndex?: number) => void
@@ -78,10 +86,11 @@ export function Sidebar({
   } = useProject()
 
   const { openMemoryViewer } = useMemoryViewer()
+  const { schedule, pending } = useUndoDelete()
 
   const handleTimelineDelete = useCallback(async (file: string) => {
-    await onCascadeDelete?.(file)
-  }, [onCascadeDelete])
+    schedule(`history:${file}`, file.split("/").pop() ?? file, async () => { await onCascadeDelete?.(file) })
+  }, [onCascadeDelete, schedule])
 
   const expandIfCollapsed = () => { if (collapsed) toggleCollapsed() }
 
@@ -134,8 +143,9 @@ export function Sidebar({
   }, [appMode, activeCanvasPath, refreshCanvases])
 
   const canvasItems = useMemo(() =>
-    buildCanvasItems(canvasNotes, projects, projectCanvases, activeCanvasPath ?? null),
-    [canvasNotes, projects, projectCanvases, activeCanvasPath],
+    hidePending(buildCanvasItems(canvasNotes, projects, projectCanvases, activeCanvasPath ?? null),
+      (item) => !!item.data && pending(`canvas:${item.data.scope}:${item.data.path}`)),
+    [canvasNotes, projects, projectCanvases, activeCanvasPath, pending],
   )
 
   // File vaults: roots maintained server-side in file-vault-roots.json; rendered
@@ -151,17 +161,25 @@ export function Sidebar({
     return () => { cancelled = true }
   }, [])
 
+  // A file-vault root, standalone (Vaults) or mounted to a project (Projects), is keyed by its absolute path.
+  const deleteVaultRoot = (path: string) => schedule(`vault:${path}`, path.split("/").pop() ?? path, async () => {
+    const result = await removeFileVaultRoot(path)
+    setVaultTreeData(result.tree)
+    onVaultsChanged?.()
+  })
+
   // Roots mounted to a project render inside that project's subtree, not here.
-  const vaultItems = useMemo(() => buildVaultItems(vaultTreeData.filter((n) => !n.project)), [vaultTreeData])
-
+  const vaultItems = useMemo(() => hidePending(buildVaultItems(vaultTreeData.filter((node) => !node.project)),
+    (item) => pending(`vault:${item.id}`)), [vaultTreeData, pending])
   const projectItems = useMemo(() =>
-    buildProjectItems(projects, activeProject, branchMeta, vaultTreeData),
-    [projects, activeProject, branchMeta, vaultTreeData],
+    // Projects tree rows: absolute ids are mounted vault roots, other vault rows are projects, elements are chats.
+    hidePending(buildProjectItems(projects, activeProject, branchMeta, vaultTreeData),
+      (item) => pending(`${item.id.startsWith("/") ? "vault" : item.type === "vault" ? "project" : "history"}:${item.id}`)),
+    [projects, activeProject, branchMeta, vaultTreeData, pending],
   )
-
   const historyItems = useMemo(() =>
-    buildHistoryItems(rootFiles, histories, projects),
-    [rootFiles, histories, projects],
+    hidePending(buildHistoryItems(rootFiles, histories, projects), (item) => pending(`history:${item.id}`)),
+    [rootFiles, histories, projects, pending],
   )
 
   const renderChatElement = useCallback((item: VaultTreeItem<string>, depth: number) => {
@@ -245,13 +263,14 @@ export function Sidebar({
               controller={canvasController}
               plusTitle="New canvas"
               folderPlaceholder="Canvas name"
-              folderIcon={PenLine}
-              onElementClick={(item) => item.data && onCanvasSelect?.(item.data.path, item.data.scope)}
-              onElementDelete={async (item) => {
+              onElementDelete={(item) => {
                 if (!item.data) return
-                await removeDocument(item.data.scope, item.data.path)
-                refreshCanvases()
-                onCanvasDeleted?.(item.data.path)
+                const { scope, path } = item.data
+                schedule(`canvas:${scope}:${path}`, item.label, async () => {
+                  await removeDocument(scope, path)
+                  await refreshCanvases()
+                  onCanvasDeleted?.(path)
+                })
               }}
               onAddFolder={async (parentId, name) => {
                 const scope = parentId ?? ""
@@ -285,15 +304,9 @@ export function Sidebar({
             onOpenChange={setProjectsOpen}
             onExpand={expandIfCollapsed}
             controller={projectsController}
-            onVaultDelete={async (id) => {
-              // ponytail: absolute path = mounted vault row (unmount), slug = project row
-              if (id.startsWith("/")) {
-                const r = await removeFileVaultRoot(id)
-                setVaultTreeData(r.tree)
-                onVaultsChanged?.()
-              } else {
-                deleteProject(id)
-              }
+            onVaultDelete={(id) => {
+              if (id.startsWith("/")) deleteVaultRoot(id)
+              else schedule(`project:${id}`, id, () => deleteProject(id))
             }}
             onAddVault={(name) => createProject(name)}
             onAddMountpoint={async (vaultId: string, path: string) => {
@@ -338,9 +351,11 @@ export function Sidebar({
               await onRefreshAll()
               setHistoriesOpen(true)
             }}
-            onVaultDelete={async (id: string) => {
-              await new Vault(id).delete()
-              await onRefreshAll()
+            onVaultDelete={(id: string) => {
+              schedule(`history:${id}`, id.split("/").pop() ?? id, async () => {
+                await new Vault(id).delete()
+                await onRefreshAll()
+              })
             }}
             onMoveElement={async (elementId: string, targetId: string | null) => {
               await moveHistoryItem(elementId, targetId ?? "")
@@ -373,11 +388,7 @@ export function Sidebar({
               setVaultTreeData(r.tree)
               onVaultsChanged?.()
             }}
-            onVaultDelete={async (id: string) => {
-              const r = await removeFileVaultRoot(id)
-              setVaultTreeData(r.tree)
-              onVaultsChanged?.()
-            }}
+            onVaultDelete={deleteVaultRoot}
           />
         </div>
 

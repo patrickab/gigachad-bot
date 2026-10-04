@@ -28,6 +28,10 @@ export interface ChatSidebarContextValue {
   onOpenVault?: () => void
   documents?: ProjectDocument[]
   onSelectDocument?: (path: string) => void
+  /** Attaches every architecture source as one text attachment; absent when the project has none. */
+  onAttachArchitecture?: () => Promise<void>
+  /** Why the last architecture attach failed; cleared when the next one starts. */
+  architectureError?: string
   onOpenDocuments?: () => void
   onCreateDocument?: () => void
   onDeleteDocument?: (path: string) => void
@@ -37,6 +41,8 @@ export interface ChatSidebarContextValue {
   vaultPaths?: Set<string>
   vaultEditingPath?: string | null
   onEditVaultDocument?: (path: string | null) => void
+  /** Model behind the editor's LLM features (assistant sidebar, inline edit). */
+  editorModel?: string
 }
 
 const ChatSidebarContext = createContext<ChatSidebarContextValue>({})
@@ -200,11 +206,12 @@ function DocumentRow({ doc, slug, onSelect, editingPath, onEdit, onDelete, onRen
   onEditVault?: (path: string | null) => void
 }) {
   const [editingTitle, setEditingTitle] = useState(false)
+  const { editorModel } = useContext(ChatSidebarContext)
   const selectTimer = useRef<number | undefined>(undefined)
   const cancelRename = useRef(false)
   const isPdf = doc.mime === "application/pdf"
   const vaultText = isVault && !isPdf
-  const editable = /\.(md|tex|canvas)$/.test(doc.name) && !vaultText
+  const editable = /\.(md|tex|canvas|c4)$/.test(doc.name) && !vaultText
   const expanded = editingPath === doc.path || (vaultText && vaultEditingPath === doc.path)
   const Icon = isPdf ? FileType : FileText
 
@@ -236,6 +243,7 @@ function DocumentRow({ doc, slug, onSelect, editingPath, onEdit, onDelete, onRen
       <div className="flex items-center gap-1 px-2 py-2 hover:bg-surface/50 transition-colors">
         <button
           type="button"
+          aria-label={`${expanded ? "Close" : "Open"} ${doc.name} editor`}
           onClick={() => {
             if (vaultText) onEditVault?.(expanded ? null : doc.path)
             else onEdit?.(expanded ? null : doc.path)
@@ -264,6 +272,7 @@ function DocumentRow({ doc, slug, onSelect, editingPath, onEdit, onDelete, onRen
         ) : (
           <button
             type="button"
+            aria-label={`Attach ${doc.name} to chat`}
             onClick={select}
             className="min-w-0 flex-1 text-left text-ink-muted hover:text-ink transition-colors"
           >
@@ -271,7 +280,7 @@ function DocumentRow({ doc, slug, onSelect, editingPath, onEdit, onDelete, onRen
           </button>
         )}
         {!isVault && (
-          <button
+          <button aria-label={`Delete ${doc.name}`}
             type="button"
             onClick={() => onDelete?.(doc.path)}
             className="rounded p-0.5 text-ink-faint hover:text-danger hover:bg-surface-elevated transition-colors shrink-0"
@@ -281,7 +290,7 @@ function DocumentRow({ doc, slug, onSelect, editingPath, onEdit, onDelete, onRen
         )}
       </div>
       {expanded && editable && slug && (
-        <DocumentEditor path={doc.path} slug={slug} onClose={() => onEdit?.(null)} onSaved={onSaved} onLiveContent={onLiveContent} />
+        <DocumentEditor path={doc.path} slug={slug} onClose={() => onEdit?.(null)} onSaved={onSaved} onLiveContent={onLiveContent} model={editorModel} />
       )}
       {expanded && !editable && doc.mime.startsWith("image/") && (
         <div className="p-2 max-h-[60vh] overflow-y-auto">
@@ -297,7 +306,7 @@ function DocumentRow({ doc, slug, onSelect, editingPath, onEdit, onDelete, onRen
   )
 }
 
-function DocumentsBody({ documents, slug, onSelect, editingPath, onEdit, onDelete, onRename, onSaved, onLiveContent, pdfWide, onTogglePdfWide, vaultPaths, vaultEditingPath, onEditVault }: { documents: ProjectDocument[]; slug: string | null; onSelect?: (path: string) => void; editingPath?: string | null; onEdit?: (path: string | null) => void; onDelete?: (path: string) => void; onRename?: (path: string, name: string) => void | Promise<void>; onSaved?: (filename?: string, content?: string) => void; onLiveContent?: (path: string, content: string | null) => void; pdfWide?: boolean; onTogglePdfWide?: () => void; vaultPaths?: Set<string>; vaultEditingPath?: string | null; onEditVault?: (path: string | null) => void }) {
+function DocumentsBody({ documents, slug, onSelect, onAttachArchitecture, architectureError, editingPath, onEdit, onDelete, onRename, onSaved, onLiveContent, pdfWide, onTogglePdfWide, vaultPaths, vaultEditingPath, onEditVault }: { documents: ProjectDocument[]; slug: string | null; onSelect?: (path: string) => void; onAttachArchitecture?: () => Promise<void>; architectureError?: string; editingPath?: string | null; onEdit?: (path: string | null) => void; onDelete?: (path: string) => void; onRename?: (path: string, name: string) => void | Promise<void>; onSaved?: (filename?: string, content?: string) => void; onLiveContent?: (path: string, content: string | null) => void; pdfWide?: boolean; onTogglePdfWide?: () => void; vaultPaths?: Set<string>; vaultEditingPath?: string | null; onEditVault?: (path: string | null) => void }) {
   if (documents.length === 0) {
     return (
       <div className="flex items-center justify-center py-6 text-xs text-ink-faint">
@@ -308,6 +317,8 @@ function DocumentsBody({ documents, slug, onSelect, editingPath, onEdit, onDelet
 
   return (
     <div>
+      {onAttachArchitecture && <button type="button" onClick={() => void onAttachArchitecture()} className="w-full border-b border-divider/50 px-3 py-2 text-left text-[11px] text-ink-muted hover:bg-surface/50 hover:text-ink">Attach architecture to chat</button>}
+      {architectureError && <p role="alert" className="px-3 py-1 text-[11px] text-danger">{architectureError}</p>}
       {documents.map((doc) => (
         <DocumentRow
           key={doc.path}
@@ -444,6 +455,8 @@ export function useSidebarElements({
     documents,
     onSelectDocument,
     onOpenDocuments,
+    onAttachArchitecture,
+    architectureError,
     onCreateDocument,
     onDeleteDocument,
     onRenameDocument,
@@ -524,7 +537,7 @@ export function useSidebarElements({
       open: isElementOpen("documents"),
       onOpenChange: (o) => onElementOpenChange("documents", o),
       body: (
-        <DocumentsBody documents={docs} slug={slug} onSelect={onSelectDocument} editingPath={editingDocPath} onEdit={onEditDocument} onDelete={onDeleteDocument} onRename={onRenameDocument} onSaved={onDocumentSaved} onLiveContent={liveCanvasRef ? (p, c) => { liveCanvasRef.current = c !== null ? { path: p, content: c } : null } : undefined} pdfWide={pdfWide} onTogglePdfWide={onTogglePdfWide} vaultPaths={vaultPaths} vaultEditingPath={vaultEditingPath} onEditVault={onEditVaultDocument} />
+        <DocumentsBody documents={docs} slug={slug} onSelect={onSelectDocument} onAttachArchitecture={onAttachArchitecture} architectureError={architectureError} editingPath={editingDocPath} onEdit={onEditDocument} onDelete={onDeleteDocument} onRename={onRenameDocument} onSaved={onDocumentSaved} onLiveContent={liveCanvasRef ? (p, c) => { liveCanvasRef.current = c !== null ? { path: p, content: c } : null } : undefined} pdfWide={pdfWide} onTogglePdfWide={onTogglePdfWide} vaultPaths={vaultPaths} vaultEditingPath={vaultEditingPath} onEditVault={onEditVaultDocument} />
       ),
     })
   }
@@ -548,7 +561,7 @@ export function useSidebarElements({
     chatId, slug, allAttachments, expandedEntries, onToggleExpand,
     onToggleAttachmentActive, onRemoveAttachment, onAttachmentContentChange,
     lastSearchResult, vaultEnabled, onOpenVault,
-    documents, onSelectDocument, onOpenDocuments, onCreateDocument,
+    documents, onSelectDocument, onAttachArchitecture, architectureError, onOpenDocuments, onCreateDocument,
     editingDocPath, onEditDocument, onDeleteDocument, onRenameDocument, onDocumentSaved,
     isElementOpen, onElementOpenChange, pdfWide, onTogglePdfWide,
     liveCanvasRef, vaultPaths, vaultEditingPath, onEditVaultDocument,

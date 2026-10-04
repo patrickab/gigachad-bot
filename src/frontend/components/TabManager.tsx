@@ -334,7 +334,7 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
                   )}
                 </div>
                 {tabs.length > 1 && (
-                  <button
+                  <button aria-label={`Close ${tab.title ?? "tab"}`}
                     className="shrink-0 p-0.5 rounded hover:bg-hover text-ink-faint hover:text-ink"
                     onClick={(e) => {
                       e.stopPropagation()
@@ -348,7 +348,7 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
             )
           })}
         </div>
-        <button
+        <button aria-label="Add tab"
           className="shrink-0 h-full px-2.5 flex items-center justify-center text-ink-subtle hover:text-ink hover:bg-surface-elevated/50 transition-colors"
           onClick={addTab}
         >

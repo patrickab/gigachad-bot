@@ -180,11 +180,11 @@ export function EditorSidebar({ content, model, width, onWidthChange, onApply }:
             className="flex-1 resize-none bg-transparent text-xs text-ink placeholder:text-ink-faint outline-none max-h-20 overflow-y-auto"
           />
           {isStreaming ? (
-            <button onClick={() => { abortRef.current?.(); setIsStreaming(false) }} className="p-1 rounded text-ink-subtle hover:text-ink transition-colors shrink-0">
+            <button aria-label="Stop assistant" onClick={() => { abortRef.current?.(); setIsStreaming(false) }} className="p-1 rounded text-ink-subtle hover:text-ink transition-colors shrink-0">
               <Square className="h-3.5 w-3.5" />
             </button>
           ) : (
-            <button onClick={handleSend} disabled={!input.trim()} className="p-1 rounded text-ink-subtle hover:text-ink disabled:opacity-30 transition-colors shrink-0">
+            <button aria-label="Send to assistant" onClick={handleSend} disabled={!input.trim()} className="p-1 rounded text-ink-subtle hover:text-ink disabled:opacity-30 transition-colors shrink-0">
               <ArrowUp className="h-3.5 w-3.5" />
             </button>
           )}
@@ -260,15 +260,15 @@ export function InlineEditPanel({ selectedText, model, onApply, onClose }: Inlin
           className="flex-1 bg-transparent text-xs text-ink placeholder:text-ink-faint outline-none"
         />
         {isStreaming ? (
-          <button onClick={() => { abortRef.current?.(); setIsStreaming(false) }} className="p-1 text-ink-subtle hover:text-ink shrink-0">
+          <button aria-label="Stop assistant" onClick={() => { abortRef.current?.(); setIsStreaming(false) }} className="p-1 text-ink-subtle hover:text-ink shrink-0">
             <Square className="h-3 w-3" />
           </button>
         ) : (
-          <button onClick={handleSend} disabled={!input.trim()} className="p-1 text-ink-subtle hover:text-ink disabled:opacity-30 shrink-0">
+          <button aria-label="Send to assistant" onClick={handleSend} disabled={!input.trim()} className="p-1 text-ink-subtle hover:text-ink disabled:opacity-30 shrink-0">
             <ArrowUp className="h-3 w-3" />
           </button>
         )}
-        <button onClick={() => { abortRef.current?.(); onClose() }} className="p-1 text-ink-subtle hover:text-ink shrink-0">
+        <button aria-label="Close assistant" onClick={() => { abortRef.current?.(); onClose() }} className="p-1 text-ink-subtle hover:text-ink shrink-0">
           <X className="h-3 w-3" />
         </button>
       </div>

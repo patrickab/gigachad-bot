@@ -46,6 +46,11 @@ def project_document_prefix(slug: str) -> str:
     return f"{PROJECT}/{_part(slug, 'project slug')}/document"
 
 
+def architecture_prefix(slug: str) -> str:
+    """One LikeC4 workspace per project: its `.c4` sources plus `.likec4/` saved layouts."""
+    return f"{GRAPH}/{_part(slug, 'project slug')}"
+
+
 def chat_upload_prefix(chat_id: str, slug: str | None = None) -> str:
     chat = _part(chat_id, "chat ID")
     if slug:

@@ -5,6 +5,7 @@ import { AnimatePresence } from "framer-motion"
 import { Plus, Trash2, Save, X, RefreshCw } from "lucide-react"
 import { FloatingWindow } from "./FloatingWindow"
 import { cn } from "@/lib/utils"
+import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import {
   fetchPromptList,
   fetchPromptBlocks,
@@ -27,6 +28,7 @@ function slugify(s: string): string {
 }
 
 export function PromptEditor({ open, onClose, onPromptsChanged }: PromptEditorProps) {
+  const { schedule, pending } = useUndoDelete()
   const [prompts, setPrompts] = useState<PromptMeta[]>([])
   const [blocks, setBlocks] = useState<Record<string, string>>({})
   const [selected, setSelected] = useState<string | null>(null)
@@ -82,17 +84,18 @@ export function PromptEditor({ open, onClose, onPromptsChanged }: PromptEditorPr
     onPromptsChanged(resolved)
   }, [selected, content, refresh, onPromptsChanged])
 
-  const handleDelete = useCallback(async () => {
+  const handleDelete = useCallback(() => {
     if (!selected) return
-    await deletePrompt(selected)
+    const slug = selected
+    schedule(`prompt:${slug}`, prompts.find((prompt) => prompt.slug === slug)?.name ?? slug, async () => {
+      await deletePrompt(slug)
+      await refresh()
+      onPromptsChanged(await fetchPrompts())
+    })
     setSelected(null)
     setContent("")
     setDirty(false)
-    await refresh()
-    const resolved = await fetchPrompts()
-    onPromptsChanged(resolved)
-  }, [selected, refresh, onPromptsChanged])
-
+  }, [selected, prompts, schedule, refresh, onPromptsChanged])
   const handleCreate = useCallback(async () => {
     if (!newName.trim()) return
     const slug = slugify(newName)
@@ -122,10 +125,10 @@ export function PromptEditor({ open, onClose, onPromptsChanged }: PromptEditorPr
             <div className="flex items-center justify-between p-3 border-b border-divider/50">
               <span className="text-xs font-medium text-ink-subtle">Prompts</span>
               <div className="flex gap-1">
-                <button onClick={() => { setCreating(true); setNewName("") }} className="p-1 rounded hover:bg-hover text-ink-muted hover:text-ink">
+                <button aria-label="Create prompt" onClick={() => { setCreating(true); setNewName("") }} className="p-1 rounded hover:bg-hover text-ink-muted hover:text-ink">
                   <Plus className="h-3.5 w-3.5" />
                 </button>
-                <button onClick={refresh} className="p-1 rounded hover:bg-hover text-ink-muted hover:text-ink">
+                <button aria-label="Refresh prompts" onClick={refresh} className="p-1 rounded hover:bg-hover text-ink-muted hover:text-ink">
                   <RefreshCw className="h-3.5 w-3.5" />
                 </button>
               </div>
@@ -141,14 +144,14 @@ export function PromptEditor({ open, onClose, onPromptsChanged }: PromptEditorPr
                   placeholder="Prompt name..."
                   className="flex-1 rounded border border-divider bg-surface px-2 py-1 text-xs text-ink outline-none"
                 />
-                <button onClick={handleCreate} className="p-1 rounded hover:bg-hover text-ink-muted hover:text-ink">
+                <button aria-label="Save new prompt" onClick={handleCreate} className="p-1 rounded hover:bg-hover text-ink-muted hover:text-ink">
                   <Save className="h-3.5 w-3.5" />
                 </button>
               </div>
             )}
 
             <div className="flex-1 overflow-y-auto">
-              {prompts.map(p => (
+              {prompts.filter((prompt) => !pending(`prompt:${prompt.slug}`)).map(p => (
                 <button
                   key={p.slug}
                   draggable
@@ -199,7 +202,7 @@ export function PromptEditor({ open, onClose, onPromptsChanged }: PromptEditorPr
                     </button>
                   </>
                 )}
-                <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-hover text-ink-muted hover:text-ink ml-2">
+                <button aria-label="Close prompt editor" onClick={onClose} className="p-1.5 rounded-lg hover:bg-hover text-ink-muted hover:text-ink ml-2">
                   <X className="h-4 w-4" />
                 </button>
               </div>

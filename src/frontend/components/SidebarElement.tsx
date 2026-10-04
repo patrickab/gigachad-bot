@@ -20,6 +20,7 @@ export function SidebarElement({
   return (
     <button
       onClick={onClick}
+      aria-label={title ?? (collapsed ? "Expand sidebar" : "Collapse sidebar")}
       className={`w-full flex items-center p-2 rounded-md transition-colors ${
         isActive
           ? "bg-surface-elevated text-ink"

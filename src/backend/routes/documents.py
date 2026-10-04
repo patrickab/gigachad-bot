@@ -26,6 +26,7 @@ from pydantic import BaseModel
 from backend.routes.deps import get_asset_store, get_document_store, get_project_store
 from backend.routes.schemas import AttachResult, FileListResponse, FileMeta
 from lib import document_library as lib_docs
+from lib.architecture_workspace import ArchitectureStore
 from lib.asset_store import Asset, AssetStore
 from lib.attachment_materialize import materialize, store_library_pdf
 from lib.data_store import DataStore, DataStorePath, StorageConflictError, StorageNotFoundError, validate_key, write_text
@@ -48,7 +49,6 @@ router = APIRouter(prefix="/api/documents", tags=["documents"])
 
 
 KEY_DRAWINGS = DRAWING
-KEY_GRAPHS = GRAPH
 KEY_NOTES = NOTE
 KEY_PDFS = PDFS
 
@@ -83,8 +83,8 @@ def _under(key: str, prefix: str) -> bool:
 def _known_key(store: ProjectStore, path: str) -> str:
     """The logical key for *path*, 404 when it is not one the app knows about.
 
-    Allow-list includes the document library, any document a project
-    references, and canonical architecture diagrams, expressed in logical keys.
+    Allow-list includes the document library, architecture workspace sources,
+    and any document a project references, expressed in logical keys.
     Logical keys cannot escape their application namespace, and anything unknown
     answers 404 so another user's documents stay undiscoverable.
     """
@@ -92,12 +92,7 @@ def _known_key(store: ProjectStore, path: str) -> str:
         key = validate_key(path)
     except ValueError:
         raise HTTPException(status_code=404, detail="Document not found") from None
-    known = (
-        _under(key, KEY_PDFS)
-        # Graph drafts are deliberately not generic documents (see resolve_known_path).
-        or (PurePosixPath(key).parent.as_posix() == KEY_GRAPHS and key.endswith(".architecture.yaml"))
-        or key in set(store.list_all_files())
-    )
+    known = _under(key, KEY_PDFS) or _under(key, GRAPH) or key in set(store.list_all_files())
     if not known:
         raise HTTPException(status_code=404, detail="Document not found")
     return key
@@ -138,20 +133,30 @@ def _promote_pdf_document(assets: AssetStore, name: str, content: bytes) -> Asse
 
 
 @router.get("", response_model=FileListResponse)
-async def list_documents(slug: str = Query(...), store: ProjectStore = Depends(get_project_store)):
-    try:
-        return FileListResponse(documents=_meta_list(store.list_files(slug)))
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-@router.get("/all", response_model=FileListResponse)
-async def list_all_documents(
+async def list_documents(
+    slug: str = Query(...),
     store: ProjectStore = Depends(get_project_store),
     docs: DataStore = Depends(get_document_store),
 ):
-    graph_paths = [e.key for e in docs.list(KEY_GRAPHS) if not e.is_dir and e.key.endswith(".architecture.yaml")]
-    return FileListResponse(documents=_meta_list(list(dict.fromkeys([*store.list_all_files(), *graph_paths]))))
+    """The project's referenced documents plus every architecture source, found
+    from the workspace root downward and named by their path inside it."""
+    try:
+        files = store.list_files(slug)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    workspace = ArchitectureStore.for_project(docs, slug)
+    root = workspace.key("")
+    sources = [
+        FileMeta(**{**lib_docs.document_meta(key), "name": key.removeprefix(root)})
+        for key in workspace.source_paths()
+    ]
+    # The workspace is the source of truth for its files, so a stray reference never duplicates one.
+    return FileListResponse(documents=_meta_list([f for f in files if not _under(f, GRAPH)]) + sources)
+
+
+@router.get("/all", response_model=FileListResponse)
+async def list_all_documents(store: ProjectStore = Depends(get_project_store)):
+    return FileListResponse(documents=_meta_list(store.list_all_files()))
 
 
 @router.get("/notes", response_model=FileListResponse)

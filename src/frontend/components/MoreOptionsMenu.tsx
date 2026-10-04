@@ -24,10 +24,11 @@ interface MoreOptionsMenuProps {
   models: ModelsResponse | null
 }
 
-function Toggle({ on, onChange }: { on: boolean; onChange: () => void }) {
+function Toggle({ on, onChange, label }: { on: boolean; onChange: () => void; label: string }) {
   return (
     <button
       role="switch"
+      aria-label={label}
       aria-checked={on}
       onClick={onChange}
       className={cn("relative h-5 w-9 rounded-full transition-colors", on ? "bg-ink-muted" : "bg-surface-elevated")}
@@ -77,7 +78,7 @@ export function MoreOptionsMenu({
 
   return (
     <div className="relative z-50" ref={ref}>
-      <button
+      <button aria-label="More options"
         onClick={() => setOpen(!open)}
         className="flex items-center justify-center rounded-lg p-2 text-ink-muted hover:text-ink hover:bg-surface transition-colors"
       >
@@ -95,7 +96,7 @@ export function MoreOptionsMenu({
           >
             <label className="flex items-center justify-between cursor-pointer">
               <span className="text-xs text-ink-subtle">Transparent background</span>
-              <Toggle on={transparentBg} onChange={toggleTransparentBg} />
+              <Toggle label="Transparent background" on={transparentBg} onChange={toggleTransparentBg} />
             </label>
 
             {/* Chat settings always apply: a tool call happens inside a normal chat turn. */}
@@ -108,7 +109,7 @@ export function MoreOptionsMenu({
                       System Prompt
                     </div>
                     {onEditPrompts && (
-                      <button onClick={() => { onEditPrompts(); close() }} className="p-0.5 rounded hover:bg-hover text-ink-faint hover:text-ink transition-colors">
+                      <button aria-label="Edit prompts" onClick={() => { onEditPrompts(); close() }} className="p-0.5 rounded hover:bg-hover text-ink-faint hover:text-ink transition-colors">
                         <Pencil className="h-3 w-3" />
                       </button>
                     )}
@@ -133,6 +134,7 @@ export function MoreOptionsMenu({
                   <label className="flex items-center justify-between cursor-pointer">
                     <span className="text-xs text-ink-subtle">Downscale images</span>
                     <Toggle
+                    label="Downscale images"
                       on={config.downscaleImages}
                       onChange={() => onConfigChange({ downscaleImages: !config.downscaleImages })}
                     />

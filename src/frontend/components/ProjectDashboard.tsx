@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import { Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useProject } from "@/contexts/ProjectContext"
+import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import type { KanbanColumnId } from "@/lib/types"
 import { ElevationProvider, ElevatedContainer } from "./ElevatedContainer"
 import { FloatingWindow } from "./FloatingWindow"
@@ -140,6 +141,7 @@ function AddCardModal({ open, onClose, onAdd, defaultState }: AddCardModalProps)
 
 export function ProjectDashboard() {
   const { projectData, activeProject, addCard, moveCard, deleteCard, setDashboardOpen } = useProject()
+  const { schedule, pending } = useUndoDelete()
   const [addModalState, setAddModalState] = useState<KanbanColumnId | null>(null)
   const [draggedCardId, setDraggedCardId] = useState<string | null>(null)
   const [dragOverCol, setDragOverCol] = useState<KanbanColumnId | null>(null)
@@ -158,7 +160,7 @@ export function ProjectDashboard() {
   if (!projectData || !activeProject) return null
 
   const cardsByColumn = (col: KanbanColumnId) =>
-    projectData.kanban.filter((c) => c.state === col)
+    projectData.kanban.filter((card) => card.state === col && !pending(`card:${activeProject}:${card.id}`))
 
   return (
     <>
@@ -208,7 +210,7 @@ export function ProjectDashboard() {
                             {cards.length}
                           </span>
                         </div>
-                        <button
+                        <button aria-label={`Add card to ${col.label}`}
                           onClick={() => setAddModalState(col.id)}
                           className="p-1 rounded-md text-ink-subtle hover:text-ink hover:bg-hover transition-all duration-200"
                         >
@@ -281,9 +283,10 @@ export function ProjectDashboard() {
                                 </div>
 
                                 <button
-                                  onClick={async (e: any) => {
-                                    e.stopPropagation()
-                                    await deleteCard(card.id)
+                                  aria-label={`Delete ${card.title}`}
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    schedule(`card:${activeProject}:${card.id}`, card.title, () => deleteCard(card.id))
                                   }}
                                   className="absolute top-3 right-3 shrink-0 opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-danger-soft text-ink-faint hover:text-danger transition-all"
                                 >

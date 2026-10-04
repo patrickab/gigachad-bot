@@ -375,7 +375,7 @@ function PdfViewerInner({
         ref={dropdownRef}
         className={`absolute top-3 right-3 z-10 flex items-center gap-1 rounded-lg bg-surface-elevated/90 backdrop-blur-sm border border-divider/60 shadow-[var(--shadow-md)] transition-opacity duration-300 pointer-events-auto ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
       >
-        <button
+        <button aria-label="Zoom out"
           onClick={() => adjustZoom(zoomRef.current - ZOOM_STEP)}
           disabled={zoom <= MIN_ZOOM}
           className="rounded-l-lg p-1.5 text-ink-subtle hover:text-ink hover:bg-hover disabled:text-ink-faint disabled:pointer-events-none transition-colors"
@@ -416,7 +416,7 @@ function PdfViewerInner({
             )}
           </AnimatePresence>
         </div>
-        <button
+        <button aria-label="Zoom in"
           onClick={() => adjustZoom(zoomRef.current + ZOOM_STEP)}
           disabled={zoom >= MAX_ZOOM}
           className="p-1.5 text-ink-subtle hover:text-ink hover:bg-hover disabled:text-ink-faint disabled:pointer-events-none transition-colors"
@@ -427,6 +427,7 @@ function PdfViewerInner({
           <>
             <div className="w-px h-4 bg-divider" />
             <button
+              aria-label={isWide ? "Narrow PDF viewer" : "Widen PDF viewer"}
               onClick={onToggleWide}
               className="p-1.5 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
             >
@@ -436,6 +437,7 @@ function PdfViewerInner({
         )}
         <div className="w-px h-4 bg-divider" />
         <button
+          aria-label={isFullscreen ? "Exit PDF fullscreen" : "Enter PDF fullscreen"}
           onClick={onToggleFullscreen}
           className="rounded-r-lg p-1.5 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
         >

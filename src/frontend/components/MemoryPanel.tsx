@@ -230,7 +230,7 @@ export function MemoryCard({
       )}
 
       {mode === "display" && onRemove && !editing && (
-        <button
+        <button aria-label={`Remove memory ${memory.id}`}
           onClick={(e) => { e.stopPropagation(); onRemove(memory.id) }}
           disabled={disabled}
           className="absolute bottom-1.5 right-1.5 rounded p-0.5 text-ink-faint hover:text-danger opacity-0 group-hover/card:opacity-100 transition-opacity disabled:opacity-40 cursor-pointer"
@@ -315,7 +315,7 @@ function CandidateWorkspace({
             <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider text-ink-faint">
               <Globe className="h-3 w-3" />Global profile
             </div>
-            <button onClick={() => setAddingScope(addingScope === "global" ? null : "global")}
+            <button aria-label="Add global memory" onClick={() => setAddingScope(addingScope === "global" ? null : "global")}
               className="rounded-md p-1 text-ink-subtle hover:bg-hover hover:text-ink transition-colors">
               <Plus className="h-3.5 w-3.5" />
             </button>
@@ -346,7 +346,7 @@ function CandidateWorkspace({
               <FolderOpen className="h-3 w-3" />Project memory
             </div>
             {projectEnabled && (
-              <button onClick={() => setAddingScope(addingScope === "project" ? null : "project")}
+              <button aria-label="Add project memory" onClick={() => setAddingScope(addingScope === "project" ? null : "project")}
                 className="rounded-md p-1 text-ink-subtle hover:bg-hover hover:text-ink transition-colors">
                 <Plus className="h-3.5 w-3.5" />
               </button>

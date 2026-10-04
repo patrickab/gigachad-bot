@@ -1,0 +1,29 @@
+{
+  "name": "gigachad-c4",
+  "private": true,
+  "type": "module",
+  "description": "Parses, lays out, and surgically edits LikeC4 workspaces for the backend.",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node server.ts",
+    "test": "node --test",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@likec4/core": "1.59.4",
+    "@likec4/language-services": "1.59.4",
+    "bundle-require": "5.1.0",
+    "esbuild": "0.28.2",
+    "json5": "2.2.3",
+    "langium": "3.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.0"
+  },
+  "overrides": {
+    "lodash-es": "4.18.1"
+  }
+}

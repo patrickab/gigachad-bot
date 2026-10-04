@@ -291,12 +291,15 @@ p, li {
 }
 
 .architecture-diagram-toolbar {
-  position: absolute;
-  top: 10px;
-  left: 10px;
+  position: relative;
   z-index: 5;
   display: flex;
-  gap: 4px;
+  min-height: 31px;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid var(--divider);
+  padding: 0 10px;
 }
 
 .architecture-diagram-edge-editor {
@@ -312,19 +315,6 @@ p, li {
   background: var(--surface-elevated);
   box-shadow: var(--shadow-sm);
 }
-.architecture-diagram-edge-editor input,
-.architecture-diagram-edge-editor select {
-  min-width: 112px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  outline: 0;
-  background: transparent;
-  color: var(--ink);
-  padding: 0 6px;
-  font: inherit;
-  font-size: 11px;
-}
-.architecture-diagram-edge-editor select { min-width: 96px; color: var(--ink-muted); }
 .architecture-diagram-delete:hover { color: var(--danger); }
 
 .architecture-diagram-button,
@@ -365,6 +355,19 @@ p, li {
 .architecture-diagram-toolbar-symbol:hover { background: var(--hover-overlay); color: var(--ink); }
 .architecture-diagram-toolbar-symbol.architecture-diagram-toolbar-symbol-active { background: var(--hover-overlay-strong); color: var(--ink); }
 .architecture-diagram-toolbar-symbol:focus-visible { outline: 2px solid var(--divider-strong); outline-offset: 2px; }
+.architecture-diagram-menu-item {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink-muted);
+  padding: 5px 8px;
+  text-align: left;
+  font-size: 12px;
+}
+.architecture-diagram-menu-item:hover, .architecture-diagram-menu-item[aria-checked="true"] { background: var(--hover-overlay); color: var(--ink); }
+.architecture-diagram-menu-item:focus-visible { outline: 2px solid var(--divider-strong); outline-offset: -2px; }
 
 .architecture-diagram-draw-overlay { position: absolute; inset: 0; z-index: 6; cursor: crosshair; touch-action: none; }
 .architecture-diagram-draw-preview { position: absolute; inset: 0; z-index: 7; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
@@ -382,18 +385,18 @@ p, li {
   text-align: center;
   user-select: none;
 }
-.architecture-diagram-node-titlebar-plain {
-  min-height: 0;
-  padding: 0 0 2px;
-}
-.architecture-diagram-node-titlebar-plain .architecture-diagram-title-display { white-space: normal; }
-.architecture-diagram-node-body.architecture-diagram-node-body-plain { flex: 0 0 auto; padding: 0; overflow: visible; align-items: stretch; text-align: center; }
-.architecture-diagram-node-body-plain .architecture-diagram-bullet-row:first-child { margin-top: 4px; }
-.architecture-diagram-node-body-plain .architecture-diagram-bullet-row { justify-content: center; }
-.architecture-diagram-node-body-plain .architecture-diagram-bullet-input { text-align: center; }
+.architecture-diagram-node-kind { flex-shrink: 0; font-size: 10px; line-height: 1; color: var(--sketch-ink-soft); user-select: none; }
+.architecture-diagram-node-body[hidden] { display: none; }
+/* A compound holds its children: title in the corner, a fainter fill, no body. */
+.architecture-diagram-node-compound .architecture-diagram-node-titlebar { justify-content: flex-start; }
+.architecture-diagram-node-compound .architecture-diagram-node-fill { fill-opacity: 0.35; }
 
-.architecture-diagram-node { height: 100%; cursor: grab; }
-.architecture-diagram-node:active { cursor: grabbing; }
+/* A card is paper until activated: a click selects it, then it moves and its text and kind respond.
+   Focus keeps a just-drawn card's title editable before it is ever selected. */
+.architecture-diagram-node { height: 100%; cursor: pointer; }
+.architecture-diagram-node-selected { cursor: grab; }
+.architecture-diagram-node-selected:active { cursor: grabbing; }
+.architecture-diagram-node:not(.architecture-diagram-node-selected):not(:focus-within) .architecture-diagram-node-content { pointer-events: none; }
 .architecture-diagram-node-sketch { color: var(--sketch-ink); }
 .architecture-diagram-node-fill { fill: var(--sketch-fill); }
 .architecture-diagram-title {
@@ -424,7 +427,8 @@ p, li {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.architecture-diagram-title:focus-visible { outline: 2px solid var(--divider-strong); outline-offset: 2px; }
+/* Keyboard focus on the title button only: the title being edited shows just its caret. */
+.architecture-diagram-title-display:focus-visible { outline: 2px solid var(--divider-strong); outline-offset: 2px; }
 
 .architecture-diagram-node-body { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 2px; padding: 4px 12px 8px; overflow: hidden; }
 .architecture-diagram-bullet-row { display: flex; align-items: flex-start; gap: 6px; }
@@ -479,6 +483,31 @@ p, li {
 .architecture-diagram-node:hover .architecture-diagram-handle,
 .architecture-diagram-node-selected .architecture-diagram-handle { opacity: 1; }
 
+/* Resizing: the sketched outline already shows the edge, so the resize lines are invisible
+   12px grab strips centred on it (React Flow's per-side border widths come later in the cascade,
+   hence !important), and the corners are small round dots like the connection dots inside a 16px
+   grab area. Raised over the card's text (an edge strip wins over the text's outer padding); the
+   connection dots and the corner X come later at the same level, so they still win where they overlap. */
+.architecture-diagram-node .react-flow__resize-control { z-index: 1; }
+.architecture-diagram-node .react-flow__resize-control.line { border-width: 0 !important; }
+.architecture-diagram-node .react-flow__resize-control.line.left,
+.architecture-diagram-node .react-flow__resize-control.line.right { width: 12px; }
+.architecture-diagram-node .react-flow__resize-control.line.top,
+.architecture-diagram-node .react-flow__resize-control.line.bottom { height: 12px; }
+.architecture-diagram-node .react-flow__resize-control.handle {
+  width: 16px;
+  height: 16px;
+  padding: 4px;
+  border: 0;
+  border-radius: 50%;
+  background-clip: content-box;
+}
+/* The sketch's corners are rounded (radius 9), so the dots sit on the curve, not the box corner. */
+.architecture-diagram-node .react-flow__resize-control.handle.top.left { transform: translate(calc(-50% + 3px), calc(-50% + 3px)); }
+.architecture-diagram-node .react-flow__resize-control.handle.top.right { transform: translate(calc(-50% - 3px), calc(-50% + 3px)); }
+.architecture-diagram-node .react-flow__resize-control.handle.bottom.left { transform: translate(calc(-50% + 3px), calc(-50% - 3px)); }
+.architecture-diagram-node .react-flow__resize-control.handle.bottom.right { transform: translate(calc(-50% - 3px), calc(-50% - 3px)); }
+
 .architecture-diagram-edge { color: var(--sketch-ink-soft); transition: color 100ms ease; }
 .react-flow__edge:hover .architecture-diagram-edge { color: var(--sketch-ink); }
 .architecture-diagram-edge-selected { color: var(--sketch-ink); }
@@ -510,15 +539,6 @@ p, li {
   font-size: 13px;
   text-align: center;
 }
-
-.architecture-diagram-surface .react-flow__controls {
-  overflow: hidden;
-  border: 1px solid var(--divider);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
-}
-.architecture-diagram-surface .react-flow__controls-button { border-bottom-color: var(--divider); background: var(--surface-elevated); fill: var(--ink-muted); }
-.architecture-diagram-surface .react-flow__controls-button:hover { background: var(--hover-overlay-strong); }
 
 @media (max-width: 640px) {
   h1, h2, h3 {

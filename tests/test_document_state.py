@@ -262,7 +262,7 @@ async def test_another_users_document_is_invisible_and_answers_404(alice, bob):
         route.WriteDocumentRequest(slug=slug, name="secret.md", content="mine"), alice.projects, alice.docs, alice.assets
     )
 
-    listed = await route.list_all_documents(bob.projects, bob.docs)
+    listed = await route.list_all_documents(bob.projects)
     assert listed.documents == []
 
     for call in (

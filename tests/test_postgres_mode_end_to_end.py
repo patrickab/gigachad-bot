@@ -12,18 +12,6 @@ import pytest
 
 from lib.db_schema import upgrade
 
-GRAPH = """\
-version: 1
-title: Checkout
-nodes:
-  - id: checkout-api
-    title: Checkout API
-    bullets:
-      - Validates carts
-    position: { x: 80, y: 160 }
-edges: []
-"""
-
 
 @pytest.fixture(scope="module")
 def database_url() -> str:
@@ -58,44 +46,136 @@ def headers(login: str, device_id: str | None = None) -> dict[str, str]:
 
 
 def test_unidentified_request_is_rejected(client):
-    assert client.get("/api/architecture-diagrams").status_code == 401
+    assert client.get("/api/architecture/project").status_code == 401
 
 
-def test_graph_lifecycle_is_revision_checked_and_user_scoped(client):
+@pytest.fixture
+def c4_service(monkeypatch):
+    import httpx
+
+    from lib import c4_service as service
+
+    url = os.environ.get("C4_SERVICE_URL", "http://127.0.0.1:8011")
+    try:
+        httpx.get(f"{url}/health", timeout=1).raise_for_status()
+    except httpx.HTTPError:
+        pytest.skip("the C4 service (src/c4/server.ts) is required for architecture tests")
+    monkeypatch.setattr(service, "C4_SERVICE_URL", url)
+
+
+def test_architecture_edits_are_gated_by_the_model_and_user_scoped(client, c4_service):
     alice = headers("alice@example.test", str(uuid4()))
+    slug = f"arch-{uuid4().hex[:8]}"
+    client.post("/api/projects", json={"name": slug}, headers=alice)
+
+    assert client.get(f"/api/architecture/{slug}", headers=alice).json()["model"]["tree"] == []
+    package = {"ops": [{"op": "createPackage", "title": "Store"}]}
+    created = client.post(f"/api/architecture/{slug}/ops", json=package, headers=alice)
+    assert created.json()["created"] == ["store/store.c4"]
+    assert f"graph/{slug}/store/store.c4" in client.get(f"/api/documents?slug={slug}", headers=alice).text
+
+    ops = [
+        {"op": "addElement", "parent": None, "kind": "system", "title": "Shop"},
+        {"op": "addElement", "parent": None, "kind": "system", "title": "Bank"},
+        {"op": "addRelation", "source": "shop", "target": "bank", "label": "pays"},
+    ]
+    edited = client.post(f"/api/architecture/{slug}/ops", json={"ops": ops, "file": "store/store.c4"}, headers=alice)
+    assert edited.status_code == 200
+    body = edited.json()
+    assert body["created"][:2] == ["shop", "bank"]
+    [relation] = {r for view in body["model"]["views"] for edge in view["edges"] for r in edge["relations"]}
+
+    # Delete never cascades: the relation still names bank, so the batch is refused untouched.
+    refused = client.post(
+        f"/api/architecture/{slug}/ops",
+        json={"ops": [{"op": "delete", "elements": ["bank"], "relations": []}], "file": "store/store.c4"},
+        headers=alice,
+    )
+    assert refused.status_code == 400
+    assert client.get(f"/api/architecture/{slug}", headers=alice).json()["model"] == body["model"]
+
+    deleted = client.post(
+        f"/api/architecture/{slug}/ops",
+        json={"ops": [{"op": "delete", "elements": ["bank"], "relations": [relation]}], "file": "store/store.c4"},
+        headers=alice,
+    )
+    assert deleted.status_code == 200
+    # Drawn top-level elements sit beside the package's system.
+    assert {e["id"] for e in deleted.json()["model"]["elements"]} == {"store", "shop"}
+
+    source = client.get("/api/fileviewer/text", params={"path": f"graph/{slug}/store/store.c4"}, headers=alice).json()["content"]
+    assert "Shop" in source and "bank" not in source
+
     bob = headers("bob@example.test", str(uuid4()))
+    assert client.get(f"/api/architecture/{slug}", headers=bob).status_code == 404
+    # Nor can bob start a workspace under a slug that is not one of his projects.
+    assert client.post(f"/api/architecture/{slug}/ops", json=package, headers=bob).status_code == 404
 
-    created = client.post("/api/architecture-diagrams", json={"name": "checkout.architecture.yaml", "content": GRAPH}, headers=alice)
-    assert created.status_code == 200
-    revision = created.json()["revision"]
 
-    read = client.get("/api/architecture-diagrams/checkout.architecture.yaml", headers=alice)
-    assert read.status_code == 200
-    assert read.headers["ETag"] == revision
+def test_packages_modules_and_views_form_one_architecture(client, c4_service):
+    alice = headers("alice@example.test", str(uuid4()))
+    slug = f"arch-{uuid4().hex[:8]}"
+    client.post("/api/projects", json={"name": slug}, headers=alice)
+    base = f"/api/architecture/{slug}"
 
-    edited = GRAPH.replace("Checkout", "Checkout v2")
-    blind = client.put("/api/architecture-diagrams/checkout.architecture.yaml", json={"content": edited}, headers=alice)
-    assert blind.status_code == 428
+    def create(op: dict) -> dict:
+        return client.post(f"{base}/ops", json={"ops": [op]}, headers=alice).json()
 
-    saved = client.put(
-        "/api/architecture-diagrams/checkout.architecture.yaml",
-        json={"content": edited},
-        headers={**alice, "If-Match": revision},
-    )
-    assert saved.status_code == 200
-    assert saved.json()["content"] == edited
+    # A package is a folder with one system and its view; the first also declares the kinds.
+    assert "system" in create({"op": "createPackage", "title": "Backend"})["model"]["kinds"]
+    assert create({"op": "createPackage", "title": "Frontend"})["created"] == ["frontend/frontend.c4"]
+    # A module extends its package from a file beside it, and shows in the package's view.
+    module = create({"op": "createModule", "package": "backend", "title": "API"})
+    assert module["created"] == ["backend/api.c4"]
+    assert {entry["path"]: entry["role"] for entry in module["model"]["tree"]} == {
+        "backend/api.c4": "module",
+        "backend/backend.c4": "package",
+        "frontend/frontend.c4": "package",
+    }
 
-    stale = client.put(
-        "/api/architecture-diagrams/checkout.architecture.yaml",
-        json={"content": GRAPH},
-        headers={**alice, "If-Match": revision},
-    )
-    assert stale.status_code == 412
-    assert client.get("/api/architecture-diagrams/checkout.architecture.yaml", headers=alice).json()["content"] == edited
+    # Drawn in frontend's view: the element joins frontend, the connection is stored once beside it.
+    ops = [
+        {"op": "addElement", "parent": None, "kind": "container", "title": "Web", "layout": {"view": "frontend", "x": 40, "y": 60}},
+        {"op": "addRelation", "source": "frontend.web", "target": "backend.api", "label": "calls"},
+    ]
+    drawn = client.post(f"{base}/ops", json={"ops": ops, "file": "frontend/frontend.c4"}, headers=alice)
+    assert drawn.status_code == 200
+    views = {view["id"]: view for view in drawn.json()["model"]["views"]}
+    assert views["frontend"]["manual"] and views["frontend"]["file"] == "frontend/frontend.c4"
+    # backend's view shows the incoming connection, though no backend file mentions it.
+    assert [edge["id"] for edge in views["backend"]["edges"]] == ["frontend->backend.api"]
+    frontend = client.get("/api/fileviewer/text", params={"path": f"graph/{slug}/frontend/frontend.c4"}, headers=alice).json()
+    assert "frontend.web -> backend.api 'calls'" in frontend["content"]
 
-    # Bob shares the key namespace but not the data.
-    assert client.get("/api/architecture-diagrams", headers=bob).json() == {"graphs": []}
-    assert client.get("/api/architecture-diagrams/checkout.architecture.yaml", headers=bob).status_code == 404
+    # A saved view is its own file; adding a whole system writes element includes.
+    assert create({"op": "createView", "title": "Checkout"})["created"] == ["views/checkout.c4"]
+    include = [
+        {"op": "includeInView", "view": "checkout", "elements": ["backend"], "descendants": True},
+        {"op": "includeInView", "view": "checkout", "elements": ["frontend.web"]},
+        {"op": "layout", "view": "checkout", "nodes": {"backend": {"x": 300, "y": 0}}, "edges": {}},
+    ]
+    checkout = client.post(f"{base}/ops", json={"ops": include}, headers=alice).json()
+    [view] = [view for view in checkout["model"]["views"] if view["id"] == "checkout"]
+    assert {"backend", "frontend.web"} <= {node["id"] for node in view["nodes"]}
+    assert next(node for node in view["nodes"] if node["id"] == "backend")["x"] == 300
+
+    # Sources are listed by their path in the workspace; saved layouts are not documents.
+    listed = {d["name"] for d in client.get(f"/api/documents?slug={slug}", headers=alice).json()["documents"]}
+    assert listed == {"backend/backend.c4", "backend/api.c4", "frontend/frontend.c4", "views/checkout.c4"}
+
+    # A package goes with its modules, but not while frontend and the view still point at it.
+    backend = {"path": ["backend/backend.c4", "backend/api.c4"]}
+    refused = client.delete(f"{base}/source", params=backend, headers=alice)
+    assert refused.status_code == 400
+    assert refused.json()["detail"].startswith("Cannot delete backend/api.c4, backend/backend.c4: ")
+    assert "still refers to 'backend" in refused.json()["detail"]
+    assert client.delete(f"{base}/source", params={"path": "backend/api.c4"}, headers=alice).status_code == 400
+    for path in ("views/checkout.c4", "frontend/frontend.c4"):
+        assert client.delete(f"{base}/source", params={"path": path}, headers=alice).status_code == 200
+    emptied = client.delete(f"{base}/source", params=backend, headers=alice)
+    assert emptied.status_code == 200 and emptied.json()["model"]["tree"] == []
+
+    assert client.post(f"{base}/source", json={"path": "../escape.c4"}, headers=alice).status_code == 400
 
 
 def test_attachment_bytes_round_trip_through_the_asset_route(client):
@@ -125,8 +205,10 @@ def test_attachment_bytes_round_trip_through_the_asset_route(client):
 def test_writes_append_a_replayable_change_log(client):
     device = str(uuid4())
     alice = headers("alice@example.test", device)
-    client.post("/api/architecture-diagrams", json={"name": "a.architecture.yaml", "content": GRAPH}, headers=alice)
-    client.post("/api/architecture-diagrams", json={"name": "b.architecture.yaml", "content": GRAPH}, headers=alice)
+    slug = f"log-{uuid4().hex[:8]}"
+    client.post("/api/projects", json={"name": slug}, headers=alice)
+    for name in ("a.md", "b.md"):
+        client.post("/api/documents/write", json={"slug": slug, "name": name, "content": name}, headers=alice)
 
     import config
 
@@ -136,8 +218,8 @@ def test_writes_append_a_replayable_change_log(client):
         ).fetchall()
 
     keys = [row[2] for row in rows]
-    assert "graph/a.architecture.yaml" in keys
-    assert "graph/b.architecture.yaml" in keys
+    assert f"project/{slug}/document/a.md" in keys
+    assert f"project/{slug}/document/b.md" in keys
     assert {row[1] for row in rows} == {"document"}
     # Echo suppression needs the writing device on every row.
     assert {str(row[3]) for row in rows} == {device}

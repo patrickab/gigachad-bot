@@ -3,9 +3,12 @@
 import { useCallback, useEffect, useMemo, useState, type Dispatch, type RefObject, type SetStateAction } from "react"
 import type { ChatInputHandle } from "@/components/ChatInput"
 import type { AppSurface } from "@/contexts/SidebarContext"
+import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { parseCanvasDoc, type CanvasAttachment, type CanvasDocument, type CanvasFrame } from "@/components/CanvasEditor"
 import {
   addDocument,
+  createArchitectureSource,
+  deleteArchitectureSources,
   attachDocument,
   attachFileVaultFile,
   fileViewerRawUrl,
@@ -16,11 +19,10 @@ import {
   removeDocument,
   uploadDocument,
   uploadFile,
-  renameArchitectureDiagram,
   renameDocument,
   writeDocument,
 } from "@/lib/api"
-import { isArchitectureDiagramPath } from "@/lib/architectureDiagram"
+import { architectureSource, isArchitecturePath } from "@/lib/architecture"
 import { buildHiddenContent } from "@/lib/attachments"
 import { renderCanvasToJpeg, type EmbedRect } from "@/lib/drawing"
 import type { Message, ProjectDocument } from "@/lib/types"
@@ -59,9 +61,11 @@ export function useProjectDocuments({
   setExtracting: Dispatch<SetStateAction<number>>
   setMessages: Dispatch<SetStateAction<Message[]>>
 }) {
+  const { schedule, pending } = useUndoDelete()
   const [documentOpen, setDocumentOpen] = useState(false)
   const [createDocOpen, setCreateDocOpen] = useState(false)
   const [projectDocuments, setProjectDocuments] = useState<ProjectDocument[]>([])
+  const [architectureError, setArchitectureError] = useState("")
   const [vaultProjectDocs, setVaultProjectDocs] = useState<ProjectDocument[]>([])
   const [allDocuments, setAllDocuments] = useState<ProjectDocument[]>([])
 
@@ -74,22 +78,19 @@ export function useProjectDocuments({
   }, [projectDocuments, vaultProjectDocs])
   // Merge library/project docs with vault docs, deduping by path so a PDF that
   // exists both in the project files and in a mounted vault (or was promoted
-  // into the cloud library) appears exactly once — library/cloud wins.
+  // into the cloud library) appears exactly once — library/cloud wins. Documents
+  // whose deletion is pending (`handleDeleteDocument`) are hidden.
   const mergedDocuments = useMemo(() => {
     const seen = new Set<string>()
     const out: ProjectDocument[] = []
-    for (const d of projectDocuments) {
-      if (seen.has(d.path)) continue
-      seen.add(d.path)
-      out.push(d)
-    }
-    for (const d of vaultProjectDocs) {
-      if (seen.has(d.path)) continue
+    for (const d of [...projectDocuments, ...vaultProjectDocs]) {
+      if (seen.has(d.path) || pending(`document:${activeProject}:${d.path}`)) continue
       seen.add(d.path)
       out.push(d)
     }
     return out
-  }, [projectDocuments, vaultProjectDocs])
+  }, [projectDocuments, vaultProjectDocs, activeProject, pending])
+  const architectureSources = useMemo(() => projectDocuments.filter((document) => isArchitecturePath(document.path)), [projectDocuments])
 
   const handleDocumentSelect = useCallback(async (path: string) => {
     setDocumentOpen(false)
@@ -141,19 +142,43 @@ export function useProjectDocuments({
   const handleCreateDocument = useCallback(async (name: string) => {
     if (!activeProject) return
     try {
-      await writeDocument(activeProject, name)
+      // A `.c4` name may carry folders (`backend/api.c4`): it joins the project's architecture workspace, empty.
+      if (name.endsWith(".c4")) await createArchitectureSource(activeProject, name)
+      else await writeDocument(activeProject, name)
       setCreateDocOpen(false)
       refreshDocuments()
     } catch { /* */ }
   }, [activeProject, refreshDocuments])
 
-  const handleDeleteDocument = useCallback(async (path: string) => {
+  // One text attachment holding every `.c4` source as a fenced LikeC4 block under its workspace path.
+  const handleAttachArchitecture = useCallback(async () => {
     if (!activeProject) return
+    setArchitectureError("")
+    setExtracting((count) => count + 1)
     try {
-      await removeDocument(activeProject, path)
+      const texts = await Promise.all(architectureSources.map(async (source) => ({ path: architectureSource(source.path), text: await loadFileViewerText(source.path) })))
+      const content = `# ${activeProject} architecture\n\n${texts.map(({ path, text }) => `## ${path}\n\n\`\`\`likec4\n${text}\n\`\`\``).join("\n\n")}`
+      const file = new File([content], `${activeProject}-architecture-${crypto.randomUUID().slice(0, 8)}.txt`, { type: "text/plain" })
+      const attachment = await uploadFile(chatId, file, activeProject)
+      chatInputRef.current?.addAttachment({ ...attachment, content })
+    } catch (cause) {
+      setArchitectureError(cause instanceof Error ? cause.message : "Could not attach architecture")
+    } finally {
+      setExtracting((count) => count - 1)
+    }
+  }, [activeProject, architectureSources, chatId, chatInputRef, setExtracting])
+
+  // Hidden until its undo window closes; the commit then deletes and refreshes the lists.
+  const handleDeleteDocument = useCallback((path: string) => {
+    if (!activeProject) return
+    const slug = activeProject
+    schedule(`document:${slug}:${path}`, path.split("/").pop() ?? path, async () => {
+      // Architecture sources are refused while another source still references them.
+      if (isArchitecturePath(path)) await deleteArchitectureSources(slug, [architectureSource(path)])
+      else await removeDocument(slug, path)
       refreshDocuments()
-    } catch { /* */ }
-  }, [activeProject, refreshDocuments])
+    })
+  }, [activeProject, refreshDocuments, schedule])
 
   const handleDocumentSaved = useCallback((filename?: string, content?: string) => {
     refreshDocuments()
@@ -186,13 +211,10 @@ export function useProjectDocuments({
   }, [activeProject, refreshDocuments])
 
   const handleRenameDocument = useCallback(async (path: string, name: string) => {
-    if (!activeProject || vaultDocPaths.has(path)) return
+    // Architecture sources are named by their path inside the workspace; there is no rename for them.
+    if (!activeProject || vaultDocPaths.has(path) || isArchitecturePath(path)) return
     try {
-      if (isArchitectureDiagramPath(path)) {
-        await renameArchitectureDiagram(path.split("/").pop()!, name)
-      } else {
-        await renameDocument(activeProject, path, name)
-      }
+      await renameDocument(activeProject, path, name)
       refreshDocuments()
     } catch { /* the stored name stays authoritative when rename fails */ }
   }, [activeProject, vaultDocPaths, refreshDocuments])
@@ -221,6 +243,9 @@ export function useProjectDocuments({
     allDocuments,
     vaultDocPaths,
     mergedDocuments,
+    architectureError,
+    /** Absent while the project has no architecture sources to attach. */
+    handleAttachArchitecture: architectureSources.length > 0 ? handleAttachArchitecture : undefined,
     refreshDocuments,
     openDocuments,
     handleDocumentSelect,

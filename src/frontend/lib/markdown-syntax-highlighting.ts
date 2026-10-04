@@ -1,4 +1,4 @@
-import { createHighlighterCore, type HighlighterCore } from "shiki/core"
+import { createHighlighterCore, type HighlighterCore, type LanguageRegistration } from "shiki/core"
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript"
 import andromeeda from "@shikijs/themes/andromeeda"
 import snazzyLight from "@shikijs/themes/snazzy-light"
@@ -31,6 +31,10 @@ import dockerfile from "@shikijs/langs/dockerfile"
 import toml from "@shikijs/langs/toml"
 import ini from "@shikijs/langs/ini"
 import diff from "@shikijs/langs/diff"
+// Shiki ships no LikeC4 grammar: this is the VS Code extension's TextMate grammar,
+// vendored unchanged from likec4/likec4@v1.59.4 packages/vscode (MIT, (c) Denis Davydkov),
+// pinned to the LikeC4 version src/c4 parses with.
+import likec4 from "./grammars/likec4.tmLanguage.json"
 
 let highlighterPromise: Promise<HighlighterCore> | null = null
 
@@ -68,6 +72,7 @@ export function getHighlighter(): Promise<HighlighterCore> {
         toml,
         ini,
         diff,
+        likec4 as unknown as LanguageRegistration,
       ],
       engine: createJavaScriptRegexEngine(),
     })
@@ -86,6 +91,7 @@ const LANG_ALIASES: Record<string, string> = {
   rb: "ruby",
   rs: "rust",
   kt: "kotlin",
+  c4: "likec4",
 }
 
 export async function highlightCode(code: string, lang: string): Promise<string> {

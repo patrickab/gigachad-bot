@@ -37,11 +37,6 @@ export interface ProjectDocument {
   mime: string
 }
 
-/** A live Architecture Diagram reference promoted to a chat's active context. */
-export interface ArchitectureDiagramContextReference {
-  path: string
-}
-
 /** The tools this build can actually offer the model. */
 export type ToolName = "web_search" | "deep_research" | "sandbox_plot" | "diagram" | "mindmap" | "latex_ocr" | "workspace_agent"
 

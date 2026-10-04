@@ -5,7 +5,9 @@ import { motion, AnimatePresence } from "framer-motion"
 import { FilePlus } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-type DocType = "md" | "tex" | "canvas"
+type DocType = "md" | "tex" | "canvas" | "c4"
+
+const DOC_TYPE_LABELS: Record<DocType, string> = { md: "Markdown", tex: "LaTeX", canvas: "Drawing", c4: "Architecture" }
 
 interface CreateDocumentPanelProps {
   open: boolean
@@ -66,7 +68,7 @@ export function CreateDocumentPanel({ open, onClose, onCreate }: CreateDocumentP
 
             <div className="px-5 pb-2">
               <div className="flex gap-1">
-                {(["md", "tex", "canvas"] as const).map((t) => (
+                {(Object.keys(DOC_TYPE_LABELS) as DocType[]).map((t) => (
                   <button
                     key={t}
                     onClick={() => setType(t)}
@@ -77,7 +79,7 @@ export function CreateDocumentPanel({ open, onClose, onCreate }: CreateDocumentP
                         : "text-ink-muted hover:text-ink hover:bg-surface/50"
                     )}
                   >
-                    {t === "md" ? "Markdown" : t === "tex" ? "LaTeX" : "Drawing"}
+                    {DOC_TYPE_LABELS[t]}
                   </button>
                 ))}
               </div>
@@ -95,7 +97,7 @@ export function CreateDocumentPanel({ open, onClose, onCreate }: CreateDocumentP
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder={`filename${ext}`}
+                placeholder={type === "c4" ? "backend/backend.c4" : `filename${ext}`}
                 className={cn(
                   "w-full rounded-lg border border-divider bg-surface/60 px-3 py-2.5 text-sm text-ink placeholder-ink-faint",
                   "outline-none transition-all duration-200",

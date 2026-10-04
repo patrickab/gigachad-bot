@@ -14,7 +14,6 @@ const { impls } = vi.hoisted(() => ({
     attachFileVaultFile: async () => ({ name: "v", mime: "text/plain", url: "u", active: true }),
     loadFileViewerText: async () => "",
     renameDocument: async () => ({ path: "project/proj/document/renamed.md", name: "renamed.md", mime: "text/markdown" }),
-    renameArchitectureDiagram: async () => ({ path: "graph/renamed.architecture.yaml", name: "renamed.architecture.yaml" }),
   } as Record<string, (...a: any[]) => any>,
 }))
 
@@ -33,7 +32,6 @@ vi.mock("@/lib/api", () => ({
     impls.attachFileVaultFile = async () => ({ name: "v", mime: "text/plain", url: "u", active: true })
     impls.loadFileViewerText = async () => ""
     impls.renameDocument = async () => ({ path: "project/proj/document/renamed.md", name: "renamed.md", mime: "text/markdown" })
-    impls.renameArchitectureDiagram = async () => ({ path: "graph/renamed.architecture.yaml", name: "renamed.architecture.yaml" })
   },
   listProjectDocuments: (...a: any[]) => impls.listProjectDocuments(...a),
   listProjectVaultDocuments: (...a: any[]) => impls.listProjectVaultDocuments(...a),
@@ -48,7 +46,6 @@ vi.mock("@/lib/api", () => ({
   fileViewerRawUrl: (path: string) => `raw:${path}`,
   loadFileViewerText: (...a: any[]) => impls.loadFileViewerText(...a),
   renameDocument: (...a: any[]) => impls.renameDocument(...a),
-  renameArchitectureDiagram: (...a: any[]) => impls.renameArchitectureDiagram(...a),
 }))
 
 vi.mock("@/lib/drawing", () => ({
@@ -59,12 +56,14 @@ vi.mock("@/lib/attachments", () => ({
 }))
 
 import * as apiMock from "@/lib/api"
-import { renderHook, act, waitFor } from "@testing-library/react"
+import { renderHook as testingRenderHook, act, waitFor, screen, fireEvent } from "@testing-library/react"
 import type { ChatInputHandle } from "@/components/ChatInput"
 import { useProjectDocuments } from "@/hooks/useProjectDocuments"
+import { UndoDeleteProvider } from "@/contexts/UndoDeleteContext"
 import type { ProjectDocument } from "@/lib/types"
 import { renderCanvasToJpeg } from "@/lib/drawing"
 
+const renderHook = <T,>(callback: () => T) => testingRenderHook(callback, { wrapper: UndoDeleteProvider })
 function makeChatInputRef(handle: Partial<ChatInputHandle> = {}) {
   return { current: { addAttachment: vi.fn(), ...handle } as unknown as ChatInputHandle }
 }
@@ -107,6 +106,8 @@ describe("useProjectDocuments", () => {
       // vaultDocPaths only contains the vault-only path (not the dup).
       expect(result.current.vaultDocPaths.has("/vault/b.txt")).toBe(true)
       expect(result.current.vaultDocPaths.has("/lib/a.pdf")).toBe(false)
+      // No `.c4` sources: there is no architecture to attach.
+      expect(result.current.handleAttachArchitecture).toBeUndefined()
     })
 
     it("clears document lists when activeProject becomes null", async () => {
@@ -226,6 +227,40 @@ describe("useProjectDocuments", () => {
       // Functional update called twice: n => n+1 then n => n-1.
       expect(setExtracting).toHaveBeenCalledTimes(2)
     })
+  })
+
+  it("attaches all C4 sources as one named chat context with file boundaries", async () => {
+    const docs = [
+      { path: "graph/proj/backend/backend.c4", name: "backend.c4", mime: "text/plain" },
+      { path: "graph/proj/frontend/frontend.c4", name: "frontend.c4", mime: "text/plain" },
+    ]
+    ;(apiMock as any).__setImpl("listProjectDocuments", async () => docs)
+    ;(apiMock as any).__setImpl("loadFileViewerText", async (path: string) => path.includes("backend") ? "backend = system" : "frontend = system")
+    const upload = vi.fn(async (_chat: string, file: File) => ({ name: file.name, mime: file.type, url: "u", active: true }))
+    ;(apiMock as any).__setImpl("uploadFile", upload)
+    const addAttachment = vi.fn()
+    const { result } = renderHook(() => useProjectDocuments(baseProps({ chatInputRef: makeChatInputRef({ addAttachment }) })))
+    await waitFor(() => expect(result.current.projectDocuments).toHaveLength(2))
+    await act(async () => { await result.current.handleAttachArchitecture!() })
+    expect(upload).toHaveBeenCalledOnce()
+    const attachment = addAttachment.mock.calls[0][0]
+    expect(attachment.content).toContain("## backend/backend.c4\n\n```likec4\nbackend = system")
+    expect(attachment.content).toContain("## frontend/frontend.c4\n\n```likec4\nfrontend = system")
+    expect(attachment.active).toBe(true)
+  })
+
+  it("hides a document until Undo restores it without deleting the source", async () => {
+    const path = "project/proj/document/spec.md"
+    const remove = vi.fn(async () => undefined)
+    ;(apiMock as any).__setImpl("listProjectDocuments", async () => [{ path, name: "spec.md", mime: "text/markdown" }])
+    ;(apiMock as any).__setImpl("removeDocument", remove)
+    const { result } = renderHook(() => useProjectDocuments(baseProps()))
+    await waitFor(() => expect(result.current.mergedDocuments).toHaveLength(1))
+    act(() => result.current.handleDeleteDocument(path))
+    expect(result.current.mergedDocuments).toHaveLength(0)
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }))
+    expect(result.current.mergedDocuments).toHaveLength(1)
+    expect(remove).not.toHaveBeenCalled()
   })
 
   describe("handleRenameDocument", () => {

@@ -118,7 +118,7 @@ function BranchRow({ node }: { node: Node }) {
           {hasKids && node.qaCount > 0 && <span className="text-ink-muted ml-0.5 text-[10px]">@{node.qaCount - 1}</span>}
         </button>
         {!mergeBlocked && (
-          <button onClick={() => onMerge(node.file)} className="p-0.5 rounded text-ink-faint hover:text-ink transition-colors opacity-0 group-hover:opacity-100 shrink-0">
+          <button aria-label={`Merge ${node.file}`} onClick={() => onMerge(node.file)} className="p-0.5 rounded text-ink-faint hover:text-ink transition-colors opacity-0 group-hover:opacity-100 shrink-0">
             <GitMerge className="h-3 w-3" />
           </button>
         )}
@@ -127,7 +127,7 @@ function BranchRow({ node }: { node: Node }) {
             <GitMerge className="h-3 w-3" />
           </span>
         )}
-        <button onClick={() => onDelete(node.file)} className="p-0.5 rounded text-ink-faint hover:text-danger transition-colors opacity-0 group-hover:opacity-100 shrink-0">
+        <button aria-label={`Delete ${node.file}`} onClick={() => onDelete(node.file)} className="p-0.5 rounded text-ink-faint hover:text-danger transition-colors opacity-0 group-hover:opacity-100 shrink-0">
           <Trash2 className="h-3 w-3" />
         </button>
       </div>
@@ -179,7 +179,7 @@ export function ChatBranchItem({ file, label, depth }: ChatBranchItemProps) {
         </button>
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
           {onDelete && (
-            <button
+            <button aria-label={`Delete ${file}`}
               onClick={() => onDelete(file)}
               className="p-0.5 rounded text-ink-faint hover:text-danger transition-colors shrink-0"
             >
