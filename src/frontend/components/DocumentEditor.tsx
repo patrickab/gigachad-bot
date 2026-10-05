@@ -251,6 +251,7 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
   const dirtyRef = useRef(dirty)
   dirtyRef.current = dirty
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(!!overlay)
   const [view, setView] = useState<EditorView>("edit")
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -318,8 +319,13 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
     else await writeDocument(slug, filename, next)
     savedContentRef.current = next
     setDirty(false)
+    // The server prunes uses of removed elements from a hand-edited `.c4`; show what it stored.
+    if (isArchitecturePath(path)) {
+      const stored = await loadFileViewerText(path).catch(() => next)
+      if (stored !== next) { setContent(stored); savedContentRef.current = stored }
+    }
     onSaved?.(filename, next)
-  }, [slug, filename, onSaved, persistOverride])
+  }, [slug, filename, path, onSaved, persistOverride])
 
   // Saves are chained so an earlier slow write can never resolve after — and
   // silently clobber — a newer one.
@@ -334,7 +340,8 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
     const next = isCanvas ? (canvasDoc ? serializeCanvasDoc(canvasDoc) : null) : content
     if (next === null || saving) return
     setSaving(true)
-    try { await persist(next) } catch { /* */ }
+    setSaveError(null)
+    try { await persist(next) } catch (err) { setSaveError(err instanceof Error ? err.message : "Save failed") }
     setSaving(false)
   }, [isCanvas, canvasDoc, content, saving, persist])
 
@@ -362,7 +369,7 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key === "s") {
+      if ((event.ctrlKey || event.metaKey) && (event.key === "s" || event.key === "Enter")) {
         event.preventDefault()
         handleSave()
       }
@@ -492,14 +499,22 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
       >
         <div className="flex-1 min-w-0 flex flex-col relative">
           {editorBody}
-          {model && !isCanvas && (
-            <button
-              aria-label={sidebarOpen ? "Hide assistant" : "Show assistant"}
-              onClick={() => setSidebarOpen(v => !v)}
-              className="absolute top-2 right-3 z-10 p-1 rounded text-ink-subtle hover:text-ink hover:bg-surface/80 transition-colors"
-            >
-              {sidebarOpen ? <ChevronRight className="h-3 w-3" /> : <ChevronLeft className="h-3 w-3" />}
-            </button>
+          {!isCanvas && (
+            <div className="absolute top-2 right-3 z-10 flex items-center gap-1">
+              {saveError && <span role="alert" className="max-w-[min(60ch,60vw)] text-right text-[10px] leading-snug text-danger">{saveError}</span>}
+              <button aria-label="Save document" onClick={handleSave} disabled={!dirty || saving} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-surface/80 disabled:opacity-30 transition-colors">
+                <Save className="h-3.5 w-3.5" />
+              </button>
+              {model && (
+                <button
+                  aria-label={sidebarOpen ? "Hide assistant" : "Show assistant"}
+                  onClick={() => setSidebarOpen(v => !v)}
+                  className="p-1 rounded text-ink-subtle hover:text-ink hover:bg-surface/80 transition-colors"
+                >
+                  {sidebarOpen ? <ChevronRight className="h-3 w-3" /> : <ChevronLeft className="h-3 w-3" />}
+                </button>
+              )}
+            </div>
           )}
         </div>
         {sidebarOpen && model && (

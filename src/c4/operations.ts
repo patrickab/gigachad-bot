@@ -13,6 +13,7 @@ export type Operation =
   | { op: 'addElement', parent: string | null, kind: string, title: string, description?: string, layout?: { view: string } & NodePin }
   | { op: 'addRelation', source: string, target: string, label?: string }
   | { op: 'delete', elements: string[], relations: string[] }
+  | { op: 'pruneDangling' }
   | { op: 'setTitle', element: string, title: string }
   | { op: 'setDescription', element: string, description: string }
   | { op: 'setKind', element: string, kind: string }
@@ -460,6 +461,42 @@ views {
     return { edits: unique.map((span) => this.remove(span.file, span.start, span.end)) }
   }
 
+  /**
+   * Hand edits that removed an element leave connections and view entries naming it.
+   * Drops every connection and every `include`/`exclude` entry with an unresolved
+   * reference, so deleting an element in text takes its uses along as the diagram does.
+   * Dangling references elsewhere (`view x of gone`, `extend gone`) stay for the parse check to report.
+   */
+  pruneDangling(): Plan {
+    const dangling: AstNode[] = []
+    const views: AstNode[] = []
+    const relations = new Map<AstNode, { file: string, start: number, end: number }>()
+    for (const { document } of this.ws.documents()) {
+      for (const node of AstUtils.streamAllContents(document.parseResult.value)) {
+        if (node.$type === 'ElementView') views.push(node)
+        for (const info of AstUtils.streamReferences(node)) if (!info.reference.ref) dangling.push(info.container)
+      }
+    }
+    for (const node of dangling) {
+      let relation: AstNode | undefined = node
+      while (relation && relation.$type !== 'Relation') relation = relation.$container
+      if (relation && !relations.has(relation)) {
+        relations.set(relation, { file: this.ws.documentPath(relation), start: cst(relation).offset, end: cst(relation).end })
+      }
+    }
+    const inside = (node: AstNode, ancestor: AstNode) => {
+      for (let cursor: AstNode | undefined = node; cursor; cursor = cursor.$container) if (cursor === ancestor) return true
+      return false
+    }
+    const edits: TextEdit[] = [...relations.values()].map((span) => this.remove(span.file, span.start, span.end))
+    for (const view of views) {
+      const doomed = new Set(this.predicates(view).flatMap((rule) => rule.entries)
+        .filter((entry) => dangling.some((node) => inside(node, entry.node))).map((entry) => entry.node))
+      if (doomed.size > 0) edits.push(...this.dropEntries(view, doomed))
+    }
+    return { edits }
+  }
+
   private bodyProperty(element: AstNode, key: string): (AstNode & { value?: AstNode }) | undefined {
     const props = (element as AstNode & { body?: { props?: Array<AstNode & { key?: string }> } }).body?.props ?? []
     return props.find((prop) => prop.key === key)
@@ -619,6 +656,7 @@ async function plan(ws: Workspace, op: Operation, home: string | null): Promise<
     case 'addElement': return planner.addElement(op)
     case 'addRelation': return planner.addRelation(op)
     case 'delete': return planner.delete(op)
+    case 'pruneDangling': return planner.pruneDangling()
     case 'setTitle': return planner.setTitle(op)
     case 'setDescription': return planner.setDescription(op)
     case 'setKind': return planner.setKind(op)

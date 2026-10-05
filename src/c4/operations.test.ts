@@ -65,6 +65,14 @@ describe('applyOperations', () => {
     ))
   })
 
+  it('prunes connections and view entries left naming a removed element', async () => {
+    const edited = SOURCE.replace("  bank = system 'Bank'\n", '')
+    const result = await applyOperations({ 'model.c4': edited }, {}, [{ op: 'pruneDangling' }], 'model.c4')
+    assert.deepEqual(result.model.errors, [])
+    assert.doesNotMatch(result.sources['model.c4'], /bank/)
+    assert.match(result.sources['model.c4'], /include shop\n/)
+  })
+
   it('creates top-level elements and connections in the model block', async () => {
     const result = await apply([
       { op: 'addElement', parent: null, kind: 'system', title: 'Shop', description: '- sells\n- ships' },

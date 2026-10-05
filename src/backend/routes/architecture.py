@@ -136,8 +136,9 @@ async def apply_operations(
 
 @router.put("/{slug}/source", response_model=WorkspaceResponse)
 async def write_source(slug: str, file: SourceFile, docs: DataStore = Depends(get_document_store)) -> WorkspaceResponse:
-    """Hand edits must parse cleanly; the model is never saved in a state the diagram cannot show."""
-    return await _write(slug, docs, [], edit=lambda sources: {**sources, file.path: file.content}, must_parse=True)
+    """Hand edits must parse cleanly; the model is never saved in a state the diagram cannot show.
+    Connections and view entries left naming an element the edit removed are dropped with it."""
+    return await _write(slug, docs, [{"op": "pruneDangling"}], edit=lambda sources: {**sources, file.path: file.content}, must_parse=True)
 
 
 @router.post("/{slug}/source", response_model=WorkspaceResponse)
