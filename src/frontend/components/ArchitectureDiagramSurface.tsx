@@ -425,7 +425,7 @@ function ArchitectureNodeCard({ data, selected }: NodeProps<GraphFlowNode>) {
         {editingTitle ? (
           <input ref={titleRef} autoFocus aria-label="Node title" value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} onBlur={() => setEditingTitle(false)} onKeyDown={handleTitleKeyDown} onPointerDown={(event) => event.stopPropagation()} className="nodrag architecture-diagram-title architecture-diagram-title-input" />
         ) : (
-          <span role="button" tabIndex={0} aria-label="Edit node title" onClick={() => setEditingTitle(true)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setEditingTitle(true) } }} className="architecture-diagram-title architecture-diagram-title-display">{data.title}</span>
+          <span role="button" tabIndex={0} aria-label="Edit node title" onClick={() => setEditingTitle(true)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setEditingTitle(true) } }} className="architecture-diagram-title architecture-diagram-title-display">{titleDraft}</span>
         )}
         {data.kinds.length > 0 && !isDraft(data.id)
           // Looks exactly like the label; on an activated card, clicking it opens the list.
