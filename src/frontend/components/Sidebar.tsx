@@ -262,6 +262,7 @@ export function Sidebar({
               onExpand={expandIfCollapsed}
               controller={canvasController}
               plusTitle="New canvas"
+              onElementClick={(item) => item.data && onCanvasSelect?.(item.data.path, item.data.scope)}
               folderPlaceholder="Canvas name"
               onElementDelete={(item) => {
                 if (!item.data) return

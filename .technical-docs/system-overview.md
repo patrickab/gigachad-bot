@@ -112,7 +112,8 @@ never followed. Only the database location is wired to routes today.
   `POST .../source`. Files are deleted together
   (`DELETE .../source?path=a&path=b`) only when the merged model still
   parses. A refusal names the remaining file and line that still refer to
-  them. Responses are `{model, created}`. Reading a project without an
+  them, and a hand edit that removes something still referenced is refused the
+  same way. Responses are `{model, created}`. Reading a project without an
   architecture returns an empty one. The project's document list shows
   sources by their path inside the workspace. Layout files are not listed.
 - **Frontend.** The canvas "+" menu has one "Architecture" entry on any canvas

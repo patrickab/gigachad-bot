@@ -62,15 +62,17 @@ def _require_project(projects: ProjectStore, slug: str) -> None:
 
 
 def _refusal(error: dict[str, Any], deleted: Iterable[str]) -> str:
-    """The first parse error as a reason. A delete leaves errors only by breaking a reference
-    in a remaining file, so it is phrased as which file still uses what."""
+    """The first parse error as a reason. A dangling reference, the usual cause after a
+    delete or a hand edit removing an element, is phrased as which line still uses what."""
     where = f"{error['file']}:{error['line'] + 1}"
-    if not (deleted := sorted(deleted)):
-        return f"{where}: {error['message']}"
     # LikeC4 reports a dangling reference as "Could not resolve reference to ... named 'x'".
-    named = re.search(r"named '([^']+)'", error["message"])
-    use = f"still refers to '{named[1]}'" if named else f"still needs it ({error['message']})"
-    return f"Cannot delete {', '.join(deleted)}: {where} {use}. Remove that reference first."
+    named = re.search(r"Could not resolve reference to .* named '([^']+)'", error["message"])
+    if deleted := sorted(deleted):
+        use = f"still refers to '{named[1]}'" if named else f"still needs it ({error['message']})"
+        return f"Cannot delete {', '.join(deleted)}: {where} {use}. Remove that reference first."
+    if named:
+        return f"Cannot save: {where} refers to '{named[1]}', which does not exist. Fix or remove that reference first."
+    return f"{where}: {error['message']}"
 
 
 async def _write(
