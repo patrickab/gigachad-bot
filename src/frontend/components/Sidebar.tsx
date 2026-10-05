@@ -225,7 +225,7 @@ export function Sidebar({
               onClick={() => onAppModeChange(appMode === "canvas" ? "chat" : "canvas")}
               className="text-base font-semibold tracking-tight text-ink truncate hover:opacity-80 transition-opacity"
             >
-              {appMode === "canvas" ? "Canvas" : "GigaChat Bot"}
+              {appMode === "canvas" ? "Canvas" : "Chat"}
             </button>
             {appMode !== "canvas" && (
               <button
