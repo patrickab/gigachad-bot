@@ -22,6 +22,8 @@ import { DocumentPicker } from "@/components/DocumentPicker"
 import { DocumentEditor } from "@/components/DocumentEditor"
 import { CreateDocumentPanel } from "@/components/CreateDocumentPanel"
 import { CanvasWorkspace, type CanvasSelection } from "@/components/CanvasWorkspace"
+import { ArchitectureWindow } from "@/components/ArchitectureWindow"
+import { architectureSlug, type EdgeStyle } from "@/lib/architecture"
 import { useCommandBar } from "@/hooks/useCommandBar"
 import { useMemoryCategories } from "@/hooks/useMemoryCategories"
 import { useVaultPicker } from "@/hooks/useVaultPicker"
@@ -152,6 +154,10 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   const appMode = tab.appMode
   const setTabAppMode = onAppModeChange
   const [canvasSel, setCanvasSel] = useState<CanvasSelection | null>(null)
+  // Canvas mode shows either a canvas or one project's architecture on its own
+  // (`graph/<slug>/<file>`; an empty file opens the first package).
+  const [architecturePath, setArchitecturePath] = useState<string | null>(null)
+  const [architectureEdgeStyle, setArchitectureEdgeStyle] = useState<EdgeStyle>("elbow")
   const [canvasToolbarSlot, setCanvasToolbarSlot] = useState<HTMLElement | null>(null)
   const [canvasFullscreen, setCanvasFullscreen] = useState(false)
 
@@ -662,8 +668,10 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           onVaultSelect={vault.handleVaultSelect}
           onVaultsChanged={vault.refreshVaultList}
           activeCanvasPath={canvasSel?.path ?? null}
-          onCanvasSelect={(path, scope) => setCanvasSel({ path, scope })}
+          onCanvasSelect={(path, scope) => { setArchitecturePath(null); setCanvasSel({ path, scope }) }}
           onCanvasDeleted={(path) => setCanvasSel((s) => (s?.path === path ? null : s))}
+          activeArchitecture={architecturePath && architectureSlug(architecturePath)}
+          onArchitectureSelect={(slug) => { setCanvasSel(null); setArchitecturePath(`graph/${slug}/`) }}
           appMode={appMode}
           onAppModeChange={setTabAppMode}
         />
@@ -697,7 +705,9 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           </div>
         </header>
         <div className="flex-1 overflow-hidden relative transition-opacity duration-200">
-          {appMode === "canvas" ? (
+          {appMode === "canvas" && architecturePath ? (
+            <ArchitectureWindow path={architecturePath} maximized hostScale={1} edgeStyle={architectureEdgeStyle} onEdgeStyleChange={setArchitectureEdgeStyle} onNavigate={setArchitecturePath} />
+          ) : appMode === "canvas" ? (
             <CanvasWorkspace
               selected={canvasSel}
               slug={activeProject}

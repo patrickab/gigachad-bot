@@ -9,7 +9,10 @@ import { Sidebar } from "@/components/Sidebar"
 
 const api = vi.hoisted(() => ({
   listNotes: vi.fn(async () => [{ path: "chat_histories/_notes/loose.canvas", name: "loose.canvas", mime: "text/plain" }]),
-  listProjectDocuments: vi.fn(async () => [{ path: "project/proj/document/board.canvas", name: "board.canvas", mime: "text/plain" }]),
+  listProjectDocuments: vi.fn(async () => [
+    { path: "project/proj/document/board.canvas", name: "board.canvas", mime: "text/plain" },
+    { path: "graph/proj/backend/backend.c4", name: "backend/backend.c4", mime: "text/plain" },
+  ]),
 }))
 vi.mock("@/lib/api", () => ({
   ...api,
@@ -38,21 +41,24 @@ vi.mock("@/contexts/MemoryViewerContext", () => ({ useMemoryViewer: () => ({ ope
 vi.mock("@/contexts/UndoDeleteContext", () => ({ useUndoDelete: () => ({ schedule: vi.fn(), pending: () => false }) }))
 
 describe("Sidebar canvas tree", () => {
-  it("opens a project canvas and a loose canvas with the scope that owns them", async () => {
+  it("opens a project's architecture, a project canvas and a loose canvas with the scope that owns them", async () => {
     const onCanvasSelect = vi.fn()
+    const onArchitectureSelect = vi.fn()
     const { findByText, getByText } = render(
       <Sidebar
         onOpenChat={vi.fn()} onRefreshAll={vi.fn(async () => {})} onSave={vi.fn()} onReset={vi.fn()}
-        appMode="canvas" onAppModeChange={vi.fn()} onCanvasSelect={onCanvasSelect}
+        appMode="canvas" onAppModeChange={vi.fn()} onCanvasSelect={onCanvasSelect} onArchitectureSelect={onArchitectureSelect}
       />,
     )
 
     fireEvent.click(await findByText("loose"))
     expect(onCanvasSelect).toHaveBeenLastCalledWith("chat_histories/_notes/loose.canvas", "")
 
-    // Project canvases sit inside their (collapsed) project row.
+    // A project's architecture and canvases sit inside its (collapsed) project row.
     fireEvent.click(getByText("Proj"))
-    fireEvent.click(await findByText("board"))
+    fireEvent.click(await findByText("Architecture"))
+    expect(onArchitectureSelect).toHaveBeenLastCalledWith("proj")
+    fireEvent.click(getByText("board"))
     await waitFor(() => expect(onCanvasSelect).toHaveBeenLastCalledWith("project/proj/document/board.canvas", "proj"))
   })
 })

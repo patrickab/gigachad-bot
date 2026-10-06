@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion } from "framer-motion"
 import { VaultTree, type VaultTreeItem } from "./VaultTree"
 import { useVaultTree } from "@/hooks/useVaultTree"
-import { Brain, Clock, FileText, FolderOpen, Lightbulb, LayoutDashboard, PanelLeftClose, PanelLeft, PenLine, Save, RotateCcw } from "lucide-react"
+import { Boxes, Brain, Clock, FileText, FolderOpen, Lightbulb, LayoutDashboard, PanelLeftClose, PanelLeft, PenLine, Save, RotateCcw } from "lucide-react"
 import { useMemoryViewer } from "@/contexts/MemoryViewerContext"
 import { SidebarElement } from "./SidebarElement"
 import { useProject } from "@/contexts/ProjectContext"
@@ -14,6 +14,7 @@ import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import type { BranchMeta, VaultNode, ProjectListItem, ProjectDocument } from "@/lib/types"
 import { ChatBranchItem } from "./ChatBranchItem"
 import { addFileVaultMountpoint, addFileVaultRoot, createDirectory, moveHistoryItem, fileVaultTree, removeFileVaultRoot, listNotes, listProjectDocuments, moveDocument, removeDocument, writeDocument, Vault } from "@/lib/api"
+import { isArchitecturePath } from "@/lib/architecture"
 
 const COLLAPSED_WIDTH = 50
 const EXPANDED_WIDTH = 280
@@ -37,6 +38,9 @@ interface SidebarProps {
   activeCanvasPath?: string | null
   onCanvasSelect?: (path: string, scope: string) => void
   onCanvasDeleted?: (path: string) => void
+  /** Project whose architecture is shown standalone in canvas mode, instead of a canvas. */
+  activeArchitecture?: string | null
+  onArchitectureSelect?: (slug: string) => void
   appMode: AppSurface
   onAppModeChange: (mode: AppSurface) => void
 }
@@ -53,6 +57,8 @@ export function Sidebar({
   activeCanvasPath,
   onCanvasSelect,
   onCanvasDeleted,
+  activeArchitecture,
+  onArchitectureSelect,
   appMode,
   onAppModeChange,
 }: SidebarProps) {
@@ -124,18 +130,18 @@ export function Sidebar({
   const historiesController = useVaultTree({ storageKey: "expanded_history_folders" })
   const vaultsController = useVaultTree({ storageKey: "expanded_vault_folders" })
   const canvasController = useVaultTree({ storageKey: "expanded_canvas_folders" })
-
   const [canvasOpen, setCanvasOpen] = useState(true)
   const [canvasNotes, setCanvasNotes] = useState<ProjectDocument[]>([])
   const [projectCanvases, setProjectCanvases] = useState<Record<string, ProjectDocument[]>>({})
+  // Projects with at least one architecture source.
+  const [architectures, setArchitectures] = useState<ReadonlySet<string>>(new Set())
 
   const refreshCanvases = useCallback(async () => {
     const notes = await listNotes().catch(() => [])
     setCanvasNotes(notes.filter((d) => d.name.endsWith(".canvas")))
-    const entries = await Promise.all(
-      projects.map(async (p) => [p.slug, (await listProjectDocuments(p.slug).catch(() => [])).filter((d) => d.name.endsWith(".canvas"))] as const),
-    )
-    setProjectCanvases(Object.fromEntries(entries))
+    const entries = await Promise.all(projects.map(async (p) => [p.slug, await listProjectDocuments(p.slug).catch(() => [])] as const))
+    setProjectCanvases(Object.fromEntries(entries.map(([slug, docs]) => [slug, docs.filter((d) => d.name.endsWith(".canvas"))])))
+    setArchitectures(new Set(entries.filter(([, docs]) => docs.some((d) => isArchitecturePath(d.path))).map(([slug]) => slug)))
   }, [projects])
 
   useEffect(() => {
@@ -143,9 +149,9 @@ export function Sidebar({
   }, [appMode, activeCanvasPath, refreshCanvases])
 
   const canvasItems = useMemo(() =>
-    hidePending(buildCanvasItems(canvasNotes, projects, projectCanvases, activeCanvasPath ?? null),
+    hidePending(buildCanvasItems(canvasNotes, projects, projectCanvases, architectures, activeCanvasPath ?? null, activeArchitecture ?? null),
       (item) => !!item.data && pending(`canvas:${item.data.scope}:${item.data.path}`)),
-    [canvasNotes, projects, projectCanvases, activeCanvasPath, pending],
+    [canvasNotes, projects, projectCanvases, architectures, activeCanvasPath, activeArchitecture, pending],
   )
 
   // File vaults: roots maintained server-side in file-vault-roots.json; rendered
@@ -253,8 +259,8 @@ export function Sidebar({
         {appMode === "canvas" ? (
           <div className="px-2">
             <VaultTree<CanvasData>
-              sectionIcon={PenLine}
-              sectionTitle="Canvases"
+              sectionIcon={Lightbulb}
+              sectionTitle="Projects"
               items={canvasItems}
               collapsed={collapsed}
               open={canvasOpen}
@@ -262,7 +268,11 @@ export function Sidebar({
               onExpand={expandIfCollapsed}
               controller={canvasController}
               plusTitle="New canvas"
-              onElementClick={(item) => item.data && onCanvasSelect?.(item.data.path, item.data.scope)}
+              onElementClick={(item) => {
+                if (!item.data) return
+                if (item.data.architecture) onArchitectureSelect?.(item.data.scope)
+                else onCanvasSelect?.(item.data.path, item.data.scope)
+              }}
               folderPlaceholder="Canvas name"
               onElementDelete={(item) => {
                 if (!item.data) return
@@ -282,6 +292,7 @@ export function Sidebar({
                 onCanvasSelect?.(doc.path, scope)
               }}
               onMoveElement={async (elementId, targetId) => {
+                if (elementId.startsWith("graph/")) return // a project's architecture stays with it
                 const inProject = Object.entries(projectCanvases).find(([, docs]) => docs.some((d) => d.path === elementId))
                 const fromSlug = inProject ? inProject[0] : ""
                 const toSlug = targetId ?? ""
@@ -412,13 +423,17 @@ export function Sidebar({
 interface CanvasData {
   path: string
   scope: string
+  /** The project's architecture (shown on its own), not a canvas file. */
+  architecture?: boolean
 }
 
 function buildCanvasItems(
   canvasNotes: ProjectDocument[],
   projects: ProjectListItem[],
   projectCanvases: Record<string, ProjectDocument[]>,
+  architectures: ReadonlySet<string>,
   activeCanvasPath: string | null,
+  activeArchitecture: string | null,
 ): VaultTreeItem<CanvasData>[] {
   const canvasElement = (doc: ProjectDocument, scope: string): VaultTreeItem<CanvasData> => ({
     id: doc.path,
@@ -428,15 +443,28 @@ function buildCanvasItems(
     data: { path: doc.path, scope },
     isActive: activeCanvasPath === doc.path,
   })
+  // Not a file of its own, so it cannot be deleted or moved from here.
+  const architectureElement = (slug: string): VaultTreeItem<CanvasData> => ({
+    id: `graph/${slug}/`,
+    label: "Architecture",
+    type: "element",
+    icon: Boxes,
+    data: { path: `graph/${slug}/`, scope: slug, architecture: true },
+    isActive: activeArchitecture === slug,
+    isSystem: true,
+  })
 
   const projectItems: VaultTreeItem<CanvasData>[] = projects
-    .filter((p) => (projectCanvases[p.slug] ?? []).length > 0)
+    .filter((p) => architectures.has(p.slug) || (projectCanvases[p.slug] ?? []).length > 0)
     .map((p) => ({
       id: p.slug,
       label: p.name,
       type: "vault" as const,
       icon: Lightbulb,
-      children: (projectCanvases[p.slug] ?? []).map((doc) => canvasElement(doc, p.slug)),
+      children: [
+        ...(architectures.has(p.slug) ? [architectureElement(p.slug)] : []),
+        ...(projectCanvases[p.slug] ?? []).map((doc) => canvasElement(doc, p.slug)),
+      ],
     }))
 
   const rootItems = canvasNotes.map((doc) => canvasElement(doc, ""))

@@ -118,7 +118,9 @@ never followed. Only the database location is wired to routes today.
   same way. Responses are `{model, created}`. Reading a project without an
   architecture returns an empty one. The project's document list shows
   sources by their path inside the workspace. Layout files are not listed.
-- **Frontend.** The canvas "+" menu has one "Architecture" entry on any canvas
+- **Frontend.** In canvas mode the sidebar's "Projects" tree lists under each
+  project its "Architecture" (when it has sources) before its canvases; picking
+  it shows the window on its own in place of a canvas. The canvas "+" menu has one "Architecture" entry on any canvas
   of a project, including the unsaved scratch canvas while a project is open.
   Without a project the menu says to open a project canvas instead. Its window
   (`components/ArchitectureWindow.tsx`) holds a collapsible tree (packages
