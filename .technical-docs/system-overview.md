@@ -49,13 +49,13 @@ every `.c4` file from that root downward (`backend/backend.c4`,
 `views/checkout.c4`, ...), merged by LikeC4 into one model. The `.c4` text is
 the source of truth, written the LikeC4 way:
 
-- **Packages and modules.** A package is a folder whose own file declares one
+- **Systems and modules.** A system is a folder whose own file declares one
   system and the view of it (`backend/backend.c4`: `backend = system 'Backend'`,
-  `view backend of backend { include * }`). The first package also declares the
+  `view backend of backend { include * }`). The first system also declares the
   element kinds. A module is a file beside it adding one container
   (`backend/api.c4`: `extend backend { api = container 'API' }`), so it shows in
-  the package's view. The service classifies every file by what it declares
-  (`model.tree`: `package`, `module`, `view`, or `file`), never by its name, so
+  the system's view. The service classifies every file by what it declares
+  (`model.tree`: `system`, `module`, `view`, or `file`), never by its name, so
   hand-written files are listed as they really are.
 - **Connections.** Each is stored once, in the file declaring its source
   element. Every view showing both ends draws it, so a file's own view also
@@ -81,14 +81,17 @@ never followed. Only the database location is wired to routes today.
   offsets, re-parses, and rejects an edit that introduces errors:
   - Model operations: `addElement`, `addRelation`, `delete`, `setTitle`,
     `setDescription`, `setKind`, `setLabel`, `rename`, `reparent`.
-  - File and view operations: `createPackage`, `createModule`, `createView`,
+  - File and view operations: `createSystem`, `createModule`, `createView`,
     `addFileView`, `includeInView`, `removeFromView`.
   - `layout`, which moves nodes and bends connections.
-  - `pruneDangling`, run on every hand-edited text save: drops connections and
-    `include`/`exclude` entries naming an element the edit removed.
+  - `pruneDangling`, run on every hand-edited text save and every file
+    deletion: drops connections, `include`/`exclude` entries, `view x of gone`
+    views and `extend gone` blocks naming an element that no longer exists.
 
-  Delete from the diagram never cascades: a delete that leaves a reference behind (a
-  connection, or a view naming the element) is refused. Edits to an element go
+  `delete` cascades the same way: it removes the elements together with every
+  connection, view entry, view and `extend` block naming them. A delete or
+  save is refused only for other broken references, e.g. element kinds that
+  a deleted `specification` declared. Edits to an element go
   into the file declaring it. An element drawn in `view x of x` becomes a child
   of x. An element drawn in any other view goes into the request's `home` file
   or the chosen parent, and is included by name when the view's rules would not
@@ -108,13 +111,14 @@ never followed. Only the database location is wired to routes today.
   at. On a conflict it rereads and re-validates the operations before
   retrying. Deleted sources and layouts of views that no longer exist are
   removed afterwards, unchecked. New files and deletions are not
-  revision-checked, which is accepted for a single user's workspace. Packages,
+  revision-checked, which is accepted for a single user's workspace. Systems,
   modules, and saved views are created through `POST .../ops`
-  (`createPackage`, `createModule`, `createView`), raw files through
+  (`createSystem`, `createModule`, `createView`), raw files through
   `POST .../source`. Files are deleted together
   (`DELETE .../source?path=a&path=b`) only when the merged model still
-  parses. A refusal names the remaining file and line that still refer to
-  them, and a hand edit that removes something still referenced is refused the
+  parses, after pruning what named them. A refusal names the remaining file
+  and line that still refer to them, and a hand edit that leaves
+  something unresolved is refused the
   same way. Responses are `{model, created}`. Reading a project without an
   architecture returns an empty one. The project's document list shows
   sources by their path inside the workspace. Layout files are not listed.
@@ -123,12 +127,12 @@ never followed. Only the database location is wired to routes today.
   it shows the window on its own in place of a canvas. The canvas "+" menu has one "Architecture" entry on any canvas
   of a project, including the unsaved scratch canvas while a project is open.
   Without a project the menu says to open a project canvas instead. Its window
-  (`components/ArchitectureWindow.tsx`) holds a collapsible tree (packages
+  (`components/ArchitectureWindow.tsx`) holds a collapsible tree (systems
   with their modules, views, other files)
-  with "+ Package", "+ Module" (under the current package), "+ View", and
-  Delete on the current row (a package goes with its modules). The window's
+  with "+ System", "+ Module" (under the current system), "+ View", and
+  Delete on the current row (a system goes with its modules). The window's
   path is the file it is on; tree clicks change it without an undo step. A
-  package or view file draws its view, a module draws its package's view with
+  system or view file draws its view, a module draws its system's view with
   the module selected (`ArchitectureDiagramSurface`, React Flow + rough.js),
   and the Diagram/Text switch shows the file in the `.c4` text editor. A file
   without a view offers "Add a view of this file".
@@ -138,7 +142,7 @@ never followed. Only the database location is wired to routes today.
     bare canvas.
   - **Nesting is drawn.** A shape drawn inside an element (any element, a leaf
     then becomes a parent) creates a child of it. On the bare canvas of a
-    package view it joins the package; a saved view creates nothing there,
+    system view it joins the system; a saved view creates nothing there,
     since it belongs to no element (it has no "+" either).
   - **Saved views.** The toolbar adds "Add to view" (a whole file's systems,
     or single elements grouped by file).
@@ -150,8 +154,11 @@ never followed. Only the database location is wired to routes today.
     fitted geometry is saved once it is moved or resized.
   - **Removing nodes.** A node's corner X (on hover or selection) and the
     Delete key do the same thing: in a saved view they only remove the node
-    from the view, in a package or module view they delete the element from
-    the model. Connections are always model edits.
+    from the view, then a dialog "Remove reference from <file>?" offers to delete
+    it from its `.c4` file (Enter deletes it from the model with everything
+    naming it, Esc or a click outside keeps it). In a
+    system or module view they delete the element from the model.
+    Connections are always model edits.
   - **Auto layout** (toolbar, once positions are saved) clears them and lets
     LikeC4 lay the view out again. Elements added to an arranged view land as
     one block to the right of it.

@@ -69,8 +69,8 @@ def test_architecture_edits_are_gated_by_the_model_and_user_scoped(client, c4_se
     client.post("/api/projects", json={"name": slug}, headers=alice)
 
     assert client.get(f"/api/architecture/{slug}", headers=alice).json()["model"]["tree"] == []
-    package = {"ops": [{"op": "createPackage", "title": "Store"}]}
-    created = client.post(f"/api/architecture/{slug}/ops", json=package, headers=alice)
+    system = {"ops": [{"op": "createSystem", "title": "Store"}]}
+    created = client.post(f"/api/architecture/{slug}/ops", json=system, headers=alice)
     assert created.json()["created"] == ["store/store.c4"]
     assert f"graph/{slug}/store/store.c4" in client.get(f"/api/documents?slug={slug}", headers=alice).text
 
@@ -83,24 +83,16 @@ def test_architecture_edits_are_gated_by_the_model_and_user_scoped(client, c4_se
     assert edited.status_code == 200
     body = edited.json()
     assert body["created"][:2] == ["shop", "bank"]
-    [relation] = {r for view in body["model"]["views"] for edge in view["edges"] for r in edge["relations"]}
 
-    # Delete never cascades: the relation still names bank, so the batch is refused untouched.
-    refused = client.post(
+    # Deleting bank takes the relation naming it along.
+    deleted = client.post(
         f"/api/architecture/{slug}/ops",
         json={"ops": [{"op": "delete", "elements": ["bank"], "relations": []}], "file": "store/store.c4"},
         headers=alice,
     )
-    assert refused.status_code == 400
-    assert client.get(f"/api/architecture/{slug}", headers=alice).json()["model"] == body["model"]
-
-    deleted = client.post(
-        f"/api/architecture/{slug}/ops",
-        json={"ops": [{"op": "delete", "elements": ["bank"], "relations": [relation]}], "file": "store/store.c4"},
-        headers=alice,
-    )
     assert deleted.status_code == 200
-    # Drawn top-level elements sit beside the package's system.
+    assert deleted.json()["model"]["errors"] == []
+    # Drawn top-level elements sit beside the system.
     assert {e["id"] for e in deleted.json()["model"]["elements"]} == {"store", "shop"}
 
     source = client.get("/api/fileviewer/text", params={"path": f"graph/{slug}/store/store.c4"}, headers=alice).json()["content"]
@@ -109,10 +101,10 @@ def test_architecture_edits_are_gated_by_the_model_and_user_scoped(client, c4_se
     bob = headers("bob@example.test", str(uuid4()))
     assert client.get(f"/api/architecture/{slug}", headers=bob).status_code == 404
     # Nor can bob start a workspace under a slug that is not one of his projects.
-    assert client.post(f"/api/architecture/{slug}/ops", json=package, headers=bob).status_code == 404
+    assert client.post(f"/api/architecture/{slug}/ops", json=system, headers=bob).status_code == 404
 
 
-def test_packages_modules_and_views_form_one_architecture(client, c4_service):
+def test_systems_modules_and_views_form_one_architecture(client, c4_service):
     alice = headers("alice@example.test", str(uuid4()))
     slug = f"arch-{uuid4().hex[:8]}"
     client.post("/api/projects", json={"name": slug}, headers=alice)
@@ -121,16 +113,16 @@ def test_packages_modules_and_views_form_one_architecture(client, c4_service):
     def create(op: dict) -> dict:
         return client.post(f"{base}/ops", json={"ops": [op]}, headers=alice).json()
 
-    # A package is a folder with one system and its view; the first also declares the kinds.
-    assert "system" in create({"op": "createPackage", "title": "Backend"})["model"]["kinds"]
-    assert create({"op": "createPackage", "title": "Frontend"})["created"] == ["frontend/frontend.c4"]
-    # A module extends its package from a file beside it, and shows in the package's view.
-    module = create({"op": "createModule", "package": "backend", "title": "API"})
+    # A system is a folder with one C4 system element and its view; the first also declares the kinds.
+    assert "system" in create({"op": "createSystem", "title": "Backend"})["model"]["kinds"]
+    assert create({"op": "createSystem", "title": "Frontend"})["created"] == ["frontend/frontend.c4"]
+    # A module extends its system from a file beside it, and shows in the system's view.
+    module = create({"op": "createModule", "system": "backend", "title": "API"})
     assert module["created"] == ["backend/api.c4"]
     assert {entry["path"]: entry["role"] for entry in module["model"]["tree"]} == {
         "backend/api.c4": "module",
-        "backend/backend.c4": "package",
-        "frontend/frontend.c4": "package",
+        "backend/backend.c4": "system",
+        "frontend/frontend.c4": "system",
     }
 
     # Drawn in frontend's view: the element joins frontend, the connection is stored once beside it.
@@ -163,14 +155,19 @@ def test_packages_modules_and_views_form_one_architecture(client, c4_service):
     listed = {d["name"] for d in client.get(f"/api/documents?slug={slug}", headers=alice).json()["documents"]}
     assert listed == {"backend/backend.c4", "backend/api.c4", "frontend/frontend.c4", "views/checkout.c4"}
 
-    # A package goes with its modules, but not while frontend and the view still point at it.
+    # Deleting a system takes the view entries naming it along.
+    assert client.delete(f"{base}/source", params={"path": "frontend/frontend.c4"}, headers=alice).status_code == 200
+    [view] = [view for view in client.get(base, headers=alice).json()["model"]["views"] if view["id"] == "checkout"]
+    assert "frontend.web" not in {node["id"] for node in view["nodes"]}
+
+    # The first system declares the element kinds, so it stays while anything still uses them.
     backend = {"path": ["backend/backend.c4", "backend/api.c4"]}
+    other = client.post(f"{base}/ops", json={"ops": [{"op": "createSystem", "title": "Billing"}]}, headers=alice)
+    assert other.status_code == 200
     refused = client.delete(f"{base}/source", params=backend, headers=alice)
     assert refused.status_code == 400
     assert refused.json()["detail"].startswith("Cannot delete backend/api.c4, backend/backend.c4: ")
-    assert "still refers to 'backend" in refused.json()["detail"]
-    assert client.delete(f"{base}/source", params={"path": "backend/api.c4"}, headers=alice).status_code == 400
-    for path in ("views/checkout.c4", "frontend/frontend.c4"):
+    for path in ("views/checkout.c4", "billing/billing.c4"):
         assert client.delete(f"{base}/source", params={"path": path}, headers=alice).status_code == 200
     emptied = client.delete(f"{base}/source", params=backend, headers=alice)
     assert emptied.status_code == 200 and emptied.json()["model"]["tree"] == []

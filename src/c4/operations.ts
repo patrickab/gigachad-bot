@@ -6,8 +6,8 @@ import { edgeKey, type NodePin, type Pins, type Snapshots, type ViewPins } from 
 import { expressionEntries, nameOf, parentOf, Workspace, type ExpressionsNode, type ModelPayload, type Sources } from './workspace.ts'
 
 export type Operation =
-  | { op: 'createPackage', title: string }
-  | { op: 'createModule', package: string, title: string }
+  | { op: 'createSystem', title: string }
+  | { op: 'createModule', system: string, title: string }
   | { op: 'createView', title: string }
   | { op: 'addFileView' }
   | { op: 'addElement', parent: string | null, kind: string, title: string, description?: string, layout?: { view: string } & NodePin }
@@ -30,7 +30,7 @@ export interface ApplyResult {
   snapshots: Snapshots
   model: ModelPayload
   /**
-   * Per operation: the FQN an `addElement` created, the path a `createPackage`,
+   * Per operation: the FQN an `addElement` created, the path a `createSystem`,
    * `createModule` or `createView` created, the view id an `addFileView` declared, otherwise null.
    */
   created: Array<string | null>
@@ -39,10 +39,13 @@ export interface ApplyResult {
 /** A request the current model cannot honour; the message is shown to the user. */
 export class OperationError extends Error {}
 
-interface TextEdit {
+interface Span {
   file: string
   start: number
   end: number
+}
+
+interface TextEdit extends Span {
   text: string
 }
 
@@ -56,7 +59,7 @@ const INDENT_UNIT = '  '
 /** Saved views live one per file under this folder; the file name is the view id. */
 const VIEWS_DIR = 'views/'
 
-/** Element kinds a workspace starts with, written into its first package. */
+/** Element kinds a workspace starts with, written into its first system. */
 const DEFAULT_SPECIFICATION = `specification {
   element actor {
     style {
@@ -279,7 +282,7 @@ class Planner {
 
   // --- Files and views ---------------------------------------------------------
 
-  /** The file a new package, module or view gets: `id` made unique against `taken` names and existing files. */
+  /** The file a new system, module or view gets: `id` made unique against `taken` names and existing files. */
   private newFile(folder: string, title: string, taken: ReadonlySet<string>): { id: string, path: string } {
     const id = uniqueId(idFromTitle(title), new Set([...taken, ...Object.keys(this.ws.sources)
       .filter((path) => path.startsWith(folder) && !path.slice(folder.length).includes('/'))
@@ -292,11 +295,11 @@ class Planner {
     return kinds.size === 0 || kinds.has(preferred) ? preferred : [...kinds][0]!
   }
 
-  /** A package is a folder, `<id>/<id>.c4`, declaring one system and the view of it. */
-  async createPackage(op: Extract<Operation, { op: 'createPackage' }>): Promise<Plan> {
+  /** A system is a folder, `<id>/<id>.c4`, declaring one system and the view of it. */
+  async createSystem(op: Extract<Operation, { op: 'createSystem' }>): Promise<Plan> {
     const title = singleLine(op.title)
-    if (!title) throw new OperationError('A package needs a name')
-    // Neither an element nor a folder may already use the id, so `views/` is never a package.
+    if (!title) throw new OperationError('A system needs a name')
+    // Neither an element nor a folder may already use the id, so `views/` is never a system.
     const folders = Object.keys(this.ws.sources).filter((path) => path.includes('/')).map((path) => path.slice(0, path.indexOf('/')))
     const id = uniqueId(idFromTitle(title), new Set([...await this.childNames(null), ...folders, VIEWS_DIR.slice(0, -1)]))
     const path = `${id}/${id}.c4`
@@ -314,17 +317,17 @@ views {
     return { edits: [{ file: path, start: 0, end: 0, text }], created: path }
   }
 
-  /** A module is a file beside its package's, adding one container to it with `extend`. */
+  /** A module is a file beside its system's, adding one container to it with `extend`. */
   async createModule(op: Extract<Operation, { op: 'createModule' }>): Promise<Plan> {
     const title = singleLine(op.title)
     if (!title) throw new OperationError('A module needs a name')
-    const pkg = this.element(op.package)
-    if (parentOf(op.package) !== null) throw new OperationError('Modules belong to a top-level package')
-    const home = this.ws.documentPath(pkg)
-    const folder = home.includes('/') ? home.slice(0, home.lastIndexOf('/') + 1) : `${op.package}/`
-    const { id, path } = this.newFile(folder, title, await this.childNames(op.package))
+    const system = this.element(op.system)
+    if (parentOf(op.system) !== null) throw new OperationError('Modules belong to a top-level system')
+    const home = this.ws.documentPath(system)
+    const folder = home.includes('/') ? home.slice(0, home.lastIndexOf('/') + 1) : `${op.system}/`
+    const { id, path } = this.newFile(folder, title, await this.childNames(op.system))
     const text = `model {
-  extend ${op.package} {
+  extend ${op.system} {
     ${id} = ${await this.kindFor('container')} ${quote(title)}
   }
 }
@@ -448,53 +451,81 @@ views {
     return { edits: [this.appendToModel(file, [line])] }
   }
 
-  delete(op: Extract<Operation, { op: 'delete' }>): Plan {
-    const spans = [
-      ...op.elements.map((fqn) => this.element(fqn)),
-      ...op.relations.map((id) => this.relation(id)),
-    ].map((node) => ({ file: this.ws.documentPath(node), start: cst(node).offset, end: cst(node).end }))
-    if (spans.length === 0) throw new OperationError('Nothing selected to delete')
-    // A child or a nested connection goes with its deleted ancestor's block.
+  /**
+   * Removes whole-line `spans` (one inside another goes with it) and applies the
+   * entry `edits` that do not fall inside a removed span.
+   */
+  private cut(spans: Span[], edits: TextEdit[]): Plan {
     const outermost = spans.filter((span) => !spans.some((other) => other !== span && other.file === span.file
       && other.start <= span.start && other.end >= span.end && (other.start !== span.start || other.end !== span.end)))
-    const unique = outermost.filter((span, index) => outermost.findIndex((other) => other.file === span.file && other.start === span.start) === index)
-    return { edits: unique.map((span) => this.remove(span.file, span.start, span.end)) }
+    const removals = outermost.filter((span, index) => outermost.findIndex((other) => other.file === span.file && other.start === span.start) === index)
+      .map((span) => this.remove(span.file, span.start, span.end))
+    const rest = edits.filter((edit) => !removals.some((gone) => gone.file === edit.file && gone.start <= edit.start && gone.end >= edit.end))
+    return { edits: [...removals, ...rest] }
   }
 
   /**
-   * Hand edits that removed an element leave connections and view entries naming it.
-   * Drops every connection and every `include`/`exclude` entry with an unresolved
-   * reference, so deleting an element in text takes its uses along as the diagram does.
-   * Dangling references elsewhere (`view x of gone`, `extend gone`) stay for the parse check to report.
+   * Everything naming an element that is gone: one `gone` is about to remove, or (without
+   * `gone`) any reference that no longer resolves after a hand edit. That is connections,
+   * a `view x of gone`, an `extend gone` block (cut whole)
+   * and `include`/`exclude` entries (dropped from their rules).
    */
-  pruneDangling(): Plan {
+  private uses(gone?: string[]): { spans: Span[], edits: TextEdit[] } {
     const dangling: AstNode[] = []
     const views: AstNode[] = []
-    const relations = new Map<AstNode, { file: string, start: number, end: number }>()
     for (const { document } of this.ws.documents()) {
       for (const node of AstUtils.streamAllContents(document.parseResult.value)) {
         if (node.$type === 'ElementView') views.push(node)
-        for (const info of AstUtils.streamReferences(node)) if (!info.reference.ref) dangling.push(info.container)
+        for (const info of AstUtils.streamReferences(node)) {
+          const target = this.ws.fqnOf(info.reference.ref)
+          if (gone ? target && gone.some((fqn) => isWithin(target, fqn)) : !info.reference.ref) dangling.push(info.container)
+        }
       }
     }
-    for (const node of dangling) {
-      let relation: AstNode | undefined = node
-      while (relation && relation.$type !== 'Relation') relation = relation.$container
-      if (relation && !relations.has(relation)) {
-        relations.set(relation, { file: this.ws.documentPath(relation), start: cst(relation).offset, end: cst(relation).end })
-      }
-    }
-    const inside = (node: AstNode, ancestor: AstNode) => {
+    const inside = (node: AstNode, ancestor: unknown) => {
       for (let cursor: AstNode | undefined = node; cursor; cursor = cursor.$container) if (cursor === ancestor) return true
       return false
     }
-    const edits: TextEdit[] = [...relations.values()].map((span) => this.remove(span.file, span.start, span.end))
+    const spans = new Map<AstNode, Span>()
+    for (const node of dangling) {
+      for (let cursor: AstNode | undefined = node; cursor; cursor = cursor.$container) {
+        const own = cursor as AstNode & { viewOf?: unknown, element?: unknown }
+        if (cursor.$type === 'Relation' || (cursor.$type === 'ElementView' && inside(node, own.viewOf))
+          || (cursor.$type === 'ExtendElement' && inside(node, own.element))) {
+          spans.set(cursor, { file: this.ws.documentPath(cursor), start: cst(cursor).offset, end: cst(cursor).end })
+          break
+        }
+      }
+    }
+    const edits: TextEdit[] = []
     for (const view of views) {
       const doomed = new Set(this.predicates(view).flatMap((rule) => rule.entries)
         .filter((entry) => dangling.some((node) => inside(node, entry.node))).map((entry) => entry.node))
       if (doomed.size > 0) edits.push(...this.dropEntries(view, doomed))
     }
-    return { edits }
+    return { spans: [...spans.values()], edits }
+  }
+
+  /**
+   * Deleting takes every use of the deleted elements along: their connections and the
+   * view entries, views and `extend` blocks naming them.
+   */
+  delete(op: Extract<Operation, { op: 'delete' }>): Plan {
+    const selected = [...op.elements.map((fqn) => this.element(fqn)), ...op.relations.map((id) => this.relation(id))]
+      .map((node) => ({ file: this.ws.documentPath(node), start: cst(node).offset, end: cst(node).end }))
+    if (selected.length === 0) throw new OperationError('Nothing selected to delete')
+    const { spans, edits } = this.uses(op.elements)
+    return this.cut([...selected, ...spans], edits)
+  }
+
+  /**
+   * Hand edits that removed an element leave connections and view entries naming it.
+   * Drops every use with an unresolved reference, so deleting an element in text takes
+   * its uses along as the diagram does.
+   */
+  pruneDangling(): Plan {
+    const { spans, edits } = this.uses()
+    return this.cut(spans, edits)
   }
 
   private bodyProperty(element: AstNode, key: string): (AstNode & { value?: AstNode }) | undefined {
@@ -649,7 +680,7 @@ views {
 async function plan(ws: Workspace, op: Operation, home: string | null): Promise<Plan> {
   const planner = new Planner(ws, home)
   switch (op.op) {
-    case 'createPackage': return planner.createPackage(op)
+    case 'createSystem': return planner.createSystem(op)
     case 'createModule': return planner.createModule(op)
     case 'createView': return planner.createView(op)
     case 'addFileView': return planner.addFileView()
@@ -780,8 +811,7 @@ export async function applyOperations(sources: Sources, pins: Pins, operations: 
         try {
           const introduced = newErrors(workspace, next)
           if (introduced.length > 0) {
-            const hint = operation.op === 'delete' ? 'Deleting would leave references to removed elements. Select their connections too, and remove them from views naming them. ' : ''
-            throw new OperationError(`${hint}${introduced[0]}`)
+            throw new OperationError(introduced[0]!)
           }
           if (Object.keys(renames).length > 0) await assertEquivalent(workspace, next, renames)
         } catch (error) {

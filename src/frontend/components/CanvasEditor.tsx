@@ -1374,7 +1374,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   }, [doc, commit, pointAtCenter])
 
   // A project has one architecture; each window browses it through its own tree,
-  // opening on the first package.
+  // opening on the first system.
   const addArchitectureWindow = useCallback(() => {
     if (!slug) return
     const { cx, cy } = pointAtCenter(DEFAULT_GRAPH_WIDTH, DEFAULT_GRAPH_HEIGHT / DEFAULT_GRAPH_WIDTH)

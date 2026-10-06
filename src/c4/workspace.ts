@@ -68,15 +68,15 @@ export interface ViewPayload {
 
 /**
  * How the UI lists a source file, from what it declares (never from its name):
- * a package declares one top-level element, a module one element nested in
+ * a system declares one top-level element, a module one element nested in
  * another file's, a view file only views; anything else is a plain file.
  */
 export interface TreeEntry {
   path: string
-  role: 'package' | 'module' | 'view' | 'file'
-  /** The package's or module's element. */
+  role: 'system' | 'module' | 'view' | 'file'
+  /** The system's or module's element. */
   element: string | null
-  /** The view a window opens for the file: a module opens its package's. */
+  /** The view a window opens for the file: a module opens its system's. */
   view: string | null
 }
 
@@ -325,7 +325,7 @@ export class Workspace {
       if (root === null) return { path, role: roots.length === 0 && own ? 'view' : 'file', element: null, view: own }
       const scoped = ordered.find((view) => view.scope === root.split('.')[0])?.id ?? null
       return parentOf(root) === null
-        ? { path, role: 'package', element: root, view: own ?? scoped }
+        ? { path, role: 'system', element: root, view: own ?? scoped }
         : { path, role: 'module', element: root, view: scoped ?? own }
     })
   }

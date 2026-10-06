@@ -6,7 +6,11 @@ import type { ChangeEvent } from "@/lib/syncStream"
 
 // The surface and the text editor have their own tests; here they only report what the window hands them.
 vi.mock("@/components/ArchitectureDiagramSurface", () => ({
-  ArchitectureDiagramSurface: ({ select }: { select?: string | null }) => <div data-testid="architecture-surface" data-select={select ?? ""} />,
+  ArchitectureDiagramSurface: ({ select, onRemoveFromView }: { select?: string | null, onRemoveFromView?: (ids: string[]) => void }) => (
+    <div data-testid="architecture-surface" data-select={select ?? ""}>
+      <button type="button" onClick={() => onRemoveFromView?.(["backend.api"])}>remove-node</button>
+    </div>
+  ),
 }))
 vi.mock("@/components/DocumentEditor", () => ({
   DocumentEditor: ({ path, onSaved }: { path: string, onSaved?: () => void }) => <button type="button" data-testid="text-editor" onClick={() => onSaved?.()}>{path}</button>,
@@ -43,13 +47,13 @@ const workspace: ArchitectureWorkspace = {
     ],
     tree: [
       { path: "backend/api.c4", role: "module", element: "backend.api", view: "backend" },
-      { path: "backend/backend.c4", role: "package", element: "backend", view: "backend" },
+      { path: "backend/backend.c4", role: "system", element: "backend", view: "backend" },
       { path: "views/checkout.c4", role: "view", element: null, view: "checkout" },
     ],
   },
 }
 
-/** `workspace` with its package retitled, to tell answers apart. */
+/** `workspace` with its system retitled, to tell answers apart. */
 const retitled = (title: string): ArchitectureWorkspace => ({
   ...workspace,
   model: { ...workspace.model, elements: workspace.model.elements.map((element) => element.id === "backend" ? { ...element, title } : element) },
@@ -73,52 +77,52 @@ function Harness() {
   </>
 }
 
-/** Renders the window, which opens on the first package of `initial`. */
+/** Renders the window, which opens on the first system of `initial`. */
 async function open(initial: ArchitectureWorkspace = workspace) {
   api.readArchitecture.mockResolvedValueOnce(initial)
   const view = render(<UndoDeleteProvider><Harness /></UndoDeleteProvider>)
   await act(async () => {})
   const button = (text: string) => Array.from(view.container.querySelectorAll("button")).find((b) => b.textContent === text)!
-  /** Names a new package, which writes it. */
-  const createPackage = async (title: string) => {
-    act(() => { button("Package").click() })
-    await act(async () => { fireEvent.keyDown(view.getByLabelText("Package name"), { key: "Enter", target: { value: title } }) })
+  /** Names a new system, which writes it. */
+  const createSystem = async (title: string) => {
+    act(() => { button("System").click() })
+    await act(async () => { fireEvent.keyDown(view.getByLabelText("System name"), { key: "Enter", target: { value: title } }) })
   }
-  return { ...view, button, createPackage }
+  return { ...view, button, createSystem }
 }
 
 describe("ArchitectureWindow", () => {
   beforeEach(() => { vi.resetAllMocks() })
   afterEach(() => { vi.useRealTimers() })
 
-  it("opens on the first package and moves through its tree", async () => {
-    const { button, createPackage, getByLabelText, findByRole, getByTestId } = await open()
+  it("opens on the first system and moves through its tree", async () => {
+    const { button, createSystem, getByLabelText, findByRole, getByTestId } = await open()
     api.deleteArchitectureSources.mockResolvedValue(workspace)
     const path = () => getByTestId("path").textContent
 
     expect(path()).toBe("graph/proj/backend/backend.c4")
     expect(getByTestId("architecture-surface").dataset.select).toBe("")
 
-    // A module opens in its package's view, selected.
+    // A module opens in its system's view, selected.
     act(() => { button("API").click() })
     await act(async () => {})
     expect(path()).toBe("graph/proj/backend/api.c4")
     expect(getByTestId("architecture-surface").dataset.select).toBe("backend.api")
 
-    // A new module lands beside its package and opens.
+    // A new module lands beside its system and opens.
     api.applyArchitectureOperations.mockResolvedValueOnce({ ...workspace, created: ["backend/db.c4"] })
     act(() => { button("Module").click() })
     await act(async () => { fireEvent.keyDown(getByLabelText("Module name"), { key: "Enter", target: { value: "DB" } }) })
-    expect(api.applyArchitectureOperations).toHaveBeenLastCalledWith("proj", [{ op: "createModule", package: "backend", title: "DB" }], null)
+    expect(api.applyArchitectureOperations).toHaveBeenLastCalledWith("proj", [{ op: "createModule", system: "backend", title: "DB" }], null)
     expect(path()).toBe("graph/proj/backend/db.c4")
 
     // A refused name keeps the field open with the server's reason.
     api.applyArchitectureOperations.mockRejectedValueOnce(new Error("Unknown element kind"))
-    await createPackage("Frontend")
+    await createSystem("Frontend")
     expect((await findByRole("alert")).textContent).toContain("Unknown element kind")
-    expect(getByLabelText("Package name")).toBeTruthy()
+    expect(getByLabelText("System name")).toBeTruthy()
 
-    // The same file as text, then the package deleted together with its modules.
+    // The same file as text, then the system deleted together with its modules.
     act(() => { button("Backend").click() })
     await act(async () => {})
     act(() => { button("Text").click() })
@@ -127,7 +131,7 @@ describe("ArchitectureWindow", () => {
     act(() => { getByLabelText("Delete Backend and its modules").click() })
     expect(api.deleteArchitectureSources).not.toHaveBeenCalled()
     expect(button("Undo")).toBeTruthy()
-    // The package and its modules leave the tree at once.
+    // The system and its modules leave the tree at once.
     expect(button("Backend")).toBeUndefined()
     expect(button("API")).toBeUndefined()
     // Moving on during the undo window keeps the window where it now is once the delete lands.
@@ -137,15 +141,36 @@ describe("ArchitectureWindow", () => {
     expect(path()).toBe("graph/proj/views/checkout.c4")
   })
 
+  it("asks whether an element removed from a saved view should leave its file too", async () => {
+    const { button, getByRole, queryByRole } = await open()
+    act(() => { button("Checkout").click() })
+    await act(async () => {})
+    api.applyArchitectureOperations.mockResolvedValue(workspace)
+
+    // Escape keeps it in the model.
+    await act(async () => { button("remove-node").click() })
+    expect(api.applyArchitectureOperations).toHaveBeenLastCalledWith("proj", [{ op: "removeFromView", view: "checkout", elements: ["backend.api"] }], "views/checkout.c4")
+    expect(getByRole("alertdialog").textContent).toContain("Remove reference from backend/api.c4?")
+    await act(async () => { fireEvent.keyDown(window, { key: "Escape" }) })
+    expect(queryByRole("alertdialog")).toBeNull()
+    expect(api.applyArchitectureOperations).toHaveBeenCalledTimes(1)
+
+    // Enter deletes it from the model.
+    await act(async () => { button("remove-node").click() })
+    await act(async () => { fireEvent.keyDown(window, { key: "Enter" }) })
+    expect(api.applyArchitectureOperations).toHaveBeenLastCalledWith("proj", [{ op: "delete", elements: ["backend.api"], relations: [] }], "views/checkout.c4")
+    expect(queryByRole("alertdialog")).toBeNull()
+  })
+
   it("never lets an earlier read replace a later write's answer", async () => {
-    const { createPackage, queryByText } = await open()
+    const { createSystem, queryByText } = await open()
     const read = deferred<ArchitectureWorkspace>()
     const write = deferred<ArchitectureWorkspace>()
     api.readArchitecture.mockReturnValueOnce(read.promise)
     api.applyArchitectureOperations.mockReturnValueOnce(write.promise)
 
     remoteChange()
-    await createPackage("Frontend")
+    await createSystem("Frontend")
     // The write's answer arrives first, the earlier read's after it.
     await act(async () => {
       write.resolve(retitled("Written"))
@@ -156,12 +181,12 @@ describe("ArchitectureWindow", () => {
   })
 
   it("rereads once after a write when another device changed the model meanwhile", async () => {
-    const { createPackage, findByText } = await open()
+    const { createSystem, findByText } = await open()
     const write = deferred<ArchitectureWorkspace>()
     api.applyArchitectureOperations.mockReturnValueOnce(write.promise)
     api.readArchitecture.mockResolvedValueOnce(retitled("Changed elsewhere"))
 
-    await createPackage("Frontend")
+    await createSystem("Frontend")
     remoteChange()
     remoteChange()
     await act(async () => {})

@@ -1327,9 +1327,8 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
     onEdgeStyleChange(next)
     emit({ edges: graphRef.current.edges.map(({ path: _path, ...edge }) => edge) })
   }, [edgeStyle, onEdgeStyleChange, emit])
-  // Delete never cascades: React Flow would also take a node's connections and
-  // children, but only what the user selected leaves the graph. The model then
-  // refuses a delete that would leave a reference behind.
+  // React Flow would also take a node's connections and children, but only what
+  // the user selected is named; the model's delete takes the other uses along.
   // Nodes follow the view's removal (see `removal`); connections are always model edits.
   const onBeforeDelete: OnBeforeDelete<GraphFlowNode, GraphFlowEdge> = useCallback(async ({ nodes: doomed, edges: doomedEdges }) => {
     const nodeIds = doomed.filter((node) => node.selected).map((node) => node.id)

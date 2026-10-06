@@ -471,7 +471,7 @@ export function readArchitecture(slug: string): Promise<ArchitectureWorkspace> {
   return request<ArchitectureWorkspace>(architecturePath(slug))
 }
 
-/** `file` is the editing window's source, where top-level elements drawn there are written; null for ops that name their own file, e.g. creating a package. */
+/** `file` is the editing window's source, where top-level elements drawn there are written; null for ops that name their own file, e.g. creating a system. */
 export function applyArchitectureOperations(slug: string, ops: ArchitectureOperation[], file: string | null): Promise<ArchitectureWorkspace> {
   return post<ArchitectureWorkspace>(`${architecturePath(slug)}/ops`, { ops, file })
 }

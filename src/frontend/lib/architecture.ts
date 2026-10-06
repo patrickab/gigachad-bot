@@ -64,15 +64,15 @@ export interface ArchitectureModel {
 }
 
 /**
- * How a source file is listed, from what it declares: a package declares one
+ * How a source file is listed, from what it declares: a system declares one
  * top-level element (`backend/backend.c4`), a module one element extending
  * another file's (`backend/api.c4`), a view file only views.
  */
 export interface ArchitectureTreeEntry {
   path: string
-  role: "package" | "module" | "view" | "file"
+  role: "system" | "module" | "view" | "file"
   element: string | null
-  /** The view a window opens for the file; a module opens its package's. */
+  /** The view a window opens for the file; a module opens its system's. */
   view: string | null
 }
 
@@ -92,9 +92,9 @@ export interface ArchitectureWorkspace {
 
 export type ArchitectureOperation =
   /** Creates `<id>/<id>.c4`, one system and its view; `created` holds that path. */
-  | { op: "createPackage", title: string }
-  /** Creates a file beside the package's, extending it with one container; `created` holds that path. */
-  | { op: "createModule", package: string, title: string }
+  | { op: "createSystem", title: string }
+  /** Creates a file beside the system's, extending it with one container; `created` holds that path. */
+  | { op: "createModule", system: string, title: string }
   /** Creates a saved view in its own file, `views/<id>.c4`; `created` holds that path. */
   | { op: "createView", title: string }
   | { op: "addFileView" }
@@ -324,10 +324,10 @@ const rectOf = (node: DiagramNode): NodePin => ({
 })
 
 /**
- * Turns one surface edit into operations. Deletion never cascades: only the
- * nodes and connections the surface removed are named, so the C4 service
- * refuses a delete that would leave a reference behind. A node drawn outside
- * every element goes into the view's scope; the server knows which.
+ * Turns one surface edit into operations. A delete names only the nodes and
+ * connections the surface removed, and the C4 service takes every other use of
+ * them along. A node drawn outside every element goes into the view's scope;
+ * the server knows which.
  */
 export function diffGraph(before: DiagramGraph, after: DiagramGraph, view: string, kinds: readonly string[]): GraphChange {
   const ops: ArchitectureOperation[] = []

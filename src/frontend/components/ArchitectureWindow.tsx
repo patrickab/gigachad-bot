@@ -1,7 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { Box, FileType, Layers, LayoutGrid, ListPlus, Package, PanelLeftClose, PanelLeftOpen, Plus, Trash2 } from "lucide-react"
+import { createPortal } from "react-dom"
+import { Box, FileType, Layers, LayoutGrid, ListPlus, Network, PanelLeftClose, PanelLeftOpen, Plus, Trash2 } from "lucide-react"
 import { applyArchitectureOperations, deleteArchitectureSources, readArchitecture } from "@/lib/api"
 import {
   architectureSlug, architectureSource, diffGraph, fitGraph, graphFromView, labelFontsReady, nodeMinWidth,
@@ -22,7 +23,7 @@ const failure = (cause: unknown, fallback: string) => cause instanceof Error && 
 
 /**
  * A `.c4` file of a project's architecture, drawn through the view it opens
- * in: a package's own `view x of x`, its package's view for a module, or a
+ * in: a system's own `view x of x`, its system's view for a module, or a
  * saved view. Reads and writes of the model run one at a time in order; each
  * write is validated by the server against the model as it is then, so a
  * stale edit is refused with a reason instead of overwriting newer work.
@@ -82,7 +83,7 @@ function useArchitectureView(slug: string, file: string) {
     if (event.device_id !== getDeviceId()) refresh()
   }), [slug, refresh])
 
-  // How the tree lists `file`, and the view it opens in (a module opens its package's).
+  // How the tree lists `file`, and the view it opens in (a module opens its system's).
   const entry = useMemo(() => workspace?.model.tree.find((candidate) => candidate.path === file) ?? null, [workspace, file])
   const view = useMemo(() => workspace?.model.views.find((candidate) => candidate.id === entry?.view) ?? null, [workspace, entry])
   // Loaded, but `file` no longer exists or opens no view.
@@ -142,8 +143,8 @@ function useArchitectureView(slug: string, file: string) {
 
 // An architecture window owns only its canvas-local frame, connection style, and
 // the file it is on; the model lives in the project's LikeC4 workspace (every
-// `.c4` file). The tree on its left moves between packages, modules, and saved
-// views; the diagram is the view the file opens in (a module opens its package's,
+// `.c4` file). The tree on its left moves between systems, modules, and saved
+// views; the diagram is the view the file opens in (a module opens its system's,
 // with the module selected), or the file itself as text. It is rendered at real
 // layout size: CSS scaling would desynchronise React Flow's handles from the pointer.
 export function ArchitectureWindow({ path, maximized, hostScale, edgeStyle = "elbow", onEdgeStyleChange, onNavigate }: {
@@ -153,7 +154,7 @@ export function ArchitectureWindow({ path, maximized, hostScale, edgeStyle = "el
   /** How connections are drawn: a window preference, LikeC4 has no such setting. */
   edgeStyle?: EdgeStyle
   onEdgeStyleChange: (style: EdgeStyle) => void
-  /** Points the window at another `graph/<slug>/<file>`; an empty file means "the first package". */
+  /** Points the window at another `graph/<slug>/<file>`; an empty file means "the first system". */
   onNavigate: (path: string) => void
 }) {
   const slug = architectureSlug(path)
@@ -162,15 +163,38 @@ export function ArchitectureWindow({ path, maximized, hostScale, edgeStyle = "el
   const [mode, setMode] = useState<"diagram" | "text">("diagram")
   const { workspace, entry, view, graph, missing, error, onChange, run, mutate, refresh } = useArchitectureView(slug, file)
   const open = useCallback((next: string) => onNavigate(`graph/${slug}/${next}`), [onNavigate, slug])
-  // A new window, or one whose file was just deleted, opens the first package.
+  // A new window, or one whose file was just deleted, opens the first system.
   useEffect(() => {
     if (file || !workspace) return
-    const first = workspace.model.tree.find((candidate) => candidate.role === "package") ?? workspace.model.tree.find((candidate) => candidate.view)
+    const first = workspace.model.tree.find((candidate) => candidate.role === "system") ?? workspace.model.tree.find((candidate) => candidate.view)
     if (first) open(first.path)
   }, [file, workspace, open])
+  // Removing from a saved view leaves the element in the model; the user is then asked whether to delete it there too.
+  const [offered, setOffered] = useState<string[]>([])
   const removeFromView = useCallback((elements: string[]) => {
-    if (view && elements.length > 0) run([{ op: "removeFromView", view: view.id, elements }])
+    if (!view || elements.length === 0) return
+    run([{ op: "removeFromView", view: view.id, elements }])
+    setOffered(elements)
   }, [run, view])
+  const offeredElements = workspace ? workspace.model.elements.filter((element) => offered.includes(element.id)) : []
+  const answer = useCallback((remove: boolean) => {
+    if (remove) run([{ op: "delete", elements: offered, relations: [] }])
+    setOffered([])
+  }, [run, offered])
+  // The dialog has the keyboard: Enter deletes, Escape keeps, whatever holds focus.
+  useEffect(() => {
+    if (offered.length === 0) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Enter" && event.key !== "Escape") return
+      event.preventDefault()
+      event.stopPropagation()
+      answer(event.key === "Enter")
+    }
+    window.addEventListener("keydown", onKey, true)
+    return () => window.removeEventListener("keydown", onKey, true)
+  }, [offered, answer])
+  // Another view or file is another question.
+  useEffect(() => { setOffered([]) }, [view?.id])
   // LikeC4's own complaints about the source, e.g. an unresolved reference; it counts lines from zero.
   const diagnostics = workspace?.model.errors ?? []
   const notice = (text: string, action?: ReactNode) => (
@@ -181,7 +205,7 @@ export function ArchitectureWindow({ path, maximized, hostScale, edgeStyle = "el
   )
   let body: ReactNode
   if (!workspace) body = notice(error ? "" : "Loading architecture…")
-  else if (!file) body = notice("Start with a package: a system whose modules are the parts inside it.")
+  else if (!file) body = notice("Start with a system: its modules are the parts inside it.")
   else if (missing === "file") body = notice(`${file} no longer exists.`)
   else if (mode === "text") body = (
     <div className="relative min-h-0 flex-1">
@@ -243,16 +267,33 @@ export function ArchitectureWindow({ path, maximized, hostScale, edgeStyle = "el
             {diagnostics.map((diagnostic, index) => <p key={index}>{diagnostic.file}:{diagnostic.line + 1}: {diagnostic.message}</p>)}
           </div>
         )}
+        {offeredElements.length > 0 && createPortal(
+          // Portaled: the window sits inside the canvas's transform, which would confine a fixed overlay.
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-backdrop backdrop-blur-[2px]" onClick={() => answer(false)}>
+            <div role="alertdialog" aria-label="Remove reference" onClick={(event) => event.stopPropagation()}
+              className="mx-4 flex flex-col gap-3 rounded-xl border border-divider bg-paper px-5 py-4 text-sm text-ink shadow-[var(--shadow-xl)]">
+              <span className="flex items-center gap-2">
+                <Trash2 className="h-4 w-4" />
+                Remove reference from {[...new Set(offeredElements.map((element) => element.file ?? "the model"))].join(", ")}?
+              </span>
+              <span className="flex justify-end gap-2 text-xs">
+                <button type="button" onClick={() => answer(true)} className="rounded-lg border border-divider bg-surface px-3 py-1.5 text-ink hover:border-ink-muted">Yes (Enter)</button>
+                <button type="button" onClick={() => answer(false)} className="rounded-lg border border-divider px-3 py-1.5 text-ink-muted hover:border-ink-muted hover:text-ink">No (Esc)</button>
+              </span>
+            </div>
+          </div>,
+          document.body,
+        )}
         {body}
       </div>
     </div>
   )
 }
 
-// The project's architecture as files: packages (a folder whose own file declares
+// The project's architecture as files: systems (a folder whose own file declares
 // one system) with their modules, saved views, and anything else hand-written.
-// Creating writes LikeC4 from templates; deleting a package takes its modules
-// along, and the server refuses while something else still uses them.
+// Creating writes LikeC4 from templates; deleting a system takes its modules
+// along, and the server drops the connections and view entries naming them.
 // A deleted row leaves the tree at once, but its files (and so the diagram) stay
 // until the delete commits when the undo window closes.
 function ArchitectureTree({ slug, workspace, current, onOpen, onCollapse, mutate }: {
@@ -263,21 +304,21 @@ function ArchitectureTree({ slug, workspace, current, onOpen, onCollapse, mutate
   onCollapse: () => void
   mutate: Mutate
 }) {
-  const [naming, setNaming] = useState<{ kind: "package" | "view" } | { kind: "module", pkg: string } | null>(null)
+  const [naming, setNaming] = useState<{ kind: "system" | "view" } | { kind: "module", system: string } | null>(null)
   const { schedule, pending } = useUndoDelete()
   const [problem, setProblem] = useState<string | null>(null)
   // Read when a delete commits, which may be after the user has moved to another file.
   const currentRef = useRef(current)
   currentRef.current = current
   const { tree, elements, views } = workspace.model
-  // One undo key per delete, named after its first path: a package's key hides its modules with it.
+  // One undo key per delete, named after its first path: a system's key hides its modules with it.
   const deleteKey = (path: string) => `architecture:${slug}:${path}`
-  const allPackages = tree.filter((entry) => entry.role === "package")
-  const packages = allPackages.filter((entry) => !pending(deleteKey(entry.path)))
-  const packageIds = new Set(allPackages.map((entry) => entry.element))
-  const packageOf = (entry: ArchitectureTreeEntry) => entry.element?.split(".")[0] ?? ""
-  const modulesOf = (pkg: string) => tree.filter((entry) => entry.role === "module" && packageOf(entry) === pkg && !pending(deleteKey(entry.path)))
-  const others = tree.filter((entry) => (entry.role === "file" || (entry.role === "module" && !packageIds.has(packageOf(entry)))) && !pending(deleteKey(entry.path)))
+  const allSystems = tree.filter((entry) => entry.role === "system")
+  const systems = allSystems.filter((entry) => !pending(deleteKey(entry.path)))
+  const systemIds = new Set(allSystems.map((entry) => entry.element))
+  const systemOf = (entry: ArchitectureTreeEntry) => entry.element?.split(".")[0] ?? ""
+  const modulesOf = (system: string) => tree.filter((entry) => entry.role === "module" && systemOf(entry) === system && !pending(deleteKey(entry.path)))
+  const others = tree.filter((entry) => (entry.role === "file" || (entry.role === "module" && !systemIds.has(systemOf(entry)))) && !pending(deleteKey(entry.path)))
   const titleOf = (entry: ArchitectureTreeEntry) => (entry.element ? elements.find((element) => element.id === entry.element)?.title : null)
     ?? (entry.role === "view" ? views.find((view) => view.id === entry.view)?.title : null)
     ?? entry.path.split("/").pop()!
@@ -291,8 +332,8 @@ function ArchitectureTree({ slug, workspace, current, onOpen, onCollapse, mutate
   }
   const create = (title: string) => {
     if (!naming || !title) { setNaming(null); return }
-    const op: ArchitectureOperation = naming.kind === "package" ? { op: "createPackage", title }
-      : naming.kind === "module" ? { op: "createModule", package: naming.pkg, title }
+    const op: ArchitectureOperation = naming.kind === "system" ? { op: "createSystem", title }
+      : naming.kind === "module" ? { op: "createModule", system: naming.system, title }
       : { op: "createView", title }
     void act(() => applyArchitectureOperations(slug, [op], null), (next) => {
       setNaming(null)
@@ -334,7 +375,7 @@ function ArchitectureTree({ slug, workspace, current, onOpen, onCollapse, mutate
       </div>
     )
   }
-  const icon = (Icon: typeof Package) => <Icon className="h-3 w-3 shrink-0 text-ink-faint" />
+  const icon = (Icon: typeof Network) => <Icon className="h-3 w-3 shrink-0 text-ink-faint" />
   const heading = (text: string) => <div className="px-2 pb-0.5 pt-2 text-[9px] uppercase tracking-wider text-ink-faint">{text}</div>
   const addButton = (label: string, onClick: () => void, depth = 0) => (
     <button type="button" onClick={() => { setProblem(null); setNaming(null); onClick() }} className="flex w-full items-center gap-1.5 py-1 text-left text-[11px] text-ink-faint hover:text-ink transition-colors" style={{ paddingLeft: 8 + depth * 12 }}>
@@ -348,20 +389,20 @@ function ArchitectureTree({ slug, workspace, current, onOpen, onCollapse, mutate
         <button type="button" aria-label="Hide files" onClick={onCollapse} className="rounded p-0.5 hover:text-ink"><PanelLeftClose className="h-3 w-3" /></button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto pb-2">
-        {heading("Packages")}
-        {packages.map((pkg) => {
-          const id = pkg.element!
+        {heading("Systems")}
+        {systems.map((system) => {
+          const id = system.element!
           const modules = modulesOf(id)
-          const open = pkg.path === current || modules.some((module) => module.path === current)
+          const open = system.path === current || modules.some((module) => module.path === current)
           return (
-            <div key={pkg.path}>
-              {row(pkg, icon(Package), 0, [pkg.path, ...modules.map((module) => module.path)])}
+            <div key={system.path}>
+              {row(system, icon(Network), 0, [system.path, ...modules.map((module) => module.path)])}
               {modules.map((module) => row(module, icon(Box), 1))}
-              {open && (naming?.kind === "module" && naming.pkg === id ? nameField("Module name", 1) : addButton("Module", () => setNaming({ kind: "module", pkg: id }), 1))}
+              {open && (naming?.kind === "module" && naming.system === id ? nameField("Module name", 1) : addButton("Module", () => setNaming({ kind: "module", system: id }), 1))}
             </div>
           )
         })}
-        {naming?.kind === "package" ? nameField("Package name", 0) : addButton("Package", () => setNaming({ kind: "package" }))}
+        {naming?.kind === "system" ? nameField("System name", 0) : addButton("System", () => setNaming({ kind: "system" }))}
         {heading("Views")}
         {tree.filter((entry) => entry.role === "view" && !pending(deleteKey(entry.path))).map((entry) => row(entry, icon(Layers), 0))}
         {naming?.kind === "view" ? nameField("View name", 0) : addButton("View", () => setNaming({ kind: "view" }))}

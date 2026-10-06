@@ -84,24 +84,33 @@ describe('applyOperations', () => {
     assert.equal(result.model.elements.find((element) => element.id === 'shop2')?.description, '- sells\n- ships')
   })
 
-  it('refuses a delete that would leave dangling references and accepts it with the connection selected', async () => {
-    await assert.rejects(apply([{ op: 'delete', elements: ['bank'], relations: [] }]), (error: unknown) =>
-      error instanceof OperationError && /Select their connections too/.test(error.message))
+  it('deletes an element together with its connections and the view entries naming it', async () => {
+    const result = await apply([{ op: 'delete', elements: ['bank'], relations: [] }])
+    assert.deepEqual(result.model.errors, [])
+    assert.equal(result.sources['model.c4'], SOURCE
+      .replace("  bank = system 'Bank'\n  shop.api -> bank 'charges'\n", '')
+      .replace('include shop, bank', 'include shop'))
+  })
 
-    const { model } = await apply([])
-    const relation = model.views.find((view) => view.id === 'shopView')!.edges[0].relations[0]
-    // custom view names bank explicitly, so it has to go too: deletion is gated, not cascaded.
-    const custom = SOURCE.replace('include shop, bank', 'include shop')
-    const result = await apply([{ op: 'delete', elements: ['bank'], relations: [relation] }], {}, custom)
-    assert.equal(result.sources['model.c4'], custom.replace("  bank = system 'Bank'\n  shop.api -> bank 'charges'\n", ''))
+  it('deletes the views and extend blocks of a deleted element', async () => {
+    const source = `${SOURCE}`.replace('model {', "model {\n  extend shop {\n    cache = container 'Cache'\n    cache -> bank\n  }")
+    const result = await apply([{ op: 'delete', elements: ['shop'], relations: [] }], {}, source)
+    assert.deepEqual(result.model.errors, [])
+    assert.doesNotMatch(result.sources['model.c4'], /shop|cache/)
+    assert.deepEqual(result.model.elements.map((element) => element.id), ['bank'])
   })
 
   it('removes nested children with their deleted parent', async () => {
-    const { model } = await apply([])
-    const relation = model.views.find((view) => view.id === 'shopView')!.edges[0].relations[0]
-    const source = SOURCE.replace('include shop, bank', 'include bank').replace(/  view shopView of shop \{\n    include \*\n  \}\n/, '')
-    const result = await apply([{ op: 'delete', elements: ['shop', 'shop.api'], relations: [relation] }], {}, source)
+    const result = await apply([{ op: 'delete', elements: ['shop', 'shop.api'], relations: [] }])
+    assert.deepEqual(result.model.errors, [])
     assert.deepEqual(result.model.elements.map((element) => element.id), ['bank'])
+  })
+
+  it('leaves unrelated broken references alone when deleting', async () => {
+    const broken = SOURCE.replace('model {', "model {\n  shop -> missing")
+    const result = await apply([{ op: 'delete', elements: ['bank'], relations: [] }], {}, broken)
+    assert.match(result.sources['model.c4'], /shop -> missing/)
+    assert.doesNotMatch(result.sources['model.c4'], /bank/)
   })
 
   it('renames an element, its references, and its saved positions', async () => {
@@ -201,13 +210,13 @@ describe('applyOperations', () => {
   })
 })
 
-describe('packages, modules, and views', () => {
+describe('systems, modules, and views', () => {
   const start = async () => {
-    const first = await applyOperations({}, {}, [{ op: 'createPackage', title: 'Backend' }], null)
-    return applyOperations(first.sources, {}, [{ op: 'createPackage', title: 'Frontend' }], null)
+    const first = await applyOperations({}, {}, [{ op: 'createSystem', title: 'Backend' }], null)
+    return applyOperations(first.sources, {}, [{ op: 'createSystem', title: 'Frontend' }], null)
   }
 
-  it('starts a package as a folder with one system and its view, and a module as an extend beside it', async () => {
+  it('starts a system as a folder with one system element and its view, and a module as an extend beside it', async () => {
     const { sources, created, model } = await start()
     assert.deepEqual(created, ['frontend/frontend.c4'])
     assert.match(sources['backend/backend.c4']!, /^specification \{/)
@@ -215,20 +224,20 @@ describe('packages, modules, and views', () => {
     const view = model.views.find((candidate) => candidate.id === 'frontend')!
     assert.deepEqual([view.file, view.scope, view.editable, view.manual], ['frontend/frontend.c4', 'frontend', true, false])
     // Names stay unique against elements and folders alike, and `views/` holds only views.
-    const again = await applyOperations(sources, {}, [{ op: 'createPackage', title: 'Frontend' }, { op: 'createPackage', title: 'Views' }, { op: 'createView', title: 'Overview' }], null)
+    const again = await applyOperations(sources, {}, [{ op: 'createSystem', title: 'Frontend' }, { op: 'createSystem', title: 'Views' }, { op: 'createView', title: 'Overview' }], null)
     assert.deepEqual(again.created.slice(0, 2), ['frontend2/frontend2.c4', 'views2/views2.c4'])
 
     const modules = await applyOperations(sources, {}, [
-      { op: 'createModule', package: 'backend', title: 'API' },
-      { op: 'createModule', package: 'backend', title: 'API' },
+      { op: 'createModule', system: 'backend', title: 'API' },
+      { op: 'createModule', system: 'backend', title: 'API' },
     ], null)
     assert.deepEqual(modules.created, ['backend/api.c4', 'backend/api2.c4'])
     assert.equal(modules.sources['backend/api.c4'], "model {\n  extend backend {\n    api = container 'API'\n  }\n}\n")
     assert.deepEqual(modules.model.views.find((candidate) => candidate.id === 'backend')!.nodes.map((node) => node.id).sort(), ['backend', 'backend.api', 'backend.api2'])
-    await assert.rejects(applyOperations(modules.sources, {}, [{ op: 'createModule', package: 'backend.api', title: 'X' }], null), /top-level package/)
+    await assert.rejects(applyOperations(modules.sources, {}, [{ op: 'createModule', system: 'backend.api', title: 'X' }], null), /top-level system/)
   })
 
-  it('lists files by what they declare, and a module opens in its package view', async () => {
+  it('lists files by what they declare, and a module opens in its system view', async () => {
     const { sources } = await start()
     const result = await applyOperations({
       ...sources,
@@ -236,14 +245,14 @@ describe('packages, modules, and views', () => {
       'loose.c4': "model {\n  a = system 'A'\n  b = system 'B'\n}\n",
       'views/overview.c4': 'views {\n  view overview {\n    include *\n  }\n}\n',
     }, {}, [
-      // Drawn inside the module's frame in the package view, a component lands in the module file.
+      // Drawn inside the module's frame in the system view, a component lands in the module file.
       { op: 'addElement', parent: 'backend.api', kind: 'component', title: 'Auth', layout: { view: 'backend', x: 0, y: 0 } },
     ], null)
     assert.match(result.sources['backend/api.c4']!, /api = container 'API' \{\n {6}auth = component 'Auth'\n {4}\}/)
     assert.deepEqual(result.model.tree, [
       { path: 'backend/api.c4', role: 'module', element: 'backend.api', view: 'backend' },
-      { path: 'backend/backend.c4', role: 'package', element: 'backend', view: 'backend' },
-      { path: 'frontend/frontend.c4', role: 'package', element: 'frontend', view: 'frontend' },
+      { path: 'backend/backend.c4', role: 'system', element: 'backend', view: 'backend' },
+      { path: 'frontend/frontend.c4', role: 'system', element: 'frontend', view: 'frontend' },
       { path: 'loose.c4', role: 'file', element: null, view: null },
       { path: 'views/overview.c4', role: 'view', element: null, view: 'overview' },
     ])
@@ -294,11 +303,13 @@ describe('packages, modules, and views', () => {
     assert.equal(back.sources['views/checkoutFlow.c4'], "views {\n  view checkoutFlow {\n    title 'Checkout flow'\n    include backend, backend.**\n  }\n}\n")
 
     // An element drawn into a saved view is included by name, and only the drawing is reported;
-    // deleting one a view names is refused.
+    // deleting it takes the view's entry along.
     const drawn = await applyOperations(back.sources, {}, [{ op: 'addElement', parent: 'frontend', kind: 'container', title: 'Mobile', layout: { view: 'checkoutFlow', x: 0, y: 0 } }], null)
     assert.deepEqual(drawn.created, ['frontend.mobile'])
     assert.match(drawn.sources['views/checkoutFlow.c4']!, /include frontend\.mobile\n/)
-    await assert.rejects(applyOperations(drawn.sources, {}, [{ op: 'delete', elements: ['frontend.mobile'], relations: [] }], null), /remove them from views naming them/)
+    const deleted = await applyOperations(drawn.sources, {}, [{ op: 'delete', elements: ['frontend.mobile'], relations: [] }], null)
+    assert.deepEqual(deleted.model.errors, [])
+    assert.doesNotMatch(deleted.sources['views/checkoutFlow.c4']!, /mobile/)
     await assert.rejects(applyOperations({ 'model.c4': SOURCE }, {}, [{ op: 'includeInView', view: 'filtered', elements: ['shop'] }], null), /edit it in its source file/)
   })
 

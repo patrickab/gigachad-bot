@@ -85,7 +85,7 @@ describe("ArchitectureDiagramSurface", () => {
     expect(screen.queryByLabelText("Delete element")).toBeNull()
   })
 
-  it("in a package view, the corner X deletes the element from the model", () => {
+  it("in a system view, the corner X deletes the element from the model", () => {
     const onChange = vi.fn()
     const graph: DiagramGraph = { nodes: [node("shop", "Shop"), node("bank", "Bank")], edges: [] }
     render(<Surface graph={graph} onChange={onChange} />)

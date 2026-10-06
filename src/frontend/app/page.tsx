@@ -155,7 +155,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   const setTabAppMode = onAppModeChange
   const [canvasSel, setCanvasSel] = useState<CanvasSelection | null>(null)
   // Canvas mode shows either a canvas or one project's architecture on its own
-  // (`graph/<slug>/<file>`; an empty file opens the first package).
+  // (`graph/<slug>/<file>`; an empty file opens the first system).
   const [architecturePath, setArchitecturePath] = useState<string | null>(null)
   const [architectureEdgeStyle, setArchitectureEdgeStyle] = useState<EdgeStyle>("elbow")
   const [canvasToolbarSlot, setCanvasToolbarSlot] = useState<HTMLElement | null>(null)

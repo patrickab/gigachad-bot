@@ -2,7 +2,7 @@
 
 A project's workspace is every ``.c4`` file under ``graph/<slug>/``, nested
 folders included; LikeC4 merges them into one model. The UI organises it as
-packages (``backend/backend.c4``: one system and its view) holding modules
+systems (``backend/backend.c4``: one C4 system and its view) holding modules
 (``backend/api.c4``: ``extend backend { api = container }``), plus saved views
 in ``views/<id>.c4``. Saved positions are LikeC4 manual layouts under ``.likec4/``.
 
@@ -128,8 +128,8 @@ async def apply_operations(
     projects: ProjectStore = Depends(get_project_store),
 ) -> WorkspaceResponse:
     """Model, view and layout edits (``{"op": "layout", ...}``), applied all or nothing. New files come
-    from ``createPackage`` (``<id>/<id>.c4``: one system and its view; the first also declares the
-    element kinds), ``createModule`` (beside its package, extending it with one container) and
+    from ``createSystem`` (``<id>/<id>.c4``: one system and its view; the first also declares the
+    element kinds), ``createModule`` (beside its system, extending it with one container) and
     ``createView`` (an empty ``views/<id>.c4``); ``created`` holds their paths."""
     return await _write(slug, docs, req.ops, file=req.file, projects=projects)
 
@@ -160,8 +160,9 @@ async def create_source(
 
 @router.delete("/{slug}/source", response_model=WorkspaceResponse)
 async def delete_source(slug: str, path: list[str] = Query(...), docs: DataStore = Depends(get_document_store)) -> WorkspaceResponse:
-    """Deletes every ``path`` together (a package with its modules), refused while
-    the remaining files still need them, e.g. they use their elements or kinds.
+    """Deletes every ``path`` together (a system with its modules). Connections and view
+    entries naming their elements go with them; it is refused only while the remaining
+    files still need something else in them, e.g. the element kinds a ``specification`` declares.
 
     The layouts of views they declared go with them. Deleting the last file
     leaves an empty model.
@@ -172,4 +173,4 @@ async def delete_source(slug: str, path: list[str] = Query(...), docs: DataStore
             raise ArchitectureNotFound(f"Source file not found: {missing[0]}")
         return {name: text for name, text in sources.items() if name not in path}
 
-    return await _write(slug, docs, [], edit=drop, must_parse=True)
+    return await _write(slug, docs, [{"op": "pruneDangling"}], edit=drop, must_parse=True)
