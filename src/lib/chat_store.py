@@ -1,7 +1,7 @@
 """Single seam for all chat-file I/O, validation, indexing, and cleanup."""
 
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 from typing import Any, Callable
 import uuid
@@ -82,33 +82,18 @@ class ChatStore:
     # ------------------------------------------------------------------
 
     def load(self, filename: str) -> dict[str, Any] | None:
-        """Load a chat file by relative filename. Returns None on failure."""
-        path = self.resolve_path(filename)
-        return self._load_path(path)
+        """Load a chat file and its revision in one read. Returns None on failure."""
+        key = self.resolve_path(filename).key
+        try:
+            content, revision = self._base.store.read_bytes(key)
+            raw = json.loads(content)
+        except Exception:
+            return None
+        return {**_normalize_chat(raw), "revision": revision.token}
 
     def _load_path(self, path: DataStorePath) -> dict[str, Any] | None:
         raw = load_json(path)
-        if raw is None:
-            return None
-        if isinstance(raw, list):
-            return {
-                "messages": raw,
-                "chat_id": None,
-                "title": None,
-                "usage": None,
-                "parent_id": None,
-                "branch_message_idx": None,
-                "children": [],
-            }
-        return {
-            "messages": raw.get("messages", []),
-            "chat_id": raw.get("chat_id"),
-            "title": raw.get("title"),
-            "usage": raw.get("usage"),
-            "parent_id": raw.get("parent_id"),
-            "branch_message_idx": raw.get("branch_message_idx"),
-            "children": raw.get("children", []),
-        }
+        return None if raw is None else _normalize_chat(raw)
 
     def revision(self, filename: str) -> str | None:
         """Return the opaque revision clients must send with an editable save."""
@@ -165,11 +150,17 @@ class ChatStore:
         self._remove_from_project(project_dir, path.name)
         return {"status": "ok"}
 
-    def _prune_children_list(self, children: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _prune_children_list(
+        self, children: list[dict[str, Any]], known_chat_ids: frozenset[str] | set[str] = frozenset()
+    ) -> list[dict[str, Any]]:
+        """Drop children whose files are gone. *known_chat_ids* were just read, so they skip the lookup."""
         pruned: list[dict[str, Any]] = []
         for child in children:
             chat_id = child.get("chat_id", "")
             if not chat_id:
+                continue
+            if chat_id in known_chat_ids:
+                pruned.append(child)
                 continue
             child_file = self.find_by_chat_id(chat_id)
             if child_file and self.resolve_path(child_file).exists():
@@ -449,25 +440,25 @@ class ChatStore:
     # ------------------------------------------------------------------
 
     def list_histories(self) -> dict[str, Any]:
-        if not self._base.exists():
-            return {"files": [], "histories": {}}
+        # One listing query instead of an is_file/is_dir round trip per entry.
+        prefix = f"{self._base.key}/"
+        entries = {e.key.removeprefix(prefix): e.is_dir for e in self._base.store.list(self._base.key, recursive=True)}
         root_files: list[str] = []
         histories: dict[str, list[str]] = {}
-        if self._base.is_dir():
-            for f in sorted(self._base.iterdir(), key=lambda path: path.name):
-                if f.name in (PROJECT_JSON, META_JSON):
-                    continue
-                if f.is_dir() and f.name.startswith("_"):
-                    continue
-                if f.name == MEMORY_DIR:
-                    continue
-                if f.is_file() and f.suffix == ".json":
-                    root_files.append(f.name)
-                elif f.is_dir() and not (f / PROJECT_JSON).exists():
-                    histories.setdefault(f.name, [])
-                    for sf in sorted(f.iterdir(), key=lambda path: path.name):
-                        if sf.is_file() and sf.suffix == ".json" and sf.name != PROJECT_JSON:
-                            histories[f.name].append(sf.name)
+        for rel in sorted(entries):
+            if "/" in rel or rel in (PROJECT_JSON, META_JSON, MEMORY_DIR):
+                continue
+            if not entries[rel]:
+                if PurePosixPath(rel).suffix == ".json":
+                    root_files.append(rel)
+            elif not rel.startswith("_") and f"{rel}/{PROJECT_JSON}" not in entries:
+                histories[rel] = []
+        for rel in sorted(entries):
+            parts = rel.split("/")
+            if len(parts) != 2 or parts[0] not in histories or entries[rel]:
+                continue
+            if PurePosixPath(rel).suffix == ".json" and parts[1] != PROJECT_JSON:
+                histories[parts[0]].append(parts[1])
         return {"files": root_files, "histories": histories}
 
     def get_branch_meta(self, dirs: str | None = None) -> dict[str, dict[str, Any]]:
@@ -486,25 +477,28 @@ class ChatStore:
         return result
 
     def _scan_dir_for_meta(self, base: DataStorePath, rel_prefix: str = "") -> dict[str, dict[str, Any]]:
-        result: dict[str, dict[str, Any]] = {}
-        for f in sorted(base.iterdir(), key=lambda path: path.name):
-            if f.name in (PROJECT_JSON, META_JSON):
+        # One recursive listing, one read per chat. Chat IDs read here vouch for their own
+        # existence, so pruning only falls back to the full index for genuinely missing children.
+        base_prefix = f"{base.key}/"
+        loaded: dict[str, tuple[DataStorePath, dict[str, Any] | None]] = {}
+        for entry in sorted(base.store.list(base.key, recursive=True), key=lambda e: e.key):
+            if entry.is_dir:
                 continue
-            if f.name.startswith("_"):
+            rel = PurePosixPath(entry.key.removeprefix(base_prefix))
+            *dirs, name = rel.parts
+            if name in (PROJECT_JSON, META_JSON) or name.startswith("_") or rel.suffix != ".json":
                 continue
-            if f.is_file() and f.suffix == ".json":
-                key = f"{rel_prefix}{f.name}" if rel_prefix else f.name
-                result[key] = self._extract_meta(f)
-            elif f.is_dir() and f.name not in ("_uploads", MEMORY_DIR):
-                sub_prefix = f"{f.name}/" if not rel_prefix else f"{rel_prefix}{f.name}/"
-                result.update(self._scan_dir_for_meta(f, sub_prefix))
-        return result
+            if any(d.startswith("_") or d == MEMORY_DIR for d in dirs):
+                continue
+            path = DataStorePath(base.store, entry.key)
+            loaded[f"{rel_prefix}{rel}"] = (path, self._load_path(path))
+        known = {data["chat_id"] for _, data in loaded.values() if data and data.get("chat_id")}
+        return {key: self._extract_meta(path, data, known) for key, (path, data) in loaded.items()}
 
-    def _extract_meta(self, path: DataStorePath) -> dict[str, Any]:
-        data = self._load_path(path)
+    def _extract_meta(self, path: DataStorePath, data: dict[str, Any] | None, known_chat_ids: set[str]) -> dict[str, Any]:
         if data is None:
             return {}
-        children = self._prune_children_list(data.get("children", []))
+        children = self._prune_children_list(data.get("children", []), known_chat_ids)
         if children != data.get("children", []):
             data["children"] = children
             safe_write_json(path, data)
@@ -541,6 +535,29 @@ class ChatStore:
 # ------------------------------------------------------------------
 # Pure helpers (module-level, no state)
 # ------------------------------------------------------------------
+
+
+def _normalize_chat(raw: dict[str, Any] | list[Any]) -> dict[str, Any]:
+    """Shape a stored chat (legacy bare message list or object) into the canonical fields."""
+    if isinstance(raw, list):
+        return {
+            "messages": raw,
+            "chat_id": None,
+            "title": None,
+            "usage": None,
+            "parent_id": None,
+            "branch_message_idx": None,
+            "children": [],
+        }
+    return {
+        "messages": raw.get("messages", []),
+        "chat_id": raw.get("chat_id"),
+        "title": raw.get("title"),
+        "usage": raw.get("usage"),
+        "parent_id": raw.get("parent_id"),
+        "branch_message_idx": raw.get("branch_message_idx"),
+        "children": raw.get("children", []),
+    }
 
 
 def _sanitize_title(title: str) -> str:

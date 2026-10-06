@@ -7,9 +7,11 @@ from lib.data_store import DataStorePath
 
 
 def load_json(path: DataStorePath) -> dict[str, Any] | list[Any] | None:
-    """Read JSON through a DataStore path."""
-    if not path.exists():
-        return None
+    """Read JSON through a DataStore path. Missing or malformed files return None.
+
+    Reads directly instead of checking ``exists()`` first: the store reports a missing key
+    as an error, which saves a round trip per read.
+    """
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:

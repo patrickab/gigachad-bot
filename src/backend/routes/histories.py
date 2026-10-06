@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Callable
 import logging
 from typing import Any, TypeVar
@@ -49,7 +50,7 @@ async def cleanup_after_delete(
     Log cleanup failures because the chat is already gone.
     """
     recorder, deleted_chat_ids = _sandbox_cleanup_recorder()
-    result = run(_composed_cleanup(assets, recorder))
+    result = await asyncio.to_thread(run, _composed_cleanup(assets, recorder))
     for chat_id in deleted_chat_ids:
         try:
             await sandbox_service.delete_chat_state(chat_id=chat_id)
@@ -87,22 +88,24 @@ class MergeRequest(BaseModel):
     child_file: str
 
 
+# Sync handlers: FastAPI runs them in its threadpool, so blocking store I/O for one request
+# (e.g. the branch-meta scan) cannot stall a concurrent chat load on the event loop.
 @router.get("")
-async def list_chat_histories(store: ChatStore = Depends(get_chat_store)) -> dict[str, Any]:
+def list_chat_histories(store: ChatStore = Depends(get_chat_store)) -> dict[str, Any]:
     return store.list_histories()
 
 
 @router.get("/branch-meta")
-async def get_branch_meta(dirs: str | None = None, store: ChatStore = Depends(get_chat_store)) -> dict[str, dict[str, Any]]:
+def get_branch_meta(dirs: str | None = None, store: ChatStore = Depends(get_chat_store)) -> dict[str, dict[str, Any]]:
     return store.get_branch_meta(dirs)
 
 
 @router.get("/{filename:path}")
-async def load_chat_history(filename: str, store: ChatStore = Depends(get_chat_store)) -> dict[str, Any]:
+def load_chat_history(filename: str, store: ChatStore = Depends(get_chat_store)) -> dict[str, Any]:
     data = store.load(filename)
     if data is None:
         raise HTTPException(status_code=404, detail="Chat history not found")
-    return {**data, "filename": filename, "revision": store.revision(filename)}
+    return {**data, "filename": filename}
 
 
 @router.put("/{filename:path}")
@@ -115,7 +118,7 @@ async def save_chat_history(
     try:
         payload = data.model_dump() if data else None
         expected_revision = payload.pop("expected_revision", None) if payload else None
-        result = store.save(filename, payload, expected_revision=expected_revision)
+        result = await asyncio.to_thread(store.save, filename, payload, expected_revision=expected_revision)
         if data is not None and data.chat_id:
             await sandbox_service.checkpoint(chat_id=data.chat_id)
         return result
@@ -171,7 +174,7 @@ async def delete_chat_history(
 
 
 @router.post("/mkdir")
-async def create_directory(req: MkdirRequest, store: ChatStore = Depends(get_chat_store)) -> dict[str, str]:
+def create_directory(req: MkdirRequest, store: ChatStore = Depends(get_chat_store)) -> dict[str, str]:
     try:
         return store.create_directory(req.parent_path, req.name)
     except ValueError as e:
@@ -179,7 +182,7 @@ async def create_directory(req: MkdirRequest, store: ChatStore = Depends(get_cha
 
 
 @router.post("/move")
-async def move_history(req: MoveRequest, store: ChatStore = Depends(get_chat_store)) -> dict[str, str]:
+def move_history(req: MoveRequest, store: ChatStore = Depends(get_chat_store)) -> dict[str, str]:
     try:
         return store.move(req.filename, req.target_dir)
     except FileNotFoundError:
@@ -189,7 +192,7 @@ async def move_history(req: MoveRequest, store: ChatStore = Depends(get_chat_sto
 
 
 @router.post("/branch")
-async def create_branch(req: BranchRequest, store: ChatStore = Depends(get_chat_store)) -> dict[str, Any]:
+def create_branch(req: BranchRequest, store: ChatStore = Depends(get_chat_store)) -> dict[str, Any]:
     try:
         return store.branch(req.parent_file, req.branch_message_idx)
     except FileNotFoundError:

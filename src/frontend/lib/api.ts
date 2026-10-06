@@ -212,7 +212,7 @@ export async function listChatHistories(): Promise<ChatHistoriesResponse> {
 }
 
 export async function fetchBranchMeta(dirs?: string[]): Promise<Record<string, BranchMeta>> {
-  const params = dirs && dirs.length > 0 ? `?dir=${dirs.map(encodeURIComponent).join(",")}` : ""
+  const params = dirs && dirs.length > 0 ? `?dirs=${dirs.map(encodeURIComponent).join(",")}` : ""
   return request(`/chat-histories/branch-meta${params}`)
 }
 
