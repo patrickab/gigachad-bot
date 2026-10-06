@@ -44,6 +44,8 @@ vi.mock("@xyflow/react", () => {
     Position: { Top: "top", Left: "left", Right: "right", Bottom: "bottom" },
   }
 })
+// No WebAssembly here: connections stay unrouted, as before libavoid loads.
+vi.mock("@/lib/edgeRouting", () => ({ loadRouter: () => Promise.resolve(false), routeEdges: () => null, bendPoint: vi.fn(), bendThrough: vi.fn() }))
 
 describe("ArchitectureDiagramSurface", () => {
   it("draws with the pen into a card that is not activated, and in a saved view nowhere else", async () => {

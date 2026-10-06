@@ -63,11 +63,34 @@ stop_postgres() {
     fi
 }
 
+# A process and everything it started, children before parents.
+tree() {
+    local child
+    for child in $(pgrep -P "$1"); do
+        tree "$child"
+    done
+    printf '%s\n' "$1"
+}
+
+# Asks each child to stop, and kills whatever is left of its tree after 10s. uvicorn's
+# worker holds the port itself, and one hung in shutdown would otherwise keep it, with
+# or without its reloader, until killed by hand.
 stop_children() {
-    local pid
+    local pid alive
+    local -a pids
     for pid in "$backend_pid" "$c4_pid"; do
         if [[ -n "$pid" ]]; then
+            mapfile -t pids < <(tree "$pid")
             kill -TERM "$pid" 2>/dev/null || true
+            for _ in {1..20}; do
+                alive=$(ps -o stat=,pid= -p "$(IFS=,; echo "${pids[*]}")" 2>/dev/null | awk '$1 !~ /^Z/ { print $2 }')
+                [[ -z "$alive" ]] && break
+                sleep 0.5
+            done
+            if [[ -n "$alive" ]]; then
+                printf 'warning: %s did not stop within 10s, killing it\n' "$(tr '\n' ' ' <<<"$alive")" >&2
+                kill -KILL "${pids[@]}" 2>/dev/null || true
+            fi
             wait "$pid" 2>/dev/null || true
         fi
     done

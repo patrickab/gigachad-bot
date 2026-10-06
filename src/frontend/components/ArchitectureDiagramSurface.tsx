@@ -15,15 +15,20 @@ import { cn } from "@/lib/utils"
 import { useTabActive } from "./TabManager"
 import { reframeCamera } from "./InfiniteViewport"
 import { FALLBACK_SIZE, isDraft, nextDraftId, nodeMinWidth, NODE_MIN_WIDTH, type DiagramEdge, type DiagramGraph, type DiagramNode, type EdgeStyle } from "@/lib/architecture"
+import { bendPoint, bendThrough, loadRouter, routeEdges, type Point as RoutePoint } from "@/lib/edgeRouting"
 import { StyledSelect } from "./StyledSelect"
 
 interface EdgeRuntime {
   onPathChange?: (id: string, path?: DiagramEdge["path"]) => void
   onLabelChange?: (id: string, label: string) => void
   toFlowPoint?: (x: number, y: number) => { x: number, y: number } | undefined
+  /** A bend being dragged, so the route follows the pointer before it is saved; null when the drag ends. */
+  onBendPreview?: (id: string, bend: number | null) => void
 }
 interface GraphFlowEdgeData extends DiagramEdge, EdgeRuntime, Record<string, unknown> {
   attachment?: EdgeAttachment
+  /** libavoid's route, clear of every card the connection does not join; absent until the router has loaded. */
+  route?: RoutePoint[]
   edgeStyle: EdgeStyle
 }
 type GraphFlowNode = Node<ArchitectureNodeData, "architecture-node">
@@ -588,6 +593,30 @@ function orthogonalRoute(from: AttachPoint, to: AttachPoint, bend: number) {
     raw = [from, horizontal(from.position) ? { x: to.x, y: from.y } : { x: from.x, y: to.y }, to]
   }
   const points = raw.filter((point, index) => index === 0 || Math.hypot(point.x - raw[index - 1].x, point.y - raw[index - 1].y) > 0.01)
+  // The lane is only draggable on a Z; the handle rides its middle segment.
+  const draggable = axis !== null && points.length === 4
+  const handle = draggable ? { x: (points[1].x + points[2].x) / 2, y: (points[1].y + points[2].y) / 2 } : null
+  return { points, d: roundedPath(points, CORNER_RADIUS), axis: draggable ? axis : null, handle }
+}
+
+// A connection label wraps at about this many characters, roughly 90px in the
+// 13px hand-drawn font, so it fits the gap between two neighbouring cards.
+const LABEL_LINE_CHARS = 12
+const LABEL_LINE_HEIGHT = 15
+
+/** A label split into lines of whole words, each at most `LABEL_LINE_CHARS` unless one word is longer. */
+function wrapLabel(label: string): string[] {
+  const lines: string[] = []
+  for (const word of label.split(/\s+/).filter(Boolean)) {
+    const last = lines.at(-1)
+    if (last !== undefined && last.length + 1 + word.length <= LABEL_LINE_CHARS) lines[lines.length - 1] = `${last} ${word}`
+    else lines.push(word)
+  }
+  return lines
+}
+
+/** A polyline with each corner rounded off by up to `radius`, never more than half of either adjoining segment. */
+function roundedPath(points: readonly Point[], radius: number): string {
   let d = `M ${points[0].x} ${points[0].y}`
   for (let index = 1; index < points.length - 1; index += 1) {
     const prev = points[index - 1]
@@ -595,16 +624,31 @@ function orthogonalRoute(from: AttachPoint, to: AttachPoint, bend: number) {
     const next = points[index + 1]
     const before = Math.hypot(corner.x - prev.x, corner.y - prev.y)
     const after = Math.hypot(next.x - corner.x, next.y - corner.y)
-    const radius = Math.min(CORNER_RADIUS, before / 2, after / 2)
-    d += ` L ${corner.x - (corner.x - prev.x) / before * radius} ${corner.y - (corner.y - prev.y) / before * radius}`
-      + ` Q ${corner.x} ${corner.y} ${corner.x + (next.x - corner.x) / after * radius} ${corner.y + (next.y - corner.y) / after * radius}`
+    if (before < 0.01 || after < 0.01) continue
+    const cut = Math.min(radius, before / 2, after / 2)
+    d += ` L ${corner.x - (corner.x - prev.x) / before * cut} ${corner.y - (corner.y - prev.y) / before * cut}`
+      + ` Q ${corner.x} ${corner.y} ${corner.x + (next.x - corner.x) / after * cut} ${corner.y + (next.y - corner.y) / after * cut}`
   }
   const last = points[points.length - 1]
-  d += ` L ${last.x} ${last.y}`
-  // The lane is only draggable on a Z; the handle rides its middle segment.
-  const draggable = axis !== null && points.length === 4
-  const handle = draggable ? { x: (points[1].x + points[2].x) / 2, y: (points[1].y + points[2].y) / 2 } : null
-  return { points, d, axis: draggable ? axis : null, handle }
+  return `${d} L ${last.x} ${last.y}`
+}
+
+// A routed connection drawn curved: its corners rounded this far, so it flows instead of stepping.
+const CURVE_RADIUS = 48
+
+/** The point halfway along a polyline. */
+function polylineMidpoint(points: readonly Point[]): Point {
+  const lengths = points.slice(1).map((point, index) => Math.hypot(point.x - points[index].x, point.y - points[index].y))
+  let left = lengths.reduce((sum, length) => sum + length, 0) / 2
+  for (const [index, length] of lengths.entries()) {
+    if (left <= length && length > 0) {
+      const from = points[index]
+      const to = points[index + 1]
+      return { x: from.x + (to.x - from.x) * left / length, y: from.y + (to.y - from.y) * left / length }
+    }
+    left -= length
+  }
+  return points[0]
 }
 
 function arrowHeadPath(tip: Point, from: Point): string {
@@ -631,15 +675,34 @@ function ArchitectureEdgePath({ id, source, target, data, selected }: EdgeProps<
     if (labelDraft.trim() !== (data?.label ?? "")) data?.onLabelChange?.(id, labelDraft.trim())
   }
 
-  // Curved: `bend` is relative to the chord (endpoint-to-endpoint line), not an
-  // absolute point. Elbow: it is the Z's middle-lane offset along its axis. Both
-  // stay correct as nodes drag.
+  // Routed (once libavoid has loaded): libavoid's path, which passes the bend
+  // point; `bend` offsets that point from the midpoint between the card centres,
+  // along the normal of the line joining them, as the saved positions store it.
+  // Unrouted: curved `bend` is relative to the chord (endpoint-to-endpoint line),
+  // elbow `bend` is the Z's middle-lane offset along its axis. All stay correct as nodes drag.
   const elbow = data?.edgeStyle === "elbow"
   const geometry = useMemo(() => {
     if (!sourceNode || !targetNode) return null
+    const bend = dragBend ?? data?.path?.bend ?? 0
+    const route = data?.route
+    if (route) {
+      const rect = (node: InternalNode<GraphFlowNode>) => ({ ...node.internals.positionAbsolute, width: node.measured.width ?? FALLBACK_SIZE.width, height: node.measured.height ?? FALLBACK_SIZE.height })
+      const sourceRect = rect(sourceNode)
+      const targetRect = rect(targetNode)
+      const through = bend ? bendPoint(sourceRect, targetRect, bend) : polylineMidpoint(route)
+      return {
+        rough: !elbow,
+        edgePath: roundedPath(route, elbow ? CORNER_RADIUS : CURVE_RADIUS),
+        arrows: arrowHeadPath(route[route.length - 1], route[route.length - 2]),
+        handle: through,
+        labelPoint: through,
+        project: (point: Point): number | null => bendThrough(sourceRect, targetRect, point),
+        nudge: (key: string) => key === "ArrowUp" || key === "ArrowRight" ? 1 : key === "ArrowDown" || key === "ArrowLeft" ? -1 : null,
+        keys: "ArrowUp ArrowDown ArrowLeft ArrowRight",
+      }
+    }
     const from = data?.attachment?.source ?? attach(sourceNode, targetNode)
     const to = data?.attachment?.target ?? attach(targetNode, sourceNode)
-    const bend = dragBend ?? data?.path?.bend ?? 0
     if (elbow) {
       const route = orthogonalRoute(from, to, bend)
       const { points } = route
@@ -674,7 +737,7 @@ function ArchitectureEdgePath({ id, source, target, data, selected }: EdgeProps<
       nudge: (key: string) => key === "ArrowUp" || key === "ArrowRight" ? 1 : key === "ArrowDown" || key === "ArrowLeft" ? -1 : null,
       keys: "ArrowUp ArrowDown ArrowLeft ArrowRight",
     }
-  }, [sourceNode, targetNode, elbow, data?.attachment, data?.path?.bend, dragBend])
+  }, [sourceNode, targetNode, elbow, data?.attachment, data?.route, data?.path?.bend, dragBend])
 
   const sketch = useMemo(
     () => geometry?.rough ? edgeSketchPaths(geometry.edgePath, roughSeed(id), selected ? 2 : 1.7) : [],
@@ -688,21 +751,26 @@ function ArchitectureEdgePath({ id, source, target, data, selected }: EdgeProps<
     event.preventDefault()
     event.stopPropagation()
     const { project } = geometry
+    // The latest bend, read when the drag ends: a parent update must not run inside a state updater.
+    let latest: number | null = null
     const move = (pointer: PointerEvent) => {
       const point = data?.toFlowPoint?.(pointer.clientX, pointer.clientY)
       if (!point) return
       const value = project(point)
-      if (value !== null) setDragBend(value)
+      if (value !== null) {
+        latest = value
+        setDragBend(value)
+        data?.onBendPreview?.(id, value)
+      }
     }
     const stop = () => {
       window.removeEventListener("pointermove", move)
       window.removeEventListener("pointerup", stop)
       window.removeEventListener("pointercancel", stop)
       stopDragRef.current = null
-      setDragBend((current) => {
-        if (current !== null) data?.onPathChange?.(id, { bend: current })
-        return null
-      })
+      data?.onBendPreview?.(id, null)
+      setDragBend(null)
+      if (latest !== null) data?.onPathChange?.(id, { bend: latest })
     }
     stopDragRef.current = stop
     window.addEventListener("pointermove", move)
@@ -727,7 +795,12 @@ function ArchitectureEdgePath({ id, source, target, data, selected }: EdgeProps<
     <path d={geometry.arrows} fill="currentColor" stroke="currentColor" strokeWidth={1.2} strokeLinejoin="round" className={cn("architecture-diagram-edge", selected && "architecture-diagram-edge-selected")} pointerEvents="none" />
     {selected && editingLabel && data?.onLabelChange
       ? <foreignObject x={labelPoint.x - 70} y={labelPoint.y - 26} width={140} height={24} overflow="visible"><input autoFocus aria-label="Connection label" value={labelDraft} placeholder="Label" onChange={(event) => setLabelDraft(event.target.value)} onBlur={commitLabel} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur() } else if (event.key === "Escape") { event.preventDefault(); setEditingLabel(false) } }} className="architecture-diagram-edge-label-input nodrag nopan nowheel" /></foreignObject>
-      : data?.label && <text x={labelPoint.x} y={labelPoint.y - 12} className="architecture-diagram-edge-label" textAnchor="middle" dominantBaseline="central">{data.label}</text>}
+      : data?.label && (
+        // Lines stack upwards, so the last sits where a one-line label would.
+        <text y={labelPoint.y - 12 - (wrapLabel(data.label).length - 1) * LABEL_LINE_HEIGHT} className="architecture-diagram-edge-label" textAnchor="middle" dominantBaseline="central">
+          {wrapLabel(data.label).map((line, index) => <tspan key={index} x={labelPoint.x} dy={index === 0 ? 0 : LABEL_LINE_HEIGHT}>{line}</tspan>)}
+        </text>
+      )}
     {selected && handle && data?.onPathChange && <circle cx={handle.x} cy={handle.y} r={6} role="button" tabIndex={0} aria-label="Adjust connection curve" aria-keyshortcuts={geometry.keys} className="architecture-diagram-path-handle nodrag nopan" onPointerDown={startDrag} onKeyDown={nudge} />}
   </>
 }
@@ -786,11 +859,15 @@ function innermostNode(nodes: readonly DiagramNode[], x: number, y: number, excl
   return best
 }
 
-function toFlowEdges(edges: DiagramEdge[], edgeStyle: EdgeStyle, attachments = new Map<string, EdgeAttachment>(), runtime: EdgeRuntime = {}): GraphFlowEdge[] {
+function toFlowEdges(edges: DiagramEdge[], edgeStyle: EdgeStyle, attachments = new Map<string, EdgeAttachment>(), runtime: EdgeRuntime = {}, routes: ReadonlyMap<string, RoutePoint[]> | null = null): GraphFlowEdge[] {
   return edges.map((edge) => ({
     ...edge,
     type: "architecture-edge",
-    data: { ...edge, ...runtime, edgeStyle, ...(attachments.has(edge.id) ? { attachment: attachments.get(edge.id) } : {}) },
+    data: {
+      ...edge, ...runtime, edgeStyle,
+      ...(attachments.has(edge.id) ? { attachment: attachments.get(edge.id) } : {}),
+      ...(routes?.has(edge.id) ? { route: routes.get(edge.id) } : {}),
+    },
   }))
 }
 
@@ -1094,9 +1171,33 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
   const flowNodes = useMemo(() => nodes.map((node) => node.draggable === !!node.selected ? node : { ...node, draggable: !!node.selected }), [nodes])
   // Recomputed from the live node rects, so dragging a card re-slots its edges.
   const attachments = useMemo(() => edgeAttachments(absoluteNodes(nodes), graph.edges), [nodes, graph.edges])
+  // Until libavoid has loaded (or if it cannot), connections take the unrouted shapes.
+  const [routerReady, setRouterReady] = useState(false)
   useEffect(() => {
-    setEdges((current) => reconcile(current, toFlowEdges(graph.edges, edgeStyle, attachments, edgeRuntime)))
-  }, [graph.edges, edgeStyle, attachments, edgeRuntime, setEdges])
+    let live = true
+    void loadRouter().then((ready) => { if (live) setRouterReady(ready) })
+    return () => { live = false }
+  }, [])
+  const [bendPreview, setBendPreview] = useState<{ id: string, bend: number } | null>(null)
+  const previewBend = useCallback((id: string, bend: number | null) => setBendPreview(bend === null ? null : { id, bend }), [])
+  // Rerouted from the live node rects too: a ~15-card view routes in about 15 ms.
+  const routes = useMemo(() => {
+    if (!routerReady) return null
+    const cards = absoluteNodes(nodes).map((card, index) => ({
+      id: card.id, x: card.position.x, y: card.position.y,
+      width: card.measured?.width ?? FALLBACK_SIZE.width, height: card.measured?.height ?? FALLBACK_SIZE.height,
+      parent: nodes[index].parentId ?? null, compound: !!nodes[index].data.compound,
+    }))
+    return routeEdges(cards, graph.edges.map((edge) => ({
+      id: edge.id, source: edge.source, target: edge.target,
+      bend: bendPreview?.id === edge.id ? bendPreview.bend : edge.path?.bend ?? 0,
+      sourcePoint: attachments.get(edge.id)?.source, targetPoint: attachments.get(edge.id)?.target,
+    })))
+  }, [routerReady, nodes, graph.edges, attachments, bendPreview])
+  const routedRuntime = useMemo<EdgeRuntime>(() => readOnly ? edgeRuntime : { ...edgeRuntime, onBendPreview: previewBend }, [edgeRuntime, previewBend, readOnly])
+  useEffect(() => {
+    setEdges((current) => reconcile(current, toFlowEdges(graph.edges, edgeStyle, attachments, routedRuntime, routes)))
+  }, [graph.edges, edgeStyle, attachments, routedRuntime, routes, setEdges])
 
   // A new node lands in the innermost element under its centre, so drawing
   // inside an element creates something inside it. Where nothing frames it, a

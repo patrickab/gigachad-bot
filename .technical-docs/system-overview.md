@@ -84,8 +84,10 @@ never followed. Only the database location is wired to routes today.
   - File and view operations: `createPackage`, `createModule`, `createView`,
     `addFileView`, `includeInView`, `removeFromView`.
   - `layout`, which moves nodes and bends connections.
+  - `pruneDangling`, run on every hand-edited text save: drops connections and
+    `include`/`exclude` entries naming an element the edit removed.
 
-  Delete never cascades: a delete that leaves a reference behind (a
+  Delete from the diagram never cascades: a delete that leaves a reference behind (a
   connection, or a view naming the element) is refused. Edits to an element go
   into the file declaring it. An element drawn in `view x of x` becomes a child
   of x. An element drawn in any other view goes into the request's `home` file
@@ -151,6 +153,17 @@ never followed. Only the database location is wired to routes today.
   - **Auto layout** (toolbar, once positions are saved) clears them and lets
     LikeC4 lay the view out again. Elements added to an arranged view land as
     one block to the right of it.
+  - **Connections are routed** with libavoid (`lib/edgeRouting.ts`, WebAssembly
+    from `public/libavoid.wasm`, copied from `libavoid-js` on build). Routes are
+    right-angled and keep clear of every card a connection does not join. Frames
+    are not obstacles, so all connections share one router and parallel stretches
+    are nudged apart; each end takes its own pin, on whichever side libavoid finds
+    cheapest. Routing reruns on every node move (about 15 ms for a 15-card
+    view). A connection's bend is a via point off the midpoint between its
+    cards' centres, the same offset the snapshot stores; dragging the handle
+    reroutes live. Curved style rounds the routed corners. Until the WASM has
+    loaded, or if it cannot, connections fall back to the unrouted Z/L and
+    arc shapes.
   - **Views using filters or styles** are read-only on the canvas.
   - **Compounds** show only their title. Their bullets (the element's
     description) stay hidden on the canvas and are edited in Text.

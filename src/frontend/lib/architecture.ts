@@ -197,8 +197,9 @@ export const NODE_MIN_WIDTH = 80
 const TITLE_WIDTH_SLACK = 34
 
 // One hidden title bar measures every card's heading and kind label in the real
-// (hand-drawn) font. Cached per text; the cache is dropped once that font has
-// loaded, since earlier measurements used the fallback.
+// (hand-drawn) font: the surface's font, set here too since the spans live on <body>.
+// Cached per text; the cache is dropped once that font has loaded, since earlier
+// measurements used the fallback.
 const labelWidths = new Map<string, number>()
 let labelMeasure: { title: HTMLSpanElement, kind: HTMLSpanElement } | null = null
 /**
@@ -221,7 +222,7 @@ export function nodeMinWidth(title: string, kind: string): number {
         const element = document.createElement("span")
         element.className = className
         element.setAttribute("aria-hidden", "true")
-        element.style.cssText = "position:absolute;left:-9999px;top:0;visibility:hidden;white-space:nowrap"
+        element.style.cssText = "position:absolute;left:-9999px;top:0;visibility:hidden;white-space:nowrap;font-family:var(--font-handwriting),cursive"
         document.body.appendChild(element)
         return element
       }
