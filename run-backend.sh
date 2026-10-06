@@ -131,7 +131,12 @@ if [[ "$profile" == development ]]; then
     printf 'Installing backend dependencies\n'
     uv sync
 fi
-export PATH="$root_dir/.venv/bin:$PATH"
+# A user unit started at boot has systemd's bare PATH, without the mise shims node lives behind.
+export PATH="$root_dir/.venv/bin:$HOME/.local/share/mise/shims:$HOME/.local/bin:$PATH"
+if ! command -v node >/dev/null; then
+    printf 'error: node is not on PATH (%s); the C4 service cannot start\n' "$PATH" >&2
+    exit 1
+fi
 if [[ "$profile" == development || ! -d "$root_dir/src/c4/node_modules" ]]; then
     printf 'Installing C4 service dependencies\n'
     npm ci --prefix "$root_dir/src/c4" --no-audit --no-fund
@@ -143,6 +148,21 @@ printf 'Starting C4 service on http://127.0.0.1:%s\n' "$c4_port"
 C4_SERVICE_HOST=127.0.0.1 C4_SERVICE_PORT="$c4_port" node "$root_dir/src/c4/server.ts" &
 c4_pid=$!
 export C4_SERVICE_URL="http://127.0.0.1:${c4_port}"
+# The backend answers 503 on every architecture route while this service is down, so it
+# only starts once the service is healthy, and one that never gets there fails the unit.
+for _ in {1..60}; do
+    curl -sf -o /dev/null "$C4_SERVICE_URL/health" && break
+    if ! kill -0 "$c4_pid" 2>/dev/null; then
+        printf 'error: the C4 service exited during startup\n' >&2
+        c4_pid=''
+        exit 1
+    fi
+    sleep 0.5
+done
+if ! curl -sf -o /dev/null "$C4_SERVICE_URL/health"; then
+    printf 'error: the C4 service did not become healthy within 30s\n' >&2
+    exit 1
+fi
 
 if [[ "$tailscale" == true ]]; then
     printf 'Configuring Tailnet-only HTTPS ingress\n'
@@ -159,10 +179,18 @@ else
 fi
 backend_pid=$!
 
-if wait "$backend_pid"; then
+# Either process ending takes the other down with it and fails the script, so systemd's
+# Restart=on-failure brings both back instead of leaving a backend without its C4 service.
+wait -n "$backend_pid" "$c4_pid" || true
+if ! kill -0 "$backend_pid" 2>/dev/null; then
+    if wait "$backend_pid"; then
+        backend_pid=''
+        exit 0
+    fi
+    status=$?
     backend_pid=''
-    exit 0
+    exit "$status"
 fi
-status=$?
-backend_pid=''
-exit "$status"
+printf 'error: the C4 service exited; stopping the backend so it is restarted together\n' >&2
+c4_pid=''
+exit 1
