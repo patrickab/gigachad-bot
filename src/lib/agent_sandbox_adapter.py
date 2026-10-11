@@ -12,9 +12,8 @@ import tarfile
 import tempfile
 from typing import Protocol
 
-from agent_sandbox import PythonScriptError, Sandbox, SandboxInvocation, SandboxManifest, SandboxRun
+from agent_sandbox import AgentSandboxError, Sandbox, SandboxInvocation, SandboxManifest, SandboxRun, StreamEvent, WorkspaceArchive
 from agent_sandbox.manifest import Execution, Outputs, WorkspaceRef
-from agent_sandbox.outputs import StreamEvent
 
 
 class SandboxScriptError(RuntimeError):
@@ -42,7 +41,7 @@ class AgentSandboxRunnerAdapter:
             return await asyncio.to_thread(
                 self._sandbox.run_python_script, interpreter, script, timeout, profile_name=profile
             )
-        except PythonScriptError as exc:
+        except AgentSandboxError as exc:
             raise SandboxScriptError(str(exc)) from exc
 
 
@@ -61,10 +60,10 @@ class FakeSandboxRunner:
 
     async def run(self, invocation: SandboxInvocation) -> SandboxRun:
         self.calls.append(invocation)
-        workspace_bytes = self._workspace_archive(f"> {invocation.prompt}\n")
+        prompt = invocation.task.prompt
+        workspace_bytes = self._workspace_archive(f"> {prompt}\n")
         workspace_sha256 = hashlib.sha256(workspace_bytes).hexdigest()
-        capture_path = self._capture(workspace_bytes)
-        summary = f"Updated the workspace for: {invocation.prompt[:200]}"
+        summary = f"Updated the workspace for: {prompt[:200]}"
         return SandboxRun(
             status="completed",
             summary=summary,
@@ -79,10 +78,8 @@ class FakeSandboxRunner:
                 execution=Execution(run_id=invocation.run_id, status="completed", exit_code=0, created_at=""),
             ),
             outputs=(StreamEvent(name="stdout", text=summary),),
-            workspace_changed=(
-                invocation.active_manifest is None or invocation.active_manifest.workspace.sha256 != workspace_sha256
-            ),
-            capture_path=capture_path,
+            workspace_changed=invocation.workspace is None or invocation.workspace.sha256 != workspace_sha256,
+            workspace=WorkspaceArchive(self._capture(workspace_bytes), workspace_sha256),
         )
 
     @staticmethod

@@ -1,7 +1,16 @@
 import hashlib
 from pathlib import Path
 
-from agent_sandbox import PythonScriptError, SandboxInvocation, SandboxManifest, SandboxRun
+from agent_sandbox import (
+    ContainerRuntimeError,
+    OmpTask,
+    ProfileError,
+    PythonScriptError,
+    SandboxInvocation,
+    SandboxManifest,
+    SandboxRun,
+    WorkspaceArchive,
+)
 from agent_sandbox.manifest import Execution, Outputs, WorkspaceRef
 import pytest
 
@@ -43,23 +52,22 @@ class SandboxStub:
 async def test_adapter_bridges_native_invocations_through_one_injected_sandbox(tmp_path: Path) -> None:
     capture = tmp_path / "capture.tar"
     capture.write_bytes(b"captured workspace")
+    capture_sha256 = hashlib.sha256(capture.read_bytes()).hexdigest()
     native_run = SandboxRun(
         status="completed",
         summary="done",
-        next_manifest=_manifest(hashlib.sha256(capture.read_bytes()).hexdigest()),
+        next_manifest=_manifest(capture_sha256),
         outputs=(),
         workspace_changed=True,
-        capture_path=str(capture),
+        workspace=WorkspaceArchive(str(capture), capture_sha256),
     )
     sandbox = SandboxStub(native_run)
     adapter = AgentSandboxRunnerAdapter(sandbox)  # type: ignore[arg-type]
     invocation = SandboxInvocation(
         slot_key="isolated-chat",
         profile_name="test",
-        prompt="trivial OMP command",
         run_id="call-2",
-        model=SANDBOX_MODEL,
-        thinking="medium",
+        task=OmpTask("trivial OMP command", model=SANDBOX_MODEL, thinking="medium"),
     )
 
     assert await adapter.run(invocation) is native_run
@@ -71,28 +79,15 @@ async def test_adapter_bridges_native_invocations_through_one_injected_sandbox(t
     assert not capture.exists()
 
 
+@pytest.mark.parametrize("error", (PythonScriptError, ProfileError, ContainerRuntimeError))
 @pytest.mark.asyncio
-async def test_adapter_maps_native_script_errors(tmp_path: Path) -> None:
-    capture = tmp_path / "capture.tar"
-    capture.write_bytes(b"captured workspace")
-    native_run = SandboxRun(
-        status="completed",
-        summary="done",
-        next_manifest=_manifest(hashlib.sha256(capture.read_bytes()).hexdigest()),
-        outputs=(),
-        workspace_changed=True,
-        capture_path=str(capture),
-    )
-    sandbox = SandboxStub(native_run)
+async def test_adapter_maps_every_native_script_error(error: type[Exception]) -> None:
+    class FailingSandbox:
+        def run_python_script(self, *_args, **_kwargs) -> str:
+            raise error("native detail")
 
-    def fail_script(*_args, **_kwargs) -> str:
-        raise PythonScriptError("native detail")
-
-    sandbox.run_python_script = fail_script  # type: ignore[method-assign]
     with pytest.raises(SandboxScriptError, match="native detail"):
-        await AgentSandboxRunnerAdapter(sandbox).run_script("bad", profile="test", interpreter="venv", timeout=1.0)  # type: ignore[arg-type]
-
-    native_run.release()
+        await AgentSandboxRunnerAdapter(FailingSandbox()).run_script("bad", profile="test", interpreter="venv", timeout=1.0)  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio
@@ -102,14 +97,12 @@ async def test_fake_runner_returns_a_native_capture_lease() -> None:
         SandboxInvocation(
             slot_key="fake-chat",
             profile_name="test",
-            prompt="create",
             run_id="call-1",
-            model=SANDBOX_MODEL,
-            thinking="medium",
+            task=OmpTask("create", model=SANDBOX_MODEL, thinking="medium"),
         )
     )
 
-    capture = Path(result.capture_path)
+    capture = Path(result.workspace.path)
     assert result.next_manifest.workspace.snapshot_asset_id is None
     assert capture.exists()
     assert result.read_workspace_file("workspace.txt") == b"> create\n"

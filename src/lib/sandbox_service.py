@@ -15,11 +15,21 @@ import logging
 import os
 import tempfile
 import time
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
-from agent_sandbox import AgentSandboxError, PromptImage, SandboxInvocation, SandboxManifest, SandboxRun
+from agent_sandbox import (
+    AgentSandboxError,
+    ErrorEvent,
+    OmpTask,
+    OutputEvent,
+    PromptImage,
+    SandboxInvocation,
+    SandboxManifest,
+    SandboxRun,
+    StreamEvent,
+    WorkspaceArchive,
+)
 from agent_sandbox.manifest import Artifact, Outputs
-from agent_sandbox.outputs import DisplayDataEvent, ErrorEvent, ExecuteResultEvent, OutputEvent, StreamEvent, UpdateDisplayDataEvent
 
 from lib.agent_sandbox_adapter import SandboxRunner
 from lib.asset_store import AssetStore
@@ -137,6 +147,12 @@ def _validate_chat_id(chat_id: str) -> str:
     return chat_id
 
 
+def _discard_restore(restore: WorkspaceArchive | None) -> None:
+    if restore is not None:
+        with suppress(FileNotFoundError):
+            os.unlink(restore.path)
+
+
 def _result_from_record(record: RunRecord) -> SandboxToolResult:
     if record.result is None:
         return SandboxToolResult(
@@ -249,7 +265,7 @@ class SandboxService:
 
             prior_manifest = staged.manifest
             started_at = time.time()
-            restore_path: str | None = None
+            restore: WorkspaceArchive | None = None
             run: SandboxRun | None = None
             runner_task: asyncio.Task[SandboxRun] | None = None
             try:
@@ -260,27 +276,29 @@ class SandboxService:
                             prior_manifest = store.read_manifest(chat_id, active.manifest_id)
                         except (StorageNotFoundError, ValueError) as exc:
                             raise SandboxServiceError("active sandbox manifest is unavailable") from exc
-                restore_path = self._materialize_workspace_archive(prior_manifest, staged.assets)
+                restore = self._materialize_workspace_archive(prior_manifest, staged.assets)
                 invocation = SandboxInvocation(
                     slot_key=slot_key,
                     profile_name=self._profile,
-                    prompt=prompt,
                     run_id=tool_call_id,
+                    task=OmpTask(
+                        prompt,
+                        prompt_images=prompt_images,
+                        model=self._model,
+                        thinking=thinking,
+                        append_system=append_system,
+                        lean=lean,
+                    ),
                     active_manifest=prior_manifest,
-                    workspace_archive_path=restore_path,
-                    prompt_images=prompt_images,
-                    model=self._model,
-                    thinking=thinking,
-                    append_system=append_system,
-                    lean=lean,
+                    workspace=restore,
                 )
                 runner_task = asyncio.create_task(self._runner.run(invocation))
                 run = await asyncio.shield(runner_task)
                 result = self._accept_run(run, staged, tool_call_id=tool_call_id)
             except asyncio.CancelledError:
                 if runner_task is not None and run is None:
-                    runner_task.add_done_callback(lambda task, path=restore_path: self._release_and_unlink_cancelled_run(task, path))
-                    restore_path = None
+                    runner_task.add_done_callback(lambda task, archive=restore: self._release_cancelled_run(task, archive))
+                    restore = None
                 raise
             except SandboxServiceError:
                 logger.exception("sandbox run %s produced an incoherent manifest for slot %s", tool_call_id, slot_key)
@@ -301,9 +319,7 @@ class SandboxService:
                     error="runner_error",
                 )
             finally:
-                if restore_path is not None:
-                    with suppress(FileNotFoundError):
-                        os.unlink(restore_path)
+                _discard_restore(restore)
                 if run is not None:
                     try:
                         run.release()
@@ -321,7 +337,7 @@ class SandboxService:
             return result
 
     @staticmethod
-    def _release_and_unlink_cancelled_run(task: asyncio.Task[SandboxRun], restore_path: str | None) -> None:
+    def _release_cancelled_run(task: asyncio.Task[SandboxRun], restore: WorkspaceArchive | None) -> None:
         try:
             run = task.result()
         except BaseException:
@@ -331,11 +347,11 @@ class SandboxService:
                 run.release()
             except Exception:  # noqa: BLE001 - cleanup must not surface after cancellation
                 logger.exception("cancelled sandbox run release failed")
-        if restore_path is not None:
-            with suppress(FileNotFoundError):
-                os.unlink(restore_path)
+        _discard_restore(restore)
 
-    def _materialize_workspace_archive(self, prior_manifest: SandboxManifest | None, staged_assets: dict[str, bytes]) -> str | None:
+    def _materialize_workspace_archive(
+        self, prior_manifest: SandboxManifest | None, staged_assets: dict[str, bytes]
+    ) -> WorkspaceArchive | None:
         if prior_manifest is None:
             return None
         sha256 = prior_manifest.workspace.sha256
@@ -355,12 +371,12 @@ class SandboxService:
             with suppress(FileNotFoundError):
                 os.unlink(path)
             raise
-        return path
+        return WorkspaceArchive(path, sha256)
 
     def _accept_run(self, run: SandboxRun, staged: _StagedState, *, tool_call_id: str) -> SandboxToolResult:
         """Persist outputs now and stage workspace bytes until checkpointing."""
         try:
-            with open(run.capture_path, "rb") as capture:
+            with open(run.workspace.path, "rb") as capture:
                 workspace_bytes = capture.read()
         except OSError as exc:
             raise SandboxServiceError("sandbox workspace capture is unavailable") from exc
@@ -368,7 +384,7 @@ class SandboxService:
         if run.next_manifest.workspace.sha256 != workspace_sha256:
             raise SandboxServiceError("sandbox capture does not match its native workspace manifest")
 
-        outputs, output_assets = self._project_outputs(cast("tuple[OutputEvent, ...]", run.outputs))
+        outputs, output_assets = self._project_outputs(run.outputs)
         plot_bytes = self._plot_bytes(run)
         if plot_bytes is not None:
             plot_output, plot_assets = self._make_output_record(
@@ -402,7 +418,7 @@ class SandboxService:
         staged.manifest = manifest
         staged.last_completed_run_id = tool_call_id
         return SandboxToolResult(
-            status=cast('Literal["completed", "failed", "cancelled"]', run.status),
+            status=run.status,
             summary=run.summary,
             manifest_id=manifest.manifest_id,
             workspace_changed=run.workspace_changed,
@@ -414,33 +430,18 @@ class SandboxService:
         outputs: list[SandboxOutputRecord] = []
         assets: dict[str, bytes] = {}
         for index, event in enumerate(events):
-            if isinstance(event, StreamEvent):
-                bundle = {"text/plain": event.text}
-                display_id = None
-                title = event.name
-            elif isinstance(event, DisplayDataEvent):
-                bundle = event.bundle.data
-                display_id = event.display_id
-                title = "Display output"
-            elif isinstance(event, ExecuteResultEvent):
-                bundle = event.bundle.data
-                display_id = None
-                title = "Execution result"
-            elif isinstance(event, UpdateDisplayDataEvent):
-                bundle = event.bundle.data
-                display_id = event.display_id
-                title = "Display update"
-            elif isinstance(event, ErrorEvent):
-                bundle = {"text/plain": f"{event.ename}: {event.evalue}"}
-                display_id = None
-                title = "Execution error"
-            else:
-                raise SandboxServiceError(f"unsupported sandbox output event: {type(event).__name__}")
+            match event:
+                case StreamEvent():
+                    title, text = event.name, event.text
+                case ErrorEvent():
+                    title, text = "Execution error", f"{event.ename}: {event.evalue}"
+                case _:
+                    raise SandboxServiceError(f"unsupported sandbox output event: {type(event).__name__}")
             output, output_assets = cls._make_output_record(
-                display_id=display_id or f"output-{index}",
+                display_id=f"output-{index}",
                 title=title,
-                bundle={media_type: value.encode("utf-8") for media_type, value in bundle.items()},
-                text=bundle.get("text/plain"),
+                bundle={"text/plain": text.encode("utf-8")},
+                text=text,
             )
             outputs.append(output)
             assets.update(output_assets)

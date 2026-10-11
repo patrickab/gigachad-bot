@@ -9,16 +9,17 @@ import io
 from pathlib import Path
 import tarfile
 
-from agent_sandbox import AgentSandboxError, PromptImage, SandboxInvocation, SandboxManifest, SandboxRun
-from agent_sandbox.manifest import Execution, Outputs, WorkspaceRef
-from agent_sandbox.outputs import (
-    DisplayDataEvent,
+from agent_sandbox import (
+    AgentSandboxError,
     ErrorEvent,
-    ExecuteResultEvent,
-    MimeBundle,
+    PromptImage,
+    SandboxInvocation,
+    SandboxManifest,
+    SandboxRun,
     StreamEvent,
-    UpdateDisplayDataEvent,
+    WorkspaceArchive,
 )
+from agent_sandbox.manifest import Execution, Outputs, WorkspaceRef
 import pytest
 
 from config import TEST_MODEL
@@ -171,21 +172,13 @@ def test_native_output_projection_preserves_order_ids_and_original_bytes() -> No
     outputs, assets = SandboxService._project_outputs(
         (
             StreamEvent(name="stdout", text=text),
-            DisplayDataEvent(MimeBundle({"text/html": "<b>display</b>"}), display_id="display-1"),
-            ExecuteResultEvent(MimeBundle({"text/plain": "result"})),
-            UpdateDisplayDataEvent(MimeBundle({"text/plain": "update"}), display_id="display-1"),
+            StreamEvent(name="stderr", text="warning"),
             ErrorEvent("ValueError", "bad input"),
         )
     )
 
-    assert [output.display_id for output in outputs] == ["output-0", "display-1", "output-2", "display-1", "output-4"]
-    assert [output.title for output in outputs] == [
-        "stdout",
-        "Display output",
-        "Execution result",
-        "Display update",
-        "Execution error",
-    ]
+    assert [output.display_id for output in outputs] == ["output-0", "output-1", "output-2"]
+    assert [output.title for output in outputs] == ["stdout", "stderr", "Execution error"]
     text_ref = outputs[0].mime_bundle["text/plain"]
     assert text_ref["size_bytes"] == len(text.encode("utf-8"))
     assert assets[text_ref["sha256"]] == text.encode("utf-8")
@@ -209,8 +202,8 @@ async def test_invoke_forwards_native_prompt_images_unchanged() -> None:
 
     await service.invoke(chat_id="chat-image", tool_call_id="image-call", prompt="describe", prompt_images=(image,))
 
-    assert runner.calls[-1].prompt_images == (image,)
-    assert isinstance(runner.calls[-1].prompt_images[0], PromptImage)
+    assert runner.calls[-1].task.prompt_images == (image,)
+    assert isinstance(runner.calls[-1].task.prompt_images[0], PromptImage)
     assert image.content not in assets._assets.values()
 
 
@@ -267,7 +260,7 @@ def test_accepting_many_outputs_persists_all_assets_and_artifacts(tmp_path: Path
         next_manifest=_manifest("many", workspace_bytes),
         outputs=tuple(StreamEvent(name="stdout", text=f"output {index}") for index in range(MAX_OUTPUTS + 1)),
         workspace_changed=True,
-        capture_path=str(capture_path),
+        workspace=WorkspaceArchive.from_file(str(capture_path)),
     )
     assets, runtime = MemoryAssetStore(), SandboxRuntimeState()
     service = _service(MemoryDataStore(), assets, runtime)
@@ -297,7 +290,7 @@ def test_asset_write_failure_does_not_mutate_staged_state(tmp_path: Path, monkey
         next_manifest=_manifest("next", next_bytes),
         outputs=(StreamEvent(name="stdout", text="output"),),
         workspace_changed=True,
-        capture_path=str(capture_path),
+        workspace=WorkspaceArchive.from_file(str(capture_path)),
     )
     runtime = SandboxRuntimeState()
     staged = runtime.stage("workspace:failure")
@@ -326,15 +319,15 @@ class NativeRunnerStub:
 
     async def run(self, invocation: SandboxInvocation) -> SandboxRun:
         self.invocation = invocation
-        assert invocation.workspace_archive_path is not None
-        self.restore_bytes = Path(invocation.workspace_archive_path).read_bytes()
+        assert invocation.workspace is not None
+        self.restore_bytes = Path(invocation.workspace.path).read_bytes()
         return SandboxRun(
             status="completed",
             summary="done",
             next_manifest=self.manifest,
             outputs=(StreamEvent(name="stdout", text="durable output"),),
             workspace_changed=True,
-            capture_path=str(self.capture_path),
+            workspace=WorkspaceArchive.from_file(str(self.capture_path)),
         )
 
 
@@ -385,7 +378,7 @@ async def test_native_run_materializes_restore_persists_outputs_and_releases_lea
     assert runner.invocation is not None
     assert runner.invocation.active_manifest == prior_manifest
     assert runner.restore_bytes == prior_bytes
-    assert not Path(runner.invocation.workspace_archive_path).exists()
+    assert not Path(runner.invocation.workspace.path).exists()
     assert not capture_path.exists()
     assert assets.read(result.outputs[0].mime_bundle["text/plain"]["asset_path"]).content == b"durable output"
     staged = runtime.get("workspace:chat-native")
@@ -450,8 +443,8 @@ async def test_cancellation_defers_resumed_workspace_cleanup(tmp_path: Path, mon
     task = asyncio.create_task(service.invoke(chat_id="chat-cancelled", tool_call_id="cancelled-call", prompt="continue"))
     try:
         await asyncio.wait_for(started.wait(), 1.0)
-        assert runner.invocation is not None and runner.invocation.workspace_archive_path is not None
-        restore_path = Path(runner.invocation.workspace_archive_path)
+        assert runner.invocation is not None and runner.invocation.workspace is not None
+        restore_path = Path(runner.invocation.workspace.path)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
@@ -528,7 +521,7 @@ async def test_invalid_native_capture_is_released_after_failure(tmp_path: Path) 
                 ),
                 outputs=(),
                 workspace_changed=True,
-                capture_path=str(capture_path),
+                workspace=WorkspaceArchive.from_file(str(capture_path)),
             )
 
     service = SandboxService(
@@ -567,7 +560,7 @@ async def test_native_release_failure_logs_without_invalidating_staged_result(
         ),
         outputs=(StreamEvent(name="stdout", text="output"),),
         workspace_changed=True,
-        capture_path=str(capture_path),
+        workspace=WorkspaceArchive.from_file(str(capture_path)),
     )
 
     class ReleaseFailingRunner:

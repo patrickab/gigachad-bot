@@ -234,15 +234,13 @@ journalctl --user -u gigachad-bot-omp.service -n 100 --no-pager
 
 The workspace agent and image-based plot requests run OMP inside
 [Agents-in-a-box](https://github.com/patrickab/Agents-in-a-box) (rootless
-Docker + gVisor). `pyproject.toml` resolves it at `../Agents-in-a-box`, so clone
-it next to both `$REPO` and `$PROD`, then run its setup once per host:
+Docker + gVisor). Clone it once per host to provision the sandbox:
 
 ```bash
-git clone git@github.com:patrickab/Agents-in-a-box.git "$HOME/git/Agents-in-a-box"
+git clone https://github.com/patrickab/Agents-in-a-box.git "$HOME/git/Agents-in-a-box"
 cd "$HOME/git/Agents-in-a-box"
-uv sync
 ./scripts/setup_agent_sandbox.sh
-uv run agent-sandbox doctor --profile gigachad
+cd "$PROD" && uv run agent-sandbox doctor --profile gigachad
 ```
 
 `setup_agent_sandbox.sh` installs rootless Docker and `runsc`, builds the
@@ -252,11 +250,12 @@ reachable from sandbox containers at `10.200.200.1:11434` through a persistent
 `127.0.0.1`. On a host that already has the sandbox, run only
 `./scripts/setup_host_services.sh`.
 
-`src/agent_sandbox/profiles/gigachad.yaml` holds absolute host paths: the OMP
-executable (mount the binary, not a `mise` shim), the Python interpreters, and
-`~/.omp`. Adjust them for a different user or layout. Doctor must pass every
-check. Restart `gigachad-bot.service` after changing Agents-in-a-box, because
-the backend imports it at startup.
+The bundled `gigachad` profile holds absolute host paths: the OMP executable
+(mount the binary, not a `mise` shim), the Python interpreters, and `~/.omp`.
+`uv sync` overwrites edits to the installed copy. For a different user or
+layout, put an adjusted `gigachad.yaml` in a directory listed in
+`AGENT_SANDBOX_PROFILE_PATH`, which is searched before the bundled profiles.
+Doctor must pass every check.
 
 ## 2. Publish the private HTTPS ingress
 

@@ -40,20 +40,11 @@ wheels = [
 [[package]]
 name = "agent-sandbox"
 version = "0.1.0"
-source = { editable = "../Agents-in-a-box" }
+source = { git = "https://github.com/patrickab/Agents-in-a-box?branch=main#399d9b354a91329d283af729ff2b03d37a99168f" }
 dependencies = [
     { name = "docker" },
     { name = "pyyaml" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "docker", specifier = ">=7.1.0" },
-    { name = "pyyaml", specifier = ">=6.0.3" },
-]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=9.1.1" }]
 
 [[package]]
 name = "aiofiles"
@@ -1335,7 +1326,7 @@ ocr = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agent-sandbox", editable = "../Agents-in-a-box" },
+    { name = "agent-sandbox", git = "https://github.com/patrickab/Agents-in-a-box?branch=main" },
     { name = "fastapi", specifier = ">=0.139.0" },
     { name = "gpt-researcher", specifier = ">=0.15.1" },
     { name = "httpx", specifier = ">=0.27" },

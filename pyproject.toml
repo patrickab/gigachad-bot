@@ -52,7 +52,7 @@ ocr = [
 default-groups = ["dev", "ocr"]
 
 [tool.uv.sources]
-agent-sandbox = { path = "../Agents-in-a-box", editable = true }
+agent-sandbox = { git = "https://github.com/patrickab/Agents-in-a-box", branch = "main" }
 
 [tool.hatch.metadata]
 allow-direct-references = true
