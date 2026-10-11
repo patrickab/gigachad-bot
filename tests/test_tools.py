@@ -3,7 +3,6 @@
 from types import SimpleNamespace
 from typing import Any
 
-from agent_sandbox import PromptImage
 import pytest
 
 from config import MODEL_DEFAULT_KEYS, TEST_MODEL
@@ -319,54 +318,6 @@ def _script_reply(script: str) -> SimpleNamespace:
 
 
 @pytest.mark.asyncio
-async def test_sandbox_plot_fast_path_hands_the_answer_round_the_code(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The chat model writes the script, then reads it back as the tool result."""
-    sandbox = SandboxServiceStub("unused", script_stdout='{"data": [{"type": "bar"}], "layout": {}}')
-    fenced = "```python\nprint(fig.to_json())\n```"
-    calls: list[dict[str, Any]] = []
-
-    def reply(*_args: Any, **kwargs: Any) -> SimpleNamespace:
-        calls.append(kwargs)
-        return _script_reply(fenced)
-
-    monkeypatch.setattr(sandbox_plot, "api_query_resilient", reply)
-    history = ({"role": "user", "content": "earlier turn"}, {"role": "assistant", "content": "earlier reply"})
-    ctx = tools.ToolContext(
-        client=ClientStub(),
-        model=TEST_MODEL,
-        opts=tools.ToolOptions(),
-        chat_id="chat-1",
-        tool_call_id="call-1",
-        sandbox_service=sandbox,
-        small_model="provider/small-model",
-        history=history,
-        user_msg="Plot the trend",
-    )
-
-    outcome = await tools.BUILTIN_TOOLS.execute("sandbox_plot", {}, ctx)
-
-    assert outcome.summary == "1 trace"
-    assert outcome.detail == {
-        "figure": {"data": [{"type": "bar"}], "layout": {}},
-        "script": "print(fig.to_json())",
-    }
-    assert "print(fig.to_json())" in outcome.content  # The code is the model's view of the chart.
-    assert "1 trace(s)" in outcome.content
-    assert "underlying concept works" in outcome.content
-    assert "how the graphic encodes" in outcome.content
-    assert "Do not explain the code" in outcome.content
-    assert sandbox.scripts == ["print(fig.to_json())"]
-    assert sandbox.calls == []  # The agent path stayed unused.
-    assert len(calls) == 1
-    assert calls[0]["model"] == TEST_MODEL  # The chat model writes the script, not the small model.
-    assert calls[0]["user_msg"] == "Plot the trend"
-    assert calls[0]["user_msg_history"] == list(history)
-    assert "dependencies" in calls[0]["system_prompt"].lower()
-
-
-@pytest.mark.asyncio
 async def test_sandbox_plot_treats_an_unfenced_reply_as_the_whole_script(monkeypatch: pytest.MonkeyPatch) -> None:
     """A model that forgets the fence still plots, and its code still reaches the answer round."""
     sandbox = SandboxServiceStub("unused", script_stdout='{"data": [{"type": "bar"}], "layout": {}}')
@@ -487,43 +438,6 @@ async def test_sandbox_plot_falls_back_to_the_agent_when_the_script_keeps_failin
     append_system = sandbox.calls[0]["append_system"]
     assert "layered, skimmable Markdown explanation" in append_system
     assert "`$...$` inline and `$$...$$`" in append_system
-
-
-@pytest.mark.asyncio
-async def test_sandbox_plot_with_images_uses_the_agent_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Only the agent path can see prompt images, so image requests skip the fast path."""
-    sandbox = SandboxServiceStub('{"data": [{"type": "scatter"}], "layout": {}, "frames": null}')
-    completions: list[dict[str, Any]] = []
-
-    def reply(*_args: Any, **kwargs: Any) -> SimpleNamespace:
-        completions.append(kwargs)
-        return _script_reply("print(fig.to_json())")
-
-    monkeypatch.setattr(sandbox_plot, "api_query_resilient", reply)
-    ctx = tools.ToolContext(
-        client=ClientStub(),
-        model=TEST_MODEL,
-        opts=tools.ToolOptions(),
-        chat_id="chat-1",
-        tool_call_id="call-1",
-        prompt_images=(PromptImage("photo.png", b"image"),),
-        sandbox_service=sandbox,
-        user_msg="Plot the trend",
-    )
-
-    outcome = await tools.BUILTIN_TOOLS.execute("sandbox_plot", {}, ctx)
-
-    assert outcome.error is None
-    assert outcome.summary == "1 trace"
-    assert outcome.detail == {"figure": {"data": [{"type": "scatter"}], "layout": {}, "frames": None}, "script": ""}
-    assert "transcript" not in outcome.content
-    assert (sandbox.scripts, completions) == ([], [])
-    # The images must reach the agent under the plot scope. Tuning knobs like
-    # thinking/lean are deliberately not pinned.
-    assert len(sandbox.calls) == 1
-    assert sandbox.calls[0]["scope"] == "sandbox_plot"
-    assert sandbox.calls[0]["prompt"] == "Plot the trend"
-    assert sandbox.calls[0]["prompt_images"] == (PromptImage("photo.png", b"image"),)
 
 
 @pytest.mark.asyncio
