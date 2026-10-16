@@ -7,6 +7,7 @@ import pytest
 from lib.chat_store import ChatStore
 from lib.db_schema import upgrade
 from lib.postgres_data_store import PostgresDataStore
+from lib.project_store import ProjectStore
 
 
 @pytest.fixture(scope="module")
@@ -65,3 +66,20 @@ def test_save_on_new_file_with_no_messages_is_empty(chat_store: ChatStore) -> No
     store.save("new.json", {"chat_id": "chat-2"})
 
     assert store.load("new.json")["messages"] == []
+
+
+def test_histories_are_every_chat_outside_a_project_and_move_only_targets_projects(chat_store: ChatStore) -> None:
+    store = chat_store
+    store.save("loose.json", {"messages": [{"role": "user", "content": "a"}], "chat_id": "loose"})
+    ProjectStore(chat_store=store, data_store=store._base.store).create_project("proj")
+    store.save("proj/inside.json", {"messages": [{"role": "user", "content": "b"}], "chat_id": "inside"})
+
+    assert store.list_histories() == {"files": ["loose.json"]}
+
+    with pytest.raises(ValueError):
+        store.move("loose.json", "not-a-project")
+
+    moved = store.move("loose.json", "proj")["new_path"]
+    assert store.list_histories() == {"files": []}
+    assert store.move(moved, "")["new_path"] == "loose.json"
+    assert store.list_histories() == {"files": ["loose.json"]}

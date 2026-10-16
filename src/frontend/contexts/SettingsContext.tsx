@@ -41,7 +41,7 @@ export function useSettings(): SettingsState {
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [selectedModel, setSelectedModel] = useState("")
   const [selectedPrompt, setSelectedPrompt] = useState<string | null>(null)
-  const [reasoningEffort, setReasoningEffort] = useState("none")
+  const [reasoningEffort, setReasoningEffort] = useState("medium")
   const [downscaleImages, setDownscaleImages] = useState(true)
 
   const [researchFastModel, setResearchFastModel] = useState("")

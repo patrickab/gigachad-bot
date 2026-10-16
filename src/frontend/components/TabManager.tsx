@@ -43,7 +43,7 @@ const TAB_CONFIG_KEYS: (keyof TabConfig)[] = [
 const DEFAULT_CONFIG: TabConfig = {
   selectedModel: "",
   selectedPrompt: null,
-  reasoningEffort: "none",
+  reasoningEffort: "medium",
   downscaleImages: true,
   researchFastModel: "",
   researchSmartModel: "",
