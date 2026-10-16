@@ -7,7 +7,6 @@ import type { TabConfig } from "@/components/TabManager"
 const config: TabConfig = {
   selectedModel: "",
   selectedPrompt: null,
-  temperature: 0.2,
   reasoningEffort: "none",
   downscaleImages: true,
   researchFastModel: "",

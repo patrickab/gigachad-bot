@@ -29,7 +29,6 @@ async def ocr(req: OCRRequest, store: ModelProviderStore = Depends(get_model_pro
             user_msg="Extract all text and LaTeX from this image.",
             system_prompt=SYS_OCR_TEXT_EXTRACTION,
             img=img,
-            temperature=0.1,
             stream=True,
         )
         return sse_event_stream(chunks)

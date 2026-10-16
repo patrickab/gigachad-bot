@@ -230,7 +230,6 @@ async def _latex_ocr(_args: dict[str, Any], context: ToolContext) -> ToolOutcome
         user_msg_history=[],
         system_prompt=SYS_OCR_TEXT_EXTRACTION,
         img=context.img,
-        temperature=0.1,
         stream=False,
     )
     text = _response_text(response).strip()

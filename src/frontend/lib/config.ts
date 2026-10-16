@@ -15,4 +15,3 @@ export const REASONING_LEVELS = ["none", "low", "medium", "high"] as const
 export type ReasoningLevel = (typeof REASONING_LEVELS)[number]
 
 export const STORAGE_KEY_THEME = "theme"
-export const STORAGE_KEY_TRANSPARENT_BG = "transparentBg"

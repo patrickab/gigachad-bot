@@ -8,8 +8,6 @@ export interface SettingsState {
   setSelectedModel: (v: string) => void
   selectedPrompt: string | null
   setSelectedPrompt: (v: string | null) => void
-  temperature: number
-  setTemperature: (v: number) => void
   reasoningEffort: string
   setReasoningEffort: (v: string) => void
   downscaleImages: boolean
@@ -43,7 +41,6 @@ export function useSettings(): SettingsState {
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [selectedModel, setSelectedModel] = useState("")
   const [selectedPrompt, setSelectedPrompt] = useState<string | null>(null)
-  const [temperature, setTemperature] = useState(0.2)
   const [reasoningEffort, setReasoningEffort] = useState("none")
   const [downscaleImages, setDownscaleImages] = useState(true)
 
@@ -61,7 +58,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     fetchBackendConfig()
       .then((cfg) => {
         setSelectedModel((prev) => prev || cfg.default_model)
-        setTemperature((prev) => prev === 0.2 ? cfg.temperature : prev)
         setDownscaleImages((prev) => prev === true ? cfg.downscale_images : prev)
         setOCRModel((prev) => prev || cfg.vision_model)
       })
@@ -73,7 +69,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const value = {
     selectedModel, setSelectedModel,
     selectedPrompt, setSelectedPrompt,
-    temperature, setTemperature,
     reasoningEffort, setReasoningEffort,
     downscaleImages, setDownscaleImages,
     researchFastModel, setResearchFastModel,

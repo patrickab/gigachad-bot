@@ -171,7 +171,6 @@ export interface ChatRequest {
   chat_id: string
   user_msg: string
   system_prompt?: string
-  temperature?: number
   reasoning_effort?: string | null
   img_paths: string[]
   downscale_images?: boolean
@@ -247,7 +246,6 @@ export interface BackendConfig {
   vision_model: string
   memory_model: string
   default_model: string
-  temperature: number
   downscale_images: boolean
 }
 

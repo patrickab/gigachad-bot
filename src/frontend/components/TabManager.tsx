@@ -6,7 +6,6 @@ import { cn } from "@/lib/utils"
 // Selected model starts blank and is seeded from the backend's configured
 // default chat model (Providers / Models → Defaults) once it loads — see
 // the settings-sync effect in app/page.tsx. Never hardcode a model name here.
-const FALLBACK_TEMPERATURE = 0.2
 import type { SettingsState } from "@/contexts/SettingsContext"
 import type { AppSurface } from "@/contexts/SidebarContext"
 
@@ -22,7 +21,6 @@ export function useTabActive(): boolean {
 export interface TabConfig {
   selectedModel: string
   selectedPrompt: string | null
-  temperature: number
   reasoningEffort: string
   downscaleImages: boolean
   researchFastModel: string
@@ -37,7 +35,7 @@ export interface TabConfig {
 }
 
 const TAB_CONFIG_KEYS: (keyof TabConfig)[] = [
-  "selectedModel", "selectedPrompt", "temperature", "reasoningEffort",
+  "selectedModel", "selectedPrompt", "reasoningEffort",
   "downscaleImages", "researchFastModel", "researchSmartModel", "researchStrategicModel",
   "researchDepth", "researchBreadth", "researchReasoning", "researchReportType",
 ]
@@ -45,7 +43,6 @@ const TAB_CONFIG_KEYS: (keyof TabConfig)[] = [
 const DEFAULT_CONFIG: TabConfig = {
   selectedModel: "",
   selectedPrompt: null,
-  temperature: FALLBACK_TEMPERATURE,
   reasoningEffort: "none",
   downscaleImages: true,
   researchFastModel: "",

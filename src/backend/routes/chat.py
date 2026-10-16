@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from fastapi.concurrency import run_in_threadpool
 import litellm
 from llm_baseclient.client import LLMClient
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from lib.asset_store import AssetStore
@@ -35,7 +35,6 @@ class ChatRequest(BaseModel):
     chat_id: str
     user_msg: str
     system_prompt: str = ""
-    temperature: float = Field(default=0.2, ge=0, le=2)
     reasoning_effort: str | None = None
     img_paths: list[str] = []
     downscale_images: bool = True
@@ -47,7 +46,7 @@ class ChatRequest(BaseModel):
 
 
 def _build_kwargs(req: ChatRequest) -> dict[str, Any]:
-    kwargs: dict[str, Any] = {"temperature": req.temperature}
+    kwargs: dict[str, Any] = {}
     if req.reasoning_effort and req.reasoning_effort != "none" and _supports_reasoning_effort(req.model):
         kwargs["reasoning_effort"] = req.reasoning_effort
     return kwargs

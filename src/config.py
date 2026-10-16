@@ -20,7 +20,6 @@ DOCUMENTS = REMOTE_ROOT / "Documents"
 MODEL_DEFAULT_KEYS = ("default_model", "small_model", "vision_model", "memory_model", "omp_model")
 # Every test runs against this model, and it seeds a store that has no defaults yet.
 TEST_MODEL = "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free"
-DEFAULT_TEMPERATURE = 0.2
 DEFAULT_DOWNSCALE_IMAGES = True
 
 # --- MinerU PDF parsing config ---

@@ -71,7 +71,6 @@ function defaultSendParams(config: TabConfig, prompts: Record<string, string>, e
   return {
     model: config.selectedModel,
     system_prompt: config.selectedPrompt ? (prompts[config.selectedPrompt] ?? "") : "",
-    temperature: config.temperature,
     reasoning_effort: config.reasoningEffort === "none" ? null : config.reasoningEffort,
     downscale_images: config.downscaleImages,
     img_paths: [] as string[],

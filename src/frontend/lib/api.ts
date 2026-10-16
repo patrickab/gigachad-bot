@@ -191,7 +191,6 @@ export function createChatStream(req: ChatRequest): SSEStreamResult {
     chat_id: req.chat_id,
     user_msg: req.user_msg,
     system_prompt: req.system_prompt ?? "",
-    temperature: req.temperature,
     downscale_images: req.downscale_images,
     img_paths: req.img_paths ?? [],
     messages: req.messages ?? [],

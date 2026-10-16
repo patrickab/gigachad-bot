@@ -64,7 +64,7 @@ export function ModeProvider({ children }: { children: ReactNode }) {
   const [enabledTools, setEnabledTools] = useState<ToolName[]>(() => TOOLS.filter((tool) => tool.defaultEnabled).map((tool) => tool.name))
 
   // Restored once on mount so the first paint uses the safe defaults above; a per-browser
-  // choice, matching every other composer preference (theme, transparent background).
+  // choice, matching every other composer preference (theme).
   useEffect(() => {
     try {
       const saved = window.localStorage.getItem(TOOLS_STORAGE_KEY)

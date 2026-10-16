@@ -1,13 +1,12 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useRef, useCallback } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { ChevronDown, MoreHorizontal, BookOpen, Pencil } from "lucide-react"
-import { LLMParams } from "./LLMParams"
 import { ParamSlider } from "./ParamSlider"
 import { StyledSelect } from "./StyledSelect"
 import { cn } from "@/lib/utils"
-import { REASONING_LEVELS, STORAGE_KEY_TRANSPARENT_BG } from "@/lib/config"
+import { REASONING_LEVELS } from "@/lib/config"
 import { displayName } from "@/lib/models"
 import { useClickOutside } from "@/hooks/useClickOutside"
 import { useModeState } from "@/hooks/useModeState"
@@ -48,24 +47,11 @@ export function MoreOptionsMenu({
   const { researchEnabled } = useModeState()
   const [open, setOpen] = useState(false)
   const [researchOpen, setResearchOpen] = useState(false)
-  const [transparentBg, setTransparentBg] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
   const close = useCallback(() => { setOpen(false) }, [])
   useClickOutside(ref, close)
 
-  useEffect(() => {
-    try {
-      setTransparentBg(localStorage.getItem(STORAGE_KEY_TRANSPARENT_BG) === "1")
-    } catch {}
-  }, [])
-
-  function toggleTransparentBg() {
-    const next = !transparentBg
-    setTransparentBg(next)
-    try { localStorage.setItem(STORAGE_KEY_TRANSPARENT_BG, next ? "1" : "0") } catch {}
-    document.documentElement.classList.toggle("transparent-bg", next)
-  }
   // Same flattening ModelDropdown uses: Ollama plus every configured
   // provider, qualified as `litellm_id/model` so the tiers can pick any
   // model the chat picker can, without pulling in its provider-editing UI.
@@ -94,11 +80,6 @@ export function MoreOptionsMenu({
             transition={{ duration: 0.15 }}
             className="absolute right-0 top-full mt-2 w-72 rounded-xl border border-divider bg-paper p-3 shadow-[var(--shadow-xl)] flex flex-col gap-4"
           >
-            <label className="flex items-center justify-between cursor-pointer">
-              <span className="text-xs text-ink-subtle">Transparent background</span>
-              <Toggle label="Transparent background" on={transparentBg} onChange={toggleTransparentBg} />
-            </label>
-
             {/* Chat settings always apply: a tool call happens inside a normal chat turn. */}
             <>
                 {/* System Prompt */}
@@ -118,14 +99,6 @@ export function MoreOptionsMenu({
                     options={Object.keys(prompts).map((p) => ({ value: p, label: p }))}
                     value={config.selectedPrompt ?? ""}
                     onChange={(v) => onConfigChange({ selectedPrompt: v || null })}
-                  />
-                </div>
-
-                {/* LLM Parameters */}
-                <div className="pt-2 border-t border-divider/50">
-                  <LLMParams
-                    temperature={config.temperature}
-                    onTemperatureChange={(v) => onConfigChange({ temperature: v })}
                   />
                 </div>
 

@@ -45,9 +45,6 @@ const THEME_SCRIPT = `
     } catch(e) {
       document.documentElement.classList.toggle('light', false)
     }
-    try {
-      document.documentElement.classList.toggle('transparent-bg', localStorage.getItem('transparentBg') === '1')
-    } catch(e) {}
   })()
 `
 
