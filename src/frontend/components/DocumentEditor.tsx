@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
 import { ConsoleEditor } from "./ConsoleEditor"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { CanvasEditor, parseCanvasDoc, serializeCanvasDoc, emptyCanvasDoc, type CanvasDocument } from "./CanvasEditor"
-import { loadFileViewerText, readFileVaultRendered, writeArchitectureSource, writeDocument, writeBinaryDocument, storeDrawing, fileViewerRawUrl, ApiError } from "@/lib/api"
+import { loadFileViewerText, readFileRootRendered, writeArchitectureSource, writeDocument, writeBinaryDocument, storeDrawing, fileViewerRawUrl, ApiError } from "@/lib/api"
 import { renderPageToPng, renderCanvasToJpeg, type EmbedRect } from "@/lib/drawing"
 import { EditorSidebar, InlineEditPanel } from "./EditorSidebar"
 import { architectureSlug, architectureSource, isArchitecturePath } from "@/lib/architecture"
@@ -240,7 +240,7 @@ function CanvasDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, ove
   )
 }
 
-// Text documents, and vault canvases (persisted through `persistOverride`).
+// Text documents, and file root canvases (persisted through `persistOverride`).
 function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, overlay, persistOverride, onModeLabel, onNavigate, model, canvasToolbarSlot }: DocumentEditorProps) {
   const isCanvas = path.endsWith(".canvas")
   const [content, setContent] = useState<string | null>(null)
@@ -291,7 +291,7 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
   useEffect(() => {
     setRenderedContent(null)
     loadFromServer()
-    if (overlay && !isCanvas) readFileVaultRendered(path).then(setRenderedContent).catch(() => {})
+    if (overlay && !isCanvas) readFileRootRendered(path).then(setRenderedContent).catch(() => {})
   }, [path, isCanvas, overlay, loadFromServer])
 
   const handleTextChange = useCallback((value: string) => {
@@ -386,9 +386,9 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
     const anchor = (e.target as HTMLElement).closest("a")
     if (!anchor) return
     const href = anchor.getAttribute("href")
-    if (!href?.startsWith("#vault:")) return
+    if (!href?.startsWith("#file:")) return
     e.preventDefault()
-    onNavigate?.(decodeURIComponent(href.slice("#vault:".length)))
+    onNavigate?.(decodeURIComponent(href.slice("#file:".length)))
   }, [onNavigate])
 
   const handleSidebarApply = useCallback((newContent: string) => {

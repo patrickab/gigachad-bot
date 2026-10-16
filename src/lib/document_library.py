@@ -3,7 +3,7 @@
 PDFs and MinerU output are Postgres rows (``AssetStore``) mirrored to the
 Nextcloud ``Documents`` tree as a convenience copy for other tools; the app
 itself never reads that mirror back. The one path this module still resolves
-off disk is a ``FileVault`` reference — an external file the user pointed the
+off disk is a ``FileRoots`` reference — an external file the user pointed the
 app at directly, which was never stored in Postgres and has no database copy
 to read instead.
 
@@ -22,7 +22,7 @@ from config import DOCUMENTS
 from lib.data_store import InvalidStorageKey, validate_key
 
 if TYPE_CHECKING:
-    from lib.file_vault import FileVault
+    from lib.file_roots import FileRoots
 
 log = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ def mime_for(path: str | Path) -> str:
 
 def document_meta(path: str | Path) -> dict[str, str]:
     """Describe a document for the API: its path (a database-native logical
-    key, or an absolute path for a live FileVault reference), display name, and MIME."""
+    key, or an absolute path for a live FileRoots reference), display name, and MIME."""
     p = Path(path)
     return {"path": str(p), "name": p.name, "mime": mime_for(p)}
 
@@ -68,7 +68,7 @@ def storage_key(path: str | Path, *, root: str | Path | None = None) -> str | No
 
     Callers hold one of two spellings for the same file: an absolute path (what the
     filesystem branch of a route records) or an already-logical key (what the storage
-    branch records). Both map onto the key the DataStore uses. Vault files and anything
+    branch records). Both map onto the key the DataStore uses. File-root files and anything
     outside *root* (``DOCUMENTS`` by default) return None — those are live references,
     never stored copies.
     """
@@ -86,10 +86,10 @@ def storage_key(path: str | Path, *, root: str | Path | None = None) -> str | No
         return None
 
 
-def resolve_known_path(path: str | Path, *, vault: "FileVault | None") -> Path:
-    """Resolve a FileVault-referenced path, rejecting anything outside it.
+def resolve_known_path(path: str | Path, *, roots: "FileRoots | None") -> Path:
+    """Resolve a FileRoots-referenced path, rejecting anything outside it.
 
-    The only paths this ever resolves off disk are live FileVault references:
+    The only paths this ever resolves off disk are live FileRoots references:
     external files the user pointed the app at directly, never stored in
     Postgres. Every app-owned artifact (PDFs, MinerU output, documents,
     canvases) is read from storage before a caller ever reaches this function.
@@ -98,7 +98,7 @@ def resolve_known_path(path: str | Path, *, vault: "FileVault | None") -> Path:
     onto its own status codes and wording.
     """
     resolved = Path(path).expanduser().resolve()
-    if vault is None or not vault.contains(resolved):
+    if roots is None or not roots.contains(resolved):
         raise PathNotAllowed(outside_roots=True)
     if not resolved.is_file():
         raise PathNotAllowed(outside_roots=False)

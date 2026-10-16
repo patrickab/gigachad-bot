@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useState } from "react"
 
 /**
- * The selection primitive shared by every VaultTree (Projects, Histories, …).
+ * The selection primitive shared by every FileTree (Projects, Histories, …).
  *
- * It owns one concern: which *branches* (vaults / folders) are expanded, and what
+ * It owns one concern: which *branches* (file roots / folders) are expanded, and what
  * expanding/collapsing one means. Element (chat) selection is a separate primitive
  * already owned by BranchContext (activeFile), so it lives outside this hook.
  *
@@ -16,16 +16,16 @@ import { useCallback, useEffect, useState } from "react"
  *   • multi     — an internal, optionally-persisted Set. Folders behave like a file
  *     browser: many open at once, no activation side effects.
  *
- * Each VaultTree gets its own controller, so collapsing a project never touches a
+ * Each FileTree gets its own controller, so collapsing a project never touches a
  * histories folder — cross-tree independence falls out for free.
  */
-export interface VaultBranchController {
+export interface FileBranchController {
   isExpanded: (id: string) => boolean
   toggleBranch: (id: string) => void
   expand: (id: string) => void
 }
 
-export interface VaultTreeConfig {
+export interface FileTreeConfig {
   /** One branch open at a time, sourced from `activeId` instead of internal state. */
   accordion?: boolean
   /** externally-active branch (e.g. activeProject); the source of truth in accordion mode. */
@@ -38,13 +38,13 @@ export interface VaultTreeConfig {
   onDeactivate?: (id: string) => void
   /**
    * Accordion mode only: restrict accordion semantics to ids this predicate
-   * accepts. Other branches (e.g. mounted file vaults nested inside a project)
+   * accepts. Other branches (e.g. mounted file roots nested inside a project)
    * fall back to the multi-expand set instead of firing onActivate.
    */
   isAccordionId?: (id: string) => boolean
 }
 
-export function useVaultTree(config: VaultTreeConfig = {}): VaultBranchController {
+export function useFileTree(config: FileTreeConfig = {}): FileBranchController {
   const { accordion, activeId, storageKey, onActivate, onDeactivate, isAccordionId } = config
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 

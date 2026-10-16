@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useState, type ElementType } from "react"
+import { createContext, useContext, useRef, useState, type ElementType } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Brain,
@@ -14,29 +14,29 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "./Skeleton"
-import type { VaultBranchController } from "@/hooks/useVaultTree"
+import type { FileBranchController } from "@/hooks/useFileTree"
 
-export type VaultTreeItemType = "vault" | "folder" | "element"
+export type FileTreeItemType = "root" | "folder" | "element"
 
-export interface VaultTreeItem<T = unknown> {
+export interface FileTreeItem<T = unknown> {
   id: string
   label: string
-  type: VaultTreeItemType
+  type: FileTreeItemType
   icon?: ElementType
   data?: T
-  children?: VaultTreeItem<T>[]
+  children?: FileTreeItem<T>[]
   isActive?: boolean
   isSystem?: boolean
-  displayInVault?: boolean
+  displayInRoot?: boolean
   badge?: string | number
-  /** Vault accepts mountpoints — shows the mount (HardDrive) hover button. */
+  /** File root accepts mountpoints — shows the mount (HardDrive) hover button. */
   mountable?: boolean
-  /** This vault row is a mounted FileVault (not a native tree vault like a project). */
+  /** This file root row is a mounted FileRoots (not a native tree file root like a project). */
   mounted?: boolean
 }
 
-interface VaultTreeProps<T> {
-  items?: VaultTreeItem<T>[]
+interface FileTreeProps<T> {
+  items?: FileTreeItem<T>[]
   depth?: number
   loading?: boolean
 
@@ -50,53 +50,73 @@ interface VaultTreeProps<T> {
   onOpenChange?: (open: boolean) => void
   onExpand?: () => void
 
-  // Branch expansion + activation — owned by the shared primitive (see useVaultTree)
-  controller: VaultBranchController
+  // Branch expansion + activation — owned by the shared primitive (see useFileTree)
+  controller: FileBranchController
 
   // Tree actions
-  onVaultDelete?: (id: string) => void
-  onElementClick?: (item: VaultTreeItem<T>) => void
-  onElementDelete?: (item: VaultTreeItem<T>) => void
-  renderElement?: (item: VaultTreeItem<T>, depth: number) => React.ReactNode
-  onAddVault?: (name: string) => Promise<void>
-  vaultPlaceholder?: string
-  onAddMountpoint?: (vaultId: string, path: string) => Promise<void>
+  onRootDelete?: (id: string) => void
+  onElementClick?: (item: FileTreeItem<T>) => void
+  onElementDelete?: (item: FileTreeItem<T>) => void
+  renderElement?: (item: FileTreeItem<T>, depth: number) => React.ReactNode
+  onAddRoot?: (name: string) => Promise<void>
+  rootPlaceholder?: string
+  onAddMountpoint?: (rootId: string, path: string) => Promise<void>
   mountpointPlaceholder?: string
   onAddFolder?: (parentId: string | null, name: string) => Promise<void>
   folderPlaceholder?: string
   folderIcon?: ElementType
   onMoveElement?: (elementId: string, targetId: string | null) => Promise<void>
-  onDashboardClick?: (vaultId: string) => void
-  onMemoryClick?: (vaultId: string) => void
+  onDashboardClick?: (rootId: string) => void
+  onMemoryClick?: (rootId: string) => void
+
+  // Multi-selection: ctrl/cmd+click toggles, shift+click selects a range, selected rows drag together
+  multiSelect?: boolean
+  /** Selected ids (files and/or folders) dropped on a row; `null` = dropped on the tree background. */
+  onDropFiles?: (ids: string[], targetId: string | null) => void
 }
+
+/** Drag payload type for multi-selected rows: a JSON array of item ids. */
+export const FILE_DRAG_TYPE = "application/x-file-tree-ids"
 
 const INDENT_BASE = 8
 const INDENT_STEP = 16
 
+/** Ids of the rows currently on screen, top to bottom — the order shift+click ranges over. */
+function visibleItemIds<T>(items: FileTreeItem<T>[] | undefined, isExpanded: (id: string) => boolean): string[] {
+  return (items ?? []).flatMap((item) => [
+    item.id,
+    ...(item.type !== "element" && isExpanded(item.id) ? visibleItemIds(item.children, isExpanded) : []),
+  ])
+}
+
 /* ─── context ─── */
 
 interface TreeCtx<T> {
-  controller: VaultBranchController
+  controller: FileBranchController
   dragOverId: string | null
   onDragOver: (e: React.DragEvent, targetId: string) => void
   onDragLeave: () => void
   onDrop: (e: React.DragEvent, targetId: string | null) => void
   onDragStart: (e: React.DragEvent, itemId: string) => void
-  onVaultDelete?: (id: string) => void
-  onElementClick?: (item: VaultTreeItem<T>) => void
-  onElementDelete?: (item: VaultTreeItem<T>) => void
-  renderElement?: (item: VaultTreeItem<T>, depth: number) => React.ReactNode
+  onRootDelete?: (id: string) => void
+  onElementClick?: (item: FileTreeItem<T>) => void
+  onElementDelete?: (item: FileTreeItem<T>) => void
+  renderElement?: (item: FileTreeItem<T>, depth: number) => React.ReactNode
   onAddFolder?: (parentId: string | null, name: string) => Promise<void>
   folderPlaceholder: string
   folderIcon: ElementType
-  onAddMountpoint?: (vaultId: string, path: string) => Promise<void>
+  onAddMountpoint?: (rootId: string, path: string) => Promise<void>
   mountpointPlaceholder: string
-  onDashboardClick?: (vaultId: string) => void
-  onMemoryClick?: (vaultId: string) => void
-  createMode: "vault" | "folder" | "mountpoint" | null
+  onDashboardClick?: (rootId: string) => void
+  onMemoryClick?: (rootId: string) => void
+  multiSelect: boolean
+  selectedIds: Set<string>
+  /** Applies ctrl/shift selection; returns true when the click was a pure selection gesture. */
+  onSelectClick: (item: FileTreeItem<T>, e: React.MouseEvent) => boolean
+  createMode: "root" | "folder" | "mountpoint" | null
   createParentId: string | null
   createName: string
-  setCreateMode: (mode: "vault" | "folder" | "mountpoint" | null) => void
+  setCreateMode: (mode: "root" | "folder" | "mountpoint" | null) => void
   setCreateParentId: (id: string | null) => void
   setCreateName: (name: string) => void
   handleCreateSubmit: () => Promise<void>
@@ -106,7 +126,7 @@ const TreeCtx = createContext<TreeCtx<unknown> | null>(null)
 
 export function useTree<T = unknown>() {
   const ctx = useContext(TreeCtx)
-  if (!ctx) throw new Error("useTree must be inside VaultTree")
+  if (!ctx) throw new Error("useTree must be inside FileTree")
   return ctx as TreeCtx<T>
 }
 
@@ -124,9 +144,9 @@ function ChevronIcon({ open }: { open: boolean }) {
   )
 }
 
-/* ─── vault tree (public) ─── */
+/* ─── file root tree (public) ─── */
 
-export function VaultTree<T>({
+export function FileTree<T>({
   items,
   depth = 0,
   loading,
@@ -139,12 +159,12 @@ export function VaultTree<T>({
   onOpenChange,
   onExpand,
   controller,
-  onVaultDelete,
+  onRootDelete,
   onElementClick,
   onElementDelete,
   renderElement,
-  onAddVault,
-  vaultPlaceholder = "Project name",
+  onAddRoot,
+  rootPlaceholder = "Project name",
   onAddMountpoint,
   mountpointPlaceholder = "Mountpoint path…",
   onAddFolder,
@@ -153,18 +173,22 @@ export function VaultTree<T>({
   onMoveElement,
   onDashboardClick,
   onMemoryClick,
-}: VaultTreeProps<T>) {
-  const [createMode, setCreateMode] = useState<"vault" | "folder" | "mountpoint" | null>(null)
+  multiSelect = false,
+  onDropFiles,
+}: FileTreeProps<T>) {
+  const [createMode, setCreateMode] = useState<"root" | "folder" | "mountpoint" | null>(null)
   const [createParentId, setCreateParentId] = useState<string | null>(null)
   const [createName, setCreateName] = useState("")
   const [dragOverId, setDragOverId] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const selectionAnchorId = useRef<string | null>(null)
 
   const isRoot = depth === 0
 
   const handleCreateSubmit = async () => {
     if (!createName.trim()) return
-    if (createMode === "vault") {
-      await onAddVault?.(createName.trim())
+    if (createMode === "root") {
+      await onAddRoot?.(createName.trim())
     } else if (createMode === "folder") {
       await onAddFolder?.(createParentId, createName.trim())
     } else if (createMode === "mountpoint") {
@@ -177,8 +201,39 @@ export function VaultTree<T>({
   }
 
   const handleDragStart = (e: React.DragEvent, itemId: string) => {
+    if (multiSelect) {
+      const draggedIds = selectedIds.has(itemId) ? [...selectedIds] : [itemId]
+      if (!selectedIds.has(itemId)) setSelectedIds(new Set(draggedIds))
+      e.dataTransfer.setData(FILE_DRAG_TYPE, JSON.stringify(draggedIds))
+      e.dataTransfer.effectAllowed = "copyMove"
+      return
+    }
     e.dataTransfer.setData("text/plain", itemId)
     e.dataTransfer.effectAllowed = "move"
+  }
+
+  const handleSelectClick = (item: FileTreeItem<T>, e: React.MouseEvent): boolean => {
+    if (!multiSelect) return false
+    if (e.ctrlKey || e.metaKey) {
+      const next = new Set(selectedIds)
+      if (!next.delete(item.id)) next.add(item.id)
+      setSelectedIds(next)
+      selectionAnchorId.current = item.id
+      return true
+    }
+    if (e.shiftKey) {
+      const visibleIds = visibleItemIds(items, controller.isExpanded)
+      const clickedIndex = visibleIds.indexOf(item.id)
+      const anchorIndex = visibleIds.indexOf(selectionAnchorId.current ?? item.id)
+      const [from, to] = anchorIndex < 0
+        ? [clickedIndex, clickedIndex]
+        : [Math.min(anchorIndex, clickedIndex), Math.max(anchorIndex, clickedIndex)]
+      setSelectedIds(new Set(visibleIds.slice(from, to + 1)))
+      return true
+    }
+    setSelectedIds(new Set([item.id]))
+    selectionAnchorId.current = item.id
+    return false
   }
 
   const handleDragOver = (e: React.DragEvent, targetId: string) => {
@@ -192,6 +247,11 @@ export function VaultTree<T>({
   const handleDrop = (e: React.DragEvent, targetId: string | null) => {
     e.preventDefault()
     setDragOverId(null)
+    const droppedIds = e.dataTransfer.getData(FILE_DRAG_TYPE)
+    if (droppedIds) {
+      onDropFiles?.(JSON.parse(droppedIds) as string[], targetId)
+      return
+    }
     const elementId = e.dataTransfer.getData("text/plain")
     if (elementId && onMoveElement) onMoveElement(elementId, targetId)
   }
@@ -199,8 +259,8 @@ export function VaultTree<T>({
   const handlePlus = () => {
     if (onPlusClick) {
       onPlusClick()
-    } else if (onAddVault) {
-      setCreateMode("vault")
+    } else if (onAddRoot) {
+      setCreateMode("root")
       setCreateParentId(null)
       setCreateName("")
       onOpenChange?.(true)
@@ -219,7 +279,7 @@ export function VaultTree<T>({
     onDragLeave: handleDragLeave,
     onDrop: handleDrop,
     onDragStart: handleDragStart,
-    onVaultDelete,
+    onRootDelete,
     onElementClick,
     onElementDelete,
     renderElement,
@@ -230,6 +290,9 @@ export function VaultTree<T>({
     mountpointPlaceholder,
     onDashboardClick,
     onMemoryClick,
+    multiSelect,
+    selectedIds,
+    onSelectClick: handleSelectClick,
     createMode,
     createParentId,
     createName,
@@ -285,7 +348,7 @@ export function VaultTree<T>({
                 </div>
               )}
             </button>
-            {(onPlusClick || onAddVault || onAddFolder) && (
+            {(onPlusClick || onAddRoot || onAddFolder) && (
               <button aria-label={`${plusTitle ?? "Add item"}`}
                 onClick={(e) => { e.stopPropagation(); handlePlus() }}
                 className="p-1 rounded text-ink-subtle hover:text-ink hover:bg-surface transition-colors"
@@ -298,7 +361,7 @@ export function VaultTree<T>({
           {open && (
             <>
               <AnimatePresence>
-                {(createMode === "vault" || createMode === "folder") && (
+                {(createMode === "root" || createMode === "folder") && (
                   <InlineCreateForm
                     key="root-create"
                     depth={0}
@@ -306,8 +369,8 @@ export function VaultTree<T>({
                     onChange={setCreateName}
                     onSubmit={handleCreateSubmit}
                     onCancel={() => { setCreateMode(null); setCreateName("") }}
-                    placeholder={createMode === "vault" ? vaultPlaceholder : folderPlaceholder}
-                    icon={createMode === "vault" ? undefined : folderIcon}
+                    placeholder={createMode === "root" ? rootPlaceholder : folderPlaceholder}
+                    icon={createMode === "root" ? undefined : folderIcon}
                   />
                 )}
               </AnimatePresence>
@@ -329,7 +392,7 @@ export function VaultTree<T>({
 
 /* ─── tree content (internal) ─── */
 
-function TreeContent<T>({ items, depth }: { items?: VaultTreeItem<T>[]; depth: number }) {
+function TreeContent<T>({ items, depth }: { items?: FileTreeItem<T>[]; depth: number }) {
   const { onDragLeave, onDrop } = useTree<T>()
   const isRoot = depth === 0
 
@@ -345,7 +408,7 @@ function TreeContent<T>({ items, depth }: { items?: VaultTreeItem<T>[]; depth: n
       onDrop={isRoot ? (e) => onDrop(e, null) : undefined}
     >
       {items.map((item) =>
-        item.type === "vault" || item.type === "folder" ? (
+        item.type === "root" || item.type === "folder" ? (
           <BranchNode key={item.id} item={item} depth={depth} />
         ) : (
           <ElementNode key={item.id} item={item} depth={depth} />
@@ -355,16 +418,16 @@ function TreeContent<T>({ items, depth }: { items?: VaultTreeItem<T>[]; depth: n
   )
 }
 
-/* ─── branch node (vault + folder merged) ─── */
+/* ─── branch node (file root + folder merged) ─── */
 
-function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number }) {
+function BranchNode<T>({ item, depth }: { item: FileTreeItem<T>; depth: number }) {
   const {
     controller,
     dragOverId,
     onDragOver,
     onDragLeave,
     onDrop,
-    onVaultDelete,
+    onRootDelete,
     onAddFolder,
     folderPlaceholder,
     folderIcon,
@@ -378,9 +441,13 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
     setCreateParentId,
     setCreateName,
     handleCreateSubmit,
+    onDragStart,
+    multiSelect,
+    selectedIds,
+    onSelectClick,
   } = useTree<T>()
 
-  const isVault = item.type === "vault"
+  const isRootNode = item.type === "root"
   const isExpanded = controller.isExpanded(item.id)
   const BranchIcon = item.icon || Folder
   const hasChildren = item.children && item.children.length > 0
@@ -391,6 +458,8 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
       <div
         className={cn(
           "flex items-center gap-1.5 rounded-md transition-colors duration-200 ease-out group",
+          multiSelect && "select-none",
+          selectedIds.has(item.id) && "bg-surface-elevated",
           dragOverId === item.id && "ring-1 ring-ink-muted bg-surface-elevated",
         )}
         onDragOver={(e) => { e.stopPropagation(); onDragOver(e, item.id) }}
@@ -399,10 +468,12 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
         style={{ paddingLeft, paddingRight: 8 }}
       >
         <button
-          onClick={() => controller.toggleBranch(item.id)}
+          draggable={multiSelect}
+          onDragStart={multiSelect ? (e) => onDragStart(e, item.id) : undefined}
+          onClick={(e) => { if (!onSelectClick(item, e)) controller.toggleBranch(item.id) }}
           className={cn(
             "flex items-center gap-1.5 py-1 flex-1 text-left transition-colors",
-            isVault
+            isRootNode
               ? item.isActive ? "text-ink" : "text-ink-subtle hover:text-ink-muted"
               : "text-ink-subtle hover:text-ink",
           )}
@@ -410,13 +481,13 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
           <ChevronIcon open={isExpanded} />
           <BranchIcon className={cn(
             "h-3.5 w-3.5 shrink-0",
-            isVault
+            isRootNode
               ? item.isActive ? "text-ink" : "text-ink-subtle"
               : "text-ink-muted",
           )} />
           <span className={cn(
             "text-[11px] font-medium truncate",
-            isVault
+            isRootNode
               ? item.isActive ? "text-ink" : "text-ink-subtle"
               : undefined,
           )}>
@@ -427,7 +498,7 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
           )}
         </button>
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-          {isVault && !item.mounted && onMemoryClick && (
+          {isRootNode && !item.mounted && onMemoryClick && (
             <button aria-label={`Open memory for ${item.label}`}
               onClick={(e) => { e.stopPropagation(); onMemoryClick(item.id) }}
               className="p-0.5 rounded text-ink-faint hover:text-ink transition-colors"
@@ -448,7 +519,7 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
               <Plus className="h-3 w-3" />
             </button>
           )}
-          {isVault && item.mountable && onAddMountpoint && (
+          {isRootNode && item.mountable && onAddMountpoint && (
             <button aria-label={`Add mountpoint to ${item.label}`}
               onClick={(e) => {
                 e.stopPropagation()
@@ -462,9 +533,9 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
               <HardDrive className="h-3 w-3" />
             </button>
           )}
-          {onVaultDelete && (
+          {onRootDelete && (
             <button aria-label={`${item.mounted ? "Unmount" : "Delete"} ${item.label}`}
-              onClick={(e) => { e.stopPropagation(); onVaultDelete(item.id) }}
+              onClick={(e) => { e.stopPropagation(); onRootDelete(item.id) }}
               className="p-0.5 rounded text-ink-faint hover:text-danger transition-colors"
             >
               <Trash2 className="h-3 w-3" />
@@ -507,8 +578,8 @@ function BranchNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number 
 
 /* ─── element node ─── */
 
-function ElementNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number }) {
-  const { onDragStart, onElementClick, onElementDelete, onDashboardClick, renderElement } = useTree<T>()
+function ElementNode<T>({ item, depth }: { item: FileTreeItem<T>; depth: number }) {
+  const { onDragStart, onElementClick, onElementDelete, onDashboardClick, renderElement, multiSelect, selectedIds, onSelectClick } = useTree<T>()
   const paddingLeft = INDENT_BASE + depth * INDENT_STEP
   const ElementIcon = item.icon
 
@@ -516,7 +587,8 @@ function ElementNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number
     return <>{renderElement(item, depth)}</>
   }
 
-  const handleClick = () => {
+  const handleClick = (e: React.MouseEvent) => {
+    if (onSelectClick(item, e)) return
     if (item.isSystem && onDashboardClick && item.data) {
       onDashboardClick(item.data as string)
     } else {
@@ -527,7 +599,11 @@ function ElementNode<T>({ item, depth }: { item: VaultTreeItem<T>; depth: number
   return (
     <div style={{ paddingLeft }}>
       <div
-        className="flex items-center gap-1 py-0.5 group"
+        className={cn(
+          "flex items-center gap-1 py-0.5 group rounded-md",
+          multiSelect && "select-none",
+          selectedIds.has(item.id) && "bg-surface-elevated",
+        )}
         style={{ paddingRight: 8 }}
       >
         <button

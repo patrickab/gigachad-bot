@@ -197,7 +197,7 @@ never followed. Only the database location is wired to routes today.
   ordinary document list still attaches individual sources. `DirectoryFiles`
   remains available for a future git-backed workspace, but the current
   project routes store sources in PostgreSQL only.
-  Deletes of history files and folders, projects, file-vault roots, sidebar
+  Deletes of history files and folders, projects, file roots, sidebar
   canvases, project documents and architecture sources, prompts, dashboard
   cards, and canvas-menu documents show a six-second Undo notice
   (`UndoDeleteContext`). The row is hidden at once and the deletion request

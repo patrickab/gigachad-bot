@@ -5,7 +5,7 @@ import { useMemo } from "react"
 import { cn } from "@/lib/utils"
 import type { BranchChild, BranchMeta } from "@/lib/types"
 import { useBranches, buildChatIdMap, isAncestorOf } from "@/contexts/BranchContext"
-import { useTree, type VaultTreeItem } from "./VaultTree"
+import { useTree, type FileTreeItem } from "./FileTree"
 
 interface Node {
   file: string

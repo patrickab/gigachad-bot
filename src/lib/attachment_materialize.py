@@ -1,10 +1,10 @@
-"""Shared attach/parse core for the documents/files/file_vaults routes.
+"""Shared attach/parse core for the documents/files/file_roots routes.
 
 A PDF and its MinerU output (markdown + images) are each written once per
 user into the shared library namespace (``PDFs/<name>``, ``Mineru/<stem>.md``,
 ``Mineru/images/<stem>/...``) and mirrored to Nextcloud as a convenience copy
 other tools can read — the app itself never reads that mirror back. Route-
-specific behavior (vault promotion, chat-upload parsing, document attach)
+specific behavior (file root promotion, chat-upload parsing, document attach)
 stays in the routes; this module is the one place that writes those two
 shared namespaces.
 """

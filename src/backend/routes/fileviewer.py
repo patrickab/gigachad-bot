@@ -7,7 +7,7 @@ unknown (treated as text) files read their content from ``/text``.
 App-owned files (documents, canvases, PDFs, MinerU output) are read from the
 request's storage — Postgres is authoritative, so serving from disk would
 hand every caller the last filesystem write instead of the current one. Only
-a live FileVault reference, which was never stored in Postgres, is read off
+a live FileRoots reference, which was never stored in Postgres, is read off
 disk, and only after storage has been checked and found not to own the path.
 """
 
@@ -17,21 +17,21 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import FileResponse
 
-from backend.routes.deps import get_asset_store, get_document_store, get_file_vault
+from backend.routes.deps import get_asset_store, get_document_store, get_file_roots
 from backend.routes.schemas import FileContent
 from lib import document_library as lib_docs
 from lib.asset_store import AssetStore
 from lib.data_store import DataStore, StorageNotFoundError, read_text
-from lib.file_vault import FileVault
+from lib.file_roots import FileRoots
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/fileviewer", tags=["fileviewer"])
 
 
-def _resolve_allowed(path: str, vault: FileVault) -> Path:
+def _resolve_allowed(path: str, roots: FileRoots) -> Path:
     try:
-        return lib_docs.resolve_known_path(path, vault=vault)
+        return lib_docs.resolve_known_path(path, roots=roots)
     except lib_docs.PathNotAllowed as exc:
         if exc.outside_roots:
             raise HTTPException(status_code=403, detail="Unknown file path") from exc
@@ -63,7 +63,7 @@ def _stored_asset(path: str, assets: AssetStore) -> bytes | None:
 @router.get("/text", response_model=FileContent)
 async def read_text_content(
     path: str = Query(...),
-    vault: FileVault = Depends(get_file_vault),
+    roots: FileRoots = Depends(get_file_roots),
     docs: DataStore = Depends(get_document_store),
 ) -> FileContent:
     key = _stored(path, docs)
@@ -74,7 +74,7 @@ async def read_text_content(
             raise HTTPException(status_code=404, detail="File not found") from exc
         return FileContent(path=path, content=content)
 
-    resolved = _resolve_allowed(path, vault)
+    resolved = _resolve_allowed(path, roots)
     try:
         content = resolved.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
@@ -85,7 +85,7 @@ async def read_text_content(
 @router.get("/raw")
 async def read_raw(
     path: str = Query(...),
-    vault: FileVault = Depends(get_file_vault),
+    roots: FileRoots = Depends(get_file_roots),
     docs: DataStore = Depends(get_document_store),
     assets: AssetStore = Depends(get_asset_store),
 ) -> Response:
@@ -109,5 +109,5 @@ async def read_raw(
             headers={"Content-Disposition": "inline"},
         )
 
-    resolved = _resolve_allowed(path, vault, store)
+    resolved = _resolve_allowed(path, roots, store)
     return FileResponse(resolved, media_type=lib_docs.mime_for(resolved), content_disposition_type="inline")

@@ -26,7 +26,7 @@ import { ArchitectureWindow } from "@/components/ArchitectureWindow"
 import { architectureSlug, type EdgeStyle } from "@/lib/architecture"
 import { useCommandBar } from "@/hooks/useCommandBar"
 import { useMemoryCategories } from "@/hooks/useMemoryCategories"
-import { useVaultPicker } from "@/hooks/useVaultPicker"
+import { useFilePicker } from "@/hooks/useFilePicker"
 import { useProjectDocuments } from "@/hooks/useProjectDocuments"
 import { useChatModals } from "@/hooks/useChatModals"
 import { TabManager, nextTab, settingsToTabConfig, type TabConfig } from "@/components/TabManager"
@@ -51,8 +51,8 @@ import {
   deleteAttachment,
   loadProjectTab,
   parseHistoryFile,
-  attachFileVaultFile,
-  writeFileVaultFile,
+  attachRootFile,
+  writeRootFile,
   fileViewerRawUrl,
   writeDocument,
 } from "@/lib/api"
@@ -94,7 +94,7 @@ const COMMANDS: CommandMenuItem[] = [
   { command: "/memorize", keywords: ["memory", "both"] },
   { command: "/memorize-global", keywords: ["memory", "global", "profile"] },
   { command: "/memorize-project", keywords: ["memory", "project"] },
-  { command: "/vault-load" },
+  { command: "/files-load" },
 ]
 
 function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleLoaded, onOpenChat, activeProject, focusQaIndex, focusKey, onConfigChange, onAppModeChange }: {
@@ -202,7 +202,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   useEffect(() => { chatIdRef.current = chatId }, [chatId])
   const [extracting, setExtracting] = useState(0)
 
-  const vault = useVaultPicker({
+  const filePicker = useFilePicker({
     isActive,
     hasMessages: messages.length > 0,
     chatInputRef,
@@ -339,7 +339,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       }
       if (e.altKey && e.key.toLowerCase() === "o") {
         e.preventDefault()
-        if (vault.vaultEnabled) vault.openVaultPicker()
+        if (filePicker.filesEnabled) filePicker.openFilePicker()
         return
       }
 
@@ -359,12 +359,12 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     return () => {
       window.removeEventListener("keydown", handler, true)
     }
-  }, [isActive, appMode, modals.isTitled, modals.handleQuickSave, modals.setSaveModalOpen, reset, commandBar.open, commandBar.submitCommand, commandBar.state.phase, messages, activeProject, chatId, branchMessageIdx, vault.vaultEnabled, vault.openVaultPicker])
+  }, [isActive, appMode, modals.isTitled, modals.handleQuickSave, modals.setSaveModalOpen, reset, commandBar.open, commandBar.submitCommand, commandBar.state.phase, messages, activeProject, chatId, branchMessageIdx, filePicker.filesEnabled, filePicker.openFilePicker])
 
   const runCommand = useCallback(async (command: string) => {
-    if (command === "/vault-load") {
+    if (command === "/files-load") {
       commandBar.close()
-      vault.openVaultPicker()
+      filePicker.openFilePicker()
       return
     }
     if (command === "/mindmap") {
@@ -384,18 +384,18 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       chatId,
       command,
     )
-  }, [commandBar.submitCommand, commandBar.close, messages, activeProject, chatId, branchMessageIdx, vault.openVaultPicker, modals.setMindmapModalOpen])
+  }, [commandBar.submitCommand, commandBar.close, messages, activeProject, chatId, branchMessageIdx, filePicker.openFilePicker, modals.setMindmapModalOpen])
 
   const commandItems = COMMANDS.filter((cmd) =>
-    (cmd.command !== "/vault-load" || vault.vaultEnabled) &&
+    (cmd.command !== "/files-load" || filePicker.filesEnabled) &&
     (cmd.command !== "/memorize-project" || activeProject != null)
   )
 
   const handleSend = useCallback(
     async (text: string, attachments: Attachment[]) => {
       const trimmed = text.trim()
-      if (trimmed === "/vault-load") {
-        vault.openVaultPicker()
+      if (trimmed === "/files-load") {
+        filePicker.openFilePicker()
         return
       }
       if (trimmed === "/mindmap" || trimmed.startsWith("/mindmap ")) {
@@ -443,7 +443,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
             slug: activeProject,
             downscaleImages: config.downscaleImages,
             baseParams: defaultSendParams(config, prompts, enabledTools),
-          }, parseFiles, attachFileVaultFile)
+          }, parseFiles, attachRootFile)
         } catch {
           updateLastAssistant(setMessages, m => ({ ...m, content: "Failed to parse attached documents. You can try again or re-upload the file." }))
           return
@@ -477,7 +477,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         void modals.handleAutosave(completion.messages, completion.usage)
       }
     },
-    [enabledTools, chatId, branchMessageIdx, activeProject, config, send, setMessages, commandBar.submitCommand, messages, vault.openVaultPicker, modals.handleMindmapSubmit, modals.handleAutosave, modals.setMindmapAttachments, modals.setMindmapModalOpen, persistToolArtifacts],
+    [enabledTools, chatId, branchMessageIdx, activeProject, config, send, setMessages, commandBar.submitCommand, messages, filePicker.openFilePicker, modals.handleMindmapSubmit, modals.handleAutosave, modals.setMindmapAttachments, modals.setMindmapModalOpen, persistToolArtifacts],
   )
 
   const handleRegenerate = useCallback(
@@ -555,7 +555,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       `attachment:${chatId}:${messageIndex}:${attachmentName}`,
       attachmentName,
       async () => {
-        // Vault refs have no upload copy — and the source file must never be deleted.
+        // File root refs have no upload copy — and the source file must never be deleted.
         if (!att.vaultPath) await deleteAttachment(chatId, attachmentName, activeProject)
       },
       () => patch(original.attachments!, original.hiddenContent),
@@ -595,8 +595,8 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     onRemoveAttachment: handleRemoveAttachment,
     onToggleAttachmentActive: handleToggleAttachmentActive,
     onAttachmentContentChange: handleAttachmentContentChange,
-    vaultEnabled: vault.vaultEnabled,
-    onOpenVault: vault.openVaultPicker,
+    filesEnabled: filePicker.filesEnabled,
+    onOpenFilePicker: filePicker.openFilePicker,
     documents: docs.mergedDocuments,
     onSelectDocument: docs.handleDocumentSelect,
     onAttachArchitecture: docs.handleAttachArchitecture,
@@ -607,14 +607,14 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     onRenameDocument: docs.handleRenameDocument,
     onDocumentSaved: docs.handleDocumentSaved,
     liveCanvasRef,
-    vaultPaths: docs.vaultDocPaths,
-    vaultEditingPath: vault.vaultEditPath,
-    onEditVaultDocument: vault.setVaultEditPath,
+    rootFilePaths: docs.rootDocPaths,
+    fileEditingPath: filePicker.fileEditPath,
+    onEditRootDocument: filePicker.setFileEditPath,
     editorModel: config.selectedModel,
   }), [
     handleRemoveAttachment, handleToggleAttachmentActive, handleAttachmentContentChange,
-    vault.vaultEnabled, vault.openVaultPicker, vault.vaultEditPath, vault.setVaultEditPath,
-    docs.handleDeleteDocument, docs.handleRenameDocument, docs.handleDocumentSaved, docs.vaultDocPaths,
+    filePicker.filesEnabled, filePicker.openFilePicker, filePicker.fileEditPath, filePicker.setFileEditPath,
+    docs.handleDeleteDocument, docs.handleRenameDocument, docs.handleDocumentSaved, docs.rootDocPaths,
     docs.handleAttachArchitecture, docs.architectureError,
     activeProject, config.selectedModel,
   ])
@@ -664,8 +664,9 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           onReset={reset}
           onMerge={(childFile) => doMergeBranch(childFile)}
           onCascadeDelete={handleCascadeDelete}
-          onVaultSelect={vault.handleVaultSelect}
-          onVaultsChanged={vault.refreshVaultList}
+          onFileSelect={filePicker.handleFileSelect}
+          onRootsChanged={filePicker.refreshFileList}
+          onDocumentsChanged={docs.refreshDocuments}
           activeCanvasPath={canvasSel?.path ?? null}
           onCanvasSelect={(path, scope) => { setArchitecturePath(null); setCanvasSel({ path, scope }) }}
           onCanvasDeleted={(path) => setCanvasSel((s) => (s?.path === path ? null : s))}
@@ -746,25 +747,25 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
               onClose={() => { setOCRImage(null); toggleOCR() }}
             />
           )}
-          {isActive && vault.vaultEditPath && (
+          {isActive && filePicker.fileEditPath && (
             <DocumentEditor
-              path={vault.vaultEditPath}
+              path={filePicker.fileEditPath}
               slug=""
               overlay
-              persistOverride={(content) => writeFileVaultFile(vault.vaultEditPath!, content)}
-              onClose={() => vault.setVaultEditPath(null)}
+              persistOverride={(content) => writeRootFile(filePicker.fileEditPath!, content)}
+              onClose={() => filePicker.setFileEditPath(null)}
               onModeLabel={onModeLabel}
-              onNavigate={vault.setVaultEditPath}
+              onNavigate={filePicker.setFileEditPath}
               model={config.selectedModel}
             />
           )}
-          {isActive && vault.vaultPdfPath && (
+          {isActive && filePicker.filePdfPath && (
             <div className="absolute inset-0 z-50 flex flex-col bg-paper">
               <div className="flex h-9 shrink-0 items-center border-b border-divider/50 px-4">
-                <span className="truncate text-xs font-medium text-ink">{vault.vaultPdfPath.split("/").pop()}</span>
+                <span className="truncate text-xs font-medium text-ink">{filePicker.filePdfPath.split("/").pop()}</span>
               </div>
               <div className="min-h-0 flex-1">
-                <LazyPdfViewer url={fileViewerRawUrl(vault.vaultPdfPath)} />
+                <LazyPdfViewer url={fileViewerRawUrl(filePicker.filePdfPath)} />
               </div>
             </div>
           )}
@@ -774,12 +775,12 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       <CreateDocumentPanel open={docs.createDocOpen} onClose={() => docs.setCreateDocOpen(false)} onCreate={docs.handleCreateDocument} />
       <MindmapModal open={modals.mindmapModalOpen} onClose={() => modals.setMindmapModalOpen(false)} onGenerate={(prompt) => modals.handleMindmapSubmit(prompt, modals.mindmapAttachments)} />
       <PromptEditor open={modals.promptEditorOpen} onClose={() => modals.setPromptEditorOpen(false)} onPromptsChanged={setPrompts} />
-      {isActive && vault.vaultPickerOpen && vault.vaultEnabled && (
+      {isActive && filePicker.filePickerOpen && filePicker.filesEnabled && (
         <FileViewer
-          files={vault.vaultFiles.map((f) => f.path)}
-          onSelect={vault.handleVaultSelect}
-          onClose={() => vault.setVaultPickerOpen(false)}
-          placeholder="Search vaults…"
+          files={filePicker.pickerFiles.map((f) => f.path)}
+          onSelect={filePicker.handleFileSelect}
+          onClose={() => filePicker.setFilePickerOpen(false)}
+          placeholder="Search files…"
           emptyLabel="No files"
         />
       )}

@@ -16,9 +16,9 @@ const api = vi.hoisted(() => ({
 }))
 vi.mock("@/lib/api", () => ({
   ...api,
-  addFileVaultMountpoint: vi.fn(), addFileVaultRoot: vi.fn(), createDirectory: vi.fn(), moveHistoryItem: vi.fn(),
-  fileVaultTree: vi.fn(async () => ({ tree: [] })), removeFileVaultRoot: vi.fn(), moveDocument: vi.fn(),
-  removeDocument: vi.fn(), writeDocument: vi.fn(), Vault: class {},
+  addFileRootMountpoint: vi.fn(), addFileRoot: vi.fn(), createDirectory: vi.fn(), moveHistoryItem: vi.fn(),
+  fileRootTree: vi.fn(async () => ({ tree: [] })), removeFileRoot: vi.fn(), moveDocument: vi.fn(),
+  removeDocument: vi.fn(), writeDocument: vi.fn(), HistoryFolder: class {},
 }))
 vi.mock("@/contexts/SidebarContext", () => ({
   useSidebar: () => ({

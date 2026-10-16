@@ -1,4 +1,4 @@
-"""Document routes — the vault-tree document feature.
+"""Document routes — the file-tree document feature.
 
 A *document* is a file a project references, stored as a database-native
 logical key in ``project.json``'s ``files`` list. The add/upload flow tidies

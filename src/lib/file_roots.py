@@ -1,17 +1,17 @@
-"""Access seam for file vaults — directories of Attachment-compatible files.
+"""Access seam for file roots — directories of Attachment-compatible files.
 
-A user can register several vault roots (an Obsidian vault is just one flavor
-of file vault). The list of roots is the single source of truth for vault
+A user can register several file roots (an Obsidian vault is just one flavor
+of file root). The list of roots is the single source of truth for file
 locations (nothing is configured in ``config.py``): it lives in ``vault_roots``
-rows for the authenticated user. With no registry the vault is simply empty
-until the user adds a root.
+rows for the authenticated user. With no registry the roots are simply empty
+until the user adds one.
 
 Each root may carry additional **mountpoints** — external directories (e.g. a
-``/mnt`` drive) attached to that vault. Mountpoint files appear as folder nodes
-inside the parent vault's tree rather than as separate top-level vaults, so a
-mounted drive is browsed as part of the vault it was attached to.
+``/mnt`` drive) attached to that root. Mountpoint files appear as folder nodes
+inside the parent root's tree rather than as separate top-level roots, so a
+mounted drive is browsed as part of the root it was attached to.
 
-Vault files are used as **live references**: attaching one to a chat stores its
+Root files are used as **live references**: attaching one to a chat stores its
 path, never a copy — edits through the app write back to the actual file.
 
 All paths handed to the UI are absolute, and every read/write is validated to
@@ -35,7 +35,7 @@ from psycopg_pool import ConnectionPool
 _SKIP_DIRS = {".obsidian", ".trash", ".git", "node_modules"}
 _IMG_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp"})
 # Attachment-compatible file types surfaced by listings.
-VAULT_SUFFIXES = frozenset({".md", ".txt", ".tex", ".pdf"})
+FILE_SUFFIXES = frozenset({".md", ".txt", ".tex", ".pdf"})
 
 
 def _is_untitled(name: str) -> bool:
@@ -43,8 +43,8 @@ def _is_untitled(name: str) -> bool:
     return Path(name).stem.lower().startswith("untitled")
 
 
-class VaultRootRepository(Protocol):
-    """Where the *root registry* lives. Vault file contents never pass through here."""
+class FileRootRepository(Protocol):
+    """Where the *root registry* lives. File root file contents never pass through here."""
 
     def load(self) -> list[object]:
         """Registered roots in registration order, in the JSON config's entry shape."""
@@ -53,10 +53,10 @@ class VaultRootRepository(Protocol):
         """Replace the registry with *roots* (``path``, ``mountpoints``, optional ``project``)."""
 
 
-class PostgresVaultRootRepository:
+class PostgresFileRootRepository:
     """The registry is ``vault_roots`` rows for one authenticated user.
 
-    Stored paths are whatever spelling the caller registered; ``FileVault``
+    Stored paths are whatever spelling the caller registered; ``FileRoots``
     re-resolves them on load, so a row migrated from another host is resolved
     against *this* host's filesystem.
     """
@@ -89,7 +89,7 @@ class PostgresVaultRootRepository:
     def save(self, roots: list[dict[str, object]]) -> None:
         # ponytail: whole-registry replace, mirroring the JSON file it replaces —
         # one statement per root. A user keeps a handful of roots; if that ever
-        # grows, give FileVault per-root add/remove hooks instead of diffing here.
+        # grows, give FileRoots per-root add/remove hooks instead of diffing here.
         paths = [str(root["path"]) for root in roots]
         with self._pool.connection() as connection, connection.transaction():
             for root in roots:
@@ -115,14 +115,14 @@ class PostgresVaultRootRepository:
                 self._change(connection, path, "delete")
 
 
-class FileVault:
-    """All access to the user's file-vault roots goes through this class."""
+class FileRoots:
+    """All access to the user's file-root roots goes through this class."""
 
-    def __init__(self, *, repository: VaultRootRepository) -> None:
+    def __init__(self, *, repository: FileRootRepository) -> None:
         self._repository = repository
         self._roots: list[Path] = []
         self._mountpoints: dict[Path, list[Path]] = defaultdict(list)
-        # A root may be mounted to a project (slug) instead of the global Vaults section.
+        # A root may be mounted to a project (slug) instead of the global Files section.
         self._project_tags: dict[Path, str] = {}
         self._reload()
 
@@ -198,35 +198,35 @@ class FileVault:
 
     # ─── mountpoint management ───
 
-    def mountpoints(self, vault_path: str) -> list[str]:
-        resolved = Path(vault_path).expanduser().resolve()
+    def mountpoints(self, root_path: str) -> list[str]:
+        resolved = Path(root_path).expanduser().resolve()
         return [str(m) for m in self._mountpoints.get(resolved, [])]
 
-    def add_mountpoint(self, vault_path: str, mountpoint_path: str) -> None:
-        vault = Path(vault_path).expanduser().resolve()
-        if vault not in self._roots:
-            raise ValueError(f"Unknown vault: {vault_path}")
+    def add_mountpoint(self, root_path: str, mountpoint_path: str) -> None:
+        root = Path(root_path).expanduser().resolve()
+        if root not in self._roots:
+            raise ValueError(f"Unknown file root: {root_path}")
         mountpoint = Path(mountpoint_path).expanduser().resolve()
         if not mountpoint.is_dir():
             raise ValueError(f"Not a directory: {mountpoint_path}")
-        if mountpoint == vault:
-            raise ValueError("Mountpoint cannot be the vault itself")
-        # Reject if this path is already a root or a mountpoint of another vault.
+        if mountpoint == root:
+            raise ValueError("Mountpoint cannot be the file root itself")
+        # Reject if this path is already a root or a mountpoint of another file root.
         if mountpoint in self._roots:
-            raise ValueError(f"Already a vault root: {mountpoint_path}")
+            raise ValueError(f"Already a file root: {mountpoint_path}")
         for v, mps in self._mountpoints.items():
-            if v != vault and mountpoint in mps:
-                raise ValueError(f"Already mounted under another vault: {mountpoint_path}")
-        if mountpoint not in self._mountpoints[vault]:
-            self._mountpoints[vault].append(mountpoint)
+            if v != root and mountpoint in mps:
+                raise ValueError(f"Already mounted under another file root: {mountpoint_path}")
+        if mountpoint not in self._mountpoints[root]:
+            self._mountpoints[root].append(mountpoint)
             self._save_roots()
 
-    def remove_mountpoint(self, vault_path: str, mountpoint_path: str) -> None:
-        vault = Path(vault_path).expanduser().resolve()
+    def remove_mountpoint(self, root_path: str, mountpoint_path: str) -> None:
+        root = Path(root_path).expanduser().resolve()
         mountpoint = Path(mountpoint_path).expanduser().resolve()
-        self._mountpoints[vault] = [m for m in self._mountpoints.get(vault, []) if m != mountpoint]
-        if not self._mountpoints[vault]:
-            self._mountpoints.pop(vault, None)
+        self._mountpoints[root] = [m for m in self._mountpoints.get(root, []) if m != mountpoint]
+        if not self._mountpoints[root]:
+            self._mountpoints.pop(root, None)
         self._save_roots()
 
     # ─── path safety ───
@@ -240,7 +240,7 @@ class FileVault:
         for mountpoint in self._all_mountpoints():
             if target.is_relative_to(mountpoint):
                 return target
-        raise ValueError(f"Path outside vault roots: {path}")
+        raise ValueError(f"Path outside file roots: {path}")
 
     def contains(self, abs_path: Path) -> bool:
         try:
@@ -252,7 +252,7 @@ class FileVault:
     # ─── listing ───
 
     def list_files(self) -> list[dict[str, str]]:
-        """Flat list of every vault file as ``{path, name}`` (absolute paths), Untitled filtered.
+        """Flat list of every file-root file as ``{path, name}`` (absolute paths), Untitled filtered.
 
         Kept for the picker/attach flow, which wants a flat, searchable list
         rather than the nested tree.
@@ -265,10 +265,10 @@ class FileVault:
         return files
 
     def list_files_for_project(self, slug: str) -> list[dict[str, str]]:
-        """Flat ``{path, name}`` list of files under vaults mounted to *slug*.
+        """Flat ``{path, name}`` list of files under file roots mounted to *slug*.
 
-        Includes files from each such vault's mountpoints so a mounted drive's
-        contents surface alongside the vault's own files.
+        Includes files from each such file root's mountpoints so a mounted drive's
+        contents surface alongside the file root's own files.
         """
         files: list[dict[str, str]] = []
         for root in self._roots:
@@ -286,7 +286,7 @@ class FileVault:
     @staticmethod
     def _collect_files(base: Path, out: list[dict[str, str]]) -> None:
         for path in base.rglob("*"):
-            if not path.is_file() or path.suffix.lower() not in VAULT_SUFFIXES:
+            if not path.is_file() or path.suffix.lower() not in FILE_SUFFIXES:
                 continue
             rel = path.relative_to(base)
             if any(part in _SKIP_DIRS for part in rel.parts):
@@ -295,13 +295,26 @@ class FileVault:
                 continue
             out.append({"path": str(path), "name": path.name})
 
-    def tree(self) -> list[dict]:
-        """Nested folder/file tree per root for the sidebar VaultTree.
+    def files_under(self, paths: list[str]) -> list[Path]:
+        """Valid files among *paths*, expanding folders recursively. Deduplicated, order kept."""
+        found: dict[Path, None] = {}
+        for path in paths:
+            target = self._root_for(path)
+            if target.is_dir():
+                entries: list[dict[str, str]] = []
+                self._collect_files(target, entries)
+                found.update(dict.fromkeys(Path(entry["path"]) for entry in entries))
+            elif target.is_file() and target.suffix.lower() in FILE_SUFFIXES:
+                found[target] = None
+        return list(found)
 
-        Each root is a ``vault`` node; directories are ``folder`` nodes,
-        Attachment-compatible files are ``file`` leaves. Empty folders (no vault
-        files underneath) are pruned. Mountpoints attached to a vault appear as
-        folder nodes inside that vault.
+    def tree(self) -> list[dict]:
+        """Nested folder/file tree per root for the sidebar FileTree.
+
+        Each root is a ``file root`` node; directories are ``folder`` nodes,
+        Attachment-compatible files are ``file`` leaves. Empty folders (no file root
+        files underneath) are pruned. Mountpoints attached to a file root appear as
+        folder nodes inside that file root.
         """
         out: list[dict] = []
         for root in self._roots:
@@ -320,7 +333,7 @@ class FileVault:
             out.append({
                 "name": root.name,
                 "path": str(root),
-                "type": "vault",
+                "type": "root",
                 "project": self._project_tags.get(root),
                 "children": children,
             })
@@ -338,9 +351,9 @@ class FileVault:
                 continue
             if entry.is_dir():
                 sub = self._build_children(entry)
-                if sub:  # prune folders with no vault files
+                if sub:  # prune folders with no file-root files
                     children.append({"name": entry.name, "path": str(entry), "type": "folder", "children": sub})
-            elif entry.is_file() and entry.suffix.lower() in VAULT_SUFFIXES and not _is_untitled(entry.name):
+            elif entry.is_file() and entry.suffix.lower() in FILE_SUFFIXES and not _is_untitled(entry.name):
                 children.append({"name": entry.stem, "path": str(entry), "type": "file"})
         return children
 
@@ -352,17 +365,17 @@ class FileVault:
         return resolved
 
     def read(self, path: str) -> str:
-        """Return the text content of a vault file."""
+        """Return the text content of a file-root file."""
         return self.resolve(path).read_text(encoding="utf-8")
 
     def write(self, path: str, content: str) -> None:
-        """Overwrite a vault file in place (validated under a vault root)."""
+        """Overwrite a file-root file in place (validated under a file root)."""
         resolved = self._root_for(path)
         resolved.write_text(content, encoding="utf-8")
 
     # ─── wiki-link resolution ───
 
-    def find_in_vault(self, name: str, source_dir: Path | None = None) -> Path | None:
+    def find_in_roots(self, name: str, source_dir: Path | None = None) -> Path | None:
         """Find a file by name. Checks source directory first, then all roots."""
         # ponytail: rglob(name) — breaks if name has glob metacharacters
         name = name.split("#")[0].strip()
@@ -395,7 +408,7 @@ class FileVault:
         source_dir = Path(source_path).parent
 
         def _resolve(name: str) -> Path | None:
-            return self.find_in_vault(name, source_dir)
+            return self.find_in_roots(name, source_dir)
 
         def _repl_embed(m: re.Match[str]) -> str:
             name = m.group(1).split("|")[0].strip()
@@ -404,7 +417,7 @@ class FileVault:
                 return m.group(0)
             if found.suffix.lower() in _IMG_SUFFIXES:
                 return f"![{name}](/api/fileviewer/raw?path={_url_quote(str(found))})"
-            return f"[{name}](#vault:{_url_quote(str(found))})"
+            return f"[{name}](#file:{_url_quote(str(found))})"
 
         content = re.sub(r"!\[\[([^\]]+)\]\]", _repl_embed, content)
 
@@ -414,7 +427,7 @@ class FileVault:
             display = parts[1].strip() if len(parts) > 1 else name
             found = _resolve(name)
             if found:
-                return f"[{display}](#vault:{_url_quote(str(found))})"
+                return f"[{display}](#file:{_url_quote(str(found))})"
             return f"[{display}](#)"
 
         content = re.sub(r"\[\[([^\]]+)\]\]", _repl_link, content)

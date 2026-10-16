@@ -1,4 +1,4 @@
-import type { Attachment, ProjectDocument, Usage, VaultFile } from "@/lib/types"
+import type { Attachment, ProjectDocument, Usage, RootFile } from "@/lib/types"
 
 /**
  * Centralised mock for `@/lib/api`. Every hook test overrides only the
@@ -13,10 +13,10 @@ import type { Attachment, ProjectDocument, Usage, VaultFile } from "@/lib/types"
 type AnyFn = (...args: any[]) => any
 
 interface Impl {
-  listFileVaultFiles: AnyFn
-  attachFileVaultFile: AnyFn
+  listRootFiles: AnyFn
+  attachRootFile: AnyFn
   listProjectDocuments: AnyFn
-  listProjectVaultDocuments: AnyFn
+  listProjectRootDocuments: AnyFn
   listAllDocuments: AnyFn
   addDocument: AnyFn
   removeDocument: AnyFn
@@ -35,10 +35,10 @@ interface Impl {
 const noop = async () => undefined
 
 const defaults: Impl = {
-  listFileVaultFiles: async () => ({ enabled: false, files: [] as VaultFile[] }),
-  attachFileVaultFile: async () => ({ name: "att", mime: "text/plain", url: "u", active: true }),
+  listRootFiles: async () => ({ enabled: false, files: [] as RootFile[] }),
+  attachRootFile: async () => ({ name: "att", mime: "text/plain", url: "u", active: true }),
   listProjectDocuments: async () => [] as ProjectDocument[],
-  listProjectVaultDocuments: async () => [] as ProjectDocument[],
+  listProjectRootDocuments: async () => [] as ProjectDocument[],
   listAllDocuments: async () => [] as ProjectDocument[],
   addDocument: noop,
   removeDocument: noop,
@@ -63,10 +63,10 @@ const impls: Impl = { ...defaults }
 export const __setImpl = <K extends keyof Impl>(key: K, fn: Impl[K]) => { impls[key] = fn }
 export const __resetImpls = () => Object.assign(impls, defaults)
 
-export const listFileVaultFiles = (...a: Parameters<Impl["listFileVaultFiles"]>) => impls.listFileVaultFiles(...a)
-export const attachFileVaultFile = (...a: Parameters<Impl["attachFileVaultFile"]>) => impls.attachFileVaultFile(...a)
+export const listRootFiles = (...a: Parameters<Impl["listRootFiles"]>) => impls.listRootFiles(...a)
+export const attachRootFile = (...a: Parameters<Impl["attachRootFile"]>) => impls.attachRootFile(...a)
 export const listProjectDocuments = (...a: Parameters<Impl["listProjectDocuments"]>) => impls.listProjectDocuments(...a)
-export const listProjectVaultDocuments = (...a: Parameters<Impl["listProjectVaultDocuments"]>) => impls.listProjectVaultDocuments(...a)
+export const listProjectRootDocuments = (...a: Parameters<Impl["listProjectRootDocuments"]>) => impls.listProjectRootDocuments(...a)
 export const listAllDocuments = (...a: Parameters<Impl["listAllDocuments"]>) => impls.listAllDocuments(...a)
 export const addDocument = (...a: Parameters<Impl["addDocument"]>) => impls.addDocument(...a)
 export const removeDocument = (...a: Parameters<Impl["removeDocument"]>) => impls.removeDocument(...a)

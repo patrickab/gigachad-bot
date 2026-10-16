@@ -13,22 +13,22 @@ export interface Attachment {
   content?: string
   parsedMd?: string
   active: boolean
-  /** Live reference to a FileVault file — no upload copy exists; edits write back to this path. */
+  /** Live reference to a FileRoots file — no upload copy exists; edits write back to this path. */
   vaultPath?: string
 }
 
-export interface VaultFile {
+export interface RootFile {
   path: string
   name: string
 }
 
-export interface VaultNode {
+export interface FileTreeNode {
   name: string
   path: string
-  type: "vault" | "folder" | "file"
-  /** Project slug this root is mounted to; null/absent = global Vaults section. */
+  type: "root" | "folder" | "file"
+  /** Project slug this root is mounted to; null/absent = global Files section. */
   project?: string | null
-  children?: VaultNode[]
+  children?: FileTreeNode[]
 }
 
 export interface ProjectDocument {

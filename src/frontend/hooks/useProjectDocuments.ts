@@ -10,11 +10,11 @@ import {
   createArchitectureSource,
   deleteArchitectureSources,
   attachDocument,
-  attachFileVaultFile,
+  attachRootFile,
   fileViewerRawUrl,
   listAllDocuments,
   listProjectDocuments,
-  listProjectVaultDocuments,
+  listProjectRootDocuments,
   loadFileViewerText,
   removeDocument,
   uploadDocument,
@@ -66,37 +66,37 @@ export function useProjectDocuments({
   const [createDocOpen, setCreateDocOpen] = useState(false)
   const [projectDocuments, setProjectDocuments] = useState<ProjectDocument[]>([])
   const [architectureError, setArchitectureError] = useState("")
-  const [vaultProjectDocs, setVaultProjectDocs] = useState<ProjectDocument[]>([])
+  const [rootProjectDocs, setRootProjectDocs] = useState<ProjectDocument[]>([])
   const [allDocuments, setAllDocuments] = useState<ProjectDocument[]>([])
 
-  // A path is "vault-surfaced" only when it's not already a project file — a
-  // promoted vault PDF that's also in the project behaves as a project doc
+  // A path is "root-surfaced" only when it's not already a project file — a
+  // promoted file root PDF that's also in the project behaves as a project doc
   // (deletable, library attach), and the merged list shows it just once.
-  const vaultDocPaths = useMemo(() => {
+  const rootDocPaths = useMemo(() => {
     const projectPaths = new Set(projectDocuments.map((d) => d.path))
-    return new Set(vaultProjectDocs.filter((d) => !projectPaths.has(d.path)).map((d) => d.path))
-  }, [projectDocuments, vaultProjectDocs])
-  // Merge library/project docs with vault docs, deduping by path so a PDF that
-  // exists both in the project files and in a mounted vault (or was promoted
+    return new Set(rootProjectDocs.filter((d) => !projectPaths.has(d.path)).map((d) => d.path))
+  }, [projectDocuments, rootProjectDocs])
+  // Merge library/project docs with file root docs, deduping by path so a PDF that
+  // exists both in the project files and in a mounted file root (or was promoted
   // into the cloud library) appears exactly once — library/cloud wins. Documents
   // whose deletion is pending (`handleDeleteDocument`) are hidden.
   const mergedDocuments = useMemo(() => {
     const seen = new Set<string>()
     const out: ProjectDocument[] = []
-    for (const d of [...projectDocuments, ...vaultProjectDocs]) {
+    for (const d of [...projectDocuments, ...rootProjectDocs]) {
       if (seen.has(d.path) || pending(`document:${activeProject}:${d.path}`)) continue
       seen.add(d.path)
       out.push(d)
     }
     return out
-  }, [projectDocuments, vaultProjectDocs, activeProject, pending])
+  }, [projectDocuments, rootProjectDocs, activeProject, pending])
   const architectureSources = useMemo(() => projectDocuments.filter((document) => isArchitecturePath(document.path)), [projectDocuments])
 
   const handleDocumentSelect = useCallback(async (path: string) => {
     setDocumentOpen(false)
-    if (vaultDocPaths.has(path)) {
+    if (rootDocPaths.has(path)) {
       setExtracting((n) => n + 1)
-      try { chatInputRef.current?.addAttachment(await attachFileVaultFile(path)) } catch { /* */ }
+      try { chatInputRef.current?.addAttachment(await attachRootFile(path)) } catch { /* */ }
       finally { setExtracting((n) => n - 1) }
       return
     }
@@ -120,15 +120,15 @@ export function useProjectDocuments({
       try { chatInputRef.current?.addAttachment(await attachDocument(chatId, path, activeProject)) } catch { /* */ }
       finally { setExtracting((n) => n - 1) }
     }
-  }, [chatId, activeProject, vaultDocPaths, chatInputRef, liveCanvasRef, setExtracting])
+  }, [chatId, activeProject, rootDocPaths, chatInputRef, liveCanvasRef, setExtracting])
 
   const loadProjectDocs = useCallback(() => {
     if (activeProject) {
       listProjectDocuments(activeProject).then(setProjectDocuments).catch(() => {})
-      listProjectVaultDocuments(activeProject).then(setVaultProjectDocs).catch(() => setVaultProjectDocs([]))
+      listProjectRootDocuments(activeProject).then(setRootProjectDocs).catch(() => setRootProjectDocs([]))
     } else {
       setProjectDocuments([])
-      setVaultProjectDocs([])
+      setRootProjectDocs([])
     }
   }, [activeProject])
 
@@ -212,12 +212,12 @@ export function useProjectDocuments({
 
   const handleRenameDocument = useCallback(async (path: string, name: string) => {
     // Architecture sources are named by their path inside the workspace; there is no rename for them.
-    if (!activeProject || vaultDocPaths.has(path) || isArchitecturePath(path)) return
+    if (!activeProject || rootDocPaths.has(path) || isArchitecturePath(path)) return
     try {
       await renameDocument(activeProject, path, name)
       refreshDocuments()
     } catch { /* the stored name stays authoritative when rename fails */ }
-  }, [activeProject, vaultDocPaths, refreshDocuments])
+  }, [activeProject, rootDocPaths, refreshDocuments])
 
   useEffect(() => {
     if (!isActive || appMode === "canvas") return
@@ -241,7 +241,7 @@ export function useProjectDocuments({
     setCreateDocOpen,
     projectDocuments,
     allDocuments,
-    vaultDocPaths,
+    rootDocPaths,
     mergedDocuments,
     architectureError,
     /** Absent while the project has no architecture sources to attach. */

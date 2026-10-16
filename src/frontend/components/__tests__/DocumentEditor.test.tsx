@@ -4,7 +4,7 @@ import { DocumentEditor } from "@/components/DocumentEditor"
 
 const api = vi.hoisted(() => ({
   loadFileViewerText: vi.fn(),
-  readFileVaultRendered: vi.fn(),
+  readFileRootRendered: vi.fn(),
   writeDocument: vi.fn(),
   writeBinaryDocument: vi.fn(),
   storeDrawing: vi.fn(),
@@ -58,12 +58,12 @@ describe("DocumentEditor canvas collaboration", () => {
     })
   })
 
-  it("keeps vault canvases on the file-viewer load and persistOverride save path", async () => {
-    api.loadFileViewerText.mockResolvedValueOnce(JSON.stringify({ version: 1, frames: [], strokes: [{ id: "s", points: [["vault"]], color: "#000", width: 2 }], attachments: [], texts: [] }))
+  it("keeps file root canvases on the file-viewer load and persistOverride save path", async () => {
+    api.loadFileViewerText.mockResolvedValueOnce(JSON.stringify({ version: 1, frames: [], strokes: [{ id: "s", points: [["root"]], color: "#000", width: 2 }], attachments: [], texts: [] }))
     const persistOverride = vi.fn().mockResolvedValue(undefined)
     const { unmount } = render(<DocumentEditor path="notes/sketch.canvas" slug="" overlay persistOverride={persistOverride} onClose={vi.fn()} />)
 
-    expect(await screen.findByTestId("canvas")).toHaveTextContent("vault")
+    expect(await screen.findByTestId("canvas")).toHaveTextContent("root")
     expect(collaboration.useCollaborativeCanvas).not.toHaveBeenCalledWith("notes/sketch.canvas")
 
     fireEvent.click(screen.getByTestId("canvas"))

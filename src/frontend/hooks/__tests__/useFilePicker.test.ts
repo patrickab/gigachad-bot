@@ -5,25 +5,25 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 // mutate it via `apiMock.__setImpl`.
 const { impls } = vi.hoisted(() => ({
   impls: {
-    listFileVaultFiles: async () => ({ enabled: false, files: [] }),
-    attachFileVaultFile: async () => ({ name: "att", mime: "text/plain", url: "u", active: true }),
+    listRootFiles: async () => ({ enabled: false, files: [] }),
+    attachRootFile: async () => ({ name: "att", mime: "text/plain", url: "u", active: true }),
   } as Record<string, (...a: any[]) => any>,
 }))
 
 vi.mock("@/lib/api", () => ({
   __setImpl: (k: string, fn: any) => { impls[k] = fn },
   __resetImpls: () => {
-    impls.listFileVaultFiles = async () => ({ enabled: false, files: [] })
-    impls.attachFileVaultFile = async () => ({ name: "att", mime: "text/plain", url: "u", active: true })
+    impls.listRootFiles = async () => ({ enabled: false, files: [] })
+    impls.attachRootFile = async () => ({ name: "att", mime: "text/plain", url: "u", active: true })
   },
-  listFileVaultFiles: (...a: any[]) => impls.listFileVaultFiles(...a),
-  attachFileVaultFile: (...a: any[]) => impls.attachFileVaultFile(...a),
+  listRootFiles: (...a: any[]) => impls.listRootFiles(...a),
+  attachRootFile: (...a: any[]) => impls.attachRootFile(...a),
 }))
 
 import * as apiMock from "@/lib/api"
 import type { ChatInputHandle } from "@/components/ChatInput"
 
-import { useVaultPicker } from "@/hooks/useVaultPicker"
+import { useFilePicker } from "@/hooks/useFilePicker"
 import { renderHook, act, waitFor } from "@testing-library/react"
 
 function makeChatInputRef(handle: Partial<ChatInputHandle> = {}) {
@@ -33,16 +33,16 @@ function makeChatInputRef(handle: Partial<ChatInputHandle> = {}) {
 beforeEach(() => (apiMock as any).__resetImpls())
 afterEach(() => vi.useRealTimers())
 
-describe("useVaultPicker", () => {
-  it("loads vault files on mount", async () => {
+describe("useFilePicker", () => {
+  it("loads file-root files on mount", async () => {
     const listSpy = vi.fn(async () => ({
       enabled: true,
       files: [{ path: "v/a.txt", name: "a.txt" }],
     }))
-    ;(apiMock as any).__setImpl("listFileVaultFiles", listSpy)
+    ;(apiMock as any).__setImpl("listRootFiles", listSpy)
 
     const { result } = renderHook(() =>
-      useVaultPicker({
+      useFilePicker({
         isActive: true,
         hasMessages: false,
         chatInputRef: makeChatInputRef(),
@@ -50,14 +50,14 @@ describe("useVaultPicker", () => {
       }),
     )
 
-    await waitFor(() => expect(result.current.vaultEnabled).toBe(true))
-    expect(result.current.vaultFiles).toHaveLength(1)
+    await waitFor(() => expect(result.current.filesEnabled).toBe(true))
+    expect(result.current.pickerFiles).toHaveLength(1)
     expect(listSpy).toHaveBeenCalledOnce()
   })
 
   it("opens standalone PDF view when chat is empty", async () => {
     const { result } = renderHook(() =>
-      useVaultPicker({
+      useFilePicker({
         isActive: true,
         hasMessages: false,
         chatInputRef: makeChatInputRef(),
@@ -66,17 +66,17 @@ describe("useVaultPicker", () => {
     )
 
     await act(async () => {
-      await result.current.handleVaultSelect("vault/report.pdf")
+      await result.current.handleFileSelect("vault/report.pdf")
     })
 
-    expect(result.current.vaultPdfPath).toBe("vault/report.pdf")
-    expect(result.current.vaultEditPath).toBeNull()
-    expect(result.current.vaultPickerOpen).toBe(false)
+    expect(result.current.filePdfPath).toBe("vault/report.pdf")
+    expect(result.current.fileEditPath).toBeNull()
+    expect(result.current.filePickerOpen).toBe(false)
   })
 
   it("opens text editor standalone when chat is empty", async () => {
     const { result } = renderHook(() =>
-      useVaultPicker({
+      useFilePicker({
         isActive: true,
         hasMessages: false,
         chatInputRef: makeChatInputRef(),
@@ -85,11 +85,11 @@ describe("useVaultPicker", () => {
     )
 
     await act(async () => {
-      await result.current.handleVaultSelect("vault/notes.md")
+      await result.current.handleFileSelect("vault/notes.md")
     })
 
-    expect(result.current.vaultEditPath).toBe("vault/notes.md")
-    expect(result.current.vaultPdfPath).toBeNull()
+    expect(result.current.fileEditPath).toBe("vault/notes.md")
+    expect(result.current.filePdfPath).toBeNull()
   })
 
   it("stages attachment on chat input when conversation is active", async () => {
@@ -102,11 +102,11 @@ describe("useVaultPicker", () => {
       active: true,
       vaultPath: "vault/v.txt",
     }))
-    ;(apiMock as any).__setImpl("attachFileVaultFile", attachSpy)
+    ;(apiMock as any).__setImpl("attachRootFile", attachSpy)
 
     const setExtracting = vi.fn()
     const { result } = renderHook(() =>
-      useVaultPicker({
+      useFilePicker({
         isActive: true,
         hasMessages: true,
         chatInputRef,
@@ -115,20 +115,20 @@ describe("useVaultPicker", () => {
     )
 
     await act(async () => {
-      await result.current.handleVaultSelect("vault/v.txt")
+      await result.current.handleFileSelect("vault/v.txt")
     })
 
     expect(attachSpy).toHaveBeenCalledWith("vault/v.txt")
     expect(addAttachment).toHaveBeenCalledOnce()
-    expect(result.current.vaultPdfPath).toBeNull()
-    expect(result.current.vaultEditPath).toBeNull()
+    expect(result.current.filePdfPath).toBeNull()
+    expect(result.current.fileEditPath).toBeNull()
     // extracting counter bumped up then back down (functional updates).
     expect(setExtracting).toHaveBeenCalledTimes(2)
   })
 
   it("Escape closes the standalone PDF viewer when active", async () => {
     const { result } = renderHook(() =>
-      useVaultPicker({
+      useFilePicker({
         isActive: true,
         hasMessages: false,
         chatInputRef: makeChatInputRef(),
@@ -137,13 +137,13 @@ describe("useVaultPicker", () => {
     )
 
     await act(async () => {
-      await result.current.handleVaultSelect("v/x.pdf")
+      await result.current.handleFileSelect("v/x.pdf")
     })
-    expect(result.current.vaultPdfPath).toBe("v/x.pdf")
+    expect(result.current.filePdfPath).toBe("v/x.pdf")
 
     await act(() => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))
     })
-    expect(result.current.vaultPdfPath).toBeNull()
+    expect(result.current.filePdfPath).toBeNull()
   })
 })

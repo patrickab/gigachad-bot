@@ -28,7 +28,7 @@ describe("normalizeAttachment", () => {
     )
   })
 
-  it("rebases a vault attachment's fileviewer URL, preserving its query", () => {
+  it("rebases a file root attachment's fileviewer URL, preserving its query", () => {
     setApiBase("https://gigachad-backend.tail8cc40f.ts.net/api")
     const stale: Attachment = {
       name: "doc.pdf",

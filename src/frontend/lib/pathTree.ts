@@ -4,8 +4,8 @@
  *
  * Built in a single O(total segments) pass, then single-child/no-file chains are
  * collapsed so the tree opens at the *common root* and only branches where the
- * paths actually diverge. This generalises cleanly: one vault collapses to its
- * root folder; multiple vaults (or any unrelated roots) surface as sibling
+ * paths actually diverge. This generalises cleanly: one file root collapses to its
+ * root folder; multiple file roots (or any unrelated roots) surface as sibling
  * entries under their lowest common ancestor.
  */
 

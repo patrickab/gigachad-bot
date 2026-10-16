@@ -18,7 +18,7 @@ from lib.agent_sandbox_adapter import AgentSandboxRunnerAdapter, FakeSandboxRunn
 from lib.asset_store import AssetStore
 from lib.chat_store import ChatStore
 from lib.data_store import DataStore
-from lib.file_vault import FileVault, PostgresVaultRootRepository
+from lib.file_roots import FileRoots, PostgresFileRootRepository
 from lib.memory_store import MemoryStore
 from lib.model_provider_store import ModelProviderStore
 from lib.project_store import ProjectStore
@@ -95,9 +95,9 @@ def get_memory_store(identity: RequestIdentity = Depends(get_request_identity)) 
     return MemoryStore(data_store=_store(identity), model=defaults["memory_model"])
 
 
-def get_file_vault(identity: RequestIdentity = Depends(get_request_identity)) -> FileVault:
-    repository = PostgresVaultRootRepository(get_postgres_pool(), identity.user_id, device_id=identity.device_id)
-    return FileVault(repository=repository)
+def get_file_roots(identity: RequestIdentity = Depends(get_request_identity)) -> FileRoots:
+    repository = PostgresFileRootRepository(get_postgres_pool(), identity.user_id, device_id=identity.device_id)
+    return FileRoots(repository=repository)
 
 
 def get_prompt_store(identity: RequestIdentity = Depends(get_request_identity)) -> PromptStore:

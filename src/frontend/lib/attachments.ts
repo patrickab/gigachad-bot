@@ -120,22 +120,22 @@ export async function buildAttachedSend(
     baseParams: Omit<ChatRequest, "chat_id" | "user_msg" | "img_paths" | "project_slug">
   },
   parse: (chatId: string, names: string[], slug: string | null) => Promise<{ name: string; parsedMd: string | null }[]>,
-  refreshVault?: (path: string) => Promise<Attachment>,
+  refreshRootFile?: (path: string) => Promise<Attachment>,
 ): Promise<{ enriched: Attachment[]; hiddenContent?: string; request: ChatRequest }> {
   const { text, attachments, priorMessages, chatId, slug, downscaleImages, baseParams } = opts
 
-  // Vault refs are live: re-read content from the source at send time (also
+  // File root refs are live: re-read content from the source at send time (also
   // picks up a PDF extraction that finished after attach). No upload copy
   // exists, so they never go through the chat-upload parse endpoint.
   let enriched = attachments
-  if (refreshVault) {
+  if (refreshRootFile) {
     enriched = await Promise.all(enriched.map(async (a) => {
       if (!a.vaultPath) return a
       try {
-        const fresh = await refreshVault(a.vaultPath)
+        const fresh = await refreshRootFile(a.vaultPath)
         return { ...a, content: fresh.content, parsedMd: fresh.parsedMd ?? a.parsedMd }
       } catch {
-        return a // dangling ref (deleted file / unmounted vault) — keep last known content
+        return a // dangling ref (deleted file / unmounted file root) — keep last known content
       }
     }))
   }

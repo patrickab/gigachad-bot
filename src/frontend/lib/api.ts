@@ -1,4 +1,4 @@
-import type { Attachment, BackendConfig, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpCatalog, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ReasoningSupport, ResearchRequest, Usage, VaultFile, VaultNode } from "./types"
+import type { Attachment, BackendConfig, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpCatalog, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ReasoningSupport, ResearchRequest, Usage, RootFile, FileTreeNode } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { getApiBase } from "./config"
@@ -300,7 +300,7 @@ function uploadsBase(chatId: string, slug: string | null): string {
 /** Rewrite MinerU's relative ``images/<name>`` markdown refs to the shared,
  * per-user library cache keyed by the PDF's stem — the same cache every
  * attach/parse route reads its markdown from, so images resolve regardless
- * of whether the PDF arrived via direct upload, library, or vault attach. */
+ * of whether the PDF arrived via direct upload, library, or file root attach. */
 export function rewriteImages(content: string, pdfName: string): string {
   const stem = encodeURIComponent(pdfName.replace(/\.pdf$/i, ""))
   return content.replace(/\(images\/([^)]+)\)/g, `(${getApiBase()}/assets/Mineru/images/${stem}/$1)`)
@@ -330,42 +330,48 @@ export async function deleteAttachment(chatId: string, filename: string, slug: s
   await del(`/files/chat/${chatId}/att/${encodeURIComponent(filename)}${toQuery({ slug })}`)
 }
 
-export async function listFileVaultFiles(): Promise<{ enabled: boolean; files: VaultFile[] }> {
-  return request("/filevaults/files")
+export async function listRootFiles(): Promise<{ enabled: boolean; files: RootFile[] }> {
+  return request("/fileroots/files")
 }
 
-/** Files from vaults mounted to *slug* — shaped like ProjectDocument so the chat sidebar can list them. */
-export async function listProjectVaultDocuments(slug: string): Promise<ProjectDocument[]> {
-  const data = await request<{ documents: ProjectDocument[] }>(`/filevaults/project-documents?slug=${encodeURIComponent(slug)}`)
+/** Files from file roots mounted to *slug* — shaped like ProjectDocument so the chat sidebar can list them. */
+export async function listProjectRootDocuments(slug: string): Promise<ProjectDocument[]> {
+  const data = await request<{ documents: ProjectDocument[] }>(`/fileroots/project-documents?slug=${encodeURIComponent(slug)}`)
   return data.documents
 }
 
-export async function fileVaultTree(): Promise<{ enabled: boolean; tree: VaultNode[] }> {
-  return request("/filevaults/tree")
+export async function fileRootTree(): Promise<{ enabled: boolean; tree: FileTreeNode[] }> {
+  return request("/fileroots/tree")
 }
 
-export async function addFileVaultRoot(path: string, project: string | null = null): Promise<{ enabled: boolean; tree: VaultNode[] }> {
-  return post("/filevaults/roots", { path, project })
+/** Add file-root files (folders expand to their valid files) to a project's documents. */
+export async function addRootFilesToProject(slug: string, paths: string[]): Promise<ProjectDocument[]> {
+  const data = await post<{ documents: ProjectDocument[] }>("/fileroots/add-to-project", { slug, paths })
+  return data.documents
 }
 
-export async function removeFileVaultRoot(path: string): Promise<{ enabled: boolean; tree: VaultNode[] }> {
-  return del(`/filevaults/roots?path=${encodeURIComponent(path)}`)
+export async function addFileRoot(path: string, project: string | null = null): Promise<{ enabled: boolean; tree: FileTreeNode[] }> {
+  return post("/fileroots/roots", { path, project })
 }
 
-export async function addFileVaultMountpoint(
-  vault: string,
+export async function removeFileRoot(path: string): Promise<{ enabled: boolean; tree: FileTreeNode[] }> {
+  return del(`/fileroots/roots?path=${encodeURIComponent(path)}`)
+}
+
+export async function addFileRootMountpoint(
+  root: string,
   path: string,
-): Promise<{ enabled: boolean; tree: VaultNode[] }> {
-  return post(`/filevaults/mountpoints?vault=${encodeURIComponent(vault)}`, { path })
+): Promise<{ enabled: boolean; tree: FileTreeNode[] }> {
+  return post(`/fileroots/mountpoints?root=${encodeURIComponent(root)}`, { path })
 }
 
-export async function readFileVaultRendered(path: string): Promise<string> {
-  const data = await request<{ path: string; content: string }>(`/filevaults/rendered?path=${encodeURIComponent(path)}`)
+export async function readFileRootRendered(path: string): Promise<string> {
+  const data = await request<{ path: string; content: string }>(`/fileroots/rendered?path=${encodeURIComponent(path)}`)
   return data.content
 }
 
-export async function writeFileVaultFile(path: string, content: string): Promise<void> {
-  await post("/filevaults/file", { path, content })
+export async function writeRootFile(path: string, content: string): Promise<void> {
+  await post("/fileroots/file", { path, content })
 }
 
 /** Direct URL to a file's raw bytes (images, PDFs) — usable as an `<img>`/PDF src. */
@@ -403,10 +409,10 @@ async function attachFileByPath(endpoint: string, chatId: string, path: string, 
   return { ...data, active: true, url: chatFileUrl(chatId, data.name, slug) }
 }
 
-/** Attach a FileVault file as a live reference — no copy; content is read from the source. */
-export async function attachFileVaultFile(path: string): Promise<Attachment> {
+/** Attach a FileRoots file as a live reference — no copy; content is read from the source. */
+export async function attachRootFile(path: string): Promise<Attachment> {
   const data = await request<{ name: string; mime: string; path: string; content?: string; parsedMd?: string }>(
-    `/filevaults/attach?path=${encodeURIComponent(path)}`,
+    `/fileroots/attach?path=${encodeURIComponent(path)}`,
     { method: "POST" },
   )
   return { ...data, active: true, vaultPath: data.path, url: fileViewerRawUrl(data.path) }
@@ -557,7 +563,7 @@ export async function loadProjectTab(name: string, filename: string): Promise<{ 
   return request(`/chat-histories/${encodeURIComponent(name)}/${encodeURIComponent(filename)}`)
 }
 
-export class Vault {
+export class HistoryFolder {
   constructor(public readonly id: string) {}
   async delete(): Promise<void> {
     await del(`/chat-histories/${this.id}`)

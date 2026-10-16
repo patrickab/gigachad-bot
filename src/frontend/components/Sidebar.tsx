@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion } from "framer-motion"
-import { VaultTree, type VaultTreeItem } from "./VaultTree"
-import { useVaultTree } from "@/hooks/useVaultTree"
+import { FileTree, type FileTreeItem } from "./FileTree"
+import { useFileTree } from "@/hooks/useFileTree"
 import { Boxes, Brain, Clock, FileText, FolderOpen, Lightbulb, LayoutDashboard, PanelLeftClose, PanelLeft, PenLine, Save, RotateCcw } from "lucide-react"
 import { useMemoryViewer } from "@/contexts/MemoryViewerContext"
 import { SidebarElement } from "./SidebarElement"
@@ -11,16 +11,16 @@ import { useProject } from "@/contexts/ProjectContext"
 import { useBranches } from "@/contexts/BranchContext"
 import { useSidebar, type AppSurface } from "@/contexts/SidebarContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
-import type { BranchMeta, VaultNode, ProjectListItem, ProjectDocument } from "@/lib/types"
+import type { BranchMeta, FileTreeNode, ProjectListItem, ProjectDocument } from "@/lib/types"
 import { ChatBranchItem } from "./ChatBranchItem"
-import { addFileVaultMountpoint, addFileVaultRoot, createDirectory, moveHistoryItem, fileVaultTree, removeFileVaultRoot, listNotes, listProjectDocuments, moveDocument, removeDocument, writeDocument, Vault } from "@/lib/api"
+import { addRootFilesToProject, addFileRootMountpoint, addFileRoot, createDirectory, moveHistoryItem, fileRootTree, removeFileRoot, listNotes, listProjectDocuments, moveDocument, removeDocument, writeDocument, HistoryFolder } from "@/lib/api"
 import { isArchitecturePath } from "@/lib/architecture"
 
 const COLLAPSED_WIDTH = 50
 const EXPANDED_WIDTH = 280
 
 /** Drops tree rows whose deletion is pending, at any depth; a hidden folder hides its children. */
-function hidePending<T>(items: VaultTreeItem<T>[], hidden: (item: VaultTreeItem<T>) => boolean): VaultTreeItem<T>[] {
+function hidePending<T>(items: FileTreeItem<T>[], hidden: (item: FileTreeItem<T>) => boolean): FileTreeItem<T>[] {
   return items.filter((item) => !hidden(item)).map((item) => item.children
     ? { ...item, children: hidePending(item.children, hidden) }
     : item)
@@ -33,8 +33,10 @@ interface SidebarProps {
   onReset: () => void
   onMerge?: (childFile: string) => Promise<void>
   onCascadeDelete?: (filename: string) => Promise<void>
-  onVaultSelect?: (path: string) => void
-  onVaultsChanged?: () => void
+  onFileSelect?: (path: string) => void
+  onRootsChanged?: () => void
+  /** Project documents changed through the sidebar (e.g. files dropped onto a project). */
+  onDocumentsChanged?: () => void
   activeCanvasPath?: string | null
   onCanvasSelect?: (path: string, scope: string) => void
   onCanvasDeleted?: (path: string) => void
@@ -52,8 +54,9 @@ export function Sidebar({
   onReset,
   onMerge,
   onCascadeDelete,
-  onVaultSelect,
-  onVaultsChanged,
+  onFileSelect,
+  onRootsChanged,
+  onDocumentsChanged,
   activeCanvasPath,
   onCanvasSelect,
   onCanvasDeleted,
@@ -119,17 +122,17 @@ export function Sidebar({
   // independent (collapsing a project never touches a histories folder).
   // Projects: accordion sourced from activeProject; opening loads the project
   // context, closing tears it down. Histories: a persisted multi-open file browser.
-  const projectsController = useVaultTree({
+  const projectsController = useFileTree({
     accordion: true,
     activeId: activeProject,
     onActivate: openProject,
     onDeactivate: closeProject,
-    // ponytail: mounted-vault ids are absolute paths; only project slugs join the accordion
+    // ponytail: mounted-root ids are absolute paths; only project slugs join the accordion
     isAccordionId: (id) => !id.startsWith("/"),
   })
-  const historiesController = useVaultTree({ storageKey: "expanded_history_folders" })
-  const vaultsController = useVaultTree({ storageKey: "expanded_vault_folders" })
-  const canvasController = useVaultTree({ storageKey: "expanded_canvas_folders" })
+  const historiesController = useFileTree({ storageKey: "expanded_history_folders" })
+  const filesController = useFileTree({ storageKey: "expanded_file_folders" })
+  const canvasController = useFileTree({ storageKey: "expanded_canvas_folders" })
   const [canvasOpen, setCanvasOpen] = useState(true)
   const [canvasNotes, setCanvasNotes] = useState<ProjectDocument[]>([])
   const [projectCanvases, setProjectCanvases] = useState<Record<string, ProjectDocument[]>>({})
@@ -154,48 +157,48 @@ export function Sidebar({
     [canvasNotes, projects, projectCanvases, architectures, activeCanvasPath, activeArchitecture, pending],
   )
 
-  // File vaults: roots maintained server-side in file-vault-roots.json; rendered
+  // File roots: maintained server-side in the database; rendered
   // as a file tree. Clicking a file attaches it to the active chat as a live reference.
-  const [vaultTreeData, setVaultTreeData] = useState<VaultNode[]>([])
-  const [vaultsOpen, setVaultsOpen] = useState(false)
+  const [rootTreeData, setRootTreeData] = useState<FileTreeNode[]>([])
+  const [filesOpen, setFilesOpen] = useState(false)
 
   useEffect(() => {
     let cancelled = false
-    fileVaultTree()
-      .then((r) => { if (!cancelled) setVaultTreeData(r.tree) })
+    fileRootTree()
+      .then((r) => { if (!cancelled) setRootTreeData(r.tree) })
       .catch(() => {})
     return () => { cancelled = true }
   }, [])
 
-  // A file-vault root, standalone (Vaults) or mounted to a project (Projects), is keyed by its absolute path.
-  const deleteVaultRoot = (path: string) => schedule(`vault:${path}`, path.split("/").pop() ?? path, async () => {
-    const result = await removeFileVaultRoot(path)
-    setVaultTreeData(result.tree)
-    onVaultsChanged?.()
+  // A file-root root, standalone (Files) or mounted to a project (Projects), is keyed by its absolute path.
+  const deleteFileRoot = (path: string) => schedule(`root:${path}`, path.split("/").pop() ?? path, async () => {
+    const result = await removeFileRoot(path)
+    setRootTreeData(result.tree)
+    onRootsChanged?.()
   })
 
   // Roots mounted to a project render inside that project's subtree, not here.
-  const vaultItems = useMemo(() => hidePending(buildVaultItems(vaultTreeData.filter((node) => !node.project)),
-    (item) => pending(`vault:${item.id}`)), [vaultTreeData, pending])
+  const fileItems = useMemo(() => hidePending(buildFileItems(rootTreeData.filter((node) => !node.project)),
+    (item) => pending(`root:${item.id}`)), [rootTreeData, pending])
   const projectItems = useMemo(() =>
-    // Projects tree rows: absolute ids are mounted vault roots, other vault rows are projects, elements are chats.
-    hidePending(buildProjectItems(projects, activeProject, branchMeta, vaultTreeData),
-      (item) => pending(`${item.id.startsWith("/") ? "vault" : item.type === "vault" ? "project" : "history"}:${item.id}`)),
-    [projects, activeProject, branchMeta, vaultTreeData, pending],
+    // Projects tree rows: absolute ids are mounted file roots, other file root rows are projects, elements are chats.
+    hidePending(buildProjectItems(projects, activeProject, branchMeta, rootTreeData),
+      (item) => pending(`${item.id.startsWith("/") ? "root" : item.type === "root" ? "project" : "history"}:${item.id}`)),
+    [projects, activeProject, branchMeta, rootTreeData, pending],
   )
   const historyItems = useMemo(() =>
     hidePending(buildHistoryItems(rootFiles, histories, projects), (item) => pending(`history:${item.id}`)),
     [rootFiles, histories, projects, pending],
   )
 
-  const renderChatElement = useCallback((item: VaultTreeItem<string>, depth: number) => {
+  const renderChatElement = useCallback((item: FileTreeItem<string>, depth: number) => {
     const data = typeof item.data === "string" ? item.data : item.id
-    // ponytail: absolute path = file inside a mounted vault; chat files are always relative
+    // ponytail: absolute path = file inside a mounted file root; chat files are always relative
     if (typeof data === "string" && data.startsWith("/")) {
       return (
         <div style={{ paddingLeft: 8 + depth * 16, paddingRight: 8 }}>
           <button
-            onClick={() => onVaultSelect?.(data)}
+            onClick={() => onFileSelect?.(data)}
             className="flex w-full items-center gap-1.5 truncate py-0.5 text-left text-[11px] text-ink-muted transition-colors hover:text-ink"
           >
             <FileText className="h-3.5 w-3.5 shrink-0 text-ink-muted" />
@@ -211,7 +214,7 @@ export function Sidebar({
         depth={depth}
       />
     )
-  }, [onVaultSelect])
+  }, [onFileSelect])
 
   useEffect(() => { registerOnFileClick(onOpenChat) }, [onOpenChat, registerOnFileClick])
   useEffect(() => { if (onMerge) registerOnMerge(onMerge) }, [onMerge, registerOnMerge])
@@ -258,7 +261,7 @@ export function Sidebar({
       <div className="flex-1 overflow-y-auto py-3 flex flex-col gap-2">
         {appMode === "canvas" ? (
           <div className="px-2">
-            <VaultTree<CanvasData>
+            <FileTree<CanvasData>
               sectionIcon={Lightbulb}
               sectionTitle="Projects"
               items={canvasItems}
@@ -307,7 +310,7 @@ export function Sidebar({
         ) : (
         <>
         <div className="px-2">
-          <VaultTree
+          <FileTree
             sectionIcon={Lightbulb}
             sectionTitle="Projects"
             items={projectItems}
@@ -316,25 +319,25 @@ export function Sidebar({
             onOpenChange={setProjectsOpen}
             onExpand={expandIfCollapsed}
             controller={projectsController}
-            onVaultDelete={(id) => {
-              if (id.startsWith("/")) deleteVaultRoot(id)
+            onRootDelete={(id) => {
+              if (id.startsWith("/")) deleteFileRoot(id)
               else schedule(`project:${id}`, id, () => deleteProject(id))
             }}
-            onAddVault={(name) => createProject(name)}
-            onAddMountpoint={async (vaultId: string, path: string) => {
-              // Project row → mount a FileVault to the project; mounted vault row → nested mountpoint.
-              const r = vaultId.startsWith("/")
-                ? await addFileVaultMountpoint(vaultId, path)
-                : await addFileVaultRoot(path, vaultId)
-              setVaultTreeData(r.tree)
-              onVaultsChanged?.()
+            onAddRoot={(name) => createProject(name)}
+            onAddMountpoint={async (rootId: string, path: string) => {
+              // Project row → mount a FileRoots to the project; mounted file root row → nested mountpoint.
+              const r = rootId.startsWith("/")
+                ? await addFileRootMountpoint(rootId, path)
+                : await addFileRoot(path, rootId)
+              setRootTreeData(r.tree)
+              onRootsChanged?.()
             }}
-            mountpointPlaceholder="Vault filepath…"
-            onDashboardClick={(vaultId) => {
-              openProject(vaultId)
+            mountpointPlaceholder="Folder path…"
+            onDashboardClick={(rootId) => {
+              openProject(rootId)
               setDashboardOpen(true)
             }}
-            onMemoryClick={(vaultId) => openMemoryViewer({ scope: "project", projectSlug: vaultId })}
+            onMemoryClick={(rootId) => openMemoryViewer({ scope: "project", projectSlug: rootId })}
             onMoveElement={async (elementId: string, targetId: string | null) => {
               const slug = targetId && projects.find(p => p.slug === targetId)?.slug
               if (!slug) return
@@ -342,11 +345,19 @@ export function Sidebar({
               await onRefreshAll()
             }}
             renderElement={renderChatElement}
+            onDropFiles={async (paths, targetId) => {
+              const slug = projects.find((p) => p.slug === targetId)?.slug
+              if (!slug) return
+              try {
+                await addRootFilesToProject(slug, paths)
+                onDocumentsChanged?.()
+              } catch { /* nothing valid dropped, or project gone — leave documents as-is */ }
+            }}
           />
         </div>
 
         <div className="px-2">
-          <VaultTree
+          <FileTree
             sectionIcon={Clock}
             sectionTitle="Histories"
             items={historyItems}
@@ -363,9 +374,9 @@ export function Sidebar({
               await onRefreshAll()
               setHistoriesOpen(true)
             }}
-            onVaultDelete={(id: string) => {
+            onRootDelete={(id: string) => {
               schedule(`history:${id}`, id.split("/").pop() ?? id, async () => {
-                await new Vault(id).delete()
+                await new HistoryFolder(id).delete()
                 await onRefreshAll()
               })
             }}
@@ -377,30 +388,31 @@ export function Sidebar({
         </div>
 
         <div className="px-2">
-          <VaultTree
+          <FileTree
             sectionIcon={FolderOpen}
-            sectionTitle="Vaults"
-            items={vaultItems}
+            sectionTitle="Files"
+            items={fileItems}
             collapsed={collapsed}
-            open={vaultsOpen}
-            onOpenChange={setVaultsOpen}
+            open={filesOpen}
+            onOpenChange={setFilesOpen}
             onExpand={expandIfCollapsed}
-            plusTitle="Add vault root"
-            controller={vaultsController}
-            vaultPlaceholder="Vault filepath…"
-            onElementClick={(item) => onVaultSelect?.((item.data as string) ?? item.id)}
-            onAddVault={async (path: string) => {
-              const r = await addFileVaultRoot(path)
-              setVaultTreeData(r.tree)
-              setVaultsOpen(true)
-              onVaultsChanged?.()
+            plusTitle="Add folder"
+            controller={filesController}
+            rootPlaceholder="Folder path…"
+            multiSelect
+            onElementClick={(item) => onFileSelect?.((item.data as string) ?? item.id)}
+            onAddRoot={async (path: string) => {
+              const r = await addFileRoot(path)
+              setRootTreeData(r.tree)
+              setFilesOpen(true)
+              onRootsChanged?.()
             }}
-            onAddMountpoint={async (vaultId: string, path: string) => {
-              const r = await addFileVaultMountpoint(vaultId, path)
-              setVaultTreeData(r.tree)
-              onVaultsChanged?.()
+            onAddMountpoint={async (rootId: string, path: string) => {
+              const r = await addFileRootMountpoint(rootId, path)
+              setRootTreeData(r.tree)
+              onRootsChanged?.()
             }}
-            onVaultDelete={deleteVaultRoot}
+            onRootDelete={deleteFileRoot}
           />
         </div>
 
@@ -434,8 +446,8 @@ function buildCanvasItems(
   architectures: ReadonlySet<string>,
   activeCanvasPath: string | null,
   activeArchitecture: string | null,
-): VaultTreeItem<CanvasData>[] {
-  const canvasElement = (doc: ProjectDocument, scope: string): VaultTreeItem<CanvasData> => ({
+): FileTreeItem<CanvasData>[] {
+  const canvasElement = (doc: ProjectDocument, scope: string): FileTreeItem<CanvasData> => ({
     id: doc.path,
     label: doc.name.replace(/\.canvas$/, ""),
     type: "element",
@@ -444,7 +456,7 @@ function buildCanvasItems(
     isActive: activeCanvasPath === doc.path,
   })
   // Not a file of its own, so it cannot be deleted or moved from here.
-  const architectureElement = (slug: string): VaultTreeItem<CanvasData> => ({
+  const architectureElement = (slug: string): FileTreeItem<CanvasData> => ({
     id: `graph/${slug}/`,
     label: "Architecture",
     type: "element",
@@ -454,12 +466,12 @@ function buildCanvasItems(
     isSystem: true,
   })
 
-  const projectItems: VaultTreeItem<CanvasData>[] = projects
+  const projectItems: FileTreeItem<CanvasData>[] = projects
     .filter((p) => architectures.has(p.slug) || (projectCanvases[p.slug] ?? []).length > 0)
     .map((p) => ({
       id: p.slug,
       label: p.name,
-      type: "vault" as const,
+      type: "root" as const,
       icon: Lightbulb,
       children: [
         ...(architectures.has(p.slug) ? [architectureElement(p.slug)] : []),
@@ -471,21 +483,21 @@ function buildCanvasItems(
   return [...projectItems, ...rootItems]
 }
 
-function buildVaultItems(nodes: VaultNode[]): VaultTreeItem<string>[] {
+function buildFileItems(nodes: FileTreeNode[]): FileTreeItem<string>[] {
   return nodes.map((n) => {
     if (n.type === "file") {
       return { id: n.path, label: n.name, type: "element" as const, data: n.path, icon: FileText }
     }
-    const isVault = n.type === "vault"
+    const isRootNode = n.type === "root"
     return {
       id: n.path,
       label: n.name,
-      type: n.type, // "vault" | "folder"
+      type: n.type, // "root" | "folder"
       data: n.path,
-      icon: isVault ? FolderOpen : undefined,
-      mountable: isVault,
-      mounted: isVault,
-      children: buildVaultItems(n.children ?? []),
+      icon: isRootNode ? FolderOpen : undefined,
+      mountable: isRootNode,
+      mounted: isRootNode,
+      children: buildFileItems(n.children ?? []),
     }
   })
 }
@@ -494,13 +506,13 @@ function buildProjectItems(
   projects: ProjectListItem[],
   activeProject: string | null,
   branchMeta: Record<string, BranchMeta>,
-  vaultTree: VaultNode[],
-): VaultTreeItem<string>[] {
+  rootTree: FileTreeNode[],
+): FileTreeItem<string>[] {
   return projects.map((project) => {
     const dirPrefix = `${project.slug}/`
     const tabByName = new Map((project.tabs ?? []).map(t => [t.filename, t]))
 
-    const items: VaultTreeItem<string>[] = []
+    const items: FileTreeItem<string>[] = []
     for (const [key, meta] of Object.entries(branchMeta)) {
       if (!key.startsWith(dirPrefix) || key === `${project.slug}/project.json`) continue
       if (meta.parent_id) continue
@@ -511,30 +523,30 @@ function buildProjectItems(
       items.push({ id: key, label, type: "element", data: key })
     }
 
-    // FileVault roots mounted to this project appear as vault nodes in its subtree.
-    const mountedVaults = buildVaultItems(vaultTree.filter((n) => n.project === project.slug))
+    // FileRoots roots mounted to this project appear as file root nodes in its subtree.
+    const mountedRoots = buildFileItems(rootTree.filter((n) => n.project === project.slug))
 
     return {
       id: project.slug,
       label: project.name,
-      type: "vault",
+      type: "root",
       data: project.slug,
       icon: Lightbulb,
       mountable: true,
       isActive: activeProject === project.slug,
       children: [
-        ...mountedVaults,
+        ...mountedRoots,
         {
           id: `${project.slug}/__dashboard__`,
           label: "Dashboard",
           type: "element" as const,
           icon: LayoutDashboard,
           isSystem: true,
-          displayInVault: false,
+          displayInRoot: false,
           data: project.slug,
         },
         ...items,
-      ].filter((child: VaultTreeItem<string>) => child.displayInVault !== false),
+      ].filter((child: FileTreeItem<string>) => child.displayInRoot !== false),
     }
   })
 }
@@ -543,7 +555,7 @@ function buildHistoryItems(
   rootFiles: string[],
   histories: Record<string, string[]>,
   projects: ProjectListItem[],
-): VaultTreeItem<string>[] {
+): FileTreeItem<string>[] {
   const projectSlugs = new Set(projects.map((p) => p.slug))
 
   const folderItems = Object.entries(histories)
