@@ -31,6 +31,10 @@ async def get_models(store: ModelProviderStore = Depends(get_model_provider_stor
     }
 
 
+# `none` is the app's "off": the chat route then omits `reasoning_effort` entirely.
+OLLAMA_REASONING_LEVELS = ["none", "low", "medium", "high"]
+
+
 async def _ollama_supports_reasoning(model: str) -> bool:
     """Ask the Ollama server itself: LiteLLM's static registry doesn't know
     locally pulled or Ollama Cloud model tags (`gemma4:31b-cloud`), but
@@ -46,18 +50,48 @@ async def _ollama_supports_reasoning(model: str) -> bool:
         return False
 
 
-@router.get("/models/reasoning-support")
-async def get_reasoning_support(model: str) -> dict:
-    """Whether `model` accepts `reasoning_effort`.
+def _litellm_reasoning_levels(model: str) -> list[str]:
+    """Effort levels from LiteLLM's `supports_<level>_reasoning_effort` flags.
 
-    Ollama-served models (`ollama/<tag>`, including Ollama Cloud tags) are
-    checked against the live Ollama server, since those model tags aren't in
-    LiteLLM's static registry. Every other model uses LiteLLM's metadata.
-    Never raises: unknown or unreachable models fall back to `False`.
+    - Mirror LiteLLM's send-time checks: `xhigh`, `max` opt-in, `low` opt-out
+    - `minimal` opt-in too, few models accept it natively
+    - `medium` and `high` come with any reasoning model
+    - `supports_none_reasoning_effort` is ignored, `none` is the app's own "off"
+    """
+    if not litellm.supports_reasoning(model=model):
+        return []
+    try:
+        info = litellm.get_model_info(model=model)
+    except Exception:
+        info = {}
+    flags = {level: info.get(f"supports_{level}_reasoning_effort") for level in ("minimal", "low", "xhigh", "max")}
+    levels = ["none"]
+    if flags["minimal"]:
+        levels.append("minimal")
+    if flags["low"] is not False:
+        levels.append("low")
+    levels += ["medium", "high"]
+    levels += [level for level in ("xhigh", "max") if flags[level]]
+    return levels
+
+
+@router.get("/models/reasoning-levels")
+async def get_reasoning_levels(model: str) -> dict:
+    """Ordered `reasoning_effort` levels `model` accepts, empty when it can't reason.
+
+    - Ollama tags (`ollama/<tag>`, incl. cloud) aren't in LiteLLM's registry, ask the live server
+    - OMP gateway models (`litellm_proxy/<provider>/<model>`) neither, use OMP's own registry
+    - Never raises: unknown or unreachable models get no levels
     """
     if model.startswith("ollama/"):
-        return {"supports_reasoning": await _ollama_supports_reasoning(model.removeprefix("ollama/"))}
-    return {"supports_reasoning": litellm.supports_reasoning(model=model)}
+        supported = await _ollama_supports_reasoning(model.removeprefix("ollama/"))
+        return {"levels": OLLAMA_REASONING_LEVELS if supported else []}
+    omp_prefix = f"{omp_source.LITELLM_ID}/"
+    if model.startswith(omp_prefix):
+        omp_levels = await asyncio.to_thread(omp_source.thinking_levels, model.removeprefix(omp_prefix))
+        if omp_levels is not None:
+            return {"levels": ["none", *omp_levels] if omp_levels else []}
+    return {"levels": _litellm_reasoning_levels(model)}
 
 
 class ProviderDefinition(BaseModel):

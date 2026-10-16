@@ -1,4 +1,4 @@
-import type { Attachment, BackendConfig, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpCatalog, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ReasoningSupport, ResearchRequest, Usage, RootFile, FileTreeNode } from "./types"
+import type { Attachment, BackendConfig, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpCatalog, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ReasoningLevels, ResearchRequest, Usage, RootFile, FileTreeNode } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { getApiBase } from "./config"
@@ -126,8 +126,8 @@ export async function fetchModels(): Promise<ModelsResponse> {
   return request<ModelsResponse>("/models")
 }
 
-export async function fetchReasoningSupport(model: string): Promise<ReasoningSupport> {
-  return request<ReasoningSupport>(`/models/reasoning-support?model=${encodeURIComponent(model)}`)
+export async function fetchReasoningLevels(model: string): Promise<ReasoningLevels> {
+  return request<ReasoningLevels>(`/models/reasoning-levels?model=${encodeURIComponent(model)}`)
 }
 
 export async function saveModelProviders(providers: ModelProvider[]): Promise<ModelsResponse> {
@@ -235,10 +235,6 @@ export async function saveChatHistory(filename: string, messages: Message[] = []
   if (opts.branchMessageIdx !== undefined) body.branch_message_idx = opts.branchMessageIdx
   if (opts.children !== undefined) body.children = opts.children
   return put(`/chat-histories/${filename}`, body)
-}
-
-export async function createDirectory(parentPath: string, name: string): Promise<{ status: string; path: string }> {
-  return post("/chat-histories/mkdir", { parent_path: parentPath, name })
 }
 
 export async function moveHistoryItem(filename: string, targetDir: string): Promise<{ status: string; new_path: string }> {
@@ -561,13 +557,6 @@ export async function saveProjectTab(name: string, filename: string, messages: M
 
 export async function loadProjectTab(name: string, filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null; title: string | null; usage: Usage | null; parent_id: string | null; branch_message_idx: number | null }> {
   return request(`/chat-histories/${encodeURIComponent(name)}/${encodeURIComponent(filename)}`)
-}
-
-export class HistoryFolder {
-  constructor(public readonly id: string) {}
-  async delete(): Promise<void> {
-    await del(`/chat-histories/${this.id}`)
-  }
 }
 
 // --- Memory API ---

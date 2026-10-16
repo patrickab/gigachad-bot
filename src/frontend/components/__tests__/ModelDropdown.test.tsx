@@ -23,7 +23,7 @@ const onlineCatalog: OmpCatalog = {
 }
 
 function openSettings() {
-  fireEvent.click(screen.getByRole("button", { name: "Model" }))
+  fireEvent.click(screen.getByRole("button", { name: /^Model:/ }))
   fireEvent.click(screen.getByRole("button", { name: "Configure providers" }))
 }
 
@@ -74,7 +74,7 @@ describe("ModelDropdown OMP source", () => {
     fetchOmpCatalog.mockResolvedValue(onlineCatalog)
     render(<ModelDropdown models={models} selectedModel="" onSelect={vi.fn()} onProvidersChange={vi.fn()} onDefaultsChange={vi.fn()} />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Model" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Model:/ }))
     expect(fetchOmpCatalog).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole("button", { name: "Configure providers" }))
@@ -93,7 +93,7 @@ describe("ModelDropdown OMP source", () => {
     }
     render(<ModelDropdown models={withThree} selectedModel="" onSelect={vi.fn()} onProvidersChange={vi.fn()} onTabOrderChange={vi.fn()} onDefaultsChange={vi.fn()} />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Model" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Model:/ }))
 
     const tabBar = (await screen.findByText("DeepSeek")).closest("div")?.parentElement
     const labels = Array.from(tabBar?.querySelectorAll("button") ?? []).map((button) => button.textContent)
@@ -109,7 +109,7 @@ describe("ModelDropdown OMP source", () => {
     }
     render(<ModelDropdown models={unsorted} selectedModel="" onSelect={vi.fn()} onProvidersChange={vi.fn()} onDefaultsChange={vi.fn()} />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Model" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Model:/ }))
     fireEvent.click(screen.getByRole("button", { name: "Ollama" }))
     expect(screen.getAllByRole("button").filter((button) => ["alpha", "zulu"].includes(button.textContent ?? "")).map((button) => button.textContent)).toEqual(["alpha", "zulu"])
 
@@ -125,7 +125,7 @@ describe("ModelDropdown OMP source", () => {
     }
     render(<ModelDropdown models={withGemini} selectedModel="gemini/gemini-3.1-pro" onSelect={vi.fn()} onProvidersChange={vi.fn()} onTabOrderChange={vi.fn()} onDefaultsChange={vi.fn()} />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Model" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Model:/ }))
 
     expect((await screen.findAllByText("gemini-3.1-pro")).length).toBeGreaterThan(0)
     expect(screen.queryByText("gemma4:31b-cloud")).not.toBeInTheDocument()

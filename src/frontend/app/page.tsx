@@ -2,14 +2,14 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { Maximize2, Minimize2 } from "lucide-react"
+import { Maximize2, Minimize2, PanelLeft, PanelLeftClose } from "lucide-react"
 import { Sidebar } from "@/components/Sidebar"
 import { CommandMenu, type CommandMenuItem } from "@/components/CommandMenu"
 import { ChatContainer, ChatSidebarProvider, type ChatSidebarContextValue } from "@/components/ChatContainer"
 import type { ChatInputHandle } from "@/components/ChatInput"
 import { MAX_SIDEBAR_WIDTH } from "@/components/ChatSidebar"
 import { ModelDropdown } from "@/components/ModelDropdown"
-import { MoreOptionsMenu } from "@/components/MoreOptionsMenu"
+import { SettingsMenu } from "@/components/SettingsMenu"
 import { PromptEditor } from "@/components/PromptEditor"
 import { ReasoningSelector } from "@/components/ReasoningSelector"
 import { ThemeToggle } from "@/components/ThemeToggle"
@@ -39,12 +39,12 @@ import { useSettings, SettingsProvider } from "@/contexts/SettingsContext"
 import { useProject, ProjectProvider } from "@/contexts/ProjectContext"
 import { useBranches } from "@/contexts/BranchContext"
 import { BranchProvider } from "@/contexts/BranchContext"
-import { SidebarProvider, type AppSurface } from "@/contexts/SidebarContext"
+import { SidebarProvider, useSidebar, type AppSurface } from "@/contexts/SidebarContext"
 import { MemoryViewerProvider } from "@/contexts/MemoryViewerContext"
 import { MemoryViewer } from "@/components/MemoryViewer"
 import { DesktopBackendProvider } from "@/components/DesktopBackendProvider"
 import { UndoDeleteProvider, useUndoDelete } from "@/contexts/UndoDeleteContext"
-import { updateLastMsg as updateLastAssistant } from "@/lib/utils"
+import { cn, updateLastMsg as updateLastAssistant } from "@/lib/utils"
 import {
   loadChatHistory as apiLoadChatHistory,
   parseFiles,
@@ -158,7 +158,9 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   const [architecturePath, setArchitecturePath] = useState<string | null>(null)
   const [architectureEdgeStyle, setArchitectureEdgeStyle] = useState<EdgeStyle>("elbow")
   const [canvasToolbarSlot, setCanvasToolbarSlot] = useState<HTMLElement | null>(null)
+  const [contextToggleSlot, setContextToggleSlot] = useState<HTMLElement | null>(null)
   const [canvasFullscreen, setCanvasFullscreen] = useState(false)
+  const { collapsed: sidebarCollapsed, toggleCollapsed: toggleSidebar } = useSidebar()
 
   // A brand new tab starts with a blank selectedModel (TabManager.DEFAULT_CONFIG);
   // seed it from the configured default chat model — the same "Chat" value
@@ -631,6 +633,16 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     })
   }, [tab.historyFile, doCreateBranch, onOpenChat])
 
+  const sidebarToggle = !canvasFullscreen && (
+    <button
+      aria-label={sidebarCollapsed ? "Open sidebar" : "Close sidebar"}
+      onClick={toggleSidebar}
+      className="shrink-0 rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
+    >
+      {sidebarCollapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+    </button>
+  )
+
   return (
     <div ref={containerRef} className="relative flex h-full overflow-hidden">
       {isActive && commandBar.state.phase === "input" && tabLabelSlot && createPortal(
@@ -660,8 +672,6 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         <Sidebar
           onOpenChat={onOpenChat}
           onRefreshAll={refreshAll}
-          onSave={() => modals.setSaveModalOpen(true)}
-          onReset={reset}
           onMerge={(childFile) => doMergeBranch(childFile)}
           onCascadeDelete={handleCascadeDelete}
           onFileSelect={filePicker.handleFileSelect}
@@ -672,25 +682,19 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           onCanvasDeleted={(path) => setCanvasSel((s) => (s?.path === path ? null : s))}
           activeArchitecture={architecturePath && architectureSlug(architecturePath)}
           onArchitectureSelect={(slug) => { setCanvasSel(null); setArchitecturePath(`graph/${slug}/`) }}
+          renderSettings={() => (
+            <SettingsMenu prompts={prompts} config={config} onConfigChange={onConfigChange} onEditPrompts={() => modals.setPromptEditorOpen(true)} models={models} />
+          )}
           appMode={appMode}
           onAppModeChange={setTabAppMode}
         />
       )}
       <main className="flex-1 min-w-0 flex flex-col relative bg-paper">
-        <header className="h-[60px] shrink-0 flex items-center px-4 gap-4 z-40 border-b border-divider/50 bg-paper/80 backdrop-blur-xl">
-          {appMode === "canvas" ? (
+        {appMode === "canvas" ? (
+          <header className="h-11 shrink-0 flex items-center px-3 gap-1 z-40 bg-paper">
+            {sidebarToggle}
             <div ref={setCanvasToolbarSlot} className="flex-1 min-w-0 flex items-center" />
-          ) : (
-            <div className="flex items-center gap-4">
-              <ModelDropdown models={models} selectedModel={config.selectedModel} onSelect={(m) => onConfigChange({ selectedModel: m })} onProvidersChange={saveModelProviders} onTabOrderChange={saveModelTabOrder} onDefaultsChange={saveModelDefaults} />
-              <ReasoningSelector model={config.selectedModel} reasoningEffort={config.reasoningEffort} onReasoningChange={(v) => onConfigChange({ reasoningEffort: v })} />
-            </div>
-          )}
-
-          {appMode !== "canvas" && <div className="flex-1" />}
-
-          <div className="flex items-center gap-2">
-            {appMode === "canvas" && (
+            <div className="flex items-center gap-1">
               <button
                 aria-label={canvasFullscreen ? "Exit canvas fullscreen" : "Enter canvas fullscreen"}
                 onClick={() => setCanvasFullscreen((f) => !f)}
@@ -698,12 +702,23 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
               >
                 {canvasFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
               </button>
-            )}
-            {appMode !== "canvas" && <TokenCounter usage={totalUsage} />}
-            <ThemeToggle />
-            <MoreOptionsMenu prompts={prompts} config={config} onConfigChange={onConfigChange} onEditPrompts={() => modals.setPromptEditorOpen(true)} models={models} />
-          </div>
-        </header>
+              <ThemeToggle />
+            </div>
+          </header>
+        ) : (
+          <header className="h-11 shrink-0 flex items-center px-3 gap-1 z-40 bg-paper">
+            {sidebarToggle}
+            <div className="flex-1 min-w-0 flex items-center">
+              <ReasoningSelector model={config.selectedModel} reasoningEffort={config.reasoningEffort} onReasoningChange={(v) => onConfigChange({ reasoningEffort: v })} placement="below" />
+              <ModelDropdown models={models} selectedModel={config.selectedModel} onSelect={(m) => onConfigChange({ selectedModel: m })} onProvidersChange={saveModelProviders} onTabOrderChange={saveModelTabOrder} onDefaultsChange={saveModelDefaults} placement="below" />
+            </div>
+            <div className="flex items-center gap-1">
+              <TokenCounter usage={totalUsage} />
+              <ThemeToggle />
+              <div ref={setContextToggleSlot} className="flex items-center" />
+            </div>
+          </header>
+        )}
         <div className="flex-1 overflow-hidden relative transition-opacity duration-200">
           {appMode === "canvas" && architecturePath ? (
             <ArchitectureWindow path={architecturePath} maximized hostScale={1} edgeStyle={architectureEdgeStyle} onEdgeStyleChange={setArchitectureEdgeStyle} onNavigate={setArchitecturePath} />
@@ -736,6 +751,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
               chatInputRef={chatInputRef}
               slug={activeProject}
               chatMaxWidth={chatMaxWidth}
+              contextToggleSlot={contextToggleSlot}
             />
           </ChatSidebarProvider>
           )}

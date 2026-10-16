@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 
 /**
- * The selection primitive shared by every FileTree (Projects, Histories, …).
+ * The selection primitive shared by every FileTree (Projects, Files, …).
  *
  * It owns one concern: which *branches* (file roots / folders) are expanded, and what
  * expanding/collapsing one means. Element (chat) selection is a separate primitive
@@ -17,7 +17,7 @@ import { useCallback, useEffect, useState } from "react"
  *     browser: many open at once, no activation side effects.
  *
  * Each FileTree gets its own controller, so collapsing a project never touches a
- * histories folder — cross-tree independence falls out for free.
+ * file folder — cross-tree independence falls out for free.
  */
 export interface FileBranchController {
   isExpanded: (id: string) => boolean

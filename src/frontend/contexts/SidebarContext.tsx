@@ -7,23 +7,17 @@ export type AppSurface = "chat" | "canvas"
 interface SidebarContextValue {
   collapsed: boolean
   toggleCollapsed: () => void
-  projectsOpen: boolean
-  setProjectsOpen: (open: boolean) => void
-  historiesOpen: boolean
-  setHistoriesOpen: (open: boolean) => void
 }
 
 const SidebarContext = createContext<SidebarContextValue | null>(null)
 
 export function SidebarProvider({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(true)
-  const [projectsOpen, setProjectsOpen] = useState(true)
-  const [historiesOpen, setHistoriesOpen] = useState(false)
 
   const toggleCollapsed = () => setCollapsed((c) => !c)
 
   return (
-    <SidebarContext.Provider value={{ collapsed, toggleCollapsed, projectsOpen, setProjectsOpen, historiesOpen, setHistoriesOpen }}>
+    <SidebarContext.Provider value={{ collapsed, toggleCollapsed }}>
       {children}
     </SidebarContext.Provider>
   )

@@ -1,69 +1,121 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
-import { fetchReasoningSupport } from "@/lib/api"
-import { REASONING_LEVELS } from "@/lib/config"
+import { Brain, Check, ChevronDown } from "lucide-react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { useClickOutside } from "@/hooks/useClickOutside"
+import { fetchReasoningLevels } from "@/lib/api"
+import { cn } from "@/lib/utils"
 
 /** Shared across every instance so switching tabs/models reuses a lookup
  *  already made this session instead of refetching. */
-const supportCache = new Map<string, boolean>()
+const levelsCache = new Map<string, string[]>()
 
 interface ReasoningSelectorProps {
   model: string
   reasoningEffort: string
   onReasoningChange: (v: string) => void
+  /** Side of the trigger the menu opens on. */
+  placement?: "above" | "below"
 }
 
-export function ReasoningSelector({ model, reasoningEffort, onReasoningChange }: ReasoningSelectorProps) {
-  const [supported, setSupported] = useState<boolean | undefined>(() => supportCache.get(model))
+function levelLabel(level: string): string {
+  return level === "none" ? "off" : level
+}
+
+/** Pie glyph filling with the effort level, slashed circle for off. */
+function ReasoningGlyph({ level }: { level: string }) {
+  return <span className="reasoning-glyph" data-level={levelLabel(level)} aria-hidden="true" />
+}
+
+export function ReasoningSelector({ model, reasoningEffort, onReasoningChange, placement = "above" }: ReasoningSelectorProps) {
+  const [levels, setLevels] = useState<string[] | undefined>(() => levelsCache.get(model))
 
   useEffect(() => {
-    const cached = supportCache.get(model)
+    const cached = levelsCache.get(model)
     if (cached !== undefined) {
-      setSupported(cached)
+      setLevels(cached)
       return
     }
-    setSupported(undefined)
+    setLevels(undefined)
     let cancelled = false
-    fetchReasoningSupport(model)
-      .then(({ supports_reasoning }) => {
-        supportCache.set(model, supports_reasoning)
-        if (!cancelled) setSupported(supports_reasoning)
+    fetchReasoningLevels(model)
+      .then(({ levels: fetched }) => {
+        levelsCache.set(model, fetched)
+        if (!cancelled) setLevels(fetched)
       })
       .catch(() => {
-        if (!cancelled) setSupported(false)
+        if (!cancelled) setLevels([])
       })
     return () => {
       cancelled = true
     }
   }, [model])
 
+  // A level the new model lacks (e.g. `xhigh` after switching models) falls back to
+  // `medium`, which every reasoning model offers, or `none` when it can't reason.
   const onReasoningChangeRef = useRef(onReasoningChange)
   onReasoningChangeRef.current = onReasoningChange
   useEffect(() => {
-    if (supported === false && reasoningEffort !== "none") onReasoningChangeRef.current("none")
-  }, [supported, reasoningEffort])
+    if (levels === undefined) return
+    const supportedEffort = levels.length === 0 ? "none" : levels.includes(reasoningEffort) ? reasoningEffort : "medium"
+    if (supportedEffort !== reasoningEffort) onReasoningChangeRef.current(supportedEffort)
+  }, [levels, reasoningEffort])
 
-  if (supported !== true) return null
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const close = useCallback(() => setOpen(false), [])
+  useClickOutside(ref, close)
+
+  if (!levels?.length) return null
 
   return (
-    <>
-      <div className="w-px h-4 bg-surface-elevated" />
-      <div className="flex rounded-md bg-surface/50 p-0.5 border border-divider/50 h-[24px] items-center">
-        {REASONING_LEVELS.map((level) => (
-          <button
-            key={level}
-            onClick={() => onReasoningChange(level)}
-            className={`px-1.5 text-[10px] font-medium rounded-sm transition-colors h-full flex items-center ${
-              level === reasoningEffort
-                ? "bg-surface-elevated text-ink shadow-[var(--shadow-sm)] ring-1 ring-divider"
-                : "text-ink-subtle hover:text-ink"
-            }`}
-          >
-            {level === "none" ? "off" : level}
-          </button>
-        ))}
-      </div>
-    </>
+    <div ref={ref} className="relative min-w-0">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-label={`Reasoning: ${levelLabel(reasoningEffort)}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className={cn(
+          "flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs capitalize text-ink-muted transition-colors hover:bg-hover hover:text-ink",
+          open && "bg-hover text-ink",
+        )}
+      >
+        <ReasoningGlyph level={reasoningEffort} />
+        <span className="truncate">{levelLabel(reasoningEffort)}</span>
+        <ChevronDown className={cn("h-3 w-3 shrink-0 opacity-70 transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <div role="menu" aria-label="Reasoning" className={cn("absolute left-0 z-50 w-44 overflow-hidden rounded-xl border border-divider bg-paper shadow-[var(--shadow-xl)]", placement === "below" ? "top-full mt-2" : "bottom-full mb-2")}>
+          <div className="flex h-8 items-center gap-2 border-b border-divider px-2.5">
+            <Brain className="h-3 w-3 text-ink-muted" />
+            <span className="text-[11px] font-semibold text-ink">Reasoning</span>
+            <span className="ml-auto font-mono text-[10px] tabular-nums text-ink-subtle">{levels.length}</span>
+          </div>
+          <div className="flex flex-col p-1">
+            {levels.map((level) => {
+              const active = level === reasoningEffort
+              return (
+                <button
+                  key={level}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={active}
+                  onClick={() => { onReasoningChange(level); close() }}
+                  className={cn(
+                    "flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-xs capitalize transition-colors",
+                    active ? "bg-surface-elevated font-semibold text-ink" : "text-ink-muted hover:bg-hover hover:text-ink",
+                  )}
+                >
+                  <span className="flex w-3.5 shrink-0 justify-center">{active && <Check className="h-3 w-3" />}</span>
+                  <ReasoningGlyph level={level} />
+                  <span className="truncate">{levelLabel(level)}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }

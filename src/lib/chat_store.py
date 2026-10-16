@@ -288,17 +288,6 @@ class ChatStore:
         return {"status": "ok", "new_path": str(rel), "filename": unique_name}
 
     # ------------------------------------------------------------------
-    # Create directory
-    # ------------------------------------------------------------------
-
-    def create_directory(self, parent_path: str, name: str) -> dict[str, str]:
-        parent = self._base / parent_path if parent_path else self._base
-        dir_path = (parent / name).resolve()
-        dir_path.mkdir(parents=True, exist_ok=True)
-        rel = dir_path.relative_to(self._base)
-        return {"status": "ok", "path": str(rel)}
-
-    # ------------------------------------------------------------------
     # Move
     # ------------------------------------------------------------------
 
@@ -307,8 +296,9 @@ class ChatStore:
         if not src.exists():
             raise FileNotFoundError(filename)
         src_data = self._load_path(src) or {}
+        if target_dir and not (self._base / target_dir / PROJECT_JSON).exists():
+            raise ValueError(f"'{target_dir}' is not a project")
         dst_dir = (self._base / target_dir).resolve() if target_dir else self._base
-        dst_dir.mkdir(parents=True, exist_ok=True)
 
         is_root = src_data.get("parent_id") is None
         has_children = bool(src_data.get("children"))
@@ -321,7 +311,6 @@ class ChatStore:
                     continue
                 child_data = self._load_path(child_src) or {}
                 child_payload = _build_payload(child_data)
-                dst_dir.mkdir(parents=True, exist_ok=True)
                 child_target = dst_dir / child_src.name
                 n = 2
                 while child_target.exists() and child_target != child_src:
@@ -439,27 +428,21 @@ class ChatStore:
     # List helpers
     # ------------------------------------------------------------------
 
-    def list_histories(self) -> dict[str, Any]:
+    def list_histories(self) -> dict[str, list[str]]:
+        """List every chat outside a project: a history is simply a chat with no project."""
         # One listing query instead of an is_file/is_dir round trip per entry.
         prefix = f"{self._base.key}/"
         entries = {e.key.removeprefix(prefix): e.is_dir for e in self._base.store.list(self._base.key, recursive=True)}
-        root_files: list[str] = []
-        histories: dict[str, list[str]] = {}
+        project_dirs = {rel.removesuffix(f"/{PROJECT_JSON}") for rel in entries if rel.endswith(f"/{PROJECT_JSON}") and rel.count("/") == 1}
+        files: list[str] = []
         for rel in sorted(entries):
-            if "/" in rel or rel in (PROJECT_JSON, META_JSON, MEMORY_DIR):
+            *dirs, name = rel.split("/")
+            if entries[rel] or PurePosixPath(name).suffix != ".json" or name in (PROJECT_JSON, META_JSON):
                 continue
-            if not entries[rel]:
-                if PurePosixPath(rel).suffix == ".json":
-                    root_files.append(rel)
-            elif not rel.startswith("_") and f"{rel}/{PROJECT_JSON}" not in entries:
-                histories[rel] = []
-        for rel in sorted(entries):
-            parts = rel.split("/")
-            if len(parts) != 2 or parts[0] not in histories or entries[rel]:
+            if any(d.startswith("_") or d == MEMORY_DIR for d in dirs) or (dirs and dirs[0] in project_dirs):
                 continue
-            if PurePosixPath(rel).suffix == ".json" and parts[1] != PROJECT_JSON:
-                histories[parts[0]].append(parts[1])
-        return {"files": root_files, "histories": histories}
+            files.append(rel)
+        return {"files": files}
 
     def get_branch_meta(self, dirs: str | None = None) -> dict[str, dict[str, Any]]:
         if not self._base.exists():

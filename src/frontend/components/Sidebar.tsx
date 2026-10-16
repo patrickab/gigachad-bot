@@ -1,22 +1,22 @@
 "use client"
 
+import { cn } from "@/lib/utils"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion } from "framer-motion"
 import { FileTree, type FileTreeItem } from "./FileTree"
 import { useFileTree } from "@/hooks/useFileTree"
-import { Boxes, Brain, Clock, FileText, FolderOpen, Lightbulb, LayoutDashboard, PanelLeftClose, PanelLeft, PenLine, Save, RotateCcw } from "lucide-react"
+import { Boxes, Brain, FileText, MessageSquare, FolderOpen, Lightbulb, LayoutDashboard, PenLine } from "lucide-react"
 import { useMemoryViewer } from "@/contexts/MemoryViewerContext"
-import { SidebarElement } from "./SidebarElement"
 import { useProject } from "@/contexts/ProjectContext"
 import { useBranches } from "@/contexts/BranchContext"
 import { useSidebar, type AppSurface } from "@/contexts/SidebarContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import type { BranchMeta, FileTreeNode, ProjectListItem, ProjectDocument } from "@/lib/types"
 import { ChatBranchItem } from "./ChatBranchItem"
-import { addRootFilesToProject, addFileRootMountpoint, addFileRoot, createDirectory, moveHistoryItem, fileRootTree, removeFileRoot, listNotes, listProjectDocuments, moveDocument, removeDocument, writeDocument, HistoryFolder } from "@/lib/api"
+import { addRootFilesToProject, addFileRootMountpoint, addFileRoot, moveHistoryItem, fileRootTree, removeFileRoot, listNotes, listProjectDocuments, moveDocument, removeDocument, writeDocument } from "@/lib/api"
 import { isArchitecturePath } from "@/lib/architecture"
 
-const COLLAPSED_WIDTH = 50
+const COLLAPSED_WIDTH = 0
 const EXPANDED_WIDTH = 280
 
 /** Drops tree rows whose deletion is pending, at any depth; a hidden folder hides its children. */
@@ -29,8 +29,6 @@ function hidePending<T>(items: FileTreeItem<T>[], hidden: (item: FileTreeItem<T>
 interface SidebarProps {
   onOpenChat: (filename: string, qaIndex?: number) => void
   onRefreshAll: () => Promise<void>
-  onSave: () => void
-  onReset: () => void
   onMerge?: (childFile: string) => Promise<void>
   onCascadeDelete?: (filename: string) => Promise<void>
   onFileSelect?: (path: string) => void
@@ -43,6 +41,8 @@ interface SidebarProps {
   /** Project whose architecture is shown standalone in canvas mode, instead of a canvas. */
   activeArchitecture?: string | null
   onArchitectureSelect?: (slug: string) => void
+  /** Settings entry pinned to the sidebar bottom; receives the collapsed state. */
+  renderSettings?: () => React.ReactNode
   appMode: AppSurface
   onAppModeChange: (mode: AppSurface) => void
 }
@@ -50,8 +50,6 @@ interface SidebarProps {
 export function Sidebar({
   onOpenChat,
   onRefreshAll,
-  onSave,
-  onReset,
   onMerge,
   onCascadeDelete,
   onFileSelect,
@@ -62,22 +60,18 @@ export function Sidebar({
   onCanvasDeleted,
   activeArchitecture,
   onArchitectureSelect,
+  renderSettings,
   appMode,
   onAppModeChange,
 }: SidebarProps) {
   const {
     collapsed,
     toggleCollapsed,
-    projectsOpen,
-    setProjectsOpen,
-    historiesOpen,
-    setHistoriesOpen,
   } = useSidebar()
 
   const {
     branchMeta,
     visibleRootFiles: rootFiles,
-    visibleHistories: histories,
     historiesLoading,
     registerOnFileClick,
     registerOnMerge,
@@ -103,25 +97,14 @@ export function Sidebar({
 
   const expandIfCollapsed = () => { if (collapsed) toggleCollapsed() }
 
-  const sidebarItems = [
-    { id: "toggle-collapse", icon: collapsed ? PanelLeft : PanelLeftClose, onClick: toggleCollapsed },
-    { id: "save-chat", icon: Save, title: "Save Chat", onClick: onSave },
-    { id: "reset-chat", icon: RotateCcw, title: "Reset History", onClick: onReset },
-  ]
-
-  const toggleItem = sidebarItems.find(item => item.id === "toggle-collapse")
-  const mainItems = sidebarItems.filter(
-    item => item.id !== "toggle-collapse" && item.id !== "save-chat" && item.id !== "reset-chat",
-  )
-
   const sidebarWidth = collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH
   const animateWidth = useMemo(() => ({ width: sidebarWidth }), [sidebarWidth])
 
 
   // Selection primitives — one per tree, so the trees behave identically yet stay
-  // independent (collapsing a project never touches a histories folder).
+  // independent (collapsing a project never touches a file folder).
   // Projects: accordion sourced from activeProject; opening loads the project
-  // context, closing tears it down. Histories: a persisted multi-open file browser.
+  // context, closing tears it down.
   const projectsController = useFileTree({
     accordion: true,
     activeId: activeProject,
@@ -130,7 +113,6 @@ export function Sidebar({
     // ponytail: mounted-root ids are absolute paths; only project slugs join the accordion
     isAccordionId: (id) => !id.startsWith("/"),
   })
-  const historiesController = useFileTree({ storageKey: "expanded_history_folders" })
   const filesController = useFileTree({ storageKey: "expanded_file_folders" })
   const canvasController = useFileTree({ storageKey: "expanded_canvas_folders" })
   const [canvasOpen, setCanvasOpen] = useState(true)
@@ -187,9 +169,11 @@ export function Sidebar({
     [projects, activeProject, branchMeta, rootTreeData, pending],
   )
   const historyItems = useMemo(() =>
-    hidePending(buildHistoryItems(rootFiles, histories, projects), (item) => pending(`history:${item.id}`)),
-    [rootFiles, histories, projects, pending],
+    hidePending(buildHistoryItems(rootFiles), (item) => pending(`history:${item.id}`)),
+    [rootFiles, pending],
   )
+  // A history is any chat that is not in a project, listed after the projects like loose canvases.
+  const chatItems = useMemo(() => [...projectItems, ...historyItems], [projectItems, historyItems])
 
   const renderChatElement = useCallback((item: FileTreeItem<string>, depth: number) => {
     const data = typeof item.data === "string" ? item.data : item.id
@@ -225,10 +209,15 @@ export function Sidebar({
       initial={false}
       animate={animateWidth}
       transition={{ duration: 0.25, ease: "easeInOut" }}
-      className="shrink-0 border-r border-divider bg-paper flex flex-col overflow-hidden shadow-[inset_-1px_0_0_0_oklch(100%_0_0/0.02)]"
+      className={cn(
+        "relative shrink-0 flex flex-col transition-[margin,background-color,box-shadow,border-color] duration-200",
+        collapsed
+          ? "border-0"
+          : "m-3 mr-0 rounded-2xl border border-divider/50 bg-surface shadow-[var(--shadow-lg)]",
+      )}
     >
-      <div className="group flex items-center justify-between px-2 py-2 border-b border-divider h-[60px] bg-paper/60 backdrop-blur-lg">
-        {!collapsed && (
+      {!collapsed && (
+        <div className="group flex items-center px-2 h-12 shrink-0">
           <div className="flex items-center gap-1.5 px-2 min-w-0">
             <button
               onClick={() => onAppModeChange(appMode === "canvas" ? "chat" : "canvas")}
@@ -240,24 +229,17 @@ export function Sidebar({
               <button
                 onClick={() => openMemoryViewer({ scope: "global" })}
                 aria-label="Open global memory profile"
-                className="shrink-0 rounded-md p-1 text-ink-subtle opacity-0 group-hover:opacity-100 hover:bg-surface hover:text-ink transition-all"
+                className="shrink-0 rounded-md p-1 text-ink-subtle opacity-0 group-hover:opacity-100 hover:bg-surface-elevated hover:text-ink transition-all"
               >
                 <Brain className="h-4 w-4" />
               </button>
             )}
           </div>
-        )}
-        <div className={collapsed ? "flex justify-center w-full" : "flex justify-end"}>
-          {toggleItem && (
-            <SidebarElement
-              {...toggleItem}
-              collapsed={collapsed}
-              className="w-auto p-1.5 hover:bg-surface"
-            />
-          )}
         </div>
-      </div>
+      )}
 
+      {!collapsed && (
+      <>
       <div className="flex-1 overflow-y-auto py-3 flex flex-col gap-2">
         {appMode === "canvas" ? (
           <div className="px-2">
@@ -311,12 +293,12 @@ export function Sidebar({
         <>
         <div className="px-2">
           <FileTree
-            sectionIcon={Lightbulb}
-            sectionTitle="Projects"
-            items={projectItems}
+            sectionIcon={MessageSquare}
+            sectionTitle="Chats"
+            items={chatItems}
+            loading={historiesLoading}
+            plusTitle="New project"
             collapsed={collapsed}
-            open={projectsOpen}
-            onOpenChange={setProjectsOpen}
             onExpand={expandIfCollapsed}
             controller={projectsController}
             onRootDelete={(id) => {
@@ -339,8 +321,8 @@ export function Sidebar({
             }}
             onMemoryClick={(rootId) => openMemoryViewer({ scope: "project", projectSlug: rootId })}
             onMoveElement={async (elementId: string, targetId: string | null) => {
-              const slug = targetId && projects.find(p => p.slug === targetId)?.slug
-              if (!slug) return
+              // Dropping on a project files the chat there, anywhere else makes it a plain history again.
+              const slug = projects.find((p) => p.slug === targetId)?.slug ?? ""
               await moveHistoryItem(elementId, slug)
               await onRefreshAll()
             }}
@@ -352,37 +334,6 @@ export function Sidebar({
                 await addRootFilesToProject(slug, paths)
                 onDocumentsChanged?.()
               } catch { /* nothing valid dropped, or project gone — leave documents as-is */ }
-            }}
-          />
-        </div>
-
-        <div className="px-2">
-          <FileTree
-            sectionIcon={Clock}
-            sectionTitle="Histories"
-            items={historyItems}
-            loading={historiesLoading}
-            collapsed={collapsed}
-            open={historiesOpen}
-            onOpenChange={setHistoriesOpen}
-            onExpand={expandIfCollapsed}
-            plusTitle="New folder"
-            controller={historiesController}
-            renderElement={renderChatElement}
-            onAddFolder={async (parentId: string | null, name: string) => {
-              await createDirectory(parentId ?? "", name)
-              await onRefreshAll()
-              setHistoriesOpen(true)
-            }}
-            onRootDelete={(id: string) => {
-              schedule(`history:${id}`, id.split("/").pop() ?? id, async () => {
-                await new HistoryFolder(id).delete()
-                await onRefreshAll()
-              })
-            }}
-            onMoveElement={async (elementId: string, targetId: string | null) => {
-              await moveHistoryItem(elementId, targetId ?? "")
-              await onRefreshAll()
             }}
           />
         </div>
@@ -415,19 +366,13 @@ export function Sidebar({
             onRootDelete={deleteFileRoot}
           />
         </div>
-
-        <div className="px-2 flex flex-col gap-1">
-          {mainItems.map((item) => (
-            <SidebarElement
-              key={item.id}
-              {...item}
-              collapsed={collapsed}
-            />
-          ))}
-        </div>
         </>
         )}
       </div>
+
+      {renderSettings && <div className="shrink-0 p-2">{renderSettings()}</div>}
+      </>
+      )}
     </motion.aside>
   )
 }
@@ -551,41 +496,11 @@ function buildProjectItems(
   })
 }
 
-function buildHistoryItems(
-  rootFiles: string[],
-  histories: Record<string, string[]>,
-  projects: ProjectListItem[],
-): FileTreeItem<string>[] {
-  const projectSlugs = new Set(projects.map((p) => p.slug))
-
-  const folderItems = Object.entries(histories)
-    .filter(([dir]) => !projectSlugs.has(dir))
-    .map(([dir, files]) => ({
-      id: dir,
-      label: dir,
-      type: "folder" as const,
-      data: dir,
-      children: files.map((file) => {
-        const key = `${dir}/${file}`
-        return {
-          id: key,
-          label: file.replace(".json", ""),
-          type: "element" as const,
-          data: key,
-          
-        }
-      }),
-    }))
-
-  const rootItems = rootFiles.map((file) => {
-    return {
-      id: file,
-      label: file.replace(".json", ""),
-      type: "element" as const,
-      data: file,
-      
-    }
-  })
-
-  return [...folderItems, ...rootItems]
+function buildHistoryItems(rootFiles: string[]): FileTreeItem<string>[] {
+  return rootFiles.map((file) => ({
+    id: file,
+    label: file.replace(".json", ""),
+    type: "element" as const,
+    data: file,
+  }))
 }

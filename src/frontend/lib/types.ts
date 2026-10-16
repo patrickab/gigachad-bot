@@ -202,7 +202,8 @@ export interface ModelsResponse {
   tab_order: string[]
 }
 
-export interface ReasoningSupport { supports_reasoning: boolean }
+/** Ordered `reasoning_effort` values the model accepts, `none` = off, empty = can't reason. */
+export interface ReasoningLevels { levels: string[] }
 
 export interface ModelDefaults { default_model: string; small_model: string; vision_model: string; memory_model: string; omp_model: string }
 
@@ -251,7 +252,6 @@ export interface BackendConfig {
 
 export interface ChatHistoriesResponse {
   files: string[]
-  histories: Record<string, string[]>
 }
 
 export interface BranchMeta {

@@ -16,18 +16,18 @@ const api = vi.hoisted(() => ({
 }))
 vi.mock("@/lib/api", () => ({
   ...api,
-  addFileRootMountpoint: vi.fn(), addFileRoot: vi.fn(), createDirectory: vi.fn(), moveHistoryItem: vi.fn(),
+  addFileRootMountpoint: vi.fn(), addFileRoot: vi.fn(), moveHistoryItem: vi.fn(),
   fileRootTree: vi.fn(async () => ({ tree: [] })), removeFileRoot: vi.fn(), moveDocument: vi.fn(),
-  removeDocument: vi.fn(), writeDocument: vi.fn(), HistoryFolder: class {},
+  removeDocument: vi.fn(), writeDocument: vi.fn(),
 }))
 vi.mock("@/contexts/SidebarContext", () => ({
   useSidebar: () => ({
-    collapsed: false, toggleCollapsed: vi.fn(), projectsOpen: true, setProjectsOpen: vi.fn(), historiesOpen: true, setHistoriesOpen: vi.fn(),
+    collapsed: false, toggleCollapsed: vi.fn(), 
   }),
 }))
 vi.mock("@/contexts/BranchContext", () => ({
   useBranches: () => ({
-    branchMeta: {}, visibleRootFiles: [], visibleHistories: [], historiesLoading: false,
+    branchMeta: {}, visibleRootFiles: [], historiesLoading: false,
     registerOnFileClick: vi.fn(), registerOnMerge: vi.fn(), registerOnDelete: vi.fn(),
   }),
 }))
@@ -46,7 +46,7 @@ describe("Sidebar canvas tree", () => {
     const onArchitectureSelect = vi.fn()
     const { findByText, getByText } = render(
       <Sidebar
-        onOpenChat={vi.fn()} onRefreshAll={vi.fn(async () => {})} onSave={vi.fn()} onReset={vi.fn()}
+        onOpenChat={vi.fn()} onRefreshAll={vi.fn(async () => {})}
         appMode="canvas" onAppModeChange={vi.fn()} onCanvasSelect={onCanvasSelect} onArchitectureSelect={onArchitectureSelect}
       />,
     )

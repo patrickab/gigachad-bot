@@ -1,5 +1,6 @@
 "use client"
 
+import { createPortal } from "react-dom"
 import { Fragment, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence } from "framer-motion"
 import type { Message, Attachment, WebSearchResult, ProjectDocument } from "@/lib/types"
@@ -8,7 +9,7 @@ import { ChatInput, type ChatInputHandle } from "./ChatInput"
 import { ChatSidebar, type ChatSidebarElementConfig } from "./ChatSidebar"
 import { rewriteImages, fileViewerRawUrl } from "@/lib/api"
 
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronsLeftRight, ChevronsRightLeft, FilePlus, FileText, FileType, FolderOpen, Globe, GitFork, Image as ImageIcon, Library, Plus, User, X } from "lucide-react"
+import { ChevronDown, ChevronRight, ChevronsLeftRight, ChevronsRightLeft, FilePlus, FileText, FileType, FolderOpen, Globe, GitFork, Image as ImageIcon, Library, PanelRight, PanelRightClose, Plus, User, X } from "lucide-react"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { cn } from "@/lib/utils"
 import { ElevationProvider, ElevatedContainer } from "./ElevatedContainer"
@@ -589,6 +590,8 @@ interface ChatContainerProps {
   chatMaxWidth?: number
   extracting?: boolean
   chatInputRef?: React.RefObject<ChatInputHandle | null>
+  /** Top-bar element the context-panel toggle renders into. */
+  contextToggleSlot?: HTMLElement | null
 }
 
 export function ChatContainer({
@@ -609,6 +612,7 @@ export function ChatContainer({
   chatMaxWidth,
   extracting,
   chatInputRef,
+  contextToggleSlot,
 }: ChatContainerProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const [editingDocPath, setEditingDocPath] = useState<string | null>(null)
@@ -1089,16 +1093,17 @@ export function ChatContainer({
             />
           </div>
         </div>
-        {hasSidebarContent && (
+        {hasSidebarContent && contextToggleSlot && createPortal(
           <button
             type="button"
             onClick={() => setContextOpen((c) => !c)}
-            aria-label={contextOpen ? "Collapse sidebar" : "Open sidebar"}
+            aria-label={contextOpen ? "Close context panel" : "Open context panel"}
             aria-expanded={contextOpen}
-            className="absolute right-1 top-4 z-30 flex items-center justify-center h-10 w-6 rounded-md text-ink-faint hover:text-ink hover:bg-surface-elevated/60 transition-colors"
+            className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
           >
-            <ChevronLeft className={cn("h-4 w-4 transition-transform", contextOpen && "rotate-180")} />
-          </button>
+            {contextOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRight className="h-4 w-4" />}
+          </button>,
+          contextToggleSlot,
         )}
       </div>
       {hasSidebarContent && contextOpen && chatId && (

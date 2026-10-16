@@ -19,6 +19,8 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import shutil
+import subprocess
 import time
 from typing import Any
 import urllib.error
@@ -39,6 +41,9 @@ FALLBACK_TOKEN = "omp-gateway"
 
 _CATALOG_TTL_SECONDS = 60.0
 _REQUEST_TIMEOUT_SECONDS = 3.0
+# `omp models --json` reads OMP's local model registry, ~1s per call.
+_THINKING_TTL_SECONDS = 300.0
+_CLI_TIMEOUT_SECONDS = 15.0
 
 # Provider ids the gateway reports verbatim; only the ones whose casing cannot
 # be derived from the id are listed.
@@ -59,6 +64,7 @@ _PROVIDER_LABELS = {
 }
 
 _cache: tuple[float, dict[str, Any]] | None = None
+_thinking_cache: tuple[float, dict[str, list[str]]] | None = None
 
 
 def omp_home() -> Path:
@@ -181,6 +187,42 @@ def catalog(*, refresh: bool = False) -> dict[str, Any]:
 def reset_cache() -> None:
     global _cache
     _cache = None
+
+
+def _fetch_thinking_levels() -> dict[str, list[str]]:
+    """`<provider>/<model>` -> OMP's baked effort ladder, empty for non-reasoning models."""
+    executable = shutil.which("omp")
+    if executable is None:
+        return {}
+    completed = subprocess.run(
+        [executable, "models", "--json"],
+        capture_output=True,
+        text=True,
+        timeout=_CLI_TIMEOUT_SECONDS,
+        check=True,
+    )
+    models = json.loads(completed.stdout).get("models") or []
+    return {
+        model["selector"]: (model.get("thinking") or []) if model.get("reasoning") else []
+        for model in models
+        if isinstance(model, dict) and isinstance(model.get("selector"), str)
+    }
+
+
+def thinking_levels(model_id: str) -> list[str] | None:
+    """Effort levels OMP accepts for `<provider>/<model>`, None when OMP doesn't know the model.
+
+    - Same source ompweb uses: OMP's model registry, not LiteLLM's, which lacks gateway models
+    - A missing or failing `omp` CLI counts as "unknown", the caller falls back to LiteLLM
+    """
+    global _thinking_cache
+    now = time.monotonic()
+    if _thinking_cache is None or now - _thinking_cache[0] >= _THINKING_TTL_SECONDS:
+        try:
+            _thinking_cache = (now, _fetch_thinking_levels())
+        except (OSError, subprocess.SubprocessError, ValueError, AttributeError):
+            return None
+    return _thinking_cache[1].get(model_id)
 
 
 def fold_provider_rows(providers: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:

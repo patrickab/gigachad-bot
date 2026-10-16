@@ -17,9 +17,7 @@ export interface BranchContextValue {
   branchMeta: Record<string, BranchMeta>
   chatIdMap: ChatIdMap
   rootFiles: string[]
-  histories: Record<string, string[]>
   visibleRootFiles: string[]
-  visibleHistories: Record<string, string[]>
   historiesLoading: boolean
   activeFile: string | null
   activeQaIndex: number | null
@@ -43,7 +41,6 @@ const BranchContext = createContext<BranchContextValue | null>(null)
 export function BranchProvider({ children }: { children: ReactNode }) {
   const [branchMeta, setBranchMeta] = useState<Record<string, BranchMeta>>({})
   const [rootFiles, setRootFiles] = useState<string[]>([])
-  const [histories, setHistories] = useState<Record<string, string[]>>({})
   const [historiesLoading, setHistoriesLoading] = useState(true)
   const [activeFile, setActiveFile] = useState<string | null>(null)
   const [activeQaIndex, setActiveQaIndex] = useState<number | null>(null)
@@ -78,17 +75,11 @@ export function BranchProvider({ children }: { children: ReactNode }) {
 
   const refreshAll = useCallback(async () => {
     const [histData, branchData] = await Promise.all([
-      listChatHistories().catch(() => ({ files: [] as string[], histories: {} as Record<string, string[]> })),
+      listChatHistories().catch(() => ({ files: [] as string[] })),
       fetchBranchMeta().catch(() => ({} as Record<string, BranchMeta>)),
     ])
     const sortedFiles = (histData.files ?? []).slice().sort((a: string, b: string) => a.localeCompare(b))
-    const rawHistories = histData.histories ?? {}
-    const sortedHistories: Record<string, string[]> = {}
-    for (const dir of Object.keys(rawHistories).sort((a: string, b: string) => a.localeCompare(b))) {
-      sortedHistories[dir] = rawHistories[dir].slice().sort((a: string, b: string) => a.localeCompare(b))
-    }
     setRootFiles(sortedFiles)
-    setHistories(sortedHistories)
     setBranchMeta(branchData)
     setHistoriesLoading(false)
   }, [])
@@ -103,17 +94,6 @@ export function BranchProvider({ children }: { children: ReactNode }) {
     () => rootFiles.filter((f) => !branchMeta[f]?.parent_id),
     [rootFiles, branchMeta],
   )
-
-  const visibleHistories = useMemo(() => {
-    const filtered: Record<string, string[]> = {}
-    for (const [dir, files] of Object.entries(histories)) {
-      filtered[dir] = files.filter((f) => {
-        const key = `${dir}/${f}`
-        return !branchMeta[key]?.parent_id
-      })
-    }
-    return filtered
-  }, [histories, branchMeta])
 
   const doCreateBranch = useCallback(async (parentFile: string, branchMessageIdx: number) => {
     const result = await apiCreateBranch(parentFile, branchMessageIdx)
@@ -143,9 +123,7 @@ export function BranchProvider({ children }: { children: ReactNode }) {
       branchMeta,
       chatIdMap,
       rootFiles,
-      histories,
       visibleRootFiles,
-      visibleHistories,
       historiesLoading,
       activeFile,
       activeQaIndex,

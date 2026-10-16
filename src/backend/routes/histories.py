@@ -69,11 +69,6 @@ class SaveRequest(BaseModel):
     expected_revision: str | None = None
 
 
-class MkdirRequest(BaseModel):
-    parent_path: str
-    name: str
-
-
 class MoveRequest(BaseModel):
     filename: str
     target_dir: str
@@ -91,7 +86,7 @@ class MergeRequest(BaseModel):
 # Sync handlers: FastAPI runs them in its threadpool, so blocking store I/O for one request
 # (e.g. the branch-meta scan) cannot stall a concurrent chat load on the event loop.
 @router.get("")
-def list_chat_histories(store: ChatStore = Depends(get_chat_store)) -> dict[str, Any]:
+def list_chat_histories(store: ChatStore = Depends(get_chat_store)) -> dict[str, list[str]]:
     return store.list_histories()
 
 
@@ -171,14 +166,6 @@ async def delete_chat_history(
         return await cleanup_after_delete(assets, sandbox_service, lambda cleanup: store.delete(filename, cleanup_uploads_fn=cleanup))
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Chat history not found")
-
-
-@router.post("/mkdir")
-def create_directory(req: MkdirRequest, store: ChatStore = Depends(get_chat_store)) -> dict[str, str]:
-    try:
-        return store.create_directory(req.parent_path, req.name)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/move")

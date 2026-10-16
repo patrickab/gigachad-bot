@@ -34,12 +34,12 @@ function Collapse({ open, children }: { open: boolean; children: ReactNode }) {
 
 function ExpandableSidebarElement({ icon: Icon, title, badge, action, open, onOpenChange, children }: { icon: ElementType; title: string; badge?: ReactNode; action?: ReactNode; open: boolean; onOpenChange: (open: boolean) => void; children: ReactNode }) {
   return (
-    <div className="border-b border-divider/50">
+    <div className="border-b border-divider/50 last:border-b-0">
       <div className="flex items-center">
         <button
           onClick={() => onOpenChange(!open)}
           aria-expanded={open}
-          className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-ink hover:bg-surface/50 transition-colors rounded"
+          className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-ink hover:bg-surface-elevated/50 transition-colors rounded"
         >
           {open ? (
             <ChevronDown className="h-3 w-3 text-ink-subtle shrink-0" />
@@ -117,7 +117,7 @@ export function ChatSidebar({ elements, width, onWidthChange, maxWidth: maxWidth
     <motion.aside
       initial={false}
       style={{ width: widthStyle }}
-      className="shrink-0 border-l border-divider bg-paper flex flex-col overflow-hidden relative"
+      className="shrink-0 mb-6 mr-6 rounded-2xl border border-divider/50 bg-surface shadow-[var(--shadow-lg)] flex flex-col overflow-hidden relative"
     >
       <div
         role="separator"

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
-import { MoreOptionsMenu } from "@/components/MoreOptionsMenu"
+import { SettingsMenu } from "@/components/SettingsMenu"
 import { ModeProvider } from "@/hooks/useModeState"
 import type { TabConfig } from "@/components/TabManager"
 
@@ -20,15 +20,15 @@ const config: TabConfig = {
   searchDomain: "",
 }
 
-describe("MoreOptionsMenu", () => {
+describe("SettingsMenu", () => {
   it("keeps domain and answer guidance inside Deep Research", () => {
-    const { container } = render(
+    render(
       <ModeProvider>
-        <MoreOptionsMenu prompts={{}} config={config} onConfigChange={vi.fn()} models={null} />
+        <SettingsMenu prompts={{}} config={config} onConfigChange={vi.fn()} models={null} />
       </ModeProvider>,
     )
 
-    fireEvent.click(container.querySelector("button")!)
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }))
 
     expect(screen.queryByPlaceholderText("site:nature.com -reddit.com")).not.toBeInTheDocument()
     expect(screen.queryByPlaceholderText("Optional guidance for the answer…")).not.toBeInTheDocument()

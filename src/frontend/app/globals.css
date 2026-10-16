@@ -237,6 +237,38 @@ p, li {
   border: none;
 }
 
+/* Reasoning level glyph, TUI style: a circle that fills up with effort, slashed when off, ringed at max. */
+.reasoning-glyph {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+}
+.reasoning-glyph::before {
+  content: "";
+  position: absolute;
+  inset: 2.5px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+}
+.reasoning-glyph[data-level="minimal"]::before { background: conic-gradient(currentColor 45deg, transparent 45deg); }
+.reasoning-glyph[data-level="low"]::before { background: conic-gradient(currentColor 90deg, transparent 90deg); }
+.reasoning-glyph[data-level="medium"]::before { background: conic-gradient(currentColor 180deg, transparent 180deg); }
+.reasoning-glyph[data-level="high"]::before { background: conic-gradient(currentColor 270deg, transparent 270deg); }
+.reasoning-glyph:is([data-level="xhigh"], [data-level="max"])::before { background: currentColor; }
+.reasoning-glyph[data-level="max"]::before { outline: 1px solid currentColor; outline-offset: 1px; }
+.reasoning-glyph[data-level="off"]::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 2.5px;
+  right: 2.5px;
+  height: 1px;
+  background: currentColor;
+  transform: rotate(-45deg);
+}
+
 /* Architecture Diagrams read as a pen sketch on the app's own paper: a strong
    ink for outlines and titles, a softer pencil for connections and notes, and
    a fill that only just lifts a shape off the canvas. In dark mode that makes

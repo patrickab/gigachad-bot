@@ -46,6 +46,7 @@ interface FileTreeProps<T> {
   onPlusClick?: () => void
   plusTitle?: string
   collapsed?: boolean
+  /** Section is collapsible only when `onOpenChange` is given; otherwise it is always open. */
   open?: boolean
   onOpenChange?: (open: boolean) => void
   onExpand?: () => void
@@ -336,18 +337,23 @@ export function FileTree<T>({
       <TreeCtx.Provider value={ctx as unknown as TreeCtx<unknown>}>
         <div className="space-y-1 w-full">
           <div className="flex w-full items-center justify-between p-1.5 rounded-md text-ink-muted hover:bg-surface-elevated/20 group">
-            <button
-              onClick={() => onOpenChange?.(!open)}
-              className="flex-1 flex items-center gap-3 p-1 rounded-md text-left transition-colors hover:text-ink"
-            >
-              <SectionIcon className="h-4 w-4 shrink-0 text-ink-muted" />
-              <span className="text-sm font-medium">{sectionTitle}</span>
-              {open != null && (
+            {onOpenChange ? (
+              <button
+                onClick={() => onOpenChange(!open)}
+                className="flex-1 flex items-center gap-3 p-1 rounded-md text-left transition-colors hover:text-ink"
+              >
+                <SectionIcon className="h-4 w-4 shrink-0 text-ink-muted" />
+                <span className="text-sm font-medium">{sectionTitle}</span>
                 <div className="ml-auto">
-                  <ChevronIcon open={open} />
+                  <ChevronIcon open={!!open} />
                 </div>
-              )}
-            </button>
+              </button>
+            ) : (
+              <div className="flex-1 flex items-center gap-3 p-1">
+                <SectionIcon className="h-4 w-4 shrink-0 text-ink-muted" />
+                <span className="text-sm font-medium">{sectionTitle}</span>
+              </div>
+            )}
             {(onPlusClick || onAddRoot || onAddFolder) && (
               <button aria-label={`${plusTitle ?? "Add item"}`}
                 onClick={(e) => { e.stopPropagation(); handlePlus() }}
@@ -358,7 +364,7 @@ export function FileTree<T>({
             )}
           </div>
 
-          {open && (
+          {(open || !onOpenChange) && (
             <>
               <AnimatePresence>
                 {(createMode === "root" || createMode === "folder") && (

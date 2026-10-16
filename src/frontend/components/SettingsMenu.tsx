@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback } from "react"
 import { AnimatePresence, motion } from "framer-motion"
-import { ChevronDown, MoreHorizontal, BookOpen, Pencil } from "lucide-react"
+import { ChevronDown, ChevronUp, Settings, BookOpen, Pencil } from "lucide-react"
 import { ParamSlider } from "./ParamSlider"
 import { StyledSelect } from "./StyledSelect"
 import { cn } from "@/lib/utils"
@@ -13,7 +13,7 @@ import { useModeState } from "@/hooks/useModeState"
 import type { ModelsResponse } from "@/lib/types"
 import type { TabConfig } from "@/components/TabManager"
 
-interface MoreOptionsMenuProps {
+interface SettingsMenuProps {
   prompts: Record<string, string>
   config: TabConfig
   onConfigChange: (config: Partial<TabConfig>) => void
@@ -37,13 +37,13 @@ function Toggle({ on, onChange, label }: { on: boolean; onChange: () => void; la
   )
 }
 
-export function MoreOptionsMenu({
+export function SettingsMenu({
   prompts,
   config,
   onConfigChange,
   onEditPrompts,
   models,
-}: MoreOptionsMenuProps) {
+}: SettingsMenuProps) {
   const { researchEnabled } = useModeState()
   const [open, setOpen] = useState(false)
   const [researchOpen, setResearchOpen] = useState(false)
@@ -63,22 +63,27 @@ export function MoreOptionsMenu({
 
 
   return (
-    <div className="relative z-50" ref={ref}>
-      <button aria-label="More options"
+    <div className="relative" ref={ref}>
+      <button aria-label="Settings"
         onClick={() => setOpen(!open)}
-        className="flex items-center justify-center rounded-lg p-2 text-ink-muted hover:text-ink hover:bg-surface transition-colors"
+        className={cn(
+          "w-full flex items-center justify-start gap-3 p-2 rounded-lg transition-colors text-ink-muted hover:bg-surface-elevated/60 hover:text-ink",
+          open && "bg-surface-elevated/60 text-ink",
+        )}
       >
-        <MoreHorizontal className="h-5 w-5" />
+        <Settings className="h-4 w-4 shrink-0" />
+        <span className="flex-1 text-left text-sm font-medium truncate">Settings</span>
+        <ChevronUp className={cn("h-3.5 w-3.5 text-ink-faint transition-transform", open && "rotate-180")} />
       </button>
 
       <AnimatePresence>
         {open && (
           <motion.div
-            initial={{ opacity: 0, y: -4, scale: 0.95 }}
+            initial={{ opacity: 0, y: 4, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -4, scale: 0.95 }}
+            exit={{ opacity: 0, y: 4, scale: 0.95 }}
             transition={{ duration: 0.15 }}
-            className="absolute right-0 top-full mt-2 w-72 rounded-xl border border-divider bg-paper p-3 shadow-[var(--shadow-xl)] flex flex-col gap-4"
+            className="absolute inset-x-1 bottom-full mb-1 max-h-[70vh] overflow-y-auto rounded-xl bg-surface-elevated p-3 shadow-[var(--shadow-md)] flex flex-col gap-4"
           >
             {/* Chat settings always apply: a tool call happens inside a normal chat turn. */}
             <>

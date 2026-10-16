@@ -23,6 +23,7 @@ interface ChatInputProps {
   isStreaming?: boolean
   onCancel?: () => void
   slug?: string | null
+  /** Rendered in the toolbar next to the attach button, e.g. model and reasoning selectors. */
 }
 
 export interface ChatInputHandle {
@@ -245,7 +246,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             className="w-full resize-none bg-transparent text-sm text-ink placeholder:text-ink-subtle outline-none"
           />
           <div className="mt-3 flex items-center justify-between">
-            <div className="flex items-center gap-1">
+            <div className="flex min-w-0 items-center gap-1">
               <input ref={fileRef} type="file" accept="image/*,application/pdf,.md,.txt,.csv,.json,.xml,.yaml,.yml,.toml,.rst,.log,.py,.js,.ts,.jsx,.tsx,.css,.html,.sh,.bash,.zsh,.go,.rs,.java,.c,.cpp,.h,.hpp,.rb,.php,.sql,.r,.tex,.bib" multiple onChange={handleFileSelect} className="hidden" />
               <div className="relative" ref={attachMenuRef}>
                 <button aria-label="Add attachment"
