@@ -69,7 +69,7 @@ export function MemoryBoard({
   }
 
   return (
-    <ElevationProvider darkColor="var(--paper)" brightColor="var(--surface-elevated)" numLevels={3}>
+    <ElevationProvider>
       <ElevatedContainer className="rounded-2xl border border-divider/30 p-3">
         <div className="space-y-3">
           {sections.map(({ category, items }) => {

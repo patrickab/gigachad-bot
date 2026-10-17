@@ -941,7 +941,7 @@ export function ChatContainer({
           style={{ paddingBottom: inputAreaHeight + BOTTOM_GAP_PX }}
         >
           <div className="mx-auto" style={{ maxWidth: effectiveMaxWidth }}>
-          <ElevationProvider darkColor="var(--paper)" brightColor="var(--surface-elevated)" numLevels={3} startLevel={1}>
+          <ElevationProvider startLevel={1}>
             <AnimatePresence>
             {pairs.map(({ user, assistant, globalIndex }, qaIndex) => {
               const expanded = isExpandedNormal(globalIndex)

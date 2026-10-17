@@ -176,7 +176,7 @@ export function ProjectDashboard() {
       />
 
       <FloatingWindow onClose={() => setDashboardOpen(false)} panelClassName="w-11/12 bg-transparent backdrop-blur-none">
-          <ElevationProvider darkColor="var(--paper)" brightColor="var(--surface-elevated)" numLevels={3}>
+          <ElevationProvider>
             <ElevatedContainer className="w-full h-full flex flex-col overflow-hidden">
               <div className="pt-6 px-8 flex items-center justify-between border-b border-divider/20 pb-4 select-none shrink-0">
                 <div className="flex items-center gap-3">
