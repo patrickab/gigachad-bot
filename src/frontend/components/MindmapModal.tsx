@@ -18,6 +18,7 @@ export function MindmapModal({ open, onClose, onGenerate }: MindmapModalProps) {
   useEffect(() => {
     if (open) {
       setPrompt("")
+      // Delay so the input is mounted and visible before focusing
       setTimeout(() => inputRef.current?.focus(), 50)
     }
   }, [open])

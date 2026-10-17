@@ -1,6 +1,6 @@
 "use client"
 
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { getStroke } from "perfect-freehand"
 import { type StrokeData, type EmbedRect, type CanvasEmbedRect, getSvgPathFromStroke, pointInPolygon, renderPageToPng } from "@/lib/drawing"
@@ -14,7 +14,6 @@ import { cn } from "@/lib/utils"
 import { Plus, Undo2, Redo2, Trash2, Copy, FileType, ImageIcon, X, Camera, CircleDashed, Type, SquarePen, PenLine, Pencil, Maximize2, Minimize2, Network } from "lucide-react"
 import { PdfViewer } from "./PdfViewer"
 import { ArchitectureWindow } from "./ArchitectureWindow"
-import { DocumentEditor } from "./DocumentEditor"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { PlotElement, type PlotFigure } from "./PlotElement"
 import { cameraToOffset, HostScaleContext, offsetToCamera, reframeCamera, screenToWorld, zoomCamera, type ZoomAnchor } from "./InfiniteViewport"
@@ -72,16 +71,13 @@ export function appendStrokePoint(points: number[][], point: number[]): void {
 }
 
 
-// Stroke objects are immutable once committed, so their outline path and bounds are
-// computed once per object — not on every render, and not on every eraser sample.
-// Weak keys, so a stroke dropped by an edit takes its cached geometry with it.
+// Committed strokes are immutable, so outline path and bounds are computed once per
+// object, not per render or eraser sample. Weak keys free the cache when an edit drops a stroke.
 const strokePathCache = new WeakMap<StrokeData, string>()
 const strokeBoundsCache = new WeakMap<StrokeData, [number, number, number, number]>()
 
-// The eraser tests every stroke on the canvas against every pointermove, so rejecting a
-// stroke has to be cheap: four comparisons against a cached box instead of a distance
-// computation per segment. On a long session's canvas this is the difference between
-// scanning every point ever drawn and scanning the handful actually under the tip.
+// The eraser tests every stroke on every pointermove, so reject cheaply with four
+// comparisons against a cached box instead of per-segment distances.
 function strokeBounds(s: StrokeData): [number, number, number, number] {
   let b = strokeBoundsCache.get(s)
   if (b === undefined) {
@@ -204,6 +200,7 @@ function sameHistoryEntity(collection: CanvasEntityCollection, a: CanvasEntity |
   return JSON.stringify(comparableEntity(collection, a)) === JSON.stringify(comparableEntity(collection, b))
 }
 
+// Per-entity delta between two docs, matched by id. Unchanged references and page-only attachment edits are ignored.
 function historyChanges(before: CanvasDocument, after: CanvasDocument): CanvasHistoryChange[] {
   const changes: CanvasHistoryChange[] = []
   for (const collection of canvasEntityCollections) {
@@ -230,6 +227,8 @@ function historyChanges(before: CanvasDocument, after: CanvasDocument): CanvasHi
   return changes
 }
 
+// Replay a recorded delta onto the live doc. A change is skipped when its entity was edited since
+// (no longer equals the expected state), and removed entities return at their recorded index.
 function restoreHistory(doc: CanvasDocument, changes: CanvasHistoryChange[], direction: "undo" | "redo"): CanvasDocument {
   let restored: CanvasDocument | null = null
   for (const collection of canvasEntityCollections) {
@@ -330,6 +329,7 @@ function migrate(d: LegacyDoc): CanvasDocument {
   return { version: 1, viewport: d.viewport, frames, strokes: migrateStrokes(d.strokes), attachments, texts: migrateTexts(d.texts) }
 }
 
+/** Parse and migrate a saved canvas, returning an empty document for invalid JSON or unknown versions. */
 export function parseCanvasDoc(text: string): CanvasDocument {
   try {
     const parsed = JSON.parse(text) as LegacyDoc
@@ -491,6 +491,7 @@ const StrokeLayer = memo(function StrokeLayer({ strokes, hidden, isDark }: { str
   )
 })
 
+/** Infinite pan/zoom canvas of ink, frames, attachments and text notes. Camera state is local, every document edit goes through `onChange`. */
 export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, docPath, depth = 0, zoomAnchor = depth > 0 ? "viewport-center" : "cursor", hostScale = 1 }: CanvasEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   // gates the window/document key listeners below to the frontmost tab
@@ -569,7 +570,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   const [isPanning, setIsPanning] = useState(false)
   const panStart = useRef({ x: 0, y: 0, ox: 0, oy: 0 })
 
-  // Hide the crosshair for pen input without updating state on every move.
+  // Hide the cursor for pen input without updating state on every move.
   const [pointerIsPen, setPointerIsPen] = useState(false)
   const lastPointerTypeRef = useRef<string>("mouse")
 
@@ -640,7 +641,6 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
 
   const baseWidth = SIZE_MAP[strokeWidth]
 
-  // Redraw the in-progress stroke.
   const redrawLive = useCallback(() => {
     const el = livePathRef.current
     if (!el) return
@@ -651,8 +651,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   // --- Select, move, scale & duplicate strokes. Draw a freehand lasso (not a
   // rectangle, so any shaped area works); once released the lasso is replaced by the
   // bounding box of what it caught, which is what you then drag, resize or copy.
-  // Activated either via the toolbar icon or by press-and-holding the pen's side button
-  // (which used to pan the canvas — panning is still available via space+drag / touch). ---
+  // Activated via the toolbar icon or by press-and-holding the pen's side button. ---
   type RectDrag = { x0: number; y0: number; x1: number; y1: number }
   const [selectionMode, setSelectionMode] = useState(false)
   const [lassoPoints, setLassoPoints] = useState<[number, number][] | null>(null) // in-progress lasso being drawn
@@ -737,6 +736,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     if (close) setColorOpen(false)
   }, [])
 
+  // Client px to canvas units, inverting the current pan/zoom.
   const screenToCanvas = useCallback((clientX: number, clientY: number): [number, number] => {
     const el = containerRef.current
     if (!el) return [0, 0]
@@ -948,6 +948,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const longPressPos = useRef<{ clientX: number; clientY: number } | null>(null)
 
+  // Fires the context menu after 500ms without a cancelling move or release.
   const startLongPress = useCallback((clientX: number, clientY: number) => {
     longPressPos.current = { clientX, clientY }
     longPressTimer.current = setTimeout(() => {
@@ -981,6 +982,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     const y = Math.min(rect.y0, rect.y1)
     const w = Math.abs(rect.x1 - rect.x0)
     const h = Math.abs(rect.y1 - rect.y0)
+    // ignore accidental tiny drags
     if (w < 4 || h < 4) return
     const sequence = ++screenshotSequence.current
     const images: EmbedRect[] = doc.frames
@@ -1038,6 +1040,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     clearSelection()
     // The mouse never draws: its drag falls through to the container and pans.
     if (e.pointerType === "mouse") return
+    // button 5 is the pen's eraser end
     if (e.button === 5) { setIsErasing(true); return }
     if (e.button !== 0) return
     e.stopPropagation()
@@ -1070,7 +1073,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
       setTextDragRect({ x0: textDragStart.current.x, y0: textDragStart.current.y, x1: cx, y1: cy })
       return
     }
-    // cancel long-press if pointer moves more than a few pixels
+    // cancel long-press once the pointer moves more than 5px (25 = squared distance)
     if (longPressPos.current) {
       const dx = e.clientX - longPressPos.current.clientX
       const dy = e.clientY - longPressPos.current.clientY
@@ -1078,6 +1081,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
     }
     if (isErasing) {
       const [ex, ey] = screenToCanvas(e.clientX, e.clientY)
+      // eraser radius: 15 screen px
       const threshold = 15 / scaleRef.current
       const updated = doc.strokes.filter((stroke) => {
         const [minX, minY, maxX, maxY] = strokeBounds(stroke)
@@ -1259,6 +1263,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
   }, [screenshotMode, selectionMode, textMode, selectedStrokes, clearSelection])
 
   const handleCanvasKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    // Only a single printable character starts a note (named keys like "Enter" are longer).
     if (e.ctrlKey || e.metaKey || e.altKey || e.nativeEvent.isComposing || Array.from(e.key).length !== 1) return
     const target = e.target as HTMLElement
     // Only the bare canvas surface should turn typing into a new text note.
@@ -1312,6 +1317,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
       .catch(() => { /* picker just stays empty */ })
   }, [addMenuOpen, slug, depth, docPath])
 
+  // Top-left canvas position that centers a w-wide box of the given height/width aspect in the view.
   const pointAtCenter = useCallback((w: number, aspect: number) => {
     const el = containerRef.current
     const vw = el ? el.clientWidth : 800
@@ -2026,7 +2032,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
                 </g>
               )
             })}
-            {/* Committed strokes */}
+            {/* Committed strokes (selected ones are hidden while a drag preview draws them) */}
             <StrokeLayer strokes={doc.strokes} hidden={dragPreview && selectedStrokes} isDark={isDark} />
             {/* In-progress stroke — d is set imperatively by redrawLive */}
             <path ref={livePathRef} fill={inkColor(color, isDark)} />
@@ -2200,6 +2206,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
                   <X className="h-3 w-3" />
                 </button>
               </div>
+              {/* Body height: fixed-size windows subtract the 31px title bar, PDFs follow their measured aspect. */}
               <div
                 data-canvas-attachment
                 className={cn(full && "flex-1 min-h-0")}

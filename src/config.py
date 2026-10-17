@@ -23,10 +23,9 @@ TEST_MODEL = "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free"
 DEFAULT_DOWNSCALE_IMAGES = True
 
 # --- MinerU PDF parsing config ---
-# The only application artifacts still mirrored to Nextcloud: PostgreSQL is
-# authoritative for both, this tree exists only so MinerU can parse a real file.
+# The only application artifact still mirrored to Nextcloud: PostgreSQL is
+# authoritative, this tree exists only so MinerU can parse a real file.
 DIRECTORY_OUTPUT_MINERU = DOCUMENTS / "Mineru"
-DIRECTORY_OUTPUT_PDF = DOCUMENTS / "PDFs"
 
 _postgres_pool: ConnectionPool | None = None
 
@@ -65,8 +64,8 @@ def get_data_store(user_id: UUID, *, device_id: UUID | None = None) -> DataStore
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
 # External MinerU OCR server (mineru.cli.fast_api). When unset, the backend
-# spawns one per parse from its own environment — impossible in the frozen
-# desktop sidecar, which excludes the ML stack and requires this to be set.
+# spawns one per parse from its own environment. The frozen desktop sidecar
+# excludes the ML stack, so there it must be set.
 MINERU_SERVER_URL = os.environ.get("MINERU_SERVER_URL")
 
 

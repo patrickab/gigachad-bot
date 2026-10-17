@@ -1,3 +1,4 @@
+/** Line diff as text, one line per entry prefixed "  " (kept), "+ " (added) or "- " (removed). O(n*m) time and memory. */
 export function computeLineDiff(oldText: string, newText: string): string {
   const oldLines = oldText.split("\n")
   const newLines = newText.split("\n")
@@ -21,6 +22,7 @@ export function computeLineDiff(oldText: string, newText: string): string {
   let i = oldLines.length
   let j = newLines.length
 
+  // Backtrack from the end, then reverse. Ties emit the addition first so removals precede additions in the output.
   while (i > 0 || j > 0) {
     if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
       diffLines.push(`  ${oldLines[i - 1]}`)

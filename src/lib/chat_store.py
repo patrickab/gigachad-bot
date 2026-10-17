@@ -22,10 +22,6 @@ class ChatStore:
         self._base = DataStorePath(data_store, prefix)
         self._chat_id_index: dict[str, str] | None = None
 
-    # ------------------------------------------------------------------
-    # Path helpers
-    # ------------------------------------------------------------------
-
     def resolve_path(self, filename: str) -> DataStorePath:
         """Resolve *filename* under the base directory, rejecting traversal."""
         return self._base / filename
@@ -47,11 +43,8 @@ class ChatStore:
         pd = self.project_dir_for(path)
         return pd.name if pd else None
 
-    # ------------------------------------------------------------------
-    # Chat ID index
-    # ------------------------------------------------------------------
-
     def _rebuild_index(self) -> dict[str, str]:
+        """Scan every chat file once to map chat_id to its relative path."""
         index: dict[str, str] = {}
         if not self._base.exists():
             self._chat_id_index = index
@@ -73,13 +66,10 @@ class ChatStore:
         self._chat_id_index = None
 
     def find_by_chat_id(self, chat_id: str) -> str | None:
+        """Return the relative path of the chat with this ID, building the index on first use."""
         if self._chat_id_index is None:
             self._rebuild_index()
         return self._chat_id_index.get(chat_id)
-
-    # ------------------------------------------------------------------
-    # Core read / write
-    # ------------------------------------------------------------------
 
     def load(self, filename: str) -> dict[str, Any] | None:
         """Load a chat file and its revision in one read. Returns None on failure."""
@@ -106,7 +96,7 @@ class ChatStore:
     def save(
         self, filename: str, data: dict[str, Any] | None = None, *, title: str | None = None, expected_revision: str | None = None
     ) -> dict[str, str]:
-        """Write a chat file. Validates chat_id mismatch. Builds payload from *data* and existing."""
+        """Write a chat file, merging *data* over the stored chat. A given *expected_revision* makes the write conflict-checked."""
         path = self.resolve_path(filename)
         existing = self._load_path(path) if path.exists() else None
         if existing and existing.get("chat_id") and data and data.get("chat_id") and existing["chat_id"] != data["chat_id"]:
@@ -119,10 +109,6 @@ class ChatStore:
             self._base.store.write_bytes(path.key, content, expected=Revision(expected_revision))
         self.invalidate_index()
         return {"status": "ok", "filename": str(filename), "revision": self.revision(filename) or ""}
-
-    # ------------------------------------------------------------------
-    # Delete
-    # ------------------------------------------------------------------
 
     def delete(self, filename: str, *, cleanup_uploads_fn: Callable[[str, str | None], None] | None = None) -> dict[str, str]:
         """Delete a single chat file. Updates parent children array and project tab registry if applicable."""
@@ -182,10 +168,6 @@ class ChatStore:
         proj_data["tabs"] = [t for t in proj_data.get("tabs", []) if t.get("filename") != filename]
         safe_write_json(proj_data_path, proj_data)
 
-    # ------------------------------------------------------------------
-    # Cascade delete
-    # ------------------------------------------------------------------
-
     def cascade_delete(self, filename: str, *, cleanup_uploads_fn: Callable[[str, str | None], None] | None = None) -> dict[str, Any]:
         """Delete a root conversation and all its descendants."""
         root_path = self.resolve_path(filename)
@@ -226,72 +208,8 @@ class ChatStore:
         self.invalidate_index()
         return {"status": "ok", "deleted": deleted}
 
-    # ------------------------------------------------------------------
-    # Orphan
-    # ------------------------------------------------------------------
-
-    def orphan(self, filename: str, *, cleanup_uploads_fn: Callable[[str, str | None], None] | None = None) -> dict[str, Any]:
-        """Promote children of a deleted root to independent roots, then delete the root."""
-        root_path = self.resolve_path(filename)
-        if not root_path.exists():
-            raise FileNotFoundError(filename)
-        root_data = self._load_path(root_path)
-        if root_data is None:
-            raise ValueError("Failed to read chat file")
-        orphaned: list[str] = []
-        for child_info in root_data.get("children", []):
-            child_file = self.find_by_chat_id(child_info.get("chat_id", ""))
-            if child_file:
-                child_path = self.resolve_path(child_file)
-                child_data = self._load_path(child_path)
-                if child_data:
-                    child_data["parent_id"] = None
-                    child_data["branch_message_idx"] = None
-                    safe_write_json(child_path, child_data)
-                    orphaned.append(child_file)
-        root_slug = self.slug_for(root_path)
-        if root_data.get("chat_id") and cleanup_uploads_fn:
-            cleanup_uploads_fn(root_data["chat_id"], root_slug)
-        root_path.unlink()
-        self.invalidate_index()
-        return {"status": "ok", "orphaned": orphaned}
-
-    # ------------------------------------------------------------------
-    # Rename
-    # ------------------------------------------------------------------
-
-    def rename(self, old_path: str, new_title: str) -> dict[str, str]:
-        old = self.resolve_path(old_path)
-        if not old.exists():
-            raise FileNotFoundError(old_path)
-        project_dir = self.project_dir_for(old)
-        sanitized = _sanitize_title(new_title)
-        new_filename = f"{sanitized}.json"
-        new_dir = project_dir if project_dir is not None else self._base
-        unique_name = _unique_filename(new_dir, new_filename)
-        new_path = new_dir / unique_name
-        data = self._load_path(old) or {}
-        payload = _build_payload(data, title=sanitized)
-        safe_write_json(new_path, payload)
-        old.unlink()
-        if project_dir is not None:
-            proj_data_path = project_dir / PROJECT_JSON
-            proj_data = safe_read_json(proj_data_path, {"name": project_dir.name, "kanban": [], "tabs": []})
-            for t in proj_data.get("tabs", []):
-                if t.get("filename") == old.name:
-                    t["filename"] = unique_name
-                    t["name"] = sanitized
-                    t["title"] = sanitized
-            safe_write_json(proj_data_path, proj_data)
-        rel = new_path.resolve().relative_to(self._base)
-        self.invalidate_index()
-        return {"status": "ok", "new_path": str(rel), "filename": unique_name}
-
-    # ------------------------------------------------------------------
-    # Move
-    # ------------------------------------------------------------------
-
     def move(self, filename: str, target_dir: str) -> dict[str, str]:
+        """Move a chat into project *target_dir* (empty for root), carrying a root chat's descendants. Name clashes get a numeric suffix."""
         src = self.resolve_path(filename)
         if not src.exists():
             raise FileNotFoundError(filename)
@@ -328,11 +246,8 @@ class ChatStore:
         rel = dst.relative_to(self._base)
         return {"status": "ok", "new_path": str(rel)}
 
-    # ------------------------------------------------------------------
-    # Branch
-    # ------------------------------------------------------------------
-
     def branch(self, parent_file: str, branch_message_idx: int) -> dict[str, Any]:
+        """Copy history through pair *branch_message_idx* into a new child chat and link it from the parent."""
         parent_path = self.resolve_path(parent_file)
         if not parent_path.exists():
             raise FileNotFoundError(parent_file)
@@ -343,6 +258,7 @@ class ChatStore:
         message_pairs = _extract_qa_pairs(parent_data.get("messages", []))
         if branch_message_idx < 0 or branch_message_idx > len(message_pairs):
             raise ValueError(f"branch_message_idx {branch_message_idx} out of range")
+        # Keep pairs 0..idx inclusive, two messages each.
         cutoff = min(branch_message_idx * 2 + 2, len(parent_data.get("messages", [])))
         child_messages = parent_data.get("messages", [])[:cutoff]
         child_chat_id = uuid.uuid4().hex[:12]
@@ -367,11 +283,8 @@ class ChatStore:
         self.invalidate_index()
         return {"status": "ok", "child_file": child_filename, "chat_id": child_chat_id}
 
-    # ------------------------------------------------------------------
-    # Merge
-    # ------------------------------------------------------------------
-
     def merge(self, child_file: str, *, cleanup_uploads_fn: Callable[[str, str | None], None] | None = None) -> dict[str, Any]:
+        """Fold a child branch back into its parent, re-parent its own children, and delete it."""
         child_path = self.resolve_path(child_file)
         if not child_path.exists():
             raise FileNotFoundError(child_file)
@@ -392,13 +305,16 @@ class ChatStore:
         if branch_idx is None:
             raise ValueError("Child has no branch_message_idx")
         parent_message_pairs = _extract_qa_pairs(parent_data.get("messages", []))
+        # The parent may hold at most the branch-point pair, otherwise it advanced since branching.
         if len(parent_message_pairs) > branch_idx + 1:
             raise ValueError("Parent has diverged past the branch point")
         child_messages = child_data.get("messages", [])
+        # Child messages from the branch point on are new to the parent. Each pair is two messages.
         new_messages = child_messages[branch_idx * 2 :] if branch_idx * 2 < len(child_messages) else []
         parent_data["messages"] = parent_data.get("messages", []) + new_messages
         parent_children = parent_data.get("children", [])
         child_chat_id = child_data.get("chat_id")
+        # Children of the merged child move up to the parent, after the pairs the parent already has.
         for sub_child in child_data.get("children", []):
             sub_file = self.find_by_chat_id(sub_child.get("chat_id", ""))
             if sub_file:
@@ -424,10 +340,6 @@ class ChatStore:
         self.invalidate_index()
         return {"status": "ok"}
 
-    # ------------------------------------------------------------------
-    # List helpers
-    # ------------------------------------------------------------------
-
     def list_histories(self) -> dict[str, list[str]]:
         """List every chat outside a project: a history is simply a chat with no project."""
         # One listing query instead of an is_file/is_dir round trip per entry.
@@ -445,6 +357,7 @@ class ChatStore:
         return {"files": files}
 
     def get_branch_meta(self, dirs: str | None = None) -> dict[str, dict[str, Any]]:
+        """Tree metadata for each chat file. *dirs* is comma-separated project dirs (empty entry for root), None scans all."""
         if not self._base.exists():
             return {}
         if dirs is None:
@@ -460,6 +373,7 @@ class ChatStore:
         return result
 
     def _scan_dir_for_meta(self, base: DataStorePath, rel_prefix: str = "") -> dict[str, dict[str, Any]]:
+        """Per-chat tree metadata keyed by path. Prunes dead children from chat files as a side effect."""
         # One recursive listing, one read per chat. Chat IDs read here vouch for their own
         # existence, so pruning only falls back to the full index for genuinely missing children.
         base_prefix = f"{base.key}/"
@@ -495,10 +409,6 @@ class ChatStore:
             "qa_count": qa_count,
         }
 
-    # ------------------------------------------------------------------
-    # Helpers (project-level, not chat-file specific)
-    # ------------------------------------------------------------------
-
     def _collect_descendants(self, data: dict[str, Any]) -> list[str]:
         files: list[str] = []
         queue = list(data.get("children", []))
@@ -513,11 +423,6 @@ class ChatStore:
                     if child_data:
                         queue.extend(child_data.get("children", []))
         return files
-
-
-# ------------------------------------------------------------------
-# Pure helpers (module-level, no state)
-# ------------------------------------------------------------------
 
 
 def _normalize_chat(raw: dict[str, Any] | list[Any]) -> dict[str, Any]:
@@ -543,12 +448,8 @@ def _normalize_chat(raw: dict[str, Any] | list[Any]) -> dict[str, Any]:
     }
 
 
-def _sanitize_title(title: str) -> str:
-    sanitized = re.sub(r"[^A-Za-z0-9._\- ]+", "_", title).strip()
-    return sanitized or "untitled"
-
-
 def _unique_filename(directory: DataStorePath, base: str) -> str:
+    """Return *base*, or the first free `stem-N.suffix` (N from 2) if it already exists."""
     target = directory / base
     if not target.exists():
         return base
@@ -563,6 +464,7 @@ def _unique_filename(directory: DataStorePath, base: str) -> str:
 
 
 def _extract_qa_pairs(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Group messages into user/assistant pairs. `assistant` is absent for an unanswered user message."""
     pairs: list[dict[str, Any]] = []
     i = 0
     while i < len(messages):
@@ -580,6 +482,7 @@ def _extract_qa_pairs(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _next_branch_filename(parent_path: DataStorePath, parent_file: str, base_dir: DataStorePath) -> str:
+    """Pick the next free `<parent stem>-NN.json` name beside the parent, keeping its directory prefix."""
     parent_dir = parent_path.parent
     parent_stem = parent_path.stem
 
@@ -590,6 +493,7 @@ def _next_branch_filename(parent_path: DataStorePath, parent_file: str, base_dir
     else:
         dir_prefix = None
 
+    # Root `foo.json` -> `foo-00.json`, child `foo-00.json` -> `foo-00-00.json`. Lowest free number wins.
     base_stem = re.sub(r"(-\d\d)+$", "", parent_stem)
 
     if parent_stem == base_stem:
@@ -625,7 +529,7 @@ def _build_payload(
     existing: dict[str, Any] | None = None,
     title: str | None = None,
 ) -> dict[str, Any]:
-    """Merge chat history fields from *data* and *existing* into a write payload."""
+    """Merge chat fields, preferring *data*, then *existing*. *title* overrides both."""
     if data and data.get("messages"):
         payload: dict[str, Any] = {"messages": data["messages"]}
     elif existing and existing.get("messages") is not None:

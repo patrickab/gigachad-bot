@@ -7,6 +7,7 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 
+/** Applies `updater` to the trailing message only when it is from the assistant. Otherwise a no-op. */
 export function updateLastMsg(
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>,
   updater: (msg: Message) => Message,

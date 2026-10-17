@@ -1,10 +1,13 @@
-"""File-root routes — the API owns every filesystem access.
+"""File-root routes. The API owns every filesystem access.
 
 The UI never touches a file root directly: it lists files (`/files`), previews one
 (`/rendered`), writes one (`/file`), and *attaches* a chosen file (`/attach`).
-Attach is a **live reference** — nothing is copied; the returned `path` is
+Attach is a **live reference**: nothing is copied, the returned `path` is
 stored on the Attachment and content is read from (and written back to) the
 actual file.
+
+Handlers are plain `def`: they walk directories and read files synchronously,
+so FastAPI runs them in its threadpool instead of blocking the event loop.
 """
 
 import logging
@@ -57,23 +60,19 @@ class RootBody(BaseModel):
 
 
 @router.get("/files", response_model=RootFileListResponse)
-async def list_files(roots: FileRoots = Depends(get_file_roots)) -> RootFileListResponse:
+def list_files(roots: FileRoots = Depends(get_file_roots)) -> RootFileListResponse:
     return RootFileListResponse(enabled=roots.enabled, files=roots.list_files())
 
 
 @router.get("/project-documents", response_model=FileListResponse)
-async def project_documents(
+def project_documents(
     slug: str = Query(...),
     roots: FileRoots = Depends(get_file_roots),
     assets: AssetStore = Depends(get_asset_store),
 ) -> FileListResponse:
     """Files from file roots mounted to *slug*, shaped like project documents.
 
-    Surfaced so the chat sidebar can list mounted-root files alongside library
-    documents. They attach as live references (no copy). A file root PDF whose
-    cloud-library copy already exists is reported at the *library* key — the
-    parsed cloud copy takes precedence over the file root original, so the sidebar
-    never lists the same PDF twice (file root row + library row).
+    A PDF whose library copy exists is reported at the library key, so the sidebar never lists it twice.
     """
     docs: list[FileMeta] = []
     for f in roots.list_files_for_project(slug):
@@ -88,12 +87,12 @@ async def project_documents(
 
 
 @router.get("/tree", response_model=FileTreeResponse)
-async def list_tree(roots: FileRoots = Depends(get_file_roots)) -> FileTreeResponse:
+def list_tree(roots: FileRoots = Depends(get_file_roots)) -> FileTreeResponse:
     return FileTreeResponse(enabled=roots.enabled, tree=roots.tree())
 
 
 @router.post("/roots", response_model=FileTreeResponse)
-async def add_root(body: RootBody, roots: FileRoots = Depends(get_file_roots)) -> FileTreeResponse:
+def add_root(body: RootBody, roots: FileRoots = Depends(get_file_roots)) -> FileTreeResponse:
     try:
         roots.add_root(body.path, project=body.project)
     except ValueError as exc:
@@ -102,7 +101,7 @@ async def add_root(body: RootBody, roots: FileRoots = Depends(get_file_roots)) -
 
 
 @router.delete("/roots", response_model=FileTreeResponse)
-async def remove_root(path: str = Query(...), roots: FileRoots = Depends(get_file_roots)) -> FileTreeResponse:
+def remove_root(path: str = Query(...), roots: FileRoots = Depends(get_file_roots)) -> FileTreeResponse:
     roots.remove_root(path)
     return FileTreeResponse(enabled=roots.enabled, tree=roots.tree())
 
@@ -112,7 +111,7 @@ class MountpointBody(BaseModel):
 
 
 @router.post("/mountpoints", response_model=FileTreeResponse)
-async def add_mountpoint(
+def add_mountpoint(
     body: MountpointBody,
     root_path: str = Query(..., alias="root"),
     roots: FileRoots = Depends(get_file_roots),
@@ -125,7 +124,7 @@ async def add_mountpoint(
 
 
 @router.delete("/mountpoints", response_model=FileTreeResponse)
-async def remove_mountpoint(
+def remove_mountpoint(
     root_path: str = Query(..., alias="root"),
     path: str = Query(...),
     roots: FileRoots = Depends(get_file_roots),
@@ -135,7 +134,7 @@ async def remove_mountpoint(
 
 
 @router.post("/file")
-async def write_file(body: FileContent, roots: FileRoots = Depends(get_file_roots)) -> dict[str, bool]:
+def write_file(body: FileContent, roots: FileRoots = Depends(get_file_roots)) -> dict[str, bool]:
     try:
         roots.write(body.path, body.content)
     except (OSError, ValueError) as exc:
@@ -144,7 +143,7 @@ async def write_file(body: FileContent, roots: FileRoots = Depends(get_file_root
 
 
 @router.get("/rendered", response_model=FileContent)
-async def read_rendered(path: str = Query(...), roots: FileRoots = Depends(get_file_roots)) -> FileContent:
+def read_rendered(path: str = Query(...), roots: FileRoots = Depends(get_file_roots)) -> FileContent:
     try:
         raw = roots.read(path)
         return FileContent(path=path, content=roots.resolve_wiki_content(raw, path))
@@ -153,24 +152,16 @@ async def read_rendered(path: str = Query(...), roots: FileRoots = Depends(get_f
 
 
 @router.post("/attach", response_model=AttachResult)
-async def attach_file(
+def attach_file(
     path: str = Query(...),
     roots: FileRoots = Depends(get_file_roots),
     assets: AssetStore = Depends(get_asset_store),
 ) -> AttachResult:
-    """Attach as a live reference: validate the path, return current content.
+    """Attach a file as a live reference: validate the path, return current content.
 
-    Idempotent and copy-free — the frontend calls this again at send time to
-    refresh content (and pick up a finished PDF extraction).
-
-    PDFs are the one exception to the copy-free rule: a file root PDF is *promoted*
-    into the shared Postgres library (``PDFs/<name>``) on first attach and the
-    library copy takes precedence thereafter. This dedupes against any
-    same-named PDF already parsed by MinerU, so a file root never shadows the
-    canonical library copy. The library's logical key is also accepted here
-    (it is what this endpoint itself returns), so the send-time refresh — which
-    re-calls this endpoint with whatever path it was last given — keeps working
-    for promoted PDFs. Non-PDF file-root files stay pure live references.
+    - Idempotent and copy-free, the frontend re-calls it at send time to refresh content
+    - PDFs are promoted into the shared library (`PDFs/<name>`) on first attach, the library copy wins afterwards
+    - The library key is also accepted as `path`, since that is what this endpoint returns for promoted PDFs
     """
     mime = lib_docs.mime_for(path)
 
@@ -181,10 +172,7 @@ async def attach_file(
             except (FileNotFoundError, ValueError) as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
             name = root_resolved.name
-            # Cloud copy takes precedence if it already exists (don't clobber a
-            # possibly-parsed library PDF with a same-named file-root file). Otherwise
-            # promote the file root PDF into the library — filename is identity, so
-            # this is an overwrite-by-name, never a "<name> (n).pdf" dupe.
+            # Library copy wins so a parsed PDF is never clobbered, else promote by name (no "<name> (n).pdf" dupes)
             if assets.list(f"{PDFS}/{name}"):
                 content = assets.read(f"{PDFS}/{name}").content or b""
             else:
@@ -219,7 +207,7 @@ class AddToProjectBody(BaseModel):
 
 
 @router.post("/add-to-project", response_model=FileListResponse)
-async def add_to_project(
+def add_to_project(
     body: AddToProjectBody,
     roots: FileRoots = Depends(get_file_roots),
     store: ProjectStore = Depends(get_project_store),

@@ -1,13 +1,11 @@
 import type { Attachment, ProjectDocument, Usage, RootFile } from "@/lib/types"
 
 /**
- * Centralised mock for `@/lib/api`. Every hook test overrides only the
- * endpoints it exercises; the rest are no-ops returning sensible empties.
+ * Centralised mock for `@/lib/api`. Hook tests override only the endpoints
+ * they exercise, the rest return empties.
  *
- * `vi.mock` is hoisted to the top of the file by vitest, so the factory
- * cannot reference outer-scope variables — we expose mutators on the mock
- * itself (the `__setImpl`/`__impls` pattern) so each test can install a
- * spy for the specific function it cares about.
+ * `vi.mock` is hoisted, so its factory cannot reference outer-scope variables.
+ * Tests install spies through the `__setImpl`/`__impls` mutators instead.
  */
 
 type AnyFn = (...args: any[]) => any

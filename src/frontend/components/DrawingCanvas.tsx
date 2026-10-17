@@ -7,7 +7,7 @@ import { X, Check, Maximize2, Minimize2, Undo2, Trash2, Pencil } from "lucide-re
 import { cn } from "@/lib/utils"
 import { getStroke } from "perfect-freehand"
 import { type StrokeData, STROKE_OPTIONS as BASE_STROKE_OPTIONS, getSvgPathFromStroke, renderStrokesToJpeg } from "@/lib/drawing"
-import { uploadFile as apiUploadFile, chatFileUrl } from "@/lib/api"
+import { uploadFile as apiUploadFile } from "@/lib/api"
 import { activeThemeName, readToken } from "@/lib/palette"
 import type { Attachment } from "@/lib/types"
 
@@ -79,6 +79,7 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
       const rect = svg.getBoundingClientRect()
       const x = e.clientX - rect.left
       const y = e.clientY - rect.top
+      // Mouse and some pens report 0 pressure, fall back to a mid value
       const pressure = e.pressure > 0 ? e.pressure : 0.5
       return [x, y, pressure]
     },
@@ -87,8 +88,9 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<SVGSVGElement>) => {
-      // ponytail: ignore touch (palm/hand) — only pen and mouse draw
+      // Ignore touch (palm/hand), only pen and mouse draw
       if (e.pointerType === "touch") return
+      // Button 5 is the pen eraser tip
       if (e.button === 5) {
         setIsErasing(true)
         return
@@ -111,6 +113,7 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
         const rect = svg.getBoundingClientRect()
         const x = e.clientX - rect.left
         const y = e.clientY - rect.top
+        // Erase radius in px around the pointer
         const threshold = 15
         setStrokes((prev) =>
           prev.filter((stroke) => {
@@ -174,7 +177,7 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
       const att = await apiUploadFile(chatId, file, slug)
       onConfirm(att)
     } catch {
-      // silently fail
+      // No error UI. The dialog stays open with strokes intact so the user can retry.
     } finally {
       setIsExporting(false)
     }

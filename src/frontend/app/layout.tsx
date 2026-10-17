@@ -36,6 +36,7 @@ export const metadata: Metadata = {
   },
 }
 
+// Runs before hydration so the saved theme applies without a flash. Default is dark.
 const THEME_SCRIPT = `
   (function() {
     try {
@@ -48,6 +49,7 @@ const THEME_SCRIPT = `
   })()
 `
 
+// Suppress the long-press context menu for touch pointers only, mouse right-click stays.
 const NO_TOUCH_CONTEXTMENU_SCRIPT = `
   (function() {
     var touchActive = false

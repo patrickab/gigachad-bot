@@ -15,10 +15,12 @@ export function formatCategoryHeading(name: string): string {
   return name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
+/** Missing or empty categories group under "uncategorized". */
 export function normalizeMemoryCategory(m: MemoryRecord): string {
   return m.category || "uncategorized"
 }
 
+// Newest first by updated_at, falling back to created_at. ISO timestamps compare lexically.
 function sortByUpdated(mems: MemoryRecord[]): MemoryRecord[] {
   return [...mems].sort((a, b) => {
     const ta = ("updated_at" in a ? a.updated_at : undefined) ?? ("created_at" in a ? a.created_at : undefined) ?? ""
@@ -27,7 +29,7 @@ function sortByUpdated(mems: MemoryRecord[]): MemoryRecord[] {
   })
 }
 
-/** Group memories into category sections in definition order (includes empty categories). */
+/** Group memories into sections in definition order (empty categories included), then any unknown categories last. */
 export function groupByCategoryOrder(
   categoryOrder: CategoryDef[],
   memories: MemoryRecord[],

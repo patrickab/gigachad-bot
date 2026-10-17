@@ -25,7 +25,7 @@ interface ChatMessageProps {
   search_result?: Message["search_result"]
   research_steps?: Message["research_steps"]
   research_progress?: Message["research_progress"]
-  /** Not rendered here — ChatContainer owns the tool element. Only suppresses the
+  /** Not rendered here. ChatContainer owns the tool element. Only suppresses the
    *  "Processing…" placeholder while a tool is still running. */
   tool_calls?: Message["tool_calls"]
   isStreaming?: boolean
@@ -49,6 +49,7 @@ export function AssistantMessageContent({
   compact,
   search_result,
 }: AssistantMessageContentProps) {
+  // Split `<thought>` block from the answer. An unclosed tag means the thought is still streaming.
   const { thought, cleanContent } = useMemo(() => {
     const startTag = "<thought>\n"
     const endTag = "\n</thought>"
@@ -113,6 +114,7 @@ function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBran
       setTimeout(() => setCopied(false), 1500)
     })
   }
+  // When the whole message is selected, copy the raw markdown instead of rendered text
   function handleNativeCopy(e: React.ClipboardEvent<HTMLDivElement>) {
     const selectedText = window.getSelection()?.toString()
     const renderedText = e.currentTarget.innerText ?? e.currentTarget.textContent ?? ""
@@ -122,6 +124,7 @@ function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBran
   }
 
 
+  // Research steps stream into `content` as progress text until the final answer replaces them
   const isResearchRunning = !isUser && isStreaming && research_steps && research_steps.length > 0
   const canRegenerate = !isUser && onRegenerate && !isStreaming && !search_result && !(research_steps && research_steps.length > 0)
 

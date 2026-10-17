@@ -19,6 +19,7 @@ class OCRRequest(BaseModel):
 
 @router.post("/ocr")
 async def ocr(req: OCRRequest, store: ModelProviderStore = Depends(get_model_provider_store)) -> EventSourceResponse:
+    """Stream OCR text and LaTeX from an image as SSE, defaulting to the configured vision model."""
     with request_client() as c:
         model = req.model or store.load_defaults()["vision_model"]
         img = decode_image(req.img_base64)

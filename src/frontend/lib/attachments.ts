@@ -33,16 +33,11 @@ export function isImageAttachment(a: Attachment): boolean {
   return a.mime.startsWith("image/")
 }
 
-// Persisted chat histories store each attachment's `url` as an absolute URL
-// computed against whatever API origin was active at upload time (e.g. an
-// old localhost dev backend) — trusting it verbatim breaks image loads for
-// any client whose API origin now differs. The URL's path+query (upload dir,
-// fileviewer path) is the only reliable locator: chat_id/slug are NOT stable
-// identities, since uploads live under whatever project was active at send
-// time and are never relocated when a chat is moved or branched. So rebase
-// the stored URL onto the current API origin, keeping its path+query intact;
-// only fall back to reconstructing from (chatId, slug) when there's no
-// stored URL to rebase.
+// Stored `url`s are absolute against whatever API origin was active at upload time
+// (e.g. an old localhost dev backend), so trusting them breaks loads on other origins.
+// Path+query is the only reliable locator: chat_id/slug are NOT stable, since uploads
+// stay under the project active at send time even when a chat is moved or branched.
+// Rebase onto the current origin, and rebuild from (chatId, slug) only without a stored URL.
 function rebaseOnApiOrigin(url: string): string | null {
   try {
     const u = new URL(url)
@@ -103,12 +98,10 @@ export function collectActiveImagePaths(
   return paths
 }
 
-// Pure attachment-intake transform. Parses unparsed non-image attachments
-// (via injected `parse`), merges results back, builds the hidden-content block,
-// and assembles the ChatRequest with prior + new image paths. The optimistic
-// placeholder message and the post-parse patch stay in the caller — this is the
-// testable core lifted out of page.tsx's handleSend. Throws if `parse` throws;
-// the caller renders the parse-failure message.
+// Pure attachment-intake transform: parses unparsed non-image attachments (via injected
+// `parse`), merges results back, builds the hidden-content block, and assembles the
+// ChatRequest with prior + new image paths. The optimistic placeholder and post-parse
+// patch stay in the caller. Throws if `parse` throws, and the caller renders the failure.
 export async function buildAttachedSend(
   opts: {
     text: string
@@ -135,7 +128,7 @@ export async function buildAttachedSend(
         const fresh = await refreshRootFile(a.vaultPath)
         return { ...a, content: fresh.content, parsedMd: fresh.parsedMd ?? a.parsedMd }
       } catch {
-        return a // dangling ref (deleted file / unmounted file root) — keep last known content
+        return a // dangling ref (deleted file / unmounted file root): keep last known content
       }
     }))
   }

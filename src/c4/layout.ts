@@ -113,6 +113,7 @@ function edgePath(edge: DiagramEdge, source: NodeRect, target: NodeRect, bend: n
   const end = border(target, bend ? control : a)
   const c1 = { x: start.x + (2 / 3) * (control.x - start.x), y: start.y + (2 / 3) * (control.y - start.y) }
   const c2 = { x: end.x + (2 / 3) * (control.x - end.x), y: end.y + (2 / 3) * (control.y - end.y) }
+  // Cubic Bezier at t = 0.5, where the label sits.
   const at = { x: (start.x + 3 * c1.x + 3 * c2.x + end.x) / 8, y: (start.y + 3 * c1.y + 3 * c2.y + end.y) / 8 }
   const { drifts: _drifts, ...rest } = edge
   return {
@@ -123,6 +124,7 @@ function edgePath(edge: DiagramEdge, source: NodeRect, target: NodeRect, bend: n
   }
 }
 
+/** Space between a compound's border and its outermost children. */
 const COMPOUND_PADDING = 32
 /** Room above the first child for the compound's own title. */
 const COMPOUND_TITLE = 64

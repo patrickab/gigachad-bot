@@ -1,16 +1,12 @@
-"""The document library — a tidy, central home for database-owned artifacts.
+"""Helpers for document MIME types, storage keys, and FileRoots path checks.
 
-PDFs and MinerU output are Postgres rows (``AssetStore``) mirrored to the
-Nextcloud ``Documents`` tree as a convenience copy for other tools; the app
-itself never reads that mirror back. The one path this module still resolves
-off disk is a ``FileRoots`` reference — an external file the user pointed the
-app at directly, which was never stored in Postgres and has no database copy
-to read instead.
+PDFs and MinerU output live in Postgres (``AssetStore``) and are mirrored to the
+Nextcloud ``Documents`` tree as a copy the app never reads back. The only path
+resolved off disk is a ``FileRoots`` reference: an external file with no database copy.
 
-This module is pure I/O over paths and mime types — it never touches
-``project.json`` (that is ``ProjectStore``'s seam) and never spawns MinerU
-(that lives in ``lib.mineru``). Keeping it dependency-free of the route layer
-lets both ``files`` and ``documents`` routes reuse it without import cycles.
+Pure path and MIME logic. Project metadata belongs to ``ProjectStore`` and MinerU
+spawning to ``lib.mineru``. Staying free of route imports lets the ``files`` and
+``documents`` routes share it without cycles.
 """
 
 import logging
@@ -44,8 +40,7 @@ def mime_for(path: str | Path) -> str:
 
 
 def document_meta(path: str | Path) -> dict[str, str]:
-    """Describe a document for the API: its path (a database-native logical
-    key, or an absolute path for a live FileRoots reference), display name, and MIME."""
+    """Describe a document for the API: path (logical key, or absolute for a FileRoots reference), name, MIME."""
     p = Path(path)
     return {"path": str(p), "name": p.name, "mime": mime_for(p)}
 
@@ -66,11 +61,9 @@ class PathNotAllowed(Exception):
 def storage_key(path: str | Path, *, root: str | Path | None = None) -> str | None:
     """The logical store key for an app-owned path, or None when it is not one.
 
-    Callers hold one of two spellings for the same file: an absolute path (what the
-    filesystem branch of a route records) or an already-logical key (what the storage
-    branch records). Both map onto the key the DataStore uses. File-root files and anything
-    outside *root* (``DOCUMENTS`` by default) return None — those are live references,
-    never stored copies.
+    Accepts an absolute path under *root* (``DOCUMENTS`` by default) or an
+    already-logical key. Paths outside *root*, including FileRoots files, return
+    None because they are live references with no stored copy.
     """
     text = str(path)
     if not text:
@@ -87,15 +80,10 @@ def storage_key(path: str | Path, *, root: str | Path | None = None) -> str | No
 
 
 def resolve_known_path(path: str | Path, *, roots: "FileRoots | None") -> Path:
-    """Resolve a FileRoots-referenced path, rejecting anything outside it.
+    """Resolve a live FileRoots reference to a real file.
 
-    The only paths this ever resolves off disk are live FileRoots references:
-    external files the user pointed the app at directly, never stored in
-    Postgres. Every app-owned artifact (PDFs, MinerU output, documents,
-    canvases) is read from storage before a caller ever reaches this function.
-
-    Raises ``PathNotAllowed`` so each caller maps the two rejection reasons
-    onto its own status codes and wording.
+    App-owned artifacts are read from storage, never through this function.
+    Raises ``PathNotAllowed`` so each caller maps the two reasons to its own status.
     """
     resolved = Path(path).expanduser().resolve()
     if roots is None or not roots.contains(resolved):

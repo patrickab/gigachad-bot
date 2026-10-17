@@ -10,6 +10,7 @@ interface ParamSliderProps {
   accent?: string
 }
 
+/** Labeled range input. The readout shows two decimals when `step` is fractional, else an integer. */
 export function ParamSlider({
   label,
   value,

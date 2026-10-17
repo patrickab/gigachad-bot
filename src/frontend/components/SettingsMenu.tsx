@@ -87,7 +87,6 @@ export function SettingsMenu({
           >
             {/* Chat settings always apply: a tool call happens inside a normal chat turn. */}
             <>
-                {/* System Prompt */}
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 text-xs font-medium text-ink-subtle">
@@ -107,7 +106,6 @@ export function SettingsMenu({
                   />
                 </div>
 
-                {/* Image Downscale */}
                 <div className="pt-2 border-t border-divider/50">
                   <label className="flex items-center justify-between cursor-pointer">
                     <span className="text-xs text-ink-subtle">Downscale images</span>

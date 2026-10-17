@@ -37,7 +37,6 @@ class MemoryCommitRequest(BaseModel):
     accepted_memories: list[ProposedMemoryModel]
     project_slug: str | None = None
     review_id: str | None = None
-    rejected_memories: list[ProposedMemoryModel] | None = None
     revised_memories: list[dict] | None = None
 
 
@@ -52,6 +51,7 @@ async def extract_memories(
     req: MemoryExtractRequest,
     store: MemoryStoreDep,
 ) -> dict:
+    """Propose memories from a conversation for user review, `project` is None without project memories."""
     try:
         with request_client() as client:
             result = await store.extract(
@@ -73,6 +73,7 @@ async def commit_memory_docs(
     req: MemoryCommitRequest,
     store: MemoryStoreDep,
 ) -> dict:
+    """Merge accepted memories into the stored memory documents."""
     try:
         with request_client() as client:
             accepted = [MemoryProposedMemory(m.id, m.memory, m.scope, m.category or "note") for m in req.accepted_memories]
@@ -82,7 +83,6 @@ async def commit_memory_docs(
                 accepted_memories=accepted,
                 project_slug=req.project_slug,
                 review_id=req.review_id,
-                rejected_memories=[m.model_dump() for m in req.rejected_memories] if req.rejected_memories else None,
                 revised_memories=req.revised_memories,
             )
     except Exception as e:
@@ -95,6 +95,7 @@ async def preview_memory_docs(
     req: MemoryPreviewRequest,
     store: MemoryStoreDep,
 ) -> dict:
+    """Dry-run a commit, return the resulting memory documents without saving."""
     try:
         with request_client() as client:
             accepted = [MemoryProposedMemory(m.id, m.memory, m.scope, m.category or "note") for m in req.accepted_memories]
@@ -114,6 +115,7 @@ async def cancel_memories(
     req: MemoryReviewRequest,
     store: MemoryStoreDep,
 ) -> dict:
+    """Discard a pending extraction review."""
     try:
         await store.cancel_async(review_id=req.review_id)
     except Exception as e:
@@ -163,7 +165,6 @@ def set_categories(req: CategorySetRequest, store: MemoryStoreDep) -> dict:
 
 
 class RemapRequest(BaseModel):
-    scope: str
     orphaned_memories: list[dict]
     remaining_categories: list[dict]
     project_slug: str | None = None
@@ -177,33 +178,7 @@ async def remap_category(req: RemapRequest, store: MemoryStoreDep) -> dict:
                 llm=client,
                 orphaned_memories=req.orphaned_memories,
                 remaining_categories=req.remaining_categories,
-                scope=req.scope,
             )
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     return {"memories": remapped}
-
-
-class MemoryMoveRequest(BaseModel):
-    memory_id: str
-    from_scope: str
-    to_scope: str
-    from_project_slug: str | None = None
-    to_project_slug: str | None = None
-
-
-@router.post("/move")
-def move_memory(req: MemoryMoveRequest, store: MemoryStoreDep) -> dict:
-    try:
-        store.move_memory(
-            memory_id=req.memory_id,
-            from_scope=req.from_scope,
-            to_scope=req.to_scope,
-            from_project_slug=req.from_project_slug,
-            to_project_slug=req.to_project_slug,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
-    return {"status": "moved"}

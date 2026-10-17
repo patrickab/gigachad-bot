@@ -7,8 +7,6 @@ because those are the only artifact classes permitted to mirror to Documents.
 
 from __future__ import annotations
 
-from pathlib import PurePosixPath
-
 from lib.data_store import InvalidStorageKey, validate_key
 
 CHAT = "chat"
@@ -25,6 +23,7 @@ MINERU = "Mineru"
 SANDBOX = "sandbox"
 
 def _part(value: str, label: str) -> str:
+    """Validate *value* as a single key segment (no separators)."""
     try:
         parsed = validate_key(value)
     except InvalidStorageKey as exc:
@@ -52,6 +51,7 @@ def architecture_prefix(slug: str) -> str:
 
 
 def chat_upload_prefix(chat_id: str, slug: str | None = None) -> str:
+    """Attachment prefix for a chat, project-scoped when *slug* is given."""
     chat = _part(chat_id, "chat ID")
     if slug:
         return f"{ATTACHMENT}/project/{_part(slug, 'project slug')}/chat/{chat}"
@@ -64,10 +64,6 @@ def project_attachment_prefix(slug: str) -> str:
 
 def chat_upload(chat_id: str, name: str, slug: str | None = None) -> str:
     return f"{chat_upload_prefix(chat_id, slug)}/{_part(name, 'attachment name')}"
-
-
-def asset_filename(key: str) -> str:
-    return PurePosixPath(validate_key(key)).name
 
 
 def sandbox_scope(scope: str) -> str:
@@ -103,4 +99,5 @@ def sandbox_manifest_prefix(chat_id: str, scope: str = "workspace") -> str:
 
 
 def sandbox_asset(sha256: str) -> str:
+    """Content-addressed asset key shared across all chats."""
     return f"{SANDBOX}/assets/{_part(sha256, 'asset sha256')}"

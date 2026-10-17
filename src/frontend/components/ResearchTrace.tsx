@@ -50,6 +50,7 @@ function formatTime(ts: number) {
   return new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
 }
 
+/** Collapsible log of research events. Steps with `details` expand to raw JSON, and the live pulse stops once a terminal step arrives. */
 function ResearchTraceInner({ steps = [], progress, isLive }: Props) {
   const [expanded, setExpanded] = useState(false)
   const [expandedSteps, setExpandedSteps] = useState<Set<number>>(new Set())
@@ -65,6 +66,7 @@ function ResearchTraceInner({ steps = [], progress, isLive }: Props) {
 
   if (steps.length === 0 && !progress && !isLive) return null
 
+  // Any of these ends a run, depending on the research mode.
   const lastStep = steps[steps.length - 1]
   const isFinished = lastStep?.step === "report_completed" || lastStep?.step === "conclusion_completed" || lastStep?.step === "deep_research_complete"
 

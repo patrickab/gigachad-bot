@@ -23,14 +23,11 @@ class ProjectStore:
         self._prefix = prefix
         self._store = chat_store or ChatStore(prefix, data_store=data_store)
 
-    # ------------------------------------------------------------------
-    # Path helpers
-    # ------------------------------------------------------------------
-
     def _meta_path(self) -> str:
         return f"{self._prefix}/{META_JSON}"
 
     def _resolve_project_dir(self, slug: str) -> str:
+        """Reject empty slugs and anything containing path separators."""
         if Path(slug).name != slug or not slug:
             raise ValueError("Invalid project slug")
         return f"{self._prefix}/{slug}"
@@ -40,6 +37,7 @@ class ProjectStore:
         return f"{directory}/{PROJECT_JSON}"
 
     def _read_json(self, key: str, default: dict[str, Any]) -> dict[str, Any]:
+        """Return *default* when the key is missing or holds invalid or non-object JSON."""
         try:
             raw, _ = read_text(self._data, key)
             data = json.loads(raw)
@@ -48,15 +46,12 @@ class ProjectStore:
             return default
 
     def _write_json(self, key: str, data: dict[str, Any]) -> None:
+        """Write with the current revision so a concurrent change raises StorageConflictError."""
         try:
             _, revision = read_text(self._data, key)
         except StorageNotFoundError:
             revision = None
         write_text(self._data, key, json.dumps(data, indent=2, ensure_ascii=False) + "\n", expected=revision)
-
-    # ------------------------------------------------------------------
-    # Catalog (projects-meta.json)
-    # ------------------------------------------------------------------
 
     def _read_meta(self) -> dict[str, Any]:
         return self._read_json(self._meta_path(), {"projects": []})
@@ -79,19 +74,11 @@ class ProjectStore:
             i += 1
         return slug
 
-    # ------------------------------------------------------------------
-    # Project file (project.json)
-    # ------------------------------------------------------------------
-
     def _read_project(self, project_dir: str) -> dict[str, Any]:
         return self._read_json(self._json_key(project_dir), {"name": Path(project_dir).name, "kanban": [], "tabs": [], "files": []})
 
     def _write_project(self, project_dir: str, data: dict[str, Any]) -> None:
         self._write_json(self._json_key(project_dir), data)
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     def list_projects(self) -> list[dict[str, Any]]:
         meta = self._read_meta()
@@ -179,6 +166,7 @@ class ProjectStore:
         return chat_ids
 
     def update_project_state(self, slug: str, kanban: list[dict[str, Any]], tabs: list[dict[str, Any]]) -> dict[str, Any]:
+        """Replace a project's kanban and tabs, dropping tabs with duplicate filenames."""
         meta = self._read_meta()
         entry = self._find_entry(meta, slug)
         if not entry:
@@ -196,10 +184,6 @@ class ProjectStore:
         data["tabs"] = deduped
         self._write_project(project_dir, data)
         return {"name": entry["name"], "slug": entry["slug"], "kanban": data["kanban"], "tabs": data["tabs"]}
-
-    # ------------------------------------------------------------------
-    # Kanban cards
-    # ------------------------------------------------------------------
 
     def add_card(self, slug: str, title: str, description: str = "", state: str = "backlog") -> dict[str, Any]:
         meta = self._read_meta()
@@ -237,10 +221,6 @@ class ProjectStore:
         self._write_project(project_dir, data)
         return {"status": "ok"}
 
-    # ------------------------------------------------------------------
-    # Tab files
-    # ------------------------------------------------------------------
-
     def save_tab(self, slug: str, filename: str, data: dict[str, Any]) -> dict[str, str]:
         meta = self._read_meta()
         if not self._find_entry(meta, slug):
@@ -267,34 +247,8 @@ class ProjectStore:
         self._write_project(project_dir, project_data)
         return {"status": "ok"}
 
-    def delete_tab(
-        self, slug: str, filename: str, *, cleanup_uploads_fn: Callable[[str, str | None], None] | None = None
-    ) -> dict[str, str]:
-        meta = self._read_meta()
-        if not self._find_entry(meta, slug):
-            raise FileNotFoundError(f"Project not found: {slug}")
-        project_dir = self._resolve_project_dir(slug)
-        tab_path = f"{project_dir}/{filename}"
-        chat_id_to_clean: str | None = None
-        if self._data.exists(tab_path):
-            raw = self._read_json(tab_path, {})
-            cid = raw.get("chat_id")
-            if isinstance(cid, str):
-                chat_id_to_clean = cid
-            self._data.delete(tab_path)
-        self._store.invalidate_index()
-        if chat_id_to_clean and cleanup_uploads_fn:
-            cleanup_uploads_fn(chat_id_to_clean, slug)
-        project_data = self._read_project(project_dir)
-        project_data["tabs"] = [t for t in project_data.get("tabs", []) if t.get("filename") != filename]
-        self._write_project(project_dir, project_data)
-        return {"status": "ok"}
-
-    # ------------------------------------------------------------------
-    # Documents (project.json "files" — arbitrary absolute paths)
-    # ------------------------------------------------------------------
-
     def list_files(self, slug: str) -> list[str]:
+        """List document paths from project.json (arbitrary absolute paths), sorted by file name."""
         files = self._mutate_files(slug, lambda files: files)
         files.sort(key=lambda f: Path(f).name.lower())
         return files
@@ -320,7 +274,7 @@ class ProjectStore:
         return updated
 
     def list_all_files(self) -> list[str]:
-        """Union of every project's documents — the global document pool."""
+        """Union of every project's documents (the global document pool)."""
         meta = self._read_meta()
         seen: set[str] = set()
         out: list[str] = []

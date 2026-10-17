@@ -9,6 +9,7 @@ export function fuzzyScore(text: string, query: string): number | null {
   const q = query.toLowerCase()
   let ti = 0
   let score = 0
+  // Start below -1 so a match at index 0 is not counted as adjacent
   let prev = -2
   for (const ch of q) {
     let found = -1

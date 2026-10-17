@@ -53,13 +53,11 @@ def _build_kwargs(req: ChatRequest) -> dict[str, Any]:
 
 
 def _supports_reasoning_effort(model: str) -> bool:
-    """Not every provider accepts `reasoning_effort` (e.g. nvidia_nim rejects the
-    param outright, regardless of value, and litellm raises UnsupportedParamsError).
-    Ask litellm's own capability table instead of hardcoding a provider allowlist,
-    so newly supported providers/models pick this up automatically. Fail closed on
-    lookup failure (unrecognized/malformed model string): dropping the param at
-    worst silently ignores a chosen reasoning level, whereas forwarding it blind
-    risks the exact crash this function exists to prevent.
+    """Whether litellm lists `reasoning_effort` as supported for *model*.
+
+    Some providers (e.g. nvidia_nim) reject the param outright, so consult litellm's
+    table instead of an allowlist. Fail closed on lookup errors: dropping the param
+    is harmless, forwarding it blind can crash the request.
     """
     try:
         return "reasoning_effort" in (litellm.get_supported_openai_params(model=model) or [])
@@ -91,6 +89,7 @@ async def chat(
     sandbox_service: Annotated[SandboxService, Depends(get_sandbox_service)],
     models: Annotated[ModelProviderStore, Depends(get_model_provider_store)],
 ) -> EventSourceResponse:
+    """Stream a completion as SSE, running the tool loop when `req.tools` is non-empty."""
     with request_client() as c:
         model_defaults = models.load_defaults()
         kwargs = _build_kwargs(req)

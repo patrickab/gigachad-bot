@@ -1,6 +1,7 @@
 import { getStroke } from "perfect-freehand"
 
 export interface StrokeData {
+  /** Each point is [x, y, pressure?]. Pressure defaults to 0.5 when drawing. */
   id: string
   points: number[][]
   color: string
@@ -25,6 +26,7 @@ export const STROKE_OPTIONS = {
   last: true,
 } as const
 
+/** Closed quadratic path through midpoints of the outline points. Returns "" when fewer than 4 points. */
 export function getSvgPathFromStroke(points: number[][], closed = true): string {
   const len = points.length
   if (len < 4) return ""
@@ -101,6 +103,7 @@ function drawTexts(ctx: CanvasRenderingContext2D, texts: TextData[], offsetX: nu
     ctx.clip()
     ctx.font = `${t.size}px ${family}`
     ctx.fillStyle = t.color
+    // 1.2 line spacing, baseline at 0.85em below the box top
     const lineHeight = t.size * 1.2
     const lines = t.text.split("\n").flatMap((line) => wrapLine(ctx, line, t.width))
     lines.forEach((line, i) => {
@@ -110,11 +113,9 @@ function drawTexts(ctx: CanvasRenderingContext2D, texts: TextData[], offsetX: nu
   }
 }
 
-// ponytail: fetch + ImageBitmap, not `new Image()` with crossOrigin. API_BASE is a
-// different origin (:8001) and the live canvas already loaded these same URLs through
-// SVG <image> without CORS; the crossOrigin request then reuses that cached non-CORS
-// entry and errors, which silently dropped every image out of the export. fetch has
-// its own cache entry and a decoded blob never taints the canvas.
+// ponytail: fetch + ImageBitmap, not `new Image()` with crossOrigin. The live canvas
+// already loaded these URLs without CORS from another origin (API_BASE), so a crossOrigin
+// request reuses that cached entry and errors, silently dropping images from the export.
 async function loadImage(url: string): Promise<ImageBitmap> {
   const res = await fetch(url)
   if (!res.ok) throw new Error(`image ${res.status}: ${url}`)
@@ -228,6 +229,7 @@ function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number)
   )
 }
 
+/** Page region as PNG bytes on white. Embeds are fetched images plus already-decoded canvas images. */
 export async function renderPageToPng(
   strokes: StrokeData[],
   pageX: number,
@@ -246,6 +248,7 @@ export async function renderPageToPng(
   return new Uint8Array(await blob.arrayBuffer())
 }
 
+/** Crops to the bounding box of all content plus `padding`. Rejects when there is nothing to render. */
 export async function renderCanvasToJpeg(strokes: StrokeData[], padding = 20, images: EmbedRect[] = [], texts: TextData[] = []): Promise<Blob> {
   const loadedImages = await loadEmbeds(images)
   if (strokes.length === 0 && loadedImages.length === 0 && texts.length === 0) return Promise.reject(new Error("Nothing to render"))

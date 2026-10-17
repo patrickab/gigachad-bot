@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, type ReactNode } from "react"
 
+/** Top-level workspace mode of a tab. */
 export type AppSurface = "chat" | "canvas"
 
 interface SidebarContextValue {
@@ -11,6 +12,7 @@ interface SidebarContextValue {
 
 const SidebarContext = createContext<SidebarContextValue | null>(null)
 
+/** Owns the sidebar collapsed flag, closed by default. */
 export function SidebarProvider({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(true)
 

@@ -24,6 +24,7 @@ if (typeof window !== "undefined") {
   }
 }
 
+// Max render width in px, and vertical gap between pages in px.
 const RENDER_WIDTH = 900
 const PAGE_GAP = 12
 const MIN_ZOOM = 1
@@ -173,6 +174,7 @@ function PdfViewerInner({
     const el = scrollRef.current
     if (!el) return
 
+      // Ctrl/Cmd + wheel zooms, anchored at the cursor
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey) return
       e.preventDefault()
@@ -222,6 +224,7 @@ function PdfViewerInner({
     return () => el.removeEventListener("keydown", onKeyDown)
   }, [numPages])
 
+  // Re-scroll after a zoom so the point under the cursor (or viewport center) stays put.
   useLayoutEffect(() => {
     const anchor = anchorRef.current
     if (!anchor) return
@@ -329,6 +332,7 @@ function PdfViewerInner({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reposition only when the width actually changes
   }, [renderWidth])
 
+  // Scroll to `initialPage` once per url, after layout is ready.
   useLayoutEffect(() => {
     const el = scrollRef.current
     const page = Math.min(numPages ?? 1, Math.max(1, initialPage))
@@ -495,6 +499,7 @@ function PdfViewerInner({
   )
 }
 
+/** PDF viewer with zoom, page tracking and fullscreen. Fullscreen reparents one mounted viewer via a portal. */
 export function PdfViewer({
   url,
   isWide,

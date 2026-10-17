@@ -64,6 +64,7 @@ class ToolContext:
         return replace(self, progress=progress)
 
     def stage(self, label: str) -> None:
+        """Report a progress stage if the runtime installed a hook."""
         if self.progress is not None:
             self.progress(label)
 
@@ -84,6 +85,7 @@ async def _web_search(args: dict[str, Any], context: ToolContext) -> ToolOutcome
     context.stage("Planning search")
     planner_model = context.small_model or context.model
     search_query, profile = await asyncio.to_thread(plan_query, context.client, args["query"], planner_model)
+    # Domain scoping is a plain keyword prefix on the planned query.
     domain = context.opts.search_domain.strip()
     if domain:
         search_query = f"{domain} {search_query}"
@@ -120,6 +122,7 @@ async def _deep_research(args: dict[str, Any], context: ToolContext) -> ToolOutc
     return ToolOutcome(
         content=report or "Deep research produced no report. Say so instead of guessing.",
         summary=f"{len(urls)} sources",
+        # Research returns bare URLs, so sources carry no title or content.
         sources=[{"label": source_label(url, set()), "url": url, "title": "", "content": ""} for url in urls],
         detail={"costs": costs, "report": report},
     )
@@ -158,6 +161,7 @@ async def _workspace_agent(args: dict[str, Any], context: ToolContext) -> ToolOu
     )
 
 
+# Whole-reply fenced block, capturing the body without the fence lines.
 _FENCED_CODE = re.compile(r"```[^\n]*\n(?P<body>.*?)\n?```", re.DOTALL)
 
 
@@ -182,10 +186,12 @@ async def _diagram(_args: dict[str, Any], context: ToolContext) -> ToolOutcome:
         stream=False,
     )
     content = _response_text(response).strip()
+    # Strip a Markdown fence if the model wrapped the source despite the prompt.
     if match := _FENCED_CODE.fullmatch(content):
         content = match.group("body").strip()
     if not content:
         raise ValueError("The diagram generator returned no Mermaid source.")
+    # Tells the model not to repeat the diagram it can't see, since the UI renders `detail["mermaid"]`.
     seen = (
         "The Mermaid diagram rendered above this response and the user can already see it. Do not create, "
         "return, or repeat Mermaid or any other diagram.\n\n"

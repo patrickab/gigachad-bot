@@ -44,7 +44,7 @@ import { MemoryViewerProvider } from "@/contexts/MemoryViewerContext"
 import { MemoryViewer } from "@/components/MemoryViewer"
 import { DesktopBackendProvider } from "@/components/DesktopBackendProvider"
 import { UndoDeleteProvider, useUndoDelete } from "@/contexts/UndoDeleteContext"
-import { cn, updateLastMsg as updateLastAssistant } from "@/lib/utils"
+import { updateLastMsg as updateLastAssistant } from "@/lib/utils"
 import {
   loadChatHistory as apiLoadChatHistory,
   parseFiles,
@@ -67,6 +67,7 @@ import {
   toolArtifactDocument,
 } from "@/lib/attachments"
 
+/** Build the `send` payload from a tab's config. UI-only "none" reasoning maps to null. */
 function defaultSendParams(config: TabConfig, prompts: Record<string, string>, enabledTools: ToolName[] = []) {
   return {
     model: config.selectedModel,
@@ -136,7 +137,6 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     createBranch: doCreateBranch,
     mergeBranch: doMergeBranch,
     cascadeDelete: doCascadeDelete,
-    orphanChildren: doOrphanChildren,
     setActiveFile,
     setActiveQaIndex,
   } = useBranches()
@@ -162,10 +162,8 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   const [canvasFullscreen, setCanvasFullscreen] = useState(false)
   const { collapsed: sidebarCollapsed, toggleCollapsed: toggleSidebar } = useSidebar()
 
-  // A brand new tab starts with a blank selectedModel (TabManager.DEFAULT_CONFIG);
-  // seed it from the configured default chat model — the same "Chat" value
-  // shown in the Default Models panel — as soon as it loads. Never hardcode
-  // a fallback model name here.
+  // A new tab has a blank selectedModel (TabManager.DEFAULT_CONFIG). Seed it from the
+  // configured default chat model. Never hardcode a fallback name here.
   useEffect(() => {
     if (!config.selectedModel && models?.defaults.default_model) onConfigChange({ selectedModel: models.defaults.default_model })
   }, [config.selectedModel, models, onConfigChange])
@@ -231,9 +229,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     docs.refreshDocuments()
   }, [activeProject, docs.refreshDocuments])
 
-  // branchMessageIdx is read/written from the memory keydown shortcut, the
-  // command bar, handleSend's memorize dispatch, and the history-load effect
-  // below — it stays here rather than in one of the domain hooks.
+  // Index where this chat branched off its parent, null for a main chat.
   const [branchMessageIdx, setBranchMessageIdx] = useState<number | null>(null)
 
   const modals = useChatModals({
@@ -277,6 +273,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     }
   }, [isActive, focusQaIndex, setActiveQaIndex])
 
+  // Leave room for the side panel when the chat column is capped.
   const chatMaxWidth = measuredWidth > 0 ? Math.max(0, measuredWidth - MAX_SIDEBAR_WIDTH) : undefined
 
   useEffect(() => {
@@ -304,12 +301,14 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
   useEffect(() => {
     if (commandBar.state.phase === "input") {
       setCommandQuery("")
+      // Defer so the portaled input exists before focusing.
       setTimeout(() => commandInputRef.current?.focus(), 0)
     }
   }, [commandBar.state.phase])
 
   const docReviewLoading = commandBar.state.phase === "doc-review" && commandBar.state.loadingScopes.length > 0
   useEffect(() => {
+    // "\0" is a sentinel that hides the tab label so the command input can take its slot.
     if (commandBar.state.phase === "input") onModeLabel("\0")
     else if (commandBar.state.phase === "extracting") onModeLabel("Memory Management", true)
     else if (commandBar.state.phase === "review") onModeLabel(`${commandMemoryCount} ${commandMemoryCount === 1 ? "memory" : "memories"} proposed`)
@@ -328,7 +327,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       if (e.altKey && e.key === "r") { e.preventDefault(); reset() }
       if (e.altKey && e.key.toLowerCase() === "m") {
         e.preventDefault()
-        // Memory is extracted from the main branch only — branches don't influence memories.
+        // Memory is extracted from the main branch only.
         if (commandBar.state.phase === "idle" && branchMessageIdx == null) {
           commandBar.submitCommand(
             messages.map((m) => ({ role: m.role, content: m.content })),
@@ -357,6 +356,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         if (commandBar.state.phase === "idle") { commandBar.open() }
       }
     }
+    // Capture phase so the shortcuts win over handlers inside focused editors.
     window.addEventListener("keydown", handler, true)
     return () => {
       window.removeEventListener("keydown", handler, true)
@@ -375,7 +375,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       modals.setMindmapModalOpen(true)
       return
     }
-    // Memory is extracted from the main branch only — branches don't influence memories.
+    // Memory is extracted from the main branch only.
     if (command.startsWith("/memorize") && branchMessageIdx != null) {
       commandBar.close()
       return
@@ -412,7 +412,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         return
       }
       if (trimmed === "/memorize" || trimmed.startsWith("/memorize ") || trimmed.startsWith("/memorize-")) {
-        // Memory is extracted from the main branch only — branches don't influence memories.
+        // Memory is extracted from the main branch only.
         if (branchMessageIdx == null) {
           await commandBar.submitCommand(
             messages.map((m) => ({ role: m.role, content: m.content })),
@@ -423,9 +423,6 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         }
         return
       }
-
-      // Tools no longer hijack the composer: attachments and tool calling coexist, the
-      // model decides whether a turn needs a tool.
 
       if (attachments.length > 0) {
         const activeAttachments = attachments.map((a) => ({ ...a, active: true }))
@@ -557,7 +554,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       `attachment:${chatId}:${messageIndex}:${attachmentName}`,
       attachmentName,
       async () => {
-        // File root refs have no upload copy — and the source file must never be deleted.
+        // File root refs have no upload copy and the source file must never be deleted.
         if (!att.vaultPath) await deleteAttachment(chatId, attachmentName, activeProject)
       },
       () => patch(original.attachments!, original.hiddenContent),
@@ -746,7 +743,6 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
               onBranch={tab.historyFile ? handleBranch : undefined}
               focusQaIndex={focusQaIndex}
               focusKey={focusKey}
-              isActive={isActive}
               branchMessageIdx={branchMessageIdx}
               chatInputRef={chatInputRef}
               slug={activeProject}
@@ -821,7 +817,6 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         <MemoryPanel
           state={commandBar.state}
           projectEnabled={!!activeProject}
-          projectSlug={activeProject}
           actions={memoryActions}
           globalCategories={globalCategories}
           projectCategories={projectCategories}
@@ -900,13 +895,12 @@ function AppContent() {
 
     const pending = pendingHistoryRef.current
     if (pending) {
-      // a chat was clicked while another project was active — open exactly it
+      // a chat was clicked while another project was active, so open exactly it
       pendingHistoryRef.current = null
       tabManagerRef.current?.initTabs([nextTab(pending.replace(".json", ""), pending, null, settingsToTabConfig(settings))])
     } else {
-      // entering or leaving a project lands on a fresh chat. Saved chats are
-      // opened explicitly from the sidebar, never auto-restored — selecting a
-      // project must not silently activate a conversation.
+      // Entering or leaving a project lands on a fresh chat. Saved chats open
+      // only from the sidebar, never auto-restored.
       tabManagerRef.current?.initTabs([nextTab(null, null, null, settingsToTabConfig(settings))])
     }
   }, [activeProject, projectData])

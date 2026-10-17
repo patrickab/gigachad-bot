@@ -11,6 +11,7 @@ function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 }
 
+/** Holds `children` until the Tauri sidecar reports its backend URL. Outside Tauri it renders them at once. */
 export function DesktopBackendProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<"starting" | "ready" | "error">(isTauri() ? "starting" : "ready")
   const [error, setError] = useState("")

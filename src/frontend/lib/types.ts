@@ -13,7 +13,7 @@ export interface Attachment {
   content?: string
   parsedMd?: string
   active: boolean
-  /** Live reference to a FileRoots file — no upload copy exists; edits write back to this path. */
+  /** Live reference to a FileRoots file: no upload copy exists, edits write back to this path. */
   vaultPath?: string
 }
 
@@ -105,7 +105,7 @@ export interface ToolCallStarted {
 }
 
 /** `tool_result` SSE payload: every field is always present on the wire. It carries no
- *  arguments or status — the browser keeps the arguments it already has and derives status. */
+ *  arguments or status, so the browser keeps the arguments it already has and derives status. */
 export interface ToolCallResult {
   id: string
   name: ToolName

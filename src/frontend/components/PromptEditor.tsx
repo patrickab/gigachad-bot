@@ -23,10 +23,12 @@ interface PromptEditorProps {
   onPromptsChanged: (prompts: Record<string, string>) => void
 }
 
+/** Lowercase kebab-case slug, capped at 64 chars. */
 function slugify(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 64) || "prompt"
 }
 
+/** Floating window to edit, reorder, create and delete prompt files, with `{{block}}` insertion. */
 export function PromptEditor({ open, onClose, onPromptsChanged }: PromptEditorProps) {
   const { schedule, pending } = useUndoDelete()
   const [prompts, setPrompts] = useState<PromptMeta[]>([])
@@ -54,6 +56,7 @@ export function PromptEditor({ open, onClose, onPromptsChanged }: PromptEditorPr
 
   const persistOrder = useCallback(() => {
     dragSlug.current = null
+    // Read the latest order via the updater so a drop right after reorder sees it
     setPrompts(prev => { void savePromptOrder(prev.map(p => p.slug)); return prev })
   }, [])
 
@@ -99,6 +102,7 @@ export function PromptEditor({ open, onClose, onPromptsChanged }: PromptEditorPr
   const handleCreate = useCallback(async () => {
     if (!newName.trim()) return
     const slug = slugify(newName)
+    // Starting frontmatter for a new prompt
     const initial = `---\nname: ${newName.trim()}\nincludes:\n---\n\n`
     await savePrompt(slug, initial)
     setCreating(false)
@@ -151,6 +155,7 @@ export function PromptEditor({ open, onClose, onPromptsChanged }: PromptEditorPr
             )}
 
             <div className="flex-1 overflow-y-auto">
+              {/* Hide prompts with a pending undoable delete */}
               {prompts.filter((prompt) => !pending(`prompt:${prompt.slug}`)).map(p => (
                 <button
                   key={p.slug}
@@ -173,7 +178,6 @@ export function PromptEditor({ open, onClose, onPromptsChanged }: PromptEditorPr
 
           {/* Main editor area */}
           <div className="flex-1 flex flex-col min-w-0">
-            {/* Toolbar */}
             <div className="flex items-center justify-between p-3 border-b border-divider/50">
               <div className="flex items-center gap-2">
                 {selected && (
@@ -210,7 +214,6 @@ export function PromptEditor({ open, onClose, onPromptsChanged }: PromptEditorPr
 
             {selected ? (
               <div className="flex-1 flex min-h-0">
-                {/* Editor */}
                 <textarea
                   value={content}
                   onChange={e => { setContent(e.target.value); setDirty(true) }}

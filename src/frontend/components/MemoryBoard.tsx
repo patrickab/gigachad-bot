@@ -40,6 +40,7 @@ export function MemoryBoard({
     [memories],
   )
 
+  // Dropping a card on its current category is a no-op, so don't highlight that zone
   const isValidTarget = useCallback((catName: string, itemId: string) => {
     const mem = memoryById.get(itemId)
     return mem ? normalizeMemoryCategory(mem) !== catName : false

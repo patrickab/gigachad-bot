@@ -38,6 +38,7 @@ export function useSettings(): SettingsState {
   return ctx
 }
 
+/** Owns the defaults new tabs inherit. Seeded from backend config without overriding existing values. */
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [selectedModel, setSelectedModel] = useState("")
   const [selectedPrompt, setSelectedPrompt] = useState<string | null>(null)
@@ -58,11 +59,12 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     fetchBackendConfig()
       .then((cfg) => {
         setSelectedModel((prev) => prev || cfg.default_model)
+        // Backend value applies only while the flag is still the `true` default.
         setDownscaleImages((prev) => prev === true ? cfg.downscale_images : prev)
         setOCRModel((prev) => prev || cfg.vision_model)
       })
       .catch(() => {
-        // backend unreachable — keep hardcoded fallbacks
+        // backend unreachable, keep hardcoded fallbacks
       })
   }, [])
 

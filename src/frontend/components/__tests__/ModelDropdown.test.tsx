@@ -27,11 +27,6 @@ function openSettings() {
   fireEvent.click(screen.getByRole("button", { name: "Configure providers" }))
 }
 
-function openDefaults() {
-  openSettings()
-  fireEvent.click(screen.getByRole("button", { name: "Default Models" }))
-}
-
 describe("ModelDropdown OMP source", () => {
   beforeEach(() => {
     fetchOmpCatalog.mockReset()

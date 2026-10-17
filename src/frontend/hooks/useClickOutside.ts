@@ -2,6 +2,7 @@
 
 import { useEffect, type RefObject } from "react"
 
+/** Call `handler` on a mousedown outside `ref` or on Escape. Memoize `handler` to avoid re-subscribing every render. */
 export function useClickOutside(ref: RefObject<HTMLElement | null>, handler: () => void) {
   useEffect(() => {
     function onMouseDown(e: MouseEvent) {

@@ -10,6 +10,7 @@ function encodePath(filename: string): string {
   return filename.split("/").map(encodeURIComponent).join("/")
 }
 
+/** Split `slug/filename` (project chat) into parts. A bare filename has no slug. */
 export function parseHistoryFile(historyFile: string): { slug: string | null; filename: string } {
   const parts = historyFile.split("/")
   if (parts.length > 1) {
@@ -18,6 +19,7 @@ export function parseHistoryFile(historyFile: string): { slug: string | null; fi
   return { slug: null, filename: historyFile }
 }
 
+/** Inverse of `parseHistoryFile`. */
 export function buildHistoryFile(filename: string, slug: string | null): string {
   return slug ? `${slug}/${filename}` : filename
 }
@@ -32,6 +34,7 @@ export class ApiError extends Error {
 
 export type CanvasEntity = "stroke" | "frame" | "attachment" | "text"
 
+/** One canvas change: upsert sets `value` on entity `id`, delete omits it. */
 export interface CanvasMutation {
   mutationId: string
   kind: "upsert" | "delete"
@@ -52,6 +55,7 @@ export interface CanvasSnapshot {
   document: CanvasDocument
 }
 
+/** Throws ApiError, preferring FastAPI's `detail` (string or validation list) over the status text. */
 async function ensureOk(res: Response): Promise<Response> {
   if (!res.ok) {
     let message = res.statusText
@@ -84,6 +88,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 type QueryValue = string | number | boolean | string[] | undefined | null
 
+/** Omits null, undefined and false. Arrays repeat the key. true becomes "true". */
 function toQuery(params: Record<string, QueryValue>): string {
   const usp = new URLSearchParams()
   for (const [k, v] of Object.entries(params)) {
@@ -185,6 +190,7 @@ export async function savePromptOrder(order: string[]): Promise<void> {
   await put("/prompt-order", { order })
 }
 
+/** Tools and tool options are sent only when at least one tool is offered. */
 export function createChatStream(req: ChatRequest): SSEStreamResult {
   const body: Record<string, unknown> = {
     model: req.model,
@@ -253,10 +259,6 @@ export async function cascadeDelete(filename: string): Promise<{ status: string;
   return del(`/chat-histories/cascade/${encodePath(filename)}`)
 }
 
-export async function orphanChildren(filename: string): Promise<{ status: string; orphaned: string[] }> {
-  return del(`/chat-histories/orphan/${encodePath(filename)}`)
-}
-
 export function createResearchStream(req: ResearchRequest): SSEStreamResult {
   return createSSEStream("/research", {
     query: req.query,
@@ -293,10 +295,7 @@ function uploadsBase(chatId: string, slug: string | null): string {
   return `${getApiBase()}/assets/${prefix}`
 }
 
-/** Rewrite MinerU's relative ``images/<name>`` markdown refs to the shared,
- * per-user library cache keyed by the PDF's stem — the same cache every
- * attach/parse route reads its markdown from, so images resolve regardless
- * of whether the PDF arrived via direct upload, library, or file root attach. */
+/** Point MinerU's relative `images/<name>` markdown refs at the per-user library cache, keyed by the PDF's stem. */
 export function rewriteImages(content: string, pdfName: string): string {
   const stem = encodeURIComponent(pdfName.replace(/\.pdf$/i, ""))
   return content.replace(/\(images\/([^)]+)\)/g, `(${getApiBase()}/assets/Mineru/images/${stem}/$1)`)
@@ -330,7 +329,7 @@ export async function listRootFiles(): Promise<{ enabled: boolean; files: RootFi
   return request("/fileroots/files")
 }
 
-/** Files from file roots mounted to *slug* — shaped like ProjectDocument so the chat sidebar can list them. */
+/** Files from file roots mounted to *slug*, shaped like ProjectDocument so the chat sidebar can list them. */
 export async function listProjectRootDocuments(slug: string): Promise<ProjectDocument[]> {
   const data = await request<{ documents: ProjectDocument[] }>(`/fileroots/project-documents?slug=${encodeURIComponent(slug)}`)
   return data.documents
@@ -370,7 +369,7 @@ export async function writeRootFile(path: string, content: string): Promise<void
   await post("/fileroots/file", { path, content })
 }
 
-/** Direct URL to a file's raw bytes (images, PDFs) — usable as an `<img>`/PDF src. */
+/** Direct URL to a file's raw bytes (images, PDFs), usable as an `<img>`/PDF src. */
 export function fileViewerRawUrl(path: string): string {
   return `${getApiBase()}/fileviewer/raw?path=${encodeURIComponent(path)}`
 }
@@ -405,7 +404,7 @@ async function attachFileByPath(endpoint: string, chatId: string, path: string, 
   return { ...data, active: true, url: chatFileUrl(chatId, data.name, slug) }
 }
 
-/** Attach a FileRoots file as a live reference — no copy; content is read from the source. */
+/** Attach a FileRoots file as a live reference: no copy, content is read from the source. */
 export async function attachRootFile(path: string): Promise<Attachment> {
   const data = await request<{ name: string; mime: string; path: string; content?: string; parsedMd?: string }>(
     `/fileroots/attach?path=${encodeURIComponent(path)}`,
@@ -431,10 +430,6 @@ export async function listNotes(): Promise<ProjectDocument[]> {
 
 export async function uploadDocument(slug: string, file: File): Promise<ProjectDocument> {
   return request(`/documents/upload?slug=${encodeURIComponent(slug)}`, { method: "POST", body: fileForm(file) })
-}
-
-export async function registerUploadAsDocument(chatId: string, filename: string, slug: string | null = null): Promise<void> {
-  await post(`/documents/register-upload${toQuery({ slug })}`, { chat_id: chatId, filename })
 }
 
 export async function addDocument(slug: string, path: string): Promise<ProjectDocument> {
@@ -559,8 +554,6 @@ export async function loadProjectTab(name: string, filename: string): Promise<{ 
   return request(`/chat-histories/${encodeURIComponent(name)}/${encodeURIComponent(filename)}`)
 }
 
-// --- Memory API ---
-
 export async function extractMemories(
   messages: { role: string; content: string }[],
   projectSlug?: string | null,
@@ -584,7 +577,6 @@ export async function commitMemoryDoc(
   acceptedMemories: ProposedMemory[],
   projectSlug: string | null,
   reviewId: string | null,
-  rejectedMemories: ProposedMemory[] | null,
   revisedMemories?: PreviewMemory[] | null,
 ): Promise<void> {
   await post("/memory/commit", {
@@ -592,7 +584,6 @@ export async function commitMemoryDoc(
     accepted_memories: acceptedMemories,
     project_slug: projectSlug,
     review_id: reviewId,
-    rejected_memories: rejectedMemories,
     ...(revisedMemories ? { revised_memories: revisedMemories } : {}),
   })
 }
@@ -622,13 +613,11 @@ export async function saveCategories(scope: "global" | "project", categories: Ca
 }
 
 export async function remapOrphanedCategory(
-  scope: "global" | "project",
   orphanedMemories: PreviewMemory[],
   remainingCategories: CategoryDef[],
   projectSlug?: string | null,
 ): Promise<{ memories: PreviewMemory[] }> {
   return post("/memory/remap-category", {
-    scope,
     orphaned_memories: orphanedMemories,
     remaining_categories: remainingCategories,
     project_slug: projectSlug ?? null,

@@ -20,6 +20,7 @@ const SYS_NOTE_EDIT = (doc: string) =>
 const SYS_INLINE_EDIT = (sel: string) =>
   `You are an AI writing assistant. The user selected this text:\n\n<selection>\n${sel}\n</selection>\n\nRespond with ONLY the replacement text. No code fences, no explanations.`
 
+/** Pump a chat stream into `onToken`, exposing its abort via `abortRef`. Abort is swallowed silently. */
 async function runStream(
   abortRef: { current: (() => void) | null },
   args: Parameters<typeof createChatStream>[0],
@@ -37,6 +38,7 @@ async function runStream(
   }
 }
 
+/** Throttle flushes to one per FLUSH_MS. `final` flushes immediately and cancels the pending timer. */
 function createFlush(onFlush: () => void) {
   let last = 0
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -50,8 +52,6 @@ function createFlush(onFlush: () => void) {
   return { schedule, final }
 }
 
-// ─── Sidebar ───
-
 interface EditorSidebarProps {
   content: string
   model: string
@@ -60,10 +60,12 @@ interface EditorSidebarProps {
   onApply: (newContent: string) => void
 }
 
+/** Chat sidebar for AI edits of the document. Apply replaces the whole document with a reply. */
 export function EditorSidebar({ content, model, width, onWidthChange, onApply }: EditorSidebarProps) {
   const [messages, setMessages] = useState<NoteMessage[]>([])
   const [input, setInput] = useState("")
   const [isStreaming, setIsStreaming] = useState(false)
+  // Ref so handleSend always sends the latest document without re-creating the callback
   const contentRef = useRef(content)
   contentRef.current = content
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -71,6 +73,7 @@ export function EditorSidebar({ content, model, width, onWidthChange, onApply }:
   const dragging = useRef(false)
   const motionWidth = useMotionValue(width)
 
+  // Spring to external width changes, but never fight an active drag
   useEffect(() => {
     if (dragging.current) return
     const controls = animate(motionWidth, width, { type: "spring", stiffness: 400, damping: 40, mass: 0.6 })
@@ -101,6 +104,7 @@ export function EditorSidebar({ content, model, width, onWidthChange, onApply }:
     document.addEventListener("mouseup", onMouseUp)
   }, [motionWidth, onWidthChange])
 
+  // Keep the newest message in view
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" })
   }, [messages])
@@ -115,6 +119,7 @@ export function EditorSidebar({ content, model, width, onWidthChange, onApply }:
     setInput("")
     setIsStreaming(true)
 
+    // Snapshot before the new messages land. `assistantMsg` is mutated per token and copied on flush
     const history = messages.map(m => ({ role: m.role, content: m.content }))
     const { schedule, final: flush } = createFlush(() => {
       setMessages(prev => {
@@ -194,8 +199,6 @@ export function EditorSidebar({ content, model, width, onWidthChange, onApply }:
   )
 }
 
-// ─── Inline Edit Panel (Ctrl+I) ───
-
 interface InlineEditPanelProps {
   selectedText: string
   model: string
@@ -203,6 +206,7 @@ interface InlineEditPanelProps {
   onClose: () => void
 }
 
+/** Ctrl+I panel: streams a replacement for `selectedText` and applies it on confirm. */
 export function InlineEditPanel({ selectedText, model, onApply, onClose }: InlineEditPanelProps) {
   const [input, setInput] = useState("")
   const [response, setResponse] = useState("")
@@ -212,6 +216,7 @@ export function InlineEditPanel({ selectedText, model, onApply, onClose }: Inlin
 
   useEffect(() => { inputRef.current?.focus() }, [])
 
+  // Capture phase so Escape closes this panel before the editor's own handlers see it
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); abortRef.current?.(); onClose() }
@@ -226,6 +231,7 @@ export function InlineEditPanel({ selectedText, model, onApply, onClose }: Inlin
 
     setIsStreaming(true)
     setResponse("")
+    // Plain object so the flush closure reads the latest text
     const buf = { text: "" }
     const { schedule, final: flush } = createFlush(() => setResponse(buf.text))
 

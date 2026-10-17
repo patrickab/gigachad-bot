@@ -9,8 +9,6 @@ import {
 } from "@/lib/api"
 import type { MemoryExtractResponse, PreviewMemory, ProposedMemory } from "@/lib/types"
 
-export type CommandBarPhase = "idle" | "input" | "extracting" | "review" | "composing" | "doc-review" | "error"
-
 interface ReviewState {
   reviewId: string
   globalMemories: ProposedMemory[]
@@ -121,6 +119,7 @@ function reducer(state: CommandBarState, action: Action): CommandBarState {
       acceptedMemories: [], rejectedMemories: [],
     }
     case "FAIL": {
+      // Ignore stale preview failures from a superseded review
       if (state.phase === "doc-review" && action.reviewId && state.reviewId !== action.reviewId) return state
       return { phase: "error", error: action.error, reviewId: action.reviewId }
     }
@@ -176,6 +175,7 @@ function reducer(state: CommandBarState, action: Action): CommandBarState {
   }
 }
 
+/** Drive the `/memorize` flow: extract, review each memory, preview revised docs, commit. Use `bindProject` to get actions scoped to a project. */
 export function useCommandBar(): UseCommandBarReturn {
   const [state, dispatch] = useReducer(reducer, INITIAL)
 
@@ -282,10 +282,10 @@ export function useCommandBar(): UseCommandBarReturn {
         const pA = state.acceptedMemories.filter(m => m.scope === "project")
         const pR = state.rejectedMemories.filter(m => m.scope === "project")
         if (gA.length > 0 || gR.length > 0) {
-          await commitMemoryDoc("global", gA, null, state.reviewId, gR, state.globalPreview?.revised_memories)
+          await commitMemoryDoc("global", gA, null, state.reviewId, state.globalPreview?.revised_memories)
         }
         if ((pA.length > 0 || pR.length > 0) && projectSlug) {
-          await commitMemoryDoc("project", pA, projectSlug, state.reviewId, pR, state.projectPreview?.revised_memories)
+          await commitMemoryDoc("project", pA, projectSlug, state.reviewId, state.projectPreview?.revised_memories)
         }
         dispatch({ type: "RESET" })
       } catch (e) {

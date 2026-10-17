@@ -6,7 +6,7 @@ import { sandboxAssetUrl } from "@/lib/api"
 import type { SandboxOutputRecord } from "@/lib/types"
 import { PlotElement, type PlotFigure } from "./PlotElement"
 
-/** Use a private MIME type because Plotly does not register one. */
+/** Vendor MIME type, since Plotly registers none. */
 const PLOTLY_MEDIA_TYPE = "application/vnd.plotly.v1+json"
 
 interface SandboxOutputElementProps {

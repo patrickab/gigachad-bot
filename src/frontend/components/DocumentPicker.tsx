@@ -17,6 +17,7 @@ interface DocumentPickerProps {
   onClose: () => void
 }
 
+/** Searchable document list scoped to the project or all documents. Left arrow toggles scope. */
 export function DocumentPicker({
   projectSlug,
   projectDocuments,
@@ -36,6 +37,7 @@ export function DocumentPicker({
 
   const handleUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const picked = e.target.files ? Array.from(e.target.files) : []
+    // Reset so re-picking the same file fires onChange again
     e.target.value = ""
     if (picked.length === 0) return
     setUploading(true)
@@ -67,6 +69,7 @@ export function DocumentPicker({
     <><Layers className="h-3 w-3 shrink-0" /><span className="truncate">all documents</span></>
   )
 
+  // Hover "+" on global rows to copy a document into the current project
   const renderRowSuffix = useCallback((path: string) => {
     if (scope !== "global" || !onAddToProject || !projectSlug || projectPaths.has(path)) return null
     return (

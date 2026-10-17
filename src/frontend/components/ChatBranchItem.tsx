@@ -4,8 +4,8 @@ import { GitMerge, Trash2 } from "lucide-react"
 import { useMemo } from "react"
 import { cn } from "@/lib/utils"
 import type { BranchChild, BranchMeta } from "@/lib/types"
-import { useBranches, buildChatIdMap, isAncestorOf } from "@/contexts/BranchContext"
-import { useTree, type FileTreeItem } from "./FileTree"
+import { useBranches, isAncestorOf } from "@/contexts/BranchContext"
+import { useTree } from "./FileTree"
 
 interface Node {
   file: string
@@ -16,10 +16,12 @@ interface Node {
   branchIdx: number | null
 }
 
+/** Build the branch tree under `root`, skipping children with no loaded meta. */
 function buildTree(root: string, meta: Record<string, BranchMeta>, chatIdMap: Map<string, string>): Node {
   const rootMeta = meta[root]
   const seen = new Set<string>()
   function walk(file: string, parentQaCount: number = 0): Node {
+    // Cycle guard: a file already visited becomes an empty leaf
     if (seen.has(file)) return { file, label: file.split("/").pop()!.replace(".json", ""), qaCount: 0, parentQaCount: 0, children: [], branchIdx: null }
     seen.add(file)
     const m = meta[file]
@@ -57,6 +59,7 @@ type Point = { idx: number; nodes: Node[] }
 function groupByPoint(children: Node[]): Point[] {
   const m = new Map<number, Node[]>()
   for (const c of children) {
+    // Children without a branch point group under 0
     const k = c.branchIdx ?? 0
     if (!m.has(k)) m.set(k, [])
     m.get(k)!.push(c)
@@ -65,7 +68,7 @@ function groupByPoint(children: Node[]): Point[] {
 }
 
 function BranchTree({ root }: { root: Node }) {
-  const { branchMeta, onFileClick, onMerge, onDelete, activeFile, activeQaIndex } = useBranches()
+  const { onFileClick, activeFile, activeQaIndex } = useBranches()
   const points = groupByPoint(root.children)
   if (points.length === 0) return null
 
@@ -101,6 +104,7 @@ function BranchRow({ node }: { node: Node }) {
   const { onFileClick, onMerge, onDelete, activeFile, activeQaIndex } = useBranches()
   const isActive = activeFile === node.file && activeQaIndex == null
   const hasKids = node.children.length > 0
+  // Merge is blocked once the parent has advanced past the branch point
   const mergeBlocked = node.branchIdx != null && node.parentQaCount > node.branchIdx + 1
 
   return (
@@ -151,11 +155,12 @@ const INDENT_BASE = 8
 const INDENT_STEP = 16
 
 export function ChatBranchItem({ file, label, depth }: ChatBranchItemProps) {
-  const { branchMeta, chatIdMap, onFileClick, onMerge, onDelete, activeFile, activeQaIndex } = useBranches()
+  const { branchMeta, chatIdMap, onFileClick, onDelete, activeFile, activeQaIndex } = useBranches()
   const { onDragStart } = useTree<string>()
   const bm = branchMeta[file]
   const hasChildren = (bm?.children?.length ?? 0) > 0
   const isActive = activeFile === file && activeQaIndex == null
+  // Build the tree only for the branch family of the active chat
   const isRelevant = isActive || activeFile === file || isAncestorOf(activeFile, file, branchMeta, chatIdMap)
   const tree = useMemo(() => hasChildren && isRelevant ? buildTree(file, branchMeta, chatIdMap) : null, [hasChildren, isRelevant, file, branchMeta, chatIdMap])
   const qaLast = bm?.qa_count != null && bm.qa_count > 0 ? bm.qa_count - 1 : null

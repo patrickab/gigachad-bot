@@ -19,8 +19,10 @@ export function useDropZone<T extends string>({
   const [placeholderTarget, setPlaceholderTarget] = useState<T | null>(null)
   const [cardHeight, setCardHeight] = useState(80)
 
+  // dragenter/dragleave also fire for child elements, so count per target and act on 0 <-> 1 only.
   const enterCounters = useRef<Record<string, number>>({})
   const placeholderTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Mirror of draggedId readable synchronously in bindZone, since state is set a tick after dragstart.
   const draggedIdRef = useRef<string | null>(null)
 
   const clearPlaceholderTimer = useCallback(() => {
@@ -49,6 +51,7 @@ export function useDropZone<T extends string>({
       e.dataTransfer.setDragImage(el, el.offsetWidth / 2, 20)
       e.dataTransfer.setData("text/plain", itemId)
       e.dataTransfer.effectAllowed = "move"
+      // Deferred so the browser snapshots the drag image before the source card restyles.
       setTimeout(() => setDraggedId(itemId), 0)
     },
     onDragEnd: reset,

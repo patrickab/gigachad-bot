@@ -101,7 +101,7 @@ export function Sidebar({
   const animateWidth = useMemo(() => ({ width: sidebarWidth }), [sidebarWidth])
 
 
-  // Selection primitives — one per tree, so the trees behave identically yet stay
+  // Selection primitives, one per tree, so the trees behave identically yet stay
   // independent (collapsing a project never touches a file folder).
   // Projects: accordion sourced from activeProject; opening loads the project
   // context, closing tears it down.
@@ -129,6 +129,7 @@ export function Sidebar({
     setArchitectures(new Set(entries.filter(([, docs]) => docs.some((d) => isArchitecturePath(d.path))).map(([slug]) => slug)))
   }, [projects])
 
+  // Refetch on active canvas change to pick up newly created or renamed canvases
   useEffect(() => {
     if (appMode === "canvas") refreshCanvases()
   }, [appMode, activeCanvasPath, refreshCanvases])
@@ -459,6 +460,7 @@ function buildProjectItems(
 
     const items: FileTreeItem<string>[] = []
     for (const [key, meta] of Object.entries(branchMeta)) {
+      // Top-level chats only: branches, project.json and memory/ docs are not listed
       if (!key.startsWith(dirPrefix) || key === `${project.slug}/project.json`) continue
       if (meta.parent_id) continue
       const filename = key.slice(dirPrefix.length)

@@ -48,8 +48,7 @@ export type ChatStreamEvent =
   | { kind: "done" }
   | { kind: "error"; message: string }
 
-// Malformed JSON throws here exactly as the inline parses did: the stream loop's
-// catch treats it as a failed turn rather than a silently skipped event.
+// Malformed JSON throws: the stream loop's catch treats it as a failed turn, not a skipped event.
 export function decodeChatStreamEvent(event: SSEEvent): ChatStreamEvent | null {
   switch (event.event) {
     case "token":
@@ -78,8 +77,7 @@ function withToolCallStarted(
   return [...(calls ?? []), { ...started, status: "running" }]
 }
 
-// Matches on call id only; a result for an unknown id lands nowhere, which is how
-// out-of-order or post-abort results have always been dropped.
+// Matches on call id only. A result for an unknown id is dropped (out-of-order or post-abort).
 function withToolCallResult(
   calls: ToolCallRecord[] | undefined,
   result: ToolCallResult,
@@ -124,13 +122,13 @@ export function applyChatStreamEvent(msg: Message, event: MessageStreamEvent): v
   }
 }
 
-/** Terminal sweep for tool records the turn never resolved — abort, transport failure,
- *  SSE error or a stream that simply ended. Cancelled work is an `error` record rather
- *  than a fourth status, so a saved chat reloads a stated failure instead of a spinner.
- *  Mutates `msg` in place; createFlushBatcher publishes the copy. */
+/** Terminal sweep for tool records the turn never resolved (abort, transport failure,
+ *  SSE error or stream end). Marked `error` rather than a new status so a saved chat
+ *  reloads a stated failure instead of a spinner. Mutates `msg` in place. */
 export function settleRunningToolCalls(msg: Message, reason: string): void {
   const calls = msg.tool_calls
   if (!calls?.some((call) => call.status === "running")) return
+  // Stage timestamps are in seconds
   const now = Date.now() / 1_000
   msg.tool_calls = calls.map((call) =>
     call.status === "running"

@@ -170,21 +170,18 @@ describe("useChatModals", () => {
         await result.current.handleMindmapSubmit("summarize", [])
       })
 
-      // Two setMessages calls: append user+placeholder, then updateLastMsg.
+      // Append user + placeholder, then updateLastMsg.
       expect(setMessages).toHaveBeenCalledTimes(2)
-      // First call adds the user message and the generating placeholder.
       const firstCall = setMessages.mock.calls[0][0] as (prev: Message[]) => Message[]
       expect(firstCall([{ role: "user", content: "q" }])).toEqual([
         { role: "user", content: "q" },
         { role: "user", content: "Provide a mindmap. summarize" },
         { role: "assistant", content: "Generating mind map…" },
       ])
-      // generateMindmap was invoked with the configured model.
       expect(genSpy).toHaveBeenCalled()
       const args = genSpy.mock.calls[0] as unknown[]
       expect(args[1]).toBe("gemini")
       expect(args[2]).toBe("summarize")
-      // Modal closed.
       expect(result.current.mindmapModalOpen).toBe(false)
     })
 
@@ -230,7 +227,6 @@ describe("useChatModals", () => {
 
       await act(async () => { await result.current.handleMindmapSubmit("", []) })
 
-      // Last setMessages call (updateLastMsg) sets the failure message.
       const lastCall = setMessages.mock.calls.at(-1)![0] as (prev: Message[]) => Message[]
       const out = lastCall([{ role: "user", content: "q" }, { role: "assistant", content: "Generating mind map…" }])
       expect(out.at(-1)!.content).toBe("Mind map generation failed.")

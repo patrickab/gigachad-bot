@@ -93,8 +93,8 @@ describe("useProjectDocuments", () => {
         { path: "/lib/a.pdf", name: "a.pdf", mime: "application/pdf" },
       ]
       const rootDocs: ProjectDocument[] = [
-        { path: "/lib/a.pdf", name: "a.pdf", mime: "application/pdf" },  // dup — should drop
-        { path: "/vault/b.txt", name: "b.txt", mime: "text/plain" },     // root-only → surfaced
+        { path: "/lib/a.pdf", name: "a.pdf", mime: "application/pdf" },  // dup, dropped
+        { path: "/vault/b.txt", name: "b.txt", mime: "text/plain" },     // root-only, surfaced
       ]
       ;(apiMock as any).__setImpl("listProjectDocuments", async () => projectDocs)
       ;(apiMock as any).__setImpl("listProjectRootDocuments", async () => rootDocs)
@@ -103,7 +103,6 @@ describe("useProjectDocuments", () => {
 
       await waitFor(() => expect(result.current.projectDocuments).toHaveLength(1))
       expect(result.current.mergedDocuments).toHaveLength(2)
-      // rootDocPaths only contains the root-only path (not the dup).
       expect(result.current.rootDocPaths.has("/vault/b.txt")).toBe(true)
       expect(result.current.rootDocPaths.has("/lib/a.pdf")).toBe(false)
       // No `.c4` sources: there is no architecture to attach.
@@ -193,7 +192,6 @@ describe("useProjectDocuments", () => {
 
       await act(async () => { await result.current.handleDocumentSelect("/lib/x.canvas") })
 
-      // live canvas content was used, not loadFileViewerText.
       expect(renderCanvasToJpeg).toHaveBeenCalledWith([stroke], 20, [], [])
       expect(uploadFile).toHaveBeenCalledWith("c1", expect.any(File), "proj", true)
       expect(addAttachment).toHaveBeenCalledOnce()
@@ -224,7 +222,6 @@ describe("useProjectDocuments", () => {
 
       await act(async () => { await result.current.handleDocumentSelect("/lib/doc.md") })
 
-      // Functional update called twice: n => n+1 then n => n-1.
       expect(setExtracting).toHaveBeenCalledTimes(2)
     })
   })

@@ -70,6 +70,7 @@ export function ChatSidebar({ elements, width, onWidthChange, maxWidth: maxWidth
   const motionWidth = useMotionValue(width)
 
   useEffect(() => {
+    // Don't fight the drag, which drives motionWidth directly
     if (dragging.current) return
     const controls = animate(motionWidth, width, {
       type: "spring",
@@ -91,6 +92,7 @@ export function ChatSidebar({ elements, width, onWidthChange, maxWidth: maxWidth
 
       const onMouseMove = (ev: MouseEvent) => {
         if (!dragging.current) return
+        // Sidebar is right-anchored, so dragging left widens it
         const newPx = startWidth + (startX - ev.clientX)
         const clamped = Math.min(effectiveMax, Math.max(MIN_SIDEBAR_WIDTH, newPx))
         motionWidth.set(clamped)

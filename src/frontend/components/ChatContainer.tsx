@@ -19,8 +19,8 @@ import { DocumentEditor } from "./DocumentEditor"
 import { ToolCallElement } from "./ToolCallElement"
 
 // Document/vault/attachment callbacks the sidebar (Context + Documents
-// elements) needs but ChatContainer itself never touches — provided by
-// TabContent so they don't have to thread through ChatContainerProps.
+// elements) needs but ChatContainer itself never touches (provided by
+// TabContent so they don't have to thread through ChatContainerProps).
 export interface ChatSidebarContextValue {
   onRemoveAttachment?: (messageIndex: number, attachmentName: string) => void
   onToggleAttachmentActive?: (messageIndex: number, attachmentName: string) => void
@@ -55,7 +55,7 @@ function AttachmentIcon({ mime }: { mime: string }) {
   return <FileText className="h-3.5 w-3.5 text-ink-muted shrink-0" />
 }
 
-function AttachmentViewer({ attachment, chatId, slug, onContentChange, pdfWide, onTogglePdfWide }: { attachment: Attachment; chatId: string; slug: string | null; onContentChange?: (newContent: string) => void; pdfWide?: boolean; onTogglePdfWide?: () => void }) {
+function AttachmentViewer({ attachment, onContentChange, pdfWide, onTogglePdfWide }: { attachment: Attachment; onContentChange?: (newContent: string) => void; pdfWide?: boolean; onTogglePdfWide?: () => void }) {
   if (attachment.mime.startsWith("image/")) {
     return (
       <div className="p-2">
@@ -110,8 +110,6 @@ function PdfAttachmentViewer({ url, parsedContent, name, pdfWide, onTogglePdfWid
 }
 
 function ContextBody({
-  chatId,
-  slug,
   allAttachments,
   expandedEntries,
   onToggleExpand,
@@ -121,8 +119,6 @@ function ContextBody({
   pdfWide,
   onTogglePdfWide,
 }: {
-  chatId: string
-  slug: string | null
   allAttachments: { messageIndex: number; attachment: Attachment }[]
   expandedEntries: { messageIndex: number; attachmentName: string }[]
   onToggleExpand: (messageIndex: number, attachmentName: string) => void
@@ -180,7 +176,7 @@ function ContextBody({
             </div>
             {expanded && (
               <div className={att.mime === "application/pdf" ? "h-[60vh]" : "max-h-[60vh] overflow-y-auto"}>
-                <AttachmentViewer attachment={att} chatId={chatId} slug={slug} onContentChange={onAttachmentContentChange ? (nc: string) => onAttachmentContentChange(mi, att.name, nc) : undefined} pdfWide={pdfWide} onTogglePdfWide={onTogglePdfWide} />
+                <AttachmentViewer attachment={att} onContentChange={onAttachmentContentChange ? (nc: string) => onAttachmentContentChange(mi, att.name, nc) : undefined} pdfWide={pdfWide} onTogglePdfWide={onTogglePdfWide} />
               </div>
             )}
           </div>
@@ -208,10 +204,12 @@ function DocumentRow({ doc, slug, onSelect, editingPath, onEdit, onDelete, onRen
 }) {
   const [editingTitle, setEditingTitle] = useState(false)
   const { editorModel } = useContext(ChatSidebarContext)
+  // Delay single-click attach so a double-click can start a rename instead
   const selectTimer = useRef<number | undefined>(undefined)
   const cancelRename = useRef(false)
   const isPdf = doc.mime === "application/pdf"
   const rootText = isRootFile && !isPdf
+  // Extensions DocumentEditor can open
   const editable = /\.(md|tex|canvas|c4)$/.test(doc.name) && !rootText
   const expanded = editingPath === doc.path || (rootText && fileEditingPath === doc.path)
   const Icon = isPdf ? FileType : FileText
@@ -491,8 +489,6 @@ export function useSidebarElements({
       onOpenChange: (o) => onElementOpenChange("context", o),
         body: (
           <ContextBody
-            chatId={chatId}
-            slug={slug}
             allAttachments={allAttachments}
             expandedEntries={expandedEntries}
             onToggleExpand={onToggleExpand}
@@ -569,7 +565,9 @@ export function useSidebarElements({
   ])
 }
 
+/** Trailing pairs expanded by default, older ones render collapsed. */
 const DEFAULT_EXPANDED_TAIL = 1
+/** Extra scroll padding below the last pair, on top of the floating input height. */
 const BOTTOM_GAP_PX = 16
 
 interface ChatContainerProps {
@@ -584,7 +582,6 @@ interface ChatContainerProps {
   focusQaIndex?: number | null
   focusKey?: number
   branchMessageIdx?: number | null
-  isActive?: boolean
   className?: string
   slug?: string | null
   chatMaxWidth?: number
@@ -606,7 +603,6 @@ export function ChatContainer({
   focusQaIndex,
   focusKey,
   branchMessageIdx,
-  isActive,
   className,
   slug = null,
   chatMaxWidth,
@@ -617,6 +613,7 @@ export function ChatContainer({
   const bottomRef = useRef<HTMLDivElement>(null)
   const [editingDocPath, setEditingDocPath] = useState<string | null>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
+  // Ref, not state: updated on every scroll and read by the message effect without re-rendering
   const isPinnedToBottomRef = useRef(true)
 
   const lastSearchResult = useMemo(() => {
@@ -651,6 +648,7 @@ export function ChatContainer({
   const containerRef = useRef<HTMLDivElement>(null)
   const savedSidebarWidth = useRef(320)
 
+  // Widen the sidebar to half the container for PDFs, restoring the previous width on exit
   const togglePdfWide = useCallback(() => {
     setPdfWide((prev) => {
       if (!prev) {
@@ -683,6 +681,7 @@ export function ChatContainer({
     const el = scrollContainerRef.current
     if (!el) return
     const handleScroll = () => {
+      // 80px slack so small overscrolls still count as pinned
       const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
       isPinnedToBottomRef.current = nearBottom
     }
@@ -695,6 +694,7 @@ export function ChatContainer({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
+  // Per-pair expand/collapse overrides keyed by global message index
   const [manualOverrides, setManualOverrides] = useState<Map<number, boolean>>(new Map())
 
   useEffect(() => {
@@ -702,6 +702,7 @@ export function ChatContainer({
       setManualOverrides(new Map())
       return
     }
+    // Expand the focused pair and scroll to the pair before it so the target sits just below a collapsed header
     const gi = focusQaIndex * 2
     setManualOverrides(new Map([[gi, true]]))
     requestAnimationFrame(() => {
@@ -716,7 +717,7 @@ export function ChatContainer({
   }, [focusQaIndex, focusKey])
 
   // Depend on the length, not the array: in an empty chat every re-render hands
-  // down a fresh [] and this would slam the sidebar shut again — including right
+  // down a fresh [] and this would slam the sidebar shut again, including right
   // after you opened the Documents expander.
   useEffect(() => {
     if (messages.length === 0) {
@@ -725,6 +726,7 @@ export function ChatContainer({
     }
   }, [messages.length])
 
+  // Pair user/assistant messages, padding a missing assistant reply with an empty one
   const pairs = useMemo<{ user: Message; assistant: Message; globalIndex: number }[]>(() => {
     const out: { user: Message; assistant: Message; globalIndex: number }[] = []
     for (let i = 0; i < messages.length; i += 2) {
@@ -739,6 +741,7 @@ export function ChatContainer({
     return out
   }, [messages])
 
+  // Pairs from this index on are expanded unless overridden
   const tailStartGlobalIndex = pairs.length > DEFAULT_EXPANDED_TAIL
     ? pairs[pairs.length - DEFAULT_EXPANDED_TAIL].globalIndex
     : (pairs.length > 0 ? pairs[0].globalIndex : -1)
@@ -793,11 +796,13 @@ export function ChatContainer({
       ? allPairsList[keyboardFocusIdx]
       : null
 
+  // Sending re-pins to bottom so the new answer streams into view
   const handleSend = useCallback((text: string, attachments: Attachment[]) => {
     isPinnedToBottomRef.current = true
     onSend(text, attachments)
   }, [onSend])
 
+  // Hover preview opens after 500ms, closes after a 100ms grace so moving between rows doesn't flicker
   const handleMouseEnter = (globalIndex: number) => {
     if (leaveTimeoutRef.current) {
       clearTimeout(leaveTimeoutRef.current)
@@ -842,6 +847,7 @@ export function ChatContainer({
     setKeyboardFocusIdx(null)
   }, [keyboardFocusIdx, allPairsList, togglePair])
 
+  // Capture phase so these shortcuts win over editor and input handlers
   useEffect(() => {
     const eat = (e: KeyboardEvent) => { e.preventDefault(); e.stopPropagation() }
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -867,6 +873,7 @@ export function ChatContainer({
     const container = scrollContainerRef.current
     if (!container) return
 
+    // Scroll so the focused pair sits 3 rows below the top, or align to the top when near it
     const atTop = keyboardFocusIdx < 3
     const targetIdx = atTop ? 0 : keyboardFocusIdx - 3
     const targetGlobalIdx = allPairsList[targetIdx]
@@ -913,6 +920,7 @@ export function ChatContainer({
   const inputAreaRef = useRef<HTMLDivElement>(null)
   const [inputAreaHeight, setInputAreaHeight] = useState(0)
 
+  // Track the floating input height to pad the scroll area under it
   useEffect(() => {
     const el = inputAreaRef.current
     if (!el) return
@@ -931,6 +939,7 @@ export function ChatContainer({
     }
   }, [hasSidebarContent])
 
+  // Leaving the context panel drops PDF wide mode
   useEffect(() => {
     if (!contextOpen) setPdfWide(false)
   }, [contextOpen])

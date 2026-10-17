@@ -342,6 +342,7 @@ describe('systems, modules, and views', () => {
     const result = await apply([{ op: 'layout', view: 'shopView', nodes: {}, edges: {} }], pins)
     const view = result.model.views.find((candidate) => candidate.id === 'shopView')!
     const rect = (id: string) => { const node = view.nodes.find((candidate) => candidate.id === id)!; return [node.x, node.y, node.width, node.height] }
+    // 632 x 432 = the child's far corner (400+200, 300+100) plus COMPOUND_PADDING.
     assert.deepEqual(rect('shop'), [0, 0, 632, 432])
     assert.deepEqual(rect('shop.api'), [400, 300, 200, 100])
   })
@@ -376,6 +377,7 @@ describe('systems, modules, and views', () => {
   })
 
   it('places elements added to an arranged view beside it, not on top of it', async () => {
+    // 440 = pinned right edge (320) + BLOCK_GAP (120).
     const result = await apply([{ op: 'layout', view: 'index', nodes: {}, edges: {} }], { index: { nodes: { bank: { x: 0, y: 0, width: 320, height: 180 } }, edges: {} } })
     const shop = result.model.views.find((candidate) => candidate.id === 'index')!.nodes.find((node) => node.id === 'shop')!
     assert.deepEqual([shop.x, shop.y], [440, 0])

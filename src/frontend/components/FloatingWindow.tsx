@@ -11,9 +11,11 @@ interface FloatingWindowProps {
   panelClassName?: string
 }
 
+/** Modal overlay with a centered panel. Backdrop click and Escape call `onClose`. */
 export function FloatingWindow({ children, onClose, overlayClassName, panelClassName }: FloatingWindowProps) {
   useEffect(() => {
     if (!onClose) return
+    // Capture phase and stopImmediatePropagation: Escape closes this before any handler underneath sees it.
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); onClose() }
     }

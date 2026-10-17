@@ -40,6 +40,7 @@ export function useProject(): ProjectContextState {
   return ctx
 }
 
+/** Owns the open project, its kanban data and the project list. */
 export function ProjectProvider({ children }: { children: ReactNode }) {
   const [activeProject, setActiveProject] = useState<string | null>(null)
   const [projectData, setProjectData] = useState<ProjectData | null>(null)
@@ -53,10 +54,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const syncVersionRef = useRef(0)
   const bumpVersion = useCallback(() => { syncVersionRef.current++ }, [])
 
-  // Mirror of `projectData` for use inside stable callbacks. Reading via ref
-  // (instead of the state value) keeps `syncTabs` identity stable across
-  // `setProjectData(updated)` calls, which would otherwise re-create it and
-  // trigger an effect-driven re-invocation loop in `TabManager`.
+  // Ref mirror of `projectData` keeps `syncTabs` identity stable. Reading state directly
+  // would re-create it on every `setProjectData` and loop the effect in `TabManager`.
   const projectDataRef = useRef<ProjectData | null>(null)
   useEffect(() => { projectDataRef.current = projectData }, [projectData])
   // Deletes commit after an undo window; they must see the project open at commit time, not at click time.
@@ -125,6 +124,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }, [runGuarded])
 
   const moveCard = useCallback(async (cardId: string, state: string) => {
+    // Optimistic move. `originalCard` is captured inside the updater so a failed or stale call can restore it.
     const nextState = state as KanbanColumnId
     let originalCard: KanbanCard | undefined = undefined
 
@@ -184,6 +184,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     const projectTabs: ProjectTab[] = []
     for (const t of tabs) {
       if (!t.historyFile) continue
+      // Tab files are stored as `<slug>/<file>`, the project state keeps the bare filename.
       const filename = t.historyFile.includes("/") ? t.historyFile.split("/").slice(1).join("/") : t.historyFile
       projectTabs.push({ filename, name: t.name, title: t.title })
     }

@@ -39,6 +39,7 @@ from lib.storage_namespace import sandbox_asset, sandbox_scope
 
 logger = logging.getLogger(__name__)
 PROMPT_MAX_LEN = 12000
+# A "running" record older than this is treated as abandoned and may be re-run.
 STALE_RUN_TIMEOUT_SECONDS = 300.0
 SCRIPT_TIMEOUT_SECONDS = 60.0
 
@@ -240,6 +241,10 @@ class SandboxService:
         thinking: Literal["low", "medium"] = "medium",
         lean: bool = False,
     ) -> SandboxToolResult:
+        """Run one workspace-agent task, idempotent per `tool_call_id`.
+
+        Raises `SandboxBusyError` while the same call is still running elsewhere.
+        """
         chat_id = _validate_chat_id(chat_id)
         prompt = _normalize_prompt(prompt)
         scope = sandbox_scope(scope)
@@ -249,6 +254,7 @@ class SandboxService:
         lock = await self._runtime.lock(slot_key)
         async with lock:
             staged = self._runtime.stage(slot_key)
+            # Replay of a finished call returns the recorded result instead of re-running.
             staged_record = staged.runs.get(tool_call_id)
             if staged_record is not None:
                 return _result_from_record(staged_record)
@@ -260,6 +266,7 @@ class SandboxService:
                     return _result_from_record(recovered)
             if existing is not None and existing.status != "running":
                 return _result_from_record(existing)
+            # Fresh running record means a live run. Stale ones fall through and re-run.
             if existing is not None and time.time() - existing.started_at < STALE_RUN_TIMEOUT_SECONDS:
                 raise SandboxBusyError(f"sandbox run {tool_call_id} is already in progress")
 
@@ -292,6 +299,7 @@ class SandboxService:
                     active_manifest=prior_manifest,
                     workspace=restore,
                 )
+                # Shield so a cancelled caller cannot orphan the native run before it is released.
                 runner_task = asyncio.create_task(self._runner.run(invocation))
                 run = await asyncio.shield(runner_task)
                 result = self._accept_run(run, staged, tool_call_id=tool_call_id)
@@ -413,6 +421,7 @@ class SandboxService:
         media_types = {ref["sha256"]: media_type for output in outputs for media_type, ref in output.mime_bundle.items()}
         self._persist_assets(output_assets, media_types)
 
+        # Only the newest workspace snapshot is kept in memory.
         staged.assets = {workspace_sha256: workspace_bytes}
         staged.output_shas.update(output_assets)
         staged.manifest = manifest
@@ -449,6 +458,7 @@ class SandboxService:
 
     @staticmethod
     def _plot_bytes(run: SandboxRun) -> bytes | None:
+        """Return `plot.json` bytes from the workspace if it holds a JSON object."""
         try:
             content = run.read_workspace_file("plot.json")
             return content if isinstance(json.loads(content), dict) else None
@@ -532,6 +542,7 @@ class SandboxService:
                     shas.update(staged.output_shas)
                 if not shas:
                     continue
+                # Keep assets still referenced by other chats, scopes, or staged runtime state.
                 still_referenced = store.referenced_shas(exclude_chat_id=chat_id, exclude_scope=state_scope)
                 still_referenced.update(self._runtime.referenced_output_shas(exclude_slot=slot_key))
                 for sha256 in shas:

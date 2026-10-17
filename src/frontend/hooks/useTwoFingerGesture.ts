@@ -20,6 +20,7 @@ interface TwoFingerOptions<S> {
 // TouchEvents though touch pointer events fire fine. Observe-only, so one-finger
 // interaction underneath is untouched.
 export function useTwoFingerGesture<S>(ref: RefObject<HTMLElement | null>, options: TwoFingerOptions<S>) {
+  // Ref keeps the effect from re-subscribing when callers pass fresh inline closures.
   const optionsRef = useRef(options)
   optionsRef.current = options
   const enabled = options.enabled ?? true
@@ -30,12 +31,11 @@ export function useTwoFingerGesture<S>(ref: RefObject<HTMLElement | null>, optio
     let gesture: { start: S, dist: number, cx: number, cy: number } | null = null
     const drop = () => { touches.clear(); gesture = null }
 
-    // Palm rejection: touch is suppressed while the pen is in contact and for
-    // PEN_TOUCH_SUPPRESS_MS after any pen event, hover included — the palm lands
-    // just before the tip touches and lingers after it lifts. A pen hover with no
-    // buttons also clears the contact flag, so a missed pointerup can never leave
-    // touch permanently disabled. Capture phase so a stopPropagation elsewhere
-    // can't hide pen events from us.
+    // Palm rejection: suppress touch while the pen is in contact and for
+    // PEN_TOUCH_SUPPRESS_MS after any pen event (hover included), since the palm lands
+    // before the tip and lingers after it lifts. A pen hover with no buttons also
+    // clears the contact flag, so a missed pointerup can't disable touch forever.
+    // Capture phase so stopPropagation elsewhere can't hide pen events.
     let penContact = false
     let penLastSeen = 0
     const onPen = (e: PointerEvent) => {
@@ -76,6 +76,7 @@ export function useTwoFingerGesture<S>(ref: RefObject<HTMLElement | null>, optio
     }
 
     el.addEventListener("pointerdown", onDown, true)
+    // Move/up on window so the gesture survives fingers leaving the element.
     window.addEventListener("pointermove", onMove)
     window.addEventListener("pointerup", onUp)
     window.addEventListener("pointercancel", onUp)

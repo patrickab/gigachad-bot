@@ -80,6 +80,7 @@ async def stream_canvas(
                 batches = await asyncio.to_thread(store.replay, key, delivered)
                 if batches:
                     continue
+                # Block until this canvas changes. The loop ends only when the broker closes the subscription, which ends the stream.
                 async for change in live:
                     if change.get("resource_kind") == "document" and change.get("resource_key") == key:
                         break

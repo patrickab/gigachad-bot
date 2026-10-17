@@ -1,9 +1,8 @@
 # ruff: noqa
 """Non-user-facing system prompts.
 
-Prompts in this module are used internally by backend routes to extract
-structured artifacts from raw material. They are NOT exposed in the
-user-facing prompt dropdown (see `PROMPT_MAP` in `routes/models.py`).
+Used internally by backend routes to extract structured artifacts. They are not
+exposed in the user-facing prompt dropdown (see `PromptStore`).
 """
 
 SYS_STUDY_MINDMAP = """

@@ -327,21 +327,13 @@ def test_pdf_asset_attachment_serves_from_storage_not_only_disk(client, tmp_path
 
     pdf_bytes = b"%PDF-1.7 fake pdf body"
     uploaded = client.post(
-        "/api/files/upload",
-        params={"chat_id": "chat-1", "slug": slug},
+        "/api/documents/upload",
+        params={"slug": slug},
         files={"file": ("exercise.pdf", pdf_bytes, "application/pdf")},
         headers=alice,
     )
     assert uploaded.status_code == 200
-
-    registered = client.post(
-        "/api/documents/register-upload",
-        params={"slug": slug},
-        json={"chat_id": "chat-1", "filename": "exercise.pdf"},
-        headers=alice,
-    )
-    assert registered.status_code == 200
-    key = registered.json()["path"]
+    key = uploaded.json()["path"]
     assert key == "PDFs/exercise.pdf"
 
     # The mirror write is a convenience copy, not the source of truth: remove it so

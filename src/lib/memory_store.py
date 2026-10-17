@@ -53,8 +53,8 @@ PROJECT_SCOPE_GUIDANCE = (
 
 # Categories define which *types* of memory are extracted. Tuned to be useful
 # for both studying lectures and hobby programming. Add entries here to teach the
-# extractor new buckets — extraction and per-category dedup pick them up
-# automatically.
+# extractor new buckets (extraction and per-category dedup pick them up
+# automatically).
 DEFAULT_GLOBAL_CATEGORIES: list[dict[str, str]] = [
     {
         "name": "identity",
@@ -155,6 +155,7 @@ class MemoryStore:
         return "\n\n".join(parts)
 
     def augment_system_prompt(self, system_prompt: str, project_slug: str | None = None) -> str:
+        """Append global and project memory to *system_prompt* under a "Persistent Memory Context" heading."""
         memory_context = self._chat_context(project_slug)
         if not memory_context:
             return system_prompt
@@ -180,7 +181,7 @@ class MemoryStore:
         Requested scopes are extracted in parallel; each prompt carries only its own categories
         plus the memories already on record, so the model emits *deltas* (new or corrected facts)
         instead of re-proposing known ones. Watermarks are tracked **per (chat_id, scope)** and
-        advance only when that scope's review is committed — so a scope-targeted ``/memorize-global``
+        advance only when that scope's review is committed. So a scope-targeted ``/memorize-global``
         does not starve a later ``/memorize-project`` on the same conversation, and cancelling
         leaves the messages eligible next time.
         """
@@ -279,14 +280,17 @@ Return JSON with this exact shape:
         accepted_memories: list[ProposedMemory],
         project_slug: str | None = None,
         review_id: str | None = None,
-        rejected_memories: list[dict[str, Any]] | None = None,
         revised_memories: list[dict[str, Any]] | None = None,
     ) -> None:
+        """Write the reconciled memories and markdown for *scope*, then advance the review's watermark.
+
+        *revised_memories* (preview output) is stored verbatim and skips reconciliation.
+        """
         json_path, md_path, title = self._scope_paths(scope, project_slug)
 
         if revised_memories is not None:
             # Revised memories come from a preview and may carry an extra "status"
-            # field for the UI — keep only the canonical StoredMemory fields.
+            # field for the UI. Keep only the canonical StoredMemory fields.
             now = _now_iso()
             updated = [
                 StoredMemory(
@@ -380,7 +384,7 @@ Return JSON with this exact shape:
             if cat not in candidates_by_cat:
                 result.extend((m, "pre-existing") for m in mems)
 
-        # Touched categories get reconciled — independent per category, so run concurrently.
+        # Touched categories get reconciled (independent per category, so run concurrently).
         touched = list(candidates_by_cat.items())
         reconciled = await asyncio.gather(
             *(self._reconcile_category(llm, scope, cat, existing_by_cat.get(cat, []), cands) for cat, cands in touched)
@@ -401,7 +405,7 @@ Return JSON with this exact shape:
         existing_texts = [m.text.strip() for m in existing if m.text.strip()]
         candidate_texts = [c.memory.strip() for c in candidates if c.memory.strip()]
 
-        # Nothing to merge against — accept candidates as-is (deduped against existing).
+        # Nothing to merge against. Accept candidates as-is (deduped against existing).
         if not existing_texts:
             final_texts = self._dedup_keep_order(candidate_texts)
         else:
@@ -477,7 +481,7 @@ Return JSON with this exact shape:
             prev = by_text.get(text)
             key = text.lower()
             if key in existing_set and prev:
-                # Unchanged — preserve id and both timestamps.
+                # Unchanged. Preserve id and both timestamps.
                 status = "pre-existing"
                 mem = StoredMemory(
                     id=prev.id,
@@ -499,7 +503,7 @@ Return JSON with this exact shape:
                     updated_at=now,
                 )
             else:
-                # LLM synthesised a combined/updated form — preserve created_at if we can find it.
+                # LLM synthesised a combined/updated form, preserve created_at if we can find it.
                 status = "combined"
                 created_at = prev.created_at if prev else now
                 mem = StoredMemory(
@@ -515,6 +519,7 @@ Return JSON with this exact shape:
 
     @staticmethod
     def _dedup_keep_order(items: Any) -> list[str]:
+        """Strip and dedupe case-insensitively, keeping first-seen casing and order. Drops empties."""
         seen: set[str] = set()
         out: list[str] = []
         for item in items:
@@ -526,10 +531,11 @@ Return JSON with this exact shape:
         return out
 
     # ------------------------------------------------------------------
-    # Pending buffer (replaces the old vector-store staging)
+    # Pending buffer
     # ------------------------------------------------------------------
 
     def _pending_path(self, review_id: str) -> DataStorePath:
+        # Strip everything but filename-safe chars so review_id cannot traverse paths.
         safe = re.sub(r"[^A-Za-z0-9_-]", "", review_id)
         return self.pending_dir / f"{safe}.json"
 
@@ -610,12 +616,13 @@ Return JSON with this exact shape:
         return out
 
     def _watermark_for(self, chat_id: str | None, scope: str) -> int:
+        """Return the index into a chat's messages before which everything is already memorized."""
         if not chat_id:
             return 0
         return self._read_watermarks().get(chat_id, {}).get(scope, 0)
 
     def _advance_watermark(self, chat_id: str, scope: str, index: int) -> None:
-        """Move ``(chat_id, scope)``'s watermark forward to *index* (monotonic — never backwards)."""
+        """Move ``(chat_id, scope)``'s watermark forward to *index* (monotonic, never backwards)."""
         marks = self._read_watermarks()
         scopes = marks.setdefault(chat_id, {})
         if index <= scopes.get(scope, 0):
@@ -654,7 +661,6 @@ Return JSON with this exact shape:
         llm: MemoryLLM,
         orphaned_memories: list[dict[str, Any]],
         remaining_categories: list[dict[str, str]],
-        scope: str,
     ) -> list[dict[str, Any]]:
         """Reassign *orphaned_memories* to *remaining_categories* via LLM.
 
@@ -713,55 +719,6 @@ Rules:
         """Return the canonical stored memories for *scope* as plain dicts."""
         json_path, _, _ = self._scope_paths(scope, project_slug)
         return [self._memory_to_dict(m) for m in self._read_stored_memories(json_path)]
-
-    def move_memory(
-        self,
-        memory_id: str,
-        from_scope: str,
-        to_scope: str,
-        from_project_slug: str | None = None,
-        to_project_slug: str | None = None,
-    ) -> None:
-        """Move a single memory from one scope to another, committing both sides immediately.
-
-        If the memory's category does not exist in the destination scope's category list,
-        it is reassigned to ``FALLBACK_CATEGORY`` so it remains visible.
-        """
-        from_json, from_md, from_title = self._scope_paths(from_scope, from_project_slug)
-        to_json, to_md, to_title = self._scope_paths(to_scope, to_project_slug)
-
-        from_mems = self._read_stored_memories(from_json)
-        target = next((m for m in from_mems if m.id == memory_id), None)
-        if target is None:
-            raise ValueError(f"Memory {memory_id!r} not found in {from_scope}")
-
-        dest_cat_names = {c["name"] for c in self.get_categories(to_scope, to_project_slug)}
-        dest_category = target.category if target.category in dest_cat_names else FALLBACK_CATEGORY
-
-        now = _now_iso()
-        moved = StoredMemory(
-            id=target.id,
-            text=target.text,
-            category=dest_category,
-            scope=to_scope,
-            created_at=target.created_at,
-            updated_at=now,
-        )
-
-        to_mems = self._read_stored_memories(to_json)
-        # Idempotent: remove any existing entry with same id from destination.
-        to_mems_updated = [m for m in to_mems if m.id != memory_id] + [moved]
-        from_mems_updated = [m for m in from_mems if m.id != memory_id]
-
-        self._write_stored_memories(from_json, from_mems_updated)
-        self._write_doc(
-            from_md, self.render_memories_as_markdown(from_mems_updated, from_title, scope=from_scope, project_slug=from_project_slug)
-        )
-
-        self._write_stored_memories(to_json, to_mems_updated)
-        self._write_doc(
-            to_md, self.render_memories_as_markdown(to_mems_updated, to_title, scope=to_scope, project_slug=to_project_slug)
-        )
 
     # ------------------------------------------------------------------
     # Canonical storage I/O & rendering
@@ -869,6 +826,7 @@ Rules:
         return self.memory_root / "global-profile.md"
 
     def _project_dir(self, project_slug: str | None) -> DataStorePath:
+        # Reject separators and dot segments so a slug cannot escape the project directory.
         if not project_slug:
             raise ValueError("Project slug is required")
         if "/" in project_slug or "\\" in project_slug or project_slug in {".", ".."}:

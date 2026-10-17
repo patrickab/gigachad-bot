@@ -13,32 +13,17 @@
    other `dark:` utilities, so this only affects Streamdown's output. */
 @custom-variant dark (&:where(:not(.light):not(.light *)));
 
-/* ============================================================
-   THEME TOKENS
-   ------------------------------------------------------------
-   Two layers:
-     1. Role tokens (--ink, --paper, --surface, --accent, ...)
-        — the only colors components should reach for
-     2. Derived tokens (--divider, --accent-soft, --hover-overlay)
-        — computed from role tokens via color-mix
-
-   Dark mode is the default (:root). Light mode overrides the
-   role tokens in `.light`. Every role token is OKLCH with a
-   warm hue (≈ 85°) and tiny chroma (0.005–0.020), so:
-     • dark mode descends from warm-tinted near-black to slightly
-       lighter warm greys
-     • light mode starts at a yellowish broken white and ascends
-       toward (but never reaches) pure white for elevated containers
-
-   Tailwind utilities (bg-paper, text-ink, border-divider, ...) are
-   generated via @theme referencing these tokens.
-   ============================================================ */
+/* THEME TOKENS
+   Role tokens (--ink, --paper, --surface, ...) are the only colors components use.
+   Derived tokens (--divider, --hover-overlay, ...) are color-mix of role tokens.
+   Dark is the default (:root), `.light` overrides the role tokens. All role tokens
+   are OKLCH with a warm hue (~85) and tiny chroma. Tailwind utilities come from @theme below. */
 
  :root {
    --shadow-strength: 0.35;
    --shadow-color: oklch(19% 0.011 83);
 
-    /* --- Text (ink) — slightly muted high contrast on dark surfaces --- */
+    /* --- Text (ink) --- */
     --ink:        oklch(92% 0.007 83);
     --ink-muted:  oklch(70% 0.011 83);
     --ink-subtle: oklch(54% 0.011 83);
@@ -104,7 +89,7 @@
     /* --- Danger: darker red for light bg --- */
     --danger:      oklch(52% 0.22 25);
   
-    /* Backdrop stays the same — a scrim is meant to darken regardless of mode */
+    /* Backdrop: a scrim darkens regardless of mode */
     --backdrop:    oklch(0% 0 0 / 0.55);
   
     /* --- Dividers: stronger on light surfaces --- */
@@ -129,13 +114,8 @@
     --inner-highlight-strong: inset 0 1px 0 0 oklch(100% 0 0 / 0.7);
   }
 
-/* ============================================================
-   TAILWIND V4 TOKEN MAPPING
-   ------------------------------------------------------------
-   Wipe the default palette (--color-*: initial) so any leftover
-   `text-zinc-400` or `bg-sky-500/10` will compile to no rules —
-   forcing every site to be migrated to a role token.
-   ============================================================ */
+/* TAILWIND V4 TOKEN MAPPING
+   `--color-*: initial` wipes the default palette so leftover `text-zinc-400` etc. compile to nothing. */
 @theme {
   --color-*: initial;
 

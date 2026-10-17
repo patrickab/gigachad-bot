@@ -51,7 +51,9 @@ interface TextEdit extends Span {
 
 interface Plan {
   edits: TextEdit[]
+  /** Old FQN -> new FQN, for saved positions and the equivalence check. */
   renames?: Record<string, string>
+  /** The FQN, file path or view id reported back in `ApplyResult.created`. */
   created?: string
 }
 
@@ -279,8 +281,6 @@ class Planner {
     const found = (await this.ws.model()).findView(view)
     return found?.isElementView() ? found.viewOf?.id ?? null : null
   }
-
-  // --- Files and views ---------------------------------------------------------
 
   /** The file a new system, module or view gets: `id` made unique against `taken` names and existing files. */
   private newFile(folder: string, title: string, taken: ReadonlySet<string>): { id: string, path: string } {
@@ -634,6 +634,7 @@ views {
     return { edits, renames: { [op.element]: parent ? `${parent}.${op.id}` : op.id } }
   }
 
+  /** Moves an element's text under `parent`, rewriting qualified references into it as absolute FQNs. */
   async reparent(op: Extract<Operation, { op: 'reparent' }>): Promise<Plan> {
     const fqn = op.element
     const element = this.element(fqn)
@@ -667,6 +668,7 @@ views {
     const inside: TextEdit[] = []
     for (const [node, { file: chainFile, text: replacement }] of chains) {
       const edit = { file: chainFile, start: node.offset, end: node.end, text: replacement }
+      // Chains inside the cut block are applied to its text, with offsets relative to the block.
       if (chainFile === file && node.offset >= cutStart && node.end <= cutEnd) inside.push({ ...edit, start: edit.start - cutStart, end: edit.end - cutStart })
       else outside.push(edit)
     }
@@ -696,11 +698,13 @@ async function plan(ws: Workspace, op: Operation, home: string | null): Promise<
     case 'reparent': return planner.reparent(op)
     case 'includeInView': return planner.includeInView(op)
     case 'removeFromView': return planner.removeFromView(op)
+    // Positions are saved by applyOperations, not by editing source.
     case 'layout': return { edits: [] }
     default: throw new OperationError(`Unknown operation: ${(op as { op?: unknown }).op}`)
   }
 }
 
+/** Rewrites `fqn` when it is, or lies under, a renamed or moved element. */
 const mapPrefix = (fqn: string, renames: Record<string, string>) => {
   for (const [from, to] of Object.entries(renames)) if (isWithin(fqn, from)) return to + fqn.slice(from.length)
   return fqn
@@ -718,7 +722,7 @@ function renamePins(pins: Pins, renames: Record<string, string>): Pins {
   }]))
 }
 
-/** A null entry unpins: the node returns to LikeC4's placement, the connection straightens. */
+/** A null entry unpins: the node returns to LikeC4's placement, the connection straightens (a zero bend does too). */
 function patchPins(pins: Pins, op: Extract<Operation, { op: 'layout' }>): Pins {
   const view: ViewPins = { nodes: { ...pins[op.view]?.nodes }, edges: { ...pins[op.view]?.edges } }
   for (const [fqn, pin] of Object.entries(op.nodes)) {

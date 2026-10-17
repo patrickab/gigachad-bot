@@ -15,13 +15,11 @@ import type { CategoryDef, PreviewMemory } from "@/lib/types"
 export function MemoryViewer() {
   const { target, closeMemoryViewer } = useMemoryViewer()
   if (!target) return null
+  // Keyed by target so switching scope/project remounts and reloads state
   return <MemoryViewerInner key={`${target.scope}:${target.projectSlug ?? ""}`} onClose={closeMemoryViewer} target={target} />
 }
 
-// ---------------------------------------------------------------------------
 // Confirmation popup for category deletion with memories
-// ---------------------------------------------------------------------------
-
 function DeleteCategoryPopup({
   category, memoryCount, remapping, onRemap, onDrop, onCancel,
 }: {
@@ -51,10 +49,7 @@ function DeleteCategoryPopup({
   )
 }
 
-// ---------------------------------------------------------------------------
 // Add-category inline form
-// ---------------------------------------------------------------------------
-
 function AddCategoryForm({ existingNames, onAdd, onCancel }: {
   existingNames: Set<string>; onAdd: (cat: CategoryDef) => void; onCancel: () => void
 }) {
@@ -94,14 +89,11 @@ function AddCategoryForm({ existingNames, onAdd, onCancel }: {
   )
 }
 
-// ---------------------------------------------------------------------------
-// Categories panel — collapsible pill list with drag-to-reorder
-// ---------------------------------------------------------------------------
-
+// Categories panel: collapsible pill list with drag-to-reorder
 function CategoriesPanel({
-  categories, memories, disabled, onReorder, onDeleteCategory, onAddCategory,
+  categories, disabled, onReorder, onDeleteCategory, onAddCategory,
 }: {
-  categories: CategoryDef[]; memories: PreviewMemory[]; disabled: boolean
+  categories: CategoryDef[]; disabled: boolean
   onReorder: (cats: CategoryDef[]) => void
   onDeleteCategory: (cat: CategoryDef) => void
   onAddCategory: (cat: CategoryDef) => void
@@ -182,10 +174,7 @@ function CategoriesPanel({
   )
 }
 
-// ---------------------------------------------------------------------------
 // Main viewer
-// ---------------------------------------------------------------------------
-
 function MemoryViewerInner({
   target, onClose,
 }: {
@@ -206,6 +195,7 @@ function MemoryViewerInner({
   const [remapping, setRemapping] = useState(false)
 
   useEffect(() => {
+    // Drop results from a stale scope/project after a switch or unmount
     let cancelled = false
     setLoading(true); setError(null)
     Promise.all([getMemories(scope, projectSlug ?? null), getCategories(scope, projectSlug ?? null)])
@@ -231,6 +221,7 @@ function MemoryViewerInner({
     setMemories((prev) => prev.filter((m) => m.id !== id))
   }, [])
 
+  // Manual ids only need to be unique locally. Default to the first category.
   const handleAdd = useCallback((s: "global" | "project", text: string) => {
     const trimmed = text.trim()
     if (!trimmed) return
@@ -262,13 +253,14 @@ function MemoryViewerInner({
     if (!pendingDeleteCat) return
     const orphaned = memories.filter((m) => m.category === pendingDeleteCat.name)
     const remaining = categories.filter((c) => c.name !== pendingDeleteCat.name)
+    // Nothing to remap into, so the orphaned memories are dropped
     if (remaining.length === 0) {
       setMemories((prev) => prev.filter((m) => m.category !== pendingDeleteCat.name))
       setCategories(remaining); setPendingDeleteCat(null); return
     }
     setRemapping(true)
     try {
-      const res = await remapOrphanedCategory(scope, orphaned, remaining, projectSlug ?? null)
+      const res = await remapOrphanedCategory(orphaned, remaining, projectSlug ?? null)
       const remappedById = new Map(res.memories.map((m) => [m.id, m]))
       setMemories((prev) =>
         prev.map((m) => remappedById.get(m.id) ?? m).filter((m) => m.category !== pendingDeleteCat.name)
@@ -294,7 +286,7 @@ function MemoryViewerInner({
       // stored JSON and the rendered markdown reflect the current category sequence.
       const ordered = sortMemoriesByCategoryOrder(memories, categories)
       await saveCategories(scope, categories, projectSlug ?? null)
-      await commitMemoryDoc(scope, [], projectSlug ?? null, null, null, ordered)
+      await commitMemoryDoc(scope, [], projectSlug ?? null, null, ordered)
       onClose()
     } catch (e) {
       setError((e as Error)?.message || "Failed to save memories")
@@ -305,6 +297,7 @@ function MemoryViewerInner({
     function onKey(e: KeyboardEvent) {
       const tgt = e.target as HTMLElement | null
       const editable = !!tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.isContentEditable)
+      // Escape closes the delete popup first, then the viewer. Enter-to-save is ignored while typing.
       if (e.key === "Escape") {
         if (pendingDeleteCat) { setPendingDeleteCat(null); return }
         e.preventDefault(); onClose(); return
@@ -323,7 +316,6 @@ function MemoryViewerInner({
     <FloatingWindow onClose={onClose} overlayClassName="z-[95]" panelClassName="h-[86vh] max-h-[840px]">
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         className="h-full flex flex-col" onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
         <div className="flex items-center justify-between border-b border-divider/50 px-4 py-2 shrink-0">
           <div className="flex items-center gap-2">
             {isLocked ? <Loader2 className="h-3.5 w-3.5 animate-spin text-ink-muted" /> : <ScopeIcon className="h-3.5 w-3.5 text-ink-muted" />}
@@ -357,7 +349,6 @@ function MemoryViewerInner({
           </div>
         ) : (
           <div className="flex-1 flex min-h-0">
-            {/* Left pane */}
             <div className="w-1/2 min-w-0 border-r border-divider/50 flex flex-col relative">
               {pendingDeleteCat && (
                 <DeleteCategoryPopup
@@ -371,7 +362,7 @@ function MemoryViewerInner({
               )}
 
               <CategoriesPanel
-                categories={categories} memories={memories} disabled={isLocked}
+                categories={categories} disabled={isLocked}
                 onReorder={handleReorderCategories}
                 onDeleteCategory={handleDeleteCategory}
                 onAddCategory={handleAddCategory}
@@ -406,7 +397,7 @@ function MemoryViewerInner({
               </div>
             </div>
 
-            {/* Right pane — markdown preview */}
+            {/* Right pane: markdown preview */}
             <div className="w-1/2 min-w-0 flex flex-col">
               <div className="flex items-center gap-2 border-b border-divider/30 px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-ink-faint">
                 Preview

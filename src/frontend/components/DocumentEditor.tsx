@@ -56,6 +56,7 @@ function ViewPills({ view, onViewChange }: { view: EditorView; onViewChange: (v:
   )
 }
 
+/** Fixed-height container with a bottom drag handle (min 200px). */
 function ResizableEditor({ children }: { children: React.ReactNode }) {
   const [height, setHeight] = useState(400)
   const dragging = useRef(false)
@@ -92,6 +93,7 @@ function ResizableEditor({ children }: { children: React.ReactNode }) {
   )
 }
 
+/** Load each image frame to measure its aspect ratio (falls back to 1 if it fails to load). */
 async function canvasImageEmbeds(doc: CanvasDocument): Promise<EmbedRect[]> {
   return Promise.all(doc.frames.filter((f) => f.kind === "image" && f.path).map(async (f) => {
     const url = fileViewerRawUrl(f.path!)
@@ -113,7 +115,7 @@ function CanvasDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, ove
   const [exporting, setExporting] = useState(false)
   const liveContentRef = useRef(onLiveContent)
   liveContentRef.current = onLiveContent
-  // Only local edits refresh the drawing JPEG — otherwise every open client would
+  // Only local edits refresh the drawing JPEG, otherwise every open client would
   // re-render and upload it for each remote change.
   const drawnRef = useRef(false)
 
@@ -153,6 +155,7 @@ function CanvasDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, ove
     setExporting(true)
     try {
       const { PDFDocument } = await import("pdf-lib") // lazy: heavy, and only needed on export
+      // A4 at 96dpi in px (1123x794) for the page crop, and in pt (595.28x841.89) for the PDF page
       const A4_ASPECT = 1123 / 794
       const imgs = await canvasImageEmbeds(canvasDocument)
       const pdfDoc = await PDFDocument.create()
@@ -304,6 +307,7 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
     setDirty(true)
   }, [])
 
+  // Reload on remote changes unless there are unsaved local edits. `resource_key` may be a path suffix.
   useEffect(() => subscribeToChanges((event) => {
     if (dirtyRef.current || event.resource_kind !== "document") return
     if (event.resource_key !== path && !path.endsWith(`/${event.resource_key}`)) return
@@ -327,8 +331,8 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
     onSaved?.(filename, next)
   }, [slug, filename, path, onSaved, persistOverride])
 
-  // Saves are chained so an earlier slow write can never resolve after — and
-  // silently clobber — a newer one.
+  // Saves are chained so an earlier slow write can never resolve after,
+  // and silently clobber, a newer one.
   const saveChain = useRef(Promise.resolve())
   const persist = useCallback((next: string) => {
     const run = saveChain.current.then(() => persistNow(next))
@@ -357,7 +361,7 @@ function StandardDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, o
     return () => clearTimeout(timer)
   }, [canvasDoc, path, persist])
 
-  // Leaving the editor flushes a pending autosave immediately — the debounce
+  // Leaving the editor flushes a pending autosave immediately. The debounce
   // cleanup alone would drop strokes drawn in the final second.
   const flushRef = useRef<() => void>(() => {})
   flushRef.current = () => {

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect, useCallback } from "react"
+import { useState, useRef, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -16,6 +16,7 @@ const COLUMNS: { id: KanbanColumnId; label: string }[] = [
   { id: "done", label: "Done" },
 ]
 
+// Click cycles forward, right-click cycles backward
 const NEXT_STATE: Record<KanbanColumnId, KanbanColumnId> = {
   backlog: "doing",
   doing: "done",
@@ -35,6 +36,7 @@ interface AddCardModalProps {
   defaultState: KanbanColumnId
 }
 
+/** Modal to add a card to `defaultState`. Enter submits. */
 function AddCardModal({ open, onClose, onAdd, defaultState }: AddCardModalProps) {
   const [title, setTitle] = useState("")
   const [desc, setDesc] = useState("")
@@ -139,6 +141,7 @@ function AddCardModal({ open, onClose, onAdd, defaultState }: AddCardModalProps)
   )
 }
 
+/** Kanban board for the active project. Cards drag between columns, click to advance, right-click to go back. */
 export function ProjectDashboard() {
   const { projectData, activeProject, addCard, moveCard, deleteCard, setDashboardOpen } = useProject()
   const { schedule, pending } = useUndoDelete()
@@ -159,6 +162,7 @@ export function ProjectDashboard() {
 
   if (!projectData || !activeProject) return null
 
+  // Cards with a pending undoable delete are hidden
   const cardsByColumn = (col: KanbanColumnId) =>
     projectData.kanban.filter((card) => card.state === col && !pending(`card:${activeProject}:${card.id}`))
 
@@ -174,7 +178,6 @@ export function ProjectDashboard() {
       <FloatingWindow onClose={() => setDashboardOpen(false)} panelClassName="w-11/12 bg-transparent backdrop-blur-none">
           <ElevationProvider darkColor="var(--paper)" brightColor="var(--surface-elevated)" numLevels={3}>
             <ElevatedContainer className="w-full h-full flex flex-col overflow-hidden">
-              {/* Board Header */}
               <div className="pt-6 px-8 flex items-center justify-between border-b border-divider/20 pb-4 select-none shrink-0">
                 <div className="flex items-center gap-3">
                    <h2 className="text-lg font-semibold tracking-tight text-ink">
@@ -183,13 +186,9 @@ export function ProjectDashboard() {
                 </div>
               </div>
 
-              {/* Board Canvas */}
               <div className="flex-1 p-10 pt-8 flex gap-6 overflow-hidden">
                 {COLUMNS.map((col) => {
                   const cards = cardsByColumn(col.id)
-                  const isBacklog = col.id === "backlog"
-                  const isDoing = col.id === "doing"
-                  const isDone = col.id === "done"
                   const isOver = dragOverCol === col.id
 
                   return (
@@ -200,7 +199,6 @@ export function ProjectDashboard() {
                         isOver ? "border-divider-strong" : "border-divider/40",
                       )}
                     >
-                      {/* Column Header */}
                       <div className="flex items-center justify-between px-4 pt-4 pb-3 select-none shrink-0">
                         <div className="flex items-center gap-2">
                            <span className="text-[11px] font-bold text-ink-muted uppercase tracking-[0.2em] tabular-nums">
@@ -218,7 +216,6 @@ export function ProjectDashboard() {
                         </button>
                       </div>
 
-                      {/* Drop Zone / Cards List */}
                       <div
                         onDragOver={(e) => { e.preventDefault() }}
                         onDragEnter={(e) => {
@@ -256,6 +253,7 @@ export function ProjectDashboard() {
                                 draggable
                                 onDragStart={(e: any) => {
                                   e.dataTransfer.setData("text/plain", card.id)
+                                  // Defer so the drag image is captured before the original fades out
                                   setTimeout(() => setDraggedCardId(card.id), 0)
                                 }}
                                 onDragEnd={() => {
@@ -263,7 +261,9 @@ export function ProjectDashboard() {
                                   setDraggedCardId(null)
                                   setDragOverCol(null)
                                 }}
+                                // Click advances the card one column, cycling
                                 onClick={() => moveCard(card.id, NEXT_STATE[col.id])}
+                                // Right-click moves the card back one column
                                 onContextMenu={(e: any) => {
                                   e.preventDefault()
                                   moveCard(card.id, PREV_STATE[col.id])
@@ -297,7 +297,7 @@ export function ProjectDashboard() {
                           ))}
                         </AnimatePresence>
 
-                        {/* Skeleton Preview */}
+                        {/* Placeholder showing where the dragged card will land */}
                         {isOver && draggedCardId && (
                           <div className="w-full p-4 rounded-xl border border-dashed border-divider bg-overlay/60 h-16" />
                         )}

@@ -23,6 +23,7 @@ const EMPTY: CanvasDocument = { version: 1, frames: [], strokes: [], attachments
 const page = (id: string, x = 0) => ({ id, kind: "page" as const, x, y: 0, width: 794 })
 
 async function flush() {
+  // Two ticks drain the awaited snapshot/submit promises chained inside the hook.
   await act(async () => {
     await Promise.resolve()
     await Promise.resolve()
@@ -39,6 +40,7 @@ describe("useCollaborativeCanvas", () => {
 
   async function edit(result: { current: CollaborativeCanvas }, frames: CanvasDocument["frames"]) {
     act(() => result.current.replace({ ...result.current.document!, frames }))
+    // Advance past the hook's local-edit debounce so the batch is submitted.
     act(() => vi.advanceTimersByTime(75))
     await flush()
   }

@@ -109,9 +109,10 @@ async def upload_file(
 
 
 async def _parse_assets(assets: AssetStore, filenames: list[str], chat_id: str, slug: str | None) -> list[AttachResult]:
-    """Bytes come from the store, MinerU works in a temp dir. The PDF library
-    row and its Nextcloud mirror are already written at upload time
-    (``upload_file``); this only needs a real file for MinerU to read."""
+    """Parse uploaded attachments to markdown, stopping the batch when MinerU is cancelled.
+
+    The PDF library row is already written by `upload_file`, MinerU only needs a real file in a temp dir.
+    """
     prefix = upload_prefix(chat_id, slug)
     results: list[AttachResult] = []
     with tempfile.TemporaryDirectory() as tmpdir:

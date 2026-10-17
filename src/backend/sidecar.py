@@ -26,6 +26,7 @@ async def serve(host: str, port: int) -> None:
             raise RuntimeError("FastAPI sidecar stopped before it became ready")
         await asyncio.sleep(0.01)
 
+    # The Tauri host reads this stdout line. Report the bound port because --port may be 0.
     socket = server.servers[0].sockets[0]
     print(json.dumps({"event": "ready", "port": socket.getsockname()[1]}), flush=True)
     await task

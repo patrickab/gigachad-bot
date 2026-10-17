@@ -91,6 +91,7 @@ def list_chat_histories(store: ChatStore = Depends(get_chat_store)) -> dict[str,
 
 
 @router.get("/branch-meta")
+# Registered before `/{filename:path}` so the literal path is not captured as a filename
 def get_branch_meta(dirs: str | None = None, store: ChatStore = Depends(get_chat_store)) -> dict[str, dict[str, Any]]:
     return store.get_branch_meta(dirs)
 
@@ -110,6 +111,7 @@ async def save_chat_history(
     store: ChatStore = Depends(get_chat_store),
     sandbox_service: SandboxService = Depends(get_sandbox_service),
 ) -> dict[str, str]:
+    """Save a chat, 409 when `expected_revision` is stale, then checkpoint its sandbox."""
     try:
         payload = data.model_dump() if data else None
         expected_revision = payload.pop("expected_revision", None) if payload else None
@@ -130,29 +132,13 @@ async def cascade_delete(
     assets: AssetStore = Depends(get_asset_store),
     sandbox_service: SandboxService = Depends(get_sandbox_service),
 ) -> dict[str, Any]:
+    """Delete a chat and all its descendant branches, purging uploads and sandbox state."""
     try:
         return await cleanup_after_delete(
             assets, sandbox_service, lambda cleanup: store.cascade_delete(filename, cleanup_uploads_fn=cleanup)
         )
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Chat history not found")
-
-
-@router.delete("/orphan/{filename:path}")
-async def orphan_children(
-    filename: str,
-    store: ChatStore = Depends(get_chat_store),
-    assets: AssetStore = Depends(get_asset_store),
-    sandbox_service: SandboxService = Depends(get_sandbox_service),
-) -> dict[str, Any]:
-    try:
-        return await cleanup_after_delete(
-            assets, sandbox_service, lambda cleanup: store.orphan(filename, cleanup_uploads_fn=cleanup)
-        )
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Chat history not found")
-    except ValueError as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.delete("/{filename:path}")
@@ -195,6 +181,7 @@ async def merge_branch(
     assets: AssetStore = Depends(get_asset_store),
     sandbox_service: SandboxService = Depends(get_sandbox_service),
 ) -> dict[str, Any]:
+    """Merge a branch back into its parent and delete the child, 409 when the parent diverged."""
     try:
         return await cleanup_after_delete(
             assets, sandbox_service, lambda cleanup: store.merge(req.child_file, cleanup_uploads_fn=cleanup)

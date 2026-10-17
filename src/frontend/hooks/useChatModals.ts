@@ -41,6 +41,7 @@ export function useChatModals({
 
   const isTitled = !!tab.historyFile
 
+  // No-op for untitled chats. Routes to the project store when the history file belongs to the active project.
   const saveHistory = useCallback(async (messagesToSave: Message[], usage: Usage | undefined) => {
     if (!tab.historyFile) return
     const { slug, filename } = parseHistoryFile(tab.historyFile)
@@ -57,6 +58,7 @@ export function useChatModals({
     await saveHistory(messages, hasUsage)
   }, [saveHistory, messages, hasUsage])
 
+  // Saves are chained so overlapping autosaves never write out of order.
   const handleAutosave = useCallback((messagesToSave: Message[], usage: Usage) => {
     if (!tab.historyFile) return Promise.resolve()
     const queued = autosaveRef.current.catch(() => {}).then(() => saveHistory(messagesToSave, usage))
@@ -67,6 +69,7 @@ export function useChatModals({
   const handleSaveSubmit = useCallback(async (name: string) => {
     const newFilename = name + ".json"
 
+    // Save failures are swallowed so the tab still adopts the new history file.
     if (activeProject) {
       try {
         await saveProjectTab(activeProject, newFilename, messages, { chatId, tabName: tab.name ?? undefined, title: name, usage: hasUsage })
@@ -82,6 +85,7 @@ export function useChatModals({
     setSaveModalOpen(false)
   }, [messages, chatId, tab.id, tab.name, activeProject, hasUsage, onHistoryFileChanged, refreshAll])
 
+  // Optimistically appends a placeholder pair, then overwrites the assistant slot with the result.
   const handleMindmapSubmit = useCallback(async (prompt: string, attachments: Attachment[] = []) => {
     if (messages.length === 0) return
     const userMsg = prompt ? `Provide a mindmap. ${prompt}` : "Provide a mindmap."

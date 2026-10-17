@@ -105,6 +105,7 @@ def manifest_asset_shas(manifest: SandboxManifest) -> set[str]:
     return {sha256 for asset_id in asset_ids if (sha256 := _asset_sha(asset_id)) is not None}
 
 
+# Older records embedded the native manifest as YAML under `extra`.
 def _legacy_manifest(data: dict[str, Any]) -> SandboxManifest:
     try:
         serialized = data["extra"]["agent_sandbox_manifest"]
@@ -162,6 +163,7 @@ class SandboxStore:
     def write_active(self, chat_id: str, pointer: ActivePointer) -> None:
         safe_write_json(DataStorePath(self._store, sandbox_active(chat_id, self._scope)), asdict(pointer))
 
+    # Write the newest run's manifest and active pointer first, then the remaining run records.
     def checkpoint(
         self,
         chat_id: str,
@@ -190,6 +192,7 @@ class SandboxStore:
             if tool_call_id != latest_run_id:
                 self.write_run(chat_id, record)
 
+    # Heal a crash between writing the active pointer and the run record.
     def recover_completed_run(self, chat_id: str, tool_call_id: str) -> RunRecord | None:
         active = self.read_active(chat_id)
         if active is None or active.last_completed_run_id != tool_call_id or active.result is None:
@@ -263,6 +266,7 @@ class SandboxStore:
         for entry in self._store.list(SANDBOX, recursive=True):
             if entry.is_dir:
                 continue
+            # Key layout is `<sandbox>/<chat_id>/<scope>/<manifests|runs>/<file>`.
             parts = entry.key.split("/")
             if len(parts) != 5 or parts[3] not in ("manifests", "runs"):
                 continue

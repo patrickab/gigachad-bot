@@ -3,21 +3,14 @@
 import { useCallback, useEffect, useState } from "react"
 
 /**
- * The selection primitive shared by every FileTree (Projects, Files, …).
+ * Expansion state shared by every FileTree. Element (chat) selection lives in BranchContext.
  *
- * It owns one concern: which *branches* (file roots / folders) are expanded, and what
- * expanding/collapsing one means. Element (chat) selection is a separate primitive
- * already owned by BranchContext (activeFile), so it lives outside this hook.
+ * - accordion: expansion is the externally-active branch (`activeId`). One open at a
+ *   time, no internal state, so it can't drift from the owning context. Toggling fires
+ *   onActivate/onDeactivate.
+ * - multi: internal, optionally persisted Set. Many open at once, no activation side effects.
  *
- * Two modes, one interface:
- *   • accordion — expansion IS the externally-active branch (`activeId`). One open
- *     at a time, no internal state, so it can never drift from the owning context
- *     (e.g. ProjectContext.activeProject). Toggling fires onActivate/onDeactivate.
- *   • multi     — an internal, optionally-persisted Set. Folders behave like a file
- *     browser: many open at once, no activation side effects.
- *
- * Each FileTree gets its own controller, so collapsing a project never touches a
- * file folder — cross-tree independence falls out for free.
+ * Each FileTree gets its own controller, so trees never affect each other.
  */
 export interface FileBranchController {
   isExpanded: (id: string) => boolean
@@ -32,9 +25,9 @@ export interface FileTreeConfig {
   activeId?: string | null
   /** localStorage key for persisting the open set (multi mode only). */
   storageKey?: string
-  /** a branch was opened — e.g. load its project context. */
+  /** a branch was opened, e.g. load its project context. */
   onActivate?: (id: string) => void
-  /** a branch was closed — e.g. close its project + chat. */
+  /** a branch was closed, e.g. close its project + chat. */
   onDeactivate?: (id: string) => void
   /**
    * Accordion mode only: restrict accordion semantics to ids this predicate
@@ -53,7 +46,6 @@ export function useFileTree(config: FileTreeConfig = {}): FileBranchController {
     [accordion, isAccordionId],
   )
 
-  // multi-mode persistence load
   useEffect(() => {
     if (accordion || !storageKey) return
     try {

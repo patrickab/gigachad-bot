@@ -18,6 +18,7 @@ export interface InfiniteViewportCamera {
 
 export type ZoomAnchor = "cursor" | "viewport-center"
 
+/** Screen offset of the world origin for a camera centered on `centerX/centerY`. */
 export function cameraToOffset(camera: InfiniteViewportCamera, viewport: ViewportSize): ViewportPoint {
   return {
     x: viewport.width / 2 - camera.centerX * camera.scale,
@@ -25,6 +26,7 @@ export function cameraToOffset(camera: InfiniteViewportCamera, viewport: Viewpor
   }
 }
 
+/** Inverse of `cameraToOffset` at a given scale. */
 export function offsetToCamera(offset: ViewportPoint, scale: number, viewport: ViewportSize): InfiniteViewportCamera {
   return {
     scale,
@@ -41,14 +43,7 @@ export function screenToWorld(point: ViewportPoint, camera: InfiniteViewportCame
   }
 }
 
-export function worldToScreen(point: ViewportPoint, camera: InfiniteViewportCamera, viewport: ViewportSize): ViewportPoint {
-  const offset = cameraToOffset(camera, viewport)
-  return {
-    x: point.x * camera.scale + offset.x,
-    y: point.y * camera.scale + offset.y,
-  }
-}
-
+/** Scale the camera by `factor`. A "cursor" anchor keeps the world point under `cursor` fixed on screen. */
 export function zoomCamera(
   camera: InfiniteViewportCamera,
   factor: number,
@@ -67,10 +62,9 @@ export function zoomCamera(
   }
 }
 
-// Carries a view across a change of its frame size and, for an embedded view,
-// its host's zoom. The world point at the frame's center stays at the center,
-// and the scale is multiplied by `factor`, so an embedded canvas magnifies
-// with its host like any other object on it while still showing the same view.
+// Carry a view across a frame resize and an optional host zoom `factor`. The world
+// point at the frame center stays centered, so an embedded canvas magnifies with its
+// host while still showing the same view.
 export function reframeCamera(offset: ViewportPoint, scale: number, previous: ViewportSize, next: ViewportSize, factor = 1): { offset: ViewportPoint, scale: number } {
   const camera = offsetToCamera(offset, scale, previous)
   const scaled = { ...camera, scale: camera.scale * factor }

@@ -34,6 +34,7 @@ export interface UseChatReturn {
   setTotalUsage: React.Dispatch<React.SetStateAction<Usage>>
 }
 
+/** Compose chat streaming, research, and web search into one message list, plus model and prompt config loaded on mount. `isStreaming` covers all three. */
 export function useChat(): UseChatReturn {
   const { messages, isStreaming, send, regenerateAt, cancel: cancelStream, deleteMessagePair, addMessagePair, setMessages, totalUsage, setTotalUsage } = useChatStream()
   const { research: doResearch, error: researchError } = useResearch()
@@ -65,6 +66,7 @@ export function useChat(): UseChatReturn {
     setMessages((prev) => [...prev, msg])
   }, [setMessages])
 
+  // Replace the trailing assistant message with a copy so memoized renderers see a new reference
   const updateLast = useCallback((msg: Message) => {
     setMessages((prev) => {
       const last = prev[prev.length - 1]

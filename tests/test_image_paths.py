@@ -15,15 +15,6 @@ class AssetStoreStub:
         return self.asset
 
 
-class ImageClientStub:
-    def __init__(self) -> None:
-        self.downscale_input: bytes | None = None
-
-    def downscale_img(self, image: bytes, *, max_tokens: int) -> str:
-        self.downscale_input = image
-        return "data:image/jpeg;base64,cmVzaXplZA=="
-
-
 def test_resolve_chat_images_reads_postgres_upload_without_nextcloud_copy() -> None:
     """A Postgres upload reaches the LLM through its database artifact key."""
     assets = AssetStoreStub("attachment/chat/chat-123/diagram.png", b"image-bytes")

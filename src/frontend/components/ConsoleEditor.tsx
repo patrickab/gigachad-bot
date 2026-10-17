@@ -17,9 +17,11 @@ interface ConsoleEditorProps {
   readOnly?: boolean
   className?: string
   startLineNumber?: number
+  /** Fired on Ctrl/Cmd+I with a non-empty selection. */
   onInlineEdit?: (selectedText: string, selectionStart: number, selectionEnd: number, splitPx: number) => void
 }
 
+/** Code editor made of a transparent textarea over a Shiki-highlighted backdrop, with a line-number gutter. */
 export function ConsoleEditor({
   value,
   onChange,
@@ -38,6 +40,7 @@ export function ConsoleEditor({
   const lineCount   = value.split("\n").length
   const gutterWidth = Math.max(2, String(lineCount).length) * 8 + 16  // px
 
+  // Highlight asynchronously, dropping results from superseded values
   useEffect(() => {
     let cancelled = false
     highlightCode(value, language).then((html) => {
@@ -60,7 +63,7 @@ export function ConsoleEditor({
 
   return (
     <div className={cn("relative flex-1 min-h-0", className)}>
-      {/* Gutter — absolutely pinned to left, scrolls with textarea */}
+      {/* Gutter: pinned to the left, scrolls with the textarea */}
       <div
         ref={gutterRef}
         className="absolute left-0 top-0 bottom-0 z-10 overflow-hidden pointer-events-none select-none text-right text-ink-faint border-r border-divider/30 bg-paper"
@@ -99,6 +102,7 @@ export function ConsoleEditor({
             const ta = textareaRef.current
             if (ta && ta.selectionStart !== ta.selectionEnd && onInlineEdit) {
               e.preventDefault()
+              // Pixel offset just below the selection's last line, where the inline edit panel is inserted
               const endLine = ta.value.substring(0, ta.selectionEnd).split("\n").length - 1
               const splitPx = PADDING_PX + (endLine + 1) * LINE_HEIGHT_PX
               onInlineEdit(ta.value.substring(ta.selectionStart, ta.selectionEnd), ta.selectionStart, ta.selectionEnd, splitPx)

@@ -1,4 +1,3 @@
-import os
 import subprocess
 from pathlib import Path
 
@@ -8,14 +7,12 @@ def main():
     venv_dir = root_dir / ".venv"
     frontend_dir = root_dir / "src" / "frontend"
 
-    # Step 1: Ensure Node.js is installed in the virtual environment
+    # `nodeenv -p` installs Node.js into the active venv.
     if not (venv_dir / "bin" / "node").exists():
         print("Installing Node.js into the Python virtual environment...")
         subprocess.run(["nodeenv", "-p"], check=True)
 
-    # Step 2: Install frontend dependencies
     print("Installing frontend dependencies...")
-    # Use the npm installed in the venv
     npm_path = venv_dir / "bin" / "npm"
 
     if not npm_path.exists():

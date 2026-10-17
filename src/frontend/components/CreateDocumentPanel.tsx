@@ -15,6 +15,7 @@ interface CreateDocumentPanelProps {
   onCreate: (name: string) => void
 }
 
+/** Modal that picks a document type and name, passing the full filename to `onCreate`. */
 export function CreateDocumentPanel({ open, onClose, onCreate }: CreateDocumentPanelProps) {
   const [name, setName] = useState("")
   const [type, setType] = useState<DocType>("md")
@@ -24,6 +25,7 @@ export function CreateDocumentPanel({ open, onClose, onCreate }: CreateDocumentP
     if (open) {
       setName("")
       setType("md")
+      // Delay so focus lands after the enter animation mounts the input
       setTimeout(() => inputRef.current?.focus(), 50)
     }
   }, [open])
@@ -38,6 +40,7 @@ export function CreateDocumentPanel({ open, onClose, onCreate }: CreateDocumentP
   }, [open, onClose])
 
   const ext = `.${type}`
+  // Append the type's extension unless the user already typed it
   const fullName = name.trim() ? (name.trim().endsWith(ext) ? name.trim() : `${name.trim()}${ext}`) : ""
 
   return (

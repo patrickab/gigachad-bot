@@ -15,6 +15,7 @@ interface StyledSelectProps {
   className?: string
 }
 
+/** Custom listbox with arrow, Home, and End key navigation. Arrows change the value directly, so the list need not be open. */
 export function StyledSelect({ options, value, onChange, ariaLabel = "Select option", variant = "box", className }: StyledSelectProps) {
   const inline = variant === "inline"
   const [open, setOpen] = useState(false)

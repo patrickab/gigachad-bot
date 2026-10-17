@@ -152,6 +152,7 @@ async def move_card(
     req: MoveCardRequest | UpdateCardRequest | None = None,
     store: ProjectStore = Depends(get_project_store),
 ) -> dict[str, Any]:
+    """Move a card (body `state`) or edit it (body `title`/`description`), omitted fields stay unchanged."""
     try:
         updates: dict[str, Any] = {}
         if req is not None:

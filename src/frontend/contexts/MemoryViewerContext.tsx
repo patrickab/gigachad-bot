@@ -23,6 +23,7 @@ export function useMemoryViewer(): MemoryViewerContextState {
   return ctx
 }
 
+/** Owns which memory scope the viewer modal shows, `null` when closed. */
 export function MemoryViewerProvider({ children }: { children: ReactNode }) {
   const [target, setTarget] = useState<MemoryViewerTarget | null>(null)
 

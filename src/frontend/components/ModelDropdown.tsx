@@ -79,9 +79,9 @@ const OMP_LABEL = "OMP"
 
 /** Picks models out of OMP's own logins, including OAuth subscription plans.
  *
- * Every pick lands in the same provider catalog as a hand-entered provider —
+ * Every pick lands in the same provider catalog as a hand-entered provider:
  * one `OMP` row prefixed `litellm_proxy` so LiteLLM routes it at the OMP
- * gateway — so nothing downstream of the catalog needs to know OMP exists.
+ * gateway. Nothing downstream of the catalog needs to know OMP exists.
  * The picker still browses by login, because that is how OMP holds
  * credentials; only the destination row is shared.
  */
@@ -158,6 +158,7 @@ export function ModelDropdown({ models, selectedModel, onSelect, onProvidersChan
   const [error, setError] = useState<string | null>(null)
   const [draftDefaults, setDraftDefaults] = useState<ModelDefaults | null>(null)
   const [ompCatalog, setOmpCatalog] = useState<OmpCatalog | null>(null)
+  // Default-model edits are buffered and flushed once on close, not saved per keystroke.
   const pendingDefaults = useRef<ModelDefaults | null>(null)
   const ref = useRef<HTMLDivElement>(null)
   const close = useCallback(() => {
@@ -188,8 +189,8 @@ export function ModelDropdown({ models, selectedModel, onSelect, onProvidersChan
   ]
   const selectableProviders = available.filter((provider) => provider.models.length > 0)
   const tabOrder = models.tab_order
-  // Explicit position from the saved tab order; unlisted tabs (never dragged,
-  // or new since the order was saved) fall to the end, alphabetical — same
+  // Explicit position from the saved tab order. Unlisted tabs (never dragged,
+  // or new since the order was saved) fall to the end, alphabetical, same
   // rank rule PromptStore uses for prompt display order.
   const orderedTabs = [...selectableProviders].sort((a, b) => {
     const ai = tabOrder.indexOf(a.label)
@@ -200,8 +201,8 @@ export function ModelDropdown({ models, selectedModel, onSelect, onProvidersChan
     return a.label.localeCompare(b.label)
   })
   const choices = available.flatMap((provider) => provider.models)
-  // Opens on whichever provider holds the current selection — falling back
-  // to a manual tab click, then the first tab — so a configured default
+  // Opens on whichever provider holds the current selection (falling back
+  // to a manual tab click, then the first tab) so a configured default
   // model (e.g. an OMP pick) doesn't get stranded behind the Ollama tab.
   const activeLabel = manualTab ?? orderedTabs.find((provider) => provider.models.includes(selectedModel))?.label ?? orderedTabs[0]?.label
   const active = orderedTabs.find((provider) => provider.label === activeLabel) ?? orderedTabs[0]

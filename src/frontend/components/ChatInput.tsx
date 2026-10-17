@@ -2,7 +2,7 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { motion, AnimatePresence } from "framer-motion"
+import { motion } from "framer-motion"
 import { ArrowUp, Loader2, Plus, LayoutGrid, Mic, Square, X, FileText, Image as ImageIcon, File as FileIcon, FileUp, Pencil } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { uploadFile as apiUploadFile } from "@/lib/api"
@@ -23,7 +23,6 @@ interface ChatInputProps {
   isStreaming?: boolean
   onCancel?: () => void
   slug?: string | null
-  /** Rendered in the toolbar next to the attach button, e.g. model and reasoning selectors. */
 }
 
 export interface ChatInputHandle {
@@ -96,11 +95,13 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   useClickOutside(toolsRef, closeTools)
   useClickOutside(attachMenuRef, closeAttachMenu)
 
+  // Mirror of `text` so speech callbacks read the latest value without re-binding
   useEffect(() => { textRef.current = text }, [text])
 
   const adjustHeight = useCallback(() => {
     const el = textareaRef.current
     if (!el) return
+    // Reset first so scrollHeight can shrink
     el.style.height = "0"
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`
   }, [])
@@ -121,6 +122,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     if (e.key === "Enter" && !e.shiftKey && !isStreaming && !extracting) { e.preventDefault(); handleSubmit() }
   }, [handleSubmit, isStreaming])
 
+  // Only the first pasted image is attached
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     const items = e.clipboardData.items
     for (const item of items) {
@@ -153,6 +155,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     e.target.value = ""
   }, [chatId, slug])
 
+  // Stale `recognitionRef` checks ignore events from a recognizer that was already replaced or stopped
   const toggleListening = useCallback(() => {
     if (isListening) { recognitionRef.current?.stop(); setIsListening(false); return }
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
@@ -352,6 +355,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
           onConfirm={(att) => {
             setShowDrawing(false)
 
+            // OCR drawings go to the OCR panel instead of being attached directly
             if (drawingOcrActive) {
               setDrawingOcrActive(false)
               toDataUrl(att.url)
@@ -383,7 +387,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
         </div>,
         document.body,
       )}
-      <AttachmentPreview attachment={previewAttachment} chatId={chatId} slug={slug} onClose={() => setPreviewAttachment(null)} />
+      <AttachmentPreview attachment={previewAttachment} onClose={() => setPreviewAttachment(null)} />
     </motion.div>
   )
 })

@@ -16,7 +16,7 @@ from .deps import get_model_provider_store, get_prompt_store
 
 router = APIRouter(prefix="/api", tags=["models"])
 
-# Restrict slugs to a flat filename — blocks path traversal (../, %2F) at the boundary.
+# Restrict slugs to a flat filename. Blocks path traversal (../, %2F) at the boundary.
 Slug = Annotated[str, Path(pattern=r"^[A-Za-z0-9_-]+$")]
 
 
@@ -98,7 +98,7 @@ class ProviderDefinition(BaseModel):
     litellm_id: str
     models: list[str]
     # Marks where the models came from, e.g. "omp". Absent for hand-entered
-    # providers; the store drops the key rather than persisting a null.
+    # providers. The store drops the key rather than persisting a null.
     source: str | None = None
 
 

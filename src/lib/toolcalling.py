@@ -34,13 +34,6 @@ class ToolOutcome:
 
 
 @dataclass(frozen=True)
-class ToolStage:
-    """One browser-visible unit of a tool's work."""
-
-    label: str
-
-
-@dataclass(frozen=True)
 class ToolProgress:
     """A snapshot of a tool's stage timeline, safe to send over SSE."""
 
@@ -146,6 +139,7 @@ class ToolCatalog(Generic[ContextT]):
         task = asyncio.create_task(self.execute(name, args, progress_context, enabled=enabled))
         while not task.done():
             try:
+                # Short timeout lets the loop notice task completion without a sentinel.
                 yield await asyncio.wait_for(progress_queue.get(), timeout=0.05)
             except TimeoutError:
                 continue
@@ -177,6 +171,7 @@ def _accumulate_tool_calls(pending: dict[int, dict[str, Any]], deltas: list[Any]
 
 
 def _tool_call_from_text(text: str, catalog: ToolCatalog[Any]) -> dict[str, Any] | None:
+    """Parse a text-mode tool call, accepting only names registered in *catalog*."""
     try:
         payload = extract_json_from_llm(text)
     except (ValueError, json.JSONDecodeError):
@@ -185,6 +180,7 @@ def _tool_call_from_text(text: str, catalog: ToolCatalog[Any]) -> dict[str, Any]
         return None
     if isinstance(payload.get("function"), dict):
         payload = payload["function"]
+    # Models without native tool calling emit `{"name": ..., "arguments": ...}` or variants as text.
     name = payload.get("name") or payload.get("tool") or payload.get("tool_name")
     if not isinstance(name, str) or not catalog._contains(name):
         return None
@@ -237,10 +233,12 @@ async def _run_round(
     kwargs: dict[str, Any],
     out: _Round,
 ) -> AsyncIterator[tuple[str, Any]]:
+    """Stream one completion, yielding `token` events and filling *out* with text, call and usage."""
     stream = await asyncio.to_thread(_start_stream, client, model, messages, specs, kwargs)
     iterator = iter(stream)
     pending: dict[int, dict[str, Any]] = {}
     in_reasoning = False
+    # Buffer leading text only when tools are offered, to detect text-mode calls before streaming.
     held: str | None = "" if specs else None
 
     while True:
@@ -271,6 +269,7 @@ async def _run_round(
                 yield ("token", delta.content)
             else:
                 held += delta.content
+                # Text opening with JSON or a fence may be a text-mode tool call, so keep buffering.
                 if not held.lstrip().startswith(("{", "[", "`")):
                     yield ("token", held)
                     held = None
@@ -280,6 +279,7 @@ async def _run_round(
     if in_reasoning:
         yield ("token", "\n</thought>")
 
+    # Only the first named call runs, matching the one-call-per-turn contract.
     native = next((call for call in (pending[index] for index in sorted(pending)) if call["name"]), None)
     if native:
         try:
@@ -291,6 +291,7 @@ async def _run_round(
             "name": native["name"],
             "arguments": args if isinstance(args, dict) else {},
         }
+    # No native call: the held text may be a JSON tool call emitted as plain content.
     elif held:
         out.call = _tool_call_from_text(held, catalog)
         if out.call is None:
@@ -369,6 +370,7 @@ async def stream_tool_turn(
                 "sandbox": outcome.sandbox,
             },
         )
+        # The mindmap tool renders in the browser, so no follow-up answer round is requested.
         if call["name"] != "mindmap":
             messages.append({"role": "tool", "tool_call_id": call["id"], "content": outcome.content})
 

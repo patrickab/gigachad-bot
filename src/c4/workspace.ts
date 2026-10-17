@@ -94,6 +94,7 @@ export interface Rendered {
   snapshots: Snapshots
 }
 
+/** Sources load under this virtual folder. Stripping it gives workspace-relative paths. */
 const WORKSPACE_URI_PREFIX = '/workspace/'
 
 /** Predicates an editable view may use: `*` and element references, optionally with `.*`, `.**`, `._`. */
@@ -137,6 +138,7 @@ function viewPayload(view: LayoutedElementView, title: string, file: string | nu
   }
 }
 
+/** LikeC4 rich text is `{ txt }` or `{ md }`. A bare string passes through. */
 const markdownText = (value: unknown): string => {
   if (!value || typeof value !== 'object') return typeof value === 'string' ? value : ''
   const record = value as { txt?: string, md?: string }
@@ -150,10 +152,12 @@ export const parentOf = (fqn: string): string | null => {
 
 export const nameOf = (fqn: string) => fqn.slice(fqn.lastIndexOf('.') + 1)
 
+/** One parsed workspace: LikeC4's model plus the syntax-tree nodes `operations.ts` edits. Dispose when done. */
 export class Workspace {
   readonly sources: Sources
   readonly errors: WorkspaceError[]
   private readonly lc: LikeC4
+  /** FQN -> `Element` node and back, filled by `index()`. */
   private readonly elementNodes = new Map<string, AstNode>()
   private readonly fqnByNode = new Map<AstNode, string>()
   private readonly viewNodes = new Map<string, ViewNode>()
@@ -202,6 +206,7 @@ export class Workspace {
     return this.relativePath(AstUtils.getDocument(node).uri.path)
   }
 
+  /** Computed (not laid-out) model, memoized. */
   async model() {
     this.computed ??= await this.lc.computedModel()
     return this.computed
@@ -216,6 +221,7 @@ export class Workspace {
     return root ? CstUtils.findLeafNodeAtOffset(root, offset)?.astNode : undefined
   }
 
+  /** Indexes views (first declaration of a name wins) and element FQN <-> syntax node. */
   private async index(): Promise<void> {
     for (const { document } of this.documents()) {
       for (const node of AstUtils.streamAst(document.parseResult.value)) {
@@ -226,6 +232,7 @@ export class Workspace {
     const model = await this.model()
     for (const element of model.elements()) {
       const location = this.lc.languageServices.locate({ element: element.id })
+      // `locate` lands on a leaf (the name), so walk up to the `Element` node.
       let node = location ? this.nodeAt(location) : undefined
       while (node && node.$type !== 'Element') node = node.$container
       if (!node) continue
@@ -243,6 +250,7 @@ export class Workspace {
   }
 
   relationNode(id: string): AstNode | undefined {
+    // `locate` lands on a leaf inside the relation, so walk up to the `Relation` node.
     const location = this.lc.languageServices.locate({ relation: id as never })
     let node = location ? this.nodeAt(location) : undefined
     while (node && node.$type !== 'Relation') node = node.$container

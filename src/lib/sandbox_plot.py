@@ -43,6 +43,7 @@ def sandbox_plot_dependencies() -> str:
     with pyproject_path.open("rb") as pyproject:
         project = tomllib.load(pyproject)["project"]
     dependencies = project["optional-dependencies"]["sandbox-plot"]
+    # Strip version specifiers, extras, and URL pins to leave bare package names.
     return ", ".join(re.split(r"[\s<>=!~\[@]", dependency, maxsplit=1)[0] for dependency in dependencies)
 
 
@@ -118,6 +119,7 @@ end with `print(fig.to_json())` printing nothing else. Reply with the corrected 
 prose, no explanation, no code fences.
 """
 
+# Matches an optional ```python fence, capturing the body between the fences.
 _SCRIPT_FENCE = re.compile(r"```(?:python)?[^\S\n]*\n(?P<body>.*?)\n?```", re.DOTALL)
 
 
@@ -162,6 +164,7 @@ def _repair_plot_script(context: PlotContext, script: str, error: str) -> str:
 
 
 def _figure_from_sandbox_outputs(outputs: tuple[str, ...]) -> dict[str, Any] | None:
+    """Return the first output that parses as a JSON object."""
     for output in outputs:
         try:
             figure = json.loads(output)
@@ -183,6 +186,7 @@ async def _fast_plot(context: PlotContext) -> tuple[dict[str, Any], str] | None:
                     raise ValueError("script did not print a Plotly figure")
                 return figure, script
             except (SandboxScriptError, ValueError, json.JSONDecodeError) as exc:
+                # Keep the tail of the error, where tracebacks put the cause.
                 error = str(exc)[-2000:]
                 logger.info("fast plot attempt failed: %s", error)
             if attempt == 0:
@@ -201,6 +205,7 @@ async def create_sandbox_plot(context: PlotContext) -> ToolOutcome:
             error="sandbox_service_unavailable",
         )
 
+    # Fast path is a throwaway script. On failure fall back to the persistent workspace agent.
     script = ""
     fast = await _fast_plot(context)
     if fast is not None:

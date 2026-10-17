@@ -122,7 +122,6 @@ describe("useFilePicker", () => {
     expect(addAttachment).toHaveBeenCalledOnce()
     expect(result.current.filePdfPath).toBeNull()
     expect(result.current.fileEditPath).toBeNull()
-    // extracting counter bumped up then back down (functional updates).
     expect(setExtracting).toHaveBeenCalledTimes(2)
   })
 

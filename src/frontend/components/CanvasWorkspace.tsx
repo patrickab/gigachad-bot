@@ -27,9 +27,8 @@ interface CanvasWorkspaceProps {
 const SCRATCH_STORAGE_KEY = "scratch-canvas-doc"
 
 export function CanvasWorkspace({ selected, slug, toolbarSlot, onCloseEditor, onCreated, onModeLabel, editorModel }: CanvasWorkspaceProps) {
-  // The scratch canvas shown by default — no backing file until the user saves
-  // it, so it lives in localStorage: every change persists, and leaving canvas
-  // mode (which unmounts this component) loses nothing.
+  // Scratch canvas shown by default. It has no backing file until saved, so it
+  // persists to localStorage on every change and survives unmounting.
   const [doc, setDoc] = useState<CanvasDocument>(() => emptyCanvasDoc())
   const [saveOpen, setSaveOpen] = useState(false)
 
@@ -53,8 +52,7 @@ export function CanvasWorkspace({ selected, slug, toolbarSlot, onCloseEditor, on
     return () => clearTimeout(t)
   }, [doc])
 
-  // Leaving canvas mode unmounts us, and the debounce cleanup alone would drop whatever
-  // was drawn in the last half second — flush it.
+  // Unmount skips the pending debounce, so flush the latest doc here.
   const docRef = useRef(doc)
   docRef.current = doc
   useEffect(() => () => {
@@ -68,6 +66,7 @@ export function CanvasWorkspace({ selected, slug, toolbarSlot, onCloseEditor, on
 
   useEffect(() => {
     if (selected) return
+    // Alt+S opens the save-as dialog for the scratch canvas
     const handler = (e: KeyboardEvent) => {
       if (e.altKey && e.key === "s") {
         e.preventDefault()
@@ -84,9 +83,9 @@ export function CanvasWorkspace({ selected, slug, toolbarSlot, onCloseEditor, on
     try {
       const saved = await writeDocument(scope, filename, serializeCanvasDoc(doc))
       setSaveOpen(false)
-      setDoc(emptyCanvasDoc()) // content now lives in the named file — reset the scratch
+      setDoc(emptyCanvasDoc()) // content now lives in the named file, reset the scratch
       onCreated({ path: saved.path, scope })
-    } catch { /* */ }
+    } catch { /* keep the dialog open so the user can retry */ }
   }, [slug, doc, onCreated])
 
   if (selected) {

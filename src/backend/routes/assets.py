@@ -1,9 +1,4 @@
-"""Authenticated byte serving for stored assets.
-
-The per-chat ``_uploads`` directories no longer exist on disk, so the StaticFiles
-mounts cannot serve attachments. This route replaces them: one asset at a time,
-always scoped to the requesting user's store.
-"""
+"""Authenticated byte serving for stored assets, always scoped to the requesting user's store."""
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 
@@ -19,8 +14,8 @@ def get_asset(logical_path: str, assets: AssetStore = Depends(get_asset_store)) 
     try:
         asset = assets.read(logical_path)
     except (InvalidStorageKey, StorageNotFoundError) as exc:
-        # The store is scoped to this user, so another user's asset is simply
-        # absent here — answer 404 so it stays undiscoverable.
+        # The store is scoped to this user, so another user's asset is absent here.
+        # Answer 404 so it stays undiscoverable.
         raise HTTPException(status_code=404, detail="Asset not found") from exc
     # ponytail: version is a monotonic counter, so a plain strong ETag is enough;
     # add Last-Modified/If-None-Match handling only if a client asks for it.

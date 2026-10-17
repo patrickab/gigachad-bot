@@ -17,6 +17,7 @@ export function useFilePicker({ isActive, hasMessages, chatInputRef, setExtracti
   const [fileEditPath, setFileEditPath] = useState<string | null>(null)
   const [filePdfPath, setFilePdfPath] = useState<string | null>(null)
 
+  // Initial load, guarded against setting state after unmount.
   useEffect(() => {
     let cancelled = false
     listRootFiles()
@@ -47,11 +48,12 @@ export function useFilePicker({ isActive, hasMessages, chatInputRef, setExtracti
       else setFileEditPath(path)
     } else {
       setExtracting((n) => n + 1)
-      try { chatInputRef.current?.addAttachment(await attachRootFile(path)) } catch { /* */ }
+      try { chatInputRef.current?.addAttachment(await attachRootFile(path)) } catch { /* attach failure leaves the input unchanged */ }
       finally { setExtracting((n) => n - 1) }
     }
   }, [hasMessages, chatInputRef, setExtracting])
 
+  // Capture phase so Escape closes the PDF viewer before other handlers see it.
   useEffect(() => {
     if (!isActive || !filePdfPath) return
     const onKey = (e: KeyboardEvent) => {

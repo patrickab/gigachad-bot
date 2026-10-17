@@ -26,6 +26,7 @@ class PostgresDataStore:
 
     @staticmethod
     def _prefix(key: str) -> str:
+        """LIKE pattern for descendants of *key* with wildcards escaped. Empty key matches everything."""
         escaped = key.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         return f"{escaped}/%" if escaped else "%"
 
@@ -34,6 +35,7 @@ class PostgresDataStore:
         return Revision(str(version))
 
     def _change(self, connection, key: str, version: int | None, operation: str) -> None:
+        """Append a row to the per-user change log used for cross-device sync."""
         connection.execute(
             """
             INSERT INTO changes (user_id, resource_kind, resource_key, version, operation, device_id)
@@ -54,6 +56,7 @@ class PostgresDataStore:
         return bytes(row[0]), self._revision(row[1])
 
     def _write(self, connection, key: str, content: bytes, expected: Revision | None) -> Revision:
+        """Upsert when *expected* is None, otherwise update only if the stored version matches, else raise StorageConflictError."""
         key = validate_key(key)
         if expected is None:
             row = connection.execute(
@@ -108,6 +111,7 @@ class PostgresDataStore:
                 (self._user_id, self._prefix(prefix)),
             ).fetchall()
 
+        # Directories can be implicit (only descendants stored), so synthesize missing ancestors.
         entries: dict[str, Entry] = {}
         for key, is_dir, size, version in rows:
             relative = PurePosixPath(key).relative_to(prefix) if prefix else PurePosixPath(key)
@@ -183,6 +187,7 @@ class PostgresDataStore:
                 ).fetchone()
                 if directory and child is not None:
                     raise OSError(f"Directory not empty: {key}")
+            # Non-recursive deletes only the exact key, since an empty LIKE pattern matches nothing.
             connection.execute(
                 "DELETE FROM documents WHERE user_id = %s AND (key = %s OR key LIKE %s ESCAPE '\\')",
                 (self._user_id, key, self._prefix(key) if recursive else ""),
@@ -204,6 +209,7 @@ class PostgresDataStore:
             ).fetchone()
             if collision is not None:
                 raise StorageConflictError(f"Destination already exists: {destination}")
+            # Rekey the source and every descendant under the destination.
             for (key,) in rows:
                 suffix = key.removeprefix(source).lstrip("/")
                 replacement = f"{destination}/{suffix}" if suffix else destination

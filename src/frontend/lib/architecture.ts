@@ -202,12 +202,7 @@ const TITLE_WIDTH_SLACK = 34
 // measurements used the fallback.
 const labelWidths = new Map<string, number>()
 let labelMeasure: { title: HTMLSpanElement, kind: HTMLSpanElement } | null = null
-/**
- * Settles once the page's fonts have loaded, after dropping every width cached
- * before then, so the next `nodeMinWidth` call measures in the real font;
- * callers re-measure when it settles. Already resolved where there is no
- * document or Font Loading API.
- */
+/** Settles when fonts load, then clears widths measured in the fallback font. Callers then re-measure. */
 export const labelFontsReady: Promise<void> = typeof document === "undefined" || !document.fonts
   ? Promise.resolve()
   : document.fonts.ready.then(() => { labelWidths.clear() })

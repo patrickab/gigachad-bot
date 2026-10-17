@@ -3,9 +3,6 @@
 import { createContext, useCallback, useContext, useEffect, useImperativeHandle, useRef, useState } from "react"
 import { Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
-// Selected model starts blank and is seeded from the backend's configured
-// default chat model (Providers / Models → Defaults) once it loads — see
-// the settings-sync effect in app/page.tsx. Never hardcode a model name here.
 import type { SettingsState } from "@/contexts/SettingsContext"
 import type { AppSurface } from "@/contexts/SidebarContext"
 
@@ -34,12 +31,15 @@ export interface TabConfig {
   searchDomain: string
 }
 
+// Settings copied into a new tab (search* fields are intentionally not per-tab)
 const TAB_CONFIG_KEYS: (keyof TabConfig)[] = [
   "selectedModel", "selectedPrompt", "reasoningEffort",
   "downscaleImages", "researchFastModel", "researchSmartModel", "researchStrategicModel",
   "researchDepth", "researchBreadth", "researchReasoning", "researchReportType",
 ]
 
+// Selected model starts blank and is seeded from the backend's default chat model
+// by the settings-sync effect in app/page.tsx. Never hardcode a model name here.
 const DEFAULT_CONFIG: TabConfig = {
   selectedModel: "",
   selectedPrompt: null,
@@ -97,6 +97,7 @@ export interface TabManagerHandle {
   updateTabAppMode: (tabId: string, mode: AppSurface) => void
 }
 
+// Monotonic id source, module-level so ids stay unique across TabManager remounts
 let tabIdCounter = 0
 
 export function nextTab(name: string | null = null, historyFile: string | null = null, title: string | null = null, config?: Partial<TabConfig>, appMode: AppSurface = "chat"): Tab {
@@ -133,6 +134,7 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
 
   useImperativeHandle(ref, () => ({
     initTabs: (newTabs: Tab[]) => {
+      // Suppress the onTabsChange echo for this programmatic replacement
       initInProgressRef.current = true
       setTabs(newTabs)
       if (newTabs.length > 0) setActiveTab(newTabs[0].id)
@@ -284,6 +286,7 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
 
   function getTabDisplayName(tab: Tab): string | null {
     const label = modeLabels[tab.id]
+    // "\0" is a sentinel meaning the tab renders no label at all
     if (label === "\0") return null
     const custom = customNames[tab.id]
     if (custom !== undefined && custom !== null) return custom

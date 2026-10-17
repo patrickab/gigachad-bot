@@ -19,6 +19,7 @@ export function ThemeToggle() {
     setTheme(next)
     try { localStorage.setItem(STORAGE_KEY_THEME, next) } catch {}
     const root = document.documentElement
+    // `theme-transition` animates the swap only briefly so later color changes stay instant.
     root.classList.add("theme-transition")
     root.classList.toggle("light", next === "light")
     window.setTimeout(() => root.classList.remove("theme-transition"), 3000)

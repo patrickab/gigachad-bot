@@ -48,6 +48,7 @@ def database_url(explicit_url: str | None = None) -> str:
 
 
 def _prepare(connection: psycopg.Connection) -> None:
+    # Transaction-scoped lock serializes concurrent upgraders and releases on commit.
     connection.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (LOCK_KEY,))
     # Restoring a dump taken before the rename brings back ``schema_migrations``.
     # Renaming it keeps that history instead of replaying steps against populated tables.

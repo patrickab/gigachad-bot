@@ -241,6 +241,7 @@ function useCardText(data: ArchitectureNodeData, cardRef: RefObject<HTMLDivEleme
   const handleCardBlur = (event: FocusEvent<HTMLDivElement>) => {
     if (event.currentTarget.contains(event.relatedTarget as globalThis.Node | null)) return
     const title = titleDraftRef.current
+    // Strip a bullet glyph or dash the user typed or pasted at the line start.
     const bullets = bulletDraftsRef.current.map((line) => line.replace(/^\s*[•-]\s?/, "").trim()).filter(Boolean)
     // Leaving drops empty lines locally too, even when nothing reaches the model.
     if (bullets.length !== bulletDraftsRef.current.length) setBullets(bullets)
@@ -330,6 +331,7 @@ function ArchitectureNodeCard({ data, selected }: NodeProps<GraphFlowNode>) {
   const [hovered, setHovered] = useState(false)
   const cardRef = useRef<HTMLDivElement>(null)
   const [cardSize, setCardSize] = useState(FALLBACK_SIZE)
+  // Track the rendered size so the sketch outline always matches the card.
   useLayoutEffect(() => {
     const card = cardRef.current
     if (!card) return
@@ -468,9 +470,8 @@ function ArchitectureNodeCard({ data, selected }: NodeProps<GraphFlowNode>) {
   )
 }
 
-// Floating edges: the attachment point is recomputed from the two nodes' live
-// rectangles on every render, so dragging a node re-routes its edges to the
-// nearest side instead of leaving a long way-around path behind.
+// Floating edges: attachment points follow the nodes' live rectangles, so
+// dragging a node moves its edges to the nearest side.
 
 // Pick the side of `node` facing `toward`, returning that side's midpoint. Used
 // until the slot pass below has geometry for both cards.
@@ -485,8 +486,8 @@ function attach(node: InternalNode<GraphFlowNode>, toward: InternalNode<GraphFlo
 }
 
 // Soft avoidance: connections sharing a card side get their own slot on it
-// instead of all leaving from the midpoint, so their stepped paths run in
-// separate lanes. Lines may still cross — nothing here is a router.
+// instead of all leaving from the midpoint, so their paths run in separate
+// lanes. Lines may still cross. This is the fallback before libavoid loads.
 const SIDE_SPREAD = 0.68
 
 interface AttachPoint {
@@ -507,6 +508,7 @@ interface CardRect {
   height: number
 }
 
+/** The point `ratio` (0 to 1) along `side` of `rect`. */
 function slotPoint(rect: CardRect, side: Position, ratio: number): AttachPoint {
   const { x, y, width, height } = rect
   if (side === Position.Top) return { x: x + width * ratio, y, position: side }
@@ -651,6 +653,7 @@ function polylineMidpoint(points: readonly Point[]): Point {
   return points[0]
 }
 
+/** Arrowhead at `tip`, pointing away from `from`: 10px wings spread 0.4 rad either side. */
 function arrowHeadPath(tip: Point, from: Point): string {
   const angle = Math.atan2(tip.y - from.y, tip.x - from.x)
   const size = 10
@@ -665,6 +668,7 @@ function ArchitectureEdgePath({ id, source, target, data, selected }: EdgeProps<
   const targetNode = useInternalNode<GraphFlowNode>(target)
   const [dragBend, setDragBend] = useState<number | null>(null)
   const stopDragRef = useRef<(() => void) | null>(null)
+  // End a drag still running at unmount so its window listeners do not leak.
   useEffect(() => () => stopDragRef.current?.(), [])
   const [editingLabel, setEditingLabel] = useState(false)
   useEffect(() => { if (!selected) setEditingLabel(false) }, [selected])
@@ -805,6 +809,7 @@ function ArchitectureEdgePath({ id, source, target, data, selected }: EdgeProps<
   </>
 }
 
+// Module-level so React Flow does not remount every card on each render.
 const nodeTypes = { "architecture-node": ArchitectureNodeCard }
 const edgeTypes = { "architecture-edge": ArchitectureEdgePath }
 
@@ -939,6 +944,7 @@ function useSurfaceCamera({ flow, viewportRef, onNodesChange, autoFit, hostScale
     enabled: !readOnly && !!flow,
     begin: () => { takeCamera(); return flow!.getViewport() },
     update: (start, { ratio, cx, cy, mx, my }) => {
+      // Same range as the ReactFlow minZoom/maxZoom props.
       const zoom = Math.min(2 * hostScale, Math.max(0.2 * hostScale, start.zoom * ratio))
       flow!.setViewport({ x: mx - (cx - start.x) / start.zoom * zoom, y: my - (cy - start.y) / start.zoom * zoom, zoom })
     },
@@ -1102,8 +1108,10 @@ function useSurfaceDrawing({ flow, viewportRef, readOnly, nodes, setNodes, setEd
   return { lasso, setLasso, preview, onPanePointerDown, lassoOverlay }
 }
 
+/** Sketch-style editor for a `DiagramGraph`: every edit is emitted through `onChange` as a whole new graph. */
 export function ArchitectureDiagramSurface({ graph, onChange, className, readOnly = false, edgeStyle, onEdgeStyleChange, autoFit = false, hostScale = 1, toolbar, onRemoveFromView, select = null, kinds = NO_KINDS, topLevelDrawing = true }: ArchitectureDiagramSurfaceProps) {
   const active = useTabActive()
+  // Callbacks read the graph through a ref so they stay stable across renders.
   const graphRef = useRef(graph)
   graphRef.current = graph
   const emit = useCallback((patch: Partial<DiagramGraph>) => onChange({ ...graphRef.current, ...patch }), [onChange])
@@ -1159,6 +1167,7 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
   const [edges, setEdges, onEdgesChange] = useEdgesState<GraphFlowEdge>(toFlowEdges(graph.edges, edgeStyle, new Map(), edgeRuntime))
   const { fitView, takeCamera, handleNodesChange, zoomGraphAtCenter } = useSurfaceCamera({ flow, viewportRef, onNodesChange, autoFit, hostScale, readOnly })
 
+  // Flow state is a local copy, re-synced from the graph while keeping what React Flow owns.
   useEffect(() => {
     setNodes((current) => reconcile(current, toFlowNodes(graph.nodes, changeNode, nodeKinds, readOnly ? undefined : claimAutoEdit, removal)))
   }, [graph.nodes, changeNode, nodeKinds, claimAutoEdit, readOnly, removal, setNodes])
@@ -1338,7 +1347,7 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
     else if (edges) emit({ edges })
     return false
   }, [emit, removal])
-  // React Flow owns selection.
+  // Selection lives in React Flow state, not in the graph.
   const selectedEdgeId = edges.find((edge) => edge.selected)?.id
   const selectedEdge = graph.edges.find((edge) => edge.id === selectedEdgeId)
   const resetSelectedEdgePath = useCallback(() => {
@@ -1384,6 +1393,7 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
         onNodeDragStop={onNodeDragStop} onConnect={onConnect} onConnectEnd={onConnectEnd} connectionRadius={48} onBeforeDelete={onBeforeDelete}
         nodesDraggable={!readOnly} nodesConnectable={!readOnly} elementsSelectable={!readOnly} deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
         connectionMode={ConnectionMode.Loose}
+        // Editable: wheel and pinch are handled by useSurfaceCamera. Read-only falls back to React Flow's pinch.
         panOnDrag={[0, 1, 2]} zoomOnPinch={readOnly} fitView minZoom={0.2 * hostScale} maxZoom={2 * hostScale} zoomOnScroll={false} zoomOnDoubleClick={false} panOnScroll selectionOnDrag={false} proOptions={{ hideAttribution: true }} elevateEdgesOnSelect
       >
         <Background gap={22} size={1} color="var(--sketch-grid)" />

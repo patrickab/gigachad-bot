@@ -14,6 +14,7 @@ export interface ChangeEvent {
 type Listener = (event: ChangeEvent) => void
 
 const listeners = new Set<Listener>()
+// One shared EventSource for all subscribers. Closed when the last one unsubscribes.
 let source: EventSource | null = null
 let lastSeq = 0
 let reconnectDelayMs = 1000

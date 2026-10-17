@@ -10,6 +10,7 @@ export function CodeBlock({ codeString, language }: { codeString: string; langua
   const [copied, setCopied] = useState(false)
   const [html, setHtml] = useState("")
 
+  // Highlighting is async. Plain `<pre>` shows until it resolves, and `cancelled` drops stale results.
   useEffect(() => {
     let cancelled = false
     highlightCode(codeString, language).then((result) => {
@@ -28,6 +29,7 @@ export function CodeBlock({ codeString, language }: { codeString: string; langua
   return (
     <div className="group/code relative">
       {html ? (
+        // The `!` overrides beat the inline styles the highlighter puts on its `<pre>`.
         <div
           className="[&_pre]:!rounded-md [&_pre]:!p-4 [&_pre]:!m-0 [&_pre]:!text-[0.75rem] [&_pre]:!leading-[1.6]"
           dangerouslySetInnerHTML={{ __html: html }}

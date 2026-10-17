@@ -1,20 +1,11 @@
 /**
- * Role-token palette spec.
+ * Role-token palette spec, the source of truth for the color system. `app/globals.css`
+ * mirrors it in `:root` and `.light`. This TS copy is the fallback for non-DOM surfaces
+ * (canvas fills, JPEG export) where `getComputedStyle` is unavailable.
+ * Colors are OKLCH with a warm hue (about 85) and tiny chroma to stay monochromatic.
  *
- * Single source of truth for the app's color system. The CSS in
- * `app/globals.css` mirrors these values inside `:root` and `.light`
- * (and any future theme selectors). The TS object is consumed by
- * non-DOM surfaces (DrawingCanvas fill colors, JPEG export, etc.)
- * as fallback values when `getComputedStyle` is not available.
- *
- * Every color is OKLCH with a warm hue (≈ 85°) and tiny chroma
- * (0.005–0.020), so the UI stays strictly monochromatic.
- *
- * To add a new theme:
- *   1. Add an entry to THEMES below with the same shape as `dark`/`light`.
- *   2. Add a matching `.yourtheme { ... }` block in globals.css
- *      using the same CSS custom-property names.
- *   3. Toggle the class on <html> (see app/layout.tsx and ThemeToggle.tsx).
+ * To add a theme: add an entry to THEMES, add a matching `.name` block in globals.css
+ * with the same custom properties, and toggle the class on <html>.
  */
 
 export interface RoleTokens {

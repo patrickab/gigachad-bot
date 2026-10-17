@@ -11,7 +11,7 @@ export interface PlotFigure {
 
 // Plotly touches `window` and is sizable (a few hundred KB minified even with the
 // "dist-min" bundle), so it must load lazily, client-only, and only for chats that
-// actually call the `sandbox_plot` tool — never in the server bundle or an idle chat's payload.
+// actually call the `sandbox_plot` tool, never in the server bundle or an idle chat's payload.
 const Plot = dynamic(
   async () => {
     // Plotly detects the global at initialization, so MathJax must load first.
@@ -39,6 +39,7 @@ const COLORWAY_HUES = [250, 25, 150, 320, 200, 60]
 const DARK_COLORWAY = COLORWAY_HUES.map((h) => `oklch(72% 0.11 ${h})`)
 const LIGHT_COLORWAY = COLORWAY_HUES.map((h) => `oklch(52% 0.13 ${h})`)
 
+// Row count from `layout.grid.rows`, else the number of distinct yaxis domains, so stacked subplots get proportional height.
 function subplotRowsFor(layout: Record<string, unknown> | undefined) {
   const gridRows = (layout?.grid as Record<string, unknown> | undefined)?.rows
   if (typeof gridRows === "number" && Number.isInteger(gridRows) && gridRows > 0) return gridRows
@@ -53,6 +54,7 @@ function subplotRowsFor(layout: Record<string, unknown> | undefined) {
   return Math.max(1, new Set(domains).size)
 }
 
+// Per-row height: 0.6 aspect ratio clamped to 300-560px
 function chartHeightFor(width: number, rows: number) {
   return Math.min(560, Math.max(300, Math.round(width * 0.6))) * rows
 }
@@ -68,16 +70,15 @@ const NO_TRACES: unknown[] = []
 export const PlotElement = memo(function PlotElement({ figure }: PlotElementProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const [hostWidth, setHostWidth] = useState(0)
-  // `getComputedStyle` below reads CSS custom properties once; toggling the `.light` class on
-  // <html> doesn't re-run this component (nothing in its own props/state changed), so without
-  // this the figure keeps the palette it was born with, colorway included. `themeTick` gives the
-  // memo below a dependency that actually changes when the theme does.
+  // Theme colors are read once in the layout memo below, and a `.light` class toggle on <html>
+  // changes none of its deps. `themeTick` bumps on that toggle to force a re-read.
   const [themeTick, setThemeTick] = useState(0)
 
   useEffect(() => {
     const host = hostRef.current
     if (!host) return
 
+    // Ignore zero widths (hidden/collapsed host) so Plot never mounts at 0px
     const updateWidth = (width: number) => setHostWidth((current) => {
       const next = Math.round(width)
       return next > 0 && next !== current ? next : current
@@ -117,6 +118,7 @@ export const PlotElement = memo(function PlotElement({ figure }: PlotElementProp
         .map(([key, value]) => [key, { ...(value as Record<string, unknown>), ...axisDefaults }]),
     )
     const modelScene = modelLayout.scene as Record<string, unknown> | undefined
+    // Model layout wins over defaults. Sizing, transparent backgrounds and axis colors are always themed.
     return {
       margin: { t: 32, r: 16, b: 40, l: 48 },
       colorway: isLight ? LIGHT_COLORWAY : DARK_COLORWAY,

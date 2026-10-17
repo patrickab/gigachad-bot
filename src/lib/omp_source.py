@@ -2,7 +2,7 @@
 
 OMP owns its own provider logins, including OAuth subscriptions such as Claude
 Pro/Max and the Codex plan, and exposes every credential it holds through
-``omp auth-gateway`` — an OpenAI-compatible forward proxy that dispatches with
+``omp auth-gateway``, an OpenAI-compatible forward proxy that dispatches with
 OMP's own provider shaping. Pointing LiteLLM's ``litellm_proxy/`` prefix at
 that gateway is enough to reach those subscriptions from chat, so an OMP model
 is an ordinary ``provider/model`` string on every existing call path:
@@ -83,6 +83,7 @@ def gateway_url() -> str:
 
 
 def gateway_token() -> str:
+    """Gateway bearer: env override, then OMP's token file, then the no-auth fallback."""
     explicit = os.environ.get("GIGACHAD_OMP_GATEWAY_TOKEN")
     if explicit:
         return explicit
@@ -107,11 +108,6 @@ def provider_label(provider_id: str) -> str:
     return known if known else provider_id.replace("-", " ").replace("_", " ").title()
 
 
-def model_selector(model_id: str) -> str:
-    """The selector gigachad stores and sends for an OMP model id."""
-    return f"{LITELLM_ID}/{model_id}"
-
-
 def _fetch_catalog_entries() -> list[dict[str, Any]]:
     request = urllib.request.Request(
         f"{gateway_url()}/models",
@@ -130,6 +126,7 @@ def group_by_provider(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
         model_id = str(entry.get("id") or "").strip().lstrip("/")
         if not model_id:
             continue
+        # Fall back to the id's first segment when the gateway omits the owner.
         owner = str(entry.get("owned_by") or "").strip()
         provider_id = owner or model_id.split("/")[0]
         modalities = entry.get("input_modalities")
@@ -228,10 +225,9 @@ def thinking_levels(model_id: str) -> list[str] | None:
 def fold_provider_rows(providers: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Collapse every OMP-sourced row into the single `OMP` row.
 
-    Earlier builds wrote one row per OMP login ("OMP · Anthropic"), which the
-    selector rendered as one tab each. Folding on read migrates those catalogs
-    in place — the browser posts the folded snapshot back on its next save —
-    and is a no-op once a catalog already has a single row.
+    Legacy catalogs hold one row per login ("OMP · Anthropic"). Folding on read
+    migrates them (the browser posts the folded snapshot back on its next save)
+    and is a no-op once a single row remains.
     """
     sourced = [(label, provider) for label, provider in providers.items() if provider.get("source") == SOURCE]
     if not sourced or (len(sourced) == 1 and sourced[0][0] == PROVIDER_LABEL):

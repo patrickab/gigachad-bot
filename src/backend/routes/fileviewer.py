@@ -5,7 +5,7 @@ by kind: images and PDFs stream their bytes from ``/raw``; markdown and
 unknown (treated as text) files read their content from ``/text``.
 
 App-owned files (documents, canvases, PDFs, MinerU output) are read from the
-request's storage — Postgres is authoritative, so serving from disk would
+request's storage. Postgres is authoritative, so serving from disk would
 hand every caller the last filesystem write instead of the current one. Only
 a live FileRoots reference, which was never stored in Postgres, is read off
 disk, and only after storage has been checked and found not to own the path.
@@ -47,9 +47,7 @@ def _stored(path: str, docs: DataStore) -> str | None:
 def _stored_asset(path: str, assets: AssetStore) -> bytes | None:
     """Binary asset bytes for *path* (PDFs, MinerU output), or None when the asset store does not hold it.
 
-    PDFs and MinerU assets live in the ``assets`` table, not ``documents``: their logical
-    path (e.g. ``PDFs/foo.pdf``) is the same key ``document_meta`` hands back to the
-    frontend, so it must be tried here too, not just the on-disk mirror.
+    These live in the `assets` table, not `documents`, under the same key `document_meta` returns.
     """
     key = lib_docs.storage_key(path)
     if key is None:

@@ -11,6 +11,7 @@ export interface SSEStreamResult {
   [Symbol.asyncIterator]: () => AsyncIterator<SSEEvent>
 }
 
+/** Yields response lines without terminators. A chunk may end mid-line, so the tail is buffered. Handles CRLF. */
 export async function* readLines(res: Response): AsyncGenerator<string> {
   if (!res.body) throw new Error("No response body")
   const reader = res.body.getReader()
@@ -33,6 +34,7 @@ export async function* readLines(res: Response): AsyncGenerator<string> {
   }
 }
 
+/** POST-based SSE (EventSource cannot POST). Aborting cancels the request. Iteration throws on non-2xx. */
 export function createSSEStream(
   path: string,
   body: Record<string, unknown>,
@@ -57,6 +59,7 @@ export function createSSEStream(
       throw new Error(text || `HTTP ${res.status}`)
     }
 
+    // Per the SSE spec, an event is dispatched at a blank line. Multiple `data:` lines join with "\n"
     let currentEvent = "message"
     let eventData: string[] = []
 
@@ -74,6 +77,7 @@ export function createSSEStream(
         continue
       }
       if (line.startsWith("data:")) {
+        // One optional space after the colon is part of the field syntax
         const d = line.startsWith("data: ") ? line.slice(6) : line.slice(5)
         eventData.push(d)
       }

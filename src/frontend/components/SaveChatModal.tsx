@@ -20,6 +20,7 @@ export function SaveChatModal({ open, onClose, onSave, title = "Save Chat", icon
   useEffect(() => {
     if (open) {
       setName("")
+      // Wait for the modal's enter animation before focusing.
       setTimeout(() => inputRef.current?.focus(), 50)
     }
   }, [open])

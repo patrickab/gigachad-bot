@@ -1,19 +1,10 @@
-"""Document routes — the file-tree document feature.
+"""Document routes for the file-tree document feature.
 
-A *document* is a file a project references, stored as a database-native
-logical key in ``project.json``'s ``files`` list. The add/upload flow tidies
-PDFs into the shared library (``PDFs/<name>``); they are sent to MinerU so a
-parsed-markdown preview is available. Selecting a document *attaches* it — a
-copy is written into the chat's upload namespace so it behaves exactly like
-any other attachment.
-
-The UI only ever passes back opaque path strings the API previously handed it.
-
-Those opaque strings are database-native artifact keys: documents are rows in
-their typed namespaces and bytes are asset rows. Every read/write is scoped to
-the request's user. PDFs and MinerU output are additionally mirrored into
-Nextcloud as a convenience copy for other tools — the app itself never reads
-that mirror back. All other application state remains database-only.
+A *document* is a logical key listed in a project's ``files``. Uploaded PDFs go
+into the shared library (``PDFs/<name>``) and are sent to MinerU for a parsed
+markdown preview. The UI only passes back opaque keys the API handed it, and every
+read/write is scoped to the requesting user. PDFs and MinerU output are also
+mirrored into Nextcloud as a convenience copy the app never reads back.
 """
 
 import logging
@@ -24,7 +15,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
 from backend.routes.deps import get_asset_store, get_document_store, get_project_store
-from backend.routes.schemas import AttachResult, FileListResponse, FileMeta
+from backend.routes.schemas import FileListResponse, FileMeta
 from lib import document_library as lib_docs
 from lib.architecture_workspace import ArchitectureStore
 from lib.asset_store import Asset, AssetStore
@@ -37,7 +28,6 @@ from lib.storage_namespace import (
     GRAPH,
     NOTE,
     PDFS,
-    chat_upload,
     project_attachment_prefix,
     project_document,
     project_document_prefix,
@@ -72,7 +62,7 @@ class RenameDocumentRequest(BaseModel):
 
 def _meta_list(paths: list[str]) -> list[FileMeta]:
     # ponytail: canvas-pasted images stay registered (so /fileviewer can serve them)
-    # but never surface as documents — they'd flood the sidebar and the canvas add menu.
+    # but never surface as documents (they'd flood the sidebar and the canvas add menu).
     return [FileMeta(**lib_docs.document_meta(p)) for p in paths if not Path(p).name.startswith("pasted-")]
 
 
@@ -100,18 +90,6 @@ def _known_key(store: ProjectStore, path: str) -> str:
 
 def _exists_key(docs: DataStore, assets: AssetStore, key: str) -> bool:
     return DataStorePath(docs, key).is_file() or bool(assets.list(key))
-
-
-def _read_key(docs: DataStore, assets: AssetStore, key: str) -> bytes:
-    """Read a logical key from whichever store owns it, 404 when neither does."""
-    try:
-        return docs.read_bytes(key)[0]
-    except StorageNotFoundError:
-        pass
-    try:
-        return assets.read(key).content or b""
-    except StorageNotFoundError:
-        raise HTTPException(status_code=404, detail="Document not found") from None
 
 
 def _project_docs_key(slug: str) -> str:
@@ -156,6 +134,7 @@ async def list_documents(
 
 @router.get("/all", response_model=FileListResponse)
 async def list_all_documents(store: ProjectStore = Depends(get_project_store)):
+    """Every document referenced by any project."""
     return FileListResponse(documents=_meta_list(store.list_all_files()))
 
 
@@ -245,6 +224,7 @@ async def upload_document(
     store: ProjectStore = Depends(get_project_store),
     assets: AssetStore = Depends(get_asset_store),
 ):
+    """Add a PDF to the shared library, queue MinerU extraction, and reference it from the project."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="Missing filename")
     try:
@@ -278,33 +258,6 @@ async def add_document(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return FileMeta(**lib_docs.document_meta(key))
-
-
-class RegisterUploadRequest(BaseModel):
-    chat_id: str
-    filename: str
-
-
-@router.post("/register-upload", response_model=FileMeta)
-async def register_upload(
-    req: RegisterUploadRequest,
-    slug: str | None = Query(default=None),
-    store: ProjectStore = Depends(get_project_store),
-    assets: AssetStore = Depends(get_asset_store),
-):
-    """Organize a chat-uploaded file into the library and optionally register it in a project."""
-    source = chat_upload(req.chat_id, Path(req.filename).name, slug)
-    try:
-        upload = assets.read(source)
-    except (StorageNotFoundError, ValueError):
-        raise HTTPException(status_code=404, detail="Uploaded file not found") from None
-    name = PurePosixPath(upload.logical_path).name
-    if Path(name).suffix.lower() != ".pdf":
-        raise HTTPException(status_code=400, detail="Only PDF documents can enter the PDF library")
-    asset = _promote_pdf_document(assets, name, upload.content or b"")
-    if slug:
-        store.add_file(slug, asset.logical_path)
-    return FileMeta(**lib_docs.document_meta(asset.logical_path))
 
 
 def _delete_under(docs: DataStore, path: str, prefix: str) -> None:
@@ -468,29 +421,3 @@ async def rename_document(
             store.remove_file(slug, key)
             store.add_file(slug, destination)
     return FileMeta(**lib_docs.document_meta(destination))
-
-
-@router.post("/attach", response_model=AttachResult)
-async def attach_document(
-    path: str = Query(...),
-    chat_id: str = Query(...),
-    slug: str | None = Query(default=None),
-    store: ProjectStore = Depends(get_project_store),
-    docs: DataStore = Depends(get_document_store),
-    assets: AssetStore = Depends(get_asset_store),
-):
-    key = _known_key(store, path)
-    content = _read_key(docs, assets, key)
-    name = PurePosixPath(key).name
-    assets.write("upload", chat_upload(chat_id, name, slug), content)
-
-    result = AttachResult(name=name, mime=lib_docs.mime_for(key))
-    if PurePosixPath(key).suffix.lower() == ".pdf":
-        store_library_pdf(assets, name, content)
-        result.parsedMd = materialize(name, content, assets, enqueue_on_miss=True)
-    elif result.mime.startswith("text/"):
-        try:
-            result.content = content.decode("utf-8")
-        except UnicodeDecodeError:
-            result.content = None
-    return result

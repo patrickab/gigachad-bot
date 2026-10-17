@@ -25,6 +25,7 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
   const [sidebarWidth, setSidebarWidth] = useState(340)
   const [inlineEdit, setInlineEdit] = useState<{ text: string; start: number; end: number; splitPx: number } | null>(null)
   const abortRef = useRef<(() => void) | null>(null)
+  // Set once confirmed so a second confirm cannot call onComplete again
   const confirmedRef = useRef(false)
 
   const reset = useCallback(() => {
@@ -51,6 +52,7 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
     return () => window.removeEventListener("paste", onPaste)
   }, [img])
 
+  // Restart OCR whenever the image or model changes and abort the stream on cleanup
   useEffect(() => {
     if (!img) return
     setIsStreaming(true)
@@ -83,6 +85,7 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
     return () => { stream.abort() }
   }, [img, model])
 
+  // Guard against double confirm (key repeat, click plus shortcut)
   const doConfirm = useCallback(() => {
     if (confirmedRef.current) return
     confirmedRef.current = true
@@ -122,6 +125,7 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
     setInlineEdit({ text, start, end, splitPx })
   }, [])
 
+  // While inline editing, split the output after the selection's line into two read-only editors with the edit panel between them
   const splitIdx = inlineEdit ? output.indexOf("\n", inlineEdit.end) : -1
   const splitChar = splitIdx === -1 ? output.length : splitIdx + 1
   const [topContent, botContent] = inlineEdit

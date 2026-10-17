@@ -9,7 +9,7 @@ streaming live rows as they are committed. Event data is JSON::
            "version": 3, "device_id": "0f1e...-uuid" | null}
 
 `seq` is monotonic, so a client persists the highest value it has applied and resumes
-with `?since=<seq>` after a disconnect. Events carry metadata only — the content is
+with `?since=<seq>` after a disconnect. Events carry metadata only: the content is
 fetched through the resource's own API, and `device_id` lets a client ignore echoes of
 its own writes. Heartbeats are SSE comments every 15 seconds.
 """
@@ -64,8 +64,8 @@ async def stream_changes(
     broker = get_change_broker()
 
     async def events() -> AsyncIterator[dict[str, str]]:
-        # Subscribe before replaying so a change committed mid-replay is not lost;
-        # the seq watermark then suppresses the overlap.
+        # Subscribe before replaying so a change committed mid-replay is not lost.
+        # The seq watermark then suppresses the overlap.
         async with broker.subscribe(user_id) as live:
             delivered = since
             for row in await asyncio.to_thread(replay_changes, user_id, since):

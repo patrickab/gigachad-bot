@@ -15,6 +15,7 @@ from config import OLLAMA_BASE_URL
 EMBEDDING_DEFAULT = "ollama:nomic-embed-text"
 RETRIEVER_DEFAULT = "duckduckgo"
 
+# GPT-Researcher reads process-wide env vars, so runs must not overlap.
 RESEARCH_ENV_LOCK = asyncio.Lock()
 
 
@@ -43,6 +44,7 @@ def build_research_config(
 
 
 def write_research_config(config: dict[str, Any]) -> str:
+    """Write *config* to a temp JSON file and return its path. The caller deletes it."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", prefix="gpt-researcher-", delete=False) as tmp:
         json.dump(config, tmp)
         return tmp.name
@@ -78,6 +80,7 @@ async def run_deep_research(
     fallback_model: str,
 ) -> tuple[str, list[str], float]:
     """Run GPT-Researcher to completion and return (report, source urls, costs)."""
+    # Imported lazily because gpt_researcher is heavy.
     from gpt_researcher import GPTResearcher
 
     config_path = write_research_config(
@@ -90,6 +93,7 @@ async def run_deep_research(
             reasoning_effort=reasoning_effort,
         )
     )
+    # `none` means unset, and `temp_environ` skips None values.
     reasoning = reasoning_effort if reasoning_effort and reasoning_effort != "none" else None
     async with RESEARCH_ENV_LOCK:
         try:

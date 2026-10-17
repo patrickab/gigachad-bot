@@ -121,6 +121,7 @@ def canonical_snapshot(content: bytes) -> dict[str, Any]:
         raise InvalidCanvasSnapshot("Canvas snapshot is not valid JSON") from exc
     if not isinstance(document, dict) or document.get("version") != 1:
         raise InvalidCanvasSnapshot("Canvas snapshot has an unsupported shape")
+    # Pre-frame canvases stored `pages`, `imageEmbeds` and `pdfEmbeds`, upgraded here on read. 794 is the A4 page width in px.
     frames = _entities(document["frames"], "frames") if "frames" in document else [
         *({**page, "kind": "page", "width": 794} for page in _entities(document.get("pages"), "pages")),
         *({**image, "kind": "image"} for image in _entities(document.get("imageEmbeds"), "imageEmbeds")),
@@ -128,6 +129,7 @@ def canonical_snapshot(content: bytes) -> dict[str, Any]:
     attachments = _entities(document["attachments"], "attachments") if "attachments" in document else [
         {**pdf, "kind": "pdf"} for pdf in _entities(document.get("pdfEmbeds"), "pdfEmbeds")
     ]
+    # Text boxes saved before sizing existed get the default box size.
     texts = [
         {**text, "width": 240 if text.get("width") is None else text["width"], "height": 80 if text.get("height") is None else text["height"]}
         for text in _entities(document.get("texts"), "texts")
@@ -251,6 +253,7 @@ class CanvasMutationStore:
                     ),
                 ).fetchone()
             ]
+            # Every mutation was a retry: report the revision they landed at (or the current one if none are logged).
             if not accepted:
                 return connection.execute(
                     f"SELECT COALESCE(MAX(revision), ({_REVISION_SQL})) FROM canvas_mutations "

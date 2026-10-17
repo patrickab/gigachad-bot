@@ -6,6 +6,7 @@ interface TokenCounterProps {
   usage: Usage
 }
 
+/** Compact total-token readout. Hidden until the first tokens are counted. */
 export function TokenCounter({ usage }: TokenCounterProps) {
   if (usage.total_tokens === 0) return null
 

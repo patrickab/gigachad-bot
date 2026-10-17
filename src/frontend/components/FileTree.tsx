@@ -4,13 +4,11 @@ import { createContext, useContext, useRef, useState, type ElementType } from "r
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Brain,
-  Check,
   ChevronRight,
   Folder,
   HardDrive,
   Plus,
   Trash2,
-  X,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "./Skeleton"
@@ -29,7 +27,7 @@ export interface FileTreeItem<T = unknown> {
   isSystem?: boolean
   displayInRoot?: boolean
   badge?: string | number
-  /** File root accepts mountpoints — shows the mount (HardDrive) hover button. */
+  /** File root accepts mountpoints, shows the mount (HardDrive) hover button. */
   mountable?: boolean
   /** This file root row is a mounted FileRoots (not a native tree file root like a project). */
   mounted?: boolean
@@ -82,15 +80,13 @@ export const FILE_DRAG_TYPE = "application/x-file-tree-ids"
 const INDENT_BASE = 8
 const INDENT_STEP = 16
 
-/** Ids of the rows currently on screen, top to bottom — the order shift+click ranges over. */
+/** Ids of the rows currently on screen, top to bottom, the order shift+click ranges over. */
 function visibleItemIds<T>(items: FileTreeItem<T>[] | undefined, isExpanded: (id: string) => boolean): string[] {
   return (items ?? []).flatMap((item) => [
     item.id,
     ...(item.type !== "element" && isExpanded(item.id) ? visibleItemIds(item.children, isExpanded) : []),
   ])
 }
-
-/* ─── context ─── */
 
 interface TreeCtx<T> {
   controller: FileBranchController
@@ -125,13 +121,12 @@ interface TreeCtx<T> {
 
 const TreeCtx = createContext<TreeCtx<unknown> | null>(null)
 
+/** Read the surrounding FileTree's context. */
 export function useTree<T = unknown>() {
   const ctx = useContext(TreeCtx)
   if (!ctx) throw new Error("useTree must be inside FileTree")
   return ctx as TreeCtx<T>
 }
-
-/* ─── chevron icon ─── */
 
 function ChevronIcon({ open }: { open: boolean }) {
   return (
@@ -145,8 +140,7 @@ function ChevronIcon({ open }: { open: boolean }) {
   )
 }
 
-/* ─── file root tree (public) ─── */
-
+/** Sidebar tree of file roots, folders and elements with inline create, drag/drop and multi-select. */
 export function FileTree<T>({
   items,
   depth = 0,
@@ -186,6 +180,7 @@ export function FileTree<T>({
 
   const isRoot = depth === 0
 
+  // Creates by `createMode`, then expands the parent so the new child is visible.
   const handleCreateSubmit = async () => {
     if (!createName.trim()) return
     if (createMode === "root") {
@@ -201,6 +196,7 @@ export function FileTree<T>({
     if (createParentId) controller.expand(createParentId)
   }
 
+  // Multi-select drags carry every selected id (dragging an unselected row replaces the selection).
   const handleDragStart = (e: React.DragEvent, itemId: string) => {
     if (multiSelect) {
       const draggedIds = selectedIds.has(itemId) ? [...selectedIds] : [itemId]
@@ -213,6 +209,7 @@ export function FileTree<T>({
     e.dataTransfer.effectAllowed = "move"
   }
 
+  // Returns true for ctrl/cmd (toggle) and shift (range from the anchor) clicks, which are not activations.
   const handleSelectClick = (item: FileTreeItem<T>, e: React.MouseEvent): boolean => {
     if (!multiSelect) return false
     if (e.ctrlKey || e.metaKey) {
@@ -388,15 +385,13 @@ export function FileTree<T>({
     )
   }
 
-  // Non-root or no section config
+  // Non-root or no section header
   return (
     <TreeCtx.Provider value={ctx as unknown as TreeCtx<unknown>}>
       {content}
     </TreeCtx.Provider>
   )
 }
-
-/* ─── tree content (internal) ─── */
 
 function TreeContent<T>({ items, depth }: { items?: FileTreeItem<T>[]; depth: number }) {
   const { onDragLeave, onDrop } = useTree<T>()
@@ -423,8 +418,6 @@ function TreeContent<T>({ items, depth }: { items?: FileTreeItem<T>[]; depth: nu
     </div>
   )
 }
-
-/* ─── branch node (file root + folder merged) ─── */
 
 function BranchNode<T>({ item, depth }: { item: FileTreeItem<T>; depth: number }) {
   const {
@@ -582,13 +575,12 @@ function BranchNode<T>({ item, depth }: { item: FileTreeItem<T>; depth: number }
   )
 }
 
-/* ─── element node ─── */
-
 function ElementNode<T>({ item, depth }: { item: FileTreeItem<T>; depth: number }) {
   const { onDragStart, onElementClick, onElementDelete, onDashboardClick, renderElement, multiSelect, selectedIds, onSelectClick } = useTree<T>()
   const paddingLeft = INDENT_BASE + depth * INDENT_STEP
   const ElementIcon = item.icon
 
+  // Consumer renders the whole row, bypassing the default element row.
   if (renderElement) {
     return <>{renderElement(item, depth)}</>
   }
@@ -638,8 +630,6 @@ function ElementNode<T>({ item, depth }: { item: FileTreeItem<T>; depth: number 
     </div>
   )
 }
-
-/* ─── inline create form ─── */
 
 function InlineCreateForm({
   depth,

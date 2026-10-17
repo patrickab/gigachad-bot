@@ -1,4 +1,4 @@
-"""Access seam for file roots — directories of Attachment-compatible files.
+"""Access seam for file roots: directories of Attachment-compatible files.
 
 A user can register several file roots (an Obsidian vault is just one flavor
 of file root). The list of roots is the single source of truth for file
@@ -6,13 +6,13 @@ locations (nothing is configured in ``config.py``): it lives in ``vault_roots``
 rows for the authenticated user. With no registry the roots are simply empty
 until the user adds one.
 
-Each root may carry additional **mountpoints** — external directories (e.g. a
+Each root may carry additional **mountpoints**, external directories (e.g. a
 ``/mnt`` drive) attached to that root. Mountpoint files appear as folder nodes
 inside the parent root's tree rather than as separate top-level roots, so a
 mounted drive is browsed as part of the root it was attached to.
 
 Root files are used as **live references**: attaching one to a chat stores its
-path, never a copy — edits through the app write back to the actual file.
+path, never a copy. Edits through the app write back to the actual file.
 
 All paths handed to the UI are absolute, and every read/write is validated to
 live under one of the roots or their mountpoints (mirroring the path-traversal
@@ -22,6 +22,7 @@ guard used by ``ChatStore``).
 from __future__ import annotations
 
 from collections import defaultdict
+import os
 from pathlib import Path
 import re
 from typing import Protocol
@@ -41,6 +42,11 @@ FILE_SUFFIXES = frozenset({".md", ".txt", ".tex", ".pdf"})
 def _is_untitled(name: str) -> bool:
     """True for Obsidian's default ``Untitled*.md`` scratch notes."""
     return Path(name).stem.lower().startswith("untitled")
+
+
+def _is_listed(name: str) -> bool:
+    """True for attachment-compatible files that listings surface."""
+    return os.path.splitext(name)[1].lower() in FILE_SUFFIXES and not _is_untitled(name)
 
 
 class FileRootRepository(Protocol):
@@ -87,7 +93,7 @@ class PostgresFileRootRepository:
         )
 
     def save(self, roots: list[dict[str, object]]) -> None:
-        # ponytail: whole-registry replace, mirroring the JSON file it replaces —
+        # ponytail: whole-registry replace, mirroring the JSON file it replaces,
         # one statement per root. A user keeps a handful of roots; if that ever
         # grows, give FileRoots per-root add/remove hooks instead of diffing here.
         paths = [str(root["path"]) for root in roots]
@@ -284,16 +290,18 @@ class FileRoots:
         return files
 
     @staticmethod
-    def _collect_files(base: Path, out: list[dict[str, str]]) -> None:
-        for path in base.rglob("*"):
-            if not path.is_file() or path.suffix.lower() not in FILE_SUFFIXES:
-                continue
-            rel = path.relative_to(base)
-            if any(part in _SKIP_DIRS for part in rel.parts):
-                continue
-            if _is_untitled(path.name):
-                continue
-            out.append({"path": str(path), "name": path.name})
+    def _collect_files(base: Path | str, out: list[dict[str, str]]) -> None:
+        """Append listed files below *base*, pruning skipped dirs and not following directory symlinks."""
+        try:
+            entries = list(os.scandir(base))
+        except OSError:
+            return
+        for entry in entries:
+            if entry.is_dir(follow_symlinks=False):
+                if entry.name not in _SKIP_DIRS:
+                    FileRoots._collect_files(entry.path, out)
+            elif _is_listed(entry.name) and entry.is_file():
+                out.append({"path": entry.path, "name": entry.name})
 
     def files_under(self, paths: list[str]) -> list[Path]:
         """Valid files among *paths*, expanding folders recursively. Deduplicated, order kept."""
@@ -311,10 +319,7 @@ class FileRoots:
     def tree(self) -> list[dict]:
         """Nested folder/file tree per root for the sidebar FileTree.
 
-        Each root is a ``file root`` node; directories are ``folder`` nodes,
-        Attachment-compatible files are ``file`` leaves. Empty folders (no file root
-        files underneath) are pruned. Mountpoints attached to a file root appear as
-        folder nodes inside that file root.
+        Empty folders are pruned. Mountpoints appear as folder nodes inside their root.
         """
         out: list[dict] = []
         for root in self._roots:
@@ -339,22 +344,22 @@ class FileRoots:
             })
         return out
 
-    def _build_children(self, directory: Path) -> list[dict]:
-        # Folders first, then files, each alphabetical — matches a file browser.
+    def _build_children(self, directory: Path | str) -> list[dict]:
+        # Folders first, then files, each alphabetical, matches a file browser.
         children: list[dict] = []
         try:
-            entries = sorted(directory.iterdir(), key=lambda p: (p.is_file(), p.name.lower()))
+            entries = sorted(os.scandir(directory), key=lambda entry: (entry.is_file(), entry.name.lower()))
         except OSError:
             return children
         for entry in entries:
             if entry.name in _SKIP_DIRS:
                 continue
             if entry.is_dir():
-                sub = self._build_children(entry)
+                sub = self._build_children(entry.path)
                 if sub:  # prune folders with no file-root files
-                    children.append({"name": entry.name, "path": str(entry), "type": "folder", "children": sub})
-            elif entry.is_file() and entry.suffix.lower() in FILE_SUFFIXES and not _is_untitled(entry.name):
-                children.append({"name": entry.stem, "path": str(entry), "type": "file"})
+                    children.append({"name": entry.name, "path": entry.path, "type": "folder", "children": sub})
+            elif _is_listed(entry.name) and entry.is_file():
+                children.append({"name": Path(entry.name).stem, "path": entry.path, "type": "file"})
         return children
 
     def resolve(self, path: str) -> Path:
@@ -377,7 +382,7 @@ class FileRoots:
 
     def find_in_roots(self, name: str, source_dir: Path | None = None) -> Path | None:
         """Find a file by name. Checks source directory first, then all roots."""
-        # ponytail: rglob(name) — breaks if name has glob metacharacters
+        # ponytail: rglob(name) breaks if name has glob metacharacters
         name = name.split("#")[0].strip()
         if not name:
             return None
@@ -419,6 +424,7 @@ class FileRoots:
                 return f"![{name}](/api/fileviewer/raw?path={_url_quote(str(found))})"
             return f"[{name}](#file:{_url_quote(str(found))})"
 
+        # Embeds run first, since `![[x]]` would otherwise match the plain `[[x]]` link pass.
         content = re.sub(r"!\[\[([^\]]+)\]\]", _repl_embed, content)
 
         def _repl_link(m: re.Match[str]) -> str:

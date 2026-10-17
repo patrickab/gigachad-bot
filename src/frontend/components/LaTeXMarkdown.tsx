@@ -5,7 +5,6 @@ import { createMathPlugin } from "@streamdown/math"
 import remarkBreaks from "remark-breaks"
 import { cloneElement, isValidElement, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { cn } from "@/lib/utils"
-import { highlightCode } from "@/lib/markdown-syntax-highlighting"
 import { apiOrigin } from "@/lib/api"
 import { HostScaleContext, offsetToCamera } from "./InfiniteViewport"
 import { createPortal } from "react-dom"
@@ -16,11 +15,12 @@ import "katex/dist/katex.min.css"
 const mathPlugin = createMathPlugin({ singleDollarTextMath: true })
 const PLUGINS = { math: mathPlugin }
 
+// Detect mermaid code in fences without a language tag by its diagram keyword.
 function isMermaidCode(code: string): boolean {
   return /^\s*(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitGraph|journey|requirementDiagram|mindmap|timeline|sankey|xychart|block-beta|packet-beta|architecture-beta)\b/i.test(code)
 }
 
-// ponytail: mutex serializes mermaid renders — it's a singleton that corrupts on concurrent calls
+// ponytail: mutex serializes mermaid renders, it's a singleton that corrupts on concurrent calls
 let mermaidQueue = Promise.resolve()
 
 // Mirrors the globals.css role tokens (sRGB of the oklch palette). Hardcoded because mermaid
@@ -102,8 +102,8 @@ function MermaidDiagram({ code }: { code: string }) {
     let cancelled = false
     setFailed(false)
     setSvg("")
-    // Fresh id per render — reusing one collides with the previous SVG still in the DOM
-    // (re-render on theme switch), which makes mermaid.render fail and the diagram vanish.
+    // Fresh id per render. Reusing one collides with the previous SVG still in the DOM
+    // (re-render on theme switch), which makes mermaid.render fail.
     const id = `mmd-${Math.random().toString(36).slice(2)}`
     enqueueMermaidRender(id, code)
       .then((rendered) => { if (!cancelled) setSvg(rendered) })
@@ -250,6 +250,7 @@ function MarkmapDiagram({ code }: { code: string }) {
 const REMARK_PLUGINS = [...Object.values(defaultRemarkPlugins), remarkBreaks]
 const LINK_SAFETY_OFF = { enabled: false }
 
+// Rewrite \( \) and \[ \] to $ and $$ outside code spans and fences.
 function normalizeMathDelimiters(input: string): string {
   if (input.indexOf("\\(") === -1 && input.indexOf("\\[") === -1) return input
   const segments = input.split(/(```[\s\S]*?```|`[^`]*`)/g)
@@ -290,6 +291,7 @@ function AsciiDiagram({ codeString }: { codeString: string }) {
   )
 }
 
+// Box-drawing (U+2500-257F) and block element (U+2580-259F) chars: treat as a diagram when dense enough.
 function containsAsciiTableArt(code: string): boolean {
   const boxChars = (code.match(/[─-╿▀-▟]/g) || []).length
   const lines = code.split("\n").length
@@ -328,6 +330,7 @@ const PROSE_COMPONENTS: Components = {
   tr: "tr",
   th: "th",
   td: "td",
+  // Flag block code so `code` can tell it apart from inline code.
   pre: ({ children }: any) =>
     isValidElement(children)
       ? cloneElement(children, { "data-block": "true" } as Record<string, string>)
@@ -355,6 +358,7 @@ const PROSE_COMPONENTS: Components = {
   },
 }
 
+// Hover pill for numeric citation links. The popup is portaled and hides after a short delay so the pointer can reach it.
 function CitationPill({ children, href, title, ...props }: any) {
   const pillRef = useRef<HTMLAnchorElement>(null)
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
@@ -429,6 +433,7 @@ function LaTeXMarkdownInner({
 }) {
   const processed = useMemo(() => normalizeMathDelimiters(content), [content])
 
+  // Source line index of each task item, only tracked when toggling is enabled.
   const checkboxLines = useMemo(() => {
     if (!onContentChange) return []
     const lines = content.split("\n")
@@ -450,6 +455,7 @@ function LaTeXMarkdownInner({
     onContentChange(lines.join("\n"))
   }, [content, checkboxLines, onContentChange])
 
+  // Render-order counter mapping each rendered checkbox to its source line in `checkboxLines`.
   const checkboxIdx = useRef(0)
   checkboxIdx.current = 0
 
@@ -519,4 +525,5 @@ function LaTeXMarkdownInner({
   )
 }
 
+/** Render markdown with KaTeX math, citations, diagrams and optional checkbox toggling via `onContentChange`. */
 export const LaTeXMarkdown = memo(LaTeXMarkdownInner)

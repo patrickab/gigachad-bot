@@ -1,12 +1,7 @@
 /**
- * Compressed path-prefix tree (radix trie over path segments) for browsing a
- * flat list of filepaths as directories.
- *
- * Built in a single O(total segments) pass, then single-child/no-file chains are
- * collapsed so the tree opens at the *common root* and only branches where the
- * paths actually diverge. This generalises cleanly: one file root collapses to its
- * root folder; multiple file roots (or any unrelated roots) surface as sibling
- * entries under their lowest common ancestor.
+ * Compressed path-prefix tree over path segments, for browsing flat filepaths as directories.
+ * Chains of directories with no files and a single subdirectory collapse, so the tree opens
+ * at the common root and branches only where paths diverge.
  */
 
 export interface PathTreeNode {
@@ -24,6 +19,7 @@ interface RawNode {
   files: string[]
 }
 
+// Joins path segments. A leading empty segment (absolute path) yields "/" as the root.
 function joinSeg(base: string, seg: string): string {
   if (base === "") return seg === "" ? "/" : seg
   if (base === "/") return "/" + seg
@@ -32,12 +28,12 @@ function joinSeg(base: string, seg: string): string {
 
 function compress(raw: RawNode): PathTreeNode {
   const dirs = [...raw.children.values()].map(compress)
-  // A directory with no files of its own and exactly one subdirectory carries no
-  // branching information — collapse it into that child.
+  // No files and one subdirectory: no branching information, collapse into the child
   if (raw.files.length === 0 && dirs.length === 1) return dirs[0]
   return { path: raw.path, dirs, files: raw.files }
 }
 
+/** `paths` are file paths split on "/". Each file lands in its parent directory node. Returns the collapsed root. */
 export function buildPathTree(paths: string[]): PathTreeNode {
   const root: RawNode = { path: "", children: new Map(), files: [] }
   for (const p of paths) {

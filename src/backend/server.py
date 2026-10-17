@@ -8,6 +8,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import langchain_community.chat_models as _lccm
 
+# gpt_researcher imports `langchain_community.chat_models.litellm`, which the installed
+# langchain_community no longer ships, so write a shim re-exporting it from langchain_litellm.
 _lccm_dir = Path(_lccm.__file__).parent
 _litellm_shim = _lccm_dir / "litellm.py"
 if not _litellm_shim.exists():
@@ -46,6 +48,7 @@ from lib.db_schema import database_url, upgrade
 from config import close_postgres_pool
 
 
+# Kill MinerU child servers before exiting so they do not outlive the API.
 def _signal_handler(signum: int, frame: object) -> None:
     kill_all_mineru_servers()
     sys.exit(128 + signum)
@@ -91,7 +94,7 @@ app.add_middleware(
     # Vercel frontend) from fetching a server whose resolved address is in a
     # private range (Tailscale's CGNAT 100.64.0.0/10) unless the preflight
     # response explicitly grants it. Only grant it when the allow-list is an
-    # exact set of origins — granting it alongside the wildcard default would
+    # exact set of origins. Granting it alongside the wildcard default would
     # let any public web page reach this unauthenticated backend.
     allow_private_network="*" not in _cors_origins,
 )

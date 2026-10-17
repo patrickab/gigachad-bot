@@ -15,6 +15,7 @@ from lib.llm_resilience import api_query_resilient
 
 BRAVE_CONTEXT_URL = "https://api.search.brave.com/res/v1/llm/context"
 
+# Brave LLM-context request parameters per planner complexity.
 SEARCH_PROFILES: dict[str, dict[str, int]] = {
     "easy": {
         "count": 12,
@@ -50,6 +51,7 @@ search_query. Do not answer the user's request."""
 
 
 def source_label(url: str, used: set[str]) -> str:
+    """Return a short unique slug from the hostname, suffixed `-2`, `-3` on collisions within *used*."""
     hostname = urlparse(url).hostname or "source"
     parts = [part for part in hostname.lower().split(".") if part not in {"www", "com", "org", "net", "io", "co", "uk", "de"}]
     base = re.sub(r"[^a-z0-9]+", "-", parts[0] if parts else "source").strip("-") or "source"
@@ -63,6 +65,7 @@ def source_label(url: str, used: set[str]) -> str:
 
 
 def sources_from_payload(payload: dict) -> list[dict[str, str]]:
+    """Flatten Brave `grounding` groups into unique-URL sources with snippets joined as content."""
     seen_urls: set[str] = set()
     used_labels: set[str] = set()
     sources: list[dict[str, str]] = []
@@ -102,6 +105,7 @@ def evidence_prompt(sources: list[dict[str, str]]) -> str:
 
 
 def search_plan(raw_query: str, plan: dict[str, Any]) -> tuple[str, dict[str, int]]:
+    """Pick the query and Brave profile from a planner reply, defaulting to the raw query and `medium`."""
     complexity = plan.get("complexity")
     query = plan.get("search_query")
     if not isinstance(query, str) or not query.strip():

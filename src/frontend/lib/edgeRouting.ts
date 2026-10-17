@@ -54,6 +54,7 @@ interface Avoid {
   CheckpointVector: new () => Handle & { push_back(checkpoint: Handle): void }
 }
 
+// Shape connection pin class shared by every pin so ConnEnd can pick any free one.
 const PIN_CLASS = 1
 // libavoid's ConnDirFlags: the direction a connection leaves a pin in.
 const DIR_UP = 1
@@ -103,6 +104,7 @@ export function routeEdges(cards: readonly RouteCard[], edges: readonly RouteEdg
   try {
     router.setRoutingParameter(lib.RoutingParameter.shapeBufferDistance, CLEARANCE)
     router.setRoutingParameter(lib.RoutingParameter.idealNudgingDistance, NUDGE_GAP)
+    // A bend costs 50 and a crossing 200, so routes cross only to avoid several bends
     router.setRoutingParameter(lib.RoutingParameter.segmentPenalty, 50)
     router.setRoutingParameter(lib.RoutingParameter.crossingPenalty, 200)
     router.setRoutingOption(lib.RoutingOption.nudgeOrthogonalSegmentsConnectedToShapes, true)
@@ -118,11 +120,13 @@ export function routeEdges(cards: readonly RouteCard[], edges: readonly RouteEdg
       const pins = degree.get(card.id) ?? 0
       for (let index = 1; index <= pins; index += 1) {
         const along = index / (pins + 1)
+        // Pin position is proportional (0..1 of the card): one per side at `along`, each leaving outward
         for (const [x, y, direction] of [[along, 0, DIR_UP], [along, 1, DIR_DOWN], [0, along, DIR_LEFT], [1, along, DIR_RIGHT]] as const) {
           new lib.ShapeConnectionPin(shape, PIN_CLASS, x, y, true, 0, direction).setExclusive(true)
         }
       }
     }
+    // A frame has no shape: attach at its given point, else the top-centre
     const end = (id: string, at: Point | undefined) => {
       const shape = shapes.get(id)
       if (shape) return value(new lib.ConnEnd(shape, PIN_CLASS))

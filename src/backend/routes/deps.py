@@ -62,6 +62,7 @@ _sandbox_runtime = SandboxRuntimeState()
 def get_sandbox_runner() -> SandboxRunner:
     global _sandbox_runner
     if _sandbox_runner is None:
+        # Fake runner when execution is disabled (EXECUTION=0) or explicitly requested (FAKE=1).
         use_fake = os.environ.get("GIGACHAD_SANDBOX_EXECUTION", "1").lower() in {"0", "false", "no"}
         use_fake = use_fake or os.environ.get("GIGACHAD_SANDBOX_FAKE", "").lower() in {"1", "true", "yes"}
         _sandbox_runner = FakeSandboxRunner() if use_fake else AgentSandboxRunnerAdapter()
@@ -71,6 +72,7 @@ def get_sandbox_runner() -> SandboxRunner:
 def get_sandbox_service(identity: RequestIdentity = Depends(get_request_identity)) -> SandboxService:
     data_store = _store(identity)
     assets = AssetStore(get_postgres_pool(), identity.user_id, device_id=identity.device_id)
+    # Per-user sandbox slot namespace without exposing the user id.
     slot_prefix = hashlib.sha256(str(identity.user_id).encode("utf-8")).hexdigest()[:16]
     defaults = get_model_provider_store(identity).load_defaults()
     return SandboxService(
@@ -119,6 +121,7 @@ def shutdown_client() -> None:
 
 @contextmanager
 def request_client() -> Iterator[LLMClient]:
+    """Yield the shared client with its history reset, since it is one process-wide instance."""
     c = get_client()
     c.reset_history()
     try:
@@ -128,6 +131,7 @@ def request_client() -> Iterator[LLMClient]:
 
 
 def decode_image(base64_data: str | None) -> bytes | None:
+    """Decode a raw or `data:image/...;base64,` string to bytes."""
     if not base64_data:
         return None
     match = _DATA_URI_RE.match(base64_data)
@@ -148,6 +152,7 @@ _SSE_HEADERS = {
 
 
 def sse_event_stream(chunks: Iterator[str] | Iterator[str | dict]) -> EventSourceResponse:
+    """Stream sync string chunks as `token` events and dict chunks as `usage` events, ending with `done`."""
     async def event_stream() -> Any:
         try:
             it = iter(chunks)

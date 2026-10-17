@@ -38,15 +38,10 @@ export function renderMemoriesMarkdown(
 export interface MemoryPanelProps {
   state: MemoryPanelState
   projectEnabled: boolean
-  projectSlug?: string | null
   actions: BoundMemoryActions
   globalCategories: CategoryDef[]
   projectCategories: CategoryDef[]
 }
-
-// ---------------------------------------------------------------------------
-// Shared memory card — editable on click, with optional accept/deny actions
-// ---------------------------------------------------------------------------
 
 function memoryText(m: MemoryRecord): string {
   return "memory" in m ? m.memory : m.text
@@ -159,6 +154,7 @@ interface MemoryCardProps {
   onRemove?: (memoryId: string) => void
 }
 
+/** Memory card, click to edit. `review` shows accept/deny, `display` shows hover-to-remove. */
 export function MemoryCard({
   memory, scope, disabled = false, mode = "review",
   embedded = false,
@@ -255,10 +251,7 @@ export function MemoryCard({
   )
 }
 
-// ---------------------------------------------------------------------------
-// Candidate review — extracted memories, editable + accept/deny
-// ---------------------------------------------------------------------------
-
+// Candidate review: extracted memories, editable + accept/deny
 function CandidateWorkspace({
   globalMemories,
   projectMemories,
@@ -377,10 +370,7 @@ function CandidateWorkspace({
   )
 }
 
-// ---------------------------------------------------------------------------
-// Doc review — reconciled memory cards + diff
-// ---------------------------------------------------------------------------
-
+// Doc review: reconciled memory cards + diff
 interface PreviewTab {
   scope: "global" | "project"
   icon: typeof Globe
@@ -507,12 +497,9 @@ function DocumentWorkspace({
   )
 }
 
-// ---------------------------------------------------------------------------
 // Main MemoryPanel
-// ---------------------------------------------------------------------------
-
 export function MemoryPanel({
-  state, projectEnabled, projectSlug, actions, globalCategories, projectCategories,
+  state, projectEnabled, actions, globalCategories, projectCategories,
 }: MemoryPanelProps) {
   const extractingMode = state.phase === "extracting"
   const composingMode = state.phase === "composing"
@@ -524,6 +511,7 @@ export function MemoryPanel({
   const projectMemories = candidatesMode ? state.projectMemories : null
   const error = errorMode ? state.error : null
 
+  // Global tab first, then project. A scope still reconciling gets a loading placeholder tab.
   const previews: PreviewTab[] = []
   if (state.phase === "doc-review") {
     const tabDefs = [
@@ -560,6 +548,7 @@ export function MemoryPanel({
         else actions.acceptRemaining()
         return
       }
+      // +/- act on the first candidate as displayed (global before project)
       if (candidatesMode) {
         const globalSections = groupByCategoryOrder(globalCategories, globalMemories)
         const projectSections = groupByCategoryOrder(projectCategories, projectMemories ?? [])

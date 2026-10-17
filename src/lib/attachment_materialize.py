@@ -1,12 +1,9 @@
 """Shared attach/parse core for the documents/files/file_roots routes.
 
-A PDF and its MinerU output (markdown + images) are each written once per
-user into the shared library namespace (``PDFs/<name>``, ``Mineru/<stem>.md``,
-``Mineru/images/<stem>/...``) and mirrored to Nextcloud as a convenience copy
-other tools can read — the app itself never reads that mirror back. Route-
-specific behavior (file root promotion, chat-upload parsing, document attach)
-stays in the routes; this module is the one place that writes those two
-shared namespaces.
+A PDF and its MinerU output (markdown + images) are written once per user into
+the shared library namespace (``PDFs/<name>``, ``Mineru/<stem>.md``,
+``Mineru/images/<stem>/...``) and mirrored to Nextcloud as a copy the app never
+reads back. This module is the one place that writes those namespaces.
 """
 
 import logging
@@ -30,8 +27,10 @@ def library_images_prefix(stem: str) -> str:
 
 
 def _mirror_quietly(assets: AssetStore, asset: Asset) -> None:
-    """The database row is authoritative: a failed mirror is a missing
-    convenience copy, logged and retried on the next write, never a lost document."""
+    """Mirror to Nextcloud, logging failure instead of raising.
+
+    The database row is authoritative, so a failed mirror only loses the convenience copy.
+    """
     try:
         assets.mirror(asset, DOCUMENTS)
     except OSError:
@@ -39,9 +38,9 @@ def _mirror_quietly(assets: AssetStore, asset: Asset) -> None:
 
 
 def store_library_pdf(assets: AssetStore, name: str, content: bytes) -> Asset:
-    """Store (or refresh) a PDF in the shared per-user library and mirror it
-    to Nextcloud. Filename is the document's identity — re-storing the same
-    name overwrites the existing library copy."""
+    """Store (or refresh) a PDF in the shared per-user library and mirror it.
+
+    The filename is the document's identity, so re-storing a name overwrites it."""
     asset = assets.write("pdf", f"{PDFS}/{name}", content, mime="application/pdf")
     _mirror_quietly(assets, asset)
     return asset
@@ -53,6 +52,7 @@ def store_library_output(assets: AssetStore, stem: str, md_path: Path, images_di
     _mirror_quietly(assets, md_asset)
     if images_dir.is_dir():
         for image in sorted(images_dir.iterdir()):
+            # The images directory may hold other documents' images, so keep only this stem's.
             if image.is_file() and image.name.startswith(stem):
                 key = f"{library_images_prefix(stem)}/{image.name}"
                 _mirror_quietly(assets, assets.write("mineru_image", key, image.read_bytes()))
@@ -65,9 +65,8 @@ def _stem(name: str) -> str:
 def materialize(name: str, content: bytes, assets: AssetStore, *, enqueue_on_miss: bool = True) -> str | None:
     """This user's cached MinerU markdown for the PDF *name*, or None on a cache miss.
 
-    Queues background extraction on a miss unless *enqueue_on_miss* is False
-    (pass False when the caller parses synchronously instead). Extraction
-    never depends on a pre-existing disk file — *content* is all it needs.
+    A miss queues background extraction unless *enqueue_on_miss* is False
+    (for callers that parse synchronously). *content* is all extraction needs.
     """
     try:
         return (assets.read(library_markdown_key(_stem(name))).content or b"").decode("utf-8")

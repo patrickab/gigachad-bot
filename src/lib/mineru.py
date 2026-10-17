@@ -29,6 +29,7 @@ _cancel_event = threading.Event()
 
 
 def kill_all_mineru_servers() -> None:
+    """Set the cancel flag and stop every registered server."""
     _cancel_event.set()
     with _active_servers_lock:
         servers = list(_active_servers)
@@ -45,6 +46,7 @@ def reset_cancel() -> None:
 
 
 def should_cancel() -> bool:
+    """True once shutdown has requested cancellation of running parses."""
     return _cancel_event.is_set()
 
 
@@ -62,9 +64,11 @@ def unregister_mineru_server(server: object) -> None:
 
 
 def _global_cache_path(stem: str) -> Path:
-    """Path to the shared, cross-request MinerU markdown cache for one PDF
-    stem. Engine-internal extraction dedup only — never read by a route; the
-    app-facing cache is each user's Postgres ``mineru_markdown`` asset."""
+    """Shared MinerU markdown cache path for one PDF stem.
+
+    Engine-internal dedup only, never read by a route. The app-facing cache is each
+    user's Postgres ``mineru_markdown`` asset.
+    """
     return DIRECTORY_OUTPUT_MINERU / f"{stem}.md"
 
 
@@ -73,14 +77,11 @@ async def parse_pdf(
     output_dir: str | Path,
     backend: str = "pipeline",
 ) -> tuple[Path, Path]:
-    """Parse a PDF with MinerU and reorganize output.
+    """Parse a PDF with MinerU into ``(md_path, images_dir)`` under *output_dir*.
 
-    Returns ``(md_path, images_dir)`` where:
-      - ``md_path`` is ``<output_dir>/<stem>.md``
-      - ``images_dir`` is ``<output_dir>/images/``
-
-    Images are named ``<stem>-<padded>.<ext>`` and markdown references are
-    rewritten to match the new layout.
+    - Reuses an existing extraction in *output_dir*, then the shared cache, before running MinerU
+    - ``backend="auto"`` picks by GPU presence
+    - Images are renamed ``<stem>-<padded>.<ext>`` and markdown links rewritten to ``images/``
     """
     from mineru.cli import api_client
 
@@ -172,6 +173,7 @@ async def parse_pdf(
         md_files = sorted(tmp_dir.glob("**/*.md"), key=lambda p: len(p.name))
         if not md_files:
             raise RuntimeError(f"MinerU produced no .md output in {tmp_dir}")
+        # Prefer the shortest filename when several .md files are extracted.
         md_path = md_files[0]
         md_content = md_path.read_text(encoding="utf-8")
 
@@ -185,6 +187,7 @@ async def parse_pdf(
         width = len(str(count)) if count > 0 else 1
 
         renaming: list[tuple[Path, Path]] = []
+        # Number images in filename order, zero-padded to the widest index.
         for idx, img_path in enumerate(all_images, start=1):
             new_name = f"{stem}-{idx:0{width}d}{img_path.suffix.lower()}"
             new_dest = images_dir / new_name
@@ -193,6 +196,7 @@ async def parse_pdf(
         for old_path, new_path in renaming:
             old_name = old_path.name
             new_name = new_path.name
+            # Repoint any link ending in the old image filename at images/<new name>.
             md_content = re.sub(
                 r"\]\([^)]*" + re.escape(old_name) + r"\)",
                 r"](images/" + new_name + r")",
@@ -208,9 +212,7 @@ async def parse_pdf(
     if output_dir != DIRECTORY_OUTPUT_MINERU:
         global_md_path = _global_cache_path(stem)
         if not global_md_path.exists():
-            # A direct-chat parse's output_dir is a temp dir, so nothing has
-            # created the global Nextcloud mirror tree yet — this can be the
-            # very first PDF processed since the backend started.
+            # Direct-chat parses use a temp output_dir, so the global cache dir may not exist yet.
             global_images_dir = DIRECTORY_OUTPUT_MINERU / "images"
             global_images_dir.mkdir(parents=True, exist_ok=True)
             shutil.copy2(final_md_path, global_md_path)

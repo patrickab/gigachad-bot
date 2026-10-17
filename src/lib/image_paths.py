@@ -1,3 +1,5 @@
+"""Resolve chat upload filenames into image payloads."""
+
 from pathlib import PurePosixPath
 import re
 
@@ -43,6 +45,7 @@ def resolve_chat_image_paths(
     assets: AssetStore,
     max_tokens: int = _DEFAULT_MAX_TOKENS,
 ) -> list[bytes | str]:
+    """Load chat upload images, optionally downscaled to *max_tokens*. Missing files are skipped."""
     if not filenames:
         return []
     images: list[bytes | str] = []

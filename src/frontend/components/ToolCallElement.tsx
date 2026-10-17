@@ -14,9 +14,9 @@ interface ToolCallElementProps {
   call: ToolCallRecord
 }
 
-/** How a call is drawn once its name has been read. Families cover every tool: `sources`
- * cites what it read, `plot` shows a figure, `diagram` renders Mermaid, `workspace` reports a
- * sandbox run, and `generic` catches a name this build no longer knows (an older saved chat). */
+/** How a call is drawn once its name has been read. `sources` cites what it read, `plot` shows a
+ * figure, `diagram` renders Mermaid, `mindmap` renders markdown, `workspace` reports a sandbox
+ * run, and `generic` catches a name this build no longer knows (an older saved chat). */
 type Presentation =
   | { family: "sources"; sources: ToolSource[]; costs: number | null }
   | { family: "plot"; figure: PlotFigure | null; brief: string | null; script: string | null }
@@ -54,11 +54,13 @@ function presentationOf(call: ToolCallRecord): Presentation {
   }
 }
 
+/** Header text for a call: the `query` argument, else the first argument, if it is a string. */
 function primaryArgument(args: Record<string, unknown>): string {
   const value = args.query ?? Object.values(args)[0]
   return typeof value === "string" ? value : ""
 }
 
+/** Elapsed time of a stage. A running stage ticks locally from `started_at` (epoch seconds), never below the server-reported duration. */
 function stageDuration(stage: NonNullable<ToolCallRecord["stages"]>[number], now: number): string {
   const seconds = stage.status === "running"
     ? Math.max(stage.duration, now / 1_000 - stage.started_at)
@@ -76,6 +78,7 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
   const [now, setNow] = useState(() => Date.now())
   const stages = call.stages ?? []
   const runningStage = stages.find((stage) => stage.status === "running")
+  // Re-render at 10 Hz only while a stage runs so its timer ticks.
   useEffect(() => {
     if (!runningStage) return
     const timer = window.setInterval(() => setNow(Date.now()), 100)
@@ -84,7 +87,7 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
   // Unknown saved names have no metadata; they keep the raw name and a neutral icon.
   const meta = TOOL_META[call.name]
   const Icon = meta?.icon ?? Wrench
-  // A plot, diagram, or mind map is its own headline, so the header carries neither argument nor disclosure.
+  // A plot, diagram, or mind map is its own headline, so the header carries no argument.
   const argument = shown.family === "plot" || shown.family === "diagram" || shown.family === "mindmap" ? "" : primaryArgument(call.arguments)
   const status = runningStage?.label ?? (call.status === "running" ? "running" : call.status === "error" ? "failed" : call.summary)
 

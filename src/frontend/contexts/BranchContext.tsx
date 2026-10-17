@@ -5,12 +5,12 @@ import {
   createBranch as apiCreateBranch,
   mergeBranch as apiMergeBranch,
   cascadeDelete as apiCascadeDelete,
-  orphanChildren as apiOrphanChildren,
   fetchBranchMeta,
   listChatHistories,
 } from "@/lib/api"
 import type { BranchMeta } from "@/lib/types"
 
+/** Chat id -> history filename. */
 type ChatIdMap = Map<string, string>
 
 export interface BranchContextValue {
@@ -28,7 +28,6 @@ export interface BranchContextValue {
   createBranch: (parentFile: string, branchMessageIdx: number) => Promise<{ childFile: string; chatId: string }>
   mergeBranch: (childFile: string) => Promise<void>
   cascadeDelete: (filename: string) => Promise<string[]>
-  orphanChildren: (filename: string) => Promise<string[]>
   setActiveFile: (file: string | null) => void
   setActiveQaIndex: (idx: number | null) => void
   registerOnFileClick: (fn: (file: string, qaIndex?: number) => void) => void
@@ -38,6 +37,7 @@ export interface BranchContextValue {
 
 const BranchContext = createContext<BranchContextValue | null>(null)
 
+/** Owns chat history list, branch metadata and the active file/QA focus shown in the sidebar. */
 export function BranchProvider({ children }: { children: ReactNode }) {
   const [branchMeta, setBranchMeta] = useState<Record<string, BranchMeta>>({})
   const [rootFiles, setRootFiles] = useState<string[]>([])
@@ -45,6 +45,7 @@ export function BranchProvider({ children }: { children: ReactNode }) {
   const [activeFile, setActiveFile] = useState<string | null>(null)
   const [activeQaIndex, setActiveQaIndex] = useState<number | null>(null)
 
+  // Tab content registers its handlers here, so the stable callbacks below never go stale.
   const onFileClickRef = useRef<(file: string, qaIndex?: number) => void>(() => {})
   const onMergeRef = useRef<(childFile: string) => Promise<void>>(async () => {})
   const onDeleteRef = useRef<(file: string) => Promise<void>>(async () => {})
@@ -112,12 +113,6 @@ export function BranchProvider({ children }: { children: ReactNode }) {
     return result.deleted
   }, [refreshAll])
 
-  const doOrphanChildren = useCallback(async (filename: string) => {
-    const result = await apiOrphanChildren(filename)
-    await refreshAll()
-    return result.orphaned
-  }, [refreshAll])
-
   return (
     <BranchContext.Provider value={{
       branchMeta,
@@ -134,7 +129,6 @@ export function BranchProvider({ children }: { children: ReactNode }) {
       createBranch: doCreateBranch,
       mergeBranch: doMergeBranch,
       cascadeDelete: doCascadeDelete,
-      orphanChildren: doOrphanChildren,
       setActiveFile,
       setActiveQaIndex,
       registerOnFileClick,
@@ -152,6 +146,7 @@ export function useBranches() {
   return ctx
 }
 
+/** Index branch metadata by `chat_id` to resolve `parent_id` links back to filenames. */
 export function buildChatIdMap(meta: Record<string, BranchMeta>): ChatIdMap {
   const m = new Map<string, string>()
   for (const [k, v] of Object.entries(meta)) {
@@ -160,6 +155,7 @@ export function buildChatIdMap(meta: Record<string, BranchMeta>): ChatIdMap {
   return m
 }
 
+/** Whether `file` is a strict ancestor of `activeFile` by walking `parent_id` links. Cycle-safe. */
 export function isAncestorOf(activeFile: string | null | undefined, file: string, meta: Record<string, BranchMeta>, chatIdMap: ChatIdMap): boolean {
   if (!activeFile) return false
   const ancestorChatId = meta[file]?.chat_id

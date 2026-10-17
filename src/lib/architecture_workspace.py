@@ -49,9 +49,11 @@ class ArchitectureNotFound(ArchitectureError, FileNotFoundError):
 class Snapshot:
     """Workspace contents plus the revisions a commit must still match."""
 
+    # Workspace-relative path -> text of every ``.c4`` source.
     sources: dict[str, str]
     # Workspace-relative path -> text of every saved layout, e.g. ``.likec4/index.likec4.snap``.
     snapshots: dict[str, str]
+    # Keyed by storage key (root-prefixed), unlike the relative-path dicts above.
     revisions: dict[str, Revision]
 
 
@@ -168,6 +170,7 @@ class ArchitectureStore:
         return f"{self._root}/{relative}" if self._root else relative
 
     def source_key(self, relative: str) -> str:
+        """Storage key for a canonical workspace-relative ``.c4`` path, else ArchitectureError."""
         try:
             normalized = validate_key(relative)
         except InvalidStorageKey as exc:

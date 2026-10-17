@@ -79,5 +79,6 @@ async def web_search(
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
+        # Disable proxy buffering so events reach the client immediately
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

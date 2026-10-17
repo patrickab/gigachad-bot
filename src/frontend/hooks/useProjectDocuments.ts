@@ -27,6 +27,7 @@ import { buildHiddenContent } from "@/lib/attachments"
 import { renderCanvasToJpeg, type EmbedRect } from "@/lib/drawing"
 import type { Message, ProjectDocument } from "@/lib/types"
  
+// PDF attachments are not drawn into the rendered canvas image
 const IMAGE_RENDER_EXCLUDED_ATTACHMENT_KINDS: Partial<Record<CanvasAttachment["kind"], true>> = { pdf: true }
 const FALLBACK_ASPECT = 1.3
 
@@ -42,6 +43,7 @@ function renderableCanvasImages({ frames = [], attachments = [] }: Partial<Pick<
   ]
 }
 
+/** Own the project documents panel: lists, selection into chat attachments, CRUD with undoable delete, and the Alt+X shortcut. */
 export function useProjectDocuments({
   isActive,
   appMode,
@@ -69,17 +71,14 @@ export function useProjectDocuments({
   const [rootProjectDocs, setRootProjectDocs] = useState<ProjectDocument[]>([])
   const [allDocuments, setAllDocuments] = useState<ProjectDocument[]>([])
 
-  // A path is "root-surfaced" only when it's not already a project file — a
-  // promoted file root PDF that's also in the project behaves as a project doc
-  // (deletable, library attach), and the merged list shows it just once.
+  // Root-surfaced = not already a project file. A promoted root PDF in the project
+  // behaves as a project doc (deletable, library attach) and is listed once.
   const rootDocPaths = useMemo(() => {
     const projectPaths = new Set(projectDocuments.map((d) => d.path))
     return new Set(rootProjectDocs.filter((d) => !projectPaths.has(d.path)).map((d) => d.path))
   }, [projectDocuments, rootProjectDocs])
-  // Merge library/project docs with file root docs, deduping by path so a PDF that
-  // exists both in the project files and in a mounted file root (or was promoted
-  // into the cloud library) appears exactly once — library/cloud wins. Documents
-  // whose deletion is pending (`handleDeleteDocument`) are hidden.
+  // Dedupe by path (library/cloud wins) so a PDF in both project and file root shows once.
+  // Documents with a pending deletion (`handleDeleteDocument`) are hidden.
   const mergedDocuments = useMemo(() => {
     const seen = new Set<string>()
     const out: ProjectDocument[] = []
@@ -100,6 +99,7 @@ export function useProjectDocuments({
       finally { setExtracting((n) => n - 1) }
       return
     }
+    // Canvas docs are attached as a rendered JPEG, preferring the unsaved live content
     if (path.endsWith(".canvas")) {
       try {
         const live = liveCanvasRef.current
@@ -109,6 +109,7 @@ export function useProjectDocuments({
         const texts = doc?.texts ?? []
         const images = doc ? renderableCanvasImages(doc) : []
         if (!doc || (!strokes.length && !texts.length && images.length === 0)) return
+        // Rasterize the canvas so it attaches as a plain image
         const blob = await renderCanvasToJpeg(strokes, 20, images, texts)
         const name = path.split("/").pop()!.replace(/\.canvas$/, ".jpg")
         const file = new File([blob], name, { type: "image/jpeg" })
@@ -222,6 +223,7 @@ export function useProjectDocuments({
   useEffect(() => {
     if (!isActive || appMode === "canvas") return
     const onKey = (e: KeyboardEvent) => {
+      // Alt+X toggles the documents panel
       if (e.altKey && (e.key === "x" || e.key === "X")) {
         e.preventDefault()
         setDocumentOpen((open) => {

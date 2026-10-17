@@ -19,6 +19,7 @@ interface CommandMenuProps {
   container: HTMLElement | null
 }
 
+/** Slash-command dropdown portaled into `container`. Captures arrow/Enter/Escape on window so the composer input keeps focus. */
 export function CommandMenu({ open, items, query, onRun, onClose, container }: CommandMenuProps) {
   const [selectedIdx, setSelectedIdx] = useState(0)
 
@@ -30,6 +31,7 @@ export function CommandMenu({ open, items, query, onRun, onClose, container }: C
 
   useEffect(() => { setSelectedIdx(0) }, [filtered])
 
+  // Capture phase so the keys are handled before the focused input sees them.
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
@@ -42,6 +44,7 @@ export function CommandMenu({ open, items, query, onRun, onClose, container }: C
     return () => window.removeEventListener("keydown", onKey, true)
   }, [open, onClose, onRun, filtered, selectedIdx])
 
+  // Match the width to the tab bar: a third of one tab, at least 20% of the bar, or the tab itself when tabs are narrow.
   const dropdownWidth = useMemo(() => {
     if (!open || !container) return undefined
     const tabBar = document.querySelector<HTMLElement>("[data-tabbar]")

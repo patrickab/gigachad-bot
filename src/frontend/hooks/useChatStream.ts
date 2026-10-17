@@ -19,6 +19,7 @@ export interface ChatStreamCompletion {
 export interface UseChatStreamReturn {
   messages: Message[]
   isStreaming: boolean
+  /** `skipAddMessages` streams into the existing trailing assistant message instead of appending a user/assistant pair. */
   send: (req: ChatRequest, skipAddMessages?: boolean) => Promise<ChatStreamCompletion | null>
   regenerateAt: (userIndex: number, req: ChatRequest) => Promise<ChatStreamCompletion | null>
   cancel: () => void
@@ -29,6 +30,7 @@ export interface UseChatStreamReturn {
   setTotalUsage: React.Dispatch<React.SetStateAction<Usage>>
 }
 
+/** Build the API history, prepending hidden attachment text to user turns and appending mindmap output to assistant turns. */
 function buildHistory(msgs: Message[]): { role: string; content: string }[] {
   return msgs
     .filter(m => m.role === "user" || m.role === "assistant")
@@ -43,11 +45,13 @@ function buildHistory(msgs: Message[]): { role: string; content: string }[] {
     })
 }
 
+/** Own the message list and stream one assistant reply at a time. `send` and `regenerateAt` resolve to null when cancelled, failed, or not completed. */
 export function useChatStream(): UseChatStreamReturn {
   const [messages, setMessages] = useState<Message[]>([])
   const [totalUsage, setTotalUsage] = useState<Usage>({ prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 })
   const [isStreaming, setIsStreaming] = useState(false)
   const abortRef = useRef<(() => void) | null>(null)
+  // Refs mirror state so callbacks read the latest values without stale closures
   const messagesRef = useRef(messages)
   const totalUsageRef = useRef(totalUsage)
   messagesRef.current = messages

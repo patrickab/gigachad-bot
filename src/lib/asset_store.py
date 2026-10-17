@@ -3,7 +3,7 @@
 Assets are the counterpart to ``PostgresDataStore``'s text documents: opaque
 bytes the app owns, addressed by a logical path and replicated to devices
 through the ``changes`` log. Like the document store, an instance is
-permanently scoped to one authenticated user — no operation takes a user id.
+permanently scoped to one authenticated user: no operation takes a user id.
 """
 
 from __future__ import annotations
@@ -31,6 +31,7 @@ _MIRROR_ROOTS = {
 }
 
 
+# Top-level path segment each mirrorable kind must live under on disk.
 @dataclass(frozen=True)
 class Asset:
     id: UUID
@@ -55,6 +56,7 @@ class AssetStore:
     def _escape_like(value: str) -> str:
         return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
+    # Row layout is ``_COLUMNS`` order, optionally followed by ``content``.
     @staticmethod
     def _asset(row, content: bytes | None = None) -> Asset:
         return Asset(
@@ -68,6 +70,7 @@ class AssetStore:
             content=content,
         )
 
+    # `version` is None for deletes and the vacated side of a move.
     def _change(self, connection, logical_path: str, version: int | None, operation: str) -> None:
         connection.execute(
             """
@@ -78,6 +81,7 @@ class AssetStore:
         )
 
     def write(self, kind: str, logical_path: str, content: bytes, *, mime: str | None = None) -> Asset:
+        """Upsert by path. Overwriting bumps ``version``, and the replicated change carries it."""
         if kind not in ASSET_KINDS:
             raise ValueError(f"Unknown asset kind: {kind}")
         logical_path = validate_key(logical_path)
@@ -130,6 +134,7 @@ class AssetStore:
         return self._asset(row, bytes(row[7]))
 
     def list(self, prefix: str = "", *, kind: str | None = None) -> list[Asset]:
+        """Assets under *prefix* (directory semantics) without content, ordered by path."""
         prefix = validate_key(prefix, allow_empty=True)
         clauses = [f"SELECT {_COLUMNS} FROM assets WHERE user_id = %s"]
         params: list[object] = [self._user_id]

@@ -10,6 +10,7 @@ import { rewriteImages } from "@/lib/api"
 
 import { LazyPdfViewer } from "./LazyPdfViewer"
 
+/** Previews by mime: image, PDF, then parsed markdown or raw text, else a placeholder. */
 function PreviewContent({ attachment }: { attachment: Attachment }) {
   if (attachment.mime.startsWith("image/")) {
     return (
@@ -48,12 +49,11 @@ function PreviewContent({ attachment }: { attachment: Attachment }) {
 
 interface AttachmentPreviewProps {
   attachment: Attachment | null
-  chatId: string
-  slug?: string | null
   onClose: () => void
 }
 
-export function AttachmentPreview({ attachment, chatId, slug = null, onClose }: AttachmentPreviewProps) {
+/** Full-screen modal for an attachment. Renders nothing while `attachment` is null. */
+export function AttachmentPreview({ attachment, onClose }: AttachmentPreviewProps) {
   useEffect(() => {
     if (!attachment) return
     function handler(e: KeyboardEvent) {

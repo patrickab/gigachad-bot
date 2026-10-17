@@ -32,6 +32,7 @@ class ResearchRequest(BaseModel):
     report_type: str = "deep"
 
 
+# Each `send_*` enqueues one named SSE event, consumed by the `research` stream.
 class SSEWriter:
     def __init__(self, queue: asyncio.Queue):
         self.queue = queue
@@ -101,6 +102,7 @@ def on_progress_factory(writer: SSEWriter):
             loop = asyncio.get_running_loop()
             loop.create_task(writer.send_progress(progress))
         except RuntimeError:
+            # No running loop (callback fired from a worker thread), drop the update
             pass
 
     return on_progress
@@ -108,6 +110,7 @@ def on_progress_factory(writer: SSEWriter):
 
 @router.post("/research")
 async def research(req: ResearchRequest):
+    """Stream a GPT-Researcher run as SSE `step`, `progress`, `result` and `error` events."""
     from gpt_researcher import GPTResearcher
 
     config = build_research_config(
@@ -180,6 +183,7 @@ async def research(req: ResearchRequest):
             finally:
                 await queue.put(None)
 
+        # Worker and stream decouple through `queue`, a `None` item marks the end of the stream
         task = asyncio.create_task(run_research())
 
         try:

@@ -30,6 +30,7 @@ export function applyDomainFilter(query: string, domain: string): string {
   return d ? `${d} ${query}` : query
 }
 
+/** Starts the POST to /web-search. `promise` resolves to the raw streaming response. */
 export function webSearchFetch(params: WebSearchParams) {
   const controller = new AbortController()
   const deviceId = getDeviceId()
@@ -48,6 +49,7 @@ export function webSearchFetch(params: WebSearchParams) {
   return { promise, abort: () => controller.abort() }
 }
 
+/** Parses the streamed response: one JSON event per line (optionally `data:`-prefixed). Non-JSON lines are ignored. Aborts end silently. */
 export async function* parseWebSearchStream(res: Response): AsyncGenerator<WebSearchParsedEvent> {
   if (!res.ok || !res.body) {
     yield { type: "error", text: await res.text() }

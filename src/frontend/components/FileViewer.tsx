@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils"
 
 import { LazyPdfViewer } from "@/components/LazyPdfViewer"
 
+// Max rows rendered for a search.
 const RESULT_CAP = 300
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif", "ico"])
 
@@ -26,6 +27,7 @@ function dirName(path: string): string {
   return i === -1 ? "" : path.slice(0, i)
 }
 
+// Dotfiles (".env") have no extension.
 function extOf(path: string): string {
   const name = baseName(path)
   const i = name.lastIndexOf(".")
@@ -75,6 +77,7 @@ interface FileViewerProps {
   onArrowRight?: () => void
 }
 
+/** Floating file picker with fuzzy search, directory drill-down and a type-aware preview pane. */
 export function FileViewer({
   files,
   onSelect,
@@ -104,7 +107,7 @@ export function FileViewer({
   const entries = useMemo<Row[]>(() => {
     const q = query.trim()
     if (q) {
-      // Search ignores the directory context — flat fuzzy across every file.
+      // Search ignores the directory context: flat fuzzy across every file, name matches get a +1 bonus.
       return sortFiles(files)
         .map((path) => {
           const byName = fuzzyScore(baseName(path), q)
@@ -128,11 +131,9 @@ export function FileViewer({
   useEffect(() => { inputRef.current?.focus() }, [])
 
   const highlighted = entries[idx]
-  const highlightedKind = highlighted?.type === "file" ? kindOf(highlighted.path) : null
 
-  // Debounce the *previewed* row separately from the *highlighted* (keyboard/hover) row —
-  // sweeping the cursor across a list changes idx on every mouseenter, and swapping the
-  // PdfViewer's url that fast tears down its pdf.js transport mid-render, crashing react-pdf.
+  // Debounce the previewed row separately from the highlighted one. Hovering fast changes idx on
+  // every mouseenter, and swapping PdfViewer's url that quickly tears down its pdf.js transport mid-render.
   const [previewed, setPreviewed] = useState<Row | undefined>(undefined)
   useEffect(() => {
     const t = setTimeout(() => setPreviewed(highlighted), 120)

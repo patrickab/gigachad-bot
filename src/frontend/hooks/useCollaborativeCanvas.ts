@@ -9,6 +9,7 @@ export type CanvasCollaborationStatus = "loading" | "synced" | "saving" | "offli
 
 export interface CollaborativeCanvas {
   document: CanvasDocument | null
+  /** Commit a locally edited document, sending the derived mutations after a short debounce. */
   replace: (nextDocument: CanvasDocument) => void
   status: CanvasCollaborationStatus
   retry: () => void
@@ -39,6 +40,7 @@ type Session = {
   closeStream?: () => void
 }
 
+/** Diff two documents into per-entity upserts and deletes, comparing changed collections by id and JSON equality. */
 function deriveMutations(previous: CanvasDocument, next: CanvasDocument): CanvasMutation[] {
   const mutations: CanvasMutation[] = []
   for (const [entity, collection] of COLLECTIONS) {
@@ -62,6 +64,7 @@ function compact(mutations: CanvasMutation[]): CanvasMutation[] {
   return mutations.filter((change) => latest.get(`${change.entity}:${change.id}`) === change)
 }
 
+/** Apply upserts and deletes in order to a copy of `document`, touching only affected collections. */
 function applyMutations(document: CanvasDocument, mutations: CanvasMutation[]): CanvasDocument {
   const next = { ...document }
   for (const change of mutations) {
@@ -112,6 +115,7 @@ export function useCollaborativeCanvas(canvasKey: string): CollaborativeCanvas {
   const fail = useCallback((session: Session, error: unknown, action: () => void) => {
     setStatus(failureStatus())
     const transient = !(error instanceof ApiError) || error.status === 408 || error.status === 429 || error.status >= 500
+    // Retry network and 408/429/5xx errors with capped exponential backoff, give up on other API errors
     if (!transient || session.attempts >= RETRY_MAX_ATTEMPTS) return
     run(session, action, Math.min(RETRY_INITIAL_MS * 2 ** session.attempts, RETRY_MAX_MS))
     session.attempts += 1

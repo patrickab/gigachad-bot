@@ -11,6 +11,7 @@ export interface UseResearchReturn {
   error: string | null
 }
 
+/** Stream a research run into the chat by appending a user/assistant pair and updating the assistant with step labels, progress, then the final report. */
 export function useResearch(): UseResearchReturn {
   const [error, setError] = useState<string | null>(null)
   const abortRef = useRef<(() => void) | null>(null)
@@ -83,6 +84,7 @@ export function useResearch(): UseResearchReturn {
             throw new Error(data.message || "Research failed")
           }
         } catch (parseErr) {
+          // Drop malformed events, rethrow only the server-reported failure
           if ((parseErr as Error).message === "Research failed" || (parseErr as Error)?.message?.includes("Research failed")) {
             throw parseErr
           }

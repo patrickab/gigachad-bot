@@ -1,10 +1,8 @@
 """Background MinerU extraction queue.
 
 Single worker processes PDFs one at a time so MinerU servers don't fight
-for resources. Enqueue at upload or promote-to-context time; extraction
-runs in the background without blocking the response. A finished parse is
-persisted into the requesting user's Postgres library cache — the on-disk
-Nextcloud mirror is never read back by the app.
+for resources. A finished parse is persisted into the requesting user's
+Postgres library cache (the Nextcloud mirror is never read back).
 """
 
 import asyncio
@@ -31,7 +29,7 @@ async def _worker() -> None:
     global _in_progress
     while True:
         item = await _queue.get()
-        if item is None:
+        if item is None:  # shutdown sentinel from stop()
             _queue.task_done()
             break
         name, content, assets = item
@@ -71,6 +69,7 @@ async def start() -> None:
 
 
 async def stop() -> None:
+    # None is the sentinel that makes _worker exit after draining earlier items.
     _queue.put_nowait(None)
     if _worker_task:
         try:

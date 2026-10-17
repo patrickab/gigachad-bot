@@ -4,13 +4,13 @@ import { memo, useMemo } from "react"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import type { Message } from "@/lib/types"
 
-/** Truncate text at the first ###, ##, or # section heading */
+/** Cut the answer at raw JSON UI blocks and at trailing sections the UI renders separately (references, related questions). */
 function truncateAtSections(text: string): string {
-  // Cut from raw JSON generative UI blocks (safety net)
+  // Safety net for generative UI ops leaking into the text
   const jsonIdx = text.indexOf('{"op":"add"')
   if (jsonIdx !== -1) text = text.slice(0, jsonIdx)
 
-  // Cut from first markdown heading (# .. ######) of a known trailing section
+  // Match a heading of any level whose title is a known trailing section
   const headingRegex = /\n#{1,6}\s+(?:Related\s*Questions|References|Sources|Citations|Images|IMAGES|Further\s*Questions?|See\s*Also|Suggested\s*Questions?)\b/i
   const idx = text.search(headingRegex)
   if (idx !== -1) text = text.slice(0, idx)
@@ -23,6 +23,7 @@ interface Props {
   search_result: NonNullable<Message["search_result"]>
 }
 
+/** Answer text with image markup and trailing sections stripped and citation markers rewritten to links for `citationMap`. */
 function WebSearchResultInner({ content, search_result }: Props) {
   const text = useMemo(() => {
     let text = content

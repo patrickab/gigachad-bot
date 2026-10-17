@@ -37,6 +37,7 @@ class Revision:
 
 @dataclass(frozen=True)
 class Entry:
+    """Listing item. `size` and `revision` are None for directories."""
     key: str
     is_dir: bool
     size: int | None = None
@@ -44,6 +45,7 @@ class Entry:
 
 
 class DataStore(Protocol):
+    """Key-addressed byte store. A stale `expected` revision raises StorageConflictError."""
     def read_bytes(self, key: str) -> tuple[bytes, Revision]: ...
     def write_bytes(self, key: str, content: bytes, *, expected: Revision | None = None) -> Revision: ...
     def write_many(self, writes: list[tuple[str, bytes, Revision | None]]) -> list[Revision]:
@@ -112,12 +114,14 @@ class DataStorePath:
         return bool(self.key) and self.store.exists(self.key)
 
     def is_file(self) -> bool:
+        # Backends may implement a cheaper single-query check.
         fast = getattr(self.store, "is_file", None)
         if callable(fast):
             return fast(self.key)
         return self.exists() and not any(entry.key == self.key and entry.is_dir for entry in self.store.list(self.parent.key))
 
     def is_dir(self) -> bool:
+        # Backends may implement a cheaper single-query check.
         fast = getattr(self.store, "is_dir", None)
         if callable(fast):
             return fast(self.key)
@@ -130,9 +134,11 @@ class DataStorePath:
         return iter(self._children(False))
 
     def glob(self, pattern: str):
+        """List direct children, matching on name only."""
         return (child for child in self._children(False) if fnmatch.fnmatch(child.name, pattern))
 
     def rglob(self, pattern: str):
+        """Recursively list descendants, matching on name only."""
         return (child for child in self._children(True) if fnmatch.fnmatch(child.name, pattern))
 
     def read_bytes(self) -> bytes:
@@ -148,6 +154,7 @@ class DataStorePath:
         self.write_bytes(content.encode(encoding))
 
     def mkdir(self, *, parents: bool = False, exist_ok: bool = False) -> None:
+        # Store mkdir is already idempotent for directories.
         del exist_ok
         if parents:
             parent = self.parent
@@ -174,9 +181,11 @@ def validate_key(key: str, *, allow_empty: bool = False) -> str:
     """Normalize a logical key and reject paths outside the storage root."""
     if not isinstance(key, str):
         raise InvalidStorageKey("Storage key must be a string")
+    # Backslashes count as separators so `..\\x` can't bypass the traversal check.
     normalized = key.replace("\\", "/").strip()
     if PurePosixPath(normalized).is_absolute():
         raise InvalidStorageKey("Storage key must be relative and cannot traverse directories")
+    # A leading slash is rejected above, so only trailing slashes are stripped here.
     normalized = normalized.strip("/")
     if not normalized:
         if allow_empty:

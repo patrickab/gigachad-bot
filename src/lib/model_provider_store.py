@@ -98,6 +98,7 @@ class ModelProviderStore:
         write_text(store, key, yaml.safe_dump(providers, allow_unicode=True, sort_keys=False), expected=revision)
 
     def load(self) -> dict[str, dict[str, Any]]:
+        """Return the catalog, seeding `DEFAULT_PROVIDERS` when none is stored."""
         try:
             return self._read(self._store)
         except StorageNotFoundError:

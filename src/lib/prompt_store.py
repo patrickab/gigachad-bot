@@ -1,8 +1,7 @@
 """Prompt store backed by the database-native ``prompt`` namespace.
 
-Reads ``prompts/*.md`` files with YAML frontmatter, resolves ``{{block}}``
-includes from ``prompts/_blocks/*.md``, and exposes a dict-like interface
-for the rest of the app.
+Reads ``prompts/*.md`` files with YAML frontmatter and resolves ``{{block}}``
+includes from ``prompts/_blocks/*.md``.
 """
 
 from __future__ import annotations
