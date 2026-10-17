@@ -2,31 +2,29 @@
 
 import { useId } from "react"
 
-const GRID_SPACING = 30 // canvas units between dots at the finest grid level
-const GRID_MIN_SCREEN_SPACING = 12 // px — below this the grid doubles its spacing
+const GRID_SPACING = 28 // canvas units between dots at the finest grid level
+const GRID_MIN_SCREEN_SPACING = 18
+const DOT_RADIUS = 0.8
 
-/** Dot grid with a constant on-screen density.
- *
- * - Zooming out doubles the spacing whenever dots would sit closer than `GRID_MIN_SCREEN_SPACING`
- * - Dots dropped by the next level fade out first, so levels blend instead of popping
- * - Dots keep a fixed screen size, the surviving ones stay put in canvas space
- */
+/** Keep a quiet, world-anchored grid with eased fades between density levels. */
 export function CanvasDotGrid({ offset, scale }: { offset: { x: number; y: number }; scale: number }) {
   const patternId = useId()
   let spacing = GRID_SPACING * scale
   while (spacing < GRID_MIN_SCREEN_SPACING) spacing *= 2
-  const fadingOpacity = Math.min(1, spacing / GRID_MIN_SCREEN_SPACING - 1)
+  const fade = Math.min(1, spacing / GRID_MIN_SCREEN_SPACING - 1)
+  const fadingOpacity = fade * fade * (3 - 2 * fade)
+  const opacity = 0.85 + 0.1 * Math.min(1, scale)
   const cell = 2 * spacing
   return (
     <svg className="absolute inset-0 w-full h-full pointer-events-none" aria-hidden>
       <defs>
         <pattern id={patternId} x={offset.x % cell} y={offset.y % cell} width={cell} height={cell} patternUnits="userSpaceOnUse">
-          <g fill="var(--ink-faint)" opacity={0.7}>
-            <circle cx={1.2} cy={1.2} r={1.2} />
+          <g className="fill-ink-muted dark:fill-ink-faint" opacity={opacity}>
+            <circle cx={DOT_RADIUS} cy={DOT_RADIUS} r={DOT_RADIUS} />
             <g opacity={fadingOpacity}>
-              <circle cx={spacing + 1.2} cy={1.2} r={1.2} />
-              <circle cx={1.2} cy={spacing + 1.2} r={1.2} />
-              <circle cx={spacing + 1.2} cy={spacing + 1.2} r={1.2} />
+              <circle cx={spacing + DOT_RADIUS} cy={DOT_RADIUS} r={DOT_RADIUS} />
+              <circle cx={DOT_RADIUS} cy={spacing + DOT_RADIUS} r={DOT_RADIUS} />
+              <circle cx={spacing + DOT_RADIUS} cy={spacing + DOT_RADIUS} r={DOT_RADIUS} />
             </g>
           </g>
         </pattern>

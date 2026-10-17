@@ -42,6 +42,14 @@ none of them are reimplemented in-repo:
 All of the above are optional/user-configured — the app degrades gracefully
 (e.g. web search and OCR just aren't available) when they're not running.
 
+## Canvas background
+
+The dot grid uses small, screen-sized dots and wider spacing at reduced zoom.
+Intermediate dots fade with an eased curve between density levels, while the
+grid stays anchored to canvas coordinates during pan and zoom. Base dot opacity stays
+between 85% and 95% for visibility. Light mode uses the darker `--ink-muted` color,
+while dark mode keeps `--ink-faint`.
+
 ## Architecture workspaces
 
 Each project can hold one LikeC4 model under `graph/<slug>/` in PostgreSQL:

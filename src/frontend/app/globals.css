@@ -9,8 +9,8 @@
 
 /* This app is dark-by-default and opts into light via a `.light` class on <html>.
    Streamdown switches code-block theming through Tailwind's `dark:` variant, so we
-   invert it: `dark:` is active everywhere EXCEPT inside `.light`. The app uses no
-   other `dark:` utilities, so this only affects Streamdown's output. */
+   invert it: `dark:` is active everywhere EXCEPT inside `.light`, matching the
+   app's theme-aware utilities and Streamdown's output. */
 @custom-variant dark (&:where(:not(.light):not(.light *)));
 
 /* THEME TOKENS
