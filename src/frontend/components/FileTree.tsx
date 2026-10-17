@@ -122,6 +122,7 @@ export function useTree<T = unknown>() {
 function ChevronIcon({ open }: { open: boolean }) {
   return (
     <motion.span
+      initial={false}
       animate={{ rotate: open ? 90 : 0 }}
       transition={{ duration: 0.15 }}
       className="shrink-0"
@@ -511,7 +512,8 @@ function BranchNode<T>({ item, depth }: { item: FileTreeItem<T>; depth: number }
         </div>
       </div>
 
-      <AnimatePresence>
+      {/* initial={false}: a sidebar mounting with the branch already open (new tab) must not replay the expand animation */}
+      <AnimatePresence initial={false}>
         {isExpanded && hasChildren && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
