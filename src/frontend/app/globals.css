@@ -739,6 +739,34 @@ code {
 }
 
 .markdown-body ul,
+.markdown-body ol,
+.markdown-body-compact ul,
+.markdown-body-compact ol {
+  list-style-position: outside;
+}
+
+.markdown-body ul,
+.markdown-body-compact ul {
+  list-style-type: "– ";
+}
+
+.markdown-body ol,
+.markdown-body-compact ol {
+  list-style-type: decimal;
+}
+
+.markdown-body ul ul,
+.markdown-body-compact ul ul {
+  list-style-type: "· ";
+}
+
+.markdown-body ul.contains-task-list,
+.markdown-body-compact ul.contains-task-list {
+  list-style-type: none;
+  padding-left: 0.25em;
+}
+
+.markdown-body ul,
 .markdown-body ol {
   margin-bottom: 0.75em;
   padding-left: 1.5em;
@@ -750,6 +778,8 @@ code {
 
 .markdown-body li::marker {
   color: var(--ink-muted);
+  font-weight: 300;
+  font-variant-numeric: tabular-nums;
 }
 
 .markdown-body blockquote {
@@ -832,6 +862,8 @@ code {
 
 .markdown-body-compact li::marker {
   color: var(--ink-muted);
+  font-weight: 300;
+  font-variant-numeric: tabular-nums;
 }
 
 .markdown-body-compact img {
