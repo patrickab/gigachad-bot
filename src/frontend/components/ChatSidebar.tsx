@@ -119,7 +119,7 @@ export function ChatSidebar({ elements, width, onWidthChange, maxWidth: maxWidth
     <motion.aside
       initial={false}
       style={{ width: widthStyle }}
-      className="shrink-0 mb-6 mr-6 rounded-2xl border border-divider/50 bg-surface shadow-[var(--shadow-lg)] flex flex-col overflow-hidden relative"
+      className="shrink-0 mt-11 mb-6 mr-6 rounded-2xl border border-divider/50 bg-surface shadow-[var(--shadow-lg)] flex flex-col overflow-hidden relative"
     >
       <div
         role="separator"

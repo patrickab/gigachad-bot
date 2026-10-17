@@ -929,7 +929,7 @@ export function ChatContainer({
   const toggleWideMode = useCallback(() => setIsWideMode((w) => !w), [])
 
   return (
-    <div ref={containerRef} className={cn("flex h-full relative", className)}>
+    <div ref={containerRef} className={cn("absolute inset-x-0 -top-11 bottom-0 flex", className)}>
       <div className="flex-1 min-w-0 flex flex-col relative">
         <div
           ref={scrollContainerRef}
@@ -941,7 +941,7 @@ export function ChatContainer({
           <button
             onClick={toggleWideMode}
             aria-label={isWideMode ? "Exit wide mode" : "Enter wide mode"}
-            className="absolute left-2 top-2 z-30 p-1 text-ink-faint opacity-0 hover:opacity-100 focus-visible:opacity-100 hover:text-ink-muted transition-opacity duration-200 cursor-pointer"
+            className="absolute left-2 top-24 z-30 p-1 text-ink-faint opacity-0 hover:opacity-100 focus-visible:opacity-100 hover:text-ink-muted transition-opacity duration-200 cursor-pointer"
           >
             {isWideMode ? <ChevronsRightLeft className="h-4 w-4" /> : <ChevronsLeftRight className="h-4 w-4" />}
           </button>

@@ -706,20 +706,23 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
             </div>
           </header>
         ) : (
-          <header className="h-11 shrink-0 flex items-center px-3 gap-1 z-40 bg-paper">
-            {sidebarToggle}
-            <div className="flex-1 min-w-0 flex items-center">
+          <header className="pointer-events-none relative h-11 shrink-0 flex items-center justify-between px-3 gap-1 z-40">
+            {/* Chat scrolls under the header. A solid page-colored backing sits behind each control group only, so controls win where they overlap content. */}
+            <div className="pointer-events-auto relative isolate flex min-w-0 items-center gap-1">
+              <div className="pointer-events-none absolute -inset-x-1 inset-y-0 -z-10 rounded-full bg-paper" />
+              {sidebarToggle}
               <ReasoningSelector model={config.selectedModel} reasoningEffort={config.reasoningEffort} onReasoningChange={(v) => onConfigChange({ reasoningEffort: v })} placement="below" />
               <ModelDropdown models={models} selectedModel={config.selectedModel} onSelect={(m) => onConfigChange({ selectedModel: m })} onProvidersChange={saveModelProviders} onTabOrderChange={saveModelTabOrder} onDefaultsChange={saveModelDefaults} placement="below" />
             </div>
-            <div className="flex items-center gap-1">
+            <div className="pointer-events-auto relative isolate flex items-center gap-1">
+              <div className="pointer-events-none absolute -inset-x-1 inset-y-0 -z-10 rounded-full bg-paper" />
               <TokenCounter usage={totalUsage} />
               <ThemeToggle />
               <div ref={setContextToggleSlot} className="flex items-center" />
             </div>
           </header>
         )}
-        <div className="flex-1 overflow-hidden relative transition-opacity duration-200">
+        <div className={`flex-1 min-h-0 relative transition-opacity duration-200 ${appMode === "canvas" ? "overflow-hidden" : ""}`}>
           {appMode === "canvas" && architecturePath ? (
             <ArchitectureWindow path={architecturePath} maximized hostScale={1} edgeStyle={architectureEdgeStyle} onEdgeStyleChange={setArchitectureEdgeStyle} onNavigate={setArchitecturePath} />
           ) : appMode === "canvas" ? (
