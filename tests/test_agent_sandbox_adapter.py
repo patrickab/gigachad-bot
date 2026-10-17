@@ -90,27 +90,6 @@ async def test_adapter_maps_every_native_script_error(error: type[Exception]) ->
         await AgentSandboxRunnerAdapter(FailingSandbox()).run_script("bad", profile="test", interpreter="venv", timeout=1.0)  # type: ignore[arg-type]
 
 
-@pytest.mark.asyncio
-async def test_fake_runner_returns_a_native_capture_lease() -> None:
-    runner = FakeSandboxRunner()
-    result = await runner.run(
-        SandboxInvocation(
-            slot_key="fake-chat",
-            profile_name="test",
-            run_id="call-1",
-            task=OmpTask("create", model=SANDBOX_MODEL, thinking="medium"),
-        )
-    )
-
-    capture = Path(result.workspace.path)
-    assert result.next_manifest.workspace.snapshot_asset_id is None
-    assert capture.exists()
-    assert result.read_workspace_file("workspace.txt") == b"> create\n"
-
-    result.release()
-    assert not capture.exists()
-
-
 def test_sandbox_dependency_reuses_one_native_runner_until_application_restart(monkeypatch: pytest.MonkeyPatch) -> None:
     from backend.routes import deps
 

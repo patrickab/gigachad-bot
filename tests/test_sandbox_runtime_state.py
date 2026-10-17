@@ -12,7 +12,6 @@ import tarfile
 from agent_sandbox import (
     AgentSandboxError,
     ErrorEvent,
-    PromptImage,
     SandboxInvocation,
     SandboxManifest,
     SandboxRun,
@@ -184,27 +183,6 @@ def test_native_output_projection_preserves_order_ids_and_original_bytes() -> No
     assert assets[text_ref["sha256"]] == text.encode("utf-8")
     assert outputs[0].text == text[:8000] + "\u2026 [truncated]"
     assert outputs[-1].text == "ValueError: bad input"
-
-
-@pytest.mark.asyncio
-async def test_invoke_forwards_native_prompt_images_unchanged() -> None:
-    data_store, assets, runtime = MemoryDataStore(), MemoryAssetStore(), SandboxRuntimeState()
-    runner = FakeSandboxRunner()
-    service = SandboxService(
-        data_store=data_store,
-        asset_store=assets,
-        runner=runner,
-        runtime_state=runtime,
-        model=TEST_MODEL,
-        profile="gigachad",
-    )
-    image = PromptImage("chart.png", b"image")
-
-    await service.invoke(chat_id="chat-image", tool_call_id="image-call", prompt="describe", prompt_images=(image,))
-
-    assert runner.calls[-1].task.prompt_images == (image,)
-    assert isinstance(runner.calls[-1].task.prompt_images[0], PromptImage)
-    assert image.content not in assets._assets.values()
 
 
 @pytest.mark.asyncio

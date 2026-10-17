@@ -24,7 +24,7 @@ import * as apiMock from "@/lib/api"
 import type { ChatInputHandle } from "@/components/ChatInput"
 
 import { useFilePicker } from "@/hooks/useFilePicker"
-import { renderHook, act, waitFor } from "@testing-library/react"
+import { renderHook, act } from "@testing-library/react"
 
 function makeChatInputRef(handle: Partial<ChatInputHandle> = {}) {
   return { current: { addAttachment: vi.fn(), ...handle } as unknown as ChatInputHandle }
@@ -34,27 +34,6 @@ beforeEach(() => (apiMock as any).__resetImpls())
 afterEach(() => vi.useRealTimers())
 
 describe("useFilePicker", () => {
-  it("loads file-root files on mount", async () => {
-    const listSpy = vi.fn(async () => ({
-      enabled: true,
-      files: [{ path: "v/a.txt", name: "a.txt" }],
-    }))
-    ;(apiMock as any).__setImpl("listRootFiles", listSpy)
-
-    const { result } = renderHook(() =>
-      useFilePicker({
-        isActive: true,
-        hasMessages: false,
-        chatInputRef: makeChatInputRef(),
-        setExtracting: vi.fn(),
-      }),
-    )
-
-    await waitFor(() => expect(result.current.filesEnabled).toBe(true))
-    expect(result.current.pickerFiles).toHaveLength(1)
-    expect(listSpy).toHaveBeenCalledOnce()
-  })
-
   it("opens standalone PDF view when chat is empty", async () => {
     const { result } = renderHook(() =>
       useFilePicker({

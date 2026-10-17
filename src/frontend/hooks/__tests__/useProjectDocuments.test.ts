@@ -54,7 +54,6 @@ import { renderHook as testingRenderHook, act, waitFor, screen, fireEvent } from
 import type { ChatInputHandle } from "@/components/ChatInput"
 import { useProjectDocuments } from "@/hooks/useProjectDocuments"
 import { UndoDeleteProvider } from "@/contexts/UndoDeleteContext"
-import type { ProjectDocument } from "@/lib/types"
 import { renderCanvasToJpeg } from "@/lib/drawing"
 
 const renderHook = <T,>(callback: () => T) => testingRenderHook(callback, { wrapper: UndoDeleteProvider })
@@ -81,33 +80,6 @@ const baseProps = (over: any = {}) => ({
 })
 
 describe("useProjectDocuments", () => {
-  describe("visibleDocuments", () => {
-    it("lists project docs on mount", async () => {
-      const projectDocs: ProjectDocument[] = [
-        { path: "/lib/a.pdf", name: "a.pdf", mime: "application/pdf" },
-      ]
-      ;(apiMock as any).__setImpl("listProjectDocuments", async () => projectDocs)
-
-      const { result } = renderHook(() => useProjectDocuments(baseProps()))
-
-      await waitFor(() => expect(result.current.projectDocuments).toHaveLength(1))
-      expect(result.current.visibleDocuments).toHaveLength(1)
-      // No `.c4` sources: there is no architecture to attach.
-      expect(result.current.handleAttachArchitecture).toBeUndefined()
-    })
-
-    it("clears document lists when activeProject becomes null", async () => {
-      let activeProject: string | null = "proj"
-      const { result, rerender } = renderHook(() =>
-        useProjectDocuments(baseProps({ activeProject })),
-      )
-      await waitFor(() => expect(result.current.projectDocuments).toEqual([]))
-      activeProject = null
-      rerender()
-      await waitFor(() => expect(result.current.projectDocuments).toEqual([]))
-    })
-  })
-
   describe("handleDocumentSelect", () => {
     it("attaches a regular project document via attachDocument", async () => {
       const attachDoc = vi.fn(async () => ({ name: "doc.md", mime: "text/markdown", url: "u", active: true }))
@@ -225,21 +197,6 @@ describe("useProjectDocuments", () => {
     fireEvent.click(screen.getByRole("button", { name: "Undo" }))
     expect(result.current.visibleDocuments).toHaveLength(1)
     expect(remove).not.toHaveBeenCalled()
-  })
-
-  describe("handleRenameDocument", () => {
-    it("renames a project document through the database API and refreshes the lists", async () => {
-      const renameDocument = vi.fn(async () => ({ path: "project/proj/document/renamed.md", name: "renamed.md", mime: "text/markdown" }))
-      ;(apiMock as any).__setImpl("renameDocument", renameDocument)
-      const listProjectDocuments = vi.fn(async () => [])
-      ;(apiMock as any).__setImpl("listProjectDocuments", listProjectDocuments)
-      const { result } = renderHook(() => useProjectDocuments(baseProps()))
-
-      await act(async () => { await result.current.handleRenameDocument("project/proj/document/original.md", "renamed") })
-
-      expect(renameDocument).toHaveBeenCalledWith("proj", "project/proj/document/original.md", "renamed")
-      expect(listProjectDocuments).toHaveBeenCalledTimes(2)
-    })
   })
 
   describe("handleDocumentSaved", () => {

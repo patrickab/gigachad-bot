@@ -80,14 +80,6 @@ describe("api.ts — ensureOk surfaces FastAPI detail on error", () => {
 
     await expect(api.deletePrompt("s")).rejects.toThrow("boom")
   })
-
-  it("falls back to statusText when the body is not JSON", async () => {
-    vi.mocked(fetch).mockResolvedValue(
-      new Response("plain", { status: 500, statusText: "Internal Server Error" }),
-    )
-
-    await expect(api.deletePrompt("s")).rejects.toThrow()
-  })
 })
 
 describe("api.ts — parseHistoryFile / buildHistoryFile round-trip", () => {

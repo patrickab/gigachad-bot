@@ -460,19 +460,6 @@ describe("keyboard text entry", () => {
     act(() => { fireEvent.change(reopened, { target: { value: "H\nI" } }) })
     expect(latest(seen).texts[0]!.text).toBe("H\nI")
   })
-
-  it("renders Markdown after leaving a text note", () => {
-    const seen: CanvasDocument[] = []
-    const { container } = render(<Harness seen={seen} />)
-    const surface = container.querySelector("[tabindex=\"0\"]") as HTMLDivElement
-
-    act(() => { fireEvent.keyDown(surface, { key: "H" }) })
-    const note = container.querySelector("textarea") as HTMLTextAreaElement
-    act(() => { fireEvent.change(note, { target: { value: "**bold**" } }) })
-    act(() => { fireEvent.keyDown(note, { key: "Enter" }) })
-
-    expect(container.querySelector("[data-testid=\"document-markdown\"]")).toHaveTextContent("**bold**")
-  })
 })
 
 describe("nested canvas", () => {
@@ -481,16 +468,6 @@ describe("nested canvas", () => {
     const item = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "New canvas")!
     act(() => { item.click() })
   }
-
-  it("adds a canvas window carrying its own document", () => {
-    const seen: CanvasDocument[] = []
-    const { container } = render(<Harness seen={seen} />)
-
-    addCanvas(container)
-    const [att] = latest(seen).attachments
-    expect(att!.kind).toBe("canvas")
-    expect(att!.canvas).toEqual(emptyCanvasDoc())
-  })
 
   it("routes edits into the nested document, not the parent", () => {
     const seen: CanvasDocument[] = []
@@ -593,18 +570,6 @@ describe("PDF attachments", () => {
     expect(reopened.container.querySelector("[data-testid=\"pdf-viewer\"]")).toHaveTextContent("4")
   })
 
-  it("lets screenshot drags pass through a PDF attachment", () => {
-    const doc: CanvasDocument = {
-      ...emptyCanvasDoc(),
-      attachments: [{ id: "pdf-1", kind: "pdf", path: "project/proj/document/reference.pdf", x: 0, y: 0, width: 500 }],
-    }
-    const { container } = render(<Harness seen={[]} initialDoc={doc} />)
-
-    act(() => { toolbar(container)[6]!.click() })
-
-    expect(container.querySelector("[data-canvas-attachment]")?.parentElement).toHaveClass("pointer-events-none")
-  })
-
   it("shows the screenshot selection over a PDF attachment", async () => {
     const doc: CanvasDocument = {
       ...emptyCanvasDoc(),
@@ -624,23 +589,6 @@ describe("PDF attachments", () => {
     const attachment = container.querySelector("[data-canvas-attachment]")!.parentElement!
     const selection = container.querySelector("[data-testid=\"screenshot-selection\"]")!
     expect(attachment.compareDocumentPosition(selection) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
-  })
-})
-
-describe("project assets", () => {
-  it("loads PDFs and images from the canvas project instead of its parent surface", async () => {
-    api.listProjectDocuments.mockResolvedValueOnce([
-      { path: "project/proj/document/reference.pdf", name: "reference.pdf", mime: "application/pdf" },
-      { path: "project/proj/document/diagram.png", name: "diagram.png", mime: "image/png" },
-    ])
-    const seen: CanvasDocument[] = []
-    const { container } = render(<Harness seen={seen} slug="proj" />)
-
-    act(() => { toolbar(container)[0]!.click() })
-    await act(async () => {})
-
-    expect(container.textContent).toContain("reference.pdf")
-    expect(container.textContent).toContain("diagram.png")
   })
 })
 

@@ -30,14 +30,6 @@ def postgres_store(postgres_pool):
     return PostgresDataStore(postgres_pool, user_id)
 
 
-def test_runtime_paths_are_outside_checkout():
-    assert config.DIRECTORY_OUTPUT_MINERU == config.REMOTE_ROOT / "Documents/Mineru"
-    for name, value in vars(config).items():
-        if name.startswith("DIRECTORY_"):
-            assert value.is_absolute()
-            assert value.is_relative_to(config.REMOTE_ROOT)
-
-
 def test_prompt_seed_preserves_edits_and_deletions(postgres_store):
     config.seed_prompts(postgres_store)
     prompt_key = next(

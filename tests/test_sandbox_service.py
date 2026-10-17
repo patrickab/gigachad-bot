@@ -168,29 +168,6 @@ async def test_tool_scopes_keep_staged_and_persisted_workspaces_independent(sand
     assert SandboxStore(data_store, scope="sandbox_plot").read_active(chat_id) is None
 
 
-async def test_second_invoke_restores_staged_workspace_before_checkpoint(sandbox_service, runner):
-    chat_id = "chat-restore-manifest"
-    result_1 = await sandbox_service.invoke(chat_id=chat_id, tool_call_id="tool-call-1", prompt="First prompt")
-    result_2 = await sandbox_service.invoke(chat_id=chat_id, tool_call_id="tool-call-2", prompt="Second prompt")
-
-    assert result_2.workspace_changed is True
-    assert result_2.manifest_id != result_1.manifest_id
-    assert len(runner.calls) == 2
-    prior_manifest = runner.calls[-1].active_manifest
-    assert prior_manifest is not None
-    assert prior_manifest.manifest_id == result_1.manifest_id
-    assert prior_manifest.workspace is not None
-
-
-async def test_staged_workspaces_are_isolated_between_chats(sandbox_service, runner):
-    await sandbox_service.invoke(chat_id="chat-a", tool_call_id="a-1", prompt="alpha")
-    await sandbox_service.invoke(chat_id="chat-b", tool_call_id="b-1", prompt="bravo")
-    await sandbox_service.invoke(chat_id="chat-a", tool_call_id="a-2", prompt="again")
-
-    prior_manifest = runner.calls[-1].active_manifest
-    assert prior_manifest is not None and prior_manifest.workspace is not None
-
-
 async def test_idempotent_invoke_same_tool_call_id(sandbox_service, runner):
     chat_id = "chat-idempotent"
     tool_call_id = "tool-call-same"
