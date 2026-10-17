@@ -89,8 +89,22 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
   const Icon = meta?.icon ?? Wrench
   // A plot, diagram, or mind map is its own headline, so the header carries no argument.
   const argument = shown.family === "plot" || shown.family === "diagram" || shown.family === "mindmap" ? "" : primaryArgument(call.arguments)
-  const status = runningStage?.label ?? (call.status === "running" ? "running" : call.status === "error" ? "failed" : call.summary)
+  // A running stage already names itself inline beside the card label.
+  const status = call.status === "running" ? (stages.length > 0 ? "" : "running") : call.status === "error" ? "failed" : call.summary
 
+  const stageTimeline = stages.length > 0 && (
+    <span className="flex min-w-0 items-center gap-x-3 truncate text-[10px]">
+      {stages.map((stage) => (
+        <span key={stage.id} className="flex shrink-0 items-center gap-1.5">
+          {stage.status === "running" && <Loader2 className="h-3 w-3 animate-spin text-ink-faint" aria-hidden="true" />}
+          <span className="tabular-nums text-ink-faint">{stageDuration(stage, now)}</span>
+          <span className={stage.status === "running" ? "text-ink" : stage.status === "error" ? "text-danger" : "text-ink-muted"}>
+            {stage.status === "error" ? "Failed" : stage.label}
+          </span>
+        </span>
+      ))}
+    </span>
+  )
   const header = <>
     <div className="mt-0.5 shrink-0">
       <div className="flex h-7 w-7 items-center justify-center rounded-xl border border-divider bg-surface-elevated">
@@ -98,27 +112,14 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
       </div>
     </div>
     <div className="min-w-0 flex-1 flex flex-col">
-      <div className="mb-0.5 text-xs font-medium text-ink-subtle">{meta?.cardLabel ?? call.name}</div>
-      {argument && <span className="truncate text-sm text-ink">{argument}</span>}
+      <div className="flex min-w-0 items-center gap-x-4">
+        <span className="shrink-0 text-xs font-medium text-ink-subtle">{meta?.cardLabel ?? call.name}</span>
+        {stageTimeline}
+      </div>
+      {argument && <span className="mt-0.5 truncate text-sm text-ink">{argument}</span>}
     </div>
     {status && <span className="mt-1 shrink-0 text-[10px] tabular-nums text-ink-faint">{status}</span>}
   </>
-
-  const stageTimeline = stages.length > 0 && (
-    <ol className="space-y-1 border-t border-divider px-6 py-3 pl-[4.5rem]">
-      {stages.map((stage) => (
-        <li key={stage.id} className="flex items-center gap-2 text-[10px]">
-          <span className="flex h-3 w-3 shrink-0 items-center justify-center">
-            {stage.status === "running" && <Loader2 className="h-3 w-3 animate-spin text-ink-faint" aria-hidden="true" />}
-          </span>
-          <span className="shrink-0 tabular-nums text-ink-faint">{stageDuration(stage, now)}</span>
-          <span className={cn("truncate", stage.status === "running" ? "text-ink" : stage.status === "error" ? "text-danger" : "text-ink-muted")}>
-            {stage.status === "error" ? "Failed" : stage.label}
-          </span>
-        </li>
-      ))}
-    </ol>
-  )
 
   const familyDetails = shown.family === "sources" ? <>
     {shown.costs !== null && <p className="text-[10px] tabular-nums text-ink-faint">cost ${shown.costs.toFixed(4)}</p>}
@@ -158,9 +159,6 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
           <ChevronDown className={cn("mt-1 h-4 w-4 shrink-0 text-ink-faint transition-transform", open && "rotate-180")} aria-hidden="true" />
         </button>
       )}
-
-      {stageTimeline}
-
 
       {shown.family === "mindmap" && (
         <div className="px-6 pb-5 pl-[3.25rem]">

@@ -1,7 +1,9 @@
 "use client"
 
 import dynamic from "next/dynamic"
-import { memo, useEffect, useMemo, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Download, Maximize2, Minimize2 } from "lucide-react"
+import { cn } from "@/lib/utils"
 
 export interface PlotFigure {
   data?: unknown[]
@@ -61,7 +63,7 @@ function chartHeightFor(width: number, rows: number) {
 
 // react-plotly calls `Plotly.react` whenever `data`, `layout` or `config` changes identity,
 // so these must stay module-level: an inline object redraws every plot on every host render.
-const PLOT_CONFIG = { responsive: false, displaylogo: false, displayModeBar: "hover" } as const
+const PLOT_CONFIG = { responsive: false, displaylogo: false, displayModeBar: false } as const
 const NO_TRACES: unknown[] = []
 
 /** Renders a figure the `sandbox_plot` tool produced. Theme values remain defaults the model can
@@ -69,7 +71,10 @@ const NO_TRACES: unknown[] = []
  *  pan/zoom re-renders its host every frame while the figure stays the same object. */
 export const PlotElement = memo(function PlotElement({ figure }: PlotElementProps) {
   const hostRef = useRef<HTMLDivElement>(null)
-  const [hostWidth, setHostWidth] = useState(0)
+  const graphRef = useRef<HTMLElement | null>(null)
+  // Height only counts in fullscreen; inline it follows the width-based aspect ratio.
+  const [hostSize, setHostSize] = useState({ width: 0, height: 0 })
+  const [isFullscreen, setIsFullscreen] = useState(false)
   // Theme colors are read once in the layout memo below, and a `.light` class toggle on <html>
   // changes none of its deps. `themeTick` bumps on that toggle to force a re-read.
   const [themeTick, setThemeTick] = useState(0)
@@ -79,14 +84,50 @@ export const PlotElement = memo(function PlotElement({ figure }: PlotElementProp
     if (!host) return
 
     // Ignore zero widths (hidden/collapsed host) so Plot never mounts at 0px
-    const updateWidth = (width: number) => setHostWidth((current) => {
-      const next = Math.round(width)
-      return next > 0 && next !== current ? next : current
+    const updateSize = (width: number, height: number) => setHostSize((current) => {
+      const next = {
+        width: Math.round(width),
+        height: host === document.fullscreenElement ? Math.round(height) : 0,
+      }
+      const isUnchanged = next.width === current.width && next.height === current.height
+      return next.width > 0 && !isUnchanged ? next : current
     })
-    const observer = new ResizeObserver(([entry]) => updateWidth(entry?.contentRect.width ?? host.clientWidth))
+    const observer = new ResizeObserver(([entry]) => updateSize(
+      entry?.contentRect.width ?? host.clientWidth,
+      entry?.contentRect.height ?? host.clientHeight,
+    ))
     observer.observe(host)
-    updateWidth(host.clientWidth)
-    return () => observer.disconnect()
+    updateSize(host.clientWidth, host.clientHeight)
+
+    // Measure in the same batch as the flag so the plot redraws once at its final size.
+    const syncFullscreen = () => {
+      setIsFullscreen(document.fullscreenElement === host)
+      updateSize(host.clientWidth, host.clientHeight)
+    }
+    document.addEventListener("fullscreenchange", syncFullscreen)
+    return () => {
+      observer.disconnect()
+      document.removeEventListener("fullscreenchange", syncFullscreen)
+    }
+  }, [])
+
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement === hostRef.current) void document.exitFullscreen()
+    else void hostRef.current?.requestFullscreen()
+  }, [])
+
+  /** Export a PNG on the page background, since the live plot is transparent. */
+  const downloadPng = useCallback(async () => {
+    const graph = graphRef.current
+    if (!graph) return
+    const { default: Plotly } = await import("plotly.js-dist-min")
+    const paper = getComputedStyle(document.documentElement).getPropertyValue("--paper").trim()
+    await Plotly.relayout(graph, { paper_bgcolor: paper })
+    try {
+      await Plotly.downloadImage(graph, { format: "png", filename: "plot", width: graph.clientWidth, height: graph.clientHeight })
+    } finally {
+      await Plotly.relayout(graph, { paper_bgcolor: "transparent" })
+    }
   }, [])
 
   useEffect(() => {
@@ -97,8 +138,10 @@ export const PlotElement = memo(function PlotElement({ figure }: PlotElementProp
 
   const subplotRows = useMemo(() => subplotRowsFor(figure.layout), [figure.layout])
   const dimensions = useMemo(
-    () => hostWidth > 0 ? { width: hostWidth, height: chartHeightFor(hostWidth, subplotRows) } : null,
-    [hostWidth, subplotRows],
+    () => hostSize.width > 0
+      ? { width: hostSize.width, height: hostSize.height || chartHeightFor(hostSize.width, subplotRows) }
+      : null,
+    [hostSize, subplotRows],
   )
 
   const layout = useMemo(() => {
@@ -154,7 +197,10 @@ export const PlotElement = memo(function PlotElement({ figure }: PlotElementProp
   }, [dimensions, figure.layout, themeTick])
 
   return (
-    <div ref={hostRef} className="w-full overflow-hidden rounded-lg">
+    <div
+      ref={hostRef}
+      className="group relative w-full overflow-hidden rounded-lg [&:fullscreen]:rounded-none [&:fullscreen]:bg-[var(--paper)]"
+    >
       {dimensions && (
         <Plot
           data={figure.data ?? NO_TRACES}
@@ -162,8 +208,27 @@ export const PlotElement = memo(function PlotElement({ figure }: PlotElementProp
           frames={figure.frames}
           config={PLOT_CONFIG}
           style={{ width: "100%", height: `${dimensions.height}px` }}
+          onInitialized={(_figure, graph) => { graphRef.current = graph }}
         />
       )}
+      <div className="absolute right-2 top-2 z-10 flex gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+        <button
+          type="button"
+          onClick={() => void downloadPng()}
+          aria-label="Download plot"
+          className="rounded p-1.5 text-ink-subtle transition-colors hover:bg-hover hover:text-ink"
+        >
+          <Download className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          onClick={toggleFullscreen}
+          aria-label={isFullscreen ? "Exit plot fullscreen" : "Enter plot fullscreen"}
+          className="rounded p-1.5 text-ink-subtle transition-colors hover:bg-hover hover:text-ink"
+        >
+          {isFullscreen ? <Minimize2 className="h-3.5 w-3.5" aria-hidden="true" /> : <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />}
+        </button>
+      </div>
     </div>
   )
 })
