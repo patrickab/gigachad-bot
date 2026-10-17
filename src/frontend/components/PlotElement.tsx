@@ -109,9 +109,11 @@ export const PlotElement = memo(function PlotElement({ figure }: PlotElementProp
     const isLight = root.classList.contains("light")
     const ink = style.getPropertyValue("--ink").trim()
     const surfaceElevated = style.getPropertyValue("--surface-elevated").trim()
-    const grid = style.getPropertyValue("--divider").trim()
+    const grid = style.getPropertyValue("--chart-grid").trim()
     const sansFont = style.getPropertyValue("--font-sans").trim() || "system-ui, sans-serif"
     const axisDefaults = { gridcolor: grid, zerolinecolor: grid, linecolor: grid }
+    // WebGL composites translucent walls on a transparent scene as near-white, so 3D walls stay off
+    const sceneAxisDefaults = { ...axisDefaults, showbackground: false }
     const themedAxes = Object.fromEntries(
       Object.entries(modelLayout)
         .filter(([key, value]) => /^(?:x|y)axis\d*$/.test(key) && value && typeof value === "object")
@@ -135,9 +137,9 @@ export const PlotElement = memo(function PlotElement({ figure }: PlotElementProp
         ...modelScene,
         aspectmode: modelScene?.aspectmode ?? "cube",
         bgcolor: "transparent",
-        xaxis: { ...(modelScene?.xaxis as Record<string, unknown> | undefined), ...axisDefaults },
-        yaxis: { ...(modelScene?.yaxis as Record<string, unknown> | undefined), ...axisDefaults },
-        zaxis: { ...(modelScene?.zaxis as Record<string, unknown> | undefined), ...axisDefaults },
+        xaxis: { ...(modelScene?.xaxis as Record<string, unknown> | undefined), ...sceneAxisDefaults },
+        yaxis: { ...(modelScene?.yaxis as Record<string, unknown> | undefined), ...sceneAxisDefaults },
+        zaxis: { ...(modelScene?.zaxis as Record<string, unknown> | undefined), ...sceneAxisDefaults },
       },
       hoverlabel: {
         bgcolor: surfaceElevated,

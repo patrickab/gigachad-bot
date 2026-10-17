@@ -39,9 +39,6 @@ export interface ChatSidebarContextValue {
   onRenameDocument?: (path: string, name: string) => void | Promise<void>
   onDocumentSaved?: (filename?: string, content?: string) => void
   liveCanvasRef?: React.MutableRefObject<{ path: string; content: string } | null>
-  rootFilePaths?: Set<string>
-  fileEditingPath?: string | null
-  onEditRootDocument?: (path: string | null) => void
   /** Model behind the editor's LLM features (assistant sidebar, inline edit). */
   editorModel?: string
 }
@@ -186,7 +183,7 @@ function ContextBody({
   )
 }
 
-function DocumentRow({ doc, slug, onSelect, editingPath, onEdit, onDelete, onRename, onSaved, onLiveContent, pdfWide, onTogglePdfWide, isRootFile, fileEditingPath, onEditRootFile }: {
+function DocumentRow({ doc, slug, onSelect, editingPath, onEdit, onDelete, onRename, onSaved, onLiveContent, pdfWide, onTogglePdfWide }: {
   doc: ProjectDocument
   slug: string | null
   onSelect?: (path: string) => void
@@ -198,9 +195,6 @@ function DocumentRow({ doc, slug, onSelect, editingPath, onEdit, onDelete, onRen
   onLiveContent?: (path: string, content: string | null) => void
   pdfWide?: boolean
   onTogglePdfWide?: () => void
-  isRootFile: boolean
-  fileEditingPath?: string | null
-  onEditRootFile?: (path: string | null) => void
 }) {
   const [editingTitle, setEditingTitle] = useState(false)
   const { editorModel } = useContext(ChatSidebarContext)
@@ -208,10 +202,9 @@ function DocumentRow({ doc, slug, onSelect, editingPath, onEdit, onDelete, onRen
   const selectTimer = useRef<number | undefined>(undefined)
   const cancelRename = useRef(false)
   const isPdf = doc.mime === "application/pdf"
-  const rootText = isRootFile && !isPdf
   // Extensions DocumentEditor can open
-  const editable = /\.(md|tex|canvas|c4)$/.test(doc.name) && !rootText
-  const expanded = editingPath === doc.path || (rootText && fileEditingPath === doc.path)
+  const editable = /\.(md|tex|canvas|c4)$/.test(doc.name)
+  const expanded = editingPath === doc.path
   const Icon = isPdf ? FileType : FileText
 
   useEffect(() => () => window.clearTimeout(selectTimer.current), [])
@@ -223,10 +216,9 @@ function DocumentRow({ doc, slug, onSelect, editingPath, onEdit, onDelete, onRen
 
   const startRename = useCallback((event: React.MouseEvent) => {
     event.stopPropagation()
-    if (isRootFile) return
     window.clearTimeout(selectTimer.current)
     setEditingTitle(true)
-  }, [isRootFile])
+  }, [])
 
   const finishRename = useCallback((name: string) => {
     setEditingTitle(false)
@@ -243,10 +235,7 @@ function DocumentRow({ doc, slug, onSelect, editingPath, onEdit, onDelete, onRen
         <button
           type="button"
           aria-label={`${expanded ? "Close" : "Open"} ${doc.name} editor`}
-          onClick={() => {
-            if (rootText) onEditRootFile?.(expanded ? null : doc.path)
-            else onEdit?.(expanded ? null : doc.path)
-          }}
+          onClick={() => onEdit?.(expanded ? null : doc.path)}
           className="rounded p-0.5 text-ink-faint hover:text-ink hover:bg-surface-elevated transition-colors shrink-0"
         >
           {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
@@ -278,15 +267,13 @@ function DocumentRow({ doc, slug, onSelect, editingPath, onEdit, onDelete, onRen
             <span className="block truncate text-[11px] font-medium" onDoubleClick={startRename}>{doc.name}</span>
           </button>
         )}
-        {!isRootFile && (
-          <button aria-label={`Delete ${doc.name}`}
-            type="button"
-            onClick={() => onDelete?.(doc.path)}
-            className="rounded p-0.5 text-ink-faint hover:text-danger hover:bg-surface-elevated transition-colors shrink-0"
-          >
-            <X className="h-3 w-3" />
-          </button>
-        )}
+        <button aria-label={`Delete ${doc.name}`}
+          type="button"
+          onClick={() => onDelete?.(doc.path)}
+          className="rounded p-0.5 text-ink-faint hover:text-danger hover:bg-surface-elevated transition-colors shrink-0"
+        >
+          <X className="h-3 w-3" />
+        </button>
       </div>
       {expanded && editable && slug && (
         <DocumentEditor path={doc.path} slug={slug} onClose={() => onEdit?.(null)} onSaved={onSaved} onLiveContent={onLiveContent} model={editorModel} />
@@ -305,7 +292,7 @@ function DocumentRow({ doc, slug, onSelect, editingPath, onEdit, onDelete, onRen
   )
 }
 
-function DocumentsBody({ documents, slug, onSelect, onAttachArchitecture, architectureError, editingPath, onEdit, onDelete, onRename, onSaved, onLiveContent, pdfWide, onTogglePdfWide, rootFilePaths, fileEditingPath, onEditRootFile }: { documents: ProjectDocument[]; slug: string | null; onSelect?: (path: string) => void; onAttachArchitecture?: () => Promise<void>; architectureError?: string; editingPath?: string | null; onEdit?: (path: string | null) => void; onDelete?: (path: string) => void; onRename?: (path: string, name: string) => void | Promise<void>; onSaved?: (filename?: string, content?: string) => void; onLiveContent?: (path: string, content: string | null) => void; pdfWide?: boolean; onTogglePdfWide?: () => void; rootFilePaths?: Set<string>; fileEditingPath?: string | null; onEditRootFile?: (path: string | null) => void }) {
+function DocumentsBody({ documents, slug, onSelect, onAttachArchitecture, architectureError, editingPath, onEdit, onDelete, onRename, onSaved, onLiveContent, pdfWide, onTogglePdfWide }: { documents: ProjectDocument[]; slug: string | null; onSelect?: (path: string) => void; onAttachArchitecture?: () => Promise<void>; architectureError?: string; editingPath?: string | null; onEdit?: (path: string | null) => void; onDelete?: (path: string) => void; onRename?: (path: string, name: string) => void | Promise<void>; onSaved?: (filename?: string, content?: string) => void; onLiveContent?: (path: string, content: string | null) => void; pdfWide?: boolean; onTogglePdfWide?: () => void }) {
   if (documents.length === 0) {
     return (
       <div className="flex items-center justify-center py-6 text-xs text-ink-faint">
@@ -332,9 +319,6 @@ function DocumentsBody({ documents, slug, onSelect, onAttachArchitecture, archit
           onLiveContent={onLiveContent}
           pdfWide={pdfWide}
           onTogglePdfWide={onTogglePdfWide}
-          isRootFile={rootFilePaths?.has(doc.path) ?? false}
-          fileEditingPath={fileEditingPath}
-          onEditRootFile={onEditRootFile}
         />
       ))}
     </div>
@@ -461,9 +445,6 @@ export function useSidebarElements({
     onRenameDocument,
     onDocumentSaved,
     liveCanvasRef,
-    rootFilePaths,
-    fileEditingPath,
-    onEditRootDocument,
   } = useContext(ChatSidebarContext)
 
   return useMemo(() => {
@@ -534,7 +515,7 @@ export function useSidebarElements({
       open: isElementOpen("documents"),
       onOpenChange: (o) => onElementOpenChange("documents", o),
       body: (
-        <DocumentsBody documents={docs} slug={slug} onSelect={onSelectDocument} onAttachArchitecture={onAttachArchitecture} architectureError={architectureError} editingPath={editingDocPath} onEdit={onEditDocument} onDelete={onDeleteDocument} onRename={onRenameDocument} onSaved={onDocumentSaved} onLiveContent={liveCanvasRef ? (p, c) => { liveCanvasRef.current = c !== null ? { path: p, content: c } : null } : undefined} pdfWide={pdfWide} onTogglePdfWide={onTogglePdfWide} rootFilePaths={rootFilePaths} fileEditingPath={fileEditingPath} onEditRootFile={onEditRootDocument} />
+        <DocumentsBody documents={docs} slug={slug} onSelect={onSelectDocument} onAttachArchitecture={onAttachArchitecture} architectureError={architectureError} editingPath={editingDocPath} onEdit={onEditDocument} onDelete={onDeleteDocument} onRename={onRenameDocument} onSaved={onDocumentSaved} onLiveContent={liveCanvasRef ? (p, c) => { liveCanvasRef.current = c !== null ? { path: p, content: c } : null } : undefined} pdfWide={pdfWide} onTogglePdfWide={onTogglePdfWide} />
       ),
     })
   }
@@ -561,7 +542,7 @@ export function useSidebarElements({
     documents, onSelectDocument, onAttachArchitecture, architectureError, onOpenDocuments, onCreateDocument,
     editingDocPath, onEditDocument, onDeleteDocument, onRenameDocument, onDocumentSaved,
     isElementOpen, onElementOpenChange, pdfWide, onTogglePdfWide,
-    liveCanvasRef, rootFilePaths, fileEditingPath, onEditRootDocument,
+    liveCanvasRef,
   ])
 }
 

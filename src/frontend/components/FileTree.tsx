@@ -6,7 +6,6 @@ import {
   Brain,
   ChevronRight,
   Folder,
-  HardDrive,
   Plus,
   Trash2,
 } from "lucide-react"
@@ -27,10 +26,6 @@ export interface FileTreeItem<T = unknown> {
   isSystem?: boolean
   displayInRoot?: boolean
   badge?: string | number
-  /** File root accepts mountpoints, shows the mount (HardDrive) hover button. */
-  mountable?: boolean
-  /** This file root row is a mounted FileRoots (not a native tree file root like a project). */
-  mounted?: boolean
 }
 
 interface FileTreeProps<T> {
@@ -59,8 +54,6 @@ interface FileTreeProps<T> {
   renderElement?: (item: FileTreeItem<T>, depth: number) => React.ReactNode
   onAddRoot?: (name: string) => Promise<void>
   rootPlaceholder?: string
-  onAddMountpoint?: (rootId: string, path: string) => Promise<void>
-  mountpointPlaceholder?: string
   onAddFolder?: (parentId: string | null, name: string) => Promise<void>
   folderPlaceholder?: string
   folderIcon?: ElementType
@@ -102,18 +95,16 @@ interface TreeCtx<T> {
   onAddFolder?: (parentId: string | null, name: string) => Promise<void>
   folderPlaceholder: string
   folderIcon: ElementType
-  onAddMountpoint?: (rootId: string, path: string) => Promise<void>
-  mountpointPlaceholder: string
   onDashboardClick?: (rootId: string) => void
   onMemoryClick?: (rootId: string) => void
   multiSelect: boolean
   selectedIds: Set<string>
   /** Applies ctrl/shift selection; returns true when the click was a pure selection gesture. */
   onSelectClick: (item: FileTreeItem<T>, e: React.MouseEvent) => boolean
-  createMode: "root" | "folder" | "mountpoint" | null
+  createMode: "root" | "folder" | null
   createParentId: string | null
   createName: string
-  setCreateMode: (mode: "root" | "folder" | "mountpoint" | null) => void
+  setCreateMode: (mode: "root" | "folder" | null) => void
   setCreateParentId: (id: string | null) => void
   setCreateName: (name: string) => void
   handleCreateSubmit: () => Promise<void>
@@ -160,8 +151,6 @@ export function FileTree<T>({
   renderElement,
   onAddRoot,
   rootPlaceholder = "Project name",
-  onAddMountpoint,
-  mountpointPlaceholder = "Mountpoint path…",
   onAddFolder,
   folderPlaceholder = "Folder name",
   folderIcon = Folder,
@@ -171,7 +160,7 @@ export function FileTree<T>({
   multiSelect = false,
   onDropFiles,
 }: FileTreeProps<T>) {
-  const [createMode, setCreateMode] = useState<"root" | "folder" | "mountpoint" | null>(null)
+  const [createMode, setCreateMode] = useState<"root" | "folder" | null>(null)
   const [createParentId, setCreateParentId] = useState<string | null>(null)
   const [createName, setCreateName] = useState("")
   const [dragOverId, setDragOverId] = useState<string | null>(null)
@@ -187,8 +176,6 @@ export function FileTree<T>({
       await onAddRoot?.(createName.trim())
     } else if (createMode === "folder") {
       await onAddFolder?.(createParentId, createName.trim())
-    } else if (createMode === "mountpoint") {
-      if (createParentId) await onAddMountpoint?.(createParentId, createName.trim())
     }
     setCreateName("")
     setCreateMode(null)
@@ -284,8 +271,6 @@ export function FileTree<T>({
     onAddFolder,
     folderPlaceholder,
     folderIcon,
-    onAddMountpoint,
-    mountpointPlaceholder,
     onDashboardClick,
     onMemoryClick,
     multiSelect,
@@ -430,8 +415,6 @@ function BranchNode<T>({ item, depth }: { item: FileTreeItem<T>; depth: number }
     onAddFolder,
     folderPlaceholder,
     folderIcon,
-    onAddMountpoint,
-    mountpointPlaceholder,
     onMemoryClick,
     createMode,
     createParentId,
@@ -458,7 +441,6 @@ function BranchNode<T>({ item, depth }: { item: FileTreeItem<T>; depth: number }
         className={cn(
           "flex items-center gap-1.5 rounded-md transition-colors duration-200 ease-out group",
           multiSelect && "select-none",
-          selectedIds.has(item.id) && "bg-surface-elevated",
           dragOverId === item.id && "ring-1 ring-ink-muted bg-surface-elevated",
         )}
         onDragOver={(e) => { e.stopPropagation(); onDragOver(e, item.id) }}
@@ -497,7 +479,7 @@ function BranchNode<T>({ item, depth }: { item: FileTreeItem<T>; depth: number }
           )}
         </button>
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-          {isRootNode && !item.mounted && onMemoryClick && (
+          {isRootNode && onMemoryClick && (
             <button aria-label={`Open memory for ${item.label}`}
               onClick={(e) => { e.stopPropagation(); onMemoryClick(item.id) }}
               className="p-0.5 rounded text-ink-faint hover:text-ink transition-colors"
@@ -518,22 +500,8 @@ function BranchNode<T>({ item, depth }: { item: FileTreeItem<T>; depth: number }
               <Plus className="h-3 w-3" />
             </button>
           )}
-          {isRootNode && item.mountable && onAddMountpoint && (
-            <button aria-label={`Add mountpoint to ${item.label}`}
-              onClick={(e) => {
-                e.stopPropagation()
-                setCreateMode("mountpoint")
-                setCreateParentId(item.id)
-                setCreateName("")
-                controller.expand(item.id)
-              }}
-              className="p-0.5 rounded text-ink-faint hover:text-ink transition-colors"
-            >
-              <HardDrive className="h-3 w-3" />
-            </button>
-          )}
           {onRootDelete && (
-            <button aria-label={`${item.mounted ? "Unmount" : "Delete"} ${item.label}`}
+            <button aria-label={`Delete ${item.label}`}
               onClick={(e) => { e.stopPropagation(); onRootDelete(item.id) }}
               className="p-0.5 rounded text-ink-faint hover:text-danger transition-colors"
             >
@@ -558,16 +526,16 @@ function BranchNode<T>({ item, depth }: { item: FileTreeItem<T>; depth: number }
       </AnimatePresence>
 
       <AnimatePresence>
-        {(createMode === "folder" || createMode === "mountpoint") && createParentId === item.id && (
+        {createMode === "folder" && createParentId === item.id && (
           <InlineCreateForm
-            key={`${createMode}-create`}
+            key="folder-create"
             depth={depth + 1}
             value={createName}
             onChange={setCreateName}
             onSubmit={handleCreateSubmit}
             onCancel={() => { setCreateMode(null); setCreateName("") }}
-            placeholder={createMode === "mountpoint" ? mountpointPlaceholder : folderPlaceholder}
-            icon={createMode === "mountpoint" ? HardDrive : folderIcon}
+            placeholder={folderPlaceholder}
+            icon={folderIcon}
           />
         )}
       </AnimatePresence>
@@ -600,7 +568,6 @@ function ElementNode<T>({ item, depth }: { item: FileTreeItem<T>; depth: number 
         className={cn(
           "flex items-center gap-1 py-0.5 group rounded-md",
           multiSelect && "select-none",
-          selectedIds.has(item.id) && "bg-surface-elevated",
         )}
         style={{ paddingRight: 8 }}
       >

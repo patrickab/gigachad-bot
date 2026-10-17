@@ -17,57 +17,63 @@
    Role tokens (--ink, --paper, --surface, ...) are the only colors components use.
    Derived tokens (--divider, --hover-overlay, ...) are color-mix of role tokens.
    Dark is the default (:root), `.light` overrides the role tokens. All role tokens
-   are OKLCH with a warm hue (~85) and tiny chroma. Tailwind utilities come from @theme below. */
+   are OKLCH with a warm hue and tiny chroma to stay monochromatic.
+   Tailwind utilities come from @theme below. */
 
  :root {
    --shadow-strength: 0.35;
-   --shadow-color: oklch(19% 0.011 83);
+   --shadow-color: oklch(4% 0.006 55);
 
-    /* --- Text (ink) --- */
-    --ink:        oklch(92% 0.007 83);
-    --ink-muted:  oklch(70% 0.011 83);
-    --ink-subtle: oklch(54% 0.011 83);
-    --ink-faint:  oklch(42% 0.009 83);
- 
-   /* --- Surfaces — warm-tinted dark greys (not near-black) --- */
-   --paper:            oklch(20% 0.006 83);
-   --surface:          oklch(25% 0.007 83);
-   --surface-elevated: oklch(31% 0.008 83);
-   --overlay:          oklch(17% 0.006 83);
- 
+   /* --- Text (ink): cream, never pure white --- */
+   --ink:        oklch(94% 0.010 75);
+   --ink-muted:  oklch(75% 0.013 70);
+   --ink-subtle: oklch(59% 0.012 65);
+   --ink-faint:  oklch(48% 0.010 60);
+
+   /* --- Surfaces: warm near-black. Hue 55 stays brown at low lightness,
+          hue 80+ turns olive and muddy there. --- */
+   --paper:            oklch(14%   0.008 55);
+   --surface:          oklch(18%   0.009 55);
+   --surface-elevated: oklch(22.5% 0.010 55);
+   --overlay:          oklch(11.5% 0.007 55);
+
    /* --- Danger (red, reserved for destructive actions only) --- */
    --danger:      oklch(68% 0.20 25);
- 
+
    /* --- Backdrop for modal scrims --- */
    --backdrop:    oklch(0% 0 0 / 0.65);
- 
-    /* --- Derived: dividers (recompute when --ink changes) --- */
-    --divider:         color-mix(in oklab, var(--ink) 20%, transparent);
-    --divider-strong:  color-mix(in oklab, var(--ink) 36%, transparent);
- 
+
+   /* --- Chart grid: opaque rgb, about 12% --ink over --surface-elevated. Plotly can't parse
+          color-mix(), and its WebGL 3D scenes render translucent or oklch colors near-white --- */
+   --chart-grid:  rgb(57, 52, 48);
+
+   /* --- Derived: dividers (recompute when --ink changes) --- */
+   --divider:         color-mix(in oklab, var(--ink) 11%, transparent);
+   --divider-strong:  color-mix(in oklab, var(--ink) 22%, transparent);
+
    /* --- Derived: danger tints --- */
    --danger-soft:     color-mix(in oklab, var(--danger) 12%, transparent);
- 
+
    /* --- Derived: hover overlay (sits on the local surface) --- */
    --hover-overlay:        color-mix(in oklab, var(--ink) 6%,  transparent);
    --hover-overlay-strong: color-mix(in oklab, var(--ink) 10%, transparent);
- 
-   /* --- Shadows (dark mode — layered, warm-tinted) --- */
-   --shadow-sm:  0 1px 2px color-mix(in oklab, var(--shadow-color) 30%, transparent),
-                 0 2px 8px color-mix(in oklab, var(--shadow-color) 20%, transparent);
-   --shadow-md:  0 1px 3px color-mix(in oklab, var(--shadow-color) 30%, transparent),
-                 0 4px 12px color-mix(in oklab, var(--shadow-color) 25%, transparent),
-                 0 8px 20px color-mix(in oklab, var(--shadow-color) 15%, transparent);
-   --shadow-lg:  0 2px 4px color-mix(in oklab, var(--shadow-color) 25%, transparent),
-                 0 8px 20px color-mix(in oklab, var(--shadow-color) 20%, transparent),
-                 0 16px 40px color-mix(in oklab, var(--shadow-color) 15%, transparent);
-   --shadow-xl:  0 2px 6px color-mix(in oklab, var(--shadow-color) 25%, transparent),
-                 0 12px 24px color-mix(in oklab, var(--shadow-color) 20%, transparent),
-                 0 24px 48px color-mix(in oklab, var(--shadow-color) 15%, transparent);
 
-   /* --- Subtle inner highlight for depth on containers --- */
-   --inner-highlight: inset 0 1px 0 0 oklch(100% 0 0 / 0.03);
-   --inner-highlight-strong: inset 0 1px 0 0 oklch(100% 0 0 / 0.06);
+   /* --- Shadows (dark mode: layered, near-black) --- */
+   --shadow-sm:  0 1px 2px color-mix(in oklab, var(--shadow-color) 40%, transparent),
+                 0 2px 8px color-mix(in oklab, var(--shadow-color) 30%, transparent);
+   --shadow-md:  0 1px 3px color-mix(in oklab, var(--shadow-color) 40%, transparent),
+                 0 4px 12px color-mix(in oklab, var(--shadow-color) 35%, transparent),
+                 0 8px 20px color-mix(in oklab, var(--shadow-color) 25%, transparent);
+   --shadow-lg:  0 2px 4px color-mix(in oklab, var(--shadow-color) 35%, transparent),
+                 0 8px 20px color-mix(in oklab, var(--shadow-color) 30%, transparent),
+                 0 16px 40px color-mix(in oklab, var(--shadow-color) 25%, transparent);
+   --shadow-xl:  0 2px 6px color-mix(in oklab, var(--shadow-color) 35%, transparent),
+                 0 12px 24px color-mix(in oklab, var(--shadow-color) 30%, transparent),
+                 0 24px 48px color-mix(in oklab, var(--shadow-color) 25%, transparent);
+
+   /* --- Inner top-edge highlight: on near-black this, not the shadow, carries depth --- */
+   --inner-highlight: inset 0 1px 0 0 oklch(100% 0 0 / 0.05);
+   --inner-highlight-strong: inset 0 1px 0 0 oklch(100% 0 0 / 0.09);
  }
 
   :root.light {
@@ -88,6 +94,8 @@
   
     /* --- Danger: darker red for light bg --- */
     --danger:      oklch(52% 0.22 25);
+  
+    --chart-grid:  rgb(225, 223, 218);
   
     /* Backdrop: a scrim darkens regardless of mode */
     --backdrop:    oklch(0% 0 0 / 0.55);
@@ -188,33 +196,41 @@ p, li {
   text-wrap: pretty;
 }
 
-/* Range-input thumb: appearance-none drops native rendering entirely in most
-   engines, so both need explicit thumb rules. Uses --paper (the app's
-   lightest/warmest role token) rather than --ink, so the knob reads as a
-   soft highlight on the filled track instead of a stark black dot. */
-.param-slider-thumb::-webkit-slider-thumb {
+/* Themed range input: recessed `--paper` track, `--ink-faint` fill up to `--fill`, `--ink-subtle` thumb.
+   appearance:none drops native rendering, so webkit and moz each need explicit track and thumb rules. */
+.param-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 9999px;
+  background: linear-gradient(to right, var(--ink-faint) var(--fill), var(--paper) var(--fill));
+  box-shadow: inset 0 0 0 1px var(--divider);
+}
+.param-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  background: transparent;
+}
+.param-slider::-moz-range-track {
+  height: 4px;
+  background: transparent;
+}
+.param-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
   width: 14px;
   height: 14px;
-  border-radius: 9999px;
-  background: var(--paper);
-  box-shadow: var(--shadow-sm);
-  cursor: pointer;
   margin-top: -5px;
+  border-radius: 9999px;
+  background: var(--ink-subtle);
+  box-shadow: var(--shadow-sm);
 }
-.param-slider-thumb::-moz-range-thumb {
+.param-slider::-moz-range-thumb {
   width: 14px;
   height: 14px;
   border: none;
   border-radius: 9999px;
-  background: var(--paper);
+  background: var(--ink-subtle);
   box-shadow: var(--shadow-sm);
-  cursor: pointer;
-}
-.param-slider-thumb::-moz-range-track {
-  background: transparent;
-  border: none;
 }
 
 /* Reasoning level glyph, TUI style: a circle that fills up with effort, slashed when off, ringed at max. */
@@ -257,8 +273,8 @@ p, li {
   font-family: var(--font-handwriting), cursive;
 
   --sketch-canvas: var(--paper);
-  --sketch-ink: oklch(88% 0.012 83);
-  --sketch-ink-soft: oklch(70% 0.012 83);
+  --sketch-ink: oklch(88% 0.012 70);
+  --sketch-ink-soft: oklch(70% 0.012 65);
   --sketch-fill: color-mix(in oklab, var(--ink) 5%, var(--paper));
   --sketch-grid: color-mix(in oklab, var(--ink) 14%, transparent);
 
@@ -594,7 +610,7 @@ body::after {
 }
 
 ::selection {
-  background-color: oklch(70% 0.02 83 / 0.35);
+  background-color: oklch(70% 0.02 65 / 0.35);
 }
 .light ::selection {
   background-color: oklch(45% 0.03 85 / 0.25);

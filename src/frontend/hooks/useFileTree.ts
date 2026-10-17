@@ -29,23 +29,11 @@ export interface FileTreeConfig {
   onActivate?: (id: string) => void
   /** a branch was closed, e.g. close its project + chat. */
   onDeactivate?: (id: string) => void
-  /**
-   * Accordion mode only: restrict accordion semantics to ids this predicate
-   * accepts. Other branches (e.g. mounted file roots nested inside a project)
-   * fall back to the multi-expand set instead of firing onActivate.
-   */
-  isAccordionId?: (id: string) => boolean
 }
 
 export function useFileTree(config: FileTreeConfig = {}): FileBranchController {
-  const { accordion, activeId, storageKey, onActivate, onDeactivate, isAccordionId } = config
+  const { accordion, activeId, storageKey, onActivate, onDeactivate } = config
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-
-  const accordionApplies = useCallback(
-    (id: string) => !!accordion && (isAccordionId?.(id) ?? true),
-    [accordion, isAccordionId],
-  )
-
   useEffect(() => {
     if (accordion || !storageKey) return
     try {
@@ -60,12 +48,12 @@ export function useFileTree(config: FileTreeConfig = {}): FileBranchController {
   }, [accordion, storageKey])
 
   const isExpanded = useCallback(
-    (id: string) => (accordionApplies(id) ? activeId === id : expanded.has(id)),
-    [accordionApplies, activeId, expanded],
+    (id: string) => (accordion ? activeId === id : expanded.has(id)),
+    [accordion, activeId, expanded],
   )
 
   const expand = useCallback((id: string) => {
-    if (accordionApplies(id)) {
+    if (accordion) {
       if (activeId !== id) onActivate?.(id)
       return
     }
@@ -75,10 +63,10 @@ export function useFileTree(config: FileTreeConfig = {}): FileBranchController {
       persist(next)
       return next
     })
-  }, [accordionApplies, activeId, onActivate, persist])
+  }, [accordion, activeId, onActivate, persist])
 
   const toggleBranch = useCallback((id: string) => {
-    if (accordionApplies(id)) {
+    if (accordion) {
       activeId === id ? onDeactivate?.(id) : onActivate?.(id)
       return
     }
@@ -88,7 +76,7 @@ export function useFileTree(config: FileTreeConfig = {}): FileBranchController {
       persist(next)
       return next
     })
-  }, [accordionApplies, activeId, onActivate, onDeactivate, persist])
+  }, [accordion, activeId, onActivate, onDeactivate, persist])
 
   return { isExpanded, toggleBranch, expand }
 }

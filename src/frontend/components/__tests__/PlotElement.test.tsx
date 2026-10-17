@@ -37,7 +37,7 @@ describe("PlotElement", () => {
       getPropertyValue: (property: string) => ({
         "--ink": "#1a1816",
         "--surface-elevated": "#f5f0e8",
-        "--divider": "#d8d0c4",
+        "--chart-grid": "#d8d0c4",
         "--font-sans": "Inter",
       })[property] ?? "",
     }))
@@ -101,7 +101,7 @@ describe("PlotElement", () => {
           layout: {
             xaxis: { gridcolor: "white" },
             xaxis2: { gridcolor: "white" },
-            scene: { bgcolor: "black", xaxis: { gridcolor: "white" } },
+            scene: { bgcolor: "black", xaxis: { gridcolor: "white", showbackground: true } },
           },
         }}
       />,
@@ -117,7 +117,7 @@ describe("PlotElement", () => {
       xaxis2: { gridcolor: "#d8d0c4", zerolinecolor: "#d8d0c4", linecolor: "#d8d0c4" },
       scene: {
         bgcolor: "transparent",
-        xaxis: { gridcolor: "#d8d0c4", zerolinecolor: "#d8d0c4", linecolor: "#d8d0c4" },
+        xaxis: { gridcolor: "#d8d0c4", zerolinecolor: "#d8d0c4", linecolor: "#d8d0c4", showbackground: false },
       },
     })
   })

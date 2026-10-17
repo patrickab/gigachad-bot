@@ -6,22 +6,22 @@ locations (nothing is configured in ``config.py``): it lives in ``vault_roots``
 rows for the authenticated user. With no registry the roots are simply empty
 until the user adds one.
 
-Each root may carry additional **mountpoints**, external directories (e.g. a
-``/mnt`` drive) attached to that root. Mountpoint files appear as folder nodes
-inside the parent root's tree rather than as separate top-level roots, so a
-mounted drive is browsed as part of the root it was attached to.
+Listings (flat list, tree, folder expansion) honor ``.gitignore`` files found
+from each root downward, with git's precedence: the last matching pattern wins
+and deeper files override shallower ones. Ignored folders are never entered.
+Explicit paths (attach, read, write) are not filtered, only validated against
+the roots.
 
 Root files are used as **live references**: attaching one to a chat stores its
 path, never a copy. Edits through the app write back to the actual file.
 
 All paths handed to the UI are absolute, and every read/write is validated to
-live under one of the roots or their mountpoints (mirroring the path-traversal
-guard used by ``ChatStore``).
+live under one of the roots (mirroring the path-traversal guard used by
+``ChatStore``).
 """
 
 from __future__ import annotations
 
-from collections import defaultdict
 import os
 from pathlib import Path
 import re
@@ -29,11 +29,13 @@ from typing import Protocol
 from urllib.parse import quote as _url_quote
 from uuid import UUID
 
-from psycopg.types.json import Jsonb
+from pathspec import GitIgnoreSpec
 from psycopg_pool import ConnectionPool
 
-# Directories that hold app internals (e.g. Obsidian's) or noise rather than files.
-_SKIP_DIRS = {".obsidian", ".trash", ".git", "node_modules"}
+# Directories that hold app internals (e.g. Obsidian's) or noise rather than files, skipped even without a .gitignore.
+_SKIP_DIRS = frozenset({".obsidian", ".trash", ".git", "node_modules"})
+# Each layer is one directory's `.gitignore`: (directory path, compiled patterns), outermost first.
+_IgnoreLayers = tuple[tuple[str, GitIgnoreSpec], ...]
 _IMG_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp"})
 # Attachment-compatible file types surfaced by listings.
 FILE_SUFFIXES = frozenset({".md", ".txt", ".tex", ".pdf"})
@@ -49,14 +51,53 @@ def _is_listed(name: str) -> bool:
     return os.path.splitext(name)[1].lower() in FILE_SUFFIXES and not _is_untitled(name)
 
 
+def _with_gitignore(directory: Path | str, inherited: _IgnoreLayers) -> _IgnoreLayers:
+    """*inherited* plus *directory*'s own `.gitignore`, if it has a readable one."""
+    try:
+        lines = (Path(directory) / ".gitignore").read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return inherited
+    return (*inherited, (str(directory), GitIgnoreSpec.from_lines(lines)))
+
+
+def _is_ignored(path: str, is_dir: bool, layers: _IgnoreLayers) -> bool:
+    """Git precedence: the last matching pattern wins, and deeper `.gitignore` files override shallower ones."""
+    ignored = False
+    for base, spec in layers:
+        relative = Path(path).relative_to(base).as_posix()
+        verdict = spec.check_file(f"{relative}/" if is_dir else relative).include
+        if verdict is not None:
+            ignored = verdict
+    return ignored
+
+
+def _visible_entries(directory: Path | str, inherited: _IgnoreLayers) -> tuple[list[tuple[os.DirEntry, bool]], _IgnoreLayers]:
+    """Entries of *directory* as ``(entry, is_dir)`` minus skipped and git-ignored ones, plus the layers for its children.
+
+    An ignored folder is dropped whole, as in git, so nothing inside it can be re-included.
+    """
+    layers = _with_gitignore(directory, inherited)
+    try:
+        entries = list(os.scandir(directory))
+    except OSError:
+        return [], layers
+    visible = []
+    for entry in entries:
+        is_dir = entry.is_dir(follow_symlinks=False)
+        if (is_dir and entry.name in _SKIP_DIRS) or _is_ignored(entry.path, is_dir, layers):
+            continue
+        visible.append((entry, is_dir))
+    return visible, layers
+
+
 class FileRootRepository(Protocol):
     """Where the *root registry* lives. File root file contents never pass through here."""
 
-    def load(self) -> list[object]:
-        """Registered roots in registration order, in the JSON config's entry shape."""
+    def load(self) -> list[str]:
+        """Registered root paths in registration order."""
 
-    def save(self, roots: list[dict[str, object]]) -> None:
-        """Replace the registry with *roots* (``path``, ``mountpoints``, optional ``project``)."""
+    def save(self, roots: list[str]) -> None:
+        """Replace the registry with *roots*."""
 
 
 class PostgresFileRootRepository:
@@ -72,16 +113,13 @@ class PostgresFileRootRepository:
         self._user_id = user_id
         self._device_id = device_id
 
-    def load(self) -> list[object]:
+    def load(self) -> list[str]:
         with self._pool.connection() as connection:
             rows = connection.execute(
-                "SELECT path, project_slug, mountpoints FROM vault_roots WHERE user_id = %s ORDER BY created_at, path",
+                "SELECT path FROM vault_roots WHERE user_id = %s ORDER BY created_at, path",
                 (self._user_id,),
             ).fetchall()
-        return [
-            {"path": path, "mountpoints": list(mountpoints or []), **({"project": slug} if slug else {})}
-            for path, slug, mountpoints in rows
-        ]
+        return [path for (path,) in rows]
 
     def _change(self, connection, path: str, operation: str) -> None:
         connection.execute(
@@ -92,30 +130,21 @@ class PostgresFileRootRepository:
             (self._user_id, path, operation, self._device_id),
         )
 
-    def save(self, roots: list[dict[str, object]]) -> None:
+    def save(self, roots: list[str]) -> None:
         # ponytail: whole-registry replace, mirroring the JSON file it replaces,
         # one statement per root. A user keeps a handful of roots; if that ever
         # grows, give FileRoots per-root add/remove hooks instead of diffing here.
-        paths = [str(root["path"]) for root in roots]
         with self._pool.connection() as connection, connection.transaction():
-            for root in roots:
-                path = str(root["path"])
-                touched = connection.execute(
-                    """
-                    INSERT INTO vault_roots (user_id, path, project_slug, mountpoints)
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (user_id, path) DO UPDATE
-                    SET project_slug = EXCLUDED.project_slug, mountpoints = EXCLUDED.mountpoints
-                    WHERE vault_roots.project_slug IS DISTINCT FROM EXCLUDED.project_slug
-                       OR vault_roots.mountpoints <> EXCLUDED.mountpoints
-                    """,
-                    (self._user_id, path, root.get("project"), Jsonb(root.get("mountpoints") or [])),
+            for path in roots:
+                inserted = connection.execute(
+                    "INSERT INTO vault_roots (user_id, path) VALUES (%s, %s) ON CONFLICT (user_id, path) DO NOTHING",
+                    (self._user_id, path),
                 ).rowcount
-                if touched:
+                if inserted:
                     self._change(connection, path, "write")
             removed = connection.execute(
                 "DELETE FROM vault_roots WHERE user_id = %s AND NOT (path = ANY(%s::text[])) RETURNING path",
-                (self._user_id, paths),
+                (self._user_id, roots),
             ).fetchall()
             for (path,) in removed:
                 self._change(connection, path, "delete")
@@ -127,54 +156,17 @@ class FileRoots:
     def __init__(self, *, repository: FileRootRepository) -> None:
         self._repository = repository
         self._roots: list[Path] = []
-        self._mountpoints: dict[Path, list[Path]] = defaultdict(list)
-        # A root may be mounted to a project (slug) instead of the global Files section.
-        self._project_tags: dict[Path, str] = {}
         self._reload()
 
     def _reload(self) -> None:
-        raw = self._repository.load()
         self._roots = []
-        self._mountpoints = defaultdict(list)
-        self._project_tags = {}
-        for entry in raw:
-            # Backward compat: a bare string entry is a root with no mountpoints.
-            if isinstance(entry, str):
-                path = Path(entry).expanduser().resolve()
-                if path not in self._roots:
-                    self._roots.append(path)
-                continue
-            if not isinstance(entry, dict):
-                continue
-            path = Path(str(entry.get("path", ""))).expanduser().resolve()
-            if not path:
-                continue
+        for entry in self._repository.load():
+            path = Path(entry).expanduser().resolve()
             if path not in self._roots:
                 self._roots.append(path)
-            if entry.get("project"):
-                self._project_tags[path] = str(entry["project"])
-            for mp in entry.get("mountpoints") or []:
-                resolved_mp = Path(str(mp)).expanduser().resolve()
-                if resolved_mp not in self._mountpoints[path]:
-                    self._mountpoints[path].append(resolved_mp)
 
     def _save_roots(self) -> None:
-        self._repository.save([
-            {
-                "path": str(r),
-                "mountpoints": [str(m) for m in self._mountpoints.get(r, [])],
-                **({"project": self._project_tags[r]} if r in self._project_tags else {}),
-            }
-            for r in self._roots
-        ])
-
-    def _all_mountpoints(self) -> list[Path]:
-        out: list[Path] = []
-        for mps in self._mountpoints.values():
-            for m in mps:
-                if m not in out:
-                    out.append(m)
-        return out
+        self._repository.save([str(root) for root in self._roots])
 
     # ─── roots management ───
 
@@ -185,67 +177,26 @@ class FileRoots:
     def roots(self) -> list[str]:
         return [str(r) for r in self._roots]
 
-    def add_root(self, path: str, project: str | None = None) -> None:
+    def add_root(self, path: str) -> None:
         resolved = Path(path).expanduser().resolve()
         if not resolved.is_dir():
             raise ValueError(f"Not a directory: {path}")
         if resolved not in self._roots:
             self._roots.append(resolved)
-        if project:
-            self._project_tags[resolved] = project
         self._save_roots()
 
     def remove_root(self, path: str) -> None:
         resolved = Path(path).expanduser().resolve()
         self._roots = [r for r in self._roots if r != resolved]
-        self._mountpoints.pop(resolved, None)
-        self._project_tags.pop(resolved, None)
-        self._save_roots()
-
-    # ─── mountpoint management ───
-
-    def mountpoints(self, root_path: str) -> list[str]:
-        resolved = Path(root_path).expanduser().resolve()
-        return [str(m) for m in self._mountpoints.get(resolved, [])]
-
-    def add_mountpoint(self, root_path: str, mountpoint_path: str) -> None:
-        root = Path(root_path).expanduser().resolve()
-        if root not in self._roots:
-            raise ValueError(f"Unknown file root: {root_path}")
-        mountpoint = Path(mountpoint_path).expanduser().resolve()
-        if not mountpoint.is_dir():
-            raise ValueError(f"Not a directory: {mountpoint_path}")
-        if mountpoint == root:
-            raise ValueError("Mountpoint cannot be the file root itself")
-        # Reject if this path is already a root or a mountpoint of another file root.
-        if mountpoint in self._roots:
-            raise ValueError(f"Already a file root: {mountpoint_path}")
-        for v, mps in self._mountpoints.items():
-            if v != root and mountpoint in mps:
-                raise ValueError(f"Already mounted under another file root: {mountpoint_path}")
-        if mountpoint not in self._mountpoints[root]:
-            self._mountpoints[root].append(mountpoint)
-            self._save_roots()
-
-    def remove_mountpoint(self, root_path: str, mountpoint_path: str) -> None:
-        root = Path(root_path).expanduser().resolve()
-        mountpoint = Path(mountpoint_path).expanduser().resolve()
-        self._mountpoints[root] = [m for m in self._mountpoints.get(root, []) if m != mountpoint]
-        if not self._mountpoints[root]:
-            self._mountpoints.pop(root, None)
         self._save_roots()
 
     # ─── path safety ───
 
     def _root_for(self, path: str) -> Path:
-        """Resolve *path*, rejecting anything that lives outside all roots and mountpoints."""
+        """Resolve *path*, rejecting anything that lives outside all roots."""
         target = Path(path).expanduser().resolve()
-        for root in self._roots:
-            if target.is_relative_to(root):
-                return target
-        for mountpoint in self._all_mountpoints():
-            if target.is_relative_to(mountpoint):
-                return target
+        if any(target.is_relative_to(root) for root in self._roots):
+            return target
         raise ValueError(f"Path outside file roots: {path}")
 
     def contains(self, abs_path: Path) -> bool:
@@ -270,36 +221,13 @@ class FileRoots:
         files.sort(key=lambda f: f["path"].lower())
         return files
 
-    def list_files_for_project(self, slug: str) -> list[dict[str, str]]:
-        """Flat ``{path, name}`` list of files under file roots mounted to *slug*.
-
-        Includes files from each such file root's mountpoints so a mounted drive's
-        contents surface alongside the file root's own files.
-        """
-        files: list[dict[str, str]] = []
-        for root in self._roots:
-            if not root.is_dir():
-                continue
-            if self._project_tags.get(root) != slug:
-                continue
-            self._collect_files(root, files)
-            for mp in self._mountpoints.get(root, []):
-                if mp.is_dir():
-                    self._collect_files(mp, files)
-        files.sort(key=lambda f: f["path"].lower())
-        return files
-
     @staticmethod
-    def _collect_files(base: Path | str, out: list[dict[str, str]]) -> None:
-        """Append listed files below *base*, pruning skipped dirs and not following directory symlinks."""
-        try:
-            entries = list(os.scandir(base))
-        except OSError:
-            return
-        for entry in entries:
-            if entry.is_dir(follow_symlinks=False):
-                if entry.name not in _SKIP_DIRS:
-                    FileRoots._collect_files(entry.path, out)
+    def _collect_files(base: Path | str, out: list[dict[str, str]], inherited: _IgnoreLayers = ()) -> None:
+        """Append listed files below *base*, skipping ignored entries and not following directory symlinks."""
+        entries, layers = _visible_entries(base, inherited)
+        for entry, is_dir in entries:
+            if is_dir:
+                FileRoots._collect_files(entry.path, out, layers)
             elif _is_listed(entry.name) and entry.is_file():
                 out.append({"path": entry.path, "name": entry.name})
 
@@ -317,45 +245,21 @@ class FileRoots:
         return list(found)
 
     def tree(self) -> list[dict]:
-        """Nested folder/file tree per root for the sidebar FileTree.
+        """Nested folder/file tree per root for the sidebar FileTree. Empty folders are pruned."""
+        return [
+            {"name": root.name, "path": str(root), "type": "root", "children": self._build_children(root)}
+            for root in self._roots
+            if root.is_dir()
+        ]
 
-        Empty folders are pruned. Mountpoints appear as folder nodes inside their root.
-        """
-        out: list[dict] = []
-        for root in self._roots:
-            if not root.is_dir():
-                continue
-            children = self._build_children(root)
-            for mp in self._mountpoints.get(root, []):
-                if not mp.is_dir():
-                    continue
-                sub = self._build_children(mp)
-                if not sub:
-                    # Surface empty mountpoints too so the user can see them.
-                    children.append({"name": mp.name, "path": str(mp), "type": "folder", "children": []})
-                else:
-                    children.append({"name": mp.name, "path": str(mp), "type": "folder", "children": sub})
-            out.append({
-                "name": root.name,
-                "path": str(root),
-                "type": "root",
-                "project": self._project_tags.get(root),
-                "children": children,
-            })
-        return out
-
-    def _build_children(self, directory: Path | str) -> list[dict]:
+    @staticmethod
+    def _build_children(directory: Path | str, inherited: _IgnoreLayers = ()) -> list[dict]:
         # Folders first, then files, each alphabetical, matches a file browser.
+        entries, layers = _visible_entries(directory, inherited)
         children: list[dict] = []
-        try:
-            entries = sorted(os.scandir(directory), key=lambda entry: (entry.is_file(), entry.name.lower()))
-        except OSError:
-            return children
-        for entry in entries:
-            if entry.name in _SKIP_DIRS:
-                continue
-            if entry.is_dir():
-                sub = self._build_children(entry.path)
+        for entry, is_dir in sorted(entries, key=lambda item: (not item[1], item[0].name.lower())):
+            if is_dir:
+                sub = FileRoots._build_children(entry.path, layers)
                 if sub:  # prune folders with no file-root files
                     children.append({"name": entry.name, "path": entry.path, "type": "folder", "children": sub})
             elif _is_listed(entry.name) and entry.is_file():
@@ -397,13 +301,6 @@ class FileRoots:
                 continue
             for c in candidates:
                 for hit in root.rglob(c):
-                    if hit.is_file():
-                        return hit
-        for mountpoint in self._all_mountpoints():
-            if not mountpoint.is_dir():
-                continue
-            for c in candidates:
-                for hit in mountpoint.rglob(c):
                     if hit.is_file():
                         return hit
         return None

@@ -14,7 +14,6 @@ interface Impl {
   listRootFiles: AnyFn
   attachRootFile: AnyFn
   listProjectDocuments: AnyFn
-  listProjectRootDocuments: AnyFn
   listAllDocuments: AnyFn
   addDocument: AnyFn
   removeDocument: AnyFn
@@ -36,7 +35,6 @@ const defaults: Impl = {
   listRootFiles: async () => ({ enabled: false, files: [] as RootFile[] }),
   attachRootFile: async () => ({ name: "att", mime: "text/plain", url: "u", active: true }),
   listProjectDocuments: async () => [] as ProjectDocument[],
-  listProjectRootDocuments: async () => [] as ProjectDocument[],
   listAllDocuments: async () => [] as ProjectDocument[],
   addDocument: noop,
   removeDocument: noop,
@@ -64,7 +62,6 @@ export const __resetImpls = () => Object.assign(impls, defaults)
 export const listRootFiles = (...a: Parameters<Impl["listRootFiles"]>) => impls.listRootFiles(...a)
 export const attachRootFile = (...a: Parameters<Impl["attachRootFile"]>) => impls.attachRootFile(...a)
 export const listProjectDocuments = (...a: Parameters<Impl["listProjectDocuments"]>) => impls.listProjectDocuments(...a)
-export const listProjectRootDocuments = (...a: Parameters<Impl["listProjectRootDocuments"]>) => impls.listProjectRootDocuments(...a)
 export const listAllDocuments = (...a: Parameters<Impl["listAllDocuments"]>) => impls.listAllDocuments(...a)
 export const addDocument = (...a: Parameters<Impl["addDocument"]>) => impls.addDocument(...a)
 export const removeDocument = (...a: Parameters<Impl["removeDocument"]>) => impls.removeDocument(...a)

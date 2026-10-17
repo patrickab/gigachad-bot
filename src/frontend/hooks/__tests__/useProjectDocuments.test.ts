@@ -3,7 +3,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 const { impls } = vi.hoisted(() => ({
   impls: {
     listProjectDocuments: async () => [] as any[],
-    listProjectRootDocuments: async () => [] as any[],
     listAllDocuments: async () => [] as any[],
     addDocument: async () => undefined,
     removeDocument: async () => undefined,
@@ -11,7 +10,6 @@ const { impls } = vi.hoisted(() => ({
     uploadDocument: async () => undefined,
     uploadFile: async () => ({ name: "u.jpg", mime: "image/jpeg", url: "u", active: true }),
     attachDocument: async () => ({ name: "d", mime: "text/plain", url: "u", active: true }),
-    attachRootFile: async () => ({ name: "v", mime: "text/plain", url: "u", active: true }),
     loadFileViewerText: async () => "",
     renameDocument: async () => ({ path: "project/proj/document/renamed.md", name: "renamed.md", mime: "text/markdown" }),
   } as Record<string, (...a: any[]) => any>,
@@ -21,7 +19,6 @@ vi.mock("@/lib/api", () => ({
   __setImpl: (k: string, fn: any) => { impls[k] = fn },
   __resetImpls: () => {
     impls.listProjectDocuments = async () => []
-    impls.listProjectRootDocuments = async () => []
     impls.listAllDocuments = async () => []
     impls.addDocument = async () => undefined
     impls.removeDocument = async () => undefined
@@ -29,12 +26,10 @@ vi.mock("@/lib/api", () => ({
     impls.uploadDocument = async () => undefined
     impls.uploadFile = async () => ({ name: "u.jpg", mime: "image/jpeg", url: "u", active: true })
     impls.attachDocument = async () => ({ name: "d", mime: "text/plain", url: "u", active: true })
-    impls.attachRootFile = async () => ({ name: "v", mime: "text/plain", url: "u", active: true })
     impls.loadFileViewerText = async () => ""
     impls.renameDocument = async () => ({ path: "project/proj/document/renamed.md", name: "renamed.md", mime: "text/markdown" })
   },
   listProjectDocuments: (...a: any[]) => impls.listProjectDocuments(...a),
-  listProjectRootDocuments: (...a: any[]) => impls.listProjectRootDocuments(...a),
   listAllDocuments: (...a: any[]) => impls.listAllDocuments(...a),
   addDocument: (...a: any[]) => impls.addDocument(...a),
   removeDocument: (...a: any[]) => impls.removeDocument(...a),
@@ -42,7 +37,6 @@ vi.mock("@/lib/api", () => ({
   uploadDocument: (...a: any[]) => impls.uploadDocument(...a),
   uploadFile: (...a: any[]) => impls.uploadFile(...a),
   attachDocument: (...a: any[]) => impls.attachDocument(...a),
-  attachRootFile: (...a: any[]) => impls.attachRootFile(...a),
   fileViewerRawUrl: (path: string) => `raw:${path}`,
   loadFileViewerText: (...a: any[]) => impls.loadFileViewerText(...a),
   renameDocument: (...a: any[]) => impls.renameDocument(...a),
@@ -87,24 +81,17 @@ const baseProps = (over: any = {}) => ({
 })
 
 describe("useProjectDocuments", () => {
-  describe("mergedDocuments / rootDocPaths dedup", () => {
-    it("lists project docs on mount and merges file root docs (deduping by path)", async () => {
+  describe("visibleDocuments", () => {
+    it("lists project docs on mount", async () => {
       const projectDocs: ProjectDocument[] = [
         { path: "/lib/a.pdf", name: "a.pdf", mime: "application/pdf" },
       ]
-      const rootDocs: ProjectDocument[] = [
-        { path: "/lib/a.pdf", name: "a.pdf", mime: "application/pdf" },  // dup, dropped
-        { path: "/vault/b.txt", name: "b.txt", mime: "text/plain" },     // root-only, surfaced
-      ]
       ;(apiMock as any).__setImpl("listProjectDocuments", async () => projectDocs)
-      ;(apiMock as any).__setImpl("listProjectRootDocuments", async () => rootDocs)
 
       const { result } = renderHook(() => useProjectDocuments(baseProps()))
 
       await waitFor(() => expect(result.current.projectDocuments).toHaveLength(1))
-      expect(result.current.mergedDocuments).toHaveLength(2)
-      expect(result.current.rootDocPaths.has("/vault/b.txt")).toBe(true)
-      expect(result.current.rootDocPaths.has("/lib/a.pdf")).toBe(false)
+      expect(result.current.visibleDocuments).toHaveLength(1)
       // No `.c4` sources: there is no architecture to attach.
       expect(result.current.handleAttachArchitecture).toBeUndefined()
     })
@@ -122,26 +109,6 @@ describe("useProjectDocuments", () => {
   })
 
   describe("handleDocumentSelect", () => {
-    it("attaches a file root doc via attachRootFile when path is root-surfaced", async () => {
-      const rootDocs: ProjectDocument[] = [{ path: "/vault/v.txt", name: "v.txt", mime: "text/plain" }]
-      ;(apiMock as any).__setImpl("listProjectRootDocuments", async () => rootDocs)
-      const attachRoot = vi.fn(async () => ({ name: "v.txt", mime: "text/plain", url: "u", active: true }))
-      ;(apiMock as any).__setImpl("attachRootFile", attachRoot)
-      const addAttachment = vi.fn()
-      const chatInputRef = makeChatInputRef({ addAttachment })
-
-      const { result } = renderHook(() =>
-        useProjectDocuments(baseProps({ chatInputRef })),
-      )
-      await waitFor(() => expect(result.current.rootDocPaths.size).toBe(1))
-
-      await act(async () => { await result.current.handleDocumentSelect("/vault/v.txt") })
-
-      expect(attachRoot).toHaveBeenCalledWith("/vault/v.txt")
-      expect(addAttachment).toHaveBeenCalledOnce()
-      expect(result.current.documentOpen).toBe(false)
-    })
-
     it("attaches a regular project document via attachDocument", async () => {
       const attachDoc = vi.fn(async () => ({ name: "doc.md", mime: "text/markdown", url: "u", active: true }))
       ;(apiMock as any).__setImpl("attachDocument", attachDoc)
@@ -252,11 +219,11 @@ describe("useProjectDocuments", () => {
     ;(apiMock as any).__setImpl("listProjectDocuments", async () => [{ path, name: "spec.md", mime: "text/markdown" }])
     ;(apiMock as any).__setImpl("removeDocument", remove)
     const { result } = renderHook(() => useProjectDocuments(baseProps()))
-    await waitFor(() => expect(result.current.mergedDocuments).toHaveLength(1))
+    await waitFor(() => expect(result.current.visibleDocuments).toHaveLength(1))
     act(() => result.current.handleDeleteDocument(path))
-    expect(result.current.mergedDocuments).toHaveLength(0)
+    expect(result.current.visibleDocuments).toHaveLength(0)
     fireEvent.click(screen.getByRole("button", { name: "Undo" }))
-    expect(result.current.mergedDocuments).toHaveLength(1)
+    expect(result.current.visibleDocuments).toHaveLength(1)
     expect(remove).not.toHaveBeenCalled()
   })
 

@@ -10,11 +10,9 @@ import {
   createArchitectureSource,
   deleteArchitectureSources,
   attachDocument,
-  attachRootFile,
   fileViewerRawUrl,
   listAllDocuments,
   listProjectDocuments,
-  listProjectRootDocuments,
   loadFileViewerText,
   removeDocument,
   uploadDocument,
@@ -68,37 +66,17 @@ export function useProjectDocuments({
   const [createDocOpen, setCreateDocOpen] = useState(false)
   const [projectDocuments, setProjectDocuments] = useState<ProjectDocument[]>([])
   const [architectureError, setArchitectureError] = useState("")
-  const [rootProjectDocs, setRootProjectDocs] = useState<ProjectDocument[]>([])
   const [allDocuments, setAllDocuments] = useState<ProjectDocument[]>([])
 
-  // Root-surfaced = not already a project file. A promoted root PDF in the project
-  // behaves as a project doc (deletable, library attach) and is listed once.
-  const rootDocPaths = useMemo(() => {
-    const projectPaths = new Set(projectDocuments.map((d) => d.path))
-    return new Set(rootProjectDocs.filter((d) => !projectPaths.has(d.path)).map((d) => d.path))
-  }, [projectDocuments, rootProjectDocs])
-  // Dedupe by path (library/cloud wins) so a PDF in both project and file root shows once.
   // Documents with a pending deletion (`handleDeleteDocument`) are hidden.
-  const mergedDocuments = useMemo(() => {
-    const seen = new Set<string>()
-    const out: ProjectDocument[] = []
-    for (const d of [...projectDocuments, ...rootProjectDocs]) {
-      if (seen.has(d.path) || pending(`document:${activeProject}:${d.path}`)) continue
-      seen.add(d.path)
-      out.push(d)
-    }
-    return out
-  }, [projectDocuments, rootProjectDocs, activeProject, pending])
+  const visibleDocuments = useMemo(
+    () => projectDocuments.filter((d) => !pending(`document:${activeProject}:${d.path}`)),
+    [projectDocuments, activeProject, pending],
+  )
   const architectureSources = useMemo(() => projectDocuments.filter((document) => isArchitecturePath(document.path)), [projectDocuments])
 
   const handleDocumentSelect = useCallback(async (path: string) => {
     setDocumentOpen(false)
-    if (rootDocPaths.has(path)) {
-      setExtracting((n) => n + 1)
-      try { chatInputRef.current?.addAttachment(await attachRootFile(path)) } catch { /* */ }
-      finally { setExtracting((n) => n - 1) }
-      return
-    }
     // Canvas docs are attached as a rendered JPEG, preferring the unsaved live content
     if (path.endsWith(".canvas")) {
       try {
@@ -121,16 +99,11 @@ export function useProjectDocuments({
       try { chatInputRef.current?.addAttachment(await attachDocument(chatId, path, activeProject)) } catch { /* */ }
       finally { setExtracting((n) => n - 1) }
     }
-  }, [chatId, activeProject, rootDocPaths, chatInputRef, liveCanvasRef, setExtracting])
+  }, [chatId, activeProject, chatInputRef, liveCanvasRef, setExtracting])
 
   const loadProjectDocs = useCallback(() => {
-    if (activeProject) {
-      listProjectDocuments(activeProject).then(setProjectDocuments).catch(() => {})
-      listProjectRootDocuments(activeProject).then(setRootProjectDocs).catch(() => setRootProjectDocs([]))
-    } else {
-      setProjectDocuments([])
-      setRootProjectDocs([])
-    }
+    if (activeProject) listProjectDocuments(activeProject).then(setProjectDocuments).catch(() => {})
+    else setProjectDocuments([])
   }, [activeProject])
 
   const refreshDocuments = useCallback(() => {
@@ -213,12 +186,12 @@ export function useProjectDocuments({
 
   const handleRenameDocument = useCallback(async (path: string, name: string) => {
     // Architecture sources are named by their path inside the workspace; there is no rename for them.
-    if (!activeProject || rootDocPaths.has(path) || isArchitecturePath(path)) return
+    if (!activeProject || isArchitecturePath(path)) return
     try {
       await renameDocument(activeProject, path, name)
       refreshDocuments()
     } catch { /* the stored name stays authoritative when rename fails */ }
-  }, [activeProject, rootDocPaths, refreshDocuments])
+  }, [activeProject, refreshDocuments])
 
   useEffect(() => {
     if (!isActive || appMode === "canvas") return
@@ -243,8 +216,7 @@ export function useProjectDocuments({
     setCreateDocOpen,
     projectDocuments,
     allDocuments,
-    rootDocPaths,
-    mergedDocuments,
+    visibleDocuments,
     architectureError,
     /** Absent while the project has no architecture sources to attach. */
     handleAttachArchitecture: architectureSources.length > 0 ? handleAttachArchitecture : undefined,

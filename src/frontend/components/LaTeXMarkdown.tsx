@@ -27,9 +27,9 @@ let mermaidQueue = Promise.resolve()
 // can't parse oklch() and the browser preserves it through getComputedStyle/canvas. If the
 // palette warmth is retuned in globals.css, regenerate these to match.
 const MERMAID_DARK = {
-  ink: "rgb(231, 228, 223)", inkMuted: "rgb(162, 158, 151)", inkSubtle: "rgb(114, 110, 104)",
-  inkFaint: "rgb(79, 77, 72)", paper: "rgb(25, 21, 14)", surface: "rgb(37, 33, 25)",
-  surfaceElevated: "rgb(53, 48, 39)",
+  ink: "rgb(239, 234, 228)", inkMuted: "rgb(179, 173, 165)", inkSubtle: "rgb(130, 124, 118)",
+  inkFaint: "rgb(98, 92, 88)", paper: "rgb(12, 8, 6)", surface: "rgb(21, 17, 14)",
+  surfaceElevated: "rgb(32, 27, 23)",
 }
 const MERMAID_LIGHT = {
   ink: "rgb(80, 77, 70)", inkMuted: "rgb(108, 104, 97)", inkSubtle: "rgb(137, 134, 127)",
@@ -206,8 +206,8 @@ function MarkmapDiagram({ code }: { code: string }) {
 
         const isLight = document.documentElement.classList.contains("light")
         const isGlass = document.documentElement.classList.contains("glass")
-        const ink = isLight ? "#1c1917" : isGlass ? "rgba(255,255,255,0.85)" : "#d4d4d8"
-        const linkColor = isLight ? "#a8a29e" : isGlass ? "rgba(255,255,255,0.2)" : "#3f3f46"
+        const ink = isLight ? "#1c1917" : isGlass ? "rgba(255,255,255,0.85)" : MERMAID_DARK.ink
+        const linkColor = isLight ? "#a8a29e" : isGlass ? "rgba(255,255,255,0.2)" : MERMAID_DARK.inkFaint
 
         // Markmap's native drag and wheel controls make this a real viewport. Fit only
         // new content. A canvas resize must preserve the user's pan and zoom.

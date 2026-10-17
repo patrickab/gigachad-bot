@@ -329,12 +329,6 @@ export async function listRootFiles(): Promise<{ enabled: boolean; files: RootFi
   return request("/fileroots/files")
 }
 
-/** Files from file roots mounted to *slug*, shaped like ProjectDocument so the chat sidebar can list them. */
-export async function listProjectRootDocuments(slug: string): Promise<ProjectDocument[]> {
-  const data = await request<{ documents: ProjectDocument[] }>(`/fileroots/project-documents?slug=${encodeURIComponent(slug)}`)
-  return data.documents
-}
-
 export async function fileRootTree(): Promise<{ enabled: boolean; tree: FileTreeNode[] }> {
   return request("/fileroots/tree")
 }
@@ -345,19 +339,12 @@ export async function addRootFilesToProject(slug: string, paths: string[]): Prom
   return data.documents
 }
 
-export async function addFileRoot(path: string, project: string | null = null): Promise<{ enabled: boolean; tree: FileTreeNode[] }> {
-  return post("/fileroots/roots", { path, project })
+export async function addFileRoot(path: string): Promise<{ enabled: boolean; tree: FileTreeNode[] }> {
+  return post("/fileroots/roots", { path })
 }
 
 export async function removeFileRoot(path: string): Promise<{ enabled: boolean; tree: FileTreeNode[] }> {
   return del(`/fileroots/roots?path=${encodeURIComponent(path)}`)
-}
-
-export async function addFileRootMountpoint(
-  root: string,
-  path: string,
-): Promise<{ enabled: boolean; tree: FileTreeNode[] }> {
-  return post(`/fileroots/mountpoints?root=${encodeURIComponent(root)}`, { path })
 }
 
 export async function readFileRootRendered(path: string): Promise<string> {

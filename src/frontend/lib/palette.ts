@@ -2,7 +2,7 @@
  * Role-token palette spec, the source of truth for the color system. `app/globals.css`
  * mirrors it in `:root` and `.light`. This TS copy is the fallback for non-DOM surfaces
  * (canvas fills, JPEG export) where `getComputedStyle` is unavailable.
- * Colors are OKLCH with a warm hue (about 85) and tiny chroma to stay monochromatic.
+ * Colors are OKLCH with a warm hue (dark about 55-75, light about 85) and tiny chroma.
  *
  * To add a theme: add an entry to THEMES, add a matching `.name` block in globals.css
  * with the same custom properties, and toggle the class on <html>.
@@ -23,14 +23,14 @@ export interface RoleTokens {
 }
 
 const dark: RoleTokens = {
-  ink:             "oklch(95% 0.006 85)",
-  inkMuted:        "oklch(72% 0.010 85)",
-  inkSubtle:       "oklch(55% 0.010 85)",
-  inkFaint:        "oklch(42% 0.008 85)",
-  paper:           "oklch(8%  0.006 85)",
-  surface:         "oklch(13% 0.008 85)",
-  surfaceElevated: "oklch(18% 0.010 85)",
-  overlay:         "oklch(6%  0.006 85)",
+  ink:             "oklch(94% 0.010 75)",
+  inkMuted:        "oklch(75% 0.013 70)",
+  inkSubtle:       "oklch(59% 0.012 65)",
+  inkFaint:        "oklch(48% 0.010 60)",
+  paper:           "oklch(14%   0.008 55)",
+  surface:         "oklch(18%   0.009 55)",
+  surfaceElevated: "oklch(22.5% 0.010 55)",
+  overlay:         "oklch(11.5% 0.007 55)",
   danger:          "oklch(68% 0.20 25)",
   backdrop:        "oklch(0% 0 0 / 0.65)",
   shadowStrength:  0.35,

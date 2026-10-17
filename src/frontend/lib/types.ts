@@ -26,8 +26,6 @@ export interface FileTreeNode {
   name: string
   path: string
   type: "root" | "folder" | "file"
-  /** Project slug this root is mounted to; null/absent = global Files section. */
-  project?: string | null
   children?: FileTreeNode[]
 }
 

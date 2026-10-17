@@ -56,34 +56,11 @@ class FileTreeResponse(BaseModel):
 
 class RootBody(BaseModel):
     path: str
-    project: str | None = None
 
 
 @router.get("/files", response_model=RootFileListResponse)
 def list_files(roots: FileRoots = Depends(get_file_roots)) -> RootFileListResponse:
     return RootFileListResponse(enabled=roots.enabled, files=roots.list_files())
-
-
-@router.get("/project-documents", response_model=FileListResponse)
-def project_documents(
-    slug: str = Query(...),
-    roots: FileRoots = Depends(get_file_roots),
-    assets: AssetStore = Depends(get_asset_store),
-) -> FileListResponse:
-    """Files from file roots mounted to *slug*, shaped like project documents.
-
-    A PDF whose library copy exists is reported at the library key, so the sidebar never lists it twice.
-    """
-    docs: list[FileMeta] = []
-    for f in roots.list_files_for_project(slug):
-        p = Path(f["path"])
-        if p.suffix.lower() == ".pdf":
-            library_key = f"{PDFS}/{p.name}"
-            if assets.list(library_key):
-                docs.append(FileMeta(**lib_docs.document_meta(library_key)))
-                continue
-        docs.append(FileMeta(path=str(p), name=p.name, mime=lib_docs.mime_for(p)))
-    return FileListResponse(documents=docs)
 
 
 @router.get("/tree", response_model=FileTreeResponse)
@@ -94,7 +71,7 @@ def list_tree(roots: FileRoots = Depends(get_file_roots)) -> FileTreeResponse:
 @router.post("/roots", response_model=FileTreeResponse)
 def add_root(body: RootBody, roots: FileRoots = Depends(get_file_roots)) -> FileTreeResponse:
     try:
-        roots.add_root(body.path, project=body.project)
+        roots.add_root(body.path)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return FileTreeResponse(enabled=roots.enabled, tree=roots.tree())
@@ -103,33 +80,6 @@ def add_root(body: RootBody, roots: FileRoots = Depends(get_file_roots)) -> File
 @router.delete("/roots", response_model=FileTreeResponse)
 def remove_root(path: str = Query(...), roots: FileRoots = Depends(get_file_roots)) -> FileTreeResponse:
     roots.remove_root(path)
-    return FileTreeResponse(enabled=roots.enabled, tree=roots.tree())
-
-
-class MountpointBody(BaseModel):
-    path: str
-
-
-@router.post("/mountpoints", response_model=FileTreeResponse)
-def add_mountpoint(
-    body: MountpointBody,
-    root_path: str = Query(..., alias="root"),
-    roots: FileRoots = Depends(get_file_roots),
-) -> FileTreeResponse:
-    try:
-        roots.add_mountpoint(root_path, body.path)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return FileTreeResponse(enabled=roots.enabled, tree=roots.tree())
-
-
-@router.delete("/mountpoints", response_model=FileTreeResponse)
-def remove_mountpoint(
-    root_path: str = Query(..., alias="root"),
-    path: str = Query(...),
-    roots: FileRoots = Depends(get_file_roots),
-) -> FileTreeResponse:
-    roots.remove_mountpoint(root_path, path)
     return FileTreeResponse(enabled=roots.enabled, tree=roots.tree())
 
 

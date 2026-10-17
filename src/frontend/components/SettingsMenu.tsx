@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback } from "react"
 import { AnimatePresence, motion } from "framer-motion"
-import { ChevronDown, ChevronUp, Settings, BookOpen, Pencil } from "lucide-react"
+import { Check, ChevronDown, ChevronUp, ImageDown, Settings, BookOpen, Pencil, Telescope } from "lucide-react"
 import { ParamSlider } from "./ParamSlider"
 import { StyledSelect } from "./StyledSelect"
 import { cn } from "@/lib/utils"
@@ -23,16 +23,16 @@ interface SettingsMenuProps {
   models: ModelsResponse | null
 }
 
-function Toggle({ on, onChange, label }: { on: boolean; onChange: () => void; label: string }) {
+function ChevronToggle({ ariaLabel, open, onToggle }: { ariaLabel: string; open: boolean; onToggle: () => void }) {
   return (
     <button
-      role="switch"
-      aria-label={label}
-      aria-checked={on}
-      onClick={onChange}
-      className={cn("relative h-5 w-9 rounded-full transition-colors", on ? "bg-ink-muted" : "bg-surface-elevated")}
+      type="button"
+      onClick={onToggle}
+      aria-expanded={open}
+      aria-label={ariaLabel}
+      className="p-0.5 rounded text-ink-faint hover:bg-hover hover:text-ink transition-colors"
     >
-      <span className={cn("absolute top-0.5 h-4 w-4 rounded-full bg-paper shadow-[var(--shadow-sm)] transition-transform", on ? "left-[18px]" : "left-0.5")} />
+      <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
     </button>
   )
 }
@@ -47,6 +47,7 @@ export function SettingsMenu({
   const { researchEnabled } = useModeState()
   const [open, setOpen] = useState(false)
   const [researchOpen, setResearchOpen] = useState(false)
+  const [promptOpen, setPromptOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
   const close = useCallback(() => { setOpen(false) }, [])
@@ -89,9 +90,10 @@ export function SettingsMenu({
             <>
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-xs font-medium text-ink-subtle">
+                    <div className="flex items-center gap-1.5 text-xs font-medium text-ink-subtle">
                       <BookOpen className="h-3.5 w-3.5" />
                       System Prompt
+                      <ChevronToggle ariaLabel="System Prompt" open={promptOpen} onToggle={() => setPromptOpen((o) => !o)} />
                     </div>
                     {onEditPrompts && (
                       <button aria-label="Edit prompts" onClick={() => { onEditPrompts(); close() }} className="p-0.5 rounded hover:bg-hover text-ink-faint hover:text-ink transition-colors">
@@ -99,40 +101,37 @@ export function SettingsMenu({
                       </button>
                     )}
                   </div>
-                  <StyledSelect
-                    options={Object.keys(prompts).map((p) => ({ value: p, label: p }))}
-                    value={config.selectedPrompt ?? ""}
-                    onChange={(v) => onConfigChange({ selectedPrompt: v || null })}
-                  />
-                </div>
-
-                <div className="pt-2 border-t border-divider/50">
-                  <label className="flex items-center justify-between cursor-pointer">
-                    <span className="text-xs text-ink-subtle">Downscale images</span>
-                    <Toggle
-                    label="Downscale images"
-                      on={config.downscaleImages}
-                      onChange={() => onConfigChange({ downscaleImages: !config.downscaleImages })}
-                    />
-                  </label>
+                  {promptOpen && (
+                    <div role="listbox" aria-label="System Prompt" className="mt-2 flex flex-col gap-0.5">
+                      {Object.keys(prompts).map((name) => (
+                        <button
+                          key={name}
+                          type="button"
+                          role="option"
+                          aria-selected={name === config.selectedPrompt}
+                          onClick={() => { onConfigChange({ selectedPrompt: name }); setPromptOpen(false) }}
+                          className={cn(
+                            "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors",
+                            name === config.selectedPrompt ? "bg-surface text-ink" : "text-ink-muted hover:bg-surface hover:text-ink",
+                          )}
+                        >
+                          <span className="min-w-0 flex-1 truncate">{name}</span>
+                          {name === config.selectedPrompt && <Check className="h-3.5 w-3.5 shrink-0" />}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </>
 
 
             {researchEnabled && config.researchDepth !== undefined && (
-              <div className="pt-2 border-t border-divider/50">
-                <button
-                  type="button"
-                  onClick={() => setResearchOpen((o) => !o)}
-                  aria-expanded={researchOpen}
-                  className="flex w-full items-center justify-between gap-2 text-xs font-medium text-ink"
-                >
-                  <span className="flex items-center gap-2">
-                    <span className="h-1.5 w-1.5 rounded-full bg-ink" />
-                    Deep Research
-                  </span>
-                  <ChevronDown className={cn("h-3.5 w-3.5 text-ink-faint transition-transform", researchOpen && "rotate-180")} />
-                </button>
+              <div className="space-y-1.5 pt-2 border-t border-divider/50">
+                <div className="flex items-center gap-1.5 text-xs font-medium text-ink-subtle">
+                  <Telescope className="h-3.5 w-3.5" />
+                  Deep Research
+                  <ChevronToggle ariaLabel="Deep Research" open={researchOpen} onToggle={() => setResearchOpen((o) => !o)} />
+                </div>
                 {researchOpen && (
                   <div className="space-y-3 pt-3">
                     <ParamSlider
@@ -142,7 +141,6 @@ export function SettingsMenu({
                       min={1}
                       max={4}
                       step={1}
-                      accent="accent-ink"
                     />
                     <ParamSlider
                       label="Breadth"
@@ -151,7 +149,6 @@ export function SettingsMenu({
                       min={2}
                       max={6}
                       step={1}
-                      accent="accent-ink"
                     />
                     <div className="space-y-1">
                       <span className="text-[10px] text-ink-faint">Reasoning effort</span>
@@ -213,6 +210,24 @@ export function SettingsMenu({
                 )}
               </div>
             )}
+
+            <div className="flex items-center justify-between pt-2 border-t border-divider/50">
+                  <div className="flex items-center gap-2 text-xs font-medium text-ink-subtle">
+                    <ImageDown className="h-3.5 w-3.5" />
+                    Downscale images
+                  </div>
+                  {/* Track sits one level below the panel (paper under surface-elevated) in both themes. */}
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-label="Downscale images"
+                    aria-checked={config.downscaleImages}
+                    onClick={() => onConfigChange({ downscaleImages: !config.downscaleImages })}
+                    className={cn("relative h-5 w-9 shrink-0 rounded-full border bg-paper shadow-[var(--inner-highlight)] transition-colors", config.downscaleImages ? "border-divider-strong" : "border-divider")}
+                  >
+                    <span className={cn("absolute left-0.5 top-0.5 h-3.5 w-3.5 rounded-full shadow-[var(--shadow-sm)] transition-all", config.downscaleImages ? "translate-x-4 bg-ink-subtle" : "translate-x-0 bg-ink-faint")} />
+                  </button>
+                </div>
           </motion.div>
         )}
       </AnimatePresence>

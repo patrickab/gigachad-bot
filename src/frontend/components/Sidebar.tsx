@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion } from "framer-motion"
 import { FileTree, type FileTreeItem } from "./FileTree"
 import { useFileTree } from "@/hooks/useFileTree"
-import { Boxes, Brain, FileText, MessageSquare, FolderOpen, Lightbulb, LayoutDashboard, PenLine } from "lucide-react"
+import { Boxes, Brain, FileText, FolderOpen, Lightbulb, LayoutDashboard, PenLine } from "lucide-react"
 import { useMemoryViewer } from "@/contexts/MemoryViewerContext"
 import { useProject } from "@/contexts/ProjectContext"
 import { useBranches } from "@/contexts/BranchContext"
@@ -13,7 +13,7 @@ import { useSidebar, type AppSurface } from "@/contexts/SidebarContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import type { BranchMeta, FileTreeNode, ProjectListItem, ProjectDocument } from "@/lib/types"
 import { ChatBranchItem } from "./ChatBranchItem"
-import { addRootFilesToProject, addFileRootMountpoint, addFileRoot, moveHistoryItem, fileRootTree, removeFileRoot, listNotes, listProjectDocuments, moveDocument, removeDocument, writeDocument } from "@/lib/api"
+import { addRootFilesToProject, addFileRoot, moveHistoryItem, fileRootTree, removeFileRoot, listNotes, listProjectDocuments, moveDocument, removeDocument, writeDocument } from "@/lib/api"
 import { isArchitecturePath } from "@/lib/architecture"
 
 const COLLAPSED_WIDTH = 0
@@ -110,8 +110,6 @@ export function Sidebar({
     activeId: activeProject,
     onActivate: openProject,
     onDeactivate: closeProject,
-    // ponytail: mounted-root ids are absolute paths; only project slugs join the accordion
-    isAccordionId: (id) => !id.startsWith("/"),
   })
   const filesController = useFileTree({ storageKey: "expanded_file_folders" })
   const canvasController = useFileTree({ storageKey: "expanded_canvas_folders" })
@@ -153,21 +151,20 @@ export function Sidebar({
     return () => { cancelled = true }
   }, [])
 
-  // A file-root root, standalone (Files) or mounted to a project (Projects), is keyed by its absolute path.
+  // A file-root root is keyed by its absolute path.
   const deleteFileRoot = (path: string) => schedule(`root:${path}`, path.split("/").pop() ?? path, async () => {
     const result = await removeFileRoot(path)
     setRootTreeData(result.tree)
     onRootsChanged?.()
   })
 
-  // Roots mounted to a project render inside that project's subtree, not here.
-  const fileItems = useMemo(() => hidePending(buildFileItems(rootTreeData.filter((node) => !node.project)),
+  const fileItems = useMemo(() => hidePending(buildFileItems(rootTreeData),
     (item) => pending(`root:${item.id}`)), [rootTreeData, pending])
   const projectItems = useMemo(() =>
-    // Projects tree rows: absolute ids are mounted file roots, other file root rows are projects, elements are chats.
-    hidePending(buildProjectItems(projects, activeProject, branchMeta, rootTreeData),
-      (item) => pending(`${item.id.startsWith("/") ? "root" : item.type === "root" ? "project" : "history"}:${item.id}`)),
-    [projects, activeProject, branchMeta, rootTreeData, pending],
+    // Projects tree rows: file root rows are projects, elements are chats.
+    hidePending(buildProjectItems(projects, activeProject, branchMeta),
+      (item) => pending(`${item.type === "root" ? "project" : "history"}:${item.id}`)),
+    [projects, activeProject, branchMeta, pending],
   )
   const historyItems = useMemo(() =>
     hidePending(buildHistoryItems(rootFiles), (item) => pending(`history:${item.id}`)),
@@ -176,30 +173,13 @@ export function Sidebar({
   // A history is any chat that is not in a project, listed after the projects like loose canvases.
   const chatItems = useMemo(() => [...projectItems, ...historyItems], [projectItems, historyItems])
 
-  const renderChatElement = useCallback((item: FileTreeItem<string>, depth: number) => {
-    const data = typeof item.data === "string" ? item.data : item.id
-    // ponytail: absolute path = file inside a mounted file root; chat files are always relative
-    if (typeof data === "string" && data.startsWith("/")) {
-      return (
-        <div style={{ paddingLeft: 8 + depth * 16, paddingRight: 8 }}>
-          <button
-            onClick={() => onFileSelect?.(data)}
-            className="flex w-full items-center gap-1.5 truncate py-0.5 text-left text-[11px] text-ink-muted transition-colors hover:text-ink"
-          >
-            <FileText className="h-3.5 w-3.5 shrink-0 text-ink-muted" />
-            {item.label}
-          </button>
-        </div>
-      )
-    }
-    return (
-      <ChatBranchItem
-        file={data}
-        label={item.label}
-        depth={depth}
-      />
-    )
-  }, [onFileSelect])
+  const renderChatElement = useCallback((item: FileTreeItem<string>, depth: number) => (
+    <ChatBranchItem
+      file={typeof item.data === "string" ? item.data : item.id}
+      label={item.label}
+      depth={depth}
+    />
+  ), [])
 
   useEffect(() => { registerOnFileClick(onOpenChat) }, [onOpenChat, registerOnFileClick])
   useEffect(() => { if (onMerge) registerOnMerge(onMerge) }, [onMerge, registerOnMerge])
@@ -294,28 +274,16 @@ export function Sidebar({
         <>
         <div className="px-2">
           <FileTree
-            sectionIcon={MessageSquare}
-            sectionTitle="Chats"
+            sectionIcon={Lightbulb}
+            sectionTitle="Projects"
             items={chatItems}
             loading={historiesLoading}
             plusTitle="New project"
             collapsed={collapsed}
             onExpand={expandIfCollapsed}
             controller={projectsController}
-            onRootDelete={(id) => {
-              if (id.startsWith("/")) deleteFileRoot(id)
-              else schedule(`project:${id}`, id, () => deleteProject(id))
-            }}
+            onRootDelete={(id) => schedule(`project:${id}`, id, () => deleteProject(id))}
             onAddRoot={(name) => createProject(name)}
-            onAddMountpoint={async (rootId: string, path: string) => {
-              // Project row → mount a FileRoots to the project; mounted file root row → nested mountpoint.
-              const r = rootId.startsWith("/")
-                ? await addFileRootMountpoint(rootId, path)
-                : await addFileRoot(path, rootId)
-              setRootTreeData(r.tree)
-              onRootsChanged?.()
-            }}
-            mountpointPlaceholder="Folder path…"
             onDashboardClick={(rootId) => {
               openProject(rootId)
               setDashboardOpen(true)
@@ -357,11 +325,6 @@ export function Sidebar({
               const r = await addFileRoot(path)
               setRootTreeData(r.tree)
               setFilesOpen(true)
-              onRootsChanged?.()
-            }}
-            onAddMountpoint={async (rootId: string, path: string) => {
-              const r = await addFileRootMountpoint(rootId, path)
-              setRootTreeData(r.tree)
               onRootsChanged?.()
             }}
             onRootDelete={deleteFileRoot}
@@ -441,8 +404,6 @@ function buildFileItems(nodes: FileTreeNode[]): FileTreeItem<string>[] {
       type: n.type, // "root" | "folder"
       data: n.path,
       icon: isRootNode ? FolderOpen : undefined,
-      mountable: isRootNode,
-      mounted: isRootNode,
       children: buildFileItems(n.children ?? []),
     }
   })
@@ -452,7 +413,6 @@ function buildProjectItems(
   projects: ProjectListItem[],
   activeProject: string | null,
   branchMeta: Record<string, BranchMeta>,
-  rootTree: FileTreeNode[],
 ): FileTreeItem<string>[] {
   return projects.map((project) => {
     const dirPrefix = `${project.slug}/`
@@ -470,19 +430,14 @@ function buildProjectItems(
       items.push({ id: key, label, type: "element", data: key })
     }
 
-    // FileRoots roots mounted to this project appear as file root nodes in its subtree.
-    const mountedRoots = buildFileItems(rootTree.filter((n) => n.project === project.slug))
-
     return {
       id: project.slug,
       label: project.name,
       type: "root",
       data: project.slug,
       icon: Lightbulb,
-      mountable: true,
       isActive: activeProject === project.slug,
       children: [
-        ...mountedRoots,
         {
           id: `${project.slug}/__dashboard__`,
           label: "Dashboard",

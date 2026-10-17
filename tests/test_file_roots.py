@@ -49,7 +49,7 @@ def reopen(pool, user_id, device_id=None):
 def rows(pool):
     with pool.connection() as connection:
         return connection.execute(
-            "SELECT user_id, path, project_slug, mountpoints FROM vault_roots ORDER BY path"
+            "SELECT user_id, path FROM vault_roots ORDER BY path"
         ).fetchall()
 
 
@@ -74,27 +74,11 @@ def root_dir(tmp_path):
 def test_add_root_writes_a_row_and_a_change(postgres_pool, root_dir):
     roots, user_id, device_id = make_file_roots(postgres_pool)
 
-    roots.add_root(str(root_dir), project="alpha")
-
-    assert rows(postgres_pool) == [(user_id, str(root_dir.resolve()), "alpha", [])]
-    assert changes(postgres_pool) == [(str(root_dir.resolve()), "write", device_id)]
-    assert reopen(postgres_pool, user_id).roots() == [str(root_dir.resolve())]
-
-
-def test_mountpoint_add_and_remove_update_the_jsonb(postgres_pool, root_dir, tmp_path):
-    roots, user_id, _ = make_file_roots(postgres_pool)
-    mountpoint = tmp_path / "mnt"
-    mountpoint.mkdir()
     roots.add_root(str(root_dir))
 
-    roots.add_mountpoint(str(root_dir), str(mountpoint))
-    assert rows(postgres_pool)[0][3] == [str(mountpoint.resolve())]
-    assert reopen(postgres_pool, user_id).mountpoints(str(root_dir)) == [str(mountpoint.resolve())]
-
-    roots.remove_mountpoint(str(root_dir), str(mountpoint))
-    assert rows(postgres_pool)[0][3] == []
-    assert reopen(postgres_pool, user_id).mountpoints(str(root_dir)) == []
-    assert [(operation) for _, operation, _ in changes(postgres_pool)] == ["write", "write", "write"]
+    assert rows(postgres_pool) == [(user_id, str(root_dir.resolve()))]
+    assert changes(postgres_pool) == [(str(root_dir.resolve()), "write", device_id)]
+    assert reopen(postgres_pool, user_id).roots() == [str(root_dir.resolve())]
 
 
 def test_remove_root_deletes_the_row(postgres_pool, root_dir):
@@ -119,7 +103,7 @@ def test_identical_root_paths_stay_isolated_per_user(postgres_pool, root_dir):
 
     bob.remove_root(str(root_dir))
 
-    assert rows(postgres_pool) == [(alice_id, str(root_dir.resolve()), None, [])]
+    assert rows(postgres_pool) == [(alice_id, str(root_dir.resolve()))]
     assert reopen(postgres_pool, alice_id).roots() == [str(root_dir.resolve())]
 
 
@@ -132,24 +116,19 @@ def test_one_user_cannot_remove_another_users_root(postgres_pool, root_dir, tmp_
     bob.add_root(str(bob_dir))
 
     bob.remove_root(str(root_dir))
-    bob.remove_mountpoint(str(root_dir), str(tmp_path))
 
     assert rows(postgres_pool) == sorted([
-        (alice_id, str(root_dir.resolve()), None, []),
-        (bob_id, str(bob_dir.resolve()), None, []),
+        (alice_id, str(root_dir.resolve())),
+        (bob_id, str(bob_dir.resolve())),
     ], key=lambda row: row[1])
     assert reopen(postgres_pool, alice_id).roots() == [str(root_dir.resolve())]
 
 
-def test_root_file_contents_never_enter_the_database(postgres_pool, root_dir, tmp_path):
+def test_root_file_contents_never_enter_the_database(postgres_pool, root_dir):
     before = {path: path.read_bytes() for path in sorted(root_dir.rglob("*")) if path.is_file()}
-    mountpoint = tmp_path / "mnt"
-    mountpoint.mkdir()
-    (mountpoint / "mounted.md").write_text("mounted\n")
 
     roots, _, _ = make_file_roots(postgres_pool)
     roots.add_root(str(root_dir))
-    roots.add_mountpoint(str(root_dir), str(mountpoint))
 
     # Listing still reads the external filesystem, not the database.
     assert [f["name"] for f in roots.list_files()] == ["note.md", "deep.txt"]

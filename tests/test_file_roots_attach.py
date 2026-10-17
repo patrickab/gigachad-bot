@@ -1,5 +1,4 @@
-"""Route-level regression tests for ``file_roots`` — file root PDF attach and
-the project-documents listing.
+"""Route-level regression tests for ``file_roots`` file root attach.
 
 A file root PDF is promoted into the shared Postgres library (``PDFs/<name>``,
 via ``store_library_pdf``) on first attach, never onto disk only. The library
@@ -84,9 +83,6 @@ class FakeFileRoots:
 
     def read(self, path: str) -> str:
         return self._mapping[path].read_text(encoding="utf-8")
-
-    def list_files_for_project(self, slug: str) -> list[dict]:
-        return [{"path": str(p), "name": p.name} for p in self._mapping.values()]
 
 
 def _build_app(roots: FakeFileRoots, assets: AssetStore) -> FastAPI:
@@ -192,33 +188,3 @@ def test_attach_root_text_file_returns_content(tmp_path, assets, no_real_extract
     assert body["parsedMd"] is None
     assert assets.list() == []
     assert no_real_extraction == []
-
-
-def test_project_documents_reports_the_library_key_once_promoted(tmp_path, assets):
-    pdf = tmp_path / "slides.pdf"
-    pdf.write_bytes(b"file root copy")
-    assets.write("pdf", "PDFs/slides.pdf", b"library copy", mime="application/pdf")
-
-    roots = FakeFileRoots({"v/slides.pdf": pdf})
-    client = TestClient(_build_app(roots, assets))
-
-    r = client.get("/api/fileroots/project-documents", params={"slug": "thesis"})
-
-    assert r.status_code == 200, r.text
-    docs = r.json()["documents"]
-    assert len(docs) == 1
-    assert docs[0]["path"] == "PDFs/slides.pdf"
-
-
-def test_project_documents_reports_the_root_path_when_not_yet_promoted(tmp_path, assets):
-    pdf = tmp_path / "slides.pdf"
-    pdf.write_bytes(b"file root copy")
-
-    roots = FakeFileRoots({"v/slides.pdf": pdf})
-    client = TestClient(_build_app(roots, assets))
-
-    r = client.get("/api/fileroots/project-documents", params={"slug": "thesis"})
-
-    assert r.status_code == 200, r.text
-    docs = r.json()["documents"]
-    assert docs[0]["path"] == str(pdf)

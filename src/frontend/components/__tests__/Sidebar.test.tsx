@@ -16,7 +16,7 @@ const api = vi.hoisted(() => ({
 }))
 vi.mock("@/lib/api", () => ({
   ...api,
-  addFileRootMountpoint: vi.fn(), addFileRoot: vi.fn(), moveHistoryItem: vi.fn(),
+  addFileRoot: vi.fn(), moveHistoryItem: vi.fn(),
   fileRootTree: vi.fn(async () => ({ tree: [] })), removeFileRoot: vi.fn(), moveDocument: vi.fn(),
   removeDocument: vi.fn(), writeDocument: vi.fn(),
 }))
