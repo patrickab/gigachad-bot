@@ -66,6 +66,7 @@ function chartHeightFor(width: number, rows: number) {
 // so these must stay module-level: an inline object redraws every plot on every host render.
 const PLOT_CONFIG = { responsive: false, displaylogo: false, displayModeBar: false, scrollZoom: true } as const
 const PINCH_WHEEL_DELTA = 200 // Plotly zooms by exp(-deltaY / 200) per wheel event
+const PINCH_ZOOM_GAIN = 4.5 // zoom = fingerRatio ** gain; 1 tracks the fingers exactly but feels slow
 const NO_TRACES: unknown[] = []
 
 /** Renders a figure the `sandbox_plot` tool produced. Theme values remain defaults the model can
@@ -140,6 +141,7 @@ export const PlotElement = memo(function PlotElement({ figure }: PlotElementProp
 
   // Pinch zooms the plot; a plain wheel scrolls the page instead (except fullscreen, which has
   // nothing to scroll). Trackpad pinches arrive as ctrl+wheel, which must not zoom the page.
+  // Two-finger touches are hidden from Plotly, whose own drag would rotate or pan mid-pinch.
   useEffect(() => {
     const host = hostRef.current
     if (!host) return
@@ -147,8 +149,17 @@ export const PlotElement = memo(function PlotElement({ figure }: PlotElementProp
       if (event.ctrlKey) event.preventDefault()
       else if (document.fullscreenElement !== host) event.stopPropagation()
     }
+    const onMultiTouch = (event: TouchEvent) => {
+      if (event.touches.length >= 2) event.stopPropagation()
+    }
     host.addEventListener("wheel", onWheel, { capture: true, passive: false })
-    return () => host.removeEventListener("wheel", onWheel, { capture: true })
+    host.addEventListener("touchstart", onMultiTouch, { capture: true })
+    host.addEventListener("touchmove", onMultiTouch, { capture: true })
+    return () => {
+      host.removeEventListener("wheel", onWheel, { capture: true })
+      host.removeEventListener("touchstart", onMultiTouch, { capture: true })
+      host.removeEventListener("touchmove", onMultiTouch, { capture: true })
+    }
   }, [])
 
   // Touch pinch has no Plotly equivalent, so replay it as ctrl+wheel, which cartesian, 3D and geo
@@ -164,7 +175,7 @@ export const PlotElement = memo(function PlotElement({ figure }: PlotElementProp
       const [clientX, clientY] = [left + mx, top + my]
       const target = document.elementFromPoint(clientX, clientY) ?? host
       target.dispatchEvent(new WheelEvent("wheel", {
-        bubbles: true, cancelable: true, clientX, clientY, ctrlKey: true, deltaY: -PINCH_WHEEL_DELTA * Math.log(stepRatio),
+        bubbles: true, cancelable: true, clientX, clientY, ctrlKey: true, deltaY: -PINCH_WHEEL_DELTA * PINCH_ZOOM_GAIN * Math.log(stepRatio),
       }))
     },
   })
