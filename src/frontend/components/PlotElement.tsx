@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Download, Maximize2, Minimize2 } from "lucide-react"
+import { useTwoFingerGesture } from "@/hooks/useTwoFingerGesture"
 import { cn } from "@/lib/utils"
 
 export interface PlotFigure {
@@ -63,7 +64,8 @@ function chartHeightFor(width: number, rows: number) {
 
 // react-plotly calls `Plotly.react` whenever `data`, `layout` or `config` changes identity,
 // so these must stay module-level: an inline object redraws every plot on every host render.
-const PLOT_CONFIG = { responsive: false, displaylogo: false, displayModeBar: false } as const
+const PLOT_CONFIG = { responsive: false, displaylogo: false, displayModeBar: false, scrollZoom: true } as const
+const PINCH_WHEEL_DELTA = 200 // Plotly zooms by exp(-deltaY / 200) per wheel event
 const NO_TRACES: unknown[] = []
 
 /** Renders a figure the `sandbox_plot` tool produced. Theme values remain defaults the model can
@@ -136,6 +138,37 @@ export const PlotElement = memo(function PlotElement({ figure }: PlotElementProp
     return () => observer.disconnect()
   }, [])
 
+  // Pinch zooms the plot; a plain wheel scrolls the page instead (except fullscreen, which has
+  // nothing to scroll). Trackpad pinches arrive as ctrl+wheel, which must not zoom the page.
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+    const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey) event.preventDefault()
+      else if (document.fullscreenElement !== host) event.stopPropagation()
+    }
+    host.addEventListener("wheel", onWheel, { capture: true, passive: false })
+    return () => host.removeEventListener("wheel", onWheel, { capture: true })
+  }, [])
+
+  // Touch pinch has no Plotly equivalent, so replay it as ctrl+wheel, which cartesian, 3D and geo
+  // plots all zoom around the cursor on.
+  useTwoFingerGesture(hostRef, {
+    begin: () => ({ previousRatio: 1 }),
+    update: (gesture, { ratio, mx, my }) => {
+      const host = hostRef.current
+      if (!host) return
+      const stepRatio = ratio / gesture.previousRatio
+      gesture.previousRatio = ratio
+      const { left, top } = host.getBoundingClientRect()
+      const [clientX, clientY] = [left + mx, top + my]
+      const target = document.elementFromPoint(clientX, clientY) ?? host
+      target.dispatchEvent(new WheelEvent("wheel", {
+        bubbles: true, cancelable: true, clientX, clientY, ctrlKey: true, deltaY: -PINCH_WHEEL_DELTA * Math.log(stepRatio),
+      }))
+    },
+  })
+
   const subplotRows = useMemo(() => subplotRowsFor(figure.layout), [figure.layout])
   const dimensions = useMemo(
     () => hostSize.width > 0
@@ -207,7 +240,7 @@ export const PlotElement = memo(function PlotElement({ figure }: PlotElementProp
           layout={layout}
           frames={figure.frames}
           config={PLOT_CONFIG}
-          style={{ width: "100%", height: `${dimensions.height}px` }}
+          style={{ width: "100%", height: `${dimensions.height}px`, touchAction: "none" }}
           onInitialized={(_figure, graph) => { graphRef.current = graph }}
         />
       )}
