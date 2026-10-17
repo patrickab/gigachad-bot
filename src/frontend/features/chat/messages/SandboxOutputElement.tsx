@@ -13,21 +13,28 @@ interface SandboxOutputElementProps {
   output: SandboxOutputRecord
 }
 
+/** Parse the figure JSON, or null when it is malformed so the caller falls back to other renderings. */
+function parsePlotFigure(text: string): PlotFigure | null {
+  try {
+    return JSON.parse(text) as PlotFigure
+  } catch {
+    return null
+  }
+}
+
 function SandboxOutputElementInner({ output }: SandboxOutputElementProps) {
   const mediaTypes = Object.keys(output.mime_bundle)
 
   if (mediaTypes.includes(PLOTLY_MEDIA_TYPE) && output.text) {
-    try {
-      const figure = JSON.parse(output.text) as PlotFigure
-      return <PlotElement figure={figure} />
-    } catch {
-      // Fall back when figure JSON is malformed.
-    }
+    const figure = parsePlotFigure(output.text)
+    if (figure) return <PlotElement figure={figure} />
   }
 
   const image = mediaTypes.find((t) => t.startsWith("image/"))
   if (image) {
     const ref = output.mime_bundle[image]
+    // Sandbox assets are served by the backend at runtime, so next/image optimization does not apply.
+    // eslint-disable-next-line @next/next/no-img-element -- dynamic backend asset URL under Tauri static export
     return <img src={sandboxAssetUrl(ref.asset_path)} alt={output.title ?? "Sandbox output"} className="max-w-full rounded-lg" />
   }
 

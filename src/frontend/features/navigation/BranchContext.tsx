@@ -32,6 +32,21 @@ interface BranchContextValue {
 
 const BranchContext = createContext<BranchContextValue | null>(null)
 
+interface Histories {
+  sortedFiles: string[]
+  branchData: Record<string, BranchMeta>
+}
+
+/** Fetch the chat history list and branch metadata; either failing yields an empty value. */
+async function fetchHistories(): Promise<Histories> {
+  const [histData, branchData] = await Promise.all([
+    listChatHistories().catch(() => ({ files: [] as string[] })),
+    fetchBranchMeta().catch(() => ({} as Record<string, BranchMeta>)),
+  ])
+  const sortedFiles = (histData.files ?? []).slice().sort((a: string, b: string) => a.localeCompare(b))
+  return { sortedFiles, branchData }
+}
+
 /** Owns chat history list, branch metadata and the active file/QA focus shown in the sidebar. */
 export function BranchProvider({ onFileClick, children }: { onFileClick: (file: string, qaIndex?: number) => void; children: ReactNode }) {
   const [branchMeta, setBranchMeta] = useState<Record<string, BranchMeta>>({})
@@ -40,20 +55,19 @@ export function BranchProvider({ onFileClick, children }: { onFileClick: (file: 
   const [activeFile, setActiveFile] = useState<string | null>(null)
   const [activeQaIndex, setActiveQaIndex] = useState<number | null>(null)
 
-  const refreshAll = useCallback(async () => {
-    const [histData, branchData] = await Promise.all([
-      listChatHistories().catch(() => ({ files: [] as string[] })),
-      fetchBranchMeta().catch(() => ({} as Record<string, BranchMeta>)),
-    ])
-    const sortedFiles = (histData.files ?? []).slice().sort((a: string, b: string) => a.localeCompare(b))
+  const applyHistories = useCallback(({ sortedFiles, branchData }: Histories) => {
     setRootFiles(sortedFiles)
     setBranchMeta(branchData)
     setHistoriesLoading(false)
   }, [])
 
+  const refreshAll = useCallback(async () => {
+    applyHistories(await fetchHistories())
+  }, [applyHistories])
+
   useEffect(() => {
-    refreshAll()
-  }, [refreshAll])
+    fetchHistories().then(applyHistories)
+  }, [applyHistories])
 
   const chatIdMap = useMemo(() => buildChatIdMap(branchMeta), [branchMeta])
 

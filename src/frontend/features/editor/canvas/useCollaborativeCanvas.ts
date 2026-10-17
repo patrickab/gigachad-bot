@@ -7,6 +7,9 @@ import { CANVAS_COLLECTIONS, COLLECTION_KIND, KIND_COLLECTION, diffEntities, typ
 
 type CanvasCollaborationStatus = "loading" | "synced" | "saving" | "offline" | "error"
 
+/** The document and status the hook exposes, tagged with the canvas key they belong to. */
+type Published = { canvasKey: string; document: CanvasDocument | null; status: CanvasCollaborationStatus }
+
 export interface CollaborativeCanvas {
   document: CanvasDocument | null
   /** Commit a locally edited document, sending the derived mutations after a short debounce. */
@@ -81,18 +84,23 @@ function failureStatus(): CanvasCollaborationStatus {
  * the revision holding a batch; the gapless stream is the single source of content.
  */
 export function useCollaborativeCanvas(canvasKey: string): CollaborativeCanvas {
-  const [document, setDocument] = useState<CanvasDocument | null>(null)
-  const [status, setStatus] = useState<CanvasCollaborationStatus>("loading")
+  const [published, setPublished] = useState<Published>({ canvasKey, document: null, status: "loading" })
+  // A new canvas starts blank and loading until its session publishes
+  if (published.canvasKey !== canvasKey) setPublished({ canvasKey, document: null, status: "loading" })
   const documentRef = useRef<CanvasDocument | null>(null)
   const sessionRef = useRef<Session | null>(null)
+
+  // Late updates from a previous canvas's session carry its key and are dropped
+  const patch = useCallback((key: string, update: Partial<Omit<Published, "canvasKey">>) => {
+    setPublished((previous) => previous.canvasKey === key ? { ...previous, ...update } : previous)
+  }, [])
 
   const publish = useCallback((session: Session) => {
     if (sessionRef.current !== session || !session.server) return
     const base = applyMutations(session.server, session.inFlight?.mutations ?? [])
     documentRef.current = { ...applyMutations(base, session.pending), viewport: session.viewport }
-    setDocument(documentRef.current)
-    setStatus(session.inFlight || session.pending.length > 0 ? "saving" : "synced")
-  }, [])
+    patch(session.canvasKey, { document: documentRef.current, status: session.inFlight || session.pending.length > 0 ? "saving" : "synced" })
+  }, [patch])
 
   const run = useCallback((session: Session, action: () => void, delay: number) => {
     clearTimeout(session.timer)
@@ -102,15 +110,15 @@ export function useCollaborativeCanvas(canvasKey: string): CollaborativeCanvas {
   }, [])
 
   const fail = useCallback((session: Session, error: unknown, action: () => void) => {
-    setStatus(failureStatus())
+    patch(session.canvasKey, { status: failureStatus() })
     const transient = !(error instanceof ApiError) || error.status === 408 || error.status === 429 || error.status >= 500
     // Retry network and 408/429/5xx errors with capped exponential backoff, give up on other API errors
     if (!transient || session.attempts >= RETRY_MAX_ATTEMPTS) return
     run(session, action, Math.min(RETRY_INITIAL_MS * 2 ** session.attempts, RETRY_MAX_MS))
     session.attempts += 1
-  }, [run])
+  }, [patch, run])
 
-  const send = useCallback((session: Session) => {
+  const send = useCallback(function sendSession(session: Session) {
     if (!session.server || session.inFlight || session.pending.length === 0) return
     const inFlight = { mutations: session.pending }
     session.inFlight = inFlight
@@ -120,7 +128,7 @@ export function useCollaborativeCanvas(canvasKey: string): CollaborativeCanvas {
       session.attempts = 0
       if (session.revision >= revision) {
         session.inFlight = null
-        send(session)
+        sendSession(session)
         publish(session)
       } else {
         session.inFlight = { ...inFlight, ackRevision: revision }
@@ -131,7 +139,7 @@ export function useCollaborativeCanvas(canvasKey: string): CollaborativeCanvas {
       session.inFlight = null
       session.pending = compact([...inFlight.mutations, ...session.pending])
       publish(session)
-      fail(session, error, () => send(session))
+      fail(session, error, () => sendSession(session))
     })
   }, [fail, publish])
 
@@ -147,7 +155,7 @@ export function useCollaborativeCanvas(canvasKey: string): CollaborativeCanvas {
     publish(session)
   }, [publish, send])
 
-  const load = useCallback((session: Session) => {
+  const load = useCallback(function loadSession(session: Session) {
     loadCanvasSnapshot(session.canvasKey).then(({ revision, document: snapshot }) => {
       if (sessionRef.current !== session) return
       session.attempts = 0
@@ -158,22 +166,20 @@ export function useCollaborativeCanvas(canvasKey: string): CollaborativeCanvas {
         session.canvasKey,
         () => session.revision,
         (batch) => receiveBatch(session, batch),
-        () => setStatus(failureStatus()),
+        () => patch(session.canvasKey, { status: failureStatus() }),
         () => publish(session),
       )
       publish(session)
       send(session)
     }).catch((error: unknown) => {
-      if (sessionRef.current === session) fail(session, error, () => load(session))
+      if (sessionRef.current === session) fail(session, error, () => loadSession(session))
     })
-  }, [fail, publish, receiveBatch, send])
+  }, [fail, patch, publish, receiveBatch, send])
 
   useEffect(() => {
     const session: Session = { canvasKey, server: null, revision: 0, viewport: undefined, pending: [], inFlight: null, attempts: 0 }
     sessionRef.current = session
     documentRef.current = null
-    setDocument(null)
-    setStatus("loading")
     load(session)
     return () => {
       clearTimeout(session.timer)
@@ -189,23 +195,23 @@ export function useCollaborativeCanvas(canvasKey: string): CollaborativeCanvas {
     session.attempts = 0
     clearTimeout(session.timer)
     if (!session.server) {
-      setStatus("loading")
+      patch(session.canvasKey, { status: "loading" })
       load(session)
     } else {
       send(session)
       publish(session)
     }
-  }, [load, publish, send])
+  }, [load, patch, publish, send])
 
   useEffect(() => {
-    const offline = () => setStatus("offline")
+    const offline = () => patch(canvasKey, { status: "offline" })
     window.addEventListener("offline", offline)
     window.addEventListener("online", retry)
     return () => {
       window.removeEventListener("offline", offline)
       window.removeEventListener("online", retry)
     }
-  }, [retry])
+  }, [canvasKey, patch, retry])
 
   const replace = useCallback((nextDocument: CanvasDocument) => {
     const session = sessionRef.current
@@ -214,12 +220,12 @@ export function useCollaborativeCanvas(canvasKey: string): CollaborativeCanvas {
     session.viewport = nextDocument.viewport
     const changes = deriveMutations(current, nextDocument)
     documentRef.current = nextDocument
-    setDocument(nextDocument)
+    patch(session.canvasKey, { document: nextDocument })
     if (changes.length === 0) return
     session.pending = compact([...session.pending, ...changes])
-    setStatus("saving")
+    patch(session.canvasKey, { status: "saving" })
     run(session, () => send(session), SEND_DEBOUNCE_MS)
-  }, [run, send])
+  }, [patch, run, send])
 
-  return { document, replace, status, retry }
+  return { document: published.document, replace, status: published.status, retry }
 }

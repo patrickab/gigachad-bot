@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useMemo, useState, useSyncExternalStore } from "react"
 
 /**
  * Expansion state shared by every FileTree. Element (chat) selection lives in BranchContext.
@@ -31,16 +31,31 @@ interface FileTreeConfig {
   onDeactivate?: (id: string) => void
 }
 
+function subscribeNever() {
+  return () => {}
+}
+
+function readSaved(storageKey: string): string | null {
+  try { return localStorage.getItem(storageKey) } catch { return null }
+}
+
+function parseSaved(saved: string | null): Set<string> {
+  if (!saved) return new Set()
+  try { return new Set(JSON.parse(saved)) } catch { return new Set() }
+}
+
 export function useFileTree(config: FileTreeConfig = {}): FileBranchController {
   const { accordion, activeId, storageKey, onActivate, onDeactivate } = config
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  useEffect(() => {
-    if (accordion || !storageKey) return
-    try {
-      const saved = localStorage.getItem(storageKey)
-      if (saved) setExpanded(new Set(JSON.parse(saved)))
-    } catch {}
-  }, [accordion, storageKey])
+  // Persisted set is read on the client only, so server and hydration render start empty.
+  const saved = useSyncExternalStore(
+    subscribeNever,
+    () => (accordion || !storageKey ? null : readSaved(storageKey)),
+    () => null,
+  )
+  const persisted = useMemo(() => parseSaved(saved), [saved])
+  // User toggles override the persisted set for the storage key they were made under.
+  const [edit, setEdit] = useState<{ storageKey: string | undefined; set: Set<string> } | null>(null)
+  const expanded = edit && edit.storageKey === storageKey ? edit.set : persisted
 
   const persist = useCallback((next: Set<string>) => {
     if (accordion || !storageKey) return
@@ -57,26 +72,28 @@ export function useFileTree(config: FileTreeConfig = {}): FileBranchController {
       if (activeId !== id) onActivate?.(id)
       return
     }
-    setExpanded((prev) => {
-      if (prev.has(id)) return prev
-      const next = new Set(prev).add(id)
+    setEdit((prev) => {
+      const current = prev && prev.storageKey === storageKey ? prev.set : persisted
+      if (current.has(id)) return prev
+      const next = new Set(current).add(id)
       persist(next)
-      return next
+      return { storageKey, set: next }
     })
-  }, [accordion, activeId, onActivate, persist])
+  }, [accordion, activeId, onActivate, persist, persisted, storageKey])
 
   const toggleBranch = useCallback((id: string) => {
     if (accordion) {
-      activeId === id ? onDeactivate?.(id) : onActivate?.(id)
+      if (activeId === id) onDeactivate?.(id)
+      else onActivate?.(id)
       return
     }
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
+    setEdit((prev) => {
+      const next = new Set(prev && prev.storageKey === storageKey ? prev.set : persisted)
+      if (!next.delete(id)) next.add(id)
       persist(next)
-      return next
+      return { storageKey, set: next }
     })
-  }, [accordion, activeId, onActivate, onDeactivate, persist])
+  }, [accordion, activeId, onActivate, onDeactivate, persist, persisted, storageKey])
 
   return { isExpanded, toggleBranch, expand }
 }

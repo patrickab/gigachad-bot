@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react"
 import { motion } from "framer-motion"
 import { CanvasEditor } from "./CanvasEditor"
 import type { CanvasToolbarSlots } from "./CanvasToolbar"
@@ -63,9 +63,8 @@ export function FileCanvasEditor({ path, slug, onClose, onSaved, onLiveContent, 
     loadFromServer()
   }), [path, loadFromServer])
 
-  const liveRef = useRef(onLiveContent)
-  liveRef.current = onLiveContent
-  useEffect(() => () => { liveRef.current?.(path, null) }, [path])
+  const publishLiveContent = useEffectEvent((livePath: string, content: string | null) => { onLiveContent?.(livePath, content) })
+  useEffect(() => () => { publishLiveContent(path, null) }, [path])
 
   // Saves are chained so an earlier slow write can never resolve after,
   // and silently clobber, a newer one.
@@ -87,7 +86,7 @@ export function FileCanvasEditor({ path, slug, onClose, onSaved, onLiveContent, 
     if (!canvasDoc) return
     const timer = setTimeout(() => {
       const serialized = serializeCanvasDoc(canvasDoc)
-      liveRef.current?.(path, serialized)
+      publishLiveContent(path, serialized)
       if (serialized !== savedContentRef.current) persist(serialized).catch(() => {})
     }, 1000)
     return () => clearTimeout(timer)
@@ -95,19 +94,18 @@ export function FileCanvasEditor({ path, slug, onClose, onSaved, onLiveContent, 
 
   // Leaving the editor flushes a pending autosave immediately. The debounce
   // cleanup alone would drop strokes drawn in the final second.
-  const flushRef = useRef<(force?: boolean) => void>(() => {})
-  flushRef.current = (force = false) => {
+  const flush = useEffectEvent((force = false) => {
     if (!canvasDoc) return
     const serialized = serializeCanvasDoc(canvasDoc)
     if (force || serialized !== savedContentRef.current) persist(serialized).catch(() => {})
-  }
-  useEffect(() => () => flushRef.current(), [])
+  })
+  useEffect(() => () => flush(), [])
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && (event.key === "s" || event.key === "Enter")) {
         event.preventDefault()
-        flushRef.current(true)
+        flush(true)
       }
       if (event.key === "Escape") {
         event.preventDefault()

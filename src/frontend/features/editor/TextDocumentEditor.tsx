@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { ChevronLeft, ChevronRight, Maximize2, Minimize2, Save, X } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
@@ -12,7 +12,7 @@ import type { CanvasToolbarSlots } from "@/features/editor/canvas/CanvasToolbar"
 import { loadFileViewerText, readFileRootRendered, writeArchitectureSource, writeDocument, ApiError } from "@/lib/backend/api"
 import { EditorSidebar } from "./EditorSidebar"
 import { architectureSlug, architectureSource, isArchitecturePath } from "@/lib/domain/architecturePaths"
-import { subscribeToChanges } from "@/lib/backend/syncStream"
+import { subscribeToChanges, type ChangeEvent } from "@/lib/backend/syncStream"
 import { baseName } from "@/lib/paths"
 
 type EditorView = "edit" | "preview"
@@ -69,8 +69,6 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent
   const [renderedContent, setRenderedContent] = useState<string | null>(null)
   const [loadError, setLoadError] = useState(false)
   const [dirty, setDirty] = useState(false)
-  const dirtyRef = useRef(dirty)
-  dirtyRef.current = dirty
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(!!overlay)
@@ -102,8 +100,14 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent
     })
   }, [path])
 
-  useEffect(() => {
+  const [renderedScope, setRenderedScope] = useState({ path, overlay })
+  // Drop the rendered preview of the previous document or mode
+  if (renderedScope.path !== path || renderedScope.overlay !== overlay) {
+    setRenderedScope({ path, overlay })
     setRenderedContent(null)
+  }
+
+  useEffect(() => {
     loadFromServer()
     if (overlay) readFileRootRendered(path).then(setRenderedContent).catch(() => {})
   }, [path, overlay, loadFromServer])
@@ -114,15 +118,15 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent
   }, [])
 
   // Reload on remote changes unless there are unsaved local edits. `resource_key` may be a path suffix.
-  useEffect(() => subscribeToChanges((event) => {
-    if (dirtyRef.current || event.resource_kind !== "document") return
+  const reloadOnRemoteChange = useEffectEvent((event: ChangeEvent) => {
+    if (dirty || event.resource_kind !== "document") return
     if (event.resource_key !== path && !path.endsWith(`/${event.resource_key}`)) return
     loadFromServer()
-  }), [path, loadFromServer])
+  })
+  useEffect(() => subscribeToChanges((event) => reloadOnRemoteChange(event)), [])
 
-  const liveRef = useRef(onLiveContent)
-  liveRef.current = onLiveContent
-  useEffect(() => () => { liveRef.current?.(path, null) }, [path])
+  const clearLiveContent = useEffectEvent((livePath: string) => { onLiveContent?.(livePath, null) })
+  useEffect(() => () => { clearLiveContent(path) }, [path])
 
   const persistNow = useCallback(async (next: string) => {
     if (persistOverride) await persistOverride(next)
@@ -205,7 +209,6 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent
   ) : (
     <div className="relative flex-1 min-h-0 group/editor flex flex-col">
       <ViewPills view={view} onViewChange={setView} />
-      {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
       <div className="flex-1 overflow-y-auto min-h-0 p-4 pt-10" onClick={handlePreviewClick}>
         <LaTeXMarkdown content={renderedContent ?? content} />
       </div>

@@ -84,7 +84,7 @@ export function FileViewer({
 }: FileViewerProps) {
   const [query, setQuery] = useState("")
   const [idx, setIdx] = useState(0)
-  const [preview, setPreview] = useState<string>("")
+  const [loaded, setLoaded] = useState<{ path: string; content: string } | null>(null)
   const cache = useRef<Map<string, string>>(new Map())
   const listRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -93,7 +93,12 @@ export function FileViewer({
   // Group filepaths into a chain-collapsed directory tree (built once per list).
   const tree = useMemo(() => buildPathTree(files), [files])
   const [stack, setStack] = useState<PathTreeNode[]>([tree])
-  useEffect(() => { setStack([tree]) }, [tree])
+  const [stackTree, setStackTree] = useState(tree)
+  // Return to the root when the file list changes
+  if (stackTree !== tree) {
+    setStackTree(tree)
+    setStack([tree])
+  }
   const currentNode = stack[stack.length - 1] ?? tree
 
   const entries = useMemo<Row[]>(() => {
@@ -119,7 +124,12 @@ export function FileViewer({
     return [...dirRows, ...fileRows]
   }, [files, query, currentNode])
 
-  useEffect(() => { setIdx(0) }, [query, currentNode])
+  const [idxScope, setIdxScope] = useState({ query, currentNode })
+  // Highlight the first row whenever the search or directory changes
+  if (idxScope.query !== query || idxScope.currentNode !== currentNode) {
+    setIdxScope({ query, currentNode })
+    setIdx(0)
+  }
   useEffect(() => { inputRef.current?.focus() }, [])
 
   const highlighted = entries[idx]
@@ -153,21 +163,18 @@ export function FileViewer({
   }, [idx])
 
   // Text/markdown previews are fetched + cached; images/pdfs render from a URL.
+  const textPath = previewed?.type === "file" && (previewedKind === "markdown" || previewedKind === "text") ? previewed.path : null
   useEffect(() => {
-    if (previewed?.type !== "file" || (previewedKind !== "markdown" && previewedKind !== "text")) {
-      setPreview("")
-      return
-    }
-    const path = previewed.path
-    const cached = cache.current.get(path)
-    if (cached !== undefined) { setPreview(cached); return }
+    if (textPath === null) return
     let cancelled = false
-    setPreview("")
-    loadFileViewerText(path)
-      .then((content) => { if (!cancelled) { cache.current.set(path, content); setPreview(content) } })
-      .catch(() => { if (!cancelled) setPreview("") })
+    const cached = cache.current.get(textPath)
+    const request = cached !== undefined ? Promise.resolve(cached) : loadFileViewerText(textPath)
+    request
+      .then((content) => { if (!cancelled) { cache.current.set(textPath, content); setLoaded({ path: textPath, content }) } })
+      .catch(() => { if (!cancelled) setLoaded({ path: textPath, content: "" }) })
     return () => { cancelled = true }
-  }, [previewed, previewedKind])
+  }, [textPath])
+  const preview = loaded?.path === textPath ? loaded.content : ""
 
   const activate = useCallback((row: Row | undefined) => {
     if (!row) return
@@ -272,6 +279,7 @@ export function FileViewer({
             ) : previewed?.type !== "file" ? (
               <div className="text-xs text-ink-faint" />
             ) : previewedKind === "image" ? (
+              // eslint-disable-next-line @next/next/no-img-element -- dynamic backend raw-file URL in a Tauri static export, next/image cannot optimize it
               <img src={fileViewerRawUrl(previewed.path)} alt={previewed.label} className="mx-auto max-h-full max-w-full rounded border border-divider object-contain" />
             ) : previewedKind === "pdf" ? (
               <LazyPdfViewer key={previewed.path} url={fileViewerRawUrl(previewed.path)} />

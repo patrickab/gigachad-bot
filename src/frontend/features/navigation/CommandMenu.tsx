@@ -29,7 +29,12 @@ export function CommandMenu({ open, items, query, onRun, onClose, container }: C
     return items.filter((it) => it.command.toLowerCase().includes(q) || it.keywords?.some((k) => k.toLowerCase().includes(q)))
   }, [items, query])
 
-  useEffect(() => { setSelectedIdx(0) }, [filtered])
+  // Restart at the first entry whenever the filtered list changes.
+  const [prevFiltered, setPrevFiltered] = useState(filtered)
+  if (prevFiltered !== filtered) {
+    setPrevFiltered(filtered)
+    setSelectedIdx(0)
+  }
 
   // Capture phase so the keys are handled before the focused input sees them.
   useEffect(() => {

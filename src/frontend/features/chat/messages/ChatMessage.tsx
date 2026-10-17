@@ -42,30 +42,32 @@ interface AssistantMessageContentProps {
   search_result?: Message["search_result"]
 }
 
+/** Split the `<thought>` block from the answer. An unclosed tag means the thought is still streaming. */
+function splitThought(content: string): { thought: string | null; cleanContent: string } {
+  const startTag = "<thought>\n"
+  const endTag = "\n</thought>"
+  const startIdx = content.indexOf(startTag)
+  if (startIdx === -1) return { thought: null, cleanContent: content }
+
+  const endIdx = content.indexOf(endTag, startIdx + startTag.length)
+  const before = content.slice(0, startIdx)
+
+  if (endIdx !== -1) {
+    const t = content.slice(startIdx + startTag.length, endIdx).trim() || null
+    const clean = (before + content.slice(endIdx + endTag.length)).trim()
+    return { thought: t, cleanContent: clean }
+  }
+  const t = content.slice(startIdx + startTag.length).trim() || null
+  return { thought: t, cleanContent: before.trim() }
+}
+
 export function AssistantMessageContent({
   content,
   isStreaming,
   compact,
   search_result,
 }: AssistantMessageContentProps) {
-  // Split `<thought>` block from the answer. An unclosed tag means the thought is still streaming.
-  const { thought, cleanContent } = useMemo(() => {
-    const startTag = "<thought>\n"
-    const endTag = "\n</thought>"
-    const startIdx = content.indexOf(startTag)
-    if (startIdx === -1) return { thought: null, cleanContent: content }
-
-    const endIdx = content.indexOf(endTag, startIdx + startTag.length)
-    const before = content.slice(0, startIdx)
-
-    if (endIdx !== -1) {
-      const t = content.slice(startIdx + startTag.length, endIdx).trim() || null
-      const clean = (before + content.slice(endIdx + endTag.length)).trim()
-      return { thought: t, cleanContent: clean }
-    }
-    const t = content.slice(startIdx + startTag.length).trim() || null
-    return { thought: t, cleanContent: before.trim() }
-  }, [content])
+  const { thought, cleanContent } = useMemo(() => splitThought(content), [content])
 
   if (search_result) {
     if (!content.trim() && isStreaming) {

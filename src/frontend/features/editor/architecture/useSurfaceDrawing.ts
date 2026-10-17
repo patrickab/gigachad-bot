@@ -68,15 +68,14 @@ export function useSurfaceDrawing({ flow, viewportRef, readOnly, cards, setNodes
   // whole surface; the preview only syncs to state once per animation frame.
   const drawPointsRef = useRef<Point[]>([])
   const drawFrameRef = useRef<number | null>(null)
-  const [drawPreview, setDrawPreview] = useState<Point[] | null>(null)
-  const drawOriginRef = useRef({ left: 0, top: 0 })
+  // The pointer samples of the stroke in progress, with the viewport's page offset they were taken against.
+  const [drawPreview, setDrawPreview] = useState<{ left: number, top: number, points: Point[] } | null>(null)
   useEffect(() => () => { if (drawFrameRef.current !== null) cancelAnimationFrame(drawFrameRef.current) }, [])
   const startDraw = useCallback((point: { clientX: number, clientY: number }) => {
     const rect = viewportRef.current?.getBoundingClientRect()
     if (!rect) return
-    drawOriginRef.current = { left: rect.left, top: rect.top }
     drawPointsRef.current = [{ x: point.clientX, y: point.clientY }]
-    setDrawPreview(drawPointsRef.current)
+    setDrawPreview({ left: rect.left, top: rect.top, points: [...drawPointsRef.current] })
   }, [viewportRef])
   const onDrawPointerMove = useCallback((event: { clientX: number, clientY: number }) => {
     if (drawPointsRef.current.length === 0) return
@@ -84,7 +83,7 @@ export function useSurfaceDrawing({ flow, viewportRef, readOnly, cards, setNodes
     if (drawFrameRef.current !== null) return
     drawFrameRef.current = requestAnimationFrame(() => {
       drawFrameRef.current = null
-      setDrawPreview([...drawPointsRef.current])
+      setDrawPreview((current) => current && { ...current, points: [...drawPointsRef.current] })
     })
   }, [])
   // Whether a gesture was a tap is judged in screen pixels, before the points
@@ -158,7 +157,6 @@ export function useSurfaceDrawing({ flow, viewportRef, readOnly, cards, setNodes
     onPointerUp: () => finishDraw(true),
     onPointerCancel: () => finishDraw(false),
   }
-  const { left, top } = drawOriginRef.current
-  const preview = drawPreview && drawPreview.length > 1 ? `M ${drawPreview.map((p) => `${p.x - left} ${p.y - top}`).join(" L ")}` : null
+  const preview = drawPreview && drawPreview.points.length > 1 ? `M ${drawPreview.points.map((p) => `${p.x - drawPreview.left} ${p.y - drawPreview.top}`).join(" L ")}` : null
   return { lasso, setLasso, preview, onPanePointerDown, lassoOverlay }
 }

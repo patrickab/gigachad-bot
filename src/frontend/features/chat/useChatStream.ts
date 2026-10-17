@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useLayoutEffect, useRef, useState } from "react"
 import { createChatStream } from "@/lib/backend/api"
 import { deactivateSentImages } from "@/features/chat/attachments"
 import {
@@ -54,8 +54,10 @@ export function useChatStream(): UseChatStreamReturn {
   // Refs mirror state so callbacks read the latest values without stale closures
   const messagesRef = useRef(messages)
   const totalUsageRef = useRef(totalUsage)
-  messagesRef.current = messages
-  totalUsageRef.current = totalUsage
+  useLayoutEffect(() => {
+    messagesRef.current = messages
+    totalUsageRef.current = totalUsage
+  }, [messages, totalUsage])
 
   const streamAssistantReply = useCallback(
     async (req: ChatRequest, history: { role: string; content: string }[], assistantMsg: Message): Promise<ChatStreamCompletion | null> => {

@@ -17,6 +17,7 @@ export function ImageThumbnail({ attachment }: { attachment: Attachment }) {
   const [failed, setFailed] = useState(false)
   if (failed || !attachment.url) return <ImageIcon className="h-4 w-4 text-ink-faint" />
   return (
+    // eslint-disable-next-line @next/next/no-img-element -- attachment URLs are blob/data/backend URLs, not optimizable by next/image under Tauri static export
     <img
       src={attachment.url}
       alt={attachment.name}

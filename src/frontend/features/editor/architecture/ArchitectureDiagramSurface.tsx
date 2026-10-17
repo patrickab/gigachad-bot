@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   Background, ConnectionMode, ReactFlow, useEdgesState, useNodesState,
   type Connection, type OnBeforeDelete, type OnConnect, type OnConnectEnd,
@@ -153,7 +153,7 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
   const active = useTabActive()
   // Callbacks read the graph through a ref so they stay stable across renders.
   const graphRef = useRef(graph)
-  graphRef.current = graph
+  useLayoutEffect(() => { graphRef.current = graph }, [graph])
   const emit = useCallback((patch: Partial<DiagramGraph>) => onChange({ ...graphRef.current, ...patch }), [onChange])
   // Cards report positions in React Flow's frame, which is relative to the parent for nested nodes.
   const changeNode = useCallback((id: string, patch: Partial<Pick<DiagramNode, "title" | "bullets" | "kind" | "width" | "height" | "position">>) => {
@@ -206,12 +206,13 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
     onBendPreview: previewBend,
   }, [changeEdgePath, changeEdgeLabel, previewBend, readOnly, toFlowPoint])
   const nodeKinds = readOnly ? NO_KINDS : kinds
-  const [nodes, setNodes, onNodesChange] = useNodesState<GraphFlowNode>(toFlowNodes(graph.nodes, changeNode, nodeKinds, readOnly ? undefined : claimAutoEdit, removal))
+  // Filled by the layout effect below before the first paint: the card callbacks read refs, which render must not touch.
+  const [nodes, setNodes, onNodesChange] = useNodesState<GraphFlowNode>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<GraphFlowEdge>(toFlowEdges(graph.edges))
   const { fitView, takeCamera, handleNodesChange, zoomGraphAtCenter } = useSurfaceCamera({ flow, viewportRef, onNodesChange, autoFit, hostScale, readOnly })
 
   // Flow state is a local copy, re-synced from the graph while keeping what React Flow owns.
-  useEffect(() => {
+  useLayoutEffect(() => {
     setNodes((current) => reconcile(current, toFlowNodes(graph.nodes, changeNode, nodeKinds, readOnly ? undefined : claimAutoEdit, removal)))
   }, [graph.nodes, changeNode, nodeKinds, claimAutoEdit, readOnly, removal, setNodes])
   useEffect(() => {
@@ -372,7 +373,7 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
   const setEdgeStyle = useCallback((next: EdgeStyle) => {
     if (next === edgeStyle) return
     onEdgeStyleChange(next)
-    emit({ edges: graphRef.current.edges.map(({ path: _path, ...edge }) => edge) })
+    emit({ edges: graphRef.current.edges.map((edge) => ({ ...edge, path: undefined })) })
   }, [edgeStyle, onEdgeStyleChange, emit])
   // React Flow would also take a node's connections and children, but only what
   // the user selected is named; the model's delete takes the other uses along.

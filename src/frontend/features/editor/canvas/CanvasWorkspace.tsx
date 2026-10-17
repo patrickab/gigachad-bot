@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useEffectEvent, useState } from "react"
 import { PenLine } from "lucide-react"
 import { CanvasEditor } from "./CanvasEditor"
 import type { CanvasToolbarSlots } from "./CanvasToolbar"
@@ -28,26 +28,24 @@ interface CanvasWorkspaceProps {
 
 const SCRATCH_STORAGE_KEY = "scratch-canvas-doc"
 
+/** The scratch canvas persisted by a previous session, or an empty one when absent or corrupt. */
+function loadScratchDoc(): CanvasDocument {
+  try {
+    const stored = localStorage.getItem(SCRATCH_STORAGE_KEY)
+    if (stored?.trim()) return parseCanvasDoc(stored)
+  } catch { /* corrupt scratch — start empty */ }
+  return emptyCanvasDoc()
+}
+
 export function CanvasWorkspace({ selected, slug, toolbarSlots, onCloseEditor, onCreated, onModeLabel, editorModel }: CanvasWorkspaceProps) {
   // Scratch canvas shown by default. It has no backing file until saved, so it
   // persists to localStorage on every change and survives unmounting.
-  const [doc, setDoc] = useState<CanvasDocument>(() => emptyCanvasDoc())
+  const [doc, setDoc] = useState<CanvasDocument>(loadScratchDoc)
   const [saveOpen, setSaveOpen] = useState(false)
-
-  const restoredRef = useRef(false)
-  useEffect(() => {
-    if (restoredRef.current) return
-    restoredRef.current = true
-    try {
-      const s = localStorage.getItem(SCRATCH_STORAGE_KEY)
-      if (s?.trim()) setDoc(parseCanvasDoc(s))
-    } catch { /* corrupt scratch — start empty */ }
-  }, [])
 
   // Debounced: serializing the doc and writing it is O(whole canvas) and localStorage is
   // synchronous, so doing it per stroke/pointermove stalls the drawing surface itself.
   useEffect(() => {
-    if (!restoredRef.current) return
     const t = setTimeout(() => {
       try { localStorage.setItem(SCRATCH_STORAGE_KEY, serializeCanvasDoc(doc)) } catch { /* quota */ }
     }, 500)
@@ -55,15 +53,14 @@ export function CanvasWorkspace({ selected, slug, toolbarSlots, onCloseEditor, o
   }, [doc])
 
   // Unmount skips the pending debounce, so flush the latest doc here.
-  const docRef = useRef(doc)
-  docRef.current = doc
-  useEffect(() => () => {
-    try { localStorage.setItem(SCRATCH_STORAGE_KEY, serializeCanvasDoc(docRef.current)) } catch { /* quota */ }
-  }, [])
+  const flushScratch = useEffectEvent(() => {
+    try { localStorage.setItem(SCRATCH_STORAGE_KEY, serializeCanvasDoc(doc)) } catch { /* quota */ }
+  })
+  useEffect(() => () => { flushScratch() }, [])
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- re-firing would only re-set the same label
+  const announceScratchLabel = useEffectEvent(() => { onModeLabel?.("untitled.canvas") })
   useEffect(() => {
-    if (!selected) onModeLabel?.("untitled.canvas")
+    if (!selected) announceScratchLabel()
   }, [selected])
 
   useEffect(() => {

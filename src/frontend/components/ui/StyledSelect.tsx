@@ -32,8 +32,8 @@ export function StyledSelect({ options, value, onChange, ariaLabel = "Select opt
 
   return <div ref={ref} className={cn("relative", inline && "inline-block")}>
     <button type="button" aria-label={ariaLabel} aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((current) => !current)} onKeyDown={(event) => {
-      if (event.key === "ArrowDown") { event.preventDefault(); open ? move(1) : setOpen(true); return }
-      if (event.key === "ArrowUp") { event.preventDefault(); open ? move(-1) : setOpen(true); return }
+      if (event.key === "ArrowDown") { event.preventDefault(); if (open) move(1); else setOpen(true); return }
+      if (event.key === "ArrowUp") { event.preventDefault(); if (open) move(-1); else setOpen(true); return }
       if (event.key === "Home" && options[0]) { event.preventDefault(); select(options[0].value); return }
       if (event.key === "End" && options.at(-1)) { event.preventDefault(); select(options.at(-1)!.value); return }
       if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setOpen((current) => !current) }

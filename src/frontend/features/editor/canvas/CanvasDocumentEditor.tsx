@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react"
 import { Download, X } from "lucide-react"
 import { CanvasEditor } from "./CanvasEditor"
 import { ResizableEditor } from "@/features/editor/ResizableEditor"
@@ -32,8 +32,7 @@ export function CanvasDocumentEditor({ path, slug, onClose, onSaved, onLiveConte
   const { document: canvasDocument, replace, status, retry } = useCollaborativeCanvas(path)
   const filename = baseName(path)
   const [exporting, setExporting] = useState(false)
-  const liveContentRef = useRef(onLiveContent)
-  liveContentRef.current = onLiveContent
+  const publishLiveContent = useEffectEvent((livePath: string, content: string | null) => { onLiveContent?.(livePath, content) })
   // Only local edits refresh the drawing JPEG, otherwise every open client would
   // re-render and upload it for each remote change.
   const drawnRef = useRef(false)
@@ -47,7 +46,7 @@ export function CanvasDocumentEditor({ path, slug, onClose, onSaved, onLiveConte
   useEffect(() => {
     if (!canvasDocument) return
     const timer = setTimeout(() => {
-      liveContentRef.current?.(path, serializeCanvasDoc(canvasDocument))
+      publishLiveContent(path, serializeCanvasDoc(canvasDocument))
       const { strokes, texts, frames } = canvasDocument
       if (!drawnRef.current || (strokes.length === 0 && texts.length === 0 && !frames.some((f) => f.kind === "image"))) return
       drawnRef.current = false
@@ -60,7 +59,7 @@ export function CanvasDocumentEditor({ path, slug, onClose, onSaved, onLiveConte
   }, [path, filename, canvasDocument])
 
   useEffect(() => () => {
-    liveContentRef.current?.(path, null)
+    publishLiveContent(path, null)
   }, [path])
 
   useEffect(() => {

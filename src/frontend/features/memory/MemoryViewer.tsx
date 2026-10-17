@@ -197,10 +197,10 @@ function MemoryViewerInner({
   useEscapeLayer(() => setPendingDeleteCat(null), pendingDeleteCat !== null)
   const [remapping, setRemapping] = useState(false)
 
+  // The viewer is keyed by scope and project, so a fresh mount starts in the loading state.
   useEffect(() => {
     // Drop results from a stale scope/project after a switch or unmount
     let cancelled = false
-    setLoading(true); setError(null)
     Promise.all([getMemories(scope, projectSlug ?? null), getCategories(scope, projectSlug ?? null)])
       .then(([memRes, catRes]) => {
         if (cancelled) return
@@ -272,7 +272,7 @@ function MemoryViewerInner({
     } catch (e) {
       setError((e as Error)?.message || "Remap failed")
     } finally { setRemapping(false) }
-  }, [pendingDeleteCat, memories, categories, scope, projectSlug])
+  }, [pendingDeleteCat, memories, categories, projectSlug])
 
   const handleConfirmDrop = useCallback(() => {
     if (!pendingDeleteCat) return

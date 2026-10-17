@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react"
+import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react"
 import { useProject } from "@/contexts/ProjectContext"
 import { useTab } from "@/contexts/TabContext"
 import { useMemorizeFlow, type BoundMemoryActions, type MemoryPanelState } from "@/features/memory/useMemorizeFlow"
@@ -18,7 +18,6 @@ export interface MemoryCommandBar {
   closeMenu: () => void
   query: string
   setQuery: Dispatch<SetStateAction<string>>
-  inputRef: RefObject<HTMLInputElement | null>
   /** Tab-row slots the menu input and list portal into. */
   labelSlot: HTMLElement | null
   setLabelSlot: Dispatch<SetStateAction<HTMLElement | null>>
@@ -47,7 +46,6 @@ export function useMemoryCommandBar({ messages, chatId, branchMessageIdx }: {
   const [query, setQuery] = useState("")
   const [labelSlot, setLabelSlot] = useState<HTMLElement | null>(null)
   const [menuSlot, setMenuSlot] = useState<HTMLElement | null>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
 
   const phase = flow.state.phase
   const memoryCount = flow.state.phase === "review"
@@ -55,12 +53,11 @@ export function useMemoryCommandBar({ messages, chatId, branchMessageIdx }: {
     : 0
   const docReviewLoading = flow.state.phase === "doc-review" && flow.state.loadingScopes.length > 0
 
-  useEffect(() => {
-    if (!menuOpen) return
+  const openMenu = useCallback(() => {
     setQuery("")
-    // Defer so the portaled input exists before focusing.
-    setTimeout(() => inputRef.current?.focus(), 0)
-  }, [menuOpen])
+    setMenuOpen(true)
+  }, [])
+  const closeMenu = useCallback(() => setMenuOpen(false), [])
 
   useEffect(() => {
     // "\0" is a sentinel that hides the tab label so the command input can take its slot.
@@ -72,14 +69,13 @@ export function useMemoryCommandBar({ messages, chatId, branchMessageIdx }: {
     else setModeLabel(tab.title ?? "Chat")
   }, [menuOpen, phase, docReviewLoading, memoryCount, tab.title, setModeLabel])
 
-  const openMenu = useCallback(() => setMenuOpen(true), [])
-  const closeMenu = useCallback(() => setMenuOpen(false), [])
+  const { extract } = flow
 
   const memorize = useCallback(async (scope: MemorizeScope) => {
     if (branchMessageIdx != null) return
     setMenuOpen(false)
-    await flow.extract(messages, activeProject, chatId, scope)
-  }, [branchMessageIdx, flow.extract, messages, activeProject, chatId])
+    await extract(messages, activeProject, chatId, scope)
+  }, [branchMessageIdx, extract, messages, activeProject, chatId])
 
   return {
     isIdle: !menuOpen && phase === "idle",
@@ -88,7 +84,6 @@ export function useMemoryCommandBar({ messages, chatId, branchMessageIdx }: {
     closeMenu,
     query,
     setQuery,
-    inputRef,
     labelSlot,
     setLabelSlot,
     menuSlot,

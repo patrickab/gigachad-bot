@@ -24,7 +24,7 @@ async function ensureOk(res: Response): Promise<Response> {
       if (body && typeof body === "object" && "detail" in body) {
         const detail = body.detail
         if (Array.isArray(detail)) {
-          message = detail.map((d: any) => d.msg || String(d)).join("; ")
+          message = detail.map((d: { msg?: string }) => d.msg || String(d)).join("; ")
         } else if (typeof detail === "string") {
           message = detail
         } else {

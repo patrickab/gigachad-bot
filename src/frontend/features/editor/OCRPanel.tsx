@@ -24,6 +24,13 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarWidth, setSidebarWidth] = useState(340)
   const abortRef = useRef<(() => void) | null>(null)
+  const [streamTarget, setStreamTarget] = useState({ img, model })
+
+  // A new image or model restarts OCR, so the stream is live again (the effect below starts it)
+  if (streamTarget.img !== img || streamTarget.model !== model) {
+    setStreamTarget({ img, model })
+    if (img) setIsStreaming(true)
+  }
   // Set once confirmed so a second confirm cannot call onComplete again
   const confirmedRef = useRef(false)
 
@@ -53,7 +60,6 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
   // Restart OCR whenever the image or model changes and abort the stream on cleanup
   useEffect(() => {
     if (!img) return
-    setIsStreaming(true)
     const stream = createOCRStream(img, model)
     abortRef.current = stream.abort
     let text = ""
@@ -184,6 +190,7 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
                   )}
                   {img ? (
                     <div className="rounded-lg border border-divider bg-surface/50 p-1.5">
+                      {/* eslint-disable-next-line @next/next/no-img-element -- user-supplied pasted/blob data URL, next/image cannot optimize it */}
                       <img src={img} alt="Source" className="w-full rounded object-contain" />
                     </div>
                   ) : (

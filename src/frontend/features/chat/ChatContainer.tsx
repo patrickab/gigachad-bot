@@ -149,16 +149,33 @@ export function ChatContainer({
   }, [messages])
 
   // Per-pair expand/collapse overrides keyed by global message index
-  const [manualOverrides, setManualOverrides] = useState<Map<number, boolean>>(new Map())
+  const [manualOverrides, setManualOverrides] = useState<Map<number, boolean>>(
+    () => new Map(focusQaIndex == null ? [] : [[focusQaIndex * 2, true]]),
+  )
 
-  useEffect(() => {
-    if (focusQaIndex == null) {
+  // A new focus request replaces the overrides: it expands only the focused pair
+  const [seenFocus, setSeenFocus] = useState({ qaIndex: focusQaIndex, key: focusKey })
+  if (seenFocus.qaIndex !== focusQaIndex || seenFocus.key !== focusKey) {
+    setSeenFocus({ qaIndex: focusQaIndex, key: focusKey })
+    setManualOverrides(new Map(focusQaIndex == null ? [] : [[focusQaIndex * 2, true]]))
+  }
+
+  // Depend on the length, not the array: in an empty chat every re-render hands
+  // down a fresh [] and this would slam the sidebar shut again, including right
+  // after you opened the Documents expander.
+  const [seenMessageCount, setSeenMessageCount] = useState(messages.length)
+  if (seenMessageCount !== messages.length) {
+    setSeenMessageCount(messages.length)
+    if (messages.length === 0) {
       setManualOverrides(new Map())
-      return
+      setOpenElements(new Set())
     }
-    // Expand the focused pair and scroll to the pair before it so the target sits just below a collapsed header
+  }
+
+  // Scroll to the pair before the focused one so the target sits just below a collapsed header
+  useEffect(() => {
+    if (focusQaIndex == null) return
     const gi = focusQaIndex * 2
-    setManualOverrides(new Map([[gi, true]]))
     requestAnimationFrame(() => {
       const el = scrollContainerRef.current
       if (!el) return
@@ -169,16 +186,6 @@ export function ChatContainer({
       target?.scrollIntoView({ behavior: "smooth", block: "start" })
     })
   }, [focusQaIndex, focusKey])
-
-  // Depend on the length, not the array: in an empty chat every re-render hands
-  // down a fresh [] and this would slam the sidebar shut again, including right
-  // after you opened the Documents expander.
-  useEffect(() => {
-    if (messages.length === 0) {
-      setManualOverrides(new Map())
-      setOpenElements(new Set())
-    }
-  }, [messages.length])
 
   // Pair user/assistant messages, padding a missing assistant reply with an empty one
   const pairs = useMemo<{ user: Message; assistant: Message; globalIndex: number }[]>(() => {
@@ -264,16 +271,9 @@ export function ChatContainer({
     return () => observer.disconnect()
   }, [])
 
-  useEffect(() => {
-    if (!hasSidebarContent) {
-      setContextOpen(false)
-    }
-  }, [hasSidebarContent])
-
-  // Leaving the context panel drops PDF wide mode
-  useEffect(() => {
-    if (!contextOpen) setPdfWide(false)
-  }, [contextOpen])
+  // Nothing left to show, or leaving the context panel, drops the panel and PDF wide mode
+  if (!hasSidebarContent && contextOpen) setContextOpen(false)
+  if (!contextOpen && pdfWide) setPdfWide(false)
 
   const effectiveMaxWidth = isWideMode ? undefined : (chatMaxWidth || undefined)
   const toggleWideMode = useCallback(() => setIsWideMode((w) => !w), [])

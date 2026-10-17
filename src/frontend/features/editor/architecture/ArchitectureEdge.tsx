@@ -129,7 +129,12 @@ export function ArchitectureEdge({ id, source, target, data, selected }: EdgePro
   // End a drag still running at unmount so its window listeners do not leak.
   useEffect(() => () => stopDragRef.current?.(), [])
   const [editingLabel, setEditingLabel] = useState(false)
-  useEffect(() => { if (!selected) setEditingLabel(false) }, [selected])
+  // Deselecting ends label editing.
+  const [wasSelected, setWasSelected] = useState(selected)
+  if (wasSelected !== selected) {
+    setWasSelected(selected)
+    if (!selected) setEditingLabel(false)
+  }
   // The label reaches the model once, when editing ends, not on every keystroke.
   const [labelDraft, setLabelDraft] = useState("")
   const commitLabel = () => {

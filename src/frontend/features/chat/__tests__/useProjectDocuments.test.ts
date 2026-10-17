@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 
+type MockImpl = (...args: unknown[]) => unknown
+
 const { impls } = vi.hoisted(() => ({
   impls: {
-    listProjectDocuments: async () => [] as any[],
-    listAllDocuments: async () => [] as any[],
+    listProjectDocuments: async () => [],
+    listAllDocuments: async () => [],
     addDocument: async () => undefined,
     removeDocument: async () => undefined,
     writeDocument: async () => undefined,
@@ -12,11 +14,11 @@ const { impls } = vi.hoisted(() => ({
     attachDocument: async () => ({ name: "d", mime: "text/plain", url: "u", active: true }),
     loadFileViewerText: async () => "",
     renameDocument: async () => ({ path: "project/proj/document/renamed.md", name: "renamed.md", mime: "text/markdown" }),
-  } as Record<string, (...a: any[]) => any>,
+  } as Record<string, MockImpl>,
 }))
 
 vi.mock("@/lib/backend/api", () => ({
-  __setImpl: (k: string, fn: any) => { impls[k] = fn },
+  __setImpl: (k: string, fn: (...a: never[]) => unknown) => { impls[k] = fn as MockImpl },
   __resetImpls: () => {
     impls.listProjectDocuments = async () => []
     impls.listAllDocuments = async () => []
@@ -29,16 +31,16 @@ vi.mock("@/lib/backend/api", () => ({
     impls.loadFileViewerText = async () => ""
     impls.renameDocument = async () => ({ path: "project/proj/document/renamed.md", name: "renamed.md", mime: "text/markdown" })
   },
-  listProjectDocuments: (...a: any[]) => impls.listProjectDocuments(...a),
-  listAllDocuments: (...a: any[]) => impls.listAllDocuments(...a),
-  addDocument: (...a: any[]) => impls.addDocument(...a),
-  removeDocument: (...a: any[]) => impls.removeDocument(...a),
-  writeDocument: (...a: any[]) => impls.writeDocument(...a),
-  uploadDocument: (...a: any[]) => impls.uploadDocument(...a),
-  uploadFile: (...a: any[]) => impls.uploadFile(...a),
-  attachDocument: (...a: any[]) => impls.attachDocument(...a),
-  loadFileViewerText: (...a: any[]) => impls.loadFileViewerText(...a),
-  renameDocument: (...a: any[]) => impls.renameDocument(...a),
+  listProjectDocuments: (...a: unknown[]) => impls.listProjectDocuments(...a),
+  listAllDocuments: (...a: unknown[]) => impls.listAllDocuments(...a),
+  addDocument: (...a: unknown[]) => impls.addDocument(...a),
+  removeDocument: (...a: unknown[]) => impls.removeDocument(...a),
+  writeDocument: (...a: unknown[]) => impls.writeDocument(...a),
+  uploadDocument: (...a: unknown[]) => impls.uploadDocument(...a),
+  uploadFile: (...a: unknown[]) => impls.uploadFile(...a),
+  attachDocument: (...a: unknown[]) => impls.attachDocument(...a),
+  loadFileViewerText: (...a: unknown[]) => impls.loadFileViewerText(...a),
+  renameDocument: (...a: unknown[]) => impls.renameDocument(...a),
 }))
 
 vi.mock("@/lib/drawing", () => ({
@@ -53,6 +55,13 @@ vi.mock("@/features/chat/attachments", () => ({
 }))
 
 import * as apiMock from "@/lib/backend/api"
+import type { Message } from "@/lib/domain/types"
+
+/** Controls the mocked api module exposes beyond the real exports. */
+const mockControls = apiMock as unknown as {
+  __setImpl: (name: string, impl: (...args: never[]) => unknown) => void
+  __resetImpls: () => void
+}
 import { renderHook as testingRenderHook, act, waitFor, screen, fireEvent } from "@testing-library/react"
 import type { ChatInputHandle } from "@/features/chat/composer/ChatInput"
 import { useProjectDocuments } from "@/features/chat/useProjectDocuments"
@@ -68,10 +77,10 @@ function makeLiveCanvasRef(path: string | null = null, content = "") {
   return { current: path ? { path, content } : null }
 }
 
-beforeEach(() => (apiMock as any).__resetImpls())
+beforeEach(() => mockControls.__resetImpls())
 afterEach(() => { vi.useRealTimers(); vi.clearAllMocks() })
 
-const baseProps = (over: any = {}) => ({
+const baseProps = (over: Partial<Parameters<typeof useProjectDocuments>[0]> = {}) => ({
   isActive: true,
   appMode: "chat" as const,
   activeProject: "proj",
@@ -87,7 +96,7 @@ describe("useProjectDocuments", () => {
   describe("handleDocumentSelect", () => {
     it("attaches a regular project document via attachDocument", async () => {
       const attachDoc = vi.fn(async () => ({ name: "doc.md", mime: "text/markdown", url: "u", active: true }))
-      ;(apiMock as any).__setImpl("attachDocument", attachDoc)
+      mockControls.__setImpl("attachDocument", attachDoc)
       const addAttachment = vi.fn()
       const chatInputRef = makeChatInputRef({ addAttachment })
 
@@ -127,7 +136,7 @@ describe("useProjectDocuments", () => {
       const addAttachment = vi.fn()
       const chatInputRef = makeChatInputRef({ addAttachment })
       const uploadFile = vi.fn(async () => ({ name: "x.jpg", mime: "image/jpeg", url: "u", active: true }))
-      ;(apiMock as any).__setImpl("uploadFile", uploadFile)
+      mockControls.__setImpl("uploadFile", uploadFile)
 
       const { result } = renderHook(() =>
         useProjectDocuments(baseProps({ chatInputRef, liveCanvasRef })),
@@ -155,7 +164,7 @@ describe("useProjectDocuments", () => {
     })
 
     it("restores extracting counter even if attach throws", async () => {
-      ;(apiMock as any).__setImpl("attachDocument", async () => { throw new Error("boom") })
+      mockControls.__setImpl("attachDocument", async () => { throw new Error("boom") })
       const setExtracting = vi.fn()
       const chatInputRef = makeChatInputRef({ addAttachment: vi.fn() })
 
@@ -174,10 +183,10 @@ describe("useProjectDocuments", () => {
       { path: "graph/proj/backend/backend.c4", name: "backend.c4", mime: "text/plain" },
       { path: "graph/proj/frontend/frontend.c4", name: "frontend.c4", mime: "text/plain" },
     ]
-    ;(apiMock as any).__setImpl("listProjectDocuments", async () => docs)
-    ;(apiMock as any).__setImpl("loadFileViewerText", async (path: string) => path.includes("backend") ? "backend = system" : "frontend = system")
+    mockControls.__setImpl("listProjectDocuments", async () => docs)
+    mockControls.__setImpl("loadFileViewerText", async (path: string) => path.includes("backend") ? "backend = system" : "frontend = system")
     const upload = vi.fn(async (_chat: string, file: File) => ({ name: file.name, mime: file.type, url: "u", active: true }))
-    ;(apiMock as any).__setImpl("uploadFile", upload)
+    mockControls.__setImpl("uploadFile", upload)
     const addAttachment = vi.fn()
     const { result } = renderHook(() => useProjectDocuments(baseProps({ chatInputRef: makeChatInputRef({ addAttachment }) })))
     await waitFor(() => expect(result.current.projectDocuments).toHaveLength(2))
@@ -192,8 +201,8 @@ describe("useProjectDocuments", () => {
   it("hides a document until Undo restores it without deleting the source", async () => {
     const path = "project/proj/document/spec.md"
     const remove = vi.fn(async () => undefined)
-    ;(apiMock as any).__setImpl("listProjectDocuments", async () => [{ path, name: "spec.md", mime: "text/markdown" }])
-    ;(apiMock as any).__setImpl("removeDocument", remove)
+    mockControls.__setImpl("listProjectDocuments", async () => [{ path, name: "spec.md", mime: "text/markdown" }])
+    mockControls.__setImpl("removeDocument", remove)
     const { result } = renderHook(() => useProjectDocuments(baseProps()))
     await waitFor(() => expect(result.current.visibleDocuments).toHaveLength(1))
     act(() => result.current.handleDeleteDocument(path))
@@ -215,13 +224,13 @@ describe("useProjectDocuments", () => {
       })
 
       expect(setMessages).toHaveBeenCalledOnce()
-      const updater = setMessages.mock.calls[0][0] as (prev: any[]) => any[]
+      const updater = setMessages.mock.calls[0][0] as (prev: Message[]) => Message[]
       const prev = [
         { role: "user", content: "q", attachments: [{ name: "doc.md", content: "old", active: true }] },
         { role: "assistant", content: "a" },
-      ]
+      ] as Message[]
       const out = updater(prev)
-      expect(out[0].attachments[0].content).toBe("new content")
+      expect(out[0].attachments?.[0].content).toBe("new content")
       expect(out[0].hiddenContent).toContain("new content")
     })
 

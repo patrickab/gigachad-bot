@@ -87,22 +87,24 @@ function enqueueMermaidRender(id: string, code: string): Promise<string> {
 }
 
 function MermaidDiagram({ code }: { code: string }) {
-  const [svg, setSvg] = useState("")
-  const [failed, setFailed] = useState(false)
+  const [result, setResult] = useState<{ code: string; themeName: string; svg: string | null } | null>(null)
   const themeName = useThemeName()
 
   useEffect(() => {
     let cancelled = false
-    setFailed(false)
-    setSvg("")
     // Fresh id per render. Reusing one collides with the previous SVG still in the DOM
     // (re-render on theme switch), which makes mermaid.render fail.
     const id = `mmd-${Math.random().toString(36).slice(2)}`
     enqueueMermaidRender(id, code)
-      .then((rendered) => { if (!cancelled) setSvg(rendered) })
-      .catch(() => { if (!cancelled) setFailed(true) })
+      .then((rendered) => { if (!cancelled) setResult({ code, themeName, svg: rendered }) })
+      .catch(() => { if (!cancelled) setResult({ code, themeName, svg: null }) })
     return () => { cancelled = true }
   }, [code, themeName])
+
+  // Results from a previous code/theme are stale and show as pending.
+  const current = result && result.code === code && result.themeName === themeName ? result : null
+  const failed = current !== null && current.svg === null
+  const svg = current?.svg ?? ""
 
   if (failed) return <CodeBlock codeString={code} language="mermaid" />
   if (!svg) return <div className="my-3 text-xs text-ink-subtle">Rendering diagram…</div>
@@ -285,8 +287,9 @@ const PROSE_COMPONENTS: Components = {
   del: "del",
   // Backend-emitted image paths (e.g. /mineru/images/...) are root-relative and
   // resolve against the backend, not whichever origin serves the frontend.
-  img: ({ src, ...props }) => (
-    <img src={typeof src === "string" && src.startsWith("/") && !src.startsWith("//") ? `${apiOrigin()}${src}` : src} {...props} />
+  img: ({ src, alt, ...props }) => (
+    // eslint-disable-next-line @next/next/no-img-element -- backend/blob URLs resolved at runtime under Tauri static export, next/image can't optimize them
+    <img alt={alt ?? ""} src={typeof src === "string" && src.startsWith("/") && !src.startsWith("//") ? `${apiOrigin()}${src}` : src} {...props} />
   ),
   table: ({ children, ...props }) => (
     <div className="overflow-x-auto my-3">
@@ -388,18 +391,23 @@ function LaTeXMarkdownInner({
   const processed = useMemo(() => normalizeMathDelimiters(content), [content])
 
   // Source line index of each task item, only tracked when toggling is enabled.
+  const togglingEnabled = !!onContentChange
   const checkboxLines = useMemo(() => {
-    if (!onContentChange) return []
+    if (!togglingEnabled) return []
     const lines = content.split("\n")
     const indices: number[] = []
     for (let i = 0; i < lines.length; i++) {
       if (/^- \[[ x]\]/.test(lines[i].trimStart())) indices.push(i)
     }
     return indices
-  }, [content, !!onContentChange])
+  }, [content, togglingEnabled])
 
-  const handleToggle = useCallback((idx: number, wasChecked: boolean) => {
+  // Rendered checkboxes follow source order, so a checkbox's index among its root's checkboxes is its task index.
+  // Read from the DOM at toggle time: Streamdown re-renders blocks independently, so render order can't number them.
+  const handleToggle = useCallback((checkbox: HTMLInputElement, wasChecked: boolean) => {
     if (!onContentChange) return
+    const root = checkbox.closest("[data-markdown-root]")
+    const idx = root ? [...root.querySelectorAll("input[type=checkbox]")].indexOf(checkbox) : -1
     const lineIdx = checkboxLines[idx]
     if (lineIdx === undefined) return
     const lines = content.split("\n")
@@ -408,10 +416,6 @@ function LaTeXMarkdownInner({
       : lines[lineIdx].replace("- [ ]", "- [x]")
     onContentChange(lines.join("\n"))
   }, [content, checkboxLines, onContentChange])
-
-  // Render-order counter mapping each rendered checkbox to its source line in `checkboxLines`.
-  const checkboxIdx = useRef(0)
-  checkboxIdx.current = 0
 
   const components = useMemo<Components>(() => {
     const base: Components = {
@@ -441,13 +445,12 @@ function LaTeXMarkdownInner({
     if (onContentChange) {
       base.input = ({ checked, type, ...rest }) => {
         if (type !== "checkbox") return <input type={type} checked={checked} {...rest} />
-        const idx = checkboxIdx.current++
         return (
           <input
             type="checkbox"
             checked={checked}
             className="mr-1.5 accent-ink cursor-pointer"
-            onChange={() => handleToggle(idx, !!checked)}
+            onChange={(event) => handleToggle(event.currentTarget, !!checked)}
           />
         )
       }
@@ -466,6 +469,7 @@ function LaTeXMarkdownInner({
 
   return (
     <div
+      data-markdown-root
       className={cn("text-[13px] leading-relaxed", compact ? "markdown-body-compact" : "markdown-body")}
       style={style}
       onCopy={handleCopy}

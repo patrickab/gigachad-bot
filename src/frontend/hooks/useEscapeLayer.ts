@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useLayoutEffect, useRef } from "react"
 
 type EscapeLayer = { current: () => void }
 
@@ -23,7 +23,9 @@ function handleEscape(event: KeyboardEvent) {
  */
 export function useEscapeLayer(onEscape: () => void, active = true) {
   const layer = useRef(onEscape)
-  layer.current = onEscape
+  useLayoutEffect(() => {
+    layer.current = onEscape
+  })
   useEffect(() => {
     if (!active) return
     if (layers.length === 0) window.addEventListener("keydown", handleEscape, true)

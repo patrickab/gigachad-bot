@@ -20,7 +20,6 @@ export function useMemoryCategories(projectSlug?: string | null) {
         setProjectCategories(projectRes.categories)
       })
       .catch((e) => {
-        // eslint-disable-next-line no-console
         console.error("Failed to load memory categories:", e)
       })
     return () => { cancelled = true }

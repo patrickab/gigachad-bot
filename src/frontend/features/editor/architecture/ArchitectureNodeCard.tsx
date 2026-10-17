@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent, type RefObject } from "react"
+import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent, type RefObject } from "react"
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react"
 import { X } from "lucide-react"
 import { isDraft } from "@/features/editor/architecture/diagramGraph"
@@ -38,35 +38,38 @@ function useCardText(data: ArchitectureNodeData, cardRef: RefObject<HTMLDivEleme
   const [editingTitle, setEditingTitle] = useState(false)
 
   // Model updates refresh the drafts only while nobody is typing in this card.
-  const typing = () => !!cardRef.current?.contains(document.activeElement)
   const [titleDraft, setTitleDraft] = useState(data.title)
-  useLayoutEffect(() => {
-    if (typing()) return
-    setTitleDraft(data.title)
-  }, [data.title])
+  const refreshTitleDraft = useEffectEvent((title: string) => {
+    if (cardRef.current?.contains(document.activeElement)) return
+    setTitleDraft(title)
+  })
+  useLayoutEffect(() => refreshTitleDraft(data.title), [data.title])
   const [bulletDrafts, setBulletDrafts] = useState<string[]>(() => [...data.bullets])
-  useLayoutEffect(() => {
-    if (typing()) return
-    setBulletDrafts([...data.bullets])
-  }, [data.bullets])
+  const refreshBulletDrafts = useEffectEvent((bullets: readonly string[]) => {
+    if (cardRef.current?.contains(document.activeElement)) return
+    setBulletDrafts([...bullets])
+  })
+  useLayoutEffect(() => refreshBulletDrafts(data.bullets), [data.bullets])
   // Drop refs for removed rows so the autosize pass cannot touch an unmounted textarea.
-  bulletRefs.current.length = bulletDrafts.length
+  const bulletCount = bulletDrafts.length
+  useLayoutEffect(() => { bulletRefs.current.length = bulletCount }, [bulletCount])
   const [pendingFocus, setPendingFocus] = useState<PendingFocus | null>(null)
   useLayoutEffect(() => {
     if (!pendingFocus) return
     const el = bulletRefs.current[pendingFocus.index]
     el?.focus()
     el?.setSelectionRange(pendingFocus.cursor, pendingFocus.cursor)
-    setPendingFocus(null)
   }, [pendingFocus])
   const focusBullet = (index: number, cursor: number) => setPendingFocus({ index, cursor })
 
   // The commit reads the drafts through refs: a key handler may change them and
   // blur in the same event, before React re-renders.
   const titleDraftRef = useRef(titleDraft)
-  titleDraftRef.current = titleDraft
   const bulletDraftsRef = useRef(bulletDrafts)
-  bulletDraftsRef.current = bulletDrafts
+  useLayoutEffect(() => {
+    titleDraftRef.current = titleDraft
+    bulletDraftsRef.current = bulletDrafts
+  }, [titleDraft, bulletDrafts])
   const setBullets = (next: string[]) => {
     bulletDraftsRef.current = next
     setBulletDrafts(next)
@@ -136,11 +139,12 @@ function useCardText(data: ArchitectureNodeData, cardRef: RefObject<HTMLDivEleme
     focusBullet(bulletDrafts.length, 0)
   }
 
-  useLayoutEffect(() => {
+  const claimTitleEdit = useEffectEvent(() => {
     if (data.claimAutoEdit?.(data.id)) setEditingTitle(true)
-    // Mount only: a freshly created node claims its one-time edit, nothing else does.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  })
+  // Mount only: a freshly created node claims its one-time edit, nothing else does.
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- claiming consumes the surface's one-shot token, which must follow the commit rather than a render that may be discarded
+  useLayoutEffect(() => claimTitleEdit(), [])
   useLayoutEffect(() => {
     if (!editingTitle) return
     // React Flow keeps a new node visibility:hidden until it has measured it,
@@ -181,6 +185,7 @@ export function ArchitectureNodeCard({ data, selected }: NodeProps<GraphFlowNode
     return () => observer.disconnect()
   }, [])
   const { titleRef, bulletRefs, editingTitle, setEditingTitle, titleDraft, setTitleDraft, bulletDrafts, editBullet, startBullet, handleCardBlur, handleTitleKeyDown, handleBulletKeyDown } = useCardText(data, cardRef)
+  const { id: nodeId, width: nodeWidth, height: nodeHeight, onChange: changeNode } = data
   // A title bar wider than the card would truncate the heading and push the kind
   // label past the edge, so their width is a resize floor (and grows the card while typing).
   const minNodeWidth = nodeMinWidth(titleDraft, data.kind)
@@ -192,8 +197,8 @@ export function ArchitectureNodeCard({ data, selected }: NodeProps<GraphFlowNode
   const resizingRef = useRef(false)
   const [fitHeight, setFitHeight] = useState(NODE_MIN_HEIGHT)
   useEffect(() => {
-    if (minNodeWidth > data.width) data.onChange(data.id, { width: minNodeWidth })
-  }, [minNodeWidth, data.width, data.id, data.onChange])
+    if (minNodeWidth > nodeWidth) changeNode(nodeId, { width: minNodeWidth })
+  }, [minNodeWidth, nodeWidth, nodeId, changeNode])
   const nodeSketch = useMemo(() => {
     const paths = nodeSketchPaths(cardSize.width, cardSize.height, roughSeed(data.id), selected ? 1.9 : hovered ? 1.7 : 1.5)
     return { fills: paths.filter((path) => path.fill !== "none"), strokes: paths.filter((path) => path.fill === "none") }
@@ -225,13 +230,13 @@ export function ArchitectureNodeCard({ data, selected }: NodeProps<GraphFlowNode
       if (resizingRef.current) return
       // A word wider than the text box can't wrap, so it clips; widen the card until it fits.
       const overflowX = bulletRefs.current.reduce((most, textarea) => textarea ? Math.max(most, textarea.scrollWidth - textarea.clientWidth) : most, 0)
-      const nextWidth = overflowX > 0 ? Math.ceil((data.width + overflowX) / GRID_SIZE) * GRID_SIZE : data.width
-      const growHeight = fit > data.height
-      if (!growHeight && nextWidth === data.width) return
-      data.onChange(data.id, { ...(growHeight ? { height: fit } : {}), ...(nextWidth !== data.width ? { width: nextWidth } : {}) })
+      const nextWidth = overflowX > 0 ? Math.ceil((nodeWidth + overflowX) / GRID_SIZE) * GRID_SIZE : nodeWidth
+      const growHeight = fit > nodeHeight
+      if (!growHeight && nextWidth === nodeWidth) return
+      changeNode(nodeId, { ...(growHeight ? { height: fit } : {}), ...(nextWidth !== nodeWidth ? { width: nextWidth } : {}) })
     })
     return () => cancelAnimationFrame(id)
-  }, [bulletDrafts, titleDraft, editingTitle, cardSize, data.height, data.width, data.id, data.onChange, bulletRefs])
+  }, [bulletDrafts, titleDraft, editingTitle, cardSize, nodeHeight, nodeWidth, nodeId, changeNode, bulletRefs])
   return (
     <div ref={cardRef} className={cn("architecture-diagram-node", data.compound && "architecture-diagram-node-compound", selected && "architecture-diagram-node-selected")} style={cardStyle} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onBlur={handleCardBlur}>
       <NodeResizer isVisible={!!selected} minWidth={minNodeWidth} minHeight={fitHeight} color="var(--sketch-ink-soft)" onResizeStart={() => { resizingRef.current = true }} onResizeEnd={(_event, params) => {

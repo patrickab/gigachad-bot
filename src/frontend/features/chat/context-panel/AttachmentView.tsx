@@ -61,6 +61,7 @@ function AttachmentBody({ attachment, variant, onContentChange, pdfWide, onToggl
   if (attachment.mime.startsWith("image/")) {
     return (
       <div className={modal ? "flex items-center justify-center p-6 overflow-auto max-h-[80vh]" : "p-2"}>
+        {/* eslint-disable-next-line @next/next/no-img-element -- attachment URLs are blob/data/backend URLs, not optimizable by next/image under Tauri static export */}
         <img
           src={attachment.url}
           alt={attachment.name}

@@ -104,18 +104,26 @@ export function Sidebar({
   // Projects with at least one architecture source.
   const [architectures, setArchitectures] = useState<ReadonlySet<string>>(new Set())
 
-  const refreshCanvases = useCallback(async () => {
+  const loadCanvasLists = useCallback(async () => {
     const notes = await listNotes().catch(() => [])
-    setCanvasNotes(notes.filter((d) => d.name.endsWith(".canvas")))
     const entries = await Promise.all(projects.map(async (p) => [p.slug, await listProjectDocuments(p.slug).catch(() => [])] as const))
+    return { notes, entries }
+  }, [projects])
+
+  const applyCanvasLists = useCallback(({ notes, entries }: Awaited<ReturnType<typeof loadCanvasLists>>) => {
+    setCanvasNotes(notes.filter((d) => d.name.endsWith(".canvas")))
     setProjectCanvases(Object.fromEntries(entries.map(([slug, docs]) => [slug, docs.filter((d) => d.name.endsWith(".canvas"))])))
     setArchitectures(new Set(entries.filter(([, docs]) => docs.some((d) => isArchitecturePath(d.path))).map(([slug]) => slug)))
-  }, [projects])
+  }, [])
+
+  const refreshCanvases = useCallback(async () => {
+    applyCanvasLists(await loadCanvasLists())
+  }, [loadCanvasLists, applyCanvasLists])
 
   // Refetch on active canvas change to pick up newly created or renamed canvases
   useEffect(() => {
-    if (appMode === "canvas") refreshCanvases()
-  }, [appMode, activeCanvasPath, refreshCanvases])
+    if (appMode === "canvas") loadCanvasLists().then(applyCanvasLists)
+  }, [appMode, activeCanvasPath, loadCanvasLists, applyCanvasLists])
 
   const canvasItems = useMemo(() =>
     hidePending(buildCanvasItems(canvasNotes, projects, projectCanvases, architectures, activeCanvasPath ?? null, activeArchitecture ?? null),

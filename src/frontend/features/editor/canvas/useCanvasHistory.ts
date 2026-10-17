@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useLayoutEffect, useRef, useState } from "react"
 import { historyChanges, restoreHistory, type CanvasDocument } from "@/lib/domain/canvasDocument"
 
 const HISTORY_LIMIT = 50 // undo depth
@@ -19,7 +19,7 @@ interface CanvasHistoryEntry {
 export function useCanvasHistory(doc: CanvasDocument, onChange: (doc: CanvasDocument) => void) {
   // latest doc/onChange for long-lived window listeners and for history
   const liveRef = useRef({ doc, onChange })
-  liveRef.current = { doc, onChange }
+  useLayoutEffect(() => { liveRef.current = { doc, onChange } })
 
   const [undoStack, setUndoStack] = useState<CanvasHistoryEntry[]>([])
   const [redoStack, setRedoStack] = useState<CanvasHistoryEntry[]>([])

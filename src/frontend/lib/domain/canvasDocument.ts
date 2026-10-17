@@ -131,9 +131,14 @@ function migrateStrokes(strokes: LegacyStroke[] | undefined): StrokeData[] {
   return (strokes ?? []).map((stroke) => stroke.id ? stroke as StrokeData : { ...stroke, id: canvasEntityId() })
 }
 
+/** Copy of `value` without `key`; the type stays that of `value` since the key may be a legacy field. */
+function omitKey<T extends object>(value: T, key: string): T {
+  return Object.fromEntries(Object.entries(value).filter(([entryKey]) => entryKey !== key)) as T
+}
+
 function migrateAttachment(attachment: CanvasAttachment): CanvasAttachment {
   // Nested frames once carried an `embeddingScale` mode; they now always scale with their host.
-  const { embeddingScale: _dropped, ...rest } = attachment as CanvasAttachment & { embeddingScale?: unknown }
+  const rest = omitKey(attachment, "embeddingScale")
   return rest.kind === "canvas" && rest.canvas
     ? { ...rest, canvas: migrate(rest.canvas) }
     : rest
@@ -218,8 +223,8 @@ interface CanvasHistoryChange extends EntityChange<CanvasEntity> {
 /** Page-only attachment edits are navigation, never a conflicting artwork edit. */
 function sameForHistory(collection: CanvasCollection, a: CanvasEntity | null, b: CanvasEntity | null): boolean {
   if (collection === "attachments" && a && b) {
-    const { page: _a, ...withoutPageA } = a as CanvasAttachment
-    const { page: _b, ...withoutPageB } = b as CanvasAttachment
+    const withoutPageA = omitKey(a as CanvasAttachment, "page")
+    const withoutPageB = omitKey(b as CanvasAttachment, "page")
     return jsonEqual(withoutPageA, withoutPageB)
   }
   return jsonEqual(a, b)

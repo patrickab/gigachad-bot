@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import { Box, FileType, Layers, LayoutGrid, ListPlus, Network, PanelLeftClose, PanelLeftOpen, Plus, Trash2 } from "lucide-react"
 import { applyArchitectureOperations, deleteArchitectureSources, readArchitecture } from "@/lib/backend/api"
@@ -72,12 +72,15 @@ function useArchitectureView(slug: string, file: string) {
     }).then(() => setLoadError(null), (cause: unknown) => setLoadError(failure(cause, "Could not load the architecture")))
   }, [mutate, slug])
 
-  useEffect(() => {
+  // Another file's project starts from nothing: no stale model, refusal, or load failure.
+  const [shownSlug, setShownSlug] = useState(slug)
+  if (shownSlug !== slug) {
+    setShownSlug(slug)
     setWorkspace(null)
     setError(null)
     setLoadError(null)
-    refresh()
-  }, [refresh])
+  }
+  useEffect(() => { refresh() }, [refresh])
 
   // Writes from this device are already reflected locally; anyone else's reload the model.
   useEffect(() => subscribeToChanges((event) => {
@@ -89,7 +92,13 @@ function useArchitectureView(slug: string, file: string) {
   const entry = useMemo(() => workspace?.model.tree.find((candidate) => candidate.path === file) ?? null, [workspace, file])
   const view = useMemo(() => workspace?.model.views.find((candidate) => candidate.id === entry?.view) ?? null, [workspace, entry])
 
-  useEffect(() => { setDrafts([]) }, [view?.id])
+  // Drafts belong to the view they were drawn on.
+  const viewId = view?.id
+  const [draftsViewId, setDraftsViewId] = useState(viewId)
+  if (draftsViewId !== viewId) {
+    setDraftsViewId(viewId)
+    setDrafts([])
+  }
 
   const serverGraph = useMemo(() => view ? graphFromView(view) : null, [view])
   // Sized and spaced to fit their labels once, before drawing, and again once the real font has loaded.
@@ -102,7 +111,7 @@ function useArchitectureView(slug: string, file: string) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fontsLoaded invalidates the measurements
   }, [optimistic, serverGraph, drafts, fontsLoaded])
   const graphRef = useRef(graph)
-  graphRef.current = graph
+  useLayoutEffect(() => { graphRef.current = graph }, [graph])
 
   // A write from the diagram, whose refusal the window shows.
   const enqueue = useCallback((write: () => Promise<ArchitectureWorkspace>) => {
@@ -194,7 +203,11 @@ export function ArchitectureWindow({ path, maximized, hostScale, edgeStyle = "el
     return () => window.removeEventListener("keydown", onKey, true)
   }, [offered, answer])
   // Another view or file is another question.
-  useEffect(() => { setOffered([]) }, [view?.id])
+  const [offeredViewId, setOfferedViewId] = useState(view?.id)
+  if (offeredViewId !== view?.id) {
+    setOfferedViewId(view?.id)
+    setOffered([])
+  }
   // LikeC4's own complaints about the source, e.g. an unresolved reference; it counts lines from zero.
   const diagnostics = workspace?.model.errors ?? []
   const notice = (text: string, action?: ReactNode) => (
@@ -308,7 +321,7 @@ function ArchitectureTree({ slug, workspace, current, onOpen, onCollapse, mutate
   const [problem, setProblem] = useState<string | null>(null)
   // Read when a delete commits, which may be after the user has moved to another file.
   const currentRef = useRef(current)
-  currentRef.current = current
+  useLayoutEffect(() => { currentRef.current = current }, [current])
   const { tree, elements, views } = workspace.model
   // One undo key per delete, named after its first path: a system's key hides its modules with it.
   const deleteKey = (path: string) => `architecture:${slug}:${path}`

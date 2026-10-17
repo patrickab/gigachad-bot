@@ -41,6 +41,13 @@ const SCREENSHOT_MIN = 4 // canvas units — smaller drags are accidents
 // render would reset the nested editor's identity on every parent re-render.
 const EMPTY_NESTED = emptyCanvasDoc()
 
+/** Copy of `record` without `key`. */
+function omitKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+  const rest = { ...record }
+  delete rest[key]
+  return rest
+}
+
 interface CanvasEditorProps {
   doc: CanvasDocument
   onChange: (doc: CanvasDocument) => void
@@ -204,7 +211,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
   const removeFrame = useCallback((id: string) => {
     const cur = liveRef.current.doc
     commit({ ...cur, frames: cur.frames.filter((f) => f.id !== id) })
-    setAspects(({ [id]: _gone, ...rest }) => rest)
+    setAspects((prev) => omitKey(prev, id))
   }, [liveRef, commit])
 
   // --- Attachment windows ---
@@ -215,7 +222,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
   const removeAttachment = useCallback((id: string) => {
     const cur = liveRef.current.doc
     commit({ ...cur, attachments: cur.attachments.filter((a) => a.id !== id) })
-    setAspects(({ [id]: _gone, ...rest }) => rest)
+    setAspects((prev) => omitKey(prev, id))
     setFullscreenId((fullscreen) => (fullscreen === id ? null : fullscreen))
   }, [liveRef, commit])
 
@@ -281,7 +288,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
   }
 
   // --- Long-press context menu ---
-  const [contextMenu, setContextMenu] = useState<{ screenX: number; screenY: number; canvasX: number; canvasY: number } | null>(null)
+  const [contextMenu, setContextMenu] = useState<{ left: number; top: number; canvasX: number; canvasY: number } | null>(null)
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const longPressPos = useRef<{ clientX: number; clientY: number } | null>(null)
 
@@ -324,7 +331,8 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
     longPressTimer.current = setTimeout(() => {
       const [cx, cy] = screenToCanvas(clientX, clientY)
       abortStroke()
-      setContextMenu({ screenX: clientX, screenY: clientY, canvasX: cx, canvasY: cy })
+      const containerRect = containerRef.current?.getBoundingClientRect()
+      setContextMenu({ left: clientX - (containerRect?.left ?? 0), top: clientY - (containerRect?.top ?? 0), canvasX: cx, canvasY: cy })
     }, LONG_PRESS_MS)
   }, [screenToCanvas, abortStroke])
 
@@ -725,7 +733,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
         {contextMenu && (
           <div
             className="absolute z-20 rounded-lg border border-divider bg-paper shadow-[var(--shadow-lg)] py-1 min-w-[100px]"
-            style={{ left: contextMenu.screenX - (containerRef.current?.getBoundingClientRect().left ?? 0), top: contextMenu.screenY - (containerRef.current?.getBoundingClientRect().top ?? 0) }}
+            style={{ left: contextMenu.left, top: contextMenu.top }}
             onPointerDown={(e) => e.stopPropagation()}
           >
             <button

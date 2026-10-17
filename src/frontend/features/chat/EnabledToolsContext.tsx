@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
 import { TOOLS } from "@/features/chat/tools"
 import type { ToolName } from "@/lib/domain/types"
 
@@ -22,31 +22,58 @@ export function useEnabledTools(): EnabledToolsState {
   return ctx
 }
 
+/** Storage never changes under a mounted provider, so there is nothing to subscribe to. */
+function subscribeNever(): () => void {
+  return () => {}
+}
+
+function readSavedTools(): string | null {
+  try { return window.localStorage.getItem(TOOLS_STORAGE_KEY) } catch { return null }
+}
+
+function writeSavedTools(tools: ToolName[]): void {
+  try { window.localStorage.setItem(TOOLS_STORAGE_KEY, JSON.stringify(tools)) } catch { /* quota */ }
+}
+
+function readServerSavedTools(): string | null {
+  return null
+}
+
+function defaultTools(): ToolName[] {
+  return TOOLS.filter((tool) => tool.defaultEnabled).map((tool) => tool.name)
+}
+
+/** Parses the saved list, keeping defaults when storage is empty or corrupt. */
+function parseSavedTools(saved: string | null): ToolName[] {
+  if (!saved) return defaultTools()
+  try {
+    const names = JSON.parse(saved) as string[]
+    const valid = new Set(TOOLS.map((tool) => tool.name))
+    return names.filter((name): name is ToolName => valid.has(name as ToolName))
+  } catch {
+    return defaultTools()
+  }
+}
+
 export function EnabledToolsProvider({ children }: { children: ReactNode }) {
-  const [enabledTools, setEnabledTools] = useState<ToolName[]>(() => TOOLS.filter((tool) => tool.defaultEnabled).map((tool) => tool.name))
-
-  // Restored once on mount so the first paint uses the safe defaults above; a per-browser
-  // choice, matching every other composer preference (theme).
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(TOOLS_STORAGE_KEY)
-      if (saved) {
-        const names = JSON.parse(saved) as string[]
-        const valid = new Set(TOOLS.map((tool) => tool.name))
-        setEnabledTools(names.filter((name): name is ToolName => valid.has(name as ToolName)))
-      }
-    } catch { /* corrupt or unavailable storage — keep defaults */ }
-  }, [])
+  // Restored once from storage (a per-browser choice, matching every other composer preference);
+  // the server snapshot is empty so the first paint uses the safe defaults.
+  const saved = useSyncExternalStore(subscribeNever, readSavedTools, readServerSavedTools)
+  const [chosen, setChosen] = useState<ToolName[] | null>(null)
+  const enabledTools = useMemo(() => chosen ?? parseSavedTools(saved), [chosen, saved])
 
   useEffect(() => {
-    try { window.localStorage.setItem(TOOLS_STORAGE_KEY, JSON.stringify(enabledTools)) } catch { /* quota */ }
-  }, [enabledTools])
+    if (chosen) writeSavedTools(chosen)
+  }, [chosen])
 
   // Tools are independent: enabling one must not disable another, because a chat can call a
   // different tool on every turn.
   const toggleTool = useCallback((name: ToolName) => {
-    setEnabledTools((prev) => (prev.includes(name) ? prev.filter((t) => t !== name) : [...prev, name]))
-  }, [])
+    setChosen((prev) => {
+      const current = prev ?? parseSavedTools(saved)
+      return current.includes(name) ? current.filter((t) => t !== name) : [...current, name]
+    })
+  }, [saved])
 
   const value: EnabledToolsState = {
     enabledTools,

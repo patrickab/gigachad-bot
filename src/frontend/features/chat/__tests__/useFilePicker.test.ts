@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 
+type MockImpl = (...args: unknown[]) => unknown
+
 // Use vi.hoisted so the mutable impl container is initialised before the
 // hoisted vi.mock call. The mock factory closes over this container; tests
 // mutate it via `apiMock.__setImpl`.
@@ -7,20 +9,26 @@ const { impls } = vi.hoisted(() => ({
   impls: {
     listRootFiles: async () => ({ enabled: false, files: [] }),
     attachRootFile: async () => ({ name: "att", mime: "text/plain", url: "u", active: true }),
-  } as Record<string, (...a: any[]) => any>,
+  } as Record<string, MockImpl>,
 }))
 
 vi.mock("@/lib/backend/api", () => ({
-  __setImpl: (k: string, fn: any) => { impls[k] = fn },
+  __setImpl: (k: string, fn: (...a: never[]) => unknown) => { impls[k] = fn as MockImpl },
   __resetImpls: () => {
     impls.listRootFiles = async () => ({ enabled: false, files: [] })
     impls.attachRootFile = async () => ({ name: "att", mime: "text/plain", url: "u", active: true })
   },
-  listRootFiles: (...a: any[]) => impls.listRootFiles(...a),
-  attachRootFile: (...a: any[]) => impls.attachRootFile(...a),
+  listRootFiles: (...a: unknown[]) => impls.listRootFiles(...a),
+  attachRootFile: (...a: unknown[]) => impls.attachRootFile(...a),
 }))
 
 import * as apiMock from "@/lib/backend/api"
+
+/** Controls the mocked api module exposes beyond the real exports. */
+const mockControls = apiMock as unknown as {
+  __setImpl: (name: string, impl: (...args: never[]) => unknown) => void
+  __resetImpls: () => void
+}
 import type { ChatInputHandle } from "@/features/chat/composer/ChatInput"
 
 import { useFilePicker } from "@/features/chat/useFilePicker"
@@ -30,7 +38,7 @@ function makeChatInputRef(handle: Partial<ChatInputHandle> = {}) {
   return { current: { addAttachment: vi.fn(), ...handle } as unknown as ChatInputHandle }
 }
 
-beforeEach(() => (apiMock as any).__resetImpls())
+beforeEach(() => mockControls.__resetImpls())
 afterEach(() => vi.useRealTimers())
 
 describe("useFilePicker", () => {
@@ -81,7 +89,7 @@ describe("useFilePicker", () => {
       active: true,
       vaultPath: "vault/v.txt",
     }))
-    ;(apiMock as any).__setImpl("attachRootFile", attachSpy)
+    mockControls.__setImpl("attachRootFile", attachSpy)
 
     const setExtracting = vi.fn()
     const { result } = renderHook(() =>

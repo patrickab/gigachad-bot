@@ -30,6 +30,7 @@ export function SourcesBody({ result }: { result: WebSearchResult }) {
           <div className="grid grid-cols-2 gap-1.5">
             {videos.slice(0, 4).map((v, i) => (
               <a key={i} href={v.url} target="_blank" rel="noopener noreferrer">
+                {/* eslint-disable-next-line @next/next/no-img-element -- arbitrary remote search-result URLs, unsuitable for next/image under Tauri static export */}
                 <img
                   src={v.thumbnail}
                   alt=""
@@ -50,6 +51,7 @@ export function SourcesBody({ result }: { result: WebSearchResult }) {
           <div className="grid grid-cols-2 gap-1.5">
             {images.slice(0, 4).map((img, i) => (
               <a key={i} href={img} target="_blank" rel="noopener noreferrer">
+                {/* eslint-disable-next-line @next/next/no-img-element -- arbitrary remote search-result URLs, unsuitable for next/image under Tauri static export */}
                 <img
                   src={img}
                   alt=""

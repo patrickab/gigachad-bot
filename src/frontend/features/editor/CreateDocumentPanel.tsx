@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { FilePlus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { SaveAsModal } from "@/components/ui/SaveAsModal"
@@ -18,10 +18,13 @@ interface CreateDocumentPanelProps {
 /** Modal that picks a document type and name, passing the full filename to `onCreate`. */
 export function CreateDocumentPanel({ open, onClose, onCreate }: CreateDocumentPanelProps) {
   const [type, setType] = useState<DocType>("md")
+  const [wasOpen, setWasOpen] = useState(open)
 
-  useEffect(() => {
+  // Reset to the default type each time the modal opens
+  if (open !== wasOpen) {
+    setWasOpen(open)
     if (open) setType("md")
-  }, [open])
+  }
 
   const ext = `.${type}`
 

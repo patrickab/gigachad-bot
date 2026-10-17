@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useRef } from "react"
 import { createPortal } from "react-dom"
 import { CommandMenu, type CommandMenuItem } from "@/features/navigation/CommandMenu"
 import { MemoryPanel } from "@/features/memory/MemoryPanel"
@@ -15,12 +16,21 @@ export function MemoryCommandLayer({ bar, items, onRun }: {
 }) {
   const { isActive } = useTab()
   const { activeProject } = useProject()
+  const inputRef = useRef<HTMLInputElement>(null)
+  const { menuOpen } = bar
+
+  useEffect(() => {
+    if (!menuOpen) return
+    // Defer so the portaled input exists before focusing.
+    const timer = setTimeout(() => inputRef.current?.focus(), 0)
+    return () => clearTimeout(timer)
+  }, [menuOpen])
 
   return (
     <>
       {isActive && bar.menuOpen && bar.labelSlot && createPortal(
         <input
-          ref={bar.inputRef}
+          ref={inputRef}
           autoFocus
           value={bar.query}
           onChange={(e) => bar.setQuery(e.target.value)}

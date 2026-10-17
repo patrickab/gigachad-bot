@@ -33,6 +33,25 @@ export interface ChatInputHandle {
   addAttachment: (att: Attachment) => void
 }
 
+/** One recognition alternative; the browser API has no DOM lib typings. */
+interface SpeechResultEvent {
+  resultIndex: number
+  results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }>
+}
+
+interface SpeechRecognitionLike {
+  continuous: boolean
+  interimResults: boolean
+  lang: string
+  onresult: ((event: SpeechResultEvent) => void) | null
+  onend: (() => void) | null
+  onerror: (() => void) | null
+  start: () => void
+  stop: () => void
+}
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike
+
 async function toDataUrl(url: string): Promise<string> {
   const blob = await (await fetch(url)).blob()
   return new Promise<string>((resolve) => {
@@ -85,7 +104,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const fileRef = useRef<HTMLInputElement>(null)
   const toolsRef = useRef<HTMLDivElement>(null)
   const attachMenuRef = useRef<HTMLDivElement>(null)
-  const recognitionRef = useRef<any>(null)
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
   const textRef = useRef(text)
 
   const closeTools = useCallback(() => setShowTools(false), [])
@@ -118,7 +137,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey && !isStreaming && !extracting) { e.preventDefault(); handleSubmit() }
-  }, [handleSubmit, isStreaming])
+  }, [handleSubmit, isStreaming, extracting])
 
   // Only the first pasted image is attached
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
@@ -156,7 +175,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   // Stale `recognitionRef` checks ignore events from a recognizer that was already replaced or stopped
   const toggleListening = useCallback(() => {
     if (isListening) { recognitionRef.current?.stop(); setIsListening(false); return }
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    const speechWindow = window as Window & { SpeechRecognition?: SpeechRecognitionConstructor; webkitSpeechRecognition?: SpeechRecognitionConstructor }
+    const SpeechRecognition = speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition
     if (!SpeechRecognition) { alert("Voice input is not supported."); return }
     const recognition = new SpeechRecognition()
     recognition.continuous = false
@@ -164,7 +184,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     recognition.lang = "en-US"
     let finalText = textRef.current.trim()
     let interimText = ""
-    recognition.onresult = (event: any) => {
+    recognition.onresult = (event: SpeechResultEvent) => {
       let interim = ""
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const r = event.results[i]

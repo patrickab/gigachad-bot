@@ -64,9 +64,6 @@ export function EditorSidebar({ content, model, width, onWidthChange, onApply }:
   const [messages, setMessages] = useState<NoteMessage[]>([])
   const [input, setInput] = useState("")
   const [isStreaming, setIsStreaming] = useState(false)
-  // Ref so handleSend always sends the latest document without re-creating the callback
-  const contentRef = useRef(content)
-  contentRef.current = content
   const scrollRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<(() => void) | null>(null)
   // Keep the newest message in view
@@ -97,14 +94,14 @@ export function EditorSidebar({ content, model, width, onWidthChange, onApply }:
     try {
       await runStream(abortRef, {
         model, chat_id: crypto.randomUUID(), user_msg: trimmed,
-        system_prompt: SYS_NOTE_EDIT(contentRef.current), messages: history, img_paths: [],
+        system_prompt: SYS_NOTE_EDIT(content), messages: history, img_paths: [],
       }, (t) => { assistantMsg.content += t; schedule() })
     } finally {
       flush()
       setIsStreaming(false)
       abortRef.current = null
     }
-  }, [input, isStreaming, messages, model])
+  }, [content, input, isStreaming, messages, model])
 
   return (
     <SidePanelFrame width={width} onWidthChange={onWidthChange} className="border-l border-divider bg-paper">

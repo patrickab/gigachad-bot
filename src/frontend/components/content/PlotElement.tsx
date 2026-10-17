@@ -57,6 +57,8 @@ function chartHeightFor(width: number, rows: number) {
   return Math.min(560, Math.max(300, Math.round(width * 0.6))) * rows
 }
 
+const MODEL_SIZING_KEYS = new Set(["autosize", "height", "width"])
+
 // react-plotly calls `Plotly.react` whenever `data`, `layout` or `config` changes identity,
 // so these must stay module-level: an inline object redraws every plot on every host render.
 const PLOT_CONFIG = { responsive: false, displaylogo: false, displayModeBar: false, scrollZoom: true } as const
@@ -179,7 +181,10 @@ export const PlotElement = memo(function PlotElement({ figure }: PlotElementProp
   )
 
   const layout = useMemo(() => {
-    const { autosize: _autosize, height: _height, width: _width, ...modelLayout } = figure.layout ?? {}
+    // Sizing comes from the measured host, never from the model.
+    const modelLayout = Object.fromEntries(
+      Object.entries(figure.layout ?? {}).filter(([key]) => !MODEL_SIZING_KEYS.has(key)),
+    )
     if (typeof window === "undefined") return modelLayout
     const root = document.documentElement
     const style = getComputedStyle(root)

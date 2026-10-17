@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -43,12 +43,15 @@ function AddCardModal({ open, onClose, onAdd, defaultState }: AddCardModalProps)
   const [desc, setDesc] = useState("")
   const titleRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
+  // Start each opening with an empty form.
+  const [wasOpen, setWasOpen] = useState(open)
+  if (wasOpen !== open) {
+    setWasOpen(open)
     if (open) {
       setTitle("")
       setDesc("")
     }
-  }, [open])
+  }
 
   const submit = () => {
     if (!title.trim()) return
@@ -213,7 +216,7 @@ export function ProjectDashboard() {
                             >
                               <ElevatedContainer
                                 draggable
-                                onDragStart={(e: any) => {
+                                onDragStart={(e) => {
                                   e.dataTransfer.setData("text/plain", card.id)
                                   // Defer so the drag image is captured before the original fades out
                                   setTimeout(() => setDraggedCardId(card.id), 0)
@@ -226,7 +229,7 @@ export function ProjectDashboard() {
                                 // Click advances the card one column, cycling
                                 onClick={() => moveCard(card.id, NEXT_STATE[col.id])}
                                 // Right-click moves the card back one column
-                                onContextMenu={(e: any) => {
+                                onContextMenu={(e) => {
                                   e.preventDefault()
                                   moveCard(card.id, PREV_STATE[col.id])
                                 }}

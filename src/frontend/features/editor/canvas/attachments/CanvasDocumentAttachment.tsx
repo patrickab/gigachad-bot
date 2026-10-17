@@ -26,25 +26,26 @@ export function CanvasDocumentAttachment({ path, hostScale, plotFrame, collapsed
   plotFrame: { width: number; scale: number } | null
   collapsed: boolean
 }) {
-  const [state, setState] = useState<DocumentAttachmentState>({ status: "loading" })
+  // The loaded result is tagged with its path, so a new path reads as loading until it resolves.
+  const [loaded, setLoaded] = useState<{ path: string; state: DocumentAttachmentState } | null>(null)
+  const state: DocumentAttachmentState = loaded?.path === path ? loaded.state : { status: "loading" }
 
   useEffect(() => {
     let alive = true
-    setState({ status: "loading" })
+    const settle = (next: DocumentAttachmentState) => { if (alive) setLoaded({ path, state: next }) }
     loadFileViewerText(path).then((text) => {
-      if (!alive) return
       if (path.endsWith(".plot.json")) {
         try {
           const figure = JSON.parse(text)
           if (!figure || typeof figure !== "object" || Array.isArray(figure)) throw new Error("Invalid figure")
-          setState({ status: "plot", figure: figure as PlotFigure })
+          settle({ status: "plot", figure: figure as PlotFigure })
         } catch {
-          setState({ status: "error", message: "Malformed plot document" })
+          settle({ status: "error", message: "Malformed plot document" })
         }
       } else {
-        setState({ status: "markdown", content: text })
+        settle({ status: "markdown", content: text })
       }
-    }).catch(() => { if (alive) setState({ status: "error", message: "Failed to load document" }) })
+    }).catch(() => settle({ status: "error", message: "Failed to load document" }))
     return () => { alive = false }
   }, [path])
 

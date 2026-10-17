@@ -83,8 +83,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
-    refreshProjects()
-  }, [refreshProjects])
+    apiListProjects().then(setProjects)
+  }, [])
 
   const openProject = useCallback(async (name: string) => {
     bumpVersion()
@@ -150,7 +150,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
           kanban: prev.kanban.map((c) => c.id === cardId ? originalCard! : c),
         } : prev)
       }
-    } catch (err) {
+    } catch {
       if (originalCard) {
         setProjectData((prev) => prev ? {
           ...prev,

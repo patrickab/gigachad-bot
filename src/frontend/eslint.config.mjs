@@ -1,8 +1,8 @@
-// Folder boundaries: features own their domain, shared layers never reach into features or app.
+// Next's recommended React, hooks, a11y and TypeScript rules, plus folder boundaries: features own their domain, shared layers never reach into features or app.
 import { defineConfig, globalIgnores } from "eslint/config"
 import nextVitals from "eslint-config-next/core-web-vitals"
+import nextTypescript from "eslint-config-next/typescript"
 import boundaries from "eslint-plugin-boundaries"
-import tseslint from "typescript-eslint"
 
 // A feature's public API: files at its root or at a sub-feature root, never inside concept folders.
 const publicEntry = ["*", "*/*"]
@@ -12,16 +12,14 @@ const crossFeature = (from, to) => ({
   allow: { to: { element: { type: "feature", captured: { feature: to }, fileInternalPath: publicEntry } } },
 })
 
-// Next's plugins are registered without their rules so existing `eslint-disable` comments for them still resolve.
-const nextPlugins = Object.assign({}, ...nextVitals.map((config) => config.plugins ?? {}))
 
 export default defineConfig([
+  ...nextVitals,
+  ...nextTypescript,
   globalIgnores([".next/**", "out/**", "build/**", "public/**", "next-env.d.ts"]),
   {
     files: ["{app,components,contexts,features,hooks,lib}/**/*.{ts,tsx}"],
-    languageOptions: { parser: tseslint.parser },
-    linterOptions: { reportUnusedDisableDirectives: "off" },
-    plugins: { ...nextPlugins, boundaries },
+    plugins: { boundaries },
     settings: {
       "import/resolver": { typescript: { alwaysTryTypes: true } },
       "boundaries/elements": [

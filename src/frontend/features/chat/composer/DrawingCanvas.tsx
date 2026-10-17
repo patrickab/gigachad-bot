@@ -163,7 +163,7 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
     } finally {
       setIsExporting(false)
     }
-  }, [strokes, chatId, slug, onConfirm])
+  }, [strokes, chatId, slug, onConfirm, bgColor])
 
   const currentStrokeOutline = currentPoints.length >= 2
     ? strokeOutlinePath(currentPoints, baseWidth, { ...STROKE_OPTIONS, last: false })

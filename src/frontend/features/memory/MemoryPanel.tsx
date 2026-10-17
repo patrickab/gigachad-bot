@@ -297,6 +297,8 @@ function DocumentWorkspace({
   )
 }
 
+const NO_MEMORIES: ProposedMemory[] = []
+
 // Main MemoryPanel
 export function MemoryPanel({
   state, projectEnabled, actions, globalCategories, projectCategories,
@@ -305,7 +307,7 @@ export function MemoryPanel({
   const errorMode = state.phase === "error"
   const candidatesMode = state.phase === "review"
   const documentsMode = state.phase === "doc-review"
-  const globalMemories = candidatesMode ? state.globalMemories : []
+  const globalMemories = candidatesMode ? state.globalMemories : NO_MEMORIES
   const projectMemories = candidatesMode ? state.projectMemories : null
   const error = errorMode ? state.error : null
 
@@ -360,7 +362,7 @@ export function MemoryPanel({
     }
     document.addEventListener("keydown", onKey)
     return () => document.removeEventListener("keydown", onKey)
-  }, [actions, documentsMode, candidatesMode, globalMemories, projectMemories])
+  }, [actions, documentsMode, candidatesMode, globalCategories, projectCategories, globalMemories, projectMemories])
 
   return (
     <AnimatePresence>

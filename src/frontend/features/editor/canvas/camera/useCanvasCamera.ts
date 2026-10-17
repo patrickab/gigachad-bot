@@ -30,8 +30,6 @@ export function useCanvasCamera(containerRef: RefObject<HTMLDivElement | null>, 
   const [offset, setOffset] = useState({ x: 40, y: 40 })
   const scaleRef = useRef(scale)
   const offsetRef = useRef(offset)
-  scaleRef.current = scale
-  offsetRef.current = offset
   const hostScaleRef = useRef(hostScale)
   // Frame size the current offset was computed for; resizes re-project from it.
   const viewportSizeRef = useRef({ width: 0, height: 0 })
@@ -102,8 +100,6 @@ export function useCanvasCamera(containerRef: RefObject<HTMLDivElement | null>, 
     }
     el.addEventListener("wheel", onWheel, { passive: false })
     return () => el.removeEventListener("wheel", onWheel)
-  // clampScale only reads a ref
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zoomAnchor, containerRef, setCamera])
 
   // Two-finger touch: pinch-zoom + pan. Fingers that land in a nested window belong to

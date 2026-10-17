@@ -1,4 +1,4 @@
-import { useEffect, useRef, type RefObject } from "react"
+import { useEffect, useLayoutEffect, useRef, type RefObject } from "react"
 
 const PEN_TOUCH_SUPPRESS_MS = 700 // touch stays suppressed this long after the last pen event (hover included)
 
@@ -22,7 +22,9 @@ interface TwoFingerOptions<S> {
 export function useTwoFingerGesture<S>(ref: RefObject<HTMLElement | null>, options: TwoFingerOptions<S>) {
   // Ref keeps the effect from re-subscribing when callers pass fresh inline closures.
   const optionsRef = useRef(options)
-  optionsRef.current = options
+  useLayoutEffect(() => {
+    optionsRef.current = options
+  })
   const enabled = options.enabled ?? true
   useEffect(() => {
     const el = ref.current

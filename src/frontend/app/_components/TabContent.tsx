@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { PanelLeft, PanelLeftClose } from "lucide-react"
 import { Sidebar } from "@/features/navigation/Sidebar"
 import { ChatContainer, type ChatFocus } from "@/features/chat/ChatContainer"
@@ -62,8 +62,9 @@ export function TabContent({ onOpenChat, focus }: {
   const usage = totalUsage.total_tokens > 0 ? totalUsage : undefined
 
   const [chatId, setChatId] = useState(() => tab.chatId)
-  // Index where this chat branched off its parent, null for a main chat.
-  const [branchMessageIdx, setBranchMessageIdx] = useState<number | null>(null)
+  const [loadedBranch, setLoadedBranch] = useState<{ historyFile: string | undefined; messageIdx: number | null }>({ historyFile: undefined, messageIdx: null })
+  // Index where this chat branched off its parent, null for a main chat or while its history loads.
+  const branchMessageIdx = loadedBranch.historyFile === tab.historyFile ? loadedBranch.messageIdx : null
   const [extracting, setExtracting] = useState(0)
   const [promptEditorOpen, setPromptEditorOpen] = useState(false)
   const [contextToggleSlot, setContextToggleSlot] = useState<HTMLElement | null>(null)
@@ -74,7 +75,7 @@ export function TabContent({ onOpenChat, focus }: {
   const loadIdRef = useRef(0)
   const [measuredWidth, setMeasuredWidth] = useState(0)
 
-  const canvasView = useCanvasView()
+  const { view: canvasView, sidebarProps: canvasSidebarProps, navigateArchitecture, closeCanvas, openCreatedCanvas, architectureEdgeStyle, setArchitectureEdgeStyle, toolbarSlots, setDrawingSlot, setViewSlot } = useCanvasView()
   const filePicker = useFilePicker({ isActive, hasMessages: messages.length > 0, chatInputRef, setExtracting })
   const docs = useProjectDocuments({ isActive, appMode, activeProject, chatId, chatInputRef, liveCanvasRef, setExtracting, setMessages })
   const persistence = useChatPersistence({ tab, activeProject, messages, chatId, usage, refreshAll, setHistoryFile })
@@ -123,13 +124,13 @@ export function TabContent({ onOpenChat, focus }: {
 
   useEffect(() => {
     if (!tab.historyFile) return
+    const historyFile = tab.historyFile
     const loadId = ++loadIdRef.current
     setMessages([])
     setTotalUsage({ total_tokens: 0, prompt_tokens: 0, completion_tokens: 0 })
-    setBranchMessageIdx(null)
     // Project chats load by their own slug, so switching projects never reloads open tabs.
-    const { slug } = parseHistoryFile(tab.historyFile)
-    loadChatHistory(tab.historyFile).then((data) => {
+    const { slug } = parseHistoryFile(historyFile)
+    loadChatHistory(historyFile).then((data) => {
       if (loadIdRef.current !== loadId) return
       if (data.messages.length > 0) {
         setMessages(data.messages.map((m) => normalizeMessageAttachments(m, data.chat_id, slug)))
@@ -137,56 +138,62 @@ export function TabContent({ onOpenChat, focus }: {
       if (data.chat_id) setChatId(data.chat_id)
       if (data.title) setTitle(data.title)
       if (data.usage) setTotalUsage(data.usage)
-      setBranchMessageIdx(data.branch_message_idx ?? null)
+      setLoadedBranch({ historyFile, messageIdx: data.branch_message_idx ?? null })
     }).catch(() => { })
   }, [tab.historyFile, setMessages, setTitle, setTotalUsage])
 
+  const onKeyDown = useEffectEvent((e: KeyboardEvent) => {
+    if (e.altKey && e.key === "s") {
+      e.preventDefault()
+      if (persistence.isTitled) persistence.handleQuickSave()
+      else persistence.setSaveModalOpen(true)
+    }
+    if (e.altKey && e.key === "r") { e.preventDefault(); reset() }
+    if (e.altKey && e.key.toLowerCase() === "m") {
+      e.preventDefault()
+      if (memory.isIdle) void memory.memorize(null)
+      return
+    }
+    if (e.altKey && e.key.toLowerCase() === "o") {
+      e.preventDefault()
+      if (filePicker.filesEnabled) filePicker.openFilePicker()
+      return
+    }
+
+    const isSlash = e.key === "/" && !e.altKey && !e.ctrlKey && !e.metaKey
+    const isCtrlK = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k"
+
+    if (isSlash || isCtrlK) {
+      const tag = (e.target as HTMLElement).tagName
+      if (isSlash && (tag === "TEXTAREA" || tag === "INPUT" || (e.target as HTMLElement).isContentEditable)) return
+      e.preventDefault()
+      e.stopPropagation()
+      e.stopImmediatePropagation()
+      // The command input lives in this tab's sidebar row.
+      if (memory.isIdle) {
+        if (sidebarCollapsed) toggleSidebar()
+        memory.openMenu()
+      }
+    }
+  })
+
   useEffect(() => {
     if (!isActive || appMode === "canvas") return
-
-    function handler(e: KeyboardEvent) {
-      if (e.altKey && e.key === "s") { e.preventDefault(); persistence.isTitled ? persistence.handleQuickSave() : persistence.setSaveModalOpen(true) }
-      if (e.altKey && e.key === "r") { e.preventDefault(); reset() }
-      if (e.altKey && e.key.toLowerCase() === "m") {
-        e.preventDefault()
-        if (memory.isIdle) void memory.memorize(null)
-        return
-      }
-      if (e.altKey && e.key.toLowerCase() === "o") {
-        e.preventDefault()
-        if (filePicker.filesEnabled) filePicker.openFilePicker()
-        return
-      }
-
-      const isSlash = e.key === "/" && !e.altKey && !e.ctrlKey && !e.metaKey
-      const isCtrlK = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k"
-
-      if (isSlash || isCtrlK) {
-        const tag = (e.target as HTMLElement).tagName
-        if (isSlash && (tag === "TEXTAREA" || tag === "INPUT" || (e.target as HTMLElement).isContentEditable)) return
-        e.preventDefault()
-        e.stopPropagation()
-        e.stopImmediatePropagation()
-        // The command input lives in this tab's sidebar row.
-        if (memory.isIdle) {
-          if (sidebarCollapsed) toggleSidebar()
-          memory.openMenu()
-        }
-      }
-    }
     // Capture phase so the shortcuts win over handlers inside focused editors.
-    window.addEventListener("keydown", handler, true)
+    window.addEventListener("keydown", onKeyDown, true)
     return () => {
-      window.removeEventListener("keydown", handler, true)
+      window.removeEventListener("keydown", onKeyDown, true)
     }
-  }, [isActive, appMode, persistence.isTitled, persistence.handleQuickSave, persistence.setSaveModalOpen, reset, memory.isIdle, memory.memorize, memory.openMenu, filePicker.filesEnabled, filePicker.openFilePicker, sidebarCollapsed, toggleSidebar])
+  }, [isActive, appMode])
 
   // Picking a menu entry always closes the menu first; memorizing then replaces it with the review panel.
+  const { closeMenu: closeMemoryMenu } = memory
   const runMenuCommand = useCallback((command: string) => {
-    memory.closeMenu()
+    closeMemoryMenu()
     void runSlashCommand(command)
-  }, [memory.closeMenu, runSlashCommand])
+  }, [closeMemoryMenu, runSlashCommand])
 
+  const { setCreateDocOpen } = docs
   const sidebarContext = useMemo<ChatSidebarContextValue>(() => ({
     onRemoveAttachment: turns.handleRemoveAttachment,
     onToggleAttachmentActive: turns.handleToggleAttachmentActive,
@@ -198,7 +205,7 @@ export function TabContent({ onOpenChat, focus }: {
     onAttachArchitecture: docs.handleAttachArchitecture,
     architectureError: docs.architectureError,
     onOpenDocuments: activeProject ? docs.openDocuments : undefined,
-    onCreateDocument: activeProject ? () => docs.setCreateDocOpen(true) : undefined,
+    onCreateDocument: activeProject ? () => setCreateDocOpen(true) : undefined,
     onDeleteDocument: docs.handleDeleteDocument,
     onRenameDocument: docs.handleRenameDocument,
     onDocumentSaved: docs.handleDocumentSaved,
@@ -207,7 +214,7 @@ export function TabContent({ onOpenChat, focus }: {
   }), [
     turns.handleRemoveAttachment, turns.handleToggleAttachmentActive, turns.handleAttachmentContentChange,
     filePicker.filesEnabled, filePicker.openFilePicker,
-    docs.visibleDocuments, docs.handleDocumentSelect, docs.openDocuments, docs.setCreateDocOpen,
+    docs.visibleDocuments, docs.handleDocumentSelect, docs.openDocuments, setCreateDocOpen,
     docs.handleDeleteDocument, docs.handleRenameDocument, docs.handleDocumentSaved,
     docs.handleAttachArchitecture, docs.architectureError,
     activeProject, config.selectedModel,
@@ -236,7 +243,7 @@ export function TabContent({ onOpenChat, focus }: {
         onFileSelect={filePicker.handleFileSelect}
         onRootsChanged={filePicker.refreshFileList}
         onDocumentsChanged={docs.refreshDocuments}
-        {...canvasView.sidebarProps}
+        {...canvasSidebarProps}
         tabs={
           <SidebarTabs
             ownerTabId={tab.id}
@@ -255,13 +262,13 @@ export function TabContent({ onOpenChat, focus }: {
         {appMode === "canvas" ? (
           // The canvas spans the full height, the bar floats over it. Architecture keeps its own header strip visible.
           <TopBar
-            overlay={canvasView.view.kind !== "architecture"}
+            overlay={canvasView.kind !== "architecture"}
             left={<>
               <TopBarTransparent>{sidebarToggle}</TopBarTransparent>
-              <TopBarPill ref={canvasView.setDrawingSlot} />
+              <TopBarPill ref={setDrawingSlot} />
             </>}
             right={<TopBarPill>
-              <div ref={canvasView.setViewSlot} className="contents" />
+              <div ref={setViewSlot} className="contents" />
               <ThemeToggle />
             </TopBarPill>}
           />
@@ -285,15 +292,15 @@ export function TabContent({ onOpenChat, focus }: {
           />
         )}
         <div className={`flex-1 min-h-0 relative transition-opacity duration-200 ${appMode === "canvas" ? "overflow-hidden" : ""}`}>
-          {appMode === "canvas" && canvasView.view.kind === "architecture" ? (
-            <ArchitectureWindow path={canvasView.view.path} maximized hostScale={1} edgeStyle={canvasView.architectureEdgeStyle} onEdgeStyleChange={canvasView.setArchitectureEdgeStyle} onNavigate={canvasView.navigateArchitecture} />
+          {appMode === "canvas" && canvasView.kind === "architecture" ? (
+            <ArchitectureWindow path={canvasView.path} maximized hostScale={1} edgeStyle={architectureEdgeStyle} onEdgeStyleChange={setArchitectureEdgeStyle} onNavigate={navigateArchitecture} />
           ) : appMode === "canvas" ? (
             <CanvasWorkspace
-              selected={canvasView.view.kind === "canvas" ? canvasView.view.selection : null}
+              selected={canvasView.kind === "canvas" ? canvasView.selection : null}
               slug={activeProject}
-              toolbarSlots={canvasView.toolbarSlots}
-              onCloseEditor={canvasView.closeCanvas}
-              onCreated={canvasView.openCreatedCanvas}
+              toolbarSlots={toolbarSlots}
+              onCloseEditor={closeCanvas}
+              onCreated={openCreatedCanvas}
               onModeLabel={setModeLabel}
               editorModel={config.selectedModel}
             />

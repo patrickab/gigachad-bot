@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect, type ElementType, type ReactNode } from "react"
+import { useState, useRef, type ElementType, type ReactNode } from "react"
 import { Save } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Dialog } from "./Dialog"
@@ -20,11 +20,14 @@ interface SaveAsModalProps {
 /** Modal with one text input; Enter submits the trimmed value. */
 export function SaveAsModal({ open, onClose, onSave, title = "Save Chat", icon = Save, placeholder, beforeInput }: SaveAsModalProps) {
   const [name, setName] = useState("")
+  const [wasOpen, setWasOpen] = useState(open)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
+  // Start every opening with an empty name.
+  if (open !== wasOpen) {
+    setWasOpen(open)
     if (open) setName("")
-  }, [open])
+  }
 
   return (
     <Dialog open={open} onClose={onClose} icon={icon} title={title} initialFocusRef={inputRef}>

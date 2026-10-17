@@ -50,7 +50,27 @@ export function nextTab(config?: Partial<TabConfig>): Tab {
 const INITIAL_TAB: Tab = nextTab()
 
 /** Provides one tab's state and actions; memoized so the context only changes with the tab or its active flag. */
-function TabScope({ tab, isActive, actions, children }: { tab: Tab; isActive: boolean; actions: TabActions; children: React.ReactNode }) {
+function TabScope({ tab, isActive, updateTab, updateModeLabel, children }: {
+  tab: Tab
+  isActive: boolean
+  updateTab: (id: string, patch: (tab: Tab) => Partial<Tab>) => void
+  updateModeLabel: (id: string, label: string, loading?: boolean) => void
+  children: React.ReactNode
+}) {
+  // One stable action set per tab. Consumers list these as effect dependencies, so a
+  // fresh closure per render re-fires them all, and two mode-label producers in one
+  // tab (the chat label plus an open document's filename) then overwrite each other forever.
+  // TabScope is keyed by tab id, so the actions are built once for the tab's lifetime.
+  const [actions] = useState<TabActions>(() => {
+    const id = tab.id
+    return {
+      setModeLabel: (label, loading) => updateModeLabel(id, label, loading),
+      updateConfig: (config) => updateTab(id, (t) => ({ config: { ...t.config, ...config } })),
+      setAppMode: (appMode) => updateTab(id, () => ({ appMode })),
+      setHistoryFile: (historyFile) => updateTab(id, () => ({ historyFile })),
+      setTitle: (title) => updateTab(id, () => ({ title })),
+    }
+  })
   const value = useMemo<TabContextValue>(() => ({ tab, isActive, ...actions }), [tab, isActive, actions])
   return <TabContext.Provider value={value}>{children}</TabContext.Provider>
 }
@@ -257,24 +277,6 @@ export function TabManager({ children, onTabsChange, defaultConfig = DEFAULT_TAB
     setModeLabels((prev) => (prev[id] === label ? prev : { ...prev, [id]: label }))
     setModeLoading((prev) => (prev[id] === loading ? prev : { ...prev, [id]: loading }))
   }, [])
-  // One stable action set per tab. Consumers list these as effect dependencies, so a
-  // fresh closure per render re-fires them all, and two mode-label producers in one
-  // tab (the chat label plus an open document's filename) then overwrite each other forever.
-  const tabActions = useRef(new Map<string, TabActions>())
-  function actionsFor(id: string): TabActions {
-    let actions = tabActions.current.get(id)
-    if (!actions) {
-      actions = {
-        setModeLabel: (label, loading) => updateModeLabel(id, label, loading),
-        updateConfig: (config) => updateTab(id, (t) => ({ config: { ...t.config, ...config } })),
-        setAppMode: (appMode) => updateTab(id, () => ({ appMode })),
-        setHistoryFile: (historyFile) => updateTab(id, () => ({ historyFile })),
-        setTitle: (title) => updateTab(id, () => ({ title })),
-      }
-      tabActions.current.set(id, actions)
-    }
-    return actions
-  }
 
   const strip = useMemo<TabStripValue>(() => ({
     tabs,
@@ -304,7 +306,7 @@ export function TabManager({ children, onTabsChange, defaultConfig = DEFAULT_TAB
             className="h-full"
             style={{ display: tab.id === activeTab ? undefined : "none" }}
           >
-            <TabScope tab={tab} isActive={tab.id === activeTab} actions={actionsFor(tab.id)}>
+            <TabScope tab={tab} isActive={tab.id === activeTab} updateTab={updateTab} updateModeLabel={updateModeLabel}>
               {children}
             </TabScope>
           </div>

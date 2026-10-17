@@ -1,8 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react"
 import { createPortal } from "react-dom"
-import { Document, Page, pdfjs } from "react-pdf"
+import { Document, Page, pdfjs, type DocumentProps } from "react-pdf"
 import { ChevronsLeftRight, ChevronsRightLeft, Maximize2, Minimize2, Minus, Plus } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import "react-pdf/dist/esm/Page/AnnotationLayer.css"
@@ -43,12 +43,14 @@ interface ScrollAnchor {
 // image bbox as fractions of the page (0..1), so it survives zoom/width changes
 interface ImageRect { left: number; top: number; width: number; height: number }
 
+type PdfDocument = Parameters<NonNullable<DocumentProps["onLoadSuccess"]>>[0]
+type PdfPage = Awaited<ReturnType<PdfDocument["getPage"]>>
+
 // Walk a page's operator list and return the bounding box of every raster image
 // (XObject / inline image). Used to punch images out of the dark-mode invert so
 // figures keep their true colors. ponytail: skips image *masks* (often 1-bit text
 // stencils); add OPS.paintImageMaskXObject if photos render as masks somewhere.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function collectImageRects(page: any): Promise<ImageRect[]> {
+async function collectImageRects(page: PdfPage): Promise<ImageRect[]> {
   const ops = await page.getOperatorList()
   const vp = page.getViewport({ scale: 1 })
   const OPS = pdfjs.OPS
@@ -127,7 +129,9 @@ function PdfViewerInner({
   const restoredPageUrlRef = useRef<string | null>(null)
   const pageRef = useRef(1)
   const onPageChangeRef = useRef(onPageChange)
-  onPageChangeRef.current = onPageChange
+  useLayoutEffect(() => {
+    onPageChangeRef.current = onPageChange
+  })
   const pageRefs = useRef(new Map<number, HTMLDivElement>())
 
   // measure the parent-controlled dimension — debounced so resizing doesn't re-render every frame
@@ -244,8 +248,7 @@ function PdfViewerInner({
   }, [zoom])
 
   const onDocumentLoadSuccess = useCallback(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    async (pdf: any) => {
+    async (pdf: PdfDocument) => {
       setNumPages(pdf.numPages)
       setImageRects({})
       // read the real first-page dimensions (works for any page size, not just A4)
@@ -483,6 +486,18 @@ function PdfViewerInner({
   )
 }
 
+function subscribeNever() {
+  return () => {}
+}
+
+function getDocumentBody() {
+  return document.body
+}
+
+function getNoBody() {
+  return null
+}
+
 /** PDF viewer with zoom, page tracking and fullscreen. Fullscreen reparents one mounted viewer via a portal. */
 export function PdfViewer({
   url,
@@ -502,31 +517,12 @@ export function PdfViewer({
   onPageChange?: (page: number) => void
 }) {
   const [isFullscreen, setIsFullscreen] = useState(false)
-  const inlineRef = useRef<HTMLDivElement>(null)
-  const overlayRef = useRef<HTMLDivElement | null>(null)
-  const [overlayReady, setOverlayReady] = useState(false)
+  const [inlineEl, setInlineEl] = useState<HTMLDivElement | null>(null)
+  const [overlayEl, setOverlayEl] = useState<HTMLDivElement | null>(null)
+  // document.body exists only on the client, so the overlay is skipped during SSR and hydration.
+  const body = useSyncExternalStore(subscribeNever, getDocumentBody, getNoBody)
 
-  // Keep one viewer mounted so fullscreen preserves its scroll and zoom state.
-  useEffect(() => {
-    const el = document.createElement("div")
-    el.className = "fixed inset-0 z-[100] bg-backdrop backdrop-blur-xl transition-opacity duration-150"
-    el.style.opacity = "0"
-    el.style.pointerEvents = "none"
-    document.body.appendChild(el)
-    overlayRef.current = el
-    setOverlayReady(true)
-    return () => {
-      document.body.removeChild(el)
-      overlayRef.current = null
-    }
-  }, [])
-
-  useEffect(() => {
-    const el = overlayRef.current
-    if (!el) return
-    el.style.opacity = isFullscreen ? "1" : "0"
-    el.style.pointerEvents = isFullscreen ? "auto" : "none"
-  }, [isFullscreen, overlayReady])
+  const toggleFullscreen = useCallback(() => setIsFullscreen((f) => !f), [])
 
   useEffect(() => {
     if (!isFullscreen) return
@@ -539,8 +535,6 @@ export function PdfViewer({
     document.addEventListener("keydown", handler)
     return () => document.removeEventListener("keydown", handler)
   }, [isFullscreen])
-
-  const toggleFullscreen = useCallback(() => setIsFullscreen((f) => !f), [])
 
   const inner = (
     <PdfViewerInner
@@ -556,12 +550,21 @@ export function PdfViewer({
     />
   )
 
-  const portalTarget = isFullscreen ? overlayRef.current : inlineRef.current
+  const portalTarget = isFullscreen ? overlayEl : inlineEl
 
+  // Keep one viewer mounted so fullscreen preserves its scroll and zoom state.
   return (
     <>
-      <div ref={inlineRef} className="contents" />
-      {overlayReady && portalTarget && createPortal(inner, portalTarget)}
+      <div ref={setInlineEl} className="contents" />
+      {body && createPortal(
+        <div
+          ref={setOverlayEl}
+          className="fixed inset-0 z-[100] bg-backdrop backdrop-blur-xl transition-opacity duration-150"
+          style={{ opacity: isFullscreen ? 1 : 0, pointerEvents: isFullscreen ? "auto" : "none" }}
+        />,
+        body,
+      )}
+      {portalTarget && createPortal(inner, portalTarget)}
     </>
   )
 }

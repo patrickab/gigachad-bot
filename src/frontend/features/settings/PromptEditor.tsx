@@ -29,6 +29,17 @@ function slugify(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 64) || "prompt"
 }
 
+interface PromptLists {
+  list: PromptMeta[]
+  blk: Record<string, string>
+}
+
+/** Fetch the prompt list together with the reusable `{{block}}` snippets. */
+async function fetchPromptLists(): Promise<PromptLists> {
+  const [list, blk] = await Promise.all([fetchPromptList(), fetchPromptBlocks()])
+  return { list, blk }
+}
+
 /** Floating window to edit, reorder, create and delete prompt files, with `{{block}}` insertion. */
 export function PromptEditor({ open, onClose, onPromptsChanged }: PromptEditorProps) {
   const { schedule, pending } = useUndoDelete()
@@ -62,15 +73,18 @@ export function PromptEditor({ open, onClose, onPromptsChanged }: PromptEditorPr
     setPrompts(prev => { void savePromptOrder(prev.map(p => p.slug)); return prev })
   }, [])
 
-  const refresh = useCallback(async () => {
-    const [list, blk] = await Promise.all([fetchPromptList(), fetchPromptBlocks()])
+  const applyLists = useCallback(({ list, blk }: PromptLists) => {
     setPrompts(list)
     setBlocks(blk)
   }, [])
 
+  const refresh = useCallback(async () => {
+    applyLists(await fetchPromptLists())
+  }, [applyLists])
+
   useEffect(() => {
-    if (open) refresh()
-  }, [open, refresh])
+    if (open) fetchPromptLists().then(applyLists)
+  }, [open, applyLists])
 
   const load = useCallback(async (slug: string) => {
     const { content: raw } = await fetchPromptRaw(slug)

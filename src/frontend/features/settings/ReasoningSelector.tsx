@@ -29,23 +29,19 @@ function ReasoningGlyph({ level }: { level: string }) {
 
 /** Reasoning levels `model` accepts, `[]` when it can't reason, undefined while loading. */
 export function useReasoningLevels(model: string): string[] | undefined {
-  const [levels, setLevels] = useState<string[] | undefined>(() => levelsCache.get(model))
+  const [fetched, setFetched] = useState<{ model: string; levels: string[] } | null>(null)
+  const levels = levelsCache.get(model) ?? (fetched?.model === model ? fetched.levels : undefined)
 
   useEffect(() => {
-    const cached = levelsCache.get(model)
-    if (cached !== undefined) {
-      setLevels(cached)
-      return
-    }
-    setLevels(undefined)
+    if (levelsCache.has(model)) return
     let cancelled = false
     fetchReasoningLevels(model)
-      .then(({ levels: fetched }) => {
-        levelsCache.set(model, fetched)
-        if (!cancelled) setLevels(fetched)
+      .then(({ levels: result }) => {
+        levelsCache.set(model, result)
+        if (!cancelled) setFetched({ model, levels: result })
       })
       .catch(() => {
-        if (!cancelled) setLevels([])
+        if (!cancelled) setFetched({ model, levels: [] })
       })
     return () => {
       cancelled = true

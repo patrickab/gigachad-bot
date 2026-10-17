@@ -81,7 +81,6 @@ export function useProjectDocuments({
 
   const loadProjectDocs = useCallback(() => {
     if (activeProject) listProjectDocuments(activeProject).then(setProjectDocuments).catch(() => {})
-    else setProjectDocuments([])
   }, [activeProject])
 
   const refreshDocuments = useCallback(() => {
@@ -90,6 +89,9 @@ export function useProjectDocuments({
   }, [loadProjectDocs])
 
   useEffect(() => { loadProjectDocs() }, [loadProjectDocs])
+
+  // Without a project there are no documents, whatever was loaded for the previous one
+  if (!activeProject && projectDocuments.length > 0) setProjectDocuments([])
 
   const handleCreateDocument = useCallback(async (name: string) => {
     if (!activeProject) return
