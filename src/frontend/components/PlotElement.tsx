@@ -139,15 +139,17 @@ export const PlotElement = memo(function PlotElement({ figure }: PlotElementProp
     return () => observer.disconnect()
   }, [])
 
-  // Pinch zooms the plot; a plain wheel scrolls the page instead (except fullscreen, which has
-  // nothing to scroll). Trackpad pinches arrive as ctrl+wheel, which must not zoom the page.
+  // A scroll gesture zooms the plot, inline and fullscreen alike. Trackpad pinches arrive as trusted
+  // ctrl+wheel events, which Plotly zooms far too slowly and the browser would turn into page zoom,
+  // so both are swallowed: pinch is a touchscreen gesture only.
   // Two-finger touches are hidden from Plotly, whose own drag would rotate or pan mid-pinch.
   useEffect(() => {
     const host = hostRef.current
     if (!host) return
     const onWheel = (event: WheelEvent) => {
-      if (event.ctrlKey) event.preventDefault()
-      else if (document.fullscreenElement !== host) event.stopPropagation()
+      if (!event.ctrlKey || !event.isTrusted) return
+      event.preventDefault()
+      event.stopPropagation()
     }
     const onMultiTouch = (event: TouchEvent) => {
       if (event.touches.length >= 2) event.stopPropagation()
@@ -162,7 +164,7 @@ export const PlotElement = memo(function PlotElement({ figure }: PlotElementProp
     }
   }, [])
 
-  // Touch pinch has no Plotly equivalent, so replay it as ctrl+wheel, which cartesian, 3D and geo
+  // Touch pinch has no Plotly equivalent, so replay it as a wheel, which cartesian, 3D and geo
   // plots all zoom around the cursor on.
   useTwoFingerGesture(hostRef, {
     begin: () => ({ previousRatio: 1 }),
@@ -175,7 +177,7 @@ export const PlotElement = memo(function PlotElement({ figure }: PlotElementProp
       const [clientX, clientY] = [left + mx, top + my]
       const target = document.elementFromPoint(clientX, clientY) ?? host
       target.dispatchEvent(new WheelEvent("wheel", {
-        bubbles: true, cancelable: true, clientX, clientY, ctrlKey: true, deltaY: -PINCH_WHEEL_DELTA * PINCH_ZOOM_GAIN * Math.log(stepRatio),
+        bubbles: true, cancelable: true, clientX, clientY, deltaY: -PINCH_WHEEL_DELTA * PINCH_ZOOM_GAIN * Math.log(stepRatio),
       }))
     },
   })
