@@ -52,13 +52,23 @@ export function ReasoningSelector({ model, reasoningEffort, onReasoningChange, p
   }, [model])
 
   // A level the new model lacks (e.g. `xhigh` after switching models) falls back to
-  // `medium`, which every reasoning model offers, or `none` when it can't reason.
+  // `medium`, which every reasoning model offers. A model that can't reason forces `none`, and
+  // the level it replaced is restored once a reasoning model is selected again.
   // The ref keeps an unstable `onReasoningChange` from re-running the effect.
   const onReasoningChangeRef = useRef(onReasoningChange)
   onReasoningChangeRef.current = onReasoningChange
+  const effortBeforeForcedOffRef = useRef<string | null>(null)
   useEffect(() => {
     if (levels === undefined) return
-    const supportedEffort = levels.length === 0 ? "none" : levels.includes(reasoningEffort) ? reasoningEffort : "medium"
+    if (levels.length === 0) {
+      if (reasoningEffort === "none") return
+      effortBeforeForcedOffRef.current = reasoningEffort
+      onReasoningChangeRef.current("none")
+      return
+    }
+    const wantedEffort = effortBeforeForcedOffRef.current ?? reasoningEffort
+    effortBeforeForcedOffRef.current = null
+    const supportedEffort = levels.includes(wantedEffort) ? wantedEffort : "medium"
     if (supportedEffort !== reasoningEffort) onReasoningChangeRef.current(supportedEffort)
   }, [levels, reasoningEffort])
 
