@@ -1,8 +1,9 @@
 "use client"
 
-import { memo } from "react"
+import { memo, useState } from "react"
 import { FileText, Image as ImageIcon, File } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { isImageAttachment } from "@/lib/attachments"
 import type { Attachment } from "@/lib/types"
 
 interface MessageAttachmentsProps {
@@ -16,12 +17,40 @@ function AttachmentIcon({ mime }: { mime: string }) {
   return <File className="h-3 w-3 text-ink-muted shrink-0" />
 }
 
+/** Image preview filling its tile, an icon when the upload is gone or unreadable. */
+export function ImageThumbnail({ attachment }: { attachment: Attachment }) {
+  const [failed, setFailed] = useState(false)
+  if (failed || !attachment.url) return <ImageIcon className="h-4 w-4 text-ink-faint" />
+  return (
+    <img
+      src={attachment.url}
+      alt={attachment.name}
+      loading="lazy"
+      draggable={false}
+      onError={() => setFailed(true)}
+      className="h-full w-full object-cover"
+    />
+  )
+}
+
 function MessageAttachmentsInner({ attachments, onClick }: MessageAttachmentsProps) {
   if (attachments.length === 0) return null
 
   return (
     <div className="flex flex-wrap gap-1.5 mt-2">
-      {attachments.map((att) => (
+      {attachments.map((att) => isImageAttachment(att) ? (
+        <button
+          key={att.name}
+          aria-label={att.name}
+          onClick={() => onClick(att)}
+          className={cn(
+            "flex h-20 w-20 items-center justify-center overflow-hidden rounded-lg border bg-surface-elevated/30 transition-opacity",
+            att.active ? "border-divider-strong/50" : "border-divider/40 opacity-50 hover:opacity-80",
+          )}
+        >
+          <ImageThumbnail attachment={att} />
+        </button>
+      ) : (
         <button
           key={att.name}
           onClick={() => onClick(att)}

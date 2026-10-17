@@ -7,12 +7,14 @@ import { ArrowUp, Loader2, Plus, LayoutGrid, Mic, Square, X, FileText, Image as 
 import { cn } from "@/lib/utils"
 import { uploadFile as apiUploadFile } from "@/lib/api"
 import type { Attachment } from "@/lib/types"
+import { isImageAttachment } from "@/lib/attachments"
 import { useClickOutside } from "@/hooks/useClickOutside"
 import { TOOLS, useModeState } from "@/hooks/useModeState"
 import { useSettings } from "@/contexts/SettingsContext"
 import { DrawingCanvas } from "./DrawingCanvas"
 import { OCRPanel } from "./OCRPanel"
 import { AttachmentPreview } from "./AttachmentPreview"
+import { ImageThumbnail } from "./MessageAttachments"
 import { ToolMenuItem, ToolMenuSection } from "./ToolMenuItem"
 
 interface ChatInputProps {
@@ -203,19 +205,26 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
           {attachments.map((att) => {
             const Icon = fileIcon(att.mime)
             const uploading = uploadingNames.has(att.name)
+            const spinner = <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-ink-faint border-t-ink" />
+            const isImage = isImageAttachment(att)
             return (
-              <motion.div key={att.name} layout className="relative w-44">
-                <div
-                  onClick={() => setPreviewAttachment(att)}
-                  className="flex items-center gap-1.5 rounded-xl border border-divider-strong bg-surface-elevated px-2.5 py-1.5 pr-6 cursor-pointer hover:border-ink-muted transition-colors"
-                >
-                  {uploading ? (
-                    <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-ink-faint border-t-ink" />
-                  ) : (
-                    <Icon className="h-3.5 w-3.5 shrink-0 text-ink" />
-                  )}
-                  <span className="max-w-[160px] truncate text-xs text-ink">{att.name}</span>
-                </div>
+              <motion.div key={att.name} layout className={isImage ? "relative" : "relative w-44"}>
+                {isImage ? (
+                  <button aria-label={`Preview ${att.name}`}
+                    onClick={() => setPreviewAttachment(att)}
+                    className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-xl border border-divider-strong bg-surface-elevated hover:border-ink-muted transition-colors"
+                  >
+                    {uploading ? spinner : <ImageThumbnail attachment={att} />}
+                  </button>
+                ) : (
+                  <div
+                    onClick={() => setPreviewAttachment(att)}
+                    className="flex items-center gap-1.5 rounded-xl border border-divider-strong bg-surface-elevated px-2.5 py-1.5 pr-6 cursor-pointer hover:border-ink-muted transition-colors"
+                  >
+                    {uploading ? spinner : <Icon className="h-3.5 w-3.5 shrink-0 text-ink" />}
+                    <span className="max-w-[160px] truncate text-xs text-ink">{att.name}</span>
+                  </div>
+                )}
                 <button aria-label={`Remove ${att.name}`}
                   onClick={() => removeAttachment(att.name)}
                   className="absolute -right-1 -top-1 rounded-full bg-surface-elevated p-0.5 text-ink-muted hover:text-danger"
