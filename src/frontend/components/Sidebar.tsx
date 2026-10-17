@@ -41,6 +41,8 @@ interface SidebarProps {
   /** Project whose architecture is shown standalone in canvas mode, instead of a canvas. */
   activeArchitecture?: string | null
   onArchitectureSelect?: (slug: string) => void
+  /** Open tabs section, pinned above the settings entry in both app modes. */
+  tabs?: React.ReactNode
   /** Settings entry pinned to the sidebar bottom; receives the collapsed state. */
   renderSettings?: () => React.ReactNode
   appMode: AppSurface
@@ -60,6 +62,7 @@ export function Sidebar({
   onCanvasDeleted,
   activeArchitecture,
   onArchitectureSelect,
+  tabs,
   renderSettings,
   appMode,
   onAppModeChange,
@@ -334,6 +337,7 @@ export function Sidebar({
         )}
       </div>
 
+      {tabs && <div className="mx-2 max-h-[35vh] shrink-0 overflow-y-auto border-t border-divider/40 pt-2">{tabs}</div>}
       {renderSettings && <div className="shrink-0 p-2">{renderSettings()}</div>}
       </>
       )}

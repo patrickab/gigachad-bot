@@ -13,6 +13,12 @@ import {
   updateProjectKanban as apiUpdateProjectKanban,
 } from "@/lib/api"
 
+/** Check if two saved-tab lists match row for row. */
+function isSameProjectTabs(left: ProjectTab[], right: ProjectTab[]): boolean {
+  return left.length === right.length && left.every((tab, index) =>
+    tab.filename === right[index].filename && tab.name === right[index].name && tab.title === right[index].title)
+}
+
 export interface ProjectContextState {
   activeProject: string | null
   projectData: ProjectData | null
@@ -61,6 +67,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   // Deletes commit after an undo window; they must see the project open at commit time, not at click time.
   const activeProjectRef = useRef<string | null>(null)
   useEffect(() => { activeProjectRef.current = activeProject }, [activeProject])
+  // Saved tabs last sent (or loaded) for the open project. Blank tabs and per-tab config
+  // changes leave them unchanged, so syncing then would only rewrite the project state.
+  const syncedTabsRef = useRef<ProjectTab[]>([])
 
   const runGuarded = useCallback(
     async <T,>(fn: (project: string) => Promise<T>): Promise<T | null> => {
@@ -94,6 +103,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     if (syncVersionRef.current !== version) return
     setActiveProject(name)
     setProjectData(data)
+    syncedTabsRef.current = data.tabs
   }, [bumpVersion])
 
   const closeProject = useCallback(() => {
@@ -188,6 +198,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       const filename = t.historyFile.includes("/") ? t.historyFile.split("/").slice(1).join("/") : t.historyFile
       projectTabs.push({ filename, name: t.name, title: t.title })
     }
+    if (isSameProjectTabs(projectTabs, syncedTabsRef.current)) return
+    syncedTabsRef.current = projectTabs
     const stateUpdate: ProjectStateUpdate = { kanban: current.kanban, tabs: projectTabs }
     const updated = await apiUpdateProjectKanban(projectAtCall, stateUpdate)
     if (syncVersionRef.current !== version) return

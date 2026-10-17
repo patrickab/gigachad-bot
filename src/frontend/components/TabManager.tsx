@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useCallback, useContext, useEffect, useImperativeHandle, useRef, useState } from "react"
+import { createContext, useCallback, useContext, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 import { Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { SettingsState } from "@/contexts/SettingsContext"
@@ -85,17 +85,34 @@ interface TabManagerProps {
 }
 
 export interface TabManagerHandle {
-  initTabs: (tabs: Tab[]) => void
+  /** Swap one tab for `tab` in place and activate it; the others stay open. */
+  replaceTab: (tabId: string, tab: Tab) => void
   switchToTab: (tabId: string) => void
   addTabWithName: (name: string | null, historyFile: string | null) => string
   getTabs: () => Tab[]
   getActiveTabId: () => string
-  getTabBarWidth: () => number
   updateTabHistoryFile: (tabId: string, historyFile: string | null) => void
   updateTabTitle: (tabId: string, title: string | null) => void
   updateTabConfig: (tabId: string, config: Partial<TabConfig>) => void
   updateTabAppMode: (tabId: string, mode: AppSurface) => void
 }
+
+/** Tab state and actions shared with `SidebarTabs`, which renders inside each tab's own sidebar. */
+interface TabStripValue {
+  tabs: Tab[]
+  activeTabId: string
+  editingTabId: string | null
+  /** null hides the label so the command bar input can take its slot */
+  labelOf: (tab: Tab) => string | null
+  isLoading: (tab: Tab) => boolean
+  select: (id: string) => void
+  close: (id: string) => void
+  add: () => void
+  startRename: (id: string) => void
+  commitRename: (id: string, value: string) => void
+  cancelRename: () => void
+}
+const TabStripContext = createContext<TabStripValue | null>(null)
 
 // Monotonic id source, module-level so ids stay unique across TabManager remounts
 let tabIdCounter = 0
@@ -107,16 +124,100 @@ export function nextTab(name: string | null = null, historyFile: string | null =
 const INITIAL_TAB: Tab = nextTab()
 const INITIAL_CONFIG: TabConfig = { ...DEFAULT_CONFIG }
 
-function TabLabel({ label, loading }: { label: string; loading?: boolean }) {
-  if (loading) {
-    return (
-      <span className="flex min-w-0 items-center gap-2 truncate">
-        <span className="h-3 w-3 shrink-0 animate-spin rounded-full border border-ink-faint border-t-ink-muted" />
-        <span className="truncate">{label}</span>
-      </span>
-    )
-  }
-  return <span className="truncate">{label}</span>
+function Spinner() {
+  return <span className="h-2.5 w-2.5 shrink-0 animate-spin rounded-full border border-ink-faint border-t-ink-muted" />
+}
+
+interface SidebarTabsProps {
+  ownerTabId: string
+  /** Lifts the owner row above the command bar's click-away overlay */
+  commandOpen: boolean
+  onLabelSlot: (element: HTMLElement | null) => void
+  onMenuSlot: (element: HTMLElement | null) => void
+}
+
+/** "Tabs" section for the sidebar bottom: one quiet row per tab, the active one softly boxed.
+ *
+ * - Every tab mounts its own sidebar, so `ownerTabId` marks the row of the tab rendering this list
+ * - The owner row hosts the command bar: its label slot takes the input, the menu slot opens below in flow
+ */
+export function SidebarTabs(props: SidebarTabsProps) {
+  const strip = useContext(TabStripContext)
+  if (!strip) return null
+
+  return (
+    <div className="space-y-0.5">
+      <div className="group flex items-center justify-between px-2 pb-0.5">
+        <span className="text-[11px] font-medium text-ink-faint">Tabs</span>
+        <button
+          aria-label="New tab"
+          onClick={strip.add}
+          className="rounded p-0.5 text-ink-faint opacity-0 transition-opacity hover:text-ink group-hover:opacity-100"
+        >
+          <Plus className="h-3 w-3" />
+        </button>
+      </div>
+      {strip.tabs.map((tab) => <TabRow key={tab.id} tab={tab} strip={strip} {...props} />)}
+    </div>
+  )
+}
+
+function TabRow({ tab, strip, ownerTabId, commandOpen, onLabelSlot, onMenuSlot }: SidebarTabsProps & {
+  tab: Tab
+  strip: TabStripValue
+}) {
+  const isOwner = tab.id === ownerTabId
+  const isActive = tab.id === strip.activeTabId
+  const label = strip.labelOf(tab)
+
+  return (
+    <div className={cn(isOwner && commandOpen && "relative z-[80]")}>
+      <div
+        className={cn(
+          "group flex h-6 cursor-pointer select-none items-center gap-1.5 rounded-md px-2 text-[11px] transition-colors",
+          isActive
+            ? "bg-surface-elevated/70 text-ink-muted"
+            : "text-ink-subtle hover:bg-surface-elevated/40 hover:text-ink-muted",
+        )}
+        onClick={() => strip.select(tab.id)}
+        onContextMenu={(e) => { e.preventDefault(); strip.close(tab.id) }}
+        onDoubleClick={() => strip.startRename(tab.id)}
+      >
+        <div ref={isOwner ? onLabelSlot : undefined} className="flex min-w-0 flex-1 items-center">
+          {label === null ? null : tab.id === strip.editingTabId ? (
+            <input
+              autoFocus
+              defaultValue={label}
+              className="min-w-0 flex-1 bg-transparent text-xs text-ink outline-none"
+              onFocus={(e) => e.target.select()}
+              onBlur={(e) => strip.commitRename(tab.id, e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") strip.commitRename(tab.id, e.currentTarget.value)
+                if (e.key === "Escape") strip.cancelRename()
+              }}
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <span className="truncate">{label}</span>
+          )}
+        </div>
+        {strip.isLoading(tab) && <Spinner />}
+        {strip.tabs.length > 1 && (
+          <button
+            aria-label={`Close ${label ?? "tab"}`}
+            className={cn(
+              "shrink-0 rounded p-0.5 text-ink-faint transition-opacity hover:text-ink",
+              isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+            )}
+            onClick={(e) => { e.stopPropagation(); strip.close(tab.id) }}
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
+      </div>
+      {isOwner && <div ref={onMenuSlot} />}
+    </div>
+  )
 }
 
 export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultConfig = INITIAL_CONFIG, ref }: TabManagerProps) {
@@ -126,18 +227,13 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
   const [modeLabels, setModeLabels] = useState<Record<string, string>>({})
   const [modeLoading, setModeLoading] = useState<Record<string, boolean>>({})
   const [customNames, setCustomNames] = useState<Record<string, string | null>>({})
-  const inputRef = useRef<HTMLInputElement>(null)
-  const tabBarRef = useRef<HTMLDivElement>(null)
-  const initInProgressRef = useRef(false)
   const onTabsChangeRef = useRef(onTabsChange)
   useEffect(() => { onTabsChangeRef.current = onTabsChange }, [onTabsChange])
 
   useImperativeHandle(ref, () => ({
-    initTabs: (newTabs: Tab[]) => {
-      // Suppress the onTabsChange echo for this programmatic replacement
-      initInProgressRef.current = true
-      setTabs(newTabs)
-      if (newTabs.length > 0) setActiveTab(newTabs[0].id)
+    replaceTab: (tabId: string, tab: Tab) => {
+      setTabs((prev) => prev.map((t) => t.id === tabId ? tab : t))
+      setActiveTab(tab.id)
     },
     switchToTab: (tabId: string) => setActiveTab(tabId),
     addTabWithName: (name: string | null, historyFile: string | null) => {
@@ -148,7 +244,6 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
     },
     getTabs: () => tabs,
     getActiveTabId: () => activeTab,
-    getTabBarWidth: () => tabBarRef.current?.clientWidth ?? 0,
     updateTabHistoryFile: (tabId: string, historyFile: string | null) => {
       setTabs((prev) => prev.map((t) => t.id === tabId ? { ...t, historyFile } : t))
     },
@@ -164,14 +259,6 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
   }), [tabs, activeTab])
 
   useEffect(() => {
-    if (editingTab) inputRef.current?.focus()
-  }, [editingTab])
-
-  useEffect(() => {
-    if (initInProgressRef.current) {
-      initInProgressRef.current = false
-      return
-    }
     onTabsChangeRef.current?.(tabs)
   }, [tabs])
 
@@ -276,86 +363,28 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
   // each other forever.
   const modeLabelHooks = useRef(new Map<string, (label: string, loading?: boolean) => void>())
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent, id: string, value: string) => {
-      if (e.key === "Enter") commitRename(id, value)
-      if (e.key === "Escape") setEditingTab(null)
+  const strip = useMemo<TabStripValue>(() => ({
+    tabs,
+    activeTabId: activeTab,
+    editingTabId: editingTab,
+    labelOf: (tab) => {
+      const label = modeLabels[tab.id]
+      // "\0" is a sentinel meaning the tab renders no label at all
+      if (label === "\0") return null
+      return customNames[tab.id] ?? (label || "Chat")
     },
-    [commitRename]
-  )
-
-  function getTabDisplayName(tab: Tab): string | null {
-    const label = modeLabels[tab.id]
-    // "\0" is a sentinel meaning the tab renders no label at all
-    if (label === "\0") return null
-    const custom = customNames[tab.id]
-    if (custom !== undefined && custom !== null) return custom
-    return label || "Chat"
-  }
+    isLoading: (tab) => customNames[tab.id] == null && (modeLoading[tab.id] ?? false),
+    select: setActiveTab,
+    close: closeTab,
+    add: addTab,
+    startRename: setEditingTab,
+    commitRename,
+    cancelRename: () => setEditingTab(null),
+  }), [tabs, activeTab, editingTab, modeLabels, modeLoading, customNames, closeTab, addTab, commitRename])
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden">
-      {/* ponytail: hide tab bar when single tab */}
-      <div className={cn("relative z-[90] h-8 shrink-0 flex items-center border-b border-divider/50 bg-paper select-none", tabs.length <= 1 && "hidden")}>
-        <div ref={tabBarRef} data-tabbar className="flex-1 flex items-center h-full min-w-0">
-          {tabs.map((tab) => {
-            const isActive = tab.id === activeTab
-            const isEditing = tab.id === editingTab
-            const displayName = getTabDisplayName(tab)
-            const showSpinner = customNames[tab.id] == null && (modeLoading[tab.id] ?? false)
-
-            return (
-              <div
-                key={tab.id}
-                className={cn(
-                  "flex-1 min-w-0 h-full flex items-center justify-between px-3 gap-1 border-r border-divider/50 cursor-pointer transition-colors text-xs whitespace-nowrap",
-                  isActive
-                    ? "bg-surface/50 text-ink"
-                    : "text-ink-subtle hover:text-ink hover:bg-surface/30"
-                )}
-                onClick={() => setActiveTab(tab.id)}
-                onContextMenu={(e) => { e.preventDefault(); closeTab(tab.id) }}
-                onDoubleClick={() => startRename(tab.id)}
-              >
-                <div id={`tab-label-${tab.id}`} className="relative flex-1 min-w-0 h-full flex items-center">
-                  <span id={`tab-command-menu-${tab.id}`} className="absolute left-0 right-0 top-full" />
-                  {displayName === null ? null : isEditing ? (
-                    <input
-                      ref={inputRef}
-                      autoFocus
-                      defaultValue={displayName}
-                      className="flex-1 bg-transparent outline-none text-ink text-xs min-w-0"
-                      onBlur={(e) => commitRename(tab.id, e.target.value)}
-                      onKeyDown={(e) => handleKeyDown(e, tab.id, (e.target as HTMLInputElement).value)}
-                      onClick={(e) => e.stopPropagation()}
-                    />
-                  ) : (
-                    <TabLabel label={displayName} loading={showSpinner} />
-                  )}
-                </div>
-                {tabs.length > 1 && (
-                  <button aria-label={`Close ${tab.title ?? "tab"}`}
-                    className="shrink-0 p-0.5 rounded hover:bg-hover text-ink-faint hover:text-ink"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      closeTab(tab.id)
-                    }}
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                )}
-              </div>
-            )
-          })}
-        </div>
-        <button aria-label="Add tab"
-          className="shrink-0 h-full px-2.5 flex items-center justify-center text-ink-subtle hover:text-ink hover:bg-surface-elevated/50 transition-colors"
-          onClick={addTab}
-        >
-          <Plus className="h-3.5 w-3.5" />
-        </button>
-      </div>
-      <div className="flex-1 min-h-0 overflow-hidden relative">
+    <TabStripContext.Provider value={strip}>
+      <div className="relative h-screen overflow-hidden">
         {tabs.map((tab) => {
           const isActive = tab.id === activeTab
           let hook = modeLabelHooks.current.get(tab.id)
@@ -380,6 +409,7 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
           )
         })}
       </div>
-    </div>
+    </TabStripContext.Provider>
   )
 }
+

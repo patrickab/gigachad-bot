@@ -29,7 +29,7 @@ import { useMemoryCategories } from "@/hooks/useMemoryCategories"
 import { useFilePicker } from "@/hooks/useFilePicker"
 import { useProjectDocuments } from "@/hooks/useProjectDocuments"
 import { useChatModals } from "@/hooks/useChatModals"
-import { TabManager, nextTab, settingsToTabConfig, type TabConfig } from "@/components/TabManager"
+import { SidebarTabs, TabManager, nextTab, settingsToTabConfig, type TabConfig } from "@/components/TabManager"
 import type { Tab, TabManagerHandle } from "@/components/TabManager"
 import { ProjectDashboard } from "@/components/ProjectDashboard"
 import { TokenCounter } from "@/components/TokenCounter"
@@ -255,11 +255,6 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     setMeasuredWidth(el.clientWidth)
   }, [isActive])
 
-  useLayoutEffect(() => {
-    setCommandMenuSlot(document.getElementById(`tab-command-menu-${tab.id}`))
-    setTabLabelSlot(document.getElementById(`tab-label-${tab.id}`))
-  }, [tab.id])
-
 
   useEffect(() => {
     if (isActive) {
@@ -282,10 +277,9 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     setMessages([])
     setTotalUsage({ total_tokens: 0, prompt_tokens: 0, completion_tokens: 0 })
     setBranchMessageIdx(null)
+    // Project chats load by their own slug, so switching projects never reloads open tabs.
     const { slug, filename } = parseHistoryFile(tab.historyFile)
-    const loader = slug && activeProject
-      ? loadProjectTab(slug, filename)
-      : apiLoadChatHistory(tab.historyFile)
+    const loader = slug ? loadProjectTab(slug, filename) : apiLoadChatHistory(tab.historyFile)
     loader.then((data) => {
       if (loadIdRef.current !== loadId) return
       if (data.messages.length > 0) {
@@ -296,7 +290,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       if (data.usage) setTotalUsage(data.usage)
       setBranchMessageIdx(data.branch_message_idx ?? null)
     }).catch(() => { })
-  }, [tab.historyFile, activeProject, setMessages, onTitleLoaded, setTotalUsage])
+  }, [tab.historyFile, setMessages, onTitleLoaded, setTotalUsage])
 
   useEffect(() => {
     if (commandBar.state.phase === "input") {
@@ -316,8 +310,8 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     else if (commandBar.state.phase === "doc-review") onModeLabel("Review memory docs", docReviewLoading)
     else if (commandBar.state.phase === "error") onModeLabel("Memory error")
     else if (ocrEnabled) onModeLabel("LaTeX OCR")
-    else onModeLabel("Chat")
-  }, [commandBar.state.phase, docReviewLoading, commandMemoryCount, ocrEnabled, onModeLabel])
+    else onModeLabel(tab.title ?? "Chat")
+  }, [commandBar.state.phase, docReviewLoading, commandMemoryCount, ocrEnabled, tab.title, onModeLabel])
 
   useEffect(() => {
     if (!isActive || appMode === "canvas") return
@@ -353,7 +347,11 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         e.preventDefault()
         e.stopPropagation()
         e.stopImmediatePropagation()
-        if (commandBar.state.phase === "idle") { commandBar.open() }
+        // The command input lives in this tab's sidebar row.
+        if (commandBar.state.phase === "idle") {
+          if (sidebarCollapsed) toggleSidebar()
+          commandBar.open()
+        }
       }
     }
     // Capture phase so the shortcuts win over handlers inside focused editors.
@@ -361,7 +359,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
     return () => {
       window.removeEventListener("keydown", handler, true)
     }
-  }, [isActive, appMode, modals.isTitled, modals.handleQuickSave, modals.setSaveModalOpen, reset, commandBar.open, commandBar.submitCommand, commandBar.state.phase, messages, activeProject, chatId, branchMessageIdx, filePicker.filesEnabled, filePicker.openFilePicker])
+  }, [isActive, appMode, modals.isTitled, modals.handleQuickSave, modals.setSaveModalOpen, reset, commandBar.open, commandBar.submitCommand, commandBar.state.phase, messages, activeProject, chatId, branchMessageIdx, filePicker.filesEnabled, filePicker.openFilePicker, sidebarCollapsed, toggleSidebar])
 
   const runCommand = useCallback(async (command: string) => {
     if (command === "/files-load") {
@@ -676,6 +674,14 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
           onCanvasDeleted={(path) => setCanvasSel((s) => (s?.path === path ? null : s))}
           activeArchitecture={architecturePath && architectureSlug(architecturePath)}
           onArchitectureSelect={(slug) => { setCanvasSel(null); setArchitecturePath(`graph/${slug}/`) }}
+          tabs={
+            <SidebarTabs
+              ownerTabId={tab.id}
+              commandOpen={isActive && commandBar.state.phase === "input"}
+              onLabelSlot={setTabLabelSlot}
+              onMenuSlot={setCommandMenuSlot}
+            />
+          }
           renderSettings={() => (
             <SettingsMenu prompts={prompts} config={config} onConfigChange={onConfigChange} onEditPrompts={() => modals.setPromptEditorOpen(true)} models={models} />
           )}
@@ -827,9 +833,8 @@ function AppContent() {
   const tabManagerRef = useRef<TabManagerHandle>(null)
   const [focusQaIndex, setFocusQaIndex] = useState<number | null>(null)
   const [focusKey, setFocusKey] = useState(0)
-  const { activeProject, projectData, dashboardOpen, syncTabs, setDashboardOpen, closeProject } = useProject()
+  const { activeProject, dashboardOpen, syncTabs, setDashboardOpen, closeProject } = useProject()
   const settings = useSettings()
-  const pendingHistoryRef = useRef<string | null>(null)
 
   const handleHistoryFileChanged = useCallback((tabId: string, historyFile: string) => {
     tabManagerRef.current?.updateTabHistoryFile(tabId, historyFile)
@@ -850,9 +855,9 @@ function AppContent() {
     const activeTabId = tabManagerRef.current?.getActiveTabId()
     const activeTab = tabs.find((t) => t.id === activeTabId)
 
-    // toggle: clicking the active element deactivates it (blank chat)
+    // toggle: clicking the active chat swaps only this tab for a blank one
     if (activeTab && activeTab.historyFile === historyFile && qaIndex == null) {
-      tabManagerRef.current?.initTabs([nextTab(null, null, null, settingsToTabConfig(settings))])
+      tabManagerRef.current?.replaceTab(activeTab.id, nextTab(null, null, null, settingsToTabConfig(settings)))
       return
     }
 
@@ -861,46 +866,25 @@ function AppContent() {
       tabManagerRef.current?.switchToTab(existing.id)
       return
     }
-    if (activeProject) {
-      const belongsToActiveProject = historyFile.startsWith(`${activeProject}/`)
-      if (!belongsToActiveProject) {
-        pendingHistoryRef.current = historyFile
-        closeProject()
-        return
-      }
-    }
+    // A chat outside the open project leaves that project; open tabs stay as they are.
+    if (activeProject && !historyFile.startsWith(`${activeProject}/`)) closeProject()
     if (activeTabId) {
       tabManagerRef.current?.updateTabHistoryFile(activeTabId, historyFile)
     }
   }, [activeProject, closeProject, settings])
 
+  // Only the open project's chats belong in its saved tabs; tabs from elsewhere stay open but unsaved there.
   const handleTabsChange = useCallback((tabs: Tab[]) => {
     if (!activeProject) return
     syncTabs(
-      tabs.map((t) => ({ id: t.id, name: t.name, historyFile: t.historyFile, title: t.title, chatId: t.chatId })),
+      tabs
+        .filter((t) => t.historyFile?.startsWith(`${activeProject}/`))
+        .map((t) => ({ id: t.id, name: t.name, historyFile: t.historyFile, title: t.title, chatId: t.chatId })),
       (tabId, historyFile) => {
         tabManagerRef.current?.updateTabHistoryFile(tabId, historyFile)
       },
     ).catch(() => { })
   }, [activeProject, syncTabs])
-
-  const loadedProjectRef = useRef<string | null>(null)
-
-  useEffect(() => {
-    if (activeProject === loadedProjectRef.current) return
-    loadedProjectRef.current = activeProject
-
-    const pending = pendingHistoryRef.current
-    if (pending) {
-      // a chat was clicked while another project was active, so open exactly it
-      pendingHistoryRef.current = null
-      tabManagerRef.current?.initTabs([nextTab(pending.replace(".json", ""), pending, null, settingsToTabConfig(settings))])
-    } else {
-      // Entering or leaving a project lands on a fresh chat. Saved chats open
-      // only from the sidebar, never auto-restored.
-      tabManagerRef.current?.initTabs([nextTab(null, null, null, settingsToTabConfig(settings))])
-    }
-  }, [activeProject, projectData])
 
   useEffect(() => {
     function handler(e: KeyboardEvent) {
