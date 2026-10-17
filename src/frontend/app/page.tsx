@@ -709,12 +709,15 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         ) : (
           <header className="pointer-events-none relative h-11 shrink-0 flex items-center justify-between px-3 gap-1 z-40">
             {/* Chat scrolls under the header. A solid page-colored backing sits behind each control group only, so controls win where they overlap content. */}
-            <div className="pointer-events-auto relative isolate flex h-8.5 min-w-0 items-center gap-1">
-              <div className="pointer-events-none absolute -inset-x-2 inset-y-0 -z-10 rounded-full bg-paper" />
-              {sidebarToggle}
-              <ReasoningSelector model={config.selectedModel} reasoningEffort={config.reasoningEffort} onReasoningChange={(v) => onConfigChange({ reasoningEffort: v })} placement="below" />
-              <ModelDropdown models={models} selectedModel={config.selectedModel} onSelect={(m) => onConfigChange({ selectedModel: m })} onProvidersChange={saveModelProviders} onTabOrderChange={saveModelTabOrder} onDefaultsChange={saveModelDefaults} placement="below" />
-              <div ref={setWideToggleSlot} className="flex items-center" />
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="pointer-events-auto relative isolate flex h-8.5 min-w-0 items-center gap-1">
+                <div className="pointer-events-none absolute -inset-x-2 inset-y-0 -z-10 rounded-full bg-paper" />
+                {sidebarToggle}
+                <ReasoningSelector model={config.selectedModel} reasoningEffort={config.reasoningEffort} onReasoningChange={(v) => onConfigChange({ reasoningEffort: v })} placement="below" />
+                <ModelDropdown models={models} selectedModel={config.selectedModel} onSelect={(m) => onConfigChange({ selectedModel: m })} onProvidersChange={saveModelProviders} onTabOrderChange={saveModelTabOrder} onDefaultsChange={saveModelDefaults} placement="below" />
+              </div>
+              {/* Wide-mode toggle floats on the content without a backing pill */}
+              <div ref={setWideToggleSlot} className="pointer-events-auto flex items-center" />
             </div>
             <div className="pointer-events-auto relative isolate flex h-8.5 items-center gap-1">
               <div className="pointer-events-none absolute -inset-x-2 inset-y-0 -z-10 rounded-full bg-paper" />
