@@ -51,6 +51,8 @@ ocr = [
 
 [tool.uv]
 default-groups = ["dev", "ocr"]
+# Supply-chain cooldown: resolve only releases at least 7 days old
+exclude-newer = "7 days"
 
 [tool.uv.sources]
 agent-sandbox = { git = "https://github.com/patrickab/Agents-in-a-box", branch = "main" }

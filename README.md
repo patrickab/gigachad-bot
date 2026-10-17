@@ -10,6 +10,7 @@ A minimalist, local-first LLM web interface. Designed for privacy, focus and cus
 
 - **Private cloud integration**: Histories and artifacts can be stored on private infrastructure. 
 - **Cloud & Local inference**: Support for 2100+ models from 100+ providers via [LiteLLM](https://github.com/BerriAI/litellm).
+- **Adaptive model selector**: collapses to a circular icon button when the full pill would overlap the chat column. Hover or keyboard focus smoothly reveals the model name, respecting reduced-motion preferences.
 - **Persistent memory**: Extract facts and user preferences from conversations via toolcalling.
 - **PDF parsing**: local VLM text extraction via [MinerU](https://github.com/opendatalab/mineru).
 - **Modes**:

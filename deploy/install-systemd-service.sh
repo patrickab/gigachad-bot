@@ -12,7 +12,7 @@ readonly backend_runner="${worktree}/run-backend.sh"
 readonly omp_runner="${script_dir}/run-production-omp.sh"
 
 if [[ ! -x $backend ]]; then
-    printf 'Production backend executable is missing: %s\nRun: cd %s && uv sync --python 3.12 --no-dev\n' "$backend" "$worktree" >&2
+    printf 'Production backend executable is missing: %s\nRun: cd %s && uv sync --python 3.12 --locked --no-dev\n' "$backend" "$worktree" >&2
     exit 1
 fi
 if [[ ! -x $backend_runner ]]; then

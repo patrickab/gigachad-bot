@@ -79,10 +79,13 @@ production dependencies:
 ```bash
 git -C "$PROD" fetch origin master
 git -C "$PROD" merge --ff-only origin/master
-cd "$PROD" && uv sync --python 3.12 --no-dev
+cd "$PROD" && uv sync --python 3.12 --locked --no-dev
 ```
 
-Do not run `run.sh` in production: it installs development dependencies,
+`--locked` installs exactly `uv.lock` and fails if it no longer matches
+`pyproject.toml`, so production runs the same Python packages as a development
+checkout of that commit. The service never syncs on start, so restarts keep that
+environment. Do not run `run.sh` in production: it installs development dependencies,
 enables reload mode, and starts a development frontend. The production sync
 includes the local OCR runtime. Leave `MINERU_SERVER_URL` unset to parse PDFs
 locally; set it only when intentionally using a remote MinerU service.
@@ -90,6 +93,24 @@ locally; set it only when intentionally using a remote MinerU service.
 Development and production intentionally use the same default Documents tree.
 Do not configure `GIGACHAD_BASE_DIR` in the environment file, service unit, or
 another production artifact. The worktree isolates code, not application state.
+
+### Dependency supply chain
+
+- Lockfiles are the source of truth: `uv.lock`, `src/frontend/package-lock.json`
+  and `src/c4/package-lock.json`. Installs use `uv sync --locked` and `npm ci`.
+- Development launchers automatically repair a missing or out-of-sync lock:
+  Python uses `uv lock` without `--upgrade`, npm uses
+  `npm install --package-lock-only`, then retries `npm ci` once. Review and commit
+  regenerated locks with the manifest changes. Unchanged pins are retained where
+  the new constraints allow them. Never treat automatic resolution as a security review.
+- Production never regenerates locks. Integrity, network, resolution, and other
+  install errors stop startup rather than triggering lock regeneration.
+- New resolutions retain the 7-day release cooldown (`exclude-newer` in
+  `pyproject.toml`, `min-release-age` in each `.npmrc`). A cooldown reduces exposure
+  to fresh releases but cannot guarantee that a package is safe.
+- npm dependency install scripts are disabled (`ignore-scripts` in each `.npmrc`).
+  A new dependency that needs one must be reviewed and run explicitly.
+- Dependabot opens update PRs for all three lockfiles. Review each lockfile diff.
 
 ### Create the shared runtime configuration file
 
@@ -208,9 +229,8 @@ their stored data never mixes.
 parses and edits architecture workspaces, on `127.0.0.1:8011` (dev) or
 `127.0.0.1:8012` (systemd), and points the backend at it through
 `C4_SERVICE_URL`. It is stateless, loopback-only, and stopped with the backend.
-Development installs its dependencies on every start; production installs them
-only when `src/c4/node_modules` is missing, so run
-`npm ci --prefix src/c4` after an update that changes `src/c4/package-lock.json`.
+Every start runs `npm ci` for it, so the service always runs exactly
+`src/c4/package-lock.json`, served from the npm cache when possible.
 Without it, the architecture routes answer 503 and everything else keeps working.
 
 The OMP unit follows the same pattern: no `EnvironmentFile`, only
@@ -347,7 +367,7 @@ responses in an enrolled browser.
 For a first deployment or an update:
 
 1. Create or fast-forward the production worktree from `origin/master`, then
-   run `uv sync --python 3.12 --no-dev` in it. Do not run `run.sh`.
+   run `uv sync --python 3.12 --locked --no-dev` in it. Do not run `run.sh`.
 2. Confirm `$ENV` has the exact production and local CORS origins, host-local
    dependency URLs, and only the required provider secrets. Leave
    `GIGACHAD_BASE_DIR` and `MINERU_SERVER_URL` unset.

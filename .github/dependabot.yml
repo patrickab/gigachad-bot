@@ -1,24 +1,33 @@
 # .github/dependabot.yml
+# Every update PR is a supply-chain change: review the lockfile diff before merging.
+# The 7-day cooldown matches `exclude-newer` in pyproject.toml and `min-release-age` in .npmrc.
 
 version: 2
 updates:
 
-  # Main rule for your Python dependencies
-  - package-ecosystem: "pip"
-    directory: "/" # Look for pyproject.toml in the root directory
+  - package-ecosystem: "uv"
+    directory: "/"
     schedule:
       interval: "weekly"
-
+    cooldown:
+      default-days: 7
     reviewers:
       - "patrickab"
 
-    ignore:
-      - dependency-name: "rag-database"
+  - package-ecosystem: "npm"
+    directory: "/src/frontend"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    reviewers:
+      - "patrickab"
 
-    # Group related updates to reduce PR noise
-    groups:
-      streamlit-plugins:
-        patterns:
-          - "streamlit*"
-          - "st-copy"
-
+  - package-ecosystem: "npm"
+    directory: "/src/c4"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    reviewers:
+      - "patrickab"

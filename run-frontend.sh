@@ -11,7 +11,8 @@ cd -- "$REPO_ROOT"
 source "$REPO_ROOT/deploy/load-env.sh"
 
 echo "Installing frontend deps"
-uv run gigachad-install
+python3 "$REPO_ROOT/src/backend/install_deps.py" python-lock "$REPO_ROOT"
+uv run --locked gigachad-install
 
 echo "Starting frontend on http://127.0.0.1:2999"
 exec .venv/bin/npm --prefix src/frontend run dev

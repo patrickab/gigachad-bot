@@ -21,6 +21,8 @@ interface ModelDropdownProps {
   onDefaultsChange: (defaults: ModelDefaults) => Promise<void>
   /** Side of the trigger the panel opens on. */
   placement?: "above" | "below"
+  /** Collapse the name when the expanded pill would cover this column. */
+  chatColumn?: HTMLElement | null
 }
 
 function AddProvider({ onAdd }: { onAdd: (label: string, litellmId: string) => void }) {
@@ -143,12 +145,34 @@ function shortName(model: string): string {
   return model.slice(model.lastIndexOf("/") + 1)
 }
 
-export function ModelDropdown({ models, selectedModel, onSelect, onProvidersChange, onTabOrderChange, onDefaultsChange, placement = "above" }: ModelDropdownProps) {
+export function ModelDropdown({ models, selectedModel, onSelect, onProvidersChange, onTabOrderChange, onDefaultsChange, placement = "above", chatColumn }: ModelDropdownProps) {
   const [configuring, setConfiguring] = useState(false)
   const [settingsTab, setSettingsTab] = useState<"providers" | "defaults">("providers")
   const [error, setError] = useState<string | null>(null)
   const [draftDefaults, setDraftDefaults] = useState<ModelDefaults | null>(null)
   const [ompCatalog, setOmpCatalog] = useState<OmpCatalog | null>(null)
+  const [compact, setCompact] = useState(false)
+  const triggerRootRef = useRef<HTMLDivElement>(null)
+  const labelRef = useRef<HTMLSpanElement>(null)
+  const labelContentRef = useRef<HTMLSpanElement>(null)
+  const loading = models === null
+
+  useEffect(() => {
+    const root = triggerRootRef.current
+    const label = labelRef.current
+    const content = labelContentRef.current
+    const main = root?.closest("main")
+    if (!chatColumn || !root || !label || !content || !main) return
+    const measure = () => {
+      // Keep overlap detection stable throughout the label's width animation.
+      const expandedRight = root.getBoundingClientRect().right + content.getBoundingClientRect().width - label.getBoundingClientRect().width
+      setCompact(expandedRight > chatColumn.getBoundingClientRect().left)
+    }
+    const observer = new ResizeObserver(measure)
+    for (const element of [root, content, chatColumn, main]) observer.observe(element)
+    measure()
+    return () => observer.disconnect()
+  }, [chatColumn, loading])
   // Default-model edits are buffered and flushed once on close, not saved per keystroke.
   const pendingDefaults = useRef<ModelDefaults | null>(null)
   const onClose = useCallback(() => {
@@ -215,9 +239,18 @@ export function ModelDropdown({ models, selectedModel, onSelect, onProvidersChan
     {errorLine}
   </>
 
-  return <PopoverSelector
+  return <div ref={triggerRootRef} data-compact={Boolean(chatColumn && compact)} className="group/model min-w-0">
+    <PopoverSelector
     triggerLabel={`Model: ${fullLabel}`}
-    triggerContent={<><Cpu className="h-3 w-3 shrink-0" /><span className="max-w-[140px] truncate">{selectedModel ? shortName(selectedModel) : fullLabel}</span></>}
+    triggerClassName="h-8.5 gap-0 bg-paper px-[11px] hover:bg-surface-elevated"
+    triggerContent={<>
+      <Cpu className="h-3 w-3 shrink-0" />
+      <span ref={labelRef} className="block max-w-[146px] overflow-hidden opacity-100 transition-[max-width,opacity] duration-250 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none group-[[data-compact=true]:not(:hover):not(:focus-within)]/model:max-w-0 group-[[data-compact=true]:not(:hover):not(:focus-within)]/model:opacity-0">
+        <span ref={labelContentRef} className="block w-max pl-1.5">
+          <span className="block max-w-[140px] truncate">{selectedModel ? shortName(selectedModel) : fullLabel}</span>
+        </span>
+      </span>
+    </>}
     label="Model"
     categories={orderedProviders.map((provider) => ({ key: provider.label, label: provider.label, items: provider.models }))}
     itemKey={(model) => model}
@@ -231,5 +264,6 @@ export function ModelDropdown({ models, selectedModel, onSelect, onProvidersChan
     placement={placement}
     panelClassName={configuring ? "w-max min-w-72" : undefined}
     onClose={onClose}
-  />
+    />
+  </div>
 }

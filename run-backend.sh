@@ -150,9 +150,12 @@ if ! postgres_is_running; then
     postgres_started=true
 fi
 
+# Repair manifest/lock drift only in development, then install strictly from the lock.
+# Production uses its reviewed deployment environment and never regenerates locks.
 if [[ "$profile" == development ]]; then
     printf 'Installing backend dependencies\n'
-    uv sync
+    python3 "$root_dir/src/backend/install_deps.py" python-lock "$root_dir"
+    uv sync --locked
 fi
 # A user unit started at boot has systemd's bare PATH, without the mise shims node lives behind.
 export PATH="$root_dir/.venv/bin:$HOME/.local/share/mise/shims:$HOME/.local/bin:$PATH"
@@ -160,9 +163,13 @@ if ! command -v node >/dev/null; then
     printf 'error: node is not on PATH (%s); the C4 service cannot start\n' "$PATH" >&2
     exit 1
 fi
-if [[ "$profile" == development || ! -d "$root_dir/src/c4/node_modules" ]]; then
-    printf 'Installing C4 service dependencies\n'
-    npm ci --prefix "$root_dir/src/c4" --no-audit --no-fund
+# npm ci installs exactly package-lock.json on every start, so a restart never runs stale or drifted packages.
+# --prefer-offline serves integrity-checked tarballs from the cache, so restarts rarely need the network.
+printf 'Installing C4 service dependencies\n'
+if [[ "$profile" == development ]]; then
+    python3 "$root_dir/src/backend/install_deps.py" npm "$root_dir/src/c4"
+else
+    npm ci --prefix "$root_dir/src/c4" --ignore-scripts --prefer-offline --no-audit --no-fund
 fi
 
 # The C4 service parses and edits LikeC4 sources for the architecture routes.

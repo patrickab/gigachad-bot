@@ -42,7 +42,8 @@ trap cleanup EXIT
 trap 'exit 0' INT TERM
 
 # Install sandbox-only Python packages into the shared venv before OMP starts.
-uv --directory "$root_dir" sync --extra sandbox-plot
+python3 "$root_dir/src/backend/install_deps.py" python-lock "$root_dir"
+uv --directory "$root_dir" sync --locked --extra sandbox-plot
 
 # Opt out with GIGACHAD_OMP=0. The script exits quietly when OMP is absent,
 # and the backend hides the OMP model source when its gateway is unreachable.

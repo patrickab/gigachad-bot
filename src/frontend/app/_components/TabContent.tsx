@@ -1,12 +1,11 @@
 "use client"
 
-import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
 import { PanelLeft, PanelLeftClose } from "lucide-react"
 import { Sidebar } from "@/features/navigation/Sidebar"
 import { ChatContainer, type ChatFocus } from "@/features/chat/ChatContainer"
 import { ChatSidebarProvider, type ChatSidebarContextValue } from "@/features/chat/context-panel/ChatContextPanel"
 import type { ChatInputHandle } from "@/features/chat/composer/ChatInput"
-import { MAX_SIDEBAR_WIDTH } from "@/components/ui/SidePanel"
 import { ModelDropdown } from "@/features/settings/ModelDropdown"
 import { SettingsMenu } from "@/features/settings/SettingsMenu"
 import { PromptEditor } from "@/features/settings/PromptEditor"
@@ -69,11 +68,10 @@ export function TabContent({ onOpenChat, focus }: {
   const [promptEditorOpen, setPromptEditorOpen] = useState(false)
   const [contextToggleSlot, setContextToggleSlot] = useState<HTMLElement | null>(null)
   const [wideToggleSlot, setWideToggleSlot] = useState<HTMLElement | null>(null)
+  const [chatColumn, setChatColumn] = useState<HTMLDivElement | null>(null)
   const chatInputRef = useRef<ChatInputHandle>(null)
   const liveCanvasRef = useRef<{ path: string; content: string } | null>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
   const loadIdRef = useRef(0)
-  const [measuredWidth, setMeasuredWidth] = useState(0)
 
   const { view: canvasView, sidebarProps: canvasSidebarProps, navigateArchitecture, closeCanvas, openCreatedCanvas, architectureEdgeStyle, setArchitectureEdgeStyle, toolbarSlots, setDrawingSlot, setViewSlot } = useCanvasView()
   const filePicker = useFilePicker({ isActive, hasMessages: messages.length > 0, chatInputRef, setExtracting })
@@ -104,13 +102,6 @@ export function TabContent({ onOpenChat, focus }: {
     if (!config.selectedModel && models?.defaults.default_model) updateConfig({ selectedModel: models.defaults.default_model })
   }, [config.selectedModel, models, updateConfig])
 
-  useLayoutEffect(() => {
-    if (!isActive) return
-    const el = containerRef.current
-    if (!el) return
-    setMeasuredWidth(el.clientWidth)
-  }, [isActive])
-
   useEffect(() => {
     if (isActive) setActiveFile(tab.historyFile)
   }, [isActive, tab.historyFile, setActiveFile])
@@ -118,9 +109,6 @@ export function TabContent({ onOpenChat, focus }: {
   useEffect(() => {
     if (isActive) setActiveQaIndex(focus.qaIndex)
   }, [isActive, focus.qaIndex, setActiveQaIndex])
-
-  // Leave room for the side panel when the chat column is capped.
-  const chatMaxWidth = measuredWidth > 0 ? Math.max(0, measuredWidth - MAX_SIDEBAR_WIDTH) : undefined
 
   useEffect(() => {
     if (!tab.historyFile) return
@@ -238,7 +226,7 @@ export function TabContent({ onOpenChat, focus }: {
   )
 
   return (
-    <div ref={containerRef} className="relative flex h-full overflow-hidden">
+    <div className="relative flex h-full overflow-hidden">
       <Sidebar
         onFileSelect={filePicker.handleFileSelect}
         onRootsChanged={filePicker.refreshFileList}
@@ -278,8 +266,10 @@ export function TabContent({ onOpenChat, focus }: {
               <TopBarTransparent>{sidebarToggle}</TopBarTransparent>
               <TopBarPill>
                 <ReasoningSelector levels={reasoningLevels} reasoningEffort={reasoningEffort} onReasoningChange={(v) => updateConfig({ reasoningEffort: v })} placement="below" />
-                <ModelDropdown models={models} selectedModel={config.selectedModel} onSelect={(m) => updateConfig({ selectedModel: m })} onProvidersChange={saveModelProviders} onTabOrderChange={saveModelTabOrder} onDefaultsChange={saveModelDefaults} placement="below" />
               </TopBarPill>
+              <TopBarTransparent>
+                <ModelDropdown models={models} selectedModel={config.selectedModel} onSelect={(m) => updateConfig({ selectedModel: m })} onProvidersChange={saveModelProviders} onTabOrderChange={saveModelTabOrder} onDefaultsChange={saveModelDefaults} placement="below" chatColumn={chatColumn} />
+              </TopBarTransparent>
               <TopBarTransparent ref={setWideToggleSlot} />
             </>}
             right={<>
@@ -308,6 +298,7 @@ export function TabContent({ onOpenChat, focus }: {
             <ChatSidebarProvider value={sidebarContext}>
               <ChatContainer
                 chatId={chatId}
+                onChatColumnChange={setChatColumn}
                 messages={messages}
                 isStreaming={isStreaming}
                 onDeletePair={turns.handleDeletePair}
@@ -320,7 +311,6 @@ export function TabContent({ onOpenChat, focus }: {
                 branchMessageIdx={branchMessageIdx}
                 chatInputRef={chatInputRef}
                 slug={activeProject}
-                chatMaxWidth={chatMaxWidth}
                 contextToggleSlot={contextToggleSlot}
                 wideToggleSlot={wideToggleSlot}
               />

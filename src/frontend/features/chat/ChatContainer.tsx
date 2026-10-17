@@ -11,9 +11,12 @@ import { ElevationProvider } from "@/components/ui/ElevatedContainer"
 import { ChatPair } from "./ChatPair"
 import { useSidebarElements, type AttachmentEntry, type ExpandedAttachment } from "@/features/chat/context-panel/ChatContextPanel"
 import { usePairFocus } from "@/features/chat/usePairFocus"
+import { MAX_SIDEBAR_WIDTH } from "@/components/ui/SidePanel"
 
 /** Trailing pairs expanded by default, older ones render collapsed. */
 const DEFAULT_EXPANDED_TAIL = 1
+/** Column width floor, matching the composer's max-w-2xl, so the chat is never narrower than the input. */
+const MIN_CHAT_COLUMN_PX = 672
 /** Extra scroll padding below the last pair, on top of the floating input height. */
 const BOTTOM_GAP_PX = 16
 
@@ -35,13 +38,14 @@ interface ChatContainerProps {
   focus?: ChatFocus
   branchMessageIdx?: number | null
   slug?: string | null
-  chatMaxWidth?: number
   extracting?: boolean
   chatInputRef?: React.RefObject<ChatInputHandle | null>
   /** Top-bar element the context-panel toggle renders into. */
   contextToggleSlot?: HTMLElement | null
   /** Top-bar element the wide-mode toggle renders into. */
   wideToggleSlot?: HTMLElement | null
+  /** Expose the message column for top-bar overlap measurement. */
+  onChatColumnChange?: (element: HTMLDivElement | null) => void
 }
 
 export function ChatContainer({
@@ -56,11 +60,11 @@ export function ChatContainer({
   focus,
   branchMessageIdx,
   slug = null,
-  chatMaxWidth,
   extracting,
   chatInputRef,
   contextToggleSlot,
   wideToggleSlot,
+  onChatColumnChange,
 }: ChatContainerProps) {
   const focusQaIndex = focus?.qaIndex ?? null
   const focusKey = focus?.key
@@ -254,6 +258,17 @@ export function ChatContainer({
     onTogglePdfWide: togglePdfWide,
   })
 
+  const [paneWidth, setPaneWidth] = useState(0)
+
+  // Track the full pane width so the column cap follows window and split resizes
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const observer = new ResizeObserver(([entry]) => setPaneWidth(entry.contentRect.width))
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
   const hasSidebarContent = sidebarElements.length > 0
   const inputAreaRef = useRef<HTMLDivElement>(null)
   const [inputAreaHeight, setInputAreaHeight] = useState(0)
@@ -275,7 +290,8 @@ export function ChatContainer({
   if (!hasSidebarContent && contextOpen) setContextOpen(false)
   if (!contextOpen && pdfWide) setPdfWide(false)
 
-  const effectiveMaxWidth = isWideMode ? undefined : (chatMaxWidth || undefined)
+  // Cap against the full pane, leaving room for the side panel, but never narrower than the composer
+  const effectiveMaxWidth = isWideMode || paneWidth === 0 ? undefined : Math.max(MIN_CHAT_COLUMN_PX, paneWidth - MAX_SIDEBAR_WIDTH)
   const toggleWideMode = useCallback(() => setIsWideMode((w) => !w), [])
 
   return (
@@ -287,7 +303,7 @@ export function ChatContainer({
           className="flex-1 overflow-y-auto text-ink outline-none"
           style={{ paddingBottom: inputAreaHeight + BOTTOM_GAP_PX }}
         >
-          <div className="mx-auto" style={{ maxWidth: effectiveMaxWidth }}>
+          <div ref={onChatColumnChange} className="mx-auto" style={{ maxWidth: effectiveMaxWidth }}>
           <ElevationProvider startLevel={1}>
             <AnimatePresence>
             {pairs.map(({ user, assistant, globalIndex }, qaIndex) => (
