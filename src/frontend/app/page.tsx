@@ -1,10 +1,10 @@
 "use client"
 
-import { DesktopBackendProvider } from "@/components/DesktopBackendProvider"
+import { DesktopBackendProvider } from "@/app/_components/DesktopBackendProvider"
 import { ProjectProvider } from "@/contexts/ProjectContext"
 import { SettingsProvider } from "@/contexts/SettingsContext"
 import { UndoDeleteProvider } from "@/contexts/UndoDeleteContext"
-import { AppShell } from "./_components/AppShell"
+import { AppShell } from "@/app/_components/AppShell"
 
 export default function Home() {
   return (

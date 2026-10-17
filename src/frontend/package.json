@@ -6,7 +6,7 @@
     "dev": "next dev --webpack -p 2999",
     "build": "cp node_modules/react-pdf/node_modules/pdfjs-dist/build/pdf.worker.min.mjs public/pdf.worker.min.mjs && cp node_modules/libavoid-js/dist/libavoid.wasm public/libavoid.wasm && next build --webpack",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
     "tauri": "tauri"
@@ -54,9 +54,14 @@
     "@types/react-plotly.js": "^2.6.4",
     "@types/turndown": "^5.0.6",
     "@vitejs/plugin-react": "^6.1.1",
+    "eslint": "^10.13.0",
+    "eslint-config-next": "^16.4.2",
+    "eslint-import-resolver-typescript": "^4.4.5",
+    "eslint-plugin-boundaries": "^7.2.0",
     "jsdom": "^25.0.0",
     "tailwindcss": "^4.1.0",
     "typescript": "^5.8.0",
+    "typescript-eslint": "^8.71.2",
     "vite": "^8.3.0",
     "vitest": "^4.1.11"
   }

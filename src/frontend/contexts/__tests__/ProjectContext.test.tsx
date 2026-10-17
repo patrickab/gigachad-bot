@@ -12,7 +12,7 @@ const api = vi.hoisted(() => ({
   loadProject: vi.fn(async () => ({ name: "Proj", slug: "proj", kanban: [], tabs: [{ filename: "saved.json", name: null, title: "Saved" }] })),
   updateProjectKanban: vi.fn(async (_slug: string, update: { kanban: []; tabs: unknown[] }) => ({ name: "Proj", slug: "proj", ...update })),
 }))
-vi.mock("@/lib/api", () => ({
+vi.mock("@/lib/backend/api", () => ({
   ...api,
   createProject: vi.fn(), deleteProject: vi.fn(), addProjectCard: vi.fn(), moveProjectCard: vi.fn(), deleteProjectCard: vi.fn(),
 }))

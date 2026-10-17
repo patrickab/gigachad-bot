@@ -1,0 +1,155 @@
+"use client"
+
+import { ChevronRight, User } from "lucide-react"
+import type { Attachment, Message } from "@/lib/domain/types"
+import { cn } from "@/lib/utils"
+import { AssistantMessageContent, ChatMessage } from "@/features/chat/messages/ChatMessage"
+import { ElevatedContainer } from "@/components/ui/ElevatedContainer"
+import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
+import { ToolCallElement } from "@/features/chat/messages/ToolCallElement"
+
+const MAX_LABEL_LENGTH = 80
+
+/** One-line label for a collapsed question: its first line, else the attachment names. */
+function abbreviate(text: string, msg: Message): string {
+  const clip = (s: string) => (s.length <= MAX_LABEL_LENGTH ? s : s.slice(0, MAX_LABEL_LENGTH) + "\u2026")
+  if (text) return clip(text.split("\n")[0])
+  const names = msg.attachments?.map((a) => a.name).join(", ")
+  return names ? clip(names) : "(empty)"
+}
+
+interface ChatPairProps {
+  user: Message
+  assistant: Message
+  /** Index of the user message in the full message list. */
+  globalIndex: number
+  expanded: boolean
+  /** Keyboard focus is on this pair. */
+  focused: boolean
+  /** Collapsed header shows the full question and the answer instead of the one-line label. */
+  showPreview: boolean
+  isStreaming: boolean
+  /** The collapsed header was clicked. */
+  onExpand: () => void
+  onCollapse: () => void
+  onMouseEnter: () => void
+  onMouseLeave: () => void
+  collapsedRef: (el: HTMLDivElement | null) => void
+  onAttachmentClick: (attachment: Attachment) => void
+  onDelete: (index: number) => void
+  onRegenerate?: (index: number) => void
+  onBranch?: () => void
+}
+
+/** A question and its answer: a collapsed header card, or the expanded messages with their tool calls. */
+export function ChatPair({
+  user,
+  assistant,
+  globalIndex,
+  expanded,
+  focused,
+  showPreview,
+  isStreaming,
+  onExpand,
+  onCollapse,
+  onMouseEnter,
+  onMouseLeave,
+  collapsedRef,
+  onAttachmentClick,
+  onDelete,
+  onRegenerate,
+  onBranch,
+}: ChatPairProps) {
+  return (
+    <div data-qa-index={globalIndex} className="group relative">
+      {!expanded && (
+        <ElevatedContainer
+          ref={collapsedRef}
+          onMouseEnter={onMouseEnter}
+          onMouseLeave={onMouseLeave}
+          onClick={onExpand}
+          className={cn(
+            "mx-3 my-4 rounded-xl border border-divider/40 shadow-[var(--shadow-sm)] overflow-hidden cursor-pointer transition-all duration-300",
+            focused && "ring-1 ring-ink-muted/50"
+          )}
+        >
+          <div className="flex gap-3 px-5 py-4 items-start">
+            <div className="mt-0.5 shrink-0">
+              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-surface-elevated">
+                <User className="h-3.5 w-3.5 text-ink-muted" />
+              </div>
+            </div>
+            <div className="min-w-0 flex-1 flex flex-col">
+              <div className="mb-0.5 text-xs font-medium text-ink-subtle">You</div>
+              {showPreview ? (
+                <div className="max-h-[12.5vh] overflow-y-auto text-ink-muted">
+                  <LaTeXMarkdown content={user.content} compact />
+                </div>
+              ) : (
+                <span className="text-sm text-ink-muted truncate">{abbreviate(user.content, user)}</span>
+              )}
+            </div>
+            <ChevronRight className="h-4 w-4 shrink-0 text-ink-faint mt-1" />
+          </div>
+          <div
+            className={cn(
+              "grid transition-[grid-template-rows] duration-300 ease-out",
+              showPreview ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+            )}
+          >
+            <div className="overflow-hidden">
+              <div className="px-5 pb-4">
+                {assistant.content && (
+                  <ElevatedContainer className="rounded-lg border border-divider overflow-hidden">
+                    <div className="px-4 py-3">
+                      <div className="text-xs font-medium text-ink-subtle mb-1">Assistant</div>
+                      <div className="max-h-[25vh] overflow-y-auto text-ink-muted">
+                        <AssistantMessageContent content={assistant.content} compact />
+                      </div>
+                    </div>
+                  </ElevatedContainer>
+                )}
+              </div>
+            </div>
+          </div>
+        </ElevatedContainer>
+      )}
+      {expanded && (
+        <ElevatedContainer className={cn("mx-3 my-4 rounded-xl border border-divider/40 overflow-hidden transition-all duration-300", focused && "ring-1 ring-ink-muted/50")}>
+          <ChatMessage
+            role="user"
+            content={user.content}
+            attachments={user.attachments}
+            index={globalIndex}
+            onAttachmentClick={onAttachmentClick}
+            onDelete={onDelete}
+            collapsibleUser
+            onCollapse={onCollapse}
+          />
+          {/* Same optic as the answer below: the tool call is a peer of the
+              response inside the pair, not a decoration on it. */}
+          {assistant.tool_calls?.map((call) => (
+            <ElevatedContainer key={call.id} className="mx-5 mb-5 rounded-lg border border-divider overflow-hidden">
+              <ToolCallElement call={call} />
+            </ElevatedContainer>
+          ))}
+          <ElevatedContainer className="mx-5 mb-5 rounded-lg border border-divider overflow-hidden">
+            <ChatMessage
+              role="assistant"
+              content={assistant.content}
+              search_result={assistant.search_result}
+              research_steps={assistant.research_steps}
+              research_progress={assistant.research_progress}
+              toolRunning={assistant.tool_calls?.some((c) => c.status === "running")}
+              isStreaming={isStreaming}
+              index={globalIndex}
+              onDelete={onDelete}
+              onRegenerate={onRegenerate}
+              onBranch={onBranch}
+            />
+          </ElevatedContainer>
+        </ElevatedContainer>
+      )}
+    </div>
+  )
+}

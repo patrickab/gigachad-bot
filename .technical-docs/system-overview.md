@@ -127,7 +127,7 @@ never followed. Only the database location is wired to routes today.
   it shows the window on its own in place of a canvas. The canvas "+" menu has one "Architecture" entry on any canvas
   of a project, including the unsaved scratch canvas while a project is open.
   Without a project the menu says to open a project canvas instead. Its window
-  (`components/ArchitectureWindow.tsx`) holds a collapsible tree (systems
+  (`features/editor/architecture/ArchitectureWindow.tsx`) holds a collapsible tree (systems
   with their modules, views, other files)
   with "+ System", "+ Module" (under the current system), "+ View", and
   Delete on the current row (a system goes with its modules). The window's
@@ -146,7 +146,7 @@ never followed. Only the database location is wired to routes today.
     since it belongs to no element (it has no "+" either).
   - **Saved views.** The toolbar adds "Add to view" (a whole file's systems,
     or single elements grouped by file).
-  - **Fitted before drawing.** `fitGraph` (in `lib/architecture.ts`) sizes
+  - **Fitted before drawing.** `fitGraph` (in `features/editor/architecture/diagramGraph.ts`) sizes
     the view once per change, before anything renders: each card is at least
     as wide as its heading plus kind label (measured in the real font,
     `nodeMinWidth`), overlapping siblings are pushed right, and parents grow
@@ -162,7 +162,7 @@ never followed. Only the database location is wired to routes today.
   - **Auto layout** (toolbar, once positions are saved) clears them and lets
     LikeC4 lay the view out again. Elements added to an arranged view land as
     one block to the right of it.
-  - **Connections are routed** with libavoid (`lib/edgeRouting.ts`, WebAssembly
+  - **Connections are routed** with libavoid (`lib/domain/edgeRouting.ts`, WebAssembly
     from `public/libavoid.wasm`, copied from `libavoid-js` on build). Routes are
     right-angled and keep clear of every card a connection does not join. Frames
     are not obstacles, so all connections share one router and parallel stretches
@@ -180,7 +180,7 @@ never followed. Only the database location is wired to routes today.
     failed read, and every parse diagnostic as `file:line: message`, in both
     Diagram and Text mode.
 
-  `lib/architecture.ts` diffs each surface edit into operations. The window
+  `features/editor/architecture/diagramGraph.ts` diffs each surface edit into operations. The window
   sends writes and rereads through one queue, so an older read never replaces
   a newer write's answer. A change from another device while a write is in
   flight triggers one reread after it. Each `.c4`
@@ -214,7 +214,7 @@ never followed. Only the database location is wired to routes today.
   its own editor undo history. Every icon-only button has an `aria-label`;
   the UI uses no hover tooltips.
   Highlighting uses LikeC4's own TextMate grammar, vendored at
-  `src/frontend/lib/grammars/likec4.tmLanguage.json`.
+  `src/frontend/components/content/grammars/likec4.tmLanguage.json`.
 
 ## Memory system
 

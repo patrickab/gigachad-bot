@@ -1,4 +1,4 @@
-import type { ModelProvider } from "./types"
+import type { ModelProvider } from "@/lib/domain/types"
 
 /** LiteLLM prefix used for OMP-sourced models: `litellm_proxy/<omp-provider>/<id>`. */
 export const OMP_LITELLM_ID = "litellm_proxy"

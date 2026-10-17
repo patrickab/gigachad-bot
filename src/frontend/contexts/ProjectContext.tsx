@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react"
-import type { ProjectData, ProjectListItem, ProjectStateUpdate, ProjectTab, KanbanCard, KanbanColumnId } from "@/lib/types"
+import type { ProjectData, ProjectListItem, ProjectStateUpdate, ProjectTab, KanbanCard, KanbanColumnId } from "@/lib/domain/types"
 import {
   listProjects as apiListProjects,
   loadProject as apiLoadProject,
@@ -11,7 +11,7 @@ import {
   moveProjectCard as apiMoveProjectCard,
   deleteProjectCard as apiDeleteProjectCard,
   updateProjectKanban as apiUpdateProjectKanban,
-} from "@/lib/api"
+} from "@/lib/backend/api"
 
 /** Check if two saved-tab lists match row for row. */
 function isSameProjectTabs(left: ProjectTab[], right: ProjectTab[]): boolean {

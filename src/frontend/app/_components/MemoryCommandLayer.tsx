@@ -1,11 +1,11 @@
 "use client"
 
 import { createPortal } from "react-dom"
-import { CommandMenu, type CommandMenuItem } from "@/components/CommandMenu"
-import { MemoryPanel } from "@/components/MemoryPanel"
+import { CommandMenu, type CommandMenuItem } from "@/features/navigation/CommandMenu"
+import { MemoryPanel } from "@/features/memory/MemoryPanel"
 import { useProject } from "@/contexts/ProjectContext"
 import { useTab } from "@/contexts/TabContext"
-import type { MemoryCommandBar } from "@/hooks/useMemoryCommandBar"
+import type { MemoryCommandBar } from "@/features/memory/useMemoryCommandBar"
 
 /** The slash-command input and menu in the tab row, the click-away overlay, and the memory review panel. */
 export function MemoryCommandLayer({ bar, items, onRun }: {

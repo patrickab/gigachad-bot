@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
-import { fetchBackendConfig } from "@/lib/api"
+import { fetchBackendConfig } from "@/lib/backend/api"
 
 export interface TabConfig {
   selectedModel: string
