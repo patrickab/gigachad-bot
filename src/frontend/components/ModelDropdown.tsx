@@ -214,7 +214,7 @@ export function ModelDropdown({ models, selectedModel, onSelect, onProvidersChan
   const reorderTabs = (next: ProviderTab[]) => void onTabOrderChange?.(next.map((provider) => provider.label)).catch((reason) => setError((reason as Error).message || "Could not save tab order"))
   const toggle = () => panel === "models" ? close() : setPanel("models")
   const triggerLabel = selectedModel ? displayName(selectedModel) : "Select model"
-  const trigger = <button type="button" onClick={toggle} aria-label={`Model: ${triggerLabel}`} aria-haspopup="dialog" aria-expanded={panel !== null} className={cn("flex h-7 min-w-0 items-center gap-1.5 rounded-full px-3 text-xs text-ink-muted transition-colors hover:bg-hover hover:text-ink", panel && "text-ink")}><Cpu className="h-3 w-3 shrink-0" /><span className="max-w-[160px] truncate">{triggerLabel}</span><ChevronDown className={cn("h-3 w-3 shrink-0 opacity-70 transition-transform", panel && "rotate-180")} /></button>
+  const trigger = <button type="button" onClick={toggle} aria-label={`Model: ${triggerLabel}`} aria-haspopup="dialog" aria-expanded={panel !== null} className={cn("flex h-7 min-w-0 items-center gap-1.5 rounded-full px-3 text-xs text-ink-muted transition-colors hover:bg-hover hover:text-ink", panel && "text-ink")}><Cpu className="h-3 w-3 shrink-0" /><span className="max-w-[160px] truncate">{triggerLabel}</span></button>
 
   return <div className="relative z-50 min-w-0" ref={ref}>
     {children ? children({ open: panel === "models", onToggle: toggle }) : trigger}

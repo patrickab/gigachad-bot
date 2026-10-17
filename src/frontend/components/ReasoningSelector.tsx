@@ -1,6 +1,6 @@
 "use client"
 
-import { Brain, Check, ChevronDown } from "lucide-react"
+import { Brain, Check } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useClickOutside } from "@/hooks/useClickOutside"
 import { fetchReasoningLevels } from "@/lib/api"
@@ -78,13 +78,11 @@ export function ReasoningSelector({ model, reasoningEffort, onReasoningChange, p
         aria-haspopup="menu"
         aria-expanded={open}
         className={cn(
-          "flex h-7 items-center gap-1.5 rounded-full px-3 text-xs capitalize text-ink-muted transition-colors hover:bg-hover hover:text-ink",
+          "flex h-7 items-center gap-1 rounded-full px-2.5 text-xs text-ink-muted transition-colors hover:bg-hover hover:text-ink",
           open && "text-ink",
         )}
       >
         <ReasoningGlyph level={reasoningEffort} />
-        <span className="truncate">{levelLabel(reasoningEffort)}</span>
-        <ChevronDown className={cn("h-3 w-3 shrink-0 opacity-70 transition-transform", open && "rotate-180")} />
       </button>
       {open && (
         <div role="menu" aria-label="Reasoning" className={cn("absolute left-0 z-50 w-44 overflow-hidden rounded-xl border border-divider bg-paper shadow-[var(--shadow-xl)]", placement === "below" ? "top-full mt-2" : "bottom-full mb-2")}>
