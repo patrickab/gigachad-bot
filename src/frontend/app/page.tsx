@@ -11,7 +11,7 @@ import { MAX_SIDEBAR_WIDTH } from "@/components/ChatSidebar"
 import { ModelDropdown } from "@/components/ModelDropdown"
 import { SettingsMenu } from "@/components/SettingsMenu"
 import { PromptEditor } from "@/components/PromptEditor"
-import { ReasoningSelector } from "@/components/ReasoningSelector"
+import { ReasoningSelector, effectiveReasoningEffort, useReasoningLevels } from "@/components/ReasoningSelector"
 import { ThemeToggle } from "@/components/ThemeToggle"
 import { OCRPanel } from "@/components/OCRPanel"
 import { SaveChatModal } from "@/components/SaveChatModal"
@@ -68,11 +68,11 @@ import {
 } from "@/lib/attachments"
 
 /** Build the `send` payload from a tab's config. UI-only "none" reasoning maps to null. */
-function defaultSendParams(config: TabConfig, prompts: Record<string, string>, enabledTools: ToolName[] = []) {
+function defaultSendParams(config: TabConfig, reasoningEffort: string, prompts: Record<string, string>, enabledTools: ToolName[] = []) {
   return {
     model: config.selectedModel,
     system_prompt: config.selectedPrompt ? (prompts[config.selectedPrompt] ?? "") : "",
-    reasoning_effort: config.reasoningEffort === "none" ? null : config.reasoningEffort,
+    reasoning_effort: reasoningEffort === "none" ? null : reasoningEffort,
     downscale_images: config.downscaleImages,
     img_paths: [] as string[],
     tools: enabledTools,
@@ -149,6 +149,8 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
 
   const settings = useSettings()
   const config = tab.config
+  const reasoningLevels = useReasoningLevels(config.selectedModel)
+  const reasoningEffort = effectiveReasoningEffort(reasoningLevels, config.reasoningEffort)
   const hasUsage = totalUsage.total_tokens > 0 ? totalUsage : undefined
   const appMode = tab.appMode
   const setTabAppMode = onAppModeChange
@@ -440,7 +442,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
             chatId,
             slug: activeProject,
             downscaleImages: config.downscaleImages,
-            baseParams: defaultSendParams(config, prompts, enabledTools),
+            baseParams: defaultSendParams(config, reasoningEffort, prompts, enabledTools),
           }, parseFiles, attachRootFile)
         } catch {
           updateLastAssistant(setMessages, m => ({ ...m, content: "Failed to parse attached documents. You can try again or re-upload the file." }))
@@ -464,7 +466,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       }
 
       const completion = await send({
-        ...defaultSendParams(config, prompts, enabledTools),
+        ...defaultSendParams(config, reasoningEffort, prompts, enabledTools),
         chat_id: chatId,
         user_msg: text,
         img_paths: collectActiveImagePaths(messages),
@@ -475,7 +477,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         void modals.handleAutosave(completion.messages, completion.usage)
       }
     },
-    [enabledTools, chatId, branchMessageIdx, activeProject, config, send, setMessages, commandBar.submitCommand, messages, filePicker.openFilePicker, modals.handleMindmapSubmit, modals.handleAutosave, modals.setMindmapAttachments, modals.setMindmapModalOpen, persistToolArtifacts],
+    [enabledTools, chatId, branchMessageIdx, activeProject, config, reasoningEffort, send, setMessages, commandBar.submitCommand, messages, filePicker.openFilePicker, modals.handleMindmapSubmit, modals.handleAutosave, modals.setMindmapAttachments, modals.setMindmapModalOpen, persistToolArtifacts],
   )
 
   const handleRegenerate = useCallback(
@@ -492,7 +494,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         const fallbackPrompt = userMsg.content.trim() ? userMsg.content : "Please review the attached document and provide a summary."
         const llmMsg = hidden ? `${hidden}\n\n${fallbackPrompt}` : fallbackPrompt
         const completion = await regenerateAt(globalIndex, {
-          ...defaultSendParams(config, prompts, enabledTools),
+          ...defaultSendParams(config, reasoningEffort, prompts, enabledTools),
           chat_id: chatId,
           user_msg: llmMsg,
           img_paths: collectActiveImagePaths(messages, { userIndex: globalIndex }),
@@ -507,7 +509,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
       }
 
       const completion = await regenerateAt(globalIndex, {
-        ...defaultSendParams(config, prompts, enabledTools),
+        ...defaultSendParams(config, reasoningEffort, prompts, enabledTools),
         chat_id: chatId,
         user_msg: userMsg.content,
         img_paths: collectActiveImagePaths(messages, { userIndex: globalIndex }),
@@ -518,7 +520,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
         void modals.handleAutosave(completion.messages, completion.usage)
       }
     },
-    [isStreaming, messages, regenerateAt, config, prompts, activeProject, chatId, enabledTools, modals.handleAutosave, persistToolArtifacts],
+    [isStreaming, messages, regenerateAt, config, reasoningEffort, prompts, activeProject, chatId, enabledTools, modals.handleAutosave, persistToolArtifacts],
   )
 
   const handleToggleAttachmentActive = useCallback((messageIndex: number, attachmentName: string) => {
@@ -714,7 +716,7 @@ function TabContent({ tab, isActive, onModeLabel, onHistoryFileChanged, onTitleL
               <div className="pointer-events-auto flex items-center">{sidebarToggle}</div>
               <div className="pointer-events-auto relative isolate flex h-8.5 min-w-0 items-center gap-1">
                 <div className="pointer-events-none absolute -inset-x-2 inset-y-0 -z-10 rounded-full bg-paper" />
-                <ReasoningSelector model={config.selectedModel} reasoningEffort={config.reasoningEffort} onReasoningChange={(v) => onConfigChange({ reasoningEffort: v })} placement="below" />
+                <ReasoningSelector levels={reasoningLevels} reasoningEffort={reasoningEffort} onReasoningChange={(v) => onConfigChange({ reasoningEffort: v })} placement="below" />
                 <ModelDropdown models={models} selectedModel={config.selectedModel} onSelect={(m) => onConfigChange({ selectedModel: m })} onProvidersChange={saveModelProviders} onTabOrderChange={saveModelTabOrder} onDefaultsChange={saveModelDefaults} placement="below" />
               </div>
               <div ref={setWideToggleSlot} className="pointer-events-auto flex items-center" />

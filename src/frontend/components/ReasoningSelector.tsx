@@ -11,7 +11,9 @@ import { cn } from "@/lib/utils"
 const levelsCache = new Map<string, string[]>()
 
 interface ReasoningSelectorProps {
-  model: string
+  /** Levels from `useReasoningLevels`, undefined while loading. */
+  levels: string[] | undefined
+  /** Effective effort from `effectiveReasoningEffort`. */
   reasoningEffort: string
   onReasoningChange: (v: string) => void
   /** Side of the trigger the menu opens on. */
@@ -27,7 +29,8 @@ function ReasoningGlyph({ level }: { level: string }) {
   return <span className="reasoning-glyph" data-level={levelLabel(level)} aria-hidden="true" />
 }
 
-export function ReasoningSelector({ model, reasoningEffort, onReasoningChange, placement = "above" }: ReasoningSelectorProps) {
+/** Reasoning levels `model` accepts, `[]` when it can't reason, undefined while loading. */
+export function useReasoningLevels(model: string): string[] | undefined {
   const [levels, setLevels] = useState<string[] | undefined>(() => levelsCache.get(model))
 
   useEffect(() => {
@@ -51,27 +54,22 @@ export function ReasoningSelector({ model, reasoningEffort, onReasoningChange, p
     }
   }, [model])
 
-  // A level the new model lacks (e.g. `xhigh` after switching models) falls back to
-  // `medium`, which every reasoning model offers. A model that can't reason forces `none`, and
-  // the level it replaced is restored once a reasoning model is selected again.
-  // The ref keeps an unstable `onReasoningChange` from re-running the effect.
-  const onReasoningChangeRef = useRef(onReasoningChange)
-  onReasoningChangeRef.current = onReasoningChange
-  const effortBeforeForcedOffRef = useRef<string | null>(null)
-  useEffect(() => {
-    if (levels === undefined) return
-    if (levels.length === 0) {
-      if (reasoningEffort === "none") return
-      effortBeforeForcedOffRef.current = reasoningEffort
-      onReasoningChangeRef.current("none")
-      return
-    }
-    const wantedEffort = effortBeforeForcedOffRef.current ?? reasoningEffort
-    effortBeforeForcedOffRef.current = null
-    const supportedEffort = levels.includes(wantedEffort) ? wantedEffort : "medium"
-    if (supportedEffort !== reasoningEffort) onReasoningChangeRef.current(supportedEffort)
-  }, [levels, reasoningEffort])
+  return levels
+}
 
+/** Effort actually used for the model, derived so the stored choice survives model switches.
+ *
+ *  - Model can't reason -> `none`, stored effort untouched for the next reasoning model
+ *  - Level the model lacks (e.g. `xhigh`) -> `medium`, which every reasoning model offers
+ *  - Levels still loading -> stored effort, the backend drops unsupported params
+ */
+export function effectiveReasoningEffort(levels: string[] | undefined, storedEffort: string): string {
+  if (levels === undefined) return storedEffort
+  if (levels.length === 0) return "none"
+  return levels.includes(storedEffort) ? storedEffort : "medium"
+}
+
+export function ReasoningSelector({ levels, reasoningEffort, onReasoningChange, placement = "above" }: ReasoningSelectorProps) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const close = useCallback(() => setOpen(false), [])
