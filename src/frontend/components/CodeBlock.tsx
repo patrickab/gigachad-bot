@@ -27,7 +27,7 @@ export function CodeBlock({ codeString, language }: { codeString: string; langua
   }, [codeString])
 
   return (
-    <div className="group/code relative">
+    <div className="group/code relative" data-code-language={language === "text" ? "" : language}>
       {html ? (
         // The `!` overrides beat the inline styles the highlighter puts on its `<pre>`.
         <div

@@ -3,9 +3,10 @@
 import { Streamdown, defaultRemarkPlugins, type Components } from "streamdown"
 import { createMathPlugin } from "@streamdown/math"
 import remarkBreaks from "remark-breaks"
-import { cloneElement, isValidElement, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react"
+import { cloneElement, isValidElement, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type CSSProperties } from "react"
 import { cn } from "@/lib/utils"
 import { apiOrigin } from "@/lib/api"
+import { fenceCode, selectionToMarkdown } from "@/lib/selectionToMarkdown"
 import { HostScaleContext, offsetToCamera } from "./InfiniteViewport"
 import { createPortal } from "react-dom"
 import { Check, Copy, Globe } from "lucide-react"
@@ -116,6 +117,7 @@ function MermaidDiagram({ code }: { code: string }) {
 
   return (
     <div
+      data-markdown-source={fenceCode("mermaid", code)}
       className="my-3 flex justify-center overflow-x-auto [&_svg]:max-w-full [&_svg]:h-auto"
       dangerouslySetInnerHTML={{ __html: svg }}
     />
@@ -244,7 +246,7 @@ function MarkmapDiagram({ code }: { code: string }) {
   }, [code, themeVersion, canvasViewportHeight])
 
   if (failed) return <CodeBlock codeString={code} language="markdown" />
-  return <div ref={containerRef} className="my-3 overflow-hidden rounded-md" style={{ height: canvasViewportHeight === null ? "var(--markmap-height, 400px)" : `${canvasViewportHeight}px` }} />
+  return <div ref={containerRef} data-markdown-source={fenceCode("markmap", code)} className="my-3 overflow-hidden rounded-md" style={{ height: canvasViewportHeight === null ? "var(--markmap-height, 400px)" : `${canvasViewportHeight}px` }} />
 }
 
 const REMARK_PLUGINS = [...Object.values(defaultRemarkPlugins), remarkBreaks]
@@ -276,7 +278,7 @@ function AsciiDiagram({ codeString }: { codeString: string }) {
   }, [codeString])
 
   return (
-    <div className="group/code relative my-3">
+    <div className="group/code relative my-3" data-code-language="">
       <pre className="rounded-md p-4 m-0 text-[0.75rem] leading-[1.6] bg-surface text-ink overflow-x-auto whitespace-pre">
         <code>{codeString}</code>
       </pre>
@@ -506,8 +508,21 @@ function LaTeXMarkdownInner({
     return base
   }, [citationMap, onContentChange, handleToggle])
 
+  // Copy the underlying markdown (headings, math, code fences) instead of the rendered text.
+  const handleCopy = useCallback((event: ReactClipboardEvent<HTMLDivElement>) => {
+    const selection = window.getSelection()
+    const markdown = selection && selectionToMarkdown(selection, event.currentTarget)
+    if (!markdown) return
+    event.preventDefault()
+    event.clipboardData.setData("text/plain", markdown)
+  }, [])
+
   return (
-    <div className={cn("text-[13px] leading-relaxed", compact ? "markdown-body-compact" : "markdown-body")} style={style}>
+    <div
+      className={cn("text-[13px] leading-relaxed", compact ? "markdown-body-compact" : "markdown-body")}
+      style={style}
+      onCopy={handleCopy}
+    >
       <Streamdown
         mode={streaming ? "streaming" : "static"}
         isAnimating={false}
