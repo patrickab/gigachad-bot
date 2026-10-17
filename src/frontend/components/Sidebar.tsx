@@ -5,16 +5,18 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion } from "framer-motion"
 import { FileTree, type FileTreeItem } from "./FileTree"
 import { useFileTree } from "@/hooks/useFileTree"
-import { Boxes, Brain, FileText, FolderOpen, Lightbulb, LayoutDashboard, PenLine } from "lucide-react"
+import { Boxes, Brain, FileText, FolderOpen, Lightbulb, PenLine } from "lucide-react"
 import { useMemoryViewer } from "@/contexts/MemoryViewerContext"
 import { useProject } from "@/contexts/ProjectContext"
 import { useBranches } from "@/contexts/BranchContext"
-import { useSidebar, type AppSurface } from "@/contexts/SidebarContext"
+import { useSidebar } from "@/contexts/SidebarContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import type { BranchMeta, FileTreeNode, ProjectListItem, ProjectDocument } from "@/lib/types"
 import { ChatBranchItem } from "./ChatBranchItem"
 import { addRootFilesToProject, addFileRoot, moveHistoryItem, fileRootTree, removeFileRoot, listNotes, listProjectDocuments, moveDocument, removeDocument, writeDocument } from "@/lib/api"
-import { isArchitecturePath } from "@/lib/architecture"
+import type { AppSurface } from "@/contexts/TabContext"
+import { isArchitecturePath } from "@/lib/architecturePaths"
+import { baseName } from "@/lib/paths"
 
 const COLLAPSED_WIDTH = 0
 const EXPANDED_WIDTH = 280
@@ -27,10 +29,6 @@ function hidePending<T>(items: FileTreeItem<T>[], hidden: (item: FileTreeItem<T>
 }
 
 interface SidebarProps {
-  onOpenChat: (filename: string, qaIndex?: number) => void
-  onRefreshAll: () => Promise<void>
-  onMerge?: (childFile: string) => Promise<void>
-  onCascadeDelete?: (filename: string) => Promise<void>
   onFileSelect?: (path: string) => void
   onRootsChanged?: () => void
   /** Project documents changed through the sidebar (e.g. files dropped onto a project). */
@@ -50,10 +48,6 @@ interface SidebarProps {
 }
 
 export function Sidebar({
-  onOpenChat,
-  onRefreshAll,
-  onMerge,
-  onCascadeDelete,
   onFileSelect,
   onRootsChanged,
   onDocumentsChanged,
@@ -67,18 +61,13 @@ export function Sidebar({
   appMode,
   onAppModeChange,
 }: SidebarProps) {
-  const {
-    collapsed,
-    toggleCollapsed,
-  } = useSidebar()
+  const { collapsed } = useSidebar()
 
   const {
     branchMeta,
     visibleRootFiles: rootFiles,
     historiesLoading,
-    registerOnFileClick,
-    registerOnMerge,
-    registerOnDelete,
+    refreshAll,
   } = useBranches()
 
   const {
@@ -88,17 +77,10 @@ export function Sidebar({
     closeProject,
     createProject,
     deleteProject,
-    setDashboardOpen,
   } = useProject()
 
   const { openMemoryViewer } = useMemoryViewer()
   const { schedule, pending } = useUndoDelete()
-
-  const handleTimelineDelete = useCallback(async (file: string) => {
-    schedule(`history:${file}`, file.split("/").pop() ?? file, async () => { await onCascadeDelete?.(file) })
-  }, [onCascadeDelete, schedule])
-
-  const expandIfCollapsed = () => { if (collapsed) toggleCollapsed() }
 
   const sidebarWidth = collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH
   const animateWidth = useMemo(() => ({ width: sidebarWidth }), [sidebarWidth])
@@ -155,7 +137,7 @@ export function Sidebar({
   }, [])
 
   // A file-root root is keyed by its absolute path.
-  const deleteFileRoot = (path: string) => schedule(`root:${path}`, path.split("/").pop() ?? path, async () => {
+  const deleteFileRoot = (path: string) => schedule(`root:${path}`, baseName(path), async () => {
     const result = await removeFileRoot(path)
     setRootTreeData(result.tree)
     onRootsChanged?.()
@@ -183,10 +165,6 @@ export function Sidebar({
       depth={depth}
     />
   ), [])
-
-  useEffect(() => { registerOnFileClick(onOpenChat) }, [onOpenChat, registerOnFileClick])
-  useEffect(() => { if (onMerge) registerOnMerge(onMerge) }, [onMerge, registerOnMerge])
-  useEffect(() => { registerOnDelete(handleTimelineDelete) }, [handleTimelineDelete, registerOnDelete])
 
   return (
     <motion.aside
@@ -231,10 +209,8 @@ export function Sidebar({
               sectionIcon={Lightbulb}
               sectionTitle="Projects"
               items={canvasItems}
-              collapsed={collapsed}
               open={canvasOpen}
               onOpenChange={setCanvasOpen}
-              onExpand={expandIfCollapsed}
               controller={canvasController}
               plusTitle="New canvas"
               onElementClick={(item) => {
@@ -282,21 +258,22 @@ export function Sidebar({
             items={chatItems}
             loading={historiesLoading}
             plusTitle="New project"
-            collapsed={collapsed}
-            onExpand={expandIfCollapsed}
             controller={projectsController}
             onRootDelete={(id) => schedule(`project:${id}`, id, () => deleteProject(id))}
             onAddRoot={(name) => createProject(name)}
-            onDashboardClick={(rootId) => {
-              openProject(rootId)
-              setDashboardOpen(true)
-            }}
-            onMemoryClick={(rootId) => openMemoryViewer({ scope: "project", projectSlug: rootId })}
+            renderBranchActions={(item) => (
+              <button aria-label={`Open memory for ${item.label}`}
+                onClick={(e) => { e.stopPropagation(); openMemoryViewer({ scope: "project", projectSlug: item.id }) }}
+                className="p-0.5 rounded text-ink-faint hover:text-ink transition-colors"
+              >
+                <Brain className="h-3 w-3" />
+              </button>
+            )}
             onMoveElement={async (elementId: string, targetId: string | null) => {
               // Dropping on a project files the chat there, anywhere else makes it a plain history again.
               const slug = projects.find((p) => p.slug === targetId)?.slug ?? ""
               await moveHistoryItem(elementId, slug)
-              await onRefreshAll()
+              await refreshAll()
             }}
             renderElement={renderChatElement}
             onDropFiles={async (paths, targetId) => {
@@ -315,10 +292,8 @@ export function Sidebar({
             sectionIcon={FolderOpen}
             sectionTitle="Files"
             items={fileItems}
-            collapsed={collapsed}
             open={filesOpen}
             onOpenChange={setFilesOpen}
-            onExpand={expandIfCollapsed}
             plusTitle="Add folder"
             controller={filesController}
             rootPlaceholder="Folder path…"
@@ -441,18 +416,7 @@ function buildProjectItems(
       data: project.slug,
       icon: Lightbulb,
       isActive: activeProject === project.slug,
-      children: [
-        {
-          id: `${project.slug}/__dashboard__`,
-          label: "Dashboard",
-          type: "element" as const,
-          icon: LayoutDashboard,
-          isSystem: true,
-          displayInRoot: false,
-          data: project.slug,
-        },
-        ...items,
-      ].filter((child: FileTreeItem<string>) => child.displayInRoot !== false),
+      children: items,
     }
   })
 }

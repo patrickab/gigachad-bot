@@ -4,16 +4,15 @@ import { useCallback, useMemo } from "react"
 import type { CategoryDef } from "@/lib/types"
 import { type MemoryRecord, groupByCategoryOrder, formatCategoryName, normalizeMemoryCategory } from "@/lib/memoryUtils"
 import { ElevationProvider, ElevatedContainer } from "@/components/ElevatedContainer"
-import { MemoryCard } from "@/components/MemoryPanel"
+import { MemoryCard } from "@/components/MemoryCard"
 import { useDropZone } from "@/hooks/useDropZone"
 import { cn } from "@/lib/utils"
 
 const PLACEHOLDER_DELAY_MS = 300
 
-export interface MemoryBoardProps {
+interface MemoryBoardProps {
   memories: MemoryRecord[]
   categoryOrder: CategoryDef[]
-  scope: "global" | "project"
   disabled?: boolean
   mode?: "review" | "display"
   onChange?: (memoryId: string, text: string) => void
@@ -26,7 +25,6 @@ export interface MemoryBoardProps {
 export function MemoryBoard({
   memories,
   categoryOrder,
-  scope,
   disabled = false,
   mode = "display",
   onChange,
@@ -122,10 +120,8 @@ export function MemoryBoard({
                       >
                         <MemoryCard
                           memory={m}
-                          scope={scope}
                           disabled={disabled}
                           mode={mode}
-                          embedded
                           onChange={onChange}
                           onAccept={onAccept}
                           onCancel={onCancel}

@@ -1,10 +1,9 @@
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { ChatSidebarProvider, useSidebarElements, type ChatSidebarContextValue } from "@/components/ChatContainer"
+import { ChatSidebarProvider, useSidebarElements, type ChatSidebarContextValue } from "@/components/ChatContextPanel"
 
 function DocumentsBodyHarness() {
   const elements = useSidebarElements({
-    chatId: "chat-1",
     slug: "proj",
     allAttachments: [],
     expandedEntries: [],
@@ -50,5 +49,19 @@ describe("DocumentsBody title interaction", () => {
 
     expect(onRenameDocument).toHaveBeenCalledWith(document.path, "summary")
     expect(onSelectDocument).not.toHaveBeenCalled()
+  })
+})
+
+describe("DocumentsBody list", () => {
+  it("follows the documents in the context when one is deleted", () => {
+    const first = { path: "project/proj/document/a.md", name: "a.md", mime: "text/markdown" }
+    const second = { path: "project/proj/document/b.md", name: "b.md", mime: "text/markdown" }
+    const { rerender } = render(<DocumentsHarness context={{ documents: [first, second], onOpenDocuments: () => {} }} />)
+    expect(screen.getByText("b.md")).toBeTruthy()
+
+    rerender(<DocumentsHarness context={{ documents: [first], onOpenDocuments: () => {} }} />)
+
+    expect(screen.queryByText("b.md")).toBeNull()
+    expect(screen.getByText("a.md")).toBeTruthy()
   })
 })

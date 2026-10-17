@@ -1,33 +1,30 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useEffect, useState } from "react"
 import { Check, Copy } from "lucide-react"
 import { highlightCode } from "@/lib/markdown-syntax-highlighting"
+import { useCopyFeedback } from "@/hooks/useCopyFeedback"
+import { cn } from "@/lib/utils"
 
 /** Syntax-highlighted code with a hover-revealed copy button. Shared by markdown-rendered
- *  fenced code and any other surface that needs to show a script (e.g. a tool call's source). */
-export function CodeBlock({ codeString, language }: { codeString: string; language: string }) {
-  const [copied, setCopied] = useState(false)
+ *  fenced code and any other surface that needs to show a script (e.g. a tool call's source).
+ *  `plain` skips highlighting, for diagrams drawn with text characters. */
+export function CodeBlock({ codeString, language, plain = false }: { codeString: string; language: string; plain?: boolean }) {
+  const { copied, copy } = useCopyFeedback(codeString)
   const [html, setHtml] = useState("")
 
   // Highlighting is async. Plain `<pre>` shows until it resolves, and `cancelled` drops stale results.
   useEffect(() => {
+    if (plain) return
     let cancelled = false
     highlightCode(codeString, language).then((result) => {
       if (!cancelled) setHtml(result)
     })
     return () => { cancelled = true }
-  }, [codeString, language])
-
-  const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(codeString).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    })
-  }, [codeString])
+  }, [codeString, language, plain])
 
   return (
-    <div className="group/code relative" data-code-language={language === "text" ? "" : language}>
+    <div className={cn("group/code relative", plain && "my-3")} data-code-language={language === "text" ? "" : language}>
       {html ? (
         // The `!` overrides beat the inline styles the highlighter puts on its `<pre>`.
         <div
@@ -35,11 +32,11 @@ export function CodeBlock({ codeString, language }: { codeString: string; langua
           dangerouslySetInnerHTML={{ __html: html }}
         />
       ) : (
-        <pre className="rounded-md p-4 m-0 text-[0.75rem] leading-[1.6] bg-surface text-ink overflow-x-auto"><code>{codeString}</code></pre>
+        <pre className={cn("rounded-md p-4 m-0 text-[0.75rem] leading-[1.6] bg-surface text-ink overflow-x-auto", plain && "whitespace-pre")}><code>{codeString}</code></pre>
       )}
       <button
-        aria-label="Copy code"
-        onClick={handleCopy}
+        aria-label={plain ? "Copy diagram" : "Copy code"}
+        onClick={copy}
         className="absolute top-2 right-2 rounded p-1 opacity-0 transition-opacity group-hover/code:opacity-100 hover:bg-surface-elevated/60 text-ink-subtle hover:text-ink"
       >
         {copied ? <Check className="h-3.5 w-3.5 text-ink" /> : <Copy className="h-3.5 w-3.5" />}

@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { getApiBase, setApiBase } from "@/lib/config"
-import { normalizeAttachment, normalizeMessageAttachments, toolArtifactDocument } from "@/lib/attachments"
+import { buildAttachedSend, composeUserMessage, normalizeAttachment, normalizeMessageAttachments, toolArtifactDocument, withAttachments } from "@/lib/attachments"
 import type { Attachment, Message } from "@/lib/types"
 
 const originalApiBase = getApiBase()
@@ -110,4 +110,68 @@ describe("toolArtifactDocument", () => {
     })).toEqual({ name: "sandbox_plot-plot-1.plot.json", content: '{\n  "data": [\n    {\n      "type": "bar"\n    }\n  ]\n}' })
   })
 
+})
+
+describe("withAttachments", () => {
+  it("replaces attachments and rebuilds hiddenContent from the active text ones", () => {
+    const msg: Message = { role: "user", content: "q", hiddenContent: "stale" }
+    const attachments: Attachment[] = [
+      { name: "a.txt", mime: "text/plain", url: "", active: true, content: "alpha" },
+      { name: "b.txt", mime: "text/plain", url: "", active: false, content: "beta" },
+    ]
+
+    const patched = withAttachments(msg, attachments)
+
+    expect(patched.attachments).toBe(attachments)
+    expect(patched.hiddenContent).toBe("**Attached files:**\n\n### a.txt\n\nalpha\n\n## END")
+    expect(withAttachments(msg, []).hiddenContent).toBeUndefined()
+  })
+})
+
+describe("composeUserMessage", () => {
+  it("puts hidden content ahead of the prompt", () => {
+    expect(composeUserMessage("hello", "HIDDEN")).toBe("HIDDEN\n\nhello")
+  })
+
+  it("falls back to a default prompt for attachment-only turns", () => {
+    expect(composeUserMessage("  ", undefined)).toBe("Please review the attached document and provide a summary.")
+    expect(composeUserMessage("", "HIDDEN")).toBe("HIDDEN\n\nPlease review the attached document and provide a summary.")
+  })
+})
+
+describe("buildAttachedSend", () => {
+  it("parses unparsed documents and assembles the request with prior and new image paths", async () => {
+    const attachments: Attachment[] = [
+      { name: "doc.pdf", mime: "application/pdf", url: "", active: true },
+      { name: "new.png", mime: "image/png", url: "", active: true },
+    ]
+    const priorMessages: Message[] = [
+      { role: "user", content: "earlier", attachments: [{ name: "old.png", mime: "image/png", url: "", active: true }] },
+      { role: "assistant", content: "ok" },
+    ]
+    const parse = vi.fn(async () => [{ name: "doc.pdf", parsedMd: "parsed text" }])
+
+    const { enriched, request } = await buildAttachedSend(
+      {
+        text: "",
+        attachments,
+        priorMessages,
+        chatId: "chat-1",
+        slug: "proj",
+        baseParams: { model: "m", downscale_images: true },
+      },
+      parse,
+    )
+
+    expect(parse).toHaveBeenCalledWith("chat-1", ["doc.pdf"], "proj")
+    expect(enriched[0].parsedMd).toBe("parsed text")
+    expect(request).toEqual({
+      model: "m",
+      downscale_images: true,
+      chat_id: "chat-1",
+      user_msg: "**Attached files:**\n\n### doc.pdf\n\nparsed text\n\n## END\n\nPlease review the attached document and provide a summary.",
+      img_paths: ["old.png", "new.png"],
+      project_slug: "proj",
+    })
+  })
 })

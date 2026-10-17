@@ -3,14 +3,18 @@
 import { Streamdown, defaultRemarkPlugins, type Components } from "streamdown"
 import { createMathPlugin } from "@streamdown/math"
 import remarkBreaks from "remark-breaks"
-import { cloneElement, isValidElement, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type CSSProperties } from "react"
+import { memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, type ReactNode } from "react"
+import type { Markmap } from "markmap-view"
 import { cn } from "@/lib/utils"
-import { apiOrigin } from "@/lib/api"
+import { apiOrigin } from "@/lib/urls"
 import { fenceCode, selectionToMarkdown } from "@/lib/selectionToMarkdown"
-import { HostScaleContext, offsetToCamera } from "./InfiniteViewport"
+import { HostScaleContext } from "@/contexts/HostScaleContext"
+import { offsetToCamera } from "@/lib/viewport"
 import { createPortal } from "react-dom"
-import { Check, Copy, Globe } from "lucide-react"
+import { Globe } from "lucide-react"
 import { CodeBlock } from "./CodeBlock"
+import { useThemeName } from "@/hooks/useThemeName"
+import type { ThemeName } from "@/lib/palette"
 import "katex/dist/katex.min.css"
 
 const mathPlugin = createMathPlugin({ singleDollarTextMath: true })
@@ -36,18 +40,6 @@ const MERMAID_LIGHT = {
   ink: "rgb(80, 77, 70)", inkMuted: "rgb(108, 104, 97)", inkSubtle: "rgb(137, 134, 127)",
   inkFaint: "rgb(167, 164, 159)", paper: "rgb(245, 238, 224)", surface: "rgb(250, 246, 238)",
   surfaceElevated: "rgb(254, 252, 247)",
-}
-
-// Bumps on any <html> class change (light/dark/glass toggle) so diagrams re-render with
-// the current palette — their colors are read/baked at render time, not via reactive CSS.
-function useThemeVersion(): number {
-  const [v, setV] = useState(0)
-  useEffect(() => {
-    const obs = new MutationObserver(() => setV((x) => x + 1))
-    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] })
-    return () => obs.disconnect()
-  }, [])
-  return v
 }
 
 function enqueueMermaidRender(id: string, code: string): Promise<string> {
@@ -97,7 +89,7 @@ function enqueueMermaidRender(id: string, code: string): Promise<string> {
 function MermaidDiagram({ code }: { code: string }) {
   const [svg, setSvg] = useState("")
   const [failed, setFailed] = useState(false)
-  const themeVersion = useThemeVersion()
+  const themeName = useThemeName()
 
   useEffect(() => {
     let cancelled = false
@@ -110,7 +102,7 @@ function MermaidDiagram({ code }: { code: string }) {
       .then((rendered) => { if (!cancelled) setSvg(rendered) })
       .catch(() => { if (!cancelled) setFailed(true) })
     return () => { cancelled = true }
-  }, [code, themeVersion])
+  }, [code, themeName])
 
   if (failed) return <CodeBlock codeString={code} language="mermaid" />
   if (!svg) return <div className="my-3 text-xs text-ink-subtle">Rendering diagram…</div>
@@ -130,11 +122,11 @@ const CANVAS_MARKMAP_PADDING = 24
 function MarkmapDiagram({ code }: { code: string }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
-  const mmRef = useRef<any>(null)
+  const mmRef = useRef<Markmap | null>(null)
   const [failed, setFailed] = useState(false)
-  const themeVersion = useThemeVersion()
+  const themeName = useThemeName()
   const [canvasViewportHeight, setCanvasViewportHeight] = useState<number | null>(null)
-  const renderedRef = useRef<{ code: string; themeVersion: number } | null>(null)
+  const renderedRef = useRef<{ code: string; themeName: ThemeName } | null>(null)
 
   // A generated document sits under Streamdown's auto-sized <pre>/<code> wrappers.
   // Measure the canvas attachment itself so the map owns its complete viewport, not
@@ -193,7 +185,7 @@ function MarkmapDiagram({ code }: { code: string }) {
         const { Markmap } = await import("markmap-view")
         if (cancelled || !containerRef.current) return
         if (containerRef.current.closest("[data-canvas-attachment]") && canvasViewportHeight === null) return
-        if (renderedRef.current?.code === code && renderedRef.current.themeVersion === themeVersion) return
+        if (renderedRef.current?.code === code && renderedRef.current.themeName === themeName) return
 
         const transformer = new Transformer()
         const { root } = transformer.transform(code)
@@ -206,10 +198,9 @@ function MarkmapDiagram({ code }: { code: string }) {
           svgRef.current = svg
         }
 
-        const isLight = document.documentElement.classList.contains("light")
-        const isGlass = document.documentElement.classList.contains("glass")
-        const ink = isLight ? "#1c1917" : isGlass ? "rgba(255,255,255,0.85)" : MERMAID_DARK.ink
-        const linkColor = isLight ? "#a8a29e" : isGlass ? "rgba(255,255,255,0.2)" : MERMAID_DARK.inkFaint
+        const isLight = themeName === "light"
+        const ink = isLight ? "#1c1917" : MERMAID_DARK.ink
+        const linkColor = isLight ? "#a8a29e" : MERMAID_DARK.inkFaint
 
         // Markmap's native drag and wheel controls make this a real viewport. Fit only
         // new content. A canvas resize must preserve the user's pan and zoom.
@@ -234,7 +225,7 @@ function MarkmapDiagram({ code }: { code: string }) {
             if (scale < MIN_MARKMAP_SCALE) await mmRef.current.rescale(MIN_MARKMAP_SCALE / scale)
           } catch {}
         }
-        renderedRef.current = { code, themeVersion }
+        renderedRef.current = { code, themeName }
 
         // text recolors on theme switch; link color is baked at create (minor)
         svgRef.current.style.setProperty("--markmap-text-color", ink)
@@ -243,7 +234,7 @@ function MarkmapDiagram({ code }: { code: string }) {
       }
     })()
     return () => { cancelled = true }
-  }, [code, themeVersion, canvasViewportHeight])
+  }, [code, themeName, canvasViewportHeight])
 
   if (failed) return <CodeBlock codeString={code} language="markdown" />
   return <div ref={containerRef} data-markdown-source={fenceCode("markmap", code)} className="my-3 overflow-hidden rounded-md" style={{ height: canvasViewportHeight === null ? "var(--markmap-height, 400px)" : `${canvasViewportHeight}px` }} />
@@ -266,31 +257,6 @@ function normalizeMathDelimiters(input: string): string {
         .replace(/\\\)/g, () => "$")
     })
     .join("")
-}
-
-function AsciiDiagram({ codeString }: { codeString: string }) {
-  const [copied, setCopied] = useState(false)
-  const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(codeString).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    })
-  }, [codeString])
-
-  return (
-    <div className="group/code relative my-3" data-code-language="">
-      <pre className="rounded-md p-4 m-0 text-[0.75rem] leading-[1.6] bg-surface text-ink overflow-x-auto whitespace-pre">
-        <code>{codeString}</code>
-      </pre>
-      <button
-        aria-label="Copy diagram"
-        onClick={handleCopy}
-        className="absolute top-2 right-2 rounded p-1 opacity-0 transition-opacity group-hover/code:opacity-100 hover:bg-surface-elevated/60 text-ink-subtle hover:text-ink"
-      >
-        {copied ? <Check className="h-3.5 w-3.5 text-ink" /> : <Copy className="h-3.5 w-3.5" />}
-      </button>
-    </div>
-  )
 }
 
 // Box-drawing (U+2500-257F) and block element (U+2580-259F) chars: treat as a diagram when dense enough.
@@ -319,10 +285,10 @@ const PROSE_COMPONENTS: Components = {
   del: "del",
   // Backend-emitted image paths (e.g. /mineru/images/...) are root-relative and
   // resolve against the backend, not whichever origin serves the frontend.
-  img: ({ src, ...props }: any) => (
+  img: ({ src, ...props }) => (
     <img src={typeof src === "string" && src.startsWith("/") && !src.startsWith("//") ? `${apiOrigin()}${src}` : src} {...props} />
   ),
-  table: ({ children, ...props }: any) => (
+  table: ({ children, ...props }) => (
     <div className="overflow-x-auto my-3">
       <table {...props}>{children}</table>
     </div>
@@ -332,19 +298,8 @@ const PROSE_COMPONENTS: Components = {
   tr: "tr",
   th: "th",
   td: "td",
-  // Flag block code so `code` can tell it apart from inline code.
-  pre: ({ children }: any) =>
-    isValidElement(children)
-      ? cloneElement(children, { "data-block": "true" } as Record<string, string>)
-      : <>{children}</>,
-  code: ({ className, children, ...props }: any) => {
-    if (!("data-block" in props)) {
-      return (
-        <code className={className} {...props}>
-          {children}
-        </code>
-      )
-    }
+  inlineCode: (props) => <code {...props} />,
+  code: ({ className, children }) => {
     const match = /language-(\w+)/.exec(className || "")
     const codeString = String(children).replace(/\n$/, "")
     if (match?.[1] === "markmap" || className?.includes("markmap")) {
@@ -354,20 +309,17 @@ const PROSE_COMPONENTS: Components = {
       return <MermaidDiagram code={codeString} />
     }
     if (!match && containsAsciiTableArt(codeString)) {
-      return <AsciiDiagram codeString={codeString} />
+      return <CodeBlock codeString={codeString} language="text" plain />
     }
     return <CodeBlock codeString={codeString} language={match?.[1] || "text"} />
   },
 }
 
 // Hover pill for numeric citation links. The popup is portaled and hides after a short delay so the pointer can reach it.
-function CitationPill({ children, href, title, ...props }: any) {
+function CitationPill({ source, children }: { source: { title: string; url: string; content: string }; children: ReactNode }) {
   const pillRef = useRef<HTMLAnchorElement>(null)
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
   const hideTimer = useRef<ReturnType<typeof setTimeout>>(null)
-
-  const popupTitle = (props["data-title"] as string) || title || ""
-  const popupContent = (props["data-content"] as string) || ""
 
   const show = useCallback(() => {
     if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = null }
@@ -385,7 +337,7 @@ function CitationPill({ children, href, title, ...props }: any) {
     <>
       <a
         ref={pillRef}
-        href={href}
+        href={source.url}
         target="_blank"
         rel="noopener noreferrer"
         className="inline-flex items-center align-middle rounded-full bg-surface-elevated/40 border border-divider-strong/40 px-1.5 py-0 text-[10px] text-ink-muted hover:bg-hover hover:border-divider-strong transition-colors no-underline"
@@ -405,11 +357,11 @@ function CitationPill({ children, href, title, ...props }: any) {
             <Globe className="h-2.5 w-2.5 text-ink shrink-0" />
             <span className="text-[10px] font-medium text-ink truncate">{children}</span>
           </span>
-          {popupTitle && (
-            <span className="text-[10px] font-medium text-ink mb-0.5 line-clamp-2 block">{popupTitle}</span>
+          {source.title && (
+            <span className="text-[10px] font-medium text-ink mb-0.5 line-clamp-2 block">{source.title}</span>
           )}
-          {popupContent && (
-            <span className="text-[9px] text-ink-subtle line-clamp-3 block">{popupContent}</span>
+          {source.content && (
+            <span className="text-[9px] text-ink-subtle line-clamp-3 block">{source.content}</span>
           )}
         </div>,
         document.body
@@ -464,17 +416,12 @@ function LaTeXMarkdownInner({
   const components = useMemo<Components>(() => {
     const base: Components = {
       ...PROSE_COMPONENTS,
-      a({ children, href, title, ...props }: any) {
+      a({ children, href, title, ...props }) {
         const num = String(children)
         const info = citationMap?.[num]
         if (info) {
           return (
-            <CitationPill
-              href={info.url}
-              title={info.title}
-              data-title={info.title}
-              data-content={info.content}
-            >
+            <CitationPill source={info}>
               {children}
             </CitationPill>
           )
@@ -492,7 +439,7 @@ function LaTeXMarkdownInner({
       },
     }
     if (onContentChange) {
-      base.input = ({ checked, type, ...rest }: any) => {
+      base.input = ({ checked, type, ...rest }) => {
         if (type !== "checkbox") return <input type={type} checked={checked} {...rest} />
         const idx = checkboxIdx.current++
         return (

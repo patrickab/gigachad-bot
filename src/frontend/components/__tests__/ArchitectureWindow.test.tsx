@@ -12,8 +12,8 @@ vi.mock("@/components/ArchitectureDiagramSurface", () => ({
     </div>
   ),
 }))
-vi.mock("@/components/DocumentEditor", () => ({
-  DocumentEditor: ({ path, onSaved }: { path: string, onSaved?: () => void }) => <button type="button" data-testid="text-editor" onClick={() => onSaved?.()}>{path}</button>,
+vi.mock("@/components/TextDocumentEditor", () => ({
+  ArchitectureSourceEditor: ({ path, onSaved }: { path: string, onSaved?: () => void }) => <button type="button" data-testid="text-editor" onClick={() => onSaved?.()}>{path}</button>,
 }))
 
 const feed = vi.hoisted(() => ({ listener: null as ((event: ChangeEvent) => void) | null }))
@@ -23,7 +23,6 @@ vi.mock("@/lib/syncStream", () => ({
     return () => { feed.listener = null }
   },
 }))
-vi.mock("@/lib/deviceId", () => ({ getDeviceId: () => "this-device" }))
 /** Another device edited one of the project's architecture files. */
 const remoteChange = () => act(() => feed.listener!({ seq: 1, resource_kind: "document", resource_key: "graph/proj/backend/backend.c4", version: 2, device_id: "other-device" }))
 

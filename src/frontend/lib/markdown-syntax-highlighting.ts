@@ -39,7 +39,7 @@ import likec4 from "./grammars/likec4.tmLanguage.json"
 let highlighterPromise: Promise<HighlighterCore> | null = null
 
 /** Lazily creates the shared highlighter. The JS regex engine avoids shipping WASM. */
-export function getHighlighter(): Promise<HighlighterCore> {
+function getHighlighter(): Promise<HighlighterCore> {
   if (!highlighterPromise) {
     highlighterPromise = createHighlighterCore({
       themes: [andromeeda, snazzyLight],
@@ -95,30 +95,21 @@ const LANG_ALIASES: Record<string, string> = {
   c4: "likec4",
 }
 
+const SHIKI_OPTIONS = {
+  themes: { dark: "andromeeda", light: "snazzy-light" },
+  defaultColor: false,
+} as const
+
 /** Dual-theme HTML (CSS vars per scheme). Unknown languages fall back to plain text. Returns "" if highlighting fails. */
 export async function highlightCode(code: string, lang: string): Promise<string> {
   const resolved = LANG_ALIASES[lang] ?? lang
   const hl = await getHighlighter()
   const safeLang = hl.getLoadedLanguages().includes(resolved) ? resolved : "text"
   try {
-    return hl.codeToHtml(code, {
-      lang: safeLang,
-      themes: {
-        dark: "andromeeda",
-        light: "snazzy-light",
-      },
-      defaultColor: false,
-    })
+    return hl.codeToHtml(code, { lang: safeLang, ...SHIKI_OPTIONS })
   } catch {
     try {
-      return hl.codeToHtml(code, {
-        lang: "text",
-        themes: {
-          dark: "andromeeda",
-          light: "snazzy-light",
-        },
-        defaultColor: false,
-      })
+      return hl.codeToHtml(code, { lang: "text", ...SHIKI_OPTIONS })
     } catch {
       return ""
     }

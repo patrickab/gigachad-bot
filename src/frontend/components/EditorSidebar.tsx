@@ -2,10 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { ArrowUp, Check, Square, X } from "lucide-react"
-import { motion, useMotionValue, useTransform, animate } from "framer-motion"
 import { createChatStream } from "@/lib/api"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
-import { MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH } from "./ChatSidebar"
+import { SidePanelFrame } from "./SidePanel"
 
 interface NoteMessage {
   role: "user" | "assistant"
@@ -70,40 +69,6 @@ export function EditorSidebar({ content, model, width, onWidthChange, onApply }:
   contentRef.current = content
   const scrollRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<(() => void) | null>(null)
-  const dragging = useRef(false)
-  const motionWidth = useMotionValue(width)
-
-  // Spring to external width changes, but never fight an active drag
-  useEffect(() => {
-    if (dragging.current) return
-    const controls = animate(motionWidth, width, { type: "spring", stiffness: 400, damping: 40, mass: 0.6 })
-    return controls.stop
-  }, [width, motionWidth])
-
-  const widthStyle = useTransform(motionWidth, (v) => `${v}px`)
-
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    dragging.current = true
-    const startX = e.clientX
-    const startWidth = motionWidth.get()
-    const onMouseMove = (ev: MouseEvent) => {
-      if (!dragging.current) return
-      motionWidth.set(Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, startWidth + (startX - ev.clientX))))
-    }
-    const onMouseUp = () => {
-      if (!dragging.current) return
-      dragging.current = false
-      const final = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, motionWidth.get()))
-      motionWidth.set(final)
-      onWidthChange(final)
-      document.removeEventListener("mousemove", onMouseMove)
-      document.removeEventListener("mouseup", onMouseUp)
-    }
-    document.addEventListener("mousemove", onMouseMove)
-    document.addEventListener("mouseup", onMouseUp)
-  }, [motionWidth, onWidthChange])
-
   // Keep the newest message in view
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" })
@@ -142,18 +107,7 @@ export function EditorSidebar({ content, model, width, onWidthChange, onApply }:
   }, [input, isStreaming, messages, model])
 
   return (
-    <motion.aside
-      initial={false}
-      style={{ width: widthStyle }}
-      className="shrink-0 border-l border-divider bg-paper flex flex-col overflow-hidden relative"
-    >
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize sidebar"
-        className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-surface-elevated active:bg-surface-elevated focus-visible:bg-surface-elevated transition-colors z-10"
-        onMouseDown={handleMouseDown}
-      />
+    <SidePanelFrame width={width} onWidthChange={onWidthChange} className="border-l border-divider bg-paper">
       <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0 p-3 space-y-3">
         {messages.map((msg, i) => (
           <div key={i}>
@@ -195,7 +149,7 @@ export function EditorSidebar({ content, model, width, onWidthChange, onApply }:
           )}
         </div>
       </div>
-    </motion.aside>
+    </SidePanelFrame>
   )
 }
 

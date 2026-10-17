@@ -37,7 +37,6 @@ vi.mock("@/lib/api", () => ({
   uploadDocument: (...a: any[]) => impls.uploadDocument(...a),
   uploadFile: (...a: any[]) => impls.uploadFile(...a),
   attachDocument: (...a: any[]) => impls.attachDocument(...a),
-  fileViewerRawUrl: (path: string) => `raw:${path}`,
   loadFileViewerText: (...a: any[]) => impls.loadFileViewerText(...a),
   renameDocument: (...a: any[]) => impls.renameDocument(...a),
 }))
@@ -46,7 +45,11 @@ vi.mock("@/lib/drawing", () => ({
   renderCanvasToJpeg: vi.fn(async () => new Blob([new Uint8Array([0])], { type: "image/jpeg" })),
 }))
 vi.mock("@/lib/attachments", () => ({
-  buildHiddenContent: (atts: any[]) => (atts.map((a) => a.content || "").filter(Boolean).join("\n") || null),
+  withAttachments: (msg: object, atts: { content?: string }[]) => ({
+    ...msg,
+    attachments: atts,
+    hiddenContent: atts.map((a) => a.content || "").filter(Boolean).join("\n") || undefined,
+  }),
 }))
 
 import * as apiMock from "@/lib/api"
@@ -55,6 +58,7 @@ import type { ChatInputHandle } from "@/components/ChatInput"
 import { useProjectDocuments } from "@/hooks/useProjectDocuments"
 import { UndoDeleteProvider } from "@/contexts/UndoDeleteContext"
 import { renderCanvasToJpeg } from "@/lib/drawing"
+import { fileViewerRawUrl } from "@/lib/urls"
 
 const renderHook = <T,>(callback: () => T) => testingRenderHook(callback, { wrapper: UndoDeleteProvider })
 function makeChatInputRef(handle: Partial<ChatInputHandle> = {}) {
@@ -113,7 +117,7 @@ describe("useProjectDocuments", () => {
       await act(async () => { await result.current.handleDocumentSelect("/lib/x.canvas") })
 
       expect(renderCanvasToJpeg).toHaveBeenCalledWith([], 20, [
-        { url: "raw:/lib/plot.png", x: 10, y: 20, width: 30, aspect: 2 },
+        { url: fileViewerRawUrl("/lib/plot.png"), x: 10, y: 20, width: 30, aspect: 2 },
       ], [])
     })
 

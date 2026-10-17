@@ -2,9 +2,6 @@
 
 import { createContext, useContext, useState, type ReactNode } from "react"
 
-/** Top-level workspace mode of a tab. */
-export type AppSurface = "chat" | "canvas"
-
 interface SidebarContextValue {
   collapsed: boolean
   toggleCollapsed: () => void

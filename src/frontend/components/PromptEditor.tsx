@@ -6,6 +6,7 @@ import { Plus, Trash2, Save, X, RefreshCw } from "lucide-react"
 import { FloatingWindow } from "./FloatingWindow"
 import { cn } from "@/lib/utils"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
+import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import {
   fetchPromptList,
   fetchPromptBlocks,
@@ -38,6 +39,7 @@ export function PromptEditor({ open, onClose, onPromptsChanged }: PromptEditorPr
   const [dirty, setDirty] = useState(false)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState("")
+  useEscapeLayer(() => setCreating(false), creating)
   const dragSlug = useRef<string | null>(null)
 
   // Live-reorder the list as the dragged item passes over others; persist once on drop.
@@ -144,7 +146,7 @@ export function PromptEditor({ open, onClose, onPromptsChanged }: PromptEditorPr
                   autoFocus
                   value={newName}
                   onChange={e => setNewName(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter") handleCreate(); if (e.key === "Escape") setCreating(false) }}
+                  onKeyDown={e => { if (e.key === "Enter") handleCreate() }}
                   placeholder="Prompt name..."
                   className="flex-1 rounded border border-divider bg-surface px-2 py-1 text-xs text-ink outline-none"
                 />

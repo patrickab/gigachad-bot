@@ -5,10 +5,10 @@ import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import { X, Check, Maximize2, Minimize2, Undo2, Trash2, Pencil } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { getStroke } from "perfect-freehand"
-import { type StrokeData, STROKE_OPTIONS as BASE_STROKE_OPTIONS, getSvgPathFromStroke, renderStrokesToJpeg } from "@/lib/drawing"
+import { type StrokeData, STROKE_OPTIONS as BASE_STROKE_OPTIONS, penPressure, renderStrokesToJpeg, strokeOutlinePath } from "@/lib/drawing"
 import { uploadFile as apiUploadFile } from "@/lib/api"
-import { activeThemeName, readToken } from "@/lib/palette"
+import { useThemeName } from "@/hooks/useThemeName"
+import { readToken } from "@/lib/palette"
 import type { Attachment } from "@/lib/types"
 
 const THIN_WIDTH = 3
@@ -17,10 +17,6 @@ const THICK_WIDTH = 8
 // Live pen input carries no real pressure, so simulate it here. The shared base
 // in lib/drawing renders already-captured strokes and leaves it off.
 const STROKE_OPTIONS = { ...BASE_STROKE_OPTIONS, simulatePressure: true } as const
-
-function detectTheme(): "dark" | "light" {
-  return activeThemeName()
-}
 
 interface DrawingCanvasProps {
   chatId: string
@@ -37,21 +33,9 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
   const [isMaximized, setIsMaximized] = useState(false)
   const [isErasing, setIsErasing] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
-  const [theme, setTheme] = useState(detectTheme)
+  useThemeName() // re-read the palette tokens below when the theme flips
 
   const svgRef = useRef<SVGSVGElement>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const observer = new MutationObserver(() => {
-      setTheme(detectTheme())
-    })
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    })
-    return () => observer.disconnect()
-  }, [])
 
   useEffect(() => {
     function handler(e: KeyboardEvent) {
@@ -79,9 +63,7 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
       const rect = svg.getBoundingClientRect()
       const x = e.clientX - rect.left
       const y = e.clientY - rect.top
-      // Mouse and some pens report 0 pressure, fall back to a mid value
-      const pressure = e.pressure > 0 ? e.pressure : 0.5
-      return [x, y, pressure]
+      return [x, y, penPressure(e)]
     },
     [],
   )
@@ -134,8 +116,8 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
     [isDrawing, isErasing, getPointerPos],
   )
 
-  const handlePointerUp = useCallback((e?: React.PointerEvent<SVGSVGElement>) => {
-    if (e?.pointerType === "touch") return
+  const handlePointerUp = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
+    if (e.pointerType === "touch") return
     if (isErasing) {
       setIsErasing(false)
       return
@@ -183,12 +165,9 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
     }
   }, [strokes, chatId, slug, onConfirm])
 
-  const currentStrokeOutline =
-    currentPoints.length >= 2
-      ? getSvgPathFromStroke(
-          getStroke(currentPoints, { ...STROKE_OPTIONS, size: baseWidth, last: false }),
-        )
-      : ""
+  const currentStrokeOutline = currentPoints.length >= 2
+    ? strokeOutlinePath(currentPoints, baseWidth, { ...STROKE_OPTIONS, last: false })
+    : ""
 
   return createPortal(
     <AnimatePresence>
@@ -280,10 +259,7 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
               </div>
             </div>
 
-          <div
-            ref={containerRef}
-            className="flex-1 min-h-0 relative"
-          >
+          <div className="flex-1 min-h-0 relative">
             <svg
               ref={svgRef}
               className="w-full h-full"
@@ -295,11 +271,7 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
             >
               <rect width="100%" height="100%" fill="var(--surface-elevated)" />
               {strokes.map((stroke, i) => {
-                const outline = getStroke(stroke.points, {
-                  ...STROKE_OPTIONS,
-                  size: stroke.width,
-                })
-                const pathD = getSvgPathFromStroke(outline)
+                const pathD = strokeOutlinePath(stroke.points, stroke.width, STROKE_OPTIONS)
                 if (!pathD) return null
                 return <path key={i} d={pathD} fill={stroke.color} />
               })}

@@ -3,16 +3,18 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { motion } from "framer-motion"
-import { ArrowUp, Loader2, Plus, LayoutGrid, Mic, Square, X, FileText, Image as ImageIcon, File as FileIcon, FileUp, Pencil } from "lucide-react"
+import { ArrowUp, Loader2, Plus, LayoutGrid, Mic, Square, X, File as FileIcon, FileUp, Pencil } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { uploadFile as apiUploadFile } from "@/lib/api"
 import type { Attachment } from "@/lib/types"
 import { isImageAttachment } from "@/lib/attachments"
 import { useClickOutside } from "@/hooks/useClickOutside"
-import { TOOLS, useModeState } from "@/hooks/useModeState"
+import { useEnabledTools } from "@/contexts/EnabledToolsContext"
+import { TOOLS } from "@/lib/tools"
 import { useSettings } from "@/contexts/SettingsContext"
 import { DrawingCanvas } from "./DrawingCanvas"
 import { OCRPanel } from "./OCRPanel"
+import { AttachmentIcon } from "./AttachmentView"
 import { AttachmentPreview } from "./AttachmentPreview"
 import { ImageThumbnail } from "./MessageAttachments"
 import { ToolMenuItem, ToolMenuSection } from "./ToolMenuItem"
@@ -29,12 +31,6 @@ interface ChatInputProps {
 
 export interface ChatInputHandle {
   addAttachment: (att: Attachment) => void
-}
-
-function fileIcon(mime: string) {
-  if (mime.startsWith("image/")) return ImageIcon
-  if (mime === "application/pdf") return FileText
-  return FileIcon
 }
 
 async function toDataUrl(url: string): Promise<string> {
@@ -55,7 +51,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   onCancel,
   slug = null,
 }, ref) {
-  const { enabledTools, toggleTool } = useModeState()
+  const { enabledTools, toggleTool } = useEnabledTools()
   const { ocrModel } = useSettings()
 
   const toolEntries = TOOLS.map((tool) => ({
@@ -203,7 +199,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
           className="relative z-10 mb-2 flex flex-wrap gap-2"
         >
           {attachments.map((att) => {
-            const Icon = fileIcon(att.mime)
             const uploading = uploadingNames.has(att.name)
             const spinner = <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-ink-faint border-t-ink" />
             const isImage = isImageAttachment(att)
@@ -221,7 +216,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                     onClick={() => setPreviewAttachment(att)}
                     className="flex items-center gap-1.5 rounded-xl border border-divider-strong bg-surface-elevated px-2.5 py-1.5 pr-6 cursor-pointer hover:border-ink-muted transition-colors"
                   >
-                    {uploading ? spinner : <Icon className="h-3.5 w-3.5 shrink-0 text-ink" />}
+                    {uploading ? spinner : <AttachmentIcon mime={att.mime} generic={FileIcon} size="h-3.5 w-3.5" genericMuted={false} />}
                     <span className="max-w-[160px] truncate text-xs text-ink">{att.name}</span>
                   </div>
                 )}

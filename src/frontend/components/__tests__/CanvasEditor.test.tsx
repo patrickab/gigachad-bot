@@ -14,9 +14,26 @@
 import { useState } from "react"
 import { describe, it, expect, vi } from "vitest"
 import { render, act, fireEvent, waitFor } from "@testing-library/react"
-import { TabActiveProvider } from "@/components/TabManager"
+import { TabContext, type TabContextValue } from "@/contexts/TabContext"
+import { DEFAULT_TAB_CONFIG } from "@/contexts/SettingsContext"
 import { UndoDeleteProvider } from "@/contexts/UndoDeleteContext"
-import type { CanvasDocument } from "@/components/CanvasEditor"
+import type { CanvasDocument } from "@/lib/canvasDocument"
+
+const noop = () => {}
+
+/** Provides a tab whose frontmost state is `value`. */
+function TabActiveProvider({ value, children }: { value: boolean; children: React.ReactNode }) {
+  const tab: TabContextValue = {
+    tab: { id: "t1", name: null, chatId: "c1", historyFile: null, title: null, config: DEFAULT_TAB_CONFIG, appMode: "canvas" },
+    isActive: value,
+    setModeLabel: noop,
+    updateConfig: noop,
+    setAppMode: noop,
+    setHistoryFile: noop,
+    setTitle: noop,
+  }
+  return <TabContext.Provider value={tab}>{children}</TabContext.Provider>
+}
 
 vi.mock("@/components/PdfViewer", () => ({
   PdfViewer: ({ initialPage = 1, onPageChange }: { initialPage?: number; onPageChange?: (page: number) => void }) =>
@@ -47,7 +64,6 @@ vi.mock("@/components/DocumentEditor", () => ({
   DocumentEditor: ({ path }: { path: string }) => <div data-testid="text-editor">{path}</div>,
 }))
 const api = vi.hoisted(() => ({
-  fileViewerRawUrl: (p: string) => `/raw/${p}`,
   writeBinaryDocument: vi.fn(),
   listProjectDocuments: vi.fn(async () => [{ path: "project/proj/document/notes.canvas", name: "notes.canvas", mime: "application/json" }]),
   loadFileViewerText: vi.fn(async () => ""),
@@ -86,10 +102,11 @@ const collaboration = vi.hoisted(() => {
 })
 vi.mock("@/hooks/useCollaborativeCanvas", () => collaboration)
 
-import {
-  CanvasEditor, appendStrokePoint, emptyCanvasDoc, parseCanvasDoc, serializeCanvasDoc, polyBounds, resizeBox, scaleStroke, scalePoly, remapAcrossCanvases, inOwnAttachment,
-  type SelBox,
-} from "@/components/CanvasEditor"
+import { CanvasEditor } from "@/components/CanvasEditor"
+import { emptyCanvasDoc, parseCanvasDoc, serializeCanvasDoc } from "@/lib/canvasDocument"
+import { appendStrokePoint } from "@/lib/canvasInk"
+import { polyBounds, resizeBox, scalePoly, scaleStroke, type SelBox } from "@/lib/canvasSelection"
+import { inOwnAttachment, remapAcrossCanvases } from "@/lib/canvasTransfer"
 import type { StrokeData } from "@/lib/drawing"
 import { CanvasWorkspace } from "@/components/CanvasWorkspace"
 
@@ -142,12 +159,11 @@ function CollaborativeHarness({ seen }: { seen: CanvasDocument[] }) {
   )
 }
 
-// toolbar order: [+, undo, redo, size, color, lasso, camera, text]
-const toolbar = (c: HTMLElement) => Array.from(c.querySelectorAll("button"))
+const toolbarButton = (c: HTMLElement, label: string) => c.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!
 const latest = (seen: CanvasDocument[]) => seen[seen.length - 1]!
 
 function addPage(container: HTMLElement) {
-  act(() => { toolbar(container)[0]!.click() }) // open the + menu
+  act(() => { toolbarButton(container, "Add to canvas").click() }) // open the + menu
   const item = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Page")!
   act(() => { item.click() })
 }
@@ -279,17 +295,17 @@ describe("canvas history", () => {
     const { container } = render(<Harness seen={seen} />)
 
     expect(latest(seen).frames).toHaveLength(0)
-    expect(toolbar(container)[1]!).toBeDisabled() // nothing to undo yet
+    expect(toolbarButton(container, "Undo")).toBeDisabled() // nothing to undo yet
 
     addPage(container)
     expect(latest(seen).frames).toHaveLength(1)
-    expect(toolbar(container)[1]!).not.toBeDisabled()
+    expect(toolbarButton(container, "Undo")).not.toBeDisabled()
 
     // the ordering bug would leave the page in place here
-    act(() => { toolbar(container)[1]!.click() })
+    act(() => { toolbarButton(container, "Undo").click() })
     expect(latest(seen).frames).toHaveLength(0)
 
-    act(() => { toolbar(container)[2]!.click() }) // redo
+    act(() => { toolbarButton(container, "Redo").click() })
     expect(latest(seen).frames).toHaveLength(1)
   })
 
@@ -301,14 +317,14 @@ describe("canvas history", () => {
     act(() => { fireEvent.click(getByText("Remote add")) })
     act(() => { fireEvent.click(getByText("Remote update")) })
 
-    act(() => { toolbar(container)[1]!.click() })
+    act(() => { toolbarButton(container, "Undo").click() })
     expect(latest(seen).frames).toHaveLength(2)
     expect(latest(seen).frames).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: "remote-frame" }),
       expect.objectContaining({ width: 999 }),
     ]))
 
-    act(() => { toolbar(container)[2]!.click() })
+    act(() => { toolbarButton(container, "Redo").click() })
     expect(latest(seen).frames).toHaveLength(2)
     expect(latest(seen).frames).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: "remote-frame" }),
@@ -326,10 +342,10 @@ describe("canvas history", () => {
     expect(latest(seen).frames).toHaveLength(3)
 
     for (const remaining of [2, 1, 0]) {
-      act(() => { toolbar(container)[1]!.click() })
+      act(() => { toolbarButton(container, "Undo").click() })
       expect(latest(seen).frames).toHaveLength(remaining)
     }
-    expect(toolbar(container)[1]!).toBeDisabled()
+    expect(toolbarButton(container, "Undo")).toBeDisabled()
   })
 
   // The viewport save callback used to depend on `doc`, so every document change re-armed
@@ -376,11 +392,11 @@ describe("canvas history", () => {
     const { container } = render(<Harness seen={seen} />)
 
     addPage(container)
-    act(() => { toolbar(container)[1]!.click() })
-    expect(toolbar(container)[2]!).not.toBeDisabled()
+    act(() => { toolbarButton(container, "Undo").click() })
+    expect(toolbarButton(container, "Redo")).not.toBeDisabled()
 
     addPage(container)
-    expect(toolbar(container)[2]!).toBeDisabled()
+    expect(toolbarButton(container, "Redo")).toBeDisabled()
   })
 })
 
@@ -436,7 +452,7 @@ describe("keyboard text entry", () => {
     expect(note).toHaveFocus()
 
     act(() => { fireEvent.change(note, { target: { value: "Hi" } }) })
-    act(() => { toolbar(container)[1]!.click() })
+    act(() => { toolbarButton(container, "Undo").click() })
     expect(latest(seen).texts).toHaveLength(0)
   })
 
@@ -464,7 +480,7 @@ describe("keyboard text entry", () => {
 
 describe("nested canvas", () => {
   const addCanvas = (container: HTMLElement) => {
-    act(() => { toolbar(container)[0]!.click() })
+    act(() => { toolbarButton(container, "Add to canvas").click() })
     const item = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "New canvas")!
     act(() => { item.click() })
   }
@@ -494,7 +510,7 @@ describe("nested canvas", () => {
 
 describe("nested canvas file", () => {
   const openCanvas = async (container: HTMLElement, name: string) => {
-    act(() => { toolbar(container)[0]!.click() })
+    act(() => { toolbarButton(container, "Add to canvas").click() })
     await act(async () => {})
     const item = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === name)!
     act(() => { item.click() })
@@ -562,7 +578,7 @@ describe("PDF attachments", () => {
     expect(latest(seen).attachments[0]!.page).toBe(4)
 
     addPage(container)
-    act(() => { toolbar(container)[1]!.click() })
+    act(() => { toolbarButton(container, "Undo").click() })
     expect(latest(seen).attachments[0]!.page).toBe(4)
 
     const restored = parseCanvasDoc(serializeCanvasDoc(latest(seen)))
@@ -576,7 +592,7 @@ describe("PDF attachments", () => {
       attachments: [{ id: "pdf-1", kind: "pdf", path: "project/proj/document/reference.pdf", x: 0, y: 0, width: 500 }],
     }
     const { container } = render(<Harness seen={[]} initialDoc={doc} />)
-    act(() => { toolbar(container)[6]!.click() })
+    act(() => { toolbarButton(container, "Capture canvas").click() })
     const surface = container.querySelectorAll("svg.absolute.inset-0.w-full.h-full")[1] as SVGSVGElement
     surface.setPointerCapture = vi.fn()
 
@@ -601,7 +617,7 @@ describe("document attachments", () => {
     const seen: CanvasDocument[] = []
     const { container } = render(<Harness seen={seen} slug="proj" />)
 
-    act(() => { toolbar(container)[0]!.click() })
+    act(() => { toolbarButton(container, "Add to canvas").click() })
     await act(async () => {})
 
     const item = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "summary.md")
@@ -620,7 +636,7 @@ describe("document attachments", () => {
     const seen: CanvasDocument[] = []
     const { container, getByTestId } = render(<Harness seen={seen} slug="proj" />)
 
-    act(() => { toolbar(container)[0]!.click() })
+    act(() => { toolbarButton(container, "Add to canvas").click() })
     await act(async () => {})
     act(() => { Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Architecture")!.click() })
     expect(latest(seen).attachments[0]).toMatchObject({ kind: "architecture-graph", path: "graph/proj/" })
@@ -633,12 +649,12 @@ describe("document attachments", () => {
     const workspace = (slug: string | null) => (
       <UndoDeleteProvider>
         <TabActiveProvider value={true}>
-          <CanvasWorkspace selected={null} slug={slug} toolbarSlot={null} onCloseEditor={() => {}} onCreated={() => {}} />
+          <CanvasWorkspace selected={null} slug={slug} toolbarSlots={null} onCloseEditor={() => {}} onCreated={() => {}} />
         </TabActiveProvider>
       </UndoDeleteProvider>
     )
     const menuButtons = async (container: HTMLElement) => {
-      act(() => { toolbar(container)[0]!.click() })
+      act(() => { toolbarButton(container, "Add to canvas").click() })
       await act(async () => {})
       return Array.from(container.querySelectorAll("button")).map((b) => b.textContent)
     }
@@ -698,7 +714,7 @@ describe("document attachments", () => {
     }
     const { container, getByLabelText, queryByLabelText, getByText } = render(<Harness seen={seen} slug="proj" initialDoc={initialDoc} />)
 
-    act(() => { toolbar(container)[0]!.click() })
+    act(() => { toolbarButton(container, "Add to canvas").click() })
     await act(async () => {})
 
     fireEvent.click(getByLabelText("Rename sandbox_plot-toolu_1.plot.json"))
@@ -759,7 +775,7 @@ describe("document attachments", () => {
     const seen: CanvasDocument[] = []
     const { container } = render(<Harness seen={seen} />)
 
-    act(() => { toolbar(container)[0]!.click() })
+    act(() => { toolbarButton(container, "Add to canvas").click() })
     await act(async () => {})
 
     expect(container.textContent).toContain("chart.plot.json")
@@ -774,7 +790,7 @@ describe("document attachments", () => {
     const seen: CanvasDocument[] = []
     const { container } = render(<Harness seen={seen} slug="proj" />)
 
-    act(() => { toolbar(container)[0]!.click() })
+    act(() => { toolbarButton(container, "Add to canvas").click() })
     await act(async () => {})
     const item = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "broken.plot.json")
     act(() => { item!.click() })

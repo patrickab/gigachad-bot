@@ -1,11 +1,11 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { ApiError, loadCanvasSnapshot, submitCanvasMutations, type CanvasAcceptedBatch, type CanvasEntity, type CanvasMutation } from "@/lib/api"
+import { ApiError, loadCanvasSnapshot, submitCanvasMutations } from "@/lib/api"
 import { subscribeToCanvasMutationBatches } from "@/lib/canvasStream"
-import type { CanvasDocument } from "@/components/CanvasEditor"
+import { CANVAS_COLLECTIONS, COLLECTION_KIND, KIND_COLLECTION, diffEntities, type CanvasAcceptedBatch, type CanvasCollection, type CanvasDocument, type CanvasMutation } from "@/lib/canvasDocument"
 
-export type CanvasCollaborationStatus = "loading" | "synced" | "saving" | "offline" | "error"
+type CanvasCollaborationStatus = "loading" | "synced" | "saving" | "offline" | "error"
 
 export interface CollaborativeCanvas {
   document: CanvasDocument | null
@@ -21,10 +21,6 @@ const RETRY_MAX_MS = 5_000
 const RETRY_MAX_ATTEMPTS = 5
 
 type Entity = { id: string }
-type CollectionName = "strokes" | "frames" | "attachments" | "texts"
-const COLLECTIONS: [CanvasEntity, CollectionName][] = [["stroke", "strokes"], ["frame", "frames"], ["attachment", "attachments"], ["text", "texts"]]
-const COLLECTION: Record<CanvasEntity, CollectionName> = Object.fromEntries(COLLECTIONS) as Record<CanvasEntity, CollectionName>
-
 /** All mutable state of one loaded canvas. A new canvas key gets a new session, so
  * late callbacks from the previous one are recognised and dropped. */
 type Session = {
@@ -42,20 +38,13 @@ type Session = {
 
 /** Diff two documents into per-entity upserts and deletes, comparing changed collections by id and JSON equality. */
 function deriveMutations(previous: CanvasDocument, next: CanvasDocument): CanvasMutation[] {
-  const mutations: CanvasMutation[] = []
-  for (const [entity, collection] of COLLECTIONS) {
-    if (previous[collection] === next[collection]) continue
-    const before = new Map((previous[collection] as Entity[]).map((value) => [value.id, value]))
-    for (const value of next[collection] as Entity[]) {
-      const prior = before.get(value.id)
-      before.delete(value.id)
-      if (prior !== value && JSON.stringify(prior) !== JSON.stringify(value)) {
-        mutations.push({ mutationId: crypto.randomUUID(), entity, kind: "upsert", id: value.id, value: value as unknown as Record<string, unknown> })
-      }
-    }
-    for (const id of before.keys()) mutations.push({ mutationId: crypto.randomUUID(), entity, kind: "delete", id })
-  }
-  return mutations
+  return CANVAS_COLLECTIONS.flatMap((collection) => {
+    if (previous[collection] === next[collection]) return []
+    const entity = COLLECTION_KIND[collection]
+    return diffEntities<Entity>(previous[collection], next[collection]).map((change): CanvasMutation => change.after
+      ? { mutationId: crypto.randomUUID(), entity, kind: "upsert", id: change.id, value: change.after as unknown as Record<string, unknown> }
+      : { mutationId: crypto.randomUUID(), entity, kind: "delete", id: change.id })
+  })
 }
 
 /** Keep only the latest pending mutation per entity. */
@@ -68,7 +57,7 @@ function compact(mutations: CanvasMutation[]): CanvasMutation[] {
 function applyMutations(document: CanvasDocument, mutations: CanvasMutation[]): CanvasDocument {
   const next = { ...document }
   for (const change of mutations) {
-    const collection = COLLECTION[change.entity]
+    const collection = KIND_COLLECTION[change.entity]
     const values = [...(next[collection] as Entity[])]
     const index = values.findIndex((value) => value.id === change.id)
     if (change.kind === "delete") {
@@ -78,7 +67,7 @@ function applyMutations(document: CanvasDocument, mutations: CanvasMutation[]): 
     } else {
       values[index] = { ...change.value, id: change.id }
     }
-    ;(next as Record<CollectionName, unknown>)[collection] = values
+    ;(next as Record<CanvasCollection, unknown>)[collection] = values
   }
   return next
 }

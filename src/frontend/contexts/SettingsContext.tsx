@@ -3,36 +3,49 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
 import { fetchBackendConfig } from "@/lib/api"
 
-export interface SettingsState {
+export interface TabConfig {
   selectedModel: string
-  setSelectedModel: (v: string) => void
   selectedPrompt: string | null
-  setSelectedPrompt: (v: string | null) => void
   reasoningEffort: string
-  setReasoningEffort: (v: string) => void
   downscaleImages: boolean
-  setDownscaleImages: (v: boolean) => void
   researchFastModel: string
-  setResearchFastModel: (v: string) => void
   researchSmartModel: string
-  setResearchSmartModel: (v: string) => void
   researchStrategicModel: string
-  setResearchStrategicModel: (v: string) => void
   researchDepth: number
-  setResearchDepth: (v: number) => void
   researchBreadth: number
-  setResearchBreadth: (v: number) => void
   researchReasoning: string
-  setResearchReasoning: (v: string) => void
   researchReportType: string
-  setResearchReportType: (v: string) => void
-  ocrModel: string
-  setOCRModel: (v: string) => void
+  searchSystemInstructions: string
+  searchDomain: string
 }
 
-const SettingsContext = createContext<SettingsState | null>(null)
+// Selected model starts blank and is seeded from the backend's default chat model
+// by `SettingsProvider`. Never hardcode a model name here.
+export const DEFAULT_TAB_CONFIG: TabConfig = {
+  selectedModel: "",
+  selectedPrompt: null,
+  reasoningEffort: "medium",
+  downscaleImages: true,
+  researchFastModel: "",
+  researchSmartModel: "",
+  researchStrategicModel: "",
+  researchDepth: 2,
+  researchBreadth: 4,
+  researchReasoning: "medium",
+  researchReportType: "deep",
+  searchSystemInstructions: "",
+  searchDomain: "",
+}
 
-export function useSettings(): SettingsState {
+interface SettingsValue {
+  /** Config every new tab starts from. */
+  tabDefaults: TabConfig
+  ocrModel: string
+}
+
+const SettingsContext = createContext<SettingsValue | null>(null)
+
+export function useSettings(): SettingsValue {
   const ctx = useContext(SettingsContext)
   if (!ctx) throw new Error("useSettings must be used within SettingsProvider")
   return ctx
@@ -40,27 +53,18 @@ export function useSettings(): SettingsState {
 
 /** Owns the defaults new tabs inherit. Seeded from backend config without overriding existing values. */
 export function SettingsProvider({ children }: { children: ReactNode }) {
-  const [selectedModel, setSelectedModel] = useState("")
-  const [selectedPrompt, setSelectedPrompt] = useState<string | null>(null)
-  const [reasoningEffort, setReasoningEffort] = useState("medium")
-  const [downscaleImages, setDownscaleImages] = useState(true)
-
-  const [researchFastModel, setResearchFastModel] = useState("")
-  const [researchSmartModel, setResearchSmartModel] = useState("")
-  const [researchStrategicModel, setResearchStrategicModel] = useState("")
-  const [researchDepth, setResearchDepth] = useState(2)
-  const [researchBreadth, setResearchBreadth] = useState(4)
-  const [researchReasoning, setResearchReasoning] = useState("medium")
-  const [researchReportType, setResearchReportType] = useState("deep")
-
+  const [tabDefaults, setTabDefaults] = useState(DEFAULT_TAB_CONFIG)
   const [ocrModel, setOCRModel] = useState("")
 
   useEffect(() => {
     fetchBackendConfig()
       .then((cfg) => {
-        setSelectedModel((prev) => prev || cfg.default_model)
-        // Backend value applies only while the flag is still the `true` default.
-        setDownscaleImages((prev) => prev === true ? cfg.downscale_images : prev)
+        setTabDefaults((prev) => ({
+          ...prev,
+          selectedModel: prev.selectedModel || cfg.default_model,
+          // Backend value applies only while the flag is still the `true` default.
+          downscaleImages: prev.downscaleImages ? cfg.downscale_images : prev.downscaleImages,
+        }))
         setOCRModel((prev) => prev || cfg.vision_model)
       })
       .catch(() => {
@@ -68,23 +72,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       })
   }, [])
 
-  const value = {
-    selectedModel, setSelectedModel,
-    selectedPrompt, setSelectedPrompt,
-    reasoningEffort, setReasoningEffort,
-    downscaleImages, setDownscaleImages,
-    researchFastModel, setResearchFastModel,
-    researchSmartModel, setResearchSmartModel,
-    researchStrategicModel, setResearchStrategicModel,
-    researchDepth, setResearchDepth,
-    researchBreadth, setResearchBreadth,
-    researchReasoning, setResearchReasoning,
-    researchReportType, setResearchReportType,
-    ocrModel, setOCRModel,
-  }
-
   return (
-    <SettingsContext.Provider value={value}>
+    <SettingsContext.Provider value={{ tabDefaults, ocrModel }}>
       {children}
     </SettingsContext.Provider>
   )

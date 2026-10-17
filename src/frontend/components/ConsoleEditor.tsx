@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import { highlightCode } from "@/lib/markdown-syntax-highlighting"
 
-const LINE_HEIGHT_PX = 12 * 1.625  // 0.75rem × 1.625
-const PADDING_PX = 16              // 1rem — matches p-4
+export const LINE_HEIGHT_PX = 12 * 1.625  // 0.75rem × 1.625
+export const PADDING_PX = 16              // 1rem — matches p-4
 
 const MONO_FONT = "var(--font-mono), 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace"
 

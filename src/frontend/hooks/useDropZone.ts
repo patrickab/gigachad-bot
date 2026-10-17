@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react"
 
-export interface UseDropZoneOptions<T extends string> {
+interface UseDropZoneOptions<T extends string> {
   onDrop: (target: T, itemId: string) => void
   /** Return false to ignore hover/placeholder on this target (e.g. same bucket as source). */
   isValidTarget?: (target: T, itemId: string) => boolean

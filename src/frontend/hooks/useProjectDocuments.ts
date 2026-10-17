@@ -2,15 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState, type Dispatch, type RefObject, type SetStateAction } from "react"
 import type { ChatInputHandle } from "@/components/ChatInput"
-import type { AppSurface } from "@/contexts/SidebarContext"
+import type { AppSurface } from "@/contexts/TabContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
-import { parseCanvasDoc, type CanvasAttachment, type CanvasDocument, type CanvasFrame } from "@/components/CanvasEditor"
 import {
   addDocument,
   createArchitectureSource,
   deleteArchitectureSources,
   attachDocument,
-  fileViewerRawUrl,
   listAllDocuments,
   listProjectDocuments,
   loadFileViewerText,
@@ -20,26 +18,11 @@ import {
   renameDocument,
   writeDocument,
 } from "@/lib/api"
-import { architectureSource, isArchitecturePath } from "@/lib/architecture"
-import { buildHiddenContent } from "@/lib/attachments"
-import { renderCanvasToJpeg, type EmbedRect } from "@/lib/drawing"
+import { architectureSource, isArchitecturePath } from "@/lib/architecturePaths"
+import { withAttachments } from "@/lib/attachments"
+import { renderCanvasTextToJpeg } from "@/lib/canvasRender"
 import type { Message, ProjectDocument } from "@/lib/types"
- 
-// PDF attachments are not drawn into the rendered canvas image
-const IMAGE_RENDER_EXCLUDED_ATTACHMENT_KINDS: Partial<Record<CanvasAttachment["kind"], true>> = { pdf: true }
-const FALLBACK_ASPECT = 1.3
-
-function imageEmbed(path: string, { x, y, width, height }: Pick<CanvasFrame | CanvasAttachment, "x" | "y" | "width"> & { height?: number }): EmbedRect {
-  return { url: fileViewerRawUrl(path), x, y, width, aspect: height ? height / width : FALLBACK_ASPECT }
-}
-function renderableCanvasImages({ frames = [], attachments = [] }: Partial<Pick<CanvasDocument, "frames" | "attachments">>): EmbedRect[] {
-  return [
-    ...frames.filter((frame) => frame.kind === "image" && frame.path).map((frame) => imageEmbed(frame.path!, frame)),
-    ...attachments
-      .filter((attachment) => attachment.path && !IMAGE_RENDER_EXCLUDED_ATTACHMENT_KINDS[attachment.kind])
-      .map((attachment) => imageEmbed(attachment.path!, attachment)),
-  ]
-}
+import { baseName } from "@/lib/paths"
 
 /** Own the project documents panel: lists, selection into chat attachments, CRUD with undoable delete, and the Alt+X shortcut. */
 export function useProjectDocuments({
@@ -82,14 +65,9 @@ export function useProjectDocuments({
       try {
         const live = liveCanvasRef.current
         const text = live?.path === path ? live.content : await loadFileViewerText(path)
-        const doc = text.trim() ? parseCanvasDoc(text) : null
-        const strokes = doc?.strokes ?? []
-        const texts = doc?.texts ?? []
-        const images = doc ? renderableCanvasImages(doc) : []
-        if (!doc || (!strokes.length && !texts.length && images.length === 0)) return
-        // Rasterize the canvas so it attaches as a plain image
-        const blob = await renderCanvasToJpeg(strokes, 20, images, texts)
-        const name = path.split("/").pop()!.replace(/\.canvas$/, ".jpg")
+        const blob = await renderCanvasTextToJpeg(text)
+        if (!blob) return
+        const name = baseName(path).replace(/\.canvas$/, ".jpg")
         const file = new File([blob], name, { type: "image/jpeg" })
         const att = await uploadFile(chatId, file, activeProject, true)
         chatInputRef.current?.addAttachment(att)
@@ -146,7 +124,7 @@ export function useProjectDocuments({
   const handleDeleteDocument = useCallback((path: string) => {
     if (!activeProject) return
     const slug = activeProject
-    schedule(`document:${slug}:${path}`, path.split("/").pop() ?? path, async () => {
+    schedule(`document:${slug}:${path}`, baseName(path), async () => {
       // Architecture sources are refused while another source still references them.
       if (isArchitecturePath(path)) await deleteArchitectureSources(slug, [architectureSource(path)])
       else await removeDocument(slug, path)
@@ -159,8 +137,8 @@ export function useProjectDocuments({
     if (filename && content !== undefined) {
       setMessages(prev => prev.map(msg => {
         if (!msg.attachments?.some(a => a.name === filename)) return msg
-        const attachments = msg.attachments!.map(a => a.name === filename ? { ...a, content } : a)
-        return { ...msg, attachments, hiddenContent: buildHiddenContent(attachments) || undefined }
+        const attachments = msg.attachments.map(a => a.name === filename ? { ...a, content } : a)
+        return withAttachments(msg, attachments)
       }))
     }
   }, [refreshDocuments, setMessages])

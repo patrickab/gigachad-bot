@@ -22,13 +22,12 @@ vi.mock("@/lib/api", () => ({
 }))
 vi.mock("@/contexts/SidebarContext", () => ({
   useSidebar: () => ({
-    collapsed: false, toggleCollapsed: vi.fn(), 
+    collapsed: false,
   }),
 }))
 vi.mock("@/contexts/BranchContext", () => ({
   useBranches: () => ({
-    branchMeta: {}, visibleRootFiles: [], historiesLoading: false,
-    registerOnFileClick: vi.fn(), registerOnMerge: vi.fn(), registerOnDelete: vi.fn(),
+    branchMeta: {}, visibleRootFiles: [], historiesLoading: false, refreshAll: vi.fn(async () => {}),
   }),
 }))
 vi.mock("@/contexts/ProjectContext", () => ({
@@ -46,7 +45,6 @@ describe("Sidebar canvas tree", () => {
     const onArchitectureSelect = vi.fn()
     const { findByText, getByText } = render(
       <Sidebar
-        onOpenChat={vi.fn()} onRefreshAll={vi.fn(async () => {})}
         appMode="canvas" onAppModeChange={vi.fn()} onCanvasSelect={onCanvasSelect} onArchitectureSelect={onArchitectureSelect}
       />,
     )

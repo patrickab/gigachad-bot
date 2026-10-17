@@ -1,32 +1,13 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { SettingsMenu } from "@/components/SettingsMenu"
-import { ModeProvider } from "@/hooks/useModeState"
-import type { TabConfig } from "@/components/TabManager"
+import { DEFAULT_TAB_CONFIG, type TabConfig } from "@/contexts/SettingsContext"
 
-const config: TabConfig = {
-  selectedModel: "",
-  selectedPrompt: null,
-  reasoningEffort: "none",
-  downscaleImages: true,
-  researchFastModel: "",
-  researchSmartModel: "",
-  researchStrategicModel: "",
-  researchDepth: 2,
-  researchBreadth: 4,
-  researchReasoning: "medium",
-  researchReportType: "deep",
-  searchSystemInstructions: "",
-  searchDomain: "",
-}
+const config: TabConfig = { ...DEFAULT_TAB_CONFIG, reasoningEffort: "none" }
 
 describe("SettingsMenu", () => {
   it("keeps domain and answer guidance inside Deep Research", () => {
-    render(
-      <ModeProvider>
-        <SettingsMenu prompts={{}} config={config} onConfigChange={vi.fn()} models={null} />
-      </ModeProvider>,
-    )
+    render(<SettingsMenu prompts={{}} config={config} onConfigChange={vi.fn()} models={null} researchEnabled />)
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }))
 

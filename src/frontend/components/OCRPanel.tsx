@@ -4,8 +4,8 @@ import { useEffect, useRef, useState, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { X, Check, ChevronLeft, ChevronRight } from "lucide-react"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
-import { ConsoleEditor } from "./ConsoleEditor"
-import { EditorSidebar, InlineEditPanel } from "./EditorSidebar"
+import { AssistedConsoleEditor } from "./AssistedConsoleEditor"
+import { EditorSidebar } from "./EditorSidebar"
 import { createOCRStream } from "@/lib/api"
 
 interface OCRPanelProps {
@@ -23,7 +23,6 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
   const [isStreaming, setIsStreaming] = useState(true)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarWidth, setSidebarWidth] = useState(340)
-  const [inlineEdit, setInlineEdit] = useState<{ text: string; start: number; end: number; splitPx: number } | null>(null)
   const abortRef = useRef<(() => void) | null>(null)
   // Set once confirmed so a second confirm cannot call onComplete again
   const confirmedRef = useRef(false)
@@ -33,7 +32,6 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
     setImg(null)
     setOutput("")
     setIsStreaming(false)
-    setInlineEdit(null)
   }, [])
 
   // While awaiting a new image, a pasted image restarts OCR
@@ -115,27 +113,6 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
     setOutput(newContent)
   }, [])
 
-  const handleInlineApply = useCallback((replacement: string) => {
-    if (!inlineEdit) return
-    setOutput(output.substring(0, inlineEdit.start) + replacement + output.substring(inlineEdit.end))
-    setInlineEdit(null)
-  }, [inlineEdit, output])
-
-  const handleInlineEditOpen = useCallback((text: string, start: number, end: number, splitPx: number) => {
-    setInlineEdit({ text, start, end, splitPx })
-  }, [])
-
-  // While inline editing, split the output after the selection's line into two read-only editors with the edit panel between them
-  const splitIdx = inlineEdit ? output.indexOf("\n", inlineEdit.end) : -1
-  const splitChar = splitIdx === -1 ? output.length : splitIdx + 1
-  const [topContent, botContent] = inlineEdit
-    ? [output.substring(0, splitChar), output.substring(splitChar)]
-    : ["", ""]
-  const botStart = topContent.split("\n").length
-  const BOT_LINE_H = 19.5  // 0.75rem × 1.625
-  const BOT_PAD = 16       // p-4
-  const botHeight = BOT_PAD + botContent.split("\n").length * BOT_LINE_H + BOT_PAD
-
   return (
     <AnimatePresence>
       <motion.div
@@ -188,30 +165,8 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
               <div className="px-3 py-1.5 border-b border-divider/30 text-[10px] text-ink-faint font-medium uppercase tracking-wider">
                 Console
               </div>
-              {inlineEdit ? (
-                <div className="relative flex-1 min-h-0 overflow-y-auto">
-                  <div style={{ height: inlineEdit.splitPx }} className="flex flex-col shrink-0 overflow-hidden">
-                    <ConsoleEditor value={topContent} onChange={() => {}} language="latex" readOnly />
-                  </div>
-                  <InlineEditPanel
-                    selectedText={inlineEdit.text}
-                    model={model}
-                    onApply={handleInlineApply}
-                    onClose={() => setInlineEdit(null)}
-                  />
-                  <div style={{ height: botHeight }} className="flex flex-col shrink-0">
-                    <ConsoleEditor value={botContent} onChange={() => {}} language="latex" startLineNumber={botStart} readOnly />
-                  </div>
-                </div>
-              ) : (
-                <ConsoleEditor
-                  value={output}
-                  onChange={setOutput}
-                  language="latex"
-                  placeholder="Waiting for output..."
-                  onInlineEdit={handleInlineEditOpen}
-                />
-              )}
+              {/* Remounting when the image is cleared (Alt+R) drops any open inline edit */}
+              <AssistedConsoleEditor key={img === null ? "awaiting-image" : "image"} value={output} onChange={setOutput} language="latex" model={model} />
             </div>
             <div className="w-1/2 flex flex-col min-w-0">
               <div className="px-3 py-1.5 border-b border-divider/30 text-[10px] text-ink-faint font-medium uppercase tracking-wider flex items-center gap-2">

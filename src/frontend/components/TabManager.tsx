@@ -3,82 +3,12 @@
 import { createContext, useCallback, useContext, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 import { Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { SettingsState } from "@/contexts/SettingsContext"
-import type { AppSurface } from "@/contexts/SidebarContext"
-
-// Tabs stay mounted in the background (CSS-hidden below, not unmounted), so key
-// listeners deep in a tab's content must check this instead of firing for whichever
-// tab happens to be frontmost. Provided per-tab in the render loop below.
-const TabActiveContext = createContext(true)
-export const TabActiveProvider = TabActiveContext.Provider
-export function useTabActive(): boolean {
-  return useContext(TabActiveContext)
-}
-
-export interface TabConfig {
-  selectedModel: string
-  selectedPrompt: string | null
-  reasoningEffort: string
-  downscaleImages: boolean
-  researchFastModel: string
-  researchSmartModel: string
-  researchStrategicModel: string
-  researchDepth: number
-  researchBreadth: number
-  researchReasoning: string
-  researchReportType: string
-  searchSystemInstructions: string
-  searchDomain: string
-}
-
-// Settings copied into a new tab (search* fields are intentionally not per-tab)
-const TAB_CONFIG_KEYS: (keyof TabConfig)[] = [
-  "selectedModel", "selectedPrompt", "reasoningEffort",
-  "downscaleImages", "researchFastModel", "researchSmartModel", "researchStrategicModel",
-  "researchDepth", "researchBreadth", "researchReasoning", "researchReportType",
-]
-
-// Selected model starts blank and is seeded from the backend's default chat model
-// by the settings-sync effect in app/page.tsx. Never hardcode a model name here.
-const DEFAULT_CONFIG: TabConfig = {
-  selectedModel: "",
-  selectedPrompt: null,
-  reasoningEffort: "medium",
-  downscaleImages: true,
-  researchFastModel: "",
-  researchSmartModel: "",
-  researchStrategicModel: "",
-  researchDepth: 2,
-  researchBreadth: 4,
-  researchReasoning: "medium",
-  researchReportType: "deep",
-  searchSystemInstructions: "",
-  searchDomain: "",
-}
-
-export function settingsToTabConfig(settings: SettingsState): TabConfig {
-  const config: Partial<TabConfig> = {}
-  for (const key of TAB_CONFIG_KEYS) {
-    if (key in settings) {
-      (config as Record<string, unknown>)[key] = settings[key as keyof SettingsState]
-    }
-  }
-  return { ...DEFAULT_CONFIG, ...config }
-}
-
-export interface Tab {
-  id: string
-  name: string | null
-  chatId: string
-  historyFile: string | null
-  title: string | null
-  config: TabConfig
-  appMode: AppSurface
-}
+import { DEFAULT_TAB_CONFIG, type TabConfig } from "@/contexts/SettingsContext"
+import { TabContext, type Tab, type TabActions, type TabContextValue } from "@/contexts/TabContext"
 
 interface TabManagerProps {
-  renderContent: (tab: Tab, onModeLabel: (label: string, loading?: boolean) => void, isActive: boolean, onConfigChange: (config: Partial<TabConfig>) => void, onAppModeChange: (mode: AppSurface) => void) => React.ReactNode
-  onCloseTab?: (tab: Tab) => void
+  /** Rendered once per tab inside that tab's `TabContext`. */
+  children: React.ReactNode
   onTabsChange?: (tabs: Tab[]) => void
   defaultConfig?: TabConfig
   ref?: React.Ref<TabManagerHandle>
@@ -88,13 +18,9 @@ export interface TabManagerHandle {
   /** Swap one tab for `tab` in place and activate it; the others stay open. */
   replaceTab: (tabId: string, tab: Tab) => void
   switchToTab: (tabId: string) => void
-  addTabWithName: (name: string | null, historyFile: string | null) => string
   getTabs: () => Tab[]
   getActiveTabId: () => string
   updateTabHistoryFile: (tabId: string, historyFile: string | null) => void
-  updateTabTitle: (tabId: string, title: string | null) => void
-  updateTabConfig: (tabId: string, config: Partial<TabConfig>) => void
-  updateTabAppMode: (tabId: string, mode: AppSurface) => void
 }
 
 /** Tab state and actions shared with `SidebarTabs`, which renders inside each tab's own sidebar. */
@@ -117,12 +43,17 @@ const TabStripContext = createContext<TabStripValue | null>(null)
 // Monotonic id source, module-level so ids stay unique across TabManager remounts
 let tabIdCounter = 0
 
-export function nextTab(name: string | null = null, historyFile: string | null = null, title: string | null = null, config?: Partial<TabConfig>, appMode: AppSurface = "chat"): Tab {
-  return { id: `tab-${++tabIdCounter}`, name, chatId: crypto.randomUUID(), historyFile, title, config: { ...DEFAULT_CONFIG, ...config }, appMode }
+export function nextTab(config?: Partial<TabConfig>): Tab {
+  return { id: `tab-${++tabIdCounter}`, name: null, chatId: crypto.randomUUID(), historyFile: null, title: null, config: { ...DEFAULT_TAB_CONFIG, ...config }, appMode: "chat" }
 }
 
 const INITIAL_TAB: Tab = nextTab()
-const INITIAL_CONFIG: TabConfig = { ...DEFAULT_CONFIG }
+
+/** Provides one tab's state and actions; memoized so the context only changes with the tab or its active flag. */
+function TabScope({ tab, isActive, actions, children }: { tab: Tab; isActive: boolean; actions: TabActions; children: React.ReactNode }) {
+  const value = useMemo<TabContextValue>(() => ({ tab, isActive, ...actions }), [tab, isActive, actions])
+  return <TabContext.Provider value={value}>{children}</TabContext.Provider>
+}
 
 function Spinner() {
   return <span className="h-2.5 w-2.5 shrink-0 animate-spin rounded-full border border-ink-faint border-t-ink-muted" />
@@ -220,15 +151,18 @@ function TabRow({ tab, strip, ownerTabId, commandOpen, onLabelSlot, onMenuSlot }
   )
 }
 
-export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultConfig = INITIAL_CONFIG, ref }: TabManagerProps) {
+export function TabManager({ children, onTabsChange, defaultConfig = DEFAULT_TAB_CONFIG, ref }: TabManagerProps) {
   const [tabs, setTabs] = useState<Tab[]>([INITIAL_TAB])
   const [activeTab, setActiveTab] = useState(INITIAL_TAB.id)
   const [editingTab, setEditingTab] = useState<string | null>(null)
   const [modeLabels, setModeLabels] = useState<Record<string, string>>({})
   const [modeLoading, setModeLoading] = useState<Record<string, boolean>>({})
-  const [customNames, setCustomNames] = useState<Record<string, string | null>>({})
   const onTabsChangeRef = useRef(onTabsChange)
   useEffect(() => { onTabsChangeRef.current = onTabsChange }, [onTabsChange])
+
+  const updateTab = useCallback((id: string, patch: (tab: Tab) => Partial<Tab>) => {
+    setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch(t) } : t)))
+  }, [])
 
   useImperativeHandle(ref, () => ({
     replaceTab: (tabId: string, tab: Tab) => {
@@ -236,34 +170,17 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
       setActiveTab(tab.id)
     },
     switchToTab: (tabId: string) => setActiveTab(tabId),
-    addTabWithName: (name: string | null, historyFile: string | null) => {
-      const tab = nextTab(name, historyFile)
-      setTabs((prev) => [...prev, tab])
-      setActiveTab(tab.id)
-      return tab.id
-    },
     getTabs: () => tabs,
     getActiveTabId: () => activeTab,
-    updateTabHistoryFile: (tabId: string, historyFile: string | null) => {
-      setTabs((prev) => prev.map((t) => t.id === tabId ? { ...t, historyFile } : t))
-    },
-    updateTabTitle: (tabId: string, title: string | null) => {
-      setTabs((prev) => prev.map((t) => t.id === tabId ? { ...t, title } : t))
-    },
-    updateTabConfig: (tabId: string, config: Partial<TabConfig>) => {
-      setTabs((prev) => prev.map((t) => t.id === tabId ? { ...t, config: { ...t.config, ...config } } : t))
-    },
-    updateTabAppMode: (tabId: string, mode: AppSurface) => {
-      setTabs((prev) => prev.map((t) => t.id === tabId ? { ...t, appMode: mode } : t))
-    },
-  }), [tabs, activeTab])
+    updateTabHistoryFile: (tabId: string, historyFile: string | null) => updateTab(tabId, () => ({ historyFile })),
+  }), [tabs, activeTab, updateTab])
 
   useEffect(() => {
     onTabsChangeRef.current?.(tabs)
   }, [tabs])
 
   const addTab = useCallback(() => {
-    const tab = nextTab(null, null, null, defaultConfig)
+    const tab = nextTab(defaultConfig)
     setTabs((prev) => [...prev, tab])
     setActiveTab(tab.id)
   }, [defaultConfig])
@@ -271,8 +188,6 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
   const closeTab = useCallback((id: string) => {
     setTabs((prev) => {
       if (prev.length <= 1) return prev
-      const tab = prev.find((t) => t.id === id)
-      if (tab) onCloseTab?.(tab)
       const next = prev.filter((t) => t.id !== id)
       if (id === activeTab) {
         const idx = prev.findIndex((t) => t.id === id)
@@ -281,7 +196,7 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
       }
       return next
     })
-  }, [activeTab, onCloseTab])
+  }, [activeTab])
 
   const closeActiveTab = useCallback(() => {
     closeTab(activeTab)
@@ -333,35 +248,33 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
     return () => document.removeEventListener("keydown", handler)
   }, [addTab, closeActiveTab, switchToNextTab, switchToPrevTab])
 
-  const startRename = useCallback((id: string) => {
-    setEditingTab(id)
-  }, [])
-
   const commitRename = useCallback((id: string, value: string) => {
     setEditingTab(null)
-    setCustomNames((prev) => {
-      const next = { ...prev }
-      if (value.trim()) {
-        next[id] = value.trim()
-      } else {
-        next[id] = null
-      }
-      return next
-    })
-    setTabs((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, name: value.trim() || null } : t))
-    )
-  }, [])
+    updateTab(id, () => ({ name: value.trim() || null }))
+  }, [updateTab])
 
   const updateModeLabel = useCallback((id: string, label: string, loading = false) => {
     setModeLabels((prev) => (prev[id] === label ? prev : { ...prev, [id]: label }))
     setModeLoading((prev) => (prev[id] === loading ? prev : { ...prev, [id]: loading }))
   }, [])
-  // One stable label callback per tab. Consumers list it as an effect dependency,
-  // so a fresh closure per render re-fires them all, and two producers in one
-  // tab (the chat mode label plus an open document's filename) then overwrite
-  // each other forever.
-  const modeLabelHooks = useRef(new Map<string, (label: string, loading?: boolean) => void>())
+  // One stable action set per tab. Consumers list these as effect dependencies, so a
+  // fresh closure per render re-fires them all, and two mode-label producers in one
+  // tab (the chat label plus an open document's filename) then overwrite each other forever.
+  const tabActions = useRef(new Map<string, TabActions>())
+  function actionsFor(id: string): TabActions {
+    let actions = tabActions.current.get(id)
+    if (!actions) {
+      actions = {
+        setModeLabel: (label, loading) => updateModeLabel(id, label, loading),
+        updateConfig: (config) => updateTab(id, (t) => ({ config: { ...t.config, ...config } })),
+        setAppMode: (appMode) => updateTab(id, () => ({ appMode })),
+        setHistoryFile: (historyFile) => updateTab(id, () => ({ historyFile })),
+        setTitle: (title) => updateTab(id, () => ({ title })),
+      }
+      tabActions.current.set(id, actions)
+    }
+    return actions
+  }
 
   const strip = useMemo<TabStripValue>(() => ({
     tabs,
@@ -371,43 +284,31 @@ export function TabManager({ renderContent, onCloseTab, onTabsChange, defaultCon
       const label = modeLabels[tab.id]
       // "\0" is a sentinel meaning the tab renders no label at all
       if (label === "\0") return null
-      return customNames[tab.id] ?? (label || "Chat")
+      return tab.name ?? (label || "Chat")
     },
-    isLoading: (tab) => customNames[tab.id] == null && (modeLoading[tab.id] ?? false),
+    isLoading: (tab) => tab.name == null && (modeLoading[tab.id] ?? false),
     select: setActiveTab,
     close: closeTab,
     add: addTab,
     startRename: setEditingTab,
     commitRename,
     cancelRename: () => setEditingTab(null),
-  }), [tabs, activeTab, editingTab, modeLabels, modeLoading, customNames, closeTab, addTab, commitRename])
+  }), [tabs, activeTab, editingTab, modeLabels, modeLoading, closeTab, addTab, commitRename])
 
   return (
     <TabStripContext.Provider value={strip}>
       <div className="relative h-screen overflow-hidden">
-        {tabs.map((tab) => {
-          const isActive = tab.id === activeTab
-          let hook = modeLabelHooks.current.get(tab.id)
-          if (!hook) {
-            hook = (label: string, loading?: boolean) => updateModeLabel(tab.id, label, loading)
-            modeLabelHooks.current.set(tab.id, hook)
-          }
-          return (
-            <div
-              key={tab.id}
-              className="h-full"
-              style={{ display: isActive ? undefined : "none" }}
-            >
-              <TabActiveProvider value={isActive}>
-                {renderContent(tab, hook, isActive, (config) => {
-                  setTabs((prev) => prev.map((t) => t.id === tab.id ? { ...t, config: { ...t.config, ...config } } : t))
-                }, (mode) => {
-                  setTabs((prev) => prev.map((t) => t.id === tab.id ? { ...t, appMode: mode } : t))
-                })}
-              </TabActiveProvider>
-            </div>
-          )
-        })}
+        {tabs.map((tab) => (
+          <div
+            key={tab.id}
+            className="h-full"
+            style={{ display: tab.id === activeTab ? undefined : "none" }}
+          >
+            <TabScope tab={tab} isActive={tab.id === activeTab} actions={actionsFor(tab.id)}>
+              {children}
+            </TabScope>
+          </div>
+        ))}
       </div>
     </TabStripContext.Provider>
   )

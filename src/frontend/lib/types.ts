@@ -1,5 +1,3 @@
-import type { WebSearchResultItem, WebSearchVideo } from "./webSearch"
-
 export interface Usage {
   prompt_tokens: number
   completion_tokens: number
@@ -40,7 +38,7 @@ export type ToolName = "web_search" | "deep_research" | "sandbox_plot" | "diagra
 
 /** A name read back from a saved chat. Widened past `ToolName` so old chats still render,
  *  while only `ToolName` may be sent as an offered tool. */
-export type ToolCallName = ToolName | (string & {})
+type ToolCallName = ToolName | (string & {})
 
 /** A cited source as it reaches the browser: the backend strips the model-only evidence
  *  `content` from every source before emitting the result event. */
@@ -57,31 +55,19 @@ export interface PlotFigure {
   frames?: unknown[]
 }
 
-export interface WebSearchDetail {
-  /** The planned query actually sent to Brave, not the model's raw argument. */
-  search_query?: string
-}
-
-export interface DeepResearchDetail {
+/** Per-tool detail, flattened: one record holds whichever tool ran, and saved chats may carry
+ *  keys this build no longer writes. */
+interface ToolCallDetail {
   costs?: number
-  report?: string
-}
-
-export interface SandboxPlotDetail {
   figure?: PlotFigure
   brief?: string
   script?: string
-}
-
-export interface DiagramDetail {
   mermaid?: string
+  mindmap?: string
+  [key: string]: unknown
 }
 
-/** Per-tool detail, flattened: one record holds whichever tool ran, and saved chats may carry
- *  keys this build no longer writes. */
-export type ToolCallDetail = WebSearchDetail & DeepResearchDetail & SandboxPlotDetail & DiagramDetail & Record<string, unknown>
-
-export interface ToolStage {
+interface ToolStage {
   id: string
   label: string
   status: "running" | "done" | "error"
@@ -131,7 +117,7 @@ export interface ToolCallRecord {
   stages?: ToolStage[]
 }
 
-export interface SandboxAssetRef {
+interface SandboxAssetRef {
   sha256: string
   media_type: string
   size_bytes: number
@@ -180,7 +166,7 @@ export interface ChatRequest {
 }
 
 /** Tool settings the browser already owns as tab config, forwarded per request. */
-export interface ToolOptions {
+interface ToolOptions {
   search_system_instructions?: string
   search_domain?: string
   research_fast_model?: string
@@ -214,7 +200,7 @@ export interface ModelProvider {
   source?: string | null
 }
 
-export interface OmpModel {
+interface OmpModel {
   /** Gateway model id, already provider-qualified, e.g. `anthropic/claude-opus-5`. */
   id: string
   name: string
@@ -222,7 +208,7 @@ export interface OmpModel {
   context_window: number | null
 }
 
-export interface OmpProvider {
+interface OmpProvider {
   id: string
   label: string
   models: OmpModel[]
@@ -265,28 +251,6 @@ export interface BranchChild {
   branch_message_idx: number
 }
 
-export interface ResearchRequest {
-  query: string
-  fast_model: string
-  smart_model: string
-  strategic_model: string
-  depth: number
-  breadth: number
-  reasoning_effort?: string | null
-  report_type: string
-}
-
-export interface ResearchParams {
-  query: string
-  fastModel: string
-  smartModel: string
-  strategicModel: string
-  depth: number
-  breadth: number
-  reasoningEffort: string
-  reportType: string
-}
-
 export interface ResearchTraceStep {
   step: string
   event_type: string
@@ -304,11 +268,19 @@ export interface ResearchTraceProgress {
   total_queries: number
 }
 
-export interface WebSearchParams {
-  query: string
-  systemInstructions?: string
-  domain?: string
-  model?: string
+interface WebSearchResultItem {
+  label?: string
+  title: string
+  url: string
+  content: string
+}
+
+/** Retained to render media from existing saved chats. New Brave searches do not fetch media. */
+interface WebSearchVideo {
+  title: string
+  url: string
+  thumbnail: string
+  iframe?: string
 }
 
 export interface WebSearchResult {

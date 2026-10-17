@@ -18,7 +18,7 @@ export interface FileBranchController {
   expand: (id: string) => void
 }
 
-export interface FileTreeConfig {
+interface FileTreeConfig {
   /** One branch open at a time, sourced from `activeId` instead of internal state. */
   accordion?: boolean
   /** externally-active branch (e.g. activeProject); the source of truth in accordion mode. */

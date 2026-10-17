@@ -4,17 +4,19 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { createPortal } from "react-dom"
 import { Box, FileType, Layers, LayoutGrid, ListPlus, Network, PanelLeftClose, PanelLeftOpen, Plus, Trash2 } from "lucide-react"
 import { applyArchitectureOperations, deleteArchitectureSources, readArchitecture } from "@/lib/api"
-import {
-  architectureSlug, architectureSource, diffGraph, fitGraph, graphFromView, labelFontsReady, nodeMinWidth,
-  type ArchitectureElement, type ArchitectureOperation, type ArchitectureTreeEntry, type ArchitectureViewNode, type ArchitectureWorkspace, type DiagramGraph, type DiagramNode, type EdgeStyle,
+import type {
+  ArchitectureElement, ArchitectureOperation, ArchitectureTreeEntry, ArchitectureViewNode, ArchitectureWorkspace,
 } from "@/lib/architecture"
-import { getDeviceId } from "@/lib/deviceId"
+import { architectureSlug, architectureSource } from "@/lib/architecturePaths"
+import { diffGraph, fitGraph, graphFromView, type DiagramGraph, type DiagramNode } from "@/lib/diagramGraph"
+import type { EdgeStyle } from "@/lib/edgeRouting"
 import { subscribeToChanges } from "@/lib/syncStream"
 import { useClickOutside } from "@/hooks/useClickOutside"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { cn } from "@/lib/utils"
 import { ArchitectureDiagramSurface } from "./ArchitectureDiagramSurface"
-import { DocumentEditor } from "./DocumentEditor"
+import { ArchitectureSourceEditor } from "./TextDocumentEditor"
+import { labelFontsReady, nodeMinWidth } from "./architectureLabelWidth"
 
 type Mutate = (write: () => Promise<ArchitectureWorkspace>) => Promise<ArchitectureWorkspace>
 
@@ -80,14 +82,12 @@ function useArchitectureView(slug: string, file: string) {
   // Writes from this device are already reflected locally; anyone else's reload the model.
   useEffect(() => subscribeToChanges((event) => {
     if (event.resource_kind !== "document" || !event.resource_key.startsWith(`graph/${slug}/`)) return
-    if (event.device_id !== getDeviceId()) refresh()
+    refresh()
   }), [slug, refresh])
 
   // How the tree lists `file`, and the view it opens in (a module opens its system's).
   const entry = useMemo(() => workspace?.model.tree.find((candidate) => candidate.path === file) ?? null, [workspace, file])
   const view = useMemo(() => workspace?.model.views.find((candidate) => candidate.id === entry?.view) ?? null, [workspace, entry])
-  // Loaded, but `file` no longer exists or opens no view.
-  const missing = !workspace || view ? null : entry ? "view" : "file"
 
   useEffect(() => { setDrafts([]) }, [view?.id])
 
@@ -138,7 +138,7 @@ function useArchitectureView(slug: string, file: string) {
     run([{ op: "layout", view: view.id, nodes: {}, edges: {} }])
   }, [run, view])
 
-  return { workspace, entry, view, graph, missing, error: error ?? loadError, onChange, run, mutate, refresh }
+  return { workspace, entry, view, graph, error: error ?? loadError, onChange, run, mutate, refresh }
 }
 
 // An architecture window owns only its canvas-local frame, connection style, and
@@ -161,7 +161,7 @@ export function ArchitectureWindow({ path, maximized, hostScale, edgeStyle = "el
   const file = architectureSource(path)
   const [treeOpen, setTreeOpen] = useState(true)
   const [mode, setMode] = useState<"diagram" | "text">("diagram")
-  const { workspace, entry, view, graph, missing, error, onChange, run, mutate, refresh } = useArchitectureView(slug, file)
+  const { workspace, entry, view, graph, error, onChange, run, mutate, refresh } = useArchitectureView(slug, file)
   const open = useCallback((next: string) => onNavigate(`graph/${slug}/${next}`), [onNavigate, slug])
   // A new window, or one whose file was just deleted, opens the first system.
   useEffect(() => {
@@ -206,17 +206,16 @@ export function ArchitectureWindow({ path, maximized, hostScale, edgeStyle = "el
   let body: ReactNode
   if (!workspace) body = notice(error ? "" : "Loading architecture…")
   else if (!file) body = notice("Start with a system: its modules are the parts inside it.")
-  else if (missing === "file") body = notice(`${file} no longer exists.`)
+  else if (!entry) body = notice(`${file} no longer exists.`)
   else if (mode === "text") body = (
     <div className="relative min-h-0 flex-1">
       {/* Saved text is this device's own write, which the change feed skips, so reread explicitly. */}
-      <DocumentEditor key={file} path={`graph/${slug}/${file}`} slug={slug} overlay onClose={() => setMode("diagram")} onSaved={refresh} />
+      <ArchitectureSourceEditor key={file} path={`graph/${slug}/${file}`} slug={slug} overlay onClose={() => setMode("diagram")} onSaved={refresh} />
     </div>
   )
-  else if (missing === "view") body = notice(`${file} declares no view yet.`, (
+  else if (!view || !graph) body = notice(`${file} declares no view yet.`, (
     <button type="button" className="architecture-diagram-button" onClick={() => run([{ op: "addFileView" }])}>Add a view of this file</button>
   ))
-  else if (!view || !graph) body = notice("Loading architecture…")
   else {
     // A landscape view shows what it names; a scoped one shows its system's surroundings.
     const landscape = view.editable && view.scope === null

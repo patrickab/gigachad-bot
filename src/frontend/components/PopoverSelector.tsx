@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useClickOutside } from "@/hooks/useClickOutside"
 import { cn } from "@/lib/utils"
 
-export interface SelectorCategory<T> { key: string; label: string; items: T[] }
+interface SelectorCategory<T> { key: string; label: string; items: T[] }
 
 /** Popover selector: pill trigger, optional category tabs, vertical item list, optional footer.
  *

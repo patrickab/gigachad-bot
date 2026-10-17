@@ -1,47 +1,22 @@
 "use client"
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type FocusEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject, type SetStateAction, type WheelEvent as ReactWheelEvent } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
-  Background, BaseEdge, ConnectionMode, Handle, NodeResizer, Position, ReactFlow, useEdgesState, useInternalNode, useNodesState,
-  type Connection, type Edge, type EdgeProps, type InternalNode, type Node, type NodeChange, type NodeProps, type OnBeforeDelete, type OnConnect, type OnConnectEnd, type ReactFlowInstance,
+  Background, ConnectionMode, ReactFlow, useEdgesState, useNodesState,
+  type Connection, type OnBeforeDelete, type OnConnect, type OnConnectEnd,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
-import rough from "roughjs"
-import { CircleDashed, Maximize, MoreHorizontal, Plus, RotateCcw, Trash2, X } from "lucide-react"
+import { CircleDashed, Maximize, MoreHorizontal, Plus, RotateCcw, Trash2 } from "lucide-react"
 import { useClickOutside } from "@/hooks/useClickOutside"
-import { useTwoFingerGesture } from "@/hooks/useTwoFingerGesture"
-import { pointInPolygon } from "@/lib/drawing"
+import { useSurfaceCamera } from "@/hooks/useSurfaceCamera"
+import { useSurfaceDrawing } from "@/hooks/useSurfaceDrawing"
+import { isDraft, nextDraftId, type DiagramEdge, type DiagramGraph, type DiagramNode } from "@/lib/diagramGraph"
+import { edgeAttachments, loadRouter, routeEdges, type EdgeStyle, type Point, type Rect, type RouteCard } from "@/lib/edgeRouting"
 import { cn } from "@/lib/utils"
-import { useTabActive } from "./TabManager"
-import { reframeCamera } from "./InfiniteViewport"
-import { FALLBACK_SIZE, isDraft, nextDraftId, nodeMinWidth, NODE_MIN_WIDTH, type DiagramEdge, type DiagramGraph, type DiagramNode, type EdgeStyle } from "@/lib/architecture"
-import { bendPoint, bendThrough, loadRouter, routeEdges, type Point as RoutePoint } from "@/lib/edgeRouting"
-import { StyledSelect } from "./StyledSelect"
-
-interface EdgeRuntime {
-  onPathChange?: (id: string, path?: DiagramEdge["path"]) => void
-  onLabelChange?: (id: string, label: string) => void
-  toFlowPoint?: (x: number, y: number) => { x: number, y: number } | undefined
-  /** A bend being dragged, so the route follows the pointer before it is saved; null when the drag ends. */
-  onBendPreview?: (id: string, bend: number | null) => void
-}
-interface GraphFlowEdgeData extends DiagramEdge, EdgeRuntime, Record<string, unknown> {
-  attachment?: EdgeAttachment
-  /** libavoid's route, clear of every card the connection does not join; absent until the router has loaded. */
-  route?: RoutePoint[]
-  edgeStyle: EdgeStyle
-}
-type GraphFlowNode = Node<ArchitectureNodeData, "architecture-node">
-type GraphFlowEdge = Edge<GraphFlowEdgeData, "architecture-edge">
-type GraphFlowInstance = ReactFlowInstance<GraphFlowNode, GraphFlowEdge>
-
-// The subset of a node the attachment pass needs: its absolute position and
-// whatever React Flow has measured so far.
-interface RoutableNode {
-  id: string
-  position: { x: number, y: number }
-  measured?: { width?: number, height?: number }
-}
+import { useTabActive } from "@/contexts/TabContext"
+import { ArchitectureEdge, EdgeGeometryContext, type EdgeEdits, type EdgeGeometry } from "./ArchitectureEdge"
+import { ArchitectureNodeCard } from "./ArchitectureNodeCard"
+import { FALLBACK_SIZE, GRID_SIZE, snapToGrid, type ArchitectureNodeData, type GraphFlowEdge, type GraphFlowNode, type NodeRemoval } from "./architectureFlow"
 
 export interface ArchitectureDiagramSurfaceProps {
   graph: DiagramGraph
@@ -68,109 +43,12 @@ export interface ArchitectureDiagramSurfaceProps {
   topLevelDrawing?: boolean
 }
 
-interface ArchitectureNodeData extends DiagramNode, Record<string, unknown> {
-  onChange: (id: string, patch: Partial<Pick<DiagramNode, "title" | "bullets" | "kind" | "width" | "height" | "position">>) => void
-  /** Kinds a selected node may switch to; empty when it cannot. */
-  kinds: readonly string[]
-  /** True exactly once, for the node the user just created. */
-  claimAutoEdit?: (id: string) => boolean
-  /** The corner X: what it says and does; absent when read-only. */
-  remove?: NodeRemoval
-}
-
-interface NodeRemoval {
-  label: string
-  run: (ids: string[], edges?: DiagramEdge[]) => void
-}
-
 /** Stable, so an unset `kinds` prop does not rebuild every node each render. */
 const NO_KINDS: readonly string[] = []
 
-// Rough.js is the same seeded, multi-stroke renderer Excalidraw uses. Stable
-// seeds keep the drawing still across React renders instead of making it jitter.
-const roughGenerator = rough.generator()
-
-function roughSeed(id: string): number {
-  let hash = 2166136261
-  for (let index = 0; index < id.length; index += 1) hash = Math.imul(hash ^ id.charCodeAt(index), 16777619)
-  return (hash >>> 0) || 1
-}
-
-// Curved connections draw as a single wobbly line: rough.js's doubled stroke
-// reads as jitter at edge scale rather than pencil. Elbow connections stay crisp.
-function edgeSketchPaths(d: string, seed: number, strokeWidth: number) {
-  return roughGenerator.toPaths(roughGenerator.path(d, {
-    seed, roughness: 1, bowing: 1, stroke: "currentColor", strokeWidth, preserveVertices: true, disableMultiStroke: true,
-  }))
-}
-
-// A rounded rectangle, sketched by rough.js like Excalidraw's boxes. The fill
-// is sketched too, so it follows the outline's wobble instead of sitting under
-// it as a perfect CSS shape. rough.js only echoes `fill` back on the fill path;
-// the actual colour comes from CSS so it tracks the theme.
-function nodeSketchPaths(width: number, height: number, seed: number, strokeWidth: number) {
-  const options = { seed, roughness: 1, bowing: 1, stroke: "currentColor", strokeWidth, preserveVertices: true, fill: "sketch", fillStyle: "solid" }
-  const radius = Math.max(0, Math.min(9, (width - 2) / 2, (height - 2) / 2))
-  const d = `M ${radius} 1 H ${width - radius} Q ${width - 1} 1 ${width - 1} ${radius} V ${height - radius} Q ${width - 1} ${height - 1} ${width - radius} ${height - 1} H ${radius} Q 1 ${height - 1} 1 ${height - radius} V ${radius} Q 1 1 ${radius} 1 Z`
-  return roughGenerator.toPaths(roughGenerator.path(d, options))
-}
-
-// Any closed loop drawn on the canvas becomes a node in its bounding box; an
-// open stroke (a line, a tick) is ignored. Every element is drawn as the same
-// box, so the loop's shape carries no meaning beyond its extent.
-const MIN_DRAW_SIZE = 30
-const MAX_OPEN_GAP_RATIO = 0.3
-
-/**
- * The box a freehand loop encloses, in the points' own coordinate space (the
- * surface passes flow coordinates). Null for fewer than three points, an open
- * stroke (ends further apart than MAX_OPEN_GAP_RATIO of its length), or a loop
- * under MIN_DRAW_SIZE on both axes.
- */
-export function drawnBox(points: Array<{ x: number, y: number }>): { x: number, y: number, width: number, height: number } | null {
-  if (points.length < 3) return null
-  const xs = points.map((p) => p.x)
-  const ys = points.map((p) => p.y)
-  const minX = Math.min(...xs), maxX = Math.max(...xs)
-  const minY = Math.min(...ys), maxY = Math.max(...ys)
-  const width = maxX - minX
-  const height = maxY - minY
-  if (Math.max(width, height) < MIN_DRAW_SIZE) return null
-
-  let pathLength = 0
-  for (let index = 1; index < points.length; index += 1) pathLength += Math.hypot(points[index].x - points[index - 1].x, points[index].y - points[index - 1].y)
-  const gap = Math.hypot(points[points.length - 1].x - points[0].x, points[points.length - 1].y - points[0].y)
-  if (pathLength === 0 || gap / pathLength > MAX_OPEN_GAP_RATIO) return null
-  return { x: minX, y: minY, width, height }
-}
-
-// Structural styling stays inline: React Flow must measure a real box even if
-// the stylesheet chunk has not loaded yet. The visible border is an SVG sketch.
-const cardStyle: CSSProperties = {
-  width: "100%",
-  height: "100%",
-  position: "relative",
-  overflow: "visible",
-  border: 0,
-  backgroundColor: "transparent",
-}
-
-// Minimum on-screen size a drawn stroke's bounding box must reach to register,
-// independent of canvas zoom.
-const DRAW_MIN_SCREEN_SIZE = 30
-const isTap = (points: ReadonlyArray<{ x: number, y: number }>) => {
-  const xs = points.map((p) => p.x)
-  const ys = points.map((p) => p.y)
-  return points.length === 0 || Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) < DRAW_MIN_SCREEN_SIZE
-}
 // New nodes spawn at a 3:2 width:height ratio.
 const NEW_NODE_WIDTH = 240
 const NEW_NODE_HEIGHT = 160
-const NODE_MIN_HEIGHT = 48
-// Drag/resize commits round to this grid, so autosaved positions stay stable
-// pixel values instead of accumulating sub-pixel drift across edit sessions.
-const GRID_SIZE = 8
-const snapToGrid = (value: number) => Math.round(value / GRID_SIZE) * GRID_SIZE
 
 // Clones `candidates` as titled drafts, so each copy becomes a new element,
 // offset diagonally so the copies read as new objects rather than sitting
@@ -188,630 +66,9 @@ export function duplicateNodes(candidates: readonly DiagramNode[], occupied: Ite
   return clones
 }
 
-interface PendingFocus {
-  index: number
-  cursor: number
-}
-
-/**
- * A card's text editor: the title and bullet drafts, moving the caret between
- * them, and one commit of both when focus leaves the card. Typing only touches
- * the drafts, so moving from the heading into the bullets never turns a new
- * node into an element mid-edit (that swaps its id and would drop the caret).
- */
-function useCardText(data: ArchitectureNodeData, cardRef: RefObject<HTMLDivElement | null>) {
-  const titleRef = useRef<HTMLInputElement>(null)
-  const bulletRefs = useRef<Array<HTMLTextAreaElement | null>>([])
-  const [editingTitle, setEditingTitle] = useState(false)
-
-  // Model updates refresh the drafts only while nobody is typing in this card.
-  const typing = () => !!cardRef.current?.contains(document.activeElement)
-  const [titleDraft, setTitleDraft] = useState(data.title)
-  useLayoutEffect(() => {
-    if (typing()) return
-    setTitleDraft(data.title)
-  }, [data.title])
-  const [bulletDrafts, setBulletDrafts] = useState<string[]>(() => [...data.bullets])
-  useLayoutEffect(() => {
-    if (typing()) return
-    setBulletDrafts([...data.bullets])
-  }, [data.bullets])
-  // Drop refs for removed rows so the autosize pass cannot touch an unmounted textarea.
-  bulletRefs.current.length = bulletDrafts.length
-  const [pendingFocus, setPendingFocus] = useState<PendingFocus | null>(null)
-  useLayoutEffect(() => {
-    if (!pendingFocus) return
-    const el = bulletRefs.current[pendingFocus.index]
-    el?.focus()
-    el?.setSelectionRange(pendingFocus.cursor, pendingFocus.cursor)
-    setPendingFocus(null)
-  }, [pendingFocus])
-  const focusBullet = (index: number, cursor: number) => setPendingFocus({ index, cursor })
-
-  // The commit reads the drafts through refs: a key handler may change them and
-  // blur in the same event, before React re-renders.
-  const titleDraftRef = useRef(titleDraft)
-  titleDraftRef.current = titleDraft
-  const bulletDraftsRef = useRef(bulletDrafts)
-  bulletDraftsRef.current = bulletDrafts
-  const setBullets = (next: string[]) => {
-    bulletDraftsRef.current = next
-    setBulletDrafts(next)
-  }
-  const handleCardBlur = (event: FocusEvent<HTMLDivElement>) => {
-    if (event.currentTarget.contains(event.relatedTarget as globalThis.Node | null)) return
-    const title = titleDraftRef.current
-    // Strip a bullet glyph or dash the user typed or pasted at the line start.
-    const bullets = bulletDraftsRef.current.map((line) => line.replace(/^\s*[•-]\s?/, "").trim()).filter(Boolean)
-    // Leaving drops empty lines locally too, even when nothing reaches the model.
-    if (bullets.length !== bulletDraftsRef.current.length) setBullets(bullets)
-    if (title === data.title && bullets.join("\n") === data.bullets.join("\n")) return
-    data.onChange(data.id, { title, bullets })
-  }
-
-  // ArrowDown moves into the bullets; Enter does too, starting the first one if there is none.
-  const handleTitleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "ArrowDown" && bulletDrafts.length > 0) {
-      event.preventDefault()
-      focusBullet(0, 0)
-    } else if (event.key === "Enter") {
-      event.preventDefault()
-      if (bulletDrafts.length === 0) setBullets([""])
-      focusBullet(0, 0)
-    }
-  }
-  const handleBulletKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>, index: number) => {
-    const textarea = event.currentTarget
-    if (event.key === "Enter" && !event.shiftKey && !textarea.value.trim()) {
-      // Enter on an empty bullet finishes the card: the line goes, focus leaves, the card commits.
-      event.preventDefault()
-      setBullets(bulletDrafts.filter((_, i) => i !== index))
-      textarea.blur()
-    } else if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault()
-      const pos = textarea.selectionStart
-      const next = [...bulletDrafts]
-      next.splice(index, 1, textarea.value.slice(0, pos), textarea.value.slice(pos))
-      setBullets(next)
-      focusBullet(index + 1, 0)
-    } else if (event.key === "Backspace" && index > 0 && textarea.selectionStart === 0 && textarea.selectionEnd === 0) {
-      event.preventDefault()
-      const mergeAt = bulletDrafts[index - 1].length
-      const next = [...bulletDrafts]
-      next.splice(index - 1, 2, next[index - 1] + next[index])
-      setBullets(next)
-      focusBullet(index - 1, mergeAt)
-    } else if ((event.key === "ArrowUp" || event.key === "ArrowDown") && !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey) {
-      // Inside a wrapped bullet the arrow moves the caret between visual lines;
-      // only when the browser leaves the caret where it was (first/last line) do we hop rows.
-      const before = textarea.selectionStart
-      const target = index + (event.key === "ArrowUp" ? -1 : 1)
-      requestAnimationFrame(() => {
-        if (!textarea.isConnected || textarea.selectionStart !== before || textarea.selectionEnd !== before) return
-        if (target < 0) { setEditingTitle(true); return }
-        if (target >= bulletDrafts.length) return
-        focusBullet(target, Math.min(before, bulletDrafts[target].length))
-      })
-    }
-  }
-  const editBullet = (index: number, text: string) => setBullets(bulletDrafts.map((line, i) => i === index ? text : line))
-  // Starts a new bullet below the others, or reuses a trailing empty one.
-  const startBullet = () => {
-    const last = bulletDrafts.length - 1
-    if (last >= 0 && !bulletDrafts[last].trim()) { focusBullet(last, 0); return }
-    setBullets([...bulletDrafts, ""])
-    focusBullet(bulletDrafts.length, 0)
-  }
-
-  useLayoutEffect(() => {
-    if (data.claimAutoEdit?.(data.id)) setEditingTitle(true)
-    // Mount only: a freshly created node claims its one-time edit, nothing else does.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-  useLayoutEffect(() => {
-    if (!editingTitle) return
-    // React Flow keeps a new node visibility:hidden until it has measured it,
-    // and a hidden input silently refuses focus, so retry for a few frames.
-    let frame = 0
-    let attempts = 0
-    const focusTitle = () => {
-      const input = titleRef.current
-      if (!input || document.activeElement === input) return
-      input.focus()
-      if (document.activeElement !== input && attempts++ < 10) frame = requestAnimationFrame(focusTitle)
-    }
-    focusTitle()
-    return () => cancelAnimationFrame(frame)
-  }, [editingTitle])
-
-  return { titleRef, bulletRefs, editingTitle, setEditingTitle, titleDraft, setTitleDraft, bulletDrafts, editBullet, startBullet, handleCardBlur, handleTitleKeyDown, handleBulletKeyDown }
-}
-
-function ArchitectureNodeCard({ data, selected }: NodeProps<GraphFlowNode>) {
-  const [hovered, setHovered] = useState(false)
-  const cardRef = useRef<HTMLDivElement>(null)
-  const [cardSize, setCardSize] = useState(FALLBACK_SIZE)
-  // Track the rendered size so the sketch outline always matches the card.
-  useLayoutEffect(() => {
-    const card = cardRef.current
-    if (!card) return
-    const update = (width: number, height: number) => {
-      const next = { width: Math.max(1, Math.round(width)), height: Math.max(1, Math.round(height)) }
-      setCardSize((current) => current.width === next.width && current.height === next.height ? current : next)
-    }
-    update(card.offsetWidth, card.offsetHeight)
-    if (typeof ResizeObserver === "undefined") return
-    const observer = new ResizeObserver(([entry]) => {
-      if (entry) update(entry.contentRect.width, entry.contentRect.height)
-    })
-    observer.observe(card)
-    return () => observer.disconnect()
-  }, [])
-  const { titleRef, bulletRefs, editingTitle, setEditingTitle, titleDraft, setTitleDraft, bulletDrafts, editBullet, startBullet, handleCardBlur, handleTitleKeyDown, handleBulletKeyDown } = useCardText(data, cardRef)
-  // A title bar wider than the card would truncate the heading and push the kind
-  // label past the edge, so their width is a resize floor (and grows the card while typing).
-  const minNodeWidth = nodeMinWidth(titleDraft, data.kind)
-  // Auto-fit: the content's natural size is a floor for the card. The card
-  // grows when text stops fitting (vertically or horizontally) and never
-  // shrinks on its own, so a size the user chose sticks until the text needs more.
-  const titlebarRef = useRef<HTMLDivElement>(null)
-  const bodyRef = useRef<HTMLDivElement>(null)
-  const resizingRef = useRef(false)
-  const [fitHeight, setFitHeight] = useState(NODE_MIN_HEIGHT)
-  useEffect(() => {
-    const current = data.width ?? FALLBACK_SIZE.width
-    if (minNodeWidth > current) data.onChange(data.id, { width: minNodeWidth })
-  }, [minNodeWidth, data.width, data.id, data.onChange])
-  const nodeSketch = useMemo(() => {
-    const paths = nodeSketchPaths(cardSize.width, cardSize.height, roughSeed(data.id), selected ? 1.9 : hovered ? 1.7 : 1.5)
-    return { fills: paths.filter((path) => path.fill !== "none"), strokes: paths.filter((path) => path.fill === "none") }
-  }, [cardSize, data.id, hovered, selected])
-  const controlsVisible = hovered || selected
-  // Hidden at rest so a sketch stays a sketch. Still always interactive, so
-  // pen/touch (no hover state) can tap a handle; a tap that selects the node
-  // reveals them.
-  const controlStyle = { opacity: controlsVisible ? 1 : 0, pointerEvents: "auto" as const }
-  useEffect(() => {
-    // scrollHeight forces a sync reflow; defer to next frame to avoid one per keystroke.
-    const id = requestAnimationFrame(() => {
-      for (const textarea of bulletRefs.current) {
-        if (!textarea) continue
-        textarea.style.height = "auto"
-        textarea.style.height = `${textarea.scrollHeight}px`
-      }
-      const titlebar = titlebarRef.current
-      const body = bodyRef.current
-      if (!titlebar || !body) return
-      // The body stretches to fill the card, so its own height says nothing
-      // about its content: add the rows up instead.
-      const style = getComputedStyle(body)
-      const rows = Array.from(body.children, (row) => (row as HTMLElement).offsetHeight)
-      const needed = titlebar.offsetHeight + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
-        + rows.reduce((sum, height) => sum + height, 0) + (parseFloat(style.rowGap) || 0) * Math.max(0, rows.length - 1)
-      const fit = Math.max(NODE_MIN_HEIGHT, Math.ceil(needed / GRID_SIZE) * GRID_SIZE)
-      setFitHeight(fit)
-      if (resizingRef.current) return
-      // A word wider than the text box can't wrap, so it clips; widen the card until it fits.
-      const overflowX = bulletRefs.current.reduce((most, textarea) => textarea ? Math.max(most, textarea.scrollWidth - textarea.clientWidth) : most, 0)
-      const width = data.width ?? FALLBACK_SIZE.width
-      const nextWidth = overflowX > 0 ? Math.ceil((width + overflowX) / GRID_SIZE) * GRID_SIZE : width
-      const growHeight = data.height !== undefined && fit > data.height
-      if (!growHeight && nextWidth === width) return
-      data.onChange(data.id, { ...(growHeight ? { height: fit } : {}), ...(nextWidth !== width ? { width: nextWidth } : {}) })
-    })
-    return () => cancelAnimationFrame(id)
-  }, [bulletDrafts, titleDraft, editingTitle, cardSize, data.height, data.width, data.id, data.onChange, bulletRefs])
-  return (
-    <div ref={cardRef} className={cn("architecture-diagram-node", data.compound && "architecture-diagram-node-compound", selected && "architecture-diagram-node-selected")} style={cardStyle} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onBlur={handleCardBlur}>
-      <NodeResizer isVisible={!!selected} minWidth={minNodeWidth} minHeight={fitHeight} color="var(--sketch-ink-soft)" onResizeStart={() => { resizingRef.current = true }} onResizeEnd={(_event, params) => {
-        resizingRef.current = false
-        const x = snapToGrid(params.x)
-        const y = snapToGrid(params.y)
-        data.onChange(data.id, { width: snapToGrid(params.x + params.width) - x, height: snapToGrid(params.y + params.height) - y, position: { x, y } })
-      }} />
-      {/* Fill sits under the content (a later positioned sibling); the outline sits on top. */}
-      <svg aria-hidden="true" focusable="false" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", overflow: "visible", pointerEvents: "none" }}>
-        {nodeSketch.fills.map((path, index) => <path key={index} d={path.d} className="architecture-diagram-node-fill" stroke="none" />)}
-      </svg>
-      <svg className="architecture-diagram-node-sketch" aria-hidden="true" focusable="false" style={{ position: "absolute", zIndex: 1, inset: 0, width: "100%", height: "100%", overflow: "visible", pointerEvents: "none" }}>
-        {nodeSketch.strokes.map((path, index) => <path key={index} d={path.d} fill="none" stroke="currentColor" strokeWidth={path.strokeWidth} />)}
-      </svg>
-      <Handle id="top" type="source" position={Position.Top} className="architecture-diagram-handle" style={controlStyle} />
-      {data.remove && controlsVisible && (
-        <button type="button" aria-label={data.remove.label} className="nodrag nopan absolute right-1 top-1 rounded-full bg-surface-elevated p-0.5 text-ink-muted hover:text-danger" style={{ zIndex: 2 }}
-          onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); data.remove!.run([data.id]) }}>
-          <X className="h-3 w-3" />
-        </button>
-      )}
-      <Handle id="left" type="source" position={Position.Left} className="architecture-diagram-handle" style={controlStyle} />
-      {/* Not clipped: the kind list opens past the card's edge. The body and title clip themselves.
-          Inert until the card is activated (see globals.css), so a click selects it first. */}
-      <div className="architecture-diagram-node-content" style={{ position: "relative", height: "100%", display: "grid" }}>
-      <div style={{ display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, width: "100%", height: "100%" }}>
-      <div ref={titlebarRef} className="architecture-diagram-node-titlebar">
-        {editingTitle ? (
-          <input ref={titleRef} autoFocus aria-label="Node title" value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} onBlur={() => setEditingTitle(false)} onKeyDown={handleTitleKeyDown} onPointerDown={(event) => event.stopPropagation()} className="nodrag architecture-diagram-title architecture-diagram-title-input" />
-        ) : (
-          <span role="button" tabIndex={0} aria-label="Edit node title" onClick={() => setEditingTitle(true)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setEditingTitle(true) } }} className="architecture-diagram-title architecture-diagram-title-display">{titleDraft}</span>
-        )}
-        {data.kinds.length > 0 && !isDraft(data.id)
-          // Looks exactly like the label; on an activated card, clicking it opens the list.
-          ? <div className="nodrag nopan" style={{ flexShrink: 0 }} onPointerDown={(event) => event.stopPropagation()}>
-            <StyledSelect variant="inline" className="architecture-diagram-node-kind" ariaLabel="Kind" value={data.kind} options={data.kinds.map((kind) => ({ value: kind, label: kind }))} onChange={(kind) => data.onChange(data.id, { kind })} />
-          </div>
-          : data.kind && <span className="architecture-diagram-node-kind">{data.kind}</span>}
-      </div>
-      {/* A compound's body is where its children sit, so its bullets (the element's
-          description) stay hidden on the canvas; they remain editable in Text. */}
-      {/* Clicking below the bullets starts a new one. Focusable, so that click keeps
-          focus inside the card instead of committing it. */}
-      <div ref={bodyRef} tabIndex={-1} className="architecture-diagram-node-body nowheel" style={{ outline: "none" }} hidden={data.compound} onClick={(event) => { if (event.target === event.currentTarget) startBullet() }}>
-        {bulletDrafts.map((text, index) => (
-          <div key={index} className="architecture-diagram-bullet-row">
-            <span className="architecture-diagram-bullet-marker" aria-hidden="true">—</span>
-            <textarea
-              ref={(el) => { bulletRefs.current[index] = el }}
-              aria-label="Node bullet"
-              value={text}
-              onChange={(event) => editBullet(index, event.target.value)}
-              onKeyDown={(event) => handleBulletKeyDown(event, index)}
-              className="nodrag architecture-diagram-bullet-input"
-              rows={1}
-              style={{ resize: "none" }}
-            />
-          </div>
-        ))}
-      </div>
-      </div>
-      </div>
-      <Handle id="right" type="source" position={Position.Right} className="architecture-diagram-handle" style={controlStyle} />
-      <Handle id="bottom" type="source" position={Position.Bottom} className="architecture-diagram-handle" style={controlStyle} />
-    </div>
-  )
-}
-
-// Floating edges: attachment points follow the nodes' live rectangles, so
-// dragging a node moves its edges to the nearest side.
-
-// Pick the side of `node` facing `toward`, returning that side's midpoint. Used
-// until the slot pass below has geometry for both cards.
-function attach(node: InternalNode<GraphFlowNode>, toward: InternalNode<GraphFlowNode>): AttachPoint {
-  const rect = (item: InternalNode<GraphFlowNode>): CardRect => ({
-    ...item.internals.positionAbsolute,
-    width: item.measured.width ?? FALLBACK_SIZE.width,
-    height: item.measured.height ?? FALLBACK_SIZE.height,
-  })
-  const own = rect(node)
-  return slotPoint(own, sideToward(own, rect(toward)), 0.5)
-}
-
-// Soft avoidance: connections sharing a card side get their own slot on it
-// instead of all leaving from the midpoint, so their paths run in separate
-// lanes. Lines may still cross. This is the fallback before libavoid loads.
-const SIDE_SPREAD = 0.68
-
-interface AttachPoint {
-  x: number
-  y: number
-  position: Position
-}
-
-export interface EdgeAttachment {
-  source: AttachPoint
-  target: AttachPoint
-}
-
-interface CardRect {
-  x: number
-  y: number
-  width: number
-  height: number
-}
-
-/** The point `ratio` (0 to 1) along `side` of `rect`. */
-function slotPoint(rect: CardRect, side: Position, ratio: number): AttachPoint {
-  const { x, y, width, height } = rect
-  if (side === Position.Top) return { x: x + width * ratio, y, position: side }
-  if (side === Position.Bottom) return { x: x + width * ratio, y: y + height, position: side }
-  if (side === Position.Left) return { x, y: y + height * ratio, position: side }
-  return { x: x + width, y: y + height * ratio, position: side }
-}
-
-function sideToward(rect: CardRect, toward: CardRect): Position {
-  const dx = toward.x + toward.width / 2 - (rect.x + rect.width / 2)
-  const dy = toward.y + toward.height / 2 - (rect.y + rect.height / 2)
-  // Compare against the card's own aspect so wide cards still prefer left/right.
-  if (Math.abs(dx) * rect.height > Math.abs(dy) * rect.width) return dx > 0 ? Position.Right : Position.Left
-  return dy > 0 ? Position.Bottom : Position.Top
-}
-
-/**
- * Slot points for every edge, keyed by edge id. `nodes` carry absolute flow
- * positions; one React Flow has not measured yet counts at FALLBACK_SIZE. An
- * edge with an endpoint missing from `nodes` is omitted, and its path falls
- * back to `attach`.
- */
-export function edgeAttachments(nodes: readonly RoutableNode[], edges: readonly DiagramEdge[]): Map<string, EdgeAttachment> {
-  const rects = new Map<string, CardRect>(nodes.map((node) => [node.id, {
-    x: node.position.x, y: node.position.y,
-    width: node.measured?.width ?? FALLBACK_SIZE.width,
-    height: node.measured?.height ?? FALLBACK_SIZE.height,
-  }]))
-  const ends = edges.flatMap((edge) => {
-    const source = rects.get(edge.source)
-    const target = rects.get(edge.target)
-    if (!source || !target) return []
-    return [
-      { edgeId: edge.id, role: "source" as const, nodeId: edge.source, rect: source, side: sideToward(source, target), toward: target },
-      { edgeId: edge.id, role: "target" as const, nodeId: edge.target, rect: target, side: sideToward(target, source), toward: source },
-    ]
-  })
-  const groups = new Map<string, typeof ends>()
-  for (const end of ends) {
-    const key = `${end.nodeId}:${end.side}`
-    groups.set(key, [...(groups.get(key) ?? []), end])
-  }
-  const points = new Map<string, AttachPoint>()
-  for (const group of groups.values()) {
-    // Order along the side by where the other card sits, so neighbouring lines
-    // keep their relative order and do not cross just to reach their slot.
-    const horizontal = group[0].side === Position.Top || group[0].side === Position.Bottom
-    const sorted = [...group].sort((a, b) => (horizontal
-      ? a.toward.x + a.toward.width / 2 - (b.toward.x + b.toward.width / 2)
-      : a.toward.y + a.toward.height / 2 - (b.toward.y + b.toward.height / 2)))
-    sorted.forEach((end, index) => {
-      const share = (index + 1) / (sorted.length + 1)
-      const ratio = 0.5 + (share - 0.5) * SIDE_SPREAD
-      points.set(`${end.edgeId}:${end.role}`, slotPoint(end.rect, end.side, ratio))
-    })
-  }
-  return new Map(edges.flatMap((edge) => {
-    const source = points.get(`${edge.id}:source`)
-    const target = points.get(`${edge.id}:target`)
-    return source && target ? [[edge.id, { source, target }] as const] : []
-  }))
-}
-
-// Orthogonal connector, like a flowchart: leave each card perpendicular to its
-// side. Facing sides give a Z whose middle lane `bend` shifts along the axis;
-// perpendicular sides give a single L. Corners are rounded.
-const CORNER_RADIUS = 8
-
-interface Point { x: number, y: number }
-
-function orthogonalRoute(from: AttachPoint, to: AttachPoint, bend: number) {
-  const horizontal = (side: Position) => side === Position.Left || side === Position.Right
-  let axis: "x" | "y" | null = null
-  let raw: Point[]
-  if (horizontal(from.position) && horizontal(to.position)) {
-    const lane = (from.x + to.x) / 2 + bend
-    raw = [from, { x: lane, y: from.y }, { x: lane, y: to.y }, to]
-    axis = "x"
-  } else if (!horizontal(from.position) && !horizontal(to.position)) {
-    const lane = (from.y + to.y) / 2 + bend
-    raw = [from, { x: from.x, y: lane }, { x: to.x, y: lane }, to]
-    axis = "y"
-  } else {
-    raw = [from, horizontal(from.position) ? { x: to.x, y: from.y } : { x: from.x, y: to.y }, to]
-  }
-  const points = raw.filter((point, index) => index === 0 || Math.hypot(point.x - raw[index - 1].x, point.y - raw[index - 1].y) > 0.01)
-  // The lane is only draggable on a Z; the handle rides its middle segment.
-  const draggable = axis !== null && points.length === 4
-  const handle = draggable ? { x: (points[1].x + points[2].x) / 2, y: (points[1].y + points[2].y) / 2 } : null
-  return { points, d: roundedPath(points, CORNER_RADIUS), axis: draggable ? axis : null, handle }
-}
-
-// A connection label wraps at about this many characters, roughly 90px in the
-// 13px hand-drawn font, so it fits the gap between two neighbouring cards.
-const LABEL_LINE_CHARS = 12
-const LABEL_LINE_HEIGHT = 15
-
-/** A label split into lines of whole words, each at most `LABEL_LINE_CHARS` unless one word is longer. */
-function wrapLabel(label: string): string[] {
-  const lines: string[] = []
-  for (const word of label.split(/\s+/).filter(Boolean)) {
-    const last = lines.at(-1)
-    if (last !== undefined && last.length + 1 + word.length <= LABEL_LINE_CHARS) lines[lines.length - 1] = `${last} ${word}`
-    else lines.push(word)
-  }
-  return lines
-}
-
-/** A polyline with each corner rounded off by up to `radius`, never more than half of either adjoining segment. */
-function roundedPath(points: readonly Point[], radius: number): string {
-  let d = `M ${points[0].x} ${points[0].y}`
-  for (let index = 1; index < points.length - 1; index += 1) {
-    const prev = points[index - 1]
-    const corner = points[index]
-    const next = points[index + 1]
-    const before = Math.hypot(corner.x - prev.x, corner.y - prev.y)
-    const after = Math.hypot(next.x - corner.x, next.y - corner.y)
-    if (before < 0.01 || after < 0.01) continue
-    const cut = Math.min(radius, before / 2, after / 2)
-    d += ` L ${corner.x - (corner.x - prev.x) / before * cut} ${corner.y - (corner.y - prev.y) / before * cut}`
-      + ` Q ${corner.x} ${corner.y} ${corner.x + (next.x - corner.x) / after * cut} ${corner.y + (next.y - corner.y) / after * cut}`
-  }
-  const last = points[points.length - 1]
-  return `${d} L ${last.x} ${last.y}`
-}
-
-// A routed connection drawn curved: its corners rounded this far, so it flows instead of stepping.
-const CURVE_RADIUS = 48
-
-/** The point halfway along a polyline. */
-function polylineMidpoint(points: readonly Point[]): Point {
-  const lengths = points.slice(1).map((point, index) => Math.hypot(point.x - points[index].x, point.y - points[index].y))
-  let left = lengths.reduce((sum, length) => sum + length, 0) / 2
-  for (const [index, length] of lengths.entries()) {
-    if (left <= length && length > 0) {
-      const from = points[index]
-      const to = points[index + 1]
-      return { x: from.x + (to.x - from.x) * left / length, y: from.y + (to.y - from.y) * left / length }
-    }
-    left -= length
-  }
-  return points[0]
-}
-
-/** Arrowhead at `tip`, pointing away from `from`: 10px wings spread 0.4 rad either side. */
-function arrowHeadPath(tip: Point, from: Point): string {
-  const angle = Math.atan2(tip.y - from.y, tip.x - from.x)
-  const size = 10
-  const wing = 0.4
-  const left = { x: tip.x - Math.cos(angle - wing) * size, y: tip.y - Math.sin(angle - wing) * size }
-  const right = { x: tip.x - Math.cos(angle + wing) * size, y: tip.y - Math.sin(angle + wing) * size }
-  return `M ${left.x} ${left.y} L ${tip.x} ${tip.y} L ${right.x} ${right.y} Z`
-}
-
-function ArchitectureEdgePath({ id, source, target, data, selected }: EdgeProps<GraphFlowEdge>) {
-  const sourceNode = useInternalNode<GraphFlowNode>(source)
-  const targetNode = useInternalNode<GraphFlowNode>(target)
-  const [dragBend, setDragBend] = useState<number | null>(null)
-  const stopDragRef = useRef<(() => void) | null>(null)
-  // End a drag still running at unmount so its window listeners do not leak.
-  useEffect(() => () => stopDragRef.current?.(), [])
-  const [editingLabel, setEditingLabel] = useState(false)
-  useEffect(() => { if (!selected) setEditingLabel(false) }, [selected])
-  // The label reaches the model once, when editing ends, not on every keystroke.
-  const [labelDraft, setLabelDraft] = useState("")
-  const commitLabel = () => {
-    setEditingLabel(false)
-    if (labelDraft.trim() !== (data?.label ?? "")) data?.onLabelChange?.(id, labelDraft.trim())
-  }
-
-  // Routed (once libavoid has loaded): libavoid's path, which passes the bend
-  // point; `bend` offsets that point from the midpoint between the card centres,
-  // along the normal of the line joining them, as the saved positions store it.
-  // Unrouted: curved `bend` is relative to the chord (endpoint-to-endpoint line),
-  // elbow `bend` is the Z's middle-lane offset along its axis. All stay correct as nodes drag.
-  const elbow = data?.edgeStyle === "elbow"
-  const geometry = useMemo(() => {
-    if (!sourceNode || !targetNode) return null
-    const bend = dragBend ?? data?.path?.bend ?? 0
-    const route = data?.route
-    if (route) {
-      const rect = (node: InternalNode<GraphFlowNode>) => ({ ...node.internals.positionAbsolute, width: node.measured.width ?? FALLBACK_SIZE.width, height: node.measured.height ?? FALLBACK_SIZE.height })
-      const sourceRect = rect(sourceNode)
-      const targetRect = rect(targetNode)
-      const through = bend ? bendPoint(sourceRect, targetRect, bend) : polylineMidpoint(route)
-      return {
-        rough: !elbow,
-        edgePath: roundedPath(route, elbow ? CORNER_RADIUS : CURVE_RADIUS),
-        arrows: arrowHeadPath(route[route.length - 1], route[route.length - 2]),
-        handle: through,
-        labelPoint: through,
-        project: (point: Point): number | null => bendThrough(sourceRect, targetRect, point),
-        nudge: (key: string) => key === "ArrowUp" || key === "ArrowRight" ? 1 : key === "ArrowDown" || key === "ArrowLeft" ? -1 : null,
-        keys: "ArrowUp ArrowDown ArrowLeft ArrowRight",
-      }
-    }
-    const from = data?.attachment?.source ?? attach(sourceNode, targetNode)
-    const to = data?.attachment?.target ?? attach(targetNode, sourceNode)
-    if (elbow) {
-      const route = orthogonalRoute(from, to, bend)
-      const { points } = route
-      const laneBase = route.axis ? (from[route.axis] + to[route.axis]) / 2 : 0
-      const axis = route.axis
-      return {
-        rough: false,
-        edgePath: route.d,
-        arrows: arrowHeadPath(points[points.length - 1], points[points.length - 2] ?? from),
-        handle: route.handle,
-        labelPoint: route.handle ?? points[Math.floor(points.length / 2)],
-        project: (point: Point) => axis ? point[axis] - laneBase : null,
-        nudge: (key: string) => axis === "x" ? (key === "ArrowRight" ? 1 : key === "ArrowLeft" ? -1 : null)
-          : axis === "y" ? (key === "ArrowDown" ? 1 : key === "ArrowUp" ? -1 : null) : null,
-        keys: axis === "x" ? "ArrowLeft ArrowRight" : "ArrowUp ArrowDown",
-      }
-    }
-    const mid = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 }
-    const length = Math.hypot(to.x - from.x, to.y - from.y) || 1
-    const normal = { x: -(to.y - from.y) / length, y: (to.x - from.x) / length }
-    // A quadratic Bézier does not pass through its control point, so the
-    // control sits twice as far out as the point the user actually sees.
-    const pathPoint = { x: mid.x + normal.x * bend, y: mid.y + normal.y * bend }
-    const control = { x: mid.x + normal.x * bend * 2, y: mid.y + normal.y * bend * 2 }
-    return {
-      rough: true,
-      edgePath: `M ${from.x} ${from.y} Q ${control.x} ${control.y} ${to.x} ${to.y}`,
-      arrows: arrowHeadPath(to, control),
-      handle: pathPoint,
-      labelPoint: pathPoint,
-      project: (point: Point) => (point.x - mid.x) * normal.x + (point.y - mid.y) * normal.y,
-      nudge: (key: string) => key === "ArrowUp" || key === "ArrowRight" ? 1 : key === "ArrowDown" || key === "ArrowLeft" ? -1 : null,
-      keys: "ArrowUp ArrowDown ArrowLeft ArrowRight",
-    }
-  }, [sourceNode, targetNode, elbow, data?.attachment, data?.route, data?.path?.bend, dragBend])
-
-  const sketch = useMemo(
-    () => geometry?.rough ? edgeSketchPaths(geometry.edgePath, roughSeed(id), selected ? 2 : 1.7) : [],
-    [geometry, id, selected],
-  )
-
-  if (!geometry) return null
-  const { labelPoint, handle } = geometry
-
-  const startDrag = (event: ReactPointerEvent<SVGCircleElement>) => {
-    event.preventDefault()
-    event.stopPropagation()
-    const { project } = geometry
-    // The latest bend, read when the drag ends: a parent update must not run inside a state updater.
-    let latest: number | null = null
-    const move = (pointer: PointerEvent) => {
-      const point = data?.toFlowPoint?.(pointer.clientX, pointer.clientY)
-      if (!point) return
-      const value = project(point)
-      if (value !== null) {
-        latest = value
-        setDragBend(value)
-        data?.onBendPreview?.(id, value)
-      }
-    }
-    const stop = () => {
-      window.removeEventListener("pointermove", move)
-      window.removeEventListener("pointerup", stop)
-      window.removeEventListener("pointercancel", stop)
-      stopDragRef.current = null
-      data?.onBendPreview?.(id, null)
-      setDragBend(null)
-      if (latest !== null) data?.onPathChange?.(id, { bend: latest })
-    }
-    stopDragRef.current = stop
-    window.addEventListener("pointermove", move)
-    window.addEventListener("pointerup", stop, { once: true })
-    window.addEventListener("pointercancel", stop, { once: true })
-  }
-  const nudge = (event: KeyboardEvent<SVGCircleElement>) => {
-    const step = event.shiftKey ? 10 : 1
-    const sign = geometry.nudge(event.key)
-    if (sign === null) return
-    event.preventDefault()
-    data?.onPathChange?.(id, { bend: (data?.path?.bend ?? 0) + sign * step })
-  }
-
-  return <>
-    <g onDoubleClick={() => { if (data?.onLabelChange) { setLabelDraft(data.label ?? ""); setEditingLabel(true) } }}>
-      <BaseEdge id={id} path={geometry.edgePath} interactionWidth={20} style={{ stroke: "transparent" }} />
-    </g>
-    {geometry.rough
-      ? sketch.map((path, index) => <path key={index} d={path.d} fill="none" stroke="currentColor" strokeWidth={path.strokeWidth} strokeLinecap="round" className={cn("architecture-diagram-edge", selected && "architecture-diagram-edge-selected")} pointerEvents="none" />)
-      : <path d={geometry.edgePath} fill="none" stroke="currentColor" strokeWidth={selected ? 2 : 1.6} strokeLinecap="round" strokeLinejoin="round" className={cn("architecture-diagram-edge", selected && "architecture-diagram-edge-selected")} pointerEvents="none" />}
-    <path d={geometry.arrows} fill="currentColor" stroke="currentColor" strokeWidth={1.2} strokeLinejoin="round" className={cn("architecture-diagram-edge", selected && "architecture-diagram-edge-selected")} pointerEvents="none" />
-    {selected && editingLabel && data?.onLabelChange
-      ? <foreignObject x={labelPoint.x - 70} y={labelPoint.y - 26} width={140} height={24} overflow="visible"><input autoFocus aria-label="Connection label" value={labelDraft} placeholder="Label" onChange={(event) => setLabelDraft(event.target.value)} onBlur={commitLabel} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur() } else if (event.key === "Escape") { event.preventDefault(); setEditingLabel(false) } }} className="architecture-diagram-edge-label-input nodrag nopan nowheel" /></foreignObject>
-      : data?.label && (
-        // Lines stack upwards, so the last sits where a one-line label would.
-        <text y={labelPoint.y - 12 - (wrapLabel(data.label).length - 1) * LABEL_LINE_HEIGHT} className="architecture-diagram-edge-label" textAnchor="middle" dominantBaseline="central">
-          {wrapLabel(data.label).map((line, index) => <tspan key={index} x={labelPoint.x} dy={index === 0 ? 0 : LABEL_LINE_HEIGHT}>{line}</tspan>)}
-        </text>
-      )}
-    {selected && handle && data?.onPathChange && <circle cx={handle.x} cy={handle.y} r={6} role="button" tabIndex={0} aria-label="Adjust connection curve" aria-keyshortcuts={geometry.keys} className="architecture-diagram-path-handle nodrag nopan" onPointerDown={startDrag} onKeyDown={nudge} />}
-  </>
-}
-
 // Module-level so React Flow does not remount every card on each render.
 const nodeTypes = { "architecture-node": ArchitectureNodeCard }
-const edgeTypes = { "architecture-edge": ArchitectureEdgePath }
+const edgeTypes = { "architecture-edge": ArchitectureEdge }
 
 // React Flow wants a parent before its children, and each child positioned
 // relative to its parent; the graph keeps absolute positions throughout.
@@ -827,23 +84,27 @@ function toFlowNodes(nodes: DiagramNode[], onNodeChange: ArchitectureNodeData["o
       id: node.id, type: "architecture-node",
       position: parent ? { x: node.position.x - parent.position.x, y: node.position.y - parent.position.y } : node.position,
       ...(parent ? { parentId: parent.id } : {}),
-      // Height is left unset for nodes without an explicit height, so they grow with their content.
-      style: { width: node.width ?? FALLBACK_SIZE.width, ...(node.height !== undefined ? { height: node.height } : {}) },
+      style: { width: node.width, height: node.height },
       data: { ...node, onChange: onNodeChange, kinds, claimAutoEdit, remove },
     }
   })
 }
 
-// Live flow nodes in absolute coordinates, so routing works across nesting levels mid-drag.
-function absoluteNodes(nodes: readonly GraphFlowNode[]): RoutableNode[] {
+// Live flow nodes as cards in absolute coordinates, so routing works across nesting levels mid-drag.
+// A node React Flow has not measured yet counts at FALLBACK_SIZE.
+function routeCards(nodes: readonly GraphFlowNode[]): RouteCard[] {
   const byId = new Map(nodes.map((node) => [node.id, node]))
-  const absolute = (node: GraphFlowNode): { x: number, y: number } => {
+  const absolute = (node: GraphFlowNode): Point => {
     const parent = node.parentId ? byId.get(node.parentId) : undefined
     if (!parent) return node.position
     const origin = absolute(parent)
     return { x: origin.x + node.position.x, y: origin.y + node.position.y }
   }
-  return nodes.map((node) => ({ id: node.id, position: absolute(node), measured: node.measured }))
+  return nodes.map((node) => ({
+    id: node.id, ...absolute(node),
+    width: node.measured?.width ?? FALLBACK_SIZE.width, height: node.measured?.height ?? FALLBACK_SIZE.height,
+    parent: node.parentId ?? null, compound: node.data.compound,
+  }))
 }
 
 /**
@@ -856,24 +117,14 @@ function innermostNode(nodes: readonly DiagramNode[], x: number, y: number, excl
   let best: string | null = null
   for (const node of nodes) {
     if ((compoundsOnly && !node.compound) || isDraft(node.id) || [...excluded].some((id) => node.id === id || node.id.startsWith(`${id}.`))) continue
-    const width = node.width ?? FALLBACK_SIZE.width
-    const height = node.height ?? FALLBACK_SIZE.height
-    if (x < node.position.x || y < node.position.y || x > node.position.x + width || y > node.position.y + height) continue
+    if (x < node.position.x || y < node.position.y || x > node.position.x + node.width || y > node.position.y + node.height) continue
     if (best === null || node.id.split(".").length > best.split(".").length) best = node.id
   }
   return best
 }
 
-function toFlowEdges(edges: DiagramEdge[], edgeStyle: EdgeStyle, attachments = new Map<string, EdgeAttachment>(), runtime: EdgeRuntime = {}, routes: ReadonlyMap<string, RoutePoint[]> | null = null): GraphFlowEdge[] {
-  return edges.map((edge) => ({
-    ...edge,
-    type: "architecture-edge",
-    data: {
-      ...edge, ...runtime, edgeStyle,
-      ...(attachments.has(edge.id) ? { attachment: attachments.get(edge.id) } : {}),
-      ...(routes?.has(edge.id) ? { route: routes.get(edge.id) } : {}),
-    },
-  }))
+function toFlowEdges(edges: DiagramEdge[]): GraphFlowEdge[] {
+  return edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target, type: "architecture-edge", data: { ...edge } }))
 }
 
 // Fields React Flow owns on a node/edge; the graph never describes them.
@@ -883,7 +134,7 @@ const RETAINED_BY_FLOW = ["selected", "measured", "dragging"] as const
 // blind replace clears selection and drops measurements on every edit, making
 // edges jump and handles fade mid-interaction. Merging the other way round is
 // just as wrong: it would keep keys the rebuilt item deliberately omits, e.g. a
-// stale `data.attachment` after the endpoint node moves to a different side.
+// stale `parentId` after a node is dropped out of its frame.
 function reconcile<T extends { id: string }>(current: T[], next: T[]): T[] {
   const previous = new Map(current.map((item) => [item.id, item as Record<string, unknown>]))
   return next.map((item) => {
@@ -895,217 +146,6 @@ function reconcile<T extends { id: string }>(current: T[], next: T[]): T[] {
     for (const key of RETAINED_BY_FLOW) if (key in existing) merged[key] = existing[key]
     return merged as T
   })
-}
-
-/**
- * The surface's camera: fitting, wheel and pinch zoom, and keeping the view
- * steady while the frame resizes or the host canvas zooms.
- */
-function useSurfaceCamera({ flow, viewportRef, onNodesChange, autoFit, hostScale, readOnly }: {
-  flow: GraphFlowInstance | null
-  viewportRef: RefObject<HTMLDivElement | null>
-  onNodesChange: (changes: NodeChange<GraphFlowNode>[]) => void
-  autoFit: boolean
-  hostScale: number
-  readOnly: boolean
-}) {
-  const fitView = useCallback(() => flow?.fitView({ padding: 0.22, duration: 180 }), [flow])
-  // Nodes measure and auto-grow after the first fit, which would leave the
-  // graph cropped. Until the user takes the camera, keep refitting as sizes settle.
-  const followFitRef = useRef(true)
-  const followTimerRef = useRef<number | undefined>(undefined)
-  useEffect(() => () => window.clearTimeout(followTimerRef.current), [])
-  const takeCamera = useCallback(() => { followFitRef.current = false }, [])
-  const handleNodesChange = useCallback((changes: NodeChange<GraphFlowNode>[]) => {
-    onNodesChange(changes)
-    if (!followFitRef.current || !changes.some((change) => change.type === "dimensions")) return
-    window.clearTimeout(followTimerRef.current)
-    followTimerRef.current = window.setTimeout(() => { if (followFitRef.current) void flow?.fitView({ padding: 0.22 }) }, 120)
-  }, [onNodesChange, flow])
-  useEffect(() => {
-    if (!autoFit) return
-    followFitRef.current = true
-    // Two frames: the host's new size has to be laid out and picked up by React
-    // Flow's own size observer before a fit can use it.
-    let frame = requestAnimationFrame(() => { frame = requestAnimationFrame(() => { void fitView() }) })
-    return () => cancelAnimationFrame(frame)
-    // Refit on the transition to true only, not whenever the flow instance changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoFit])
-  const zoomGraphAtCenter = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
-    if (!flow || event.deltaY === 0) return
-    takeCamera()
-    event.preventDefault()
-    event.stopPropagation()
-    void (event.deltaY < 0 ? flow.zoomIn() : flow.zoomOut())
-  }, [flow, takeCamera])
-  // Two-finger pinch + pan: the same hook every canvas uses.
-  useTwoFingerGesture(viewportRef, {
-    enabled: !readOnly && !!flow,
-    begin: () => { takeCamera(); return flow!.getViewport() },
-    update: (start, { ratio, cx, cy, mx, my }) => {
-      // Same range as the ReactFlow minZoom/maxZoom props.
-      const zoom = Math.min(2 * hostScale, Math.max(0.2 * hostScale, start.zoom * ratio))
-      flow!.setViewport({ x: mx - (cx - start.x) / start.zoom * zoom, y: my - (cy - start.y) / start.zoom * zoom, zoom })
-    },
-  })
-  // React Flow pins its viewport to the top-left corner, so when the frame
-  // resizes (fullscreen, a resize drag) the view's middle would drift. Both
-  // this and host zoom re-project from the size the current viewport was set
-  // for, keeping whatever sat in the center before in the center after.
-  const viewportSizeRef = useRef({ width: 0, height: 0 })
-  const hostScaleRef = useRef(hostScale)
-  const reframe = useCallback((factor: number) => {
-    const el = viewportRef.current
-    if (!el || !flow) return
-    const next = { width: el.clientWidth, height: el.clientHeight }
-    const { x, y, zoom } = flow.getViewport()
-    const view = reframeCamera({ x, y }, zoom, viewportSizeRef.current, next, factor)
-    viewportSizeRef.current = next
-    void flow.setViewport({ ...view.offset, zoom: view.scale })
-  }, [flow, viewportRef])
-  useEffect(() => {
-    const el = viewportRef.current
-    if (!el || !flow || typeof ResizeObserver === "undefined") return
-    viewportSizeRef.current = { width: el.clientWidth, height: el.clientHeight }
-    const observer = new ResizeObserver(() => {
-      const { width, height } = viewportSizeRef.current
-      if (el.clientWidth !== width || el.clientHeight !== height) reframe(1)
-    })
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [flow, reframe, viewportRef])
-  // Embedded in a canvas, the frame grows and shrinks with the host's zoom;
-  // magnify the graph by the same factor so the frame shows the same view,
-  // just bigger or smaller. Runs before the ResizeObserver sees the new size.
-  useLayoutEffect(() => {
-    const factor = hostScale / hostScaleRef.current
-    hostScaleRef.current = hostScale
-    if (factor !== 1) reframe(factor)
-  }, [hostScale, reframe])
-  return { fitView, takeCamera, handleNodesChange, zoomGraphAtCenter }
-}
-
-/**
- * Pen drawing and the lasso. Drawing needs no tool: a closed pen stroke becomes
- * a node (`addDraft`). The lasso is the one opt-in tool: its loop selects the
- * nodes whose centres it encloses. Points are sampled in screen pixels and
- * converted to flow space when the stroke ends.
- */
-function useSurfaceDrawing({ flow, viewportRef, readOnly, nodes, setNodes, setEdges, addDraft }: {
-  flow: GraphFlowInstance | null
-  viewportRef: RefObject<HTMLDivElement | null>
-  readOnly: boolean
-  nodes: GraphFlowNode[]
-  setNodes: Dispatch<SetStateAction<GraphFlowNode[]>>
-  setEdges: Dispatch<SetStateAction<GraphFlowEdge[]>>
-  addDraft: (box: CardRect) => void
-}) {
-  const [lasso, setLasso] = useState(false)
-  useEffect(() => {
-    if (!lasso) return
-    const onKeyDown = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") setLasso(false) }
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
-  }, [lasso])
-  // Points accumulate in a ref so every pointer sample doesn't re-render the
-  // whole surface; the preview only syncs to state once per animation frame.
-  const drawPointsRef = useRef<Array<{ x: number, y: number }>>([])
-  const drawFrameRef = useRef<number | null>(null)
-  const [drawPreview, setDrawPreview] = useState<Array<{ x: number, y: number }> | null>(null)
-  const drawOriginRef = useRef({ left: 0, top: 0 })
-  useEffect(() => () => { if (drawFrameRef.current !== null) cancelAnimationFrame(drawFrameRef.current) }, [])
-  const startDraw = useCallback((point: { clientX: number, clientY: number }) => {
-    const rect = viewportRef.current?.getBoundingClientRect()
-    if (!rect) return
-    drawOriginRef.current = { left: rect.left, top: rect.top }
-    drawPointsRef.current = [{ x: point.clientX, y: point.clientY }]
-    setDrawPreview(drawPointsRef.current)
-  }, [viewportRef])
-  const onDrawPointerMove = useCallback((event: { clientX: number, clientY: number }) => {
-    if (drawPointsRef.current.length === 0) return
-    drawPointsRef.current.push({ x: event.clientX, y: event.clientY })
-    if (drawFrameRef.current !== null) return
-    drawFrameRef.current = requestAnimationFrame(() => {
-      drawFrameRef.current = null
-      setDrawPreview([...drawPointsRef.current])
-    })
-  }, [])
-  // Whether a gesture was a tap is judged in screen pixels, before the points
-  // are converted to flow space, so it does not change with zoom.
-  const finishDraw = useCallback((commit: boolean) => {
-    if (drawFrameRef.current !== null) { cancelAnimationFrame(drawFrameRef.current); drawFrameRef.current = null }
-    const points = drawPointsRef.current
-    drawPointsRef.current = []
-    setDrawPreview(null)
-    if (!commit || !flow || points.length === 0) return
-    const tap = isTap(points)
-    if (lasso) {
-      // A tap clears the selection; a loop selects every node whose centre it
-      // encloses, plus the connections between them, so one Delete removes the lot.
-      const polygon = tap ? [] : points.map((p): [number, number] => { const at = flow.screenToFlowPosition(p); return [at.x, at.y] })
-      const picked = new Set(absoluteNodes(nodes).filter((node) => pointInPolygon(
-        node.position.x + (node.measured?.width ?? FALLBACK_SIZE.width) / 2,
-        node.position.y + (node.measured?.height ?? FALLBACK_SIZE.height) / 2,
-        polygon,
-      )).map((node) => node.id))
-      setNodes((current) => current.map((node) => ({ ...node, selected: picked.has(node.id) })))
-      setEdges((current) => current.map((edge) => ({ ...edge, selected: picked.has(edge.source) && picked.has(edge.target) })))
-      // Leave the tool once something is caught: the overlay would otherwise
-      // swallow the drag that moves the selection.
-      if (picked.size > 0) setLasso(false)
-      return
-    }
-    // A tap is not a stroke: the pane click handler deselects.
-    if (tap) return
-    const box = drawnBox(points.map((p) => flow.screenToFlowPosition(p)))
-    if (box) addDraft({ x: box.x, y: box.y, width: Math.max(NODE_MIN_WIDTH, Math.round(box.width)), height: Math.max(NODE_MIN_HEIGHT, Math.round(box.height)) })
-  }, [flow, addDraft, lasso, nodes, setNodes, setEdges])
-  // Pen draws, on the bare canvas and on any card that is not activated, which
-  // is just more paper; touch and mouse pan. Window listeners, not pointer
-  // capture: the pane still receives its click.
-  const onPanePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (readOnly || lasso || event.pointerType !== "pen" || event.button !== 0) return
-    const target = event.target as Element
-    const card = target.closest(".react-flow__node")
-    const onCard = !!card && !card.classList.contains("selected") && !target.closest(".nodrag")
-    if (!onCard && !target.classList.contains("react-flow__pane")) return
-    // Stops the pen's compatibility mousedown, which would also start React Flow's pan.
-    event.preventDefault()
-    startDraw(event)
-    const cleanup = () => {
-      window.removeEventListener("pointermove", onDrawPointerMove)
-      window.removeEventListener("pointerup", up)
-      window.removeEventListener("pointercancel", cancel)
-    }
-    const up = () => {
-      cleanup()
-      const stroke = !isTap(drawPointsRef.current)
-      finishDraw(true)
-      if (!onCard || !stroke) return
-      // The stroke's closing click would otherwise activate the card it was drawn on.
-      const swallow = (click: MouseEvent) => click.stopPropagation()
-      window.addEventListener("click", swallow, { capture: true, once: true })
-      setTimeout(() => window.removeEventListener("click", swallow, { capture: true }))
-    }
-    const cancel = () => { cleanup(); finishDraw(false) }
-    window.addEventListener("pointermove", onDrawPointerMove)
-    window.addEventListener("pointerup", up)
-    window.addEventListener("pointercancel", cancel)
-  }, [readOnly, lasso, startDraw, onDrawPointerMove, finishDraw])
-  // The lasso draws on an overlay that captures the pointer.
-  const lassoOverlay = {
-    onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => {
-      event.currentTarget.setPointerCapture(event.pointerId)
-      startDraw(event)
-    },
-    onPointerMove: onDrawPointerMove,
-    onPointerUp: () => finishDraw(true),
-    onPointerCancel: () => finishDraw(false),
-  }
-  const { left, top } = drawOriginRef.current
-  const preview = drawPreview && drawPreview.length > 1 ? `M ${drawPreview.map((p) => `${p.x - left} ${p.y - top}`).join(" L ")}` : null
-  return { lasso, setLasso, preview, onPanePointerDown, lassoOverlay }
 }
 
 /** Sketch-style editor for a `DiagramGraph`: every edit is emitted through `onChange` as a whole new graph. */
@@ -1145,7 +185,7 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
       if (doomed.size > 0 || edges) emit({ nodes: graphRef.current.nodes.filter((node) => !doomed.has(node.id)), ...(edges ? { edges } : {}) })
     },
   }, [readOnly, onRemoveFromView, emit])
-  const [flow, setFlow] = useState<GraphFlowInstance | null>(null)
+  const [flow, setFlow] = useState<Parameters<typeof useSurfaceCamera>[0]["flow"]>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const [edgeMenuOpen, setEdgeMenuOpen] = useState(false)
   const edgeMenuRef = useRef<HTMLDivElement>(null)
@@ -1157,14 +197,17 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
     emit({ edges: graphRef.current.edges.map((edge) => edge.id === id ? { ...edge, label } : edge) })
   }, [emit])
   const toFlowPoint = useCallback((x: number, y: number) => flow?.screenToFlowPosition({ x, y }), [flow])
-  const edgeRuntime = useMemo<EdgeRuntime>(() => readOnly ? {} : {
+  const [bendPreview, setBendPreview] = useState<{ id: string, bend: number } | null>(null)
+  const previewBend = useCallback((id: string, bend: number | null) => setBendPreview(bend === null ? null : { id, bend }), [])
+  const edit = useMemo<EdgeEdits | undefined>(() => readOnly ? undefined : {
     onPathChange: changeEdgePath,
     onLabelChange: changeEdgeLabel,
     toFlowPoint,
-  }, [changeEdgePath, changeEdgeLabel, readOnly, toFlowPoint])
+    onBendPreview: previewBend,
+  }, [changeEdgePath, changeEdgeLabel, previewBend, readOnly, toFlowPoint])
   const nodeKinds = readOnly ? NO_KINDS : kinds
   const [nodes, setNodes, onNodesChange] = useNodesState<GraphFlowNode>(toFlowNodes(graph.nodes, changeNode, nodeKinds, readOnly ? undefined : claimAutoEdit, removal))
-  const [edges, setEdges, onEdgesChange] = useEdgesState<GraphFlowEdge>(toFlowEdges(graph.edges, edgeStyle, new Map(), edgeRuntime))
+  const [edges, setEdges, onEdgesChange] = useEdgesState<GraphFlowEdge>(toFlowEdges(graph.edges))
   const { fitView, takeCamera, handleNodesChange, zoomGraphAtCenter } = useSurfaceCamera({ flow, viewportRef, onNodesChange, autoFit, hostScale, readOnly })
 
   // Flow state is a local copy, re-synced from the graph while keeping what React Flow owns.
@@ -1172,14 +215,18 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
     setNodes((current) => reconcile(current, toFlowNodes(graph.nodes, changeNode, nodeKinds, readOnly ? undefined : claimAutoEdit, removal)))
   }, [graph.nodes, changeNode, nodeKinds, claimAutoEdit, readOnly, removal, setNodes])
   useEffect(() => {
+    setEdges((current) => reconcile(current, toFlowEdges(graph.edges)))
+  }, [graph.edges, setEdges])
+  useEffect(() => {
     if (select) setNodes((current) => current.map((node) => ({ ...node, selected: node.id === select })))
   }, [select, setNodes])
   // Only an activated (selected) card moves. Any other card is paper: a drag
   // on it pans (React Flow pans from non-draggable nodes), a pen draws on it,
   // and a click activates it.
   const flowNodes = useMemo(() => nodes.map((node) => node.draggable === !!node.selected ? node : { ...node, draggable: !!node.selected }), [nodes])
-  // Recomputed from the live node rects, so dragging a card re-slots its edges.
-  const attachments = useMemo(() => edgeAttachments(absoluteNodes(nodes), graph.edges), [nodes, graph.edges])
+  // Recomputed from the live node rects, so dragging a card re-slots and reroutes its edges.
+  const cards = useMemo(() => routeCards(nodes), [nodes])
+  const attachments = useMemo(() => edgeAttachments(cards, graph.edges), [cards, graph.edges])
   // Until libavoid has loaded (or if it cannot), connections take the unrouted shapes.
   const [routerReady, setRouterReady] = useState(false)
   useEffect(() => {
@@ -1187,31 +234,22 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
     void loadRouter().then((ready) => { if (live) setRouterReady(ready) })
     return () => { live = false }
   }, [])
-  const [bendPreview, setBendPreview] = useState<{ id: string, bend: number } | null>(null)
-  const previewBend = useCallback((id: string, bend: number | null) => setBendPreview(bend === null ? null : { id, bend }), [])
-  // Rerouted from the live node rects too: a ~15-card view routes in about 15 ms.
-  const routes = useMemo(() => {
-    if (!routerReady) return null
-    const cards = absoluteNodes(nodes).map((card, index) => ({
-      id: card.id, x: card.position.x, y: card.position.y,
-      width: card.measured?.width ?? FALLBACK_SIZE.width, height: card.measured?.height ?? FALLBACK_SIZE.height,
-      parent: nodes[index].parentId ?? null, compound: !!nodes[index].data.compound,
-    }))
-    return routeEdges(cards, graph.edges.map((edge) => ({
+  // A ~15-card view routes in about 15 ms.
+  const routes = useMemo(() => routerReady
+    ? routeEdges(cards, graph.edges.map((edge) => ({
       id: edge.id, source: edge.source, target: edge.target,
       bend: bendPreview?.id === edge.id ? bendPreview.bend : edge.path?.bend ?? 0,
       sourcePoint: attachments.get(edge.id)?.source, targetPoint: attachments.get(edge.id)?.target,
     })))
-  }, [routerReady, nodes, graph.edges, attachments, bendPreview])
-  const routedRuntime = useMemo<EdgeRuntime>(() => readOnly ? edgeRuntime : { ...edgeRuntime, onBendPreview: previewBend }, [edgeRuntime, previewBend, readOnly])
-  useEffect(() => {
-    setEdges((current) => reconcile(current, toFlowEdges(graph.edges, edgeStyle, attachments, routedRuntime, routes)))
-  }, [graph.edges, edgeStyle, attachments, routedRuntime, routes, setEdges])
+    : null, [routerReady, cards, graph.edges, attachments, bendPreview])
+  const edgeGeometry = useMemo<EdgeGeometry>(() => ({
+    edgeStyle, cards: new Map(cards.map((card) => [card.id, card])), attachments, routes, bendPreview, edit,
+  }), [edgeStyle, cards, attachments, routes, bendPreview, edit])
 
   // A new node lands in the innermost element under its centre, so drawing
   // inside an element creates something inside it. Where nothing frames it, a
   // view without its own canvas element (a saved view) takes nothing.
-  const addDraft = useCallback((box: CardRect) => {
+  const addDraft = useCallback((box: Rect) => {
     const nodes = graphRef.current.nodes
     const id = nextDraftId(nodes.map((node) => node.id))
     const parent = innermostNode(nodes, box.x + box.width / 2, box.y + box.height / 2, new Set(), false)
@@ -1223,7 +261,7 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
     const offset = 100 + graphRef.current.nodes.length * 28
     addDraft({ x: offset, y: offset, width: NEW_NODE_WIDTH, height: NEW_NODE_HEIGHT })
   }, [addDraft])
-  const { lasso, setLasso, preview, onPanePointerDown, lassoOverlay } = useSurfaceDrawing({ flow, viewportRef, readOnly, nodes, setNodes, setEdges, addDraft })
+  const { lasso, setLasso, preview, onPanePointerDown, lassoOverlay } = useSurfaceDrawing({ flow, viewportRef, readOnly, cards, setNodes, setEdges, addDraft })
   // Adds clones to the graph and selects them, not their sources, so repeated
   // Ctrl+D / Ctrl+V walks diagonally instead of stacking on the same spot.
   const addClones = useCallback((clones: DiagramNode[]) => {
@@ -1278,8 +316,8 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
   const onNodeDragStop = useCallback((_event: MouseEvent | TouchEvent, _node: GraphFlowNode, dragged: GraphFlowNode[]) => {
     const current = graphRef.current.nodes
     const byId = new Map(current.map((node) => [node.id, node]))
-    const shifts = new Map<string, { x: number, y: number }>()
-    const placed = new Map<string, { x: number, y: number }>()
+    const shifts = new Map<string, Point>()
+    const placed = new Map<string, Point>()
     for (const moved of dragged) {
       const node = byId.get(moved.id)
       if (!node) continue
@@ -1288,7 +326,7 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
       placed.set(node.id, position)
       shifts.set(node.id, { x: position.x - node.position.x, y: position.y - node.position.y })
     }
-    const shiftOf = (node: DiagramNode): { x: number, y: number } | undefined => {
+    const shiftOf = (node: DiagramNode): Point | undefined => {
       for (let parent = node.parent; parent; parent = byId.get(parent)?.parent ?? null) {
         const shift = shifts.get(parent)
         if (shift) return shift
@@ -1300,8 +338,8 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
     const lone = dragged.length === 1 && single ? byId.get(single.id) : undefined
     if (lone && !lone.compound) {
       const at = placed.get(lone.id)!
-      const width = single.measured?.width ?? lone.width ?? FALLBACK_SIZE.width
-      const height = single.measured?.height ?? lone.height ?? FALLBACK_SIZE.height
+      const width = single.measured?.width ?? lone.width
+      const height = single.measured?.height ?? lone.height
       const parent = innermostNode(current, at.x + width / 2, at.y + height / 2, new Set([lone.id]), true)
       if (parent !== lone.parent) reparent = { id: lone.id, parent }
     }
@@ -1383,21 +421,23 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
         <button type="button" className="architecture-diagram-icon-button architecture-diagram-delete" onClick={deleteSelectedEdge} aria-label="Delete connection"><Trash2 size={14} /></button>
       </div>}
       {lasso && !readOnly && <div className="architecture-diagram-draw-overlay" {...lassoOverlay} />}
-      <ReactFlow<GraphFlowNode, GraphFlowEdge>
-        nodes={flowNodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
-        onInit={setFlow}
-        onNodesChange={handleNodesChange}
-        onEdgesChange={onEdgesChange}
-        onNodeDragStart={takeCamera} onNodeClick={takeCamera} onPaneClick={takeCamera}
-        onMoveStart={(event) => { if (event) takeCamera() }}
-        onNodeDragStop={onNodeDragStop} onConnect={onConnect} onConnectEnd={onConnectEnd} connectionRadius={48} onBeforeDelete={onBeforeDelete}
-        nodesDraggable={!readOnly} nodesConnectable={!readOnly} elementsSelectable={!readOnly} deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
-        connectionMode={ConnectionMode.Loose}
-        // Editable: wheel and pinch are handled by useSurfaceCamera. Read-only falls back to React Flow's pinch.
-        panOnDrag={[0, 1, 2]} zoomOnPinch={readOnly} fitView minZoom={0.2 * hostScale} maxZoom={2 * hostScale} zoomOnScroll={false} zoomOnDoubleClick={false} panOnScroll selectionOnDrag={false} proOptions={{ hideAttribution: true }} elevateEdgesOnSelect
-      >
-        <Background gap={22} size={1} color="var(--sketch-grid)" />
-      </ReactFlow>
+      <EdgeGeometryContext.Provider value={edgeGeometry}>
+        <ReactFlow<GraphFlowNode, GraphFlowEdge>
+          nodes={flowNodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
+          onInit={setFlow}
+          onNodesChange={handleNodesChange}
+          onEdgesChange={onEdgesChange}
+          onNodeDragStart={takeCamera} onNodeClick={takeCamera} onPaneClick={takeCamera}
+          onMoveStart={(event) => { if (event) takeCamera() }}
+          onNodeDragStop={onNodeDragStop} onConnect={onConnect} onConnectEnd={onConnectEnd} connectionRadius={48} onBeforeDelete={onBeforeDelete}
+          nodesDraggable={!readOnly} nodesConnectable={!readOnly} elementsSelectable={!readOnly} deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
+          connectionMode={ConnectionMode.Loose}
+          // Editable: wheel and pinch are handled by useSurfaceCamera. Read-only falls back to React Flow's pinch.
+          panOnDrag={[0, 1, 2]} zoomOnPinch={readOnly} fitView minZoom={0.2 * hostScale} maxZoom={2 * hostScale} zoomOnScroll={false} zoomOnDoubleClick={false} panOnScroll selectionOnDrag={false} proOptions={{ hideAttribution: true }} elevateEdgesOnSelect
+        >
+          <Background gap={22} size={1} color="var(--sketch-grid)" />
+        </ReactFlow>
+      </EdgeGeometryContext.Provider>
       {preview && (
         <svg className="architecture-diagram-draw-preview" aria-hidden="true">
           <path d={preview} fill="none" strokeDasharray={lasso ? "6 4" : undefined} />

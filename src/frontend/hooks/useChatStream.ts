@@ -5,10 +5,11 @@ import { createChatStream } from "@/lib/api"
 import { deactivateSentImages } from "@/lib/attachments"
 import {
   applyChatStreamEvent,
-  createFlushBatcher,
+  createMessagePublisher,
   decodeChatStreamEvent,
   settleRunningToolCalls,
 } from "@/lib/streaming"
+import { toolPayload } from "@/lib/toolCalls"
 import type { ChatRequest, Message, Usage } from "@/lib/types"
 
 export interface ChatStreamCompletion {
@@ -24,7 +25,6 @@ export interface UseChatStreamReturn {
   regenerateAt: (userIndex: number, req: ChatRequest) => Promise<ChatStreamCompletion | null>
   cancel: () => void
   deleteMessagePair: (index: number) => void
-  addMessagePair: (userContent: string, assistantContent: string) => void
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>
   totalUsage: Usage
   setTotalUsage: React.Dispatch<React.SetStateAction<Usage>>
@@ -39,8 +39,8 @@ function buildHistory(msgs: Message[]): { role: string; content: string }[] {
       if (m.role === "user" && m.hiddenContent) {
         content = m.hiddenContent + "\n\n" + content
       }
-      const mindmap = m.tool_calls?.find(call => call.name === "mindmap")?.detail?.mindmap
-      if (typeof mindmap === "string") content = [content, mindmap].filter(Boolean).join("\n\n")
+      const mindmap = m.tool_calls?.map(toolPayload).find((payload) => payload.family === "mindmap")
+      if (mindmap?.family === "mindmap" && mindmap.content) content = [content, mindmap.content].filter(Boolean).join("\n\n")
       return { role: m.role, content }
     })
 }
@@ -61,7 +61,7 @@ export function useChatStream(): UseChatStreamReturn {
     async (req: ChatRequest, history: { role: string; content: string }[], assistantMsg: Message): Promise<ChatStreamCompletion | null> => {
       setIsStreaming(true)
 
-      const batch = createFlushBatcher(setMessages, assistantMsg)
+      const publish = createMessagePublisher(setMessages, assistantMsg)
       // Every exit from the loop below settles the tool cards still marked running.
       let unresolvedReason = "Stream ended before the tool returned"
       let completed = false
@@ -86,7 +86,7 @@ export function useChatStream(): UseChatStreamReturn {
             break
           }
           applyChatStreamEvent(assistantMsg, decoded)
-          batch.schedule()
+          publish()
           // An error event is the turn's last content: append it, then stop reading.
           if (decoded.kind === "error") {
             unresolvedReason = decoded.message
@@ -99,7 +99,7 @@ export function useChatStream(): UseChatStreamReturn {
         unresolvedReason = err.name === "AbortError" ? "Cancelled" : err.message || "Stream failed"
       } finally {
         settleRunningToolCalls(assistantMsg, unresolvedReason)
-        batch.final()
+        publish()
         const current = messagesRef.current
         if (current.at(-1)?.role === "assistant") {
           finalMessages = deactivateSentImages(
@@ -169,13 +169,5 @@ export function useChatStream(): UseChatStreamReturn {
     })
   }, [])
 
-  const addMessagePair = useCallback((userContent: string, assistantContent: string) => {
-    setMessages((prev) => [
-      ...prev,
-      { role: "user", content: userContent },
-      { role: "assistant", content: assistantContent },
-    ])
-  }, [])
-
-  return { messages, isStreaming, send, regenerateAt, cancel, deleteMessagePair, addMessagePair, setMessages, totalUsage, setTotalUsage }
+  return { messages, isStreaming, send, regenerateAt, cancel, deleteMessagePair, setMessages, totalUsage, setTotalUsage }
 }

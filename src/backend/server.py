@@ -39,9 +39,6 @@ from backend.routes.models import router as models_router
 from backend.routes.file_roots import router as file_roots_router
 from backend.routes.ocr import router as ocr_router
 from backend.routes.projects import router as projects_router
-from backend.routes.research import router as research_router
-from backend.routes.search import router as search_router
-from backend.routes.study import router as study_router
 from backend.routes.sync import router as sync_router
 from backend.sync import get_change_broker
 from lib.db_schema import database_url, upgrade
@@ -137,12 +134,9 @@ app.include_router(fileviewer_router)
 app.include_router(histories_router)
 app.include_router(memory_router)
 app.include_router(models_router)
-app.include_router(search_router)
 app.include_router(file_roots_router)
 app.include_router(ocr_router)
 app.include_router(projects_router)
-app.include_router(research_router)
-app.include_router(study_router)
 app.include_router(sync_router)
 app.include_router(canvases_router)
 

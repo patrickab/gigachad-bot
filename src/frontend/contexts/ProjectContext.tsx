@@ -19,22 +19,19 @@ function isSameProjectTabs(left: ProjectTab[], right: ProjectTab[]): boolean {
     tab.filename === right[index].filename && tab.name === right[index].name && tab.title === right[index].title)
 }
 
-export interface ProjectContextState {
+interface ProjectContextState {
   activeProject: string | null
   projectData: ProjectData | null
   projects: ProjectListItem[]
-  projectsLoading: boolean
   dashboardOpen: boolean
   openProject: (name: string) => Promise<void>
   closeProject: () => void
   createProject: (name: string) => Promise<void>
   deleteProject: (name: string) => Promise<void>
-  refreshProjects: () => Promise<void>
   addCard: (title: string, description: string, state?: string) => Promise<void>
   moveCard: (cardId: string, state: string) => Promise<void>
   deleteCard: (cardId: string) => Promise<void>
-  updateKanban: (data: ProjectData) => Promise<void>
-  syncTabs: (tabs: { id: string; name: string | null; historyFile: string | null; title: string | null; chatId: string }[], updateHistoryFile: (tabId: string, historyFile: string) => void) => Promise<void>
+  syncTabs: (tabs: { id: string; name: string | null; historyFile: string | null; title: string | null; chatId: string }[]) => Promise<void>
   setDashboardOpen: (open: boolean) => void
 }
 
@@ -51,7 +48,6 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [activeProject, setActiveProject] = useState<string | null>(null)
   const [projectData, setProjectData] = useState<ProjectData | null>(null)
   const [projects, setProjects] = useState<ProjectListItem[]>([])
-  const [projectsLoading, setProjectsLoading] = useState(false)
   const [dashboardOpen, setDashboardOpen] = useState(false)
 
   // Single monotonic counter bumped on any project-switch event. Async calls
@@ -83,13 +79,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   )
 
   const refreshProjects = useCallback(async () => {
-    setProjectsLoading(true)
-    try {
-      const list = await apiListProjects()
-      setProjects(list)
-    } finally {
-      setProjectsLoading(false)
-    }
+    setProjects(await apiListProjects())
   }, [])
 
   useEffect(() => {
@@ -178,14 +168,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     } : prev)
   }, [runGuarded])
 
-  const updateKanban = useCallback(async (data: ProjectData) => {
-    const updated = await runGuarded((p) => apiUpdateProjectKanban(p, data))
-    if (updated) setProjectData(updated)
-  }, [runGuarded])
-
   const syncTabs = useCallback(async (
     tabs: { id: string; name: string | null; historyFile: string | null; title: string | null; chatId: string }[],
-    _updateHistoryFile: (tabId: string, historyFile: string) => void,
   ) => {
     const current = projectDataRef.current
     if (!activeProject || !current) return
@@ -211,17 +195,14 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     activeProject,
     projectData,
     projects,
-    projectsLoading,
     dashboardOpen,
     openProject,
     closeProject,
     createProject,
     deleteProject,
-    refreshProjects,
     addCard,
     moveCard,
     deleteCard,
-    updateKanban,
     syncTabs,
     setDashboardOpen,
   }

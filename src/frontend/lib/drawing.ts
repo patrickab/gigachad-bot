@@ -27,7 +27,7 @@ export const STROKE_OPTIONS = {
 } as const
 
 /** Closed quadratic path through midpoints of the outline points. Returns "" when fewer than 4 points. */
-export function getSvgPathFromStroke(points: number[][], closed = true): string {
+function outlinePath(points: number[][]): string {
   const len = points.length
   if (len < 4) return ""
 
@@ -45,8 +45,17 @@ export function getSvgPathFromStroke(points: number[][], closed = true): string 
     result += `${avg(a[0], b[0]).toFixed(2)},${avg(a[1], b[1]).toFixed(2)} `
   }
 
-  if (closed) result += "Z"
-  return result
+  return `${result}Z`
+}
+
+/** SVG path of a freehand stroke's outline. Returns "" when the stroke is too short to outline. */
+export function strokeOutlinePath(points: number[][], size: number, options: Parameters<typeof getStroke>[1] = STROKE_OPTIONS): string {
+  return outlinePath(getStroke(points, { ...options, size }))
+}
+
+/** Pen pressure of a pointer event, with a mid value for mice and pens that report none. */
+export function penPressure(e: { pressure: number }): number {
+  return e.pressure > 0 ? e.pressure : 0.5
 }
 
 export interface EmbedRect {
@@ -57,7 +66,7 @@ export interface EmbedRect {
   aspect: number
 }
 
-export interface TextData {
+interface TextData {
   x: number
   y: number
   width: number
@@ -180,46 +189,13 @@ async function drawCanvas(
     ctx.drawImage(embed.image, dx, dy, embed.width, dh)
   }
   for (const stroke of strokes) {
-    const outline = getStroke(
-      stroke.points.map((p) => [p[0]! - offsetX, p[1]! - offsetY, p[2] ?? 0.5]),
-      { ...STROKE_OPTIONS, size: stroke.width },
-    )
-    if (outline.length < 4) continue
+    const d = strokeOutlinePath(stroke.points.map((p) => [p[0]! - offsetX, p[1]! - offsetY, p[2] ?? 0.5]), stroke.width)
+    if (!d) continue
     ctx.fillStyle = stroke.color
-    ctx.fill(new Path2D(getSvgPathFromStroke(outline)))
+    ctx.fill(new Path2D(d))
   }
   if (texts.length > 0) await document.fonts.ready
   drawTexts(ctx, texts, offsetX, offsetY)
-  return canvas
-}
-
-// ponytail: legacy sync path for callers that don't need images
-function drawStrokes(
-  strokes: StrokeData[],
-  w: number,
-  h: number,
-  offsetX: number,
-  offsetY: number,
-  bg: string,
-): HTMLCanvasElement {
-  const dpr = 2
-  const canvas = document.createElement("canvas")
-  canvas.width = w * dpr
-  canvas.height = h * dpr
-  const ctx = canvas.getContext("2d")
-  if (!ctx) throw new Error("No canvas context")
-  ctx.scale(dpr, dpr)
-  ctx.fillStyle = bg
-  ctx.fillRect(0, 0, w, h)
-  for (const stroke of strokes) {
-    const outline = getStroke(
-      stroke.points.map((p) => [p[0]! - offsetX, p[1]! - offsetY, p[2] ?? 0.5]),
-      { ...STROKE_OPTIONS, size: stroke.width },
-    )
-    if (outline.length < 4) continue
-    ctx.fillStyle = stroke.color
-    ctx.fill(new Path2D(getSvgPathFromStroke(outline)))
-  }
   return canvas
 }
 
@@ -241,9 +217,7 @@ export async function renderPageToPng(
   canvasImages: CanvasEmbedRect[] = [],
 ): Promise<Uint8Array> {
   const loadedImages = [...await loadEmbeds(images), ...canvasImages]
-  const canvas = loadedImages.length > 0 || texts.length > 0
-    ? await drawCanvas(strokes, loadedImages, pageW, pageH, pageX, pageY, "#ffffff", texts)
-    : drawStrokes(strokes, pageW, pageH, pageX, pageY, "#ffffff")
+  const canvas = await drawCanvas(strokes, loadedImages, pageW, pageH, pageX, pageY, "#ffffff", texts)
   const blob = await canvasToBlob(canvas, "image/png")
   return new Uint8Array(await blob.arrayBuffer())
 }
@@ -275,17 +249,15 @@ export async function renderCanvasToJpeg(strokes: StrokeData[], padding = 20, im
   }
   const w = maxX - minX + padding * 2
   const h = maxY - minY + padding * 2
-  const canvas = loadedImages.length > 0 || texts.length > 0
-    ? await drawCanvas(strokes, loadedImages, w, h, minX - padding, minY - padding, "#ffffff", texts)
-    : drawStrokes(strokes, w, h, minX - padding, minY - padding, "#ffffff")
+  const canvas = await drawCanvas(strokes, loadedImages, w, h, minX - padding, minY - padding, "#ffffff", texts)
   return canvasToBlob(canvas, "image/jpeg", 0.92)
 }
 
-export function renderStrokesToJpeg(
+export async function renderStrokesToJpeg(
   strokes: StrokeData[],
   width: number,
   height: number,
   bgColor: string,
 ): Promise<Blob> {
-  return canvasToBlob(drawStrokes(strokes, width, height, 0, 0, bgColor), "image/jpeg", 0.9)
+  return canvasToBlob(await drawCanvas(strokes, [], width, height, 0, 0, bgColor), "image/jpeg", 0.9)
 }

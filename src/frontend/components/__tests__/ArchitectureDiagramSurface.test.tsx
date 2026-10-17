@@ -2,11 +2,12 @@ import type { ComponentType, ReactNode } from "react"
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { useEffect, useState } from "react"
 import { describe, expect, it, vi } from "vitest"
-import { ArchitectureDiagramSurface, drawnBox, duplicateNodes, edgeAttachments, type ArchitectureDiagramSurfaceProps } from "@/components/ArchitectureDiagramSurface"
-import { isDraft, type DiagramGraph, type DiagramNode } from "@/lib/architecture"
+import { ArchitectureDiagramSurface, duplicateNodes, type ArchitectureDiagramSurfaceProps } from "@/components/ArchitectureDiagramSurface"
+import { drawnBox } from "@/hooks/useSurfaceDrawing"
+import { isDraft, type DiagramGraph, type DiagramNode } from "@/lib/diagramGraph"
 
 const node = (id: string, title: string, position = { x: 0, y: 0 }, extra: Partial<DiagramNode> = {}): DiagramNode =>
-  ({ id, title, bullets: [], kind: "system", parent: null, compound: false, position, ...extra })
+  ({ id, title, bullets: [], kind: "system", parent: null, compound: false, position, width: 240, height: 160, ...extra })
 const emptyGraph: DiagramGraph = { nodes: [], edges: [] }
 const Surface = (props: Omit<ArchitectureDiagramSurfaceProps, "edgeStyle" | "onEdgeStyleChange"> & Partial<ArchitectureDiagramSurfaceProps>) =>
   <ArchitectureDiagramSurface edgeStyle="elbow" onEdgeStyleChange={() => {}} {...props} />
@@ -45,7 +46,7 @@ vi.mock("@xyflow/react", () => {
   }
 })
 // No WebAssembly here: connections stay unrouted, as before libavoid loads.
-vi.mock("@/lib/edgeRouting", () => ({ loadRouter: () => Promise.resolve(false), routeEdges: () => null, bendPoint: vi.fn(), bendThrough: vi.fn() }))
+vi.mock("@/lib/edgeRouting", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/edgeRouting")>(), loadRouter: () => Promise.resolve(false) }))
 
 describe("ArchitectureDiagramSurface", () => {
   it("draws with the pen into a card that is not activated, and in a saved view nowhere else", async () => {
@@ -153,36 +154,6 @@ describe("ArchitectureDiagramSurface", () => {
     fireEvent.click(screen.getByRole("menuitemradio", { name: "Curved edges" }))
     expect(onEdgeStyleChange).toHaveBeenCalledWith("curved")
     expect(onChange).toHaveBeenCalledWith({ ...graph, edges: [{ id: "shop->bank", source: "shop", target: "bank", relations: ["r1"] }] })
-  })
-
-  it("gives connections sharing a card side their own slot on it", () => {
-    const nodes = [
-      { id: "left", position: { x: 0, y: 0 }, measured: { width: 100, height: 60 } },
-      { id: "right", position: { x: 300, y: 0 }, measured: { width: 100, height: 60 } },
-      { id: "below", position: { x: 300, y: 300 }, measured: { width: 100, height: 60 } },
-    ]
-    const edge = (id: string, source: string, target: string) => ({ id, source, target, relations: [] })
-
-    // A lone connection still leaves from the side midpoint.
-    const single = edgeAttachments(nodes, [edge("a", "left", "right")])
-    expect(single.get("a")).toEqual({
-      source: { x: 100, y: 30, position: "right" },
-      target: { x: 300, y: 30, position: "left" },
-    })
-
-    // Two connections between the same pair share a side, so they split it.
-    const pair = edgeAttachments(nodes, [edge("a", "left", "right"), edge("b", "left", "right")])
-    expect(pair.get("a")!.source.y).not.toBe(pair.get("b")!.source.y)
-    for (const attachment of pair.values()) {
-      expect(attachment.source.x).toBe(100)
-      expect(attachment.source.y).toBeGreaterThan(0)
-      expect(attachment.source.y).toBeLessThan(60)
-    }
-
-    // Connections leaving different sides keep the midpoint of their own side.
-    const fanned = edgeAttachments(nodes, [edge("a", "left", "right"), edge("b", "left", "below")])
-    expect(fanned.get("a")!.source).toEqual({ x: 100, y: 30, position: "right" })
-    expect(fanned.get("b")!.source).toEqual({ x: 50, y: 60, position: "bottom" })
   })
 
   it("keeps the title being edited when the graph is updated from outside", () => {

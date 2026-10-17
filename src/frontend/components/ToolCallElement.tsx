@@ -3,8 +3,9 @@
 import { memo, useEffect, useState } from "react"
 import { ChevronDown, Loader2, Wrench } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { TOOL_META } from "@/hooks/useModeState"
-import type { PlotFigure, SandboxToolResultRecord, ToolCallRecord, ToolSource } from "@/lib/types"
+import { TOOL_META } from "@/lib/tools"
+import { toolPayload } from "@/lib/toolCalls"
+import type { ToolCallRecord } from "@/lib/types"
 import { CodeBlock } from "./CodeBlock"
 import { PlotElement } from "./PlotElement"
 import { SandboxOutputElement } from "./SandboxOutputElement"
@@ -12,46 +13,6 @@ import { LaTeXMarkdown } from "./LaTeXMarkdown"
 
 interface ToolCallElementProps {
   call: ToolCallRecord
-}
-
-/** How a call is drawn once its name has been read. `sources` cites what it read, `plot` shows a
- * figure, `diagram` renders Mermaid, `mindmap` renders markdown, `workspace` reports a sandbox
- * run, and `generic` catches a name this build no longer knows (an older saved chat). */
-type Presentation =
-  | { family: "sources"; sources: ToolSource[]; costs: number | null }
-  | { family: "plot"; figure: PlotFigure | null; brief: string | null; script: string | null }
-  | { family: "diagram"; mermaid: string | null }
-  | { family: "mindmap"; content: string | null }
-  | { family: "workspace"; sandbox: SandboxToolResultRecord | null }
-  | { family: "generic" }
-
-/** The only place a tool name is read. Another citing tool joins the `sources` case; nothing
- *  below this switch branches on names. */
-function presentationOf(call: ToolCallRecord): Presentation {
-  switch (call.name) {
-    case "web_search":
-    case "deep_research":
-      return {
-        family: "sources",
-        sources: call.sources ?? [],
-        costs: typeof call.detail?.costs === "number" ? call.detail.costs : null,
-      }
-    case "sandbox_plot":
-      return {
-        family: "plot",
-        figure: call.detail?.figure ?? null,
-        brief: call.detail?.brief ?? null,
-        script: call.detail?.script ?? null,
-      }
-    case "diagram":
-      return { family: "diagram", mermaid: typeof call.detail?.mermaid === "string" ? call.detail.mermaid : null }
-    case "mindmap":
-      return { family: "mindmap", content: typeof call.detail?.mindmap === "string" ? call.detail.mindmap : null }
-    case "workspace_agent":
-      return { family: "workspace", sandbox: call.sandbox ?? null }
-    default:
-      return { family: "generic" }
-  }
 }
 
 /** Header text for a call: the `query` argument, else the first argument, if it is a string. */
@@ -74,7 +35,7 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
   const [open, setOpen] = useState(false)
   const [briefOpen, setBriefOpen] = useState(false)
   const [codeOpen, setCodeOpen] = useState(false)
-  const shown = presentationOf(call)
+  const shown = toolPayload(call)
   const [now, setNow] = useState(() => Date.now())
   const stages = call.stages ?? []
   const runningStage = stages.find((stage) => stage.status === "running")

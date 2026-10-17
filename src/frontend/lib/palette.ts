@@ -8,7 +8,7 @@
  * with the same custom properties, and toggle the class on <html>.
  */
 
-export interface RoleTokens {
+interface RoleTokens {
   ink: string
   inkMuted: string
   inkSubtle: string
@@ -19,7 +19,6 @@ export interface RoleTokens {
   overlay: string
   danger: string
   backdrop: string
-  shadowStrength: number
 }
 
 const dark: RoleTokens = {
@@ -33,7 +32,6 @@ const dark: RoleTokens = {
   overlay:         "oklch(11.5% 0.007 55)",
   danger:          "oklch(68% 0.20 25)",
   backdrop:        "oklch(0% 0 0 / 0.65)",
-  shadowStrength:  0.35,
 }
 
 const light: RoleTokens = {
@@ -47,13 +45,12 @@ const light: RoleTokens = {
   overlay:         "oklch(96%   0.015 85)",
   danger:          "oklch(52% 0.22 25)",
   backdrop:        "oklch(0% 0 0 / 0.55)",
-  shadowStrength:  0.08,
 }
 
 const THEMES = { dark, light } as const
 
 export type ThemeName = keyof typeof THEMES
-export type ColorToken = Exclude<keyof RoleTokens, "shadowStrength">
+type ColorToken = keyof RoleTokens
 
 const CSS_VAR: Record<ColorToken, string> = {
   ink:             "--ink",

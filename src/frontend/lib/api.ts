@@ -1,28 +1,11 @@
-import type { Attachment, BackendConfig, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpCatalog, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ReasoningLevels, ResearchRequest, Usage, RootFile, FileTreeNode } from "./types"
+import type { Attachment, BackendConfig, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpCatalog, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ReasoningLevels, Usage, RootFile, FileTreeNode } from "./types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { getApiBase } from "./config"
 import type { ArchitectureOperation, ArchitectureWorkspace } from "./architecture"
-import type { CanvasDocument } from "@/components/CanvasEditor"
-import { getDeviceId } from "./deviceId"
-
-function encodePath(filename: string): string {
-  return filename.split("/").map(encodeURIComponent).join("/")
-}
-
-/** Split `slug/filename` (project chat) into parts. A bare filename has no slug. */
-export function parseHistoryFile(historyFile: string): { slug: string | null; filename: string } {
-  const parts = historyFile.split("/")
-  if (parts.length > 1) {
-    return { slug: parts[0], filename: parts.slice(1).join("/") }
-  }
-  return { slug: null, filename: historyFile }
-}
-
-/** Inverse of `parseHistoryFile`. */
-export function buildHistoryFile(filename: string, slug: string | null): string {
-  return slug ? `${slug}/${filename}` : filename
-}
+import type { CanvasMutation, CanvasSnapshot } from "./canvasDocument"
+import { deviceHeaders } from "./deviceId"
+import { chatFileUrl, encodePath, fileViewerRawUrl, toQuery } from "./urls"
 
 /** Carries the HTTP status so callers can tell a stale-revision rejection from a real failure. */
 export class ApiError extends Error {
@@ -30,29 +13,6 @@ export class ApiError extends Error {
     super(message)
     this.name = "ApiError"
   }
-}
-
-export type CanvasEntity = "stroke" | "frame" | "attachment" | "text"
-
-/** One canvas change: upsert sets `value` on entity `id`, delete omits it. */
-export interface CanvasMutation {
-  mutationId: string
-  kind: "upsert" | "delete"
-  entity: CanvasEntity
-  id: string
-  value?: Record<string, unknown>
-}
-
-export interface CanvasAcceptedBatch {
-  canvasKey: string
-  revision: number
-  mutations: CanvasMutation[]
-}
-
-/** A canonical materialized canvas: every entity carries a stable `id`. */
-export interface CanvasSnapshot {
-  revision: number
-  document: CanvasDocument
 }
 
 /** Throws ApiError, preferring FastAPI's `detail` (string or validation list) over the status text. */
@@ -80,24 +40,9 @@ async function ensureOk(res: Response): Promise<Response> {
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const deviceId = getDeviceId()
-  const headers = { ...(options?.headers as Record<string, string> | undefined), ...(deviceId ? { "X-Device-Id": deviceId } : {}) }
+  const headers = { ...(options?.headers as Record<string, string> | undefined), ...deviceHeaders() }
   const res = await ensureOk(await fetch(`${getApiBase()}${path}`, { ...options, headers }))
   return res.json()
-}
-
-type QueryValue = string | number | boolean | string[] | undefined | null
-
-/** Omits null, undefined and false. Arrays repeat the key. true becomes "true". */
-function toQuery(params: Record<string, QueryValue>): string {
-  const usp = new URLSearchParams()
-  for (const [k, v] of Object.entries(params)) {
-    if (v === undefined || v === null || v === false) continue
-    if (Array.isArray(v)) v.forEach((item) => usp.append(k, item))
-    else usp.set(k, v === true ? "true" : String(v))
-  }
-  const s = usp.toString()
-  return s ? `?${s}` : ""
 }
 
 function jsonInit(method: string, body: unknown, headers: Record<string, string> = {}): RequestInit {
@@ -222,11 +167,11 @@ export async function fetchBranchMeta(dirs?: string[]): Promise<Record<string, B
 }
 
 export async function loadChatHistory(filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null; title: string | null; usage: Usage | null; parent_id: string | null; branch_message_idx: number | null; children: BranchMeta["children"] }> {
-  return request(`/chat-histories/${filename}`)
+  return request(`/chat-histories/${encodePath(filename)}`)
 }
 
 /** Omitting a field leaves it unchanged server-side; passing null clears it. */
-export interface SaveChatHistoryOptions {
+interface SaveChatHistoryOptions {
   chatId?: string
   title?: string
   usage?: Usage
@@ -259,19 +204,6 @@ export async function cascadeDelete(filename: string): Promise<{ status: string;
   return del(`/chat-histories/cascade/${encodePath(filename)}`)
 }
 
-export function createResearchStream(req: ResearchRequest): SSEStreamResult {
-  return createSSEStream("/research", {
-    query: req.query,
-    fast_model: req.fast_model,
-    smart_model: req.smart_model,
-    strategic_model: req.strategic_model,
-    depth: req.depth,
-    breadth: req.breadth,
-    reasoning_effort: req.reasoning_effort,
-    report_type: req.report_type,
-  })
-}
-
 export function createOCRStream(
   imgBase64: string,
   model?: string
@@ -279,39 +211,18 @@ export function createOCRStream(
   return createSSEStream("/ocr", { img_base64: imgBase64, model })
 }
 
-/** Origin of the backend, for asset URLs the backend emits as root-relative paths. */
-export function apiOrigin(): string {
-  const url = new URL(getApiBase())
-  return url.origin
-}
+type AttachmentPayload = Omit<Attachment, "active" | "url">
 
-// Asset URLs use database-native namespaces. Local filesystem layout is never
-// part of the persisted attachment identity.
-function uploadsBase(chatId: string, slug: string | null): string {
-  const chat = encodeURIComponent(chatId)
-  const prefix = slug
-    ? `attachment/project/${encodeURIComponent(slug)}/chat/${chat}`
-    : `attachment/chat/${chat}`
-  return `${getApiBase()}/assets/${prefix}`
-}
-
-/** Point MinerU's relative `images/<name>` markdown refs at the per-user library cache, keyed by the PDF's stem. */
-export function rewriteImages(content: string, pdfName: string): string {
-  const stem = encodeURIComponent(pdfName.replace(/\.pdf$/i, ""))
-  return content.replace(/\(images\/([^)]+)\)/g, `(${getApiBase()}/assets/Mineru/images/${stem}/$1)`)
-}
-
-export function chatFileUrl(chatId: string, filename: string, slug: string | null = null): string {
-  return `${uploadsBase(chatId, slug)}/${encodeURIComponent(filename)}`
+function toChatAttachment(data: AttachmentPayload, chatId: string, slug: string | null): Attachment {
+  return { ...data, active: true, url: chatFileUrl(chatId, data.name, slug) }
 }
 
 export async function uploadFile(chatId: string, file: File, slug: string | null = null, overwrite = false): Promise<Attachment> {
   const query = toQuery({ chat_id: chatId, slug, overwrite })
-  const data = await request<any>(`/files/upload${query}`, { method: "POST", body: fileForm(file) })
-  return { ...data, active: true, url: chatFileUrl(chatId, data.name, slug) }
+  return toChatAttachment(await request<AttachmentPayload>(`/files/upload${query}`, { method: "POST", body: fileForm(file) }), chatId, slug)
 }
 
-export interface ParsedAttachment {
+interface ParsedAttachment {
   name: string
   parsedMd: string | null
 }
@@ -356,15 +267,6 @@ export async function writeRootFile(path: string, content: string): Promise<void
   await post("/fileroots/file", { path, content })
 }
 
-/** Direct URL to a file's raw bytes (images, PDFs), usable as an `<img>`/PDF src. */
-export function fileViewerRawUrl(path: string): string {
-  return `${getApiBase()}/fileviewer/raw?path=${encodeURIComponent(path)}`
-}
-
-export function sandboxAssetUrl(assetPath: string): string {
-  return `${getApiBase()}/assets/${encodePath(assetPath)}`
-}
-
 /** Read a file's text content (markdown / unknown-treated-as-text). */
 export async function loadFileViewerText(path: string): Promise<string> {
   const data = await request<{ path: string; content: string }>(`/fileviewer/text?path=${encodeURIComponent(path)}`)
@@ -381,14 +283,10 @@ export async function submitCanvasMutations(canvasKey: string, mutations: Canvas
   return post<{ revision: number }>(`/canvases/${encodePath(canvasKey)}/mutations`, { mutations })
 }
 
-export function canvasMutationStreamUrl(canvasKey: string, sinceRevision: number): string {
-  return `${getApiBase()}/canvases/${encodePath(canvasKey)}/stream${toQuery({ sinceRevision })}`
-}
-
 /** Materialise a file at *path* into the chat's upload dir as an Attachment. */
 async function attachFileByPath(endpoint: string, chatId: string, path: string, slug: string | null): Promise<Attachment> {
-  const data = await request<any>(`/${endpoint}/attach${toQuery({ path, chat_id: chatId, slug })}`, { method: "POST" })
-  return { ...data, active: true, url: chatFileUrl(chatId, data.name, slug) }
+  const data = await request<AttachmentPayload>(`/${endpoint}/attach${toQuery({ path, chat_id: chatId, slug })}`, { method: "POST" })
+  return toChatAttachment(data, chatId, slug)
 }
 
 /** Attach a FileRoots file as a live reference: no copy, content is read from the source. */
@@ -486,11 +384,6 @@ export async function storeDrawing(filename: string, blob: Blob): Promise<void> 
   await request("/documents/store-drawing", { method: "POST", body: fileForm(blob, filename) })
 }
 
-export async function generateMindmap(messages: { role: string; content: string }[], model: string, prompt: string = ""): Promise<string> {
-  const data = await post<{ mindmap: string }>("/study/mindmap", { messages, model, prompt })
-  return data.mindmap
-}
-
 export async function listProjects(): Promise<ProjectListItem[]> {
   const data = await request<{ projects: ProjectListItem[] }>("/projects")
   return data.projects
@@ -525,7 +418,7 @@ export async function deleteProjectCard(name: string, cardId: string): Promise<v
 }
 
 /** Omitting a field leaves it unchanged server-side; passing null clears it. */
-export interface SaveProjectTabOptions {
+interface SaveProjectTabOptions {
   chatId?: string
   tabName?: string
   title?: string
@@ -535,10 +428,6 @@ export interface SaveProjectTabOptions {
 export async function saveProjectTab(name: string, filename: string, messages: Message[], opts: SaveProjectTabOptions = {}): Promise<{ status: string }> {
   const body: Record<string, unknown> = { filename, messages, chat_id: opts.chatId ?? null, tab_name: opts.tabName ?? null, title: opts.title ?? null, usage: opts.usage ?? null }
   return put(`/projects/${encodeURIComponent(name)}/tabs/${encodeURIComponent(filename)}`, body)
-}
-
-export async function loadProjectTab(name: string, filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null; title: string | null; usage: Usage | null; parent_id: string | null; branch_message_idx: number | null }> {
-  return request(`/chat-histories/${encodeURIComponent(name)}/${encodeURIComponent(filename)}`)
 }
 
 export async function extractMemories(

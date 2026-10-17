@@ -21,11 +21,11 @@ none of them are reimplemented in-repo:
 - **LiteLLM** — the model-provider abstraction. All chat/completions go
   through it, so Gemini, DeepSeek, OpenRouter, and local providers are
   swappable behind one interface (`src/config.py` holds defaults).
-- **Brave LLM Context** — backend web search retrieves labelled source
+- **Brave LLM Context** — the `web_search` chat tool retrieves labelled source
   passages using `BRAVE_API_KEY`, then has the selected model produce a
   citation-grounded answer. No local search service is required.
-- **GPT-Researcher** powers `/api/research` with its built-in DuckDuckGo
-  retriever and streams progress and results over SSE.
+- **GPT-Researcher** powers the `deep_research` chat tool with its built-in
+  DuckDuckGo retriever.
 - **MinerU** — PDF parsing/OCR. `routes/mineru.py` + `ExtractQueue`
   (`extract_queue.py`) manage the parse lifecycle; parsed Markdown backs both
   the "Study" mode (mind map/overview/article generation) and the document

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { diffGraph, fitGraph, type DiagramEdge, type DiagramGraph, type DiagramNode } from "@/lib/architecture"
+import { diffGraph, fitGraph, type DiagramEdge, type DiagramGraph, type DiagramNode } from "@/lib/diagramGraph"
 
 const KINDS = ["actor", "component", "container", "database", "system"]
 

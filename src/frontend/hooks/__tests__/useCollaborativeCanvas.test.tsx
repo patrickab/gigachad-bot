@@ -1,7 +1,6 @@
 import { act, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { CanvasDocument } from "@/components/CanvasEditor"
-import type { CanvasAcceptedBatch, CanvasMutation } from "@/lib/api"
+import type { CanvasAcceptedBatch, CanvasDocument, CanvasMutation } from "@/lib/canvasDocument"
 
 const api = vi.hoisted(() => {
   class MockApiError extends Error {

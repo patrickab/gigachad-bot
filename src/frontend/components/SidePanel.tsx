@@ -1,0 +1,164 @@
+"use client"
+
+import { ElementType, ReactNode, useCallback, useEffect, useRef } from "react"
+import { ChevronDown, ChevronRight } from "lucide-react"
+import { motion, useMotionValue, useTransform, animate } from "framer-motion"
+import { cn } from "@/lib/utils"
+
+const MIN_SIDEBAR_WIDTH = 200
+export const MAX_SIDEBAR_WIDTH = 600
+
+export interface SidePanelSection {
+  id: string
+  icon: React.ElementType
+  title: string
+  badge?: React.ReactNode
+  action?: React.ReactNode
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  body: React.ReactNode
+}
+
+/** Spring-animated width of a right-anchored panel, plus a drag handler for its left edge. */
+function useResizableWidth(width: number, onWidthChange: (w: number) => void, maxWidth: number) {
+  const dragging = useRef(false)
+  const motionWidth = useMotionValue(width)
+
+  // Spring to external width changes, but never fight an active drag
+  useEffect(() => {
+    if (dragging.current) return
+    const controls = animate(motionWidth, width, { type: "spring", stiffness: 400, damping: 40, mass: 0.6 })
+    return controls.stop
+  }, [width, motionWidth])
+
+  const widthStyle = useTransform(motionWidth, (v) => `${v}px`)
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    dragging.current = true
+    const startX = e.clientX
+    const startWidth = motionWidth.get()
+    const clamp = (px: number) => Math.min(maxWidth, Math.max(MIN_SIDEBAR_WIDTH, px))
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!dragging.current) return
+      // Right-anchored, so dragging left widens the panel
+      motionWidth.set(clamp(startWidth + (startX - ev.clientX)))
+    }
+    const onMouseUp = () => {
+      if (!dragging.current) return
+      dragging.current = false
+      const finalWidth = clamp(motionWidth.get())
+      motionWidth.set(finalWidth)
+      onWidthChange(finalWidth)
+      document.removeEventListener("mousemove", onMouseMove)
+      document.removeEventListener("mouseup", onMouseUp)
+    }
+    document.addEventListener("mousemove", onMouseMove)
+    document.addEventListener("mouseup", onMouseUp)
+  }, [motionWidth, onWidthChange, maxWidth])
+
+  return { widthStyle, handleMouseDown }
+}
+
+interface SidePanelFrameProps {
+  width: number
+  onWidthChange: (w: number) => void
+  maxWidth?: number
+  className?: string
+  children: ReactNode
+}
+
+/** Right-anchored panel with a draggable left edge; callers own the width and the surface styling. */
+export function SidePanelFrame({ width, onWidthChange, maxWidth = MAX_SIDEBAR_WIDTH, className, children }: SidePanelFrameProps) {
+  const { widthStyle, handleMouseDown } = useResizableWidth(width, onWidthChange, maxWidth)
+  return (
+    <motion.aside
+      initial={false}
+      style={{ width: widthStyle }}
+      className={cn("shrink-0 flex flex-col overflow-hidden relative", className)}
+    >
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize sidebar"
+        className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-surface-elevated active:bg-surface-elevated focus-visible:bg-surface-elevated transition-colors z-10"
+        onMouseDown={handleMouseDown}
+      />
+      {children}
+    </motion.aside>
+  )
+}
+
+function Collapse({ open, children }: { open: boolean; children: ReactNode }) {
+  return (
+    <div
+      className={cn(
+        "grid transition-[grid-template-rows] duration-200 ease-in-out",
+        open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+      )}
+    >
+      <div className="overflow-hidden">{children}</div>
+    </div>
+  )
+}
+
+function ExpandableSection({ icon: Icon, title, badge, action, open, onOpenChange, children }: { icon: ElementType; title: string; badge?: ReactNode; action?: ReactNode; open: boolean; onOpenChange: (open: boolean) => void; children: ReactNode }) {
+  return (
+    <div className="border-b border-divider/50 last:border-b-0">
+      <div className="flex items-center">
+        <button
+          onClick={() => onOpenChange(!open)}
+          aria-expanded={open}
+          className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-ink hover:bg-surface-elevated/50 transition-colors rounded"
+        >
+          {open ? (
+            <ChevronDown className="h-3 w-3 text-ink-subtle shrink-0" />
+          ) : (
+            <ChevronRight className="h-3 w-3 text-ink-subtle shrink-0" />
+          )}
+          <Icon className="h-3.5 w-3.5 text-ink-muted shrink-0" />
+          <span className="text-[11px] font-medium truncate flex-1 text-left">{title}</span>
+          {badge != null && <span className="text-[10px] text-ink-faint shrink-0">{badge}</span>}
+        </button>
+        {action != null && <div className="shrink-0 pr-1.5">{action}</div>}
+      </div>
+      <Collapse open={open}>{children}</Collapse>
+    </div>
+  )
+}
+
+interface SidePanelProps {
+  sections: SidePanelSection[]
+  width: number
+  onWidthChange: (w: number) => void
+  maxWidth?: number
+}
+
+/** Resizable floating panel stacking collapsible sections. */
+export function SidePanel({ sections, width, onWidthChange, maxWidth }: SidePanelProps) {
+  return (
+    <SidePanelFrame
+      width={width}
+      onWidthChange={onWidthChange}
+      maxWidth={maxWidth}
+      className="mt-11 mb-6 mr-6 rounded-2xl border border-divider/50 bg-surface shadow-[var(--shadow-lg)]"
+    >
+      <div className="flex-1 overflow-y-auto">
+        {sections.map((section) => (
+          <ExpandableSection
+            key={section.id}
+            icon={section.icon}
+            title={section.title}
+            badge={section.badge}
+            action={section.action}
+            open={section.open}
+            onOpenChange={section.onOpenChange}
+          >
+            {section.body}
+          </ExpandableSection>
+        ))}
+      </div>
+    </SidePanelFrame>
+  )
+}

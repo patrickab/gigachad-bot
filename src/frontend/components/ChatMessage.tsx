@@ -2,12 +2,13 @@
 
 import dynamic from "next/dynamic"
 import { motion } from "framer-motion"
-import { memo, useMemo, useState } from "react"
+import { memo, useMemo } from "react"
 import { Bot, Brain, Check, ChevronDown, Copy, GitFork, Loader2, RotateCcw, Trash2, User } from "lucide-react"
 import { LaTeXMarkdown } from "./LaTeXMarkdown"
 import { ResearchTrace } from "./ResearchTrace"
 import { MessageAttachments } from "./MessageAttachments"
 import type { Message, Attachment } from "@/lib/types"
+import { useCopyFeedback } from "@/hooks/useCopyFeedback"
 
 const WebSearchResult = dynamic(() => import("./WebSearchResult").then(m => m.WebSearchResult), { ssr: false })
 
@@ -25,18 +26,16 @@ interface ChatMessageProps {
   search_result?: Message["search_result"]
   research_steps?: Message["research_steps"]
   research_progress?: Message["research_progress"]
-  /** Not rendered here. ChatContainer owns the tool element. Only suppresses the
-   *  "Processing…" placeholder while a tool is still running. */
-  tool_calls?: Message["tool_calls"]
+  /** A tool call of this message is still running; suppresses the "Processing…" placeholder (ChatContainer renders the tool element). */
+  toolRunning?: boolean
   isStreaming?: boolean
   attachments?: Attachment[]
-  messageIndex?: number
   onAttachmentClick?: (attachment: Attachment) => void
   collapsibleUser?: boolean
   onCollapse?: () => void
 }
 
-export interface AssistantMessageContentProps {
+interface AssistantMessageContentProps {
   content: string
   isStreaming?: boolean
   compact?: boolean
@@ -104,16 +103,9 @@ export function AssistantMessageContent({
   )
 }
 
-function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBranch, search_result, research_steps, research_progress, tool_calls: toolCalls, isStreaming, attachments, onAttachmentClick, collapsibleUser, onCollapse }: ChatMessageProps) {
+function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBranch, search_result, research_steps, research_progress, toolRunning, isStreaming, attachments, onAttachmentClick, collapsibleUser, onCollapse }: ChatMessageProps) {
   const isUser = role === "user"
-  const [copied, setCopied] = useState(false)
-
-  function handleCopy() {
-    navigator.clipboard.writeText(content).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    })
-  }
+  const { copied, copy } = useCopyFeedback(content)
   // When the whole message is selected, copy the raw markdown instead of rendered text
   function handleNativeCopy(e: React.ClipboardEvent<HTMLDivElement>) {
     const selectedText = window.getSelection()?.toString()
@@ -173,7 +165,7 @@ function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBran
             <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-ink" aria-hidden="true" />
             {content}
           </span>
-        ) : isStreaming && !toolCalls?.some((c) => c.status === "running") ? (
+        ) : isStreaming && !toolRunning ? (
           <span role="status" className="inline-flex items-center gap-2 text-ink text-sm">
             <Loader2 className="h-3.5 w-3.5 animate-spin text-ink-faint" aria-hidden="true" />
             <span>Processing…</span>
@@ -190,7 +182,7 @@ function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBran
           {content && !isResearchRunning && (
             <div className="relative">
               <button
-                onClick={(e) => { e.stopPropagation(); handleCopy() }}
+                onClick={(e) => { e.stopPropagation(); copy() }}
               className="rounded p-1 hover:bg-surface-elevated text-ink-subtle hover:text-ink"
               aria-label="Copy message"
               >

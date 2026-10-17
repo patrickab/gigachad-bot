@@ -3,7 +3,7 @@ import { useEffect, useRef, type RefObject } from "react"
 const PEN_TOUCH_SUPPRESS_MS = 700 // touch stays suppressed this long after the last pen event (hover included)
 
 /** ratio: current/start finger distance. (cx, cy): gesture start centre, (mx, my): current centre, both relative to the element. */
-export interface TwoFingerFrame { ratio: number, cx: number, cy: number, mx: number, my: number }
+interface TwoFingerFrame { ratio: number, cx: number, cy: number, mx: number, my: number }
 
 interface TwoFingerOptions<S> {
   enabled?: boolean

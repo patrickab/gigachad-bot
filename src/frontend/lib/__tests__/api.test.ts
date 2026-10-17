@@ -81,27 +81,3 @@ describe("api.ts — ensureOk surfaces FastAPI detail on error", () => {
     await expect(api.deletePrompt("s")).rejects.toThrow("boom")
   })
 })
-
-describe("api.ts — parseHistoryFile / buildHistoryFile round-trip", () => {
-  it("round-trips a project-scoped path", () => {
-    const historyFile = api.buildHistoryFile("tab.json", "proj")
-    expect(historyFile).toBe("proj/tab.json")
-    const { slug, filename } = api.parseHistoryFile(historyFile)
-    expect(slug).toBe("proj")
-    expect(filename).toBe("tab.json")
-  })
-
-  it("round-trips a standalone path", () => {
-    const historyFile = api.buildHistoryFile("tab.json", null)
-    expect(historyFile).toBe("tab.json")
-    const { slug, filename } = api.parseHistoryFile(historyFile)
-    expect(slug).toBeNull()
-    expect(filename).toBe("tab.json")
-  })
-
-  it("parseHistoryFile splits nested directories correctly", () => {
-    const { slug, filename } = api.parseHistoryFile("proj/sub/dir/tab.json")
-    expect(slug).toBe("proj")
-    expect(filename).toBe("sub/dir/tab.json")
-  })
-})

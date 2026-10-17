@@ -8,7 +8,6 @@ const api = vi.hoisted(() => ({
   writeDocument: vi.fn(),
   writeBinaryDocument: vi.fn(),
   storeDrawing: vi.fn(),
-  fileViewerRawUrl: vi.fn(),
   ApiError: class ApiError extends Error {
     status: number
     constructor(message: string, status: number) {
@@ -41,9 +40,6 @@ vi.mock("@/components/CanvasEditor", () => ({
       {doc.strokes[0]?.points[0]?.[0] ?? "empty"}
     </button>
   ),
-  emptyCanvasDoc: () => ({ version: 1, frames: [], strokes: [], attachments: [], texts: [] }),
-  parseCanvasDoc: JSON.parse,
-  serializeCanvasDoc: JSON.stringify,
 }))
 
 describe("DocumentEditor canvas collaboration", () => {

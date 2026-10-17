@@ -2,9 +2,9 @@
 
 import { memo } from "react"
 import { Download, FileText } from "lucide-react"
-import { sandboxAssetUrl } from "@/lib/api"
-import type { SandboxOutputRecord } from "@/lib/types"
-import { PlotElement, type PlotFigure } from "./PlotElement"
+import { sandboxAssetUrl } from "@/lib/urls"
+import type { PlotFigure, SandboxOutputRecord } from "@/lib/types"
+import { PlotElement } from "./PlotElement"
 
 /** Vendor MIME type, since Plotly registers none. */
 const PLOTLY_MEDIA_TYPE = "application/vnd.plotly.v1+json"

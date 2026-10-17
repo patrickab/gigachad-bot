@@ -5,11 +5,12 @@ import { motion } from "framer-motion"
 import { Check, ChevronDown, ChevronRight, FolderOpen, Globe, GripVertical, Loader2, Plus, X } from "lucide-react"
 import { FloatingWindow } from "@/components/FloatingWindow"
 import { LaTeXMarkdown } from "@/components/LaTeXMarkdown"
+import { AddMemoryCard, MemoryErrorCard } from "@/components/MemoryCard"
 import { MemoryBoard } from "@/components/MemoryBoard"
-import { AddMemoryCard, renderMemoriesMarkdown } from "@/components/MemoryPanel"
 import { commitMemoryDoc, getCategories, getMemories, remapOrphanedCategory, saveCategories } from "@/lib/api"
-import { sortMemoriesByCategoryOrder } from "@/lib/memoryUtils"
+import { newManualMemoryId, renderMemoriesMarkdown, sortMemoriesByCategoryOrder } from "@/lib/memoryUtils"
 import { useMemoryViewer } from "@/contexts/MemoryViewerContext"
+import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import type { CategoryDef, PreviewMemory } from "@/lib/types"
 
 export function MemoryViewer() {
@@ -57,6 +58,7 @@ function AddCategoryForm({ existingNames, onAdd, onCancel }: {
   const [description, setDescription] = useState("")
   const nameRef = useRef<HTMLInputElement>(null)
   useEffect(() => { nameRef.current?.focus() }, [])
+  useEscapeLayer(onCancel)
 
   const nameKey = name.trim().toLowerCase().replace(/\s+/g, "_")
   const isDuplicate = existingNames.has(nameKey)
@@ -70,12 +72,12 @@ function AddCategoryForm({ existingNames, onAdd, onCancel }: {
   return (
     <div className="rounded-lg border border-divider bg-surface p-2.5 space-y-1.5">
       <input ref={nameRef} value={name} onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => { if (e.key === "Enter") handleSave(); if (e.key === "Escape") onCancel() }}
+        onKeyDown={(e) => { if (e.key === "Enter") handleSave() }}
         placeholder="category_name"
         className="w-full rounded border border-divider bg-transparent px-2 py-1 text-xs text-ink placeholder:text-ink-faint outline-none focus:border-divider-strong" />
       {isDuplicate && <div className="text-[10px] text-red-400">Name already exists</div>}
       <input value={description} onChange={(e) => setDescription(e.target.value)}
-        onKeyDown={(e) => { if (e.key === "Enter") handleSave(); if (e.key === "Escape") onCancel() }}
+        onKeyDown={(e) => { if (e.key === "Enter") handleSave() }}
         placeholder="Short description (optional)"
         className="w-full rounded border border-divider bg-transparent px-2 py-1 text-xs text-ink placeholder:text-ink-faint outline-none focus:border-divider-strong" />
       <div className="flex items-center justify-end gap-2 pt-0.5">
@@ -192,6 +194,7 @@ function MemoryViewerInner({
   const [error, setError] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
   const [pendingDeleteCat, setPendingDeleteCat] = useState<CategoryDef | null>(null)
+  useEscapeLayer(() => setPendingDeleteCat(null), pendingDeleteCat !== null)
   const [remapping, setRemapping] = useState(false)
 
   useEffect(() => {
@@ -227,7 +230,7 @@ function MemoryViewerInner({
     if (!trimmed) return
     const now = new Date().toISOString()
     setMemories((prev) => [...prev, {
-      id: `manual-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      id: newManualMemoryId(),
       text: trimmed, category: categories[0]?.name ?? "note", scope: s,
       created_at: now, updated_at: now,
     }])
@@ -297,16 +300,12 @@ function MemoryViewerInner({
     function onKey(e: KeyboardEvent) {
       const tgt = e.target as HTMLElement | null
       const editable = !!tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.isContentEditable)
-      // Escape closes the delete popup first, then the viewer. Enter-to-save is ignored while typing.
-      if (e.key === "Escape") {
-        if (pendingDeleteCat) { setPendingDeleteCat(null); return }
-        e.preventDefault(); onClose(); return
-      }
+      // Enter-to-save is ignored while typing; Escape belongs to the window and the delete popup layers.
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !editable) { e.preventDefault(); handleSave() }
     }
     document.addEventListener("keydown", onKey)
     return () => document.removeEventListener("keydown", onKey)
-  }, [onClose, handleSave, pendingDeleteCat])
+  }, [handleSave])
 
   // Preview always reflects current category order.
   const previewMarkdown = renderMemoriesMarkdown(memories, title, categories).trimEnd() + "\n"
@@ -341,12 +340,7 @@ function MemoryViewerInner({
             <span className="text-xs text-ink-muted">Loading memories…</span>
           </div>
         ) : error ? (
-          <div className="flex flex-1 items-center justify-center p-8 min-h-0">
-            <div className="w-full max-w-lg rounded-xl border border-divider bg-surface p-5">
-              <div className="text-sm font-medium text-ink">Memory error</div>
-              <div className="mt-2 whitespace-pre-wrap text-xs leading-5 text-ink-muted">{error}</div>
-            </div>
-          </div>
+          <MemoryErrorCard message={error} />
         ) : (
           <div className="flex-1 flex min-h-0">
             <div className="w-1/2 min-w-0 border-r border-divider/50 flex flex-col relative">
@@ -387,7 +381,6 @@ function MemoryViewerInner({
                 <MemoryBoard
                   memories={memories}
                   categoryOrder={categories}
-                  scope={scope}
                   disabled={isLocked}
                   mode="display"
                   onChange={handleEdit}

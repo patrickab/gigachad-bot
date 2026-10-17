@@ -2,17 +2,31 @@ import type React from "react"
 import type { SSEEvent } from "./sse"
 import type { Message, ToolCallProgress, ToolCallRecord, ToolCallResult, ToolCallStarted, Usage } from "./types"
 
-// Publish every SSE event immediately. Delaying state updates turns short and fast
-// responses into a single final render, which is indistinguishable from no streaming.
-export function createFlushBatcher(
+/** Applies `updater` to the trailing message only when it is from the assistant; any other trailing message leaves state untouched. */
+export function updateLastAssistant(
+  setMessages: React.Dispatch<React.SetStateAction<Message[]>>,
+  updater: (msg: Message) => Message,
+) {
+  setMessages((prev) => {
+    const last = prev[prev.length - 1]
+    if (last?.role !== "assistant") return prev
+    const copy = [...prev]
+    copy[copy.length - 1] = updater(last)
+    return copy
+  })
+}
+
+/** Returns a `publish` that copies the accumulator `msg` into the trailing assistant slot on every
+ *  call: batching short fast responses would collapse streaming into one final render. */
+export function createMessagePublisher(
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>,
   msg: Message,
-) {
+): () => void {
   // `msg` remains the mutable accumulator. `owned` tracks the copy React last
   // received so an abandoned stream cannot overwrite a newer assistant message.
   let owned: Message = msg
 
-  const flush = () => {
+  return () => {
     const published = { ...msg }
     const expected = owned
     // Advance before the updater runs: React invokes it later, and may invoke it twice.
@@ -25,21 +39,11 @@ export function createFlushBatcher(
       return copy
     })
   }
-
-  const schedule = () => {
-    flush()
-  }
-
-  const final = () => {
-    flush()
-  }
-
-  return { schedule, final }
 }
 
 /** A wire event decoded into the shape the chat reducer consumes. Unknown event
  *  names decode to null so new backend events stay inert instead of breaking the fold. */
-export type ChatStreamEvent =
+type ChatStreamEvent =
   | { kind: "token"; text: string }
   | { kind: "tool_call"; started: ToolCallStarted }
   | { kind: "tool_progress"; progress: ToolCallProgress }
@@ -96,12 +100,12 @@ function withToolCallProgress(
 
 /** The events that fold into the trailing assistant message. `usage` and `done`
  *  stay with the caller: one lands in React state, the other only ends the loop. */
-export type MessageStreamEvent = Extract<
+type MessageStreamEvent = Extract<
   ChatStreamEvent,
   { kind: "token" | "tool_call" | "tool_progress" | "tool_result" | "error" }
 >
 
-// Mutates `msg` in place; createFlushBatcher publishes the copy.
+// Mutates `msg` in place; createMessagePublisher publishes the copy.
 export function applyChatStreamEvent(msg: Message, event: MessageStreamEvent): void {
   switch (event.kind) {
     case "token":

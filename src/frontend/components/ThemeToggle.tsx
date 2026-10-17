@@ -1,22 +1,14 @@
 "use client"
 
-import { useEffect, useState } from "react"
 import { Sun, Moon } from "lucide-react"
 import { STORAGE_KEY_THEME } from "@/lib/config"
+import { useThemeName } from "@/hooks/useThemeName"
 
 export function ThemeToggle() {
-  const [theme, setTheme] = useState<"light" | "dark">("dark")
-
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY_THEME)
-      if (stored === "light" || stored === "dark") setTheme(stored)
-    } catch {}
-  }, [])
+  const theme = useThemeName()
 
   function toggle() {
     const next = theme === "dark" ? "light" : "dark"
-    setTheme(next)
     try { localStorage.setItem(STORAGE_KEY_THEME, next) } catch {}
     const root = document.documentElement
     // `theme-transition` animates the swap only briefly so later color changes stay instant.

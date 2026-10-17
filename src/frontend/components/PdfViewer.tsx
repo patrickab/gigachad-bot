@@ -170,37 +170,43 @@ function PdfViewerInner({
     }, 2500)
   }, [])
 
+  /** Zooms to `nextZoom`, keeping the client point under it (default: viewport center) fixed. */
+  const zoomAt = useCallback((nextZoom: number, point?: { x: number; y: number }) => {
+    const el = scrollRef.current
+    if (!el) return
+
+    const prevZoom = zoomRef.current
+    const clamped = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, nextZoom))
+    if (clamped === prevZoom) return
+
+    const rect = el.getBoundingClientRect()
+    anchorRef.current = {
+      mouseX: point ? point.x - rect.left : rect.width / 2,
+      mouseY: point ? point.y - rect.top : rect.height / 2,
+      scrollLeft: el.scrollLeft,
+      scrollTop: el.scrollTop,
+      ratio: clamped / prevZoom,
+    }
+
+    zoomRef.current = clamped
+    setZoom(clamped)
+    showControls()
+  }, [showControls])
+
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
 
-      // Ctrl/Cmd + wheel zooms, anchored at the cursor
+    // Ctrl/Cmd + wheel zooms, anchored at the cursor
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey) return
       e.preventDefault()
-
-      const prevZoom = zoomRef.current
-      const factor = e.deltaY < 0 ? 1.08 : 1 / 1.08
-      const nextZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, prevZoom * factor))
-      if (nextZoom === prevZoom) return
-
-      const rect = el.getBoundingClientRect()
-      anchorRef.current = {
-        mouseX: e.clientX - rect.left,
-        mouseY: e.clientY - rect.top,
-        scrollLeft: el.scrollLeft,
-        scrollTop: el.scrollTop,
-        ratio: nextZoom / prevZoom,
-      }
-
-      zoomRef.current = nextZoom
-      setZoom(nextZoom)
-      showControls()
+      zoomAt(zoomRef.current * (e.deltaY < 0 ? 1.08 : 1 / 1.08), { x: e.clientX, y: e.clientY })
     }
 
     el.addEventListener("wheel", onWheel, { passive: false })
     return () => el.removeEventListener("wheel", onWheel)
-  }, [showControls])
+  }, [zoomAt])
 
   useEffect(() => {
     const el = scrollRef.current
@@ -236,28 +242,6 @@ function PdfViewerInner({
     el.scrollLeft = anchor.scrollLeft * anchor.ratio + anchor.mouseX * (anchor.ratio - 1)
     el.scrollTop = anchor.scrollTop * anchor.ratio + anchor.mouseY * (anchor.ratio - 1)
   }, [zoom])
-
-  const adjustZoom = useCallback((nextZoom: number) => {
-    const el = scrollRef.current
-    if (!el) return
-
-    const prevZoom = zoomRef.current
-    const clamped = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, nextZoom))
-    if (clamped === prevZoom) return
-
-    const rect = el.getBoundingClientRect()
-    anchorRef.current = {
-      mouseX: rect.width / 2,
-      mouseY: rect.height / 2,
-      scrollLeft: el.scrollLeft,
-      scrollTop: el.scrollTop,
-      ratio: clamped / prevZoom,
-    }
-
-    zoomRef.current = clamped
-    setZoom(clamped)
-    showControls()
-  }, [showControls])
 
   const onDocumentLoadSuccess = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -380,7 +364,7 @@ function PdfViewerInner({
         className={`absolute top-3 right-3 z-10 flex items-center gap-1 rounded-lg bg-surface-elevated/90 backdrop-blur-sm border border-divider/60 shadow-[var(--shadow-md)] transition-opacity duration-300 pointer-events-auto ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
       >
         <button aria-label="Zoom out"
-          onClick={() => adjustZoom(zoomRef.current - ZOOM_STEP)}
+          onClick={() => zoomAt(zoomRef.current - ZOOM_STEP)}
           disabled={zoom <= MIN_ZOOM}
           className="rounded-l-lg p-1.5 text-ink-subtle hover:text-ink hover:bg-hover disabled:text-ink-faint disabled:pointer-events-none transition-colors"
         >
@@ -406,7 +390,7 @@ function PdfViewerInner({
                   <button
                     key={preset}
                     onClick={() => {
-                      adjustZoom(preset)
+                      zoomAt(preset)
                       setDropdownOpen(false)
                     }}
                     className={`block w-full px-4 py-1 text-[10px] font-medium tabular-nums text-left hover:bg-hover transition-colors ${
@@ -421,7 +405,7 @@ function PdfViewerInner({
           </AnimatePresence>
         </div>
         <button aria-label="Zoom in"
-          onClick={() => adjustZoom(zoomRef.current + ZOOM_STEP)}
+          onClick={() => zoomAt(zoomRef.current + ZOOM_STEP)}
           disabled={zoom >= MAX_ZOOM}
           className="p-1.5 text-ink-subtle hover:text-ink hover:bg-hover disabled:text-ink-faint disabled:pointer-events-none transition-colors"
         >

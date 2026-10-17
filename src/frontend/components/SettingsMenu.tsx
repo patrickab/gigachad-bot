@@ -7,11 +7,10 @@ import { ParamSlider } from "./ParamSlider"
 import { StyledSelect } from "./StyledSelect"
 import { cn } from "@/lib/utils"
 import { REASONING_LEVELS } from "@/lib/config"
-import { displayName } from "@/lib/models"
+import { displayName, qualifiedModelIds } from "@/lib/models"
 import { useClickOutside } from "@/hooks/useClickOutside"
-import { useModeState } from "@/hooks/useModeState"
 import type { ModelsResponse } from "@/lib/types"
-import type { TabConfig } from "@/components/TabManager"
+import type { TabConfig } from "@/contexts/SettingsContext"
 
 interface SettingsMenuProps {
   prompts: Record<string, string>
@@ -21,6 +20,8 @@ interface SettingsMenuProps {
   /** Populates the research model-tier selects; the chat model picker owns
    *  its own copy and stays in the topbar. */
   models: ModelsResponse | null
+  /** Whether the Deep Research tool is on; its settings only show then. */
+  researchEnabled: boolean
 }
 
 function ChevronToggle({ ariaLabel, open, onToggle }: { ariaLabel: string; open: boolean; onToggle: () => void }) {
@@ -43,8 +44,8 @@ export function SettingsMenu({
   onConfigChange,
   onEditPrompts,
   models,
+  researchEnabled,
 }: SettingsMenuProps) {
-  const { researchEnabled } = useModeState()
   const [open, setOpen] = useState(false)
   const [researchOpen, setResearchOpen] = useState(false)
   const [promptOpen, setPromptOpen] = useState(false)
@@ -53,15 +54,11 @@ export function SettingsMenu({
   const close = useCallback(() => { setOpen(false) }, [])
   useClickOutside(ref, close)
 
-  // Same flattening ModelDropdown uses: Ollama plus every configured
-  // provider, qualified as `litellm_id/model` so the tiers can pick any
-  // model the chat picker can, without pulling in its provider-editing UI.
-  const modelChoices: { value: string; label: string }[] = models
-    ? [models.ollama, ...models.providers.map((p) => p.models.map((m) => `${p.litellm_id}/${m}`))]
-        .flat()
-        .map((id) => ({ value: id, label: displayName(id) }))
+  // Ollama plus every configured provider, so the tiers can pick any model the chat picker
+  // can, without pulling in its provider-editing UI.
+  const modelChoices = models
+    ? [...models.ollama, ...models.providers.flatMap(qualifiedModelIds)].map((id) => ({ value: id, label: displayName(id) }))
     : []
-
 
   return (
     <div className="relative" ref={ref}>
@@ -86,46 +83,42 @@ export function SettingsMenu({
             transition={{ duration: 0.15 }}
             className="absolute inset-x-1 bottom-full mb-1 max-h-[70vh] overflow-y-auto rounded-xl bg-surface-elevated p-3 shadow-[var(--shadow-md)] flex flex-col gap-4"
           >
-            {/* Chat settings always apply: a tool call happens inside a normal chat turn. */}
-            <>
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 text-xs font-medium text-ink-subtle">
-                      <BookOpen className="h-3.5 w-3.5" />
-                      System Prompt
-                      <ChevronToggle ariaLabel="System Prompt" open={promptOpen} onToggle={() => setPromptOpen((o) => !o)} />
-                    </div>
-                    {onEditPrompts && (
-                      <button aria-label="Edit prompts" onClick={() => { onEditPrompts(); close() }} className="p-0.5 rounded hover:bg-hover text-ink-faint hover:text-ink transition-colors">
-                        <Pencil className="h-3 w-3" />
-                      </button>
-                    )}
-                  </div>
-                  {promptOpen && (
-                    <div role="listbox" aria-label="System Prompt" className="mt-2 flex flex-col gap-0.5">
-                      {Object.keys(prompts).map((name) => (
-                        <button
-                          key={name}
-                          type="button"
-                          role="option"
-                          aria-selected={name === config.selectedPrompt}
-                          onClick={() => { onConfigChange({ selectedPrompt: name }); setPromptOpen(false) }}
-                          className={cn(
-                            "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors",
-                            name === config.selectedPrompt ? "bg-surface text-ink" : "text-ink-muted hover:bg-surface hover:text-ink",
-                          )}
-                        >
-                          <span className="min-w-0 flex-1 truncate">{name}</span>
-                          {name === config.selectedPrompt && <Check className="h-3.5 w-3.5 shrink-0" />}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs font-medium text-ink-subtle">
+                  <BookOpen className="h-3.5 w-3.5" />
+                  System Prompt
+                  <ChevronToggle ariaLabel="System Prompt" open={promptOpen} onToggle={() => setPromptOpen((o) => !o)} />
                 </div>
-              </>
+                {onEditPrompts && (
+                  <button aria-label="Edit prompts" onClick={() => { onEditPrompts(); close() }} className="p-0.5 rounded hover:bg-hover text-ink-faint hover:text-ink transition-colors">
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+              {promptOpen && (
+                <div role="listbox" aria-label="System Prompt" className="mt-2 flex flex-col gap-0.5">
+                  {Object.keys(prompts).map((name) => (
+                    <button
+                      key={name}
+                      type="button"
+                      role="option"
+                      aria-selected={name === config.selectedPrompt}
+                      onClick={() => { onConfigChange({ selectedPrompt: name }); setPromptOpen(false) }}
+                      className={cn(
+                        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors",
+                        name === config.selectedPrompt ? "bg-surface text-ink" : "text-ink-muted hover:bg-surface hover:text-ink",
+                      )}
+                    >
+                      <span className="min-w-0 flex-1 truncate">{name}</span>
+                      {name === config.selectedPrompt && <Check className="h-3.5 w-3.5 shrink-0" />}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
 
-
-            {researchEnabled && config.researchDepth !== undefined && (
+            {researchEnabled && (
               <div className="space-y-1.5 pt-2 border-t border-divider/50">
                 <div className="flex items-center gap-1.5 text-xs font-medium text-ink-subtle">
                   <Telescope className="h-3.5 w-3.5" />
@@ -212,22 +205,22 @@ export function SettingsMenu({
             )}
 
             <div className="flex items-center justify-between pt-2 border-t border-divider/50">
-                  <div className="flex items-center gap-2 text-xs font-medium text-ink-subtle">
-                    <ImageDown className="h-3.5 w-3.5" />
-                    Downscale images
-                  </div>
-                  {/* Track sits one level below the panel (paper under surface-elevated) in both themes. */}
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-label="Downscale images"
-                    aria-checked={config.downscaleImages}
-                    onClick={() => onConfigChange({ downscaleImages: !config.downscaleImages })}
-                    className={cn("relative h-5 w-9 shrink-0 rounded-full border bg-paper shadow-[var(--inner-highlight)] transition-colors", config.downscaleImages ? "border-divider-strong" : "border-divider")}
-                  >
-                    <span className={cn("absolute left-0.5 top-0.5 h-3.5 w-3.5 rounded-full shadow-[var(--shadow-sm)] transition-all", config.downscaleImages ? "translate-x-4 bg-ink-subtle" : "translate-x-0 bg-ink-faint")} />
-                  </button>
-                </div>
+              <div className="flex items-center gap-2 text-xs font-medium text-ink-subtle">
+                <ImageDown className="h-3.5 w-3.5" />
+                Downscale images
+              </div>
+              {/* Track sits one level below the panel (paper under surface-elevated) in both themes. */}
+              <button
+                type="button"
+                role="switch"
+                aria-label="Downscale images"
+                aria-checked={config.downscaleImages}
+                onClick={() => onConfigChange({ downscaleImages: !config.downscaleImages })}
+                className={cn("relative h-5 w-9 shrink-0 rounded-full border bg-paper shadow-[var(--inner-highlight)] transition-colors", config.downscaleImages ? "border-divider-strong" : "border-divider")}
+              >
+                <span className={cn("absolute left-0.5 top-0.5 h-3.5 w-3.5 rounded-full shadow-[var(--shadow-sm)] transition-all", config.downscaleImages ? "translate-x-4 bg-ink-subtle" : "translate-x-0 bg-ink-faint")} />
+              </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

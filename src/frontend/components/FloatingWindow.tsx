@@ -1,8 +1,9 @@
 "use client"
 
-import { useEffect, type ReactNode } from "react"
+import type { ReactNode } from "react"
 import { motion } from "framer-motion"
 import { cn } from "@/lib/utils"
+import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 
 interface FloatingWindowProps {
   children: ReactNode
@@ -13,15 +14,7 @@ interface FloatingWindowProps {
 
 /** Modal overlay with a centered panel. Backdrop click and Escape call `onClose`. */
 export function FloatingWindow({ children, onClose, overlayClassName, panelClassName }: FloatingWindowProps) {
-  useEffect(() => {
-    if (!onClose) return
-    // Capture phase and stopImmediatePropagation: Escape closes this before any handler underneath sees it.
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); onClose() }
-    }
-    window.addEventListener("keydown", handler, true)
-    return () => window.removeEventListener("keydown", handler, true)
-  }, [onClose])
+  useEscapeLayer(() => onClose?.(), onClose !== undefined)
 
   return (
     <motion.div

@@ -13,3 +13,8 @@ export function getDeviceId(): string | undefined {
     return undefined
   }
 }
+
+export function deviceHeaders(): Record<string, string> {
+  const deviceId = getDeviceId()
+  return deviceId ? { "X-Device-Id": deviceId } : {}
+}

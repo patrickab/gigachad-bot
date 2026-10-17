@@ -1,6 +1,7 @@
 "use client"
 
-import { canvasMutationStreamUrl, type CanvasAcceptedBatch } from "./api"
+import type { CanvasAcceptedBatch } from "./canvasDocument"
+import { canvasMutationStreamUrl } from "./urls"
 
 const RECONNECT_INITIAL_MS = 250
 const RECONNECT_MAX_MS = 5_000

@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Search, FileText, FileType, Image as ImageIcon, Folder, ChevronRight } from "lucide-react"
-import { fileViewerRawUrl, loadFileViewerText } from "@/lib/api"
+import { loadFileViewerText } from "@/lib/api"
+import { fileViewerRawUrl } from "@/lib/urls"
 import { LaTeXMarkdown } from "@/components/LaTeXMarkdown"
 import { FloatingWindow } from "@/components/FloatingWindow"
 import { fuzzyScore } from "@/lib/fuzzy"
+import { baseName, dirName } from "@/lib/paths"
 import { buildPathTree, relativeName, type PathTreeNode } from "@/lib/pathTree"
 import { cn } from "@/lib/utils"
 
@@ -16,16 +18,6 @@ const RESULT_CAP = 300
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif", "ico"])
 
 type FileKind = "image" | "pdf" | "markdown" | "text"
-
-function baseName(path: string): string {
-  const i = path.lastIndexOf("/")
-  return i === -1 ? path : path.slice(i + 1)
-}
-
-function dirName(path: string): string {
-  const i = path.lastIndexOf("/")
-  return i === -1 ? "" : path.slice(0, i)
-}
 
 // Dotfiles (".env") have no extension.
 function extOf(path: string): string {

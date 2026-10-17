@@ -25,14 +25,14 @@ it("writes project state only when the saved tabs change", async () => {
   const { result } = renderHook(() => useProject(), { wrapper })
   await act(async () => { await result.current.openProject("proj") })
 
-  await act(async () => { await result.current.syncTabs([savedTab, blankTab], vi.fn()) })
+  await act(async () => { await result.current.syncTabs([savedTab, blankTab]) })
   expect(api.updateProjectKanban).not.toHaveBeenCalled()
 
   const renamed = { ...savedTab, title: "Renamed" }
-  await act(async () => { await result.current.syncTabs([renamed, blankTab], vi.fn()) })
+  await act(async () => { await result.current.syncTabs([renamed, blankTab]) })
   expect(api.updateProjectKanban).toHaveBeenCalledTimes(1)
   expect(api.updateProjectKanban).toHaveBeenLastCalledWith("proj", { kanban: [], tabs: [{ filename: "saved.json", name: null, title: "Renamed" }] })
 
-  await act(async () => { await result.current.syncTabs([renamed], vi.fn()) })
+  await act(async () => { await result.current.syncTabs([renamed]) })
   expect(api.updateProjectKanban).toHaveBeenCalledTimes(1)
 })

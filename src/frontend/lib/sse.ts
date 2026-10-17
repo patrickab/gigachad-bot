@@ -1,5 +1,5 @@
 import { getApiBase } from "./config"
-import { getDeviceId } from "./deviceId"
+import { deviceHeaders } from "./deviceId"
 
 export interface SSEEvent {
   event: string
@@ -12,7 +12,7 @@ export interface SSEStreamResult {
 }
 
 /** Yields response lines without terminators. A chunk may end mid-line, so the tail is buffered. Handles CRLF. */
-export async function* readLines(res: Response): AsyncGenerator<string> {
+async function* readLines(res: Response): AsyncGenerator<string> {
   if (!res.body) throw new Error("No response body")
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
@@ -35,19 +35,12 @@ export async function* readLines(res: Response): AsyncGenerator<string> {
 }
 
 /** POST-based SSE (EventSource cannot POST). Aborting cancels the request. Iteration throws on non-2xx. */
-export function createSSEStream(
-  path: string,
-  body: Record<string, unknown>,
-  base: string = getApiBase()
-): SSEStreamResult {
+export function createSSEStream(path: string, body: Record<string, unknown>): SSEStreamResult {
   const controller = new AbortController()
 
-  const deviceId = getDeviceId()
-  const headers: Record<string, string> = { "Content-Type": "application/json" }
-  if (deviceId) headers["X-Device-Id"] = deviceId
-  const promise = fetch(`${base}${path}`, {
+  const promise = fetch(`${getApiBase()}${path}`, {
     method: "POST",
-    headers,
+    headers: { "Content-Type": "application/json", ...deviceHeaders() },
     body: JSON.stringify(body),
     signal: controller.signal,
   })

@@ -6,6 +6,7 @@ import { Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useProject } from "@/contexts/ProjectContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
+import { Dialog } from "./Dialog"
 import type { KanbanColumnId } from "@/lib/types"
 import { ElevationProvider, ElevatedContainer } from "./ElevatedContainer"
 import { FloatingWindow } from "./FloatingWindow"
@@ -46,18 +47,8 @@ function AddCardModal({ open, onClose, onAdd, defaultState }: AddCardModalProps)
     if (open) {
       setTitle("")
       setDesc("")
-      setTimeout(() => titleRef.current?.focus(), 50)
     }
   }, [open])
-
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose()
-    }
-    document.addEventListener("keydown", handler)
-    return () => document.removeEventListener("keydown", handler)
-  }, [open, onClose])
 
   const submit = () => {
     if (!title.trim()) return
@@ -73,71 +64,51 @@ function AddCardModal({ open, onClose, onAdd, defaultState }: AddCardModalProps)
   }
 
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.15 }}
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-backdrop backdrop-blur-[2px]"
-          onClick={onClose}
-        >
-          <motion.div
-            initial={{ opacity: 0, scale: 0.96, y: 8 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 8 }}
-            transition={{ duration: 0.2, ease: "easeOut" }}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-sm mx-4 rounded-2xl border border-divider-strong bg-surface shadow-[var(--shadow-lg)] overflow-hidden"
-          >
-            <div className="px-5 pt-5 pb-3">
-              <div className="flex items-center gap-2 text-sm font-medium text-ink">
-                <Plus className="h-4 w-4 text-ink" />
-                Add Card to <span className="text-ink-muted font-semibold uppercase text-xs">{defaultState}</span>
-              </div>
-            </div>
-
-            <form
-              onSubmit={(e) => {
-                e.preventDefault()
-                submit()
-              }}
-              onKeyDown={handleKeyDown}
-              className="px-5 pb-5 space-y-3"
-            >
-              <input
-                ref={titleRef}
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className={cn(
-                  "w-full rounded-lg border border-divider-strong bg-surface-elevated/60 px-3 py-2.5 text-sm text-ink placeholder-ink-faint",
-                   "outline-none transition-all duration-200 focus:border-ink-muted"
-                 )}
-                 placeholder="Title"
-                 required
-                 autoComplete="off"
-                 spellCheck={false}
-               />
-               <input
-                 type="text"
-                 value={desc}
-                 onChange={(e) => setDesc(e.target.value)}
-                 className={cn(
-                   "w-full rounded-lg border border-divider-strong bg-surface-elevated/60 px-3 py-2.5 text-sm text-ink placeholder-ink-faint",
-                   "outline-none transition-all duration-200 focus:border-ink-muted"
-                )}
-                placeholder="Description (optional)"
-                autoComplete="off"
-                spellCheck={false}
-              />
-              <button type="submit" className="hidden" />
-            </form>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      icon={Plus}
+      title={<>Add Card to <span className="text-ink-muted font-semibold uppercase text-xs">{defaultState}</span></>}
+      initialFocusRef={titleRef}
+      panelClassName="rounded-2xl border border-divider-strong bg-surface shadow-[var(--shadow-lg)]"
+    >
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          submit()
+        }}
+        onKeyDown={handleKeyDown}
+        className="px-5 pb-5 space-y-3"
+      >
+        <input
+          ref={titleRef}
+          type="text"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          className={cn(
+            "w-full rounded-lg border border-divider-strong bg-surface-elevated/60 px-3 py-2.5 text-sm text-ink placeholder-ink-faint",
+            "outline-none transition-all duration-200 focus:border-ink-muted"
+          )}
+          placeholder="Title"
+          required
+          autoComplete="off"
+          spellCheck={false}
+        />
+        <input
+          type="text"
+          value={desc}
+          onChange={(e) => setDesc(e.target.value)}
+          className={cn(
+            "w-full rounded-lg border border-divider-strong bg-surface-elevated/60 px-3 py-2.5 text-sm text-ink placeholder-ink-faint",
+            "outline-none transition-all duration-200 focus:border-ink-muted"
+          )}
+          placeholder="Description (optional)"
+          autoComplete="off"
+          spellCheck={false}
+        />
+        <button type="submit" className="hidden" />
+      </form>
+    </Dialog>
   )
 }
 
@@ -150,15 +121,6 @@ export function ProjectDashboard() {
   const [dragOverCol, setDragOverCol] = useState<KanbanColumnId | null>(null)
   // Per-column drag-enter counter to avoid false dragLeave on child elements.
   const dragCounters = useRef<Record<string, number>>({ backlog: 0, doing: 0, done: 0 })
-
-  useEffect(() => {
-    if (addModalState !== null) return
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setDashboardOpen(false)
-    }
-    document.addEventListener("keydown", handler)
-    return () => document.removeEventListener("keydown", handler)
-  }, [setDashboardOpen, addModalState])
 
   if (!projectData || !activeProject) return null
 

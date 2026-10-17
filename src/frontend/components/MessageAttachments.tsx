@@ -1,20 +1,15 @@
 "use client"
 
 import { memo, useState } from "react"
-import { FileText, Image as ImageIcon, File } from "lucide-react"
+import { Image as ImageIcon, File } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { isImageAttachment } from "@/lib/attachments"
 import type { Attachment } from "@/lib/types"
+import { AttachmentIcon } from "./AttachmentView"
 
 interface MessageAttachmentsProps {
   attachments: Attachment[]
   onClick: (attachment: Attachment) => void
-}
-
-function AttachmentIcon({ mime }: { mime: string }) {
-  if (mime.startsWith("image/")) return <ImageIcon className="h-3 w-3 text-ink shrink-0" />
-  if (mime === "application/pdf") return <FileText className="h-3 w-3 text-ink shrink-0" />
-  return <File className="h-3 w-3 text-ink-muted shrink-0" />
 }
 
 /** Image preview filling its tile, an icon when the upload is gone or unreadable. */
@@ -61,7 +56,7 @@ function MessageAttachmentsInner({ attachments, onClick }: MessageAttachmentsPro
               : "border-divider/40 bg-surface-elevated/15 text-ink-faint hover:bg-hover hover:text-ink-subtle",
           )}
         >
-          <AttachmentIcon mime={att.mime} />
+          <AttachmentIcon mime={att.mime} generic={File} size="h-3 w-3" />
           <span className="max-w-[140px] truncate">{att.name}</span>
         </button>
       ))}

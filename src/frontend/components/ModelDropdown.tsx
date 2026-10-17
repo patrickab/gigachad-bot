@@ -3,7 +3,7 @@
 import { ArrowLeft, Check, ChevronDown, ChevronRight, Cpu, Plus, Settings2, Trash2 } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { fetchOmpCatalog } from "@/lib/api"
-import { displayName } from "@/lib/models"
+import { displayName, qualifiedModelIds } from "@/lib/models"
 import type { ModelDefaults, ModelProvider, ModelsResponse, OmpCatalog } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { PopoverSelector, PopoverSelectorAction } from "./PopoverSelector"
@@ -172,9 +172,10 @@ export function ModelDropdown({ models, selectedModel, onSelect, onProvidersChan
 
   if (models === null) return <Skeleton className="mx-2 h-4 w-28" />
 
+  const byDisplayName = (a: string, b: string) => displayName(a).localeCompare(displayName(b))
   const available: ProviderTab[] = [
-    { label: "Ollama", models: [...models.ollama].sort((a, b) => displayName(a).localeCompare(displayName(b))) },
-    ...models.providers.map((provider) => ({ label: provider.label, models: provider.models.map((model) => `${provider.litellm_id}/${model}`).sort((a, b) => displayName(a).localeCompare(displayName(b))) })),
+    { label: "Ollama", models: [...models.ollama].sort(byDisplayName) },
+    ...models.providers.map((provider) => ({ label: provider.label, models: qualifiedModelIds(provider).sort(byDisplayName) })),
   ]
   const selectableProviders = available.filter((provider) => provider.models.length > 0)
   const tabOrder = models.tab_order

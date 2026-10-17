@@ -1,357 +1,54 @@
 "use client"
 
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react"
-import { createPortal } from "react-dom"
-import { getStroke } from "perfect-freehand"
-import { type StrokeData, type EmbedRect, type CanvasEmbedRect, getSvgPathFromStroke, pointInPolygon, renderPageToPng } from "@/lib/drawing"
-import { fileViewerRawUrl, writeBinaryDocument, listNotes, listProjectDocuments, loadFileViewerText, renameDocument, removeDocument } from "@/lib/api"
-import type { EdgeStyle } from "@/lib/architecture"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { ImageIcon } from "lucide-react"
+import { A4_ASPECT, FALLBACK_ASPECT, TEXT_DEFAULT_HEIGHT, TEXT_DEFAULT_WIDTH, canvasEntityId, emptyCanvasDoc, type CanvasAttachment, type CanvasDocument, type CanvasFrame } from "@/lib/canvasDocument"
+import { STROKE_WIDTHS, appendStrokePoint, inkColor, strokesAfterErase, type StrokeSize } from "@/lib/canvasInk"
+import type { Poly } from "@/lib/canvasSelection"
+import { penPressure, renderPageToPng, strokeOutlinePath, type CanvasEmbedRect, type EmbedRect } from "@/lib/drawing"
+import { renameDocument } from "@/lib/api"
+import { fileViewerRawUrl } from "@/lib/urls"
 import { useCollaborativeCanvas } from "@/hooks/useCollaborativeCanvas"
-import { useUndoDelete } from "@/contexts/UndoDeleteContext"
-import { useTwoFingerGesture } from "@/hooks/useTwoFingerGesture"
-import { activeThemeName } from "@/lib/palette"
+import { useCanvasCamera } from "@/hooks/useCanvasCamera"
+import { useCanvasDrag } from "@/hooks/useCanvasDrag"
+import { useCanvasHistory } from "@/hooks/useCanvasHistory"
+import { useCanvasInsert } from "@/hooks/useCanvasInsert"
+import { useTabActive } from "@/contexts/TabContext"
+import { useCanvasSelection } from "@/hooks/useCanvasSelection"
+import { useThemeName } from "@/hooks/useThemeName"
 import { cn } from "@/lib/utils"
-import { Plus, Undo2, Redo2, Trash2, Copy, FileType, ImageIcon, X, Camera, CircleDashed, Type, SquarePen, PenLine, Pencil, Maximize2, Minimize2, Network } from "lucide-react"
-import { PdfViewer } from "./PdfViewer"
-import { ArchitectureWindow } from "./ArchitectureWindow"
-import { LaTeXMarkdown } from "./LaTeXMarkdown"
-import { PlotElement, type PlotFigure } from "./PlotElement"
-import { cameraToOffset, HostScaleContext, offsetToCamera, reframeCamera, screenToWorld, zoomCamera, type ZoomAnchor } from "./InfiniteViewport"
-import { useTabActive } from "./TabManager"
+import { CanvasAddMenu } from "./CanvasAddMenu"
+import { CanvasAttachmentWindow } from "./CanvasAttachmentWindow"
+import { CanvasDotGrid } from "./CanvasDotGrid"
+import { CanvasFrameView } from "./CanvasFrameView"
+import { CanvasLassoTrace, CanvasScreenshotBox, CanvasSelectionActions, CanvasSelectionOutline } from "./CanvasSelectionOverlay"
+import { CanvasStrokeLayer } from "./CanvasStrokeLayer"
+import { CanvasTextNote } from "./CanvasTextNote"
+import { CanvasToolbar, type CanvasTool, type CanvasToolbarSlots } from "./CanvasToolbar"
 
-const A4_W = 794
-const A4_H = 1123
-const A4_ASPECT = A4_H / A4_W // height / width — page frames are locked to this
-const PAGE_GAP = 40
-const DEFAULT_PDF_WIDTH = 500 // attachment default width (canvas units)
-const DEFAULT_IMAGE_WIDTH = 400 // image-frame default width (canvas units)
-const DEFAULT_CANVAS_WIDTH = 600 // nested canvas window default width (canvas units)
-const CANVAS_ASPECT = 0.7 // nested canvas windows have no intrinsic aspect — fix one
-const DEFAULT_GRAPH_WIDTH = 720
-const DEFAULT_GRAPH_HEIGHT = 480
 const MAX_NEST_DEPTH = 2 // canvas windows stop opening files here, so A→B→A can't recurse
-const MIN_FRAME_WIDTH = 120
-const MIN_ATTACH_WIDTH = 200
-const MIN_GRAPH_HEIGHT = 180
-const FALLBACK_ASPECT = 1.3 // height/width used until the real aspect is measured
-const MIN_SCALE = 0.15
-const MAX_SCALE = 3
-const GRID_SPACING = 30 // canvas units between dots at the finest grid level
-const GRID_MIN_SCREEN_SPACING = 12 // px — below this the grid doubles its spacing
-const THIN_WIDTH = 2
-const MEDIUM_WIDTH = 5
-const THICK_WIDTH = 10
 const PEN_HOLD_MS = 400 // press-and-hold the pen button to activate selection mode
 const PEN_DOUBLE_CLICK_MS = 350 // double-click the pen button to activate screenshot mode
 const TEXT_DEFAULT_SIZE = 28 // canvas units — font size for new text notes
-const TEXT_DEFAULT_WIDTH = 240 // box size for a plain click (no drag) in text mode
-const TEXT_DEFAULT_HEIGHT = 80
-const MIN_TEXT_WIDTH = 80
-const MIN_TEXT_HEIGHT = 40
 const STRAIGHTEN_HOLD_MS = 500 // hold the pen still mid-stroke to snap it into a straight line
-const ZOOM_SETTLE_MS = 250 // attachments re-rasterize at full resolution this long after the zoom stops changing
-const PDF_LAYOUT_CAP = 916 // PdfViewer caps rendering at 900px + scrollbar gutter — wider layout gains no resolution
-const PLOT_MIN_LAYOUT_WIDTH = 960 // plots lay out at least this wide and scale down, so legends/titles never collide
 const STRAIGHTEN_MOVE_TOLERANCE = 5 // px of client movement that resets the "holding still" timer
-const HISTORY_LIMIT = 50 // undo depth
-const LASSO_COVERAGE = 0.6 // fraction of a stroke's points that must fall inside the lasso to select it
-const SELECTION_MIN = 24 // canvas units — selection box can be squeezed no smaller
-const COPY_OFFSET_PX = 24 // screen px a duplicated selection is nudged by, so it reads as a new object
-
-const STROKE_OPTIONS = {
-  smoothing: 0.5,
-  streamline: 0.5,
-  simulatePressure: false,
-  last: true,
-} as const
-// Preserve the latest position supplied by either coalesced input or pointerup. A
-// captured pen can cross a child or canvas boundary without ending its stroke.
-export function appendStrokePoint(points: number[][], point: number[]): void {
-  const last = points[points.length - 1]
-  if (last?.[0] === point[0] && last[1] === point[1]) return
-  points.push(point)
-}
-
-
-// Committed strokes are immutable, so outline path and bounds are computed once per
-// object, not per render or eraser sample. Weak keys free the cache when an edit drops a stroke.
-const strokePathCache = new WeakMap<StrokeData, string>()
-const strokeBoundsCache = new WeakMap<StrokeData, [number, number, number, number]>()
-
-// The eraser tests every stroke on every pointermove, so reject cheaply with four
-// comparisons against a cached box instead of per-segment distances.
-function strokeBounds(s: StrokeData): [number, number, number, number] {
-  let b = strokeBoundsCache.get(s)
-  if (b === undefined) {
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-    for (const p of s.points) {
-      minX = Math.min(minX, p[0]!); maxX = Math.max(maxX, p[0]!)
-      minY = Math.min(minY, p[1]!); maxY = Math.max(maxY, p[1]!)
-    }
-    b = [minX, minY, maxX, maxY]
-    strokeBoundsCache.set(s, b)
-  }
-  return b
-}
-function strokePath(stroke: StrokeData): string {
-  let d = strokePathCache.get(stroke)
-  if (d === undefined) {
-    d = getSvgPathFromStroke(getStroke(stroke.points, { ...STROKE_OPTIONS, size: stroke.width }))
-    strokePathCache.set(stroke, d)
-  }
-  return d
-}
-
-const PRESET_COLORS = [
-  { name: "Black", value: "#000000" },
-  { name: "Red", value: "#dc2626" },
-  { name: "Green", value: "#16a34a" },
-  { name: "Blue", value: "#2563eb" },
-] as const
-
-type StrokeSize = "thin" | "medium" | "thick"
-const SIZE_MAP: Record<StrokeSize, number> = { thin: THIN_WIDTH, medium: MEDIUM_WIDTH, thick: THICK_WIDTH }
-
-// --- Canvas primitives ---------------------------------------------------
-// CanvasFrame  = content that IS the artwork (page or image). Rasterized into
-//                the PDF/image export. Shared minimalistic chrome: drag the top
-//                border to move, bottom-right corner to resize, top-right to delete.
-// CanvasAttachment = a live, scrollable file reference (PDF; later text/LaTeX), or a
-//                nested canvas window carrying its own CanvasDocument inline.
-//                NOT baked into export. Filename header doubles as the move handle.
-
-export interface CanvasFrame {
-  id: string
-  kind: "page" | "image"
-  x: number
-  y: number
-  width: number
-  path?: string // image source (library/project path); pages have none
-}
-
-export interface CanvasAttachment {
-  id: string
-  kind: "pdf" | "canvas" | "architecture-graph" | "document"
-  path?: string // pdf source; nested canvases have none
-  canvas?: CanvasDocument // nested canvas contents (kind === "canvas")
-  x: number
-  y: number
-  width: number
-  height?: number // Architecture Diagrams own their viewport height; legacy attachments retain their aspect
-  title?: string // user label, independent of the backing document filename
-  page?: number // selected PDF page, persisted with the canvas
-  edgeStyle?: EdgeStyle // architecture windows: how connections are drawn; LikeC4 has no such setting
-}
-
-// CanvasText = handwriting-style note in a resizable box. Rasterized into export
-// like CanvasFrame content (word-wrapped and clipped to width/height).
-export interface CanvasText {
-  id: string
-  x: number
-  y: number
-  width: number
-  height: number
-  text: string
-  color: string
-  size: number
-}
-
-export interface CanvasDocument {
-  version: 1
-  viewport?: { scale: number; centerX: number; centerY: number }
-  frames: CanvasFrame[]
-  strokes: StrokeData[]
-  attachments: CanvasAttachment[]
-  texts: CanvasText[]
-}
-
-export function emptyCanvasDoc(): CanvasDocument {
-  return { version: 1, frames: [], strokes: [], attachments: [], texts: [] }
-}
-
-type CanvasEntityCollection = "frames" | "strokes" | "attachments" | "texts"
-type CanvasEntity = CanvasFrame | StrokeData | CanvasAttachment | CanvasText
-
-interface CanvasHistoryChange {
-  collection: CanvasEntityCollection
-  id: string
-  before: CanvasEntity | null
-  after: CanvasEntity | null
-  beforeIndex: number
-  afterIndex: number
-}
-
-interface CanvasHistoryEntry {
-  before: CanvasDocument
-  after: CanvasDocument | null // null until the gesture's first write
-}
-
-const canvasEntityCollections: CanvasEntityCollection[] = ["frames", "strokes", "attachments", "texts"]
-
-function canvasEntities(doc: CanvasDocument, collection: CanvasEntityCollection): CanvasEntity[] {
-  return doc[collection] as CanvasEntity[]
-}
-
-function comparableEntity(collection: CanvasEntityCollection, entity: CanvasEntity | null): unknown {
-  if (!entity || collection !== "attachments") return entity
-  const { page: _page, ...withoutPage } = entity as CanvasAttachment
-  return withoutPage
-}
-
-function sameHistoryEntity(collection: CanvasEntityCollection, a: CanvasEntity | null, b: CanvasEntity | null): boolean {
-  return JSON.stringify(comparableEntity(collection, a)) === JSON.stringify(comparableEntity(collection, b))
-}
-
-// Per-entity delta between two docs, matched by id. Unchanged references and page-only attachment edits are ignored.
-function historyChanges(before: CanvasDocument, after: CanvasDocument): CanvasHistoryChange[] {
-  const changes: CanvasHistoryChange[] = []
-  for (const collection of canvasEntityCollections) {
-    const beforeItems = canvasEntities(before, collection)
-    const afterItems = canvasEntities(after, collection)
-    if (beforeItems === afterItems) continue
-    const beforeById = new Map(beforeItems.map((entity, index) => [entity.id, { entity, index }]))
-    const afterById = new Map(afterItems.map((entity, index) => [entity.id, { entity, index }]))
-    for (const id of new Set([...beforeById.keys(), ...afterById.keys()])) {
-      const previous = beforeById.get(id)
-      const next = afterById.get(id)
-      if (previous?.entity !== next?.entity && !sameHistoryEntity(collection, previous?.entity ?? null, next?.entity ?? null)) {
-        changes.push({
-          collection,
-          id,
-          before: previous?.entity ?? null,
-          after: next?.entity ?? null,
-          beforeIndex: previous?.index ?? -1,
-          afterIndex: next?.index ?? -1,
-        })
-      }
-    }
-  }
-  return changes
-}
-
-// Replay a recorded delta onto the live doc. A change is skipped when its entity was edited since
-// (no longer equals the expected state), and removed entities return at their recorded index.
-function restoreHistory(doc: CanvasDocument, changes: CanvasHistoryChange[], direction: "undo" | "redo"): CanvasDocument {
-  let restored: CanvasDocument | null = null
-  for (const collection of canvasEntityCollections) {
-    const collectionChanges = changes.filter((change) => change.collection === collection)
-    if (collectionChanges.length === 0) continue
-    const changesById = new Map(collectionChanges.map((change) => [change.id, change]))
-    const current = canvasEntities(doc, collection)
-    const items = current.flatMap((entity) => {
-      const change = changesById.get(entity.id)
-      if (!change) return [entity]
-      const expected = direction === "undo" ? change.after : change.before
-      const replacement = direction === "undo" ? change.before : change.after
-      if (!sameHistoryEntity(collection, entity, expected)) return [entity]
-      if (!replacement) return []
-      // PDF page changes are navigation, never a conflicting artwork edit.
-      if (collection === "attachments") {
-        const page = (entity as CanvasAttachment).page
-        return [{ ...(replacement as CanvasAttachment), ...(page === undefined ? {} : { page }) }]
-      }
-      return [replacement]
-    })
-    for (const change of collectionChanges
-      .filter((change) => (direction === "undo" ? change.after : change.before) === null)
-      .sort((a, b) => (direction === "undo" ? a.beforeIndex : a.afterIndex) - (direction === "undo" ? b.beforeIndex : b.afterIndex))) {
-      const replacement = direction === "undo" ? change.before : change.after
-      if (!replacement || items.some((entity) => entity.id === change.id)) continue
-      const index = direction === "undo" ? change.beforeIndex : change.afterIndex
-      items.splice(Math.max(0, Math.min(index, items.length)), 0, replacement)
-    }
-    if (items.length === current.length && items.every((entity, index) => entity === current[index])) continue
-    const target: CanvasDocument = restored ?? { ...doc }
-    restored = target
-    if (collection === "frames") target.frames = items as CanvasFrame[]
-    else if (collection === "strokes") target.strokes = items as StrokeData[]
-    else if (collection === "attachments") target.attachments = items as CanvasAttachment[]
-    else target.texts = items as CanvasText[]
-  }
-  return restored ?? doc
-}
+const LONG_PRESS_MS = 500 // touch/mouse press-and-hold opens the context menu
+const LONG_PRESS_TOLERANCE = 5 // px of client movement that cancels a long press
+const ERASER_RADIUS_PX = 15
+const SCREENSHOT_MIN = 4 // canvas units — smaller drags are accidents
 
 // Stable fallback for a nested canvas saved without contents — a fresh object per
 // render would reset the nested editor's identity on every parent re-render.
 const EMPTY_NESTED = emptyCanvasDoc()
-
-// Legacy on-disk shape (pages / pdfEmbeds / imageEmbeds) — migrated on load.
-type LegacyEmbed = { id: string; path: string; x: number; y: number; width: number }
-// earlier point-text model saved notes without width/height
-type LegacyText = Omit<CanvasText, "width" | "height"> & { width?: number; height?: number }
-type LegacyStroke = Omit<StrokeData, "id"> & { id?: string }
-type LegacyDoc = {
-  version: 1
-  viewport?: CanvasDocument["viewport"]
-  strokes?: LegacyStroke[]
-  frames?: CanvasFrame[]
-  attachments?: CanvasAttachment[]
-  texts?: LegacyText[]
-  pages?: { id: string; x: number; y: number }[]
-  pdfEmbeds?: LegacyEmbed[]
-  imageEmbeds?: LegacyEmbed[]
-}
-
-function canvasEntityId(): string {
-  return crypto.randomUUID()
-}
-
-function migrateStrokes(strokes: LegacyStroke[] | undefined): StrokeData[] {
-  return (strokes ?? []).map((stroke) => stroke.id ? stroke as StrokeData : { ...stroke, id: canvasEntityId() })
-}
-
-function migrateAttachment(attachment: CanvasAttachment): CanvasAttachment {
-  // Nested frames once carried an `embeddingScale` mode; they now always scale with their host.
-  const { embeddingScale: _dropped, ...rest } = attachment as CanvasAttachment & { embeddingScale?: unknown }
-  return rest.kind === "canvas" && rest.canvas
-    ? { ...rest, canvas: migrate(rest.canvas) }
-    : rest
-}
-
-// backfills width/height for text notes saved under the earlier point-text model
-function migrateTexts(texts: LegacyText[] | undefined): CanvasText[] {
-  return (texts ?? []).map((t) => ({ ...t, width: t.width ?? TEXT_DEFAULT_WIDTH, height: t.height ?? TEXT_DEFAULT_HEIGHT }))
-}
-
-function migrate(d: LegacyDoc): CanvasDocument {
-  if (Array.isArray(d.frames)) {
-    return {
-      version: 1,
-      viewport: d.viewport,
-      frames: d.frames,
-      strokes: migrateStrokes(d.strokes),
-      attachments: (d.attachments ?? []).map(migrateAttachment),
-      texts: migrateTexts(d.texts),
-    }
-  }
-  const frames: CanvasFrame[] = []
-  for (const p of d.pages ?? []) frames.push({ id: p.id, kind: "page", x: p.x, y: p.y, width: A4_W })
-  for (const im of d.imageEmbeds ?? []) frames.push({ id: im.id, kind: "image", x: im.x, y: im.y, width: im.width, path: im.path })
-  const attachments: CanvasAttachment[] = (d.pdfEmbeds ?? []).map((e) => ({ id: e.id, kind: "pdf", x: e.x, y: e.y, width: e.width, path: e.path }))
-  return { version: 1, viewport: d.viewport, frames, strokes: migrateStrokes(d.strokes), attachments, texts: migrateTexts(d.texts) }
-}
-
-/** Parse and migrate a saved canvas, returning an empty document for invalid JSON or unknown versions. */
-export function parseCanvasDoc(text: string): CanvasDocument {
-  try {
-    const parsed = JSON.parse(text) as LegacyDoc
-    if (parsed && parsed.version === 1) return migrate(parsed)
-  } catch { /* */ }
-  return emptyCanvasDoc()
-}
-
-export function serializeCanvasDoc(doc: CanvasDocument): string {
-  return JSON.stringify(doc)
-}
 
 interface CanvasEditorProps {
   doc: CanvasDocument
   onChange: (doc: CanvasDocument) => void
   slug?: string
   onImageAdded?: (path: string) => void
-  // When given, the toolbar renders into this external element (e.g. the app
-  // header in canvas mode) instead of above the drawing surface.
-  toolbarSlot?: HTMLElement | null
+  // When given, the toolbar renders into these external elements (the app header pills
+  // in canvas mode) instead of above the drawing surface.
+  toolbarSlots?: CanvasToolbarSlots | null
   // Path of the `.canvas` file being edited — kept out of the "open canvas" picker so a
   // canvas can't embed itself.
   docPath?: string
@@ -359,249 +56,37 @@ interface CanvasEditorProps {
   // canvas window stops opening its file, so a cycle (A embeds B, B embeds A) can't
   // recurse forever.
   depth?: number
-  zoomAnchor?: ZoomAnchor
   // Effective zoom of the canvas embedding this one (1 at the top level). The
   // embedded view magnifies with it, so zooming the host scales the nested
   // content along with its frame instead of revealing more or less of it.
   hostScale?: number
 }
 
-
-// shortest distance from (px,py) to segment (ax,ay)-(bx,by) — straight strokes (e.g.
-// straightened lines) can be as sparse as 2 points, so the eraser must hit-test the
-// segment between points, not just the points themselves
-function distToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
-  const dx = bx - ax
-  const dy = by - ay
-  const lenSq = dx * dx + dy * dy
-  const t = lenSq === 0 ? 0 : Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq))
-  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy))
-}
-
-// --- Selection ------------------------------------------------------------
-// The lasso keeps its freehand shape — that outline is what you drag to move, and it
-// deforms along with the ink when scaled. A single handle at the shape's bottom-right
-// resizes diagonally, anchored at the top-left. Stroke `width` is never touched by a
-// scale — squeezing a drawing must not thin the pen that drew it.
-export interface SelBox { x: number; y: number; w: number; h: number }
-type Poly = [number, number][]
-
-export function polyBounds(poly: Poly): SelBox | null {
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-  for (const [x, y] of poly) {
-    minX = Math.min(minX, x); maxX = Math.max(maxX, x)
-    minY = Math.min(minY, y); maxY = Math.max(maxY, y)
-  }
-  if (minX === Infinity) return null
-  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
-}
-
-// The bottom-right handle: top-left stays put, both axes scale independently. Clamped to
-// SELECTION_MIN so the shape can't collapse (zero width ⇒ infinite scale factor) or flip.
-export function resizeBox(b: SelBox, dx: number, dy: number): SelBox {
-  return { x: b.x, y: b.y, w: Math.max(SELECTION_MIN, b.w + dx), h: Math.max(SELECTION_MIN, b.h + dy) }
-}
-
-// Map a point from one box into another. Pure scale+translate — `width` is not a factor.
-function remap(p: number[], from: SelBox, to: SelBox): number[] {
-  return [
-    to.x + (p[0]! - from.x) * (to.w / from.w),
-    to.y + (p[1]! - from.y) * (to.h / from.h),
-    p[2] ?? 0.5,
-  ]
-}
-
-export function scalePoly(poly: Poly, from: SelBox, to: SelBox): Poly {
-  return poly.map((p) => { const [x, y] = remap(p, from, to); return [x!, y!] as [number, number] })
-}
-
-// Rewrite a stroke's geometry from one selection box into another. `width` is carried
-// over deliberately untouched: squeezing a drawing must not thin the pen that drew it.
-export function scaleStroke(stroke: StrokeData, points: number[][], from: SelBox, to: SelBox): StrokeData {
-  return { ...stroke, points: points.map((p) => remap(p, from, to)) }
-}
-
-// --- Cross-canvas stroke transfer ------------------------------------------------
-// Every mounted canvas registers its drawing surface here, so a selection dragged out of
-// one canvas can be handed to whichever canvas is under the pointer on release — into a
-// nested window or back out of one. The handoff is in client coordinates, so the ink
-// lands exactly where it was dropped and comes out at the target's zoom: same on-screen
-// size, which means `width` scales by the zoom ratio (a lasso resize deliberately leaves
-// the pen alone; a canvas with a different zoom is the opposite case).
-// A canvas surface as the transfer sees it: where it sits on screen, and how it maps its
-// own units onto that. `rect` only needs left/top, so tests can pass a bare object.
-export interface CanvasView { rect: { left: number; top: number }; scale: number; offset: { x: number; y: number } }
-type StrokeDrop = (strokes: StrokeData[], from: CanvasView) => void
-const canvasDropTargets = new Map<HTMLElement, StrokeDrop>()
-
-// Rewrite a stroke from one canvas's units into another's, going through client px, so
-// it keeps both its position and its size on screen. `width` is in canvas units, so it
-// takes the zoom ratio too — dropping into a canvas zoomed out 2× would otherwise double
-// the apparent pen thickness.
-export function remapAcrossCanvases(stroke: StrokeData, from: CanvasView, to: CanvasView): StrokeData {
-  return {
-    ...stroke,
-    width: stroke.width * (from.scale / to.scale),
-    points: stroke.points.map((p) => [
-      (from.rect.left + p[0]! * from.scale + from.offset.x - to.rect.left - to.offset.x) / to.scale,
-      (from.rect.top + p[1]! * from.scale + from.offset.y - to.rect.top - to.offset.y) / to.scale,
-      p[2] ?? 0.5,
-    ]),
-  }
-}
-
-// Innermost registered surface under the point, skipping the one being dragged from —
-// walking up from the topmost element is what picks the nested window over its host.
-function dropTargetAt(x: number, y: number, self: HTMLElement | null): StrokeDrop | null {
-  let el: Element | null = document.elementFromPoint(x, y)
-  while (el) {
-    const drop = canvasDropTargets.get(el as HTMLElement)
-    if (drop && el !== self) return drop
-    el = el.parentElement
-  }
-  return null
-}
-
-// True when an event landed in an attachment window that *this* surface owns — those
-// (PDFs, nested canvases) handle their own scroll and zoom, so the host must keep its
-// hands off. Containment is the whole point: a nested canvas's own container also sits
-// inside an attachment element, its own, and that one must still zoom itself. Native
-// listeners run before React's synthetic dispatch, so a JSX stopPropagation can't do it.
-export function inOwnAttachment(target: EventTarget | null, el: HTMLElement): boolean {
-  const att = (target as Element | null)?.closest?.("[data-canvas-attachment]")
-  return !!att && el.contains(att)
-}
-
-// ponytail: swap black↔white for display only, stored colour stays unchanged
-function inkColor(c: string, isDark: boolean): string {
-  return isDark && c === "#000000" ? "#ffffff" : c
-}
-
-// The committed ink is by far the biggest thing on the canvas, and it does not change
-// when you pan, zoom, type in a note or drag a frame — memoizing it keeps those off an
-// O(strokes) reconciliation. `hidden` lets a drag preview take a few strokes over
-// without touching the layer, so a selection drag re-renders k strokes, not all of them.
-const StrokeLayer = memo(function StrokeLayer({ strokes, hidden, isDark }: { strokes: StrokeData[]; hidden: Set<number> | null; isDark: boolean }) {
-  return (
-    <>
-      {strokes.map((stroke, i) => {
-        if (hidden?.has(i)) return null
-        const d = strokePath(stroke)
-        return d ? <path key={stroke.id} d={d} fill={inkColor(stroke.color, isDark)} /> : null
-      })}
-    </>
-  )
-})
+/** A rubber-band drag in canvas units: the lasso traces every point, the screenshot rectangle uses its first and last. */
+type Band = { tool: Exclude<CanvasTool, "draw">; points: Poly }
 
 /** Infinite pan/zoom canvas of ink, frames, attachments and text notes. Camera state is local, every document edit goes through `onChange`. */
-export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, docPath, depth = 0, zoomAnchor = depth > 0 ? "viewport-center" : "cursor", hostScale = 1 }: CanvasEditorProps) {
+export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, docPath, depth = 0, hostScale = 1 }: CanvasEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-/** Dot grid with a constant on-screen density.
- *
- * - Zooming out doubles the spacing whenever dots would sit closer than `GRID_MIN_SCREEN_SPACING`
- * - Dots dropped by the next level fade out first, so levels blend instead of popping
- * - Dots keep a fixed screen size, the surviving ones stay put in canvas space
- */
-function DotGrid({ offset, scale }: { offset: { x: number; y: number }; scale: number }) {
-  const patternId = useId()
-  let spacing = GRID_SPACING * scale
-  while (spacing < GRID_MIN_SCREEN_SPACING) spacing *= 2
-  const fadingOpacity = Math.min(1, spacing / GRID_MIN_SCREEN_SPACING - 1)
-  const cell = 2 * spacing
-  return (
-    <svg className="absolute inset-0 w-full h-full pointer-events-none" aria-hidden>
-      <defs>
-        <pattern id={patternId} x={offset.x % cell} y={offset.y % cell} width={cell} height={cell} patternUnits="userSpaceOnUse">
-          <g fill="var(--ink-faint)" opacity={0.7}>
-            <circle cx={1.2} cy={1.2} r={1.2} />
-            <g opacity={fadingOpacity}>
-              <circle cx={spacing + 1.2} cy={1.2} r={1.2} />
-              <circle cx={1.2} cy={spacing + 1.2} r={1.2} />
-              <circle cx={spacing + 1.2} cy={spacing + 1.2} r={1.2} />
-            </g>
-          </g>
-        </pattern>
-      </defs>
-      <rect width="100%" height="100%" fill={`url(#${patternId})`} />
-    </svg>
-  )
-}
-
   // gates the window/document key listeners below to the frontmost tab
   const active = useTabActive()
-  const svgRef = useRef<SVGSVGElement>(null)
+  const isDark = useThemeName() === "dark"
 
-  // latest doc/onChange for the long-lived window drag listeners and for history
-  const liveRef = useRef({ doc, onChange })
-  liveRef.current = { doc, onChange }
-  const restoredRef = useRef(false)
+  const { scale, offset, settledScale, scaleRef, offsetRef, screenToCanvas, pointAtCenter, isPanning, startPan, movePan, endPan } = useCanvasCamera(containerRef, { viewport: doc.viewport, hostScale, depth })
+  const { liveRef, applyChange, commit, snapshot, snapshotOnce, endGesture, undo: undoHistory, redo: redoHistory, canUndo, canRedo } = useCanvasHistory(doc, onChange)
+  const selection = useCanvasSelection({ liveRef, containerRef, scaleRef, offsetRef, commit })
+  const { clear: clearSelection } = selection
+  const startDrag = useCanvasDrag({ liveRef, scaleRef, snapshotOnce, applyChange, endGesture, moveSelectionDrag: selection.moveDrag, endSelectionDrag: selection.endDrag })
+  const insert = useCanvasInsert({ liveRef, commit, pointAtCenter, slug, depth, active, onImageAdded })
 
-  // `scale` is the effective on-screen scale: the canvas's own zoom times its host's.
-  const initScale = (doc.viewport?.scale ?? 0.5) * hostScale
-  // offset is derived once the container mounts; fall back to a reasonable default
-  const [scale, setScale] = useState(initScale)
-  const [offset, setOffset] = useState({ x: 40, y: 40 })
-  const scaleRef = useRef(scale)
-  const offsetRef = useRef(offset)
-  scaleRef.current = scale
-  offsetRef.current = offset
-  const hostScaleRef = useRef(hostScale)
-  // Frame size the current offset was computed for; resizes re-project from it.
-  const viewportSizeRef = useRef({ width: 0, height: 0 })
+  // Selections hold stroke ids, but a restore can still resurrect or drop strokes under the highlight — both directions drop it.
+  const undo = useCallback(() => { if (undoHistory()) clearSelection() }, [undoHistory, clearSelection])
+  const redo = useCallback(() => { if (redoHistory()) clearSelection() }, [redoHistory, clearSelection])
 
-  // Restore a legacy viewport once on mount; camera movement stays device-local.
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
-    const apply = () => {
-      const vp = doc.viewport
-      const camera = { scale: (vp?.scale ?? 0.5) * hostScaleRef.current, centerX: vp?.centerX ?? 0, centerY: vp?.centerY ?? 0 }
-      const o = cameraToOffset(camera, { width: el.clientWidth, height: el.clientHeight })
-      offsetRef.current = o
-      scaleRef.current = camera.scale
-      setOffset(o)
-      setScale(camera.scale)
-      restoredRef.current = true
-    }
-    apply()
-    viewportSizeRef.current = { width: el.clientWidth, height: el.clientHeight }
-    const ro = new ResizeObserver(() => {
-      const next = { width: el.clientWidth, height: el.clientHeight }
-      const previous = viewportSizeRef.current
-      if (!restoredRef.current || (next.width === previous.width && next.height === previous.height)) return
-      // Keep the world point at the viewport's center fixed across resizes: the
-      // browser window for a top-level canvas, fullscreen or a resize drag for a
-      // nested one. Pinning the top-left instead would slide the middle away.
-      const view = reframeCamera(offsetRef.current, scaleRef.current, previous, next)
-      viewportSizeRef.current = next
-      offsetRef.current = view.offset
-      setOffset(view.offset)
-    })
-    ro.observe(el)
-    return () => ro.disconnect()
-  // Camera state is local after initialization.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  // Host zoom: the frame has already been resized by the same factor, so scale
-  // the view with it around the center. Runs before the ResizeObserver sees the
-  // new size and records it, so the resize isn't applied a second time.
-  useLayoutEffect(() => {
-    const factor = hostScale / hostScaleRef.current
-    hostScaleRef.current = hostScale
-    const el = containerRef.current
-    if (factor === 1 || !el || !restoredRef.current) return
-    const next = { width: el.clientWidth, height: el.clientHeight }
-    const view = reframeCamera(offsetRef.current, scaleRef.current, viewportSizeRef.current, next, factor)
-    viewportSizeRef.current = next
-    offsetRef.current = view.offset
-    scaleRef.current = view.scale
-    setOffset(view.offset)
-    setScale(view.scale)
-  }, [hostScale])
-
-  const [isPanning, setIsPanning] = useState(false)
-  const panStart = useRef({ x: 0, y: 0, ox: 0, oy: 0 })
+  const [tool, setTool] = useState<CanvasTool>("draw")
+  const [strokeSize, setStrokeSize] = useState<StrokeSize>("thin")
+  const [color, setColor] = useState("#000000")
+  const baseWidth = STROKE_WIDTHS[strokeSize]
 
   // Hide the cursor for pen input without updating state on every move.
   const [pointerIsPen, setPointerIsPen] = useState(false)
@@ -616,168 +101,47 @@ function DotGrid({ offset, scale }: { offset: { x: number; y: number }; scale: n
   // the pointer that began a stroke may extend or finish it.
   const drawingPointerId = useRef<number | null>(null)
   const [isErasing, setIsErasing] = useState(false)
-  const [strokeWidth, setStrokeWidth] = useState<StrokeSize>("thin")
-  const [color, setColor] = useState("#000000")
-  const [recentColors, setRecentColors] = useState<string[]>([])
-  const [colorOpen, setColorOpen] = useState(false)
-  const colorRef = useRef<HTMLDivElement>(null)
-
-  // History records one entry per local gesture: the doc before it and its latest write.
-  // Undo/redo diff the two and replay only that delta against the live document, so
-  // remote entities (and later remote edits) stay intact — and a drag costs nothing extra
-  // per pointermove.
-  const [undoStack, setUndoStack] = useState<CanvasHistoryEntry[]>([])
-  const [redoStack, setRedoStack] = useState<CanvasHistoryEntry[]>([])
-  const gestureRef = useRef<CanvasHistoryEntry | null>(null)
-
-  // Opens a gesture. `before` must be read here, not inside a setState updater — updaters
-  // run during the next render, by which point liveRef already holds the post-change doc.
-  const snapshot = useCallback(() => {
-    gestureRef.current = { before: liveRef.current.doc, after: null }
-    setRedoStack([])
-  }, [])
-
-  const finishHistory = useCallback(() => {
-    gestureRef.current = null
-  }, [])
-
-  // Writing through this keeps `liveRef` in step within the same tick: two mutations can
-  // land back to back before React re-renders (a cross-canvas stroke drop removes here
-  // and adds there), and the second must not read the pre-first document.
-  const applyChange = useCallback((next: CanvasDocument) => {
-    const gesture = gestureRef.current
-    if (gesture) {
-      // the gesture's first write puts it on the stack; later writes only move its end
-      if (!gesture.after) setUndoStack((stack) => [...stack, gesture].slice(-HISTORY_LIMIT))
-      gesture.after = next
-    }
-    liveRef.current.doc = next
-    liveRef.current.onChange(next)
-  }, [])
-
-  // Discrete (non-drag) mutation: snapshot, then apply.
-  const commit = useCallback((next: CanvasDocument) => {
-    snapshot()
-    applyChange(next)
-    finishHistory()
-  }, [snapshot, applyChange, finishHistory])
-
-  // A drag fires onChange on every pointermove, so it must snapshot only once — and
-  // only on the move that actually changes something, so a click that moves nothing
-  // (or an eraser pass over empty space) leaves no dead undo step. Reset on pointerup.
-  const gestureSnapped = useRef(false)
-  const snapshotOnce = useCallback(() => {
-    if (gestureSnapped.current) return
-    gestureSnapped.current = true
-    snapshot()
-  }, [snapshot])
-
-  const baseWidth = SIZE_MAP[strokeWidth]
 
   const redrawLive = useCallback(() => {
     const el = livePathRef.current
     if (!el) return
     const pts = currentPointsRef.current
-    el.setAttribute("d", pts.length >= 2 ? getSvgPathFromStroke(getStroke(pts, { ...STROKE_OPTIONS, size: baseWidth })) : "")
+    el.setAttribute("d", pts.length >= 2 ? strokeOutlinePath(pts, baseWidth) : "")
   }, [baseWidth])
 
-  // --- Select, move, scale & duplicate strokes. Draw a freehand lasso (not a
-  // rectangle, so any shaped area works); once released the lasso is replaced by the
-  // bounding box of what it caught, which is what you then drag, resize or copy.
-  // Activated via the toolbar icon or by press-and-holding the pen's side button. ---
-  type RectDrag = { x0: number; y0: number; x1: number; y1: number }
-  const [selectionMode, setSelectionMode] = useState(false)
-  const [lassoPoints, setLassoPoints] = useState<[number, number][] | null>(null) // in-progress lasso being drawn
-  const lassoActive = useRef(false)
-  const [selectionLasso, setSelectionLasso] = useState<Poly | null>(null) // frozen shape backing the current selection
-  const [selectedStrokes, setSelectedStrokes] = useState<Set<number>>(new Set())
-  const selDragRef = useRef<{ handle: "move" | "resize"; startX: number; startY: number; originals: Map<number, number[][]>; origLasso: Poly; origBox: SelBox; box: SelBox | null } | null>(null)
-  // The strokes under an in-flight drag, as [index, stroke]. While this is set the
-  // committed layer hides those indices and only this small list re-renders per frame;
-  // the document itself is not touched until the gesture ends.
-  const [dragPreview, setDragPreview] = useState<[number, StrokeData][] | null>(null)
-
-  const clearSelection = useCallback(() => {
-    setSelectedStrokes((prev) => (prev.size === 0 ? prev : new Set()))
-    setSelectionLasso(null)
+  // --- Rubber band: a lasso (select) or a rectangle (screenshot) dragged on the canvas.
+  // The ref is the synchronous truth for the pointer handlers; the state drives rendering. ---
+  const [band, setBand] = useState<Band | null>(null)
+  const bandRef = useRef<Band | null>(null)
+  const writeBand = useCallback((next: Band | null) => {
+    bandRef.current = next
+    setBand(next)
   }, [])
+  const startBand = useCallback((bandTool: Band["tool"], point: [number, number]) => writeBand({ tool: bandTool, points: [point] }), [writeBand])
+  const extendBand = useCallback((point: [number, number]) => {
+    const b = bandRef.current
+    if (b) writeBand({ tool: b.tool, points: b.tool === "select" ? [...b.points, point] : [b.points[0]!, point] })
+  }, [writeBand])
 
-  // Receive a selection dropped from another canvas: source canvas units → client px →
-  // our canvas units, so the ink keeps its screen position and screen size.
-  const dropStrokes = useCallback<StrokeDrop>((incoming, from) => {
-    const el = containerRef.current
-    if (!el) return
-    const to = { rect: el.getBoundingClientRect(), scale: scaleRef.current, offset: offsetRef.current }
-    const cur = liveRef.current.doc
-    commit({ ...cur, strokes: [...cur.strokes, ...incoming.map((s) => remapAcrossCanvases(s, from, to))] })
-  }, [commit])
-
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
-    canvasDropTargets.set(el, dropStrokes)
-    return () => { canvasDropTargets.delete(el) }
-  }, [dropStrokes])
+  const toggleTool = useCallback((next: Band["tool"]) => setTool((current) => current === next ? "draw" : next), [])
 
   // Pen side-button gesture: hold => activate selection mode, double-click => activate screenshot mode
   const penHoldTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const penHoldFired = useRef(false)
   const penClickPending = useRef(false)
   const penClickTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-
-  // --- Screenshot: drag a rect, release copies the rasterized region to clipboard ---
-  const [screenshotMode, setScreenshotMode] = useState(false)
-  const [shotRect, setShotRect] = useState<RectDrag | null>(null)
-  const shotStart = useRef<{ x: number; y: number } | null>(null)
   const screenshotSequence = useRef(0)
 
   // --- Text: notes render as Markdown when unfocused. Enter switches from source
   // to formatted content, while clicking the rendered note reopens its textarea. ---
-  const [textMode, setTextMode] = useState(false)
-  const [textDragRect, setTextDragRect] = useState<RectDrag | null>(null)
-  const textDragStart = useRef<{ x: number; y: number } | null>(null)
   const lastCanvasPoint = useRef<[number, number] | null>(null)
   const newTextIds = useRef(new Set<string>())
   const [autoFocusId, setAutoFocusId] = useState<string | null>(null)
   const [editingTextId, setEditingTextId] = useState<string | null>(null)
-
-  const [isDark, setIsDark] = useState(() => activeThemeName() === "dark")
-  useEffect(() => {
-    const obs = new MutationObserver(() => setIsDark(activeThemeName() === "dark"))
-    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] })
-    return () => obs.disconnect()
-  }, [])
-
-  // ponytail: close color popover on outside click, skip if native picker is active
-  const nativePickerOpen = useRef(false)
-  useEffect(() => {
-    if (!colorOpen) return
-    const handler = (e: MouseEvent) => {
-      if (nativePickerOpen.current) return
-      if (colorRef.current && !colorRef.current.contains(e.target as Node)) setColorOpen(false)
-    }
-    document.addEventListener("mousedown", handler)
-    return () => document.removeEventListener("mousedown", handler)
-  }, [colorOpen])
-
-  const pickColor = useCallback((c: string, close = true) => {
-    setColor(c)
-    setRecentColors((prev) => {
-      const without = prev.filter((x) => x !== c)
-      return [c, ...without].slice(0, 3)
-    })
-    if (close) setColorOpen(false)
-  }, [])
-
-  // Client px to canvas units, inverting the current pan/zoom.
-  const screenToCanvas = useCallback((clientX: number, clientY: number): [number, number] => {
-    const el = containerRef.current
-    if (!el) return [0, 0]
-    const rect = el.getBoundingClientRect()
-    const camera = offsetToCamera(offsetRef.current, scaleRef.current, { width: el.clientWidth, height: el.clientHeight })
-    const point = screenToWorld({ x: clientX - rect.left, y: clientY - rect.top }, camera, { width: el.clientWidth, height: el.clientHeight })
-    return [point.x, point.y]
-  }, [])
+  // One history gesture per focus session of a text note, closed on blur, so typing a
+  // sentence is one undo step, not one per keystroke. A freshly created box opens no new
+  // one — its creation gesture (from addText) stays open and covers the typing.
+  const textEdited = useRef(false)
 
   const addText = useCallback((x: number, y: number, width = TEXT_DEFAULT_WIDTH, height = TEXT_DEFAULT_HEIGHT, text = "") => {
     const id = canvasEntityId()
@@ -788,162 +152,47 @@ function DotGrid({ offset, scale }: { offset: { x: number; y: number }; scale: n
     applyChange({ ...cur, texts: [...cur.texts, { id, x, y, width, height, text, color, size: TEXT_DEFAULT_SIZE }] })
     setAutoFocusId(id)
     setEditingTextId(id)
-  }, [color, snapshot, applyChange])
+  }, [liveRef, color, snapshot, applyChange])
 
-  // Wheel zoom
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
-    const onWheel = (e: WheelEvent) => {
-      if (inOwnAttachment(e.target, el)) return
-      e.preventDefault()
-      const rect = el.getBoundingClientRect()
-      const current = offsetToCamera(offsetRef.current, scaleRef.current, { width: el.clientWidth, height: el.clientHeight })
-      const factor = e.deltaY < 0 ? 1.08 : 1 / 1.08
-      // Clamp the canvas's own zoom; its host's zoom rides on top of it.
-      const nextScale = Math.min(MAX_SCALE * hostScaleRef.current, Math.max(MIN_SCALE * hostScaleRef.current, current.scale * factor))
-      const camera = zoomCamera(current, nextScale / current.scale, { width: el.clientWidth, height: el.clientHeight }, zoomAnchor, {
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top,
-      })
-      const nextOffset = cameraToOffset(camera, { width: el.clientWidth, height: el.clientHeight })
-      scaleRef.current = camera.scale
-      offsetRef.current = nextOffset
-      setScale(camera.scale)
-      setOffset(nextOffset)
+  const editText = useCallback((id: string, text: string) => {
+    const cur = liveRef.current.doc
+    if (!textEdited.current) {
+      textEdited.current = true
+      if (cur.texts.find((t) => t.id === id)?.text !== "") snapshot()
     }
-    el.addEventListener("wheel", onWheel, { passive: false })
-    return () => el.removeEventListener("wheel", onWheel)
-  }, [zoomAnchor])
+    applyChange({ ...cur, texts: cur.texts.map((t) => t.id === id ? { ...t, text } : t) })
+  }, [liveRef, snapshot, applyChange])
 
+  const focusText = useCallback((id: string) => {
+    textEdited.current = newTextIds.current.delete(id)
+    setAutoFocusId((cur) => cur === id ? null : cur)
+  }, [])
 
-  // --- Pan (middle mouse or space+drag) ---
-  const spaceDown = useRef(false)
-  useEffect(() => {
-    if (!active) return
-    const down = (e: KeyboardEvent) => { if (e.code === "Space" && !e.repeat) spaceDown.current = true }
-    const up = (e: KeyboardEvent) => { if (e.code === "Space") spaceDown.current = false }
-    window.addEventListener("keydown", down)
-    window.addEventListener("keyup", up)
-    return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up) }
-  }, [active])
-
-  const handleContainerPointerDown = useCallback((e: React.PointerEvent) => {
-    if (e.pointerType === "touch") return
-    ;(e.currentTarget as HTMLElement).focus({ preventScroll: true })
-    lastCanvasPoint.current = screenToCanvas(e.clientX, e.clientY)
-    if (screenshotMode || selectionMode) return
-    // any pointerdown that bubbles this far didn't hit the selection lasso or its
-    // handles (they stopPropagation) — so it's "outside" and drops the selection
-    clearSelection()
-    if (e.button === 1 || (e.pointerType === "pen" && e.button === 2)) {
-      // pen side button: hold = activate selection mode & start the lasso right on this
-      // same press (no lift-and-retouch needed), double-click = activate screenshot mode
-      e.preventDefault()
-      ;(e.target as Element).setPointerCapture(e.pointerId)
-      penHoldFired.current = false
-      clearTimeout(penHoldTimer.current)
-      const clientX = e.clientX, clientY = e.clientY
-      penHoldTimer.current = setTimeout(() => {
-        penHoldFired.current = true
-        setSelectionMode(true)
-        setScreenshotMode(false)
-        const [cx, cy] = screenToCanvas(clientX, clientY)
-        lassoActive.current = true
-        setLassoPoints([[cx, cy]])
-      }, PEN_HOLD_MS)
-      return
+  // Removes a text note if its content is blank — called on blur so an
+  // untouched or fully-cleared box doesn't linger as an empty artifact.
+  const blurText = useCallback((id: string) => {
+    setEditingTextId(null)
+    const cur = liveRef.current.doc
+    const item = cur.texts.find((t) => t.id === id)
+    if (item && item.text.trim() === "") {
+      applyChange({ ...cur, texts: cur.texts.filter((t) => t.id !== id) })
     }
-    if ((e.button === 0 && (spaceDown.current || e.pointerType === "mouse")) || (e.button === 2 && e.pointerType === "mouse")) {
-      e.preventDefault()
-      setIsPanning(true)
-      panStart.current = { x: e.clientX, y: e.clientY, ox: offsetRef.current.x, oy: offsetRef.current.y }
-      ;(e.target as Element).setPointerCapture(e.pointerId)
-    }
-  }, [screenshotMode, selectionMode, clearSelection, screenToCanvas])
+    endGesture()
+  }, [liveRef, applyChange, endGesture])
 
-  const handleContainerPointerMove = useCallback((e: React.PointerEvent) => {
-    if (e.pointerType === "touch") return
-    lastCanvasPoint.current = screenToCanvas(e.clientX, e.clientY)
-    if (e.pointerType !== lastPointerTypeRef.current) {
-      lastPointerTypeRef.current = e.pointerType
-      setPointerIsPen(e.pointerType === "pen")
-    }
-    if (!isPanning) return
-    const dx = e.clientX - panStart.current.x
-    const dy = e.clientY - panStart.current.y
-    const newOffset = { x: panStart.current.ox + dx, y: panStart.current.oy + dy }
-    offsetRef.current = newOffset
-    setOffset(newOffset)
-  }, [isPanning, screenToCanvas])
+  const handleCanvasKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    // Only a single printable character starts a note (named keys like "Enter" are longer).
+    if (e.ctrlKey || e.metaKey || e.altKey || e.nativeEvent.isComposing || Array.from(e.key).length !== 1) return
+    const target = e.target as HTMLElement
+    // Only the bare canvas surface should turn typing into a new text note.
+    // Any nested editable (architecture diagram fields, modals, contenteditable) keeps its keystrokes.
+    if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable) return
 
-  const handleContainerPointerUp = useCallback((e: React.PointerEvent) => {
-    if (e.pointerType === "touch") return
-    if (e.button === 1 || (e.pointerType === "pen" && e.button === 2)) {
-      clearTimeout(penHoldTimer.current)
-      if (penHoldFired.current) { penHoldFired.current = false; return }
-      if (penClickPending.current) {
-        penClickPending.current = false
-        clearTimeout(penClickTimer.current)
-        setScreenshotMode(true)
-        setSelectionMode(false)
-      } else {
-        penClickPending.current = true
-        penClickTimer.current = setTimeout(() => { penClickPending.current = false }, PEN_DOUBLE_CLICK_MS)
-      }
-      return
-    }
-    if (isPanning) setIsPanning(false)
-  }, [isPanning])
-
-  // Test every stroke against the finished lasso loop and keep the ones it mostly
-  // covers — full enclosure meant a stroke poking one pixel out was silently missed.
-  // ponytail: coverage is measured on the raw sample points, so a 2-point straightened
-  // line still effectively needs both ends inside; resample if that ever bites.
-  const finalizeLasso = useCallback((pts: [number, number][] | null) => {
-    if (pts && pts.length >= 3) {
-      const picked = new Set<number>()
-      doc.strokes.forEach((s, i) => {
-        if (s.points.length === 0) return
-        const inside = s.points.reduce((n, p) => n + (pointInPolygon(p[0]!, p[1]!, pts) ? 1 : 0), 0)
-        if (inside / s.points.length > LASSO_COVERAGE) picked.add(i)
-      })
-      setSelectedStrokes(picked)
-      setSelectionLasso(picked.size > 0 ? pts : null)
-    }
-  }, [doc.strokes])
-
-  // --- Two-finger touch: pinch-zoom + pan (shared hook). Fingers that land in a
-  // nested window belong to that window's pinch/pan, not ours. ---
-  useTwoFingerGesture(containerRef, {
-    ignoreTarget: (target) => !!containerRef.current && inOwnAttachment(target, containerRef.current),
-    begin: () => ({ scale: scaleRef.current, ox: offsetRef.current.x, oy: offsetRef.current.y }),
-    update: (t, { ratio, cx, cy, mx, my }) => {
-      const el = containerRef.current
-      if (!el) return
-      const size = { width: el.clientWidth, height: el.clientHeight }
-      const nextScale = Math.min(MAX_SCALE * hostScaleRef.current, Math.max(MIN_SCALE * hostScaleRef.current, t.scale * ratio))
-      const current = offsetToCamera({ x: t.ox, y: t.oy }, t.scale, size)
-      const camera = zoomCamera(current, nextScale / t.scale, size, zoomAnchor, { x: cx, y: cy })
-      const offset = cameraToOffset(camera, size)
-      const nextOffset = { x: offset.x + mx - cx, y: offset.y + my - cy }
-      scaleRef.current = camera.scale
-      offsetRef.current = nextOffset
-      setScale(camera.scale)
-      setOffset(nextOffset)
-    },
-  })
-
-  // Attachments scale with canvas zoom, but re-rendering the PDF at every zoom
-  // frame re-rasterizes all pages (flicker). Instead the gesture scales them as
-  // bitmaps via CSS transform, and once the zoom settles the layout width snaps
-  // to the true screen size for one sharp re-render — PdfViewer preserves the
-  // reading position across that width change.
-  const [settledScale, setSettledScale] = useState(scale)
-  useEffect(() => {
-    const t = setTimeout(() => setSettledScale(scale), ZOOM_SETTLE_MS)
-    return () => clearTimeout(t)
-  }, [scale])
+    e.preventDefault()
+    const point = lastCanvasPoint.current
+      ?? screenToCanvas(containerRef.current?.clientWidth ?? 0, containerRef.current?.clientHeight ?? 0)
+    addText(point[0], point[1], TEXT_DEFAULT_WIDTH, TEXT_DEFAULT_HEIGHT, e.key)
+  }, [addText, screenToCanvas])
 
   // --- Aspect cache (image frames + pdf attachments), keyed by element id ---
   const [aspects, setAspects] = useState<Record<string, number>>({})
@@ -951,6 +200,90 @@ function DotGrid({ offset, scale }: { offset: { x: number; y: number }; scale: n
     setAspects((prev) => (Math.abs((prev[id] ?? 0) - r) < 0.001 ? prev : { ...prev, [id]: r }))
   }, [])
   const aspectFor = useCallback((f: CanvasFrame) => f.kind === "page" ? A4_ASPECT : (aspects[f.id] ?? FALLBACK_ASPECT), [aspects])
+
+  const removeFrame = useCallback((id: string) => {
+    const cur = liveRef.current.doc
+    commit({ ...cur, frames: cur.frames.filter((f) => f.id !== id) })
+    setAspects(({ [id]: _gone, ...rest }) => rest)
+  }, [liveRef, commit])
+
+  // --- Attachment windows ---
+  // Which attachment window, if any, is blown up over the whole surface. Exiting drops
+  // straight back onto the canvas that holds it.
+  const [fullscreenId, setFullscreenId] = useState<string | null>(null)
+
+  const removeAttachment = useCallback((id: string) => {
+    const cur = liveRef.current.doc
+    commit({ ...cur, attachments: cur.attachments.filter((a) => a.id !== id) })
+    setAspects(({ [id]: _gone, ...rest }) => rest)
+    setFullscreenId((fullscreen) => (fullscreen === id ? null : fullscreen))
+  }, [liveRef, commit])
+
+  // Navigation, window state and titles (the tree's file, the PDF page, the connection style) persist without an undo step.
+  // ponytail: nested canvas edits bypass the parent's history too — the nested editor has its own
+  // undo/redo, and snapshotting the whole parent per nested stroke would be absurd.
+  const patchAttachment = useCallback((id: string, patch: Partial<CanvasAttachment>) => {
+    const cur = liveRef.current.doc
+    const attachment = cur.attachments.find((a) => a.id === id)
+    if (!attachment || Object.entries(patch).every(([key, value]) => attachment[key as keyof CanvasAttachment] === value)) return
+    applyChange({ ...cur, attachments: cur.attachments.map((a) => a.id === id ? { ...a, ...patch } : a) })
+  }, [liveRef, applyChange])
+
+  const retitleAttachment = useCallback(async (id: string, nextTitle: string) => {
+    const attachment = liveRef.current.doc.attachments.find((a) => a.id === id)
+    const title = nextTitle.trim()
+    if (!attachment || !title || attachment.title === title) return
+    // Architecture sources have no rename, so renaming an architecture window only retitles the window.
+    if (!attachment.path || attachment.kind === "architecture-graph") { patchAttachment(id, { title }); return }
+    try {
+      const renamed = await renameDocument(slug ?? "", attachment.path, title)
+      patchAttachment(id, { path: renamed.path, title })
+    } catch { /* the stored name stays authoritative when rename fails */ }
+  }, [liveRef, patchAttachment, slug])
+
+  // Attachments on this canvas follow a file the add menu renames; they go once its delete commits, since the file is then gone for good.
+  const followRenamedDocument = useCallback((oldPath: string, newPath: string) => {
+    const cur = liveRef.current.doc
+    if (cur.attachments.some((a) => a.path === oldPath)) {
+      applyChange({ ...cur, attachments: cur.attachments.map((a) => a.path === oldPath ? { ...a, path: newPath } : a) })
+    }
+  }, [liveRef, applyChange])
+
+  const dropDeletedDocument = useCallback((path: string) => {
+    const cur = liveRef.current.doc
+    const gone = cur.attachments.filter((a) => a.path === path).map((a) => a.id)
+    if (gone.length === 0) return
+    applyChange({ ...cur, attachments: cur.attachments.filter((a) => a.path !== path) })
+    setFullscreenId((id) => (id && gone.includes(id) ? null : id))
+  }, [liveRef, applyChange])
+
+  // A canvas window's body. Passed down rather than imported by the window, so editor and window stay out of an import cycle.
+  const renderNestedCanvas = (att: CanvasAttachment, name: string) => {
+    if (!att.path) {
+      return (
+        <CanvasEditor
+          doc={att.canvas ?? EMPTY_NESTED}
+          onChange={(d) => patchAttachment(att.id, { canvas: d })}
+          slug={slug}
+          depth={depth + 1}
+          hostScale={scale}
+        />
+      )
+    }
+    if (depth >= MAX_NEST_DEPTH) {
+      return (
+        <div className="flex h-full items-center justify-center px-3 text-center text-[10px] text-ink-faint">
+          {name} — open it directly to edit
+        </div>
+      )
+    }
+    return <NestedCanvasFile path={att.path} slug={slug} depth={depth + 1} hostScale={scale} />
+  }
+
+  // --- Long-press context menu ---
+  const [contextMenu, setContextMenu] = useState<{ screenX: number; screenY: number; canvasX: number; canvasY: number } | null>(null)
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const longPressPos = useRef<{ clientX: number; clientY: number } | null>(null)
 
   // --- Straighten-on-hold: pausing mid-stroke for STRAIGHTEN_HOLD_MS snaps the
   // in-progress freehand stroke to a straight line from its start to the hold point. ---
@@ -976,24 +309,24 @@ function DotGrid({ offset, scale }: { offset: { x: number; y: number }; scale: n
     straightened.current = false
   }, [])
 
-  // --- Long-press context menu ---
-  const [contextMenu, setContextMenu] = useState<{ screenX: number; screenY: number; canvasX: number; canvasY: number } | null>(null)
-  const longPressTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const longPressPos = useRef<{ clientX: number; clientY: number } | null>(null)
+  // Drop the in-progress stroke, e.g. the tiny hold-dot a long press leaves behind.
+  const abortStroke = useCallback(() => {
+    setIsDrawing(false)
+    currentPointsRef.current = []
+    drawingPointerId.current = null
+    redrawLive()
+    cancelStraighten()
+  }, [redrawLive, cancelStraighten])
 
-  // Fires the context menu after 500ms without a cancelling move or release.
+  // Fires the context menu after LONG_PRESS_MS without a cancelling move or release.
   const startLongPress = useCallback((clientX: number, clientY: number) => {
     longPressPos.current = { clientX, clientY }
     longPressTimer.current = setTimeout(() => {
       const [cx, cy] = screenToCanvas(clientX, clientY)
-      setIsDrawing(false)
-      currentPointsRef.current = []
-      drawingPointerId.current = null
-      redrawLive()
-      cancelStraighten()
+      abortStroke()
       setContextMenu({ screenX: clientX, screenY: clientY, canvasX: cx, canvasY: cy })
-    }, 500)
-  }, [screenToCanvas, cancelStraighten, redrawLive])
+    }, LONG_PRESS_MS)
+  }, [screenToCanvas, abortStroke])
 
   const cancelLongPress = useCallback(() => {
     clearTimeout(longPressTimer.current)
@@ -1010,15 +343,15 @@ function DotGrid({ offset, scale }: { offset: { x: number; y: number }; scale: n
   }, [contextMenu])
 
   // --- Screenshot capture: rasterize a canvas-space rect and copy it to the clipboard ---
-  const captureScreenshot = useCallback(async (rect: RectDrag) => {
-    const x = Math.min(rect.x0, rect.x1)
-    const y = Math.min(rect.y0, rect.y1)
-    const w = Math.abs(rect.x1 - rect.x0)
-    const h = Math.abs(rect.y1 - rect.y0)
-    // ignore accidental tiny drags
-    if (w < 4 || h < 4) return
+  const captureScreenshot = useCallback(async ([x0, y0]: [number, number], [x1, y1]: [number, number]) => {
+    const x = Math.min(x0, x1)
+    const y = Math.min(y0, y1)
+    const w = Math.abs(x1 - x0)
+    const h = Math.abs(y1 - y0)
+    if (w < SCREENSHOT_MIN || h < SCREENSHOT_MIN) return
     const sequence = ++screenshotSequence.current
-    const images: EmbedRect[] = doc.frames
+    const { frames, strokes, texts } = liveRef.current.doc
+    const images: EmbedRect[] = frames
       .filter((f) => f.kind === "image" && f.path)
       .map((f) => ({ url: fileViewerRawUrl(f.path!), x: f.x, y: f.y, width: f.width, aspect: aspectFor(f) }))
     const pdfPages: CanvasEmbedRect[] = Array.from(
@@ -1026,47 +359,92 @@ function DotGrid({ offset, scale }: { offset: { x: number; y: number }; scale: n
     ).flatMap((image) => {
       const rect = image.getBoundingClientRect()
       if (rect.width === 0 || rect.height === 0) return []
-      const [x, y] = screenToCanvas(rect.left, rect.top)
+      const [left, top] = screenToCanvas(rect.left, rect.top)
       const [right, bottom] = screenToCanvas(rect.right, rect.bottom)
-      return [{ image, x, y, width: right - x, aspect: (bottom - y) / (right - x) }]
+      return [{ image, x: left, y: top, width: right - left, aspect: (bottom - top) / (right - left) }]
     })
     try {
-      const pngBytes = await renderPageToPng(doc.strokes, x, y, w, h, images, doc.texts, pdfPages)
+      const pngBytes = await renderPageToPng(strokes, x, y, w, h, images, texts, pdfPages)
       if (sequence !== screenshotSequence.current) return
       const blob = new Blob([pngBytes.buffer as ArrayBuffer], { type: "image/png" })
       await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })])
     } catch { /* clipboard write can fail without permission — silently drop */ }
-  }, [doc.frames, doc.strokes, doc.texts, aspectFor, screenToCanvas])
+  }, [liveRef, aspectFor, screenToCanvas])
+
+  // --- Container pointer handling: pan, pen side-button and typing position ---
+  const spaceDown = useRef(false)
+  useEffect(() => {
+    if (!active) return
+    const down = (e: KeyboardEvent) => { if (e.code === "Space" && !e.repeat) spaceDown.current = true }
+    const up = (e: KeyboardEvent) => { if (e.code === "Space") spaceDown.current = false }
+    window.addEventListener("keydown", down)
+    window.addEventListener("keyup", up)
+    return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up) }
+  }, [active])
+
+  const handleContainerPointerDown = useCallback((e: React.PointerEvent) => {
+    if (e.pointerType === "touch") return
+    ;(e.currentTarget as HTMLElement).focus({ preventScroll: true })
+    lastCanvasPoint.current = screenToCanvas(e.clientX, e.clientY)
+    if (tool !== "draw") return
+    // any pointerdown that bubbles this far didn't hit the selection lasso or its
+    // handles (they stopPropagation) — so it's "outside" and drops the selection
+    clearSelection()
+    if (e.button === 1 || (e.pointerType === "pen" && e.button === 2)) {
+      // pen side button: hold = activate selection mode & start the lasso right on this
+      // same press (no lift-and-retouch needed), double-click = activate screenshot mode
+      e.preventDefault()
+      ;(e.target as Element).setPointerCapture(e.pointerId)
+      penHoldFired.current = false
+      clearTimeout(penHoldTimer.current)
+      const clientX = e.clientX, clientY = e.clientY
+      penHoldTimer.current = setTimeout(() => {
+        penHoldFired.current = true
+        setTool("select")
+        startBand("select", screenToCanvas(clientX, clientY))
+      }, PEN_HOLD_MS)
+      return
+    }
+    if ((e.button === 0 && (spaceDown.current || e.pointerType === "mouse")) || (e.button === 2 && e.pointerType === "mouse")) startPan(e)
+  }, [tool, clearSelection, screenToCanvas, startBand, startPan])
+
+  const handleContainerPointerMove = useCallback((e: React.PointerEvent) => {
+    if (e.pointerType === "touch") return
+    lastCanvasPoint.current = screenToCanvas(e.clientX, e.clientY)
+    if (e.pointerType !== lastPointerTypeRef.current) {
+      lastPointerTypeRef.current = e.pointerType
+      setPointerIsPen(e.pointerType === "pen")
+    }
+    movePan(e)
+  }, [screenToCanvas, movePan])
+
+  const handleContainerPointerUp = useCallback((e: React.PointerEvent) => {
+    if (e.pointerType === "touch") return
+    if (e.button === 1 || (e.pointerType === "pen" && e.button === 2)) {
+      clearTimeout(penHoldTimer.current)
+      if (penHoldFired.current) { penHoldFired.current = false; return }
+      if (penClickPending.current) {
+        penClickPending.current = false
+        clearTimeout(penClickTimer.current)
+        setTool("screenshot")
+      } else {
+        penClickPending.current = true
+        penClickTimer.current = setTimeout(() => { penClickPending.current = false }, PEN_DOUBLE_CLICK_MS)
+      }
+      return
+    }
+    endPan()
+  }, [endPan])
 
   // --- Drawing (on SVG) ---
   const handleSvgPointerDown = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
     if (e.pointerType === "touch") return
     if (spaceDown.current) return
-    if (screenshotMode) {
+    if (tool !== "draw") {
       if (e.button !== 0) return
       e.stopPropagation()
-      ;e.currentTarget.setPointerCapture(e.pointerId)
-      const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
-      shotStart.current = { x: cx, y: cy }
-      setShotRect({ x0: cx, y0: cy, x1: cx, y1: cy })
-      return
-    }
-    if (selectionMode) {
-      if (e.button !== 0) return
-      e.stopPropagation()
-      ;e.currentTarget.setPointerCapture(e.pointerId)
-      const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
-      lassoActive.current = true
-      setLassoPoints([[cx, cy]])
-      return
-    }
-    if (textMode) {
-      if (e.button !== 0) return
-      e.stopPropagation()
-      ;e.currentTarget.setPointerCapture(e.pointerId)
-      const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
-      textDragStart.current = { x: cx, y: cy }
-      setTextDragRect({ x0: cx, y0: cy, x1: cx, y1: cy })
+      e.currentTarget.setPointerCapture(e.pointerId)
+      startBand(tool, screenToCanvas(e.clientX, e.clientY))
       return
     }
     // drawing/erasing directly on the canvas counts as "outside" the selection
@@ -1077,65 +455,44 @@ function DotGrid({ offset, scale }: { offset: { x: number; y: number }; scale: n
     if (e.button === 5) { setIsErasing(true); return }
     if (e.button !== 0) return
     e.stopPropagation()
-    ;e.currentTarget.setPointerCapture(e.pointerId)
+    e.currentTarget.setPointerCapture(e.pointerId)
     setIsDrawing(true)
     const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
-    currentPointsRef.current = [[cx, cy, e.pressure > 0 ? e.pressure : 0.5]]
+    currentPointsRef.current = [[cx, cy, penPressure(e)]]
     drawingPointerId.current = e.pointerId
     redrawLive()
     // the long-press context menu (incl. "Paste image") is a touch/mouse affordance —
     // a pen stroke that pauses mid-draw must never be mistaken for a long-press
     if (e.pointerType !== "pen") startLongPress(e.clientX, e.clientY)
     armStraighten(e.clientX, e.clientY)
-  }, [screenToCanvas, startLongPress, armStraighten, screenshotMode, selectionMode, textMode, clearSelection, redrawLive])
+  }, [tool, screenToCanvas, startBand, startLongPress, armStraighten, clearSelection, redrawLive])
 
   const handleSvgPointerMove = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
     if (e.pointerType === "touch") return
-    if (lassoActive.current) {
-      const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
-      setLassoPoints((prev) => (prev ? [...prev, [cx, cy]] : [[cx, cy]]))
+    if (bandRef.current) {
+      extendBand(screenToCanvas(e.clientX, e.clientY))
       return
     }
-    if (shotStart.current) {
-      const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
-      setShotRect({ x0: shotStart.current.x, y0: shotStart.current.y, x1: cx, y1: cy })
-      return
-    }
-    if (textDragStart.current) {
-      const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
-      setTextDragRect({ x0: textDragStart.current.x, y0: textDragStart.current.y, x1: cx, y1: cy })
-      return
-    }
-    // cancel long-press once the pointer moves more than 5px (25 = squared distance)
+    // cancel long-press once the pointer moves more than LONG_PRESS_TOLERANCE px
     if (longPressPos.current) {
       const dx = e.clientX - longPressPos.current.clientX
       const dy = e.clientY - longPressPos.current.clientY
-      if (dx * dx + dy * dy > 25) cancelLongPress()
+      if (dx * dx + dy * dy > LONG_PRESS_TOLERANCE * LONG_PRESS_TOLERANCE) cancelLongPress()
     }
     if (isErasing) {
       const [ex, ey] = screenToCanvas(e.clientX, e.clientY)
-      // eraser radius: 15 screen px
-      const threshold = 15 / scaleRef.current
-      const updated = doc.strokes.filter((stroke) => {
-        const [minX, minY, maxX, maxY] = strokeBounds(stroke)
-        if (ex < minX - threshold || ex > maxX + threshold || ey < minY - threshold || ey > maxY + threshold) return true
-        const pts = stroke.points
-        if (pts.length === 1) return Math.hypot(pts[0]![0]! - ex, pts[0]![1]! - ey) >= threshold
-        for (let i = 1; i < pts.length; i++) {
-          if (distToSegment(ex, ey, pts[i - 1]![0]!, pts[i - 1]![1]!, pts[i]![0]!, pts[i]![1]!) < threshold) return false
-        }
-        return true
-      })
-      if (updated.length !== doc.strokes.length) {
+      const cur = liveRef.current.doc
+      const updated = strokesAfterErase(cur.strokes, ex, ey, ERASER_RADIUS_PX / scaleRef.current)
+      if (updated.length !== cur.strokes.length) {
         snapshotOnce()
-        applyChange({ ...doc, strokes: updated })
+        applyChange({ ...cur, strokes: updated })
       }
       return
     }
     if (!isDrawing || e.pointerId !== drawingPointerId.current) return
     if (straightened.current) {
       const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
-      currentPointsRef.current = [currentPointsRef.current[0]!, [cx, cy, e.pressure > 0 ? e.pressure : 0.5]]
+      currentPointsRef.current = [currentPointsRef.current[0]!, [cx, cy, penPressure(e)]]
       redrawLive()
       return
     }
@@ -1149,97 +506,47 @@ function DotGrid({ offset, scale }: { offset: { x: number; y: number }; scale: n
     const native = e.nativeEvent
     for (const ev of native.getCoalescedEvents?.() ?? [native]) {
       const [cx, cy] = screenToCanvas(ev.clientX, ev.clientY)
-      appendStrokePoint(currentPointsRef.current, [cx, cy, ev.pressure > 0 ? ev.pressure : 0.5])
+      appendStrokePoint(currentPointsRef.current, [cx, cy, penPressure(ev)])
     }
     redrawLive()
-  }, [isDrawing, isErasing, screenToCanvas, doc, cancelLongPress, armStraighten, redrawLive, snapshotOnce, applyChange])
+  }, [isDrawing, isErasing, liveRef, scaleRef, screenToCanvas, extendBand, cancelLongPress, armStraighten, redrawLive, snapshotOnce, applyChange])
 
-  const handleSvgPointerUp = useCallback((e?: React.PointerEvent<SVGSVGElement>) => {
+  const handleSvgPointerUp = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
     cancelLongPress()
     cancelStraighten()
-    if (e?.pointerType === "touch") return
-    if (lassoActive.current) {
-      lassoActive.current = false
-      setLassoPoints((pts) => { finalizeLasso(pts); return null })
-      setSelectionMode(false)
-      return
-    }
-    if (shotStart.current) {
-      const start = shotStart.current
-      shotStart.current = null
-      setShotRect(null)
-      if (e) {
-        const [x1, y1] = screenToCanvas(e.clientX, e.clientY)
-        captureScreenshot({ x0: start.x, y0: start.y, x1, y1 })
-      }
-      setScreenshotMode(false)
-      return
-    }
-    if (textDragStart.current) {
-      const start = textDragStart.current
-      textDragStart.current = null
-      setTextDragRect(null)
-      if (e) {
-        const [ex, ey] = screenToCanvas(e.clientX, e.clientY)
-        const x = Math.min(start.x, ex)
-        const y = Math.min(start.y, ey)
-        const dragW = Math.abs(ex - start.x)
-        const dragH = Math.abs(ey - start.y)
-        // a plain click (no real drag) gets a default-size box instead of a sliver
-        addText(x, y, dragW < MIN_TEXT_WIDTH ? TEXT_DEFAULT_WIDTH : dragW, dragH < MIN_TEXT_HEIGHT ? TEXT_DEFAULT_HEIGHT : dragH)
-      }
+    if (e.pointerType === "touch") return
+    const finished = bandRef.current
+    if (finished) {
+      writeBand(null)
+      setTool("draw")
+      if (finished.tool === "select") selection.select(finished.points)
+      else void captureScreenshot(finished.points[0]!, screenToCanvas(e.clientX, e.clientY))
       return
     }
     if (isErasing) {
       setIsErasing(false)
-      finishHistory()
-      gestureSnapped.current = false
+      endGesture()
       return
     }
-    if (!isDrawing || (e && e.pointerId !== drawingPointerId.current)) return
+    if (!isDrawing || e.pointerId !== drawingPointerId.current) return
     setIsDrawing(false)
     const pts = currentPointsRef.current
     // pointercancel and lostpointercapture do not carry a usable final position.
     // Appending their default (often 0, 0) coordinate creates a diagonal to the
     // canvas origin. The most recent move sample is the safe final point instead.
-    if (e?.type === "pointerup") {
+    if (e.type === "pointerup") {
       const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
-      appendStrokePoint(pts, [cx, cy, e.pressure > 0 ? e.pressure : 0.5])
+      appendStrokePoint(pts, [cx, cy, penPressure(e)])
     }
     currentPointsRef.current = []
     drawingPointerId.current = null
     redrawLive()
     if (pts.length < 2) return
-    commit({ ...doc, strokes: [...doc.strokes, { id: canvasEntityId(), points: pts, color, width: baseWidth }] })
-  }, [isDrawing, isErasing, color, baseWidth, doc, cancelLongPress, cancelStraighten, captureScreenshot, finalizeLasso, screenToCanvas, redrawLive, commit, addText, finishHistory])
+    const cur = liveRef.current.doc
+    commit({ ...cur, strokes: [...cur.strokes, { id: canvasEntityId(), points: pts, color, width: baseWidth }] })
+  }, [isDrawing, isErasing, color, baseWidth, liveRef, selection, cancelLongPress, cancelStraighten, captureScreenshot, writeBand, screenToCanvas, redrawLive, commit, endGesture])
 
-  // --- Undo / Redo ---
-  // Selections index into doc.strokes, so a restore that shifts the array would leave
-  // them pointing at the wrong strokes — both directions drop the selection.
-  const undo = useCallback(() => {
-    const entry = undoStack[undoStack.length - 1]
-    if (!entry?.after) return
-    finishHistory()
-    const current = liveRef.current.doc
-    const restored = restoreHistory(current, historyChanges(entry.before, entry.after), "undo")
-    if (restored !== current) applyChange(restored)
-    setUndoStack((stack) => stack.slice(0, -1))
-    setRedoStack((stack) => [...stack, entry])
-    clearSelection()
-  }, [undoStack, applyChange, finishHistory, clearSelection])
-
-  const redo = useCallback(() => {
-    const entry = redoStack[redoStack.length - 1]
-    if (!entry?.after) return
-    finishHistory()
-    const current = liveRef.current.doc
-    const restored = restoreHistory(current, historyChanges(entry.before, entry.after), "redo")
-    if (restored !== current) applyChange(restored)
-    setRedoStack((stack) => stack.slice(0, -1))
-    setUndoStack((stack) => [...stack, entry].slice(-HISTORY_LIMIT))
-    clearSelection()
-  }, [redoStack, applyChange, finishHistory, clearSelection])
-
+  // --- Keyboard: undo/redo, and Escape to cancel a band or drop the stroke selection ---
   useEffect(() => {
     if (!active) return
     const handler = (e: KeyboardEvent) => {
@@ -1259,697 +566,61 @@ function DotGrid({ offset, scale }: { offset: { x: number; y: number }; scale: n
     return () => window.removeEventListener("keydown", handler)
   }, [undo, redo, active])
 
-  // One history gesture per focus session of a text note, closed on blur, so typing a
-  // sentence is one undo step, not one per keystroke. A freshly created box opens no new
-  // one — its creation gesture (from addText) stays open and covers the typing.
-  const textEdited = useRef(false)
-
-  // Removes a text note if its content is blank — called on blur so an
-  // untouched or fully-cleared box doesn't linger as an empty artifact.
-  const dropIfEmptyText = useCallback((id: string) => {
-    const cur = liveRef.current.doc
-    const item = cur.texts.find((t) => t.id === id)
-    if (item && item.text.trim() === "") {
-      applyChange({ ...cur, texts: cur.texts.filter((t) => t.id !== id) })
-    }
-    finishHistory()
-  }, [applyChange, finishHistory])
-
-  // Escape cancels an in-progress screenshot/selection-drawing/text-box-drag, or drops the current stroke selection
   useEffect(() => {
-    if (!screenshotMode && !selectionMode && !textMode && selectedStrokes.size === 0) return
+    if (tool === "draw" && selection.selectedIds.size === 0) return
     const esc = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return
-      shotStart.current = null
-      setShotRect(null)
-      setScreenshotMode(false)
-      lassoActive.current = false
-      setLassoPoints(null)
-      setSelectionMode(false)
-      textDragStart.current = null
-      setTextDragRect(null)
-      setTextMode(false)
+      writeBand(null)
+      setTool("draw")
       clearSelection()
     }
     document.addEventListener("keydown", esc)
     return () => document.removeEventListener("keydown", esc)
-  }, [screenshotMode, selectionMode, textMode, selectedStrokes, clearSelection])
+  }, [tool, selection.selectedIds, writeBand, clearSelection])
 
-  const handleCanvasKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
-    // Only a single printable character starts a note (named keys like "Enter" are longer).
-    if (e.ctrlKey || e.metaKey || e.altKey || e.nativeEvent.isComposing || Array.from(e.key).length !== 1) return
-    const target = e.target as HTMLElement
-    // Only the bare canvas surface should turn typing into a new text note.
-    // Any nested editable (architecture diagram fields, modals, contenteditable) keeps its keystrokes.
-    if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable) return
-
-    e.preventDefault()
-    const point = lastCanvasPoint.current
-      ?? screenToCanvas(containerRef.current?.clientWidth ?? 0, containerRef.current?.clientHeight ?? 0)
-    addText(point[0], point[1], TEXT_DEFAULT_WIDTH, TEXT_DEFAULT_HEIGHT, e.key)
-  }, [addText, screenToCanvas])
-
-  const nextSize = useCallback(() => {
-    setStrokeWidth((w) => w === "thin" ? "medium" : w === "medium" ? "thick" : "thin")
-  }, [])
-
-  // --- Add menu (pages / images / pdf attachments) ---
-  const [addMenuOpen, setAddMenuOpen] = useState(false)
-  const addMenuRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!addMenuOpen) return
-    const handler = (e: MouseEvent) => {
-      if (addMenuRef.current && !addMenuRef.current.contains(e.target as Node)) setAddMenuOpen(false)
-    }
-    document.addEventListener("mousedown", handler)
-    return () => document.removeEventListener("mousedown", handler)
-  }, [addMenuOpen])
-
-  // Fetch project assets here, rather than from the surface hosting the editor. This
-  // keeps chat and canvas mode on the same data path. Only the outermost editor offers
-  // other canvases, so a canvas window can hold a file without handing out more.
-  const [projectCanvases, setProjectCanvases] = useState<{ path: string; name: string }[]>([])
-  const [projectPdfs, setProjectPdfs] = useState<{ path: string; name: string }[]>([])
-  const [projectImages, setProjectImages] = useState<{ path: string; name: string }[]>([])
-  const [documents, setDocuments] = useState<{ path: string; name: string }[]>([])
-  useEffect(() => {
-    if (!addMenuOpen) return
-    const load = slug ? listProjectDocuments(slug) : listNotes()
-    load
-      .then((docs) => {
-        setDocuments(docs
-          .filter((d) => d.path.endsWith(".md") || d.path.endsWith(".plot.json"))
-          .map((d) => ({ path: d.path, name: d.name })))
-        if (!slug) return
-        setProjectPdfs(docs.filter((d) => d.mime === "application/pdf").map((d) => ({ path: d.path, name: d.name })))
-        setProjectImages(docs.filter((d) => d.mime.startsWith("image/")).map((d) => ({ path: d.path, name: d.name })))
-        if (depth === 0) setProjectCanvases(docs
-          .filter((d) => d.path.endsWith(".canvas") && d.path !== docPath)
-          .map((d) => ({ path: d.path, name: d.name })))
-      })
-      .catch(() => { /* picker just stays empty */ })
-  }, [addMenuOpen, slug, depth, docPath])
-
-  // Top-left canvas position that centers a w-wide box of the given height/width aspect in the view.
-  const pointAtCenter = useCallback((w: number, aspect: number) => {
-    const el = containerRef.current
-    const vw = el ? el.clientWidth : 800
-    const vh = el ? el.clientHeight : 600
-    const cx = (-offsetRef.current.x + vw / 2) / scaleRef.current - w / 2
-    const cy = (-offsetRef.current.y + vh / 2) / scaleRef.current - (w * aspect) / 2
-    return { cx, cy }
-  }, [])
-
-  // --- Frames (pages + images) ---
-  const addPage = useCallback(() => {
-    const pages = doc.frames.filter((f) => f.kind === "page")
-    const last = pages[pages.length - 1]
-    const newX = last ? last.x + last.width + PAGE_GAP : 0
-    commit({ ...doc, frames: [...doc.frames, { id: canvasEntityId(), kind: "page", x: newX, y: last?.y ?? 0, width: A4_W }] })
-  }, [doc, commit])
-
-  const addImageFrameAt = useCallback((path: string, x: number, y: number) => {
-    commit({ ...doc, frames: [...doc.frames, { id: canvasEntityId(), kind: "image", x, y, width: DEFAULT_IMAGE_WIDTH, path }] })
-  }, [doc, commit])
-
-  const addImageFrame = useCallback((path: string) => {
-    const { cx, cy } = pointAtCenter(DEFAULT_IMAGE_WIDTH, FALLBACK_ASPECT)
-    addImageFrameAt(path, cx, cy)
-    setAddMenuOpen(false)
-  }, [pointAtCenter, addImageFrameAt])
-
-  const removeFrame = useCallback((id: string) => {
-    commit({ ...doc, frames: doc.frames.filter((f) => f.id !== id) })
-    setAspects(({ [id]: _gone, ...rest }) => rest)
-  }, [doc, commit])
-
-  // --- Attachments (pdf) ---
-  const addAttachment = useCallback((path: string) => {
-    if (doc.attachments.some((a) => a.path === path)) { setAddMenuOpen(false); return }
-    const { cx, cy } = pointAtCenter(DEFAULT_PDF_WIDTH, FALLBACK_ASPECT)
-    commit({ ...doc, attachments: [...doc.attachments, { id: canvasEntityId(), kind: "pdf", path, x: cx, y: cy, width: DEFAULT_PDF_WIDTH }] })
-    setAddMenuOpen(false)
-  }, [doc, commit, pointAtCenter])
-
-  // Nested canvas window — a full CanvasEditor living inside this one, contents stored
-  // inline in the parent document.
-  const addCanvasWindow = useCallback(() => {
-    const { cx, cy } = pointAtCenter(DEFAULT_CANVAS_WIDTH, CANVAS_ASPECT)
-    commit({ ...doc, attachments: [...doc.attachments, {
-      id: canvasEntityId(), kind: "canvas", canvas: emptyCanvasDoc(), x: cx, y: cy, width: DEFAULT_CANVAS_WIDTH,
-    }] })
-    setAddMenuOpen(false)
-  }, [doc, commit, pointAtCenter])
-
-  // A referenced canvas stores only its placement here; its document is owned by its
-  // own collaboration hook in NestedCanvasFile.
-  const addCanvasFile = useCallback((path: string) => {
-    if (doc.attachments.some((a) => a.path === path)) { setAddMenuOpen(false); return }
-    const { cx, cy } = pointAtCenter(DEFAULT_CANVAS_WIDTH, CANVAS_ASPECT)
-    commit({ ...doc, attachments: [...doc.attachments, {
-      id: canvasEntityId(), kind: "canvas", path, x: cx, y: cy, width: DEFAULT_CANVAS_WIDTH,
-    }] })
-    setAddMenuOpen(false)
-  }, [doc, commit, pointAtCenter])
-
-  // A project has one architecture; each window browses it through its own tree,
-  // opening on the first system.
-  const addArchitectureWindow = useCallback(() => {
-    if (!slug) return
-    const { cx, cy } = pointAtCenter(DEFAULT_GRAPH_WIDTH, DEFAULT_GRAPH_HEIGHT / DEFAULT_GRAPH_WIDTH)
-    commit({ ...doc, attachments: [...doc.attachments, {
-      id: canvasEntityId(), kind: "architecture-graph", path: `graph/${slug}/`, x: cx, y: cy, width: DEFAULT_GRAPH_WIDTH, height: DEFAULT_GRAPH_HEIGHT,
-    }] })
-    setAddMenuOpen(false)
-  }, [doc, commit, pointAtCenter, slug])
-
-  const addDocumentAttachment = useCallback((path: string) => {
-    if (doc.attachments.some((attachment) => attachment.path === path)) { setAddMenuOpen(false); return }
-    const { cx, cy } = pointAtCenter(DEFAULT_GRAPH_WIDTH, DEFAULT_GRAPH_HEIGHT / DEFAULT_GRAPH_WIDTH)
-    commit({ ...doc, attachments: [...doc.attachments, {
-      id: canvasEntityId(), kind: "document", path, x: cx, y: cy, width: DEFAULT_GRAPH_WIDTH, height: DEFAULT_GRAPH_HEIGHT,
-    }] })
-    setAddMenuOpen(false)
-  }, [doc, commit, pointAtCenter])
-
-  // Navigation, window state and titles (the tree's file, the PDF page, the connection style) persist without an undo step.
-  // ponytail: nested canvas edits bypass the parent's history too — the nested editor has its own
-  // undo/redo, and snapshotting the whole parent per nested stroke would be absurd.
-  const patchAttachment = useCallback((id: string, patch: Partial<CanvasAttachment>) => {
-    const cur = liveRef.current.doc
-    const attachment = cur.attachments.find((a) => a.id === id)
-    if (!attachment || Object.entries(patch).every(([key, value]) => attachment[key as keyof CanvasAttachment] === value)) return
-    applyChange({ ...cur, attachments: cur.attachments.map((a) => a.id === id ? { ...a, ...patch } : a) })
-  }, [applyChange])
-
-  const [editingAttachmentId, setEditingAttachmentId] = useState<string | null>(null)
-  const updateAttachmentTitle = useCallback(async (id: string, nextTitle: string) => {
-    const attachment = liveRef.current.doc.attachments.find((a) => a.id === id)
-    const title = nextTitle.trim()
-    setEditingAttachmentId(null)
-    if (!attachment || !title || attachment.title === title) return
-    // Architecture sources have no rename, so renaming an architecture window only retitles the window.
-    if (!attachment.path || attachment.kind === "architecture-graph") { patchAttachment(id, { title }); return }
-    try {
-      const renamed = await renameDocument(slug ?? "", attachment.path, title)
-      patchAttachment(id, { path: renamed.path, title })
-    } catch { /* the stored name stays authoritative when rename fails */ }
-  }, [patchAttachment, slug])
-
-  // Documents in the add menu (generated tool artifacts included) are renamed and
-  // deleted in place. Attachments on this canvas follow the file: a rename repoints
-  // them; a delete hides the row during its undo window and drops them once it
-  // commits, since the file is then gone for good.
-  const [renamingDocPath, setRenamingDocPath] = useState<string | null>(null)
-  const cancelDocRename = useRef(false)
-
-  const renameMenuDocument = useCallback(async (path: string, currentName: string, nextName: string) => {
-    setRenamingDocPath(null)
-    if (cancelDocRename.current) { cancelDocRename.current = false; return }
-    const name = nextName.trim()
-    if (!name || name === currentName) return
-    try {
-      const renamed = await renameDocument(slug ?? "", path, name)
-      setDocuments((docs) => docs.map((d) => d.path === path ? { path: renamed.path, name: renamed.name } : d))
-      const cur = liveRef.current.doc
-      if (cur.attachments.some((a) => a.path === path)) {
-        applyChange({ ...cur, attachments: cur.attachments.map((a) => a.path === path ? { ...a, path: renamed.path } : a) })
-      }
-    } catch { /* the stored name stays authoritative when rename fails */ }
-  }, [applyChange, slug])
-
-  const { schedule: scheduleDelete, pending: deletePending } = useUndoDelete()
-  const deleteMenuDocument = useCallback((path: string) => {
-    const name = path.split("/").pop() ?? path
-    scheduleDelete(`canvas-document:${slug ?? ""}:${path}`, name, async () => {
-      await removeDocument(slug ?? "", path)
-      setDocuments((docs) => docs.filter((d) => d.path !== path))
-      const cur = liveRef.current.doc
-      const gone = cur.attachments.filter((a) => a.path === path).map((a) => a.id)
-      if (gone.length === 0) return
-      applyChange({ ...cur, attachments: cur.attachments.filter((a) => a.path !== path) })
-      setFullscreenId((id) => (id && gone.includes(id) ? null : id))
-    })
-  }, [applyChange, scheduleDelete, slug])
-
-  // Which attachment window, if any, is blown up over the whole surface. Exiting drops
-  // straight back onto the canvas that holds it.
-  const [fullscreenId, setFullscreenId] = useState<string | null>(null)
-
-  const removeAttachment = useCallback((id: string) => {
-    commit({ ...doc, attachments: doc.attachments.filter((a) => a.id !== id) })
-    setAspects(({ [id]: _gone, ...rest }) => rest)
-    setFullscreenId((cur) => (cur === id ? null : cur))
-  }, [doc, commit])
-
-  // --- Paste image (Ctrl+V or long-press menu) ---
-  const pasteImageAtPoint = useCallback(async (canvasX: number, canvasY: number) => {
-    if (!slug) return
-    try {
-      const items = await navigator.clipboard.read()
-      for (const item of items) {
-        const imageType = item.types.find((t) => t.startsWith("image/"))
-        if (!imageType) continue
-        const blob = await item.getType(imageType)
-        const ext = imageType.split("/")[1] || "png"
-        const name = `pasted-${Date.now()}.${ext}`
-        const res = await writeBinaryDocument(slug, name, blob)
-        addImageFrameAt(res.path, canvasX, canvasY)
-        onImageAdded?.(res.path)
-        return
-      }
-    } catch { /* clipboard empty or no permission */ }
-  }, [slug, addImageFrameAt, onImageAdded])
-
-  useEffect(() => {
-    const handler = (e: ClipboardEvent) => {
-      // every canvas window listens on `window`; only the outermost, active one may act
-      if (!active || !slug || depth > 0) return
-      const items = e.clipboardData?.items
-      if (!items) return
-      for (const item of items) {
-        if (!item.type.startsWith("image/")) continue
-        e.preventDefault()
-        const blob = item.getAsFile()
-        if (!blob) continue
-        const ext = item.type.split("/")[1] || "png"
-        const name = `pasted-${Date.now()}.${ext}`
-        const { cx, cy } = pointAtCenter(DEFAULT_IMAGE_WIDTH, FALLBACK_ASPECT)
-        writeBinaryDocument(slug, name, blob).then((res) => {
-          addImageFrameAt(res.path, cx, cy)
-          onImageAdded?.(res.path)
-        }).catch(() => {})
-        return
-      }
-    }
-    window.addEventListener("paste", handler)
-    return () => window.removeEventListener("paste", handler)
-  }, [active, slug, depth, pointAtCenter, addImageFrameAt, onImageAdded])
-
-  // --- Shared move / resize for frames + attachments + text notes ---
-  const dragRef = useRef<{
-    id: string; target: "frame" | "attachment" | "text"; mode: "move" | "resize"
-    startX: number; startY: number; origX: number; origY: number; origW: number; origH: number
-  } | null>(null)
-
-  const startInteraction = useCallback((id: string, target: "frame" | "attachment" | "text", mode: "move" | "resize", clientX: number, clientY: number) => {
-    const list = target === "frame" ? liveRef.current.doc.frames : target === "attachment" ? liveRef.current.doc.attachments : liveRef.current.doc.texts
-    const item = list.find((e) => e.id === id)
-    if (!item) return
-    dragRef.current = {
-      id, target, mode, startX: clientX, startY: clientY, origX: item.x, origY: item.y,
-      origW: "width" in item ? item.width : 0, origH: "height" in item ? (item.height ?? 0) : 0,
-    }
-  }, [])
-
-  // Drag the selection box body to translate every selected stroke together, or a
-  // handle to scale them. Originals are snapshotted at gesture start so every frame
-  // maps from the same source — repeated relative deltas would drift.
-  const startSelDrag = useCallback((handle: "move" | "resize", clientX: number, clientY: number) => {
-    const originals = new Map<number, number[][]>()
-    for (const i of selectedStrokes) {
-      const s = liveRef.current.doc.strokes[i]
-      if (s) originals.set(i, s.points.map((p) => [...p]))
-    }
-    const origBox = selectionLasso && polyBounds(selectionLasso)
-    if (originals.size === 0 || !selectionLasso || !origBox) return
-    selDragRef.current = { handle, startX: clientX, startY: clientY, originals, origLasso: selectionLasso.map((p) => [...p] as [number, number]), origBox, box: null }
-  }, [selectedStrokes, selectionLasso])
-
-  const deleteSelection = useCallback(() => {
-    if (selectedStrokes.size === 0) return
-    commit({ ...liveRef.current.doc, strokes: liveRef.current.doc.strokes.filter((_, i) => !selectedStrokes.has(i)) })
-    clearSelection()
-  }, [selectedStrokes, clearSelection, commit])
-
-  // Duplicate the selection, offset so the copy is visibly its own object, and hand the
-  // selection over to it — the originals drop out, the copies are what you keep dragging.
-  const copySelection = useCallback(() => {
-    const cur = liveRef.current.doc
-    if (selectedStrokes.size === 0 || !selectionLasso) return
-    const off = COPY_OFFSET_PX / scaleRef.current
-    const copies = [...selectedStrokes]
-      .map((i) => cur.strokes[i])
-      .filter((s): s is StrokeData => Boolean(s))
-      .map((s) => ({ ...s, id: canvasEntityId(), points: s.points.map((p) => [p[0]! + off, p[1]! + off, p[2] ?? 0.5]) }))
-    if (copies.length === 0) return
-    commit({ ...cur, strokes: [...cur.strokes, ...copies] })
-    setSelectedStrokes(new Set(copies.map((_, k) => cur.strokes.length + k)))
-    setSelectionLasso(selectionLasso.map(([x, y]) => [x + off, y + off]))
-  }, [selectedStrokes, selectionLasso, commit])
-
-  useEffect(() => {
-    const onMove = (e: PointerEvent) => {
-      const s = selDragRef.current
-      if (s) {
-        const dx = (e.clientX - s.startX) / scaleRef.current
-        const dy = (e.clientY - s.startY) / scaleRef.current
-        if (dx === 0 && dy === 0) return
-        // A move translates the shape's box by the delta; the handle grows it. Either way
-        // the strokes AND the lasso outline are remapped from the original box into the new
-        // one, so the outline keeps hugging the ink. `width` is left alone — scaling ink
-        // must not change how thick the pen was.
-        const box = s.handle === "move"
-          ? { ...s.origBox, x: s.origBox.x + dx, y: s.origBox.y + dy }
-          : resizeBox(s.origBox, dx, dy)
-        s.box = box
-        // Preview only: writing the document here would rebuild every stroke array and
-        // re-serialize the whole canvas on every pointermove. The commit happens on release.
-        const strokes = liveRef.current.doc.strokes
-        setDragPreview([...s.originals].map(([i, pts]) => [i, scaleStroke(strokes[i]!, pts, s.origBox, box)]))
-        // the outline (and the buttons anchored to it) rides along with the strokes
-        setSelectionLasso(scalePoly(s.origLasso, s.origBox, box))
-        return
-      }
-      const d = dragRef.current
-      if (!d) return
-      const dx = (e.clientX - d.startX) / scaleRef.current
-      const dy = (e.clientY - d.startY) / scaleRef.current
-      if (dx === 0 && dy === 0) return
-      snapshotOnce()
-      const cur = liveRef.current.doc
-      const minW = d.target === "frame" ? MIN_FRAME_WIDTH : MIN_ATTACH_WIDTH
-      if (d.target === "frame") {
-        applyChange({ ...cur, frames: cur.frames.map((f) => f.id !== d.id ? f
-          : d.mode === "resize" ? { ...f, width: Math.max(minW, d.origW + dx) }
-          : { ...f, x: d.origX + dx, y: d.origY + dy }) })
-      } else if (d.target === "attachment") {
-        applyChange({ ...cur, attachments: cur.attachments.map((a) => a.id !== d.id ? a
-          : d.mode === "resize" ? (a.kind === "architecture-graph" || a.kind === "document")
-            ? { ...a, width: Math.max(minW, d.origW + dx), height: Math.max(MIN_GRAPH_HEIGHT, d.origH + dy) }
-            : { ...a, width: Math.max(minW, d.origW + dx) }
-          : { ...a, x: d.origX + dx, y: d.origY + dy }) })
-      } else {
-        applyChange({ ...cur, texts: cur.texts.map((t) => t.id !== d.id ? t
-          : d.mode === "resize" ? { ...t, width: Math.max(MIN_TEXT_WIDTH, d.origW + dx), height: Math.max(MIN_TEXT_HEIGHT, d.origH + dy) }
-          : { ...t, x: d.origX + dx, y: d.origY + dy }) })
-      }
-    }
-    const onUp = (e: PointerEvent) => {
-      const s = selDragRef.current
-      if (s?.box) {
-        const { doc: cur } = liveRef.current
-        const box = s.box
-        const moved = cur.strokes.map((stroke, i) => {
-          const orig = s.originals.get(i)
-          return orig ? scaleStroke(stroke, orig, s.origBox, box) : stroke
-        })
-        // Released over another canvas: hand the ink over and delete it here. Two
-        // documents change, so it costs one undo step on each side.
-        const el = containerRef.current
-        const drop = s.handle === "move" ? dropTargetAt(e.clientX, e.clientY, el) : null
-        if (drop && el) {
-          commit({ ...cur, strokes: moved.filter((_, i) => !s.originals.has(i)) })
-          drop(moved.filter((_, i) => s.originals.has(i)), { rect: el.getBoundingClientRect(), scale: scaleRef.current, offset: offsetRef.current })
-          clearSelection()
-        } else {
-          commit({ ...cur, strokes: moved })
-        }
-      }
-      setDragPreview(null)
-      dragRef.current = null
-      selDragRef.current = null
-      gestureSnapped.current = false
-      finishHistory()
-    }
-    window.addEventListener("pointermove", onMove)
-    window.addEventListener("pointerup", onUp)
-    return () => {
-      window.removeEventListener("pointermove", onMove)
-      window.removeEventListener("pointerup", onUp)
-    }
-  }, [snapshotOnce, commit, clearSelection, applyChange, finishHistory])
-
-  // Bounds of the frozen lasso — positions the resize handle and the action buttons
-  const selectionBounds = selectionLasso ? polyBounds(selectionLasso) : null
-
-  const toolbar = (
-      <div className={cn("flex items-center gap-1 shrink-0 min-w-0", toolbarSlot ? "flex-1" : "px-2 py-1.5 border-b border-divider/50")}>
-        <div className="relative" ref={addMenuRef}>
-          <button aria-label="Add to canvas"
-            onClick={() => setAddMenuOpen((o) => !o)}
-            className="flex items-center gap-1 rounded px-2 py-1 text-[10px] font-medium text-ink-muted hover:text-ink hover:bg-hover transition-colors"
-          >
-            <Plus className="h-3 w-3" />
-          </button>
-          {addMenuOpen && (
-            <div className="absolute top-full left-0 mt-1 z-10 rounded-lg border border-divider bg-paper shadow-[var(--shadow-lg)] py-1 min-w-[160px] max-h-[60vh] overflow-y-auto">
-              <button
-                onClick={() => { addPage(); setAddMenuOpen(false) }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink hover:bg-hover transition-colors"
-              >
-                Page
-              </button>
-              {projectImages.length > 0 && (
-                <>
-                  <div className="mx-2 my-1 border-t border-divider/50" />
-                  <div className="px-3 py-0.5 text-[9px] text-ink-faint uppercase tracking-wider">Images</div>
-                  {projectImages.map((img) => (
-                    <button
-                      key={img.path}
-                      onClick={() => addImageFrame(img.path)}
-                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink hover:bg-hover transition-colors truncate"
-                    >
-                      <ImageIcon className="h-3 w-3 shrink-0 text-ink-faint" />
-                      <span className="truncate">{img.name}</span>
-                    </button>
-                  ))}
-                </>
-              )}
-              {projectPdfs.length > 0 && (
-                <>
-                  <div className="mx-2 my-1 border-t border-divider/50" />
-                  <div className="px-3 py-0.5 text-[9px] text-ink-faint uppercase tracking-wider">PDFs</div>
-                  {projectPdfs.map((pdf) => (
-                    <button
-                      key={pdf.path}
-                      onClick={() => addAttachment(pdf.path)}
-                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink hover:bg-hover transition-colors truncate"
-                    >
-                      <FileType className="h-3 w-3 shrink-0 text-ink-faint" />
-                      <span className="truncate">{pdf.name}</span>
-                    </button>
-                  ))}
-                </>
-              )}
-              {documents.length > 0 && (
-                <>
-                  <div className="mx-2 my-1 border-t border-divider/50" />
-                  <div className="px-3 py-0.5 text-[9px] text-ink-faint uppercase tracking-wider">Documents</div>
-                  {documents.filter((docItem) => !deletePending(`canvas-document:${slug ?? ""}:${docItem.path}`)).map((docItem) => (
-                    <div key={docItem.path} className="flex items-center gap-1 pr-2 hover:bg-hover transition-colors">
-                      {renamingDocPath === docItem.path ? (
-                        <div className="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5">
-                          <FileType className="h-3 w-3 shrink-0 text-ink-faint" />
-                          <input
-                            autoFocus
-                            defaultValue={docItem.name}
-                            aria-label={`New name for ${docItem.name}`}
-                            className="min-w-0 flex-1 bg-transparent text-[11px] text-ink outline-none"
-                            onBlur={(e) => { void renameMenuDocument(docItem.path, docItem.name, e.currentTarget.value) }}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") e.currentTarget.blur()
-                              if (e.key === "Escape") { cancelDocRename.current = true; e.currentTarget.blur() }
-                            }}
-                          />
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => addDocumentAttachment(docItem.path)}
-                          className="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink transition-colors"
-                        >
-                          <FileType className="h-3 w-3 shrink-0 text-ink-faint" />
-                          <span className="truncate">{docItem.name}</span>
-                        </button>
-                      )}
-                      <button
-                        onClick={() => setRenamingDocPath(docItem.path)}
-                        aria-label={`Rename ${docItem.name}`}
-                        className="rounded p-0.5 text-ink-faint hover:text-ink transition-colors shrink-0"
-                      >
-                        <Pencil className="h-3 w-3" />
-                      </button>
-                      <button
-                        onClick={() => deleteMenuDocument(docItem.path)}
-                        aria-label={`Delete ${docItem.name}`}
-                        className="rounded p-0.5 text-ink-faint hover:text-danger transition-colors shrink-0"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </div>
-                  ))}
-                </>
-              )}
-              <div className="mx-2 my-1 border-t border-divider/50" />
-              {slug ? (
-                <button
-                  onClick={addArchitectureWindow}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink hover:bg-hover transition-colors"
-                >
-                  <Network className="h-3 w-3 shrink-0 text-ink-faint" />
-                  <span className="truncate">Architecture</span>
-                </button>
-              ) : (
-                // An architecture belongs to a project; say how to get one instead of hiding the entry.
-                <div className="flex items-center gap-2 px-3 py-1.5 text-[11px] text-ink-faint">
-                  <Network className="h-3 w-3 shrink-0" />
-                  <span>Architecture: open a project canvas</span>
-                </div>
-              )}
-              <div className="mx-2 my-1 border-t border-divider/50" />
-              <div className="px-3 py-0.5 text-[9px] text-ink-faint uppercase tracking-wider">Canvases</div>
-              <button
-                onClick={addCanvasWindow}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink hover:bg-hover transition-colors"
-              >
-                <SquarePen className="h-3 w-3 shrink-0 text-ink-faint" />
-                <span className="truncate">New canvas</span>
-              </button>
-              {projectCanvases.map((cv) => (
-                <button
-                  key={cv.path}
-                  onClick={() => addCanvasFile(cv.path)}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink hover:bg-hover transition-colors truncate"
-                >
-                  <PenLine className="h-3 w-3 shrink-0 text-ink-faint" />
-                  <span className="truncate">{cv.name}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="w-px h-4 bg-divider/50 mx-0.5" />
-        <button aria-label="Undo"
-          onClick={undo}
-          disabled={undoStack.length === 0}
-          className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors"
-        >
-          <Undo2 className="h-3.5 w-3.5" />
-        </button>
-        <div className="w-px h-4 bg-divider/50 mx-0.5" />
-        <button aria-label="Redo"
-          onClick={redo}
-          disabled={redoStack.length === 0}
-          className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors"
-        >
-          <Redo2 className="h-3.5 w-3.5" />
-        </button>
-        <div className="w-px h-4 bg-divider/50 mx-0.5" />
-        <button aria-label="Change pen width"
-          onClick={nextSize}
-          className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
-        >
-          <svg width="10" height="10" viewBox="0 0 10 10" className="shrink-0">
-            <circle cx="5" cy="5" r={strokeWidth === "thin" ? 1.5 : strokeWidth === "medium" ? 2.5 : 4} fill="currentColor" />
-          </svg>
-        </button>
-        <div className="w-px h-4 bg-divider/50 mx-0.5" />
-        <div className="relative" ref={colorRef}>
-          <button
-            onClick={() => setColorOpen((o) => !o)}
-            className="flex items-center gap-1.5 rounded px-2 py-1 text-[10px] font-medium hover:bg-hover transition-colors"
-            style={{ color: inkColor(color, isDark) }}
-          >
-            Color
-          </button>
-          {colorOpen && (
-            <div className="absolute top-full left-0 mt-1 z-10 rounded-lg border border-divider bg-paper shadow-[var(--shadow-lg)] p-2 min-w-[100px]">
-              <div className="grid grid-cols-4 gap-1 mb-1.5">
-                {PRESET_COLORS.map((c) => (
-                  <button
-                    key={c.value}
-                    onClick={() => pickColor(c.value)}
-                    className={cn(
-                      "w-5 h-5 rounded-full border-2 transition-all",
-                      color === c.value ? "border-ink scale-110" : "border-transparent hover:border-ink-faint"
-                    )}
-                    style={{ backgroundColor: inkColor(c.value, isDark) }}
-                  />
-                ))}
-              </div>
-              {recentColors.length > 0 && (
-                <>
-                  <div className="text-[9px] text-ink-faint uppercase tracking-wider mb-1">Recent</div>
-                  <div className="flex gap-1 mb-1.5">
-                    {recentColors.map((c) => (
-                      <button
-                        key={c}
-                        onClick={() => pickColor(c)}
-                        className={cn(
-                          "w-5 h-5 rounded-full border-2 transition-all",
-                          color === c ? "border-ink scale-110" : "border-transparent hover:border-ink-faint"
-                        )}
-                        style={{ backgroundColor: inkColor(c, isDark) }}
-                      />
-                    ))}
-                  </div>
-                </>
-              )}
-              <label className="flex items-center gap-1.5 cursor-pointer">
-                <input
-                  type="color"
-                  value={color}
-                  onFocus={() => { nativePickerOpen.current = true }}
-                  onBlur={() => { nativePickerOpen.current = false }}
-                  onChange={(e) => pickColor(e.target.value, false)}
-                  className="w-5 h-5 rounded border-0 p-0 cursor-pointer bg-transparent [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded [&::-webkit-color-swatch]:border-divider"
-                />
-                <span className="text-[10px] text-ink-subtle">Custom</span>
-              </label>
-            </div>
-          )}
-        </div>
-        <div className="w-px h-4 bg-divider/50 mx-0.5" />
-        <button aria-label="Select on canvas"
-          onClick={() => { setSelectionMode((v) => !v); setScreenshotMode(false); setTextMode(false) }}
-          className={cn(
-            "rounded p-1 transition-colors",
-            selectionMode ? "text-ink bg-hover" : "text-ink-subtle hover:text-ink hover:bg-hover",
-          )}
-        >
-          <CircleDashed className="h-3.5 w-3.5" />
-        </button>
-        <div className="w-px h-4 bg-divider/50 mx-0.5" />
-        <button aria-label="Capture canvas"
-          onClick={() => { setScreenshotMode((v) => !v); setSelectionMode(false); setTextMode(false) }}
-          className={cn(
-            "rounded p-1 transition-colors",
-            screenshotMode ? "text-ink bg-hover" : "text-ink-subtle hover:text-ink hover:bg-hover",
-          )}
-        >
-          <Camera className="h-3.5 w-3.5" />
-        </button>
-        <div className="w-px h-4 bg-divider/50 mx-0.5" />
-        <button aria-label="Add text to canvas"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => { setTextMode((v) => !v); setSelectionMode(false); setScreenshotMode(false) }}
-          className={cn(
-            "rounded p-1 transition-colors",
-            textMode ? "text-ink bg-hover" : "text-ink-subtle hover:text-ink hover:bg-hover",
-          )}
-        >
-          <Type className="h-3.5 w-3.5" />
-        </button>
-        <div className="flex-1" />
-        <span className="text-[10px] text-ink-faint tabular-nums">{Math.round(scale / hostScale * 100)}%</span>
-        {isErasing && <span className="text-[10px] text-ink-faint ml-1">(eraser)</span>}
-        {screenshotMode && <span className="text-[10px] text-ink-faint ml-1">(drag to capture)</span>}
-        {selectionMode && <span className="text-[10px] text-ink-faint ml-1">(draw a lasso to select)</span>}
-        {textMode && <span className="text-[10px] text-ink-faint ml-1">(drag a box to write in)</span>}
-        {selectedStrokes.size > 0 && <span className="text-[10px] text-ink-faint ml-1">({selectedStrokes.size} selected — drag, resize or Esc)</span>}
-      </div>
+  const addMenu = (
+    <CanvasAddMenu
+      slug={slug}
+      depth={depth}
+      docPath={docPath}
+      onAddPage={insert.addPage}
+      onAddImage={insert.addImage}
+      onAddPdf={insert.addPdf}
+      onAddDocument={insert.addDocument}
+      onAddArchitecture={insert.addArchitecture}
+      onAddNewCanvas={insert.addNewCanvas}
+      onAddCanvasFile={insert.addCanvasFile}
+      onDocumentRenamed={followRenamedDocument}
+      onDocumentDeleted={dropDeletedDocument}
+    />
   )
 
   return (
     <div className="flex flex-col h-full">
-      {/* Toolbar — inline above the canvas, or portaled into the app header in canvas mode */}
-      {toolbarSlot ? createPortal(toolbar, toolbarSlot) : toolbar}
+      <CanvasToolbar
+        slots={toolbarSlots}
+        addMenu={addMenu}
+        strokeSize={strokeSize}
+        onCycleStrokeSize={() => setStrokeSize((w) => w === "thin" ? "medium" : w === "medium" ? "thick" : "thin")}
+        color={color}
+        onColorChange={setColor}
+        isDark={isDark}
+        tool={tool}
+        onToggleTool={toggleTool}
+        isErasing={isErasing}
+        selectedCount={selection.selectedIds.size}
+        onUndo={undo}
+        onRedo={redo}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        zoomPercent={Math.round(scale / hostScale * 100)}
+      />
 
       {/* Canvas area */}
       <div
         ref={containerRef}
         tabIndex={0}
-        className={cn("flex-1 min-h-0 overflow-hidden relative", isDrawing || pointerIsPen ? "cursor-none" : isPanning ? "cursor-grabbing" : textMode || selectionMode || screenshotMode ? "cursor-crosshair" : "cursor-grab")}
+        className={cn("flex-1 min-h-0 overflow-hidden relative", isDrawing || pointerIsPen ? "cursor-none" : isPanning ? "cursor-grabbing" : tool !== "draw" ? "cursor-crosshair" : "cursor-grab")}
         style={{ touchAction: "none", WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none", fontFamily: "var(--font-handwriting), cursive" }}
         onKeyDown={handleCanvasKeyDown}
         onPointerDown={handleContainerPointerDown}
@@ -1957,13 +628,11 @@ function DotGrid({ offset, scale }: { offset: { x: number; y: number }; scale: n
         onPointerUp={handleContainerPointerUp}
         onContextMenu={(e) => e.preventDefault()}
       >
-        {/* Dot grid background */}
-        <DotGrid offset={offset} scale={scale} />
+        <CanvasDotGrid offset={offset} scale={scale} />
 
         {/* Transformed canvas layer — frames + strokes share this space so strokes
             always render over frame content and both export identically. */}
         <svg
-          ref={svgRef}
           className="absolute inset-0 w-full h-full"
           style={{ touchAction: "none" }}
           onPointerDown={handleSvgPointerDown}
@@ -1973,417 +642,84 @@ function DotGrid({ offset, scale }: { offset: { x: number; y: number }; scale: n
           onLostPointerCapture={handleSvgPointerUp}
         >
           <g transform={`translate(${offset.x},${offset.y}) scale(${scale})`}>
-            {/* Frames (pages + images) — the CanvasFrame primitive.
-                All chrome is sized in `u` (= one screen px) so it stays a
-                constant, light size at any zoom. */}
-            {doc.frames.map((f) => {
-              const u = 1 / scale // one screen pixel in canvas units
-              const w = f.width
-              const h = f.width * aspectFor(f)
-              const rx = 6 * u
-              const band = 16 * u           // top drag-band height
-              const gripW = 26 * u          // grip handle pill
-              const delC = { x: f.x + w - 11 * u, y: f.y + 11 * u } // delete center (inside top-right)
-              const arm = 2.75 * u
-              return (
-                <g key={f.id} className="group/frame">
-                  {/* content — clipped to rounded corners, pointer-transparent so you can draw over it */}
-                  <clipPath id={`frame-clip-${f.id}`}>
-                    <rect x={f.x} y={f.y} width={w} height={h} rx={rx} ry={rx} />
-                  </clipPath>
-                  <g clipPath={`url(#frame-clip-${f.id})`} style={{ pointerEvents: "none" }}>
-                    {f.kind === "page" ? (
-                      <rect x={f.x} y={f.y} width={w} height={h} fill="var(--surface-elevated)" />
-                    ) : (
-                      <image
-                        href={fileViewerRawUrl(f.path!)}
-                        x={f.x} y={f.y} width={w} height={h}
-                        preserveAspectRatio="none"
-                        onLoad={(e) => {
-                          const img = e.currentTarget as unknown as SVGImageElement & { naturalWidth?: number; naturalHeight?: number }
-                          if (img.naturalWidth && img.naturalHeight) setAspect(f.id, img.naturalHeight / img.naturalWidth)
-                          else {
-                            const probe = new Image()
-                            probe.onload = () => { if (probe.naturalWidth) setAspect(f.id, probe.naturalHeight / probe.naturalWidth) }
-                            probe.src = fileViewerRawUrl(f.path!)
-                          }
-                        }}
-                      />
-                    )}
-                  </g>
-                  {/* rounded border */}
-                  <rect x={f.x} y={f.y} width={w} height={h} rx={rx} ry={rx} fill="none" stroke="var(--divider-strong)" strokeWidth={u} style={{ pointerEvents: "none" }} />
-
-                  {/* top drag-band hit area (move) */}
-                  <rect
-                    x={f.x} y={f.y} width={w} height={band}
-                    fill="transparent" style={{ cursor: "grab" }}
-                    onPointerDown={(e) => { e.stopPropagation(); startInteraction(f.id, "frame", "move", e.clientX, e.clientY) }}
-                  />
-                  {/* grip handle — the minimal drag affordance, dim until hover */}
-                  <rect
-                    x={f.x + w / 2 - gripW / 2} y={f.y + 2.5 * u} width={gripW} height={3.5 * u} rx={1.75 * u}
-                    fill="var(--ink-faint)"
-                    className="opacity-50 group-hover/frame:opacity-90 transition-opacity"
-                    style={{ pointerEvents: "none" }}
-                  />
-
-                  {/* resize handle (bottom-right) — subtle corner ticks */}
-                  <g
-                    style={{ cursor: "nwse-resize" }}
-                    onPointerDown={(e) => { e.stopPropagation(); startInteraction(f.id, "frame", "resize", e.clientX, e.clientY) }}
-                  >
-                    <rect x={f.x + w - 16 * u} y={f.y + h - 16 * u} width={16 * u} height={16 * u} fill="transparent" />
-                    <path
-                      d={`M ${f.x + w - 4.5 * u},${f.y + h - 1.5 * u} L ${f.x + w - 1.5 * u},${f.y + h - 4.5 * u} M ${f.x + w - 9 * u},${f.y + h - 1.5 * u} L ${f.x + w - 1.5 * u},${f.y + h - 9 * u}`}
-                      stroke="var(--ink-faint)" strokeWidth={1.25 * u} strokeLinecap="round" fill="none"
-                      className="opacity-50 group-hover/frame:opacity-90 transition-opacity"
-                      style={{ pointerEvents: "none" }}
-                    />
-                  </g>
-
-                  {/* delete — always visible, grey → red on hover, no background (matches CanvasAttachment) */}
-                  <g
-                    className="text-ink-faint hover:text-danger transition-colors"
-                    style={{ cursor: "pointer" }}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onClick={(e) => { e.stopPropagation(); removeFrame(f.id) }}
-                  >
-                    <circle cx={delC.x} cy={delC.y} r={8 * u} fill="transparent" />
-                    <path
-                      d={`M ${delC.x - arm},${delC.y - arm} L ${delC.x + arm},${delC.y + arm} M ${delC.x - arm},${delC.y + arm} L ${delC.x + arm},${delC.y - arm}`}
-                      stroke="currentColor" strokeWidth={1.5 * u} strokeLinecap="round" fill="none"
-                    />
-                  </g>
-                </g>
-              )
-            })}
+            {doc.frames.map((f) => (
+              <CanvasFrameView
+                key={f.id}
+                frame={f}
+                aspect={aspectFor(f)}
+                scale={scale}
+                onDragStart={(mode, x, y) => startDrag("frames", f.id, mode, x, y)}
+                onRemove={() => removeFrame(f.id)}
+                onAspect={(r) => setAspect(f.id, r)}
+              />
+            ))}
             {/* Committed strokes (selected ones are hidden while a drag preview draws them) */}
-            <StrokeLayer strokes={doc.strokes} hidden={dragPreview && selectedStrokes} isDark={isDark} />
+            <CanvasStrokeLayer strokes={doc.strokes} hidden={selection.preview && selection.selectedIds} isDark={isDark} />
             {/* In-progress stroke — d is set imperatively by redrawLive */}
             <path ref={livePathRef} fill={inkColor(color, isDark)} />
 
-            {/* Stroke selection — highlighted outlines + the freehand lasso fill, which is
-                what you drag to move them together. One handle at the shape's bottom-right
-                scales it diagonally; it is sized in `u` so it stays a constant,
-                thumb-findable size at any zoom. */}
-            {selectionLasso && selectionBounds && (() => {
-              const u = 1 / scale
-              const b = selectionBounds
-              const hit = 13 * u  // invisible grab area — bigger than the dot you see
-              const dot = 5 * u
-              // Mid-drag the committed layer hides these, so they are drawn here from the
-              // preview — one gesture frame re-renders the selection, not the whole canvas.
-              const picked: [number, StrokeData | undefined][] = dragPreview ?? [...selectedStrokes].map((i) => [i, doc.strokes[i]])
-              return (
-                <>
-                  {picked.map(([i, s]) => {
-                    const d = s && strokePath(s)
-                    if (!d) return null
-                    return (
-                      <g key={`sel-${i}`}>
-                        {dragPreview && <path d={d} fill={inkColor(s!.color, isDark)} />}
-                        <path d={d} fill="none" stroke="var(--ink)" strokeWidth={1.5 * u} strokeDasharray={`${3 * u} ${3 * u}`} />
-                      </g>
-                    )
-                  })}
-                  <path
-                    d={`M ${selectionLasso.map(([x, y]) => `${x},${y}`).join(" L ")} Z`}
-                    fill="var(--ink-faint)" fillOpacity={0.08}
-                    stroke="var(--ink-muted)" strokeWidth={u} strokeDasharray={`${4 * u} ${4 * u}`}
-                    style={{ cursor: "grab", pointerEvents: "all" }}
-                    onPointerDown={(e) => { e.stopPropagation(); startSelDrag("move", e.clientX, e.clientY) }}
-                  />
-                  <g
-                    style={{ cursor: "nwse-resize" }}
-                    onPointerDown={(e) => { e.stopPropagation(); startSelDrag("resize", e.clientX, e.clientY) }}
-                  >
-                    <rect x={b.x + b.w - hit / 2} y={b.y + b.h - hit / 2} width={hit} height={hit} fill="transparent" />
-                    <rect
-                      x={b.x + b.w - dot / 2} y={b.y + b.h - dot / 2} width={dot} height={dot} rx={1.5 * u}
-                      fill="var(--paper)" stroke="var(--ink-muted)" strokeWidth={u}
-                      style={{ pointerEvents: "none" }}
-                    />
-                  </g>
-                </>
-              )
-            })()}
-
-            {/* In-progress lasso — pen-button drag traces the selection outline freehand */}
-            {lassoPoints && lassoPoints.length > 1 && (
-              <path
-                d={`M ${lassoPoints.map(([x, y]) => `${x},${y}`).join(" L ")}`}
-                fill="none"
-                stroke="var(--ink-muted)" strokeWidth={1.5 / scale} strokeDasharray={`${4 / scale} ${4 / scale}`}
-                style={{ pointerEvents: "none" }}
+            {selection.lasso && selection.bounds && (
+              <CanvasSelectionOutline
+                lasso={selection.lasso}
+                bounds={selection.bounds}
+                strokes={doc.strokes}
+                selectedIds={selection.selectedIds}
+                preview={selection.preview}
+                scale={scale}
+                isDark={isDark}
+                onDragStart={selection.startDrag}
               />
             )}
-            {/* Rubber-band rect — text box being dragged out */}
-            {textDragRect && (
-              <rect
-                x={Math.min(textDragRect.x0, textDragRect.x1)} y={Math.min(textDragRect.y0, textDragRect.y1)}
-                width={Math.abs(textDragRect.x1 - textDragRect.x0)} height={Math.abs(textDragRect.y1 - textDragRect.y0)}
-                fill="var(--ink)" fillOpacity={0.06}
-                stroke="var(--ink)" strokeWidth={1.5 / scale} strokeDasharray={`${5 / scale} ${3 / scale}`}
-                style={{ pointerEvents: "none" }}
-              />
-            )}
+            {band?.tool === "select" && <CanvasLassoTrace points={band.points} scale={scale} />}
           </g>
         </svg>
 
-        {/* Selection actions — duplicate / delete, anchored just above the lasso's bounds */}
-        {selectionBounds && (
-          <div
-            className="absolute z-10 flex items-center gap-1 -translate-y-full"
-            style={{
-              left: selectionBounds.x * scale + offset.x,
-              top: selectionBounds.y * scale + offset.y - 6,
-            }}
-          >
-            <button aria-label="Copy selection"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => { e.stopPropagation(); copySelection() }}
-              className="rounded-full p-1 bg-paper border border-divider-strong text-ink-faint hover:text-ink shadow-[var(--shadow-lg)] transition-colors"
-            >
-              <Copy className="h-3 w-3" />
-            </button>
-            <button aria-label="Delete selection"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => { e.stopPropagation(); deleteSelection() }}
-              className="rounded-full p-1 bg-paper border border-divider-strong text-ink-faint hover:text-danger shadow-[var(--shadow-lg)] transition-colors"
-            >
-              <Trash2 className="h-3 w-3" />
-            </button>
-          </div>
+        {selection.bounds && (
+          <CanvasSelectionActions bounds={selection.bounds} scale={scale} offset={offset} onCopy={selection.copySelected} onDelete={selection.deleteSelected} />
         )}
 
-        {/* Attachments (pdf) — the CanvasAttachment primitive. Live, scrollable,
-            positioned HTML over the SVG, never baked into export. */}
-        {doc.attachments.map((att) => {
-          const screenX = att.x * scale + offset.x
-          const screenY = att.y * scale + offset.y
-          const nested = att.kind === "canvas"
-          const architectureDiagram = att.kind === "architecture-graph"
-          const isDocument = att.kind === "document"
-          const aspect = nested ? CANVAS_ASPECT : (aspects[att.id] ?? FALLBACK_ASPECT)
-          const name = att.title ?? (architectureDiagram ? "Architecture" : att.path?.split("/").pop()) ?? (nested ? "Canvas" : isDocument ? "Document" : "PDF")
-          // PDFs rasterize through a settled layout size. Interactive viewport frames
-          // use their actual screen size so pointer coordinates stay exact.
-          const contentHeight = att.height ?? att.width * CANVAS_ASPECT
-          const screenW = att.width * scale
-          const screenH = contentHeight * scale
-          const layoutW = nested || architectureDiagram || isDocument ? screenW : Math.min(att.width * settledScale, PDF_LAYOUT_CAP)
-          // Fullscreen only restyles this same wrapper — moving the window elsewhere in
-          // the tree would remount the editor inside it and lose whatever it holds.
-          const full = fullscreenId === att.id
-          return (
-            <div
-              key={att.id}
-              className={cn(
-                "absolute flex flex-col border border-divider-strong rounded-lg overflow-hidden bg-paper shadow-[var(--shadow-lg)]",
-                full && "z-20",
-                screenshotMode && "pointer-events-none",
-              )}
-              style={full
-                ? { inset: 0, transform: "none" }
-                : architectureDiagram || isDocument
-                  ? { left: screenX, top: screenY, width: screenW, height: screenH, transform: "none" }
-                : { left: screenX, top: screenY, width: layoutW, transform: `scale(${screenW / layoutW})`, transformOrigin: "top left" }}
-            >
-              <div
-                className={cn(
-                  "flex items-center gap-1.5 px-2 py-1 border-b border-divider/50 select-none shrink-0",
-                  !full && "cursor-grab active:cursor-grabbing",
-                )}
-                onPointerDown={(e) => { e.stopPropagation(); if (!full) startInteraction(att.id, "attachment", "move", e.clientX, e.clientY) }}
-              >
-                {nested ? <SquarePen className="h-3 w-3 text-ink-faint shrink-0" /> : <FileType className="h-3 w-3 text-ink-faint shrink-0" />}
-                {editingAttachmentId === att.id ? (
-                  <input
-                    autoFocus
-                    defaultValue={name}
-                    className="flex-1 min-w-0 bg-transparent text-[10px] font-medium text-ink outline-none select-text"
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onBlur={(e) => updateAttachmentTitle(att.id, e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") updateAttachmentTitle(att.id, e.currentTarget.value)
-                      if (e.key === "Escape") setEditingAttachmentId(null)
-                    }}
-                  />
-                ) : (
-                  <span
-                    className="flex-1 min-w-0 truncate text-[10px] font-medium text-ink-muted"
-                    onDoubleClick={(e) => { e.stopPropagation(); setEditingAttachmentId(att.id) }}
-                  >
-                    {name}
-                  </span>
-                )}
-                <button
-                  aria-label={full ? `Restore ${name}` : `Expand ${name}`}
-                  onClick={(e) => { e.stopPropagation(); setFullscreenId(full ? null : att.id) }}
-                  className="rounded p-0.5 text-ink-faint hover:text-ink transition-colors shrink-0"
-                >
-                  {full ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
-                </button>
-                <button aria-label="Remove attachment"
-                  onClick={(e) => { e.stopPropagation(); removeAttachment(att.id) }}
-                  className="rounded p-0.5 text-ink-faint hover:text-danger transition-colors shrink-0"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </div>
-              {/* Body height: fixed-size windows subtract the 31px title bar, PDFs follow their measured aspect. */}
-              <div
-                data-canvas-attachment
-                className={cn(full && "flex-1 min-h-0")}
-                style={{ height: full ? undefined : architectureDiagram || isDocument ? screenH - 31 : layoutW * aspect }}
-                onPointerDown={(e) => e.stopPropagation()}
-              >
-                {architectureDiagram ? (
-                  <ArchitectureWindow path={att.path!} maximized={full} hostScale={full ? 1 : scale} edgeStyle={att.edgeStyle} onEdgeStyleChange={(edgeStyle) => patchAttachment(att.id, { edgeStyle })} onNavigate={(path) => patchAttachment(att.id, { path })} />
-                ) : isDocument ? (
-                  <CanvasDocumentAttachment
-                    path={att.path!}
-                    hostScale={scale}
-                    plotFrame={full ? null : { width: Math.max(att.width * settledScale, PLOT_MIN_LAYOUT_WIDTH), scale: screenW / Math.max(att.width * settledScale, PLOT_MIN_LAYOUT_WIDTH) }}
-                    collapsed={!full && scale !== settledScale}
-                  />
-                ) : nested ? (
-                  att.path ? (
-                    depth < MAX_NEST_DEPTH ? (
-                      <NestedCanvasFile
-                        path={att.path}
-                        slug={slug}
-                        depth={depth + 1}
-                        hostScale={scale}
-                      />
-                    ) : (
-                      <div className="flex h-full items-center justify-center px-3 text-center text-[10px] text-ink-faint">
-                        {name} — open it directly to edit
-                      </div>
-                    )
-                  ) : (
-                    <CanvasEditor
-                      doc={att.canvas ?? EMPTY_NESTED}
-                      onChange={(d) => patchAttachment(att.id, { canvas: d })}
-                      slug={slug}
-                      depth={depth + 1}
-                      hostScale={scale}
-                    />
-                  )
-                ) : (
-                  <PdfViewer
-                    url={fileViewerRawUrl(att.path!)}
-                    onPageAspect={(r) => setAspect(att.id, r)}
-                    initialPage={att.page}
-                    onPageChange={(page) => patchAttachment(att.id, { page })}
-                  />
-                )}
-              </div>
-              {!full && (
-                <div
-                  className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize"
-                  onPointerDown={(e) => { e.stopPropagation(); startInteraction(att.id, "attachment", "resize", e.clientX, e.clientY) }}
-                >
-                  <svg className="w-full h-full text-ink-faint" viewBox="0 0 16 16">
-                    <path d="M14 2L2 14M14 6L6 14M14 10L10 14" stroke="currentColor" strokeWidth="1.5" fill="none" />
-                  </svg>
-                </div>
-              )}
-            </div>
-          )
-        })}
+        {/* Attachments — live, scrollable, positioned HTML over the SVG, never baked into export. */}
+        {doc.attachments.map((att) => (
+          <CanvasAttachmentWindow
+            key={att.id}
+            attachment={att}
+            scale={scale}
+            settledScale={settledScale}
+            offset={offset}
+            pdfAspect={aspects[att.id] ?? FALLBACK_ASPECT}
+            full={fullscreenId === att.id}
+            inert={tool === "screenshot"}
+            onDragStart={(mode, x, y) => startDrag("attachments", att.id, mode, x, y)}
+            onToggleFullscreen={() => setFullscreenId(fullscreenId === att.id ? null : att.id)}
+            onRemove={() => removeAttachment(att.id)}
+            onPatch={(patch) => patchAttachment(att.id, patch)}
+            onRetitle={(title) => { void retitleAttachment(att.id, title) }}
+            onPdfAspect={(r) => setAspect(att.id, r)}
+            renderNestedCanvas={renderNestedCanvas}
+          />
+        ))}
 
         {/* Screenshot selection belongs above live attachments so it remains visible while dragging over a PDF. */}
-        {shotRect && (
-          <div
-            data-testid="screenshot-selection"
-            className="absolute z-10 pointer-events-none border-[1.5px] border-dashed border-ink bg-ink/5"
-            style={{
-              left: Math.min(shotRect.x0, shotRect.x1) * scale + offset.x,
-              top: Math.min(shotRect.y0, shotRect.y1) * scale + offset.y,
-              width: Math.abs(shotRect.x1 - shotRect.x0) * scale,
-              height: Math.abs(shotRect.y1 - shotRect.y0) * scale,
-            }}
-          />
-        )}
+        {band?.tool === "screenshot" && <CanvasScreenshotBox from={band.points[0]!} to={band.points[band.points.length - 1]!} scale={scale} offset={offset} />}
 
         {/* Text notes render their Markdown until clicked, then expose the source textarea.
             They remain rasterized as source text in canvas exports. */}
-        {doc.texts.map((t) => {
-          const screenX = t.x * scale + offset.x
-          const screenY = t.y * scale + offset.y
-          const screenW = t.width * scale
-          const screenH = t.height * scale
-          const band = 6
-          const editing = t.id === editingTextId
-          return (
-            <div key={t.id} className="absolute group/text" style={{ left: screenX, top: screenY, width: screenW, height: screenH }}>
-              {editing ? (
-                <textarea
-                  autoFocus={t.id === autoFocusId}
-                  value={t.text}
-                  onChange={(e) => {
-                    if (!textEdited.current) { textEdited.current = true; if (t.text !== "") snapshot() }
-                    applyChange({ ...doc, texts: doc.texts.map((x) => x.id === t.id ? { ...x, text: e.target.value } : x) })
-                  }}
-                  onFocus={() => {
-                    textEdited.current = newTextIds.current.delete(t.id)
-                    setAutoFocusId((cur) => cur === t.id ? null : cur)
-                  }}
-                  onBlur={() => {
-                    setEditingTextId(null)
-                    dropIfEmptyText(t.id)
-                  }}
-                  onKeyDown={(e) => {
-                    e.stopPropagation()
-                    if (e.key === "Enter" && !(e.ctrlKey || e.metaKey)) {
-                      e.preventDefault()
-                      ;(e.target as HTMLTextAreaElement).blur()
-                    } else if (e.key === "Escape") {
-                      e.preventDefault()
-                      ;(e.target as HTMLTextAreaElement).blur()
-                    }
-                  }}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  className="absolute inset-0 resize-none bg-transparent outline-none border border-transparent focus:border-dashed focus:border-divider-strong rounded px-1"
-                  style={{
-                    fontSize: t.size * scale,
-                    lineHeight: 1.2,
-                    color: inkColor(t.color, isDark),
-                  }}
-                />
-              ) : (
-                <div
-                  className="absolute inset-0 cursor-text overflow-auto rounded px-1 py-0.5"
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    if ((e.target as HTMLElement).closest("a")) return
-                    setEditingTextId(t.id)
-                    setAutoFocusId(t.id)
-                  }}
-                >
-                  <LaTeXMarkdown content={t.text} style={{ fontSize: t.size * scale, color: inkColor(t.color, isDark) }} />
-                </div>
-              )}
-              {/* top drag-band (move) — thin sliver above the textarea, dim until hover */}
-              <div
-                className="absolute inset-x-0 top-0 opacity-0 group-hover/text:opacity-60 hover:!opacity-100 transition-opacity bg-[var(--ink-faint)] rounded-t"
-                style={{ height: band, cursor: "grab" }}
-                onPointerDown={(e) => { e.stopPropagation(); startInteraction(t.id, "text", "move", e.clientX, e.clientY) }}
-              />
-              {/* resize handle (bottom-right) — broadens/elongates the box */}
-              <div
-                className="absolute bottom-0 right-0 w-3 h-3 opacity-0 group-hover/text:opacity-100 transition-opacity cursor-nwse-resize"
-                onPointerDown={(e) => { e.stopPropagation(); startInteraction(t.id, "text", "resize", e.clientX, e.clientY) }}
-              >
-                <svg className="w-full h-full text-ink-faint" viewBox="0 0 16 16">
-                  <path d="M14 2L2 14M14 6L6 14M14 10L10 14" stroke="currentColor" strokeWidth="1.5" fill="none" />
-                </svg>
-              </div>
-            </div>
-          )
-        })}
+        {doc.texts.map((t) => (
+          <CanvasTextNote
+            key={t.id}
+            note={t}
+            scale={scale}
+            offset={offset}
+            isDark={isDark}
+            editing={t.id === editingTextId}
+            autoFocus={t.id === autoFocusId}
+            onStartEditing={() => { setEditingTextId(t.id); setAutoFocusId(t.id) }}
+            onEdit={(text) => editText(t.id, text)}
+            onFocusNote={() => focusText(t.id)}
+            onBlurNote={() => blurText(t.id)}
+            onDragStart={(mode, x, y) => startDrag("texts", t.id, mode, x, y)}
+          />
+        ))}
 
         {/* Long-press context menu */}
         {contextMenu && (
@@ -2396,13 +732,7 @@ function DotGrid({ offset, scale }: { offset: { x: number; y: number }; scale: n
               onClick={() => {
                 const { canvasX, canvasY } = contextMenu
                 setContextMenu(null)
-                // discard the tiny hold-dot stroke
-                setIsDrawing(false)
-                currentPointsRef.current = []
-                drawingPointerId.current = null
-                redrawLive()
-                cancelStraighten()
-                pasteImageAtPoint(canvasX, canvasY)
+                void insert.pasteImageAtPoint(canvasX, canvasY)
               }}
               disabled={!slug}
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink hover:bg-hover transition-colors disabled:opacity-30"
@@ -2415,73 +745,6 @@ function DotGrid({ offset, scale }: { offset: { x: number; y: number }; scale: n
       </div>
     </div>
   )
-}
-
-// A document attachment is a read-only view of a generated chat artifact — a Mermaid
-// or markmap note rendered through the shared markdown renderer, or a Plotly figure
-// through the shared plot renderer. Markdown is laid out at screen size like an
-// Architecture Diagram. A plot instead lays out at a zoom-independent width wide enough
-// to avoid overlapping labels, is CSS-scaled into its window, and collapses while a
-// zoom gesture runs: Plotly then redraws at most once per settled zoom, not per frame.
-type DocumentAttachmentState =
-  | { status: "loading" }
-  | { status: "markdown"; content: string }
-  | { status: "plot"; figure: PlotFigure }
-  | { status: "error"; message: string }
-
-function CanvasDocumentAttachment({ path, hostScale, plotFrame, collapsed }: {
-  path: string
-  hostScale: number
-  /** Layout width (px) and CSS scale for a plot; null renders it at its window size (fullscreen). */
-  plotFrame: { width: number; scale: number } | null
-  collapsed: boolean
-}) {
-  const [state, setState] = useState<DocumentAttachmentState>({ status: "loading" })
-
-  useEffect(() => {
-    let alive = true
-    setState({ status: "loading" })
-    loadFileViewerText(path).then((text) => {
-      if (!alive) return
-      if (path.endsWith(".plot.json")) {
-        try {
-          const figure = JSON.parse(text)
-          if (!figure || typeof figure !== "object" || Array.isArray(figure)) throw new Error("Invalid figure")
-          setState({ status: "plot", figure: figure as PlotFigure })
-        } catch {
-          setState({ status: "error", message: "Malformed plot document" })
-        }
-      } else {
-        setState({ status: "markdown", content: text })
-      }
-    }).catch(() => { if (alive) setState({ status: "error", message: "Failed to load document" }) })
-    return () => { alive = false }
-  }, [path])
-
-  if (state.status === "loading") return <div className="flex h-full items-center justify-center text-[10px] text-ink-faint">Loading…</div>
-  if (state.status === "error") return <div className="flex h-full items-center justify-center px-3 text-center text-[10px] text-ink-faint">{state.message}</div>
-  if (state.status === "plot") {
-    if (!plotFrame) return <div className="h-full overflow-auto p-2"><PlotElement figure={state.figure} /></div>
-    return (
-      <div className="relative h-full overflow-hidden">
-        <div
-          className="overflow-auto p-2"
-          style={{
-            width: plotFrame.width,
-            height: `${100 / plotFrame.scale}%`,
-            transform: `scale(${plotFrame.scale})`,
-            transformOrigin: "top left",
-            visibility: collapsed ? "hidden" : undefined,
-          }}
-        >
-          <PlotElement figure={state.figure} />
-        </div>
-        {collapsed && <div className="absolute inset-0 flex items-center justify-center text-[10px] text-ink-faint">Plot</div>}
-      </div>
-    )
-  }
-  // Markdown can hold a markmap, which is its own viewport and magnifies with the canvas.
-  return <div className="h-full overflow-auto p-3 text-[12px]"><HostScaleContext.Provider value={hostScale}><LaTeXMarkdown content={state.content} /></HostScaleContext.Provider></div>
 }
 
 // A file-backed window is another view onto the same canvas collaboration owner.

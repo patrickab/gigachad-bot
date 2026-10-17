@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
 import {
   createBranch as apiCreateBranch,
   mergeBranch as apiMergeBranch,
@@ -13,7 +13,7 @@ import type { BranchMeta } from "@/lib/types"
 /** Chat id -> history filename. */
 type ChatIdMap = Map<string, string>
 
-export interface BranchContextValue {
+interface BranchContextValue {
   branchMeta: Record<string, BranchMeta>
   chatIdMap: ChatIdMap
   rootFiles: string[]
@@ -22,57 +22,23 @@ export interface BranchContextValue {
   activeFile: string | null
   activeQaIndex: number | null
   onFileClick: (file: string, qaIndex?: number) => void
-  onMerge: (childFile: string) => Promise<void>
-  onDelete: (file: string) => void
   refreshAll: () => Promise<void>
   createBranch: (parentFile: string, branchMessageIdx: number) => Promise<{ childFile: string; chatId: string }>
   mergeBranch: (childFile: string) => Promise<void>
   cascadeDelete: (filename: string) => Promise<string[]>
   setActiveFile: (file: string | null) => void
   setActiveQaIndex: (idx: number | null) => void
-  registerOnFileClick: (fn: (file: string, qaIndex?: number) => void) => void
-  registerOnMerge: (fn: (childFile: string) => Promise<void>) => void
-  registerOnDelete: (fn: (file: string) => Promise<void>) => void
 }
 
 const BranchContext = createContext<BranchContextValue | null>(null)
 
 /** Owns chat history list, branch metadata and the active file/QA focus shown in the sidebar. */
-export function BranchProvider({ children }: { children: ReactNode }) {
+export function BranchProvider({ onFileClick, children }: { onFileClick: (file: string, qaIndex?: number) => void; children: ReactNode }) {
   const [branchMeta, setBranchMeta] = useState<Record<string, BranchMeta>>({})
   const [rootFiles, setRootFiles] = useState<string[]>([])
   const [historiesLoading, setHistoriesLoading] = useState(true)
   const [activeFile, setActiveFile] = useState<string | null>(null)
   const [activeQaIndex, setActiveQaIndex] = useState<number | null>(null)
-
-  // Tab content registers its handlers here, so the stable callbacks below never go stale.
-  const onFileClickRef = useRef<(file: string, qaIndex?: number) => void>(() => {})
-  const onMergeRef = useRef<(childFile: string) => Promise<void>>(async () => {})
-  const onDeleteRef = useRef<(file: string) => Promise<void>>(async () => {})
-
-  const registerOnFileClick = useCallback((fn: (file: string, qaIndex?: number) => void) => {
-    onFileClickRef.current = fn
-  }, [])
-
-  const registerOnMerge = useCallback((fn: (childFile: string) => Promise<void>) => {
-    onMergeRef.current = fn
-  }, [])
-
-  const registerOnDelete = useCallback((fn: (file: string) => Promise<void>) => {
-    onDeleteRef.current = fn
-  }, [])
-
-  const onFileClick = useCallback((file: string, qaIndex?: number) => {
-    onFileClickRef.current(file, qaIndex)
-  }, [])
-
-  const onMerge = useCallback((childFile: string) => {
-    return onMergeRef.current(childFile)
-  }, [])
-
-  const onDelete = useCallback((file: string) => {
-    void onDeleteRef.current(file)
-  }, [])
 
   const refreshAll = useCallback(async () => {
     const [histData, branchData] = await Promise.all([
@@ -123,17 +89,12 @@ export function BranchProvider({ children }: { children: ReactNode }) {
       activeFile,
       activeQaIndex,
       onFileClick,
-      onMerge,
-      onDelete,
       refreshAll,
       createBranch: doCreateBranch,
       mergeBranch: doMergeBranch,
       cascadeDelete: doCascadeDelete,
       setActiveFile,
       setActiveQaIndex,
-      registerOnFileClick,
-      registerOnMerge,
-      registerOnDelete,
     }}>
       {children}
     </BranchContext.Provider>
@@ -147,7 +108,7 @@ export function useBranches() {
 }
 
 /** Index branch metadata by `chat_id` to resolve `parent_id` links back to filenames. */
-export function buildChatIdMap(meta: Record<string, BranchMeta>): ChatIdMap {
+function buildChatIdMap(meta: Record<string, BranchMeta>): ChatIdMap {
   const m = new Map<string, string>()
   for (const [k, v] of Object.entries(meta)) {
     if (v.chat_id) m.set(v.chat_id, k)

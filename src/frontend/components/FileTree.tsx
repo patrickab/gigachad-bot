@@ -3,7 +3,6 @@
 import { createContext, useContext, useRef, useState, type ElementType } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
-  Brain,
   ChevronRight,
   Folder,
   Plus,
@@ -13,7 +12,7 @@ import { cn } from "@/lib/utils"
 import { Skeleton } from "./Skeleton"
 import type { FileBranchController } from "@/hooks/useFileTree"
 
-export type FileTreeItemType = "root" | "folder" | "element"
+type FileTreeItemType = "root" | "folder" | "element"
 
 export interface FileTreeItem<T = unknown> {
   id: string
@@ -24,7 +23,6 @@ export interface FileTreeItem<T = unknown> {
   children?: FileTreeItem<T>[]
   isActive?: boolean
   isSystem?: boolean
-  displayInRoot?: boolean
   badge?: string | number
 }
 
@@ -36,13 +34,10 @@ interface FileTreeProps<T> {
   // Section header (root level only)
   sectionIcon?: ElementType
   sectionTitle?: string
-  onPlusClick?: () => void
   plusTitle?: string
-  collapsed?: boolean
   /** Section is collapsible only when `onOpenChange` is given; otherwise it is always open. */
   open?: boolean
   onOpenChange?: (open: boolean) => void
-  onExpand?: () => void
 
   // Branch expansion + activation — owned by the shared primitive (see useFileTree)
   controller: FileBranchController
@@ -58,8 +53,8 @@ interface FileTreeProps<T> {
   folderPlaceholder?: string
   folderIcon?: ElementType
   onMoveElement?: (elementId: string, targetId: string | null) => Promise<void>
-  onDashboardClick?: (rootId: string) => void
-  onMemoryClick?: (rootId: string) => void
+  /** Extra per-branch buttons, rendered before the add-folder and delete buttons. */
+  renderBranchActions?: (item: FileTreeItem<T>) => React.ReactNode
 
   // Multi-selection: ctrl/cmd+click toggles, shift+click selects a range, selected rows drag together
   multiSelect?: boolean
@@ -68,7 +63,7 @@ interface FileTreeProps<T> {
 }
 
 /** Drag payload type for multi-selected rows: a JSON array of item ids. */
-export const FILE_DRAG_TYPE = "application/x-file-tree-ids"
+const FILE_DRAG_TYPE = "application/x-file-tree-ids"
 
 const INDENT_BASE = 8
 const INDENT_STEP = 16
@@ -95,10 +90,8 @@ interface TreeCtx<T> {
   onAddFolder?: (parentId: string | null, name: string) => Promise<void>
   folderPlaceholder: string
   folderIcon: ElementType
-  onDashboardClick?: (rootId: string) => void
-  onMemoryClick?: (rootId: string) => void
+  renderBranchActions?: (item: FileTreeItem<T>) => React.ReactNode
   multiSelect: boolean
-  selectedIds: Set<string>
   /** Applies ctrl/shift selection; returns true when the click was a pure selection gesture. */
   onSelectClick: (item: FileTreeItem<T>, e: React.MouseEvent) => boolean
   createMode: "root" | "folder" | null
@@ -139,12 +132,9 @@ export function FileTree<T>({
   loading,
   sectionIcon: SectionIcon,
   sectionTitle,
-  onPlusClick,
   plusTitle,
-  collapsed,
   open,
   onOpenChange,
-  onExpand,
   controller,
   onRootDelete,
   onElementClick,
@@ -156,8 +146,7 @@ export function FileTree<T>({
   folderPlaceholder = "Folder name",
   folderIcon = Folder,
   onMoveElement,
-  onDashboardClick,
-  onMemoryClick,
+  renderBranchActions,
   multiSelect = false,
   onDropFiles,
 }: FileTreeProps<T>) {
@@ -243,19 +232,10 @@ export function FileTree<T>({
   }
 
   const handlePlus = () => {
-    if (onPlusClick) {
-      onPlusClick()
-    } else if (onAddRoot) {
-      setCreateMode("root")
-      setCreateParentId(null)
-      setCreateName("")
-      onOpenChange?.(true)
-    } else if (onAddFolder) {
-      setCreateMode("folder")
-      setCreateParentId(null)
-      setCreateName("")
-      onOpenChange?.(true)
-    }
+    setCreateMode(onAddRoot ? "root" : "folder")
+    setCreateParentId(null)
+    setCreateName("")
+    onOpenChange?.(true)
   }
 
   const ctx: TreeCtx<T> = {
@@ -272,10 +252,8 @@ export function FileTree<T>({
     onAddFolder,
     folderPlaceholder,
     folderIcon,
-    onDashboardClick,
-    onMemoryClick,
+    renderBranchActions,
     multiSelect,
-    selectedIds,
     onSelectClick: handleSelectClick,
     createMode,
     createParentId,
@@ -284,19 +262,6 @@ export function FileTree<T>({
     setCreateParentId,
     setCreateName,
     handleCreateSubmit,
-  }
-
-  // Collapsed (icon-only sidebar mode)
-  if (collapsed && isRoot && SectionIcon) {
-    return (
-      <button
-        onClick={() => { onExpand?.(); onOpenChange?.(true) }}
-        className="w-full flex items-center justify-center p-2 rounded-md text-ink-muted hover:bg-surface-elevated/50 hover:text-ink transition-colors"
-        aria-label={collapsed ? `Expand ${sectionTitle ?? "section"}` : undefined}
-      >
-        <SectionIcon className="h-4 w-4 shrink-0" />
-      </button>
-    )
   }
 
   // Loading state (root only)
@@ -337,7 +302,7 @@ export function FileTree<T>({
                 <span className="text-sm font-medium">{sectionTitle}</span>
               </div>
             )}
-            {(onPlusClick || onAddRoot || onAddFolder) && (
+            {(onAddRoot || onAddFolder) && (
               <button aria-label={`${plusTitle ?? "Add item"}`}
                 onClick={(e) => { e.stopPropagation(); handlePlus() }}
                 className="p-1 rounded text-ink-subtle hover:text-ink hover:bg-surface transition-colors"
@@ -416,7 +381,7 @@ function BranchNode<T>({ item, depth }: { item: FileTreeItem<T>; depth: number }
     onAddFolder,
     folderPlaceholder,
     folderIcon,
-    onMemoryClick,
+    renderBranchActions,
     createMode,
     createParentId,
     createName,
@@ -426,7 +391,6 @@ function BranchNode<T>({ item, depth }: { item: FileTreeItem<T>; depth: number }
     handleCreateSubmit,
     onDragStart,
     multiSelect,
-    selectedIds,
     onSelectClick,
   } = useTree<T>()
 
@@ -480,14 +444,7 @@ function BranchNode<T>({ item, depth }: { item: FileTreeItem<T>; depth: number }
           )}
         </button>
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-          {isRootNode && onMemoryClick && (
-            <button aria-label={`Open memory for ${item.label}`}
-              onClick={(e) => { e.stopPropagation(); onMemoryClick(item.id) }}
-              className="p-0.5 rounded text-ink-faint hover:text-ink transition-colors"
-            >
-              <Brain className="h-3 w-3" />
-            </button>
-          )}
+          {renderBranchActions?.(item)}
           {onAddFolder && (
             <button aria-label={`Add folder to ${item.label}`}
               onClick={(e) => {
@@ -546,7 +503,7 @@ function BranchNode<T>({ item, depth }: { item: FileTreeItem<T>; depth: number }
 }
 
 function ElementNode<T>({ item, depth }: { item: FileTreeItem<T>; depth: number }) {
-  const { onDragStart, onElementClick, onElementDelete, onDashboardClick, renderElement, multiSelect, selectedIds, onSelectClick } = useTree<T>()
+  const { onDragStart, onElementClick, onElementDelete, renderElement, multiSelect, onSelectClick } = useTree<T>()
   const paddingLeft = INDENT_BASE + depth * INDENT_STEP
   const ElementIcon = item.icon
 
@@ -556,12 +513,7 @@ function ElementNode<T>({ item, depth }: { item: FileTreeItem<T>; depth: number 
   }
 
   const handleClick = (e: React.MouseEvent) => {
-    if (onSelectClick(item, e)) return
-    if (item.isSystem && onDashboardClick && item.data) {
-      onDashboardClick(item.data as string)
-    } else {
-      onElementClick?.(item)
-    }
+    if (!onSelectClick(item, e)) onElementClick?.(item)
   }
 
   return (

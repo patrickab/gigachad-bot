@@ -1,23 +1,30 @@
 // Connection routing with libavoid (WebAssembly, served from /libavoid.wasm):
 // right-angled routes that keep clear of every card a connection does not
 // join, with parallel stretches nudged apart so lines never run on top of
-// each other. Routing is synchronous once the library has loaded.
+// each other. Routing is synchronous once the library has loaded. Also the
+// unrouted fallback geometry: attach slots on card sides, elbows, rounded paths.
 import { AvoidLib } from "libavoid-js"
+
+/** How connections are drawn: a preference of the window or canvas hosting the graph. */
+export type EdgeStyle = "curved" | "elbow"
 
 export interface Point { x: number, y: number }
 
-export interface RouteCard {
-  id: string
-  x: number
-  y: number
+export type Side = "top" | "right" | "bottom" | "left"
+
+export interface Rect extends Point {
   width: number
   height: number
+}
+
+export interface RouteCard extends Rect {
+  id: string
   parent: string | null
   /** Frames other cards; connections pass its border freely and never attach to it by pin. */
   compound: boolean
 }
 
-export interface RouteEdge {
+interface RouteEdge {
   id: string
   source: string
   target: string
@@ -161,20 +168,164 @@ export function routeEdges(cards: readonly RouteCard[], edges: readonly RouteEdg
   }
 }
 
-const centre = (rect: { x: number, y: number, width: number, height: number }) => ({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 })
+export const centre = (rect: Rect): Point => ({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 })
 
-/** Where a connection with this bend passes: off the midpoint between the card centres, along the normal of the line joining them. */
-export function bendPoint(source: { x: number, y: number, width: number, height: number }, target: { x: number, y: number, width: number, height: number }, bend: number): Point {
-  const a = centre(source)
-  const b = centre(target)
+/** The point `offset` off the midpoint of `a` and `b`, along the normal of the line joining them. */
+export function normalPoint(a: Point, b: Point, offset: number): Point {
   const length = Math.hypot(b.x - a.x, b.y - a.y) || 1
-  return { x: (a.x + b.x) / 2 - (b.y - a.y) / length * bend, y: (a.y + b.y) / 2 + (b.x - a.x) / length * bend }
+  return { x: (a.x + b.x) / 2 - (b.y - a.y) / length * offset, y: (a.y + b.y) / 2 + (b.x - a.x) / length * offset }
 }
 
-/** The bend that makes a connection pass `point`'s projection onto the normal: the inverse of `bendPoint`. */
-export function bendThrough(source: { x: number, y: number, width: number, height: number }, target: { x: number, y: number, width: number, height: number }, point: Point): number {
-  const a = centre(source)
-  const b = centre(target)
+/** The offset that puts `normalPoint(a, b, offset)` level with `point`: its inverse. */
+export function normalOffset(a: Point, b: Point, point: Point): number {
   const length = Math.hypot(b.x - a.x, b.y - a.y) || 1
   return (point.x - (a.x + b.x) / 2) * -(b.y - a.y) / length + (point.y - (a.y + b.y) / 2) * (b.x - a.x) / length
+}
+
+/** Where a connection with this bend passes: off the midpoint between the card centres, along the normal of the line joining them. */
+export const bendPoint = (source: Rect, target: Rect, bend: number): Point => normalPoint(centre(source), centre(target), bend)
+
+/** The bend that makes a connection pass `point`'s projection onto the normal: the inverse of `bendPoint`. */
+export const bendThrough = (source: Rect, target: Rect, point: Point): number => normalOffset(centre(source), centre(target), point)
+
+// Soft avoidance: connections sharing a card side get their own slot on it
+// instead of all leaving from the midpoint, so their paths run in separate
+// lanes. Lines may still cross. This is the fallback before libavoid loads.
+const SIDE_SPREAD = 0.68
+
+interface AttachPoint extends Point {
+  position: Side
+}
+
+export interface EdgeAttachment {
+  source: AttachPoint
+  target: AttachPoint
+}
+
+/** The point `ratio` (0 to 1) along `side` of `rect`. */
+function slotPoint({ x, y, width, height }: Rect, side: Side, ratio: number): AttachPoint {
+  if (side === "top") return { x: x + width * ratio, y, position: side }
+  if (side === "bottom") return { x: x + width * ratio, y: y + height, position: side }
+  if (side === "left") return { x, y: y + height * ratio, position: side }
+  return { x: x + width, y: y + height * ratio, position: side }
+}
+
+function sideToward(rect: Rect, toward: Rect): Side {
+  const from = centre(rect)
+  const to = centre(toward)
+  const dx = to.x - from.x
+  const dy = to.y - from.y
+  // Compare against the card's own aspect so wide cards still prefer left/right.
+  if (Math.abs(dx) * rect.height > Math.abs(dy) * rect.width) return dx > 0 ? "right" : "left"
+  return dy > 0 ? "bottom" : "top"
+}
+
+/**
+ * Slot points for every edge, keyed by edge id. An edge with an endpoint
+ * missing from `cards` is omitted.
+ */
+export function edgeAttachments(cards: readonly RouteCard[], edges: ReadonlyArray<Pick<RouteEdge, "id" | "source" | "target">>): Map<string, EdgeAttachment> {
+  const byId = new Map(cards.map((card) => [card.id, card]))
+  const ends = edges.flatMap((edge) => {
+    const source = byId.get(edge.source)
+    const target = byId.get(edge.target)
+    if (!source || !target) return []
+    return [
+      { edgeId: edge.id, role: "source" as const, nodeId: edge.source, rect: source, side: sideToward(source, target), toward: target },
+      { edgeId: edge.id, role: "target" as const, nodeId: edge.target, rect: target, side: sideToward(target, source), toward: source },
+    ]
+  })
+  const groups = new Map<string, typeof ends>()
+  for (const end of ends) {
+    const key = `${end.nodeId}:${end.side}`
+    groups.set(key, [...(groups.get(key) ?? []), end])
+  }
+  const points = new Map<string, AttachPoint>()
+  for (const group of groups.values()) {
+    // Order along the side by where the other card sits, so neighbouring lines
+    // keep their relative order and do not cross just to reach their slot.
+    const axis = group[0].side === "top" || group[0].side === "bottom" ? "x" : "y"
+    const sorted = [...group].sort((a, b) => centre(a.toward)[axis] - centre(b.toward)[axis])
+    sorted.forEach((end, index) => {
+      const share = (index + 1) / (sorted.length + 1)
+      const ratio = 0.5 + (share - 0.5) * SIDE_SPREAD
+      points.set(`${end.edgeId}:${end.role}`, slotPoint(end.rect, end.side, ratio))
+    })
+  }
+  return new Map(edges.flatMap((edge) => {
+    const source = points.get(`${edge.id}:source`)
+    const target = points.get(`${edge.id}:target`)
+    return source && target ? [[edge.id, { source, target }] as const] : []
+  }))
+}
+
+/** A polyline with each corner rounded off by up to `radius`, never more than half of either adjoining segment. */
+export function roundedPath(points: readonly Point[], radius: number): string {
+  let d = `M ${points[0].x} ${points[0].y}`
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const prev = points[index - 1]
+    const corner = points[index]
+    const next = points[index + 1]
+    const before = Math.hypot(corner.x - prev.x, corner.y - prev.y)
+    const after = Math.hypot(next.x - corner.x, next.y - corner.y)
+    if (before < 0.01 || after < 0.01) continue
+    const cut = Math.min(radius, before / 2, after / 2)
+    d += ` L ${corner.x - (corner.x - prev.x) / before * cut} ${corner.y - (corner.y - prev.y) / before * cut}`
+      + ` Q ${corner.x} ${corner.y} ${corner.x + (next.x - corner.x) / after * cut} ${corner.y + (next.y - corner.y) / after * cut}`
+  }
+  const last = points[points.length - 1]
+  return `${d} L ${last.x} ${last.y}`
+}
+
+/** The point halfway along a polyline. */
+export function polylineMidpoint(points: readonly Point[]): Point {
+  const lengths = points.slice(1).map((point, index) => Math.hypot(point.x - points[index].x, point.y - points[index].y))
+  let left = lengths.reduce((sum, length) => sum + length, 0) / 2
+  for (const [index, length] of lengths.entries()) {
+    if (left <= length && length > 0) {
+      const from = points[index]
+      const to = points[index + 1]
+      return { x: from.x + (to.x - from.x) * left / length, y: from.y + (to.y - from.y) * left / length }
+    }
+    left -= length
+  }
+  return points[0]
+}
+
+/** Arrowhead at `tip`, pointing away from `from`: 10px wings spread 0.4 rad either side. */
+export function arrowHeadPath(tip: Point, from: Point): string {
+  const angle = Math.atan2(tip.y - from.y, tip.x - from.x)
+  const size = 10
+  const wing = 0.4
+  const left = { x: tip.x - Math.cos(angle - wing) * size, y: tip.y - Math.sin(angle - wing) * size }
+  const right = { x: tip.x - Math.cos(angle + wing) * size, y: tip.y - Math.sin(angle + wing) * size }
+  return `M ${left.x} ${left.y} L ${tip.x} ${tip.y} L ${right.x} ${right.y} Z`
+}
+
+// Orthogonal connector, like a flowchart: leave each card perpendicular to its
+// side. Facing sides give a Z whose middle lane `bend` shifts along the axis;
+// perpendicular sides give a single L. Corners are rounded.
+export const CORNER_RADIUS = 8
+
+/** The unrouted elbow between two attach points; `axis` is the way a Z's middle lane slides, null for an L. */
+export function orthogonalRoute(from: AttachPoint, to: AttachPoint, bend: number) {
+  const horizontal = (side: Side) => side === "left" || side === "right"
+  let axis: "x" | "y" | null = null
+  let raw: Point[]
+  if (horizontal(from.position) && horizontal(to.position)) {
+    const lane = (from.x + to.x) / 2 + bend
+    raw = [from, { x: lane, y: from.y }, { x: lane, y: to.y }, to]
+    axis = "x"
+  } else if (!horizontal(from.position) && !horizontal(to.position)) {
+    const lane = (from.y + to.y) / 2 + bend
+    raw = [from, { x: from.x, y: lane }, { x: to.x, y: lane }, to]
+    axis = "y"
+  } else {
+    raw = [from, horizontal(from.position) ? { x: to.x, y: from.y } : { x: from.x, y: to.y }, to]
+  }
+  const points = raw.filter((point, index) => index === 0 || Math.hypot(point.x - raw[index - 1].x, point.y - raw[index - 1].y) > 0.01)
+  // The lane is only draggable on a Z; the handle rides its middle segment.
+  const draggable = axis !== null && points.length === 4
+  const handle = draggable ? { x: (points[1].x + points[2].x) / 2, y: (points[1].y + points[2].y) / 2 } : null
+  return { points, d: roundedPath(points, CORNER_RADIUS), axis: draggable ? axis : null, handle }
 }

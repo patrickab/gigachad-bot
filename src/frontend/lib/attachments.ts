@@ -1,8 +1,9 @@
 import type { Attachment, ChatRequest, Message, ToolCallRecord } from "./types"
-import { apiOrigin, chatFileUrl, fileViewerRawUrl } from "./api"
+import { apiOrigin, chatFileUrl, fileViewerRawUrl } from "./urls"
+import { toolPayload } from "./toolCalls"
 
 
-export interface ToolArtifactDocument {
+interface ToolArtifactDocument {
   name: string
   content: string
 }
@@ -14,17 +15,18 @@ function artifactName(call: ToolCallRecord, extension: string): string {
 
 /** Turn a renderable chat-tool result into a normal document for later reuse. */
 export function toolArtifactDocument(call: ToolCallRecord): ToolArtifactDocument | null {
-  if (call.name === "diagram" && typeof call.detail?.mermaid === "string") {
+  const payload = toolPayload(call)
+  if (payload.family === "diagram" && payload.mermaid !== null) {
     return {
       name: artifactName(call, ".md"),
-      content: `# Mermaid diagram\n\n\`\`\`mermaid\n${call.detail.mermaid}\n\`\`\`\n`,
+      content: `# Mermaid diagram\n\n\`\`\`mermaid\n${payload.mermaid}\n\`\`\`\n`,
     }
   }
-  if (call.name === "mindmap" && typeof call.detail?.mindmap === "string") {
-    return { name: artifactName(call, ".md"), content: call.detail.mindmap }
+  if (payload.family === "mindmap" && payload.content !== null) {
+    return { name: artifactName(call, ".md"), content: payload.content }
   }
-  if (call.name === "sandbox_plot" && call.detail?.figure && typeof call.detail.figure === "object") {
-    return { name: artifactName(call, ".plot.json"), content: JSON.stringify(call.detail.figure, null, 2) }
+  if (payload.family === "plot" && payload.figure) {
+    return { name: artifactName(call, ".plot.json"), content: JSON.stringify(payload.figure, null, 2) }
   }
   return null
 }
@@ -56,12 +58,7 @@ export function normalizeAttachment(a: Attachment, chatId: string | null, slug: 
 
 export function normalizeMessageAttachments(msg: Message, chatId: string | null, slug: string | null): Message {
   if (!msg.attachments?.length) return msg
-  const attachments = msg.attachments.map((a) => normalizeAttachment(a, chatId, slug))
-  return {
-    ...msg,
-    attachments,
-    hiddenContent: buildHiddenContent(attachments) || undefined,
-  }
+  return withAttachments(msg, msg.attachments.map((a) => normalizeAttachment(a, chatId, slug)))
 }
 
 export function buildHiddenContent(attachments: Attachment[]): string {
@@ -75,6 +72,19 @@ export function buildHiddenContent(attachments: Attachment[]): string {
   return textParts.length > 0
     ? "**Attached files:**\n\n" + textParts.join("\n\n") + "\n\n## END"
     : ""
+}
+
+/** Replace a message's attachments and rebuild the model-facing `hiddenContent` from them. */
+export function withAttachments(msg: Message, attachments: Attachment[]): Message {
+  return { ...msg, attachments, hiddenContent: buildHiddenContent(attachments) || undefined }
+}
+
+const ATTACHMENT_ONLY_PROMPT = "Please review the attached document and provide a summary."
+
+/** The text the model receives for a user turn: attached-file content ahead of the prompt, with a default prompt for attachment-only turns. */
+export function composeUserMessage(text: string, hiddenContent: string | undefined): string {
+  const prompt = text.trim() ? text : ATTACHMENT_ONLY_PROMPT
+  return hiddenContent ? `${hiddenContent}\n\n${prompt}` : prompt
 }
 
 export function collectActiveImagePaths(
@@ -99,9 +109,9 @@ export function collectActiveImagePaths(
 }
 
 // Pure attachment-intake transform: parses unparsed non-image attachments (via injected
-// `parse`), merges results back, builds the hidden-content block, and assembles the
-// ChatRequest with prior + new image paths. The optimistic placeholder and post-parse
-// patch stay in the caller. Throws if `parse` throws, and the caller renders the failure.
+// `parse`), merges results back, and assembles the ChatRequest with prior + new image
+// paths. The optimistic placeholder and post-parse patch stay in the caller. Throws if
+// `parse` throws, and the caller renders the failure.
 export async function buildAttachedSend(
   opts: {
     text: string
@@ -109,13 +119,12 @@ export async function buildAttachedSend(
     priorMessages: Message[]
     chatId: string
     slug: string | null
-    downscaleImages: boolean
     baseParams: Omit<ChatRequest, "chat_id" | "user_msg" | "img_paths" | "project_slug">
   },
   parse: (chatId: string, names: string[], slug: string | null) => Promise<{ name: string; parsedMd: string | null }[]>,
   refreshRootFile?: (path: string) => Promise<Attachment>,
-): Promise<{ enriched: Attachment[]; hiddenContent?: string; request: ChatRequest }> {
-  const { text, attachments, priorMessages, chatId, slug, downscaleImages, baseParams } = opts
+): Promise<{ enriched: Attachment[]; request: ChatRequest }> {
+  const { text, attachments, priorMessages, chatId, slug, baseParams } = opts
 
   // File root refs are live: re-read content from the source at send time (also
   // picks up a PDF extraction that finished after attach). No upload copy
@@ -143,22 +152,18 @@ export async function buildAttachedSend(
     })
   }
 
-  const hiddenContent = buildHiddenContent(enriched) || undefined
   const priorImgPaths = collectActiveImagePaths(priorMessages)
   const newImgPaths = enriched.filter((a) => a.active && isImageAttachment(a)).map((a) => a.name)
-  const fallbackPrompt = text.trim() ? text : "Please review the attached document and provide a summary."
-  const userMsg = hiddenContent ? `${hiddenContent}\n\n${fallbackPrompt}` : fallbackPrompt
 
   const request: ChatRequest = {
     ...baseParams,
     chat_id: chatId,
-    user_msg: userMsg,
+    user_msg: composeUserMessage(text, buildHiddenContent(enriched) || undefined),
     img_paths: [...priorImgPaths, ...newImgPaths],
-    downscale_images: downscaleImages,
     project_slug: slug,
   }
 
-  return { enriched, hiddenContent, request }
+  return { enriched, request }
 }
 
 export function deactivateSentImages(messages: Message[], sentPaths: string[]): Message[] {

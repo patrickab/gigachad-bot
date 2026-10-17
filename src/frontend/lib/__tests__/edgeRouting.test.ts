@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { fileURLToPath } from "node:url"
 import { beforeAll, describe, expect, it } from "vitest"
-import { bendPoint, loadRouter, routeEdges, type Point, type RouteCard } from "@/lib/edgeRouting"
+import { bendPoint, edgeAttachments, loadRouter, routeEdges, type Point, type RouteCard } from "@/lib/edgeRouting"
 
 const card = (id: string, x: number, y: number, extra: Partial<RouteCard> = {}): RouteCard =>
   ({ id, x, y, width: 200, height: 100, parent: null, compound: false, ...extra })
@@ -73,5 +73,37 @@ describe("routeEdges", () => {
       return Math.min(from.x, to.x) <= through.x && through.x <= Math.max(from.x, to.x) && Math.min(from.y, to.y) <= through.y && through.y <= Math.max(from.y, to.y)
     })
     expect(onRoute).toBe(true)
+  })
+})
+
+describe("edgeAttachments", () => {
+  const cards = [
+    card("left", 0, 0, { width: 100, height: 60 }),
+    card("right", 300, 0, { width: 100, height: 60 }),
+    card("below", 300, 300, { width: 100, height: 60 }),
+  ]
+  const edge = (id: string, source: string, target: string) => ({ id, source, target })
+
+  it("gives connections sharing a card side their own slot on it", () => {
+    // A lone connection still leaves from the side midpoint.
+    const single = edgeAttachments(cards, [edge("a", "left", "right")])
+    expect(single.get("a")).toEqual({
+      source: { x: 100, y: 30, position: "right" },
+      target: { x: 300, y: 30, position: "left" },
+    })
+
+    // Two connections between the same pair share a side, so they split it.
+    const pair = edgeAttachments(cards, [edge("a", "left", "right"), edge("b", "left", "right")])
+    expect(pair.get("a")!.source.y).not.toBe(pair.get("b")!.source.y)
+    for (const attachment of pair.values()) {
+      expect(attachment.source.x).toBe(100)
+      expect(attachment.source.y).toBeGreaterThan(0)
+      expect(attachment.source.y).toBeLessThan(60)
+    }
+
+    // Connections leaving different sides keep the midpoint of their own side.
+    const fanned = edgeAttachments(cards, [edge("a", "left", "right"), edge("b", "left", "below")])
+    expect(fanned.get("a")!.source).toEqual({ x: 100, y: 30, position: "right" })
+    expect(fanned.get("b")!.source).toEqual({ x: 50, y: 60, position: "bottom" })
   })
 })

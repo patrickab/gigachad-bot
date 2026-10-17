@@ -3,14 +3,9 @@
 import dynamic from "next/dynamic"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Download, Maximize2, Minimize2 } from "lucide-react"
+import { useThemeName } from "@/hooks/useThemeName"
 import { useTwoFingerGesture } from "@/hooks/useTwoFingerGesture"
-import { cn } from "@/lib/utils"
-
-export interface PlotFigure {
-  data?: unknown[]
-  layout?: Record<string, unknown>
-  frames?: unknown[]
-}
+import type { PlotFigure } from "@/lib/types"
 
 // Plotly touches `window` and is sizable (a few hundred KB minified even with the
 // "dist-min" bundle), so it must load lazily, client-only, and only for chats that
@@ -78,9 +73,8 @@ export const PlotElement = memo(function PlotElement({ figure }: PlotElementProp
   // Height only counts in fullscreen; inline it follows the width-based aspect ratio.
   const [hostSize, setHostSize] = useState({ width: 0, height: 0 })
   const [isFullscreen, setIsFullscreen] = useState(false)
-  // Theme colors are read once in the layout memo below, and a `.light` class toggle on <html>
-  // changes none of its deps. `themeTick` bumps on that toggle to force a re-read.
-  const [themeTick, setThemeTick] = useState(0)
+  // Theme colors are read once in the layout memo below, so a theme flip must re-run it.
+  const themeName = useThemeName()
 
   useEffect(() => {
     const host = hostRef.current
@@ -131,12 +125,6 @@ export const PlotElement = memo(function PlotElement({ figure }: PlotElementProp
     } finally {
       await Plotly.relayout(graph, { paper_bgcolor: "transparent" })
     }
-  }, [])
-
-  useEffect(() => {
-    const observer = new MutationObserver(() => setThemeTick((t) => t + 1))
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] })
-    return () => observer.disconnect()
   }, [])
 
   // A scroll gesture zooms the plot, inline and fullscreen alike. Trackpad pinches arrive as trusted
@@ -195,7 +183,7 @@ export const PlotElement = memo(function PlotElement({ figure }: PlotElementProp
     if (typeof window === "undefined") return modelLayout
     const root = document.documentElement
     const style = getComputedStyle(root)
-    const isLight = root.classList.contains("light")
+    const isLight = themeName === "light"
     const ink = style.getPropertyValue("--ink").trim()
     const surfaceElevated = style.getPropertyValue("--surface-elevated").trim()
     const grid = style.getPropertyValue("--chart-grid").trim()
@@ -240,7 +228,7 @@ export const PlotElement = memo(function PlotElement({ figure }: PlotElementProp
       width: dimensions?.width,
       height: dimensions?.height,
     }
-  }, [dimensions, figure.layout, themeTick])
+  }, [dimensions, figure.layout, themeName])
 
   return (
     <div

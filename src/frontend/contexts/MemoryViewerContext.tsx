@@ -2,14 +2,14 @@
 
 import { createContext, useCallback, useContext, useState, type ReactNode } from "react"
 
-export type MemoryViewerScope = "global" | "project"
+type MemoryViewerScope = "global" | "project"
 
-export interface MemoryViewerTarget {
+interface MemoryViewerTarget {
   scope: MemoryViewerScope
   projectSlug?: string | null
 }
 
-export interface MemoryViewerContextState {
+interface MemoryViewerContextState {
   target: MemoryViewerTarget | null
   openMemoryViewer: (target: MemoryViewerTarget) => void
   closeMemoryViewer: () => void

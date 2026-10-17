@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { PenLine } from "lucide-react"
-import { CanvasEditor, emptyCanvasDoc, parseCanvasDoc, serializeCanvasDoc, type CanvasDocument } from "./CanvasEditor"
+import { CanvasEditor } from "./CanvasEditor"
+import type { CanvasToolbarSlots } from "./CanvasToolbar"
+import { emptyCanvasDoc, parseCanvasDoc, serializeCanvasDoc, type CanvasDocument } from "@/lib/canvasDocument"
 import { DocumentEditor } from "./DocumentEditor"
-import { SaveChatModal } from "./SaveChatModal"
+import { SaveAsModal } from "./SaveAsModal"
 import { writeDocument } from "@/lib/api"
 
 // A canvas selection carries its owning scope: "" = chat_histories/_notes, otherwise a project slug.
@@ -16,7 +18,7 @@ export interface CanvasSelection {
 interface CanvasWorkspaceProps {
   selected: CanvasSelection | null
   slug: string | null
-  toolbarSlot: HTMLElement | null
+  toolbarSlots: CanvasToolbarSlots | null
   onCloseEditor: () => void
   onCreated: (sel: CanvasSelection) => void
   onModeLabel?: (label: string) => void
@@ -26,7 +28,7 @@ interface CanvasWorkspaceProps {
 
 const SCRATCH_STORAGE_KEY = "scratch-canvas-doc"
 
-export function CanvasWorkspace({ selected, slug, toolbarSlot, onCloseEditor, onCreated, onModeLabel, editorModel }: CanvasWorkspaceProps) {
+export function CanvasWorkspace({ selected, slug, toolbarSlots, onCloseEditor, onCreated, onModeLabel, editorModel }: CanvasWorkspaceProps) {
   // Scratch canvas shown by default. It has no backing file until saved, so it
   // persists to localStorage on every change and survives unmounting.
   const [doc, setDoc] = useState<CanvasDocument>(() => emptyCanvasDoc())
@@ -95,7 +97,7 @@ export function CanvasWorkspace({ selected, slug, toolbarSlot, onCloseEditor, on
         path={selected.path}
         slug={selected.scope}
         overlay
-        canvasToolbarSlot={toolbarSlot}
+        canvasToolbarSlots={toolbarSlots}
         onClose={onCloseEditor}
         onModeLabel={onModeLabel}
         model={editorModel}
@@ -106,8 +108,8 @@ export function CanvasWorkspace({ selected, slug, toolbarSlot, onCloseEditor, on
   return (
     <div className="relative h-full">
       {/* The scratch canvas belongs to the open project (it is saved there too), so it offers that project's documents and architecture. */}
-      <CanvasEditor doc={doc} onChange={setDoc} slug={slug ?? undefined} toolbarSlot={toolbarSlot} />
-      <SaveChatModal
+      <CanvasEditor doc={doc} onChange={setDoc} slug={slug ?? undefined} toolbarSlots={toolbarSlots} />
+      <SaveAsModal
         open={saveOpen}
         onClose={() => setSaveOpen(false)}
         onSave={handleSaveSubmit}

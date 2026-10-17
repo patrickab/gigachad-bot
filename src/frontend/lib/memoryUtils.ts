@@ -11,13 +11,22 @@ export function formatCategoryName(name: string): string {
   return name.replace(/_/g, " ")
 }
 
-export function formatCategoryHeading(name: string): string {
+function formatCategoryHeading(name: string): string {
   return name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
 /** Missing or empty categories group under "uncategorized". */
 export function normalizeMemoryCategory(m: MemoryRecord): string {
   return m.category || "uncategorized"
+}
+
+export function memoryText(m: MemoryRecord): string {
+  return "memory" in m ? m.memory : m.text
+}
+
+/** Locally unique id for a manually added memory. */
+export function newManualMemoryId(): string {
+  return `manual-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
 // Newest first by updated_at, falling back to created_at. ISO timestamps compare lexically.
@@ -62,4 +71,19 @@ export function groupByCategoryOrder(
 /** Flatten sections back into a category-ordered memory list. */
 export function sortMemoriesByCategoryOrder(mems: PreviewMemory[], categoryOrder: CategoryDef[]): PreviewMemory[] {
   return groupByCategoryOrder(categoryOrder, mems).flatMap((s) => s.items) as PreviewMemory[]
+}
+
+/** Mirror the backend `render_memories_as_markdown` so live edits update the diff without a round-trip. */
+export function renderMemoriesMarkdown(
+  memories: PreviewMemory[],
+  title: string,
+  categoryOrder?: CategoryDef[],
+): string {
+  const parts = [`# ${title}`]
+  for (const { category, items } of groupByCategoryOrder(categoryOrder ?? [], memories)) {
+    if (items.length === 0) continue
+    parts.push(`\n## ${formatCategoryHeading(category.name)}`)
+    for (const m of items) parts.push(`- ${memoryText(m)}`)
+  }
+  return parts.join("\n")
 }

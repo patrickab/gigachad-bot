@@ -21,7 +21,6 @@
    Tailwind utilities come from @theme below. */
 
  :root {
-   --shadow-strength: 0.35;
    --shadow-color: oklch(4% 0.006 55);
 
    /* --- Text (ink): cream, never pure white --- */
@@ -77,7 +76,6 @@
  }
 
   :root.light {
-    --shadow-strength: 0.08;
     --shadow-color: oklch(35% 0.01 85);
   
     /* --- Text: warm near-charcoal down to faint grey --- */
@@ -646,42 +644,6 @@ pre {
   box-shadow: var(--shadow-sm), var(--inner-highlight);
 }
 
-[data-rehype-pretty-code-figure] pre {
-  padding: 0.75rem 1rem;
-}
-
-[data-rehype-pretty-code-figure] pre > code {
-  display: grid;
-}
-
-[data-rehype-pretty-code-figure] [data-line] {
-  padding: 0 1rem;
-  border-left: 2px solid transparent;
-}
-
-[data-rehype-pretty-code-figure] [data-highlighted-line] {
-  background: color-mix(in oklab, var(--ink) 6%, transparent);
-  border-left-color: var(--ink-muted);
-}
-
-.light [data-rehype-pretty-code-figure] [data-highlighted-line] {
-  background: color-mix(in oklab, var(--ink) 4%, transparent);
-}
-
-[data-rehype-pretty-code-title] {
-  padding: 0.5rem 1rem;
-  font-size: 0.75rem;
-  color: var(--ink-muted);
-  background: var(--surface);
-  border-bottom: 1px solid var(--divider);
-  border-radius: var(--radius-md) var(--radius-md) 0 0;
-}
-
-[data-rehype-pretty-code-title] + pre {
-  border-radius: 0 0 var(--radius-md) var(--radius-md);
-  margin-top: 0;
-}
-
 code {
   font-family: var(--font-mono), 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
   font-size: 0.875em;
@@ -953,14 +915,6 @@ code {
   display: none;
 }
 
-/* Assistant message sits between page bg and full surface — the color-mix signature
-   dynamically adapts: in dark mode it leans toward surface; in light mode it leans
-   toward paper. Both inherit the parent's polarity. */
-.bg-assistant-message {
-  background-color: color-mix(in oklab, var(--paper), var(--surface) 50%);
-  background-image: linear-gradient(180deg, oklch(100% 0 0 / 0.015) 0%, transparent 40%);
-}
-
 .animate-shimmer {
   animation: shimmer 1.5s ease-in-out infinite;
   background-size: 200% 100%;
@@ -969,7 +923,7 @@ code {
 /* PDF pages render on an opaque white canvas. We retint that page to the
    assistant-message color (--surface-elevated = ElevatedContainer level 2/3) in
    every theme, so it never sits as a stark white rectangle:
-     dark/glass : invert the page (text → white, paper → black), then a `lighten`
+     dark       : invert the page (text → white, paper → black), then a `lighten`
                   tint floors the black up to the surface color, text stays white.
      light      : no invert needed (text already black); a `darken` tint pulls the
                   white page down to the surface color, text stays black.

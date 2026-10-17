@@ -1,5 +1,12 @@
+import type { ModelProvider } from "./types"
+
 /** LiteLLM prefix used for OMP-sourced models: `litellm_proxy/<omp-provider>/<id>`. */
 export const OMP_LITELLM_ID = "litellm_proxy"
+
+/** A provider's models as `litellm_id/model` ids. */
+export function qualifiedModelIds(provider: ModelProvider): string[] {
+  return provider.models.map((model) => `${provider.litellm_id}/${model}`)
+}
 
 export function displayName(m: string): string {
   // Keep the OMP provider segment (`anthropic/claude-opus-5`) so rows stay distinct under the

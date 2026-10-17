@@ -4,48 +4,8 @@ import { useEffect } from "react"
 import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import { X } from "lucide-react"
-import { LaTeXMarkdown } from "@/components/LaTeXMarkdown"
 import type { Attachment } from "@/lib/types"
-import { rewriteImages } from "@/lib/api"
-
-import { LazyPdfViewer } from "./LazyPdfViewer"
-
-/** Previews by mime: image, PDF, then parsed markdown or raw text, else a placeholder. */
-function PreviewContent({ attachment }: { attachment: Attachment }) {
-  if (attachment.mime.startsWith("image/")) {
-    return (
-      <div className="flex items-center justify-center p-6 overflow-auto max-h-[80vh]">
-        <img src={attachment.url} alt={attachment.name} className="max-w-full max-h-[80vh] rounded-lg shadow-[var(--shadow-xl)] object-contain" />
-      </div>
-    )
-  }
-
-  if (attachment.mime === "application/pdf") {
-    return (
-      <div className="flex-1 min-h-0 overflow-hidden">
-        <LazyPdfViewer url={attachment.url} />
-      </div>
-    )
-  }
-
-  const content = attachment.parsedMd ?? attachment.content
-  if (content) {
-    const rewritten = rewriteImages(content, attachment.name)
-    return (
-      <div className="flex-1 min-h-0 overflow-y-auto p-6">
-        <div className="max-w-3xl mx-auto">
-          <LaTeXMarkdown content={rewritten} />
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex-1 flex items-center justify-center">
-      <p className="text-sm text-ink-subtle">No preview available</p>
-    </div>
-  )
-}
+import { AttachmentView } from "./AttachmentView"
 
 interface AttachmentPreviewProps {
   attachment: Attachment | null
@@ -96,7 +56,7 @@ export function AttachmentPreview({ attachment, onClose }: AttachmentPreviewProp
               <X className="h-4 w-4" />
             </button>
           </div>
-          <PreviewContent attachment={attachment} />
+          <AttachmentView attachment={attachment} variant="modal" />
         </motion.div>
       </motion.div>
     </AnimatePresence>,

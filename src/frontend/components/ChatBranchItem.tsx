@@ -1,11 +1,22 @@
 "use client"
 
 import { GitMerge, Trash2 } from "lucide-react"
-import { useMemo } from "react"
+import { useCallback, useMemo } from "react"
 import { cn } from "@/lib/utils"
 import type { BranchChild, BranchMeta } from "@/lib/types"
 import { useBranches, isAncestorOf } from "@/contexts/BranchContext"
+import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { useTree } from "./FileTree"
+import { baseName } from "@/lib/paths"
+
+/** Schedules an undoable delete of a chat together with its branches. */
+function useDeleteChat() {
+  const { cascadeDelete } = useBranches()
+  const { schedule } = useUndoDelete()
+  return useCallback((file: string) => {
+    schedule(`history:${file}`, baseName(file), async () => { await cascadeDelete(file) })
+  }, [cascadeDelete, schedule])
+}
 
 interface Node {
   file: string
@@ -18,17 +29,17 @@ interface Node {
 
 /** Build the branch tree under `root`, skipping children with no loaded meta. */
 function buildTree(root: string, meta: Record<string, BranchMeta>, chatIdMap: Map<string, string>): Node {
-  const rootMeta = meta[root]
   const seen = new Set<string>()
   function walk(file: string, parentQaCount: number = 0): Node {
+    const label = baseName(file).replace(".json", "")
     // Cycle guard: a file already visited becomes an empty leaf
-    if (seen.has(file)) return { file, label: file.split("/").pop()!.replace(".json", ""), qaCount: 0, parentQaCount: 0, children: [], branchIdx: null }
+    if (seen.has(file)) return { file, label, qaCount: 0, parentQaCount: 0, children: [], branchIdx: null }
     seen.add(file)
     const m = meta[file]
     const qa = m?.qa_count ?? 0
     return {
       file,
-      label: file.split("/").pop()!.replace(".json", ""),
+      label,
       qaCount: qa,
       parentQaCount,
       children: (m?.children ?? []).flatMap((c: BranchChild) => {
@@ -39,19 +50,7 @@ function buildTree(root: string, meta: Record<string, BranchMeta>, chatIdMap: Ma
       branchIdx: null,
     }
   }
-  const qa = rootMeta?.qa_count ?? 0
-  return {
-    file: root,
-    label: root.split("/").pop()!.replace(".json", ""),
-    qaCount: qa,
-    parentQaCount: 0,
-    children: (rootMeta?.children ?? []).flatMap((c: BranchChild) => {
-      const cf = chatIdMap.get(c.chat_id)
-      if (!cf || !meta[cf]) return []
-      return [{ ...walk(cf, qa), branchIdx: c.branch_message_idx }]
-    }),
-    branchIdx: null,
-  }
+  return walk(root)
 }
 
 type Point = { idx: number; nodes: Node[] }
@@ -78,7 +77,7 @@ function BranchTree({ root }: { root: Node }) {
       {points.map((pt) => (
         <div key={`${root.file}-${pt.idx}`}>
           <button
-            onClick={() => onFileClick?.(root.file, pt.idx)}
+            onClick={() => onFileClick(root.file, pt.idx)}
             className={cn(
               "relative z-[1] ml-3 px-1 py-0.5 rounded-sm text-[10px] font-mono tabular-nums transition-colors",
               activeFile === root.file && activeQaIndex === pt.idx
@@ -101,7 +100,8 @@ function BranchTree({ root }: { root: Node }) {
 }
 
 function BranchRow({ node }: { node: Node }) {
-  const { onFileClick, onMerge, onDelete, activeFile, activeQaIndex } = useBranches()
+  const { onFileClick, mergeBranch, activeFile, activeQaIndex } = useBranches()
+  const deleteChat = useDeleteChat()
   const isActive = activeFile === node.file && activeQaIndex == null
   const hasKids = node.children.length > 0
   // Merge is blocked once the parent has advanced past the branch point
@@ -115,14 +115,14 @@ function BranchRow({ node }: { node: Node }) {
         isActive ? "bg-surface-elevated" : "hover:bg-surface-elevated/50"
       )}>
         <button
-          onClick={() => onFileClick?.(node.file)}
+          onClick={() => onFileClick(node.file)}
           className={cn("flex-1 text-left text-[11px] truncate", isActive ? "text-ink font-semibold" : "text-ink-muted hover:text-ink")}
         >
           {node.label}
           {hasKids && node.qaCount > 0 && <span className="text-ink-muted ml-0.5 text-[10px]">@{node.qaCount - 1}</span>}
         </button>
         {!mergeBlocked && (
-          <button aria-label={`Merge ${node.file}`} onClick={() => onMerge(node.file)} className="p-0.5 rounded text-ink-faint hover:text-ink transition-colors opacity-0 group-hover:opacity-100 shrink-0">
+          <button aria-label={`Merge ${node.file}`} onClick={() => mergeBranch(node.file)} className="p-0.5 rounded text-ink-faint hover:text-ink transition-colors opacity-0 group-hover:opacity-100 shrink-0">
             <GitMerge className="h-3 w-3" />
           </button>
         )}
@@ -131,7 +131,7 @@ function BranchRow({ node }: { node: Node }) {
             <GitMerge className="h-3 w-3" />
           </span>
         )}
-        <button aria-label={`Delete ${node.file}`} onClick={() => onDelete(node.file)} className="p-0.5 rounded text-ink-faint hover:text-danger transition-colors opacity-0 group-hover:opacity-100 shrink-0">
+        <button aria-label={`Delete ${node.file}`} onClick={() => deleteChat(node.file)} className="p-0.5 rounded text-ink-faint hover:text-danger transition-colors opacity-0 group-hover:opacity-100 shrink-0">
           <Trash2 className="h-3 w-3" />
         </button>
       </div>
@@ -145,7 +145,7 @@ function BranchRow({ node }: { node: Node }) {
   )
 }
 
-export interface ChatBranchItemProps {
+interface ChatBranchItemProps {
   file: string
   label: string
   depth: number
@@ -155,7 +155,8 @@ const INDENT_BASE = 8
 const INDENT_STEP = 16
 
 export function ChatBranchItem({ file, label, depth }: ChatBranchItemProps) {
-  const { branchMeta, chatIdMap, onFileClick, onDelete, activeFile, activeQaIndex } = useBranches()
+  const { branchMeta, chatIdMap, onFileClick, activeFile, activeQaIndex } = useBranches()
+  const deleteChat = useDeleteChat()
   const { onDragStart } = useTree<string>()
   const bm = branchMeta[file]
   const hasChildren = (bm?.children?.length ?? 0) > 0
@@ -173,7 +174,7 @@ export function ChatBranchItem({ file, label, depth }: ChatBranchItemProps) {
         <button
           draggable={!!onDragStart}
           onDragStart={onDragStart ? (e) => onDragStart(e, file) : undefined}
-          onClick={() => onFileClick?.(file)}
+          onClick={() => onFileClick(file)}
           className={cn(
             "flex items-center gap-1.5 flex-1 truncate text-left text-[11px] transition-colors",
             isActive ? "text-ink font-medium" : "text-ink-muted hover:text-ink",
@@ -183,14 +184,12 @@ export function ChatBranchItem({ file, label, depth }: ChatBranchItemProps) {
           {qaLast !== null && <span className="text-ink-muted text-[10px] ml-0.5">@{qaLast}</span>}
         </button>
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-          {onDelete && (
-            <button aria-label={`Delete ${file}`}
-              onClick={() => onDelete(file)}
-              className="p-0.5 rounded text-ink-faint hover:text-danger transition-colors shrink-0"
-            >
-              <Trash2 className="h-3 w-3" />
-            </button>
-          )}
+          <button aria-label={`Delete ${file}`}
+            onClick={() => deleteChat(file)}
+            className="p-0.5 rounded text-ink-faint hover:text-danger transition-colors shrink-0"
+          >
+            <Trash2 className="h-3 w-3" />
+          </button>
         </div>
       </div>
     </div>
