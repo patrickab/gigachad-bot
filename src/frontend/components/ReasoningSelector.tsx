@@ -1,10 +1,8 @@
 "use client"
 
-import { Check } from "lucide-react"
-import { useCallback, useEffect, useRef, useState } from "react"
-import { useClickOutside } from "@/hooks/useClickOutside"
+import { useEffect, useState } from "react"
 import { fetchReasoningLevels } from "@/lib/api"
-import { cn } from "@/lib/utils"
+import { PopoverSelector } from "./PopoverSelector"
 
 /** Shared across every instance so switching tabs/models reuses a lookup
  *  already made this session instead of refetching. */
@@ -70,54 +68,19 @@ export function effectiveReasoningEffort(levels: string[] | undefined, storedEff
 }
 
 export function ReasoningSelector({ levels, reasoningEffort, onReasoningChange, placement = "above" }: ReasoningSelectorProps) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  const close = useCallback(() => setOpen(false), [])
-  useClickOutside(ref, close)
-
   if (!levels?.length) return null
 
-  return (
-    <div ref={ref} className="relative min-w-0">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-label={`Reasoning: ${levelLabel(reasoningEffort)}`}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className={cn(
-          "flex h-7 items-center gap-1 rounded-full px-2.5 text-xs text-ink-muted transition-colors hover:bg-hover hover:text-ink",
-          open && "text-ink",
-        )}
-      >
-        <ReasoningGlyph level={reasoningEffort} />
-      </button>
-      {open && (
-        <div role="menu" aria-label="Reasoning" className={cn("absolute left-0 z-50 w-40 rounded-xl border border-divider bg-surface p-1.5 shadow-[var(--shadow-lg)]", placement === "below" ? "top-full mt-2" : "bottom-full mb-2")}>
-          <div className="flex flex-col gap-0.5">
-            {levels.map((level) => {
-              const active = level === reasoningEffort
-              return (
-                <button
-                  key={level}
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={active}
-                  onClick={() => { onReasoningChange(level); close() }}
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm capitalize text-ink transition-colors",
-                    active ? "bg-surface-elevated" : "hover:bg-surface-elevated",
-                  )}
-                >
-                  <ReasoningGlyph level={level} />
-                  <span className="flex-1 truncate">{levelLabel(level)}</span>
-                  {active && <Check className="h-3.5 w-3.5 shrink-0" />}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  )
+  return <PopoverSelector
+    triggerLabel={`Reasoning: ${levelLabel(reasoningEffort)}`}
+    triggerContent={<ReasoningGlyph level={reasoningEffort} />}
+    triggerClassName="px-2.5"
+    label="Reasoning"
+    categories={[{ key: "levels", label: "Reasoning", items: levels }]}
+    itemKey={(level) => level}
+    isSelected={(level) => level === reasoningEffort}
+    renderItem={(level) => <><ReasoningGlyph level={level} /><span className="flex-1 truncate capitalize">{levelLabel(level)}</span></>}
+    onSelect={onReasoningChange}
+    placement={placement}
+    panelClassName="w-40"
+  />
 }

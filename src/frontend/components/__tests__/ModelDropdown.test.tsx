@@ -106,10 +106,10 @@ describe("ModelDropdown OMP source", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^Model:/ }))
     fireEvent.click(screen.getByRole("button", { name: "Ollama" }))
-    expect(screen.getAllByRole("button").filter((button) => ["alpha", "zulu"].includes(button.textContent ?? "")).map((button) => button.textContent)).toEqual(["alpha", "zulu"])
+    expect(screen.getAllByRole("menuitemradio").map((row) => row.textContent)).toEqual(["alpha", "zulu"])
 
     fireEvent.click(screen.getByRole("button", { name: "Gemini" }))
-    expect(screen.getAllByRole("button").filter((button) => ["alpha", "zeta"].includes(button.textContent ?? "")).map((button) => button.textContent)).toEqual(["alpha", "zeta"])
+    expect(screen.getAllByRole("menuitemradio").map((row) => row.textContent)).toEqual(["alpha", "zeta"])
   })
 
   it("opens on the provider tab holding the currently selected model, not Ollama", async () => {
@@ -118,7 +118,7 @@ describe("ModelDropdown OMP source", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^Model:/ }))
 
-    expect(screen.getByRole("button", { name: "gemini-3.1-pro" })).toBeInTheDocument()
+    expect(screen.getByRole("menuitemradio", { name: "gemini-3.1-pro" })).toBeInTheDocument()
     expect(screen.queryByText("gemma4:31b-cloud")).not.toBeInTheDocument()
   })
 })

@@ -1,19 +1,16 @@
 "use client"
 
-import { AnimatePresence, motion, Reorder } from "framer-motion"
 import { ArrowLeft, Check, ChevronDown, ChevronRight, Cpu, Plus, Settings2, Trash2 } from "lucide-react"
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
-import { useClickOutside } from "@/hooks/useClickOutside"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { fetchOmpCatalog } from "@/lib/api"
 import { displayName } from "@/lib/models"
 import type { ModelDefaults, ModelProvider, ModelsResponse, OmpCatalog } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { PopoverSelector, PopoverSelectorAction } from "./PopoverSelector"
 import { Skeleton } from "./Skeleton"
 import { StyledSelect } from "./StyledSelect"
 
-interface Tab { key: string; label: string }
 interface ProviderTab { label: string; models: string[] }
-type Panel = "models" | "configure" | null
 
 interface ModelDropdownProps {
   models: ModelsResponse | null
@@ -22,19 +19,9 @@ interface ModelDropdownProps {
   onProvidersChange: (providers: ModelProvider[]) => Promise<void>
   onTabOrderChange?: (order: string[]) => Promise<void>
   onDefaultsChange: (defaults: ModelDefaults) => Promise<void>
-  accent?: "sky" | "amber"
   /** Side of the trigger the panel opens on. */
   placement?: "above" | "below"
-  extraTabs?: Tab[]
-  activeExtraTab?: string
-  onExtraTabChange?: (key: string) => void
-  children?: (props: { open: boolean; onToggle: () => void }) => ReactNode
 }
-
-const ACCENT_CLASSES = {
-  sky: { selected: "bg-surface-elevated text-ink", check: "h-4 w-4" },
-  amber: { selected: "bg-surface-elevated text-ink", check: "h-3.5 w-3.5" },
-} as const
 
 function AddProvider({ onAdd }: { onAdd: (label: string, litellmId: string) => void }) {
   const [label, setLabel] = useState("")
@@ -156,40 +143,32 @@ function shortName(model: string): string {
   return model.slice(model.lastIndexOf("/") + 1)
 }
 
-export function ModelDropdown({ models, selectedModel, onSelect, onProvidersChange, onTabOrderChange, onDefaultsChange, accent = "sky", placement = "above", extraTabs, activeExtraTab, onExtraTabChange, children }: ModelDropdownProps) {
-  const [panel, setPanel] = useState<Panel>(null)
+export function ModelDropdown({ models, selectedModel, onSelect, onProvidersChange, onTabOrderChange, onDefaultsChange, placement = "above" }: ModelDropdownProps) {
+  const [configuring, setConfiguring] = useState(false)
   const [settingsTab, setSettingsTab] = useState<"providers" | "defaults">("providers")
-  const [manualTab, setManualTab] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [draftDefaults, setDraftDefaults] = useState<ModelDefaults | null>(null)
   const [ompCatalog, setOmpCatalog] = useState<OmpCatalog | null>(null)
   // Default-model edits are buffered and flushed once on close, not saved per keystroke.
   const pendingDefaults = useRef<ModelDefaults | null>(null)
-  const ref = useRef<HTMLDivElement>(null)
-  const panelRef = useRef<HTMLDivElement>(null)
-  const close = useCallback(() => {
-    setPanel(null)
+  const onClose = useCallback(() => {
+    setConfiguring(false)
     const defaults = pendingDefaults.current
     pendingDefaults.current = null
     if (defaults) void onDefaultsChange(defaults).catch((reason) => setError((reason as Error).message || "Could not save default models"))
   }, [onDefaultsChange])
-  useClickOutside(ref, close)
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape" && panel === "configure") setPanel("models") }
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape" && configuring) setConfiguring(false) }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [panel])
-  // A long provider list scrolls, so bring the current pick into view on open.
-  useEffect(() => {
-    if (panel === "models") panelRef.current?.querySelector("[data-selected]")?.scrollIntoView?.({ block: "nearest" })
-  }, [panel])
+  }, [configuring])
   // Loaded when the settings panel opens, not on mount: OMP is optional, so
   // probing its gateway for every chat view would cost a request nobody asked
   // for. A failed probe stays null and simply hides the section.
   useEffect(() => {
-    if (panel !== "configure" || ompCatalog) return
+    if (!configuring || ompCatalog) return
     fetchOmpCatalog().then(setOmpCatalog).catch(() => undefined)
-  }, [panel, ompCatalog])
+  }, [configuring, ompCatalog])
 
   if (models === null) return <Skeleton className="mx-2 h-4 w-28" />
 
@@ -211,27 +190,20 @@ export function ModelDropdown({ models, selectedModel, onSelect, onProvidersChan
     return a.label.localeCompare(b.label)
   })
   const choices = available.flatMap((provider) => provider.models)
-  // Opens on whichever provider holds the current selection (falling back
-  // to a manual tab click, then the first tab) so a configured default
-  // model (e.g. an OMP pick) doesn't get stranded behind the Ollama tab.
-  const activeLabel = manualTab ?? orderedProviders.find((provider) => provider.models.includes(selectedModel))?.label ?? orderedProviders[0]?.label
-  const active = orderedProviders.find((provider) => provider.label === activeLabel) ?? orderedProviders[0]
   const persist = async (next: ModelProvider[]) => {
     setError(null)
     try { await onProvidersChange(next); return true } catch (reason) { setError((reason as Error).message || "Could not save providers"); return false }
   }
   const updateDefaults = (defaults: ModelDefaults) => { setDraftDefaults(defaults); pendingDefaults.current = defaults }
   const reorderProviders = (labels: string[]) => void onTabOrderChange?.(labels).catch((reason) => setError((reason as Error).message || "Could not save provider order"))
-  const selectModel = (model: string) => { onSelect(model); close() }
-  const toggle = () => panel === "models" ? close() : setPanel("models")
   const fullLabel = selectedModel ? displayName(selectedModel) : "Select model"
-  const trigger = <button type="button" onClick={toggle} aria-label={`Model: ${fullLabel}`} aria-haspopup="dialog" aria-expanded={panel !== null} className={cn("flex h-7 min-w-0 items-center gap-1.5 rounded-full px-3 text-xs text-ink-muted transition-colors hover:bg-hover hover:text-ink", panel && "text-ink")}><Cpu className="h-3 w-3 shrink-0" /><span className="max-w-[140px] truncate">{selectedModel ? shortName(selectedModel) : fullLabel}</span></button>
+  const errorLine = error && <p className="px-2 pb-1.5 text-xs text-danger">{error}</p>
 
   const segmentClass = (active: boolean) => cn("flex-1 rounded-md px-2 py-1.5 text-xs transition-colors", active ? "bg-surface-elevated text-ink shadow-[var(--shadow-sm)]" : "text-ink-subtle hover:text-ink")
   const configurePanel = <>
     <div className="border-b border-divider p-1.5">
       <div className="flex rounded-lg bg-paper p-0.5">
-        <button aria-label="Back to model selector" onClick={() => setPanel("models")} className="rounded-md px-2 py-1.5 text-ink-subtle hover:bg-surface-elevated hover:text-ink"><ArrowLeft className="h-3.5 w-3.5" /></button>
+        <button aria-label="Back to model selector" onClick={() => setConfiguring(false)} className="rounded-md px-2 py-1.5 text-ink-subtle hover:bg-surface-elevated hover:text-ink"><ArrowLeft className="h-3.5 w-3.5" /></button>
         <button onClick={() => setSettingsTab("providers")} className={segmentClass(settingsTab === "providers")}>Providers / Models</button>
         <button onClick={() => setSettingsTab("defaults")} className={segmentClass(settingsTab === "defaults")}>Default Models</button>
       </div>
@@ -239,59 +211,24 @@ export function ModelDropdown({ models, selectedModel, onSelect, onProvidersChan
     {settingsTab === "providers"
       ? <ProviderSettings providers={models.providers} ompCatalog={ompCatalog} onChange={persist} />
       : <DefaultModels defaults={draftDefaults ?? models.defaults} choices={choices} onChange={updateDefaults} />}
+    {errorLine}
   </>
 
-  const modelsPanel = <>
-    <div className="space-y-1.5 border-b border-divider p-1.5">
-      {extraTabs && extraTabs.length > 0 && <div className="flex rounded-lg bg-paper p-0.5">{extraTabs.map((tab) => <button key={tab.key} onClick={() => onExtraTabChange?.(tab.key)} className={cn(segmentClass(tab.key === activeExtraTab), "font-medium capitalize")}>{tab.label}</button>)}</div>}
-      {/* Tabs size to their labels and scroll sideways once they outgrow the panel; drag to reorder. */}
-      <Reorder.Group as="div" axis="x" layoutScroll values={orderedProviders.map((provider) => provider.label)} onReorder={reorderProviders} className="flex overflow-x-auto rounded-lg bg-paper p-0.5 [scrollbar-width:none]">
-        {orderedProviders.map((provider) => <Reorder.Item as="div" key={provider.label} value={provider.label} className="flex-auto shrink-0 cursor-grab active:cursor-grabbing">
-          <button onClick={() => setManualTab(provider.label)} className={cn(segmentClass(provider.label === active?.label), "w-full whitespace-nowrap font-medium")}>{provider.label}</button>
-        </Reorder.Item>)}
-      </Reorder.Group>
-    </div>
-    {active
-      ? <div className="max-h-[50vh] space-y-0.5 overflow-y-auto p-1.5">{active.models.map((model) => {
-        const selected = model === selectedModel
-        return <button
-          key={model}
-          type="button"
-          onClick={() => selectModel(model)}
-          data-selected={selected || undefined}
-          className={cn("flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors", selected ? ACCENT_CLASSES[accent].selected : "text-ink-muted hover:bg-surface-elevated hover:text-ink")}
-        >
-          <span className="flex-1 truncate">{displayName(model)}</span>
-          {selected && <Check className={cn("shrink-0", ACCENT_CLASSES[accent].check)} />}
-        </button>
-      })}</div>
-      : <p className="px-3.5 py-3 text-xs text-ink-subtle">No models added yet</p>}
-    <div className="border-t border-divider p-1.5">
-      <button type="button" onClick={() => setPanel("configure")} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-ink-muted transition-colors hover:bg-surface-elevated hover:text-ink">
-        <Settings2 className="h-3.5 w-3.5" aria-hidden="true" />
-        Manage models
-      </button>
-    </div>
-  </>
-
-  return <div className="relative z-50 min-w-0" ref={ref}>
-    {children ? children({ open: panel === "models", onToggle: toggle }) : trigger}
-    <AnimatePresence>{panel && <motion.div
-      ref={panelRef}
-      role="dialog"
-      aria-label="Model"
-      initial={{ opacity: 0, y: 4 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: 4 }}
-      transition={{ duration: 0.15 }}
-      className={cn(
-        "absolute left-0 flex flex-col rounded-xl border border-divider bg-surface shadow-[var(--shadow-lg)]",
-        panel === "configure" ? "w-max min-w-72" : "w-64 overflow-hidden",
-        placement === "below" ? "top-full mt-2" : "bottom-full mb-2",
-      )}
-    >
-      {panel === "configure" ? configurePanel : modelsPanel}
-      {error && <p className="px-3.5 pb-2 text-xs text-danger">{error}</p>}
-    </motion.div>}</AnimatePresence>
-  </div>
+  return <PopoverSelector
+    triggerLabel={`Model: ${fullLabel}`}
+    triggerContent={<><Cpu className="h-3 w-3 shrink-0" /><span className="max-w-[140px] truncate">{selectedModel ? shortName(selectedModel) : fullLabel}</span></>}
+    label="Model"
+    categories={orderedProviders.map((provider) => ({ key: provider.label, label: provider.label, items: provider.models }))}
+    itemKey={(model) => model}
+    isSelected={(model) => model === selectedModel}
+    renderItem={(model) => <span className="flex-1 truncate">{displayName(model)}</span>}
+    onSelect={onSelect}
+    onReorderCategories={reorderProviders}
+    footer={<>{errorLine}<PopoverSelectorAction icon={Settings2} label="Manage models" onClick={() => setConfiguring(true)} /></>}
+    view={configuring ? configurePanel : undefined}
+    emptyText="No models added yet"
+    placement={placement}
+    panelClassName={configuring ? "w-max min-w-72" : undefined}
+    onClose={onClose}
+  />
 }
