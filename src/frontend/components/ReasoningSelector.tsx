@@ -1,6 +1,6 @@
 "use client"
 
-import { Brain, Check } from "lucide-react"
+import { Check } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useClickOutside } from "@/hooks/useClickOutside"
 import { fetchReasoningLevels } from "@/lib/api"
@@ -95,13 +95,8 @@ export function ReasoningSelector({ model, reasoningEffort, onReasoningChange, p
         <ReasoningGlyph level={reasoningEffort} />
       </button>
       {open && (
-        <div role="menu" aria-label="Reasoning" className={cn("absolute left-0 z-50 w-44 overflow-hidden rounded-xl border border-divider bg-paper shadow-[var(--shadow-xl)]", placement === "below" ? "top-full mt-2" : "bottom-full mb-2")}>
-          <div className="flex h-8 items-center gap-2 border-b border-divider px-2.5">
-            <Brain className="h-3 w-3 text-ink-muted" />
-            <span className="text-[11px] font-semibold text-ink">Reasoning</span>
-            <span className="ml-auto font-mono text-[10px] tabular-nums text-ink-subtle">{levels.length}</span>
-          </div>
-          <div className="flex flex-col p-1">
+        <div role="menu" aria-label="Reasoning" className={cn("absolute left-0 z-50 w-40 rounded-xl border border-divider bg-surface p-1.5 shadow-[var(--shadow-lg)]", placement === "below" ? "top-full mt-2" : "bottom-full mb-2")}>
+          <div className="flex flex-col gap-0.5">
             {levels.map((level) => {
               const active = level === reasoningEffort
               return (
@@ -112,13 +107,13 @@ export function ReasoningSelector({ model, reasoningEffort, onReasoningChange, p
                   aria-checked={active}
                   onClick={() => { onReasoningChange(level); close() }}
                   className={cn(
-                    "flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-xs capitalize transition-colors",
-                    active ? "bg-surface-elevated font-semibold text-ink" : "text-ink-muted hover:bg-hover hover:text-ink",
+                    "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm capitalize text-ink transition-colors",
+                    active ? "bg-surface-elevated" : "hover:bg-surface-elevated",
                   )}
                 >
-                  <span className="flex w-3.5 shrink-0 justify-center">{active && <Check className="h-3 w-3" />}</span>
                   <ReasoningGlyph level={level} />
-                  <span className="truncate">{levelLabel(level)}</span>
+                  <span className="flex-1 truncate">{levelLabel(level)}</span>
+                  {active && <Check className="h-3.5 w-3.5 shrink-0" />}
                 </button>
               )
             })}
