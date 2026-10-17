@@ -1,6 +1,6 @@
 "use client"
 
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { getStroke } from "perfect-freehand"
 import { type StrokeData, type EmbedRect, type CanvasEmbedRect, getSvgPathFromStroke, pointInPolygon, renderPageToPng } from "@/lib/drawing"
@@ -36,6 +36,8 @@ const MIN_GRAPH_HEIGHT = 180
 const FALLBACK_ASPECT = 1.3 // height/width used until the real aspect is measured
 const MIN_SCALE = 0.15
 const MAX_SCALE = 3
+const GRID_SPACING = 30 // canvas units between dots at the finest grid level
+const GRID_MIN_SCREEN_SPACING = 12 // px — below this the grid doubles its spacing
 const THIN_WIDTH = 2
 const MEDIUM_WIDTH = 5
 const THICK_WIDTH = 10
@@ -494,6 +496,37 @@ const StrokeLayer = memo(function StrokeLayer({ strokes, hidden, isDark }: { str
 /** Infinite pan/zoom canvas of ink, frames, attachments and text notes. Camera state is local, every document edit goes through `onChange`. */
 export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, docPath, depth = 0, zoomAnchor = depth > 0 ? "viewport-center" : "cursor", hostScale = 1 }: CanvasEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+/** Dot grid with a constant on-screen density.
+ *
+ * - Zooming out doubles the spacing whenever dots would sit closer than `GRID_MIN_SCREEN_SPACING`
+ * - Dots dropped by the next level fade out first, so levels blend instead of popping
+ * - Dots keep a fixed screen size, the surviving ones stay put in canvas space
+ */
+function DotGrid({ offset, scale }: { offset: { x: number; y: number }; scale: number }) {
+  const patternId = useId()
+  let spacing = GRID_SPACING * scale
+  while (spacing < GRID_MIN_SCREEN_SPACING) spacing *= 2
+  const fadingOpacity = Math.min(1, spacing / GRID_MIN_SCREEN_SPACING - 1)
+  const cell = 2 * spacing
+  return (
+    <svg className="absolute inset-0 w-full h-full pointer-events-none" aria-hidden>
+      <defs>
+        <pattern id={patternId} x={offset.x % cell} y={offset.y % cell} width={cell} height={cell} patternUnits="userSpaceOnUse">
+          <g fill="var(--ink-faint)" opacity={0.7}>
+            <circle cx={1.2} cy={1.2} r={1.2} />
+            <g opacity={fadingOpacity}>
+              <circle cx={spacing + 1.2} cy={1.2} r={1.2} />
+              <circle cx={1.2} cy={spacing + 1.2} r={1.2} />
+              <circle cx={spacing + 1.2} cy={spacing + 1.2} r={1.2} />
+            </g>
+          </g>
+        </pattern>
+      </defs>
+      <rect width="100%" height="100%" fill={`url(#${patternId})`} />
+    </svg>
+  )
+}
+
   // gates the window/document key listeners below to the frontmost tab
   const active = useTabActive()
   const svgRef = useRef<SVGSVGElement>(null)
@@ -1925,14 +1958,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlot, d
         onContextMenu={(e) => e.preventDefault()}
       >
         {/* Dot grid background */}
-        <svg className="absolute inset-0 w-full h-full pointer-events-none" aria-hidden>
-          <defs>
-            <pattern id="canvas-dots" x={offset.x % (30 * scale)} y={offset.y % (30 * scale)} width={30 * scale} height={30 * scale} patternUnits="userSpaceOnUse">
-              <circle cx={1.2} cy={1.2} r={1.2} fill="var(--ink-faint)" opacity={0.7} />
-            </pattern>
-          </defs>
-          <rect width="100%" height="100%" fill="url(#canvas-dots)" />
-        </svg>
+        <DotGrid offset={offset} scale={scale} />
 
         {/* Transformed canvas layer — frames + strokes share this space so strokes
             always render over frame content and both export identically. */}
