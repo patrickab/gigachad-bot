@@ -1,9 +1,13 @@
 import asyncio
+import os
 
+from fastapi import BackgroundTasks
+from psycopg_pool import ConnectionPool
 import pytest
 
 from backend.routes import models
-from backend.routes.models import _litellm_reasoning_levels, get_reasoning_levels
+from backend.routes.models import _litellm_reasoning_levels, _resolve_reasoning_levels, get_reasoning_levels
+from lib.db_schema import upgrade
 
 
 def _stub_litellm(monkeypatch: pytest.MonkeyPatch, supports_reasoning: bool, model_info: dict | Exception) -> None:
@@ -65,5 +69,60 @@ def test_omp_models_use_omp_registry_before_litellm(monkeypatch: pytest.MonkeyPa
         return omp_levels
 
     monkeypatch.setattr(models.omp_source, "thinking_levels", thinking_levels)
-    assert asyncio.run(get_reasoning_levels("litellm_proxy/openai-codex/gpt-6-astra")) == {"levels": expected}
+    assert asyncio.run(_resolve_reasoning_levels("litellm_proxy/openai-codex/gpt-6-astra")) == expected
     assert requested == ["openai-codex/gpt-6-astra"]
+
+
+@pytest.fixture
+def stored_levels(monkeypatch: pytest.MonkeyPatch):
+    """Route the levels table to the test database, emptied per test."""
+    url = os.environ.get("POSTGRES_TEST_DATABASE_URL")
+    if not url:
+        pytest.skip("POSTGRES_TEST_DATABASE_URL is required")
+    upgrade(url)
+    pool = ConnectionPool(url, min_size=1, max_size=2)
+    with pool.connection() as connection:
+        connection.execute("TRUNCATE model_reasoning_levels")
+    monkeypatch.setattr(models, "get_postgres_pool", lambda: pool)
+    yield
+    pool.close()
+
+
+def _stub_live_levels(monkeypatch: pytest.MonkeyPatch, live: dict[str, list[str] | None]) -> None:
+    async def resolve(model: str) -> list[str] | None:
+        return live[model]
+
+    monkeypatch.setattr(models, "_resolve_reasoning_levels", resolve)
+
+
+def _request_levels(model: str) -> tuple[list[str], BackgroundTasks]:
+    background_tasks = BackgroundTasks()
+    response = asyncio.run(get_reasoning_levels(model, background_tasks))
+    return response["levels"], background_tasks
+
+
+def test_stored_levels_answer_first_and_revalidate_in_background(monkeypatch: pytest.MonkeyPatch, stored_levels) -> None:
+    live = {"omp/model": ["none", "low", "medium"]}
+    _stub_live_levels(monkeypatch, live)
+    assert _request_levels("omp/model")[0] == ["none", "low", "medium"]
+
+    live["omp/model"] = ["none", "low", "medium", "high"]
+    levels, background_tasks = _request_levels("omp/model")
+    assert levels == ["none", "low", "medium"]
+
+    asyncio.run(background_tasks())
+    assert _request_levels("omp/model")[0] == ["none", "low", "medium", "high"]
+
+
+def test_failed_lookup_keeps_stored_levels(monkeypatch: pytest.MonkeyPatch, stored_levels) -> None:
+    live: dict[str, list[str] | None] = {"ollama/thinker": None}
+    _stub_live_levels(monkeypatch, live)
+    assert _request_levels("ollama/thinker")[0] == []
+
+    live["ollama/thinker"] = ["none", "low", "medium", "high"]
+    assert _request_levels("ollama/thinker")[0] == ["none", "low", "medium", "high"]
+
+    live["ollama/thinker"] = None
+    levels, background_tasks = _request_levels("ollama/thinker")
+    asyncio.run(background_tasks())
+    assert levels == _request_levels("ollama/thinker")[0] == ["none", "low", "medium", "high"]

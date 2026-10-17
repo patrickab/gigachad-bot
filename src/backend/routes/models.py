@@ -1,13 +1,13 @@
 import asyncio
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path
 import httpx
 import litellm
 from llm_baseclient.config import discover_ollama_models
 from pydantic import BaseModel
 
-from config import OLLAMA_BASE_URL
+from config import OLLAMA_BASE_URL, get_postgres_pool
 from lib import omp_source
 from lib.model_provider_store import ModelProviderStore, providers_for_ui
 from lib.prompt_store import PromptStore
@@ -35,11 +35,11 @@ async def get_models(store: ModelProviderStore = Depends(get_model_provider_stor
 OLLAMA_REASONING_LEVELS = ["none", "low", "medium", "high"]
 
 
-async def _ollama_supports_reasoning(model: str) -> bool:
-    """Ask the Ollama server itself: LiteLLM's static registry doesn't know
-    locally pulled or Ollama Cloud model tags (`gemma4:31b-cloud`), but
-    `/api/show` reports each model's real capabilities, `thinking` among
-    them, for both local and cloud-proxied models.
+async def _ollama_supports_reasoning(model: str) -> bool | None:
+    """Ask the Ollama server itself, None when it can't answer.
+
+    - LiteLLM's static registry doesn't know pulled or Ollama Cloud tags (`gemma4:31b-cloud`)
+    - `/api/show` reports real capabilities, `thinking` among them, for local and cloud models
     """
     try:
         async with httpx.AsyncClient(base_url=OLLAMA_BASE_URL, timeout=5.0) as client:
@@ -47,7 +47,7 @@ async def _ollama_supports_reasoning(model: str) -> bool:
             resp.raise_for_status()
             return "thinking" in (resp.json().get("capabilities") or [])
     except (httpx.HTTPError, ValueError):
-        return False
+        return None
 
 
 def _litellm_reasoning_levels(model: str) -> list[str]:
@@ -75,23 +75,63 @@ def _litellm_reasoning_levels(model: str) -> list[str]:
     return levels
 
 
-@router.get("/models/reasoning-levels")
-async def get_reasoning_levels(model: str) -> dict:
-    """Ordered `reasoning_effort` levels `model` accepts, empty when it can't reason.
+async def _resolve_reasoning_levels(model: str) -> list[str] | None:
+    """Live lookup of the levels `model` accepts, None when the lookup itself failed.
 
     - Ollama tags (`ollama/<tag>`, incl. cloud) aren't in LiteLLM's registry, ask the live server
     - OMP gateway models (`litellm_proxy/<provider>/<model>`) neither, use OMP's own registry
-    - Never raises: unknown or unreachable models get no levels
     """
     if model.startswith("ollama/"):
         supported = await _ollama_supports_reasoning(model.removeprefix("ollama/"))
-        return {"levels": OLLAMA_REASONING_LEVELS if supported else []}
+        if supported is None:
+            return None
+        return OLLAMA_REASONING_LEVELS if supported else []
     omp_prefix = f"{omp_source.LITELLM_ID}/"
     if model.startswith(omp_prefix):
         omp_levels = await asyncio.to_thread(omp_source.thinking_levels, model.removeprefix(omp_prefix))
         if omp_levels is not None:
-            return {"levels": ["none", *omp_levels] if omp_levels else []}
-    return {"levels": _litellm_reasoning_levels(model)}
+            return ["none", *omp_levels] if omp_levels else []
+    return _litellm_reasoning_levels(model)
+
+
+def _load_stored_reasoning_levels(model: str) -> list[str] | None:
+    with get_postgres_pool().connection() as connection:
+        row = connection.execute("SELECT levels FROM model_reasoning_levels WHERE model = %s", (model,)).fetchone()
+    return row[0] if row else None
+
+
+def _store_reasoning_levels(model: str, levels: list[str]) -> None:
+    with get_postgres_pool().connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO model_reasoning_levels (model, levels) VALUES (%s, %s)
+            ON CONFLICT (model) DO UPDATE SET levels = EXCLUDED.levels, updated_at = now()
+            WHERE model_reasoning_levels.levels IS DISTINCT FROM EXCLUDED.levels
+            """,
+            (model, levels),
+        )
+
+
+async def _refresh_reasoning_levels(model: str) -> list[str] | None:
+    """Resolve `model` live and persist the answer, a failed lookup keeps the stored row."""
+    levels = await _resolve_reasoning_levels(model)
+    if levels is not None:
+        await asyncio.to_thread(_store_reasoning_levels, model, levels)
+    return levels
+
+
+@router.get("/models/reasoning-levels")
+async def get_reasoning_levels(model: str, background_tasks: BackgroundTasks) -> dict:
+    """Ordered `reasoning_effort` levels `model` accepts, empty when it can't reason.
+
+    - Stored levels answer instantly, a background lookup revalidates them
+    - Unknown models resolve live once, failed lookups (e.g. Ollama down) get no levels
+    """
+    stored = await asyncio.to_thread(_load_stored_reasoning_levels, model)
+    if stored is not None:
+        background_tasks.add_task(_refresh_reasoning_levels, model)
+        return {"levels": stored}
+    return {"levels": await _refresh_reasoning_levels(model) or []}
 
 
 class ProviderDefinition(BaseModel):
