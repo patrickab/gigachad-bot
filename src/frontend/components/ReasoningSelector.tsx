@@ -78,7 +78,7 @@ export function ReasoningSelector({ model, reasoningEffort, onReasoningChange, p
         aria-haspopup="menu"
         aria-expanded={open}
         className={cn(
-          "flex h-6 items-center gap-1.5 rounded-full px-2.5 text-[11px] capitalize text-ink-muted transition-colors hover:bg-hover hover:text-ink",
+          "flex h-7 items-center gap-1.5 rounded-full px-3 text-xs capitalize text-ink-muted transition-colors hover:bg-hover hover:text-ink",
           open && "text-ink",
         )}
       >

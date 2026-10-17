@@ -570,6 +570,8 @@ interface ChatContainerProps {
   chatInputRef?: React.RefObject<ChatInputHandle | null>
   /** Top-bar element the context-panel toggle renders into. */
   contextToggleSlot?: HTMLElement | null
+  /** Top-bar element the wide-mode toggle renders into. */
+  wideToggleSlot?: HTMLElement | null
 }
 
 export function ChatContainer({
@@ -590,6 +592,7 @@ export function ChatContainer({
   extracting,
   chatInputRef,
   contextToggleSlot,
+  wideToggleSlot,
 }: ChatContainerProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const [editingDocPath, setEditingDocPath] = useState<string | null>(null)
@@ -938,13 +941,6 @@ export function ChatContainer({
           style={{ paddingBottom: inputAreaHeight + BOTTOM_GAP_PX }}
         >
           <div className="mx-auto" style={{ maxWidth: effectiveMaxWidth }}>
-          <button
-            onClick={toggleWideMode}
-            aria-label={isWideMode ? "Exit wide mode" : "Enter wide mode"}
-            className="absolute left-2 top-24 z-30 p-1 text-ink-faint opacity-0 hover:opacity-100 focus-visible:opacity-100 hover:text-ink-muted transition-opacity duration-200 cursor-pointer"
-          >
-            {isWideMode ? <ChevronsRightLeft className="h-4 w-4" /> : <ChevronsLeftRight className="h-4 w-4" />}
-          </button>
           <ElevationProvider darkColor="var(--paper)" brightColor="var(--surface-elevated)" numLevels={3} startLevel={1}>
             <AnimatePresence>
             {pairs.map(({ user, assistant, globalIndex }, qaIndex) => {
@@ -1094,6 +1090,17 @@ export function ChatContainer({
             {contextOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRight className="h-4 w-4" />}
           </button>,
           contextToggleSlot,
+        )}
+        {wideToggleSlot && createPortal(
+          <button
+            type="button"
+            onClick={toggleWideMode}
+            aria-label={isWideMode ? "Exit wide mode" : "Enter wide mode"}
+            className="rounded-lg p-1.5 text-ink-subtle opacity-0 transition-opacity duration-200 hover:text-ink hover:opacity-100 focus-visible:opacity-100"
+          >
+            {isWideMode ? <ChevronsRightLeft className="h-4 w-4" /> : <ChevronsLeftRight className="h-4 w-4" />}
+          </button>,
+          wideToggleSlot,
         )}
       </div>
       {hasSidebarContent && contextOpen && chatId && (
