@@ -38,10 +38,14 @@ const api = vi.hoisted(() => ({
       { path: "/source/docs", name: "docs", type: "folder", children: [{ path: "/source/docs/guide.md", name: "guide.md", type: "file" }] },
     ],
   }] })),
+  fetchWorktrees: vi.fn<typeof import("@/lib/backend/api").fetchWorktrees>(async () => ({ is_clone: false, default_base: null, branches: [], worktrees: [] })),
+  removeWorktree: vi.fn<typeof import("@/lib/backend/api").removeWorktree>(async () => {}),
+  deleteWorktreeBranch: vi.fn<typeof import("@/lib/backend/api").deleteWorktreeBranch>(async () => {}),
 }))
-vi.mock("@/lib/backend/api", () => ({
+vi.mock("@/lib/backend/api", async (importOriginal) => ({
   ...api,
-  addFileRoot: vi.fn(), createArchitectureSource: vi.fn(), fetchProviderUsage: vi.fn(async () => ({ reports: [] })),
+  ApiError: (await importOriginal<typeof import("@/lib/backend/api")>()).ApiError,
+  addFileRoot: vi.fn(), createArchitectureSource: vi.fn(), createWorktree: vi.fn(), fetchProviderUsage: vi.fn(async () => ({ reports: [] })),
   removeFileRoot: vi.fn(), moveDocument: vi.fn(), removeDocument: vi.fn(),
 }))
 vi.mock("@/features/navigation/SidebarContext", () => ({ useSidebar: () => ({ collapsed: false }) }))
@@ -131,6 +135,36 @@ describe("Project navigation", () => {
     const view = render(<Sidebar appMode="chat" onDiffSelect={onDiffSelect} />)
     fireEvent.click(await within(view.getByLabelText("File mounts")).findByRole("button", { name: "Open diff for source" }))
     expect(onDiffSelect).toHaveBeenCalledWith("/source")
+  })
+
+  it("switches a clone mount to a worktree, then removes it and keeps the branch unless confirmed", async () => {
+    const { ApiError } = await vi.importActual<typeof import("@/lib/backend/api")>("@/lib/backend/api")
+    const listWorktrees = api.fetchWorktrees.getMockImplementation()
+    api.fetchWorktrees.mockImplementation(async () => ({ is_clone: true, default_base: "dev", branches: ["dev", "feature"], worktrees: [
+      { path: "/source", branch: "dev", is_main: true, changed_files: 0, ahead: 0, behind: 0 },
+      { path: "/wt/feature", branch: "feature", is_main: false, changed_files: 2, ahead: 1, behind: 0 },
+    ] }))
+    api.removeWorktree.mockRejectedValueOnce(new ApiError("contains modified or untracked files", 409))
+    try {
+      const view = render(<Sidebar appMode="chat" />)
+      const fileMounts = within(view.getByLabelText("File mounts"))
+      fireEvent.click(await fileMounts.findByRole("button", { name: "source" }))
+      fireEvent.click(await fileMounts.findByRole("button", { name: "worktrees" }))
+
+      fireEvent.click(fileMounts.getByRole("button", { name: "feature 2 changed ↑1" }))
+      await waitFor(() => expect(api.fileRootTree).toHaveBeenLastCalledWith(["/wt/feature"]))
+
+      fireEvent.click(fileMounts.getByRole("button", { name: "Delete feature" }))
+      fireEvent.click(await fileMounts.findByRole("button", { name: "Yes" }))
+      expect(api.removeWorktree).toHaveBeenLastCalledWith("/source", "/wt/feature", true)
+      fireEvent.keyDown(await fileMounts.findByRole("group", { name: "Delete branch feature?" }), { key: "Escape" })
+
+      await waitFor(() => expect(api.fileRootTree).toHaveBeenLastCalledWith([]))
+      expect(fileMounts.queryByRole("group", { name: "Delete branch feature?" })).not.toBeInTheDocument()
+      expect(api.deleteWorktreeBranch).not.toHaveBeenCalled()
+    } finally {
+      api.fetchWorktrees.mockImplementation(listWorktrees!)
+    }
   })
 
   it("opens canvases, architecture and files from chat without mixing their categories", async () => {

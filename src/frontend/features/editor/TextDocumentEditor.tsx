@@ -253,7 +253,8 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent
     )
   }
 
-  if (content === null) {
+  // After a path change, `content` still belongs to the previous document until the new load lands.
+  if (content === null || loadedPath !== path) {
     return <div className="flex items-center justify-center py-6 text-xs text-ink-faint">Loading...</div>
   }
 

@@ -280,6 +280,27 @@ With Neovim enabled, **Edit diff** opens read-only HEAD beside editable working
 content. `:w` saves the file, `:qa` returns to the refreshed diff. Deleted,
 binary, oversized and symlinked files cannot be edited this way.
 
+## Worktrees
+
+A file mount holding a `.git` folder is a clone, the integration checkout its
+worktrees branch off. Its "worktrees" folder in the sidebar lists every worktree
+git knows, wherever it was created (`lib/git_worktree.py`, `/api/fileroots/worktrees`).
+Each row shows uncommitted files and commits ahead of and behind the base branch.
+
+- **Switch**: clicking a worktree makes the mount show it. The choice is kept
+  per mount in `localStorage` (`active_worktrees`), `GET /api/fileroots/tree?worktree=`
+  returns that worktree's files with `mount` holding the clone. The file tree,
+  diff and Neovim follow it. `FileRoots` admits the worktrees of clone mounts.
+- **Create**: the base defaults to `dev`, else origin's default branch. The base is
+  fetched and fast-forwarded where it is checked out, then `git worktree add -b`
+  creates `~/git/worktrees/<repo>/<name>`, the layout of the `worktree` agent skill.
+  An existing branch or folder is refused.
+- **Remove**: uncommitted changes need a confirmed force remove. Then "Delete
+  branch?" is opt-in, an unmerged branch needs a second confirmation. The remote
+  branch is never touched.
+
+The project linked to a clone keeps reading the clone's `docs/architecture`.
+
 ## Neovim editor
 
 Text documents can be edited in a real Neovim with the backend user's own

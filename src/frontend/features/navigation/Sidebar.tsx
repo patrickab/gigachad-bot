@@ -16,6 +16,7 @@ import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import type { BranchMeta, FileTreeNode, ProjectListItem, ProjectDocument } from "@/lib/domain/types"
 import { ChatBranchPreview } from "./ChatBranchPreview"
 import { FileMountPicker } from "./FileMountPicker"
+import { useWorktrees } from "./useWorktrees"
 import { addRootFilesToProject, addFileRoot, createArchitectureSource, fileRootTree, removeFileRoot, listNotes, listProjectDocuments, moveDocument, removeDocument, writeDocument } from "@/lib/backend/api"
 import { useTab, useTabActive, type AppSurface } from "@/contexts/TabContext"
 import { isArchitecturePath } from "@/lib/domain/architecturePaths"
@@ -84,12 +85,24 @@ export function Sidebar({
     return () => { cancelled = true }
   }, [projects, activeCanvasPath, appMode, isActive])
 
+  const mounts = rootTreeData.map((node) => node.mount ?? node.path)
+  const worktrees = useWorktrees(mounts)
+  const { reload: reloadWorktrees } = worktrees
+  const activeWorktreesKey = worktrees.activeWorktrees.join("\n")
+
+  const loadRootTree = useCallback(() => fileRootTree(activeWorktreesKey.split("\n").filter(Boolean))
+    .then((result) => setRootTreeData(result.tree)), [activeWorktreesKey])
+
   useEffect(() => {
     if (!isActive) return
     let cancelled = false
-    fileRootTree().then((result) => { if (!cancelled) setRootTreeData(result.tree) }).catch(() => {})
+    fileRootTree(activeWorktreesKey.split("\n").filter(Boolean)).then((result) => { if (!cancelled) setRootTreeData(result.tree) }).catch(() => {})
     return () => { cancelled = true }
-  }, [isActive])
+  }, [isActive, activeWorktreesKey])
+
+  useEffect(() => {
+    if (isActive) reloadWorktrees()
+  }, [isActive, reloadWorktrees])
 
   const moveToProject = async (path: string, scope: string) => {
     if (isArchitecturePath(path)) return
@@ -120,23 +133,38 @@ export function Sidebar({
     onDocumentsChanged?.()
   }
 
-  const buildRootFiles = (nodes: FileTreeNode[]): FileTreeItem<string>[] => nodes
-    .filter((node) => !pending(`root:${node.path}`))
-    .map((node) => ({
-      id: node.path,
-      label: node.name,
-      type: node.type === "file" ? "element" : "folder",
-      multiSelect: true,
-      isActive: node.path === activeDocumentPath,
-      onSelect: node.type === "file" ? () => onFileSelect?.(node.path) : undefined,
-      actions: node.type === "root" ? [{ label: `Open diff for ${node.name}`, icon: GitCompare, onClick: () => onDiffSelect?.(node.path) }] : undefined,
-      onDelete: node.type === "root" ? () => schedule(`root:${node.path}`, node.name, async () => {
-        const result = await removeFileRoot(node.path)
-        setRootTreeData(result.tree)
-        onRootsChanged?.()
-      }) : undefined,
-      children: node.children ? buildRootFiles(node.children) : undefined,
-    }))
+  const buildRootFiles = (nodes: FileTreeNode[]): FileTreeItem<string>[] => nodes.map((node) => ({
+    id: node.path,
+    label: node.name,
+    type: node.type === "file" ? "element" : "folder",
+    multiSelect: true,
+    isActive: node.path === activeDocumentPath,
+    onSelect: node.type === "file" ? () => onFileSelect?.(node.path) : undefined,
+    children: node.children ? buildRootFiles(node.children) : undefined,
+  }))
+
+  /** Mounts keep their registered path as id, so switching worktrees keeps them expanded. */
+  const buildMounts = (nodes: FileTreeNode[]): FileTreeItem<string>[] => nodes
+    .filter((node) => !pending(`root:${node.mount ?? node.path}`))
+    .map((node) => {
+      const mount = node.mount ?? node.path
+      const folder = worktrees.folder(mount)
+      return {
+        id: mount,
+        label: node.name,
+        type: "folder",
+        badge: worktrees.shownBranch(mount),
+        // Dragging a mount adds its path, only unambiguous while it shows the clone itself.
+        multiSelect: node.path === mount,
+        actions: [{ label: `Open diff for ${node.name}`, icon: GitCompare, onClick: () => onDiffSelect?.(node.path) }],
+        onDelete: () => schedule(`root:${mount}`, node.name, async () => {
+          await removeFileRoot(mount)
+          await loadRootTree()
+          onRootsChanged?.()
+        }),
+        children: [...(folder ? [folder] : []), ...buildRootFiles(node.children ?? [])],
+      }
+    })
 
   const hasArchitecture = (slug: string) => (documents[slug] ?? []).some((doc) => isArchitecturePath(doc.path))
 
@@ -256,7 +284,7 @@ export function Sidebar({
           onMoveToRoot={(path) => moveToProject(path, "")}
         />
         <div role="separator" className="my-4 border-t border-divider/50" />
-        <FileTree label="File mounts" items={buildRootFiles(rootTreeData)} controller={fileMountController}
+        <FileTree label="File mounts" items={buildMounts(rootTreeData)} controller={fileMountController}
           create={{ label: "Add file mount", onClick: () => setFileMountPickerOpen(true) }}
         />
       </nav>
@@ -264,8 +292,8 @@ export function Sidebar({
       {renderSettings && <div className="shrink-0 p-2">{renderSettings()}</div>}
     </>}
     <FileMountPicker open={fileMountPickerOpen} onClose={() => setFileMountPickerOpen(false)} onConfirm={async (path) => {
-      const result = await addFileRoot(path)
-      setRootTreeData(result.tree)
+      await addFileRoot(path)
+      await loadRootTree()
       onRootsChanged?.()
     }} />
   </motion.aside>

@@ -24,6 +24,8 @@ export interface FileTreeNode {
   name: string
   path: string
   type: "root" | "folder" | "file"
+  /** Root nodes: the registered mount, `path` differs when one of its worktrees is shown. */
+  mount?: string
   children?: FileTreeNode[]
 }
 

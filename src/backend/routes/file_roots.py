@@ -23,7 +23,7 @@ from lib import document_library as lib_docs
 from lib.asset_store import AssetStore
 from lib.attachment_materialize import materialize, store_library_pdf
 from lib.data_store import StorageNotFoundError
-from lib import git_diff
+from lib import git_diff, git_worktree
 from lib.file_roots import FileRoots, list_directories
 from lib.project_store import ProjectStore
 from lib.storage_namespace import PDFS
@@ -47,6 +47,7 @@ class FileTreeNode(BaseModel):
     name: str
     path: str
     type: str
+    mount: str | None = None
     project: str | None = None
     children: list["FileTreeNode"] | None = None
 
@@ -72,8 +73,9 @@ def list_files(roots: FileRoots = Depends(get_file_roots)) -> RootFileListRespon
 
 
 @router.get("/tree", response_model=FileTreeResponse)
-def list_tree(roots: FileRoots = Depends(get_file_roots)) -> FileTreeResponse:
-    return FileTreeResponse(enabled=roots.enabled, tree=roots.tree())
+def list_tree(worktree: list[str] = Query(default=[]), roots: FileRoots = Depends(get_file_roots)) -> FileTreeResponse:
+    """Every root's tree, a root shows one of its *worktree* paths instead of its own files when listed."""
+    return FileTreeResponse(enabled=roots.enabled, tree=roots.tree(worktree))
 
 
 @router.post("/roots", response_model=FileTreeResponse)
@@ -277,3 +279,90 @@ def read_diff_content(root: str = Query(...), path: str = Query(...), roots: Fil
     except git_diff.UnsupportedDiffContent as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return DiffContentResponse(base_content=base, content=content)
+
+
+class WorktreeEntry(BaseModel):
+    path: str
+    branch: str | None
+    is_main: bool
+    changed_files: int
+    ahead: int
+    behind: int
+
+
+class WorktreeListResponse(BaseModel):
+    is_clone: bool
+    default_base: str | None = None
+    branches: list[str] = []
+    worktrees: list[WorktreeEntry] = []
+
+
+class CreateWorktreeBody(BaseModel):
+    root: str
+    name: str
+    base: str
+
+
+def _clone_root(root: str, roots: FileRoots) -> Path:
+    """The registered mount *root*, 403 for anything else."""
+    directory = Path(root).expanduser().resolve()
+    if str(directory) not in roots.roots():
+        raise HTTPException(status_code=403, detail=f"Not a file mount: {root}")
+    return directory
+
+
+def _git_refusal(exc: git_worktree.WorktreeError) -> HTTPException:
+    conflict = isinstance(exc, (git_worktree.WorktreeDirty, git_worktree.BranchNotMerged))
+    return HTTPException(status_code=409 if conflict else 400, detail=str(exc))
+
+
+@router.get("/worktrees", response_model=WorktreeListResponse)
+def list_worktrees(root: str = Query(...), roots: FileRoots = Depends(get_file_roots)) -> WorktreeListResponse:
+    """Worktrees of the clone mounted at *root*, each with its uncommitted files and commits ahead/behind the base."""
+    repository = _clone_root(root, roots)
+    if not git_worktree.is_clone(repository):
+        return WorktreeListResponse(is_clone=False)
+    try:
+        base = git_worktree.default_base_branch(repository)
+        entries = [
+            WorktreeEntry(path=worktree.path, branch=worktree.branch, is_main=worktree.is_main, **vars(git_worktree.status(Path(worktree.path), base)))
+            for worktree in git_worktree.list_worktrees(repository)
+        ]
+        return WorktreeListResponse(is_clone=True, default_base=base, branches=git_worktree.branches(repository), worktrees=entries)
+    except git_worktree.WorktreeError as exc:
+        raise _git_refusal(exc) from exc
+
+
+@router.post("/worktrees", response_model=RootFile)
+def create_worktree(body: CreateWorktreeBody, roots: FileRoots = Depends(get_file_roots)) -> RootFile:
+    """Pull *base* and branch a new worktree off it, `name` is the branch."""
+    repository = _clone_root(body.root, roots)
+    try:
+        worktree = git_worktree.create_worktree(repository, body.name, body.base)
+    except git_worktree.WorktreeError as exc:
+        raise _git_refusal(exc) from exc
+    return RootFile(path=worktree.path, name=worktree.branch or Path(worktree.path).name)
+
+
+@router.delete("/worktrees")
+def remove_worktree(
+    root: str = Query(...), path: str = Query(...), force: bool = Query(default=False), roots: FileRoots = Depends(get_file_roots),
+) -> dict[str, bool]:
+    """Remove a worktree, keeping its branch. 409 when it holds uncommitted changes and *force* is off."""
+    try:
+        git_worktree.remove_worktree(_clone_root(root, roots), path, force=force)
+    except git_worktree.WorktreeError as exc:
+        raise _git_refusal(exc) from exc
+    return {"ok": True}
+
+
+@router.delete("/worktrees/branch")
+def delete_worktree_branch(
+    root: str = Query(...), branch: str = Query(...), force: bool = Query(default=False), roots: FileRoots = Depends(get_file_roots),
+) -> dict[str, bool]:
+    """Delete a local branch. 409 when it is not fully merged and *force* is off."""
+    try:
+        git_worktree.delete_branch(_clone_root(root, roots), branch, force=force)
+    except git_worktree.WorktreeError as exc:
+        raise _git_refusal(exc) from exc
+    return {"ok": True}

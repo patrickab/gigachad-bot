@@ -4,13 +4,22 @@ import { useRef, useState, type ElementType, type ReactNode } from "react"
 import { ChevronRight, Plus, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/Skeleton"
+import { StyledSelect } from "@/components/ui/StyledSelect"
 import type { FileBranchController } from "./useFileTree"
+
+/** A second input of a create form, e.g. the branch a new worktree starts from. */
+export interface FileTreeCreateChoice {
+  label: string
+  options: string[]
+  initial: string
+}
 
 export type FileTreeCreateAction =
   | {
     label: string
     placeholder: string
-    onSubmit: (name: string) => Promise<void>
+    choice?: FileTreeCreateChoice
+    onSubmit: (name: string, choice?: string) => Promise<void>
   }
   | {
     label: string
@@ -29,6 +38,8 @@ export interface FileTreeItem<T = unknown> {
   multiSelect?: boolean
   onSelect?: () => void
   onDelete?: () => void
+  /** Shown under the row, e.g. an inline confirmation. */
+  detail?: ReactNode
   create?: FileTreeCreateAction
   actions?: {
     label: string
@@ -209,6 +220,7 @@ export function FileTree<T>({ items, controller, label, loading, create, renderB
           </button>}
         </div>
       </div>
+      {item.detail && <div style={{ marginLeft: paddingLeft + 20 }}>{item.detail}</div>}
       {expanded && <div role="group" aria-label={`${item.label} contents`}>
         {renderItems(item.children ?? [], depth + 1)}
         {creation?.parentId === item.id && <InlineCreateForm
@@ -251,6 +263,7 @@ function InlineCreateForm({ action, depth, onDone, onCancel }: {
   onCancel: () => void
 }) {
   const [name, setName] = useState("")
+  const [choice, setChoice] = useState(action.choice?.initial)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
   const submit = async () => {
@@ -258,7 +271,7 @@ function InlineCreateForm({ action, depth, onDone, onCancel }: {
     setSaving(true)
     setError("")
     try {
-      await action.onSubmit(name.trim())
+      await action.onSubmit(name.trim(), choice)
       onDone()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not create this item")
@@ -280,6 +293,12 @@ function InlineCreateForm({ action, depth, onDone, onCancel }: {
       }}
       className="h-6 w-full bg-transparent text-xs text-ink placeholder:text-ink-faint outline-none"
     />
+    {action.choice && choice != null && <div className="flex items-center gap-1 text-[10px] text-ink-faint">
+      <span>{action.choice.label}</span>
+      <StyledSelect variant="inline" ariaLabel={action.choice.label} value={choice} onChange={setChoice}
+        options={action.choice.options.map((option) => ({ value: option, label: option }))}
+        className="text-[10px] text-ink-muted hover:text-ink" />
+    </div>}
     {error && <p role="alert" className="py-1 text-xs text-danger">{error}</p>}
   </div>
 }

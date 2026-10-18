@@ -260,8 +260,45 @@ export async function listRootFiles(): Promise<{ enabled: boolean; files: RootFi
   return request("/fileroots/files")
 }
 
-export async function fileRootTree(): Promise<{ enabled: boolean; tree: FileTreeNode[] }> {
-  return request("/fileroots/tree")
+/** Every mount's tree, a mount listed with one of its `worktrees` shows that worktree instead. */
+export async function fileRootTree(worktrees: string[] = []): Promise<{ enabled: boolean; tree: FileTreeNode[] }> {
+  return request(`/fileroots/tree${toQuery({ worktree: worktrees })}`)
+}
+
+export interface Worktree {
+  path: string
+  branch: string | null
+  is_main: boolean
+  changed_files: number
+  ahead: number
+  behind: number
+}
+
+export interface WorktreeList {
+  /** The mount holds a `.git` folder, only clones have worktrees. */
+  is_clone: boolean
+  default_base: string | null
+  branches: string[]
+  worktrees: Worktree[]
+}
+
+export async function fetchWorktrees(root: string): Promise<WorktreeList> {
+  return request(`/fileroots/worktrees${toQuery({ root })}`)
+}
+
+/** Pull `base`, then branch worktree `name` off it, returns the new worktree's path. */
+export async function createWorktree(root: string, name: string, base: string): Promise<RootFile> {
+  return post("/fileroots/worktrees", { root, name, base })
+}
+
+/** Throws ApiError 409 when the worktree holds uncommitted changes and `force` is off. */
+export async function removeWorktree(root: string, path: string, force = false): Promise<void> {
+  await del(`/fileroots/worktrees${toQuery({ root, path, force })}`)
+}
+
+/** Throws ApiError 409 when the branch is not fully merged and `force` is off. */
+export async function deleteWorktreeBranch(root: string, branch: string, force = false): Promise<void> {
+  await del(`/fileroots/worktrees/branch${toQuery({ root, branch, force })}`)
 }
 
 /** Add file-root files (folders expand to their valid files) to a project's documents. */

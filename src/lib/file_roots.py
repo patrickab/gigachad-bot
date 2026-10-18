@@ -10,7 +10,7 @@ Listings (flat list, tree, folder expansion) honor ``.gitignore`` files found
 from each root downward, with git's precedence: the last matching pattern wins
 and deeper files override shallower ones. Ignored folders are never entered.
 Explicit paths (attach, read, write) are not filtered, only validated against
-the roots.
+the roots. A root that is a git clone also admits its worktrees (``git_worktree``).
 
 Root files are used as **live references**: attaching one to a chat stores its
 path, never a copy. Edits through the app write back to the actual file.
@@ -25,12 +25,14 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import re
-from typing import Protocol
+from typing import Iterable, Protocol
 from urllib.parse import quote as _url_quote
 from uuid import UUID
 
 from pathspec import GitIgnoreSpec
 from psycopg_pool import ConnectionPool
+
+from lib import git_worktree
 
 # Directories that hold app internals (e.g. Obsidian's) or noise rather than files, skipped even without a .gitignore.
 _SKIP_DIRS = frozenset({".obsidian", ".trash", ".git", "node_modules"})
@@ -72,7 +74,8 @@ def _visible_entries(directory: Path | str, inherited: _IgnoreLayers) -> tuple[l
     visible = []
     for entry in entries:
         is_dir = entry.is_dir(follow_symlinks=False)
-        if (is_dir and entry.name in _SKIP_DIRS) or _is_ignored(entry.path, is_dir, layers):
+        # A linked worktree's `.git` is a file pointing at the clone, skipped like the folder.
+        if (is_dir and entry.name in _SKIP_DIRS) or entry.name == ".git" or _is_ignored(entry.path, is_dir, layers):
             continue
         visible.append((entry, is_dir))
     return visible, layers
@@ -158,6 +161,7 @@ class FileRoots:
     def __init__(self, *, repository: FileRootRepository) -> None:
         self._repository = repository
         self._roots: list[Path] = []
+        self._worktrees: dict[Path, list[Path]] | None = None
         self._reload()
 
     def _reload(self) -> None:
@@ -194,10 +198,29 @@ class FileRoots:
 
     # ─── path safety ───
 
+    def worktrees_of(self, root: Path) -> list[Path]:
+        """Linked worktrees of a registered clone root, empty for other roots. Listed once per instance."""
+        if self._worktrees is None:
+            self._worktrees = {}
+            for candidate in self._roots:
+                if not git_worktree.is_clone(candidate):
+                    continue
+                try:
+                    listed = git_worktree.list_worktrees(candidate)
+                except git_worktree.WorktreeError:
+                    continue
+                self._worktrees[candidate] = [Path(worktree.path) for worktree in listed if not worktree.is_main]
+        return self._worktrees.get(root, [])
+
+    def _accessible_roots(self, target: Path) -> list[Path]:
+        """Registered roots holding *target*, else the clone worktrees holding it, so worktrees cost git calls only when used."""
+        holding = [root for root in self._roots if target.is_relative_to(root)]
+        return holding or [worktree for root in self._roots for worktree in self.worktrees_of(root) if target.is_relative_to(worktree)]
+
     def _root_for(self, path: str) -> Path:
-        """Resolve *path*, rejecting anything that lives outside all roots."""
+        """Resolve *path*, rejecting anything that lives outside all roots and their worktrees."""
         target = Path(path).expanduser().resolve()
-        if any(target.is_relative_to(root) for root in self._roots):
+        if self._accessible_roots(target):
             return target
         raise ValueError(f"Path outside file roots: {path}")
 
@@ -209,9 +232,12 @@ class FileRoots:
             return False
 
     def root_of(self, path: str) -> Path:
-        """Innermost registered root holding *path*, ValueError outside all roots."""
-        target = self._root_for(path)
-        return max((root for root in self._roots if target.is_relative_to(root)), key=lambda root: len(root.parts))
+        """Innermost registered root or clone worktree holding *path*, ValueError outside all of them."""
+        target = Path(path).expanduser().resolve()
+        holding = self._accessible_roots(target)
+        if not holding:
+            raise ValueError(f"Path outside file roots: {path}")
+        return max(holding, key=lambda root: len(root.parts))
 
     # ─── listing ───
 
@@ -251,13 +277,20 @@ class FileRoots:
                 found[target] = None
         return list(found)
 
-    def tree(self) -> list[dict]:
-        """Nested folder/file tree per root for the sidebar FileTree. Empty folders are pruned."""
-        return [
-            {"name": root.name, "path": str(root), "type": "root", "children": self._build_children(root)}
-            for root in self._roots
-            if root.is_dir()
-        ]
+    def tree(self, active_worktrees: Iterable[str] = ()) -> list[dict]:
+        """Nested folder/file tree per root for the sidebar FileTree. Empty folders are pruned.
+
+        - A root listed with one of its worktrees in *active_worktrees* shows that worktree's files and path
+        - `mount` always holds the registered root path
+        """
+        active = {Path(path).expanduser().resolve() for path in active_worktrees}
+        nodes = []
+        for root in self._roots:
+            if not root.is_dir():
+                continue
+            shown = next((worktree for worktree in self.worktrees_of(root) if worktree in active), root) if active else root
+            nodes.append({"name": root.name, "path": str(shown), "mount": str(root), "type": "root", "children": self._build_children(shown)})
+        return nodes
 
     @staticmethod
     def _build_children(directory: Path | str, inherited: _IgnoreLayers = ()) -> list[dict]:
