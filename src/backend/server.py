@@ -38,6 +38,7 @@ from lib import omp_source
 from backend.routes.models import router as models_router
 from backend.routes.file_roots import router as file_roots_router
 from backend.routes.ocr import router as ocr_router
+from backend.routes.omp import router as omp_router
 from backend.routes.projects import router as projects_router
 from backend.routes.sync import router as sync_router
 from backend.sync import get_change_broker
@@ -136,4 +137,5 @@ app.include_router(ocr_router)
 app.include_router(projects_router)
 app.include_router(sync_router)
 app.include_router(canvases_router)
+app.include_router(omp_router)
 
