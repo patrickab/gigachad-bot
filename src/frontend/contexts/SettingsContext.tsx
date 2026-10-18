@@ -53,6 +53,8 @@ interface SettingsValue {
   tabDefaults: TabConfig
   ocrModel: string
   neovim: NeovimSetting
+  /** omp-web's address for the omp tabs' frame, null until the backend config loaded. */
+  ompWebUrl: string | null
 }
 
 const SettingsContext = createContext<SettingsValue | null>(null)
@@ -78,6 +80,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [ocrModel, setOCRModel] = useState("")
   const [neovimAvailable, setNeovimAvailable] = useState(false)
   const [neovimPreferred, setNeovimPreferred] = useState(readNeovimPreference)
+  const [ompWebUrl, setOmpWebUrl] = useState<string | null>(null)
 
   useEffect(() => {
     fetchBackendConfig()
@@ -90,6 +93,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         }))
         setOCRModel((prev) => prev || cfg.vision_model)
         setNeovimAvailable(cfg.neovim_available)
+        setOmpWebUrl(cfg.omp_web_url)
       })
       .catch(() => {
         // backend unreachable, keep hardcoded fallbacks
@@ -106,7 +110,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <SettingsContext.Provider value={{ tabDefaults, ocrModel, neovim }}>
+    <SettingsContext.Provider value={{ tabDefaults, ocrModel, neovim, ompWebUrl }}>
       {children}
     </SettingsContext.Provider>
   )

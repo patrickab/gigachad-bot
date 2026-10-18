@@ -1,4 +1,4 @@
-import type { Attachment, BackendConfig, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, DirectoryListing, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpCatalog, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ReasoningLevels, Usage, RootFile, FileTreeNode } from "@/lib/domain/types"
+import type { Attachment, BackendConfig, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, DirectoryListing, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpArchivedSession, OmpCatalog, OmpOverview, OmpSystemPrompt, OmpWorkspace, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ReasoningLevels, Usage, RootFile, FileTreeNode } from "@/lib/domain/types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { getApiBase } from "./config"
@@ -581,4 +581,31 @@ export async function remapOrphanedCategory(
     remaining_categories: remainingCategories,
     project_slug: projectSlug ?? null,
   })
+}
+
+export async function fetchOmpOverview(): Promise<OmpOverview> {
+  return request<OmpOverview>("/omp/overview")
+}
+
+export async function addOmpWorkspace(path: string): Promise<OmpWorkspace> {
+  return post<OmpWorkspace>("/omp/workspaces", { path })
+}
+
+export async function fetchOmpArchive(): Promise<OmpArchivedSession[]> {
+  return request<OmpArchivedSession[]>("/omp/archive")
+}
+
+/** Restore an archived omp session, resolves to its session id. */
+export async function restoreOmpSession(key: string): Promise<string> {
+  const data = await post<{ session_id: string }>("/omp/archive/restore", { key })
+  return data.session_id
+}
+
+/** Archive an omp session. omp-web refuses (409) while forks of it exist. */
+export async function archiveOmpSession(sessionId: string): Promise<void> {
+  await ensureOk(await fetch(`${getApiBase()}/omp/sessions/${encodeURIComponent(sessionId)}/archive`, { method: "POST", headers: deviceHeaders() }))
+}
+
+export async function fetchOmpSystemPrompt(sessionId: string): Promise<OmpSystemPrompt> {
+  return request<OmpSystemPrompt>(`/omp/sessions/${encodeURIComponent(sessionId)}/system-prompt`)
 }
