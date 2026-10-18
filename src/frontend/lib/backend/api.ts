@@ -1,4 +1,4 @@
-import type { Attachment, BackendConfig, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpCatalog, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ReasoningLevels, Usage, RootFile, FileTreeNode } from "@/lib/domain/types"
+import type { Attachment, BackendConfig, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, DirectoryListing, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpCatalog, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ReasoningLevels, Usage, RootFile, FileTreeNode } from "@/lib/domain/types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { getApiBase } from "./config"
@@ -256,6 +256,11 @@ export async function addFileRoot(path: string): Promise<{ enabled: boolean; tre
 
 export async function removeFileRoot(path: string): Promise<{ enabled: boolean; tree: FileTreeNode[] }> {
   return del(`/fileroots/roots?path=${encodeURIComponent(path)}`)
+}
+
+/** List a backend directory for picking a workspace; `~` is the backend user's home. */
+export async function browseDirectories(path: string): Promise<DirectoryListing> {
+  return request(`/fileroots/browse${toQuery({ path })}`)
 }
 
 export async function readFileRootRendered(path: string): Promise<string> {

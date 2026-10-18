@@ -13,6 +13,7 @@ import { useSidebar } from "@/features/navigation/SidebarContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import type { BranchMeta, FileTreeNode, ProjectListItem, ProjectDocument } from "@/lib/domain/types"
 import { ChatBranchPreview } from "./ChatBranchPreview"
+import { WorkspacePicker } from "./WorkspacePicker"
 import { addRootFilesToProject, addFileRoot, createArchitectureSource, fileRootTree, removeFileRoot, listNotes, listProjectDocuments, moveDocument, removeDocument, writeDocument } from "@/lib/backend/api"
 import { useTab, useTabActive, type AppSurface } from "@/contexts/TabContext"
 import { isArchitecturePath } from "@/lib/domain/architecturePaths"
@@ -48,13 +49,14 @@ export function Sidebar({
   const { openMemoryViewer } = useMemoryViewer()
   const { schedule, pending } = useUndoDelete()
   const defaultExpanded = useMemo(() => [
-    "shared:canvases", "shared:files",
+    "shared:canvases",
     ...projects.flatMap((project) => ["chats", "canvases", "architecture", "files"].map((category) => `project:${project.slug}:${category}`)),
   ], [projects])
   const controller = useFileTree({ storageKey: "expanded_workspace_projects", defaultExpanded })
   const [documents, setDocuments] = useState<Record<string, ProjectDocument[]>>({})
   const [notes, setNotes] = useState<ProjectDocument[]>([])
   const [rootTreeData, setRootTreeData] = useState<FileTreeNode[]>([])
+  const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false)
 
   const refreshDocuments = useCallback(async () => {
     const [loose, entries] = await Promise.all([
@@ -190,30 +192,23 @@ export function Sidebar({
           onSelect: () => onArchitectureSelect?.(scope),
         }] : [],
       }] : []),
-      {
-        id: `${prefix}:files`, label: "files", type: "folder",
-        create: project ? {
+      ...(project ? [{
+        id: `${prefix}:files`, label: "files", type: "folder" as const,
+        create: {
           label: `New file in ${owner}`, placeholder: "File name",
-          onSubmit: async (name) => {
+          onSubmit: async (name: string) => {
             const doc = await writeDocument(scope, name)
             await refreshDocuments()
             onDocumentSelect?.(doc.path, scope)
           },
-        } : {
-          label: "Add shared folder", placeholder: "Folder path…",
-          onSubmit: async (path) => {
-            const result = await addFileRoot(path)
-            setRootTreeData(result.tree)
-            onRootsChanged?.()
-          },
         },
-        onDropFiles: project ? (paths) => importFiles(scope, paths) : undefined,
-        children: project ? docs.filter((doc) => !doc.name.endsWith(".canvas") && !isArchitecturePath(doc.path)).map((doc) => ({
+        onDropFiles: (paths: string[]) => importFiles(scope, paths),
+        children: docs.filter((doc) => !doc.name.endsWith(".canvas") && !isArchitecturePath(doc.path)).map((doc): FileTreeItem<string> => ({
           id: doc.path, label: doc.name, type: "element", isActive: activeDocumentPath === doc.path,
           onSelect: () => onDocumentSelect?.(doc.path, scope),
           onDelete: () => deleteDocument(doc.path, scope),
-        })) : buildRootFiles(rootTreeData),
-      },
+        })),
+      }] : []),
     ]
   }
 
@@ -259,9 +254,18 @@ export function Sidebar({
           renderBeforeItem={(item) => item.data ? <ChatBranchPreview file={item.data} /> : null}
           onMoveToRoot={(path) => moveToProject(path, "")}
         />
+        <div role="separator" className="my-4 border-t border-divider/50" />
+        <FileTree label="Workspaces" items={buildRootFiles(rootTreeData)} controller={controller}
+          create={{ label: "Add workspace", onClick: () => setWorkspacePickerOpen(true) }}
+        />
       </nav>
       {renderSettings && <div className="shrink-0 p-2">{renderSettings()}</div>}
     </>}
+    <WorkspacePicker open={workspacePickerOpen} onClose={() => setWorkspacePickerOpen(false)} onConfirm={async (path) => {
+      const result = await addFileRoot(path)
+      setRootTreeData(result.tree)
+      onRootsChanged?.()
+    }} />
   </motion.aside>
 }
 

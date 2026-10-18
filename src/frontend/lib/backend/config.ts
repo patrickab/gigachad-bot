@@ -14,3 +14,4 @@ export function setApiBase(base: string): void {
 export const REASONING_LEVELS = ["none", "low", "medium", "high"] as const
 
 export const STORAGE_KEY_THEME = "theme"
+export const STORAGE_KEY_NEOVIM = "neovim"

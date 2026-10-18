@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
+import { isNeovimKeyEvent } from "@/lib/utils"
 
 /** Hover-preview and Ctrl+Up/Down keyboard focus over a chat's question/answer pairs. */
 export function usePairFocus({ pairs, scrollContainerRef, togglePair }: {
@@ -69,6 +70,7 @@ export function usePairFocus({ pairs, scrollContainerRef, togglePair }: {
   useEffect(() => {
     const eat = (e: KeyboardEvent) => { e.preventDefault(); e.stopPropagation() }
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (isNeovimKeyEvent(e)) return
       const ctrl = e.ctrlKey || e.metaKey
       if (ctrl && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
         eat(e)

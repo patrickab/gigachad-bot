@@ -74,7 +74,10 @@ async def read_text_content(
 
     resolved = _resolve_allowed(path, roots)
     try:
-        content = resolved.read_text(encoding="utf-8", errors="replace")
+        # Strict decode: a lossy one would let the editor save replacement characters over a binary file.
+        content = resolved.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=415, detail="Not a UTF-8 text file") from exc
     except OSError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return FileContent(path=path, content=content)
@@ -107,5 +110,5 @@ async def read_raw(
             headers={"Content-Disposition": "inline"},
         )
 
-    resolved = _resolve_allowed(path, roots, store)
+    resolved = _resolve_allowed(path, roots)
     return FileResponse(resolved, media_type=lib_docs.mime_for(resolved), content_disposition_type="inline")

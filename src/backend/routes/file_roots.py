@@ -16,15 +16,16 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from backend.routes.deps import get_asset_store, get_document_store, get_file_roots, get_project_store
+from backend.identity import RequestIdentity, get_request_identity
+from backend.routes.deps import get_asset_store, get_file_roots, get_project_store
 from backend.routes.schemas import AttachResult, FileContent, FileListResponse, FileMeta
 from lib import document_library as lib_docs
 from lib.asset_store import AssetStore
 from lib.attachment_materialize import materialize, store_library_pdf
-from lib.data_store import DataStore, StorageNotFoundError, write_text
-from lib.file_roots import FileRoots
+from lib.data_store import StorageNotFoundError
+from lib.file_roots import FileRoots, list_directories
 from lib.project_store import ProjectStore
-from lib.storage_namespace import PDFS, project_document
+from lib.storage_namespace import PDFS
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +59,12 @@ class RootBody(BaseModel):
     path: str
 
 
+class DirectoryListing(BaseModel):
+    path: str
+    parent: str | None
+    directories: list[str]
+
+
 @router.get("/files", response_model=RootFileListResponse)
 def list_files(roots: FileRoots = Depends(get_file_roots)) -> RootFileListResponse:
     return RootFileListResponse(enabled=roots.enabled, files=roots.list_files())
@@ -81,6 +88,22 @@ def add_root(body: RootBody, roots: FileRoots = Depends(get_file_roots)) -> File
 def remove_root(path: str = Query(...), roots: FileRoots = Depends(get_file_roots)) -> FileTreeResponse:
     roots.remove_root(path)
     return FileTreeResponse(enabled=roots.enabled, tree=roots.tree())
+
+
+@router.get("/browse", response_model=DirectoryListing)
+def browse_directories(
+    path: str = Query(default="~"),
+    _identity: RequestIdentity = Depends(get_request_identity),
+) -> DirectoryListing:
+    """List the subdirectories of *path* on the backend host, to pick a new root."""
+    try:
+        directory, names = list_directories(path)
+    except NotADirectoryError as exc:
+        raise HTTPException(status_code=404, detail=f"Not a directory: {path}") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=f"Cannot read {path}") from exc
+    parent = str(directory.parent) if directory.parent != directory else None
+    return DirectoryListing(path=str(directory), parent=parent, directories=names)
 
 
 @router.post("/file")
@@ -161,13 +184,13 @@ def add_to_project(
     body: AddToProjectBody,
     roots: FileRoots = Depends(get_file_roots),
     store: ProjectStore = Depends(get_project_store),
-    docs: DataStore = Depends(get_document_store),
     assets: AssetStore = Depends(get_asset_store),
 ) -> FileListResponse:
-    """Add file-root files (folders expand recursively, valid extensions only) to a project's documents.
+    """Reference file-root files (folders expand recursively) from a project.
 
+    - Text files are stored as their absolute path, so the project always sees the workspace file
+      and removing it from the project never touches the filesystem
     - PDFs are promoted into the shared library, as on attach
-    - Text files are copied into the project's documents, overwriting a same-named one
     - Files that are not valid UTF-8 text are skipped
     """
     try:
@@ -186,11 +209,10 @@ def add_to_project(
             materialize(file.name, content, assets, enqueue_on_miss=True)
         else:
             try:
-                text = file.read_text(encoding="utf-8")
+                file.read_text(encoding="utf-8")
             except UnicodeDecodeError:
                 continue
-            key = project_document(body.slug, file.name)
-            write_text(docs, key, text)
+            key = str(file)
         store.add_file(body.slug, key)
         added.append(FileMeta(**lib_docs.document_meta(key)))
     return FileListResponse(documents=added)

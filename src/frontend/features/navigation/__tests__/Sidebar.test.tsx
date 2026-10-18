@@ -83,14 +83,15 @@ function WorkspaceDraft() {
 }
 
 describe("Project navigation", () => {
-  it("opens immediate categories by default without expanding file roots", async () => {
+  it("opens immediate categories by default and lists mounted roots collapsed under Workspaces", async () => {
     localStorage.setItem("expanded_workspace_projects", "[]")
     const view = render(<Sidebar appMode="chat" />)
     const general = within(view.getByLabelText("General"))
     expect(general.getByRole("button", { name: "canvases" })).toHaveAttribute("aria-expanded", "true")
-    expect(general.getByRole("button", { name: "files" })).toHaveAttribute("aria-expanded", "true")
-    expect(await general.findByRole("button", { name: "source" })).toHaveAttribute("aria-expanded", "false")
-    expect(general.queryByRole("button", { name: "first.md" })).not.toBeInTheDocument()
+    expect(general.queryByRole("button", { name: "files" })).not.toBeInTheDocument()
+    const workspaces = within(view.getByLabelText("Workspaces"))
+    expect(await workspaces.findByRole("button", { name: "source" })).toHaveAttribute("aria-expanded", "false")
+    expect(workspaces.queryByRole("button", { name: "first.md" })).not.toBeInTheDocument()
 
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
@@ -194,7 +195,7 @@ describe("Project navigation", () => {
     const view = render(<Sidebar appMode="chat" />)
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
-    const shared = within(view.getByLabelText("General"))
+    const shared = within(view.getByLabelText("Workspaces"))
     fireEvent.click(await shared.findByRole("button", { name: "source" }))
     const first = shared.getByRole("button", { name: "first.md" })
     const second = shared.getByRole("button", { name: "second.md" })

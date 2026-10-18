@@ -15,11 +15,13 @@ interface DialogProps {
   initialFocusRef?: RefObject<HTMLElement | null>
   /** Surface classes of the card; sizing and clipping are fixed by the shell. */
   panelClassName?: string
+  /** Max-width class of the card, `max-w-sm` by default. */
+  widthClassName?: string
   children: ReactNode
 }
 
 /** Centered modal shell: backdrop, animated card with icon + title header, Escape and backdrop-click close. */
-export function Dialog({ open, onClose, icon: Icon, title, initialFocusRef, panelClassName = DEFAULT_PANEL_CLASS, children }: DialogProps) {
+export function Dialog({ open, onClose, icon: Icon, title, initialFocusRef, panelClassName = DEFAULT_PANEL_CLASS, widthClassName = "max-w-sm", children }: DialogProps) {
   useEffect(() => {
     if (!open) return
     // Wait for the enter animation to mount the input before focusing
@@ -46,7 +48,7 @@ export function Dialog({ open, onClose, icon: Icon, title, initialFocusRef, pane
             exit={{ opacity: 0, scale: 0.96, y: 8 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
             onClick={(e) => e.stopPropagation()}
-            className={`w-full max-w-sm mx-4 overflow-hidden ${panelClassName}`}
+            className={`w-full ${widthClassName} mx-4 overflow-hidden ${panelClassName}`}
           >
             <div className="px-5 pt-5 pb-3">
               <div className="flex items-center gap-2 text-sm font-medium text-ink">

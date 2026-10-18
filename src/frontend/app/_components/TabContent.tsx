@@ -38,6 +38,7 @@ import { loadChatHistory, writeRootFile } from "@/lib/backend/api"
 import { normalizeMessageAttachments } from "@/features/chat/attachments"
 import { parseHistoryFile } from "@/lib/domain/historyFile"
 import { fileViewerRawUrl } from "@/lib/backend/urls"
+import { isNeovimKeyEvent } from "@/lib/utils"
 import { MemoryCommandLayer } from "./MemoryCommandLayer"
 
 /** One tab's workspace: the chat (or canvas) with its sidebar, top bar, modals and keyboard shortcuts. */
@@ -137,6 +138,7 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
   }, [tab.historyFile, setMessages, setTitle, setTotalUsage])
 
   const onKeyDown = useEffectEvent((e: KeyboardEvent) => {
+    if (isNeovimKeyEvent(e)) return
     if (e.altKey && e.key === "s") {
       e.preventDefault()
       if (persistence.isTitled) persistence.handleQuickSave()

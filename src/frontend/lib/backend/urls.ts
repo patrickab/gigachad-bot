@@ -55,3 +55,8 @@ export function sandboxAssetUrl(assetPath: string): string {
 export function canvasMutationStreamUrl(canvasKey: string, sinceRevision: number): string {
   return `${getApiBase()}/canvases/${encodePath(canvasKey)}/stream${toQuery({ sinceRevision })}`
 }
+
+/** WebSocket for one Neovim terminal session, see `backend/routes/neovim.py`. */
+export function neovimSessionUrl(): string {
+  return `${getApiBase().replace(/^http/, "ws")}/neovim/session`
+}

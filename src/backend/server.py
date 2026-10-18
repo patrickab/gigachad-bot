@@ -1,6 +1,5 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
-import os
 import signal
 import sys
 
@@ -28,6 +27,7 @@ from lib.data_store import StorageConflictError
 from backend.routes.chat import router as chat_router
 from backend.routes.config import router as config_router
 from backend.routes.deps import get_client, shutdown_client
+from backend.routes.neovim import router as neovim_router
 from backend.routes.documents import router as documents_router
 from backend.routes.files import router as files_router
 from backend.routes.fileviewer import router as fileviewer_router
@@ -42,7 +42,7 @@ from backend.routes.projects import router as projects_router
 from backend.routes.sync import router as sync_router
 from backend.sync import get_change_broker
 from lib.db_schema import database_url, upgrade
-from config import close_postgres_pool
+from config import CORS_ORIGINS, close_postgres_pool
 
 
 # Kill MinerU child servers before exiting so they do not outlive the API.
@@ -78,13 +78,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="gigachad-bot", lifespan=lifespan)
 
-# Defaults to the pre-desktop wildcard; the Tauri shell narrows it to its own
-# webview origins via this env var, and server deployments can do the same.
-_cors_origins = [o.strip() for o in os.environ.get("GIGACHAD_CORS_ORIGINS", "*").split(",") if o.strip()]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_origins,
+    allow_origins=CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
     # Chrome's Private Network Access check blocks a public origin (e.g. the
@@ -93,7 +89,7 @@ app.add_middleware(
     # response explicitly grants it. Only grant it when the allow-list is an
     # exact set of origins. Granting it alongside the wildcard default would
     # let any public web page reach this unauthenticated backend.
-    allow_private_network="*" not in _cors_origins,
+    allow_private_network="*" not in CORS_ORIGINS,
 )
 
 
@@ -134,6 +130,7 @@ app.include_router(fileviewer_router)
 app.include_router(histories_router)
 app.include_router(memory_router)
 app.include_router(models_router)
+app.include_router(neovim_router)
 app.include_router(file_roots_router)
 app.include_router(ocr_router)
 app.include_router(projects_router)

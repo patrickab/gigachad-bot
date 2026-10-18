@@ -155,6 +155,7 @@ OLLAMA_BASE_URL=http://127.0.0.1:11434
 | `NEXT_PUBLIC_API_BASE` | For local frontend development | No | Local browser API base; it is intentionally public configuration. |
 | `OLLAMA_BASE_URL` | When using local models | No | Host-local Ollama endpoint. |
 | `MINERU_SERVER_URL` | No | No | Remote MinerU endpoint. Leave unset for required local OCR. |
+| `GIGACHAD_NVIM_USERS` | No | No | Tailscale logins allowed to use the Neovim editor. It runs commands as the backend user, so list only the host owner. |
 
 URL and model settings are configuration, not secrets. Keep every backend
 credential—including `POSTGRES_PASSWORD_DEV`, `POSTGRES_PASSWORD_PROD`,

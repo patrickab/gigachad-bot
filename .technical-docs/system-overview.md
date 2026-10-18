@@ -224,6 +224,72 @@ never followed. Only the database location is wired to routes today.
   Highlighting uses LikeC4's own TextMate grammar, vendored at
   `src/frontend/components/content/grammars/likec4.tmLanguage.json`.
 
+## Workspaces
+
+File roots are mounted backend directories, listed in the sidebar's
+"Workspaces" section below "General". "Add workspace" opens a directory
+picker (`features/navigation/WorkspacePicker.tsx`) that starts at the backend
+user's home: clicking a directory opens it, the up button opens its parent, the
+list follows a typed path, and Enter mounts the path in the input. It lists
+directories through `GET /api/fileroots/browse?path=`, which browses the whole
+host (directory names only), since any directory can be mounted. Mounting goes
+through `POST /api/fileroots/roots` as before.
+
+The tree lists every file a root holds by its full name, skipping only
+`.gitignore` matches and `.git`, `node_modules`, `.obsidian` and `.trash`.
+Opening a file picks its viewer by type: PDFs open in the PDF viewer, `.canvas`,
+`.c4`, `.plot.json` and markmap documents keep their renderers, and everything
+else opens as editable text (Neovim when enabled). Files that are not UTF-8 text
+are refused (`GET /api/fileviewer/text` returns 415) rather than decoded lossily,
+so a save can never overwrite a binary file.
+
+Dragging workspace files onto a project's "files" adds them by reference: the
+project stores the file's absolute path (`POST /api/fileroots/add-to-project`),
+so it always shows the current file, and saving it in the editor writes the
+workspace file. Deleting it from the project only removes the reference, the
+file stays on disk. PDFs still go into the shared PDF library as before.
+
+## Neovim editor
+
+Text documents can be edited in a real Neovim with the backend user's own
+config, rendered in the browser by xterm.js. The "Neovim editor" switch in
+Settings is a per-device preference (`localStorage`) and appears only when
+`GET /api/config` reports `neovim_available`: the login is listed in
+`GIGACHAD_NVIM_USERS`, `nvim` is on the backend's `PATH`, and
+`$XDG_CONFIG_HOME/nvim` (default `~/.config/nvim`) exists. Otherwise the
+built-in editor stays in use.
+
+- **One process per open document.** `WS /api/neovim/session`
+  (`routes/neovim.py`) spawns `nvim -n` in a PTY (`lib/neovim_session.py`) on a
+  private temp copy of the text the browser loaded. It starts in the innermost
+  mounted file root holding the document (so pickers and `:e` see that tree),
+  in the home directory for database documents. Binary frames carry terminal
+  bytes, text frames carry JSON control messages.
+- **Saving is explicit.** A buffer-local `BufWriteCmd` sends the buffer over
+  msgpack-RPC to the backend, which forwards it to the browser. The browser
+  persists it through the document's normal write path (project document, file
+  root, or validated `.c4` source) and returns the stored text, which replaces
+  the buffer if the server rewrote it. A failed save shows in Neovim and keeps
+  the buffer modified. The temp copy itself is never written.
+- **Closing discards.** Closing the tab or document, or losing the connection,
+  terminates `nvim` and deletes the temp copy, with no recovery of unsaved
+  edits. `:q` closes the document. Switching to preview or fullscreen keeps the
+  same session.
+- **Rendering.** xterm.js uses its WebGL renderer, which draws box-drawing
+  glyphs itself so borders join, and falls back to the DOM renderer without
+  WebGL2. Fonts come from the browser's machine: a local `JetBrainsMono Nerd
+  Font Mono` or `Symbols Nerd Font Mono` shows config icons, otherwise the app's
+  mono font is used and icons are missing.
+- **Keys.** While the terminal has focus every key goes to Neovim, Escape
+  included: the terminal stops propagation, and capture-phase app handlers
+  (shortcuts, `useEscapeLayer` windows, the command menu) skip events from it
+  (`isNeovimKeyEvent` in `lib/utils.ts`). `:q` or the close button leaves a
+  window holding Neovim. Outside the terminal the app keys work as before.
+- **Security.** The terminal is code execution as the backend user. Besides the
+  allow-list, the WebSocket requires an `Origin` from `GIGACHAD_CORS_ORIGINS`,
+  or a loopback origin while that list is the `*` default, since CORS does not
+  apply to WebSockets.
+
 ## Memory system
 
 Memory is a **document-backed, LLM-mediated** store (`src/lib/memory_store.py`,

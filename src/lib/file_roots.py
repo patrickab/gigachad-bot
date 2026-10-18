@@ -37,18 +37,6 @@ _SKIP_DIRS = frozenset({".obsidian", ".trash", ".git", "node_modules"})
 # Each layer is one directory's `.gitignore`: (directory path, compiled patterns), outermost first.
 _IgnoreLayers = tuple[tuple[str, GitIgnoreSpec], ...]
 _IMG_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp"})
-# Attachment-compatible file types surfaced by listings.
-FILE_SUFFIXES = frozenset({".md", ".txt", ".tex", ".pdf"})
-
-
-def _is_untitled(name: str) -> bool:
-    """True for Obsidian's default ``Untitled*.md`` scratch notes."""
-    return Path(name).stem.lower().startswith("untitled")
-
-
-def _is_listed(name: str) -> bool:
-    """True for attachment-compatible files that listings surface."""
-    return os.path.splitext(name)[1].lower() in FILE_SUFFIXES and not _is_untitled(name)
 
 
 def _with_gitignore(directory: Path | str, inherited: _IgnoreLayers) -> _IgnoreLayers:
@@ -150,6 +138,20 @@ class PostgresFileRootRepository:
                 self._change(connection, path, "delete")
 
 
+def list_directories(path: str) -> tuple[Path, list[str]]:
+    """Resolve *path* (`~` expanded) and list its subdirectory names, hidden ones included.
+
+    - Used to pick a new root, so it browses the whole host, not only registered roots
+    - Raises NotADirectoryError for a missing or non-directory path, PermissionError when unreadable
+    """
+    directory = Path(path).expanduser().resolve()
+    if not directory.is_dir():
+        raise NotADirectoryError(path)
+    with os.scandir(directory) as entries:
+        names = [entry.name for entry in entries if entry.is_dir()]
+    return directory, sorted(names, key=str.casefold)
+
+
 class FileRoots:
     """All access to the user's file-root roots goes through this class."""
 
@@ -206,10 +208,15 @@ class FileRoots:
         except ValueError:
             return False
 
+    def root_of(self, path: str) -> Path:
+        """Innermost registered root holding *path*, ValueError outside all roots."""
+        target = self._root_for(path)
+        return max((root for root in self._roots if target.is_relative_to(root)), key=lambda root: len(root.parts))
+
     # ─── listing ───
 
     def list_files(self) -> list[dict[str, str]]:
-        """Flat list of every file-root file as ``{path, name}`` (absolute paths), Untitled filtered.
+        """Flat list of every file-root file as ``{path, name}`` (absolute paths).
 
         Kept for the picker/attach flow, which wants a flat, searchable list
         rather than the nested tree.
@@ -228,11 +235,11 @@ class FileRoots:
         for entry, is_dir in entries:
             if is_dir:
                 FileRoots._collect_files(entry.path, out, layers)
-            elif _is_listed(entry.name) and entry.is_file():
+            elif entry.is_file():
                 out.append({"path": entry.path, "name": entry.name})
 
     def files_under(self, paths: list[str]) -> list[Path]:
-        """Valid files among *paths*, expanding folders recursively. Deduplicated, order kept."""
+        """Files among *paths*, expanding folders recursively. Deduplicated, order kept."""
         found: dict[Path, None] = {}
         for path in paths:
             target = self._root_for(path)
@@ -240,7 +247,7 @@ class FileRoots:
                 entries: list[dict[str, str]] = []
                 self._collect_files(target, entries)
                 found.update(dict.fromkeys(Path(entry["path"]) for entry in entries))
-            elif target.is_file() and target.suffix.lower() in FILE_SUFFIXES:
+            elif target.is_file():
                 found[target] = None
         return list(found)
 
@@ -262,8 +269,8 @@ class FileRoots:
                 sub = FileRoots._build_children(entry.path, layers)
                 if sub:  # prune folders with no file-root files
                     children.append({"name": entry.name, "path": entry.path, "type": "folder", "children": sub})
-            elif _is_listed(entry.name) and entry.is_file():
-                children.append({"name": Path(entry.name).stem, "path": entry.path, "type": "file"})
+            elif entry.is_file():
+                children.append({"name": entry.name, "path": entry.path, "type": "file"})
         return children
 
     def resolve(self, path: str) -> Path:

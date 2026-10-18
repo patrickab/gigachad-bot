@@ -11,6 +11,18 @@ started via `run.sh` or manually by the user, in a terminal they control.
 
 ## UI hints
 
-No hover tooltips. The authoritative rule, including the rendered-markdown exception,
-lives under "Layout Patterns" in `.docs/conventions.md`.
+No hover tooltips, except on rendered markdown.
+
+## UI style
+
+Clean, calm UI that lets the user focus on the content (chat, document, canvas).
+
+- **Content first**: the work surface gets the space. Chrome stays small and quiet.
+- **Minimal**: no decoration without a function. Remove an element before adding one.
+- **Low noise**: muted colors, no heavy borders, no badges or animation for their own sake.
+- **Progressive disclosure**: secondary controls appear on hover or focus, and common actions stay one click away.
+- **Consistent**: new controls copy the shape, size, colors and states of their neighbors.
+- **Stable**: adding a control must not shift or resize existing ones.
+- **Shared primitives**: reuse the components in `src/frontend/components/ui/` before writing custom markup. Extend a primitive if it falls short, rather than forking a one-off.
+- **Accessible**: icon-only buttons have an `aria-label`. Keyboard focus is always visible.
 

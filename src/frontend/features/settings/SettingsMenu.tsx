@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback } from "react"
 import { AnimatePresence, motion } from "framer-motion"
-import { Check, ChevronDown, ChevronUp, ImageDown, Settings, BookOpen, Pencil, Telescope } from "lucide-react"
+import { Check, ChevronDown, ChevronUp, ImageDown, Settings, BookOpen, Pencil, Telescope, SquareTerminal } from "lucide-react"
 import { ParamSlider } from "./ParamSlider"
 import { StyledSelect } from "@/components/ui/StyledSelect"
 import { cn } from "@/lib/utils"
@@ -10,7 +10,7 @@ import { REASONING_LEVELS } from "@/lib/backend/config"
 import { displayName, qualifiedModelIds } from "@/lib/models"
 import { useClickOutside } from "@/hooks/useClickOutside"
 import type { ModelsResponse } from "@/lib/domain/types"
-import type { TabConfig } from "@/contexts/SettingsContext"
+import { useNeovimSetting, type TabConfig } from "@/contexts/SettingsContext"
 
 interface SettingsMenuProps {
   prompts: Record<string, string>
@@ -38,6 +38,22 @@ function ChevronToggle({ ariaLabel, open, onToggle }: { ariaLabel: string; open:
   )
 }
 
+/** Track sits one level below the panel (paper under surface-elevated) in both themes. */
+function Switch({ label, checked, onToggle }: { label: string; checked: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-label={label}
+      aria-checked={checked}
+      onClick={onToggle}
+      className={cn("relative h-5 w-9 shrink-0 rounded-full border bg-paper shadow-[var(--inner-highlight)] transition-colors", checked ? "border-divider-strong" : "border-divider")}
+    >
+      <span className={cn("absolute left-0.5 top-0.5 h-3.5 w-3.5 rounded-full shadow-[var(--shadow-sm)] transition-all", checked ? "translate-x-4 bg-ink-subtle" : "translate-x-0 bg-ink-faint")} />
+    </button>
+  )
+}
+
 export function SettingsMenu({
   prompts,
   config,
@@ -50,6 +66,7 @@ export function SettingsMenu({
   const [researchOpen, setResearchOpen] = useState(false)
   const [promptOpen, setPromptOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const neovim = useNeovimSetting()
 
   const close = useCallback(() => { setOpen(false) }, [])
   useClickOutside(ref, close)
@@ -209,18 +226,18 @@ export function SettingsMenu({
                 <ImageDown className="h-3.5 w-3.5" />
                 Downscale images
               </div>
-              {/* Track sits one level below the panel (paper under surface-elevated) in both themes. */}
-              <button
-                type="button"
-                role="switch"
-                aria-label="Downscale images"
-                aria-checked={config.downscaleImages}
-                onClick={() => onConfigChange({ downscaleImages: !config.downscaleImages })}
-                className={cn("relative h-5 w-9 shrink-0 rounded-full border bg-paper shadow-[var(--inner-highlight)] transition-colors", config.downscaleImages ? "border-divider-strong" : "border-divider")}
-              >
-                <span className={cn("absolute left-0.5 top-0.5 h-3.5 w-3.5 rounded-full shadow-[var(--shadow-sm)] transition-all", config.downscaleImages ? "translate-x-4 bg-ink-subtle" : "translate-x-0 bg-ink-faint")} />
-              </button>
+              <Switch label="Downscale images" checked={config.downscaleImages} onToggle={() => onConfigChange({ downscaleImages: !config.downscaleImages })} />
             </div>
+
+            {neovim.available && (
+              <div className="flex items-center justify-between pt-2 border-t border-divider/50">
+                <div className="flex items-center gap-2 text-xs font-medium text-ink-subtle">
+                  <SquareTerminal className="h-3.5 w-3.5" />
+                  Neovim editor
+                </div>
+                <Switch label="Neovim editor" checked={neovim.enabled} onToggle={() => neovim.setPreferred(!neovim.enabled)} />
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

@@ -6,16 +6,18 @@ import { Maximize2, Minimize2, X } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import { cn } from "@/lib/utils"
 import { AssistedConsoleEditor } from "./AssistedConsoleEditor"
+import { NeovimEditor, useNeovimTerminal } from "./NeovimEditor"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
 import { PlotElement } from "@/components/content/PlotElement"
 import type { PlotFigure } from "@/lib/domain/types"
 import { ResizableEditor } from "./ResizableEditor"
 import type { CanvasToolbarSlots } from "@/features/editor/canvas/CanvasToolbar"
-import { loadFileViewerText, readFileRootRendered, writeArchitectureSource, writeDocument, ApiError } from "@/lib/backend/api"
+import { loadFileViewerText, readFileRootRendered, writeArchitectureSource, writeDocument, writeRootFile, ApiError } from "@/lib/backend/api"
 import { architectureSlug, architectureSource, isArchitecturePath } from "@/lib/domain/architecturePaths"
 import { subscribeToChanges, type ChangeEvent } from "@/lib/backend/syncStream"
 import { baseName } from "@/lib/paths"
 import { useTabActive } from "@/contexts/TabContext"
+import { useNeovimSetting } from "@/contexts/SettingsContext"
 
 type EditorView = "edit" | "preview"
 
@@ -95,10 +97,11 @@ export function ArchitectureSourceEditor(props: DocumentEditorProps) {
 /** Text document editor; `persistOverride` replaces the default document write. */
 export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, overlay, persistOverride, onModeLabel, onNavigate, model }: DocumentEditorProps) {
   const isActive = useTabActive()
+  const neovim = useNeovimSetting()
   const [content, setContent] = useState<string | null>(null)
   const [renderedContent, setRenderedContent] = useState<string | null>(null)
   const [loadedPath, setLoadedPath] = useState<string | null>(null)
-  const [loadError, setLoadError] = useState(false)
+  const [loadError, setLoadError] = useState<"failed" | "binary" | null>(null)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -125,7 +128,7 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent
 
   const loadFromServer = useCallback(() => {
     const apply = (text: string) => {
-      setLoadError(false)
+      setLoadError(null)
       setContent(text)
       setLoadedPath(path)
       savedContentRef.current = text
@@ -134,7 +137,7 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent
     // not arm a save of blank content over the real stored content.
     return loadFileViewerText(path).then(apply).catch((err) => {
       if (err instanceof ApiError && err.status === 404) apply("")
-      else setLoadError(true)
+      else setLoadError(err instanceof ApiError && err.status === 415 ? "binary" : "failed")
     })
   }, [path])
 
@@ -168,6 +171,8 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent
 
   const persistNow = useCallback(async (next: string) => {
     if (persistOverride) await persistOverride(next)
+    // An absolute path is a workspace file, referenced by a project or opened directly: save it in place.
+    else if (path.startsWith("/")) await writeRootFile(path, next)
     else await writeDocument(slug, filename, next)
     savedContentRef.current = next
     setDirty(false)
@@ -188,6 +193,18 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent
     return run
   }, [persistNow])
 
+  // Neovim owns the text while it runs: `:w` persists, and React shows what was stored.
+  const saveFromNeovim = useCallback(async (text: string) => {
+    await persist(text)
+    setContent(savedContentRef.current)
+    return savedContentRef.current
+  }, [persist])
+  const neovimSession = useNeovimTerminal(
+    neovim.enabled && content !== null && loadedPath === path ? { key: path, path, filename, content } : null,
+    saveFromNeovim,
+    onClose,
+  )
+
   const handleSave = useCallback(async () => {
     if (content === null || saving) return
     setSaving(true)
@@ -199,7 +216,7 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (!isActive) return
-      if ((event.ctrlKey || event.metaKey) && (event.key === "s" || event.key === "Enter")) {
+      if (!neovim.enabled && (event.ctrlKey || event.metaKey) && (event.key === "s" || event.key === "Enter")) {
         event.preventDefault()
         handleSave()
       }
@@ -210,7 +227,7 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent
     }
     document.addEventListener("keydown", handler)
     return () => document.removeEventListener("keydown", handler)
-  }, [handleSave, isFullscreen, overlay, onClose, isActive])
+  }, [handleSave, isFullscreen, overlay, onClose, isActive, neovim.enabled])
 
   const handlePreviewClick = useCallback((e: React.MouseEvent) => {
     const anchor = (e.target as HTMLElement).closest("a")
@@ -220,6 +237,10 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent
     e.preventDefault()
     onNavigate?.(decodeURIComponent(href.slice("#file:".length)))
   }, [onNavigate])
+
+  if (loadError === "binary") {
+    return <div className="flex items-center justify-center py-6 text-xs text-ink-faint">This is not a text file, so it cannot be opened in the editor.</div>
+  }
 
   if (loadError) {
     return (
@@ -236,18 +257,29 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent
     return <div className="flex items-center justify-center py-6 text-xs text-ink-faint">Loading...</div>
   }
 
-  const editorBody = view === "edit" ? (
+  const preview = (
+    <div className="flex-1 overflow-y-auto min-h-0 p-4 pt-10" onClick={handlePreviewClick}>
+      {path.endsWith(".plot.json")
+        ? plotFigure ? <PlotElement figure={plotFigure} /> : <p className="text-xs text-danger">This plot file is not valid Plotly JSON.</p>
+        : <LaTeXMarkdown content={renderedContent ?? content} />}
+    </div>
+  )
+
+  // Neovim stays mounted while previewing, so switching views keeps unsaved edits.
+  const editorBody = neovim.enabled ? (
+    <div className="relative flex-1 min-h-0 group/editor flex flex-col">
+      {!isArtifact && <ViewPills view={view} onViewChange={setView} />}
+      <NeovimEditor terminal={neovimSession.terminal} status={neovimSession.status} onRestart={neovimSession.restart} className={view === "edit" ? undefined : "hidden"} />
+      {view === "preview" && preview}
+    </div>
+  ) : view === "edit" ? (
     <AssistedConsoleEditor value={content} onChange={handleTextChange} language={language} model={model} placeholder="Start writing..." className="group/editor">
       {!isArtifact && <ViewPills view={view} onViewChange={setView} />}
     </AssistedConsoleEditor>
   ) : (
     <div className="relative flex-1 min-h-0 group/editor flex flex-col">
       {!isArtifact && <ViewPills view={view} onViewChange={setView} />}
-      <div className="flex-1 overflow-y-auto min-h-0 p-4 pt-10" onClick={handlePreviewClick}>
-        {path.endsWith(".plot.json")
-          ? plotFigure ? <PlotElement figure={plotFigure} /> : <p className="text-xs text-danger">This plot file is not valid Plotly JSON.</p>
-          : <LaTeXMarkdown content={renderedContent ?? content} />}
-      </div>
+      {preview}
     </div>
   )
 

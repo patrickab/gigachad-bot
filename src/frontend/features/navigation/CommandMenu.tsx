@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { cn } from "@/lib/utils"
+import { cn, isNeovimKeyEvent } from "@/lib/utils"
 
 export interface CommandMenuItem {
   command: string
@@ -38,6 +38,7 @@ export function CommandMenu({ open, items, query, onRun, onClose }: CommandMenuP
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
+      if (isNeovimKeyEvent(e)) return
       if (e.key === "Escape") { e.preventDefault(); onClose(); return }
       if (e.key === "ArrowDown") { e.preventDefault(); setSelectedIdx((i) => (i + 1) % filtered.length); return }
       if (e.key === "ArrowUp") { e.preventDefault(); setSelectedIdx((i) => (i - 1 + filtered.length) % filtered.length); return }

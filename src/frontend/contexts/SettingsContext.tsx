@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
 import { fetchBackendConfig } from "@/lib/backend/api"
+import { STORAGE_KEY_NEOVIM } from "@/lib/backend/config"
 
 export interface TabConfig {
   selectedModel: string
@@ -37,10 +38,21 @@ export const DEFAULT_TAB_CONFIG: TabConfig = {
   searchDomain: "",
 }
 
+export interface NeovimSetting {
+  /** The backend runs Neovim for this user: allow-listed, `nvim` installed, config present. */
+  available: boolean
+  /** Edit text documents in Neovim: chosen on this device and available. */
+  enabled: boolean
+  setPreferred: (preferred: boolean) => void
+}
+
+const NEOVIM_UNAVAILABLE: NeovimSetting = { available: false, enabled: false, setPreferred: () => {} }
+
 interface SettingsValue {
   /** Config every new tab starts from. */
   tabDefaults: TabConfig
   ocrModel: string
+  neovim: NeovimSetting
 }
 
 const SettingsContext = createContext<SettingsValue | null>(null)
@@ -51,10 +63,21 @@ export function useSettings(): SettingsValue {
   return ctx
 }
 
+/** Neovim editor setting, unavailable outside a `SettingsProvider`. */
+export function useNeovimSetting(): NeovimSetting {
+  return useContext(SettingsContext)?.neovim ?? NEOVIM_UNAVAILABLE
+}
+
+function readNeovimPreference(): boolean {
+  try { return localStorage.getItem(STORAGE_KEY_NEOVIM) === "true" } catch { return false }
+}
+
 /** Owns the defaults new tabs inherit. Seeded from backend config without overriding existing values. */
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [tabDefaults, setTabDefaults] = useState(DEFAULT_TAB_CONFIG)
   const [ocrModel, setOCRModel] = useState("")
+  const [neovimAvailable, setNeovimAvailable] = useState(false)
+  const [neovimPreferred, setNeovimPreferred] = useState(readNeovimPreference)
 
   useEffect(() => {
     fetchBackendConfig()
@@ -66,14 +89,24 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
           downscaleImages: prev.downscaleImages ? cfg.downscale_images : prev.downscaleImages,
         }))
         setOCRModel((prev) => prev || cfg.vision_model)
+        setNeovimAvailable(cfg.neovim_available)
       })
       .catch(() => {
         // backend unreachable, keep hardcoded fallbacks
       })
   }, [])
 
+  const neovim: NeovimSetting = {
+    available: neovimAvailable,
+    enabled: neovimAvailable && neovimPreferred,
+    setPreferred: (preferred) => {
+      setNeovimPreferred(preferred)
+      try { localStorage.setItem(STORAGE_KEY_NEOVIM, String(preferred)) } catch { /* quota */ }
+    },
+  }
+
   return (
-    <SettingsContext.Provider value={{ tabDefaults, ocrModel }}>
+    <SettingsContext.Provider value={{ tabDefaults, ocrModel, neovim }}>
       {children}
     </SettingsContext.Provider>
   )

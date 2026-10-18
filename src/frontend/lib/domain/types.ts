@@ -27,6 +27,13 @@ export interface FileTreeNode {
   children?: FileTreeNode[]
 }
 
+/** Subdirectories of `path` on the backend host; `parent` is null at the filesystem root. */
+export interface DirectoryListing {
+  path: string
+  parent: string | null
+  directories: string[]
+}
+
 export interface ProjectDocument {
   path: string
   name: string
@@ -232,6 +239,7 @@ export interface BackendConfig {
   memory_model: string
   default_model: string
   downscale_images: boolean
+  neovim_available: boolean
 }
 
 export interface ChatHistoriesResponse {

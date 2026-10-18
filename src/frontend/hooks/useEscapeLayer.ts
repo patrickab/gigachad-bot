@@ -1,15 +1,17 @@
 "use client"
 
 import { useEffect, useLayoutEffect, useRef } from "react"
+import { isNeovimKeyEvent } from "@/lib/utils"
 
 type EscapeLayer = { current: () => void }
 
 /** Active layers, innermost (most recently activated) last. */
 const layers: EscapeLayer[] = []
 
+// Neovim owns Escape while its terminal has focus, so `:q` is the way out of a window holding it.
 function handleEscape(event: KeyboardEvent) {
   const top = layers.at(-1)
-  if (event.key !== "Escape" || !top) return
+  if (event.key !== "Escape" || !top || isNeovimKeyEvent(event)) return
   event.preventDefault()
   event.stopImmediatePropagation()
   top.current()

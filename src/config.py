@@ -13,6 +13,10 @@ from lib.storage_namespace import PROMPT
 REMOTE_ROOT = Path(os.environ.get("GIGACHAD_BASE_DIR", "~/Nextcloud/linux")).expanduser()
 DOCUMENTS = REMOTE_ROOT / "Documents"
 
+# Browser origins allowed to call the API. Defaults to the pre-desktop wildcard; the Tauri
+# shell narrows it to its own webview origins, and server deployments can do the same.
+CORS_ORIGINS = [origin.strip() for origin in os.environ.get("GIGACHAD_CORS_ORIGINS", "*").split(",") if origin.strip()]
+
 # --- Model configuration ---
 # The user-editable defaults in `model-defaults.yaml` are the single source of truth for every
 # model the app uses. Nothing here may name a production model.
