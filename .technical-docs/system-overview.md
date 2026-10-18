@@ -326,14 +326,22 @@ the launcher sets it from `GIGACHAD_OMP_WEB_FRAME_ANCESTORS`
 - **Tab item**: `WorkspaceItem` kind `omp` holds an `OmpView` (session, new session
   in a cwd, settings). A session the frame opens itself (fork, first message of a
   new session) becomes the tab's view
-- **Composer**: omp tabs use gigachad's `ChatInput` (tools menu off) and
-  `ModelDropdown` (only the OMP provider rows, `litellm_proxy/<provider>/<model>`),
-  `features/omp/OmpComposer.tsx`. They drive omp-web's hidden composer over the
-  bridge (`composer-send`, `composer-abort`, `composer-set-model`, state back as
-  `composer`), so sending, queueing and new sessions stay omp-web's. Images go as
-  base64, documents as text the way chats send them. Uploads land under the tab's
-  `chatId`. Not available: slash and `@` autocomplete, word prediction, thinking
-  level, `!` bash mode, steering while a run is busy
+- **Composer**: omp tabs use gigachad's `ChatInput` (tools menu off), `ModelDropdown`
+  (only the OMP provider rows, `litellm_proxy/<provider>/<model>`) and
+  `ReasoningSelector` (omp-web's thinking levels), `features/omp/OmpComposer.tsx`.
+  They drive omp-web's hidden composer over the bridge (`composer-send`,
+  `composer-abort`, `composer-set-model`, `composer-set-thinking`, state back as
+  `composer`), so sending, queueing, `!cmd` shell commands and new sessions stay
+  omp-web's. Images go as base64, documents as text the way chats send them.
+  Uploads land under the tab's `chatId`
+  - Autocomplete: `composer-complete` asks the frame, `composer-completions`
+    answers. `/word` lists omp's extension, prompt and skill commands, `@` lists
+    files of the session cwd (directories drill down). The menu is
+    `features/chat/composer/CompletionMenu.tsx`, ChatInput's `complete` prop
+  - Restore: text and images omp hands back (Stop withdrew queued messages, the
+    queue panel's Edit) arrive as `composer-restore` and merge into the draft
+  - Not available: word prediction, steering or queueing from gigachad's composer
+    while a run is busy
 - **Sidebar**: a project whose slug names a file mount's folder gets a "code"
   category with the sessions whose `project_root ?? cwd` lies inside that mount.
   The "OMP" section lists every other omp-web workspace, its label opens omp
