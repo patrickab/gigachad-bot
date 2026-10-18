@@ -14,6 +14,9 @@ export function ompItem(view: OmpView, path: string, projectSlug: string | null)
   return { kind: "omp", path, projectSlug, omp: view }
 }
 
+/** Session rows a code category or omp workspace shows before "Show more", like omp-web's project list. */
+const SESSION_LIMIT = 5
+
 /**
  * Sidebar rows for omp-web sessions, built from the shared overview.
  *
@@ -94,6 +97,7 @@ export function useOmpSidebar({ onOpen }: { onOpen?: (item: WorkspaceItem, inNew
       label: "code",
       type: "folder",
       create: { label: `New session in ${project.name}`, onClick: () => onOpen?.(ompItem({ kind: "new", cwd: mount }, mount, project.slug), true) },
+      childLimit: SESSION_LIMIT,
       children: sessionForest(sessionsInside(sessions, mount)).map((node) => sessionItem(node, mount, project.slug)),
     }
   }
@@ -106,6 +110,7 @@ export function useOmpSidebar({ onOpen }: { onOpen?: (item: WorkspaceItem, inNew
       label: workspace.label,
       type: "root",
       create: { label: `New session in ${workspace.label}`, onClick: () => onOpen?.(ompItem({ kind: "new", cwd: workspace.path }, workspace.path, null), true) },
+      childLimit: SESSION_LIMIT,
       children: sessionForest(workspace.sessions).map((node) => sessionItem(node, workspace.path, null)),
     }))
     if (archived.length === 0) return workspaces

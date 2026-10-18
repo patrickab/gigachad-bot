@@ -32,6 +32,8 @@ export interface FileTreeItem<T = unknown> {
   type: "root" | "folder" | "element"
   data?: T
   children?: FileTreeItem<T>[]
+  /** Children shown before a "Show more" row, a child holding the active item always shows. */
+  childLimit?: number
   isActive?: boolean
   badge?: string | number
   draggable?: boolean
@@ -68,11 +70,23 @@ const INDENT_STEP = 16
 const ACTIONS_CLASS = "flex shrink-0 items-center gap-0.5 max-w-0 overflow-hidden opacity-0 transition-opacity group-hover/row:max-w-24 group-hover/row:opacity-100 group-focus-within/row:max-w-24 group-focus-within/row:opacity-100"
 const ACTION_CLASS = "shrink-0 rounded p-1 text-ink-faint hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
 
+/** Children `item` renders: up to `childLimit` unless `uncapped`, plus any later child holding the active item. */
+function visibleChildren<T>(item: FileTreeItem<T>, uncapped: boolean): FileTreeItem<T>[] {
+  const children = item.children ?? []
+  if (uncapped || item.childLimit == null) return children
+  const limit = item.childLimit
+  return children.filter((child, index) => index < limit || holdsActive(child))
+}
+
+function holdsActive<T>(item: FileTreeItem<T>): boolean {
+  return Boolean(item.isActive) || (item.children ?? []).some(holdsActive)
+}
+
 /** List visible multi-select rows in range-selection order. */
-function selectableIds<T>(items: FileTreeItem<T>[], controller: FileBranchController): string[] {
+function selectableIds<T>(items: FileTreeItem<T>[], controller: FileBranchController, uncappedIds: ReadonlySet<string>): string[] {
   return items.flatMap((item) => [
     ...(item.multiSelect ? [item.id] : []),
-    ...(item.children && controller.isExpanded(item.id) ? selectableIds(item.children, controller) : []),
+    ...(item.children && controller.isExpanded(item.id) ? selectableIds(visibleChildren(item, uncappedIds.has(item.id)), controller, uncappedIds) : []),
   ])
 }
 
@@ -86,6 +100,13 @@ export function FileTree<T>({ items, controller, label, loading, create, renderB
   const [dragOverId, setDragOverId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
   const selectionAnchorId = useRef<string | null>(null)
+  const [uncappedIds, setUncappedIds] = useState<ReadonlySet<string>>(() => new Set())
+
+  const toggleCap = (id: string) => setUncappedIds((current) => {
+    const next = new Set(current)
+    if (!next.delete(id)) next.add(id)
+    return next
+  })
 
   const startCreate = async (parentId: string | null, action: FileTreeCreateAction) => {
     setActionError("")
@@ -108,7 +129,7 @@ export function FileTree<T>({ items, controller, label, loading, create, renderB
         return
       }
       if (event.shiftKey) {
-        const visible = selectableIds(items, controller)
+        const visible = selectableIds(items, controller, uncappedIds)
         const clickedIndex = visible.indexOf(item.id)
         const anchorIndex = visible.indexOf(selectionAnchorId.current ?? item.id)
         const from = anchorIndex < 0 ? clickedIndex : Math.min(anchorIndex, clickedIndex)
@@ -224,7 +245,8 @@ export function FileTree<T>({ items, controller, label, loading, create, renderB
       </div>
       {item.detail && <div style={{ marginLeft: paddingLeft + 20 }}>{item.detail}</div>}
       {expanded && <div role="group" aria-label={`${item.label} contents`}>
-        {renderItems(item.children ?? [], depth + 1)}
+        {renderItems(visibleChildren(item, uncappedIds.has(item.id)), depth + 1)}
+        <CapToggle item={item} depth={depth + 1} uncapped={uncappedIds.has(item.id)} onToggle={() => toggleCap(item.id)} />
         {creation?.parentId === item.id && <InlineCreateForm
           action={creation.action} depth={depth + 1}
           onDone={() => setCreation((current) => current === creation ? null : current)}
@@ -258,6 +280,23 @@ export function FileTree<T>({ items, controller, label, loading, create, renderB
       >{renderItems(items, 0)}</div>}
     {actionError && <p role="alert" className="px-2 py-1 text-xs text-danger">{actionError}</p>}
   </div>
+}
+
+/** "Show N more" / "Show less" row under a branch with more children than its `childLimit`. */
+function CapToggle<T>({ item, depth, uncapped, onToggle }: {
+  item: FileTreeItem<T>
+  depth: number
+  uncapped: boolean
+  onToggle: () => void
+}) {
+  const total = item.children?.length ?? 0
+  if (item.childLimit == null || total <= item.childLimit) return null
+  const hidden = total - visibleChildren(item, false).length
+  if (!uncapped && hidden === 0) return null
+  return <button type="button" onClick={onToggle} style={{ marginLeft: INDENT_BASE + depth * INDENT_STEP + 20 }}
+    className="flex h-6 items-center rounded px-1 text-xs text-ink-faint hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">
+    {uncapped ? "Show less" : `Show ${hidden} more`}
+  </button>
 }
 
 function InlineCreateForm({ action, depth, onDone, onCancel }: {
