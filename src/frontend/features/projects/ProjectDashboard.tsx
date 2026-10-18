@@ -1,13 +1,13 @@
 "use client"
 
-import { useState, useRef } from "react"
+import { useCallback, useEffect, useState, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { useProject } from "@/contexts/ProjectContext"
+import { loadProject, addProjectCard, moveProjectCard, deleteProjectCard } from "@/lib/backend/api"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { Dialog } from "@/components/ui/Dialog"
-import type { KanbanColumnId } from "@/lib/domain/types"
+import type { KanbanColumnId, ProjectData } from "@/lib/domain/types"
 import { ElevationProvider, ElevatedContainer } from "@/components/ui/ElevatedContainer"
 import { FloatingWindow } from "@/components/ui/FloatingWindow"
 
@@ -115,9 +115,54 @@ function AddCardModal({ open, onClose, onAdd, defaultState }: AddCardModalProps)
   )
 }
 
-/** Kanban board for the active project. Cards drag between columns, click to advance, right-click to go back. */
-export function ProjectDashboard() {
-  const { projectData, activeProject, addCard, moveCard, deleteCard, setDashboardOpen } = useProject()
+/** Load one project's board and apply card changes to it. Remount per `slug` (via `key`) so a late response never lands on another project. */
+function useProjectBoard(slug: string, onLoadFailed: () => void) {
+  const [projectData, setProjectData] = useState<ProjectData | null>(null)
+  const onLoadFailedRef = useRef(onLoadFailed)
+  useEffect(() => { onLoadFailedRef.current = onLoadFailed }, [onLoadFailed])
+
+  useEffect(() => {
+    let stale = false
+    loadProject(slug).then(
+      (data) => { if (!stale) setProjectData(data) },
+      () => { if (!stale) onLoadFailedRef.current() },
+    )
+    return () => { stale = true }
+  }, [slug])
+
+  const addCard = useCallback(async (title: string, description: string, state: string = "backlog") => {
+    const card = await addProjectCard(slug, title, description, state)
+    setProjectData((prev) => prev ? { ...prev, kanban: [...prev.kanban, card] } : prev)
+  }, [slug])
+
+  const moveCard = useCallback(async (cardId: string, state: KanbanColumnId) => {
+    // Optimistic move. `originalCard` is captured inside the updater so a failed call can restore it.
+    let originalCard: ProjectData["kanban"][number] | undefined
+    setProjectData((prev) => {
+      if (!prev) return prev
+      originalCard = prev.kanban.find((c) => c.id === cardId)
+      return { ...prev, kanban: prev.kanban.map((c) => c.id === cardId ? { ...c, state } : c) }
+    })
+    try {
+      const updated = await moveProjectCard(slug, cardId, state)
+      setProjectData((prev) => prev ? { ...prev, kanban: prev.kanban.map((c) => c.id === cardId ? updated : c) } : prev)
+    } catch {
+      const original = originalCard
+      if (original) setProjectData((prev) => prev ? { ...prev, kanban: prev.kanban.map((c) => c.id === cardId ? original : c) } : prev)
+    }
+  }, [slug])
+
+  const deleteCard = useCallback(async (cardId: string) => {
+    await deleteProjectCard(slug, cardId)
+    setProjectData((prev) => prev ? { ...prev, kanban: prev.kanban.filter((c) => c.id !== cardId) } : prev)
+  }, [slug])
+
+  return { projectData, addCard, moveCard, deleteCard }
+}
+
+/** Kanban board for the project `slug`. Cards drag between columns, click to advance, right-click to go back. */
+export function ProjectDashboard({ slug, onClose }: { slug: string; onClose: () => void }) {
+  const { projectData, addCard, moveCard, deleteCard } = useProjectBoard(slug, onClose)
   const { schedule, pending } = useUndoDelete()
   const [addModalState, setAddModalState] = useState<KanbanColumnId | null>(null)
   const [draggedCardId, setDraggedCardId] = useState<string | null>(null)
@@ -125,11 +170,11 @@ export function ProjectDashboard() {
   // Per-column drag-enter counter to avoid false dragLeave on child elements.
   const dragCounters = useRef<Record<string, number>>({ backlog: 0, doing: 0, done: 0 })
 
-  if (!projectData || !activeProject) return null
+  if (!projectData) return null
 
   // Cards with a pending undoable delete are hidden
   const cardsByColumn = (col: KanbanColumnId) =>
-    projectData.kanban.filter((card) => card.state === col && !pending(`card:${activeProject}:${card.id}`))
+    projectData.kanban.filter((card) => card.state === col && !pending(`card:${slug}:${card.id}`))
 
   return (
     <>
@@ -140,13 +185,13 @@ export function ProjectDashboard() {
         defaultState={addModalState ?? "backlog"}
       />
 
-      <FloatingWindow onClose={() => setDashboardOpen(false)} panelClassName="w-11/12 bg-transparent backdrop-blur-none">
+      <FloatingWindow onClose={onClose} panelClassName="w-11/12 bg-transparent backdrop-blur-none">
           <ElevationProvider>
             <ElevatedContainer className="w-full h-full flex flex-col overflow-hidden">
               <div className="pt-6 px-8 flex items-center justify-between border-b border-divider/20 pb-4 select-none shrink-0">
                 <div className="flex items-center gap-3">
                    <h2 className="text-lg font-semibold tracking-tight text-ink">
-                     {projectData.name || activeProject} Dashboard
+                     {projectData.name || slug} Dashboard
                    </h2>
                 </div>
               </div>
@@ -251,7 +296,7 @@ export function ProjectDashboard() {
                                   aria-label={`Delete ${card.title}`}
                                   onClick={(event) => {
                                     event.stopPropagation()
-                                    schedule(`card:${activeProject}:${card.id}`, card.title, () => deleteCard(card.id))
+                                    schedule(`card:${slug}:${card.id}`, card.title, () => deleteCard(card.id))
                                   }}
                                   className="absolute top-3 right-3 shrink-0 opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-danger-soft text-ink-faint hover:text-danger transition-all"
                                 >

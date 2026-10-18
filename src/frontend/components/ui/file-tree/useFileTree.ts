@@ -21,40 +21,42 @@ function readSaved(storageKey: string): string | null {
   try { return localStorage.getItem(storageKey) } catch { return null }
 }
 
-function parseSaved(saved: string | null): Set<string> {
-  if (!saved) return new Set()
-  try { return new Set(JSON.parse(saved)) } catch { return new Set() }
+function parseSaved(saved: string | null): Record<string, boolean> {
+  if (!saved) return {}
+  try {
+    const parsed = JSON.parse(saved)
+    // Migrate the old expanded-only list without treating absent defaults as collapsed.
+    return Array.isArray(parsed) ? Object.fromEntries(parsed.map((id) => [id, true])) : parsed ?? {}
+  } catch { return {} }
 }
 
 /** Share persisted expansion across mounted tabs without activating their contents. */
-export function useFileTree({ storageKey }: { storageKey?: string } = {}): FileBranchController {
+export function useFileTree({ storageKey, defaultExpanded = [] }: { storageKey?: string; defaultExpanded?: readonly string[] } = {}): FileBranchController {
   const saved = useSyncExternalStore(
     subscribeExpansion,
     () => storageKey ? readSaved(storageKey) : null,
     () => null,
   )
   const persisted = useMemo(() => parseSaved(saved), [saved])
-  const [localExpanded, setLocalExpanded] = useState<Set<string>>(() => new Set())
+  const [localExpanded, setLocalExpanded] = useState<Record<string, boolean>>({})
   const expanded = storageKey && saved !== null ? persisted : localExpanded
 
-  const persist = useCallback((next: Set<string>) => {
+  const persist = useCallback((next: Record<string, boolean>) => {
     setLocalExpanded(next)
     if (!storageKey) return
     try {
-      localStorage.setItem(storageKey, JSON.stringify([...next]))
+      localStorage.setItem(storageKey, JSON.stringify(next))
       window.dispatchEvent(new Event("file-tree-expansion"))
     } catch {}
   }, [storageKey])
 
-  const isExpanded = useCallback((id: string) => expanded.has(id), [expanded])
+  const isExpanded = useCallback((id: string) => typeof expanded[id] === "boolean" ? expanded[id] : defaultExpanded.includes(id), [expanded, defaultExpanded])
   const expand = useCallback((id: string) => {
-    if (!expanded.has(id)) persist(new Set(expanded).add(id))
-  }, [persist, expanded])
+    if (!isExpanded(id)) persist({ ...expanded, [id]: true })
+  }, [persist, expanded, isExpanded])
   const toggleBranch = useCallback((id: string) => {
-    const next = new Set(expanded)
-    if (!next.delete(id)) next.add(id)
-    persist(next)
-  }, [persist, expanded])
+    persist({ ...expanded, [id]: !isExpanded(id) })
+  }, [persist, expanded, isExpanded])
 
   return { isExpanded, toggleBranch, expand }
 }

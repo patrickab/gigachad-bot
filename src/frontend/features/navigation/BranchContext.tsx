@@ -7,6 +7,7 @@ import {
   cascadeDelete as apiCascadeDelete,
   fetchBranchMeta,
   listChatHistories,
+  moveHistoryItem as apiMoveHistoryItem,
 } from "@/lib/backend/api"
 import type { BranchMeta } from "@/lib/domain/types"
 
@@ -23,6 +24,7 @@ interface BranchContextValue {
   activeQaIndex: number | null
   onFileClick: (file: string, qaIndex?: number) => void
   refreshAll: () => Promise<void>
+  moveHistory: (filename: string, targetDir: string) => Promise<void>
   createBranch: (parentFile: string, branchMessageIdx: number) => Promise<{ childFile: string; chatId: string }>
   mergeBranch: (childFile: string) => Promise<void>
   cascadeDelete: (filename: string) => Promise<string[]>
@@ -48,7 +50,11 @@ async function fetchHistories(): Promise<Histories> {
 }
 
 /** Owns chat history list, branch metadata and the active file/QA focus shown in the sidebar. */
-export function BranchProvider({ onFileClick, children }: { onFileClick: (file: string, qaIndex?: number) => void; children: ReactNode }) {
+export function BranchProvider({ onFileClick, onHistoriesMoved, children }: {
+  onFileClick: (file: string, qaIndex?: number) => void
+  onHistoriesMoved?: (moves: ReadonlyMap<string, string>) => void
+  children: ReactNode
+}) {
   const [branchMeta, setBranchMeta] = useState<Record<string, BranchMeta>>({})
   const [rootFiles, setRootFiles] = useState<string[]>([])
   const [historiesLoading, setHistoriesLoading] = useState(true)
@@ -75,6 +81,21 @@ export function BranchProvider({ onFileClick, children }: { onFileClick: (file: 
     () => rootFiles.filter((f) => !branchMeta[f]?.parent_id),
     [rootFiles, branchMeta],
   )
+  const moveHistory = useCallback(async (filename: string, targetDir: string) => {
+    const result = await apiMoveHistoryItem(filename, targetDir)
+    const histories = await fetchHistories()
+    const pathsByChatId = buildChatIdMap(histories.branchData)
+    const moves = new Map([[filename, result.new_path]])
+    // The store carries descendant branches and may rename files on collision.
+    for (const [oldPath, metadata] of Object.entries(branchMeta)) {
+      const newPath = metadata.chat_id ? pathsByChatId.get(metadata.chat_id) : undefined
+      if (newPath && newPath !== oldPath) moves.set(oldPath, newPath)
+    }
+    onHistoriesMoved?.(moves)
+    setActiveFile((current) => current ? moves.get(current) ?? current : null)
+    applyHistories(histories)
+  }, [branchMeta, onHistoriesMoved, applyHistories])
+
 
   const doCreateBranch = useCallback(async (parentFile: string, branchMessageIdx: number) => {
     const result = await apiCreateBranch(parentFile, branchMessageIdx)
@@ -104,6 +125,7 @@ export function BranchProvider({ onFileClick, children }: { onFileClick: (file: 
       activeQaIndex,
       onFileClick,
       refreshAll,
+      moveHistory,
       createBranch: doCreateBranch,
       mergeBranch: doMergeBranch,
       cascadeDelete: doCascadeDelete,

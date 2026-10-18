@@ -1,38 +1,18 @@
 "use client"
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react"
-import type { ProjectData, ProjectListItem, ProjectStateUpdate, ProjectTab, KanbanCard, KanbanColumnId } from "@/lib/domain/types"
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
+import type { ProjectListItem } from "@/lib/domain/types"
 import {
   listProjects as apiListProjects,
-  loadProject as apiLoadProject,
   createProject as apiCreateProject,
   deleteProject as apiDeleteProject,
-  addProjectCard as apiAddProjectCard,
-  moveProjectCard as apiMoveProjectCard,
-  deleteProjectCard as apiDeleteProjectCard,
-  updateProjectKanban as apiUpdateProjectKanban,
 } from "@/lib/backend/api"
 
-/** Check if two saved-tab lists match row for row. */
-function isSameProjectTabs(left: ProjectTab[], right: ProjectTab[]): boolean {
-  return left.length === right.length && left.every((tab, index) =>
-    tab.filename === right[index].filename && tab.name === right[index].name && tab.title === right[index].title)
-}
-
 interface ProjectContextState {
-  activeProject: string | null
-  projectData: ProjectData | null
   projects: ProjectListItem[]
-  dashboardOpen: boolean
-  openProject: (name: string) => Promise<void>
-  closeProject: () => void
+  refreshProjects: () => Promise<void>
   createProject: (name: string) => Promise<string>
   deleteProject: (name: string) => Promise<void>
-  addCard: (title: string, description: string, state?: string) => Promise<void>
-  moveCard: (cardId: string, state: string) => Promise<void>
-  deleteCard: (cardId: string) => Promise<void>
-  syncTabs: (tabs: { id: string; name: string | null; historyFile: string | null; title: string | null; chatId: string }[]) => Promise<void>
-  setDashboardOpen: (open: boolean) => void
 }
 
 const ProjectContext = createContext<ProjectContextState | null>(null)
@@ -43,170 +23,33 @@ export function useProject(): ProjectContextState {
   return ctx
 }
 
-/** Owns the open project, its kanban data and the project list. */
+/** Owns the project list. Which project a chat belongs to is the tab's `projectSlug`, never provider state. */
 export function ProjectProvider({ children }: { children: ReactNode }) {
-  const [activeProject, setActiveProject] = useState<string | null>(null)
-  const [projectData, setProjectData] = useState<ProjectData | null>(null)
   const [projects, setProjects] = useState<ProjectListItem[]>([])
-  const [dashboardOpen, setDashboardOpen] = useState(false)
-
-  // Single monotonic counter bumped on any project-switch event. Async calls
-  // capture the current value and drop their result if the counter advanced
-  // (i.e. the user switched project mid-flight, or closed/deleted it).
-  const syncVersionRef = useRef(0)
-  const bumpVersion = useCallback(() => { syncVersionRef.current++ }, [])
-
-  // Ref mirror of `projectData` keeps `syncTabs` identity stable. Reading state directly
-  // would re-create it on every `setProjectData` and loop the effect in `TabManager`.
-  const projectDataRef = useRef<ProjectData | null>(null)
-  useEffect(() => { projectDataRef.current = projectData }, [projectData])
-  // Deletes commit after an undo window; they must see the project open at commit time, not at click time.
-  const activeProjectRef = useRef<string | null>(null)
-  useEffect(() => { activeProjectRef.current = activeProject }, [activeProject])
-  // Saved tabs last sent (or loaded) for the open project. Blank tabs and per-tab config
-  // changes leave them unchanged, so syncing then would only rewrite the project state.
-  const syncedTabsRef = useRef<ProjectTab[]>([])
-
-  const runGuarded = useCallback(
-    async <T,>(fn: (project: string) => Promise<T>): Promise<T | null> => {
-      if (!activeProject) return null
-      const version = syncVersionRef.current
-      const project = activeProject
-      const result = await fn(project)
-      return syncVersionRef.current === version ? result : null
-    },
-    [activeProject],
-  )
 
   const refreshProjects = useCallback(async () => {
     setProjects(await apiListProjects())
   }, [])
 
   useEffect(() => {
-    apiListProjects().then(setProjects)
+    apiListProjects().then(setProjects).catch(() => {})
   }, [])
-
-  const openProject = useCallback(async (name: string) => {
-    bumpVersion()
-    const version = syncVersionRef.current
-    const data = await apiLoadProject(name)
-    if (syncVersionRef.current !== version) return
-    setActiveProject(name)
-    setProjectData(data)
-    syncedTabsRef.current = data.tabs
-  }, [bumpVersion])
-
-  const closeProject = useCallback(() => {
-    bumpVersion()
-    setActiveProject(null)
-    setProjectData(null)
-  }, [bumpVersion])
 
   const createProject = useCallback(async (name: string) => {
     const created = await apiCreateProject(name)
     await refreshProjects()
-    await openProject(created.slug)
     return created.slug
-  }, [refreshProjects, openProject])
+  }, [refreshProjects])
 
   const deleteProject = useCallback(async (name: string) => {
     await apiDeleteProject(name)
-    if (activeProjectRef.current === name) {
-      bumpVersion()
-      setActiveProject(null)
-      setProjectData(null)
-    }
     await refreshProjects()
-  }, [refreshProjects, bumpVersion])
+  }, [refreshProjects])
 
-  const addCard = useCallback(async (title: string, description: string, state: string = "backlog") => {
-    const card = await runGuarded((p) => apiAddProjectCard(p, title, description, state))
-    if (card) setProjectData((prev) => prev ? { ...prev, kanban: [...prev.kanban, card] } : prev)
-  }, [runGuarded])
-
-  const moveCard = useCallback(async (cardId: string, state: string) => {
-    // Optimistic move. `originalCard` is captured inside the updater so a failed or stale call can restore it.
-    const nextState = state as KanbanColumnId
-    let originalCard: KanbanCard | undefined = undefined
-
-    setProjectData((prev) => {
-      if (!prev) return prev
-      originalCard = prev.kanban.find((c) => c.id === cardId)
-      return {
-        ...prev,
-        kanban: prev.kanban.map((c) => c.id === cardId ? { ...c, state: nextState } : c),
-      }
-    })
-
-    try {
-      const updated = await runGuarded((p) => apiMoveProjectCard(p, cardId, state))
-      if (updated) {
-        setProjectData((prev) => prev ? {
-          ...prev,
-          kanban: prev.kanban.map((c) => c.id === cardId ? updated : c),
-        } : prev)
-      } else if (originalCard) {
-        setProjectData((prev) => prev ? {
-          ...prev,
-          kanban: prev.kanban.map((c) => c.id === cardId ? originalCard! : c),
-        } : prev)
-      }
-    } catch {
-      if (originalCard) {
-        setProjectData((prev) => prev ? {
-          ...prev,
-          kanban: prev.kanban.map((c) => c.id === cardId ? originalCard! : c),
-        } : prev)
-      }
-    }
-  }, [runGuarded])
-
-  const deleteCard = useCallback(async (cardId: string) => {
-    const ok = await runGuarded((p) => apiDeleteProjectCard(p, cardId).then(() => true))
-    if (ok) setProjectData((prev) => prev ? {
-      ...prev,
-      kanban: prev.kanban.filter((c) => c.id !== cardId),
-    } : prev)
-  }, [runGuarded])
-
-  const syncTabs = useCallback(async (
-    tabs: { id: string; name: string | null; historyFile: string | null; title: string | null; chatId: string }[],
-  ) => {
-    const current = projectDataRef.current
-    if (!activeProject || !current) return
-    const version = syncVersionRef.current
-    const projectAtCall = activeProject
-    const projectTabs: ProjectTab[] = []
-    for (const t of tabs) {
-      if (!t.historyFile) continue
-      // Tab files are stored as `<slug>/<file>`, the project state keeps the bare filename.
-      const filename = t.historyFile.includes("/") ? t.historyFile.split("/").slice(1).join("/") : t.historyFile
-      projectTabs.push({ filename, name: t.name, title: t.title })
-    }
-    if (isSameProjectTabs(projectTabs, syncedTabsRef.current)) return
-    syncedTabsRef.current = projectTabs
-    const stateUpdate: ProjectStateUpdate = { kanban: current.kanban, tabs: projectTabs }
-    const updated = await apiUpdateProjectKanban(projectAtCall, stateUpdate)
-    if (syncVersionRef.current !== version) return
-    setProjectData(updated)
-    await refreshProjects()
-  }, [activeProject, refreshProjects])
-
-  const value: ProjectContextState = {
-    activeProject,
-    projectData,
-    projects,
-    dashboardOpen,
-    openProject,
-    closeProject,
-    createProject,
-    deleteProject,
-    addCard,
-    moveCard,
-    deleteCard,
-    syncTabs,
-    setDashboardOpen,
-  }
+  const value = useMemo<ProjectContextState>(
+    () => ({ projects, refreshProjects, createProject, deleteProject }),
+    [projects, refreshProjects, createProject, deleteProject],
+  )
 
   return (
     <ProjectContext.Provider value={value}>

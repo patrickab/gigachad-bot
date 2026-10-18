@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils"
 import { DEFAULT_TAB_CONFIG, type TabConfig } from "@/contexts/SettingsContext"
 import { TabContext, useTab, type Tab, type TabActions, type TabContextValue, type WorkspaceItem } from "@/contexts/TabContext"
 import { baseName } from "@/lib/paths"
+import { parseHistoryFile } from "@/lib/domain/historyFile"
 import { useProject } from "@/contexts/ProjectContext"
 import { useClickOutside } from "@/hooks/useClickOutside"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
@@ -23,8 +24,9 @@ export interface TabManagerHandle {
   switchToTab: (tabId: string) => void
   getTabs: () => Tab[]
   openTab: (tab: Tab) => void
-  showChat: (tabId: string) => void
-  showItem: (tabId: string, item: WorkspaceItem) => void
+  showChat: (historyFile: string) => void
+  showItem: (item: WorkspaceItem) => void
+  relocateHistories: (moves: ReadonlyMap<string, string>) => void
 }
 
 /** Tab state and actions shared by toolbar workspace switchers. */
@@ -153,16 +155,9 @@ export function TabSwitcher() {
   const visibleTabs = orderedTabs.filter((entry) => `${entry.project} ${entry.category} ${entry.file}`.toLowerCase().includes(search))
   const nextTab = orderedTabs[(orderedTabs.findIndex(({ item }) => item.id === strip.activeTabId) + 1) % orderedTabs.length].item
 
-  return <div ref={rootRef} data-tab-switcher data-open={open} className="pointer-events-auto flex w-max max-w-[min(28rem,100%)] items-center opacity-0 transition-opacity duration-160 [&:hover]:opacity-100 focus-within:opacity-100 data-[open=true]:opacity-100 motion-reduce:transition-none"
+  return <div ref={rootRef} data-tab-switcher data-open={open} className="pointer-events-auto flex w-[28rem] max-w-full flex-col items-center opacity-0 transition-opacity duration-160 [&:hover]:opacity-100 focus-within:opacity-100 data-[open=true]:opacity-100 motion-reduce:transition-none"
     onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) close() }}>
-    <button type="button" aria-label="Next tab" disabled={strip.tabs.length < 2}
-      onClick={() => {
-        close()
-        strip.select(nextTab.id)
-      }}
-      className="flex h-8.5 w-8.5 shrink-0 items-center justify-center rounded-full bg-paper text-ink-muted transition-colors hover:bg-surface-elevated hover:text-ink focus:bg-surface-elevated focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-subtle disabled:cursor-default disabled:text-ink-faint">
-      <ArrowRightLeft aria-hidden="true" className="h-3 w-3" />
-    </button>
+    <div className="relative flex min-w-0 max-w-[calc(100%_-_4.75rem)]">
     <button ref={triggerRef} type="button" aria-label={`Switch tabs: ${breadcrumb}`} aria-haspopup="dialog" aria-expanded={open}
       aria-describedby={activityDescriptionId}
       onClick={() => {
@@ -172,7 +167,7 @@ export function TabSwitcher() {
           setOpen(true)
         }
       }}
-      className="flex h-8.5 min-w-0 items-center gap-1.5 rounded-full bg-paper px-2 text-xs text-ink-muted transition-colors hover:bg-surface-elevated hover:text-ink focus:bg-surface-elevated focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-subtle">
+      className="flex h-8.5 max-w-full min-w-0 items-center gap-1.5 rounded-full bg-paper px-2 text-xs text-ink-muted transition-colors hover:bg-surface-elevated hover:text-ink focus:bg-surface-elevated focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-subtle">
       <span className="flex min-w-0 items-center gap-1.5">
           <span data-workspace-breadcrumb className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
             <span className="max-w-24 truncate text-ink-subtle">{projectName(tab.projectSlug)}</span>
@@ -184,17 +179,24 @@ export function TabSwitcher() {
           <ChevronDown aria-hidden="true" className="h-3 w-3 shrink-0 text-ink-subtle" />
         </span>
     </button>
+      <button type="button" data-new-chat aria-label="New chat" onClick={() => {
+        close()
+        strip.add()
+      }} className="absolute left-full ml-1 flex h-8.5 w-8.5 items-center justify-center rounded-full bg-paper text-ink-muted transition-colors hover:bg-surface-elevated hover:text-ink focus:bg-surface-elevated focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-subtle">
+        <Plus aria-hidden="true" className="h-3 w-3" />
+      </button>
+    </div>
+      <button type="button" aria-label="Next tab" disabled={strip.tabs.length < 2}
+        onClick={() => {
+          close()
+          strip.select(nextTab.id)
+        }}
+        className="flex h-8.5 w-8.5 shrink-0 items-center justify-center rounded-full bg-paper text-ink-muted transition-colors hover:bg-surface-elevated hover:text-ink focus:bg-surface-elevated focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-subtle disabled:cursor-default disabled:text-ink-faint">
+        <ArrowRightLeft aria-hidden="true" className="h-3 w-3" />
+      </button>
     <span id={activityDescriptionId} className="sr-only">{strip.labelOf(tab)}</span>
     {open && isActive && <div ref={panelRef} role="dialog" aria-label="Open tabs"
       className="absolute left-1/2 top-full z-50 mt-1 flex w-max max-w-[min(36rem,100%)] -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-divider bg-surface shadow-[var(--shadow-lg)]">
-      <div className="flex justify-center px-2 pt-1">
-        <button type="button" data-new-chat aria-label="New chat" onClick={() => {
-          close()
-          strip.add()
-        }} className="flex items-center justify-center rounded p-1.5 text-ink-muted hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-subtle">
-          <Plus aria-hidden="true" className="h-3.5 w-3.5" />
-        </button>
-      </div>
       {showSearch && <div className="border-b border-divider p-2">
         <input aria-label="Search open tabs" placeholder="Find a tab…" value={query} onChange={(event) => setQuery(event.target.value)}
           className="w-full rounded-md bg-paper px-2 py-1.5 text-xs text-ink outline-none focus-visible:ring-1 focus-visible:ring-ink-faint" />
@@ -219,7 +221,7 @@ export function TabSwitcher() {
                 onClick={() => {
                   if (active) close()
                   else {
-                    const target = panelRef.current?.querySelector<HTMLInputElement>("input") ?? panelRef.current?.querySelector<HTMLButtonElement>("[data-new-chat]") ?? triggerRef.current
+                    const target = panelRef.current?.querySelector<HTMLInputElement>("input") ?? triggerRef.current
                     target?.focus()
                   }
                   strip.close(item.id)
@@ -274,15 +276,33 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
       setTabs((prev) => [...prev, tab])
       setActiveTab(tab.id)
     },
-    showChat: (tabId: string) => {
-      updateTab(tabId, () => ({ appMode: "chat" }))
-      setActiveTab(tabId)
+    showChat: (historyFile) => {
+      updateTab(activeTab, (tab) => ({
+        appMode: "chat",
+        projectSlug: parseHistoryFile(historyFile).slug,
+        ...(tab.historyFile !== historyFile ? {
+          historyFile, chatId: crypto.randomUUID(), title: null, name: null, workspaceItem: null,
+        } : {}),
+      }))
     },
-    showItem: (tabId: string, workspaceItem: WorkspaceItem) => {
-      updateTab(tabId, () => ({ workspaceItem, appMode: workspaceItem.kind === "document" ? "document" : "canvas" }))
-      setActiveTab(tabId)
+    showItem: (item) => {
+      updateTab(activeTab, (tab) => ({
+        workspaceItem: item.kind === "architecture" && tab.workspaceItem?.kind === "architecture"
+          && tab.workspaceItem.projectSlug === item.projectSlug ? tab.workspaceItem : item,
+        projectSlug: item.projectSlug,
+        appMode: item.kind === "document" ? "document" : "canvas",
+      }))
     },
-  }), [tabs, updateTab, setActiveTab])
+    relocateHistories: (moves) => {
+      setTabs((current) => current.map((tab) => {
+        const historyFile = tab.historyFile ? moves.get(tab.historyFile) : undefined
+        return historyFile ? {
+          ...tab, historyFile,
+          projectSlug: tab.appMode === "chat" ? parseHistoryFile(historyFile).slug : tab.projectSlug,
+        } : tab
+      }))
+    },
+  }), [tabs, activeTab, updateTab, setActiveTab])
 
   useEffect(() => {
     onTabsChangeRef.current?.(tabs)
@@ -401,7 +421,7 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
             }}
             style={{ display: tab.id === activeTab || tab.id === outgoingTab && !reduceMotion ? undefined : "none" }}
           >
-            <TabScope tab={tab} isActive={tab.id === activeTab} updateTab={updateTab} updateModeLabel={updateModeLabel}>
+            <TabScope key={tab.chatId} tab={tab} isActive={tab.id === activeTab} updateTab={updateTab} updateModeLabel={updateModeLabel}>
               {children}
             </TabScope>
           </div>

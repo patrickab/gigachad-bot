@@ -231,7 +231,7 @@ Memory is a **document-backed, LLM-mediated** store (`src/lib/memory_store.py`,
 
 - **global** — durable facts about the user, valid across all projects
   (identity, communication/learning/engineering preferences, goals).
-- **project** — facts about one active project (purpose, current focus, key
+- **project** — facts about the chat's containing project (purpose, current focus, key
   concepts, decisions, constraints, resources, open questions).
 
 Each scope has its own configurable set of **categories**
@@ -262,8 +262,19 @@ to built-in defaults); every stored memory belongs to exactly one category.
    the watermark.
 
 At chat time, `MemoryStore.augment_system_prompt` reads both Markdown docs
-(global profile + the active project's memory, if any) and appends them to
+(global profile + the chat's containing project's memory, if any) and appends them to
 the system prompt under a `# Persistent Memory Context` header — this is how
 the LLM actually "remembers" across chats. Users can also list, move a memory
 between scopes, or re-bucket memories orphaned by a category rename/deletion
 (`remap_orphaned`), all without touching the raw JSON by hand.
+
+Project membership belongs to each workspace tab, not a global active-project setting.
+Switching tabs or selecting another project does not change another chat's memory scope.
+The sidebar highlights the selected item and its containing project. Selection backgrounds
+fit the item label and badge, excluding indentation and unused row space.
+
+Workspace navigation reveals a centered breadcrumb with a borderless new-chat `+`
+immediately to its right and a separate, centered next-tab button beneath it.
+All controls share the hover and keyboard-focus reveal. The `+` creates a tab in
+the current project scope without opening the menu. The tab menu only lists,
+searches, and closes open workspaces.

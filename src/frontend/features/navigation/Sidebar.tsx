@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion } from "framer-motion"
 import { Brain } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -13,8 +13,8 @@ import { useSidebar } from "@/features/navigation/SidebarContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import type { BranchMeta, FileTreeNode, ProjectListItem, ProjectDocument } from "@/lib/domain/types"
 import { ChatBranchPreview } from "./ChatBranchPreview"
-import { addRootFilesToProject, addFileRoot, createArchitectureSource, moveHistoryItem, fileRootTree, removeFileRoot, listNotes, listProjectDocuments, moveDocument, removeDocument, writeDocument } from "@/lib/backend/api"
-import { useTabActive, type AppSurface } from "@/contexts/TabContext"
+import { addRootFilesToProject, addFileRoot, createArchitectureSource, fileRootTree, removeFileRoot, listNotes, listProjectDocuments, moveDocument, removeDocument, writeDocument } from "@/lib/backend/api"
+import { useTab, useTabActive, type AppSurface } from "@/contexts/TabContext"
 import { isArchitecturePath } from "@/lib/domain/architecturePaths"
 import { baseName } from "@/lib/paths"
 
@@ -42,11 +42,16 @@ export function Sidebar({
 }: SidebarProps) {
   const { collapsed } = useSidebar()
   const isActive = useTabActive()
-  const { branchMeta, visibleRootFiles, historiesLoading, refreshAll, onFileClick, activeFile, activeQaIndex, cascadeDelete } = useBranches()
-  const { projects, activeProject, openProject, createProject, deleteProject } = useProject()
+  const { tab } = useTab()
+  const { branchMeta, visibleRootFiles, historiesLoading, moveHistory, onFileClick, activeFile, activeQaIndex, cascadeDelete } = useBranches()
+  const { projects, createProject, deleteProject } = useProject()
   const { openMemoryViewer } = useMemoryViewer()
   const { schedule, pending } = useUndoDelete()
-  const controller = useFileTree({ storageKey: "expanded_workspace_projects" })
+  const defaultExpanded = useMemo(() => [
+    "shared:canvases", "shared:files",
+    ...projects.flatMap((project) => ["chats", "canvases", "architecture", "files"].map((category) => `project:${project.slug}:${category}`)),
+  ], [projects])
+  const controller = useFileTree({ storageKey: "expanded_workspace_projects", defaultExpanded })
   const [documents, setDocuments] = useState<Record<string, ProjectDocument[]>>({})
   const [notes, setNotes] = useState<ProjectDocument[]>([])
   const [rootTreeData, setRootTreeData] = useState<FileTreeNode[]>([])
@@ -91,8 +96,7 @@ export function Sidebar({
         onCanvasDeleted?.(path)
       }
     } else {
-      await moveHistoryItem(path, scope)
-      await refreshAll()
+      await moveHistory(path, scope)
     }
   }
 
@@ -215,11 +219,8 @@ export function Sidebar({
 
   const items: FileTreeItem<string>[] = [
     ...projects.filter((project) => !pending(`project:${project.slug}`)).map((project): FileTreeItem<string> => ({
-      id: project.slug, label: project.name, type: "root", isActive: activeProject === project.slug,
-      onSelect: () => {
-        if (onProjectSelect) onProjectSelect(project.slug)
-        else void openProject(project.slug)
-      },
+      id: project.slug, label: project.name, type: "root", isActive: tab.projectSlug === project.slug,
+      onSelect: () => onProjectSelect?.(project.slug),
       onDelete: () => schedule(`project:${project.slug}`, project.name, () => deleteProject(project.slug)),
       actions: [{ label: `Open memory for ${project.name}`, icon: Brain,
         onClick: () => openMemoryViewer({ scope: "project", projectSlug: project.slug }) }],
@@ -227,8 +228,8 @@ export function Sidebar({
       onDropFiles: (paths) => importFiles(project.slug, paths),
       children: buildCategories(project),
     })),
-    { id: "shared:", label: "general", type: "root", children: buildCategories(null), onMoveHere: (path) => moveToProject(path, "") },
   ]
+  const [generalChats, ...generalCategories] = buildCategories(null)
 
   return <motion.aside
     initial={false} animate={{ width: collapsed ? 0 : 280 }} transition={{ duration: 0.25, ease: "easeInOut" }}
@@ -249,6 +250,12 @@ export function Sidebar({
             controller.expand(slug)
             onNewChat?.(slug)
           } }}
+          renderBeforeItem={(item) => item.data ? <ChatBranchPreview file={item.data} /> : null}
+          onMoveToRoot={(path) => moveToProject(path, "")}
+        />
+        <div role="separator" className="my-4 border-t border-divider/50" />
+        <FileTree label="General" items={[...(generalChats.children ?? []), ...generalCategories]} controller={controller} loading={historiesLoading}
+          create={generalChats.create}
           renderBeforeItem={(item) => item.data ? <ChatBranchPreview file={item.data} /> : null}
           onMoveToRoot={(path) => moveToProject(path, "")}
         />

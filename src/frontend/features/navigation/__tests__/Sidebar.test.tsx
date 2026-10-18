@@ -1,9 +1,17 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest"
-import { createRef } from "react"
-import { act, cleanup, render, fireEvent, waitFor, within } from "@testing-library/react"
+import { createRef, type ReactElement } from "react"
+import { act, cleanup, render as testingRender, fireEvent, waitFor, within } from "@testing-library/react"
 import { Sidebar } from "@/features/navigation/Sidebar"
 import { TabManager, TabSwitcher, nextTab, type TabManagerHandle } from "@/features/navigation/TabManager"
-import { useTab } from "@/contexts/TabContext"
+import { TabContext, useTab } from "@/contexts/TabContext"
+import { BranchProvider, useBranches } from "@/features/navigation/BranchContext"
+import type { BranchMeta } from "@/lib/domain/types"
+
+const render = (element: ReactElement) => testingRender(
+  <TabContext.Provider value={{ tab: nextTab(), isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), setAppMode: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
+    {element}
+  </TabContext.Provider>,
+)
 
 const fixtures = vi.hoisted(() => ({
   projects: [{ slug: "proj", name: "Proj", tabs: [] }, { slug: "empty", name: "Empty project", tabs: [] }],
@@ -14,8 +22,11 @@ const fixtures = vi.hoisted(() => ({
   ],
 }))
 const api = vi.hoisted(() => ({
-  listNotes: vi.fn(async () => [{ path: "chat_histories/_notes/loose.canvas", name: "loose.canvas", mime: "text/plain" }]),
+  listNotes: vi.fn(async () => [{ path: "chat_histories/_notes/loose-board.canvas", name: "loose-board.canvas", mime: "text/plain" }]),
   listProjectDocuments: vi.fn(async (slug: string) => slug === "proj" ? fixtures.documents : []),
+  listChatHistories: vi.fn<typeof import("@/lib/backend/api").listChatHistories>(async () => ({ files: [] })),
+  fetchBranchMeta: vi.fn<typeof import("@/lib/backend/api").fetchBranchMeta>(async () => ({})),
+  moveHistoryItem: vi.fn<typeof import("@/lib/backend/api").moveHistoryItem>(),
   writeDocument: vi.fn<typeof import("@/lib/backend/api").writeDocument>(async (scope, name) => ({
     path: `project/${scope}/document/${name}`, name, mime: "text/plain",
   })),
@@ -29,18 +40,19 @@ const api = vi.hoisted(() => ({
 }))
 vi.mock("@/lib/backend/api", () => ({
   ...api,
-  addFileRoot: vi.fn(), createArchitectureSource: vi.fn(), moveHistoryItem: vi.fn(),
+  addFileRoot: vi.fn(), createArchitectureSource: vi.fn(),
   removeFileRoot: vi.fn(), moveDocument: vi.fn(), removeDocument: vi.fn(),
 }))
 vi.mock("@/features/navigation/SidebarContext", () => ({ useSidebar: () => ({ collapsed: false }) }))
-vi.mock("@/features/navigation/BranchContext", () => ({
-  useBranches: () => ({
-    branchMeta: {}, visibleRootFiles: [], historiesLoading: false, refreshAll: vi.fn(async () => {}),
-  }),
+vi.mock("@/features/navigation/BranchContext", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/features/navigation/BranchContext")>(),
+  useBranches: vi.fn(() => ({
+    branchMeta: {}, visibleRootFiles: [], historiesLoading: false, refreshAll: vi.fn(async () => {}), moveHistory: vi.fn(),
+  })),
 }))
 vi.mock("@/contexts/ProjectContext", () => ({
   useProject: () => ({
-    projects: fixtures.projects, activeProject: null, openProject: vi.fn(),
+    projects: fixtures.projects,
     createProject: vi.fn(), deleteProject: vi.fn(),
   }),
 }))
@@ -71,6 +83,31 @@ function WorkspaceDraft() {
 }
 
 describe("Project navigation", () => {
+  it("opens immediate categories by default without expanding file roots", async () => {
+    localStorage.setItem("expanded_workspace_projects", "[]")
+    const view = render(<Sidebar appMode="chat" />)
+    const general = within(view.getByLabelText("General"))
+    expect(general.getByRole("button", { name: "canvases" })).toHaveAttribute("aria-expanded", "true")
+    expect(general.getByRole("button", { name: "files" })).toHaveAttribute("aria-expanded", "true")
+    expect(await general.findByRole("button", { name: "source" })).toHaveAttribute("aria-expanded", "false")
+    expect(general.queryByRole("button", { name: "first.md" })).not.toBeInTheDocument()
+
+    fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
+    const project = within(view.getByLabelText("Proj contents"))
+    for (const category of ["sessions", "canvases", "architecture", "files"]) {
+      expect(project.getByRole("button", { name: category })).toHaveAttribute("aria-expanded", "true")
+    }
+    expect(await project.findByRole("button", { name: "board" })).toBeVisible()
+    expect(project.getByRole("button", { name: "notes.md" })).toBeVisible()
+    fireEvent.click(project.getByRole("button", { name: "canvases" }))
+    fireEvent.click(view.getByRole("button", { name: "Collapse Proj" }))
+    fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
+    expect(within(view.getByLabelText("Proj contents")).getByRole("button", { name: "canvases" })).toHaveAttribute("aria-expanded", "false")
+    view.unmount()
+    const reopened = render(<Sidebar appMode="chat" />)
+    expect(within(reopened.getByLabelText("Proj contents")).getByRole("button", { name: "canvases" })).toHaveAttribute("aria-expanded", "false")
+  })
+
   it("opens canvases, architecture and files from chat without mixing their categories", async () => {
     const onCanvasSelect = vi.fn()
     const onArchitectureSelect = vi.fn()
@@ -81,13 +118,10 @@ describe("Project navigation", () => {
 
     fireEvent.click(view.getByRole("button", { name: "Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
-    fireEvent.click(project.getByRole("button", { name: "canvases" }))
     fireEvent.click(await project.findByText("board"))
     expect(onCanvasSelect).toHaveBeenLastCalledWith("project/proj/document/board.canvas", "proj")
-    fireEvent.click(project.getByRole("button", { name: "architecture" }))
     fireEvent.click(await project.findByText("System overview"))
     expect(onArchitectureSelect).toHaveBeenLastCalledWith("proj")
-    fireEvent.click(project.getByRole("button", { name: "files" }))
     fireEvent.click(await project.findByText("notes.md"))
     expect(onDocumentSelect).toHaveBeenLastCalledWith("project/proj/document/notes.md", "proj")
     expect(project.queryByText("board.canvas")).not.toBeInTheDocument()
@@ -101,7 +135,6 @@ describe("Project navigation", () => {
     fireEvent.click(first.getByRole("button", { name: "Expand Proj" }))
     expect(onProjectSelect).not.toHaveBeenCalled()
     const project = within(first.getByLabelText("Proj contents"))
-    fireEvent.click(project.getByRole("button", { name: "canvases" }))
     await project.findByText("board")
 
     const second = within(render(<Sidebar appMode="canvas" onProjectSelect={onProjectSelect} />).container)
@@ -124,11 +157,9 @@ describe("Project navigation", () => {
     fireEvent.click(empty.getByRole("button", { name: "New chat in Empty project" }))
     expect(onNewChat).toHaveBeenLastCalledWith("empty")
 
-    fireEvent.click(view.getByRole("button", { name: "general" }))
-    const categories = view.getAllByRole("button", { name: "canvases" })
-    fireEvent.click(categories[categories.length - 1])
-    fireEvent.click(await view.findByText("loose"))
-    expect(onCanvasSelect).toHaveBeenLastCalledWith("chat_histories/_notes/loose.canvas", "")
+    const general = within(view.getByLabelText("General"))
+    fireEvent.click(await general.findByText("loose-board"))
+    expect(onCanvasSelect).toHaveBeenLastCalledWith("chat_histories/_notes/loose-board.canvas", "")
   })
 
   it("keeps a failed creation editable and navigates only after a successful retry", async () => {
@@ -163,10 +194,7 @@ describe("Project navigation", () => {
     const view = render(<Sidebar appMode="chat" />)
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
-    fireEvent.click(project.getByRole("button", { name: "files" }))
-    fireEvent.click(view.getByRole("button", { name: "general" }))
-    const shared = within(view.getByLabelText("general contents"))
-    fireEvent.click(shared.getByRole("button", { name: "files" }))
+    const shared = within(view.getByLabelText("General"))
     fireEvent.click(await shared.findByRole("button", { name: "source" }))
     const first = shared.getByRole("button", { name: "first.md" })
     const second = shared.getByRole("button", { name: "second.md" })
@@ -196,6 +224,68 @@ describe("Project navigation", () => {
     expect(view.getByText("Second workspace")).toBeVisible()
     fireEvent.keyDown(category, { key: "Tab", shiftKey: true })
     expect(view.getByText("Second workspace")).toBeVisible()
+  })
+
+  it("moves an always-visible general history onto a collapsed project and relocates its open branches", async () => {
+    const actual = await vi.importActual<typeof import("@/features/navigation/BranchContext")>("@/features/navigation/BranchContext")
+    vi.mocked(useBranches).mockImplementation(actual.useBranches)
+    const root: BranchMeta = { chat_id: "root", parent_id: null, branch_message_idx: null, children: [{ chat_id: "child", branch_message_idx: 0 }], qa_count: 0 }
+    const child: BranchMeta = { chat_id: "child", parent_id: "root", branch_message_idx: 0, children: [], qa_count: 0 }
+    api.listChatHistories.mockResolvedValue({ files: ["loose.json", "child.json"] })
+    api.fetchBranchMeta.mockResolvedValue({ "loose.json": root, "child.json": child })
+    api.moveHistoryItem.mockImplementation(async () => {
+      api.listChatHistories.mockResolvedValue({ files: [] })
+      api.fetchBranchMeta.mockResolvedValue({ "proj/loose-2.json": root, "proj/child-2.json": child })
+      return { status: "ok", new_path: "proj/loose-2.json" }
+    })
+    const manager = createRef<TabManagerHandle>()
+    const view = render(<BranchProvider onFileClick={vi.fn()} onHistoriesMoved={(moves) => manager.current!.relocateHistories(moves)}>
+      <TabManager ref={manager}><Sidebar appMode="chat" /><TabSwitcher /><WorkspaceDraft /></TabManager>
+    </BranchProvider>)
+    const rootTab = { ...nextTab(), name: "Root", historyFile: "loose.json" }
+    const childTab = { ...nextTab(), name: "Branch", historyFile: "child.json" }
+    act(() => {
+      manager.current!.openTab(rootTab)
+      manager.current!.openTab(childTab)
+    })
+    fireEvent.change(view.getByRole("textbox", { name: "Draft Branch" }), { target: { value: "Keep this draft" } })
+    const navigation = within(view.getByRole("navigation", { name: "Workspace" }))
+    const general = within(navigation.getByLabelText("General"))
+    const history = await general.findByRole("button", { name: "loose" })
+    expect(general.queryByRole("button", { name: "child" })).not.toBeInTheDocument()
+    expect(navigation.queryByLabelText("Proj contents")).not.toBeInTheDocument()
+    const payload = new Map<string, string>()
+    const dataTransfer = {
+      get types() { return [...payload.keys()] },
+      setData: (type: string, value: string) => { payload.set(type, value) },
+      getData: (type: string) => payload.get(type) ?? "",
+    }
+    fireEvent.dragStart(history, { dataTransfer })
+    fireEvent.dragOver(navigation.getByRole("button", { name: "Proj" }), { dataTransfer })
+    fireEvent.drop(navigation.getByRole("button", { name: "Proj" }), { dataTransfer })
+    await waitFor(() => expect(general.queryByRole("button", { name: "loose" })).not.toBeInTheDocument())
+    fireEvent.click(navigation.getByRole("button", { name: "Expand Proj" }))
+    const project = within(navigation.getByLabelText("Proj contents"))
+    expect(project.getByRole("button", { name: "loose-2" })).toBeVisible()
+    expect(manager.current!.getTabs().find((tab) => tab.id === rootTab.id)).toMatchObject({ historyFile: "proj/loose-2.json", projectSlug: "proj" })
+    expect(manager.current!.getTabs().find((tab) => tab.id === childTab.id)).toMatchObject({ historyFile: "proj/child-2.json", projectSlug: "proj" })
+    expect(view.getByRole("textbox", { name: "Draft Branch" })).toHaveValue("Keep this draft")
+    expect(api.moveHistoryItem).toHaveBeenCalledWith("loose.json", "proj")
+  })
+
+  it("keeps a general history visible when dropping it into a project fails", async () => {
+    const actual = await vi.importActual<typeof import("@/features/navigation/BranchContext")>("@/features/navigation/BranchContext")
+    vi.mocked(useBranches).mockImplementation(actual.useBranches)
+    api.listChatHistories.mockResolvedValue({ files: ["loose.json"] })
+    api.moveHistoryItem.mockRejectedValue(new Error("Storage unavailable"))
+    const view = render(<BranchProvider onFileClick={vi.fn()}><Sidebar appMode="chat" /></BranchProvider>)
+    const general = within(view.getByLabelText("General"))
+    const history = await general.findByRole("button", { name: "loose" })
+    const dataTransfer = { types: ["text/plain"], getData: (type: string) => type === "text/plain" ? "loose.json" : "" }
+    fireEvent.drop(view.getByRole("button", { name: "Proj" }), { dataTransfer })
+    expect(await view.findByRole("alert")).toHaveTextContent("Storage unavailable")
+    expect(history).toBeVisible()
+    expect(view.queryByLabelText("Proj contents")).not.toBeInTheDocument()
   })
 })
 
@@ -232,6 +322,33 @@ describe("Toolbar tab switching", () => {
     }
   })
 
+  it("reuses the selected tab for sessions and items without disturbing background tabs", () => {
+    const manager = createRef<TabManagerHandle>()
+    const view = render(<TabManager ref={manager}><TabSwitcher /><WorkspaceDraft /></TabManager>)
+    act(() => manager.current!.showChat("proj/first.json"))
+    const background = manager.current!.getTabs()[0]
+    const selected = nextTab()
+    act(() => manager.current!.openTab(selected))
+    fireEvent.change(view.getByRole("textbox"), { target: { value: "Unsaved draft" } })
+
+    act(() => manager.current!.showChat("proj/first.json"))
+    expect(view.getByRole("button", { name: "Switch tabs: Proj / sessions / first.json" })).toBeVisible()
+    expect(view.getByRole("textbox")).toHaveValue("")
+    fireEvent.change(view.getByRole("textbox"), { target: { value: "Session draft" } })
+    act(() => manager.current!.showItem({ kind: "canvas", path: "board.canvas", projectSlug: "proj" }))
+    expect(view.getByRole("button", { name: "Switch tabs: Proj / canvases / board.canvas" })).toBeVisible()
+    act(() => manager.current!.showChat("proj/first.json"))
+    expect(view.getByRole("textbox")).toHaveValue("Session draft")
+
+    act(() => manager.current!.showItem({ kind: "document", path: "/source/notes.md", projectSlug: null, rootFile: true }))
+    expect(view.getByRole("button", { name: "Switch tabs: general / files / notes.md" })).toBeVisible()
+    act(() => manager.current!.showChat("proj/second.json"))
+    expect(view.getByRole("button", { name: "Switch tabs: Proj / sessions / second.json" })).toBeVisible()
+    expect(view.getByRole("textbox")).toHaveValue("")
+    expect(manager.current!.getTabs().map((tab) => tab.id)).toEqual([background.id, selected.id])
+    expect(manager.current!.getTabs()[0]).toEqual(background)
+  })
+
   it("tracks the visible surface across project, shared, and scratch workspaces", () => {
     const manager = createRef<TabManagerHandle>()
     const view = render(<TabManager ref={manager}><TabSwitcher /></TabManager>)
@@ -250,8 +367,8 @@ describe("Toolbar tab switching", () => {
       expect(view.queryByRole("dialog")).not.toBeInTheDocument()
       expect(view.getByRole("button", { name: `Switch tabs: ${breadcrumb}` })).toBeVisible()
     }
-    act(() => manager.current!.showChat(canvas.id))
-    expect(view.getByRole("button", { name: "Switch tabs: Proj / sessions / New chat" })).toBeVisible()
+    act(() => manager.current!.showChat("proj/session.json"))
+    expect(view.getByRole("button", { name: "Switch tabs: Proj / sessions / session.json" })).toBeVisible()
   })
 
   it("keeps search usable after closing a filtered tab and preserves keyboard focus", () => {
@@ -326,8 +443,8 @@ describe("Toolbar tab switching", () => {
     })
     for (const tab of [projectTab, sharedTab]) {
       act(() => manager.current!.switchToTab(tab.id))
-      fireEvent.click(view.getByRole("button", { name: /^Switch tabs:/ }))
-      fireEvent.click(within(view.getByRole("dialog", { name: "Open tabs" })).getByRole("button", { name: "New chat" }))
+      expect(view.queryByRole("dialog")).not.toBeInTheDocument()
+      fireEvent.click(view.getByRole("button", { name: "New chat" }))
       expect(manager.current!.getTabs().at(-1)?.projectSlug).toBe(tab.projectSlug)
       expect(view.queryByRole("dialog")).not.toBeInTheDocument()
     }

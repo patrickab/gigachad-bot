@@ -83,7 +83,7 @@ afterEach(() => { vi.useRealTimers(); vi.clearAllMocks() })
 const baseProps = (over: Partial<Parameters<typeof useProjectDocuments>[0]> = {}) => ({
   isActive: true,
   appMode: "chat" as const,
-  activeProject: "proj",
+  projectSlug: "proj",
   chatId: "c1",
   chatInputRef: makeChatInputRef(),
   liveCanvasRef: makeLiveCanvasRef(),

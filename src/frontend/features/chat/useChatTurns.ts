@@ -45,7 +45,7 @@ function baseRequest(config: TabConfig, reasoningEffort: string, prompts: Record
 export function useChatTurns({
   chat,
   chatId,
-  activeProject,
+  projectSlug,
   config,
   reasoningEffort,
   prompts,
@@ -55,7 +55,7 @@ export function useChatTurns({
 }: {
   chat: Pick<UseChatStreamReturn, "messages" | "isStreaming" | "send" | "regenerateAt" | "deleteMessagePair" | "setMessages">
   chatId: string
-  activeProject: string | null
+  projectSlug: string | null
   config: TabConfig
   reasoningEffort: string
   prompts: Record<string, string>
@@ -83,10 +83,10 @@ export function useChatTurns({
       const artifact = toolArtifactDocument(call)
       return artifact ? [artifact] : []
     })
-    await Promise.allSettled(artifacts.map((artifact) => writeDocument(activeProject ?? "", artifact.name, artifact.content)))
+    await Promise.allSettled(artifacts.map((artifact) => writeDocument(projectSlug ?? "", artifact.name, artifact.content)))
     refreshDocuments()
     void autosave(completion.messages, completion.usage)
-  }, [activeProject, refreshDocuments, autosave])
+  }, [projectSlug, refreshDocuments, autosave])
 
   const handleSend = useCallback(async (text: string, attachments: Attachment[]) => {
     if (await runSlashCommand(text.trim())) return
@@ -97,7 +97,7 @@ export function useChatTurns({
         chat_id: chatId,
         user_msg: text,
         img_paths: collectActiveImagePaths(messages),
-        project_slug: activeProject,
+        project_slug: projectSlug,
       }))
       return
     }
@@ -114,7 +114,7 @@ export function useChatTurns({
       attachments: activeAttachments,
       priorMessages: messages,
       chatId,
-      slug: activeProject,
+      slug: projectSlug,
       baseParams,
     }, parseFiles, attachRootFile).catch(() => null)
     if (!built) {
@@ -129,7 +129,7 @@ export function useChatTurns({
       return copy
     })
     await finishTurn(await send(built.request, true))
-  }, [runSlashCommand, finishTurn, send, baseParams, chatId, messages, activeProject, setMessages])
+  }, [runSlashCommand, finishTurn, send, baseParams, chatId, messages, projectSlug, setMessages])
 
   const handleRegenerate = useCallback(async (globalIndex: number) => {
     if (isStreaming) return
@@ -147,9 +147,9 @@ export function useChatTurns({
       chat_id: chatId,
       user_msg,
       img_paths: collectActiveImagePaths(messages, { userIndex: globalIndex }),
-      project_slug: activeProject,
+      project_slug: projectSlug,
     }))
-  }, [isStreaming, messages, regenerateAt, finishTurn, baseParams, chatId, activeProject])
+  }, [isStreaming, messages, regenerateAt, finishTurn, baseParams, chatId, projectSlug])
 
   const handleToggleAttachmentActive = useCallback((messageIndex: number, attachmentName: string) => {
     setMessages(prev => {
@@ -179,11 +179,11 @@ export function useChatTurns({
       attachmentName,
       async () => {
         // File root refs have no upload copy and the source file must never be deleted.
-        if (!att.vaultPath) await deleteAttachment(chatId, attachmentName, activeProject)
+        if (!att.vaultPath) await deleteAttachment(chatId, attachmentName, projectSlug)
       },
       () => patch(original),
     )
-  }, [messages, setMessages, chatId, activeProject, scheduleDelete])
+  }, [messages, setMessages, chatId, projectSlug, scheduleDelete])
 
   // Nothing to commit: the pair leaves the chat (and what the model sees) at once; Undo puts it back.
   const handleDeletePair = useCallback((index: number) => {

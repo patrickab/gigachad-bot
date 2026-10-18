@@ -9,7 +9,7 @@ import type { Message, Usage } from "@/lib/domain/types"
 /** Save a tab's chat: explicit save-as, quick save, and chained autosaves once it has a history file. */
 export function useChatPersistence({
   tab,
-  activeProject,
+  projectSlug,
   messages,
   chatId,
   usage,
@@ -17,7 +17,7 @@ export function useChatPersistence({
   setHistoryFile,
 }: {
   tab: Tab
-  activeProject: string | null
+  projectSlug: string | null
   messages: Message[]
   chatId: string
   usage: Usage | undefined
@@ -29,18 +29,18 @@ export function useChatPersistence({
 
   const isTitled = !!tab.historyFile
 
-  // No-op for untitled chats. Routes to the project store when the history file belongs to the active project.
+  // No-op for untitled chats. Saved histories retain their own project scope.
   const saveHistory = useCallback(async (messagesToSave: Message[], usageToSave: Usage | undefined) => {
     if (!tab.historyFile) return
     const { slug, filename } = parseHistoryFile(tab.historyFile)
     const title = tab.title ?? filename.replace(".json", "")
-    if (slug && slug === activeProject) {
-      await saveProjectTab(activeProject, filename, messagesToSave, { chatId, tabName: tab.name ?? undefined, title, usage: usageToSave })
+    if (slug && slug === projectSlug) {
+      await saveProjectTab(projectSlug, filename, messagesToSave, { chatId, tabName: tab.name ?? undefined, title, usage: usageToSave })
     } else {
       await apiSaveChatHistory(tab.historyFile, messagesToSave, { chatId, title, usage: usageToSave })
     }
     await refreshAll()
-  }, [tab.historyFile, tab.title, tab.name, activeProject, chatId, refreshAll])
+  }, [tab.historyFile, tab.title, tab.name, projectSlug, chatId, refreshAll])
 
   const handleQuickSave = useCallback(async () => {
     await saveHistory(messages, usage)
@@ -58,11 +58,11 @@ export function useChatPersistence({
     const newFilename = name + ".json"
 
     // Save failures are swallowed so the tab still adopts the new history file.
-    if (activeProject) {
+    if (projectSlug) {
       try {
-        await saveProjectTab(activeProject, newFilename, messages, { chatId, tabName: tab.name ?? undefined, title: name, usage })
+        await saveProjectTab(projectSlug, newFilename, messages, { chatId, tabName: tab.name ?? undefined, title: name, usage })
       } catch { }
-      setHistoryFile(buildHistoryFile(newFilename, activeProject))
+      setHistoryFile(buildHistoryFile(newFilename, projectSlug))
     } else {
       try {
         await apiSaveChatHistory(newFilename, messages, { chatId, title: name, usage })
@@ -71,7 +71,7 @@ export function useChatPersistence({
     }
     await refreshAll()
     setSaveModalOpen(false)
-  }, [messages, chatId, tab.name, activeProject, usage, setHistoryFile, refreshAll])
+  }, [messages, chatId, tab.name, projectSlug, usage, setHistoryFile, refreshAll])
 
   return {
     isTitled,

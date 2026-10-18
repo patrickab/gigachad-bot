@@ -33,9 +33,9 @@ export function useMemoryCommandBar({ messages, chatId, branchMessageIdx }: {
   branchMessageIdx: number | null
 }): MemoryCommandBar {
   const { tab, setModeLabel } = useTab()
-  const activeProject = tab.projectSlug
+  const projectSlug = tab.projectSlug
   const flow = useMemorizeFlow()
-  const categories = useMemoryCategories(activeProject)
+  const categories = useMemoryCategories(projectSlug)
   const [menuOpen, setMenuOpen] = useState(false)
   const [query, setQuery] = useState("")
 
@@ -65,8 +65,8 @@ export function useMemoryCommandBar({ messages, chatId, branchMessageIdx }: {
   const memorize = useCallback(async (scope: MemorizeScope) => {
     if (branchMessageIdx != null) return
     setMenuOpen(false)
-    await extract(messages, activeProject, chatId, scope)
-  }, [branchMessageIdx, extract, messages, activeProject, chatId])
+    await extract(messages, projectSlug, chatId, scope)
+  }, [branchMessageIdx, extract, messages, projectSlug, chatId])
 
   return {
     isIdle: !menuOpen && phase === "idle",
@@ -77,7 +77,7 @@ export function useMemoryCommandBar({ messages, chatId, branchMessageIdx }: {
     setQuery,
     memorize,
     panelState: flow.state.phase === "idle" ? null : flow.state,
-    panelActions: flow.bindProject(activeProject),
+    panelActions: flow.bindProject(projectSlug),
     categories,
   }
 }

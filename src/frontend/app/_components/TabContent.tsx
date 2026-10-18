@@ -49,7 +49,7 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
   focus: ChatFocus
 }) {
   const { tab, isActive, setModeLabel, updateConfig, setAppMode, setWorkspaceItem, setHistoryFile, setTitle } = useTab()
-  const activeProject = tab.projectSlug
+  const projectSlug = tab.projectSlug
   const documentItem = tab.workspaceItem?.kind === "document" ? tab.workspaceItem : null
   const chat = useChat()
   const { messages, isStreaming, cancel, reset, models, saveModelProviders, saveModelTabOrder, saveModelDefaults, prompts, setPrompts, setMessages, totalUsage, setTotalUsage } = chat
@@ -78,19 +78,19 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
 
   const { view: canvasView, sidebarProps: canvasSidebarProps, navigateArchitecture, closeCanvas, openCreatedCanvas, architectureEdgeStyle, setArchitectureEdgeStyle, toolbarSlots, setDrawingSlot, setViewSlot } = useCanvasView()
   const filePicker = useFilePicker({ isActive, hasMessages: messages.length > 0, chatInputRef, setExtracting })
-  const docs = useProjectDocuments({ isActive, appMode, activeProject, chatId, chatInputRef, liveCanvasRef, setExtracting, setMessages })
-  const persistence = useChatPersistence({ tab, activeProject, messages, chatId, usage, refreshAll, setHistoryFile })
+  const docs = useProjectDocuments({ isActive, appMode, projectSlug, chatId, chatInputRef, liveCanvasRef, setExtracting, setMessages })
+  const persistence = useChatPersistence({ tab, projectSlug, messages, chatId, usage, refreshAll, setHistoryFile })
   const memory = useMemoryCommandBar({ messages, chatId, branchMessageIdx })
   const { menuItems, runSlashCommand } = useSlashCommands({
     filesEnabled: filePicker.filesEnabled,
-    hasProject: activeProject != null,
+    hasProject: projectSlug != null,
     openFilePicker: filePicker.openFilePicker,
     memorize: memory.memorize,
   })
   const turns = useChatTurns({
     chat,
     chatId,
-    activeProject,
+    projectSlug,
     config,
     reasoningEffort,
     prompts,
@@ -112,6 +112,8 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
   useEffect(() => {
     if (isActive) setActiveQaIndex(focus.qaIndex)
   }, [isActive, focus.qaIndex, setActiveQaIndex])
+  useEffect(() => cancel, [cancel])
+
 
   useEffect(() => {
     if (!tab.historyFile) return
@@ -131,6 +133,7 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
       if (data.usage) setTotalUsage(data.usage)
       setLoadedBranch({ historyFile, messageIdx: data.branch_message_idx ?? null })
     }).catch(() => { })
+    return () => { loadIdRef.current++ }
   }, [tab.historyFile, setMessages, setTitle, setTotalUsage])
 
   const onKeyDown = useEffectEvent((e: KeyboardEvent) => {
@@ -193,8 +196,8 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
     onSelectDocument: docs.handleDocumentSelect,
     onAttachArchitecture: docs.handleAttachArchitecture,
     architectureError: docs.architectureError,
-    onOpenDocuments: activeProject ? docs.openDocuments : undefined,
-    onCreateDocument: activeProject ? () => setCreateDocOpen(true) : undefined,
+    onOpenDocuments: projectSlug ? docs.openDocuments : undefined,
+    onCreateDocument: projectSlug ? () => setCreateDocOpen(true) : undefined,
     onDeleteDocument: docs.handleDeleteDocument,
     onRenameDocument: docs.handleRenameDocument,
     onDocumentSaved: docs.handleDocumentSaved,
@@ -206,7 +209,7 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
     docs.visibleDocuments, docs.handleDocumentSelect, docs.openDocuments, setCreateDocOpen,
     docs.handleDeleteDocument, docs.handleRenameDocument, docs.handleDocumentSaved,
     docs.handleAttachArchitecture, docs.architectureError,
-    activeProject, config.selectedModel,
+    projectSlug, config.selectedModel,
   ])
 
   const handleBranch = useCallback((qaIndex: number) => {
@@ -323,7 +326,7 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
           ) : appMode === "canvas" ? (
             <CanvasWorkspace
               selected={canvasView.kind === "canvas" ? canvasView.selection : null}
-              slug={activeProject}
+              slug={projectSlug}
               toolbarSlots={toolbarSlots}
               onCloseEditor={closeCanvas}
               onCreated={openCreatedCanvas}
@@ -346,7 +349,7 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
                 focus={focus}
                 branchMessageIdx={branchMessageIdx}
                 chatInputRef={chatInputRef}
-                slug={activeProject}
+                slug={projectSlug}
                 contextToggleSlot={contextToggleSlot}
                 wideToggleSlot={wideToggleSlot}
               />
@@ -390,7 +393,7 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
       )}
       {isActive && docs.documentOpen && (
         <DocumentPicker
-          projectSlug={activeProject}
+          projectSlug={projectSlug}
           projectDocuments={docs.projectDocuments}
           allDocuments={docs.allDocuments}
           onAttach={docs.handleDocumentSelect}

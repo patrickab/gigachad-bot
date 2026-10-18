@@ -47,7 +47,7 @@ FALLBACK_CATEGORY = "note"
 # Per-scope framing fed into the extraction prompt (fills "You extract durable ___").
 GLOBAL_SCOPE_GUIDANCE = "facts about the user, valid across all projects (identity, preferences, working style, goals)"
 PROJECT_SCOPE_GUIDANCE = (
-    "facts about the active project or subject (purpose, concepts, decisions, constraints, resources, open questions)"
+    "facts about the chat's project or subject (purpose, concepts, decisions, constraints, resources, open questions)"
 )
 
 
@@ -149,7 +149,7 @@ class MemoryStore:
         if global_profile:
             parts.append(f"## Global User Profile\n\n{global_profile}")
         if project_memory:
-            parts.append(f"## Active Project Memory\n\n{project_memory}")
+            parts.append(f"## Project Memory\n\n{project_memory}")
         if not parts:
             return ""
         return "\n\n".join(parts)

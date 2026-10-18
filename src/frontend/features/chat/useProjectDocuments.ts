@@ -28,7 +28,7 @@ import { baseName } from "@/lib/paths"
 export function useProjectDocuments({
   isActive,
   appMode,
-  activeProject,
+  projectSlug,
   chatId,
   chatInputRef,
   liveCanvasRef,
@@ -37,7 +37,7 @@ export function useProjectDocuments({
 }: {
   isActive: boolean
   appMode: AppSurface
-  activeProject: string | null
+  projectSlug: string | null
   chatId: string
   chatInputRef: RefObject<ChatInputHandle | null>
   liveCanvasRef: RefObject<{ path: string; content: string } | null>
@@ -53,8 +53,8 @@ export function useProjectDocuments({
 
   // Documents with a pending deletion (`handleDeleteDocument`) are hidden.
   const visibleDocuments = useMemo(
-    () => projectDocuments.filter((d) => !pending(`document:${activeProject}:${d.path}`)),
-    [projectDocuments, activeProject, pending],
+    () => projectDocuments.filter((d) => !pending(`document:${projectSlug}:${d.path}`)),
+    [projectDocuments, projectSlug, pending],
   )
   const architectureSources = useMemo(() => projectDocuments.filter((document) => isArchitecturePath(document.path)), [projectDocuments])
 
@@ -69,19 +69,19 @@ export function useProjectDocuments({
         if (!blob) return
         const name = baseName(path).replace(/\.canvas$/, ".jpg")
         const file = new File([blob], name, { type: "image/jpeg" })
-        const att = await uploadFile(chatId, file, activeProject, true)
+        const att = await uploadFile(chatId, file, projectSlug, true)
         chatInputRef.current?.addAttachment(att)
       } catch { /* */ }
     } else {
       setExtracting((n) => n + 1)
-      try { chatInputRef.current?.addAttachment(await attachDocument(chatId, path, activeProject)) } catch { /* */ }
+      try { chatInputRef.current?.addAttachment(await attachDocument(chatId, path, projectSlug)) } catch { /* */ }
       finally { setExtracting((n) => n - 1) }
     }
-  }, [chatId, activeProject, chatInputRef, liveCanvasRef, setExtracting])
+  }, [chatId, projectSlug, chatInputRef, liveCanvasRef, setExtracting])
 
   const loadProjectDocs = useCallback(() => {
-    if (activeProject) listProjectDocuments(activeProject).then(setProjectDocuments).catch(() => {})
-  }, [activeProject])
+    if (projectSlug) listProjectDocuments(projectSlug).then(setProjectDocuments).catch(() => {})
+  }, [projectSlug])
 
   const refreshDocuments = useCallback(() => {
     loadProjectDocs()
@@ -91,48 +91,48 @@ export function useProjectDocuments({
   useEffect(() => { loadProjectDocs() }, [loadProjectDocs])
 
   // Without a project there are no documents, whatever was loaded for the previous one
-  if (!activeProject && projectDocuments.length > 0) setProjectDocuments([])
+  if (!projectSlug && projectDocuments.length > 0) setProjectDocuments([])
 
   const handleCreateDocument = useCallback(async (name: string) => {
-    if (!activeProject) return
+    if (!projectSlug) return
     try {
       // A `.c4` name may carry folders (`backend/api.c4`): it joins the project's architecture workspace, empty.
-      if (name.endsWith(".c4")) await createArchitectureSource(activeProject, name)
-      else await writeDocument(activeProject, name)
+      if (name.endsWith(".c4")) await createArchitectureSource(projectSlug, name)
+      else await writeDocument(projectSlug, name)
       setCreateDocOpen(false)
       refreshDocuments()
     } catch { /* */ }
-  }, [activeProject, refreshDocuments])
+  }, [projectSlug, refreshDocuments])
 
   // One text attachment holding every `.c4` source as a fenced LikeC4 block under its workspace path.
   const handleAttachArchitecture = useCallback(async () => {
-    if (!activeProject) return
+    if (!projectSlug) return
     setArchitectureError("")
     setExtracting((count) => count + 1)
     try {
       const texts = await Promise.all(architectureSources.map(async (source) => ({ path: architectureSource(source.path), text: await loadFileViewerText(source.path) })))
-      const content = `# ${activeProject} architecture\n\n${texts.map(({ path, text }) => `## ${path}\n\n\`\`\`likec4\n${text}\n\`\`\``).join("\n\n")}`
-      const file = new File([content], `${activeProject}-architecture-${crypto.randomUUID().slice(0, 8)}.txt`, { type: "text/plain" })
-      const attachment = await uploadFile(chatId, file, activeProject)
+      const content = `# ${projectSlug} architecture\n\n${texts.map(({ path, text }) => `## ${path}\n\n\`\`\`likec4\n${text}\n\`\`\``).join("\n\n")}`
+      const file = new File([content], `${projectSlug}-architecture-${crypto.randomUUID().slice(0, 8)}.txt`, { type: "text/plain" })
+      const attachment = await uploadFile(chatId, file, projectSlug)
       chatInputRef.current?.addAttachment({ ...attachment, content })
     } catch (cause) {
       setArchitectureError(cause instanceof Error ? cause.message : "Could not attach architecture")
     } finally {
       setExtracting((count) => count - 1)
     }
-  }, [activeProject, architectureSources, chatId, chatInputRef, setExtracting])
+  }, [projectSlug, architectureSources, chatId, chatInputRef, setExtracting])
 
   // Hidden until its undo window closes; the commit then deletes and refreshes the lists.
   const handleDeleteDocument = useCallback((path: string) => {
-    if (!activeProject) return
-    const slug = activeProject
+    if (!projectSlug) return
+    const slug = projectSlug
     schedule(`document:${slug}:${path}`, baseName(path), async () => {
       // Architecture sources are refused while another source still references them.
       if (isArchitecturePath(path)) await deleteArchitectureSources(slug, [architectureSource(path)])
       else await removeDocument(slug, path)
       refreshDocuments()
     })
-  }, [activeProject, refreshDocuments, schedule])
+  }, [projectSlug, refreshDocuments, schedule])
 
   const handleDocumentSaved = useCallback((filename?: string, content?: string) => {
     refreshDocuments()
@@ -151,27 +151,27 @@ export function useProjectDocuments({
   }, [refreshDocuments])
 
   const handleDocumentUpload = useCallback(async (files: File[]) => {
-    if (!activeProject) return
-    await Promise.allSettled(files.map(f => uploadDocument(activeProject, f)))
+    if (!projectSlug) return
+    await Promise.allSettled(files.map(f => uploadDocument(projectSlug, f)))
     refreshDocuments()
-  }, [activeProject, refreshDocuments])
+  }, [projectSlug, refreshDocuments])
 
   const handleAddDocToProject = useCallback(async (path: string) => {
-    if (!activeProject) return
+    if (!projectSlug) return
     try {
-      await addDocument(activeProject, path)
+      await addDocument(projectSlug, path)
       refreshDocuments()
     } catch { }
-  }, [activeProject, refreshDocuments])
+  }, [projectSlug, refreshDocuments])
 
   const handleRenameDocument = useCallback(async (path: string, name: string) => {
     // Architecture sources are named by their path inside the workspace; there is no rename for them.
-    if (!activeProject || isArchitecturePath(path)) return
+    if (!projectSlug || isArchitecturePath(path)) return
     try {
-      await renameDocument(activeProject, path, name)
+      await renameDocument(projectSlug, path, name)
       refreshDocuments()
     } catch { /* the stored name stays authoritative when rename fails */ }
-  }, [activeProject, refreshDocuments])
+  }, [projectSlug, refreshDocuments])
 
   useEffect(() => {
     if (!isActive || appMode !== "chat") return

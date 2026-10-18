@@ -22,7 +22,7 @@ export function TopBar({ left, center, right, overlay = false }: { left?: ReactN
   // `overlay` lifts it out of the flow so the content below spans the full height.
   return <header className={cn("pointer-events-none z-40 flex h-11 items-center justify-between gap-3 px-3", overlay ? "absolute inset-x-0 top-0" : "relative shrink-0")}>
     <div className="relative z-10 flex min-w-0 items-center gap-3">{left}</div>
-    <div className="absolute inset-x-4 top-0 flex h-11 items-center justify-center">{center}</div>
+    <div className="absolute inset-x-4 top-[5px] flex justify-center">{center}</div>
     <div className="relative z-10 flex shrink-0 items-center justify-end gap-3">{right}</div>
   </header>
 }

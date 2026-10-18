@@ -64,7 +64,7 @@ describe("useChatPersistence", () => {
       const { result } = renderHook(() =>
         useChatPersistence({
           tab: makeTab({ historyFile: "saved.json", title: "Saved" }),
-          activeProject: null,
+          projectSlug: null,
           messages: [],
           chatId: "c",
           usage: undefined,
@@ -89,7 +89,7 @@ describe("useChatPersistence", () => {
       const { result } = renderHook(() =>
         useChatPersistence({
           tab: makeTab(),
-          activeProject: null,
+          projectSlug: null,
           messages: [],
           chatId: "c",
           usage: undefined,
@@ -120,7 +120,7 @@ describe("useChatPersistence", () => {
       const { result } = renderHook(() =>
         useChatPersistence({
           tab: makeTab(),
-          activeProject: null,
+          projectSlug: null,
           messages,
           chatId: "c",
           usage: undefined,

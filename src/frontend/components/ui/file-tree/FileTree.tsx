@@ -154,9 +154,7 @@ export function FileTree<T>({ items, controller, label, loading, create, renderB
         {renderBeforeItem(item)}
       </div>}
       <div
-        data-workspace-highlight={item.type === "element" && item.isActive || selected || undefined}
         className={cn("group/row flex h-6 min-w-0 items-center gap-2 rounded-md pr-1 transition-colors duration-160 motion-reduce:transition-none",
-          (item.type === "element" && item.isActive || selected) && "bg-surface-elevated/70",
           dragOverId === item.id && "ring-1 ring-ink-muted bg-surface-elevated",
           item.multiSelect && "select-none")}
         style={{ marginLeft: paddingLeft }}
@@ -189,8 +187,14 @@ export function FileTree<T>({ items, controller, label, loading, create, renderB
           {!(branch && item.onSelect) && (branch
             ? <ChevronRight className={cn("h-3 w-3 shrink-0 transition-transform", expanded && "rotate-90")} />
             : <span className="w-3 shrink-0" />)}
-          <span className="truncate">{item.label}</span>
-          {item.badge != null && <span className="shrink-0 text-[10px] text-ink-faint">{item.badge}</span>}
+          <span
+            data-workspace-highlight={item.type === "element" && item.isActive || selected || undefined}
+            className={cn("flex min-w-0 items-center gap-2 rounded px-1 transition-colors duration-160 motion-reduce:transition-none",
+              (item.type === "element" && item.isActive || selected) && "bg-surface-elevated/70")}
+          >
+            <span className="truncate">{item.label}</span>
+            {item.badge != null && <span className="shrink-0 text-[10px] text-ink-faint">{item.badge}</span>}
+          </span>
         </button>
         <div className={ACTIONS_CLASS}>
           {item.actions?.map((action) => <button key={action.label} aria-label={action.label} onClick={action.onClick} className={ACTION_CLASS}>

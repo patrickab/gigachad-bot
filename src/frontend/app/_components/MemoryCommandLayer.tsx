@@ -2,7 +2,6 @@
 
 import { CommandMenu, type CommandMenuItem } from "@/features/navigation/CommandMenu"
 import { MemoryPanel } from "@/features/memory/MemoryPanel"
-import { useProject } from "@/contexts/ProjectContext"
 import { useTab } from "@/contexts/TabContext"
 import type { MemoryCommandBar } from "@/features/memory/useMemoryCommandBar"
 
@@ -12,8 +11,7 @@ export function MemoryCommandLayer({ bar, items, onRun }: {
   items: CommandMenuItem[]
   onRun: (command: string) => void
 }) {
-  const { isActive } = useTab()
-  const { activeProject } = useProject()
+  const { tab, isActive } = useTab()
 
   return (
     <>
@@ -34,7 +32,7 @@ export function MemoryCommandLayer({ bar, items, onRun }: {
       {isActive && bar.panelState && (
         <MemoryPanel
           state={bar.panelState}
-          projectEnabled={!!activeProject}
+          projectEnabled={!!tab.projectSlug}
           actions={bar.panelActions}
           globalCategories={bar.categories.globalCategories}
           projectCategories={bar.categories.projectCategories}
