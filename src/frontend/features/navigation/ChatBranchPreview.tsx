@@ -6,7 +6,6 @@ import { cn } from "@/lib/utils"
 import type { BranchChild, BranchMeta } from "@/lib/domain/types"
 import { useBranches, isAncestorOf } from "@/features/navigation/BranchContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
-import { useTree } from "@/components/ui/file-tree/FileTree"
 import { baseName } from "@/lib/paths"
 
 /** Schedules an undoable delete of a chat together with its branches. */
@@ -122,7 +121,7 @@ function BranchRow({ node }: { node: Node }) {
           {hasKids && node.qaCount > 0 && <span className="text-ink-muted ml-0.5 text-[10px]">@{node.qaCount - 1}</span>}
         </button>
         {!mergeBlocked && (
-          <button aria-label={`Merge ${node.file}`} onClick={() => mergeBranch(node.file)} className="p-0.5 rounded text-ink-faint hover:text-ink transition-colors opacity-0 group-hover:opacity-100 shrink-0">
+          <button aria-label={`Merge ${node.file}`} onClick={() => mergeBranch(node.file)} className="p-0.5 rounded text-ink-faint hover:text-ink transition-colors opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 shrink-0">
             <GitMerge className="h-3 w-3" />
           </button>
         )}
@@ -131,7 +130,7 @@ function BranchRow({ node }: { node: Node }) {
             <GitMerge className="h-3 w-3" />
           </span>
         )}
-        <button aria-label={`Delete ${node.file}`} onClick={() => deleteChat(node.file)} className="p-0.5 rounded text-ink-faint hover:text-danger transition-colors opacity-0 group-hover:opacity-100 shrink-0">
+        <button aria-label={`Delete ${node.file}`} onClick={() => deleteChat(node.file)} className="p-0.5 rounded text-ink-faint hover:text-danger transition-colors opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 shrink-0">
           <Trash2 className="h-3 w-3" />
         </button>
       </div>
@@ -145,53 +144,14 @@ function BranchRow({ node }: { node: Node }) {
   )
 }
 
-interface ChatBranchItemProps {
-  file: string
-  label: string
-  depth: number
-}
-
-const INDENT_BASE = 8
-const INDENT_STEP = 16
-
-export function ChatBranchItem({ file, label, depth }: ChatBranchItemProps) {
-  const { branchMeta, chatIdMap, onFileClick, activeFile, activeQaIndex } = useBranches()
-  const deleteChat = useDeleteChat()
-  const { onDragStart } = useTree<string>()
-  const bm = branchMeta[file]
-  const hasChildren = (bm?.children?.length ?? 0) > 0
+/** Show the active chat's branch genealogy before its standard tree row. */
+export function ChatBranchPreview({ file }: { file: string }) {
+  const { branchMeta, chatIdMap, activeFile, activeQaIndex } = useBranches()
+  const metadata = branchMeta[file]
+  const hasChildren = (metadata?.children?.length ?? 0) > 0
   const isActive = activeFile === file && activeQaIndex == null
-  // Build the tree only for the branch family of the active chat
   const isRelevant = isActive || activeFile === file || isAncestorOf(activeFile, file, branchMeta, chatIdMap)
-  const tree = useMemo(() => hasChildren && isRelevant ? buildTree(file, branchMeta, chatIdMap) : null, [hasChildren, isRelevant, file, branchMeta, chatIdMap])
-  const qaLast = bm?.qa_count != null && bm.qa_count > 0 ? bm.qa_count - 1 : null
-  const paddingLeft = INDENT_BASE + depth * INDENT_STEP
-
-  return (
-    <div style={{ paddingLeft }}>
-      {tree && <BranchTree root={tree} />}
-      <div className="flex items-center gap-1 py-0.5 group" style={{ paddingRight: 8 }}>
-        <button
-          draggable={!!onDragStart}
-          onDragStart={onDragStart ? (e) => onDragStart(e, file) : undefined}
-          onClick={() => onFileClick(file)}
-          className={cn(
-            "flex items-center gap-1.5 flex-1 truncate text-left text-[11px] transition-colors",
-            isActive ? "text-ink font-medium" : "text-ink-muted hover:text-ink",
-          )}
-        >
-          {label}
-          {qaLast !== null && <span className="text-ink-muted text-[10px] ml-0.5">@{qaLast}</span>}
-        </button>
-        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button aria-label={`Delete ${file}`}
-            onClick={() => deleteChat(file)}
-            className="p-0.5 rounded text-ink-faint hover:text-danger transition-colors shrink-0"
-          >
-            <Trash2 className="h-3 w-3" />
-          </button>
-        </div>
-      </div>
-    </div>
-  )
+  const tree = useMemo(() => hasChildren && isRelevant ? buildTree(file, branchMeta, chatIdMap) : null,
+    [hasChildren, isRelevant, file, branchMeta, chatIdMap])
+  return tree ? <BranchTree root={tree} /> : null
 }

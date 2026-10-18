@@ -1,7 +1,7 @@
 import type { ReactNode, Ref } from "react"
 import { cn } from "@/lib/utils"
 
-/** App top bar with a left and a right control cluster, floating over the chat or canvas.
+/** Single-row app toolbar with controls anchored to either side.
  *
  * Wrap every control in one of two containers:
  * - `TopBarPill` -> solid page-colored pill, for selectors and readouts (model, reasoning, tokens)
@@ -17,12 +17,13 @@ import { cn } from "@/lib/utils"
  * ...   right={<TopBarPill><TokenCounter … /></TopBarPill>}
  * ... />
  */
-export function TopBar({ left, right, overlay = false }: { left?: ReactNode; right?: ReactNode; overlay?: boolean }) {
+export function TopBar({ left, center, right, overlay = false }: { left?: ReactNode; center?: ReactNode; right?: ReactNode; overlay?: boolean }) {
   // The bar ignores pointer events so clicks between controls reach the content beneath.
   // `overlay` lifts it out of the flow so the content below spans the full height.
-  return <header className={cn("pointer-events-none z-40 flex h-11 items-center justify-between gap-1 px-3", overlay ? "absolute inset-x-0 top-0" : "relative shrink-0")}>
-    <div className="flex min-w-0 items-center gap-3">{left}</div>
-    <div className="flex items-center gap-3">{right}</div>
+  return <header className={cn("pointer-events-none z-40 flex h-11 items-center justify-between gap-3 px-3", overlay ? "absolute inset-x-0 top-0" : "relative shrink-0")}>
+    <div className="relative z-10 flex min-w-0 items-center gap-3">{left}</div>
+    <div className="absolute inset-x-4 top-0 flex h-11 items-center justify-center">{center}</div>
+    <div className="relative z-10 flex shrink-0 items-center justify-end gap-3">{right}</div>
   </header>
 }
 

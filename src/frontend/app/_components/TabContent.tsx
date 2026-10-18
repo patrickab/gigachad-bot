@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
-import { PanelLeft, PanelLeftClose } from "lucide-react"
+import { PanelLeft, PanelLeftClose, X } from "lucide-react"
 import { Sidebar } from "@/features/navigation/Sidebar"
 import { ChatContainer, type ChatFocus } from "@/features/chat/ChatContainer"
 import { ChatSidebarProvider, type ChatSidebarContextValue } from "@/features/chat/context-panel/ChatContextPanel"
@@ -18,15 +18,14 @@ import { DocumentEditor } from "@/features/editor/DocumentEditor"
 import { CreateDocumentPanel } from "@/features/editor/CreateDocumentPanel"
 import { CanvasWorkspace } from "@/features/editor/canvas/CanvasWorkspace"
 import { ArchitectureWindow } from "@/features/editor/architecture/ArchitectureWindow"
-import { SidebarTabs } from "@/features/navigation/TabManager"
+import { TabSwitcher } from "@/features/navigation/TabManager"
 import { TokenCounter } from "@/features/chat/TokenCounter"
 import { TopBar, TopBarPill, TopBarTransparent } from "@/features/navigation/TopBar"
 import { LazyPdfViewer } from "@/components/content/LazyPdfViewer"
 import { useBranches } from "@/features/navigation/BranchContext"
 import { useEnabledTools } from "@/features/chat/EnabledToolsContext"
-import { useProject } from "@/contexts/ProjectContext"
 import { useSidebar } from "@/features/navigation/SidebarContext"
-import { useTab } from "@/contexts/TabContext"
+import { useTab, type WorkspaceItem } from "@/contexts/TabContext"
 import { useCanvasView } from "@/features/editor/canvas/useCanvasView"
 import { useChat } from "@/features/chat/useChat"
 import { useChatPersistence } from "@/features/chat/useChatPersistence"
@@ -42,12 +41,16 @@ import { fileViewerRawUrl } from "@/lib/backend/urls"
 import { MemoryCommandLayer } from "./MemoryCommandLayer"
 
 /** One tab's workspace: the chat (or canvas) with its sidebar, top bar, modals and keyboard shortcuts. */
-export function TabContent({ onOpenChat, focus }: {
+export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, focus }: {
   onOpenChat: (historyFile: string, qaIndex?: number) => void
+  onOpenProject: (slug: string) => void
+  onNewChat: (slug: string | null) => void
+  onOpenItem: (item: WorkspaceItem) => void
   focus: ChatFocus
 }) {
-  const { tab, isActive, setModeLabel, updateConfig, setAppMode, setHistoryFile, setTitle } = useTab()
-  const { activeProject } = useProject()
+  const { tab, isActive, setModeLabel, updateConfig, setAppMode, setWorkspaceItem, setHistoryFile, setTitle } = useTab()
+  const activeProject = tab.projectSlug
+  const documentItem = tab.workspaceItem?.kind === "document" ? tab.workspaceItem : null
   const chat = useChat()
   const { messages, isStreaming, cancel, reset, models, saveModelProviders, saveModelTabOrder, saveModelDefaults, prompts, setPrompts, setMessages, totalUsage, setTotalUsage } = chat
   const { refreshAll, createBranch, setActiveFile, setActiveQaIndex } = useBranches()
@@ -157,16 +160,14 @@ export function TabContent({ onOpenChat, focus }: {
       e.preventDefault()
       e.stopPropagation()
       e.stopImmediatePropagation()
-      // The command input lives in this tab's sidebar row.
       if (memory.isIdle) {
-        if (sidebarCollapsed) toggleSidebar()
         memory.openMenu()
       }
     }
   })
 
   useEffect(() => {
-    if (!isActive || appMode === "canvas") return
+    if (!isActive || appMode !== "chat") return
     // Capture phase so the shortcuts win over handlers inside focused editors.
     window.addEventListener("keydown", onKeyDown, true)
     return () => {
@@ -228,40 +229,59 @@ export function TabContent({ onOpenChat, focus }: {
   return (
     <div className="relative flex h-full overflow-hidden">
       <Sidebar
-        onFileSelect={filePicker.handleFileSelect}
+        onFileSelect={(path) => onOpenItem({ kind: "document", path, projectSlug: null, rootFile: true })}
         onRootsChanged={filePicker.refreshFileList}
         onDocumentsChanged={docs.refreshDocuments}
         {...canvasSidebarProps}
-        tabs={
-          <SidebarTabs
-            ownerTabId={tab.id}
-            commandOpen={isActive && memory.menuOpen}
-            onLabelSlot={memory.setLabelSlot}
-            onMenuSlot={memory.setMenuSlot}
-          />
-        }
+        onProjectSelect={onOpenProject}
+        onNewChat={onNewChat}
+        onDocumentSelect={(path, scope) => onOpenItem({ kind: "document", path, projectSlug: scope || null })}
+        activeDocumentPath={appMode === "document" ? documentItem?.path : null}
+        onCanvasSelect={(path, scope) => onOpenItem({ kind: "canvas", path, projectSlug: scope || null })}
+        onArchitectureSelect={(slug) => onOpenItem({ kind: "architecture", path: `graph/${slug}/`, projectSlug: slug })}
         renderSettings={() => (
           <SettingsMenu prompts={prompts} config={config} onConfigChange={updateConfig} onEditPrompts={() => setPromptEditorOpen(true)} models={models} researchEnabled={researchEnabled} />
         )}
         appMode={appMode}
-        onAppModeChange={setAppMode}
       />
       <main className="flex-1 min-w-0 flex flex-col relative bg-paper">
         {appMode === "canvas" ? (
           // The canvas spans the full height, the bar floats over it. Architecture keeps its own header strip visible.
           <TopBar
             overlay={canvasView.kind !== "architecture"}
+            center={<TabSwitcher />}
             left={<>
               <TopBarTransparent>{sidebarToggle}</TopBarTransparent>
               <TopBarPill ref={setDrawingSlot} />
             </>}
-            right={<TopBarPill>
-              <div ref={setViewSlot} className="contents" />
-              <ThemeToggle />
-            </TopBarPill>}
+            right={<>
+              <TopBarPill>
+                <div ref={setViewSlot} className="contents" />
+                <ThemeToggle />
+              </TopBarPill>
+            </>}
+          />
+        ) : appMode === "document" ? (
+          <TopBar
+            center={<TabSwitcher />}
+            left={<>
+              <TopBarTransparent>{sidebarToggle}</TopBarTransparent>
+              <TopBarTransparent>
+                <ModelDropdown models={models} selectedModel={config.selectedModel} onSelect={(model) => updateConfig({ selectedModel: model })} onProvidersChange={saveModelProviders} onTabOrderChange={saveModelTabOrder} onDefaultsChange={saveModelDefaults} placement="below" />
+              </TopBarTransparent>
+            </>}
+            right={<>
+              <TopBarTransparent>
+                <ThemeToggle />
+                <button aria-label="Close file" onClick={() => setAppMode("chat")} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover">
+                  <X className="h-4 w-4" />
+                </button>
+              </TopBarTransparent>
+            </>}
           />
         ) : (
           <TopBar
+            center={<TabSwitcher />}
             left={<>
               <TopBarTransparent>{sidebarToggle}</TopBarTransparent>
               <TopBarPill>
@@ -281,8 +301,24 @@ export function TabContent({ onOpenChat, focus }: {
             </>}
           />
         )}
-        <div className={`flex-1 min-h-0 relative transition-opacity duration-200 ${appMode === "canvas" ? "overflow-hidden" : ""}`}>
-          {appMode === "canvas" && canvasView.kind === "architecture" ? (
+        <div data-workspace-surface className={`flex-1 min-h-0 relative ${appMode === "canvas" ? "overflow-hidden" : ""}`}>
+          {appMode === "document" && documentItem ? (
+            documentItem.path.toLowerCase().endsWith(".pdf") ? (
+              <LazyPdfViewer url={fileViewerRawUrl(documentItem.path)} />
+            ) : (
+              <DocumentEditor
+                path={documentItem.path}
+                slug={documentItem.projectSlug ?? ""}
+                overlay
+                persistOverride={documentItem.rootFile ? (content) => writeRootFile(documentItem.path, content) : undefined}
+                onClose={() => setAppMode("chat")}
+                onSaved={docs.handleDocumentSaved}
+                onModeLabel={setModeLabel}
+                onNavigate={(path) => setWorkspaceItem({ ...documentItem, path })}
+                model={config.selectedModel}
+              />
+            )
+          ) : appMode === "canvas" && canvasView.kind === "architecture" ? (
             <ArchitectureWindow path={canvasView.path} maximized hostScale={1} edgeStyle={architectureEdgeStyle} onEdgeStyleChange={setArchitectureEdgeStyle} onNavigate={navigateArchitecture} />
           ) : appMode === "canvas" ? (
             <CanvasWorkspace

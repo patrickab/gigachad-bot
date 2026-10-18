@@ -1,14 +1,12 @@
 "use client"
 
-import { useEffect, useRef } from "react"
-import { createPortal } from "react-dom"
 import { CommandMenu, type CommandMenuItem } from "@/features/navigation/CommandMenu"
 import { MemoryPanel } from "@/features/memory/MemoryPanel"
 import { useProject } from "@/contexts/ProjectContext"
 import { useTab } from "@/contexts/TabContext"
 import type { MemoryCommandBar } from "@/features/memory/useMemoryCommandBar"
 
-/** The slash-command input and menu in the tab row, the click-away overlay, and the memory review panel. */
+/** Show workspace commands independently of sidebar navigation, plus memory review. */
 export function MemoryCommandLayer({ bar, items, onRun }: {
   bar: MemoryCommandBar
   items: CommandMenuItem[]
@@ -16,47 +14,23 @@ export function MemoryCommandLayer({ bar, items, onRun }: {
 }) {
   const { isActive } = useTab()
   const { activeProject } = useProject()
-  const inputRef = useRef<HTMLInputElement>(null)
-  const { menuOpen } = bar
-
-  useEffect(() => {
-    if (!menuOpen) return
-    // Defer so the portaled input exists before focusing.
-    const timer = setTimeout(() => inputRef.current?.focus(), 0)
-    return () => clearTimeout(timer)
-  }, [menuOpen])
 
   return (
     <>
-      {isActive && bar.menuOpen && bar.labelSlot && createPortal(
-        <input
-          ref={inputRef}
-          autoFocus
-          value={bar.query}
-          onChange={(e) => bar.setQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") { e.preventDefault(); bar.closeMenu() }
-          }}
-          onClick={(e) => e.stopPropagation()}
-          spellCheck={false}
-          className="flex-1 min-w-0 bg-transparent font-mono text-xs text-ink outline-none"
-        />,
-        bar.labelSlot,
-      )}
-      <CommandMenu
-        open={isActive && bar.menuOpen}
-        items={items}
-        query={bar.query}
-        onRun={onRun}
-        onClose={bar.closeMenu}
-        container={bar.menuSlot}
-      />
-      {bar.menuOpen && (
-        <div
-          className="absolute inset-0 z-[70]"
-          onClick={bar.closeMenu}
-        />
-      )}
+      {isActive && bar.menuOpen && <div className="absolute inset-0 z-[70]" onClick={bar.closeMenu}>
+        <div role="dialog" aria-label="Commands" className="absolute left-1/2 top-14 w-80 max-w-[calc(100%-2rem)] -translate-x-1/2 overflow-hidden rounded-xl border border-divider bg-surface p-2 shadow-[var(--shadow-lg)]" onClick={(event) => event.stopPropagation()}>
+          <input
+            autoFocus
+            aria-label="Search commands"
+            placeholder="Find a command…"
+            value={bar.query}
+            onChange={(event) => bar.setQuery(event.target.value)}
+            spellCheck={false}
+            className="w-full rounded-md bg-paper px-2 py-2 font-mono text-xs text-ink outline-none focus-visible:ring-1 focus-visible:ring-ink-faint"
+          />
+          <CommandMenu open items={items} query={bar.query} onRun={onRun} onClose={bar.closeMenu} />
+        </div>
+      </div>}
       {isActive && bar.panelState && (
         <MemoryPanel
           state={bar.panelState}

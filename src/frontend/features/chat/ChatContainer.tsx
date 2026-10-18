@@ -260,11 +260,13 @@ export function ChatContainer({
 
   const [paneWidth, setPaneWidth] = useState(0)
 
-  // Track the full pane width so the column cap follows window and split resizes
+  // Keep the last visible width while background tabs have display: none.
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
-    const observer = new ResizeObserver(([entry]) => setPaneWidth(entry.contentRect.width))
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry.contentRect.width > 0) setPaneWidth(entry.contentRect.width)
+    })
     observer.observe(el)
     return () => observer.disconnect()
   }, [])
@@ -273,13 +275,13 @@ export function ChatContainer({
   const inputAreaRef = useRef<HTMLDivElement>(null)
   const [inputAreaHeight, setInputAreaHeight] = useState(0)
 
-  // Track the floating input height to pad the scroll area under it
+  // Preserve composer spacing while hidden so returning tabs do not jump.
   useEffect(() => {
     const el = inputAreaRef.current
     if (!el) return
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        setInputAreaHeight(entry.contentRect.height)
+        if (entry.contentRect.height > 0) setInputAreaHeight(entry.contentRect.height)
       }
     })
     observer.observe(el)

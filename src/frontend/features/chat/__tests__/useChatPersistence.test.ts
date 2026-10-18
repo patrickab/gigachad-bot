@@ -41,6 +41,8 @@ function makeTab(over: Partial<Tab> = {}): Tab {
     title: null,
     config: {} as Tab["config"],
     appMode: "chat",
+    projectSlug: null,
+    workspaceItem: null,
     ...over,
   }
 }

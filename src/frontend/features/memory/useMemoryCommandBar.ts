@@ -1,7 +1,6 @@
 "use client"
 
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react"
-import { useProject } from "@/contexts/ProjectContext"
 import { useTab } from "@/contexts/TabContext"
 import { useMemorizeFlow, type BoundMemoryActions, type MemoryPanelState } from "@/features/memory/useMemorizeFlow"
 import { useMemoryCategories } from "@/features/memory/useMemoryCategories"
@@ -18,11 +17,6 @@ export interface MemoryCommandBar {
   closeMenu: () => void
   query: string
   setQuery: Dispatch<SetStateAction<string>>
-  /** Tab-row slots the menu input and list portal into. */
-  labelSlot: HTMLElement | null
-  setLabelSlot: Dispatch<SetStateAction<HTMLElement | null>>
-  menuSlot: HTMLElement | null
-  setMenuSlot: Dispatch<SetStateAction<HTMLElement | null>>
   /** Extract memories from the main branch; a branch chat does nothing. Starting one closes the menu. */
   memorize: (scope: MemorizeScope) => Promise<void>
   /** Null while no memorize flow is running. */
@@ -31,7 +25,7 @@ export interface MemoryCommandBar {
   categories: { globalCategories: CategoryDef[]; projectCategories: CategoryDef[] }
 }
 
-/** Slash-command menu in the tab row plus the memorize flow it launches, which share the tab's label slot. */
+/** Own the workspace command menu and the memory flow it launches. */
 export function useMemoryCommandBar({ messages, chatId, branchMessageIdx }: {
   messages: Message[]
   chatId: string
@@ -39,13 +33,11 @@ export function useMemoryCommandBar({ messages, chatId, branchMessageIdx }: {
   branchMessageIdx: number | null
 }): MemoryCommandBar {
   const { tab, setModeLabel } = useTab()
-  const { activeProject } = useProject()
+  const activeProject = tab.projectSlug
   const flow = useMemorizeFlow()
   const categories = useMemoryCategories(activeProject)
   const [menuOpen, setMenuOpen] = useState(false)
   const [query, setQuery] = useState("")
-  const [labelSlot, setLabelSlot] = useState<HTMLElement | null>(null)
-  const [menuSlot, setMenuSlot] = useState<HTMLElement | null>(null)
 
   const phase = flow.state.phase
   const memoryCount = flow.state.phase === "review"
@@ -60,14 +52,13 @@ export function useMemoryCommandBar({ messages, chatId, branchMessageIdx }: {
   const closeMenu = useCallback(() => setMenuOpen(false), [])
 
   useEffect(() => {
-    // "\0" is a sentinel that hides the tab label so the command input can take its slot.
-    if (menuOpen) setModeLabel("\0")
-    else if (phase === "extracting") setModeLabel("Memory Management", true)
+    if (tab.appMode !== "chat") return
+    if (phase === "extracting") setModeLabel("Memory Management", true)
     else if (phase === "review") setModeLabel(`${memoryCount} ${memoryCount === 1 ? "memory" : "memories"} proposed`)
     else if (phase === "doc-review") setModeLabel("Review memory docs", docReviewLoading)
     else if (phase === "error") setModeLabel("Memory error")
     else setModeLabel(tab.title ?? "Chat")
-  }, [menuOpen, phase, docReviewLoading, memoryCount, tab.title, setModeLabel])
+  }, [phase, docReviewLoading, memoryCount, tab.title, tab.appMode, setModeLabel])
 
   const { extract } = flow
 
@@ -84,10 +75,6 @@ export function useMemoryCommandBar({ messages, chatId, branchMessageIdx }: {
     closeMenu,
     query,
     setQuery,
-    labelSlot,
-    setLabelSlot,
-    menuSlot,
-    setMenuSlot,
     memorize,
     panelState: flow.state.phase === "idle" ? null : flow.state,
     panelActions: flow.bindProject(activeProject),

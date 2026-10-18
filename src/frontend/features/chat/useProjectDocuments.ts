@@ -174,7 +174,7 @@ export function useProjectDocuments({
   }, [activeProject, refreshDocuments])
 
   useEffect(() => {
-    if (!isActive || appMode === "canvas") return
+    if (!isActive || appMode !== "chat") return
     const onKey = (e: KeyboardEvent) => {
       // Alt+X toggles the documents panel
       if (e.altKey && (e.key === "x" || e.key === "X")) {

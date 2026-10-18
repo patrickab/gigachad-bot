@@ -14,6 +14,7 @@ import { EditorSidebar } from "./EditorSidebar"
 import { architectureSlug, architectureSource, isArchitecturePath } from "@/lib/domain/architecturePaths"
 import { subscribeToChanges, type ChangeEvent } from "@/lib/backend/syncStream"
 import { baseName } from "@/lib/paths"
+import { useTabActive } from "@/contexts/TabContext"
 
 type EditorView = "edit" | "preview"
 
@@ -65,6 +66,7 @@ export function ArchitectureSourceEditor(props: DocumentEditorProps) {
 
 /** Text document editor; `persistOverride` replaces the default document write. */
 export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, overlay, persistOverride, onModeLabel, onNavigate, model }: DocumentEditorProps) {
+  const isActive = useTabActive()
   const [content, setContent] = useState<string | null>(null)
   const [renderedContent, setRenderedContent] = useState<string | null>(null)
   const [loadError, setLoadError] = useState(false)
@@ -160,6 +162,7 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      if (!isActive) return
       if ((event.ctrlKey || event.metaKey) && (event.key === "s" || event.key === "Enter")) {
         event.preventDefault()
         handleSave()
@@ -171,7 +174,7 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent
     }
     document.addEventListener("keydown", handler)
     return () => document.removeEventListener("keydown", handler)
-  }, [handleSave, isFullscreen, overlay, onClose])
+  }, [handleSave, isFullscreen, overlay, onClose, isActive])
 
   const handlePreviewClick = useCallback((e: React.MouseEvent) => {
     const anchor = (e.target as HTMLElement).closest("a")

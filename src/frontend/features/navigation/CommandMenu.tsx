@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import { cn } from "@/lib/utils"
 
@@ -16,11 +15,10 @@ interface CommandMenuProps {
   query: string
   onRun: (command: string) => void
   onClose: () => void
-  container: HTMLElement | null
 }
 
-/** Slash-command list portaled into `container`, in flow below the tab row. Captures arrow/Enter/Escape on window so the composer input keeps focus. */
-export function CommandMenu({ open, items, query, onRun, onClose, container }: CommandMenuProps) {
+/** Filter commands inline and capture navigation keys while the search input keeps focus. */
+export function CommandMenu({ open, items, query, onRun, onClose }: CommandMenuProps) {
   const [selectedIdx, setSelectedIdx] = useState(0)
 
   const filtered = useMemo(() => {
@@ -49,9 +47,9 @@ export function CommandMenu({ open, items, query, onRun, onClose, container }: C
     return () => window.removeEventListener("keydown", onKey, true)
   }, [open, onClose, onRun, filtered, selectedIdx])
 
-  if (!container || filtered.length === 0) return null
+  if (!open || filtered.length === 0) return null
 
-  return createPortal(
+  return (
     <AnimatePresence>
       {open && (
         <motion.div
@@ -78,7 +76,6 @@ export function CommandMenu({ open, items, query, onRun, onClose, container }: C
           </div>
         </motion.div>
       )}
-    </AnimatePresence>,
-    container,
+    </AnimatePresence>
   )
 }

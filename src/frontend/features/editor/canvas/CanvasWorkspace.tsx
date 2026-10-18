@@ -8,6 +8,7 @@ import { emptyCanvasDoc, parseCanvasDoc, serializeCanvasDoc, type CanvasDocument
 import { DocumentEditor } from "@/features/editor/DocumentEditor"
 import { SaveAsModal } from "@/components/ui/SaveAsModal"
 import { writeDocument } from "@/lib/backend/api"
+import { useTabActive } from "@/contexts/TabContext"
 
 // A canvas selection carries its owning scope: "" = chat_histories/_notes, otherwise a project slug.
 export interface CanvasSelection {
@@ -38,6 +39,7 @@ function loadScratchDoc(): CanvasDocument {
 }
 
 export function CanvasWorkspace({ selected, slug, toolbarSlots, onCloseEditor, onCreated, onModeLabel, editorModel }: CanvasWorkspaceProps) {
+  const isActive = useTabActive()
   // Scratch canvas shown by default. It has no backing file until saved, so it
   // persists to localStorage on every change and survives unmounting.
   const [doc, setDoc] = useState<CanvasDocument>(loadScratchDoc)
@@ -58,13 +60,13 @@ export function CanvasWorkspace({ selected, slug, toolbarSlots, onCloseEditor, o
   })
   useEffect(() => () => { flushScratch() }, [])
 
-  const announceScratchLabel = useEffectEvent(() => { onModeLabel?.("untitled.canvas") })
+  const announceScratchLabel = useEffectEvent(() => { onModeLabel?.("new.canvas") })
   useEffect(() => {
     if (!selected) announceScratchLabel()
   }, [selected])
 
   useEffect(() => {
-    if (selected) return
+    if (selected || !isActive) return
     // Alt+S opens the save-as dialog for the scratch canvas
     const handler = (e: KeyboardEvent) => {
       if (e.altKey && e.key === "s") {
@@ -74,7 +76,7 @@ export function CanvasWorkspace({ selected, slug, toolbarSlots, onCloseEditor, o
     }
     document.addEventListener("keydown", handler)
     return () => document.removeEventListener("keydown", handler)
-  }, [selected])
+  }, [selected, isActive])
 
   const handleSaveSubmit = useCallback(async (name: string) => {
     const filename = name.endsWith(".canvas") ? name : `${name}.canvas`

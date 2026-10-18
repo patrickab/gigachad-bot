@@ -11,56 +11,90 @@ import { MemoryViewerProvider } from "@/features/memory/MemoryViewerContext"
 import { useProject } from "@/contexts/ProjectContext"
 import { useSettings } from "@/contexts/SettingsContext"
 import { SidebarProvider } from "@/features/navigation/SidebarContext"
-import type { Tab } from "@/contexts/TabContext"
+import type { Tab, WorkspaceItem } from "@/contexts/TabContext"
+import { parseHistoryFile } from "@/lib/domain/historyFile"
 import { TabContent } from "./TabContent"
 
-/** The tab strip with every tab's workspace, plus the cross-tab project dashboard, memory viewer and shortcuts. */
+/** Keep project navigation and memory shared while each tab retains its own workspace. */
 export function AppShell() {
   const tabManagerRef = useRef<TabManagerHandle>(null)
+  const lastProjectTabs = useRef(new Map<string, string>())
+  const requestedProject = useRef<string | null | undefined>(undefined)
   const [focus, setFocus] = useState<ChatFocus>({ qaIndex: null, key: 0 })
-  const { activeProject, dashboardOpen, syncTabs, setDashboardOpen, closeProject } = useProject()
+  const { activeProject, dashboardOpen, syncTabs, setDashboardOpen, openProject, closeProject } = useProject()
   const settings = useSettings()
 
+  const handleActiveTabChange = useCallback((tab: Tab) => {
+    if (tab.projectSlug) lastProjectTabs.current.set(tab.projectSlug, tab.id)
+    if (requestedProject.current === tab.projectSlug) return
+    requestedProject.current = tab.projectSlug
+    if (tab.projectSlug) {
+      void openProject(tab.projectSlug).catch(() => { requestedProject.current = undefined })
+    } else {
+      closeProject()
+    }
+  }, [openProject, closeProject])
+
+  const handleNewChat = useCallback((slug: string | null) => {
+    const tab = nextTab(settings.tabDefaults)
+    tab.projectSlug = slug
+    tabManagerRef.current?.openTab(tab)
+  }, [settings.tabDefaults])
+
+  const handleOpenProject = useCallback((slug: string) => {
+    const manager = tabManagerRef.current
+    if (!manager) return
+    const tabs = manager.getTabs()
+    const remembered = tabs.find((tab) => tab.id === lastProjectTabs.current.get(slug) && tab.projectSlug === slug)
+    const existing = remembered ?? tabs.findLast((tab) => tab.projectSlug === slug)
+    if (existing) manager.switchToTab(existing.id)
+    else handleNewChat(slug)
+  }, [handleNewChat])
+
   const handleOpenChat = useCallback((historyFile: string, qaIndex?: number) => {
-    setFocus((f) => {
-      if (qaIndex != null) return { qaIndex, key: f.key + 1 }
-      return f.qaIndex == null ? f : { ...f, qaIndex: null }
-    })
-    const tabs = tabManagerRef.current?.getTabs() ?? []
-    const activeTabId = tabManagerRef.current?.getActiveTabId()
-    const activeTab = tabs.find((t) => t.id === activeTabId)
-
-    // toggle: clicking the active chat swaps only this tab for a blank one
-    if (activeTab && activeTab.historyFile === historyFile && qaIndex == null) {
-      tabManagerRef.current?.replaceTab(activeTab.id, nextTab(settings.tabDefaults))
-      return
-    }
-
-    const existing = tabs.find((t) => t.historyFile === historyFile)
+    setFocus((current) => ({ qaIndex: qaIndex ?? null, key: current.key + 1 }))
+    const manager = tabManagerRef.current
+    if (!manager) return
+    const existing = manager.getTabs().find((tab) => tab.historyFile === historyFile)
     if (existing) {
-      tabManagerRef.current?.switchToTab(existing.id)
+      manager.showChat(existing.id)
       return
     }
-    // A chat outside the open project leaves that project; open tabs stay as they are.
-    if (activeProject && !historyFile.startsWith(`${activeProject}/`)) closeProject()
-    if (activeTabId) {
-      tabManagerRef.current?.updateTabHistoryFile(activeTabId, historyFile)
-    }
-  }, [activeProject, closeProject, settings.tabDefaults])
+    const tab = nextTab(settings.tabDefaults)
+    tab.historyFile = historyFile
+    tab.projectSlug = parseHistoryFile(historyFile).slug
+    manager.openTab(tab)
+  }, [settings.tabDefaults])
 
-  // Only the open project's chats belong in its saved tabs; tabs from elsewhere stay open but unsaved there.
+  const handleOpenItem = useCallback((item: WorkspaceItem) => {
+    const manager = tabManagerRef.current
+    if (!manager) return
+    const existing = manager.getTabs().find((tab) => tab.workspaceItem?.kind === item.kind
+      && tab.projectSlug === item.projectSlug
+      && (item.kind === "architecture" || tab.workspaceItem.path === item.path)
+      && !!tab.workspaceItem.rootFile === !!item.rootFile)
+    if (existing?.workspaceItem) {
+      manager.showItem(existing.id, item.kind === "architecture" ? existing.workspaceItem : item)
+      return
+    }
+    const tab = nextTab(settings.tabDefaults)
+    tab.workspaceItem = item
+    tab.projectSlug = item.projectSlug
+    tab.appMode = item.kind === "document" ? "document" : "canvas"
+    manager.openTab(tab)
+  }, [settings.tabDefaults])
+
   const handleTabsChange = useCallback((tabs: Tab[]) => {
     if (!activeProject) return
-    syncTabs(
-      tabs
-        .filter((t) => t.historyFile?.startsWith(`${activeProject}/`))
-        .map((t) => ({ id: t.id, name: t.name, historyFile: t.historyFile, title: t.title, chatId: t.chatId })),
-    ).catch(() => { })
+    void syncTabs(tabs
+      .filter((tab) => tab.projectSlug === activeProject && tab.historyFile?.startsWith(`${activeProject}/`))
+      .map((tab) => ({ id: tab.id, name: tab.name, historyFile: tab.historyFile, title: tab.title, chatId: tab.chatId })),
+    ).catch(() => {})
   }, [activeProject, syncTabs])
 
   useEffect(() => {
-    function handler(e: KeyboardEvent) {
-      if (e.altKey && e.key === "d") { e.preventDefault(); setDashboardOpen(!dashboardOpen) }
+    function handler(event: KeyboardEvent) {
+      if (event.altKey && event.key === "d") { event.preventDefault(); setDashboardOpen(!dashboardOpen) }
     }
     document.addEventListener("keydown", handler)
     return () => document.removeEventListener("keydown", handler)
@@ -70,9 +104,9 @@ export function AppShell() {
     <BranchProvider onFileClick={handleOpenChat}>
       <SidebarProvider>
         <MemoryViewerProvider>
-          <TabManager ref={tabManagerRef} onTabsChange={handleTabsChange} defaultConfig={settings.tabDefaults}>
+          <TabManager ref={tabManagerRef} onTabsChange={handleTabsChange} onActiveTabChange={handleActiveTabChange} defaultConfig={settings.tabDefaults}>
             <EnabledToolsProvider>
-              <TabContent onOpenChat={handleOpenChat} focus={focus} />
+              <TabContent onOpenChat={handleOpenChat} onOpenProject={handleOpenProject} onNewChat={handleNewChat} onOpenItem={handleOpenItem} focus={focus} />
             </EnabledToolsProvider>
           </TabManager>
           {dashboardOpen && <ProjectDashboard />}

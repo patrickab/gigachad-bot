@@ -26,7 +26,7 @@ interface ProjectContextState {
   dashboardOpen: boolean
   openProject: (name: string) => Promise<void>
   closeProject: () => void
-  createProject: (name: string) => Promise<void>
+  createProject: (name: string) => Promise<string>
   deleteProject: (name: string) => Promise<void>
   addCard: (title: string, description: string, state?: string) => Promise<void>
   moveCard: (cardId: string, state: string) => Promise<void>
@@ -106,6 +106,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     const created = await apiCreateProject(name)
     await refreshProjects()
     await openProject(created.slug)
+    return created.slug
   }, [refreshProjects, openProject])
 
   const deleteProject = useCallback(async (name: string) => {

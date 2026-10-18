@@ -11,6 +11,7 @@ import { fileViewerRawUrl } from "@/lib/backend/urls"
 import { renderPageToPng, renderCanvasToJpeg, type EmbedRect } from "@/lib/drawing"
 import { useCollaborativeCanvas } from "@/features/editor/canvas/useCollaborativeCanvas"
 import { baseName } from "@/lib/paths"
+import { useTabActive } from "@/contexts/TabContext"
 
 /** Load each image frame to measure its aspect ratio (falls back to 1 if it fails to load). */
 async function canvasImageEmbeds(doc: CanvasDocument): Promise<EmbedRect[]> {
@@ -29,6 +30,7 @@ async function canvasImageEmbeds(doc: CanvasDocument): Promise<EmbedRect[]> {
 
 /** Database canvas: the collaboration hook owns loading and saving. */
 export function CanvasDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, overlay, onModeLabel, canvasToolbarSlots }: DocumentEditorProps) {
+  const isActive = useTabActive()
   const { document: canvasDocument, replace, status, retry } = useCollaborativeCanvas(path)
   const filename = baseName(path)
   const [exporting, setExporting] = useState(false)
@@ -91,7 +93,7 @@ export function CanvasDocumentEditor({ path, slug, onClose, onSaved, onLiveConte
   }, [canvasDocument, exporting, slug, filename, onSaved])
 
   useEffect(() => {
-    if (!overlay) return
+    if (!overlay || !isActive) return
     const handler = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault()
@@ -100,7 +102,7 @@ export function CanvasDocumentEditor({ path, slug, onClose, onSaved, onLiveConte
     }
     document.addEventListener("keydown", handler)
     return () => document.removeEventListener("keydown", handler)
-  }, [overlay, onClose])
+  }, [overlay, onClose, isActive])
 
   if (!canvasDocument) {
     if (status === "error") {

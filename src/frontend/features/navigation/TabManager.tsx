@@ -1,53 +1,62 @@
 "use client"
 
-import { createContext, useCallback, useContext, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
-import { Plus, X } from "lucide-react"
+import { createContext, useCallback, useContext, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import { ArrowRightLeft, Check, ChevronDown, Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { DEFAULT_TAB_CONFIG, type TabConfig } from "@/contexts/SettingsContext"
-import { TabContext, type Tab, type TabActions, type TabContextValue } from "@/contexts/TabContext"
+import { TabContext, useTab, type Tab, type TabActions, type TabContextValue, type WorkspaceItem } from "@/contexts/TabContext"
+import { baseName } from "@/lib/paths"
+import { useProject } from "@/contexts/ProjectContext"
+import { useClickOutside } from "@/hooks/useClickOutside"
+import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 
 interface TabManagerProps {
   /** Rendered once per tab inside that tab's `TabContext`. */
   children: React.ReactNode
   onTabsChange?: (tabs: Tab[]) => void
+  onActiveTabChange?: (tab: Tab) => void
   defaultConfig?: TabConfig
   ref?: React.Ref<TabManagerHandle>
 }
 
 export interface TabManagerHandle {
-  /** Swap one tab for `tab` in place and activate it; the others stay open. */
-  replaceTab: (tabId: string, tab: Tab) => void
   switchToTab: (tabId: string) => void
   getTabs: () => Tab[]
-  getActiveTabId: () => string
-  updateTabHistoryFile: (tabId: string, historyFile: string | null) => void
+  openTab: (tab: Tab) => void
+  showChat: (tabId: string) => void
+  showItem: (tabId: string, item: WorkspaceItem) => void
 }
 
-/** Tab state and actions shared with `SidebarTabs`, which renders inside each tab's own sidebar. */
+/** Tab state and actions shared by toolbar workspace switchers. */
 interface TabStripValue {
   tabs: Tab[]
   activeTabId: string
-  editingTabId: string | null
-  /** null hides the label so the command bar input can take its slot */
-  labelOf: (tab: Tab) => string | null
+  /** Activity description exposed alongside the workspace breadcrumb. */
+  labelOf: (tab: Tab) => string
   isLoading: (tab: Tab) => boolean
   select: (id: string) => void
   close: (id: string) => void
   add: () => void
-  startRename: (id: string) => void
-  commitRename: (id: string, value: string) => void
-  cancelRename: () => void
 }
 const TabStripContext = createContext<TabStripValue | null>(null)
 
-// Monotonic id source, module-level so ids stay unique across TabManager remounts
-let tabIdCounter = 0
 
 export function nextTab(config?: Partial<TabConfig>): Tab {
-  return { id: `tab-${++tabIdCounter}`, name: null, chatId: crypto.randomUUID(), historyFile: null, title: null, config: { ...DEFAULT_TAB_CONFIG, ...config }, appMode: "chat" }
+  return { id: `tab-${crypto.randomUUID()}`, name: null, chatId: crypto.randomUUID(), historyFile: null, title: null, config: { ...DEFAULT_TAB_CONFIG, ...config }, appMode: "chat", projectSlug: null, workspaceItem: null }
 }
 
 const INITIAL_TAB: Tab = nextTab()
+const WORKSPACE_SWITCH_MS = 160
+
+function subscribeReducedMotion(onChange: () => void) {
+  const media = window.matchMedia?.("(prefers-reduced-motion: reduce)")
+  media?.addEventListener("change", onChange)
+  return () => media?.removeEventListener("change", onChange)
+}
+
+function prefersReducedMotion() {
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? true
+}
 
 /** Provides one tab's state and actions; memoized so the context only changes with the tab or its active flag. */
 function TabScope({ tab, isActive, updateTab, updateModeLabel, children }: {
@@ -67,6 +76,11 @@ function TabScope({ tab, isActive, updateTab, updateModeLabel, children }: {
       setModeLabel: (label, loading) => updateModeLabel(id, label, loading),
       updateConfig: (config) => updateTab(id, (t) => ({ config: { ...t.config, ...config } })),
       setAppMode: (appMode) => updateTab(id, () => ({ appMode })),
+      setWorkspaceItem: (workspaceItem) => updateTab(id, (tab) => ({
+        workspaceItem,
+        projectSlug: workspaceItem ? workspaceItem.projectSlug : tab.projectSlug,
+        appMode: workspaceItem?.kind === "document" ? "document" : "canvas",
+      })),
       setHistoryFile: (historyFile) => updateTab(id, () => ({ historyFile })),
       setTitle: (title) => updateTab(id, () => ({ title })),
     }
@@ -79,131 +93,212 @@ function Spinner() {
   return <span className="h-2.5 w-2.5 shrink-0 animate-spin rounded-full border border-ink-faint border-t-ink-muted" />
 }
 
-interface SidebarTabsProps {
-  ownerTabId: string
-  /** Lifts the owner row above the command bar's click-away overlay */
-  commandOpen: boolean
-  onLabelSlot: (element: HTMLElement | null) => void
-  onMenuSlot: (element: HTMLElement | null) => void
+/** Describe the visible surface, not a background item retained by the tab. */
+function tabLocation(tab: Tab) {
+  if (tab.appMode === "canvas") {
+    return tab.workspaceItem?.kind === "architecture"
+      ? { category: "architecture", file: tab.name ?? "System overview" }
+      : { category: "canvases", file: tab.name ?? (tab.workspaceItem?.kind === "canvas" ? baseName(tab.workspaceItem.path) : "new.canvas") }
+  }
+  if (tab.appMode === "document") {
+    return { category: "files", file: tab.name ?? (tab.workspaceItem ? baseName(tab.workspaceItem.path) : "New file") }
+  }
+  return { category: "sessions", file: tab.name ?? tab.title ?? (tab.historyFile ? baseName(tab.historyFile) : "New chat") }
 }
 
-/** "Tabs" section for the sidebar bottom: one quiet row per tab, the active one softly boxed.
- *
- * - Every tab mounts its own sidebar, so `ownerTabId` marks the row of the tab rendering this list
- * - The owner row hosts the command bar: its label slot takes the input, the menu slot opens below in flow
- */
-export function SidebarTabs(props: SidebarTabsProps) {
+const TAB_PATH_COLLATOR = new Intl.Collator("en", { numeric: true, sensitivity: "base" })
+
+/** Reveal centered workspace navigation on hover, keyboard focus, or while its menu is open. */
+export function TabSwitcher() {
   const strip = useContext(TabStripContext)
+  const { tab, isActive } = useTab()
+  const { projects } = useProject()
+  const activityDescriptionId = useId()
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState("")
+  const [showSearch, setShowSearch] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const close = useCallback(() => {
+    setOpen(false)
+    setQuery("")
+  }, [])
+  useClickOutside(rootRef, close)
+  useEscapeLayer(() => {
+    close()
+    triggerRef.current?.focus()
+  }, open && isActive)
+  useEffect(() => {
+    if (!open || !isActive) return
+    const panel = panelRef.current
+    const current = panel?.querySelector<HTMLElement>("[aria-current=page]")
+    current?.scrollIntoView?.({ block: "nearest" })
+    const input = panel?.querySelector<HTMLInputElement>("input")
+    const focusTarget = input ?? current
+    focusTarget?.focus()
+  }, [open, isActive])
   if (!strip) return null
 
-  return (
-    <div className="space-y-0.5">
-      <div className="group flex items-center justify-between px-2 pb-0.5">
-        <span className="text-[11px] font-medium text-ink-faint">Tabs</span>
-        <button
-          aria-label="New tab"
-          onClick={strip.add}
-          className="rounded p-0.5 text-ink-faint opacity-0 transition-opacity hover:text-ink group-hover:opacity-100"
-        >
-          <Plus className="h-3 w-3" />
+  const projectName = (slug: string | null) => projects.find((project) => project.slug === slug)?.name ?? slug ?? "general"
+  const location = tabLocation(tab)
+  const breadcrumb = `${projectName(tab.projectSlug)} / ${location.category} / ${location.file}`
+  const search = query.trim().toLowerCase()
+  const orderedTabs = strip.tabs.map((item) => ({ item, project: projectName(item.projectSlug), ...tabLocation(item) }))
+    .sort((left, right) => Number(left.project === "general") - Number(right.project === "general")
+      || TAB_PATH_COLLATOR.compare(left.project, right.project)
+      || TAB_PATH_COLLATOR.compare(left.category, right.category)
+      || TAB_PATH_COLLATOR.compare(left.file, right.file)
+      || left.item.id.localeCompare(right.item.id))
+  const visibleTabs = orderedTabs.filter((entry) => `${entry.project} ${entry.category} ${entry.file}`.toLowerCase().includes(search))
+  const nextTab = orderedTabs[(orderedTabs.findIndex(({ item }) => item.id === strip.activeTabId) + 1) % orderedTabs.length].item
+
+  return <div ref={rootRef} data-tab-switcher data-open={open} className="pointer-events-auto flex w-max max-w-[min(28rem,100%)] items-center opacity-0 transition-opacity duration-160 [&:hover]:opacity-100 focus-within:opacity-100 data-[open=true]:opacity-100 motion-reduce:transition-none"
+    onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) close() }}>
+    <button type="button" aria-label="Next tab" disabled={strip.tabs.length < 2}
+      onClick={() => {
+        close()
+        strip.select(nextTab.id)
+      }}
+      className="flex h-8.5 w-8.5 shrink-0 items-center justify-center rounded-full bg-paper text-ink-muted transition-colors hover:bg-surface-elevated hover:text-ink focus:bg-surface-elevated focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-subtle disabled:cursor-default disabled:text-ink-faint">
+      <ArrowRightLeft aria-hidden="true" className="h-3 w-3" />
+    </button>
+    <button ref={triggerRef} type="button" aria-label={`Switch tabs: ${breadcrumb}`} aria-haspopup="dialog" aria-expanded={open}
+      aria-describedby={activityDescriptionId}
+      onClick={() => {
+        if (open) close()
+        else {
+          setShowSearch(strip.tabs.length > 8)
+          setOpen(true)
+        }
+      }}
+      className="flex h-8.5 min-w-0 items-center gap-1.5 rounded-full bg-paper px-2 text-xs text-ink-muted transition-colors hover:bg-surface-elevated hover:text-ink focus:bg-surface-elevated focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-subtle">
+      <span className="flex min-w-0 items-center gap-1.5">
+          <span data-workspace-breadcrumb className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
+            <span className="max-w-24 truncate text-ink-subtle">{projectName(tab.projectSlug)}</span>
+            <span aria-hidden="true" className="text-ink-faint">/</span>
+            <span className="shrink-0 text-ink-subtle">{location.category}</span>
+            <span aria-hidden="true" className="text-ink-faint">/</span>
+            <span className="min-w-0 truncate text-ink">{location.file}</span>
+          </span>
+          <ChevronDown aria-hidden="true" className="h-3 w-3 shrink-0 text-ink-subtle" />
+        </span>
+    </button>
+    <span id={activityDescriptionId} className="sr-only">{strip.labelOf(tab)}</span>
+    {open && isActive && <div ref={panelRef} role="dialog" aria-label="Open tabs"
+      className="absolute left-1/2 top-full z-50 mt-1 flex w-max max-w-[min(36rem,100%)] -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-divider bg-surface shadow-[var(--shadow-lg)]">
+      <div className="flex justify-center px-2 pt-1">
+        <button type="button" data-new-chat aria-label="New chat" onClick={() => {
+          close()
+          strip.add()
+        }} className="flex items-center justify-center rounded p-1.5 text-ink-muted hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-subtle">
+          <Plus aria-hidden="true" className="h-3.5 w-3.5" />
         </button>
       </div>
-      {strip.tabs.map((tab) => <TabRow key={tab.id} tab={tab} strip={strip} {...props} />)}
-    </div>
-  )
-}
-
-function TabRow({ tab, strip, ownerTabId, commandOpen, onLabelSlot, onMenuSlot }: SidebarTabsProps & {
-  tab: Tab
-  strip: TabStripValue
-}) {
-  const isOwner = tab.id === ownerTabId
-  const isActive = tab.id === strip.activeTabId
-  const label = strip.labelOf(tab)
-
-  return (
-    <div className={cn(isOwner && commandOpen && "relative z-[80]")}>
-      <div
-        className={cn(
-          "group flex h-6 cursor-pointer select-none items-center gap-1.5 rounded-md px-2 text-[11px] transition-colors",
-          isActive
-            ? "bg-surface-elevated/70 text-ink-muted"
-            : "text-ink-subtle hover:bg-surface-elevated/40 hover:text-ink-muted",
-        )}
-        onClick={() => strip.select(tab.id)}
-        onContextMenu={(e) => { e.preventDefault(); strip.close(tab.id) }}
-        onDoubleClick={() => strip.startRename(tab.id)}
-      >
-        <div ref={isOwner ? onLabelSlot : undefined} className="flex min-w-0 flex-1 items-center">
-          {label === null ? null : tab.id === strip.editingTabId ? (
-            <input
-              autoFocus
-              defaultValue={label}
-              className="min-w-0 flex-1 bg-transparent text-xs text-ink outline-none"
-              onFocus={(e) => e.target.select()}
-              onBlur={(e) => strip.commitRename(tab.id, e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") strip.commitRename(tab.id, e.currentTarget.value)
-                if (e.key === "Escape") strip.cancelRename()
-              }}
-              onClick={(e) => e.stopPropagation()}
-            />
-          ) : (
-            <span className="truncate">{label}</span>
-          )}
-        </div>
-        {strip.isLoading(tab) && <Spinner />}
-        {strip.tabs.length > 1 && (
-          <button
-            aria-label={`Close ${label ?? "tab"}`}
-            className={cn(
-              "shrink-0 rounded p-0.5 text-ink-faint transition-opacity hover:text-ink",
-              isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100",
-            )}
-            onClick={(e) => { e.stopPropagation(); strip.close(tab.id) }}
-          >
-            <X className="h-3 w-3" />
-          </button>
-        )}
+      {showSearch && <div className="border-b border-divider p-2">
+        <input aria-label="Search open tabs" placeholder="Find a tab…" value={query} onChange={(event) => setQuery(event.target.value)}
+          className="w-full rounded-md bg-paper px-2 py-1.5 text-xs text-ink outline-none focus-visible:ring-1 focus-visible:ring-ink-faint" />
+      </div>}
+      <div role="group" aria-label="Workspaces" className="max-h-[min(28rem,60vh)] overflow-y-auto p-1.5">
+          {visibleTabs.map(({ item, project, category, file }) => {
+            const active = item.id === strip.activeTabId
+            return <div key={item.id} className={cn("group/tab flex items-center rounded-md transition-colors duration-160 motion-reduce:transition-none", active ? "bg-surface-elevated" : "hover:bg-surface-elevated/60")}>
+              <button type="button" aria-label={`Switch to ${project} / ${category} / ${file}`} aria-current={active ? "page" : undefined}
+                aria-describedby={`${activityDescriptionId}-${item.id}`}
+                onClick={() => {
+                  close()
+                  strip.select(item.id)
+                }}
+                className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-ink-muted focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-subtle">
+                <span className="min-w-0 flex-1 truncate whitespace-nowrap"><span className="text-ink-subtle">{project} / {category} / </span><span className={active ? "text-ink" : undefined}>{file}</span></span>
+                <span id={`${activityDescriptionId}-${item.id}`} className="sr-only">{strip.labelOf(item)}</span>
+                {strip.isLoading(item) && <Spinner />}
+                {active && <Check aria-hidden="true" className="h-3 w-3 shrink-0 text-ink-subtle" />}
+              </button>
+              {strip.tabs.length > 1 && <button type="button" aria-label={`Close ${project} / ${category} / ${file}`}
+                onClick={() => {
+                  if (active) close()
+                  else {
+                    const target = panelRef.current?.querySelector<HTMLInputElement>("input") ?? panelRef.current?.querySelector<HTMLButtonElement>("[data-new-chat]") ?? triggerRef.current
+                    target?.focus()
+                  }
+                  strip.close(item.id)
+                }}
+                className="mr-1 rounded p-1 text-ink-faint opacity-0 hover:text-ink group-hover/tab:opacity-100 group-focus-within/tab:opacity-100 focus-visible:opacity-100">
+                <X aria-hidden="true" className="h-3 w-3" />
+              </button>}
+            </div>
+          })}
+        {visibleTabs.length === 0 && <p className="px-2 py-3 text-xs text-ink-subtle">No matching tabs</p>}
       </div>
-      {isOwner && <div ref={onMenuSlot} />}
-    </div>
-  )
+    </div>}
+  </div>
 }
 
-export function TabManager({ children, onTabsChange, defaultConfig = DEFAULT_TAB_CONFIG, ref }: TabManagerProps) {
+
+export function TabManager({ children, onTabsChange, onActiveTabChange, defaultConfig = DEFAULT_TAB_CONFIG, ref }: TabManagerProps) {
   const [tabs, setTabs] = useState<Tab[]>([INITIAL_TAB])
-  const [activeTab, setActiveTab] = useState(INITIAL_TAB.id)
-  const [editingTab, setEditingTab] = useState<string | null>(null)
+  const reduceMotion = useSyncExternalStore(subscribeReducedMotion, prefersReducedMotion, () => true)
+  const [{ activeTab, outgoingTab }, setVisibleTabs] = useState<{ activeTab: string; outgoingTab: string | null }>({ activeTab: INITIAL_TAB.id, outgoingTab: null })
   const [modeLabels, setModeLabels] = useState<Record<string, string>>({})
   const [modeLoading, setModeLoading] = useState<Record<string, boolean>>({})
   const onTabsChangeRef = useRef(onTabsChange)
   useEffect(() => { onTabsChangeRef.current = onTabsChange }, [onTabsChange])
+
+  const setActiveTab = useCallback((next: React.SetStateAction<string>) => {
+    setVisibleTabs((current) => {
+      const id = typeof next === "function" ? next(current.activeTab) : next
+      if (id === current.activeTab) return current
+      return { activeTab: id, outgoingTab: reduceMotion ? null : current.activeTab }
+    })
+  }, [reduceMotion])
+
+  useEffect(() => {
+    if (!outgoingTab || !reduceMotion) return
+    const timer = window.setTimeout(() => {
+      setVisibleTabs((current) => current.activeTab === activeTab && current.outgoingTab === outgoingTab
+        ? { ...current, outgoingTab: null }
+        : current)
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [activeTab, outgoingTab, reduceMotion])
 
   const updateTab = useCallback((id: string, patch: (tab: Tab) => Partial<Tab>) => {
     setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch(t) } : t)))
   }, [])
 
   useImperativeHandle(ref, () => ({
-    replaceTab: (tabId: string, tab: Tab) => {
-      setTabs((prev) => prev.map((t) => t.id === tabId ? tab : t))
-      setActiveTab(tab.id)
-    },
     switchToTab: (tabId: string) => setActiveTab(tabId),
     getTabs: () => tabs,
-    getActiveTabId: () => activeTab,
-    updateTabHistoryFile: (tabId: string, historyFile: string | null) => updateTab(tabId, () => ({ historyFile })),
-  }), [tabs, activeTab, updateTab])
+    openTab: (tab: Tab) => {
+      setTabs((prev) => [...prev, tab])
+      setActiveTab(tab.id)
+    },
+    showChat: (tabId: string) => {
+      updateTab(tabId, () => ({ appMode: "chat" }))
+      setActiveTab(tabId)
+    },
+    showItem: (tabId: string, workspaceItem: WorkspaceItem) => {
+      updateTab(tabId, () => ({ workspaceItem, appMode: workspaceItem.kind === "document" ? "document" : "canvas" }))
+      setActiveTab(tabId)
+    },
+  }), [tabs, updateTab, setActiveTab])
 
   useEffect(() => {
     onTabsChangeRef.current?.(tabs)
   }, [tabs])
 
+  useEffect(() => {
+    const selected = tabs.find((tab) => tab.id === activeTab)
+    if (selected) onActiveTabChange?.(selected)
+  }, [tabs, activeTab, onActiveTabChange])
+
   const addTab = useCallback(() => {
     const tab = nextTab(defaultConfig)
+    tab.projectSlug = tabs.find((current) => current.id === activeTab)?.projectSlug ?? null
     setTabs((prev) => [...prev, tab])
     setActiveTab(tab.id)
-  }, [defaultConfig])
+  }, [defaultConfig, tabs, activeTab, setActiveTab])
 
   const closeTab = useCallback((id: string) => {
     setTabs((prev) => {
@@ -216,7 +311,7 @@ export function TabManager({ children, onTabsChange, defaultConfig = DEFAULT_TAB
       }
       return next
     })
-  }, [activeTab])
+  }, [activeTab, setActiveTab])
 
   const closeActiveTab = useCallback(() => {
     closeTab(activeTab)
@@ -228,7 +323,7 @@ export function TabManager({ children, onTabsChange, defaultConfig = DEFAULT_TAB
       const next = (idx + 1) % tabs.length
       return tabs[next].id
     })
-  }, [tabs])
+  }, [tabs, setActiveTab])
 
   const switchToPrevTab = useCallback(() => {
     setActiveTab((current) => {
@@ -236,7 +331,7 @@ export function TabManager({ children, onTabsChange, defaultConfig = DEFAULT_TAB
       const prev = (idx - 1 + tabs.length) % tabs.length
       return tabs[prev].id
     })
-  }, [tabs])
+  }, [tabs, setActiveTab])
 
   useEffect(() => {
     function handler(e: KeyboardEvent) {
@@ -254,7 +349,7 @@ export function TabManager({ children, onTabsChange, defaultConfig = DEFAULT_TAB
           target.tagName === "INPUT" ||
           target.tagName === "TEXTAREA" ||
           target.isContentEditable
-        if (!isEditable) {
+        if (!isEditable && !target.closest("[data-file-tree], [data-tab-switcher]")) {
           e.preventDefault()
           if (e.shiftKey) {
             switchToPrevTab()
@@ -268,10 +363,6 @@ export function TabManager({ children, onTabsChange, defaultConfig = DEFAULT_TAB
     return () => document.removeEventListener("keydown", handler)
   }, [addTab, closeActiveTab, switchToNextTab, switchToPrevTab])
 
-  const commitRename = useCallback((id: string, value: string) => {
-    setEditingTab(null)
-    updateTab(id, () => ({ name: value.trim() || null }))
-  }, [updateTab])
 
   const updateModeLabel = useCallback((id: string, label: string, loading = false) => {
     setModeLabels((prev) => (prev[id] === label ? prev : { ...prev, [id]: label }))
@@ -281,30 +372,34 @@ export function TabManager({ children, onTabsChange, defaultConfig = DEFAULT_TAB
   const strip = useMemo<TabStripValue>(() => ({
     tabs,
     activeTabId: activeTab,
-    editingTabId: editingTab,
     labelOf: (tab) => {
+      if (tab.appMode !== "chat" && tab.workspaceItem) {
+        return tab.name ?? (tab.workspaceItem.kind === "architecture" ? "Architecture" : baseName(tab.workspaceItem.path))
+      }
       const label = modeLabels[tab.id]
-      // "\0" is a sentinel meaning the tab renders no label at all
-      if (label === "\0") return null
       return tab.name ?? (label || "Chat")
     },
     isLoading: (tab) => tab.name == null && (modeLoading[tab.id] ?? false),
     select: setActiveTab,
     close: closeTab,
     add: addTab,
-    startRename: setEditingTab,
-    commitRename,
-    cancelRename: () => setEditingTab(null),
-  }), [tabs, activeTab, editingTab, modeLabels, modeLoading, closeTab, addTab, commitRename])
+  }), [tabs, activeTab, modeLabels, modeLoading, closeTab, addTab, setActiveTab])
 
   return (
     <TabStripContext.Provider value={strip}>
-      <div className="relative h-screen overflow-hidden">
+      <div className="relative h-screen overflow-hidden" style={{ "--workspace-switch-duration": `${WORKSPACE_SWITCH_MS}ms` } as React.CSSProperties}>
         {tabs.map((tab) => (
           <div
             key={tab.id}
-            className="h-full"
-            style={{ display: tab.id === activeTab ? undefined : "none" }}
+            className="workspace-tab absolute inset-0 h-full"
+            data-phase={tab.id === activeTab ? outgoingTab && !reduceMotion ? "incoming" : "idle" : "outgoing"}
+            aria-hidden={tab.id !== activeTab}
+            inert={tab.id !== activeTab}
+            onAnimationEnd={(event) => {
+              if (tab.id !== activeTab || event.animationName !== "workspace-dissolve-in") return
+              setVisibleTabs((current) => current.activeTab === tab.id ? { ...current, outgoingTab: null } : current)
+            }}
+            style={{ display: tab.id === activeTab || tab.id === outgoingTab && !reduceMotion ? undefined : "none" }}
           >
             <TabScope tab={tab} isActive={tab.id === activeTab} updateTab={updateTab} updateModeLabel={updateModeLabel}>
               {children}

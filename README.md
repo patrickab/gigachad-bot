@@ -16,7 +16,15 @@ A minimalist, local-first LLM web interface. Designed for privacy, focus and cus
 - **Modes**:
   - **Deep Research**: multi-step reports via [GPT-Researcher](https://github.com/assafelovic/gpt-researcher).
   - **Web Search**: Brave LLM Context search with visible, citation-mapped source labels.
-- **Project Mode**: isolated memory, kanban board, and a per-project document library.
+- **Project workspaces**: one stable sidebar groups sessions, canvases, architecture, and files under each project, alongside isolated memory and a kanban board.
+  - Select a project to restore its last-opened workspace in the current session. Use its chevron to expand or collapse navigation without switching views.
+  - Open items to change the workspace and contextual tools. Category expansion never changes the current view.
+  - The sidebar uses one text-only recursive tree with consistent indentation. Hover or keyboard-focus a row to reveal creation and management actions. Empty categories add no placeholder rows.
+  - A borderless **project / category / file** switcher is centered in the existing toolbar row. It fades out at rest, reappears on hover or keyboard focus, and stays visible while its menu is open. Click the arrows on the left to advance through the tab list with wraparound, or toggle directly when two tabs are open. The arrows are disabled with one tab. Click or tap the breadcrumb to open the centered tab list, including with the sidebar collapsed. The breadcrumb no longer collapses on overlap, and neighboring controls never shift. Tabs stay naturally sorted by project, category, and filename, with **general** last. The dropdown fits long labels within the workspace and offers search for long tab lists. Unsaved canvases display as `new.canvas`.
+  - Switching tabs crossfades workspace content over 160ms with a subtle upward settle and breadcrumb fade. The sidebar and toolbar stay anchored, rapid switches interrupt immediately, and reduced-motion preferences disable the effect.
+  - Background chats retain their last visible column width and composer spacing, preventing layout jumps and unnecessary plot resizing when returning to a tab.
+  - Loose chats, canvases, and external file roots remain accessible under **general**, always listed after projects. The global memory button stays above the project list, without a mode heading.
+  - Open workspace commands with `/` or `Ctrl/Cmd+K`. The focused command popup works with the sidebar collapsed, supports filtering and keyboard selection, and closes with Escape.
 - **Infinite Canvas**: whiteboard for drawing, pdfs attach to canvas, canvas can be rendered as jpg and attached to chat
 - **Chat branching**: fork a conversation from any message, merge branches back.
 - **Obsidian vaults**: integrate Obsidian vaults into project documents. Files can be attached as live references. Edits write back to the source.

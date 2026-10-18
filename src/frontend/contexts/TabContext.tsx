@@ -4,7 +4,14 @@ import { createContext, useContext } from "react"
 import type { TabConfig } from "@/contexts/SettingsContext"
 
 /** Top-level workspace mode of a tab. */
-export type AppSurface = "chat" | "canvas"
+export type AppSurface = "chat" | "canvas" | "document"
+
+export interface WorkspaceItem {
+  kind: "canvas" | "architecture" | "document"
+  path: string
+  projectSlug: string | null
+  rootFile?: boolean
+}
 
 export interface Tab {
   id: string
@@ -14,14 +21,17 @@ export interface Tab {
   title: string | null
   config: TabConfig
   appMode: AppSurface
+  projectSlug: string | null
+  workspaceItem: WorkspaceItem | null
 }
 
 /** Actions bound to one tab; each is stable for the tab's lifetime. */
 export interface TabActions {
-  /** `loading` shows a spinner on the tab row; the `"\0"` label hides the tab label so the command input can take its slot. */
+  /** Describe tab activity and optionally show a loading spinner in the workspace switcher. */
   setModeLabel: (label: string, loading?: boolean) => void
   updateConfig: (config: Partial<TabConfig>) => void
   setAppMode: (mode: AppSurface) => void
+  setWorkspaceItem: (item: WorkspaceItem | null) => void
   setHistoryFile: (historyFile: string | null) => void
   setTitle: (title: string | null) => void
 }
