@@ -155,7 +155,7 @@ export function Sidebar({
     const chats = project ? buildChats(project, branchMeta) : visibleRootFiles.map((path) => ({ path, label: path.replace(/\.json$/, "") }))
     return [
       {
-        id: `${prefix}:chats`, label: "sessions", type: "folder",
+        id: `${prefix}:chats`, label: "chats", type: "folder",
         create: { label: `New chat in ${owner}`, onClick: () => onNewChat?.(scope || null) },
         onMoveHere: (path) => moveToProject(path, scope),
         children: chats.filter((chat) => !pending(`history:${chat.path}`)).map((chat) => {

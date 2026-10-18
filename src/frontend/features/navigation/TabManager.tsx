@@ -105,7 +105,7 @@ function tabLocation(tab: Tab) {
   if (tab.appMode === "document") {
     return { category: "files", file: tab.name ?? (tab.workspaceItem ? baseName(tab.workspaceItem.path) : "New file") }
   }
-  return { category: "sessions", file: tab.name ?? tab.title ?? (tab.historyFile ? baseName(tab.historyFile) : "New chat") }
+  return { category: "chats", file: tab.name ?? tab.title ?? (tab.historyFile ? baseName(tab.historyFile) : "New chat") }
 }
 
 const TAB_PATH_COLLATOR = new Intl.Collator("en", { numeric: true, sensitivity: "base" })

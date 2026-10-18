@@ -96,7 +96,7 @@ describe("Project navigation", () => {
 
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
-    for (const category of ["sessions", "canvases", "files"]) {
+    for (const category of ["chats", "canvases", "files"]) {
       expect(project.getByRole("button", { name: category })).toHaveAttribute("aria-expanded", "true")
     }
     expect(project.queryByRole("button", { name: "architecture" })).not.toBeInTheDocument()
@@ -326,14 +326,14 @@ describe("Toolbar tab switching", () => {
 
     for (const name of ["New chat", "Other"]) {
       fireEvent.click(view.getByRole("button", { name: "Next tab" }))
-      expect(view.getByRole("button", { name: `Switch tabs: general / sessions / ${name}` })).toBeVisible()
+      expect(view.getByRole("button", { name: `Switch tabs: general / chats / ${name}` })).toBeVisible()
       expect(view.queryByRole("dialog")).not.toBeInTheDocument()
     }
 
     fireEvent.click(view.getByRole("button", { name: /^Switch tabs:/ }))
-    fireEvent.click(view.getByRole("button", { name: "Close general / sessions / Other" }))
+    fireEvent.click(view.getByRole("button", { name: "Close general / chats / Other" }))
     expect(view.getByRole("button", { name: "Next tab" })).toBeDisabled()
-    expect(view.getByRole("button", { name: "Switch tabs: general / sessions / New chat" })).toBeVisible()
+    expect(view.getByRole("button", { name: "Switch tabs: general / chats / New chat" })).toBeVisible()
   })
 
   it("cycles in natural menu order rather than creation order and wraps at the end", () => {
@@ -346,11 +346,11 @@ describe("Toolbar tab switching", () => {
 
     for (const name of ["Chat 10", "New chat", "Chat 2"]) {
       fireEvent.click(view.getByRole("button", { name: "Next tab" }))
-      expect(view.getByRole("button", { name: `Switch tabs: general / sessions / ${name}` })).toBeVisible()
+      expect(view.getByRole("button", { name: `Switch tabs: general / chats / ${name}` })).toBeVisible()
     }
   })
 
-  it("reuses the selected tab for sessions and items without disturbing background tabs", () => {
+  it("reuses the selected tab for chats and items without disturbing background tabs", () => {
     const manager = createRef<TabManagerHandle>()
     const view = render(<TabManager ref={manager}><TabSwitcher /><WorkspaceDraft /></TabManager>)
     act(() => manager.current!.showChat("proj/first.json"))
@@ -360,7 +360,7 @@ describe("Toolbar tab switching", () => {
     fireEvent.change(view.getByRole("textbox"), { target: { value: "Unsaved draft" } })
 
     act(() => manager.current!.showChat("proj/first.json"))
-    expect(view.getByRole("button", { name: "Switch tabs: Proj / sessions / first.json" })).toBeVisible()
+    expect(view.getByRole("button", { name: "Switch tabs: Proj / chats / first.json" })).toBeVisible()
     expect(view.getByRole("textbox")).toHaveValue("")
     fireEvent.change(view.getByRole("textbox"), { target: { value: "Session draft" } })
     act(() => manager.current!.showItem({ kind: "canvas", path: "board.canvas", projectSlug: "proj" }))
@@ -371,7 +371,7 @@ describe("Toolbar tab switching", () => {
     act(() => manager.current!.showItem({ kind: "document", path: "/source/notes.md", projectSlug: null, rootFile: true }))
     expect(view.getByRole("button", { name: "Switch tabs: general / files / notes.md" })).toBeVisible()
     act(() => manager.current!.showChat("proj/second.json"))
-    expect(view.getByRole("button", { name: "Switch tabs: Proj / sessions / second.json" })).toBeVisible()
+    expect(view.getByRole("button", { name: "Switch tabs: Proj / chats / second.json" })).toBeVisible()
     expect(view.getByRole("textbox")).toHaveValue("")
     expect(manager.current!.getTabs().map((tab) => tab.id)).toEqual([background.id, selected.id])
     expect(manager.current!.getTabs()[0]).toEqual(background)
@@ -396,7 +396,7 @@ describe("Toolbar tab switching", () => {
       expect(view.getByRole("button", { name: `Switch tabs: ${breadcrumb}` })).toBeVisible()
     }
     act(() => manager.current!.showChat("proj/session.json"))
-    expect(view.getByRole("button", { name: "Switch tabs: Proj / sessions / session.json" })).toBeVisible()
+    expect(view.getByRole("button", { name: "Switch tabs: Proj / chats / session.json" })).toBeVisible()
   })
 
   it("keeps search usable after closing a filtered tab and preserves keyboard focus", () => {
@@ -405,18 +405,18 @@ describe("Toolbar tab switching", () => {
     act(() => {
       for (let index = 1; index <= 8; index++) manager.current!.openTab({ ...nextTab(), name: `Chat ${index}`, projectSlug: "proj" })
     })
-    const trigger = view.getByRole("button", { name: "Switch tabs: Proj / sessions / Chat 8" })
+    const trigger = view.getByRole("button", { name: "Switch tabs: Proj / chats / Chat 8" })
     fireEvent.click(trigger)
     const input = view.getByRole("textbox", { name: "Search open tabs" })
     fireEvent.change(input, { target: { value: "Chat 1" } })
     const dialog = within(view.getByRole("dialog", { name: "Open tabs" }))
-    expect(dialog.queryByRole("button", { name: "Switch to Proj / sessions / Chat 8" })).not.toBeInTheDocument()
-    fireEvent.click(dialog.getByRole("button", { name: "Close Proj / sessions / Chat 1" }))
+    expect(dialog.queryByRole("button", { name: "Switch to Proj / chats / Chat 8" })).not.toBeInTheDocument()
+    fireEvent.click(dialog.getByRole("button", { name: "Close Proj / chats / Chat 1" }))
     expect(input).toBeVisible()
     expect(input).toHaveFocus()
     expect(dialog.getByText("No matching tabs")).toBeInTheDocument()
     fireEvent.change(input, { target: { value: "" } })
-    const active = dialog.getByRole("button", { name: "Switch to Proj / sessions / Chat 8" })
+    const active = dialog.getByRole("button", { name: "Switch to Proj / chats / Chat 8" })
     expect(fireEvent.keyDown(active, { key: "Tab" })).toBe(true)
     expect(trigger).toHaveAttribute("aria-expanded", "true")
     fireEvent.keyDown(input, { key: "Escape" })
@@ -425,7 +425,7 @@ describe("Toolbar tab switching", () => {
     fireEvent.click(trigger)
     expect(view.queryByRole("textbox", { name: "Search open tabs" })).not.toBeInTheDocument()
     fireEvent.click(view.getByRole("button", { name: "New chat" }))
-    expect(view.getByRole("button", { name: "Switch tabs: Proj / sessions / New chat" })).toBeVisible()
+    expect(view.getByRole("button", { name: "Switch tabs: Proj / chats / New chat" })).toBeVisible()
     expect(manager.current!.getTabs()).toHaveLength(9)
   })
 
@@ -443,13 +443,13 @@ describe("Toolbar tab switching", () => {
     act(() => { for (const tab of tabs) manager.current!.openTab(tab) })
     fireEvent.click(view.getByRole("button", { name: /^Switch tabs:/ }))
     const expected = [
-      "Switch to Empty project / sessions / Z last",
+      "Switch to Empty project / chats / Z last",
       "Switch to Proj / architecture / System overview",
       "Switch to Proj / canvases / Board2.canvas",
       "Switch to Proj / canvases / board10.canvas",
+      "Switch to Proj / chats / Alpha",
       "Switch to Proj / files / alpha.md",
-      "Switch to Proj / sessions / Alpha",
-      "Switch to general / sessions / New chat",
+      "Switch to general / chats / New chat",
     ]
     const labels = () => within(view.getByRole("dialog", { name: "Open tabs" })).getAllByRole("button", { name: /^Switch to / }).map((button) => button.getAttribute("aria-label"))
     expect(labels()).toEqual(expected)
