@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Attachment, ModelsResponse } from "@/lib/domain/types"
-import { composerFor, composerImageFile, mergeRestoredText, ompModelOf, ompPrompt, ompSelectorModels, selectorModelId, type ComposerState } from "../composer"
+import { composerFor, composerImageFile, mergeRestoredText, ompModelOf, ompPrompt, ompSelectorModels, selectorModelId, shellHint, type ComposerState } from "../composer"
 
 const state = (sessionId: string | null): ComposerState => ({ type: "composer", sessionId, streaming: false, model: null, thinkingLevel: "auto", thinkingLevels: [] })
 
@@ -95,5 +95,17 @@ describe("composerImageFile", () => {
     expect(file).toMatchObject({ name: "restored-image-1.png", type: "image/png" })
     const content = await new Promise((resolve) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.readAsText(file) })
     expect(content).toBe("png")
+  })
+})
+
+describe("shellHint", () => {
+  it("tells a shell command from a local one", () => {
+    expect(shellHint("  !ls", 0)).toBe("Shell · output sent to the model")
+    expect(shellHint("!!ls", 0)).toBe("Shell · output stays local")
+    expect(shellHint("ls !x", 0)).toBeNull()
+  })
+
+  it("treats a draft with attachments as a prompt, like omp-web", () => {
+    expect(shellHint("!ls", 1)).toBeNull()
   })
 })

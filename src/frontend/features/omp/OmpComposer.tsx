@@ -1,14 +1,55 @@
 "use client"
 
-import { useEffect, useRef, useState, type ComponentProps, type RefObject } from "react"
+import { useEffect, useMemo, useRef, useState, type ComponentProps, type RefObject } from "react"
+import { File as FileIcon, Folder, MessageSquareText, Puzzle, Sparkles, type LucideIcon } from "lucide-react"
 import { withParsedAttachments } from "@/features/chat/attachments"
 import { ChatInput, type ChatInputHandle } from "@/features/chat/composer/ChatInput"
+import type { CompleteDraft, ComposerCompletion } from "@/features/chat/composer/CompletionMenu"
 import { ModelDropdown } from "@/features/settings/ModelDropdown"
 import { ReasoningSelector } from "@/features/settings/ReasoningSelector"
 import { parseFiles } from "@/lib/backend/api"
 import type { Attachment, OmpView } from "@/lib/domain/types"
-import { composerFor, composerImageFile, isComposerOf, mergeRestoredText, ompModelOf, ompPrompt, ompSelectorModels, selectorModelId } from "./composer"
+import { composerFor, composerImageFile, isComposerOf, mergeRestoredText, ompModelOf, ompPrompt, ompSelectorModels, selectorModelId, shellHint } from "./composer"
 import { useOmp } from "./OmpProvider"
+import type { Completion } from "./protocol"
+
+const COMPLETION_ICONS: Record<Completion["kind"], LucideIcon> = {
+  extension: Puzzle, prompt: MessageSquareText, skill: Sparkles, file: FileIcon, directory: Folder,
+}
+/** An unanswered completion request (frame reloading) resolves empty after this. */
+const COMPLETION_TIMEOUT_MS = 3_000
+/** Shared by every omp composer: answers go to all of them, the id picks the asker. */
+let lastCompletionRequestId = 0
+
+function toComposerCompletion(completion: Completion): ComposerCompletion {
+  const isPath = completion.kind === "file" || completion.kind === "directory"
+  return { ...completion, icon: COMPLETION_ICONS[completion.kind], mono: isPath }
+}
+
+/** Ask the frame for suggestions for `sessionId`'s draft (`undefined`: no composer state yet, no suggestions). */
+function useFrameCompletions(sessionId: string | null | undefined): CompleteDraft | undefined {
+  const { sendToComposer, onComposerEvent } = useOmp()
+  const pendingRef = useRef(new Map<number, (items: Completion[]) => void>())
+  useEffect(() => onComposerEvent((event) => {
+    if (event.type === "composer-completions") pendingRef.current.get(event.requestId)?.(event.items)
+  }), [onComposerEvent])
+
+  return useMemo(() => {
+    if (sessionId === undefined) return undefined
+    return (text: string, caret: number) => new Promise<ComposerCompletion[]>((resolve) => {
+      const requestId = ++lastCompletionRequestId
+      const pending = pendingRef.current
+      const settle = (items: Completion[]) => {
+        pending.delete(requestId)
+        window.clearTimeout(timer)
+        resolve(items.map(toComposerCompletion))
+      }
+      const timer = window.setTimeout(() => settle([]), COMPLETION_TIMEOUT_MS)
+      pending.set(requestId, settle)
+      sendToComposer({ type: "composer-complete", sessionId, requestId, text, caret })
+    })
+  }, [sessionId, sendToComposer])
+}
 
 /** Put what omp hands back for `view` (abort-withdrawn queue, queue Edit) into the composer behind `inputRef`. */
 function useComposerRestore(view: OmpView, inputRef: RefObject<ChatInputHandle | null>) {
@@ -40,6 +81,7 @@ export function OmpComposer({ view, chatId, slug }: { view: OmpView; chatId: str
   const [preparing, setPreparing] = useState(false)
   const [error, setError] = useState("")
   const sessionId = state?.sessionId ?? null
+  const complete = useFrameCompletions(state?.sessionId)
 
   const send = async (text: string, attachments: Attachment[]) => {
     setError("")
@@ -67,6 +109,8 @@ export function OmpComposer({ view, chatId, slug }: { view: OmpView; chatId: str
         onCancel={() => sendToComposer({ type: "composer-abort", sessionId })}
         toolsMenu={false}
         placeholder="Message omp"
+        complete={complete}
+        hint={shellHint}
       />
       {error && <p role="alert" className="mx-auto mt-1 max-w-2xl px-1 text-xs text-danger">{error}</p>}
     </div>

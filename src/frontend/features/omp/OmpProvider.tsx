@@ -10,7 +10,7 @@ import { EMBED_CHANNEL, EMBED_PROTOCOL_VERSION, type BranchNode, type Envelope, 
 
 export type ComposerCommand = Extract<ShellMessage, { type: `composer-${string}` }>
 /** Frame messages for one composer, not state: delivered to `onComposerEvent` listeners, never kept. */
-export type ComposerEvent = Extract<FrameMessage, { type: "composer-restore" }>
+export type ComposerEvent = Extract<FrameMessage, { type: "composer-restore" | "composer-completions" }>
 type ComposerEventListener = (event: ComposerEvent) => void
 
 const OVERVIEW_POLL_MS = 15_000
@@ -216,7 +216,7 @@ export function OmpProvider({ children }: { children: ReactNode }) {
       else if (message.type === "view") onFrameView(message)
       else if (message.type === "branch-tree") setBranchTree({ sessionId: message.sessionId, tree: message.tree, activeLeafId: message.activeLeafId })
       else if (message.type === "composer") setComposer(message)
-      else if (message.type === "composer-restore") composerListenersRef.current.forEach((listener) => listener(message))
+      else if (message.type === "composer-restore" || message.type === "composer-completions") composerListenersRef.current.forEach((listener) => listener(message))
       else if (message.type === "key") {
         const { key, altKey, ctrlKey, metaKey, shiftKey } = message
         document.dispatchEvent(new KeyboardEvent("keydown", { key, altKey, ctrlKey, metaKey, shiftKey, bubbles: true, cancelable: true }))

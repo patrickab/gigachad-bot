@@ -5,7 +5,7 @@
  * - Every message carries `channel: EMBED_CHANNEL` so unrelated postMessage traffic is ignored
  */
 export const EMBED_CHANNEL = "omp-embed"
-export const EMBED_PROTOCOL_VERSION = 4
+export const EMBED_PROTOCOL_VERSION = 5
 
 export type ThemeMode = "light" | "dark"
 
@@ -30,6 +30,20 @@ export type ModelRef = { provider: string; modelId: string }
 /** Base64 image without data-URL prefix, as omp's `prompt` command takes it. */
 export type ComposerImage = { data: string; mimeType: string }
 
+/**
+ * One autocomplete row: an omp command (`/name`, extensions, prompts and skills only) or a file under the session cwd (`@path`).
+ * Applying it replaces `text.slice(from, to)` with `insert` and puts the caret at `from + caretOffset`.
+ */
+export type Completion = {
+  kind: "extension" | "prompt" | "skill" | "file" | "directory"
+  label: string
+  detail?: string
+  from: number
+  to: number
+  insert: string
+  caretOffset: number
+}
+
 export type ShellMessage =
   /** Sent on every `ready`: the frame learns the shell origin and replays its current state. */
   | { type: "hello"; version: number; forwardKeys: KeyChord[]; theme: ThemeMode }
@@ -48,6 +62,8 @@ export type ShellMessage =
   | ({ type: "composer-set-model"; sessionId: string | null } & ModelRef)
   /** One of the composer's `thinkingLevels`. */
   | { type: "composer-set-thinking"; sessionId: string | null; level: string }
+  /** Completions for the draft at `caret`, answered by `composer-completions` with the same `requestId`. */
+  | { type: "composer-complete"; sessionId: string | null; requestId: number; text: string; caret: number }
 
 export type FrameMessage =
   /** Posted on every page load, the only message sent before `hello` (target origin "*", no data). */
@@ -66,5 +82,7 @@ export type FrameMessage =
    * Merge with `mergeRestoredText` (`composer.ts`), a mirror of omp-web's `mergeRecoveredText`.
    */
   | { type: "composer-restore"; sessionId: string | null; text: string; replace: { lead: string; fallback: string } | null; images: ComposerImage[] }
+  /** Answer to `composer-complete`, empty when nothing matches or the lookup failed. */
+  | { type: "composer-completions"; sessionId: string | null; requestId: number; items: Completion[] }
 
 export type Envelope<Message> = Message & { channel: typeof EMBED_CHANNEL }

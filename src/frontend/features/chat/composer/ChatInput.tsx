@@ -18,6 +18,7 @@ import { AttachmentIcon } from "@/features/chat/context-panel/AttachmentView"
 import { AttachmentPreview } from "./AttachmentPreview"
 import { ImageThumbnail } from "@/features/chat/messages/MessageAttachments"
 import { ToolMenuItem, ToolMenuSection } from "./ToolMenuItem"
+import { CompletionMenu, useCompletions, type CompleteDraft } from "./CompletionMenu"
 
 interface ChatInputProps {
   chatId: string
@@ -30,6 +31,10 @@ interface ChatInputProps {
   /** gigachad's chat tools menu, off where another agent owns the tools (omp tabs). */
   toolsMenu?: boolean
   placeholder?: string
+  /** Suggestions while typing (omp commands and files), none without. */
+  complete?: CompleteDraft
+  /** Mode note under the draft, e.g. that `!ls` runs in a shell, null for none. */
+  hint?: (text: string, attachmentCount: number) => string | null
 }
 
 export interface ChatInputHandle {
@@ -78,6 +83,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   slug = null,
   toolsMenu = true,
   placeholder = "Send a Message",
+  complete,
+  hint,
 }, ref) {
   const { enabledTools, toggleTool } = useEnabledTools()
   const { ocrModel } = useSettings()
@@ -127,6 +134,12 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     }
   }, [chatId, slug])
 
+  const replaceText = useCallback((next: string) => {
+    setText(next)
+    requestAnimationFrame(() => adjustHeight())
+  }, [adjustHeight])
+  const completions = useCompletions(complete, textareaRef, replaceText)
+
   useImperativeHandle(ref, () => ({
     addAttachment: (att: Attachment) => setAttachments(prev => {
       const existing = prev.findIndex(a => a.name === att.name)
@@ -154,15 +167,17 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const handleSubmit = useCallback(() => {
     const trimmed = text.trim()
     if (!trimmed && attachments.length === 0) return
+    completions.close()
     onSend(trimmed || "", attachments)
     setText("")
     clearAttachments()
     requestAnimationFrame(() => adjustHeight())
-  }, [text, attachments, onSend, clearAttachments, adjustHeight])
+  }, [text, attachments, onSend, clearAttachments, adjustHeight, completions])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (completions.handleKey(e, text)) return
     if (e.key === "Enter" && !e.shiftKey && !isStreaming && !extracting) { e.preventDefault(); handleSubmit() }
-  }, [handleSubmit, isStreaming, extracting])
+  }, [handleSubmit, isStreaming, extracting, completions, text])
 
   // Only the first pasted image is attached
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
@@ -225,6 +240,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   }, [isListening, adjustHeight])
 
   const canSend = text.trim().length > 0 || attachments.length > 0
+  const hintText = hint?.(text, attachments.length) ?? null
 
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mx-auto w-full max-w-2xl">
@@ -269,12 +285,19 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       )}
 
       <div className="relative z-20 rounded-2xl border border-divider/50 p-4 transition-all duration-300 bg-surface shadow-[var(--shadow-xl),var(--inner-highlight)] focus-within:shadow-[var(--shadow-xl),var(--inner-highlight-strong)]">
+          <CompletionMenu
+            items={completions.items}
+            activeIndex={completions.activeIndex}
+            onHover={completions.setActiveIndex}
+            onApply={(item) => completions.apply(text, item)}
+          />
           <textarea
             ref={textareaRef}
             rows={1}
             value={text}
-            onChange={(e) => { setText(e.target.value); adjustHeight() }}
+            onChange={(e) => { setText(e.target.value); adjustHeight(); completions.request(e.target.value, e.target.selectionStart) }}
             onKeyDown={handleKeyDown}
+            onBlur={completions.close}
             onPaste={handlePaste}
             disabled={disabled && !isStreaming}
             placeholder={placeholder}
@@ -286,6 +309,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             data-enable-grammarly="false"
             className="w-full resize-none bg-transparent text-sm text-ink placeholder:text-ink-subtle outline-none"
           />
+          {hintText && <p className="mt-1 text-xs text-ink-muted">{hintText}</p>}
           <div className="mt-3 flex items-center justify-between">
             <div className="flex min-w-0 items-center gap-1">
               <input ref={fileRef} type="file" accept="image/*,application/pdf,.md,.txt,.csv,.json,.xml,.yaml,.yml,.toml,.rst,.log,.py,.js,.ts,.jsx,.tsx,.css,.html,.sh,.bash,.zsh,.go,.rs,.java,.c,.cpp,.h,.hpp,.rb,.php,.sql,.r,.tex,.bib" multiple onChange={handleFileSelect} className="hidden" />

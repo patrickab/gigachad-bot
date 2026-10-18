@@ -34,6 +34,13 @@ export function composerImageFile(image: ComposerImage, index: number): File {
   return new File([bytes], `restored-image-${index + 1}.${extension}`, { type: image.mimeType })
 }
 
+/** Shell mode note like omp-web's input box: `!cmd` sends the output to the model, `!!cmd` keeps it local. Attachments make it a prompt. */
+export function shellHint(text: string, attachmentCount: number): string | null {
+  const draft = text.trimStart()
+  if (attachmentCount > 0 || !draft.startsWith("!")) return null
+  return draft.startsWith("!!") ? "Shell · output stays local" : "Shell · output sent to the model"
+}
+
 /** Selector models for omp tabs: only the providers picked from omp's logins, whose models are omp `provider/modelId` ids. */
 export function ompSelectorModels(models: ModelsResponse): ModelsResponse {
   return { ...models, ollama: [], providers: models.providers.filter((provider) => provider.source === OMP_MODEL_SOURCE) }
