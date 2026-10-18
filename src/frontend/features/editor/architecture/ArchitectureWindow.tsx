@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom"
-import { Box, FileType, Layers, LayoutGrid, ListPlus, Network, PanelLeftClose, PanelLeftOpen, Plus, Trash2 } from "lucide-react"
+import { LayoutGrid, ListPlus, ListTree, Trash2 } from "lucide-react"
 import { applyArchitectureOperations, deleteArchitectureSources, readArchitecture } from "@/lib/backend/api"
 import type {
   ArchitectureElement, ArchitectureOperation, ArchitectureTreeEntry, ArchitectureViewNode, ArchitectureWorkspace,
@@ -14,6 +14,9 @@ import { subscribeToChanges } from "@/lib/backend/syncStream"
 import { useClickOutside } from "@/hooks/useClickOutside"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { cn } from "@/lib/utils"
+import { FileTree, type FileTreeItem } from "@/components/ui/file-tree/FileTree"
+import { useFileTree } from "@/components/ui/file-tree/useFileTree"
+import { SEPARATOR, toolButton, type CanvasToolbarSlots } from "@/features/editor/canvas/CanvasToolbar"
 import { ArchitectureDiagramSurface } from "./ArchitectureDiagramSurface"
 import { ArchitectureSourceEditor } from "@/features/editor/TextDocumentEditor"
 import { labelFontsReady, nodeMinWidth } from "./architectureLabelWidth"
@@ -156,7 +159,7 @@ function useArchitectureView(slug: string, file: string) {
 // views; the diagram is the view the file opens in (a module opens its system's,
 // with the module selected), or the file itself as text. It is rendered at real
 // layout size: CSS scaling would desynchronise React Flow's handles from the pointer.
-export function ArchitectureWindow({ path, maximized, hostScale, edgeStyle = "elbow", onEdgeStyleChange, onNavigate }: {
+export function ArchitectureWindow({ path, maximized, hostScale, edgeStyle = "elbow", onEdgeStyleChange, onNavigate, toolbarSlots }: {
   path: string
   maximized: boolean
   hostScale: number
@@ -165,11 +168,17 @@ export function ArchitectureWindow({ path, maximized, hostScale, edgeStyle = "el
   onEdgeStyleChange: (style: EdgeStyle) => void
   /** Points the window at another `graph/<slug>/<file>`; an empty file means "the first system". */
   onNavigate: (path: string) => void
+  /** App top-bar elements this window renders its controls into, and floats its file tree as a sidebar card; without them the controls sit inside the window. */
+  toolbarSlots?: CanvasToolbarSlots | null
 }) {
   const slug = architectureSlug(path)
   const file = architectureSource(path)
   const [treeOpen, setTreeOpen] = useState(true)
   const [mode, setMode] = useState<"diagram" | "text">("diagram")
+  // The window's own mounting points inside the top-bar slots, so its controls keep a fixed order.
+  const [surfaceDrawing, setSurfaceDrawing] = useState<HTMLElement | null>(null)
+  const [surfaceView, setSurfaceView] = useState<HTMLElement | null>(null)
+  const surfaceSlots = toolbarSlots && surfaceDrawing && surfaceView ? { drawing: surfaceDrawing, view: surfaceView } : null
   const { workspace, entry, view, graph, error, onChange, run, mutate, refresh } = useArchitectureView(slug, file)
   const open = useCallback((next: string) => onNavigate(`graph/${slug}/${next}`), [onNavigate, slug])
   // A new window, or one whose file was just deleted, opens the first system.
@@ -236,14 +245,14 @@ export function ArchitectureWindow({ path, maximized, hostScale, edgeStyle = "el
       ? <span className="text-[10px] text-ink-faint">Read-only: this view uses filters or styles, edit it as text</span>
       : <>
         {landscape && <>
-          <span className="architecture-diagram-toolbar-delimiter" aria-hidden="true">|</span>
+          {SEPARATOR}
           <ArchitectureViewPicker elements={workspace.model.elements} shown={view.nodes} onInclude={(elements, descendants) => run([{ op: "includeInView", view: view.id, elements, descendants }])} />
         </>}
         {/* Hands every position back to LikeC4: arrows decide the ranks, the rest lines up. */}
         {view.manual && (
-          <button type="button" className="architecture-diagram-toolbar-symbol" style={{ width: "auto", padding: "0 6px", fontSize: 11 }}
+          <button type="button" className={cn(toolButton(false), "flex items-center gap-1 text-xs")}
             onClick={() => run([{ op: "layout", view: view.id, nodes: Object.fromEntries(view.nodes.map((node) => [node.id, null])), edges: Object.fromEntries(view.edges.map((edge) => [edge.id, null])) }])}>
-            <LayoutGrid size={13} /> Auto layout
+            <LayoutGrid className="h-3.5 w-3.5" /> Auto layout
           </button>
         )}
       </>
@@ -251,28 +260,52 @@ export function ArchitectureWindow({ path, maximized, hostScale, edgeStyle = "el
       <ArchitectureDiagramSurface
         key={view.id} graph={graph} onChange={onChange} readOnly={!view.editable} className="min-h-0 flex-1" autoFit={maximized} hostScale={hostScale}
         edgeStyle={edgeStyle} onEdgeStyleChange={onEdgeStyleChange}
-        toolbar={toolbar} onRemoveFromView={landscape ? removeFromView : undefined}
+        toolbar={toolbar} toolbarSlots={surfaceSlots} onRemoveFromView={landscape ? removeFromView : undefined}
         select={entry?.role === "module" ? entry.element : null} kinds={workspace.model.kinds} topLevelDrawing={!landscape}
       />
     )
   }
+  const treeToggle = workspace && (
+    <button type="button" aria-label={treeOpen ? "Hide files" : "Show files"} aria-expanded={treeOpen} onClick={() => setTreeOpen((current) => !current)} className={toolButton(treeOpen)}>
+      <ListTree className="h-3.5 w-3.5" />
+    </button>
+  )
+  const modeToggle = entry && (
+    <div role="group" aria-label="Show as" className="flex gap-px rounded-md bg-surface p-0.5">
+      {(["diagram", "text"] as const).map((option) => (
+        <button key={option} type="button" aria-pressed={mode === option} onClick={() => setMode(option)} className={cn("rounded px-2 py-0.5 text-xs transition-colors", mode === option ? "bg-surface-elevated text-ink" : "text-ink-subtle hover:text-ink")}>
+          {option === "diagram" ? "Diagram" : "Text"}
+        </button>
+      ))}
+    </div>
+  )
   return (
     <div className="flex h-full">
-      {treeOpen && workspace && <ArchitectureTree slug={slug} workspace={workspace} current={file} onOpen={open} onCollapse={() => setTreeOpen(false)} mutate={mutate} />}
+      {toolbarSlots && <>
+        {createPortal(
+          <div className="flex shrink-0 items-center gap-1">
+            {treeToggle}
+            <div ref={setSurfaceDrawing} className="flex items-center gap-1 empty:hidden before:mx-0.5 before:h-4 before:w-px before:bg-divider/50" />
+          </div>,
+          toolbarSlots.drawing,
+        )}
+        {createPortal(
+          <div className="flex shrink-0 items-center gap-1">
+            {modeToggle}
+            <div ref={setSurfaceView} className="contents" />
+          </div>,
+          toolbarSlots.view,
+        )}
+      </>}
+      {treeOpen && workspace && <ArchitectureTree slug={slug} workspace={workspace} current={file} onOpen={open} mutate={mutate} floating={!!toolbarSlots} />}
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex h-6 shrink-0 items-center gap-2 border-b border-divider/50 px-2 text-[10px] text-ink-faint">
-          {!treeOpen && <button type="button" aria-label="Show files" onClick={() => setTreeOpen(true)} className="rounded p-0.5 hover:text-ink"><PanelLeftOpen className="h-3 w-3" /></button>}
-          <span className="min-w-0 flex-1 truncate">{file}</span>
-          {entry && (
-            <div role="group" aria-label="Show as" className="flex gap-px rounded bg-surface p-px">
-              {(["diagram", "text"] as const).map((option) => (
-                <button key={option} type="button" aria-pressed={mode === option} onClick={() => setMode(option)} className={cn("rounded px-1.5 py-px transition-colors", mode === option ? "bg-surface-elevated text-ink" : "hover:text-ink")}>
-                  {option === "diagram" ? "Diagram" : "Text"}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        {!toolbarSlots && (
+          <div className="flex h-7 shrink-0 items-center gap-2 border-b border-divider/50 px-1.5 text-[10px] text-ink-faint">
+            {treeToggle}
+            <span className="min-w-0 flex-1 truncate">{file}</span>
+            {modeToggle}
+          </div>
+        )}
         {(error || diagnostics.length > 0) && (
           <div className="max-h-20 shrink-0 overflow-y-auto px-2 py-1 text-[10px] text-danger">
             {error && <p role="alert">{error}</p>}
@@ -308,17 +341,16 @@ export function ArchitectureWindow({ path, maximized, hostScale, edgeStyle = "el
 // along, and the server drops the connections and view entries naming them.
 // A deleted row leaves the tree at once, but its files (and so the diagram) stay
 // until the delete commits when the undo window closes.
-function ArchitectureTree({ slug, workspace, current, onOpen, onCollapse, mutate }: {
+function ArchitectureTree({ slug, workspace, current, onOpen, mutate, floating }: {
   slug: string
   workspace: ArchitectureWorkspace
   current: string
   onOpen: (file: string) => void
-  onCollapse: () => void
   mutate: Mutate
+  /** A card like the app sidebar; otherwise a flat column inside a small window. */
+  floating: boolean
 }) {
-  const [naming, setNaming] = useState<{ kind: "system" | "view" } | { kind: "module", system: string } | null>(null)
   const { schedule, pending } = useUndoDelete()
-  const [problem, setProblem] = useState<string | null>(null)
   // Read when a delete commits, which may be after the user has moved to another file.
   const currentRef = useRef(current)
   useLayoutEffect(() => { currentRef.current = current }, [current])
@@ -334,93 +366,50 @@ function ArchitectureTree({ slug, workspace, current, onOpen, onCollapse, mutate
   const titleOf = (entry: ArchitectureTreeEntry) => (entry.element ? elements.find((element) => element.id === entry.element)?.title : null)
     ?? (entry.role === "view" ? views.find((view) => view.id === entry.view)?.title : null)
     ?? entry.path.split("/").pop()!
-  const act = async (write: () => Promise<ArchitectureWorkspace>, then: (next: ArchitectureWorkspace) => void) => {
-    setProblem(null)
-    try {
-      then(await mutate(write))
-    } catch (cause) {
-      setProblem(failure(cause, "The architecture could not be changed"))
-    }
-  }
-  const create = (title: string) => {
-    if (!naming || !title) { setNaming(null); return }
-    const op: ArchitectureOperation = naming.kind === "system" ? { op: "createSystem", title }
-      : naming.kind === "module" ? { op: "createModule", system: naming.system, title }
-      : { op: "createView", title }
-    void act(() => applyArchitectureOperations(slug, [op], null), (next) => {
-      setNaming(null)
-      const [created] = next.created
-      if (created) onOpen(created)
-    })
+  // Every system starts open, so its modules are visible.
+  const systemPaths = allSystems.map((entry) => entry.path).join("\n")
+  const defaultExpanded = useMemo(() => systemPaths.split("\n"), [systemPaths])
+  const controller = useFileTree({ storageKey: "expanded_architecture_tree", defaultExpanded })
+  // A refused name throws, which keeps the tree's name field open with the server's reason.
+  const create = async (operation: ArchitectureOperation) => {
+    const next = await mutate(() => applyArchitectureOperations(slug, [operation], null))
+    const [created] = next.created
+    if (created) onOpen(created)
   }
   const remove = (paths: string[], label: string) => {
-    setProblem(null)
     schedule(deleteKey(paths[0]), label, async () => {
       await mutate(() => deleteArchitectureSources(slug, paths))
       if (paths.includes(currentRef.current)) onOpen("")
     })
   }
-  const nameField = (placeholder: string, depth: number) => (
-    <div className="py-1 pr-2" style={{ paddingLeft: 8 + depth * 12 }}>
-      <input
-        autoFocus placeholder={placeholder} aria-label={placeholder}
-        className="w-full bg-transparent text-[11px] text-ink placeholder-ink-faint outline-none"
-        onChange={() => setProblem(null)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") create(event.currentTarget.value.trim())
-          if (event.key === "Escape") { event.stopPropagation(); setNaming(null) }
-        }}
-      />
-    </div>
-  )
-  const row = (entry: ArchitectureTreeEntry, icon: ReactNode, depth: number, doomed: string[] = [entry.path]) => {
-    const label = titleOf(entry)
-    const here = entry.path === current
-    return (
-      <div key={entry.path}>
-        <div className={cn("flex items-center pr-1", here && "bg-hover")}>
-          <button type="button" onClick={() => onOpen(entry.path)} aria-current={here || undefined} className={cn("flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left text-[11px] transition-colors", here ? "text-ink" : "text-ink-muted hover:text-ink")} style={{ paddingLeft: 8 + depth * 12 }}>
-            {icon}<span className="truncate">{label}</span>
-          </button>
-          {here && <button type="button" aria-label={`Delete ${label}${doomed.length > 1 ? " and its modules" : ""}`} onClick={() => remove(doomed, label)} className="rounded p-0.5 text-ink-faint hover:text-danger transition-colors"><Trash2 className="h-3 w-3" /></button>}
-        </div>
-      </div>
-    )
-  }
-  const icon = (Icon: typeof Network) => <Icon className="h-3 w-3 shrink-0 text-ink-faint" />
-  const heading = (text: string) => <div className="px-2 pb-0.5 pt-2 text-[9px] uppercase tracking-wider text-ink-faint">{text}</div>
-  const addButton = (label: string, onClick: () => void, depth = 0) => (
-    <button type="button" onClick={() => { setProblem(null); setNaming(null); onClick() }} className="flex w-full items-center gap-1.5 py-1 text-left text-[11px] text-ink-faint hover:text-ink transition-colors" style={{ paddingLeft: 8 + depth * 12 }}>
-      <Plus className="h-3 w-3 shrink-0" />{label}
-    </button>
-  )
+  const itemOf = (entry: ArchitectureTreeEntry, doomed: string[] = [entry.path]): FileTreeItem<string> => ({
+    id: entry.path, label: titleOf(entry), type: "element", isActive: entry.path === current,
+    onSelect: () => onOpen(entry.path),
+    onDelete: () => remove(doomed, titleOf(entry)),
+  })
+  const systemItems = systems.map((system): FileTreeItem<string> => {
+    const modules = modulesOf(system.element!)
+    return {
+      ...itemOf(system, [system.path, ...modules.map((module) => module.path)]),
+      type: "folder",
+      children: modules.map((module) => itemOf(module)),
+      create: { label: `New module in ${titleOf(system)}`, placeholder: "Module name", onSubmit: (title) => create({ op: "createModule", system: system.element!, title }) },
+    }
+  })
+  const viewItems = tree.filter((entry) => entry.role === "view" && !pending(deleteKey(entry.path))).map((entry) => itemOf(entry))
+  const separator = <div role="separator" className="my-4 border-t border-divider/50" />
   return (
-    <nav aria-label="Architecture files" className="flex w-44 shrink-0 flex-col border-r border-divider/50">
-      <div className="flex h-6 shrink-0 items-center border-b border-divider/50 pl-2 pr-1 text-[10px] text-ink-faint">
-        <span className="flex-1">Architecture</span>
-        <button type="button" aria-label="Hide files" onClick={onCollapse} className="rounded p-0.5 hover:text-ink"><PanelLeftClose className="h-3 w-3" /></button>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto pb-2">
-        {heading("Systems")}
-        {systems.map((system) => {
-          const id = system.element!
-          const modules = modulesOf(id)
-          const open = system.path === current || modules.some((module) => module.path === current)
-          return (
-            <div key={system.path}>
-              {row(system, icon(Network), 0, [system.path, ...modules.map((module) => module.path)])}
-              {modules.map((module) => row(module, icon(Box), 1))}
-              {open && (naming?.kind === "module" && naming.system === id ? nameField("Module name", 1) : addButton("Module", () => setNaming({ kind: "module", system: id }), 1))}
-            </div>
-          )
-        })}
-        {naming?.kind === "system" ? nameField("System name", 0) : addButton("System", () => setNaming({ kind: "system" }))}
-        {heading("Views")}
-        {tree.filter((entry) => entry.role === "view" && !pending(deleteKey(entry.path))).map((entry) => row(entry, icon(Layers), 0))}
-        {naming?.kind === "view" ? nameField("View name", 0) : addButton("View", () => setNaming({ kind: "view" }))}
-        {others.length > 0 && heading("Other files")}
-        {others.map((entry) => row(entry, icon(FileType), 0))}
-        {problem && <p className="px-2 pt-1 text-[10px] text-danger" role="alert">{problem}</p>}
+    <nav aria-label="Architecture files" className={cn("flex shrink-0 flex-col", floating ? "mb-3 ml-3 w-60 rounded-2xl border border-divider/50 bg-surface shadow-[var(--shadow-lg)]" : "w-44 border-r border-divider/50")}>
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 py-3">
+        <FileTree label="Systems" items={systemItems} controller={controller}
+          create={{ label: "New system", placeholder: "System name", onSubmit: (title) => create({ op: "createSystem", title }) }} />
+        {separator}
+        <FileTree label="Views" items={viewItems} controller={controller}
+          create={{ label: "New view", placeholder: "View name", onSubmit: (title) => create({ op: "createView", title }) }} />
+        {others.length > 0 && <>
+          {separator}
+          <FileTree label="Other files" items={others.map((entry) => itemOf(entry))} controller={controller} />
+        </>}
       </div>
     </nav>
   )
@@ -455,8 +444,8 @@ function ArchitectureViewPicker({ elements, shown, onInclude }: {
   const include = (ids: string[], descendants: boolean) => { onInclude(ids, descendants); setOpen(false) }
   return (
     <div ref={ref} style={{ position: "relative" }}>
-      <button type="button" onClick={() => setOpen((current) => !current)} aria-haspopup="menu" aria-expanded={open} className="architecture-diagram-toolbar-symbol" style={{ width: "auto", padding: "0 6px", fontSize: 11 }}>
-        <ListPlus size={13} /> Add to view
+      <button type="button" onClick={() => setOpen((current) => !current)} aria-haspopup="menu" aria-expanded={open} className={cn(toolButton(open), "flex items-center gap-1 text-xs")}>
+        <ListPlus className="h-3.5 w-3.5" /> Add to view
       </button>
       {open && (
         <div role="menu" aria-label="Add to view" style={{ position: "absolute", zIndex: 10, top: "calc(100% + 4px)", left: 0, width: 260, maxHeight: 320, overflowY: "auto", padding: 4, border: "1px solid var(--divider)", borderRadius: 6, background: "var(--paper)", boxShadow: "var(--shadow-lg)" }}>

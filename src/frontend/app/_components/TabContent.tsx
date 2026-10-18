@@ -324,7 +324,7 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
               />
             )
           ) : appMode === "canvas" && canvasView.kind === "architecture" ? (
-            <ArchitectureWindow path={canvasView.path} maximized hostScale={1} edgeStyle={architectureEdgeStyle} onEdgeStyleChange={setArchitectureEdgeStyle} onNavigate={navigateArchitecture} />
+            <ArchitectureWindow path={canvasView.path} maximized hostScale={1} edgeStyle={architectureEdgeStyle} onEdgeStyleChange={setArchitectureEdgeStyle} onNavigate={navigateArchitecture} toolbarSlots={toolbarSlots} />
           ) : appMode === "canvas" ? (
             <CanvasWorkspace
               selected={canvasView.kind === "canvas" ? canvasView.selection : null}

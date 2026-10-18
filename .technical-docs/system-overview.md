@@ -136,9 +136,13 @@ never followed. Only the database location is wired to routes today.
   of a project, including the unsaved scratch canvas while a project is open.
   Without a project the menu says to open a project canvas instead. Its window
   (`features/editor/architecture/ArchitectureWindow.tsx`) holds a collapsible tree (systems
-  with their modules, views, other files)
-  with "+ System", "+ Module" (under the current system), "+ View", and
-  Delete on the current row (a system goes with its modules). The window's
+  with their modules, views, other files) built from the shared `FileTree`, with
+  hover "+" for a system, a module (per system) and a view, and Delete on any
+  row (a system goes with its modules). Full-screen in canvas mode, the window
+  follows the app's chrome: the tree is a second sidebar card, and the tree
+  toggle, drawing tools, Diagram/Text switch and connection menu portal into
+  the shared `TopBar` pills like the canvas toolbar. Inside a canvas attachment
+  it keeps a flat tree and an inline header strip instead. The window's
   path is the file it is on; tree clicks change it without an undo step. A
   system or view file draws its view, a module draws its system's view with
   the module selected (`ArchitectureDiagramSurface`, React Flow + rough.js),

@@ -5,7 +5,7 @@ import { motion } from "framer-motion"
 import { Brain } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { FileTree, type FileTreeItem } from "@/components/ui/file-tree/FileTree"
-import { useFileTree } from "@/components/ui/file-tree/useFileTree"
+import { useFileTree, usePathTree } from "@/components/ui/file-tree/useFileTree"
 import { useMemoryViewer } from "@/features/memory/MemoryViewerContext"
 import { useProject } from "@/contexts/ProjectContext"
 import { useBranches } from "@/features/navigation/BranchContext"
@@ -53,6 +53,7 @@ export function Sidebar({
     ...projects.flatMap((project) => ["chats", "canvases", "architecture", "files"].map((category) => `project:${project.slug}:${category}`)),
   ], [projects])
   const controller = useFileTree({ storageKey: "expanded_workspace_projects", defaultExpanded })
+  const workspaceController = usePathTree()
   const [documents, setDocuments] = useState<Record<string, ProjectDocument[]>>({})
   const [notes, setNotes] = useState<ProjectDocument[]>([])
   const [rootTreeData, setRootTreeData] = useState<FileTreeNode[]>([])
@@ -255,7 +256,7 @@ export function Sidebar({
           onMoveToRoot={(path) => moveToProject(path, "")}
         />
         <div role="separator" className="my-4 border-t border-divider/50" />
-        <FileTree label="Workspaces" items={buildRootFiles(rootTreeData)} controller={controller}
+        <FileTree label="Workspaces" items={buildRootFiles(rootTreeData)} controller={workspaceController}
           create={{ label: "Add workspace", onClick: () => setWorkspacePickerOpen(true) }}
         />
       </nav>

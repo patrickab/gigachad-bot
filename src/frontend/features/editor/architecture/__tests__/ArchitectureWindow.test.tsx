@@ -84,8 +84,10 @@ async function open(initial: ArchitectureWorkspace = workspace) {
   const button = (text: string) => Array.from(view.container.querySelectorAll("button")).find((b) => b.textContent === text)!
   /** Names a new system, which writes it. */
   const createSystem = async (title: string) => {
-    act(() => { button("System").click() })
-    await act(async () => { fireEvent.keyDown(view.getByLabelText("System name"), { key: "Enter", target: { value: title } }) })
+    act(() => { view.getByLabelText("New system").click() })
+    const field = view.getByLabelText("System name")
+    fireEvent.change(field, { target: { value: title } })
+    await act(async () => { fireEvent.keyDown(field, { key: "Enter" }) })
   }
   return { ...view, button, createSystem }
 }
@@ -110,8 +112,10 @@ describe("ArchitectureWindow", () => {
 
     // A new module lands beside its system and opens.
     api.applyArchitectureOperations.mockResolvedValueOnce({ ...workspace, created: ["backend/db.c4"] })
-    act(() => { button("Module").click() })
-    await act(async () => { fireEvent.keyDown(getByLabelText("Module name"), { key: "Enter", target: { value: "DB" } }) })
+    act(() => { getByLabelText("New module in Backend").click() })
+    const moduleField = getByLabelText("Module name")
+    fireEvent.change(moduleField, { target: { value: "DB" } })
+    await act(async () => { fireEvent.keyDown(moduleField, { key: "Enter" }) })
     expect(api.applyArchitectureOperations).toHaveBeenLastCalledWith("proj", [{ op: "createModule", system: "backend", title: "DB" }], null)
     expect(path()).toBe("graph/proj/backend/db.c4")
 
@@ -127,7 +131,7 @@ describe("ArchitectureWindow", () => {
     act(() => { button("Text").click() })
     expect(getByTestId("text-editor").textContent).toBe("graph/proj/backend/backend.c4")
     vi.useFakeTimers()
-    act(() => { getByLabelText("Delete Backend and its modules").click() })
+    act(() => { getByLabelText("Delete Backend").click() })
     expect(api.deleteArchitectureSources).not.toHaveBeenCalled()
     expect(button("Undo")).toBeTruthy()
     // The system and its modules leave the tree at once.

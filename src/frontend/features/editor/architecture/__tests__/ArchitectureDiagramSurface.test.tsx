@@ -156,6 +156,15 @@ describe("ArchitectureDiagramSurface", () => {
     expect(onChange).toHaveBeenCalledWith({ ...graph, edges: [{ id: "shop->bank", source: "shop", target: "bank", relations: ["r1"] }] })
   })
 
+  it("renders its toolbar into the given top-bar slots instead of above the diagram", () => {
+    const slots = { drawing: document.body.appendChild(document.createElement("div")), view: document.body.appendChild(document.createElement("div")) }
+    const { container } = render(<Surface graph={{ nodes: [node("shop", "Shop")], edges: [] }} onChange={() => {}} toolbarSlots={slots} />)
+
+    expect(slots.drawing).toContainElement(screen.getByRole("button", { name: "Fit view" }))
+    expect(slots.view).toContainElement(screen.getByRole("button", { name: "Connection style" }))
+    expect(container.querySelector(".architecture-diagram-toolbar")).toBeNull()
+  })
+
   it("keeps the title being edited when the graph is updated from outside", () => {
     const { rerender } = render(<Surface graph={{ nodes: [node("gateway", "Gateway")], edges: [] }} onChange={() => {}} />)
     fireEvent.click(screen.getByRole("button", { name: "Edit node title" }))

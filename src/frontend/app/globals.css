@@ -396,24 +396,6 @@ p, li {
 .architecture-diagram-icon-button { width: 28px; }
 .architecture-diagram-button:hover, .architecture-diagram-icon-button:hover { background: var(--hover-overlay-strong); color: var(--ink); }
 .architecture-diagram-button:focus-visible, .architecture-diagram-icon-button:focus-visible { outline: 2px solid var(--divider-strong); outline-offset: 2px; }
-
-.architecture-diagram-toolbar-symbol {
-  display: inline-flex;
-  width: 24px;
-  min-height: 24px;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--ink-muted);
-  padding: 0;
-  transition: color 150ms ease, background-color 150ms ease;
-}
-.architecture-diagram-toolbar-symbol:hover { background: var(--hover-overlay); color: var(--ink); }
-.architecture-diagram-toolbar-symbol.architecture-diagram-toolbar-symbol-active { background: var(--hover-overlay-strong); color: var(--ink); }
-.architecture-diagram-toolbar-symbol:focus-visible { outline: 2px solid var(--divider-strong); outline-offset: 2px; }
 .architecture-diagram-menu-item {
   display: block;
   width: 100%;
@@ -431,8 +413,6 @@ p, li {
 .architecture-diagram-draw-overlay { position: absolute; inset: 0; z-index: 6; cursor: crosshair; touch-action: none; }
 .architecture-diagram-draw-preview { position: absolute; inset: 0; z-index: 7; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .architecture-diagram-draw-preview path { stroke: var(--sketch-ink-soft); stroke-width: 1.5; stroke-dasharray: 4 3; stroke-linecap: round; stroke-linejoin: round; }
-
-.architecture-diagram-toolbar-delimiter { color: var(--ink-muted); font-size: 12px; line-height: 1; user-select: none; }
 
 .architecture-diagram-node-titlebar {
   display: flex;

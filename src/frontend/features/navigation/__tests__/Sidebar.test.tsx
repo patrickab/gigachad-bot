@@ -35,6 +35,7 @@ const api = vi.hoisted(() => ({
     path: "/source", name: "source", type: "root", children: [
       { path: "/source/first.md", name: "first.md", type: "file" },
       { path: "/source/second.md", name: "second.md", type: "file" },
+      { path: "/source/docs", name: "docs", type: "folder", children: [{ path: "/source/docs/guide.md", name: "guide.md", type: "file" }] },
     ],
   }] })),
 }))
@@ -107,6 +108,21 @@ describe("Project navigation", () => {
     view.unmount()
     const reopened = render(<Sidebar appMode="chat" />)
     expect(within(reopened.getByLabelText("Proj contents")).getByRole("button", { name: "canvases" })).toHaveAttribute("aria-expanded", "false")
+  })
+
+  it("reopens a workspace with its contents collapsed, ignoring saved expansion", async () => {
+    localStorage.setItem("expanded_workspace_projects", JSON.stringify({ "/source": true }))
+    const view = render(<Sidebar appMode="chat" />)
+    const workspaces = within(view.getByLabelText("Workspaces"))
+    const source = await workspaces.findByRole("button", { name: "source" })
+    expect(source).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(source)
+    fireEvent.click(workspaces.getByRole("button", { name: "docs" }))
+    expect(workspaces.getByRole("button", { name: "guide.md" })).toBeVisible()
+    fireEvent.click(source)
+    fireEvent.click(source)
+    expect(workspaces.getByRole("button", { name: "docs" })).toHaveAttribute("aria-expanded", "false")
+    expect(workspaces.queryByRole("button", { name: "guide.md" })).not.toBeInTheDocument()
   })
 
   it("opens canvases, architecture and files from chat without mixing their categories", async () => {

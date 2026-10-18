@@ -147,7 +147,8 @@ export function FileTree<T>({ items, controller, label, loading, create, renderB
   const renderItems = (nodes: FileTreeItem<T>[], depth: number): ReactNode => nodes.map((item) => {
     const branch = item.type !== "element"
     const expanded = branch && controller.isExpanded(item.id)
-    const selected = selectedIds.has(item.id)
+    // A lone selection is just the last click, so only a Ctrl/Shift multi-selection is shown.
+    const selected = selectedIds.size > 1 && selectedIds.has(item.id)
     const paddingLeft = INDENT_BASE + depth * INDENT_STEP
     return <div key={item.id} className={item.type === "root" ? "mt-2 first:mt-0" : undefined}>
       {!branch && renderBeforeItem && <div style={{ paddingLeft: paddingLeft + 20 }}>

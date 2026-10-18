@@ -60,3 +60,14 @@ export function useFileTree({ storageKey, defaultExpanded = [] }: { storageKey?:
 
   return { isExpanded, toggleBranch, expand }
 }
+
+/** Unpersisted expansion for path-keyed trees: everything starts collapsed, and collapsing a folder collapses its contents. */
+export function usePathTree(): FileBranchController {
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set())
+  const isExpanded = useCallback((id: string) => expanded.has(id), [expanded])
+  const expand = useCallback((id: string) => setExpanded((current) => current.has(id) ? current : new Set(current).add(id)), [])
+  const toggleBranch = useCallback((id: string) => setExpanded((current) => current.has(id)
+    ? new Set([...current].filter((other) => other !== id && !other.startsWith(`${id}/`)))
+    : new Set(current).add(id)), [])
+  return { isExpanded, toggleBranch, expand }
+}

@@ -13,7 +13,7 @@ export type CanvasToolbarSlots = { drawing: HTMLElement; view: HTMLElement }
 export type CanvasTool = "draw" | "select" | "screenshot"
 
 const RECENT_COLORS = 3
-const SEPARATOR = <div className="w-px h-4 bg-divider/50 mx-0.5" />
+export const SEPARATOR = <div className="w-px h-4 bg-divider/50 mx-0.5" />
 
 /** Preset, recent and custom ink colours behind a popover. */
 function ColorPicker({ color, isDark, onChange }: { color: string; isDark: boolean; onChange: (color: string) => void }) {
@@ -107,7 +107,7 @@ interface CanvasToolbarProps {
   zoomPercent: number
 }
 
-const toolButton = (active: boolean) => cn("rounded p-1 transition-colors", active ? "text-ink bg-hover" : "text-ink-subtle hover:text-ink hover:bg-hover")
+export const toolButton = (active: boolean) => cn("rounded p-1 transition-colors", active ? "text-ink bg-hover" : "text-ink-subtle hover:text-ink hover:bg-hover")
 
 /** Drawing tools on the left, view and history controls on the right. */
 export function CanvasToolbar({

@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { createPortal } from "react-dom"
 import {
   Background, ConnectionMode, ReactFlow, useEdgesState, useNodesState,
   type Connection, type OnBeforeDelete, type OnConnect, type OnConnectEnd,
@@ -13,6 +14,7 @@ import { useSurfaceDrawing } from "@/features/editor/architecture/useSurfaceDraw
 import { isDraft, nextDraftId, type DiagramEdge, type DiagramGraph, type DiagramNode } from "@/features/editor/architecture/diagramGraph"
 import { edgeAttachments, loadRouter, routeEdges, type EdgeStyle, type Point, type Rect, type RouteCard } from "@/lib/domain/edgeRouting"
 import { cn } from "@/lib/utils"
+import { SEPARATOR, toolButton, type CanvasToolbarSlots } from "@/features/editor/canvas/CanvasToolbar"
 import { useTabActive } from "@/contexts/TabContext"
 import { ArchitectureEdge, EdgeGeometryContext, type EdgeEdits, type EdgeGeometry } from "./ArchitectureEdge"
 import { ArchitectureNodeCard } from "./ArchitectureNodeCard"
@@ -33,6 +35,8 @@ export interface ArchitectureDiagramSurfaceProps {
   hostScale?: number
   /** Extra controls for the toolbar, e.g. what a view shows. */
   toolbar?: ReactNode
+  /** Top-bar elements the toolbar renders into; without them it sits above the diagram. */
+  toolbarSlots?: CanvasToolbarSlots | null
   /** Given (saved views), removing a node only takes it out of this view; otherwise it deletes the element from the model. */
   onRemoveFromView?: (nodeIds: string[]) => void
   /** Selects this node whenever it changes, e.g. the module a window was opened on. */
@@ -149,7 +153,7 @@ function reconcile<T extends { id: string }>(current: T[], next: T[]): T[] {
 }
 
 /** Sketch-style editor for a `DiagramGraph`: every edit is emitted through `onChange` as a whole new graph. */
-export function ArchitectureDiagramSurface({ graph, onChange, className, readOnly = false, edgeStyle, onEdgeStyleChange, autoFit = false, hostScale = 1, toolbar, onRemoveFromView, select = null, kinds = NO_KINDS, topLevelDrawing = true }: ArchitectureDiagramSurfaceProps) {
+export function ArchitectureDiagramSurface({ graph, onChange, className, readOnly = false, edgeStyle, onEdgeStyleChange, autoFit = false, hostScale = 1, toolbar, toolbarSlots, onRemoveFromView, select = null, kinds = NO_KINDS, topLevelDrawing = true }: ArchitectureDiagramSurfaceProps) {
   const active = useTabActive()
   // Callbacks read the graph through a ref so they stay stable across renders.
   const graphRef = useRef(graph)
@@ -398,24 +402,28 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
     emit({ edges: graphRef.current.edges.filter((edge) => edge.id !== selectedEdgeId) })
   }, [emit, selectedEdgeId])
 
+  const drawingTools = <>
+    {!readOnly && <>
+      {topLevelDrawing && <button type="button" onClick={addNode} className={toolButton(false)} aria-label="Add node"><Plus className="h-3.5 w-3.5" /></button>}
+      <button type="button" onClick={() => setLasso((current) => !current)} aria-pressed={lasso} className={toolButton(lasso)} aria-label="Lasso select"><CircleDashed className="h-3.5 w-3.5" /></button>
+      {SEPARATOR}
+    </>}
+    <button type="button" onClick={fitView} className={toolButton(false)} aria-label="Fit view"><Maximize className="h-3.5 w-3.5" /></button>
+    {toolbar}
+  </>
+  const viewTools = !readOnly && <div ref={edgeMenuRef} className={cn("relative", !toolbarSlots && "ml-auto")}>
+    <button type="button" onClick={() => setEdgeMenuOpen((current) => !current)} aria-label="Connection style" aria-haspopup="menu" aria-expanded={edgeMenuOpen} className={toolButton(edgeMenuOpen)}><MoreHorizontal className="h-3.5 w-3.5" /></button>
+    {edgeMenuOpen && <div role="menu" aria-label="Connection style" style={{ position: "absolute", zIndex: 10, top: "calc(100% + 4px)", right: 0, minWidth: 132, padding: 4, border: "1px solid var(--divider)", borderRadius: 6, background: "var(--paper)", boxShadow: "var(--shadow-lg)" }}>
+      <button type="button" role="menuitemradio" aria-checked={edgeStyle === "elbow"} onClick={() => { setEdgeStyle("elbow"); setEdgeMenuOpen(false) }} className="architecture-diagram-menu-item">Angled edges</button>
+      <button type="button" role="menuitemradio" aria-checked={edgeStyle === "curved"} onClick={() => { setEdgeStyle("curved"); setEdgeMenuOpen(false) }} className="architecture-diagram-menu-item">Curved edges</button>
+    </div>}
+  </div>
+
   return (
-    <div className={cn("architecture-diagram-surface", className)} style={{ display: "flex", minHeight: 0, height: "100%", flexDirection: "column", overflow: "hidden", borderTop: "1px solid var(--divider)", backgroundColor: "var(--sketch-canvas)" }}>
-      <div className="architecture-diagram-toolbar">
-        {!readOnly && <>
-          {topLevelDrawing && <button type="button" onClick={addNode} className="architecture-diagram-toolbar-symbol" aria-label="Add node"><Plus size={13} /></button>}
-          <button type="button" onClick={() => setLasso((current) => !current)} aria-pressed={lasso} className={cn("architecture-diagram-toolbar-symbol", lasso && "architecture-diagram-toolbar-symbol-active")} aria-label="Lasso select"><CircleDashed size={13} /></button>
-          <span className="architecture-diagram-toolbar-delimiter" aria-hidden="true">|</span>
-        </>}
-        <button type="button" onClick={fitView} className="architecture-diagram-toolbar-symbol" aria-label="Fit view"><Maximize size={13} /></button>
-        {toolbar}
-        {!readOnly && <div ref={edgeMenuRef} style={{ position: "relative", marginLeft: "auto" }}>
-          <button type="button" onClick={() => setEdgeMenuOpen((current) => !current)} aria-label="Connection style" aria-haspopup="menu" aria-expanded={edgeMenuOpen} className="architecture-diagram-toolbar-symbol"><MoreHorizontal size={15} /></button>
-          {edgeMenuOpen && <div role="menu" aria-label="Connection style" style={{ position: "absolute", zIndex: 10, top: "calc(100% + 4px)", right: 0, minWidth: 132, padding: 4, border: "1px solid var(--divider)", borderRadius: 6, background: "var(--paper)", boxShadow: "var(--shadow-lg)" }}>
-            <button type="button" role="menuitemradio" aria-checked={edgeStyle === "elbow"} onClick={() => { setEdgeStyle("elbow"); setEdgeMenuOpen(false) }} className="architecture-diagram-menu-item">Angled edges</button>
-            <button type="button" role="menuitemradio" aria-checked={edgeStyle === "curved"} onClick={() => { setEdgeStyle("curved"); setEdgeMenuOpen(false) }} className="architecture-diagram-menu-item">Curved edges</button>
-          </div>}
-        </div>}
-      </div>
+    <div className={cn("architecture-diagram-surface", className)} style={{ display: "flex", minHeight: 0, height: "100%", flexDirection: "column", overflow: "hidden", borderTop: toolbarSlots ? undefined : "1px solid var(--divider)", backgroundColor: "var(--sketch-canvas)" }}>
+      {toolbarSlots
+        ? <>{createPortal(drawingTools, toolbarSlots.drawing)}{createPortal(viewTools, toolbarSlots.view)}</>
+        : <div className="architecture-diagram-toolbar">{drawingTools}{viewTools}</div>}
       <div ref={viewportRef} onWheelCapture={zoomGraphAtCenter} onPointerDown={onPanePointerDown} onContextMenu={(event) => event.preventDefault()} style={{ position: "relative", minHeight: 0, flex: 1 }}>
       {!readOnly && selectedEdge && <div className="architecture-diagram-edge-editor">
         {selectedEdge.path && <button type="button" className="architecture-diagram-icon-button" onClick={resetSelectedEdgePath} aria-label="Reset connection path"><RotateCcw size={14} /></button>}
