@@ -65,6 +65,7 @@ export function Sidebar({
   const [notes, setNotes] = useState<ProjectDocument[]>([])
   const [rootTreeData, setRootTreeData] = useState<FileTreeNode[]>([])
   const [fileMountPickerOpen, setFileMountPickerOpen] = useState(false)
+  const [ompWorkspacePickerOpen, setOmpWorkspacePickerOpen] = useState(false)
 
   const refreshDocuments = useCallback(async () => {
     const [loose, entries] = await Promise.all([
@@ -262,6 +263,7 @@ export function Sidebar({
     })),
   ]
   const [generalChats, ...generalCategories] = buildCategories(null)
+  const linkedMounts = projects.flatMap((project) => projectMount(project.slug, mounts) ?? [])
 
   return <motion.aside
     initial={false} animate={{ width: collapsed ? 0 : 280 }} transition={{ duration: 0.25, ease: "easeInOut" }}
@@ -291,6 +293,13 @@ export function Sidebar({
           renderBeforeItem={(item) => item.data ? <ChatBranchPreview file={item.data} /> : null}
           onMoveToRoot={(path) => moveToProject(path, "")}
         />
+        {omp.available && <>
+          <div role="separator" className="my-4 border-t border-divider/50" />
+          <FileTree label="OMP" items={omp.workspaceItems(linkedMounts)} controller={controller}
+            labelAction={{ label: "Open omp settings", onClick: omp.openSettings }}
+            create={{ label: "Add omp workspace", onClick: () => setOmpWorkspacePickerOpen(true) }}
+          />
+        </>}
         <div role="separator" className="my-4 border-t border-divider/50" />
         <FileTree label="File mounts" items={buildMounts(rootTreeData)} controller={fileMountController}
           create={{ label: "Add file mount", onClick: () => setFileMountPickerOpen(true) }}
@@ -304,6 +313,7 @@ export function Sidebar({
       await loadRootTree()
       onRootsChanged?.()
     }} />
+    <FileMountPicker noun="omp workspace" open={ompWorkspacePickerOpen} onClose={() => setOmpWorkspacePickerOpen(false)} onConfirm={omp.addWorkspace} />
   </motion.aside>
 }
 

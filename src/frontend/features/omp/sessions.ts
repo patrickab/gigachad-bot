@@ -57,3 +57,34 @@ export function sessionForest(sessions: readonly OmpSession[]): SessionNode[] {
   }
   return roots
 }
+
+export interface WorkspaceGroup {
+  path: string
+  label: string
+  sessions: OmpSession[]
+}
+
+const PATH_COLLATOR = new Intl.Collator("en", { numeric: true, sensitivity: "base" })
+
+/**
+ * Group sessions outside every `linkedPaths` entry by omp-web workspace.
+ *
+ * - A session joins the deepest workspace containing it, else a group of its own directory
+ * - Workspaces inside a linked path are left out, a project's code category lists them
+ */
+export function unlinkedWorkspaces(overview: OmpOverview, linkedPaths: readonly string[]): WorkspaceGroup[] {
+  const isLinked = (path: string) => linkedPaths.some((linked) => isInside(path, linked))
+  const aliases = new Map(overview.workspaces.map((workspace) => [trimSlash(workspace.path), workspace.alias]))
+  const groups = new Map<string, OmpSession[]>()
+  for (const path of aliases.keys()) if (!isLinked(path)) groups.set(path, [])
+  for (const session of overview.sessions) {
+    const directory = trimSlash(sessionDirectory(session))
+    if (isLinked(directory)) continue
+    const workspace = [...groups.keys()].filter((path) => aliases.has(path) && isInside(directory, path))
+      .sort((left, right) => right.length - left.length)[0] ?? directory
+    groups.set(workspace, [...(groups.get(workspace) ?? []), session])
+  }
+  return [...groups.entries()]
+    .map(([path, sessions]) => ({ path, label: aliases.get(path) || baseName(path), sessions }))
+    .sort((left, right) => PATH_COLLATOR.compare(left.label, right.label) || PATH_COLLATOR.compare(left.path, right.path))
+}

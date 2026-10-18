@@ -1,9 +1,10 @@
 import { useTab } from "@/contexts/TabContext"
 import type { WorkspaceItem } from "@/contexts/TabContext"
 import type { FileTreeItem } from "@/components/ui/file-tree/FileTree"
+import { addOmpWorkspace } from "@/lib/backend/api"
 import type { OmpView, ProjectListItem } from "@/lib/domain/types"
 import { useOmp } from "./OmpProvider"
-import { sessionForest, sessionTitle, sessionsInside, type SessionNode } from "./sessions"
+import { sessionForest, sessionTitle, sessionsInside, unlinkedWorkspaces, type SessionNode } from "./sessions"
 
 /** Workspace item showing `view`, `path` is the workspace directory it was opened from. */
 export function ompItem(view: OmpView, path: string, projectSlug: string | null): WorkspaceItem {
@@ -19,7 +20,7 @@ export function ompItem(view: OmpView, path: string, projectSlug: string | null)
  */
 export function useOmpSidebar({ onOpen }: { onOpen?: (item: WorkspaceItem, inNewTab?: boolean) => void }) {
   const { tab } = useTab()
-  const { overview } = useOmp()
+  const { overview, refreshOverview } = useOmp()
   const shownView = tab.appMode === "omp" ? tab.workspaceItem?.omp : undefined
   const shownSessionId = shownView?.kind === "session" ? shownView.sessionId : null
   const running = new Set(overview?.running_session_ids ?? [])
@@ -49,5 +50,24 @@ export function useOmpSidebar({ onOpen }: { onOpen?: (item: WorkspaceItem, inNew
     }
   }
 
-  return { codeCategory }
+  /** OMP section rows: every omp-web workspace no project's code category covers, with its sessions. */
+  const workspaceItems = (linkedMounts: readonly string[]): FileTreeItem<string>[] => {
+    if (!overview) return []
+    return unlinkedWorkspaces(overview, linkedMounts).map((workspace) => ({
+      id: `omp-workspace:${workspace.path}`,
+      label: workspace.label,
+      type: "root",
+      create: { label: `New session in ${workspace.label}`, onClick: () => onOpen?.(ompItem({ kind: "new", cwd: workspace.path }, workspace.path, null), true) },
+      children: sessionForest(workspace.sessions).map((node) => sessionItem(node, workspace.path, null)),
+    }))
+  }
+
+  const openSettings = () => onOpen?.(ompItem({ kind: "settings" }, "", null))
+
+  const addWorkspace = async (path: string) => {
+    await addOmpWorkspace(path)
+    refreshOverview()
+  }
+
+  return { available: overview !== null, codeCategory, workspaceItems, openSettings, addWorkspace }
 }

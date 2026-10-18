@@ -58,6 +58,8 @@ interface FileTreeProps<T> {
   create?: FileTreeCreateAction
   renderBeforeItem?: (item: FileTreeItem<T>) => ReactNode
   onMoveToRoot?: (id: string) => Promise<void>
+  /** Makes the section label a button named `label`, e.g. to open the section's settings. */
+  labelAction?: { label: string; onClick: () => void }
 }
 
 const FILE_DRAG_TYPE = "application/x-file-tree-ids"
@@ -75,7 +77,7 @@ function selectableIds<T>(items: FileTreeItem<T>[], controller: FileBranchContro
 }
 
 /** Render every hierarchy level with the same indentation, disclosure, selection and action rules. */
-export function FileTree<T>({ items, controller, label, loading, create, renderBeforeItem, onMoveToRoot }: FileTreeProps<T>) {
+export function FileTree<T>({ items, controller, label, loading, create, renderBeforeItem, onMoveToRoot, labelAction }: FileTreeProps<T>) {
   const [creation, setCreation] = useState<{
     parentId: string | null
     action: Extract<FileTreeCreateAction, { onSubmit: unknown }>
@@ -234,7 +236,9 @@ export function FileTree<T>({ items, controller, label, loading, create, renderB
 
   return <div aria-label={label} data-file-tree>
     <div className="group/row mb-2 flex h-6 items-center justify-between px-2">
-      <span className="text-xs font-medium text-ink-subtle">{label}</span>
+      {labelAction
+        ? <button type="button" aria-label={labelAction.label} onClick={labelAction.onClick} className="rounded text-xs font-medium text-ink-subtle hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">{label}</button>
+        : <span className="text-xs font-medium text-ink-subtle">{label}</span>}
       {create && <div className={ACTIONS_CLASS}>
         <button aria-label={create.label} onClick={() => { void startCreate(null, create) }} className={ACTION_CLASS}>
           <Plus className="h-3 w-3" />

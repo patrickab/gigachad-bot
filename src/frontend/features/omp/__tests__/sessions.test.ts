@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { isInside, projectMount, sessionForest, sessionsInside } from "@/features/omp/sessions"
-import type { OmpSession } from "@/lib/domain/types"
+import { isInside, projectMount, sessionForest, sessionsInside, unlinkedWorkspaces } from "@/features/omp/sessions"
+import type { OmpOverview, OmpSession } from "@/lib/domain/types"
 
 function session(id: string, cwd: string, extra: Partial<OmpSession> = {}): OmpSession {
   return {
@@ -46,5 +46,32 @@ describe("sessionForest", () => {
     ])
     expect(forest.map((node) => node.session.id)).toEqual(["new", "old", "orphan"])
     expect(forest[1].forks.map((node) => node.session.id)).toEqual(["fork"])
+  })
+})
+
+describe("unlinkedWorkspaces", () => {
+  it("groups sessions by their deepest workspace, leaves linked ones out and keeps empty registered workspaces", () => {
+    const overview: OmpOverview = {
+      running_session_ids: [],
+      workspaces: [
+        { path: "/git", alias: null, added_at: null },
+        { path: "/git/tool", alias: "Tool", added_at: null },
+        { path: "/git/linked/docs", alias: null, added_at: null },
+        { path: "/empty", alias: null, added_at: null },
+      ],
+      sessions: [
+        session("deep", "/git/tool/src"),
+        session("shallow", "/git/misc"),
+        session("linked", "/git/linked"),
+        session("loose", "/tmp/scratch"),
+      ],
+    }
+    const groups = unlinkedWorkspaces(overview, ["/git/linked"])
+    expect(groups.map((group) => [group.label, group.sessions.map((found) => found.id)])).toEqual([
+      ["empty", []],
+      ["git", ["shallow"]],
+      ["scratch", ["loose"]],
+      ["Tool", ["deep"]],
+    ])
   })
 })

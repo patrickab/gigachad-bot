@@ -240,6 +240,39 @@ describe("Project navigation", () => {
     }
   })
 
+  it("lists omp workspaces no project covers in the OMP section, which opens omp settings and hides while omp-web never answered", async () => {
+    const listTree = api.fileRootTree.getMockImplementation()
+    api.fileRootTree.mockImplementation(async () => ({ enabled: true, tree: [{ path: "/git/proj", name: "proj", type: "root", children: [] }] }))
+    omp.overview = {
+      running_session_ids: [],
+      workspaces: [{ path: "/git/proj", alias: null, added_at: null }, { path: "/git/tool", alias: null, added_at: null }],
+      sessions: [ompSession("linked", "/git/proj"), ompSession("tooling", "/git/tool/src")],
+    }
+    try {
+      const onOmpOpen = vi.fn()
+      const view = render(<Sidebar appMode="chat" onOmpOpen={onOmpOpen} />)
+      const section = within(view.getByLabelText("OMP"))
+      await waitFor(() => expect(section.queryByRole("button", { name: "proj" })).not.toBeInTheDocument())
+      fireEvent.click(section.getByRole("button", { name: "tool" }))
+      expect(section.getByRole("button", { name: "tooling" })).toBeVisible()
+      expect(section.queryByRole("button", { name: "linked" })).not.toBeInTheDocument()
+
+      fireEvent.click(section.getByRole("button", { name: "Open omp settings" }))
+      expect(onOmpOpen).toHaveBeenLastCalledWith({ kind: "omp", path: "", projectSlug: null, omp: { kind: "settings" } })
+      fireEvent.click(section.getByRole("button", { name: "New session in tool" }))
+      expect(onOmpOpen).toHaveBeenLastCalledWith({ kind: "omp", path: "/git/tool", projectSlug: null, omp: { kind: "new", cwd: "/git/tool" } }, true)
+
+      omp.overview = null
+      view.rerender(<TabContext.Provider value={{ tab: nextTab(), isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), setAppMode: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
+        <Sidebar appMode="chat" onOmpOpen={onOmpOpen} />
+      </TabContext.Provider>)
+      expect(view.queryByLabelText("OMP")).not.toBeInTheDocument()
+    } finally {
+      omp.overview = null
+      api.fileRootTree.mockImplementation(listTree!)
+    }
+  })
+
   it("keeps expansion independent from project selection and shares it across mounted views", async () => {
     const onProjectSelect = vi.fn()
     const first = render(<Sidebar appMode="chat" onProjectSelect={onProjectSelect} />)

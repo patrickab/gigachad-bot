@@ -8,16 +8,17 @@ import type { DirectoryListing } from "@/lib/domain/types"
 
 const HOME = "~"
 
-/** Pick a backend directory to mount as a file mount.
+/** Pick a backend directory to add, a file mount unless `noun` names another target.
  *
  * - Starts at the backend user's home, the list follows what is typed into the path
  * - Clicking a directory opens it, the up button opens its parent
- * - Enter or "Add" mounts the typed path
+ * - Enter or "Add" adds the typed path
  */
-export function FileMountPicker({ open, onClose, onConfirm }: {
+export function FileMountPicker({ open, onClose, onConfirm, noun = "file mount" }: {
   open: boolean
   onClose: () => void
   onConfirm: (path: string) => Promise<void>
+  noun?: string
 }) {
   const [path, setPath] = useState(HOME)
   const [listing, setListing] = useState<DirectoryListing | null>(null)
@@ -70,7 +71,7 @@ export function FileMountPicker({ open, onClose, onConfirm }: {
       await onConfirm(target)
       onClose()
     } catch (error) {
-      setConfirmError(error instanceof Error ? error.message : "Could not add this file mount")
+      setConfirmError(error instanceof Error ? error.message : `Could not add this ${noun}`)
     }
     setConfirming(false)
   }
@@ -78,7 +79,7 @@ export function FileMountPicker({ open, onClose, onConfirm }: {
   const childPath = (name: string) => listing!.path === "/" ? `/${name}` : `${listing!.path}/${name}`
 
   return (
-    <Dialog open={open} onClose={onClose} icon={FolderPlus} title="Add file mount" initialFocusRef={inputRef} widthClassName="max-w-lg">
+    <Dialog open={open} onClose={onClose} icon={FolderPlus} title={`Add ${noun}`} initialFocusRef={inputRef} widthClassName="max-w-lg">
       <form onSubmit={(event) => { event.preventDefault(); void confirm() }} className="flex items-center gap-2 px-5 pb-3">
         <button
           type="button"
@@ -91,7 +92,7 @@ export function FileMountPicker({ open, onClose, onConfirm }: {
         </button>
         <input
           ref={inputRef}
-          aria-label="File mount path"
+          aria-label={`${noun.charAt(0).toUpperCase()}${noun.slice(1)} path`}
           value={path}
           onChange={(event) => { setPath(event.target.value); void load(event.target.value, false) }}
           autoComplete="off"
