@@ -26,3 +26,19 @@ Clean, calm UI that lets the user focus on the content (chat, document, canvas).
 - **Shared primitives**: reuse the components in `src/frontend/components/ui/` before writing custom markup. Extend a primitive if it falls short, rather than forking a one-off.
 - **Accessible**: icon-only buttons have an `aria-label`. Keyboard focus is always visible.
 
+## omp-web integration
+
+omp tabs embed omp-web from the fork `patrickab/ompweb` (branch `custom`), itself a fork of `kahme247/ompweb`. Both repos must keep rebasing onto upstream without conflicts, so gigachad-bot adapts to omp-web, never the reverse. Architecture: `.technical-docs/system-overview.md`, "omp tabs".
+
+- **Minimal delta upstream**: never ask for or make changes to omp-web's server API, session handling or protocol logic. Read what it already serves. A feature omp-web lacks is built here, or added in the fork's `custom/` following its `custom/AGENTS.md`
+- **Drop before you change**: omp-web UI gigachad-bot does not want is hidden in the fork's embed mode (`custom/theme/embed.css`), not rewritten. Prefer hiding a feature over porting or patching it
+- **Adapters own all omp-web knowledge**, one place per side, so an omp-web change lands in one file:
+  - Backend: `src/lib/omp_web.py` only. Routes (`routes/omp.py`) map its errors, they never build omp-web URLs. Pydantic contract models validate every response, a shape change fails loudly with the field name (502)
+  - Frontend: `src/frontend/features/omp/` only. Nothing else knows the iframe, the postMessage protocol or omp-web URLs. Other features import its public files (eslint `crossFeature`)
+  - The browser never calls omp-web's API, the backend does, server to server
+- **Never vendor omp-web code** (components, hooks, CSS). Write new code against its API with omp-web as reference
+- **Mirrored contracts change in both repos in one go**: `features/omp/protocol.ts` mirrors the fork's `custom/embed/protocol.ts` (bump `EMBED_PROTOCOL_VERSION`), the fork's `custom/theme/palette.css` embed tokens mirror `app/globals.css`
+- **One shared iframe**: tabs switch it by message, never by reload or by moving it in the DOM. Do not add a second frame or a per-tab frame
+- **Atomic commits**: one concern each (adapter, frame, tabs, sidebar, ...), the body names what omp-web contract it relies on
+- **After an omp-web update**: pin the worktree (`git -C ~/.local/share/gigachad-bot/ompweb checkout --detach custom`), run `pytest tests/test_omp_web.py`, then smoke an omp tab: open a session, switch omp tabs, send a prompt
+
