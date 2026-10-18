@@ -84,15 +84,15 @@ function WorkspaceDraft() {
 }
 
 describe("Project navigation", () => {
-  it("opens immediate categories by default and lists mounted roots collapsed under Workspaces", async () => {
+  it("opens immediate categories by default and lists mounted roots collapsed under File mounts", async () => {
     localStorage.setItem("expanded_workspace_projects", "[]")
     const view = render(<Sidebar appMode="chat" />)
     const general = within(view.getByLabelText("General"))
     expect(general.getByRole("button", { name: "canvases" })).toHaveAttribute("aria-expanded", "true")
     expect(general.queryByRole("button", { name: "files" })).not.toBeInTheDocument()
-    const workspaces = within(view.getByLabelText("Workspaces"))
-    expect(await workspaces.findByRole("button", { name: "source" })).toHaveAttribute("aria-expanded", "false")
-    expect(workspaces.queryByRole("button", { name: "first.md" })).not.toBeInTheDocument()
+    const fileMounts = within(view.getByLabelText("File mounts"))
+    expect(await fileMounts.findByRole("button", { name: "source" })).toHaveAttribute("aria-expanded", "false")
+    expect(fileMounts.queryByRole("button", { name: "first.md" })).not.toBeInTheDocument()
 
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
@@ -111,19 +111,19 @@ describe("Project navigation", () => {
     expect(within(reopened.getByLabelText("Proj contents")).getByRole("button", { name: "canvases" })).toHaveAttribute("aria-expanded", "false")
   })
 
-  it("reopens a workspace with its contents collapsed, ignoring saved expansion", async () => {
+  it("reopens a file mount with its contents collapsed, ignoring saved expansion", async () => {
     localStorage.setItem("expanded_workspace_projects", JSON.stringify({ "/source": true }))
     const view = render(<Sidebar appMode="chat" />)
-    const workspaces = within(view.getByLabelText("Workspaces"))
-    const source = await workspaces.findByRole("button", { name: "source" })
+    const fileMounts = within(view.getByLabelText("File mounts"))
+    const source = await fileMounts.findByRole("button", { name: "source" })
     expect(source).toHaveAttribute("aria-expanded", "false")
     fireEvent.click(source)
-    fireEvent.click(workspaces.getByRole("button", { name: "docs" }))
-    expect(workspaces.getByRole("button", { name: "guide.md" })).toBeVisible()
+    fireEvent.click(fileMounts.getByRole("button", { name: "docs" }))
+    expect(fileMounts.getByRole("button", { name: "guide.md" })).toBeVisible()
     fireEvent.click(source)
     fireEvent.click(source)
-    expect(workspaces.getByRole("button", { name: "docs" })).toHaveAttribute("aria-expanded", "false")
-    expect(workspaces.queryByRole("button", { name: "guide.md" })).not.toBeInTheDocument()
+    expect(fileMounts.getByRole("button", { name: "docs" })).toHaveAttribute("aria-expanded", "false")
+    expect(fileMounts.queryByRole("button", { name: "guide.md" })).not.toBeInTheDocument()
   })
 
   it("opens canvases, architecture and files from chat without mixing their categories", async () => {
@@ -222,7 +222,7 @@ describe("Project navigation", () => {
     const view = render(<Sidebar appMode="chat" />)
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
-    const shared = within(view.getByLabelText("Workspaces"))
+    const shared = within(view.getByLabelText("File mounts"))
     fireEvent.click(await shared.findByRole("button", { name: "source" }))
     const first = shared.getByRole("button", { name: "first.md" })
     const second = shared.getByRole("button", { name: "second.md" })

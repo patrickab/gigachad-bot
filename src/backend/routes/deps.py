@@ -108,7 +108,7 @@ def get_architecture_store(
     docs: DataStore = Depends(get_document_store),
     roots: FileRoots = Depends(get_file_roots),
 ) -> ArchitectureStore:
-    """The project's architecture: its linked workspace's ``docs/architecture`` when present, else the database copy."""
+    """The project's architecture: its linked file mount's ``docs/architecture`` when present, else the database copy."""
     return ArchitectureStore.for_project(docs, slug, roots.roots())
 
 

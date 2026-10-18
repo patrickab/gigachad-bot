@@ -53,7 +53,7 @@ while dark mode keeps `--ink-faint`.
 ## Architecture workspaces
 
 Each project holds one LikeC4 model, either under `docs/architecture/` of its linked
-workspace on disk or, without one, under `graph/<slug>/` in PostgreSQL:
+file mount on disk or, without one, under `graph/<slug>/` in PostgreSQL:
 every `.c4` file from that root downward (`backend/backend.c4`,
 `views/checkout.c4`, ...), merged by LikeC4 into one model. The `.c4` text is
 the source of truth, written the LikeC4 way:
@@ -244,11 +244,11 @@ failing `omp` answers 502. The sidebar's `ProviderUsage` (above Settings) shows 
 account (click for each window). Accounts without limits are hidden.
 
 
-## Workspaces
+## File mounts
 
 File roots are mounted backend directories, listed in the sidebar's
-"Workspaces" section below "General". "Add workspace" opens a directory
-picker (`features/navigation/WorkspacePicker.tsx`) that starts at the backend
+"File mounts" section below "General". "Add file mount" opens a directory
+picker (`features/navigation/FileMountPicker.tsx`) that starts at the backend
 user's home: clicking a directory opens it, the up button opens its parent, the
 list follows a typed path, and Enter mounts the path in the input. It lists
 directories through `GET /api/fileroots/browse?path=`, which browses the whole
@@ -263,10 +263,10 @@ else opens as editable text (Neovim when enabled). Files that are not UTF-8 text
 are refused (`GET /api/fileviewer/text` returns 415) rather than decoded lossily,
 so a save can never overwrite a binary file.
 
-Dragging workspace files onto a project's "files" adds them by reference: the
+Dragging files from a file mount onto a project's "files" adds them by reference: the
 project stores the file's absolute path (`POST /api/fileroots/add-to-project`),
 so it always shows the current file, and saving it in the editor writes the
-workspace file. Deleting it from the project only removes the reference, the
+mounted file. Deleting it from the project only removes the reference, the
 file stays on disk. PDFs still go into the shared PDF library as before.
 
 ## Neovim editor

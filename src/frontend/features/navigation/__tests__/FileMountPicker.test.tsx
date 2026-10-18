@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { WorkspacePicker } from "@/features/navigation/WorkspacePicker"
+import { FileMountPicker } from "@/features/navigation/FileMountPicker"
 import type { DirectoryListing } from "@/lib/domain/types"
 
 const tree: Record<string, DirectoryListing> = {
@@ -18,14 +18,14 @@ const api = vi.hoisted(() => ({
 }))
 vi.mock("@/lib/backend/api", () => api)
 
-describe("WorkspacePicker", () => {
+describe("FileMountPicker", () => {
   beforeEach(() => { api.browseDirectories.mockClear() })
 
   it("starts at home, opens a clicked directory, goes up, and mounts the path on Enter", async () => {
     const onConfirm = vi.fn(async () => {})
     const onClose = vi.fn()
-    render(<WorkspacePicker open onClose={onClose} onConfirm={onConfirm} />)
-    const input = screen.getByLabelText("Workspace path")
+    render(<FileMountPicker open onClose={onClose} onConfirm={onConfirm} />)
+    const input = screen.getByLabelText("File mount path")
     await waitFor(() => expect(input).toHaveValue("/home/noob"))
 
     fireEvent.click(screen.getByRole("button", { name: "git" }))
@@ -45,8 +45,8 @@ describe("WorkspacePicker", () => {
 
   it("keeps the window open and shows the reason when mounting fails", async () => {
     const onClose = vi.fn()
-    render(<WorkspacePicker open onClose={onClose} onConfirm={async () => { throw new Error("Not a directory: /nope") }} />)
-    const input = screen.getByLabelText("Workspace path")
+    render(<FileMountPicker open onClose={onClose} onConfirm={async () => { throw new Error("Not a directory: /nope") }} />)
+    const input = screen.getByLabelText("File mount path")
     fireEvent.change(input, { target: { value: "/nope" } })
     fireEvent.submit(input)
     expect(await screen.findByRole("alert")).toHaveTextContent("Not a directory: /nope")

@@ -15,7 +15,7 @@ import { useSidebar } from "@/features/navigation/SidebarContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import type { BranchMeta, FileTreeNode, ProjectListItem, ProjectDocument } from "@/lib/domain/types"
 import { ChatBranchPreview } from "./ChatBranchPreview"
-import { WorkspacePicker } from "./WorkspacePicker"
+import { FileMountPicker } from "./FileMountPicker"
 import { addRootFilesToProject, addFileRoot, createArchitectureSource, fileRootTree, removeFileRoot, listNotes, listProjectDocuments, moveDocument, removeDocument, writeDocument } from "@/lib/backend/api"
 import { useTab, useTabActive, type AppSurface } from "@/contexts/TabContext"
 import { isArchitecturePath } from "@/lib/domain/architecturePaths"
@@ -54,11 +54,11 @@ export function Sidebar({
     ...projects.flatMap((project) => ["chats", "canvases", "files"].map((category) => `project:${project.slug}:${category}`)),
   ], [projects])
   const controller = useFileTree({ storageKey: "expanded_workspace_projects", defaultExpanded })
-  const workspaceController = usePathTree()
+  const fileMountController = usePathTree()
   const [documents, setDocuments] = useState<Record<string, ProjectDocument[]>>({})
   const [notes, setNotes] = useState<ProjectDocument[]>([])
   const [rootTreeData, setRootTreeData] = useState<FileTreeNode[]>([])
-  const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false)
+  const [fileMountPickerOpen, setFileMountPickerOpen] = useState(false)
 
   const refreshDocuments = useCallback(async () => {
     const [loose, entries] = await Promise.all([
@@ -254,14 +254,14 @@ export function Sidebar({
           onMoveToRoot={(path) => moveToProject(path, "")}
         />
         <div role="separator" className="my-4 border-t border-divider/50" />
-        <FileTree label="Workspaces" items={buildRootFiles(rootTreeData)} controller={workspaceController}
-          create={{ label: "Add workspace", onClick: () => setWorkspacePickerOpen(true) }}
+        <FileTree label="File mounts" items={buildRootFiles(rootTreeData)} controller={fileMountController}
+          create={{ label: "Add file mount", onClick: () => setFileMountPickerOpen(true) }}
         />
       </nav>
       <ProviderUsage />
       {renderSettings && <div className="shrink-0 p-2">{renderSettings()}</div>}
     </>}
-    <WorkspacePicker open={workspacePickerOpen} onClose={() => setWorkspacePickerOpen(false)} onConfirm={async (path) => {
+    <FileMountPicker open={fileMountPickerOpen} onClose={() => setFileMountPickerOpen(false)} onConfirm={async (path) => {
       const result = await addFileRoot(path)
       setRootTreeData(result.tree)
       onRootsChanged?.()

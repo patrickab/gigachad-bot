@@ -1,7 +1,7 @@
 """HTTP boundary for per-project LikeC4 architecture workspaces.
 
 A project's workspace is every ``.c4`` file under ``docs/architecture/`` of its linked
-workspace (the file root named like the project) when that directory exists, else under
+file mount (the file root named like the project) when that directory exists, else under
 ``graph/<slug>/`` in the database, nested folders included; LikeC4 merges them into
 one model. The UI organises it as
 systems (``backend/backend.c4``: one C4 system and its view) holding modules

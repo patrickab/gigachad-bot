@@ -171,7 +171,7 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent
 
   const persistNow = useCallback(async (next: string) => {
     if (persistOverride) await persistOverride(next)
-    // An absolute path is a workspace file, referenced by a project or opened directly: save it in place.
+    // An absolute path is a file mount file, referenced by a project or opened directly: save it in place.
     else if (path.startsWith("/")) await writeRootFile(path, next)
     else await writeDocument(slug, filename, next)
     savedContentRef.current = next

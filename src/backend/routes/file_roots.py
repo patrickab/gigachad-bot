@@ -188,7 +188,7 @@ def add_to_project(
 ) -> FileListResponse:
     """Reference file-root files (folders expand recursively) from a project.
 
-    - Text files are stored as their absolute path, so the project always sees the workspace file
+    - Text files are stored as their absolute path, so the project always sees the mounted file
       and removing it from the project never touches the filesystem
     - PDFs are promoted into the shared library, as on attach
     - Files that are not valid UTF-8 text are skipped
