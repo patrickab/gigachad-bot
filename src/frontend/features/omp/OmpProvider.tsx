@@ -237,6 +237,10 @@ export function OmpProvider({ children }: { children: ReactNode }) {
   }), [overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, reloadFrame])
 
   const visible = attachment !== null && rect !== null && frameStatus === "ready"
+  useEffect(() => {
+    // A hidden frame keeps focus, keystrokes would land in it (e.g. after Alt+T from inside it opened a chat tab).
+    if (!visible && document.activeElement === frameRef.current) frameRef.current?.blur()
+  }, [visible])
   return (
     <OmpContext.Provider value={value}>
       {children}
