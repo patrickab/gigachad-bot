@@ -2,16 +2,25 @@
 
 import { createContext, useContext } from "react"
 import type { TabConfig } from "@/contexts/SettingsContext"
+import type { OmpView } from "@/lib/domain/types"
 
 /** Top-level workspace mode of a tab. */
-export type AppSurface = "chat" | "canvas" | "document"
+export type AppSurface = "chat" | "canvas" | "document" | "omp"
 
 export interface WorkspaceItem {
-  kind: "canvas" | "architecture" | "document" | "diff"
-  /** A `diff` item holds the mounted directory it compares against HEAD. */
+  kind: "canvas" | "architecture" | "document" | "diff" | "omp"
+  /** A `diff` item holds the mounted directory it compares against HEAD, an `omp` item its workspace directory ("" for settings). */
   path: string
   projectSlug: string | null
   rootFile?: boolean
+  /** What an `omp` item shows in omp-web's frame. */
+  omp?: OmpView
+}
+
+/** Surface that shows `item`. */
+export function surfaceOf(item: WorkspaceItem): AppSurface {
+  if (item.kind === "omp") return "omp"
+  return item.kind === "document" || item.kind === "diff" ? "document" : "canvas"
 }
 
 export interface Tab {

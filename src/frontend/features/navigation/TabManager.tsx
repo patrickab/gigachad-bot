@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useId, useImperative
 import { ArrowRightLeft, Check, ChevronDown, Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { DEFAULT_TAB_CONFIG, type TabConfig } from "@/contexts/SettingsContext"
-import { TabContext, useTab, type Tab, type TabActions, type TabContextValue, type WorkspaceItem } from "@/contexts/TabContext"
+import { TabContext, surfaceOf, useTab, type Tab, type TabActions, type TabContextValue, type WorkspaceItem } from "@/contexts/TabContext"
 import { baseName } from "@/lib/paths"
 import { parseHistoryFile } from "@/lib/domain/historyFile"
 import { useProject } from "@/contexts/ProjectContext"
@@ -81,7 +81,7 @@ function TabScope({ tab, isActive, updateTab, updateModeLabel, children }: {
       setWorkspaceItem: (workspaceItem) => updateTab(id, (tab) => ({
         workspaceItem,
         projectSlug: workspaceItem ? workspaceItem.projectSlug : tab.projectSlug,
-        appMode: workspaceItem?.kind === "document" || workspaceItem?.kind === "diff" ? "document" : "canvas",
+        appMode: workspaceItem ? surfaceOf(workspaceItem) : "canvas",
       })),
       setHistoryFile: (historyFile) => updateTab(id, () => ({ historyFile })),
       setTitle: (title) => updateTab(id, () => ({ title })),
@@ -97,6 +97,9 @@ function Spinner() {
 
 /** Describe the visible surface, not a background item retained by the tab. */
 function tabLocation(tab: Tab) {
+  if (tab.appMode === "omp") {
+    return { category: tab.projectSlug ? "code" : "omp", file: tab.name ?? tab.title ?? "omp" }
+  }
   if (tab.appMode === "canvas") {
     return tab.workspaceItem?.kind === "architecture"
       ? { category: "architecture", file: tab.name ?? "System overview" }
@@ -293,7 +296,7 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
         workspaceItem: item.kind === "architecture" && tab.workspaceItem?.kind === "architecture"
           && tab.workspaceItem.projectSlug === item.projectSlug ? tab.workspaceItem : item,
         projectSlug: item.projectSlug,
-        appMode: item.kind === "document" || item.kind === "diff" ? "document" : "canvas",
+        appMode: surfaceOf(item),
       }))
     },
     relocateHistories: (moves) => {
@@ -397,6 +400,7 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
     activeTabId: activeTab,
     labelOf: (tab) => {
       if (tab.appMode !== "chat" && tab.workspaceItem) {
+        if (tab.appMode === "omp") return tab.name ?? tab.title ?? "omp"
         return tab.name ?? (tab.workspaceItem.kind === "architecture" ? "Architecture" : baseName(tab.workspaceItem.path))
       }
       const label = modeLabels[tab.id]

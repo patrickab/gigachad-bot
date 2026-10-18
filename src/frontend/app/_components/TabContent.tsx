@@ -19,6 +19,7 @@ import { DiffViewer } from "@/features/editor/diff/DiffViewer"
 import { CreateDocumentPanel } from "@/features/editor/CreateDocumentPanel"
 import { CanvasWorkspace } from "@/features/editor/canvas/CanvasWorkspace"
 import { ArchitectureWindow } from "@/features/editor/architecture/ArchitectureWindow"
+import { OmpSurface } from "@/features/omp/OmpSurface"
 import { TabSwitcher } from "@/features/navigation/TabManager"
 import { TokenCounter } from "@/features/chat/TokenCounter"
 import { TopBar, TopBarPill, TopBarTransparent } from "@/features/navigation/TopBar"
@@ -54,6 +55,8 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
   const projectSlug = tab.projectSlug
   const documentItem = tab.workspaceItem?.kind === "document" ? tab.workspaceItem : null
   const diffItem = tab.workspaceItem?.kind === "diff" ? tab.workspaceItem : null
+  const ompItem = tab.workspaceItem?.kind === "omp" ? tab.workspaceItem : null
+  const ompView = ompItem?.omp ?? null
   const chat = useChat()
   const { messages, isStreaming, cancel, reset, models, saveModelProviders, saveModelTabOrder, saveModelDefaults, prompts, setPrompts, setMessages, totalUsage, setTotalUsage } = chat
   const { refreshAll, createBranch, setActiveFile, setActiveQaIndex } = useBranches()
@@ -269,6 +272,13 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
               </TopBarPill>
             </>}
           />
+        ) : appMode === "omp" ? (
+          // omp's composer carries its own model and usage controls.
+          <TopBar
+            center={<TabSwitcher />}
+            left={<TopBarTransparent>{sidebarToggle}</TopBarTransparent>}
+            right={<TopBarPill><ThemeToggle /></TopBarPill>}
+          />
         ) : appMode === "document" ? (
           <TopBar
             center={<TabSwitcher />}
@@ -310,7 +320,9 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
           />
         )}
         <div data-workspace-surface className={`flex-1 min-h-0 relative ${appMode === "canvas" ? "overflow-hidden" : ""}`}>
-          {appMode === "document" && diffItem ? (
+          {appMode === "omp" && ompItem && ompView ? (
+            <OmpSurface view={ompView} onViewChange={(omp) => setWorkspaceItem({ ...ompItem, omp })} />
+          ) : appMode === "document" && diffItem ? (
             <DiffViewer key={diffItem.path} root={diffItem.path} />
           ) : appMode === "document" && documentItem ? (
             documentItem.path.toLowerCase().endsWith(".pdf") ? (
