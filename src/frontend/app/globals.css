@@ -161,8 +161,8 @@
   --color-hover-strong: var(--hover-overlay-strong);
 
   /* Font families */
-  --font-sans: var(--font-sans), Outfit, system-ui, -apple-system, sans-serif;
-  --font-mono: var(--font-mono), 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  --font-sans: var(--font-sans), var(--font-symbols), Outfit, system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-mono), var(--font-symbols), 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
 
   /* Radii */
   --radius-sm: 0.25rem;
@@ -229,7 +229,7 @@ html {
 }
 
  body {
-   font-family: var(--font-sans), Outfit, system-ui, -apple-system, sans-serif;
+   font-family: var(--font-sans), var(--font-symbols), Outfit, system-ui, -apple-system, sans-serif;
    min-height: 100dvh;
    overscroll-behavior-x: none;
    -webkit-touch-callout: none;
@@ -594,7 +594,7 @@ p, li {
 }
 
 code, pre, .font-mono {
-  font-family: var(--font-mono), 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  font-family: var(--font-mono), var(--font-symbols), 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
 }
 
 .tabular-nums {
@@ -677,7 +677,7 @@ pre {
 }
 
 code {
-  font-family: var(--font-mono), 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  font-family: var(--font-mono), var(--font-symbols), 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
   font-size: 0.875em;
 }
 

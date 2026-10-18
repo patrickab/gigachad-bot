@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import { Outfit } from "next/font/google"
 import { JetBrains_Mono } from "next/font/google"
 import { Architects_Daughter } from "next/font/google"
+import localFont from "next/font/local"
 import "./globals.css"
 
 const outfit = Outfit({
@@ -23,6 +24,16 @@ const architectsDaughter = Architects_Daughter({
   variable: "--font-handwriting",
   display: "swap",
   weight: ["400"],
+})
+
+// Nerd Font icons (omp session titles start with one). PUA only, fetched when a page shows such a glyph.
+const symbolsNerdFont = localFont({
+  src: "./fonts/SymbolsNerdFontMono-Regular.woff2",
+  variable: "--font-symbols",
+  display: "swap",
+  preload: false,
+  adjustFontFallback: false,
+  declarations: [{ prop: "unicode-range", value: "U+E000-F8FF, U+F0000-FFFFD" }],
 })
 
 export const metadata: Metadata = {
@@ -61,7 +72,7 @@ const NO_TOUCH_CONTEXTMENU_SCRIPT = `
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning className={`${outfit.variable} ${jetbrainsMono.variable} ${architectsDaughter.variable}`}>
+    <html lang="en" suppressHydrationWarning className={`${outfit.variable} ${jetbrainsMono.variable} ${architectsDaughter.variable} ${symbolsNerdFont.variable}`}>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         <script dangerouslySetInnerHTML={{ __html: NO_TOUCH_CONTEXTMENU_SCRIPT }} />
