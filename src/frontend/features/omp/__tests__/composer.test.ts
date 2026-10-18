@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Attachment, ModelsResponse } from "@/lib/domain/types"
 import { composerFor, ompModelOf, ompPrompt, ompSelectorModels, selectorModelId, type ComposerState } from "../composer"
 
-const state = (sessionId: string | null): ComposerState => ({ type: "composer", sessionId, streaming: false, model: null })
+const state = (sessionId: string | null): ComposerState => ({ type: "composer", sessionId, streaming: false, model: null, thinkingLevel: "auto", thinkingLevels: [] })
 
 describe("composerFor", () => {
   it("matches the session a view shows", () => {

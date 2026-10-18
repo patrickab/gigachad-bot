@@ -4,6 +4,7 @@ import { useState, type ComponentProps } from "react"
 import { withParsedAttachments } from "@/features/chat/attachments"
 import { ChatInput } from "@/features/chat/composer/ChatInput"
 import { ModelDropdown } from "@/features/settings/ModelDropdown"
+import { ReasoningSelector } from "@/features/settings/ReasoningSelector"
 import { parseFiles } from "@/lib/backend/api"
 import type { Attachment, OmpView } from "@/lib/domain/types"
 import { composerFor, ompModelOf, ompPrompt, ompSelectorModels, selectorModelId } from "./composer"
@@ -74,6 +75,20 @@ export function OmpModelSelector({ view, models, ...dropdown }: { view: OmpView 
       models={models && ompSelectorModels(models)}
       selectedModel={state?.model ? selectorModelId(state.model) : ""}
       onSelect={select}
+    />
+  )
+}
+
+/** gigachad's reasoning selector for an omp tab: omp-web's thinking levels, applied to the session through the frame. */
+export function OmpReasoningSelector({ view }: { view: OmpView }) {
+  const { state, sendToComposer } = useComposerFor(view)
+  if (!state) return null
+  return (
+    <ReasoningSelector
+      levels={state.thinkingLevels}
+      reasoningEffort={state.thinkingLevel}
+      onReasoningChange={(level) => sendToComposer({ type: "composer-set-thinking", sessionId: state.sessionId, level })}
+      placement="below"
     />
   )
 }

@@ -5,7 +5,7 @@
  * - Every message carries `channel: EMBED_CHANNEL` so unrelated postMessage traffic is ignored
  */
 export const EMBED_CHANNEL = "omp-embed"
-export const EMBED_PROTOCOL_VERSION = 2
+export const EMBED_PROTOCOL_VERSION = 3
 
 export type ThemeMode = "light" | "dark"
 
@@ -46,6 +46,8 @@ export type ShellMessage =
   | { type: "composer-send"; sessionId: string | null; text: string; images: ComposerImage[] }
   | { type: "composer-abort"; sessionId: string | null }
   | ({ type: "composer-set-model"; sessionId: string | null } & ModelRef)
+  /** One of the composer's `thinkingLevels`. */
+  | { type: "composer-set-thinking"; sessionId: string | null; level: string }
 
 export type FrameMessage =
   /** Posted on every page load, the only message sent before `hello` (target origin "*", no data). */
@@ -54,7 +56,10 @@ export type FrameMessage =
   | { type: "view"; sessionId: string | null; settingsOpen: boolean }
   | { type: "branch-tree"; sessionId: string; tree: BranchNode[]; activeLeafId: string | null }
   | ({ type: "key" } & KeyChord)
-  /** Composer state for this shell's composer. `sessionId` is the shown session, null on the new-session screen. */
-  | { type: "composer"; sessionId: string | null; streaming: boolean; model: ModelRef | null }
+  /**
+   * Composer state for this shell's composer. `sessionId` is the shown session, null on the new-session screen.
+   * `thinkingLevels` is what omp-web's reasoning menu offers (`auto`, `off`, ... `max`), empty when it shows none. `thinkingLevel` is the selected one.
+   */
+  | { type: "composer"; sessionId: string | null; streaming: boolean; model: ModelRef | null; thinkingLevel: string; thinkingLevels: string[] }
 
 export type Envelope<Message> = Message & { channel: typeof EMBED_CHANNEL }

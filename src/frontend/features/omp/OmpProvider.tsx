@@ -8,7 +8,7 @@ import type { OmpOverview, OmpView } from "@/lib/domain/types"
 import type { ComposerState } from "./composer"
 import { EMBED_CHANNEL, EMBED_PROTOCOL_VERSION, type BranchNode, type Envelope, type FrameMessage, type KeyChord, type ShellMessage } from "./protocol"
 
-export type ComposerCommand = Extract<ShellMessage, { type: "composer-send" | "composer-abort" | "composer-set-model" }>
+export type ComposerCommand = Extract<ShellMessage, { type: `composer-${string}` }>
 
 const OVERVIEW_POLL_MS = 15_000
 /** A navigation waits this long for the frame to report its view before reports count as user navigation again. */
