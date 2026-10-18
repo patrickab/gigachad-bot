@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion } from "framer-motion"
 import { Brain } from "lucide-react"
+import { ArchitectureIcon } from "./ArchitectureIcon"
+import { ProviderUsage } from "./ProviderUsage"
 import { cn } from "@/lib/utils"
 import { FileTree, type FileTreeItem } from "@/components/ui/file-tree/FileTree"
 import { useFileTree, usePathTree } from "@/components/ui/file-tree/useFileTree"
@@ -30,7 +32,6 @@ interface SidebarProps {
   activeDocumentPath?: string | null
   onCanvasSelect?: (path: string, scope: string) => void
   onCanvasDeleted?: (path: string) => void
-  activeArchitecture?: string | null
   onArchitectureSelect?: (slug: string) => void
   renderSettings?: () => React.ReactNode
   appMode: AppSurface
@@ -38,7 +39,7 @@ interface SidebarProps {
 
 export function Sidebar({
   onFileSelect, onRootsChanged, onDocumentsChanged, onDocumentSelect, onProjectSelect, onNewChat,
-  activeCanvasPath, onCanvasSelect, onCanvasDeleted, activeArchitecture, onArchitectureSelect,
+  activeCanvasPath, onCanvasSelect, onCanvasDeleted, onArchitectureSelect,
   activeDocumentPath, renderSettings, appMode,
 }: SidebarProps) {
   const { collapsed } = useSidebar()
@@ -50,7 +51,7 @@ export function Sidebar({
   const { schedule, pending } = useUndoDelete()
   const defaultExpanded = useMemo(() => [
     "shared:canvases",
-    ...projects.flatMap((project) => ["chats", "canvases", "architecture", "files"].map((category) => `project:${project.slug}:${category}`)),
+    ...projects.flatMap((project) => ["chats", "canvases", "files"].map((category) => `project:${project.slug}:${category}`)),
   ], [projects])
   const controller = useFileTree({ storageKey: "expanded_workspace_projects", defaultExpanded })
   const workspaceController = usePathTree()
@@ -135,6 +136,16 @@ export function Sidebar({
       children: node.children ? buildRootFiles(node.children) : undefined,
     }))
 
+  const hasArchitecture = (slug: string) => (documents[slug] ?? []).some((doc) => isArchitecturePath(doc.path))
+
+  const openArchitecture = async (slug: string) => {
+    if (!hasArchitecture(slug)) {
+      await createArchitectureSource(slug, "system.c4")
+      await refreshDocuments()
+    }
+    onArchitectureSelect?.(slug)
+  }
+
   const buildCategories = (project: ProjectListItem | null): FileTreeItem<string>[] => {
     const scope = project?.slug ?? ""
     const owner = project?.name ?? "general"
@@ -142,7 +153,6 @@ export function Sidebar({
     const docs = (project ? documents[scope] ?? [] : notes)
       .filter((doc) => !pending(`document:${scope}:${doc.path}`))
     const chats = project ? buildChats(project, branchMeta) : visibleRootFiles.map((path) => ({ path, label: path.replace(/\.json$/, "") }))
-    const hasArchitecture = docs.some((doc) => isArchitecturePath(doc.path))
     return [
       {
         id: `${prefix}:chats`, label: "sessions", type: "folder",
@@ -178,22 +188,6 @@ export function Sidebar({
         })),
       },
       ...(project ? [{
-        id: `${prefix}:architecture`, label: "architecture", type: "folder" as const,
-        create: hasArchitecture ? undefined : {
-          label: `New architecture in ${owner}`,
-          onClick: async () => {
-            await createArchitectureSource(scope, "system.c4")
-            await refreshDocuments()
-            onArchitectureSelect?.(scope)
-          },
-        },
-        children: hasArchitecture ? [{
-          id: `graph/${scope}/`, label: "System overview", type: "element" as const,
-          isActive: appMode === "canvas" && activeArchitecture === scope,
-          onSelect: () => onArchitectureSelect?.(scope),
-        }] : [],
-      }] : []),
-      ...(project ? [{
         id: `${prefix}:files`, label: "files", type: "folder" as const,
         create: {
           label: `New file in ${owner}`, placeholder: "File name",
@@ -218,8 +212,12 @@ export function Sidebar({
       id: project.slug, label: project.name, type: "root", isActive: tab.projectSlug === project.slug,
       onSelect: () => onProjectSelect?.(project.slug),
       onDelete: () => schedule(`project:${project.slug}`, project.name, () => deleteProject(project.slug)),
-      actions: [{ label: `Open memory for ${project.name}`, icon: Brain,
-        onClick: () => openMemoryViewer({ scope: "project", projectSlug: project.slug }) }],
+      actions: [
+        { label: `${hasArchitecture(project.slug) ? "Open" : "Create"} architecture for ${project.name}`, icon: ArchitectureIcon,
+          onClick: () => openArchitecture(project.slug) },
+        { label: `Open memory for ${project.name}`, icon: Brain,
+          onClick: () => openMemoryViewer({ scope: "project", projectSlug: project.slug }) },
+      ],
       onMoveHere: (path) => moveToProject(path, project.slug),
       onDropFiles: (paths) => importFiles(project.slug, paths),
       children: buildCategories(project),
@@ -260,6 +258,7 @@ export function Sidebar({
           create={{ label: "Add workspace", onClick: () => setWorkspacePickerOpen(true) }}
         />
       </nav>
+      <ProviderUsage />
       {renderSettings && <div className="shrink-0 p-2">{renderSettings()}</div>}
     </>}
     <WorkspacePicker open={workspacePickerOpen} onClose={() => setWorkspacePickerOpen(false)} onConfirm={async (path) => {

@@ -15,6 +15,7 @@ from sse_starlette.sse import EventSourceResponse
 from backend.identity import RequestIdentity, get_request_identity
 from config import get_data_store, get_postgres_pool, seed_prompts
 from lib.agent_sandbox_adapter import AgentSandboxRunnerAdapter, FakeSandboxRunner, SandboxRunner
+from lib.architecture_workspace import ArchitectureStore
 from lib.asset_store import AssetStore
 from lib.chat_store import ChatStore
 from lib.data_store import DataStore
@@ -100,6 +101,15 @@ def get_memory_store(identity: RequestIdentity = Depends(get_request_identity)) 
 def get_file_roots(identity: RequestIdentity = Depends(get_request_identity)) -> FileRoots:
     repository = PostgresFileRootRepository(get_postgres_pool(), identity.user_id, device_id=identity.device_id)
     return FileRoots(repository=repository)
+
+
+def get_architecture_store(
+    slug: str,
+    docs: DataStore = Depends(get_document_store),
+    roots: FileRoots = Depends(get_file_roots),
+) -> ArchitectureStore:
+    """The project's architecture: its linked workspace's ``docs/architecture`` when present, else the database copy."""
+    return ArchitectureStore.for_project(docs, slug, roots.roots())
 
 
 def get_prompt_store(identity: RequestIdentity = Depends(get_request_identity)) -> PromptStore:

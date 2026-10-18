@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse
 from backend.routes.deps import get_asset_store, get_document_store, get_file_roots
 from backend.routes.schemas import FileContent
 from lib import document_library as lib_docs
+from lib.architecture_workspace import ArchitectureError, ArchitectureStore, split_source_path
 from lib.asset_store import AssetStore
 from lib.data_store import DataStore, StorageNotFoundError, read_text
 from lib.file_roots import FileRoots
@@ -64,6 +65,12 @@ async def read_text_content(
     roots: FileRoots = Depends(get_file_roots),
     docs: DataStore = Depends(get_document_store),
 ) -> FileContent:
+    if architecture := split_source_path(path):
+        slug, relative = architecture
+        try:
+            return FileContent(path=path, content=ArchitectureStore.for_project(docs, slug, roots.roots()).read_source(relative))
+        except (StorageNotFoundError, ArchitectureError) as exc:
+            raise HTTPException(status_code=404, detail="File not found") from exc
     key = _stored(path, docs)
     if key is not None:
         try:

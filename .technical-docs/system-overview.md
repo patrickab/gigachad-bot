@@ -52,7 +52,8 @@ while dark mode keeps `--ink-faint`.
 
 ## Architecture workspaces
 
-Each project can hold one LikeC4 model under `graph/<slug>/` in PostgreSQL:
+Each project holds one LikeC4 model, either under `docs/architecture/` of its linked
+workspace on disk or, without one, under `graph/<slug>/` in PostgreSQL:
 every `.c4` file from that root downward (`backend/backend.c4`,
 `views/checkout.c4`, ...), merged by LikeC4 into one model. The `.c4` text is
 the source of truth, written the LikeC4 way:
@@ -80,7 +81,11 @@ the source of truth, written the LikeC4 way:
 or a directory on disk (`DirectoryFiles`). Inside a git work tree a directory
 lists what `git ls-files --cached --others --exclude-standard` lists, so
 gitignored files are skipped; outside one it lists every file. Symlinks are
-never followed. Only the database location is wired to routes today.
+never followed. A project is linked to the file root whose folder name equals
+its slug: when `<root>/docs/architecture/` exists, that directory is its
+architecture (routes resolve it through `get_architecture_store`, and
+`/api/fileviewer/text` reads `graph/<slug>/…` paths from it); otherwise the
+database copy under `graph/<slug>/` is used.
 
 - **`src/c4/`** — a stateless loopback Node service (LikeC4 + Langium).
   `POST /model` parses sources, applies the saved layouts, and returns views,
@@ -130,9 +135,9 @@ never followed. Only the database location is wired to routes today.
   same way. Responses are `{model, created}`. Reading a project without an
   architecture returns an empty one. The project's document list shows
   sources by their path inside the workspace. Layout files are not listed.
-- **Frontend.** In canvas mode the sidebar's "Projects" tree lists under each
-  project its "Architecture" (when it has sources) before its canvases; picking
-  it shows the window on its own in place of a canvas. The canvas "+" menu has one "Architecture" entry on any canvas
+- **Frontend.** Each project row in the sidebar has a hover layers icon: it opens
+  the project's architecture window in place of a canvas, or creates an empty
+  database architecture when the project has none. The canvas "+" menu has one "Architecture" entry on any canvas
   of a project, including the unsaved scratch canvas while a project is open.
   Without a project the menu says to open a project canvas instead. Its window
   (`features/editor/architecture/ArchitectureWindow.tsx`) holds a collapsible tree (systems
@@ -227,6 +232,17 @@ never followed. Only the database location is wired to routes today.
   the UI uses no hover tooltips.
   Highlighting uses LikeC4's own TextMate grammar, vendored at
   `src/frontend/components/content/grammars/likec4.tmLanguage.json`.
+
+## Provider usage
+
+`GET /api/provider-usage[?refresh=true]` (`routes/models.py`, `lib/provider_usage.py`) runs
+`omp usage --json` and returns one row per OMP login: its worst limit per
+5h/7d/30d window with the minutes until reset, or `no_limits`. Output is cached
+for 5 minutes. `refresh=true` runs `omp usage invalidate` first. A missing or
+failing `omp` answers 502. The sidebar's `ProviderUsage` (above Settings) shows a
+"Usage" line with the highest percentage, and opens into one meter per limited
+account (click for each window). Accounts without limits are hidden.
+
 
 ## Workspaces
 

@@ -14,7 +14,7 @@ from pathlib import Path, PurePosixPath
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
-from backend.routes.deps import get_asset_store, get_document_store, get_project_store
+from backend.routes.deps import get_architecture_store, get_asset_store, get_document_store, get_project_store
 from backend.routes.schemas import FileListResponse, FileMeta
 from lib import document_library as lib_docs
 from lib.architecture_workspace import ArchitectureStore
@@ -28,6 +28,7 @@ from lib.storage_namespace import (
     GRAPH,
     NOTE,
     PDFS,
+    architecture_prefix,
     project_attachment_prefix,
     project_document,
     project_document_prefix,
@@ -114,7 +115,7 @@ def _promote_pdf_document(assets: AssetStore, name: str, content: bytes) -> Asse
 async def list_documents(
     slug: str = Query(...),
     store: ProjectStore = Depends(get_project_store),
-    docs: DataStore = Depends(get_document_store),
+    architecture: ArchitectureStore = Depends(get_architecture_store),
 ):
     """The project's referenced documents plus every architecture source, found
     from the workspace root downward and named by their path inside it."""
@@ -122,11 +123,9 @@ async def list_documents(
         files = store.list_files(slug)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    workspace = ArchitectureStore.for_project(docs, slug)
-    root = workspace.key("")
     sources = [
-        FileMeta(**{**lib_docs.document_meta(key), "name": key.removeprefix(root)})
-        for key in workspace.source_paths()
+        FileMeta(**{**lib_docs.document_meta(f"{architecture_prefix(slug)}/{relative}"), "name": relative})
+        for relative in architecture.source_paths()
     ]
     # The workspace is the source of truth for its files, so a stray reference never duplicates one.
     return FileListResponse(documents=_meta_list([f for f in files if not _under(f, GRAPH)]) + sources)

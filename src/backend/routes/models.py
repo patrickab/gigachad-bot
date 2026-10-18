@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from config import OLLAMA_BASE_URL, get_postgres_pool
 from lib import omp_source
 from lib.model_provider_store import ModelProviderStore, providers_for_ui
+from lib.provider_usage import UsageUnavailable, provider_usage
 from lib.prompt_store import PromptStore
 
 from .deps import get_model_provider_store, get_prompt_store
@@ -29,6 +30,15 @@ async def get_models(store: ModelProviderStore = Depends(get_model_provider_stor
         "defaults": store.load_defaults(),
         "tab_order": store.load_tab_order(),
     }
+
+
+@router.get("/provider-usage")
+async def get_provider_usage(refresh: bool = False) -> dict:
+    """Subscription rate-limit usage per OMP login; `refresh` refetches instead of using the 5 minute cache."""
+    try:
+        return await asyncio.to_thread(provider_usage, refresh)
+    except UsageUnavailable as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 # `none` is the app's "off": the chat route then omits `reasoning_effort` entirely.

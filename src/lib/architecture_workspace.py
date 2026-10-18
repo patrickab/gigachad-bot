@@ -29,9 +29,11 @@ from lib.data_store import (
     read_text,
     validate_key,
 )
-from lib.storage_namespace import architecture_prefix
+from lib.storage_namespace import GRAPH, architecture_prefix
 
 SOURCE_SUFFIX = ".c4"
+# Where a project's architecture lives inside its linked workspace (the file root named like the project).
+WORKSPACE_ARCHITECTURE_DIR = "docs/architecture"
 # LikeC4's default manual-layout location (its `manualLayouts.outDir`).
 SNAPSHOT_DIR = ".likec4/"
 SNAPSHOT_SUFFIX = ".likec4.snap"
@@ -43,6 +45,13 @@ class ArchitectureError(ValueError):
 
 class ArchitectureNotFound(ArchitectureError, FileNotFoundError):
     """The project has no architecture workspace yet."""
+
+
+def split_source_path(path: str) -> tuple[str, str] | None:
+    """``("shop", "backend/api.c4")`` for the logical path ``graph/shop/backend/api.c4``, else None."""
+    prefix, _, rest = path.partition("/")
+    slug, _, relative = rest.partition("/")
+    return (slug, relative) if prefix == GRAPH and slug and relative.endswith(SOURCE_SUFFIX) else None
 
 
 @dataclass(frozen=True)
@@ -161,8 +170,11 @@ class ArchitectureStore:
         self._root = validate_key(root, allow_empty=True)
 
     @classmethod
-    def for_project(cls, docs: DataStore, slug: str) -> ArchitectureStore:
-        """The project's workspace in the database, under ``graph/<slug>/``."""
+    def for_project(cls, docs: DataStore, slug: str, workspace_roots: Iterable[str] = ()) -> ArchitectureStore:
+        """``<root>/docs/architecture`` of the file root named *slug* once that directory exists, else the database's ``graph/<slug>/``."""
+        for root in map(Path, workspace_roots):
+            if root.name == slug and (root / WORKSPACE_ARCHITECTURE_DIR).is_dir():
+                return cls(DirectoryFiles(root), WORKSPACE_ARCHITECTURE_DIR)
         return cls(docs, architecture_prefix(slug))
 
     def key(self, relative: str) -> str:
@@ -185,8 +197,12 @@ class ArchitectureStore:
         return [(entry.key[skip:], entry) for entry in self._files.list(self._root, recursive=True) if not entry.is_dir]
 
     def source_paths(self) -> list[str]:
-        """Storage keys of every ``.c4`` source, in path order."""
-        return sorted(entry.key for relative, entry in self._entries() if relative.endswith(SOURCE_SUFFIX))
+        """Workspace-relative paths of every ``.c4`` source, in path order."""
+        return sorted(relative for relative, _ in self._entries() if relative.endswith(SOURCE_SUFFIX))
+
+    def read_source(self, relative: str) -> str:
+        """Text of one source; StorageNotFoundError when it does not exist."""
+        return read_text(self._files, self.source_key(relative))[0]
 
     def read(self, *, allow_empty: bool = False) -> Snapshot:
         """Every source plus the saved layouts; a workspace without sources is not found unless *allow_empty*."""

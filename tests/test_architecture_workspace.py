@@ -83,3 +83,18 @@ def test_paths_cannot_leave_the_workspace(tmp_path):
             store.source_key(path)
     with pytest.raises(ArchitectureNotFound):
         store.read()
+
+
+def test_a_project_reads_docs_architecture_of_the_workspace_named_like_it(tmp_path):
+    workspace = tmp_path / "shop"
+    _write(workspace, "docs/architecture/model.c4", "model {\n}\n")
+    database = object()
+
+    linked = ArchitectureStore.for_project(database, "shop", [str(workspace)])
+    assert linked.source_paths() == ["model.c4"]
+
+    # No docs/architecture yet, or a differently named workspace: the database copy is used.
+    assert ArchitectureStore.for_project(database, "shop", [str(tmp_path / "other")]).key("") == "graph/shop/"
+    (workspace / "docs/architecture/model.c4").unlink()
+    (workspace / "docs/architecture").rmdir()
+    assert ArchitectureStore.for_project(database, "shop", [str(workspace)]).key("") == "graph/shop/"

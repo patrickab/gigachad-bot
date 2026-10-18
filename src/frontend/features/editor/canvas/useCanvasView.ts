@@ -16,7 +16,6 @@ interface CanvasSidebarProps {
   activeCanvasPath: string | null
   onCanvasSelect: (path: string, scope: CanvasSelection["scope"]) => void
   onCanvasDeleted: (path: string) => void
-  activeArchitecture: string | null
   onArchitectureSelect: (slug: string) => void
 }
 
@@ -64,7 +63,6 @@ export function useCanvasView(): CanvasViewState {
     onCanvasDeleted: (path) => {
       if (view.kind === "canvas" && view.selection?.path === path) closeCanvas()
     },
-    activeArchitecture: view.kind === "architecture" ? architectureSlug(view.path) : null,
     onArchitectureSelect: (slug) => navigateArchitecture(`graph/${slug}/`),
   }
 

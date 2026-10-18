@@ -368,7 +368,7 @@ function ArchitectureTree({ slug, workspace, current, onOpen, mutate, floating }
     ?? entry.path.split("/").pop()!
   // Every system starts open, so its modules are visible.
   const systemPaths = allSystems.map((entry) => entry.path).join("\n")
-  const defaultExpanded = useMemo(() => systemPaths.split("\n"), [systemPaths])
+  const defaultExpanded = systemPaths.split("\n")
   const controller = useFileTree({ storageKey: "expanded_architecture_tree", defaultExpanded })
   // A refused name throws, which keeps the tree's name field open with the server's reason.
   const create = async (operation: ArchitectureOperation) => {

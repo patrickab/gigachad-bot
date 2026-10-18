@@ -22,11 +22,9 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-_TEXT_EXTS = {".c4", ".canvas", ".csv", ".json", ".yaml", ".yml", ".xml", ".toml", ".ini", ".cfg", ".conf", ".log", ".md", ".rst", ".tex", ".txt", ".svg"}
-
 
 def mime_for(path: str | Path) -> str:
-    """Best-effort MIME for a document path (suffix-driven, PDF-aware)."""
+    """Best-effort MIME for a document path: PDF and registered types by suffix, everything else is text."""
     p = Path(path)
     suffix = p.suffix.lower()
     if suffix == ".pdf":
@@ -34,9 +32,7 @@ def mime_for(path: str | Path) -> str:
     guessed, _ = mimetypes.guess_type(p.name)
     if guessed:
         return guessed
-    if suffix in _TEXT_EXTS:
-        return "text/markdown" if suffix == ".md" else "text/plain"
-    return "application/octet-stream"
+    return "text/markdown" if suffix == ".md" else "text/plain"
 
 
 def document_meta(path: str | Path) -> dict[str, str]:

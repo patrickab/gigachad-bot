@@ -76,6 +76,24 @@ export async function fetchModels(): Promise<ModelsResponse> {
   return request<ModelsResponse>("/models")
 }
 
+export interface ProviderUsageWindow {
+  id: "5h" | "7d" | "30d"
+  percent: number
+  resets_in_minutes: number | null
+}
+
+export interface ProviderUsageReport {
+  provider: string
+  account: string | null
+  no_limits: boolean
+  windows: ProviderUsageWindow[]
+}
+
+/** Subscription usage per OMP login; `refresh` skips the server's 5 minute cache. */
+export async function fetchProviderUsage(refresh = false): Promise<{ reports: ProviderUsageReport[] }> {
+  return request<{ reports: ProviderUsageReport[] }>(`/provider-usage${refresh ? "?refresh=true" : ""}`)
+}
+
 export async function fetchReasoningLevels(model: string): Promise<ReasoningLevels> {
   return request<ReasoningLevels>(`/models/reasoning-levels?model=${encodeURIComponent(model)}`)
 }

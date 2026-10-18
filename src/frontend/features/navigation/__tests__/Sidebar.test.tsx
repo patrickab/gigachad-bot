@@ -41,7 +41,7 @@ const api = vi.hoisted(() => ({
 }))
 vi.mock("@/lib/backend/api", () => ({
   ...api,
-  addFileRoot: vi.fn(), createArchitectureSource: vi.fn(),
+  addFileRoot: vi.fn(), createArchitectureSource: vi.fn(), fetchProviderUsage: vi.fn(async () => ({ reports: [] })),
   removeFileRoot: vi.fn(), moveDocument: vi.fn(), removeDocument: vi.fn(),
 }))
 vi.mock("@/features/navigation/SidebarContext", () => ({ useSidebar: () => ({ collapsed: false }) }))
@@ -96,9 +96,10 @@ describe("Project navigation", () => {
 
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
-    for (const category of ["sessions", "canvases", "architecture", "files"]) {
+    for (const category of ["sessions", "canvases", "files"]) {
       expect(project.getByRole("button", { name: category })).toHaveAttribute("aria-expanded", "true")
     }
+    expect(project.queryByRole("button", { name: "architecture" })).not.toBeInTheDocument()
     expect(await project.findByRole("button", { name: "board" })).toBeVisible()
     expect(project.getByRole("button", { name: "notes.md" })).toBeVisible()
     fireEvent.click(project.getByRole("button", { name: "canvases" }))
@@ -137,13 +138,23 @@ describe("Project navigation", () => {
     const project = within(view.getByLabelText("Proj contents"))
     fireEvent.click(await project.findByText("board"))
     expect(onCanvasSelect).toHaveBeenLastCalledWith("project/proj/document/board.canvas", "proj")
-    fireEvent.click(await project.findByText("System overview"))
+    fireEvent.click(view.getByRole("button", { name: "Open architecture for Proj" }))
     expect(onArchitectureSelect).toHaveBeenLastCalledWith("proj")
     fireEvent.click(await project.findByText("notes.md"))
     expect(onDocumentSelect).toHaveBeenLastCalledWith("project/proj/document/notes.md", "proj")
     expect(project.queryByText("board.canvas")).not.toBeInTheDocument()
     expect(project.queryByText("backend/backend.c4")).not.toBeInTheDocument()
     expect(onProjectSelect).toHaveBeenCalledTimes(1)
+  })
+
+  it("creates the architecture of a project without one when its icon is used", async () => {
+    const onArchitectureSelect = vi.fn()
+    const view = render(<Sidebar appMode="chat" onArchitectureSelect={onArchitectureSelect} />)
+
+    fireEvent.click(await view.findByRole("button", { name: "Create architecture for Empty project" }))
+
+    await waitFor(() => expect(onArchitectureSelect).toHaveBeenCalledWith("empty"))
+    expect(vi.mocked((await import("@/lib/backend/api")).createArchitectureSource)).toHaveBeenCalledWith("empty", "system.c4")
   })
 
   it("keeps expansion independent from project selection and shares it across mounted views", async () => {
