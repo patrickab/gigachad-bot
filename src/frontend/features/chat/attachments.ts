@@ -108,6 +108,20 @@ export function collectActiveImagePaths(
   return paths
 }
 
+type ParseAttachments = (chatId: string, names: string[], slug: string | null) => Promise<{ name: string; parsedMd: string | null }[]>
+
+/** Parse the uploaded non-image attachments that carry no text yet (PDFs) and merge the markdown in. */
+export async function withParsedAttachments(attachments: Attachment[], chatId: string, slug: string | null, parse: ParseAttachments): Promise<Attachment[]> {
+  const needsParsing = attachments.filter((a) => !isImageAttachment(a) && !a.vaultPath && !a.content && !a.parsedMd)
+  if (needsParsing.length === 0) return attachments
+  const parsed = await parse(chatId, needsParsing.map((a) => a.name), slug)
+  return attachments.map((a) => {
+    if (!needsParsing.includes(a)) return a
+    const p = parsed.find((r) => r.name === a.name)
+    return { ...a, parsedMd: p?.parsedMd ?? undefined }
+  })
+}
+
 // Pure attachment-intake transform: parses unparsed non-image attachments (via injected
 // `parse`), merges results back, and assembles the ChatRequest with prior + new image
 // paths. The optimistic placeholder and post-parse patch stay in the caller. Throws if
@@ -121,7 +135,7 @@ export async function buildAttachedSend(
     slug: string | null
     baseParams: Omit<ChatRequest, "chat_id" | "user_msg" | "img_paths" | "project_slug">
   },
-  parse: (chatId: string, names: string[], slug: string | null) => Promise<{ name: string; parsedMd: string | null }[]>,
+  parse: ParseAttachments,
   refreshRootFile?: (path: string) => Promise<Attachment>,
 ): Promise<{ enriched: Attachment[]; request: ChatRequest }> {
   const { text, attachments, priorMessages, chatId, slug, baseParams } = opts
@@ -142,15 +156,7 @@ export async function buildAttachedSend(
     }))
   }
 
-  const needsParsing = enriched.filter((a) => !isImageAttachment(a) && !a.vaultPath && !a.content && !a.parsedMd)
-  if (needsParsing.length > 0) {
-    const parsed = await parse(chatId, needsParsing.map((a) => a.name), slug)
-    enriched = enriched.map((a) => {
-      if (a.content || a.parsedMd || a.vaultPath || isImageAttachment(a)) return a
-      const p = parsed.find((r) => r.name === a.name)
-      return { ...a, parsedMd: p?.parsedMd ?? undefined }
-    })
-  }
+  enriched = await withParsedAttachments(enriched, chatId, slug, parse)
 
   const priorImgPaths = collectActiveImagePaths(priorMessages)
   const newImgPaths = enriched.filter((a) => a.active && isImageAttachment(a)).map((a) => a.name)
