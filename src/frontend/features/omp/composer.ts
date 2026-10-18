@@ -4,14 +4,34 @@ import { buildHiddenContent, composeUserMessage, isImageAttachment } from "@/fea
 import type { ComposerImage, FrameMessage, ModelRef } from "./protocol"
 
 export type ComposerState = Extract<FrameMessage, { type: "composer" }>
+export type ComposerRestore = Extract<FrameMessage, { type: "composer-restore" }>
 
 const OMP_MODEL_SOURCE = "omp"
 
+/** Whether a composer message for `sessionId` belongs to `view`. The new-session screen has no session. */
+export function isComposerOf(view: OmpView, sessionId: string | null): boolean {
+  if (view.kind === "settings") return false
+  return sessionId === (view.kind === "session" ? view.sessionId : null)
+}
+
 /** The frame's composer state when it belongs to `view`, else null (frame elsewhere, Settings, still loading). */
 export function composerFor(view: OmpView, composer: ComposerState | null): ComposerState | null {
-  if (!composer || view.kind === "settings") return null
-  const sessionId = view.kind === "session" ? view.sessionId : null
-  return composer.sessionId === sessionId ? composer : null
+  return composer && isComposerOf(view, composer.sessionId) ? composer : null
+}
+
+/** Draft after a restore, mirror of omp-web's `mergeRecoveredText` (`lib/draft-store.ts`): later restores replace the block an earlier one put in front. */
+export function mergeRestoredText(draft: string, { text, replace }: Pick<ComposerRestore, "text" | "replace">): string {
+  if (!text) return draft
+  if (replace && draft.startsWith(replace.lead)) return text + draft.slice(replace.lead.length)
+  const lead = replace ? replace.fallback : text
+  return draft ? `${lead}\n\n${draft}` : lead
+}
+
+/** Restored omp image as a file for the composer's upload path. */
+export function composerImageFile(image: ComposerImage, index: number): File {
+  const bytes = Uint8Array.from(atob(image.data), (character) => character.charCodeAt(0))
+  const extension = image.mimeType.split("/")[1] || "png"
+  return new File([bytes], `restored-image-${index + 1}.${extension}`, { type: image.mimeType })
 }
 
 /** Selector models for omp tabs: only the providers picked from omp's logins, whose models are omp `provider/modelId` ids. */

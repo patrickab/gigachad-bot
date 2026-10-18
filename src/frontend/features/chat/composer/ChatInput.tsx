@@ -34,6 +34,10 @@ interface ChatInputProps {
 
 export interface ChatInputHandle {
   addAttachment: (att: Attachment) => void
+  /** Replace the draft text with `update(current)` and focus the input. */
+  updateText: (update: (current: string) => string) => void
+  /** Upload and attach files, like picking them in the file dialog. */
+  addFiles: (files: File[]) => void
 }
 
 /** One recognition alternative; the browser API has no DOM lib typings. */
@@ -97,28 +101,12 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const [previewAttachment, setPreviewAttachment] = useState<Attachment | null>(null)
   const [isListening, setIsListening] = useState(false)
 
-  useImperativeHandle(ref, () => ({
-    addAttachment: (att: Attachment) => setAttachments(prev => {
-      const existing = prev.findIndex(a => a.name === att.name)
-      if (existing >= 0) { const copy = [...prev]; copy[existing] = att; return copy }
-      return [...prev, att]
-    }),
-  }), [])
-
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const toolsRef = useRef<HTMLDivElement>(null)
   const attachMenuRef = useRef<HTMLDivElement>(null)
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
   const textRef = useRef(text)
-
-  const closeTools = useCallback(() => setShowTools(false), [])
-  const closeAttachMenu = useCallback(() => setShowAttachMenu(false), [])
-  useClickOutside(toolsRef, closeTools)
-  useClickOutside(attachMenuRef, closeAttachMenu)
-
-  // Mirror of `text` so speech callbacks read the latest value without re-binding
-  useEffect(() => { textRef.current = text }, [text])
 
   const adjustHeight = useCallback(() => {
     const el = textareaRef.current
@@ -127,6 +115,38 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     el.style.height = "0"
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`
   }, [])
+
+  const uploadFiles = useCallback((files: File[]) => {
+    for (const file of files) {
+      const name = file.name
+      setUploadingNames(prev => new Set(prev).add(name))
+      apiUploadFile(chatId, file, slug)
+        .then(att => setAttachments(prev => [...prev, att]))
+        .catch(() => {})
+        .finally(() => setUploadingNames(prev => { const n = new Set(prev); n.delete(name); return n }))
+    }
+  }, [chatId, slug])
+
+  useImperativeHandle(ref, () => ({
+    addAttachment: (att: Attachment) => setAttachments(prev => {
+      const existing = prev.findIndex(a => a.name === att.name)
+      if (existing >= 0) { const copy = [...prev]; copy[existing] = att; return copy }
+      return [...prev, att]
+    }),
+    updateText: (update) => {
+      setText(update)
+      requestAnimationFrame(() => { adjustHeight(); textareaRef.current?.focus() })
+    },
+    addFiles: uploadFiles,
+  }), [adjustHeight, uploadFiles])
+
+  const closeTools = useCallback(() => setShowTools(false), [])
+  const closeAttachMenu = useCallback(() => setShowAttachMenu(false), [])
+  useClickOutside(toolsRef, closeTools)
+  useClickOutside(attachMenuRef, closeAttachMenu)
+
+  // Mirror of `text` so speech callbacks read the latest value without re-binding
+  useEffect(() => { textRef.current = text }, [text])
 
   const clearAttachments = useCallback(() => setAttachments([]), [])
   const removeAttachment = useCallback((name: string) => setAttachments(prev => prev.filter(a => a.name !== name)), [])
@@ -164,18 +184,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   }, [chatId, slug])
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = Array.from(e.target.files ?? [])
-    if (selected.length === 0) return
-    for (const file of selected) {
-      const name = file.name
-      setUploadingNames(prev => new Set(prev).add(name))
-      apiUploadFile(chatId, file, slug)
-        .then(att => setAttachments(prev => [...prev, att]))
-        .catch(() => {})
-        .finally(() => setUploadingNames(prev => { const n = new Set(prev); n.delete(name); return n }))
-    }
+    uploadFiles(Array.from(e.target.files ?? []))
     e.target.value = ""
-  }, [chatId, slug])
+  }, [uploadFiles])
 
   // Stale `recognitionRef` checks ignore events from a recognizer that was already replaced or stopped
   const toggleListening = useCallback(() => {

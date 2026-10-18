@@ -5,7 +5,7 @@
  * - Every message carries `channel: EMBED_CHANNEL` so unrelated postMessage traffic is ignored
  */
 export const EMBED_CHANNEL = "omp-embed"
-export const EMBED_PROTOCOL_VERSION = 3
+export const EMBED_PROTOCOL_VERSION = 4
 
 export type ThemeMode = "light" | "dark"
 
@@ -61,5 +61,10 @@ export type FrameMessage =
    * `thinkingLevels` is what omp-web's reasoning menu offers (`auto`, `off`, ... `max`), empty when it shows none. `thinkingLevel` is the selected one.
    */
   | { type: "composer"; sessionId: string | null; streaming: boolean; model: ModelRef | null; thinkingLevel: string; thinkingLevels: string[] }
+  /**
+   * Text and images omp handed back (an abort withdrew queued messages, the queue panel's Edit), for this shell's composer.
+   * Merge with `mergeRestoredText` (`composer.ts`), a mirror of omp-web's `mergeRecoveredText`.
+   */
+  | { type: "composer-restore"; sessionId: string | null; text: string; replace: { lead: string; fallback: string } | null; images: ComposerImage[] }
 
 export type Envelope<Message> = Message & { channel: typeof EMBED_CHANNEL }

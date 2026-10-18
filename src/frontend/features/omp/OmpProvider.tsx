@@ -9,6 +9,9 @@ import type { ComposerState } from "./composer"
 import { EMBED_CHANNEL, EMBED_PROTOCOL_VERSION, type BranchNode, type Envelope, type FrameMessage, type KeyChord, type ShellMessage } from "./protocol"
 
 export type ComposerCommand = Extract<ShellMessage, { type: `composer-${string}` }>
+/** Frame messages for one composer, not state: delivered to `onComposerEvent` listeners, never kept. */
+export type ComposerEvent = Extract<FrameMessage, { type: "composer-restore" }>
+type ComposerEventListener = (event: ComposerEvent) => void
 
 const OVERVIEW_POLL_MS = 15_000
 /** A navigation waits this long for the frame to report its view before reports count as user navigation again. */
@@ -48,6 +51,8 @@ interface OmpContextValue {
   /** Composer state of the session the frame shows, null until the frame reported one. */
   composer: ComposerState | null
   sendToComposer: (command: ComposerCommand) => void
+  /** Listen for composer events, returns the unsubscribe. */
+  onComposerEvent: (listener: ComposerEventListener) => () => void
 }
 
 const OmpContext = createContext<OmpContextValue | null>(null)
@@ -155,6 +160,7 @@ export function OmpProvider({ children }: { children: ReactNode }) {
   const lastNewCwdRef = useRef<string | null>(null)
   const pendingUntilRef = useRef(0)
   const readyRef = useRef(false)
+  const composerListenersRef = useRef(new Set<ComposerEventListener>())
   const rect = useSlotRect(attachment?.slot ?? null)
   const frameOrigin = useMemo(() => (ompWebUrl ? new URL(ompWebUrl).origin : null), [ompWebUrl])
 
@@ -210,6 +216,7 @@ export function OmpProvider({ children }: { children: ReactNode }) {
       else if (message.type === "view") onFrameView(message)
       else if (message.type === "branch-tree") setBranchTree({ sessionId: message.sessionId, tree: message.tree, activeLeafId: message.activeLeafId })
       else if (message.type === "composer") setComposer(message)
+      else if (message.type === "composer-restore") composerListenersRef.current.forEach((listener) => listener(message))
       else if (message.type === "key") {
         const { key, altKey, ctrlKey, metaKey, shiftKey } = message
         document.dispatchEvent(new KeyboardEvent("keydown", { key, altKey, ctrlKey, metaKey, shiftKey, bubbles: true, cancelable: true }))
@@ -252,10 +259,15 @@ export function OmpProvider({ children }: { children: ReactNode }) {
   }, [post])
 
   const sendToComposer = useCallback((command: ComposerCommand) => post(command), [post])
+  const onComposerEvent = useCallback((listener: ComposerEventListener) => {
+    const listeners = composerListenersRef.current
+    listeners.add(listener)
+    return () => { listeners.delete(listener) }
+  }, [])
 
   const value = useMemo<OmpContextValue>(() => ({
-    overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, reloadFrame, composer, sendToComposer,
-  }), [overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, reloadFrame, composer, sendToComposer])
+    overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, reloadFrame, composer, sendToComposer, onComposerEvent,
+  }), [overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, reloadFrame, composer, sendToComposer, onComposerEvent])
 
   const visible = attachment !== null && rect !== null && frameStatus === "ready"
   useEffect(() => {

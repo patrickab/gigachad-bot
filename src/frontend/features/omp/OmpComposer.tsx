@@ -1,14 +1,24 @@
 "use client"
 
-import { useState, type ComponentProps } from "react"
+import { useEffect, useRef, useState, type ComponentProps, type RefObject } from "react"
 import { withParsedAttachments } from "@/features/chat/attachments"
-import { ChatInput } from "@/features/chat/composer/ChatInput"
+import { ChatInput, type ChatInputHandle } from "@/features/chat/composer/ChatInput"
 import { ModelDropdown } from "@/features/settings/ModelDropdown"
 import { ReasoningSelector } from "@/features/settings/ReasoningSelector"
 import { parseFiles } from "@/lib/backend/api"
 import type { Attachment, OmpView } from "@/lib/domain/types"
-import { composerFor, ompModelOf, ompPrompt, ompSelectorModels, selectorModelId } from "./composer"
+import { composerFor, composerImageFile, isComposerOf, mergeRestoredText, ompModelOf, ompPrompt, ompSelectorModels, selectorModelId } from "./composer"
 import { useOmp } from "./OmpProvider"
+
+/** Put what omp hands back for `view` (abort-withdrawn queue, queue Edit) into the composer behind `inputRef`. */
+function useComposerRestore(view: OmpView, inputRef: RefObject<ChatInputHandle | null>) {
+  const { onComposerEvent } = useOmp()
+  useEffect(() => onComposerEvent((event) => {
+    if (event.type !== "composer-restore" || !isComposerOf(view, event.sessionId)) return
+    inputRef.current?.updateText((draft) => mergeRestoredText(draft, event))
+    if (event.images.length > 0) inputRef.current?.addFiles(event.images.map(composerImageFile))
+  }), [onComposerEvent, view, inputRef])
+}
 
 /** The frame's composer state when it shows `view`, null while the frame loads or shows another view. */
 function useComposerFor(view: OmpView) {
@@ -20,10 +30,13 @@ function useComposerFor(view: OmpView) {
  * gigachad's composer for an omp tab. omp-web's own one stays hidden in the frame and submits what this one sends.
  *
  * - Images go as omp images, documents as text the way gigachad chats send them
+ * - Text and images omp hands back land in this composer
  * - Disabled until the frame reports the composer of this tab's session
  */
 export function OmpComposer({ view, chatId, slug }: { view: OmpView; chatId: string; slug: string | null }) {
   const { state, sendToComposer } = useComposerFor(view)
+  const inputRef = useRef<ChatInputHandle>(null)
+  useComposerRestore(view, inputRef)
   const [preparing, setPreparing] = useState(false)
   const [error, setError] = useState("")
   const sessionId = state?.sessionId ?? null
@@ -44,6 +57,7 @@ export function OmpComposer({ view, chatId, slug }: { view: OmpView; chatId: str
   return (
     <div className="px-4 pb-6 pt-2">
       <ChatInput
+        ref={inputRef}
         chatId={chatId}
         slug={slug}
         onSend={(text, attachments) => { void send(text, attachments) }}

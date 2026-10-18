@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Attachment, ModelsResponse } from "@/lib/domain/types"
-import { composerFor, ompModelOf, ompPrompt, ompSelectorModels, selectorModelId, type ComposerState } from "../composer"
+import { composerFor, composerImageFile, mergeRestoredText, ompModelOf, ompPrompt, ompSelectorModels, selectorModelId, type ComposerState } from "../composer"
 
 const state = (sessionId: string | null): ComposerState => ({ type: "composer", sessionId, streaming: false, model: null, thinkingLevel: "auto", thinkingLevels: [] })
 
@@ -68,5 +68,32 @@ describe("ompPrompt", () => {
 
     expect(prompt.images).toEqual([])
     expect(prompt.text).toMatch(/### spec\.pdf\n\n# Spec[\s\S]*summarize$/)
+  })
+})
+
+describe("mergeRestoredText", () => {
+  it("puts restored text before what the user typed meanwhile", () => {
+    expect(mergeRestoredText("", { text: "queued", replace: null })).toBe("queued")
+    expect(mergeRestoredText("typed", { text: "queued", replace: null })).toBe("queued\n\ntyped")
+    expect(mergeRestoredText("typed", { text: "", replace: null })).toBe("typed")
+  })
+
+  it("replaces the block an earlier restore put in front", () => {
+    const replace = { lead: "first", fallback: "second" }
+    expect(mergeRestoredText("first\n\ntyped", { text: "first\n\nsecond", replace })).toBe("first\n\nsecond\n\ntyped")
+  })
+
+  it("prepends only the new part once the user edited the earlier block", () => {
+    const replace = { lead: "first", fallback: "second" }
+    expect(mergeRestoredText("edited", { text: "first\n\nsecond", replace })).toBe("second\n\nedited")
+  })
+})
+
+describe("composerImageFile", () => {
+  it("decodes the base64 image omp hands back", async () => {
+    const file = composerImageFile({ data: btoa("png"), mimeType: "image/png" }, 0)
+    expect(file).toMatchObject({ name: "restored-image-1.png", type: "image/png" })
+    const content = await new Promise((resolve) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.readAsText(file) })
+    expect(content).toBe("png")
   })
 })
