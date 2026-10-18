@@ -41,6 +41,15 @@ vi.mock("@/features/editor/canvas/CanvasEditor", () => ({
     </button>
   ),
 }))
+vi.mock("@/features/editor/AssistedConsoleEditor", () => ({
+  AssistedConsoleEditor: ({ value, children }: { value: string; children: React.ReactNode }) => <div><textarea aria-label="Document text" value={value} readOnly />{children}</div>,
+}))
+vi.mock("@/components/content/PlotElement", () => ({
+  PlotElement: ({ figure }: { figure: unknown }) => <output data-testid="rendered-plot">{JSON.stringify(figure)}</output>,
+}))
+vi.mock("@/components/content/LaTeXMarkdown", () => ({
+  LaTeXMarkdown: ({ content }: { content: string }) => <output data-testid="rendered-markdown">{content}</output>,
+}))
 
 describe("DocumentEditor canvas collaboration", () => {
   beforeEach(() => {
@@ -82,5 +91,28 @@ describe("DocumentEditor canvas collaboration", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Canvas sync interrupted")
     fireEvent.click(screen.getByText("Retry"))
     expect(collaboration.retry).toHaveBeenCalledOnce()
+  })
+})
+
+describe("DocumentEditor tool artifacts", () => {
+  it("renders plot JSON by default and switches between render and text", async () => {
+    const figure = { data: [{ type: "bar", y: [1, 2] }] }
+    api.loadFileViewerText.mockResolvedValueOnce(JSON.stringify(figure))
+    render(<DocumentEditor path="project/proj/document/sandbox_plot-call-1.plot.json" slug="proj" onClose={vi.fn()} />)
+
+    expect(await screen.findByTestId("rendered-plot")).toHaveTextContent(JSON.stringify(figure))
+    fireEvent.click(screen.getByRole("button", { name: "Text" }))
+    expect(screen.getByRole("textbox", { name: "Document text" })).toHaveValue(JSON.stringify(figure))
+    fireEvent.click(screen.getByRole("button", { name: "Render" }))
+    expect(screen.getByTestId("rendered-plot")).toBeInTheDocument()
+  })
+
+  it("renders markmap markdown by default", async () => {
+    const mindmap = "```markmap\n# Topic\n```"
+    api.loadFileViewerText.mockResolvedValueOnce(mindmap)
+    render(<DocumentEditor path="project/proj/document/mindmap-call-1.md" slug="proj" onClose={vi.fn()} />)
+
+    expect(await screen.findByTestId("rendered-markdown")).toHaveTextContent("```markmap # Topic ```")
+    expect(screen.getByRole("button", { name: "Text" })).toHaveAttribute("aria-pressed", "false")
   })
 })

@@ -1,16 +1,17 @@
 "use client"
 
-import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react"
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { ChevronLeft, ChevronRight, Maximize2, Minimize2, Save, X } from "lucide-react"
+import { Maximize2, Minimize2, X } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import { cn } from "@/lib/utils"
 import { AssistedConsoleEditor } from "./AssistedConsoleEditor"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
+import { PlotElement } from "@/components/content/PlotElement"
+import type { PlotFigure } from "@/lib/domain/types"
 import { ResizableEditor } from "./ResizableEditor"
 import type { CanvasToolbarSlots } from "@/features/editor/canvas/CanvasToolbar"
 import { loadFileViewerText, readFileRootRendered, writeArchitectureSource, writeDocument, ApiError } from "@/lib/backend/api"
-import { EditorSidebar } from "./EditorSidebar"
 import { architectureSlug, architectureSource, isArchitecturePath } from "@/lib/domain/architecturePaths"
 import { subscribeToChanges, type ChangeEvent } from "@/lib/backend/syncStream"
 import { baseName } from "@/lib/paths"
@@ -37,13 +38,27 @@ function editorLanguage(path: string): string {
   if (path.endsWith(".c4")) return "likec4"
   return "markdown"
 }
+function isToolArtifact(path: string, content: string): boolean {
+  return path.endsWith(".plot.json") || /```markmap\b/i.test(content)
+}
+
+function parsePlotFigure(content: string): PlotFigure | null {
+  try {
+    const figure: unknown = JSON.parse(content)
+    return figure && typeof figure === "object" && !Array.isArray(figure) ? figure as PlotFigure : null
+  } catch {
+    return null
+  }
+}
 
 function ViewPills({ view, onViewChange }: { view: EditorView; onViewChange: (v: EditorView) => void }) {
   return (
-    <div className="absolute top-2 left-3 z-10 flex items-center gap-px rounded-md bg-surface/80 backdrop-blur-sm p-0.5 opacity-0 hover:opacity-100 transition-opacity">
+    <div role="group" aria-label="Show as" className="absolute top-2 left-3 z-10 flex items-center gap-px rounded-md bg-surface/80 backdrop-blur-sm p-0.5 opacity-0 hover:opacity-100 transition-opacity">
       {(["edit", "preview"] as const).map((v) => (
         <button
           key={v}
+          type="button"
+          aria-pressed={view === v}
           onClick={() => onViewChange(v)}
           className={cn(
             "px-2 py-0.5 rounded text-[10px] font-medium transition-colors",
@@ -51,6 +66,19 @@ function ViewPills({ view, onViewChange }: { view: EditorView; onViewChange: (v:
           )}
         >
           {v === "edit" ? "Edit" : "Preview"}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** C4 "Show as" switch for tool artifacts: rendered view first, source text second. */
+function ShowAsToggle({ view, onViewChange }: { view: EditorView; onViewChange: (v: EditorView) => void }) {
+  return (
+    <div role="group" aria-label="Show as" className="flex gap-px rounded bg-surface p-px">
+      {(["preview", "edit"] as const).map((option) => (
+        <button key={option} type="button" aria-pressed={view === option} onClick={() => onViewChange(option)} className={cn("rounded px-1.5 py-px transition-colors", view === option ? "bg-surface-elevated text-ink" : "hover:text-ink")}>
+          {option === "preview" ? "Render" : "Text"}
         </button>
       ))}
     </div>
@@ -69,19 +97,26 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent
   const isActive = useTabActive()
   const [content, setContent] = useState<string | null>(null)
   const [renderedContent, setRenderedContent] = useState<string | null>(null)
+  const [loadedPath, setLoadedPath] = useState<string | null>(null)
   const [loadError, setLoadError] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(!!overlay)
-  const [view, setView] = useState<EditorView>("edit")
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [sidebarWidth, setSidebarWidth] = useState(340)
+  const [view, setView] = useState<EditorView>(() => path.endsWith(".plot.json") ? "preview" : "edit")
+  const initializedViewPath = useRef<string | null>(null)
   const savedContentRef = useRef("")
 
   const filename = baseName(path)
   const language = editorLanguage(path)
+  const isArtifact = isToolArtifact(path, content ?? "")
+  const plotFigure = useMemo(() => path.endsWith(".plot.json") && content !== null ? parsePlotFigure(content) : null, [content, path])
 
+  useEffect(() => {
+    if (loadedPath !== path || content === null || initializedViewPath.current === path) return
+    initializedViewPath.current = path
+    setView(isToolArtifact(path, content) ? "preview" : "edit")
+  }, [path, content, loadedPath])
   const modeLabelRef = useRef(onModeLabel)
   useEffect(() => { modeLabelRef.current = onModeLabel }, [onModeLabel])
   useEffect(() => {
@@ -92,6 +127,7 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent
     const apply = (text: string) => {
       setLoadError(false)
       setContent(text)
+      setLoadedPath(path)
       savedContentRef.current = text
     }
     // A confirmed-missing document legitimately starts blank. Any other failure must
@@ -185,11 +221,6 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent
     onNavigate?.(decodeURIComponent(href.slice("#file:".length)))
   }, [onNavigate])
 
-  const handleSidebarApply = useCallback((newContent: string) => {
-    setContent(newContent)
-    setDirty(newContent !== savedContentRef.current)
-  }, [])
-
   if (loadError) {
     return (
       <div className="flex flex-col items-center justify-center gap-2 py-6 text-xs text-ink-faint">
@@ -207,35 +238,30 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent
 
   const editorBody = view === "edit" ? (
     <AssistedConsoleEditor value={content} onChange={handleTextChange} language={language} model={model} placeholder="Start writing..." className="group/editor">
-      <ViewPills view={view} onViewChange={setView} />
+      {!isArtifact && <ViewPills view={view} onViewChange={setView} />}
     </AssistedConsoleEditor>
   ) : (
     <div className="relative flex-1 min-h-0 group/editor flex flex-col">
-      <ViewPills view={view} onViewChange={setView} />
+      {!isArtifact && <ViewPills view={view} onViewChange={setView} />}
       <div className="flex-1 overflow-y-auto min-h-0 p-4 pt-10" onClick={handlePreviewClick}>
-        <LaTeXMarkdown content={renderedContent ?? content} />
+        {path.endsWith(".plot.json")
+          ? plotFigure ? <PlotElement figure={plotFigure} /> : <p className="text-xs text-danger">This plot file is not valid Plotly JSON.</p>
+          : <LaTeXMarkdown content={renderedContent ?? content} />}
       </div>
     </div>
   )
 
-  // Inline chrome (sidebar documents): filename, save, fullscreen, close.
+  // Sidebar documents: C4-style header with filename, view switch and window controls.
   const chrome = !overlay && (
-    <div className="flex items-center justify-between px-3 py-1.5 border-b border-divider/50 shrink-0">
-      <div className="flex items-center gap-2 min-w-0">
-        <span className="text-[11px] font-medium text-ink truncate">{filename}</span>
-        {dirty && <span className="text-[10px] text-ink-faint">(modified)</span>}
-      </div>
-      <div className="flex items-center gap-1 shrink-0">
-        <button aria-label="Save document" onClick={handleSave} disabled={!dirty || saving} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors">
-          <Save className="h-3.5 w-3.5" />
-        </button>
-        <button aria-label={isFullscreen ? "Exit document fullscreen" : "Enter document fullscreen"} onClick={() => setIsFullscreen((f) => !f)} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors">
-          {isFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-        </button>
-        <button aria-label="Close document" onClick={onClose} className="rounded p-1 text-ink-subtle hover:text-danger transition-colors">
-          <X className="h-3.5 w-3.5" />
-        </button>
-      </div>
+    <div className="flex h-6 shrink-0 items-center gap-2 border-b border-divider/50 px-2 text-[10px] text-ink-faint">
+      <span className="min-w-0 flex-1 truncate">{filename}{dirty && " (modified)"}</span>
+      {isArtifact && <ShowAsToggle view={view} onViewChange={setView} />}
+      <button aria-label={isFullscreen ? "Exit document fullscreen" : "Enter document fullscreen"} onClick={() => setIsFullscreen((f) => !f)} className="rounded p-0.5 hover:text-ink">
+        {isFullscreen ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
+      </button>
+      <button aria-label="Close document" onClick={onClose} className="rounded p-0.5 hover:text-danger">
+        <X className="h-3 w-3" />
+      </button>
     </div>
   )
 
@@ -251,29 +277,9 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent
           {editorBody}
           <div className="absolute top-2 right-3 z-10 flex items-center gap-1">
             {saveError && <span role="alert" className="max-w-[min(60ch,60vw)] text-right text-[10px] leading-snug text-danger">{saveError}</span>}
-            <button aria-label="Save document" onClick={handleSave} disabled={!dirty || saving} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-surface/80 disabled:opacity-30 transition-colors">
-              <Save className="h-3.5 w-3.5" />
-            </button>
-            {model && (
-              <button
-                aria-label={sidebarOpen ? "Hide assistant" : "Show assistant"}
-                onClick={() => setSidebarOpen(v => !v)}
-                className="p-1 rounded text-ink-subtle hover:text-ink hover:bg-surface/80 transition-colors"
-              >
-                {sidebarOpen ? <ChevronRight className="h-3 w-3" /> : <ChevronLeft className="h-3 w-3" />}
-              </button>
-            )}
+            {isArtifact && <ShowAsToggle view={view} onViewChange={setView} />}
           </div>
         </div>
-        {sidebarOpen && model && (
-          <EditorSidebar
-            content={content}
-            model={model}
-            width={sidebarWidth}
-            onWidthChange={setSidebarWidth}
-            onApply={handleSidebarApply}
-          />
-        )}
       </motion.div>
     )
   }
