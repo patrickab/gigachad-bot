@@ -67,13 +67,13 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
     </span>
   )
   const header = <>
-    <div className="mt-0.5 shrink-0">
+    <div className="shrink-0">
       <div className="flex h-7 w-7 items-center justify-center rounded-xl border border-divider bg-surface-elevated">
         <Icon className={cn("h-3.5 w-3.5", call.status === "error" ? "text-danger" : "text-ink")} aria-hidden="true" />
       </div>
     </div>
     <div className="min-w-0 flex-1 flex flex-col">
-      <div className="flex min-w-0 items-center gap-x-4">
+      <div className="flex min-h-7 min-w-0 items-center gap-x-4">
         <span className="shrink-0 text-xs font-medium text-ink-subtle">{meta?.cardLabel ?? call.name}</span>
         {stageTimeline}
       </div>

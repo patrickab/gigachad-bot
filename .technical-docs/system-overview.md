@@ -59,11 +59,15 @@ overflow. Wide mode continues to fill the available pane.
 
 Q&A pairs use Soft styling: borderless rounded tonal panels, with answers and tool
 outputs on a slightly raised surface. Collapsed previews share the same treatment.
-Spacing and Q&A interactions are unchanged. Surface colors derive from the shared
+Q&A interactions are unchanged. Surface colors derive from the shared
 theme tokens in both dark and light modes.
-Collapsed pairs omit role headings and always show a compact answer preview and
+Collapsed pairs use tighter padding and gaps, omit role headings, and always show a compact answer preview and
 each called tool's icon and name, without hovering. Long previews scroll within
-12.5% of viewport height. Expanding a pair reveals its unchanged full messages and tool outputs.
+12.5% of viewport height. Expanded messages use equal 20px padding on every side
+and no role headings, with the first text line centered beside the avatar.
+Actions share the final paragraph line with reserved space so text cannot overlap
+them, appearing on hover or keyboard focus. Other terminal blocks keep actions
+below their content. Collapsed preview panels use equal 14px padding.
 
 ## Canvas background
 

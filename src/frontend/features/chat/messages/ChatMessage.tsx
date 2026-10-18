@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic"
 import { motion } from "framer-motion"
-import { memo, useMemo } from "react"
+import { memo, useMemo, type CSSProperties } from "react"
 import { Bot, Brain, Check, ChevronDown, Copy, GitFork, Loader2, RotateCcw, Trash2, User } from "lucide-react"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
 import { ResearchTrace } from "./ResearchTrace"
@@ -121,16 +121,17 @@ function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBran
   // Research steps stream into `content` as progress text until the final answer replaces them
   const isResearchRunning = !isUser && isStreaming && research_steps && research_steps.length > 0
   const canRegenerate = !isUser && onRegenerate && !isStreaming && !search_result && !(research_steps && research_steps.length > 0)
+  const actionCount = Number(!!content && !isResearchRunning) + Number(!!canRegenerate) + Number(!isUser && !!onBranch) + Number(!!onDelete)
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25 }}
-      className="flex gap-3 px-6 py-5 text-ink"
+      className="flex gap-3 p-5 text-ink"
     >
       <div
-        className={`mt-0.5 shrink-0 ${isUser && collapsibleUser ? "cursor-pointer" : ""}`}
+        className={`shrink-0 ${isUser && collapsibleUser ? "cursor-pointer" : ""}`}
         onClick={isUser && collapsibleUser ? onCollapse : undefined}
       >
         {isUser ? (
@@ -143,8 +144,8 @@ function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBran
           </div>
         )}
       </div>
-      <div className="min-w-0 flex-1 flex flex-col">
-        <div className="mb-0.5 text-xs font-medium text-ink-subtle">{isUser ? "You" : "Assistant"}</div>
+      <div className="chat-message-body relative min-w-0 flex-1 pt-[3px]" style={{ "--message-actions-space": `${actionCount * 22 + Math.max(0, actionCount - 1) * 4 + 12}px` } as CSSProperties}>
+        <div className="chat-message-content">
         {isUser ? (
           <>
             {content && (
@@ -180,9 +181,10 @@ function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBran
             isLive={isStreaming}
           />
         )}
-        <div className="flex items-center justify-end gap-1 mt-1 opacity-0 transition-opacity group-hover:opacity-100" role="group" aria-label="Message actions">
+        </div>
+        {actionCount > 0 && <div className="chat-message-actions flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100" role="group" aria-label="Message actions">
           {content && !isResearchRunning && (
-            <div className="relative">
+            <div className="relative flex">
               <button
                 onClick={(e) => { e.stopPropagation(); copy() }}
               className="rounded p-1 hover:bg-surface-elevated text-ink-subtle hover:text-ink"
@@ -230,7 +232,7 @@ function ChatMessageInner({ role, content, index, onDelete, onRegenerate, onBran
               <Trash2 className="h-3.5 w-3.5" />
             </button>
           )}
-        </div>
+        </div>}
       </div>
       {isUser && collapsibleUser && (
         <button

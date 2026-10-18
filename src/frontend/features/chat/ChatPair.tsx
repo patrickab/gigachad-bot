@@ -70,12 +70,12 @@ export function ChatPair({
           onClick={onExpand}
           style={PAIR_SURFACE}
           className={cn(
-            "mx-3 my-4 rounded-3xl border border-transparent overflow-hidden cursor-pointer",
+            "mx-3 my-3 rounded-3xl border border-transparent overflow-hidden cursor-pointer",
             focused && "ring-1 ring-ink-muted/50"
           )}
         >
-          <div className="flex gap-3 px-5 py-4 items-start">
-            <div className="mt-0.5 shrink-0">
+          <div className="flex gap-3 p-3.5 items-center">
+            <div className="shrink-0">
               <div className="flex h-7 w-7 items-center justify-center rounded-full bg-surface-elevated">
                 <User className="h-3.5 w-3.5 text-ink-muted" />
               </div>
@@ -83,19 +83,19 @@ export function ChatPair({
             <div className="min-w-0 flex-1 flex flex-col">
               <span className="text-sm text-ink-muted truncate">{abbreviate(user.content, user)}</span>
             </div>
-            <ChevronRight className="h-4 w-4 shrink-0 text-ink-faint mt-1" />
+            <ChevronRight className="h-4 w-4 shrink-0 text-ink-faint" />
           </div>
-          {(assistant.content || assistant.tool_calls?.length) ? <div className="space-y-2 px-5 pb-4">
+          {(assistant.content || assistant.tool_calls?.length) ? <div className="space-y-1.5 px-3.5 pb-3.5">
             {assistant.tool_calls?.map((call) => {
               const meta = TOOL_META[call.name]
               const Icon = meta?.icon ?? Wrench
-              return <ElevatedContainer key={call.id} style={RESPONSE_SURFACE} className="flex items-center gap-2 rounded-[1.125rem] border border-transparent px-4 py-3 text-xs text-ink-subtle">
+              return <ElevatedContainer key={call.id} style={RESPONSE_SURFACE} className="flex items-center gap-2 rounded-[1.125rem] border border-transparent p-3.5 text-xs text-ink-subtle">
                 <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 <span>{meta?.cardLabel ?? call.name}</span>
               </ElevatedContainer>
             })}
             {assistant.content && <ElevatedContainer style={RESPONSE_SURFACE} className="rounded-[1.125rem] border border-transparent overflow-hidden">
-              <div className="px-4 py-3">
+              <div className="p-3.5">
                 <div className="max-h-[12.5vh] overflow-y-auto text-ink-muted">
                   <AssistantMessageContent content={assistant.content} compact />
                 </div>
