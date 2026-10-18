@@ -10,6 +10,7 @@ A self-hosted LLM workspace for chat, research, and working with your own docume
 - **Watch subscription limits**: the sidebar shows how much of each [OMP](https://github.com/can1357/oh-my-pi) login's 5h, 7d and monthly limits you have used.
 - **Review changes**: open the git diff of any mounted file directory from the sidebar.
 - **Work in worktrees**: a mounted git clone lists its worktrees, switches the mount to one, creates new ones from a pulled base branch and removes them.
+- **Code with omp agents**: open omp-web sessions in tabs. A project linked to a file mount lists the sessions of that directory under "code", the "OMP" section lists every other omp workspace.
 - **Organize projects**: keep conversations, files, canvases, architecture diagrams, and project memory together. Each chat uses its containing project's memory, independently of the selected tab.
 - **Explore conversations**: branch from any message and merge branches back.
 - **Work with documents**: extract PDF content with [MinerU](https://github.com/opendatalab/mineru), attach live file references, and edit Obsidian vault files in place.
@@ -44,6 +45,8 @@ Requires Linux, Bash, Python 3.12 or 3.13, [uv](https://docs.astral.sh/uv/), and
 The launcher installs dependencies, including Node.js, and starts the development services and PostgreSQL. The default dependency install includes MinerU's large local OCR stack, so allow extra time and disk space on the first run.
 
 To run services separately, use `./run-frontend.sh` or `./run-backend.sh`. Optional nonsecret configuration goes in `${XDG_CONFIG_HOME:-$HOME/.config}/gigachad-bot/env` as plain `KEY=value` lines.
+
+`./run.sh` also serves omp-web on `127.0.0.1:30177` for the omp tabs. It needs `omp` on `PATH` and the ompweb fork checked out at `~/git/ompweb` (branch `custom`). The first start builds it in a separate worktree, which takes a few minutes. Set `GIGACHAD_OMP_WEB=0` to skip it.
 
 ## Further reading
 

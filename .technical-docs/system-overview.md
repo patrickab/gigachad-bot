@@ -301,6 +301,41 @@ Each row shows uncommitted files and commits ahead of and behind the base branch
 
 The project linked to a clone keeps reading the clone's `docs/architecture`.
 
+## omp tabs (omp-web)
+
+omp tabs show [omp](https://github.com/can1357/oh-my-pi) coding sessions through
+omp-web, a separate Next.js server from the ompweb fork (branch `custom`).
+`run-omp-web.sh` serves it on `127.0.0.1:30177` from a detached worktree at
+`~/.local/share/gigachad-bot/ompweb` (pinned, update with
+`git -C <dir> checkout --detach custom`), reusing an instance already on the port.
+omp-web refuses frames unless `OMP_WEB_FRAME_ANCESTORS` lists the frontend origin,
+the launcher sets it from `GIGACHAD_OMP_WEB_FRAME_ANCESTORS`
+(default the `:2999` origins). Remote access needs that origin listed too.
+
+- **Data**: the backend reads omp-web server to server (`lib/omp_web.py`,
+  `/api/omp/*`), the browser never calls omp-web's API. Pydantic contract models
+  fail with the field name when omp-web's JSON changes (502). omp-web down: 503.
+  `GIGACHAD_OMP_WEB_URL` points it elsewhere, `GIGACHAD_OMP_WEB_AUTH` is sent as
+  `x-omp-web-auth` for a password-protected omp-web
+- **Frame**: `features/omp/OmpProvider.tsx` renders ONE iframe for all omp tabs,
+  fixed over the active omp tab's slot and hidden otherwise. Tabs switch it by
+  postMessage (`features/omp/protocol.ts`, mirror of the fork's
+  `custom/embed/protocol.ts`), never by reload. In a frame omp-web hides its own
+  sidebar, topbar and file panel
+- **Tab item**: `WorkspaceItem` kind `omp` holds an `OmpView` (session, new session
+  in a cwd, settings). A session the frame opens itself (fork, first message of a
+  new session) becomes the tab's view
+- **Sidebar**: a project whose slug names a file mount's folder gets a "code"
+  category with the sessions whose `project_root ?? cwd` lies inside that mount.
+  The "OMP" section lists every other omp-web workspace, its label opens omp
+  settings. Forks nest under their parent, the session in view lists its
+  in-session branches. Rows archive, the "archived" folder restores.
+  The overview refreshes every 15s and on window focus
+- **Keys**: Alt+T/W/D pressed inside the frame come back to the shell
+- **Limits**: omp-web's file panel is hidden, so file links in its chat open
+  nothing. DOCX/PDF previews stay blank inside the frame (`/api/files` keeps
+  `SAMEORIGIN`)
+
 ## Neovim editor
 
 Text documents can be edited in a real Neovim with the backend user's own
