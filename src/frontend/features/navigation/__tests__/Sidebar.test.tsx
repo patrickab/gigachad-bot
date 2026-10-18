@@ -41,6 +41,9 @@ const api = vi.hoisted(() => ({
   fetchWorktrees: vi.fn<typeof import("@/lib/backend/api").fetchWorktrees>(async () => ({ is_clone: false, default_base: null, branches: [], worktrees: [] })),
   removeWorktree: vi.fn<typeof import("@/lib/backend/api").removeWorktree>(async () => {}),
   deleteWorktreeBranch: vi.fn<typeof import("@/lib/backend/api").deleteWorktreeBranch>(async () => {}),
+  fetchOmpArchive: vi.fn<typeof import("@/lib/backend/api").fetchOmpArchive>(async () => []),
+  archiveOmpSession: vi.fn<typeof import("@/lib/backend/api").archiveOmpSession>(async () => {}),
+  restoreOmpSession: vi.fn<typeof import("@/lib/backend/api").restoreOmpSession>(async () => "restored"),
 }))
 vi.mock("@/lib/backend/api", async (importOriginal) => ({
   ...api,
@@ -63,7 +66,7 @@ vi.mock("@/contexts/ProjectContext", () => ({
 }))
 vi.mock("@/features/memory/MemoryViewerContext", () => ({ useMemoryViewer: () => ({ openMemoryViewer: vi.fn() }) }))
 vi.mock("@/contexts/UndoDeleteContext", () => ({ useUndoDelete: () => ({ schedule: vi.fn(), pending: () => false }) }))
-const omp = vi.hoisted(() => ({ overview: null as import("@/lib/domain/types").OmpOverview | null }))
+const omp = vi.hoisted(() => ({ overview: null as import("@/lib/domain/types").OmpOverview | null, refreshOverview: () => {} }))
 vi.mock("@/features/omp/OmpProvider", () => ({ useOmp: () => omp }))
 
 function ompSession(id: string, cwd: string, extra: Partial<import("@/lib/domain/types").OmpSession> = {}) {
@@ -270,6 +273,37 @@ describe("Project navigation", () => {
     } finally {
       omp.overview = null
       api.fileRootTree.mockImplementation(listTree!)
+    }
+  })
+
+  it("archives a session from its row, explains a refusal for sessions with forks and restores from the archive", async () => {
+    const { ApiError } = await vi.importActual<typeof import("@/lib/backend/api")>("@/lib/backend/api")
+    omp.overview = {
+      running_session_ids: [],
+      workspaces: [{ path: "/git/tool", alias: null, added_at: null }],
+      sessions: [ompSession("parent", "/git/tool"), ompSession("child", "/git/tool", { parent_session_id: "parent" }), ompSession("solo", "/git/tool")],
+    }
+    api.fetchOmpArchive.mockImplementation(async () => [{ key: "old.jsonl", id: "old", cwd: "/git/tool", name: "old", created: "", archived_at: "", message_count: 1, first_message: "", status: null }])
+    api.archiveOmpSession.mockRejectedValueOnce(new ApiError("session_has_children", 409))
+    try {
+      const view = render(<Sidebar appMode="chat" />)
+      const section = within(view.getByLabelText("OMP"))
+      fireEvent.click(section.getByRole("button", { name: "tool" }))
+
+      fireEvent.click(section.getByRole("button", { name: "Archive parent" }))
+      expect(await view.findByRole("alert")).toHaveTextContent("Archive the forks of parent first")
+      expect(section.getByRole("button", { name: "parent" })).toBeVisible()
+
+      fireEvent.click(section.getByRole("button", { name: "Archive solo" }))
+      await waitFor(() => expect(section.queryByRole("button", { name: "solo" })).not.toBeInTheDocument())
+      expect(api.archiveOmpSession).toHaveBeenLastCalledWith("solo")
+      expect(view.queryByRole("alert")).not.toBeInTheDocument()
+
+      fireEvent.click(await section.findByRole("button", { name: "archived" }))
+      fireEvent.click(section.getByRole("button", { name: "Restore old" }))
+      await waitFor(() => expect(api.restoreOmpSession).toHaveBeenCalledWith("old.jsonl"))
+    } finally {
+      omp.overview = null
     }
   })
 

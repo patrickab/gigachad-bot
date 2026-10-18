@@ -299,6 +299,7 @@ export function Sidebar({
             labelAction={{ label: "Open omp settings", onClick: omp.openSettings }}
             create={{ label: "Add omp workspace", onClick: () => setOmpWorkspacePickerOpen(true) }}
           />
+          {omp.error && <p role="alert" className="px-2 py-1 text-xs text-danger">{omp.error}</p>}
         </>}
         <div role="separator" className="my-4 border-t border-divider/50" />
         <FileTree label="File mounts" items={buildMounts(rootTreeData)} controller={fileMountController}
