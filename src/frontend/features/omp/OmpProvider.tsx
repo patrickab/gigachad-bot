@@ -73,6 +73,14 @@ function navigationMessage(view: OmpView): ShellMessage {
   return { type: "open-settings" }
 }
 
+/** Frame URL for a (re)load. A session loads as omp-web's own deep link, an `open-session` sent during its startup gets lost. */
+function frameUrl(ompWebUrl: string, view: OmpView): string {
+  if (view.kind !== "session") return ompWebUrl
+  const url = new URL(ompWebUrl)
+  url.searchParams.set("session", view.sessionId)
+  return url.href
+}
+
 function useOverviewPolling(): { overview: OmpOverview | null; refreshOverview: () => void } {
   const [overview, setOverview] = useState<OmpOverview | null>(null)
   const refreshOverview = useCallback(() => {
@@ -130,7 +138,8 @@ export function OmpProvider({ children }: { children: ReactNode }) {
   const { overview, refreshOverview } = useOverviewPolling()
   const theme = useThemeName()
   const [attachment, setAttachment] = useState<FrameAttachment | null>(null)
-  const [mounted, setMounted] = useState(false)
+  /** View the frame (re)loaded with, null until the first omp tab attached. */
+  const [loadedView, setLoadedView] = useState<OmpView | null>(null)
   const [frameStatus, setFrameStatus] = useState<FrameStatus>("loading")
   const [frameKey, setFrameKey] = useState(0)
   const [branchTree, setBranchTree] = useState<BranchTree | null>(null)
@@ -211,22 +220,23 @@ export function OmpProvider({ children }: { children: ReactNode }) {
   }, [attachedView, navigate])
 
   useEffect(() => {
-    if (!mounted || frameStatus !== "loading") return
+    if (!loadedView || frameStatus !== "loading") return
     const timer = window.setTimeout(() => setFrameStatus("unreachable"), READY_TIMEOUT_MS)
     return () => window.clearTimeout(timer)
-  }, [mounted, frameStatus, frameKey])
+  }, [loadedView, frameStatus, frameKey])
 
   const attachFrame = useCallback((next: FrameAttachment) => {
     setAttachment(next)
-    setMounted(true)
+    setLoadedView((current) => current ?? next.view)
     return () => setAttachment((current) => (current === next ? null : current))
   }, [])
 
   const reloadFrame = useCallback(() => {
     readyRef.current = false
+    if (attachedView) setLoadedView(attachedView)
     setFrameStatus("loading")
     setFrameKey((key) => key + 1)
-  }, [])
+  }, [attachedView])
 
   const selectLeaf = useCallback((sessionId: string, leafId: string | null) => {
     post({ type: "select-leaf", sessionId, leafId })
@@ -244,11 +254,11 @@ export function OmpProvider({ children }: { children: ReactNode }) {
   return (
     <OmpContext.Provider value={value}>
       {children}
-      {mounted && ompWebUrl && (
+      {loadedView && ompWebUrl && (
         <iframe
           key={frameKey}
           ref={frameRef}
-          src={ompWebUrl}
+          src={frameUrl(ompWebUrl, loadedView)}
           title="omp"
           allow="clipboard-read; clipboard-write"
           className="fixed z-0 border-0 bg-paper"
