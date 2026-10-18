@@ -10,6 +10,15 @@ import { ToolCallElement } from "@/features/chat/messages/ToolCallElement"
 
 const MAX_LABEL_LENGTH = 80
 
+const PAIR_SURFACE = {
+  backgroundColor: "color-mix(in oklab, var(--surface) 65%, var(--paper))",
+  boxShadow: "var(--tw-ring-shadow, 0 0 #0000), var(--shadow-sm)",
+}
+const RESPONSE_SURFACE = {
+  backgroundColor: "color-mix(in oklab, var(--surface-elevated) 45%, var(--surface))",
+  boxShadow: "none",
+}
+
 /** One-line label for a collapsed question: its first line, else the attachment names. */
 function abbreviate(text: string, msg: Message): string {
   const clip = (s: string) => (s.length <= MAX_LABEL_LENGTH ? s : s.slice(0, MAX_LABEL_LENGTH) + "\u2026")
@@ -68,8 +77,9 @@ export function ChatPair({
           onMouseEnter={onMouseEnter}
           onMouseLeave={onMouseLeave}
           onClick={onExpand}
+          style={PAIR_SURFACE}
           className={cn(
-            "mx-3 my-4 rounded-xl border border-divider/40 shadow-[var(--shadow-sm)] overflow-hidden cursor-pointer transition-all duration-300",
+            "mx-3 my-4 rounded-3xl border border-transparent overflow-hidden cursor-pointer",
             focused && "ring-1 ring-ink-muted/50"
           )}
         >
@@ -100,7 +110,7 @@ export function ChatPair({
             <div className="overflow-hidden">
               <div className="px-5 pb-4">
                 {assistant.content && (
-                  <ElevatedContainer className="rounded-lg border border-divider overflow-hidden">
+                  <ElevatedContainer style={RESPONSE_SURFACE} className="rounded-[1.125rem] border border-transparent overflow-hidden">
                     <div className="px-4 py-3">
                       <div className="text-xs font-medium text-ink-subtle mb-1">Assistant</div>
                       <div className="max-h-[25vh] overflow-y-auto text-ink-muted">
@@ -115,7 +125,7 @@ export function ChatPair({
         </ElevatedContainer>
       )}
       {expanded && (
-        <ElevatedContainer className={cn("mx-3 my-4 rounded-xl border border-divider/40 overflow-hidden transition-all duration-300", focused && "ring-1 ring-ink-muted/50")}>
+        <ElevatedContainer style={PAIR_SURFACE} className={cn("mx-3 my-4 rounded-3xl border border-transparent overflow-hidden", focused && "ring-1 ring-ink-muted/50")}>
           <ChatMessage
             role="user"
             content={user.content}
@@ -129,11 +139,11 @@ export function ChatPair({
           {/* Same optic as the answer below: the tool call is a peer of the
               response inside the pair, not a decoration on it. */}
           {assistant.tool_calls?.map((call) => (
-            <ElevatedContainer key={call.id} className="mx-5 mb-5 rounded-lg border border-divider overflow-hidden">
+            <ElevatedContainer key={call.id} style={RESPONSE_SURFACE} className="mx-5 mb-5 rounded-[1.125rem] border border-transparent overflow-hidden">
               <ToolCallElement call={call} />
             </ElevatedContainer>
           ))}
-          <ElevatedContainer className="mx-5 mb-5 rounded-lg border border-divider overflow-hidden">
+          <ElevatedContainer style={RESPONSE_SURFACE} className="mx-5 mb-5 rounded-[1.125rem] border border-transparent overflow-hidden">
             <ChatMessage
               role="assistant"
               content={assistant.content}

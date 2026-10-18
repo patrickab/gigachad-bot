@@ -57,6 +57,11 @@ remaining pane width. Opening navigation or context panels preserves that width
 until the available space cannot fit it, then the column shrinks without horizontal
 overflow. Wide mode continues to fill the available pane.
 
+Q&A pairs use Soft styling: borderless rounded tonal panels, with answers and tool
+outputs on a slightly raised surface. Collapsed previews share the same treatment.
+Spacing and Q&A interactions are unchanged. Surface colors derive from the shared
+theme tokens in both dark and light modes.
+
 ## Canvas background
 
 The dot grid uses small, screen-sized dots and wider spacing at reduced zoom.
