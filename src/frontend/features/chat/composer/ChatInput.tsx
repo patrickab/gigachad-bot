@@ -27,6 +27,9 @@ interface ChatInputProps {
   isStreaming?: boolean
   onCancel?: () => void
   slug?: string | null
+  /** gigachad's chat tools menu, off where another agent owns the tools (omp tabs). */
+  toolsMenu?: boolean
+  placeholder?: string
 }
 
 export interface ChatInputHandle {
@@ -69,6 +72,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   isStreaming,
   onCancel,
   slug = null,
+  toolsMenu = true,
+  placeholder = "Send a Message",
 }, ref) {
   const { enabledTools, toggleTool } = useEnabledTools()
   const { ocrModel } = useSettings()
@@ -261,7 +266,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             disabled={disabled && !isStreaming}
-            placeholder="Send a Message"
+            placeholder={placeholder}
             spellCheck={false}
             autoCorrect="off"
             autoCapitalize="off"
@@ -310,7 +315,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               </div>
             </div>
             <div className="flex items-center gap-1">
-              <div className="relative" ref={toolsRef}>
+              {toolsMenu && <div className="relative" ref={toolsRef}>
                 <button aria-label="Toggle tools"
                   onClick={() => setShowTools(!showTools)}
                   disabled={disabled}
@@ -332,7 +337,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
 
                   </div>
                 )}
-              </div>
+              </div>}
               <button aria-label={`${isListening ? "Stop listening" : "Start listening"}`}
                 onClick={toggleListening}
                 disabled={disabled}
