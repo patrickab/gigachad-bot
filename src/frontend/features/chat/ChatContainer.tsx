@@ -226,7 +226,7 @@ export function ChatContainer({
     })
   }
 
-  const { hoveredPair, focusedGlobalIndex, clearKeyboardFocus, handleMouseEnter, handleMouseLeave, collapsedRef } = usePairFocus({ pairs, scrollContainerRef, togglePair })
+  const { focusedGlobalIndex, clearKeyboardFocus, collapsedRef } = usePairFocus({ pairs, scrollContainerRef, togglePair })
 
   // Sending re-pins to bottom so the new answer streams into view
   const handleSend = useCallback((text: string, attachments: Attachment[]) => {
@@ -303,15 +303,12 @@ export function ChatContainer({
                   globalIndex={globalIndex}
                   expanded={isExpandedNormal(globalIndex)}
                   focused={focusedGlobalIndex === globalIndex}
-                  showPreview={hoveredPair === globalIndex || focusedGlobalIndex === globalIndex}
                   isStreaming={isStreaming}
                   onExpand={() => {
                     togglePair(globalIndex)
                     clearKeyboardFocus()
                   }}
                   onCollapse={() => togglePair(globalIndex)}
-                  onMouseEnter={() => handleMouseEnter(globalIndex)}
-                  onMouseLeave={handleMouseLeave}
                   collapsedRef={collapsedRef(globalIndex)}
                   onAttachmentClick={(att) => handleAttachmentClick(globalIndex, att)}
                   onDelete={onDeletePair}

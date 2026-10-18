@@ -1,12 +1,12 @@
 "use client"
 
-import { ChevronRight, User } from "lucide-react"
+import { ChevronRight, User, Wrench } from "lucide-react"
 import type { Attachment, Message } from "@/lib/domain/types"
 import { cn } from "@/lib/utils"
 import { AssistantMessageContent, ChatMessage } from "@/features/chat/messages/ChatMessage"
 import { ElevatedContainer } from "@/components/ui/ElevatedContainer"
-import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
 import { ToolCallElement } from "@/features/chat/messages/ToolCallElement"
+import { TOOL_META } from "@/features/chat/tools"
 
 const MAX_LABEL_LENGTH = 80
 
@@ -35,14 +35,10 @@ interface ChatPairProps {
   expanded: boolean
   /** Keyboard focus is on this pair. */
   focused: boolean
-  /** Collapsed header shows the full question and the answer instead of the one-line label. */
-  showPreview: boolean
   isStreaming: boolean
   /** The collapsed header was clicked. */
   onExpand: () => void
   onCollapse: () => void
-  onMouseEnter: () => void
-  onMouseLeave: () => void
   collapsedRef: (el: HTMLDivElement | null) => void
   onAttachmentClick: (attachment: Attachment) => void
   onDelete: (index: number) => void
@@ -57,12 +53,9 @@ export function ChatPair({
   globalIndex,
   expanded,
   focused,
-  showPreview,
   isStreaming,
   onExpand,
   onCollapse,
-  onMouseEnter,
-  onMouseLeave,
   collapsedRef,
   onAttachmentClick,
   onDelete,
@@ -74,8 +67,6 @@ export function ChatPair({
       {!expanded && (
         <ElevatedContainer
           ref={collapsedRef}
-          onMouseEnter={onMouseEnter}
-          onMouseLeave={onMouseLeave}
           onClick={onExpand}
           style={PAIR_SURFACE}
           className={cn(
@@ -90,38 +81,27 @@ export function ChatPair({
               </div>
             </div>
             <div className="min-w-0 flex-1 flex flex-col">
-              <div className="mb-0.5 text-xs font-medium text-ink-subtle">You</div>
-              {showPreview ? (
-                <div className="max-h-[12.5vh] overflow-y-auto text-ink-muted">
-                  <LaTeXMarkdown content={user.content} compact />
-                </div>
-              ) : (
-                <span className="text-sm text-ink-muted truncate">{abbreviate(user.content, user)}</span>
-              )}
+              <span className="text-sm text-ink-muted truncate">{abbreviate(user.content, user)}</span>
             </div>
             <ChevronRight className="h-4 w-4 shrink-0 text-ink-faint mt-1" />
           </div>
-          <div
-            className={cn(
-              "grid transition-[grid-template-rows] duration-300 ease-out",
-              showPreview ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
-            )}
-          >
-            <div className="overflow-hidden">
-              <div className="px-5 pb-4">
-                {assistant.content && (
-                  <ElevatedContainer style={RESPONSE_SURFACE} className="rounded-[1.125rem] border border-transparent overflow-hidden">
-                    <div className="px-4 py-3">
-                      <div className="text-xs font-medium text-ink-subtle mb-1">Assistant</div>
-                      <div className="max-h-[25vh] overflow-y-auto text-ink-muted">
-                        <AssistantMessageContent content={assistant.content} compact />
-                      </div>
-                    </div>
-                  </ElevatedContainer>
-                )}
+          {(assistant.content || assistant.tool_calls?.length) ? <div className="space-y-2 px-5 pb-4">
+            {assistant.tool_calls?.map((call) => {
+              const meta = TOOL_META[call.name]
+              const Icon = meta?.icon ?? Wrench
+              return <ElevatedContainer key={call.id} style={RESPONSE_SURFACE} className="flex items-center gap-2 rounded-[1.125rem] border border-transparent px-4 py-3 text-xs text-ink-subtle">
+                <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span>{meta?.cardLabel ?? call.name}</span>
+              </ElevatedContainer>
+            })}
+            {assistant.content && <ElevatedContainer style={RESPONSE_SURFACE} className="rounded-[1.125rem] border border-transparent overflow-hidden">
+              <div className="px-4 py-3">
+                <div className="max-h-[12.5vh] overflow-y-auto text-ink-muted">
+                  <AssistantMessageContent content={assistant.content} compact />
+                </div>
               </div>
-            </div>
-          </div>
+            </ElevatedContainer>}
+          </div> : null}
         </ElevatedContainer>
       )}
       {expanded && (
