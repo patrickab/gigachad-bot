@@ -124,8 +124,13 @@ class _Restored(ContractModel):
 
 
 def omp_web_url() -> str:
-    """Base URL of omp-web, also the frame source in the browser."""
+    """Base URL the backend reaches omp-web at."""
     return os.environ.get("GIGACHAD_OMP_WEB_URL", DEFAULT_URL).rstrip("/")
+
+
+def omp_web_frame_url() -> str:
+    """Base URL the browser frames omp-web from, `GIGACHAD_OMP_WEB_FRAME_URL` when omp-web sits behind the Tailnet gate."""
+    return os.environ.get("GIGACHAD_OMP_WEB_FRAME_URL", omp_web_url()).rstrip("/")
 
 
 def _headers() -> dict[str, str]:

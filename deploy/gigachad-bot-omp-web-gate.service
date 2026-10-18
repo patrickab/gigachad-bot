@@ -1,0 +1,19 @@
+[Unit]
+Description=gigachad-bot omp-web Tailnet identity gate
+Wants=network-online.target gigachad-bot-omp-web.service
+After=network-online.target gigachad-bot-omp-web.service
+
+[Service]
+Type=exec
+WorkingDirectory=%h/git/gigachad-bot-prod
+Environment=GIGACHAD_ENV_FILE=%h/.config/gigachad-bot/env
+ExecStart=%h/git/gigachad-bot-prod/deploy/run-production-omp-web.sh gate
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=default.target

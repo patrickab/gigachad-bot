@@ -1,0 +1,21 @@
+[Unit]
+Description=gigachad-bot omp-web (omp tabs' chat and settings)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=exec
+WorkingDirectory=%h/git/gigachad-bot-prod
+Environment=GIGACHAD_ENV_FILE=%h/.config/gigachad-bot/env
+Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/git/gigachad-bot-prod/deploy/run-production-omp-web.sh server
+Restart=on-failure
+RestartSec=5s
+# The first start installs and builds omp-web
+TimeoutStartSec=10min
+TimeoutStopSec=30s
+# No NoNewPrivileges, PrivateTmp or UMask: omp-web runs the user's omp agents, which need the
+# real /tmp, sudo and normal file modes like a login shell
+
+[Install]
+WantedBy=default.target

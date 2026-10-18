@@ -33,7 +33,7 @@ omp tabs embed omp-web from the fork `patrickab/ompweb` (branch `custom`), itsel
 - **Minimal delta upstream**: never ask for or make changes to omp-web's server API, session handling or protocol logic. Read what it already serves. A feature omp-web lacks is built here, or added in the fork's `custom/` following its `custom/AGENTS.md`
 - **Drop before you change**: omp-web UI gigachad-bot does not want is hidden in the fork's embed mode (`custom/theme/embed.css`), not rewritten. Prefer hiding a feature over porting or patching it
 - **Adapters own all omp-web knowledge**, one place per side, so an omp-web change lands in one file:
-  - Backend: `src/lib/omp_web.py` only. Routes (`routes/omp.py`) map its errors, they never build omp-web URLs. Pydantic contract models validate every response, a shape change fails loudly with the field name (502)
+  - Backend: `src/lib/omp_web.py` only. Routes (`routes/omp.py`) map its errors, they never build omp-web URLs. Pydantic contract models validate every response, a shape change fails loudly with the field name (502). `src/backend/omp_web_gate.py` (production Tailnet gate in front of the frame) is a plain identity-checking proxy, keep omp-web API knowledge out of it
   - Frontend: `src/frontend/features/omp/` only. Nothing else knows the iframe, the postMessage protocol or omp-web URLs. Other features import its public files (eslint `crossFeature`)
   - The browser never calls omp-web's API, the backend does, server to server
 - **Never vendor omp-web code** (components, hooks, CSS). Write new code against its API with omp-web as reference

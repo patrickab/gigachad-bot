@@ -317,6 +317,10 @@ the launcher sets it from `GIGACHAD_OMP_WEB_FRAME_ANCESTORS`
   fail with the field name when omp-web's JSON changes (502). omp-web down: 503.
   `GIGACHAD_OMP_WEB_URL` points it elsewhere, `GIGACHAD_OMP_WEB_AUTH` is sent as
   `x-omp-web-auth` for a password-protected omp-web
+- **Frame access**: `/api/config` hands the browser `GIGACHAD_OMP_WEB_FRAME_URL`
+  (default `GIGACHAD_OMP_WEB_URL`). In production that is Tailscale Serve `:8443`
+  in front of `backend/omp_web_gate.py`, which forwards only the
+  `GIGACHAD_OMP_WEB_USERS` logins to omp-web on loopback, see the deployment runbook
 - **Frame**: `features/omp/OmpProvider.tsx` renders ONE iframe for all omp tabs,
   fixed over the active omp tab's slot and hidden otherwise. Tabs switch it by
   postMessage (`features/omp/protocol.ts`, mirror of the fork's

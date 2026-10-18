@@ -305,14 +305,53 @@ builds, about 2 minutes. An omp-web already listening on the port is reused.
 | `GIGACHAD_OMP_WEB_REF` | `custom` | Ref the worktree is created at |
 | `GIGACHAD_OMP_WEB_BIND` | `127.0.0.1:30177` | omp-web listen address |
 | `GIGACHAD_OMP_WEB_FRAME_ANCESTORS` | `http://127.0.0.1:2999 http://localhost:2999` | Origins allowed to frame omp-web. A frontend origin missing here gets a blank frame |
-| `GIGACHAD_OMP_WEB_URL` | `http://127.0.0.1:30177` | Backend: omp-web base URL, also the frame source in the browser |
+| `GIGACHAD_OMP_WEB_URL` | `http://127.0.0.1:30177` | Backend and gate: where omp-web listens |
+| `GIGACHAD_OMP_WEB_FRAME_URL` | `GIGACHAD_OMP_WEB_URL` | Frame source the browser loads (`/api/config`), the gate's Serve URL in production |
+| `GIGACHAD_OMP_WEB_USERS` | unset | Gate: comma-separated Tailscale logins allowed to use omp-web. Empty refuses everyone |
+| `GIGACHAD_OMP_WEB_GATE_PORT` | `30179` | Gate listen port (loopback) |
 | `GIGACHAD_OMP_WEB_AUTH` | unset | Backend: trusted header for a password-protected omp-web |
 | `GIGACHAD_OMP_WEB` | `1` | `0` makes `run.sh` skip omp-web |
 
-`GIGACHAD_OMP_WEB_URL` is what the browser loads in the frame, so it must be
-reachable from the browser. The default only works in a browser on the host
-itself. There is no systemd unit for omp-web yet, it runs through `run.sh` or
-`run-omp-web.sh`.
+#### Production: units and the Tailnet gate
+
+The browser loads omp-web in a frame, so on a deployed host omp-web has to be
+reachable over the Tailnet. omp-web runs shell commands as the host user, and
+every Tailnet device can reach the host unless the ACL says otherwise, so it is
+never served directly: Tailscale Serve `:8443` goes to an identity gate
+(`src/backend/omp_web_gate.py`), which forwards only the logins in
+`GIGACHAD_OMP_WEB_USERS` to omp-web on loopback. omp-web's own password cannot do
+this job, its `SameSite=Lax` cookie is not sent inside the cross-site frame.
+
+```text
+browser (Vercel page, iframe) ── HTTPS ──> <tailnet-hostname>:8443
+                                           Tailscale Serve ──> 127.0.0.1:30179 gate ──> 127.0.0.1:30177 omp-web
+```
+
+Two user units run it, both from `deploy/run-production-omp-web.sh`:
+
+- `gigachad-bot-omp-web.service` (`server`): omp-web through `run-omp-web.sh`.
+  Frame ancestors default to `GIGACHAD_CORS_ORIGINS`. No sandboxing flags: the omp
+  agents it runs need the real `/tmp`, `sudo` and normal file modes
+- `gigachad-bot-omp-web-gate.service` (`gate`): the gate, refuses to start with an
+  empty `GIGACHAD_OMP_WEB_USERS`
+
+Add to `$ENV`, then install the units and publish the gate:
+
+```dotenv
+GIGACHAD_OMP_WEB_FRAME_URL=https://<tailnet-hostname>:8443
+GIGACHAD_OMP_WEB_USERS=<your Tailscale login, e.g. me@gmail.com>
+GIGACHAD_OMP_WEB_REF=origin/custom
+```
+
+```bash
+"$PROD/deploy/install-systemd-service.sh"
+systemctl --user start gigachad-bot-omp-web.service gigachad-bot-omp-web-gate.service
+"$PROD/deploy/tailscale-serve.sh" 30179 8443
+systemctl --user restart gigachad-bot.service
+```
+
+Find logins with `tailscale status --json` (`User.*.LoginName`). The backend
+restart picks up `GIGACHAD_OMP_WEB_FRAME_URL`.
 
 #### Update omp-web
 
@@ -328,18 +367,22 @@ grep -h 'EMBED_PROTOCOL_VERSION =' \
   "$HOME/.local/share/gigachad-bot/ompweb/custom/embed/protocol.ts"
 ```
 
+On the production host `~/git/gigachad-bot/redeploy.sh` runs these steps after
+restarting the backend. By hand:
+
 1. Make sure no omp session is mid-run, a restart ends its omp process:
-   `curl -s http://127.0.0.1:8001/api/omp/overview` must list no
-   `running_session_ids`.
+   `curl -s http://127.0.0.1:30177/api/sessions` must list no
+   `runningSessionIds`.
 2. Pull the fork and move the served worktree:
 
    ```bash
-   git -C "$HOME/git/ompweb" pull --ff-only origin custom
-   git -C "$HOME/.local/share/gigachad-bot/ompweb" checkout --detach custom
+   git -C "$HOME/git/ompweb" fetch origin custom
+   git -C "$HOME/.local/share/gigachad-bot/ompweb" checkout --detach origin/custom
    ```
 
-3. Stop the running omp-web, then start `./run-omp-web.sh` again. It rebuilds
-   because the sources are newer than the last build, then answers
+3. Restart omp-web (`systemctl --user restart gigachad-bot-omp-web.service`, or
+   stop it and start `./run-omp-web.sh` in development). It rebuilds because the
+   sources are newer than the last build, then answers
    `curl -sf http://127.0.0.1:30177/login`.
 4. Update gigachad-bot to the matching commit and reload the frontend.
 5. Smoke an omp tab: open a session, send a prompt, Stop, switch the model and
@@ -445,8 +488,9 @@ For a first deployment or an update:
    `GIGACHAD_BASE_DIR` and `MINERU_SERVER_URL` unset.
 3. On a new host, provision the code sandbox (see above) and confirm
    `agent-sandbox doctor --profile gigachad` passes.
-4. For omp tabs, clone the ompweb fork (see "Provision omp-web") and keep it on
-   the `custom` commit matching this gigachad-bot commit.
+4. For omp tabs, clone the ompweb fork, set the omp-web variables in `$ENV`, start
+   both omp-web units and publish the gate on `:8443` (see "Provision omp-web").
+   Keep the fork on the `custom` commit matching this gigachad-bot commit.
 5. Start or restart `gigachad-bot.service` and confirm its loopback health
    check.
 6. Run `"$PROD/deploy/tailscale-serve.sh" 8002` and confirm Tailnet HTTPS health

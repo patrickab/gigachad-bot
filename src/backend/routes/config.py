@@ -20,5 +20,5 @@ async def get_config(
         **store.load_defaults(),
         "downscale_images": DEFAULT_DOWNSCALE_IMAGES,
         "neovim_available": is_neovim_available(identity.login),
-        "omp_web_url": omp_web.omp_web_url(),
+        "omp_web_url": omp_web.omp_web_frame_url(),
     }
