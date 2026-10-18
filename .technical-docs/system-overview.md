@@ -68,6 +68,10 @@ and no role headings, with the first text line centered beside the avatar.
 Actions share the final paragraph line with reserved space so text cannot overlap
 them, appearing on hover or keyboard focus. Other terminal blocks keep actions
 below their content. Collapsed preview panels use equal 14px padding.
+`features/chat/chat.css` owns Soft surfaces and final-line action placement.
+Chat uses plain panels rather than nesting the shared elevation context, which
+remains available to memory and project views. Message action eligibility is
+shared between toolbar rendering and its reserved text space.
 
 ## Canvas background
 

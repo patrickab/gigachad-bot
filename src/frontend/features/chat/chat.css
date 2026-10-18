@@ -1,0 +1,37 @@
+.chat-pair-surface,
+.chat-response-surface {
+  position: relative;
+  transition: all 200ms;
+}
+
+.chat-pair-surface {
+  background-color: color-mix(in oklab, var(--surface) 65%, var(--paper));
+  box-shadow: var(--tw-ring-shadow, 0 0 #0000), var(--shadow-sm);
+}
+
+.chat-response-surface {
+  background-color: color-mix(in oklab, var(--surface-elevated) 45%, var(--surface));
+  box-shadow: none;
+}
+
+/* Share the final paragraph line with actions. Other terminal blocks keep
+   actions in normal flow beneath the content. */
+.chat-message-body:has(> .chat-message-actions):has(> .chat-message-content > .text-ink:last-child > .markdown-body > div > p:last-child) {
+  & > .chat-message-actions {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+  }
+
+  & > .chat-message-content > .text-ink:last-child > .markdown-body > div > p:last-child {
+    margin-bottom: 0;
+
+    &::after {
+      content: "";
+      display: inline-block;
+      width: min(100%, var(--message-actions-space));
+      height: 22px;
+      vertical-align: bottom;
+    }
+  }
+}

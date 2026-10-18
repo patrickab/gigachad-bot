@@ -4,20 +4,10 @@ import { ChevronRight, User, Wrench } from "lucide-react"
 import type { Attachment, Message } from "@/lib/domain/types"
 import { cn } from "@/lib/utils"
 import { AssistantMessageContent, ChatMessage } from "@/features/chat/messages/ChatMessage"
-import { ElevatedContainer } from "@/components/ui/ElevatedContainer"
 import { ToolCallElement } from "@/features/chat/messages/ToolCallElement"
 import { TOOL_META } from "@/features/chat/tools"
 
 const MAX_LABEL_LENGTH = 80
-
-const PAIR_SURFACE = {
-  backgroundColor: "color-mix(in oklab, var(--surface) 65%, var(--paper))",
-  boxShadow: "var(--tw-ring-shadow, 0 0 #0000), var(--shadow-sm)",
-}
-const RESPONSE_SURFACE = {
-  backgroundColor: "color-mix(in oklab, var(--surface-elevated) 45%, var(--surface))",
-  boxShadow: "none",
-}
 
 /** One-line label for a collapsed question: its first line, else the attachment names. */
 function abbreviate(text: string, msg: Message): string {
@@ -65,47 +55,40 @@ export function ChatPair({
   return (
     <div data-qa-index={globalIndex} className="group relative">
       {!expanded && (
-        <ElevatedContainer
+        <div
           ref={collapsedRef}
           onClick={onExpand}
-          style={PAIR_SURFACE}
           className={cn(
-            "mx-3 my-3 rounded-3xl border border-transparent overflow-hidden cursor-pointer",
+            "chat-pair-surface mx-3 my-3 rounded-3xl border border-transparent overflow-hidden cursor-pointer text-ink",
             focused && "ring-1 ring-ink-muted/50"
           )}
         >
           <div className="flex gap-3 p-3.5 items-center">
-            <div className="shrink-0">
-              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-surface-elevated">
-                <User className="h-3.5 w-3.5 text-ink-muted" />
-              </div>
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-surface-elevated">
+              <User className="h-3.5 w-3.5 text-ink-muted" />
             </div>
-            <div className="min-w-0 flex-1 flex flex-col">
-              <span className="text-sm text-ink-muted truncate">{abbreviate(user.content, user)}</span>
-            </div>
+            <span className="min-w-0 flex-1 text-sm text-ink-muted truncate">{abbreviate(user.content, user)}</span>
             <ChevronRight className="h-4 w-4 shrink-0 text-ink-faint" />
           </div>
           {(assistant.content || assistant.tool_calls?.length) ? <div className="space-y-1.5 px-3.5 pb-3.5">
             {assistant.tool_calls?.map((call) => {
               const meta = TOOL_META[call.name]
               const Icon = meta?.icon ?? Wrench
-              return <ElevatedContainer key={call.id} style={RESPONSE_SURFACE} className="flex items-center gap-2 rounded-[1.125rem] border border-transparent p-3.5 text-xs text-ink-subtle">
+              return <div key={call.id} className="chat-response-surface flex items-center gap-2 rounded-[1.125rem] border border-transparent p-3.5 text-xs text-ink-subtle">
                 <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 <span>{meta?.cardLabel ?? call.name}</span>
-              </ElevatedContainer>
-            })}
-            {assistant.content && <ElevatedContainer style={RESPONSE_SURFACE} className="rounded-[1.125rem] border border-transparent overflow-hidden">
-              <div className="p-3.5">
-                <div className="max-h-[12.5vh] overflow-y-auto text-ink-muted">
-                  <AssistantMessageContent content={assistant.content} compact />
-                </div>
               </div>
-            </ElevatedContainer>}
+            })}
+            {assistant.content && <div className="chat-response-surface rounded-[1.125rem] border border-transparent overflow-hidden p-3.5">
+              <div className="max-h-[12.5vh] overflow-y-auto text-ink-muted">
+                <AssistantMessageContent content={assistant.content} compact />
+              </div>
+            </div>}
           </div> : null}
-        </ElevatedContainer>
+        </div>
       )}
       {expanded && (
-        <ElevatedContainer style={PAIR_SURFACE} className={cn("mx-3 my-4 rounded-3xl border border-transparent overflow-hidden", focused && "ring-1 ring-ink-muted/50")}>
+        <div className={cn("chat-pair-surface mx-3 my-4 rounded-3xl border border-transparent overflow-hidden text-ink", focused && "ring-1 ring-ink-muted/50")}>
           <ChatMessage
             role="user"
             content={user.content}
@@ -116,14 +99,12 @@ export function ChatPair({
             collapsibleUser
             onCollapse={onCollapse}
           />
-          {/* Same optic as the answer below: the tool call is a peer of the
-              response inside the pair, not a decoration on it. */}
           {assistant.tool_calls?.map((call) => (
-            <ElevatedContainer key={call.id} style={RESPONSE_SURFACE} className="mx-5 mb-5 rounded-[1.125rem] border border-transparent overflow-hidden">
+            <div key={call.id} className="chat-response-surface mx-5 mb-5 rounded-[1.125rem] border border-transparent overflow-hidden">
               <ToolCallElement call={call} />
-            </ElevatedContainer>
+            </div>
           ))}
-          <ElevatedContainer style={RESPONSE_SURFACE} className="mx-5 mb-5 rounded-[1.125rem] border border-transparent overflow-hidden">
+          <div className="chat-response-surface mx-5 mb-5 rounded-[1.125rem] border border-transparent overflow-hidden">
             <ChatMessage
               role="assistant"
               content={assistant.content}
@@ -137,8 +118,8 @@ export function ChatPair({
               onRegenerate={onRegenerate}
               onBranch={onBranch}
             />
-          </ElevatedContainer>
-        </ElevatedContainer>
+          </div>
+        </div>
       )}
     </div>
   )

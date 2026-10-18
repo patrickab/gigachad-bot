@@ -7,7 +7,7 @@ import type { Message, Attachment } from "@/lib/domain/types"
 import { ChatInput, type ChatInputHandle } from "@/features/chat/composer/ChatInput"
 import { SidePanel } from "@/components/ui/SidePanel"
 import { ChevronsLeftRight, ChevronsRightLeft, GitFork, PanelRight, PanelRightClose } from "lucide-react"
-import { ElevationProvider } from "@/components/ui/ElevatedContainer"
+import "./chat.css"
 import { ChatPair } from "./ChatPair"
 import { useSidebarElements, type AttachmentEntry, type ExpandedAttachment } from "@/features/chat/context-panel/ChatContextPanel"
 import { usePairFocus } from "@/features/chat/usePairFocus"
@@ -293,7 +293,6 @@ export function ChatContainer({
           style={{ paddingBottom: inputAreaHeight + BOTTOM_GAP_PX }}
         >
           <div ref={onChatColumnChange} className="mx-auto" style={{ maxWidth: effectiveMaxWidth }}>
-          <ElevationProvider startLevel={1}>
             <AnimatePresence>
             {pairs.map(({ user, assistant, globalIndex }, qaIndex) => (
               <Fragment key={globalIndex}>
@@ -325,7 +324,6 @@ export function ChatContainer({
               </Fragment>
             ))}
           </AnimatePresence>
-          </ElevationProvider>
           <div ref={bottomRef} />
           </div>
         </div>
