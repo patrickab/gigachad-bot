@@ -258,19 +258,6 @@ export function ChatContainer({
     onTogglePdfWide: togglePdfWide,
   })
 
-  const [paneWidth, setPaneWidth] = useState(0)
-
-  // Keep the last visible width while background tabs have display: none.
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
-    const observer = new ResizeObserver(([entry]) => {
-      if (entry.contentRect.width > 0) setPaneWidth(entry.contentRect.width)
-    })
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [])
-
   const hasSidebarContent = sidebarElements.length > 0
   const inputAreaRef = useRef<HTMLDivElement>(null)
   const [inputAreaHeight, setInputAreaHeight] = useState(0)
@@ -292,8 +279,8 @@ export function ChatContainer({
   if (!hasSidebarContent && contextOpen) setContextOpen(false)
   if (!contextOpen && pdfWide) setPdfWide(false)
 
-  // Cap against the full pane, leaving room for the side panel, but never narrower than the composer
-  const effectiveMaxWidth = isWideMode || paneWidth === 0 ? undefined : Math.max(MIN_CHAT_COLUMN_PX, paneWidth - MAX_SIDEBAR_WIDTH)
+  // Match the collapsed-sidebar width, shrinking only when the available column cannot fit it.
+  const effectiveMaxWidth = isWideMode ? undefined : `max(${MIN_CHAT_COLUMN_PX}px, calc(100vw - ${MAX_SIDEBAR_WIDTH}px))`
   const toggleWideMode = useCallback(() => setIsWideMode((w) => !w), [])
 
   return (

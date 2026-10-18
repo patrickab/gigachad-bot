@@ -21,7 +21,7 @@
    Tailwind utilities come from @theme below. */
 
  :root {
-   --shadow-color: oklch(4% 0.006 55);
+   --shadow-color: oklch(4% 0.004 70);
 
    /* --- Text (ink): cream, never pure white --- */
    --ink:        oklch(94% 0.010 75);
@@ -29,12 +29,11 @@
    --ink-subtle: oklch(59% 0.012 65);
    --ink-faint:  oklch(48% 0.010 60);
 
-   /* --- Surfaces: warm near-black. Hue 55 stays brown at low lightness,
-          hue 80+ turns olive and muddy there. --- */
-   --paper:            oklch(14%   0.008 55);
-   --surface:          oklch(18%   0.009 55);
-   --surface-elevated: oklch(22.5% 0.010 55);
-   --overlay:          oklch(11.5% 0.007 55);
+   /* --- Surfaces: low-chroma yellow warmth without a red-brown cast. --- */
+   --paper:            oklch(13%   0.006 70);
+   --surface:          oklch(16.5% 0.007 70);
+   --surface-elevated: oklch(19%   0.008 70);
+   --overlay:          oklch(10.5% 0.005 70);
 
    /* --- Danger (red, reserved for destructive actions only) --- */
    --danger:      oklch(68% 0.20 25);
@@ -46,7 +45,7 @@
 
    /* --- Chart grid: opaque rgb, about 12% --ink over --surface-elevated. Plotly can't parse
           color-mix(), and its WebGL 3D scenes render translucent or oklch colors near-white --- */
-   --chart-grid:  rgb(57, 52, 48);
+   --chart-grid:  rgb(47, 44, 40);
 
    /* --- Derived: dividers (recompute when --ink changes) --- */
    --divider:         color-mix(in oklab, var(--ink) 11%, transparent);

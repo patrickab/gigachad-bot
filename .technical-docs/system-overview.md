@@ -42,6 +42,21 @@ none of them are reimplemented in-repo:
 All of the above are optional/user-configured — the app degrades gracefully
 (e.g. web search and OCR just aren't available) when they're not running.
 
+## Theme palette
+
+`src/frontend/app/globals.css` owns the warm dark-mode surface stack: paper at
+13% OKLCH lightness, surface at 16.5%, and elevated panels at 19%. Raised panels
+stay close to the background with low-chroma yellow warmth (hue 70), not red-brown.
+Light mode is independent. Keep the embedded dark tokens in ompweb's
+`custom/theme/palette.css` synchronized with these shell tokens.
+
+## Chat sizing
+
+Q&A columns use the collapsed-sidebar width derived from the viewport, not the
+remaining pane width. Opening navigation or context panels preserves that width
+until the available space cannot fit it, then the column shrinks without horizontal
+overflow. Wide mode continues to fill the available pane.
+
 ## Canvas background
 
 The dot grid uses small, screen-sized dots and wider spacing at reduced zoom.
