@@ -46,7 +46,13 @@ The launcher installs dependencies, including Node.js, and starts the developmen
 
 To run services separately, use `./run-frontend.sh` or `./run-backend.sh`. Optional nonsecret configuration goes in `${XDG_CONFIG_HOME:-$HOME/.config}/gigachad-bot/env` as plain `KEY=value` lines.
 
-`./run.sh` also serves omp-web on `127.0.0.1:30177` for the omp tabs. It needs `omp` on `PATH` and the ompweb fork checked out at `~/git/ompweb` (branch `custom`). The first start builds it in a separate worktree, which takes a few minutes. Set `GIGACHAD_OMP_WEB=0` to skip it.
+`./run.sh` also serves omp-web on `127.0.0.1:30177` for the omp tabs. It needs `omp` on `PATH` and the private ompweb fork checked out at `~/git/ompweb` on branch `custom`:
+
+```bash
+git clone --branch custom https://github.com/patrickab/ompweb.git ~/git/ompweb
+```
+
+The first start builds it in a separate worktree, which takes a few minutes. Set `GIGACHAD_OMP_WEB=0` to skip it. Updating omp-web means updating both repos together, see the [deployment runbook](.technical-docs/deployment.md#update-omp-web).
 
 ## Further reading
 

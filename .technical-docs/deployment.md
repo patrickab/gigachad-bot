@@ -278,6 +278,77 @@ layout, put an adjusted `gigachad.yaml` in a directory listed in
 `AGENT_SANDBOX_PROFILE_PATH`, which is searched before the bundled profiles.
 Doctor must pass every check.
 
+### Provision omp-web (omp tabs)
+
+omp tabs frame omp-web, served from the private fork
+[patrickab/ompweb](https://github.com/patrickab/ompweb), branch `custom` (embed
+mode, postMessage bridge, composer adapter). It needs `omp` on `PATH` and GitHub
+access to the private fork. Clone it once per host:
+
+```bash
+git clone --branch custom https://github.com/patrickab/ompweb.git "$HOME/git/ompweb"
+git -C "$HOME/git/ompweb" remote add upstream https://github.com/kahme247/ompweb
+git -C "$HOME/git/ompweb" remote set-url --push upstream no-push
+```
+
+The `upstream` remote is only needed to rebase the fork, see its
+`custom/AGENTS.md`. `run-omp-web.sh` (started by `run.sh`) serves omp-web on
+`127.0.0.1:30177` from a detached worktree at
+`~/.local/share/gigachad-bot/ompweb`, created from `custom` on first start, so
+its `next build` never touches the fork checkout. The first start installs and
+builds, about 2 minutes. An omp-web already listening on the port is reused.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `GIGACHAD_OMP_WEB_REPO` | `~/git/ompweb` | Fork checkout the worktree comes from |
+| `GIGACHAD_OMP_WEB_DIR` | `~/.local/share/gigachad-bot/ompweb` | Served worktree |
+| `GIGACHAD_OMP_WEB_REF` | `custom` | Ref the worktree is created at |
+| `GIGACHAD_OMP_WEB_BIND` | `127.0.0.1:30177` | omp-web listen address |
+| `GIGACHAD_OMP_WEB_FRAME_ANCESTORS` | `http://127.0.0.1:2999 http://localhost:2999` | Origins allowed to frame omp-web. A frontend origin missing here gets a blank frame |
+| `GIGACHAD_OMP_WEB_URL` | `http://127.0.0.1:30177` | Backend: omp-web base URL, also the frame source in the browser |
+| `GIGACHAD_OMP_WEB_AUTH` | unset | Backend: trusted header for a password-protected omp-web |
+| `GIGACHAD_OMP_WEB` | `1` | `0` makes `run.sh` skip omp-web |
+
+`GIGACHAD_OMP_WEB_URL` is what the browser loads in the frame, so it must be
+reachable from the browser. The default only works in a browser on the host
+itself. There is no systemd unit for omp-web yet, it runs through `run.sh` or
+`run-omp-web.sh`.
+
+#### Update omp-web
+
+gigachad-bot and the fork share the postMessage protocol
+(`src/frontend/features/omp/protocol.ts` mirrors the fork's
+`custom/embed/protocol.ts`). Nothing checks `EMBED_PROTOCOL_VERSION` at runtime: a
+mismatch fails silently (missing composer controls, dropped messages). Always
+deploy both sides together and confirm the version is equal:
+
+```bash
+grep -h 'EMBED_PROTOCOL_VERSION =' \
+  "$REPO/src/frontend/features/omp/protocol.ts" \
+  "$HOME/.local/share/gigachad-bot/ompweb/custom/embed/protocol.ts"
+```
+
+1. Make sure no omp session is mid-run, a restart ends its omp process:
+   `curl -s http://127.0.0.1:8001/api/omp/overview` must list no
+   `running_session_ids`.
+2. Pull the fork and move the served worktree:
+
+   ```bash
+   git -C "$HOME/git/ompweb" pull --ff-only origin custom
+   git -C "$HOME/.local/share/gigachad-bot/ompweb" checkout --detach custom
+   ```
+
+3. Stop the running omp-web, then start `./run-omp-web.sh` again. It rebuilds
+   because the sources are newer than the last build, then answers
+   `curl -sf http://127.0.0.1:30177/login`.
+4. Update gigachad-bot to the matching commit and reload the frontend.
+5. Smoke an omp tab: open a session, send a prompt, Stop, switch the model and
+   thinking level, type `/` and `@` for the suggestion menus.
+
+Known limit: on a fresh omp-web load whose first omp tab is a new session, the
+frame ignores that tab's folder and opens omp-web's last-used one. Tabs opened
+after the frame loaded are unaffected.
+
 ## 2. Publish the private HTTPS ingress
 
 On the backend host, inspect any existing Serve configuration before changing
@@ -374,13 +445,15 @@ For a first deployment or an update:
    `GIGACHAD_BASE_DIR` and `MINERU_SERVER_URL` unset.
 3. On a new host, provision the code sandbox (see above) and confirm
    `agent-sandbox doctor --profile gigachad` passes.
-4. Start or restart `gigachad-bot.service` and confirm its loopback health
+4. For omp tabs, clone the ompweb fork (see "Provision omp-web") and keep it on
+   the `custom` commit matching this gigachad-bot commit.
+5. Start or restart `gigachad-bot.service` and confirm its loopback health
    check.
-5. Run `"$PROD/deploy/tailscale-serve.sh" 8002` and confirm Tailnet HTTPS health
+6. Run `"$PROD/deploy/tailscale-serve.sh" 8002` and confirm Tailnet HTTPS health
    from another enrolled device.
-6. Configure Vercel's root directory, build settings, and public
+7. Configure Vercel's root directory, build settings, and public
    `NEXT_PUBLIC_API_BASE`, then deploy production.
-7. From an enrolled browser, open the Vercel production URL and use the app. A
+8. From an enrolled browser, open the Vercel production URL and use the app. A
    browser outside the Tailnet cannot reach its API by design.
 
 Before an update that could affect stored state, take a non-destructive backup
