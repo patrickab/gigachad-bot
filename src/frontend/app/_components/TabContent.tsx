@@ -20,6 +20,7 @@ import { CreateDocumentPanel } from "@/features/editor/CreateDocumentPanel"
 import { CanvasWorkspace } from "@/features/editor/canvas/CanvasWorkspace"
 import { ArchitectureWindow } from "@/features/editor/architecture/ArchitectureWindow"
 import { OmpSurface } from "@/features/omp/OmpSurface"
+import { OmpSystemPrompt } from "@/features/omp/OmpSystemPrompt"
 import { TabSwitcher } from "@/features/navigation/TabManager"
 import { TokenCounter } from "@/features/chat/TokenCounter"
 import { TopBar, TopBarPill, TopBarTransparent } from "@/features/navigation/TopBar"
@@ -278,7 +279,10 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
           <TopBar
             center={<TabSwitcher />}
             left={<TopBarTransparent>{sidebarToggle}</TopBarTransparent>}
-            right={<TopBarPill><ThemeToggle /></TopBarPill>}
+            right={<TopBarPill>
+              {ompView && <OmpSystemPrompt view={ompView} />}
+              <ThemeToggle />
+            </TopBarPill>}
           />
         ) : appMode === "document" ? (
           <TopBar
