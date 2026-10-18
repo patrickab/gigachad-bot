@@ -5,6 +5,7 @@ import type { WorkspaceItem } from "@/contexts/TabContext"
 import type { FileTreeItem } from "@/components/ui/file-tree/FileTree"
 import { ApiError, addOmpWorkspace, archiveOmpSession, fetchOmpArchive, restoreOmpSession } from "@/lib/backend/api"
 import type { OmpArchivedSession, OmpSession, OmpView, ProjectListItem } from "@/lib/domain/types"
+import { OmpBranchTree } from "./OmpBranchTree"
 import { useOmp } from "./OmpProvider"
 import { sessionForest, sessionTitle, sessionsInside, unlinkedWorkspaces, type SessionNode } from "./sessions"
 
@@ -78,6 +79,7 @@ export function useOmpSidebar({ onOpen }: { onOpen?: (item: WorkspaceItem, inNew
       type: node.forks.length > 0 ? "folder" : "element",
       badge: running.has(session.id) ? "running" : undefined,
       isActive: session.id === shownSessionId,
+      detail: session.id === shownSessionId ? <OmpBranchTree sessionId={session.id} /> : undefined,
       onSelect: () => onOpen?.(ompItem({ kind: "session", sessionId: session.id }, path, projectSlug)),
       actions: [{ label: `Archive ${title}`, icon: Archive, onClick: () => { void archive(session) } }],
       children: node.forks.map((fork) => sessionItem(fork, path, projectSlug)),
