@@ -25,24 +25,25 @@ afterEach(() => {
 })
 
 describe("ProviderUsage", () => {
-  it("summarises the least used subscription, lists limited accounts only once opened, and shows each window on demand", async () => {
+  it("summarises the lowest five-hour usage and reveals other windows on demand", async () => {
     const view = render(<ProviderUsage />)
 
-    expect(await view.findByText("28% · 7d")).toBeVisible()
+    expect(await view.findByRole("button", { name: /Usage.*5-hour usage: 0%/ })).toBeVisible()
     expect(view.queryByText("openai-codex")).not.toBeInTheDocument()
 
     fireEvent.click(view.getByText("Usage"))
     expect(view.getByText("openai-codex")).toBeVisible()
-    expect(view.getByText("28%")).toBeVisible()
+    expect(view.queryByText("28%")).not.toBeInTheDocument()
     expect(view.queryByText("ollama")).not.toBeInTheDocument()
 
-    fireEvent.click(view.getByRole("button", { name: "openai-codex me@example.com" }))
+    fireEvent.click(view.getByRole("button", { name: "openai-codex" }))
     expect(view.getByText("in 6d 7h")).toBeVisible()
+    expect(view.getByText("28%")).toBeVisible()
   })
 
   it("refreshes past the server cache and says so when usage cannot be read", async () => {
     const view = render(<ProviderUsage />)
-    await view.findByText("28% · 7d")
+    await view.findByRole("button", { name: /Usage.*5-hour usage: 0%/ })
 
     api.fetchProviderUsage.mockRejectedValueOnce(new Error("502"))
     fireEvent.click(view.getByRole("button", { name: "Refresh usage" }))

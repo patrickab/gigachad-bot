@@ -293,6 +293,10 @@ export function Sidebar({
           renderBeforeItem={(item) => item.data ? <ChatBranchPreview file={item.data} /> : null}
           onMoveToRoot={(path) => moveToProject(path, "")}
         />
+        <div role="separator" className="my-4 border-t border-divider/50" />
+        <FileTree label="File mounts" items={buildMounts(rootTreeData)} controller={fileMountController}
+          create={{ label: "Add file mount", onClick: () => setFileMountPickerOpen(true) }}
+        />
         {omp.available && <>
           <div role="separator" className="my-4 border-t border-divider/50" />
           <FileTree label="OMP" items={omp.workspaceItems(linkedMounts)} controller={controller}
@@ -301,10 +305,6 @@ export function Sidebar({
           />
           {omp.error && <p role="alert" className="px-2 py-1 text-xs text-danger">{omp.error}</p>}
         </>}
-        <div role="separator" className="my-4 border-t border-divider/50" />
-        <FileTree label="File mounts" items={buildMounts(rootTreeData)} controller={fileMountController}
-          create={{ label: "Add file mount", onClick: () => setFileMountPickerOpen(true) }}
-        />
       </nav>
       <ProviderUsage />
       {renderSettings && <div className="shrink-0 p-2">{renderSettings()}</div>}

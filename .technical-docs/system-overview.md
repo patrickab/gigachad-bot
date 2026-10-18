@@ -260,14 +260,17 @@ database copy under `graph/<slug>/` is used.
 5h/7d/30d window with the minutes until reset, or `no_limits`. Output is cached
 for 5 minutes. `refresh=true` runs `omp usage invalidate` first. A missing or
 failing `omp` answers 502. The sidebar's `ProviderUsage` (above Settings) shows a
-"Usage" line with the least used subscription (each counted by its fullest window), and opens into one meter per limited
-account (click for each window). Accounts without limits are hidden.
+"Usage" line with the lowest available 5-hour usage across subscriptions. Provider
+rows show only their 5-hour percentage and a muted bar. Missing 5-hour limits show
+`—`, never a weekly fallback. Clicking a provider reveals all windows (including
+weekly usage) and reset times. Account emails stay hidden. Accounts without limits
+are hidden. Only percentage labels at 100% or above turn red, never the bars.
 
 
 ## File mounts
 
 File roots are mounted backend directories, listed in the sidebar's
-"File mounts" section below "General". "Add file mount" opens a directory
+"File mounts" section below "General" and above "OMP". "Add file mount" opens a directory
 picker (`features/navigation/FileMountPicker.tsx`) that starts at the backend
 user's home: clicking a directory opens it, the up button opens its parent, the
 list follows a typed path, and Enter mounts the path in the input. It lists
