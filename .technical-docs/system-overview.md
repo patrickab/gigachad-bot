@@ -320,11 +320,20 @@ the launcher sets it from `GIGACHAD_OMP_WEB_FRAME_ANCESTORS`
 - **Frame**: `features/omp/OmpProvider.tsx` renders ONE iframe for all omp tabs,
   fixed over the active omp tab's slot and hidden otherwise. Tabs switch it by
   postMessage (`features/omp/protocol.ts`, mirror of the fork's
-  `custom/embed/protocol.ts`), never by reload. In a frame omp-web hides its own
-  sidebar, topbar and file panel
+  `custom/embed/protocol.ts`), never by reload. The frame loads with the first
+  session as `?session=` deep link. In a frame omp-web hides its own sidebar,
+  topbar, file panel and input box
 - **Tab item**: `WorkspaceItem` kind `omp` holds an `OmpView` (session, new session
   in a cwd, settings). A session the frame opens itself (fork, first message of a
   new session) becomes the tab's view
+- **Composer**: omp tabs use gigachad's `ChatInput` (tools menu off) and
+  `ModelDropdown` (only the OMP provider rows, `litellm_proxy/<provider>/<model>`),
+  `features/omp/OmpComposer.tsx`. They drive omp-web's hidden composer over the
+  bridge (`composer-send`, `composer-abort`, `composer-set-model`, state back as
+  `composer`), so sending, queueing and new sessions stay omp-web's. Images go as
+  base64, documents as text the way chats send them. Uploads land under the tab's
+  `chatId`. Not available: slash and `@` autocomplete, word prediction, thinking
+  level, `!` bash mode, steering while a run is busy
 - **Sidebar**: a project whose slug names a file mount's folder gets a "code"
   category with the sessions whose `project_root ?? cwd` lies inside that mount.
   The "OMP" section lists every other omp-web workspace, its label opens omp

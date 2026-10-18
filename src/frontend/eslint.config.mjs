@@ -40,6 +40,8 @@ export default defineConfig([
           crossFeature("chat", "editor"),
           crossFeature("navigation", "memory"),
           crossFeature("navigation", "omp"),
+          crossFeature("omp", "chat"),
+          crossFeature("omp", "settings"),
         ],
       }],
     },

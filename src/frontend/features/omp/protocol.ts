@@ -5,7 +5,7 @@
  * - Every message carries `channel: EMBED_CHANNEL` so unrelated postMessage traffic is ignored
  */
 export const EMBED_CHANNEL = "omp-embed"
-export const EMBED_PROTOCOL_VERSION = 1
+export const EMBED_PROTOCOL_VERSION = 2
 
 export type ThemeMode = "light" | "dark"
 
@@ -24,6 +24,12 @@ export type BranchNode = {
   children: BranchNode[]
 }
 
+/** omp model id, as omp-web's composer holds it. */
+export type ModelRef = { provider: string; modelId: string }
+
+/** Base64 image without data-URL prefix, as omp's `prompt` command takes it. */
+export type ComposerImage = { data: string; mimeType: string }
+
 export type ShellMessage =
   /** Sent on every `ready`: the frame learns the shell origin and replays its current state. */
   | { type: "hello"; version: number; forwardKeys: KeyChord[]; theme: ThemeMode }
@@ -33,6 +39,13 @@ export type ShellMessage =
   | { type: "open-settings" }
   | { type: "set-theme"; theme: ThemeMode }
   | { type: "select-leaf"; sessionId: string; leafId: string | null }
+  /**
+   * This shell's composer replaces omp-web's hidden one. Each names the session it was typed for (null: new-session screen), a frame showing another one ignores it.
+   * `composer-send` submits like omp-web's composer: builtins (`/btw`), then a prompt, a follow-up while the agent is busy.
+   */
+  | { type: "composer-send"; sessionId: string | null; text: string; images: ComposerImage[] }
+  | { type: "composer-abort"; sessionId: string | null }
+  | ({ type: "composer-set-model"; sessionId: string | null } & ModelRef)
 
 export type FrameMessage =
   /** Posted on every page load, the only message sent before `hello` (target origin "*", no data). */
@@ -41,5 +54,7 @@ export type FrameMessage =
   | { type: "view"; sessionId: string | null; settingsOpen: boolean }
   | { type: "branch-tree"; sessionId: string; tree: BranchNode[]; activeLeafId: string | null }
   | ({ type: "key" } & KeyChord)
+  /** Composer state for this shell's composer. `sessionId` is the shown session, null on the new-session screen. */
+  | { type: "composer"; sessionId: string | null; streaming: boolean; model: ModelRef | null }
 
 export type Envelope<Message> = Message & { channel: typeof EMBED_CHANNEL }

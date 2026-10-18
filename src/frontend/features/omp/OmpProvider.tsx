@@ -5,7 +5,10 @@ import { useSettings } from "@/contexts/SettingsContext"
 import { useThemeName } from "@/hooks/useThemeName"
 import { fetchOmpOverview } from "@/lib/backend/api"
 import type { OmpOverview, OmpView } from "@/lib/domain/types"
+import type { ComposerState } from "./composer"
 import { EMBED_CHANNEL, EMBED_PROTOCOL_VERSION, type BranchNode, type Envelope, type FrameMessage, type KeyChord, type ShellMessage } from "./protocol"
+
+export type ComposerCommand = Extract<ShellMessage, { type: "composer-send" | "composer-abort" | "composer-set-model" }>
 
 const OVERVIEW_POLL_MS = 15_000
 /** A navigation waits this long for the frame to report its view before reports count as user navigation again. */
@@ -42,6 +45,9 @@ interface OmpContextValue {
   selectLeaf: (sessionId: string, leafId: string | null) => void
   attachFrame: (attachment: FrameAttachment) => () => void
   reloadFrame: () => void
+  /** Composer state of the session the frame shows, null until the frame reported one. */
+  composer: ComposerState | null
+  sendToComposer: (command: ComposerCommand) => void
 }
 
 const OmpContext = createContext<OmpContextValue | null>(null)
@@ -143,6 +149,7 @@ export function OmpProvider({ children }: { children: ReactNode }) {
   const [frameStatus, setFrameStatus] = useState<FrameStatus>("loading")
   const [frameKey, setFrameKey] = useState(0)
   const [branchTree, setBranchTree] = useState<BranchTree | null>(null)
+  const [composer, setComposer] = useState<ComposerState | null>(null)
   const frameRef = useRef<HTMLIFrameElement>(null)
   const frameViewRef = useRef<FrameView | null>(null)
   const lastNewCwdRef = useRef<string | null>(null)
@@ -189,6 +196,7 @@ export function OmpProvider({ children }: { children: ReactNode }) {
     frameViewRef.current = null
     lastNewCwdRef.current = null
     setFrameStatus("ready")
+    setComposer(null)
     post({ type: "hello", version: EMBED_PROTOCOL_VERSION, forwardKeys: FORWARD_KEYS, theme })
     if (attachment) navigate(attachment.view, true)
   })
@@ -201,6 +209,7 @@ export function OmpProvider({ children }: { children: ReactNode }) {
       if (message.type === "ready") onFrameReady()
       else if (message.type === "view") onFrameView(message)
       else if (message.type === "branch-tree") setBranchTree({ sessionId: message.sessionId, tree: message.tree, activeLeafId: message.activeLeafId })
+      else if (message.type === "composer") setComposer(message)
       else if (message.type === "key") {
         const { key, altKey, ctrlKey, metaKey, shiftKey } = message
         document.dispatchEvent(new KeyboardEvent("keydown", { key, altKey, ctrlKey, metaKey, shiftKey, bubbles: true, cancelable: true }))
@@ -242,9 +251,11 @@ export function OmpProvider({ children }: { children: ReactNode }) {
     post({ type: "select-leaf", sessionId, leafId })
   }, [post])
 
+  const sendToComposer = useCallback((command: ComposerCommand) => post(command), [post])
+
   const value = useMemo<OmpContextValue>(() => ({
-    overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, reloadFrame,
-  }), [overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, reloadFrame])
+    overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, reloadFrame, composer, sendToComposer,
+  }), [overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, reloadFrame, composer, sendToComposer])
 
   const visible = attachment !== null && rect !== null && frameStatus === "ready"
   useEffect(() => {

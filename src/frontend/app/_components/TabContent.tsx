@@ -19,6 +19,7 @@ import { DiffViewer } from "@/features/editor/diff/DiffViewer"
 import { CreateDocumentPanel } from "@/features/editor/CreateDocumentPanel"
 import { CanvasWorkspace } from "@/features/editor/canvas/CanvasWorkspace"
 import { ArchitectureWindow } from "@/features/editor/architecture/ArchitectureWindow"
+import { OmpModelSelector } from "@/features/omp/OmpComposer"
 import { OmpSurface } from "@/features/omp/OmpSurface"
 import { OmpSystemPrompt } from "@/features/omp/OmpSystemPrompt"
 import { TabSwitcher } from "@/features/navigation/TabManager"
@@ -275,10 +276,14 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
             </>}
           />
         ) : appMode === "omp" ? (
-          // omp's composer carries its own model and usage controls.
           <TopBar
             center={<TabSwitcher />}
-            left={<TopBarTransparent>{sidebarToggle}</TopBarTransparent>}
+            left={<>
+              <TopBarTransparent>{sidebarToggle}</TopBarTransparent>
+              {ompView && <TopBarTransparent>
+                <OmpModelSelector view={ompView} models={models} onProvidersChange={saveModelProviders} onTabOrderChange={saveModelTabOrder} onDefaultsChange={saveModelDefaults} placement="below" />
+              </TopBarTransparent>}
+            </>}
             right={<TopBarPill>
               {ompView && <OmpSystemPrompt view={ompView} />}
               <ThemeToggle />
