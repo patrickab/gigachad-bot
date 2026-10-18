@@ -18,7 +18,9 @@ import { ChatBranchPreview } from "./ChatBranchPreview"
 import { FileMountPicker } from "./FileMountPicker"
 import { useWorktrees } from "./useWorktrees"
 import { addRootFilesToProject, addFileRoot, createArchitectureSource, fileRootTree, removeFileRoot, listNotes, listProjectDocuments, moveDocument, removeDocument, writeDocument } from "@/lib/backend/api"
-import { useTab, useTabActive, type AppSurface } from "@/contexts/TabContext"
+import { useTab, useTabActive, type AppSurface, type WorkspaceItem } from "@/contexts/TabContext"
+import { projectMount } from "@/features/omp/sessions"
+import { useOmpSidebar } from "@/features/omp/useOmpSidebar"
 import { isArchitecturePath } from "@/lib/domain/architecturePaths"
 import { baseName } from "@/lib/paths"
 
@@ -35,13 +37,15 @@ interface SidebarProps {
   onCanvasSelect?: (path: string, scope: string) => void
   onCanvasDeleted?: (path: string) => void
   onArchitectureSelect?: (slug: string) => void
+  /** Show an omp-web session, new session or settings, in the current tab unless `inNewTab`. */
+  onOmpOpen?: (item: WorkspaceItem, inNewTab?: boolean) => void
   renderSettings?: () => React.ReactNode
   appMode: AppSurface
 }
 
 export function Sidebar({
   onFileSelect, onDiffSelect, onRootsChanged, onDocumentsChanged, onDocumentSelect, onProjectSelect, onNewChat,
-  activeCanvasPath, onCanvasSelect, onCanvasDeleted, onArchitectureSelect,
+  activeCanvasPath, onCanvasSelect, onCanvasDeleted, onArchitectureSelect, onOmpOpen,
   activeDocumentPath, renderSettings, appMode,
 }: SidebarProps) {
   const { collapsed } = useSidebar()
@@ -53,7 +57,7 @@ export function Sidebar({
   const { schedule, pending } = useUndoDelete()
   const defaultExpanded = useMemo(() => [
     "shared:canvases",
-    ...projects.flatMap((project) => ["chats", "canvases", "files"].map((category) => `project:${project.slug}:${category}`)),
+    ...projects.flatMap((project) => ["chats", "canvases", "files", "code"].map((category) => `project:${project.slug}:${category}`)),
   ], [projects])
   const controller = useFileTree({ storageKey: "expanded_workspace_projects", defaultExpanded })
   const fileMountController = usePathTree()
@@ -86,6 +90,7 @@ export function Sidebar({
   }, [projects, activeCanvasPath, appMode, isActive])
 
   const mounts = rootTreeData.map((node) => node.mount ?? node.path)
+  const omp = useOmpSidebar({ onOpen: onOmpOpen })
   const worktrees = useWorktrees(mounts)
   const { reload: reloadWorktrees } = worktrees
   const activeWorktreesKey = worktrees.activeWorktrees.join("\n")
@@ -183,6 +188,8 @@ export function Sidebar({
     const docs = (project ? documents[scope] ?? [] : notes)
       .filter((doc) => !pending(`document:${scope}:${doc.path}`))
     const chats = project ? buildChats(project, branchMeta) : visibleRootFiles.map((path) => ({ path, label: path.replace(/\.json$/, "") }))
+    const mount = project ? projectMount(project.slug, mounts) : null
+    const code = project && mount ? omp.codeCategory(project, mount) : null
     return [
       {
         id: `${prefix}:chats`, label: "chats", type: "folder",
@@ -234,6 +241,7 @@ export function Sidebar({
           onDelete: () => deleteDocument(doc.path, scope),
         })),
       }] : []),
+      ...(code ? [code] : []),
     ]
   }
 

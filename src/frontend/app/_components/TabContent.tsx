@@ -48,7 +48,7 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
   onOpenChat: (historyFile: string, qaIndex?: number) => void
   onOpenProject: (slug: string) => void
   onNewChat: (slug: string | null) => void
-  onOpenItem: (item: WorkspaceItem) => void
+  onOpenItem: (item: WorkspaceItem, inNewTab?: boolean) => void
   focus: ChatFocus
 }) {
   const { tab, isActive, setModeLabel, updateConfig, setAppMode, setWorkspaceItem, setHistoryFile, setTitle } = useTab()
@@ -250,6 +250,7 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
         activeDocumentPath={appMode === "document" ? documentItem?.path : null}
         onCanvasSelect={(path, scope) => onOpenItem({ kind: "canvas", path, projectSlug: scope || null })}
         onArchitectureSelect={(slug) => onOpenItem({ kind: "architecture", path: `graph/${slug}/`, projectSlug: slug })}
+        onOmpOpen={onOpenItem}
         renderSettings={() => (
           <SettingsMenu prompts={prompts} config={config} onConfigChange={updateConfig} onEditPrompts={() => setPromptEditorOpen(true)} models={models} researchEnabled={researchEnabled} />
         )}

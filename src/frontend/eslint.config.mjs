@@ -39,6 +39,7 @@ export default defineConfig([
           { from: { element: { type: "app" } }, allow: { to: { element: { type: "feature", fileInternalPath: publicEntry } } } },
           crossFeature("chat", "editor"),
           crossFeature("navigation", "memory"),
+          crossFeature("navigation", "omp"),
         ],
       }],
     },

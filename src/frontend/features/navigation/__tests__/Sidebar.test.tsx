@@ -63,6 +63,15 @@ vi.mock("@/contexts/ProjectContext", () => ({
 }))
 vi.mock("@/features/memory/MemoryViewerContext", () => ({ useMemoryViewer: () => ({ openMemoryViewer: vi.fn() }) }))
 vi.mock("@/contexts/UndoDeleteContext", () => ({ useUndoDelete: () => ({ schedule: vi.fn(), pending: () => false }) }))
+const omp = vi.hoisted(() => ({ overview: null as import("@/lib/domain/types").OmpOverview | null }))
+vi.mock("@/features/omp/OmpProvider", () => ({ useOmp: () => omp }))
+
+function ompSession(id: string, cwd: string, extra: Partial<import("@/lib/domain/types").OmpSession> = {}) {
+  return {
+    id, path: `/s/${id}.jsonl`, cwd, name: id, created: "2026-01-01", modified: "2026-01-01", message_count: 1,
+    first_message: "", parent_session_id: null, project_root: null, worktree_branch: null, ...extra,
+  }
+}
 
 beforeEach(() => {
   const stored = new Map<string, string>()
@@ -196,6 +205,39 @@ describe("Project navigation", () => {
 
     await waitFor(() => expect(onArchitectureSelect).toHaveBeenCalledWith("empty"))
     expect(vi.mocked((await import("@/lib/backend/api")).createArchitectureSource)).toHaveBeenCalledWith("empty", "system.c4")
+  })
+
+  it("lists the omp sessions of the mount named like a project under its code category and starts new ones there", async () => {
+    const listTree = api.fileRootTree.getMockImplementation()
+    api.fileRootTree.mockImplementation(async () => ({ enabled: true, tree: [{ path: "/git/proj", name: "proj", type: "root", children: [] }] }))
+    omp.overview = {
+      running_session_ids: ["fork"],
+      workspaces: [],
+      sessions: [
+        ompSession("main", "/git/proj/src"),
+        ompSession("fork", "/git/proj", { parent_session_id: "main" }),
+        ompSession("worktree", "/git/proj-worktrees/feat", { project_root: "/git/proj" }),
+        ompSession("elsewhere", "/git/project-old"),
+      ],
+    }
+    try {
+      const onOmpOpen = vi.fn()
+      const view = render(<Sidebar appMode="chat" onOmpOpen={onOmpOpen} />)
+      fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
+      const code = within(await within(view.getByLabelText("Proj contents")).findByRole("group", { name: "code contents" }))
+      expect(code.getByRole("button", { name: "worktree" })).toBeVisible()
+      expect(code.queryByRole("button", { name: "elsewhere" })).not.toBeInTheDocument()
+
+      fireEvent.click(code.getByRole("button", { name: "main" }))
+      expect(onOmpOpen).toHaveBeenLastCalledWith({ kind: "omp", path: "/git/proj", projectSlug: "proj", omp: { kind: "session", sessionId: "main" } })
+      expect(code.getByRole("button", { name: "fork running" })).toBeVisible()
+
+      fireEvent.click(view.getByRole("button", { name: "New session in Proj" }))
+      expect(onOmpOpen).toHaveBeenLastCalledWith({ kind: "omp", path: "/git/proj", projectSlug: "proj", omp: { kind: "new", cwd: "/git/proj" } }, true)
+    } finally {
+      omp.overview = null
+      api.fileRootTree.mockImplementation(listTree!)
+    }
   })
 
   it("keeps expansion independent from project selection and shares it across mounted views", async () => {

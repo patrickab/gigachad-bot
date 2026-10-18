@@ -12,7 +12,7 @@ import { useProject } from "@/contexts/ProjectContext"
 import { useSettings } from "@/contexts/SettingsContext"
 import { SidebarProvider } from "@/features/navigation/SidebarContext"
 import { OmpProvider } from "@/features/omp/OmpProvider"
-import type { Tab, WorkspaceItem } from "@/contexts/TabContext"
+import { surfaceOf, type Tab, type WorkspaceItem } from "@/contexts/TabContext"
 import { TabContent } from "./TabContent"
 
 /** Keep each project's list entry (saved chat labels) current: histories refresh after every chat save. */
@@ -65,9 +65,14 @@ export function AppShell() {
     tabManagerRef.current?.showChat(historyFile)
   }, [])
 
-  const handleOpenItem = useCallback((item: WorkspaceItem) => {
-    tabManagerRef.current?.showItem(item)
-  }, [])
+  const handleOpenItem = useCallback((item: WorkspaceItem, inNewTab = false) => {
+    if (!inNewTab) {
+      tabManagerRef.current?.showItem(item)
+      return
+    }
+    const tab = nextTab(settings.tabDefaults)
+    tabManagerRef.current?.openTab({ ...tab, workspaceItem: item, projectSlug: item.projectSlug, appMode: surfaceOf(item) })
+  }, [settings.tabDefaults])
 
   const handleHistoriesMoved = useCallback((moves: ReadonlyMap<string, string>) => {
     tabManagerRef.current?.relocateHistories(moves)
