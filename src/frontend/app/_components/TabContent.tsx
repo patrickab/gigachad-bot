@@ -15,6 +15,7 @@ import { SaveAsModal } from "@/components/ui/SaveAsModal"
 import { FileViewer } from "@/features/editor/FileViewer"
 import { DocumentPicker } from "@/features/editor/DocumentPicker"
 import { DocumentEditor } from "@/features/editor/DocumentEditor"
+import { DiffViewer } from "@/features/editor/diff/DiffViewer"
 import { CreateDocumentPanel } from "@/features/editor/CreateDocumentPanel"
 import { CanvasWorkspace } from "@/features/editor/canvas/CanvasWorkspace"
 import { ArchitectureWindow } from "@/features/editor/architecture/ArchitectureWindow"
@@ -52,6 +53,7 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
   const { tab, isActive, setModeLabel, updateConfig, setAppMode, setWorkspaceItem, setHistoryFile, setTitle } = useTab()
   const projectSlug = tab.projectSlug
   const documentItem = tab.workspaceItem?.kind === "document" ? tab.workspaceItem : null
+  const diffItem = tab.workspaceItem?.kind === "diff" ? tab.workspaceItem : null
   const chat = useChat()
   const { messages, isStreaming, cancel, reset, models, saveModelProviders, saveModelTabOrder, saveModelDefaults, prompts, setPrompts, setMessages, totalUsage, setTotalUsage } = chat
   const { refreshAll, createBranch, setActiveFile, setActiveQaIndex } = useBranches()
@@ -235,6 +237,7 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
     <div className="relative flex h-full overflow-hidden">
       <Sidebar
         onFileSelect={(path) => onOpenItem({ kind: "document", path, projectSlug: null, rootFile: true })}
+        onDiffSelect={(path) => onOpenItem({ kind: "diff", path, projectSlug: null })}
         onRootsChanged={filePicker.refreshFileList}
         onDocumentsChanged={docs.refreshDocuments}
         {...canvasSidebarProps}
@@ -307,7 +310,9 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
           />
         )}
         <div data-workspace-surface className={`flex-1 min-h-0 relative ${appMode === "canvas" ? "overflow-hidden" : ""}`}>
-          {appMode === "document" && documentItem ? (
+          {appMode === "document" && diffItem ? (
+            <DiffViewer key={diffItem.path} root={diffItem.path} />
+          ) : appMode === "document" && documentItem ? (
             documentItem.path.toLowerCase().endsWith(".pdf") ? (
               <LazyPdfViewer url={fileViewerRawUrl(documentItem.path)} />
             ) : (

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion } from "framer-motion"
-import { Brain } from "lucide-react"
+import { Brain, GitCompare } from "lucide-react"
 import { ArchitectureIcon } from "./ArchitectureIcon"
 import { ProviderUsage } from "./ProviderUsage"
 import { cn } from "@/lib/utils"
@@ -23,6 +23,7 @@ import { baseName } from "@/lib/paths"
 
 interface SidebarProps {
   onFileSelect?: (path: string) => void
+  onDiffSelect?: (path: string) => void
   onRootsChanged?: () => void
   onDocumentsChanged?: () => void
   onDocumentSelect?: (path: string, scope: string) => void
@@ -38,7 +39,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({
-  onFileSelect, onRootsChanged, onDocumentsChanged, onDocumentSelect, onProjectSelect, onNewChat,
+  onFileSelect, onDiffSelect, onRootsChanged, onDocumentsChanged, onDocumentSelect, onProjectSelect, onNewChat,
   activeCanvasPath, onCanvasSelect, onCanvasDeleted, onArchitectureSelect,
   activeDocumentPath, renderSettings, appMode,
 }: SidebarProps) {
@@ -128,6 +129,7 @@ export function Sidebar({
       multiSelect: true,
       isActive: node.path === activeDocumentPath,
       onSelect: node.type === "file" ? () => onFileSelect?.(node.path) : undefined,
+      actions: node.type === "root" ? [{ label: `Open diff for ${node.name}`, icon: GitCompare, onClick: () => onDiffSelect?.(node.path) }] : undefined,
       onDelete: node.type === "root" ? () => schedule(`root:${node.path}`, node.name, async () => {
         const result = await removeFileRoot(node.path)
         setRootTreeData(result.tree)

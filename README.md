@@ -8,6 +8,7 @@ A self-hosted LLM workspace for chat, research, and working with your own docume
 
 - **Choose your models**: connect cloud and local providers through [LiteLLM](https://github.com/BerriAI/litellm).
 - **Watch subscription limits**: the sidebar shows how much of each [OMP](https://github.com/can1357/oh-my-pi) login's 5h, 7d and monthly limits you have used.
+- **Review changes**: open the git diff of any mounted file directory from the sidebar.
 - **Organize projects**: keep conversations, files, canvases, architecture diagrams, and project memory together. Each chat uses its containing project's memory, independently of the selected tab.
 - **Explore conversations**: branch from any message and merge branches back.
 - **Work with documents**: extract PDF content with [MinerU](https://github.com/opendatalab/mineru), attach live file references, and edit Obsidian vault files in place.

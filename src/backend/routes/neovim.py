@@ -3,7 +3,8 @@
 `WS /api/neovim/session` runs one `nvim` per connection. Binary frames carry terminal
 bytes both ways, text frames carry JSON control messages:
 
-- client -> server: `{"type": "open", "path", "filename", "content", "rows", "cols"}` first,
+- client -> server: `{"type": "open", "path", "filename", "content", "base_content"?, "rows", "cols"}` first
+  (a string `base_content` opens a read-only left diff buffer against the editable document),
   then `{"type": "resize", "rows", "cols"}` and `{"type": "saved", "id", "content" | "error"}`
 - server -> client: `{"type": "save", "id", "content"}` on `:w`, `{"type": "exit", "code"}` when `nvim` quits
 
@@ -48,6 +49,7 @@ class OpenMessage(BaseModel):
     path: str
     filename: str
     content: str
+    base_content: str | None = None
     rows: int = Field(ge=1, le=1000)
     cols: int = Field(ge=1, le=1000)
 
@@ -164,6 +166,7 @@ async def neovim_session(
     session = NeovimSession.spawn(
         opening.filename,
         opening.content,
+        base_content=opening.base_content,
         rows=opening.rows,
         cols=opening.cols,
         cwd=working_directory(roots, opening.path),

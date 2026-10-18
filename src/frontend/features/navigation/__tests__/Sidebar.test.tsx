@@ -126,6 +126,13 @@ describe("Project navigation", () => {
     expect(fileMounts.queryByRole("button", { name: "guide.md" })).not.toBeInTheDocument()
   })
 
+  it("opens the diff of a file mount from its hover action", async () => {
+    const onDiffSelect = vi.fn()
+    const view = render(<Sidebar appMode="chat" onDiffSelect={onDiffSelect} />)
+    fireEvent.click(await within(view.getByLabelText("File mounts")).findByRole("button", { name: "Open diff for source" }))
+    expect(onDiffSelect).toHaveBeenCalledWith("/source")
+  })
+
   it("opens canvases, architecture and files from chat without mixing their categories", async () => {
     const onCanvasSelect = vi.fn()
     const onArchitectureSelect = vi.fn()

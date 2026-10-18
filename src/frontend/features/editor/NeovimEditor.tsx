@@ -29,6 +29,7 @@ export interface NeovimDocument {
   path: string
   filename: string
   content: string
+  base_content?: string
 }
 
 /** Run one backend Neovim session for `document`.
@@ -74,7 +75,7 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
       const encoder = new TextEncoder()
 
       socket.onopen = () => {
-        send(JSON.stringify({ type: "open", path: opened.path, filename: opened.filename, content: opened.content, rows: xterm.rows, cols: xterm.cols }))
+        send(JSON.stringify({ type: "open", path: opened.path, filename: opened.filename, content: opened.content, base_content: opened.base_content, rows: xterm.rows, cols: xterm.cols }))
       }
       socket.onmessage = async (event: MessageEvent<ArrayBuffer | string>) => {
         if (typeof event.data !== "string") { xterm.write(new Uint8Array(event.data)); return }

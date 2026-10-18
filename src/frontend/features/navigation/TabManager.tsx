@@ -81,7 +81,7 @@ function TabScope({ tab, isActive, updateTab, updateModeLabel, children }: {
       setWorkspaceItem: (workspaceItem) => updateTab(id, (tab) => ({
         workspaceItem,
         projectSlug: workspaceItem ? workspaceItem.projectSlug : tab.projectSlug,
-        appMode: workspaceItem?.kind === "document" ? "document" : "canvas",
+        appMode: workspaceItem?.kind === "document" || workspaceItem?.kind === "diff" ? "document" : "canvas",
       })),
       setHistoryFile: (historyFile) => updateTab(id, () => ({ historyFile })),
       setTitle: (title) => updateTab(id, () => ({ title })),
@@ -101,6 +101,9 @@ function tabLocation(tab: Tab) {
     return tab.workspaceItem?.kind === "architecture"
       ? { category: "architecture", file: tab.name ?? "System overview" }
       : { category: "canvases", file: tab.name ?? (tab.workspaceItem?.kind === "canvas" ? baseName(tab.workspaceItem.path) : "new.canvas") }
+  }
+  if (tab.appMode === "document" && tab.workspaceItem?.kind === "diff") {
+    return { category: "diff", file: tab.name ?? baseName(tab.workspaceItem.path) }
   }
   if (tab.appMode === "document") {
     return { category: "files", file: tab.name ?? (tab.workspaceItem ? baseName(tab.workspaceItem.path) : "New file") }
@@ -290,7 +293,7 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
         workspaceItem: item.kind === "architecture" && tab.workspaceItem?.kind === "architecture"
           && tab.workspaceItem.projectSlug === item.projectSlug ? tab.workspaceItem : item,
         projectSlug: item.projectSlug,
-        appMode: item.kind === "document" ? "document" : "canvas",
+        appMode: item.kind === "document" || item.kind === "diff" ? "document" : "canvas",
       }))
     },
     relocateHistories: (moves) => {

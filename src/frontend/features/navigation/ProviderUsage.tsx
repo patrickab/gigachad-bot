@@ -31,6 +31,11 @@ function Meter({ percent }: { percent: number }) {
 
 function AccountRow({ report }: { report: ProviderUsageReport }) {
   const [open, setOpen] = useState(false)
+  if (report.unavailable) return <div className="flex items-baseline gap-2 px-2 pt-1 pb-1.5 text-xs">
+    <span className="shrink-0 text-ink">{report.provider}</span>
+    <span className="min-w-0 flex-1 truncate text-ink-faint">{report.account}</span>
+    <span className="shrink-0 text-ink-faint">unavailable</span>
+  </div>
   const worst = worstWindow(report)
   const percent = Math.round(worst?.percent ?? 0)
   return <div>
@@ -85,7 +90,8 @@ export function ProviderUsage() {
   }, [load])
 
   if (!failed && reports?.length === 0) return null
-  const worst = (reports ?? []).flatMap((report) => report.windows).reduce<ProviderUsageWindow | null>((best, window) => (!best || window.percent > best.percent ? window : best), null)
+  // Headroom: each account counts with its binding window, the header shows the least used account.
+  const worst = (reports ?? []).map(worstWindow).reduce<ProviderUsageWindow | null>((least, window) => (window && (!least || window.percent < least.percent) ? window : least), null)
   const summary = failed ? "unavailable" : worst ? `${Math.round(worst.percent)}% · ${worst.id}` : "…"
 
   return <section aria-label="Provider usage" className="group/usage mx-2 shrink-0 border-t border-divider/50 py-2">

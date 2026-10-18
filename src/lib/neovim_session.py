@@ -28,11 +28,14 @@ _STARTUP_SECONDS = 15
 _SHUTDOWN_SECONDS = 2
 _READ_CHUNK = 65536
 
-# Receives (channel, path). Mirrors Neovim's own write rules: an empty buffer is
+# Receives (channel, working path, optional baseline path). Mirrors Neovim's write rules:
 # empty, otherwise a final newline unless both 'eol' and 'fixeol' are off.
 _SETUP_LUA = r"""
-local channel, path = ...
-local buffer = vim.fn.bufnr(path)
+local channel, path, base_path = ...
+if base_path == vim.NIL then base_path = nil end
+local buffer = vim.fn.bufadd(path)
+vim.fn.bufload(buffer)
+vim.api.nvim_win_set_buf(0, buffer)
 
 local function buffer_text()
   local lines = vim.api.nvim_buf_get_lines(buffer, 0, -1, false)
@@ -59,6 +62,21 @@ vim.api.nvim_create_autocmd("BufWriteCmd", {
     vim.api.nvim_echo({ { "Saved " .. vim.fn.fnamemodify(path, ":t") } }, false, {})
   end,
 })
+
+if base_path then
+  local work_window = vim.api.nvim_get_current_win()
+  vim.cmd("leftabove vertical split " .. vim.fn.fnameescape(base_path))
+  local base_buffer = vim.api.nvim_get_current_buf()
+  vim.bo[base_buffer].readonly = true
+  vim.bo[base_buffer].modifiable = false
+  vim.api.nvim_create_autocmd("BufWriteCmd", {
+    buffer = base_buffer,
+    callback = function() error("Baseline is read-only", 0) end,
+  })
+  vim.cmd("diffthis")
+  vim.api.nvim_set_current_win(work_window)
+  vim.cmd("diffthis")
+end
 """
 
 
@@ -186,7 +204,8 @@ class NeovimSession:
     >>> await session.close()
     """
 
-    def __init__(self, process: subprocess.Popen, terminal_fd: int, workdir: Path, document: Path) -> None:
+    def __init__(self, process: subprocess.Popen, terminal_fd: int, workdir: Path, document: Path, base: Path | None = None) -> None:
+        self._base = base
         self._process = process
         self._terminal_fd = terminal_fd
         self._workdir = workdir
@@ -197,11 +216,16 @@ class NeovimSession:
         self._loop.add_reader(terminal_fd, self._read_terminal)
 
     @classmethod
-    def spawn(cls, filename: str, content: str, *, rows: int, cols: int, cwd: Path) -> NeovimSession:
-        """Start `nvim` in *cwd* on a private copy of *content*. Call from a running event loop."""
+    def spawn(cls, filename: str, content: str, *, rows: int, cols: int, cwd: Path, base_content: str | None = None) -> NeovimSession:
+        """Start `nvim` in *cwd* on a private copy of *content*, diffed against a read-only *base_content* when given. Call from a running event loop."""
         workdir = Path(tempfile.mkdtemp(prefix="gigachad-nvim-"))
         document = workdir / _document_name(filename)
         document.write_text(content, encoding="utf-8", newline="")
+        base: Path | None = None
+        if base_content is not None:
+            (workdir / "base").mkdir()
+            base = workdir / "base" / _document_name(filename)
+            base.write_text(base_content, encoding="utf-8", newline="")
         terminal_fd, child_fd = os.openpty()
         _set_terminal_size(terminal_fd, rows, cols)
         try:
@@ -221,7 +245,7 @@ class NeovimSession:
             raise
         finally:
             os.close(child_fd)
-        return cls(process, terminal_fd, workdir, document)
+        return cls(process, terminal_fd, workdir, document, base)
 
     async def connect(self, save: SaveDocument) -> None:
         """Route `:w` of the document buffer to *save*, whose return value replaces the buffer if it differs."""
@@ -242,7 +266,8 @@ class NeovimSession:
         reader, writer = await asyncio.open_unix_connection(str(socket_path))
         self._rpc = _NeovimRpc(reader, writer, handle_request)
         channel, _ = await asyncio.wait_for(self._rpc.request("nvim_get_api_info"), _STARTUP_SECONDS)
-        await asyncio.wait_for(self._rpc.request("nvim_exec_lua", _SETUP_LUA, [channel, str(self._document)]), _STARTUP_SECONDS)
+        base = str(self._base) if self._base is not None else None
+        await asyncio.wait_for(self._rpc.request("nvim_exec_lua", _SETUP_LUA, [channel, str(self._document), base]), _STARTUP_SECONDS)
 
     async def read_output(self) -> bytes | None:
         """Next terminal output chunk, None once the terminal has closed."""

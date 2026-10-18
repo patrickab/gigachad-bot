@@ -102,3 +102,20 @@ def test_workspace_files_serve_raw_bytes_and_refuse_binary_as_text(tmp_path):
 
     assert (pdf.status_code, pdf.content) == (200, b"%PDF-1.4")
     assert image_as_text.status_code == 415
+
+
+def test_diff_routes_serve_mounted_repositories_and_refuse_other_directories(tmp_path):
+    mounted = tmp_path / "mounted"
+    mounted.mkdir()
+    (mounted / "note.md").write_text("hi\n")
+    roots = FileRoots(repository=SimpleNamespace(load=lambda: [str(mounted)], save=lambda roots: None))
+    app = FastAPI()
+    app.include_router(file_roots_route.router)
+    app.dependency_overrides[file_roots_route.get_file_roots] = lambda: roots
+    client = TestClient(app)
+
+    listing = client.get("/api/fileroots/diff/files", params={"root": str(mounted)})
+    outside = client.get("/api/fileroots/diff/files", params={"root": str(tmp_path)})
+
+    assert listing.json() == {"is_git_repository": False, "files": []}
+    assert outside.status_code == 403

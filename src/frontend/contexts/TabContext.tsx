@@ -7,7 +7,8 @@ import type { TabConfig } from "@/contexts/SettingsContext"
 export type AppSurface = "chat" | "canvas" | "document"
 
 export interface WorkspaceItem {
-  kind: "canvas" | "architecture" | "document"
+  kind: "canvas" | "architecture" | "document" | "diff"
+  /** A `diff` item holds the mounted directory it compares against HEAD. */
   path: string
   projectSlug: string | null
   rootFile?: boolean

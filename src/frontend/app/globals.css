@@ -38,6 +38,8 @@
 
    /* --- Danger (red, reserved for destructive actions only) --- */
    --danger:      oklch(68% 0.20 25);
+   --diff-added:   oklch(76% 0.16 150);
+   --diff-removed: oklch(73% 0.17 25);
 
    /* --- Backdrop for modal scrims --- */
    --backdrop:    oklch(0% 0 0 / 0.65);
@@ -92,6 +94,8 @@
   
     /* --- Danger: darker red for light bg --- */
     --danger:      oklch(52% 0.22 25);
+    --diff-added:   oklch(43% 0.13 150);
+    --diff-removed: oklch(48% 0.19 25);
   
     --chart-grid:  rgb(225, 223, 218);
   
@@ -144,6 +148,10 @@
   /* Danger (red — destructive only) */
   --color-danger:      var(--danger);
   --color-danger-soft: var(--danger-soft);
+
+  /* Diff changes */
+  --color-diff-added: var(--diff-added);
+  --color-diff-removed: var(--diff-removed);
 
   /* Backdrop */
   --color-backdrop: var(--backdrop);

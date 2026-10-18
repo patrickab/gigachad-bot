@@ -11,12 +11,15 @@ from typing import Any
 
 _CLI_TIMEOUT_SECONDS = 30
 _CACHE_SECONDS = 5 * 60
+# A provider whose usage fetch fails drops out of `omp usage`; its last report stands in this long.
+_STALE_REPORT_SECONDS = 60 * 60
 _WINDOW_DURATIONS_MS = {"5h": 5 * 3_600_000, "7d": 7 * 86_400_000, "30d": 30 * 86_400_000}
 # omp's own window ids, folded onto the three the UI shows.
 _WINDOW_ALIASES = {"monthly": "30d", "daily": "5h"}
 
-_lock = threading.Lock()
+_lock = threading.RLock()
 _cache: tuple[float, str] | None = None
+_last_reports: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
 class UsageUnavailable(RuntimeError):
@@ -94,9 +97,37 @@ def parse_usage(output: str, now_ms: float) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise UsageUnavailable("omp usage returned an invalid response")
     reports = [_summarize(report, now_ms) for report in payload.get("reports") or [] if isinstance(report, dict) and report.get("provider")]
+    # Accounts whose usage fetch failed this time, e.g. a rate-limited provider usage API.
+    reports += [
+        {"provider": account["provider"], "account": account.get("email") or None, "no_limits": False, "unavailable": True, "windows": []}
+        for account in payload.get("accountsWithoutUsage") or []
+        if isinstance(account, dict) and account.get("provider")
+    ]
     return {"generated_at": payload.get("generatedAt"), "reports": reports}
 
 
+def _with_dropped_providers(usage: dict[str, Any], now: float) -> dict[str, Any]:
+    """Replace providers this fetch could not read with their last report, so a failed fetch does not hide them."""
+    fresh = [report for report in usage["reports"] if not report.get("unavailable")]
+    present = {report["provider"] for report in fresh}
+    for report in fresh:
+        _last_reports[report["provider"]] = (now, report)
+    reports = list(fresh)
+    for provider, (seen_at, report) in list(_last_reports.items()):
+        if provider in present:
+            continue
+        if now - seen_at > _STALE_REPORT_SECONDS:
+            del _last_reports[provider]
+            continue
+        elapsed_minutes = round((now - seen_at) / 60)
+        windows = [{**window, "resets_in_minutes": max(0, window["resets_in_minutes"] - elapsed_minutes)} if window["resets_in_minutes"] is not None else window for window in report["windows"]]
+        reports.append({**report, "windows": windows})
+    known = {report["provider"] for report in reports}
+    reports += [report for report in usage["reports"] if report.get("unavailable") and report["provider"] not in known]
+    return {**usage, "reports": reports}
+
+
 def provider_usage(refresh: bool = False) -> dict[str, Any]:
-    """`{"generated_at", "reports": [{"provider", "account", "no_limits", "windows": [{"id", "percent", "resets_in_minutes"}]}]}`."""
-    return parse_usage(_output(refresh), time.time() * 1000)
+    """`{"generated_at", "reports": [{"provider", "account", "no_limits", "unavailable"?, "windows": [{"id", "percent", "resets_in_minutes"}]}]}`."""
+    with _lock:
+        return _with_dropped_providers(parse_usage(_output(refresh), time.time() * 1000), time.monotonic())

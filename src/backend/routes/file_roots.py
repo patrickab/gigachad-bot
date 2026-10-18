@@ -23,6 +23,7 @@ from lib import document_library as lib_docs
 from lib.asset_store import AssetStore
 from lib.attachment_materialize import materialize, store_library_pdf
 from lib.data_store import StorageNotFoundError
+from lib import git_diff
 from lib.file_roots import FileRoots, list_directories
 from lib.project_store import ProjectStore
 from lib.storage_namespace import PDFS
@@ -216,3 +217,63 @@ def add_to_project(
         store.add_file(body.slug, key)
         added.append(FileMeta(**lib_docs.document_meta(key)))
     return FileListResponse(documents=added)
+
+
+class DiffFile(BaseModel):
+    path: str
+    status: git_diff.ChangeStatus
+
+
+class DiffStatusResponse(BaseModel):
+    is_git_repository: bool
+    files: list[DiffFile]
+
+
+class FileDiffResponse(BaseModel):
+    supported: bool
+    status: git_diff.ChangeStatus | None = None
+    patch: str | None = None
+
+
+def _git_directory(root: str, roots: FileRoots) -> Path:
+    try:
+        roots.root_of(root)
+        directory = Path(root).expanduser().resolve()
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    if not directory.is_dir():
+        raise HTTPException(status_code=404, detail=f"Not a directory: {root}")
+    return directory
+
+
+@router.get("/diff/files", response_model=DiffStatusResponse)
+def list_changed_files(root: str = Query(...), roots: FileRoots = Depends(get_file_roots)) -> DiffStatusResponse:
+    """Files of the git working tree at *root* that differ from HEAD."""
+    files = git_diff.changed_files(_git_directory(root, roots))
+    if files is None:
+        return DiffStatusResponse(is_git_repository=False, files=[])
+    return DiffStatusResponse(is_git_repository=True, files=[DiffFile(path=file.path, status=file.status) for file in files])
+
+
+@router.get("/diff", response_model=FileDiffResponse)
+def read_file_diff(root: str = Query(...), path: str = Query(...), roots: FileRoots = Depends(get_file_roots)) -> FileDiffResponse:
+    """Unified patch of *path* (relative to *root*) against HEAD, `supported=false` for binary or oversized files."""
+    patch = git_diff.file_patch(_git_directory(root, roots), path)
+    if patch is None:
+        return FileDiffResponse(supported=False)
+    return FileDiffResponse(supported=True, status=patch[0], patch=patch[1])
+
+
+class DiffContentResponse(BaseModel):
+    base_content: str
+    content: str
+
+
+@router.get("/diff/content", response_model=DiffContentResponse)
+def read_diff_content(root: str = Query(...), path: str = Query(...), roots: FileRoots = Depends(get_file_roots)) -> DiffContentResponse:
+    """HEAD and working-tree text of *path* (relative to *root*) for the native Neovim diff."""
+    try:
+        base, content = git_diff.file_contents(_git_directory(root, roots), path)
+    except git_diff.UnsupportedDiffContent as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return DiffContentResponse(base_content=base, content=content)

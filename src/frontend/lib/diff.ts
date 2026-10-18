@@ -39,3 +39,40 @@ export function computeLineDiff(oldText: string, newText: string): string {
 
   return diffLines.reverse().join("\n")
 }
+
+export interface PatchLine {
+  kind: "hunk" | "added" | "removed" | "context" | "note"
+  text: string
+  oldNumber: number | null
+  newNumber: number | null
+}
+
+const HUNK_HEADER = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/
+
+/** Display lines of a unified patch with line numbers, file headers before the first hunk dropped. */
+export function parsePatch(patch: string): PatchLine[] {
+  const lines: PatchLine[] = []
+  let oldNumber = 0
+  let newNumber = 0
+  let inHunk = false
+  for (const text of patch.split("\n")) {
+    const header = HUNK_HEADER.exec(text)
+    if (header) {
+      oldNumber = Number(header[1])
+      newNumber = Number(header[2])
+      inHunk = true
+      lines.push({ kind: "hunk", text, oldNumber: null, newNumber: null })
+    } else if (!inHunk) {
+      continue
+    } else if (text.startsWith("\\")) {
+      lines.push({ kind: "note", text, oldNumber: null, newNumber: null })
+    } else if (text.startsWith("+")) {
+      lines.push({ kind: "added", text: text.slice(1), oldNumber: null, newNumber: newNumber++ })
+    } else if (text.startsWith("-")) {
+      lines.push({ kind: "removed", text: text.slice(1), oldNumber: oldNumber++, newNumber: null })
+    } else if (text.startsWith(" ")) {
+      lines.push({ kind: "context", text: text.slice(1), oldNumber: oldNumber++, newNumber: newNumber++ })
+    }
+  }
+  return lines
+}

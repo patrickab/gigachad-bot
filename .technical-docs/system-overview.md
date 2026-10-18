@@ -240,7 +240,7 @@ database copy under `graph/<slug>/` is used.
 5h/7d/30d window with the minutes until reset, or `no_limits`. Output is cached
 for 5 minutes. `refresh=true` runs `omp usage invalidate` first. A missing or
 failing `omp` answers 502. The sidebar's `ProviderUsage` (above Settings) shows a
-"Usage" line with the highest percentage, and opens into one meter per limited
+"Usage" line with the least used subscription (each counted by its fullest window), and opens into one meter per limited
 account (click for each window). Accounts without limits are hidden.
 
 
@@ -268,6 +268,17 @@ project stores the file's absolute path (`POST /api/fileroots/add-to-project`),
 so it always shows the current file, and saving it in the editor writes the
 mounted file. Deleting it from the project only removes the reference, the
 file stays on disk. PDFs still go into the shared PDF library as before.
+
+## Diff viewer
+
+Each file mount's **Open diff** action opens a continuous HEAD-to-working-tree
+diff with green additions and red removals. The file tree jumps to each file.
+`DiffViewer.tsx` uses `/api/fileroots/diff/files`, `/diff` and `/diff/content`,
+served by `routes/file_roots.py` and `lib/git_diff.py` within mounted roots.
+
+With Neovim enabled, **Edit diff** opens read-only HEAD beside editable working
+content. `:w` saves the file, `:qa` returns to the refreshed diff. Deleted,
+binary, oversized and symlinked files cannot be edited this way.
 
 ## Neovim editor
 

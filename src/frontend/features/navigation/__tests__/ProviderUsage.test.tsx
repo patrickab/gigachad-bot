@@ -25,10 +25,10 @@ afterEach(() => {
 })
 
 describe("ProviderUsage", () => {
-  it("summarises the highest window, lists limited accounts only once opened, and shows each window on demand", async () => {
+  it("summarises the least used subscription, lists limited accounts only once opened, and shows each window on demand", async () => {
     const view = render(<ProviderUsage />)
 
-    expect(await view.findByText("91% · 5h")).toBeVisible()
+    expect(await view.findByText("28% · 7d")).toBeVisible()
     expect(view.queryByText("openai-codex")).not.toBeInTheDocument()
 
     fireEvent.click(view.getByText("Usage"))
@@ -42,7 +42,7 @@ describe("ProviderUsage", () => {
 
   it("refreshes past the server cache and says so when usage cannot be read", async () => {
     const view = render(<ProviderUsage />)
-    await view.findByText("91% · 5h")
+    await view.findByText("28% · 7d")
 
     api.fetchProviderUsage.mockRejectedValueOnce(new Error("502"))
     fireEvent.click(view.getByRole("button", { name: "Refresh usage" }))
@@ -54,5 +54,18 @@ describe("ProviderUsage", () => {
 
   it("formats reset times", () => {
     expect([45, 60, 296, 1440, 9084].map(formatReset)).toEqual(["45m", "1h", "4h 56m", "1d", "6d 7h"])
+  })
+})
+
+describe("ProviderUsage unavailable accounts", () => {
+  it("keeps an account omp could not read as an unavailable row", async () => {
+    api.fetchProviderUsage.mockResolvedValue({ reports: [
+      ...reports.slice(0, 1),
+      { provider: "anthropic", account: "me@example.com", no_limits: false, unavailable: true, windows: [] },
+    ] })
+    localStorage.setItem("provider_usage_open", "true")
+    const view = render(<ProviderUsage />)
+    expect(await view.findByText("unavailable")).toBeVisible()
+    expect(view.getByText("anthropic")).toBeVisible()
   })
 })

@@ -86,6 +86,8 @@ export interface ProviderUsageReport {
   provider: string
   account: string | null
   no_limits: boolean
+  /** omp could not read this account's usage this time, e.g. a rate-limited usage API. */
+  unavailable?: boolean
   windows: ProviderUsageWindow[]
 }
 
@@ -266,6 +268,27 @@ export async function fileRootTree(): Promise<{ enabled: boolean; tree: FileTree
 export async function addRootFilesToProject(slug: string, paths: string[]): Promise<ProjectDocument[]> {
   const data = await post<{ documents: ProjectDocument[] }>("/fileroots/add-to-project", { slug, paths })
   return data.documents
+}
+
+export type DiffStatus = "modified" | "added" | "deleted" | "renamed" | "untracked" | "conflict"
+
+export interface RootDiffFiles {
+  is_git_repository: boolean
+  files: { path: string; status: DiffStatus }[]
+}
+
+/** Files of the git working tree at a mounted root that differ from HEAD. */
+export async function fetchRootDiffFiles(root: string): Promise<RootDiffFiles> {
+  return request(`/fileroots/diff/files?root=${encodeURIComponent(root)}`)
+}
+
+/** Unified patch of one changed file, `supported` is false for binary or oversized files. */
+export async function fetchRootFileDiff(root: string, path: string): Promise<{ supported: boolean; status?: DiffStatus; patch?: string }> {
+  return request(`/fileroots/diff?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`)
+}
+
+export async function fetchRootDiffContent(root: string, path: string): Promise<{ base_content: string; content: string }> {
+  return request(`/fileroots/diff/content?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`)
 }
 
 export async function addFileRoot(path: string): Promise<{ enabled: boolean; tree: FileTreeNode[] }> {

@@ -52,3 +52,37 @@ def test_an_account_without_limits_is_listed_as_unlimited_without_a_label():
 def test_unreadable_output_is_unavailable_not_empty():
     with pytest.raises(UsageUnavailable):
         parse_usage("not json", NOW_MS)
+
+
+def test_a_provider_dropped_by_a_failed_fetch_keeps_its_last_report(monkeypatch):
+    import lib.provider_usage as usage
+
+    def payload(*providers):
+        return json.dumps({"generatedAt": NOW_MS, "reports": [
+            {"provider": provider, "limits": [_limit("5h", 0.4, resets_in_ms=120 * 60_000)]} for provider in providers
+        ]})
+
+    outputs = iter([payload("openai-codex", "anthropic"), payload("openai-codex")[:-1] + ', "accountsWithoutUsage": [{"provider": "anthropic"}]}'])
+    clock = iter([0.0, 30 * 60.0])
+    monkeypatch.setattr(usage, "_last_reports", {})
+    monkeypatch.setattr(usage, "_output", lambda refresh: next(outputs))
+    monkeypatch.setattr(usage.time, "time", lambda: NOW_MS / 1000)
+    monkeypatch.setattr(usage.time, "monotonic", lambda: next(clock))
+
+    usage.provider_usage()
+    reports = {report["provider"]: report for report in usage.provider_usage()["reports"]}
+
+    assert set(reports) == {"openai-codex", "anthropic"}
+    assert reports["anthropic"]["windows"] == [{"id": "5h", "percent": 40.0, "resets_in_minutes": 90}]
+
+
+def test_an_account_without_usage_is_listed_as_unavailable_until_it_has_a_report(monkeypatch):
+    import lib.provider_usage as usage
+
+    output = json.dumps({"generatedAt": NOW_MS, "reports": [], "accountsWithoutUsage": [{"provider": "anthropic", "email": "a@b.c"}]})
+    monkeypatch.setattr(usage, "_last_reports", {})
+    monkeypatch.setattr(usage, "_output", lambda refresh: output)
+
+    assert usage.provider_usage()["reports"] == [
+        {"provider": "anthropic", "account": "a@b.c", "no_limits": False, "unavailable": True, "windows": []},
+    ]
