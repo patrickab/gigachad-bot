@@ -85,14 +85,9 @@ def neovim_config_dir() -> Path:
     return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "nvim"
 
 
-def neovim_users() -> frozenset[str]:
-    """Logins listed in the comma-separated `GIGACHAD_NVIM_USERS`."""
-    return frozenset(login.strip() for login in os.environ.get("GIGACHAD_NVIM_USERS", "").split(",") if login.strip())
-
-
-def is_neovim_available(login: str) -> bool:
-    """Allow-listed login, `nvim` installed and a config to load."""
-    return login in neovim_users() and shutil.which("nvim") is not None and neovim_config_dir().is_dir()
+def is_neovim_installed() -> bool:
+    """`nvim` on PATH and a config to load."""
+    return shutil.which("nvim") is not None and neovim_config_dir().is_dir()
 
 
 class NeovimRpcError(RuntimeError):

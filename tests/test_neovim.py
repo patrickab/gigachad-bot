@@ -13,7 +13,7 @@ from backend.identity import RequestIdentity, get_request_identity
 from backend.routes import neovim as neovim_route
 from backend.routes.deps import get_file_roots
 from lib.file_roots import FileRoots
-from lib.neovim_session import NeovimSession, is_neovim_available
+from lib.neovim_session import NeovimSession, is_neovim_installed
 
 requires_nvim = pytest.mark.skipif(shutil.which("nvim") is None, reason="nvim is not installed")
 
@@ -45,24 +45,21 @@ def test_terminal_origin_policy(monkeypatch, cors_origins, origin, trusted):
 
 
 @requires_nvim
-def test_neovim_requires_allow_listed_login_and_config(neovim_home, monkeypatch):
-    monkeypatch.setenv("GIGACHAD_NVIM_USERS", "alice@example.test, bob@example.test")
-    assert is_neovim_available("bob@example.test")
-    assert not is_neovim_available("mallory@example.test")
+def test_neovim_needs_a_config_to_load(neovim_home):
+    assert is_neovim_installed()
     neovim_home.rmdir()
-    assert not is_neovim_available("bob@example.test")
+    assert not is_neovim_installed()
 
 
 @pytest.mark.parametrize(
-    ("allowed_users", "origin"),
-    [("someone-else@example.test", "http://localhost:2999"), ("me@example.test", "https://evil.example")],
+    ("has_host_access", "origin"),
+    [(False, "http://localhost:2999"), (True, "https://evil.example")],
 )
-def test_session_refuses_untrusted_requests(monkeypatch, neovim_home, allowed_users, origin):
-    monkeypatch.setenv("GIGACHAD_NVIM_USERS", allowed_users)
+def test_session_refuses_untrusted_requests(monkeypatch, neovim_home, has_host_access, origin):
     monkeypatch.setattr(neovim_route, "CORS_ORIGINS", ["*"])
     app = FastAPI()
     app.include_router(neovim_route.router)
-    app.dependency_overrides[get_request_identity] = lambda: RequestIdentity(uuid4(), "me@example.test", None)
+    app.dependency_overrides[get_request_identity] = lambda: RequestIdentity(uuid4(), "me@example.test", None, has_host_access)
     app.dependency_overrides[get_file_roots] = lambda: None
     with (
         pytest.raises(WebSocketDisconnect) as refused,

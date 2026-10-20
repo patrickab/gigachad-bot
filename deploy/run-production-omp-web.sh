@@ -23,10 +23,6 @@ case "${1:-}" in
         exec "${repo_root}/run-omp-web.sh"
         ;;
     gate)
-        if [[ -z ${GIGACHAD_OMP_WEB_USERS:-} ]]; then
-            printf 'error: GIGACHAD_OMP_WEB_USERS is empty, the gate would refuse every login\n' >&2
-            exit 1
-        fi
         exec "${repo_root}/.venv/bin/uvicorn" backend.omp_web_gate:app --app-dir "${repo_root}/src" \
             --host 127.0.0.1 --port "${GIGACHAD_OMP_WEB_GATE_PORT:-30179}" --no-access-log
         ;;

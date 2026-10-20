@@ -4,11 +4,17 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel
 
-from backend.identity import get_request_identity
+from backend.identity import HOST_CAPABILITY, RequestIdentity, get_request_identity
 from lib import omp_web
 
-# Every route needs a known user: omp-web runs the machine owner's omp, it has no users of its own.
-router = APIRouter(prefix="/api/omp", tags=["omp"], dependencies=[Depends(get_request_identity)])
+
+def require_host_access(identity: RequestIdentity = Depends(get_request_identity)) -> None:
+    """Refuse logins without the host capability: omp-web runs the machine owner's omp, it has no users of its own."""
+    if not identity.has_host_access:
+        raise HTTPException(status_code=403, detail=f"omp is limited to logins granted {HOST_CAPABILITY}")
+
+
+router = APIRouter(prefix="/api/omp", tags=["omp"], dependencies=[Depends(require_host_access)])
 
 # omp session ids are UUIDs, the pattern keeps anything else out of omp-web's URL space.
 SessionId = Annotated[str, Path(pattern=r"^[A-Za-z0-9-]+$")]

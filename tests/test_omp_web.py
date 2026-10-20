@@ -1,13 +1,14 @@
 """omp-web answers become gigachad's snake_case contract, and a changed shape or refusal is reported, not hidden."""
 
 import json
+from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import httpx
 import pytest
 
-from backend.identity import get_request_identity
+from backend.identity import RequestIdentity, get_request_identity
 from backend.routes.omp import router
 from lib import omp_web
 
@@ -81,12 +82,21 @@ async def test_system_prompt_joins_parts_and_is_none_while_stopped(monkeypatch):
     assert (await omp_web.system_prompt(session_id)).model_dump() == {"running": False, "system_prompt": None}
 
 
-@pytest.fixture
-def client() -> TestClient:
+def _client(has_host_access: bool) -> TestClient:
     app = FastAPI()
     app.include_router(router)
-    app.dependency_overrides[get_request_identity] = lambda: None
+    app.dependency_overrides[get_request_identity] = lambda: RequestIdentity(uuid4(), "me@example.test", None, has_host_access)
     return TestClient(app)
+
+
+@pytest.fixture
+def client() -> TestClient:
+    return _client(has_host_access=True)
+
+
+def test_logins_without_host_access_never_reach_omp_web(monkeypatch):
+    _serve(monkeypatch, {"GET /api/sessions": (200, SESSIONS), "GET /api/projects": (200, PROJECTS)})
+    assert _client(has_host_access=False).get("/api/omp/overview").status_code == 403
 
 
 def test_refusals_keep_omp_webs_status_and_message(monkeypatch, client):

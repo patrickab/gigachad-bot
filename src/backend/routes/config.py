@@ -4,7 +4,7 @@ from backend.identity import RequestIdentity, get_request_identity
 from config import DEFAULT_DOWNSCALE_IMAGES
 from lib import omp_web
 from lib.model_provider_store import ModelProviderStore
-from lib.neovim_session import is_neovim_available
+from lib.neovim_session import is_neovim_installed
 
 from .deps import get_model_provider_store
 
@@ -19,6 +19,6 @@ async def get_config(
     return {
         **store.load_defaults(),
         "downscale_images": DEFAULT_DOWNSCALE_IMAGES,
-        "neovim_available": is_neovim_available(identity.login),
-        "omp_web_url": omp_web.omp_web_frame_url(),
+        "neovim_available": identity.has_host_access and is_neovim_installed(),
+        "omp_web_url": omp_web.omp_web_frame_url() if identity.has_host_access else None,
     }

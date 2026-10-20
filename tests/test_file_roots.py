@@ -119,3 +119,31 @@ def test_diff_routes_serve_mounted_repositories_and_refuse_other_directories(tmp
 
     assert listing.json() == {"is_git_repository": False, "files": []}
     assert outside.status_code == 403
+
+
+@pytest.mark.parametrize("host_access", [False, True])
+def test_host_access_reaches_unmounted_files_but_never_credentials(tmp_path, host_access):
+    mounted, elsewhere = tmp_path / "mounted", tmp_path / "elsewhere"
+    for directory in (mounted, elsewhere, elsewhere / ".ssh"):
+        directory.mkdir()
+    for path in (mounted / ".env", elsewhere / "notes.md", elsewhere / ".env", elsewhere / ".ssh" / "id_ed25519"):
+        path.write_text("v1")
+    roots = FileRoots(repository=SimpleNamespace(load=lambda: [str(mounted)], save=lambda roots: None), host_access=host_access)
+    app = FastAPI()
+    app.include_router(fileviewer_route.router)
+    app.include_router(file_roots_route.router)
+    app.dependency_overrides[fileviewer_route.get_file_roots] = lambda: roots
+    app.dependency_overrides[fileviewer_route.get_document_store] = lambda: None
+    client = TestClient(app)
+
+    def read_status(path) -> int:
+        return client.get("/api/fileviewer/text", params={"path": str(path)}).status_code
+
+    saved = client.post("/api/fileroots/file", json={"path": str(elsewhere / "notes.md"), "content": "v2"})
+
+    assert read_status(mounted / ".env") == 200
+    assert read_status(elsewhere / "notes.md") == (200 if host_access else 403)
+    assert (saved.status_code < 400) == host_access
+    assert (elsewhere / "notes.md").read_text() == ("v2" if host_access else "v1")
+    assert read_status(elsewhere / ".env") == 403
+    assert read_status(elsewhere / ".ssh" / "id_ed25519") == 403

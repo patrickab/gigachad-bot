@@ -15,4 +15,5 @@ fi
 
 # --bg persists the named HTTPS listener and replaces its handler on repeated runs.
 # Tailscale Serve rejects unavailable or unauthenticated daemons. HTTPS ports: 443, 8443, 10000.
-exec tailscale serve --bg --https="${2:-443}" "http://127.0.0.1:${1}"
+# --accept-app-caps (Tailscale v1.92+) forwards the host grant as `Tailscale-App-Capabilities`, see backend/identity.py.
+exec tailscale serve --bg --https="${2:-443}" --accept-app-caps=gigachad.local/cap/host "http://127.0.0.1:${1}"

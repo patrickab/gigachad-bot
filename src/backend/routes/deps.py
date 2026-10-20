@@ -100,7 +100,7 @@ def get_memory_store(identity: RequestIdentity = Depends(get_request_identity)) 
 
 def get_file_roots(identity: RequestIdentity = Depends(get_request_identity)) -> FileRoots:
     repository = PostgresFileRootRepository(get_postgres_pool(), identity.user_id, device_id=identity.device_id)
-    return FileRoots(repository=repository)
+    return FileRoots(repository=repository, host_access=identity.has_host_access)
 
 
 def get_architecture_store(

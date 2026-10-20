@@ -17,7 +17,8 @@ path, never a copy. Edits through the app write back to the actual file.
 
 All paths handed to the UI are absolute, and every read/write is validated to
 live under one of the roots (mirroring the path-traversal guard used by
-``ChatStore``).
+``ChatStore``). Logins with host access (they can already run commands as the
+host user) also reach every path outside the roots, except credential stores.
 """
 
 from __future__ import annotations
@@ -39,6 +40,19 @@ _SKIP_DIRS = frozenset({".obsidian", ".trash", ".git", "node_modules"})
 # Each layer is one directory's `.gitignore`: (directory path, compiled patterns), outermost first.
 _IgnoreLayers = tuple[tuple[str, GitIgnoreSpec], ...]
 _IMG_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp"})
+# Credential stores host access never opens outside the roots.
+_SECRET_DIRECTORIES = frozenset({".ssh", ".gnupg", ".secrets"})
+_OMP_SECRET_NAMES = ("agent.db", "models.yml")
+
+
+def is_secret_path(path: Path) -> bool:
+    """Whether *path* is a credential store: SSH/GPG keys, env files, omp's API keys."""
+    name = path.name.lower()
+    if _SECRET_DIRECTORIES.intersection(path.parts):
+        return True
+    if name == ".env" or name.startswith(".env.") or (name == "env" and path.parent.name == "gigachad-bot"):
+        return True
+    return ".omp" in path.parts and name.startswith(_OMP_SECRET_NAMES)
 
 
 def _with_gitignore(directory: Path | str, inherited: _IgnoreLayers) -> _IgnoreLayers:
@@ -158,8 +172,9 @@ def list_directories(path: str) -> tuple[Path, list[str]]:
 class FileRoots:
     """All access to the user's file-root roots goes through this class."""
 
-    def __init__(self, *, repository: FileRootRepository) -> None:
+    def __init__(self, *, repository: FileRootRepository, host_access: bool = False) -> None:
         self._repository = repository
+        self._host_access = host_access
         self._roots: list[Path] = []
         self._worktrees: dict[Path, list[Path]] | None = None
         self._reload()
@@ -218,9 +233,9 @@ class FileRoots:
         return holding or [worktree for root in self._roots for worktree in self.worktrees_of(root) if target.is_relative_to(worktree)]
 
     def _root_for(self, path: str) -> Path:
-        """Resolve *path*, rejecting anything that lives outside all roots and their worktrees."""
+        """Resolve *path*, rejecting anything outside all roots and their worktrees, unless host access reaches it."""
         target = Path(path).expanduser().resolve()
-        if self._accessible_roots(target):
+        if self._accessible_roots(target) or (self._host_access and not is_secret_path(target)):
             return target
         raise ValueError(f"Path outside file roots: {path}")
 

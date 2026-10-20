@@ -1,12 +1,14 @@
-"""The omp-web gate forwards only allowlisted Tailnet logins, and forwards them so omp-web's same-origin guard still holds."""
+"""The omp-web gate forwards only Tailnet logins granted the host capability, and forwards them so omp-web's same-origin guard still holds."""
 
 import httpx
 import pytest
 from starlette.testclient import TestClient
 
 from backend import omp_web_gate
+from backend.identity import HOST_CAPABILITY
 
 OWNER = "owner@example.com"
+GRANTED = f'{{"{HOST_CAPABILITY}":[{{}}]}}'
 HOST = "gigachad-backend.tail.ts.net:8443"
 
 
@@ -27,25 +29,24 @@ def upstream(monkeypatch) -> list[httpx.Request]:
         return httpx.Response(200, headers=[("set-cookie", "a=1"), ("set-cookie", "b=2")], stream=_StreamedBody())
 
     monkeypatch.setattr(omp_web_gate, "_transport", httpx.MockTransport(handler))
-    monkeypatch.setenv("GIGACHAD_OMP_WEB_USERS", f" {OWNER} , second@example.com")
     return seen
 
 
-def _get(path: str, login: str | None) -> httpx.Response:
-    headers = {"host": HOST, "origin": f"https://{HOST}"} | ({"tailscale-user-login": login} if login else {})
+def _get(path: str, login: str | None, capabilities: str | None = GRANTED) -> httpx.Response:
+    headers = {"host": HOST, "origin": f"https://{HOST}"}
+    headers |= {"tailscale-user-login": login} if login else {}
+    headers |= {"tailscale-app-capabilities": capabilities} if capabilities else {}
     with TestClient(omp_web_gate.app) as client:
         return client.get(path, headers=headers)
 
 
-@pytest.mark.parametrize("login", [None, "guest@example.com"])
-def test_refuses_logins_off_the_allowlist(upstream, login):
-    assert _get("/", login).status_code == 403
+@pytest.mark.parametrize(
+    ("login", "capabilities"),
+    [(None, GRANTED), (OWNER, None), (OWNER, '{"example.com/cap/other":[{}]}'), (OWNER, "not json")],
+)
+def test_refuses_logins_without_the_host_capability(upstream, login, capabilities):
+    assert _get("/", login, capabilities).status_code == 403
     assert upstream == []
-
-
-def test_an_empty_allowlist_refuses_everyone(upstream, monkeypatch):
-    monkeypatch.setenv("GIGACHAD_OMP_WEB_USERS", "")
-    assert _get("/", OWNER).status_code == 403
 
 
 def test_forwards_with_the_browser_host_marked_https(upstream):

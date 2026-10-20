@@ -17,6 +17,12 @@ DOCUMENTS = REMOTE_ROOT / "Documents"
 # shell narrows it to its own webview origins, and server deployments can do the same.
 CORS_ORIGINS = [origin.strip() for origin in os.environ.get("GIGACHAD_CORS_ORIGINS", "*").split(",") if origin.strip()]
 
+
+def is_cors_unsafe_for_production() -> bool:
+    """Whether production would let any web page call the API: identity comes from the tailnet, not a cookie."""
+    return os.environ.get("GIGACHAD_ENV") == "production" and (not CORS_ORIGINS or "*" in CORS_ORIGINS)
+
+
 # --- Model configuration ---
 # The user-editable defaults in `model-defaults.yaml` are the single source of truth for every
 # model the app uses. Nothing here may name a production model.

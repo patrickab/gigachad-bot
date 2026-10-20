@@ -151,11 +151,10 @@ OLLAMA_BASE_URL=http://127.0.0.1:11434
 
 | Variable | Required | Secret? | Purpose |
 | --- | --- | --- | --- |
-| `GIGACHAD_CORS_ORIGINS` | Yes | No | Comma-separated exact production and local browser origins. Do not use `*`. |
+| `GIGACHAD_CORS_ORIGINS` | Yes | No | Comma-separated exact production and local browser origins. The backend refuses to start in production with `*` or an empty list: identity comes from the tailnet connection, not a cookie, so with `*` any web page open on a tailnet device could act as that user. |
 | `NEXT_PUBLIC_API_BASE` | For local frontend development | No | Local browser API base; it is intentionally public configuration. |
 | `OLLAMA_BASE_URL` | When using local models | No | Host-local Ollama endpoint. |
 | `MINERU_SERVER_URL` | No | No | Remote MinerU endpoint. Leave unset for required local OCR. |
-| `GIGACHAD_NVIM_USERS` | No | No | Tailscale logins allowed to use the Neovim editor. It runs commands as the backend user, so list only the host owner. |
 
 URL and model settings are configuration, not secrets. Keep every backend
 credential—including `POSTGRES_PASSWORD_DEV`, `POSTGRES_PASSWORD_PROD`,
@@ -294,20 +293,21 @@ git -C "$HOME/git/ompweb" remote set-url --push upstream no-push
 The `upstream` remote is only needed to rebase the fork, see its
 `custom/AGENTS.md`. `run-omp-web.sh` (started by `run.sh`) serves omp-web on
 `127.0.0.1:30177` from a detached worktree at
-`~/.local/share/gigachad-bot/ompweb`, created from `custom` on first start, so
-its `next build` never touches the fork checkout. The first start installs and
-builds, about 2 minutes. An omp-web already listening on the port is reused.
+`~/.local/share/gigachad-bot/ompweb`, created from `custom` on first start and
+moved to the latest commit of `custom` on every start, so its `next build` never
+touches the fork checkout. The first start installs and builds, about 2 minutes,
+later starts rebuild only when that commit changed sources. An omp-web already
+listening on the port is reused, so a new commit needs an omp-web restart.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `GIGACHAD_OMP_WEB_REPO` | `~/git/ompweb` | Fork checkout the worktree comes from |
 | `GIGACHAD_OMP_WEB_DIR` | `~/.local/share/gigachad-bot/ompweb` | Served worktree |
-| `GIGACHAD_OMP_WEB_REF` | `custom` | Ref the worktree is created at |
+| `GIGACHAD_OMP_WEB_REF` | `custom` | Ref the worktree follows, re-resolved on every start |
 | `GIGACHAD_OMP_WEB_BIND` | `127.0.0.1:30177` | omp-web listen address |
 | `GIGACHAD_OMP_WEB_FRAME_ANCESTORS` | `http://127.0.0.1:2999 http://localhost:2999` | Origins allowed to frame omp-web. A frontend origin missing here gets a blank frame |
 | `GIGACHAD_OMP_WEB_URL` | `http://127.0.0.1:30177` | Backend and gate: where omp-web listens |
 | `GIGACHAD_OMP_WEB_FRAME_URL` | `GIGACHAD_OMP_WEB_URL` | Frame source the browser loads (`/api/config`), the gate's Serve URL in production |
-| `GIGACHAD_OMP_WEB_USERS` | unset | Gate: comma-separated Tailscale logins allowed to use omp-web. Empty refuses everyone |
 | `GIGACHAD_OMP_WEB_GATE_PORT` | `30179` | Gate listen port (loopback) |
 | `GIGACHAD_OMP_WEB_AUTH` | unset | Backend: trusted header for a password-protected omp-web |
 | `GIGACHAD_OMP_WEB` | `1` | `0` makes `run.sh` skip omp-web |
@@ -318,8 +318,8 @@ The browser loads omp-web in a frame, so on a deployed host omp-web has to be
 reachable over the Tailnet. omp-web runs shell commands as the host user, and
 every Tailnet device can reach the host unless the ACL says otherwise, so it is
 never served directly: Tailscale Serve `:8443` goes to an identity gate
-(`src/backend/omp_web_gate.py`), which forwards only the logins in
-`GIGACHAD_OMP_WEB_USERS` to omp-web on loopback. omp-web's own password cannot do
+(`src/backend/omp_web_gate.py`), which forwards only logins granted the host
+capability (see "Host access" below) to omp-web on loopback. omp-web's own password cannot do
 this job, its `SameSite=Lax` cookie is not sent inside the cross-site frame.
 
 ```text
@@ -332,14 +332,13 @@ Two user units run it, both from `deploy/run-production-omp-web.sh`:
 - `gigachad-bot-omp-web.service` (`server`): omp-web through `run-omp-web.sh`.
   Frame ancestors default to `GIGACHAD_CORS_ORIGINS`. No sandboxing flags: the omp
   agents it runs need the real `/tmp`, `sudo` and normal file modes
-- `gigachad-bot-omp-web-gate.service` (`gate`): the gate, refuses to start with an
-  empty `GIGACHAD_OMP_WEB_USERS`
+- `gigachad-bot-omp-web-gate.service` (`gate`): the gate, refuses every login
+  without the host capability
 
 Add to `$ENV`, then install the units and publish the gate:
 
 ```dotenv
 GIGACHAD_OMP_WEB_FRAME_URL=https://<tailnet-hostname>:8443
-GIGACHAD_OMP_WEB_USERS=<your Tailscale login, e.g. me@gmail.com>
 GIGACHAD_OMP_WEB_REF=origin/custom
 ```
 
@@ -355,16 +354,28 @@ restart picks up `GIGACHAD_OMP_WEB_FRAME_URL`.
 
 #### Update omp-web
 
-gigachad-bot and the fork share the postMessage protocol
-(`src/frontend/features/omp/protocol.ts` mirrors the fork's
-`custom/embed/protocol.ts`). Nothing checks `EMBED_PROTOCOL_VERSION` at runtime: a
-mismatch fails silently (missing composer controls, dropped messages). Always
-deploy both sides together and confirm the version is equal:
+gigachad-bot and the fork share `@gigachad/chat-ui`: the postMessage protocol
+(`protocol.ts`), the role palette (`palette.css`), Q&A cards and markdown. Its
+canonical source is gigachad-bot's `src/frontend/packages/chat-ui/`, and ompweb
+installs the checked-in `custom/vendor/gigachad-chat-ui-<version>.tgz` through its
+lockfile. The deployed fork needs no sibling gigachad checkout. Ordinary
+deployment uses its lockfile and does not repack sources.
+
+Package changes bump its version, then `npm run sync:ompweb` from gigachad's
+`src/frontend` packs the tarball into the fork (`GIGACHAD_OMP_WEB_REPO`, default
+`~/git/ompweb`), removes older ones and installs it there. Commit the fork's
+tarball, manifest and lock together. `npm run check:ompweb` fails on a stale
+tarball. Pack with the project's npm (`.venv/bin` first on `PATH`), another npm
+version writes different tarball bytes.
+
+Nothing checks `EMBED_PROTOCOL_VERSION` at runtime: a mismatch fails silently
+(missing composer controls, dropped messages). Always deploy both sides together
+and confirm the version is equal:
 
 ```bash
 grep -h 'EMBED_PROTOCOL_VERSION =' \
-  "$REPO/src/frontend/features/omp/protocol.ts" \
-  "$HOME/.local/share/gigachad-bot/ompweb/custom/embed/protocol.ts"
+  "$REPO/src/frontend/packages/chat-ui/src/protocol.ts" \
+  "$HOME/.local/share/gigachad-bot/ompweb/node_modules/@gigachad/chat-ui/dist/protocol.js"
 ```
 
 On the production host `~/git/gigachad-bot/redeploy.sh` runs these steps after
@@ -373,11 +384,12 @@ restarting the backend. By hand:
 1. Make sure no omp session is mid-run, a restart ends its omp process:
    `curl -s http://127.0.0.1:30177/api/sessions` must list no
    `runningSessionIds`.
-2. Pull the fork and move the served worktree:
+2. Fetch the fork's `custom` branch. The fork is rebased and force-pushed, so
+   fetch instead of pulling. The served worktree follows
+   `GIGACHAD_OMP_WEB_REF` (`origin/custom` in production) on start:
 
    ```bash
    git -C "$HOME/git/ompweb" fetch origin custom
-   git -C "$HOME/.local/share/gigachad-bot/ompweb" checkout --detach origin/custom
    ```
 
 3. Restart omp-web (`systemctl --user restart gigachad-bot-omp-web.service`, or
@@ -385,8 +397,12 @@ restarting the backend. By hand:
    sources are newer than the last build, then answers
    `curl -sf http://127.0.0.1:30177/login`.
 4. Update gigachad-bot to the matching commit and reload the frontend.
-5. Smoke an omp tab: open a session, send a prompt, Stop, switch the model and
-   thinking level, type `/` and `@` for the suggestion menus.
+5. Smoke an omp tab: inspect old and recent Q&A cards, scroll an answer preview,
+   expand/collapse a turn, page to older available history, and switch tabs.
+   Confirm tools/thinking and standalone omp-web retain their native behavior.
+   Exercise sending, Stop, model/thinking changes and `/` / `@` completion only
+   in an explicitly approved disposable session, never by prompting in an
+   existing session.
 
 Known limit: on a fresh omp-web load whose first omp tab is a new session, the
 frame ignores that tab's folder and opens omp-web's last-used one. Tabs opened
@@ -409,7 +425,7 @@ preserves `/api` and `/healthz`, so no path rewrite is needed:
 tailscale serve status
 ```
 
-The helper runs exactly `tailscale serve --bg --https=443 http://127.0.0.1:8002`.
+The helper runs exactly `tailscale serve --bg --https=443 --accept-app-caps=gigachad.local/cap/host http://127.0.0.1:8002`.
 
 The status output should show a proxy to `http://127.0.0.1:8002` available only
 inside the Tailnet. `--bg` persists the Serve configuration across Tailscale
@@ -425,6 +441,35 @@ curl --fail --show-error https://<tailnet-hostname>/api/config
 
 Do not use a device outside the Tailnet for this check or supply a public
 fallback URL.
+
+### Host access
+
+Logins with host access act as the host user: omp tabs, the Neovim editor and
+every file outside their mounts (credential stores excepted, `lib/file_roots.py`).
+Everyone else on the tailnet keeps the normal app on their own mounts. The grant
+lives in the tailnet policy, not in `$ENV`: the helper starts Serve with
+`--accept-app-caps=gigachad.local/cap/host` (Tailscale v1.92+), Serve forwards the
+grant as `Tailscale-App-Capabilities`, and the backend and the gate read it
+(`backend/identity.py`). Serve strips client-sent copies, the backend listens on
+loopback only, so the header cannot be forged from the tailnet.
+
+In the admin console, Access controls, add to the policy file (keep existing rules):
+
+```jsonc
+"hosts": { "gigachad-backend": "<backend tailnet IP>" },
+"grants": [
+  // ...existing grants...
+  {
+    "src": ["<your Tailscale login>"],
+    "dst": ["gigachad-backend"],
+    "app": { "gigachad.local/cap/host": [{}] }
+  }
+]
+```
+
+A missing grant or an old Serve without the flag fails closed: nobody gets host
+access. Check with `curl https://<tailnet-hostname>/api/config` from a granted
+device: `omp_web_url` is set, from any other login it is `null`.
 
 ## 3. Configure the Vercel frontend
 

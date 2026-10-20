@@ -44,11 +44,14 @@ All of the above are optional/user-configured — the app degrades gracefully
 
 ## Theme palette
 
-`src/frontend/app/globals.css` owns the warm dark-mode surface stack: paper at
-13% OKLCH lightness, surface at 16.5%, and elevated panels at 19%. Raised panels
-stay close to the background with low-chroma yellow warmth (hue 70), not red-brown.
-Light mode is independent. Keep the embedded dark tokens in ompweb's
-`custom/theme/palette.css` synchronized with these shell tokens.
+The role colors shared with the omp frame (ink, paper, surfaces, danger, dividers,
+small shadow, inner highlight) live once in
+`src/frontend/packages/chat-ui/src/palette.css` as `--gc-<mode>-<role>`.
+`src/frontend/app/globals.css` maps them onto the shell's role tokens (`:root`
+dark, `:root.light`) and owns the shell-only ones, ompweb's
+`custom/theme/palette.css` maps the same values in embed mode. The warm dark
+surface stack: paper at 13% OKLCH lightness, surface at 16.5%, elevated panels
+at 19%, low-chroma yellow warmth (hue 70), not red-brown. Light mode is independent.
 
 ## Chat sizing
 
@@ -68,7 +71,9 @@ and no role headings, with the first text line centered beside the avatar.
 Actions share the final paragraph line with reserved space so text cannot overlap
 them, appearing on hover or keyboard focus. Other terminal blocks keep actions
 below their content. Collapsed preview panels use equal 14px padding.
-`features/chat/chat.css` owns Soft surfaces and final-line action placement.
+`packages/chat-ui` (`Turn.tsx`, `turn.css`) owns the cards, surfaces, actions and
+final-line action placement, and the embedded omp chat renders the same package,
+so a visual change to either chat lands in both.
 Chat uses plain panels rather than nesting the shared elevation context, which
 remains available to memory and project views. Message action eligibility is
 shared between toolbar rendering and its reserved text space.
@@ -289,6 +294,14 @@ directories through `GET /api/fileroots/browse?path=`, which browses the whole
 host (directory names only), since any directory can be mounted. Mounting goes
 through `POST /api/fileroots/roots` as before.
 
+Reads and writes by path stay inside the mounts, except for logins with host
+access (`RequestIdentity.has_host_access`: the local dev login, or a tailnet
+login granted `gigachad.local/cap/host`, see "Host access" in the deployment runbook).
+They reach every path the backend user can, except credential stores
+(`lib/file_roots.py` `is_secret_path`: `.ssh`, `.gnupg`, `.secrets`, `.env*`,
+gigachad-bot's `env`, omp's `agent.db` and `models.yml`). Git, worktree and
+tree routes stay mount-only.
+
 The tree lists every file a root holds by its full name, skipping only
 `.gitignore` matches and `.git`, `node_modules`, `.obsidian` and `.trash`.
 Opening a file picks its viewer by type: PDFs open in the PDF viewer, `.canvas`,
@@ -340,8 +353,8 @@ The project linked to a clone keeps reading the clone's `docs/architecture`.
 omp tabs show [omp](https://github.com/can1357/oh-my-pi) coding sessions through
 omp-web, a separate Next.js server from the ompweb fork (branch `custom`).
 `run-omp-web.sh` serves it on `127.0.0.1:30177` from a detached worktree at
-`~/.local/share/gigachad-bot/ompweb` (pinned, update with
-`git -C <dir> checkout --detach custom`), reusing an instance already on the port.
+`~/.local/share/gigachad-bot/ompweb` that follows the latest commit of `custom`
+on every start, reusing an instance already on the port.
 omp-web refuses frames unless `OMP_WEB_FRAME_ANCESTORS` lists the frontend origin,
 the launcher sets it from `GIGACHAD_OMP_WEB_FRAME_ANCESTORS`
 (default the `:2999` origins). Remote access needs that origin listed too.
@@ -351,14 +364,14 @@ the launcher sets it from `GIGACHAD_OMP_WEB_FRAME_ANCESTORS`
   fail with the field name when omp-web's JSON changes (502). omp-web down: 503.
   `GIGACHAD_OMP_WEB_URL` points it elsewhere, `GIGACHAD_OMP_WEB_AUTH` is sent as
   `x-omp-web-auth` for a password-protected omp-web
-- **Frame access**: `/api/config` hands the browser `GIGACHAD_OMP_WEB_FRAME_URL`
-  (default `GIGACHAD_OMP_WEB_URL`). In production that is Tailscale Serve `:8443`
-  in front of `backend/omp_web_gate.py`, which forwards only the
-  `GIGACHAD_OMP_WEB_USERS` logins to omp-web on loopback, see the deployment runbook
+- **Frame access**: `/api/config` hands host-access logins `GIGACHAD_OMP_WEB_FRAME_URL`
+  (default `GIGACHAD_OMP_WEB_URL`), others get none and `/api/omp/*` refuses them.
+  In production that URL is Tailscale Serve `:8443` in front of `backend/omp_web_gate.py`,
+  which forwards only logins granted the host capability, see the deployment runbook
 - **Frame**: `features/omp/OmpProvider.tsx` renders ONE iframe for all omp tabs,
   fixed over the active omp tab's slot and hidden otherwise. Tabs switch it by
-  postMessage (`features/omp/protocol.ts`, mirror of the fork's
-  `custom/embed/protocol.ts`), never by reload. The frame loads with the first
+  postMessage (`packages/chat-ui/src/protocol.ts`, the definition the fork
+  installs as `@gigachad/chat-ui/protocol`), never by reload. The frame loads with the first
   session as `?session=` deep link. In a frame omp-web hides its own sidebar,
   topbar, file panel and input box
 - **Tab item**: `WorkspaceItem` kind `omp` holds an `OmpView` (session, new session
@@ -380,6 +393,10 @@ the launcher sets it from `GIGACHAD_OMP_WEB_FRAME_ANCESTORS`
     queue panel's Edit) arrive as `composer-restore` and merge into the draft
   - Not available: word prediction, steering or queueing from gigachad's composer
     while a run is busy
+- **Conversation presentation**: embedded omp turns use the same soft Q&A layout as local chats, with equal padding, icon-only copy/fork actions and always-visible collapsed answer previews capped at 12.5vh. Tool names remain visible in collapsed cards. Header toggles and preview scrolling are independent. Older turns collapse initially, the newest stays expanded, and per-session choices survive history paging. Plain text-only turns are kept together before history windowing. Earlier available history, including pre-compaction messages, loads without an extra click. Standalone omp-web keeps its original flat presentation.
+  - Copy uses original markdown, not thinking/tool output. Persisted per-message deletion is deferred: OMP has no supported entry-deletion mutation, so there is no delete button.
+  - One implementation, `src/frontend/packages/chat-ui/` (`@gigachad/chat-ui`): Q&A turn components and `turn.css`, the Markdown/LaTeX renderer, `markdown.css` and source-preserving copy. Local chat and the fork compose it with host content. The fork consumes a reproducibly packed, versioned tarball and builds without a sibling checkout. Fork internals (typed seam, token mapping, history handling) are in the fork's `custom/AGENTS.md`, "Q&A cards".
+  - Package updates: bump its version, run `npm run sync:ompweb` from `src/frontend` (packs into the fork, installs it there), and commit the fork's tarball, manifest and lock together. `npm run check:ompweb` verifies the tarball, the fork's version and its lock integrity.
 - **Sidebar**: a project whose slug names a file mount's folder gets a "code"
   category with the sessions whose `project_root ?? cwd` lies inside that mount.
   The "OMP" section lists every other omp-web workspace, its label opens omp
@@ -387,8 +404,14 @@ the launcher sets it from `GIGACHAD_OMP_WEB_FRAME_ANCESTORS`
   in-session branches. Rows archive, the "archived" folder restores.
   The overview refreshes every 15s and on window focus
 - **Keys**: Alt+T/W/D pressed inside the frame come back to the shell
-- **Limits**: omp-web's file panel is hidden, so file links in its chat open
-  nothing. DOCX/PDF previews stay blank inside the frame (`/api/files` keeps
+- **File links**: a local file link in omp's chat (markdown, Q&A cards, tool
+  output) arrives as `open-file` and opens in the shell's floating file view
+  (`features/editor/FileHoverView.tsx`, `useOpenFileHoverView` from anywhere under
+  `FileHoverViewProvider`): Neovim when the Neovim editor setting is on (`:w`
+  saves in place, `:q` closes), else a read-only render, markdown as itself and
+  other text as a highlighted code block. Without host access only files inside
+  a file root load, others show why
+- **Limits**: DOCX/PDF previews stay blank inside the frame (`/api/files` keeps
   `SAMEORIGIN`)
 
 ## Neovim editor
@@ -396,8 +419,8 @@ the launcher sets it from `GIGACHAD_OMP_WEB_FRAME_ANCESTORS`
 Text documents can be edited in a real Neovim with the backend user's own
 config, rendered in the browser by xterm.js. The "Neovim editor" switch in
 Settings is a per-device preference (`localStorage`) and appears only when
-`GET /api/config` reports `neovim_available`: the login is listed in
-`GIGACHAD_NVIM_USERS`, `nvim` is on the backend's `PATH`, and
+`GET /api/config` reports `neovim_available`: the login has host access,
+`nvim` is on the backend's `PATH`, and
 `$XDG_CONFIG_HOME/nvim` (default `~/.config/nvim`) exists. Otherwise the
 built-in editor stays in use.
 

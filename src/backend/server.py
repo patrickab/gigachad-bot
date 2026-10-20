@@ -43,7 +43,10 @@ from backend.routes.projects import router as projects_router
 from backend.routes.sync import router as sync_router
 from backend.sync import get_change_broker
 from lib.db_schema import database_url, upgrade
-from config import CORS_ORIGINS, close_postgres_pool
+from config import CORS_ORIGINS, close_postgres_pool, is_cors_unsafe_for_production
+
+if is_cors_unsafe_for_production():
+    raise RuntimeError("GIGACHAD_CORS_ORIGINS must list exact browser origins in production, never `*`")
 
 
 # Kill MinerU child servers before exiting so they do not outlive the API.

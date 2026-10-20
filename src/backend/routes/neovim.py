@@ -1,4 +1,4 @@
-"""Neovim terminal sessions for logins listed in `GIGACHAD_NVIM_USERS`.
+"""Neovim terminal sessions for logins with host access (`backend.identity.HOST_CAPABILITY`).
 
 `WS /api/neovim/session` runs one `nvim` per connection. Binary frames carry terminal
 bytes both ways, text frames carry JSON control messages:
@@ -31,7 +31,7 @@ from backend.identity import RequestIdentity, get_request_identity
 from backend.routes.deps import get_file_roots
 from config import CORS_ORIGINS
 from lib.file_roots import FileRoots
-from lib.neovim_session import NeovimSession, is_neovim_available
+from lib.neovim_session import NeovimSession, is_neovim_installed
 
 log = logging.getLogger(__name__)
 
@@ -154,7 +154,7 @@ async def neovim_session(
     identity: RequestIdentity = Depends(get_request_identity),
     roots: FileRoots = Depends(get_file_roots),
 ) -> None:
-    if not is_trusted_origin(websocket.headers.get("origin")) or not is_neovim_available(identity.login):
+    if not is_trusted_origin(websocket.headers.get("origin")) or not (identity.has_host_access and is_neovim_installed()):
         await websocket.close(code=_POLICY_VIOLATION)
         return
     await websocket.accept()
