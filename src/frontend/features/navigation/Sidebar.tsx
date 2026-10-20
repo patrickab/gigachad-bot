@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion } from "framer-motion"
-import { Brain, GitCompare } from "lucide-react"
-import { ArchitectureIcon } from "./ArchitectureIcon"
+import { Brain, FilePlus, GitCompare } from "lucide-react"
+import { ArchitectureIcon } from "@/components/ui/ArchitectureIcon"
+import { CreateDocumentPanel } from "./CreateDocumentPanel"
 import { ProviderUsage } from "./ProviderUsage"
 import { cn } from "@/lib/utils"
 import { FileTree, type FileTreeItem } from "@/components/ui/file-tree/FileTree"
@@ -64,6 +65,7 @@ export function Sidebar({
   const [documents, setDocuments] = useState<Record<string, ProjectDocument[]>>({})
   const [notes, setNotes] = useState<ProjectDocument[]>([])
   const [rootTreeData, setRootTreeData] = useState<FileTreeNode[]>([])
+  const [createDocumentSlug, setCreateDocumentSlug] = useState<string | null>(null)
   const [fileMountPickerOpen, setFileMountPickerOpen] = useState(false)
   const [ompWorkspacePickerOpen, setOmpWorkspacePickerOpen] = useState(false)
 
@@ -182,6 +184,24 @@ export function Sidebar({
     onArchitectureSelect?.(slug)
   }
 
+  /** Create a document in `slug` and open it: architecture sources in the architecture window, canvases as canvas, the rest in the editor. */
+  const createDocument = async (slug: string, name: string) => {
+    try {
+      let open: () => void
+      if (name.endsWith(".c4")) {
+        await createArchitectureSource(slug, name)
+        open = () => onArchitectureSelect?.(slug)
+      } else {
+        const { path } = await writeDocument(slug, name)
+        open = path.endsWith(".canvas") ? () => onCanvasSelect?.(path, slug) : () => onDocumentSelect?.(path, slug)
+      }
+      setCreateDocumentSlug(null)
+      await refreshDocuments()
+      onDocumentsChanged?.()
+      open()
+    } catch { /* the panel stays open to retry */ }
+  }
+
   const buildCategories = (project: ProjectListItem | null): FileTreeItem<string>[] => {
     const scope = project?.slug ?? ""
     const owner = project?.name ?? "general"
@@ -252,6 +272,7 @@ export function Sidebar({
       onSelect: () => onProjectSelect?.(project.slug),
       onDelete: () => schedule(`project:${project.slug}`, project.name, () => deleteProject(project.slug)),
       actions: [
+        { label: `New document in ${project.name}`, icon: FilePlus, onClick: () => setCreateDocumentSlug(project.slug) },
         { label: `${hasArchitecture(project.slug) ? "Open" : "Create"} architecture for ${project.name}`, icon: ArchitectureIcon,
           onClick: () => openArchitecture(project.slug) },
         { label: `Open memory for ${project.name}`, icon: Brain,
@@ -315,6 +336,8 @@ export function Sidebar({
       onRootsChanged?.()
     }} />
     <FileMountPicker noun="omp workspace" open={ompWorkspacePickerOpen} onClose={() => setOmpWorkspacePickerOpen(false)} onConfirm={omp.addWorkspace} />
+    <CreateDocumentPanel open={createDocumentSlug != null} onClose={() => setCreateDocumentSlug(null)}
+      onCreate={(name) => { if (createDocumentSlug) void createDocument(createDocumentSlug, name) }} />
   </motion.aside>
 }
 
