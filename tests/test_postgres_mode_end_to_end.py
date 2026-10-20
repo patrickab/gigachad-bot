@@ -309,37 +309,33 @@ def test_embedded_canvas_images_come_from_storage(client, tmp_path, monkeypatch)
     assert client.get(f"/api/fileviewer/raw?path={key}", headers=alice).content == pasted
 
 
-def test_pdf_asset_attachment_serves_from_storage_not_only_disk(client, tmp_path, monkeypatch):
-    """A canvas PDF attachment's path is the *relative* asset key ``document_meta``
-    hands back (``PDFs/<name>``), not an absolute filesystem path. ``/raw`` must
-    resolve it through the assets table: the old fallback resolved a relative
-    path against the process's cwd, not the Nextcloud mirror root, and 404'd.
+def test_library_pdf_serves_from_storage_after_its_files_are_gone(client, tmp_path, monkeypatch):
+    """A mounted PDF added to a project is synced into the PDF library (``PDFs/<name>``).
+    ``/raw`` must serve that key from the assets table, the fallback a chat uses once the
+    mounted file is gone, even with the Nextcloud mirror deleted too.
     """
     import lib.attachment_materialize as attachment_materialize
     import lib.document_library as lib_docs
 
-    monkeypatch.setattr(lib_docs, "DOCUMENTS", tmp_path)
-    monkeypatch.setattr(attachment_materialize, "DOCUMENTS", tmp_path)
+    mirror, mount = tmp_path / "mirror", tmp_path / "mount"
+    mount.mkdir()
+    monkeypatch.setattr(lib_docs, "DOCUMENTS", mirror)
+    monkeypatch.setattr(attachment_materialize, "DOCUMENTS", mirror)
+    monkeypatch.setattr(attachment_materialize.extract_queue, "enqueue", lambda name, content, assets: None)
 
     alice = headers("alice@example.test", str(uuid4()))
     slug = f"pdf-{uuid4().hex[:8]}"
     assert client.post("/api/projects", json={"name": slug}, headers=alice).status_code == 200
+    assert client.post("/api/fileroots/roots", json={"path": str(mount)}, headers=alice).status_code == 200
 
     pdf_bytes = b"%PDF-1.7 fake pdf body"
-    uploaded = client.post(
-        "/api/documents/upload",
-        params={"slug": slug},
-        files={"file": ("exercise.pdf", pdf_bytes, "application/pdf")},
-        headers=alice,
-    )
-    assert uploaded.status_code == 200
-    key = uploaded.json()["path"]
-    assert key == "PDFs/exercise.pdf"
+    (mount / "exercise.pdf").write_bytes(pdf_bytes)
+    added = client.post("/api/fileroots/add-to-project", json={"slug": slug, "paths": [str(mount / "exercise.pdf")]}, headers=alice)
+    assert added.status_code == 200
 
-    # The mirror write is a convenience copy, not the source of truth: remove it so
-    # a pass can only mean the assets table served the bytes.
-    (tmp_path / key).unlink()
+    (mount / "exercise.pdf").unlink()
+    (mirror / "PDFs" / "exercise.pdf").unlink()
 
-    served = client.get(f"/api/fileviewer/raw?path={key}", headers=alice)
+    served = client.get("/api/fileviewer/raw?path=PDFs/exercise.pdf", headers=alice)
     assert served.status_code == 200
     assert served.content == pdf_bytes

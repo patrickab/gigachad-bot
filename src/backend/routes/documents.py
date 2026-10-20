@@ -1,10 +1,10 @@
 """Document routes for the file-tree document feature.
 
-A *document* is a logical key listed in a project's ``files``. Uploaded PDFs go
-into the shared library (``PDFs/<name>``) and are sent to MinerU for a parsed
-markdown preview. The UI only passes back opaque keys the API handed it, and every
-read/write is scoped to the requesting user. PDFs and MinerU output are also
-mirrored into Nextcloud as a convenience copy the app never reads back.
+A *document* is a logical key or a mounted file path listed in a project's
+``files``. Library PDFs (``PDFs/<name>``) come from mounted PDFs and are sent to
+MinerU for a parsed markdown preview. The UI only passes back opaque keys the API
+handed it, and every read/write is scoped to the requesting user. PDFs and MinerU
+output are also mirrored into Nextcloud as a convenience copy the app never reads back.
 """
 
 import logging
@@ -18,8 +18,7 @@ from backend.routes.deps import get_architecture_store, get_asset_store, get_doc
 from backend.routes.schemas import FileListResponse, FileMeta
 from lib import document_library as lib_docs
 from lib.architecture_workspace import ArchitectureStore
-from lib.asset_store import Asset, AssetStore
-from lib.attachment_materialize import materialize, store_library_pdf
+from lib.asset_store import AssetStore
 from lib.data_store import DataStore, DataStorePath, StorageConflictError, StorageNotFoundError, validate_key, write_text
 from lib.file_roots import FileRoots
 from lib.project_store import ProjectStore
@@ -102,14 +101,6 @@ def _uploads_key(slug: str | None) -> str:
     if slug:
         return project_attachment_prefix(slug)
     return ATTACHMENT
-
-
-def _promote_pdf_document(assets: AssetStore, name: str, content: bytes) -> Asset:
-    """Store *content* in the shared PDF library and enqueue MinerU extraction
-    unless it is already cached."""
-    asset = store_library_pdf(assets, name, content)
-    materialize(name, content, assets, enqueue_on_miss=True)
-    return asset
 
 
 def _follow_moved_reference(store: ProjectStore, roots: FileRoots, slug: str, path: str) -> str:
@@ -230,30 +221,6 @@ async def store_drawing(
         raise HTTPException(status_code=400, detail="Invalid filename")
     assets.write("drawing", f"{KEY_DRAWINGS}/{safe_name}", await file.read())
     return {"status": "ok"}
-
-
-@router.post("/upload", response_model=FileMeta)
-async def upload_document(
-    file: UploadFile = File(...),
-    slug: str = Query(...),
-    store: ProjectStore = Depends(get_project_store),
-    assets: AssetStore = Depends(get_asset_store),
-):
-    """Add a PDF to the shared library, queue MinerU extraction, and reference it from the project."""
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="Missing filename")
-    try:
-        store.list_files(slug)  # validates project exists
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    content_b = await file.read()
-    name = Path(file.filename).name
-    if Path(name).suffix.lower() != ".pdf":
-        raise HTTPException(status_code=400, detail="Only PDF documents can enter the PDF library")
-    asset = _promote_pdf_document(assets, name, content_b)
-    store.add_file(slug, asset.logical_path)
-    return FileMeta(**lib_docs.document_meta(asset.logical_path))
 
 
 @router.post("/add", response_model=FileMeta)
