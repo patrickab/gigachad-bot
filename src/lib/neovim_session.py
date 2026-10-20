@@ -261,6 +261,10 @@ class NeovimSession:
         reader, writer = await asyncio.open_unix_connection(str(socket_path))
         self._rpc = _NeovimRpc(reader, writer, handle_request)
         channel, _ = await asyncio.wait_for(self._rpc.request("nvim_get_api_info"), _STARTUP_SECONDS)
+        while not await asyncio.wait_for(self._rpc.request("nvim_eval", "v:vim_did_enter"), _STARTUP_SECONDS):
+            if self._loop.time() > deadline + _STARTUP_SECONDS:
+                raise TimeoutError("Neovim did not finish starting")
+            await asyncio.sleep(0.02)  # config and plugins still loading, FileType handlers not registered yet
         base = str(self._base) if self._base is not None else None
         await asyncio.wait_for(self._rpc.request("nvim_exec_lua", _SETUP_LUA, [channel, str(self._document), base]), _STARTUP_SECONDS)
 
