@@ -36,6 +36,8 @@ export interface FileTreeItem<T = unknown> {
   childLimit?: number
   isActive?: boolean
   badge?: string | number
+  /** Right-aligned row end, e.g. line change counts. The label truncates first. */
+  meta?: ReactNode
   draggable?: boolean
   multiSelect?: boolean
   onSelect?: () => void
@@ -230,6 +232,7 @@ export function FileTree<T>({ items, controller, label, loading, create, renderB
             <span className="truncate">{item.label}</span>
             {item.badge != null && <span className="shrink-0 text-[10px] text-ink-faint">{item.badge}</span>}
           </span>
+          {item.meta != null && <span className="ml-auto flex shrink-0 gap-1.5 text-[10px] tabular-nums">{item.meta}</span>}
         </button>
         <div className={ACTIONS_CLASS}>
           {item.actions?.map((action) => <button key={action.label} aria-label={action.label} onClick={action.onClick} className={ACTION_CLASS}>

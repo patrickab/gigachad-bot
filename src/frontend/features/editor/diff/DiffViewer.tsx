@@ -23,7 +23,7 @@ const LINE_CLASS: Record<PatchLine["kind"], string> = {
 }
 
 /** Nest changed files under their directories, folder ids are `dir:<path>`. */
-function buildTree(files: RootDiffFiles["files"], activePath: string | null, select: (path: string) => void): FileTreeItem<string>[] {
+function buildTree(files: RootDiffFiles["files"], patches: Record<string, FilePatch>, activePath: string | null, select: (path: string) => void): FileTreeItem<string>[] {
   const roots: FileTreeItem<string>[] = []
   for (const file of files) {
     const parts = file.path.split("/")
@@ -37,43 +37,64 @@ function buildTree(files: RootDiffFiles["files"], activePath: string | null, sel
       }
       siblings = folder.children!
     })
+    const lines = patches[file.path]?.lines
     siblings.push({
       id: file.path, label: parts[parts.length - 1], type: "element", badge: STATUS_BADGE[file.status],
+      meta: lines && <LineCountLabel counts={countLines(lines)} />,
       isActive: file.path === activePath, onSelect: () => select(file.path),
     })
   }
-  return roots
+  return compactFolders(roots)
+}
+
+/** Merge chains of folders holding only one folder into a single `a/b/c` row, the row keeps the deepest id. */
+function compactFolders(items: FileTreeItem<string>[]): FileTreeItem<string>[] {
+  return items.map((item) => {
+    let folder = item
+    while (folder.children?.length === 1 && folder.children[0]!.type === "folder") {
+      const child = folder.children[0]!
+      folder = { ...child, label: `${folder.label}/${child.label}` }
+    }
+    return folder.children ? { ...folder, children: compactFolders(folder.children) } : folder
+  })
 }
 
 function folderIds(files: RootDiffFiles["files"]): string[] {
   return files.flatMap((file) => file.path.split("/").slice(0, -1).map((_, depth, parts) => `dir:${parts.slice(0, depth + 1).join("/")}`))
 }
 
-function ChangedFiles({ files, activePath, onSelect, root }: {
-  files: RootDiffFiles["files"]; activePath: string | null; onSelect: (path: string) => void; root: string
+function ChangedFiles({ files, patches, activePath, onSelect, root }: {
+  files: RootDiffFiles["files"]; patches: Record<string, FilePatch>; activePath: string | null; onSelect: (path: string) => void; root: string
 }) {
   const controller = useFileTree({ defaultExpanded: folderIds(files) })
-  return <FileTree label={`Changes in ${baseName(root)}`} items={buildTree(files, activePath, onSelect)} controller={controller} />
+  return <FileTree label={`Changes in ${baseName(root)}`} items={buildTree(files, patches, activePath, onSelect)} controller={controller} />
 }
 
-const totalsCache = new Map<string, { added: number; removed: number }>()
+type LineCounts = { added: number; removed: number }
+
+const totalsCache = new Map<string, LineCounts>()
+
+function countLines(lines: PatchLine[]): LineCounts {
+  return {
+    added: lines.filter((line) => line.kind === "added").length,
+    removed: lines.filter((line) => line.kind === "removed").length,
+  }
+}
+
+function LineCountLabel({ counts }: { counts: LineCounts }) {
+  return <>
+    <span className="text-diff-added">+{counts.added}</span>
+    <span className="text-diff-removed">−{counts.removed}</span>
+  </>
+}
 
 /** Pull-request style totals: changed files, then added and removed lines. Shown only once every patch loaded, else the last known totals of this root. */
 function ChangeSummary({ root, files, patches }: { root: string; files: number; patches: FilePatch[] }) {
-  if (patches.length === files) {
-    const lines = patches.flatMap((patch) => patch.lines ?? [])
-    totalsCache.set(root, {
-      added: lines.filter((line) => line.kind === "added").length,
-      removed: lines.filter((line) => line.kind === "removed").length,
-    })
-  }
+  if (patches.length === files) totalsCache.set(root, countLines(patches.flatMap((patch) => patch.lines ?? [])))
   const totals = totalsCache.get(root)
   return <p aria-label="Change summary" className="flex items-center gap-2 px-2 pb-2 text-xs tabular-nums text-ink-faint">
     <span>{files} {files === 1 ? "file" : "files"}</span>
-    {totals && <>
-      <span className="text-diff-added">+{totals.added}</span>
-      <span className="text-diff-removed">−{totals.removed}</span>
-    </>}
+    {totals && <LineCountLabel counts={totals} />}
   </p>
 }
 
@@ -101,7 +122,8 @@ export function DiffViewer({ root }: { root: string }) {
   const sections = useRef(new Map<string, HTMLElement>())
   const neovim = useNeovimSetting()
   const [editing, setEditing] = useState<NeovimDocument | null>(null)
-  const [opening, setOpening] = useState(false)
+  const [openingPath, setOpeningPath] = useState<string | null>(null)
+  const opening = openingPath !== null
   const [editError, setEditError] = useState("")
   const [revision, setRevision] = useState(0)
   const session = useNeovimTerminal(editing, async (text) => {
@@ -153,18 +175,17 @@ export function DiffViewer({ root }: { root: string }) {
     return () => { cancelled = true }
   }, [current, patchKey, root])
 
-  const openEditor = async () => {
-    if (!activePath) return
-    setOpening(true)
+  const openEditor = async (filePath: string) => {
+    setOpeningPath(filePath)
     setEditError("")
     try {
-      const contents = await fetchRootDiffContent(root, activePath)
-      const path = `${root}/${activePath}`
+      const contents = await fetchRootDiffContent(root, filePath)
+      const path = `${root}/${filePath}`
       setEditing({ key: path, path, filename: baseName(path), ...contents })
     } catch (error) {
       setEditError(error instanceof Error ? error.message : "Cannot edit this file")
     } finally {
-      setOpening(false)
+      setOpeningPath(null)
     }
   }
   const jumpToFile = useCallback((path: string) => {
@@ -192,17 +213,28 @@ export function DiffViewer({ root }: { root: string }) {
     setSelected(visible)
   }
 
+  const loadedPatches = patches.key === patchKey ? patches.files : {}
   const content = !current ? <Placeholder>Loading changes</Placeholder>
     : !current.result ? <Placeholder>Could not read this directory</Placeholder>
     : !current.result.is_git_repository ? <Placeholder>This file mount is not a git repository</Placeholder>
     : !activePath ? <Placeholder>No changes</Placeholder>
     : files.map((file) => {
-      const patch = patches.key === patchKey ? patches.files[file.path] : undefined
+      const patch = loadedPatches[file.path]
       return <section key={file.path} aria-label={`Diff for ${file.path}`} ref={(element) => {
         if (element) sections.current.set(file.path, element)
         else sections.current.delete(file.path)
       }} className="min-h-24 border-b border-divider/50 last:min-h-full">
-        <h3 className="sticky top-0 z-10 bg-paper px-3 py-2 font-mono text-xs text-ink-muted">{file.path}</h3>
+        <h3 className="sticky top-0 z-10 flex items-center gap-2 bg-paper px-3 py-2 font-mono text-xs text-ink-muted">
+          <span className="min-w-0 flex-1 truncate">{file.path}</span>
+          {patch?.lines && <span aria-label={`Line changes in ${file.path}`} className="flex shrink-0 gap-2 tabular-nums">
+            <LineCountLabel counts={countLines(patch.lines)} />
+          </span>}
+          {neovim.enabled && file.status !== "deleted" && <button
+            disabled={opening}
+            onClick={() => void openEditor(file.path)}
+            className="-my-1 shrink-0 rounded px-2 py-1 font-sans text-xs text-ink-faint hover:text-ink disabled:opacity-50"
+          >{openingPath === file.path ? "Opening…" : "Edit diff"}</button>}
+        </h3>
         {patch?.lines ? <PatchView lines={patch.lines} /> : <div className="px-3 py-6 text-xs text-ink-faint">
           {!patch ? "Loading diff" : patch.failed ? "Could not load diff" : "No text diff for this file"}
         </div>}
@@ -210,18 +242,16 @@ export function DiffViewer({ root }: { root: string }) {
     })
 
   return <div className="flex h-full">
-    <nav aria-label="Changed files" className="mb-3 ml-3 flex w-60 shrink-0 flex-col rounded-2xl border border-divider/50 bg-surface shadow-[var(--shadow-lg)]">
+    <nav aria-label="Changed files" className="mb-3 ml-3 flex w-72 shrink-0 flex-col rounded-2xl border border-divider/50 bg-surface shadow-[var(--shadow-lg)]">
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-3">
-        {files.length > 0 && <ChangeSummary root={root} files={files.length} patches={patches.key === patchKey ? Object.values(patches.files) : []} />}
-        <ChangedFiles files={files} activePath={activePath} onSelect={jumpToFile} root={root} />
+        {files.length > 0 && <ChangeSummary root={root} files={files.length} patches={Object.values(loadedPatches)} />}
+        <ChangedFiles files={files} patches={loadedPatches} activePath={activePath} onSelect={jumpToFile} root={root} />
       </div>
     </nav>
     <div className="flex min-w-0 flex-1 flex-col">
       <div className="flex h-7 shrink-0 items-center px-3 text-[10px] text-ink-faint">
         <span className="min-w-0 flex-1 truncate">{activePath ?? ""}</span>
-        {editing ? <span>HEAD · working file · :w saves · :qa returns</span> : neovim.enabled && activePath && files.find((file) => file.path === activePath)?.status !== "deleted" ? (
-          <button disabled={opening} onClick={() => void openEditor()} className="shrink-0 rounded px-2 py-1 text-xs text-ink-subtle hover:text-ink disabled:opacity-50">{opening ? "Opening…" : "Edit diff"}</button>
-        ) : null}
+        {editing && <span>HEAD · working file · :w saves · :qa returns</span>}
       </div>
       {editError && <p role="alert" className="px-3 py-1 text-xs text-danger">{editError}</p>}
       {editing && <div className="min-h-0 flex-1 overflow-hidden"><NeovimEditor terminal={session.terminal} status={session.status} onRestart={session.restart} className="h-full" /></div>}
