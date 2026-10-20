@@ -1,0 +1,307 @@
+/* Prose presentation of @gigachad/chat-ui, the only copy: the shell imports this file from source, the ompweb fork
+   imports it through the package export `@gigachad/chat-ui/markdown.css`.
+
+   Scope
+   - Every rule hangs off the renderer's root, `.gc-markdown` (full) or `.gc-markdown-compact` (compact, the `compact`
+     prop). Both carry `data-markdown-root`. Nothing outside the root is styled, a host's own markdown surfaces
+     (tool output, thinking, `.markdown-body`) are untouched.
+   - Fenced code, diagrams, citations and images are the host's components, only the prose around them is styled here.
+
+   Host contract: the role tokens this file reads. The shell defines them in `app/globals.css`, a host with another
+   palette maps them on `[data-markdown-root]` (the ompweb fork does in `custom/theme/chat-ui.css`).
+     --ink  --ink-muted  --divider  --divider-strong  --surface  --surface-elevated
+     --radius-sm  --radius-md  --inner-highlight  --font-mono  --font-symbols
+
+   Utilities layer: Streamdown wraps its output in a div classed `space-y-4 whitespace-normal [&>*:first-child]:mt-0
+   [&>*:last-child]:mb-0`, Tailwind utilities that only exist where Tailwind scans Streamdown's dist (the shell does,
+   the fork does not). The block spacing is replicated below inside the same `utilities` layer, so unlayered prose
+   rules and a host's own utilities (e.g. `my-3`) win over it exactly as they do over the generated classes. */
+
+@layer theme, base, components, utilities;
+
+@layer utilities {
+  :where([data-markdown-root] > div > :not(:last-child)) {
+    margin-block-start: 0;
+    margin-block-end: 1rem;
+  }
+
+  [data-markdown-root] > :where(div) {
+    white-space: normal;
+  }
+
+  [data-markdown-root] > :where(div) > :first-child {
+    margin-top: 0;
+  }
+
+  [data-markdown-root] > :where(div) > :last-child {
+    margin-bottom: 0;
+  }
+
+  /* Scroll wrapper the renderer puts around every table, the `overflow-x-auto my-3` utilities of the shell's
+     former table override: layered, so it yields to the first and last child rules above like they did. */
+  :where(.gc-markdown, .gc-markdown-compact) .gc-markdown-table-wrap {
+    overflow-x: auto;
+    margin-block: 0.75rem;
+  }
+}
+
+.gc-markdown,
+.gc-markdown-compact {
+  font-size: 13px;
+  line-height: 1.625;
+  color: var(--ink-muted);
+}
+
+.gc-markdown .katex,
+.gc-markdown-compact .katex {
+  color: inherit;
+}
+
+.gc-markdown .katex-display,
+.gc-markdown-compact .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.gc-markdown :not(pre) > code,
+.gc-markdown-compact :not(pre) > code {
+  font-family: var(--font-mono), var(--font-symbols), 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  font-size: 0.875em;
+  background: var(--surface-elevated);
+  border: 1px solid var(--divider);
+  padding: 0.1em 0.35em;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  box-shadow: var(--inner-highlight);
+}
+
+.gc-markdown strong,
+.gc-markdown-compact strong {
+  color: inherit;
+  font-weight: 600;
+}
+
+.gc-markdown h1,
+.gc-markdown h2,
+.gc-markdown h3,
+.gc-markdown-compact h1,
+.gc-markdown-compact h2,
+.gc-markdown-compact h3 {
+  text-wrap: balance;
+}
+
+.gc-markdown p,
+.gc-markdown li,
+.gc-markdown-compact p,
+.gc-markdown-compact li {
+  text-wrap: pretty;
+}
+
+.gc-markdown h1,
+.gc-markdown h2,
+.gc-markdown h3,
+.gc-markdown h4,
+.gc-markdown h5,
+.gc-markdown h6 {
+  margin-top: 1.25em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  color: inherit;
+}
+
+.gc-markdown h1 { font-size: 1.4em; }
+.gc-markdown h2 { font-size: 1.2em; }
+.gc-markdown h3 { font-size: 1.05em; }
+.gc-markdown h4 { font-size: 1em; }
+
+.gc-markdown h1:first-child,
+.gc-markdown h2:first-child,
+.gc-markdown h3:first-child,
+.gc-markdown h4:first-child {
+  margin-top: 0;
+}
+
+.gc-markdown h2 {
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--divider);
+}
+
+.gc-markdown p {
+  margin-bottom: 0.75em;
+  line-height: 1.7;
+}
+
+.gc-markdown ul,
+.gc-markdown ol,
+.gc-markdown-compact ul,
+.gc-markdown-compact ol {
+  list-style-position: outside;
+}
+
+.gc-markdown ul,
+.gc-markdown-compact ul {
+  list-style-type: "– ";
+}
+
+.gc-markdown ol,
+.gc-markdown-compact ol {
+  list-style-type: decimal;
+}
+
+.gc-markdown ul ul,
+.gc-markdown-compact ul ul {
+  list-style-type: "· ";
+}
+
+.gc-markdown ul.contains-task-list,
+.gc-markdown-compact ul.contains-task-list {
+  list-style-type: none;
+  padding-left: 0.25em;
+}
+
+.gc-markdown ul,
+.gc-markdown ol {
+  margin-bottom: 0.75em;
+  padding-left: 1.5em;
+}
+
+.gc-markdown li {
+  margin-bottom: 0.25em;
+}
+
+.gc-markdown li::marker,
+.gc-markdown-compact li::marker {
+  color: var(--ink-muted);
+  font-weight: 300;
+  font-variant-numeric: tabular-nums;
+}
+
+.gc-markdown blockquote {
+  border-left: 3px solid var(--divider-strong);
+  padding-left: 1rem;
+  margin: 0.75em 0;
+  color: var(--ink-muted);
+}
+
+.gc-markdown img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-md);
+  margin: 0.75em 0;
+}
+
+.gc-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.75em 0;
+}
+
+.gc-markdown th,
+.gc-markdown td {
+  border: 1px solid var(--divider);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+
+.gc-markdown th {
+  background: var(--surface);
+  font-weight: 600;
+}
+
+.gc-markdown hr {
+  border: none;
+  border-top: 1px solid var(--divider);
+  margin: 1.5em 0;
+}
+
+.gc-markdown a,
+.gc-markdown-compact a {
+  color: var(--ink-muted);
+  text-decoration: underline;
+  text-decoration-color: var(--divider-strong);
+  text-underline-offset: 2px;
+  transition: color 150ms cubic-bezier(0.4, 0, 0.2, 1), text-decoration-color 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.gc-markdown a:hover,
+.gc-markdown-compact a:hover {
+  color: var(--ink);
+  text-decoration-color: var(--ink-muted);
+}
+
+.gc-markdown-compact h1,
+.gc-markdown-compact h2,
+.gc-markdown-compact h3,
+.gc-markdown-compact h4,
+.gc-markdown-compact h5,
+.gc-markdown-compact h6 {
+  margin-top: 0.5em;
+  margin-bottom: 0.3em;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  color: inherit;
+}
+
+.gc-markdown-compact h1 { font-size: 1.2em; }
+.gc-markdown-compact h2 { font-size: 1.1em; }
+.gc-markdown-compact h3 { font-size: 1.02em; }
+.gc-markdown-compact h4 { font-size: 1em; }
+
+.gc-markdown-compact h1:first-child,
+.gc-markdown-compact h2:first-child,
+.gc-markdown-compact h3:first-child,
+.gc-markdown-compact h4:first-child {
+  margin-top: 0;
+}
+
+.gc-markdown-compact img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-md);
+  margin: 0.4em 0;
+}
+
+.gc-markdown-compact p {
+  margin-bottom: 0.4em;
+  line-height: 1.5;
+}
+
+.gc-markdown-compact ul,
+.gc-markdown-compact ol {
+  margin-bottom: 0.4em;
+  padding-left: 1.25em;
+}
+
+.gc-markdown-compact li {
+  margin-bottom: 0.15em;
+}
+
+.gc-markdown-compact blockquote {
+  border-left: 2px solid var(--divider-strong);
+  padding-left: 0.75rem;
+  margin: 0.4em 0;
+  color: var(--ink-muted);
+}
+
+.gc-markdown-compact table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.4em 0;
+}
+
+.gc-markdown-compact th,
+.gc-markdown-compact td {
+  border: 1px solid var(--divider);
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+  font-size: 0.9em;
+}
+
+.gc-markdown-compact hr {
+  border: none;
+  border-top: 1px solid var(--divider);
+  margin: 0.5em 0;
+}

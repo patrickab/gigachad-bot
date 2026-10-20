@@ -1,4 +1,4 @@
-import type { BranchNode } from "./protocol"
+import type { BranchNode } from "@gigachad/chat-ui/protocol"
 
 /** One in-session branch: the path from a session's first entry to `leafId`. */
 export interface SessionBranch {

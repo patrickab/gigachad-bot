@@ -12,12 +12,12 @@ import { PlotElement } from "@/components/content/PlotElement"
 import type { PlotFigure } from "@/lib/domain/types"
 import { ResizableEditor } from "./ResizableEditor"
 import type { CanvasToolbarSlots } from "@/features/editor/canvas/CanvasToolbar"
-import { loadFileViewerText, readFileRootRendered, writeArchitectureSource, writeDocument, writeRootFile, ApiError } from "@/lib/backend/api"
+import { readFileRootRendered, writeArchitectureSource, writeDocument, writeRootFile } from "@/lib/backend/api"
 import { architectureSlug, architectureSource, isArchitecturePath } from "@/lib/domain/architecturePaths"
-import { subscribeToChanges, type ChangeEvent } from "@/lib/backend/syncStream"
 import { baseName } from "@/lib/paths"
 import { useTabActive } from "@/contexts/TabContext"
 import { useNeovimSetting } from "@/contexts/SettingsContext"
+import { useRootFileDocument } from "./useRootFileDocument"
 
 type EditorView = "edit" | "preview"
 
@@ -98,19 +98,27 @@ export function ArchitectureSourceEditor(props: DocumentEditorProps) {
 export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, overlay, persistOverride, onModeLabel, onNavigate, model }: DocumentEditorProps) {
   const isActive = useTabActive()
   const neovim = useNeovimSetting()
-  const [content, setContent] = useState<string | null>(null)
   const [renderedContent, setRenderedContent] = useState<string | null>(null)
-  const [loadedPath, setLoadedPath] = useState<string | null>(null)
-  const [loadError, setLoadError] = useState<"failed" | "binary" | null>(null)
-  const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(!!overlay)
   const [view, setView] = useState<EditorView>(() => path.endsWith(".plot.json") ? "preview" : "edit")
   const initializedViewPath = useRef<string | null>(null)
-  const savedContentRef = useRef("")
 
   const filename = baseName(path)
+  const write = useCallback(async (next: string) => {
+    if (persistOverride) await persistOverride(next)
+    // An absolute path is a file mount file, referenced by a project or opened directly: save it in place.
+    else if (path.startsWith("/")) await writeRootFile(path, next)
+    else await writeDocument(slug, filename, next)
+  }, [slug, filename, path, persistOverride])
+  const notifySaved = useCallback((next: string) => onSaved?.(filename, next), [filename, onSaved])
+  // A confirmed-missing document legitimately starts blank. The server prunes uses of removed elements
+  // from a hand-edited `.c4`, so its saves read back what it stored.
+  const { content, loadedPath, loadError, dirty, reload: loadFromServer, handleTextChange, persist, saveFromNeovim } = useRootFileDocument({
+    path, write, blankWhenMissing: true, readBackAfterSave: isArchitecturePath(path), onSaved: notifySaved,
+  })
+
   const language = editorLanguage(path)
   const isArtifact = isToolArtifact(path, content ?? "")
   const plotFigure = useMemo(() => path.endsWith(".plot.json") && content !== null ? parsePlotFigure(content) : null, [content, path])
@@ -126,21 +134,6 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent
     if (overlay) modeLabelRef.current?.(filename)
   }, [overlay, filename])
 
-  const loadFromServer = useCallback(() => {
-    const apply = (text: string) => {
-      setLoadError(null)
-      setContent(text)
-      setLoadedPath(path)
-      savedContentRef.current = text
-    }
-    // A confirmed-missing document legitimately starts blank. Any other failure must
-    // not arm a save of blank content over the real stored content.
-    return loadFileViewerText(path).then(apply).catch((err) => {
-      if (err instanceof ApiError && err.status === 404) apply("")
-      else setLoadError(err instanceof ApiError && err.status === 415 ? "binary" : "failed")
-    })
-  }, [path])
-
   const [renderedScope, setRenderedScope] = useState({ path, overlay })
   // Drop the rendered preview of the previous document or mode
   if (renderedScope.path !== path || renderedScope.overlay !== overlay) {
@@ -153,52 +146,9 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent
     if (overlay) readFileRootRendered(path).then(setRenderedContent).catch(() => {})
   }, [path, overlay, loadFromServer])
 
-  const handleTextChange = useCallback((value: string) => {
-    setContent(value)
-    setDirty(value !== savedContentRef.current)
-  }, [])
-
-  // Reload on remote changes unless there are unsaved local edits. `resource_key` may be a path suffix.
-  const reloadOnRemoteChange = useEffectEvent((event: ChangeEvent) => {
-    if (dirty || event.resource_kind !== "document") return
-    if (event.resource_key !== path && !path.endsWith(`/${event.resource_key}`)) return
-    loadFromServer()
-  })
-  useEffect(() => subscribeToChanges((event) => reloadOnRemoteChange(event)), [])
-
   const clearLiveContent = useEffectEvent((livePath: string) => { onLiveContent?.(livePath, null) })
   useEffect(() => () => { clearLiveContent(path) }, [path])
 
-  const persistNow = useCallback(async (next: string) => {
-    if (persistOverride) await persistOverride(next)
-    // An absolute path is a file mount file, referenced by a project or opened directly: save it in place.
-    else if (path.startsWith("/")) await writeRootFile(path, next)
-    else await writeDocument(slug, filename, next)
-    savedContentRef.current = next
-    setDirty(false)
-    // The server prunes uses of removed elements from a hand-edited `.c4`; show what it stored.
-    if (isArchitecturePath(path)) {
-      const stored = await loadFileViewerText(path).catch(() => next)
-      if (stored !== next) { setContent(stored); savedContentRef.current = stored }
-    }
-    onSaved?.(filename, next)
-  }, [slug, filename, path, onSaved, persistOverride])
-
-  // Saves are chained so an earlier slow write can never resolve after,
-  // and silently clobber, a newer one.
-  const saveChain = useRef(Promise.resolve())
-  const persist = useCallback((next: string) => {
-    const run = saveChain.current.then(() => persistNow(next))
-    saveChain.current = run.catch(() => {})
-    return run
-  }, [persistNow])
-
-  // Neovim owns the text while it runs: `:w` persists, and React shows what was stored.
-  const saveFromNeovim = useCallback(async (text: string) => {
-    await persist(text)
-    setContent(savedContentRef.current)
-    return savedContentRef.current
-  }, [persist])
   const neovimSession = useNeovimTerminal(
     neovim.enabled && content !== null && loadedPath === path ? { key: path, path, filename, content } : null,
     saveFromNeovim,

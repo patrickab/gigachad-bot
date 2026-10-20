@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "katex/dist/katex.min.css";
 @import "streamdown/styles.css";
+@import "../packages/chat-ui/src/palette.css";
 
 /* Streamdown emits arbitrary-value utilities (e.g. dark:text-[var(--shiki-dark,...)])
    from its compiled output, so Tailwind must scan its dist to generate them. */
@@ -16,27 +17,25 @@
 /* THEME TOKENS
    Role tokens (--ink, --paper, --surface, ...) are the only colors components use.
    Derived tokens (--divider, --hover-overlay, ...) are color-mix of role tokens.
-   Dark is the default (:root), `.light` overrides the role tokens. All role tokens
-   are OKLCH with a warm hue and tiny chroma to stay monochromatic.
+   Dark is the default (:root), `.light` overrides the role tokens.
+   Roles shared with the omp frame take their values from `packages/chat-ui/src/palette.css`
+   (`--gc-<mode>-*`), change them there. Shell-only roles are OKLCH with the same warm hue.
    Tailwind utilities come from @theme below. */
 
  :root {
-   --shadow-color: oklch(4% 0.004 70);
+   --shadow-color: var(--gc-dark-shadow-color);
 
-   /* --- Text (ink): cream, never pure white --- */
-   --ink:        oklch(94% 0.010 75);
-   --ink-muted:  oklch(75% 0.013 70);
-   --ink-subtle: oklch(59% 0.012 65);
-   --ink-faint:  oklch(48% 0.010 60);
+   --ink:        var(--gc-dark-ink);
+   --ink-muted:  var(--gc-dark-ink-muted);
+   --ink-subtle: var(--gc-dark-ink-subtle);
+   --ink-faint:  var(--gc-dark-ink-faint);
 
-   /* --- Surfaces: low-chroma yellow warmth without a red-brown cast. --- */
-   --paper:            oklch(13%   0.006 70);
-   --surface:          oklch(16.5% 0.007 70);
-   --surface-elevated: oklch(19%   0.008 70);
+   --paper:            var(--gc-dark-paper);
+   --surface:          var(--gc-dark-surface);
+   --surface-elevated: var(--gc-dark-surface-elevated);
    --overlay:          oklch(10.5% 0.005 70);
 
-   /* --- Danger (red, reserved for destructive actions only) --- */
-   --danger:      oklch(68% 0.20 25);
+   --danger:      var(--gc-dark-danger);
    --diff-added:   oklch(76% 0.16 150);
    --diff-removed: oklch(73% 0.17 25);
 
@@ -47,9 +46,8 @@
           color-mix(), and its WebGL 3D scenes render translucent or oklch colors near-white --- */
    --chart-grid:  rgb(47, 44, 40);
 
-   /* --- Derived: dividers (recompute when --ink changes) --- */
-   --divider:         color-mix(in oklab, var(--ink) 11%, transparent);
-   --divider-strong:  color-mix(in oklab, var(--ink) 22%, transparent);
+   --divider:         var(--gc-dark-divider);
+   --divider-strong:  var(--gc-dark-divider-strong);
 
    /* --- Derived: danger tints --- */
    --danger-soft:     color-mix(in oklab, var(--danger) 12%, transparent);
@@ -59,8 +57,7 @@
    --hover-overlay-strong: color-mix(in oklab, var(--ink) 10%, transparent);
 
    /* --- Shadows (dark mode: layered, near-black) --- */
-   --shadow-sm:  0 1px 2px color-mix(in oklab, var(--shadow-color) 40%, transparent),
-                 0 2px 8px color-mix(in oklab, var(--shadow-color) 30%, transparent);
+   --shadow-sm:  var(--gc-dark-shadow-sm);
    --shadow-md:  0 1px 3px color-mix(in oklab, var(--shadow-color) 40%, transparent),
                  0 4px 12px color-mix(in oklab, var(--shadow-color) 35%, transparent),
                  0 8px 20px color-mix(in oklab, var(--shadow-color) 25%, transparent);
@@ -71,28 +68,24 @@
                  0 12px 24px color-mix(in oklab, var(--shadow-color) 30%, transparent),
                  0 24px 48px color-mix(in oklab, var(--shadow-color) 25%, transparent);
 
-   /* --- Inner top-edge highlight: on near-black this, not the shadow, carries depth --- */
-   --inner-highlight: inset 0 1px 0 0 oklch(100% 0 0 / 0.05);
+   --inner-highlight: var(--gc-dark-inner-highlight);
    --inner-highlight-strong: inset 0 1px 0 0 oklch(100% 0 0 / 0.09);
  }
 
   :root.light {
-    --shadow-color: oklch(35% 0.01 85);
+    --shadow-color: var(--gc-light-shadow-color);
   
-    /* --- Text: warm near-charcoal down to faint grey --- */
-    --ink:        oklch(30% 0.012 85);
-    --ink-muted:  oklch(46% 0.012 85);
-    --ink-subtle: oklch(58% 0.010 85);
-    --ink-faint:  oklch(72% 0.008 85);
+    --ink:        var(--gc-light-ink);
+    --ink-muted:  var(--gc-light-ink-muted);
+    --ink-subtle: var(--gc-light-ink-subtle);
+    --ink-faint:  var(--gc-light-ink-faint);
   
-    /* --- Surfaces: yellowish broken white, ascending toward (not to) white --- */
-    --paper:            oklch(95%   0.020 85);
-    --surface:          oklch(97.5% 0.012 85);
-    --surface-elevated: oklch(99%   0.006 85);
+    --paper:            var(--gc-light-paper);
+    --surface:          var(--gc-light-surface);
+    --surface-elevated: var(--gc-light-surface-elevated);
     --overlay:          oklch(96%   0.015 85);
   
-    /* --- Danger: darker red for light bg --- */
-    --danger:      oklch(52% 0.22 25);
+    --danger:      var(--gc-light-danger);
     --diff-added:   oklch(43% 0.13 150);
     --diff-removed: oklch(48% 0.19 25);
   
@@ -101,13 +94,11 @@
     /* Backdrop: a scrim darkens regardless of mode */
     --backdrop:    oklch(0% 0 0 / 0.55);
   
-    /* --- Dividers: stronger on light surfaces --- */
-    --divider:        color-mix(in oklab, var(--ink) 24%, transparent);
-    --divider-strong: color-mix(in oklab, var(--ink) 42%, transparent);
+    --divider:        var(--gc-light-divider);
+    --divider-strong: var(--gc-light-divider-strong);
   
     /* --- Shadows (light mode — layered, softer) --- */
-    --shadow-sm:  0 1px 2px color-mix(in oklab, var(--shadow-color) 6%, transparent),
-                  0 2px 8px color-mix(in oklab, var(--shadow-color) 5%, transparent);
+    --shadow-sm:  var(--gc-light-shadow-sm);
     --shadow-md:  0 1px 3px color-mix(in oklab, var(--shadow-color) 8%, transparent),
                   0 4px 12px color-mix(in oklab, var(--shadow-color) 5%, transparent),
                   0 8px 20px color-mix(in oklab, var(--shadow-color) 3%, transparent);
@@ -119,7 +110,7 @@
                   0 24px 48px color-mix(in oklab, var(--shadow-color) 3%, transparent);
 
     /* --- Inner highlight stronger on light mode --- */
-    --inner-highlight: inset 0 1px 0 0 oklch(100% 0 0 / 0.5);
+    --inner-highlight: var(--gc-light-inner-highlight);
     --inner-highlight-strong: inset 0 1px 0 0 oklch(100% 0 0 / 0.7);
   }
 
@@ -645,24 +636,9 @@ body::after {
   background-color: oklch(45% 0.03 85 / 0.25);
 }
 
-.markdown-body,
-.markdown-body-compact {
-  color: var(--ink-muted);
-}
-
-.markdown-body .katex,
-.markdown-body-compact .katex {
-  color: inherit;
-}
-
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--divider) transparent;
-}
-
-.katex-display {
-  overflow-x: auto;
-  overflow-y: hidden;
 }
 
 pre {
@@ -678,234 +654,6 @@ pre {
 code {
   font-family: var(--font-mono), var(--font-symbols), 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
   font-size: 0.875em;
-}
-
-:not(pre) > code {
-  background: var(--surface-elevated);
-  border: 1px solid var(--divider);
-  padding: 0.1em 0.35em;
-  border-radius: var(--radius-sm);
-  white-space: nowrap;
-  box-shadow: var(--inner-highlight);
-}
-
-.markdown-body strong,
-.markdown-body-compact strong {
-  color: inherit;
-  font-weight: 600;
-}
-
-.markdown-body h1,
-.markdown-body h2,
-.markdown-body h3,
-.markdown-body h4,
-.markdown-body h5,
-.markdown-body h6 {
-  margin-top: 1.25em;
-  margin-bottom: 0.5em;
-  font-weight: 600;
-  line-height: 1.3;
-  letter-spacing: -0.01em;
-  color: inherit;
-}
-
-.markdown-body h1 { font-size: 1.4em; }
-.markdown-body h2 { font-size: 1.2em; }
-.markdown-body h3 { font-size: 1.05em; }
-.markdown-body h4 { font-size: 1em; }
-
-.markdown-body h1:first-child,
-.markdown-body h2:first-child,
-.markdown-body h3:first-child,
-.markdown-body h4:first-child {
-  margin-top: 0;
-}
-
-.markdown-body h2 {
-  padding-bottom: 0.3em;
-  border-bottom: 1px solid var(--divider);
-}
-
-.markdown-body p {
-  margin-bottom: 0.75em;
-  line-height: 1.7;
-}
-
-.markdown-body ul,
-.markdown-body ol,
-.markdown-body-compact ul,
-.markdown-body-compact ol {
-  list-style-position: outside;
-}
-
-.markdown-body ul,
-.markdown-body-compact ul {
-  list-style-type: "– ";
-}
-
-.markdown-body ol,
-.markdown-body-compact ol {
-  list-style-type: decimal;
-}
-
-.markdown-body ul ul,
-.markdown-body-compact ul ul {
-  list-style-type: "· ";
-}
-
-.markdown-body ul.contains-task-list,
-.markdown-body-compact ul.contains-task-list {
-  list-style-type: none;
-  padding-left: 0.25em;
-}
-
-.markdown-body ul,
-.markdown-body ol {
-  margin-bottom: 0.75em;
-  padding-left: 1.5em;
-}
-
-.markdown-body li {
-  margin-bottom: 0.25em;
-}
-
-.markdown-body li::marker {
-  color: var(--ink-muted);
-  font-weight: 300;
-  font-variant-numeric: tabular-nums;
-}
-
-.markdown-body blockquote {
-  border-left: 3px solid var(--divider-strong);
-  padding-left: 1rem;
-  margin: 0.75em 0;
-  color: var(--ink-muted);
-}
-
-.markdown-body img {
-  max-width: 100%;
-  height: auto;
-  border-radius: var(--radius-md);
-  margin: 0.75em 0;
-}
-
-.markdown-body table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 0.75em 0;
-}
-
-.markdown-body th,
-.markdown-body td {
-  border: 1px solid var(--divider);
-  padding: 0.5rem 0.75rem;
-  text-align: left;
-}
-
-.markdown-body th {
-  background: var(--surface);
-  font-weight: 600;
-}
-
-.markdown-body hr {
-  border: none;
-  border-top: 1px solid var(--divider);
-  margin: 1.5em 0;
-}
-
-.markdown-body a,
-.markdown-body-compact a {
-  color: var(--ink-muted);
-  text-decoration: underline;
-  text-decoration-color: var(--divider-strong);
-  text-underline-offset: 2px;
-}
-
-.markdown-body a:hover,
-.markdown-body-compact a:hover {
-  color: var(--ink);
-  text-decoration-color: var(--ink-muted);
-}
-
-.markdown-body-compact h1,
-.markdown-body-compact h2,
-.markdown-body-compact h3,
-.markdown-body-compact h4,
-.markdown-body-compact h5,
-.markdown-body-compact h6 {
-  margin-top: 0.5em;
-  margin-bottom: 0.3em;
-  font-weight: 600;
-  line-height: 1.3;
-  letter-spacing: -0.01em;
-  color: inherit;
-}
-
-.markdown-body-compact h1 { font-size: 1.2em; }
-.markdown-body-compact h2 { font-size: 1.1em; }
-.markdown-body-compact h3 { font-size: 1.02em; }
-.markdown-body-compact h4 { font-size: 1em; }
-
-.markdown-body-compact h1:first-child,
-.markdown-body-compact h2:first-child,
-.markdown-body-compact h3:first-child,
-.markdown-body-compact h4:first-child {
-  margin-top: 0;
-}
-
-.markdown-body-compact li::marker {
-  color: var(--ink-muted);
-  font-weight: 300;
-  font-variant-numeric: tabular-nums;
-}
-
-.markdown-body-compact img {
-  max-width: 100%;
-  height: auto;
-  border-radius: var(--radius-md);
-  margin: 0.4em 0;
-}
-
-.markdown-body-compact p {
-  margin-bottom: 0.4em;
-  line-height: 1.5;
-}
-
-.markdown-body-compact ul,
-.markdown-body-compact ol {
-  margin-bottom: 0.4em;
-  padding-left: 1.25em;
-}
-
-.markdown-body-compact li {
-  margin-bottom: 0.15em;
-}
-
-.markdown-body-compact blockquote {
-  border-left: 2px solid var(--divider-strong);
-  padding-left: 0.75rem;
-  margin: 0.4em 0;
-  color: var(--ink-muted);
-}
-
-.markdown-body-compact table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 0.4em 0;
-}
-
-.markdown-body-compact th,
-.markdown-body-compact td {
-  border: 1px solid var(--divider);
-  padding: 0.35rem 0.5rem;
-  text-align: left;
-  font-size: 0.9em;
-}
-
-.markdown-body-compact hr {
-  border: none;
-  border-top: 1px solid var(--divider);
-  margin: 0.5em 0;
 }
 
 .shiki,

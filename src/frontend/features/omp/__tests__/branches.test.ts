@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { sessionBranches } from "@/features/omp/branches"
-import type { BranchNode } from "@/features/omp/protocol"
+import type { BranchNode } from "@gigachad/chat-ui/protocol"
 
 function entry(id: string, role: "user" | "assistant" | undefined, preview: string, children: BranchNode[] = []): BranchNode {
   return { id, type: role ? "message" : "model_change", role, preview, children }

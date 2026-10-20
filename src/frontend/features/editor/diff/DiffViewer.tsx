@@ -56,15 +56,24 @@ function ChangedFiles({ files, activePath, onSelect, root }: {
   return <FileTree label={`Changes in ${baseName(root)}`} items={buildTree(files, activePath, onSelect)} controller={controller} />
 }
 
-/** Pull-request style totals: changed files, then added and removed lines of the loaded patches. */
-function ChangeSummary({ files, patches }: { files: number; patches: FilePatch[] }) {
-  const lines = patches.flatMap((patch) => patch.lines ?? [])
-  const added = lines.filter((line) => line.kind === "added").length
-  const removed = lines.filter((line) => line.kind === "removed").length
+const totalsCache = new Map<string, { added: number; removed: number }>()
+
+/** Pull-request style totals: changed files, then added and removed lines. Shown only once every patch loaded, else the last known totals of this root. */
+function ChangeSummary({ root, files, patches }: { root: string; files: number; patches: FilePatch[] }) {
+  if (patches.length === files) {
+    const lines = patches.flatMap((patch) => patch.lines ?? [])
+    totalsCache.set(root, {
+      added: lines.filter((line) => line.kind === "added").length,
+      removed: lines.filter((line) => line.kind === "removed").length,
+    })
+  }
+  const totals = totalsCache.get(root)
   return <p aria-label="Change summary" className="flex items-center gap-2 px-2 pb-2 text-xs tabular-nums text-ink-faint">
     <span>{files} {files === 1 ? "file" : "files"}</span>
-    <span className="text-diff-added">+{added}</span>
-    <span className="text-diff-removed">−{removed}</span>
+    {totals && <>
+      <span className="text-diff-added">+{totals.added}</span>
+      <span className="text-diff-removed">−{totals.removed}</span>
+    </>}
   </p>
 }
 
@@ -203,7 +212,7 @@ export function DiffViewer({ root }: { root: string }) {
   return <div className="flex h-full">
     <nav aria-label="Changed files" className="mb-3 ml-3 flex w-60 shrink-0 flex-col rounded-2xl border border-divider/50 bg-surface shadow-[var(--shadow-lg)]">
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-3">
-        {files.length > 0 && <ChangeSummary files={files.length} patches={patches.key === patchKey ? Object.values(patches.files) : []} />}
+        {files.length > 0 && <ChangeSummary root={root} files={files.length} patches={patches.key === patchKey ? Object.values(patches.files) : []} />}
         <ChangedFiles files={files} activePath={activePath} onSelect={jumpToFile} root={root} />
       </div>
     </nav>

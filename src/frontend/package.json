@@ -9,7 +9,9 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "sync:ompweb": "node packages/chat-ui/pack.mjs --out \"${GIGACHAD_OMP_WEB_REPO:-$HOME/git/ompweb}\"/custom/vendor --app \"${GIGACHAD_OMP_WEB_REPO:-$HOME/git/ompweb}\" --install",
+    "check:ompweb": "node packages/chat-ui/pack.mjs --out \"${GIGACHAD_OMP_WEB_REPO:-$HOME/git/ompweb}\"/custom/vendor --app \"${GIGACHAD_OMP_WEB_REPO:-$HOME/git/ompweb}\" --check"
   },
   "dependencies": {
     "@streamdown/math": "^1.0.2",

@@ -11,7 +11,7 @@ import { parseFiles } from "@/lib/backend/api"
 import type { Attachment, OmpView } from "@/lib/domain/types"
 import { composerFor, composerImageFile, isComposerOf, mergeRestoredText, ompModelOf, ompPrompt, ompSelectorModels, selectorModelId, shellHint } from "./composer"
 import { useOmp } from "./OmpProvider"
-import type { Completion } from "./protocol"
+import type { Completion } from "@gigachad/chat-ui/protocol"
 
 const COMPLETION_ICONS: Record<Completion["kind"], LucideIcon> = {
   extension: Puzzle, prompt: MessageSquareText, skill: Sparkles, file: FileIcon, directory: Folder,

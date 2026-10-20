@@ -1,18 +1,19 @@
 /**
- * postMessage protocol between this shell and omp-web in its frame.
+ * postMessage protocol between gigachad-bot's shell (parent window) and omp-web (ompweb fork) in its frame.
  *
- * - Mirror of ompweb `custom/embed/protocol.ts`, change both together and bump the version
+ * - The one definition both sides import: the shell from source, the fork as `@gigachad/chat-ui/protocol`
+ * - Bump `EMBED_PROTOCOL_VERSION` with every message change, a running frame may still be an older build
  * - Every message carries `channel: EMBED_CHANNEL` so unrelated postMessage traffic is ignored
  */
 export const EMBED_CHANNEL = "omp-embed"
-export const EMBED_PROTOCOL_VERSION = 5
+export const EMBED_PROTOCOL_VERSION = 6
 
 export type ThemeMode = "light" | "dark"
 
-/** Key combination the frame hands back to the shell instead of handling it. `key` is `KeyboardEvent.key`. */
+/** Key combination the frame hands back to the shell instead of handling it, e.g. Alt+T for a new tab. `key` is `KeyboardEvent.key`. */
 export type KeyChord = { key: string; altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }
 
-/** Message-only view of an omp session tree entry. */
+/** Message-only view of an omp session tree entry, omp-web's `SessionTreeNode` (`lib/types.ts`). */
 export type BranchNode = {
   id: string
   /** Entry type from the session file (`message`, `model_change`, `compaction`, ...). */
@@ -24,7 +25,7 @@ export type BranchNode = {
   children: BranchNode[]
 }
 
-/** omp model id, as omp-web's composer holds it. */
+/** omp model id, as omp-web's `ChatInput` `model` prop holds it. */
 export type ModelRef = { provider: string; modelId: string }
 
 /** Base64 image without data-URL prefix, as omp's `prompt` command takes it. */
@@ -54,7 +55,7 @@ export type ShellMessage =
   | { type: "set-theme"; theme: ThemeMode }
   | { type: "select-leaf"; sessionId: string; leafId: string | null }
   /**
-   * This shell's composer replaces omp-web's hidden one. Each names the session it was typed for (null: new-session screen), a frame showing another one ignores it.
+   * The shell's composer replaces omp-web's hidden one. Each names the session it was typed for (null: new-session screen), a frame showing another one ignores it.
    * `composer-send` submits like omp-web's composer: builtins (`/btw`), then a prompt, a follow-up while the agent is busy.
    */
   | { type: "composer-send"; sessionId: string | null; text: string; images: ComposerImage[] }
@@ -73,16 +74,18 @@ export type FrameMessage =
   | { type: "branch-tree"; sessionId: string; tree: BranchNode[]; activeLeafId: string | null }
   | ({ type: "key" } & KeyChord)
   /**
-   * Composer state for this shell's composer. `sessionId` is the shown session, null on the new-session screen.
+   * Composer state for the shell's composer. `sessionId` is the shown session, null on the new-session screen.
    * `thinkingLevels` is what omp-web's reasoning menu offers (`auto`, `off`, ... `max`), empty when it shows none. `thinkingLevel` is the selected one.
    */
   | { type: "composer"; sessionId: string | null; streaming: boolean; model: ModelRef | null; thinkingLevel: string; thinkingLevels: string[] }
   /**
-   * Text and images omp handed back (an abort withdrew queued messages, the queue panel's Edit), for this shell's composer.
-   * Merge with `mergeRestoredText` (`composer.ts`), a mirror of omp-web's `mergeRecoveredText`.
+   * Text and images omp handed back (an abort withdrew queued messages, the queue panel's Edit), for the shell's composer.
+   * Merge like omp-web's `mergeRecoveredText` (`lib/draft-store.ts`): `replace` set and the draft starts with `replace.lead` -> that lead becomes `text`, else `replace.fallback` (or `text`) goes before the draft.
    */
   | { type: "composer-restore"; sessionId: string | null; text: string; replace: { lead: string; fallback: string } | null; images: ComposerImage[] }
   /** Answer to `composer-complete`, empty when nothing matches or the lookup failed. */
   | { type: "composer-completions"; sessionId: string | null; requestId: number; items: Completion[] }
+  /** The user clicked a link to a local file, the shell shows it instead of omp-web's file panel. `path` is absolute. */
+  | { type: "open-file"; path: string }
 
 export type Envelope<Message> = Message & { channel: typeof EMBED_CHANNEL }

@@ -7,7 +7,7 @@ import { fileViewerRawUrl } from "@/lib/backend/urls"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
 import { FloatingWindow } from "@/components/ui/FloatingWindow"
 import { fuzzyScore } from "@/lib/fuzzy"
-import { baseName, dirName } from "@/lib/paths"
+import { baseName, dirName, extOf, kindOf, type FileKind } from "@/lib/paths"
 import { buildPathTree, relativeName, type PathTreeNode } from "@/lib/pathTree"
 import { cn } from "@/lib/utils"
 
@@ -15,24 +15,6 @@ import { LazyPdfViewer } from "@/components/content/LazyPdfViewer"
 
 // Max rows rendered for a search.
 const RESULT_CAP = 300
-const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif", "ico"])
-
-type FileKind = "image" | "pdf" | "markdown" | "text"
-
-// Dotfiles (".env") have no extension.
-function extOf(path: string): string {
-  const name = baseName(path)
-  const i = name.lastIndexOf(".")
-  return i <= 0 ? "" : name.slice(i + 1).toLowerCase()
-}
-
-function kindOf(path: string): FileKind {
-  const ext = extOf(path)
-  if (IMAGE_EXTS.has(ext)) return "image"
-  if (ext === "pdf") return "pdf"
-  if (ext === "md" || ext === "markdown") return "markdown"
-  return "text"
-}
 
 function iconFor(kind: FileKind) {
   if (kind === "image") return ImageIcon

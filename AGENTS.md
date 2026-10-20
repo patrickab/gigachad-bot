@@ -34,11 +34,11 @@ omp tabs embed omp-web from the fork `patrickab/ompweb` (branch `custom`), itsel
 - **Drop before you change**: omp-web UI gigachad-bot does not want is hidden in the fork's embed mode (`custom/theme/embed.css`), not rewritten. Prefer hiding a feature over porting or patching it
 - **Adapters own all omp-web knowledge**, one place per side, so an omp-web change lands in one file:
   - Backend: `src/lib/omp_web.py` only. Routes (`routes/omp.py`) map its errors, they never build omp-web URLs. Pydantic contract models validate every response, a shape change fails loudly with the field name (502). `src/backend/omp_web_gate.py` (production Tailnet gate in front of the frame) is a plain identity-checking proxy, keep omp-web API knowledge out of it
-  - Frontend: `src/frontend/features/omp/` only. Nothing else knows the iframe, the postMessage protocol or omp-web URLs. Other features import its public files (eslint `crossFeature`)
+  - Frontend: `src/frontend/features/omp/` only. Nothing else knows the iframe, the postMessage protocol (defined in the shared package, eslint lets only this feature import it) or omp-web URLs. Other features import its public files (eslint `crossFeature`)
   - The browser never calls omp-web's API, the backend does, server to server
 - **Never vendor omp-web code** (components, hooks, CSS). Write new code against its API with omp-web as reference
-- **Mirrored contracts change in both repos in one go**: `features/omp/protocol.ts` mirrors the fork's `custom/embed/protocol.ts` (bump `EMBED_PROTOCOL_VERSION`), the fork's `custom/theme/palette.css` embed tokens mirror `app/globals.css`
+- **Shared contracts live once, in `src/frontend/packages/chat-ui/`** (`@gigachad/chat-ui`): the postMessage protocol (`src/protocol.ts`, bump `EMBED_PROTOCOL_VERSION` with every message change) and the role palette (`src/palette.css`). The shell imports the source, the fork the vendored tarball. Ship a change with `npm run sync:ompweb` (bump the package version first) and commit the fork's tarball, manifest and lock
 - **One shared iframe**: tabs switch it by message, never by reload or by moving it in the DOM. Do not add a second frame or a per-tab frame
 - **Atomic commits**: one concern each (adapter, frame, tabs, sidebar, ...), the body names what omp-web contract it relies on
-- **After an omp-web update**: pin the worktree (`git -C ~/.local/share/gigachad-bot/ompweb checkout --detach custom`), run `pytest tests/test_omp_web.py`, then smoke an omp tab: open a session, switch omp tabs, send a prompt
+- **After an omp-web update**: commit it to the fork's `custom` branch and restart omp-web (its worktree follows `custom` on start), run `pytest tests/test_omp_web.py`, then smoke an omp tab: open a session, switch omp tabs, send a prompt
 

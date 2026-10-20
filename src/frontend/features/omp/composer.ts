@@ -1,7 +1,7 @@
 import type { Attachment, ModelsResponse, OmpView } from "@/lib/domain/types"
 import { OMP_LITELLM_ID } from "@/lib/models"
 import { buildHiddenContent, composeUserMessage, isImageAttachment } from "@/features/chat/attachments"
-import type { ComposerImage, FrameMessage, ModelRef } from "./protocol"
+import type { ComposerImage, FrameMessage, ModelRef } from "@gigachad/chat-ui/protocol"
 
 export type ComposerState = Extract<FrameMessage, { type: "composer" }>
 export type ComposerRestore = Extract<FrameMessage, { type: "composer-restore" }>

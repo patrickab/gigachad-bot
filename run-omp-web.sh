@@ -3,8 +3,8 @@
 #
 #   source    patrickab/ompweb fork, branch `custom` (embed mode + postMessage bridge)
 #   checkout  a dedicated detached worktree, so its `next build` never touches
-#             the fork checkout's `npm run dev`. It stays on the commit it was
-#             created at, update with `git -C "$dir" checkout --detach custom`
+#             the fork checkout's `npm run dev`. Every start moves it to the
+#             latest commit of `custom`, its run.sh then rebuilds what changed
 #   framing   omp-web refuses frames unless OMP_WEB_FRAME_ANCESTORS lists the
 #             frontend origin. Its run.sh rebuilds when that value changes
 #
@@ -56,6 +56,9 @@ if [[ ! -d "$dir" ]]; then
     mkdir -p "$(dirname -- "$dir")"
     git -C "$repo" worktree add --detach "$dir" "$ref"
 fi
+# Detached because `custom` is usually checked out in the fork checkout itself.
+git -C "$dir" checkout --quiet --detach "$ref"
+printf 'omp-web worktree at %s (%s)\n' "$ref" "$(git -C "$dir" log -1 --format='%h %s')"
 
 # Node >= 24 comes from the project venv, like the frontend's.
 export PATH="$root_dir/.venv/bin:$PATH"

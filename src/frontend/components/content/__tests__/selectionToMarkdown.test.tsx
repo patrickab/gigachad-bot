@@ -1,7 +1,7 @@
-import { render } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { fireEvent, render } from "@testing-library/react"
+import { describe, expect, it, vi } from "vitest"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
-import { selectionToMarkdown } from "@/components/content/selectionToMarkdown"
+import { selectionToMarkdown } from "@gigachad/chat-ui"
 
 /** Render `content`, select `target` (or everything) and return the markdown a copy would produce. */
 function copiedMarkdown(content: string, selector?: string): string | null {
@@ -41,5 +41,22 @@ describe("selectionToMarkdown", () => {
 
   it("returns plain text unchanged for a plain selection", () => {
     expect(copiedMarkdown("snake_case and 2 * 3", "p")).toBe("snake_case and 2 * 3")
+  })
+})
+
+describe("copying from a rendered message", () => {
+  it("copies the exact source when the whole message is selected", () => {
+    const content = "First _paragraph_.\n\n* item"
+    const { container } = render(<LaTeXMarkdown content={content} />)
+    const root = container.firstElementChild as HTMLElement
+    const range = document.createRange()
+    range.selectNodeContents(root)
+    window.getSelection()!.removeAllRanges()
+    window.getSelection()!.addRange(range)
+    const setData = vi.fn()
+
+    fireEvent.copy(root, { clipboardData: { setData } })
+
+    expect(setData).toHaveBeenCalledWith("text/plain", content)
   })
 })

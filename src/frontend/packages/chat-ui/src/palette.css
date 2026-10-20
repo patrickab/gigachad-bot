@@ -1,0 +1,46 @@
+/* gigachad-bot's role colors per mode, the one place their values live.
+
+   - Hosts map them onto their own role tokens per theme: the shell in `app/globals.css` (`:root` dark, `:root.light`),
+     the ompweb fork in `custom/theme/palette.css` (`html.cf-embed`). The package's components read the mapped roles
+     (`--ink`, `--paper`, ...), never these
+   - Namespaced `--gc-<mode>-<role>` and defined for both modes at once, so no host token collides and no theme
+     selector is shared
+   - OKLCH with a warm hue and tiny chroma, monochromatic. Dark is cream on near-black, light is charcoal on
+     yellowish broken white */
+
+:root {
+  /* --- Dark --- */
+  --gc-dark-ink: oklch(94% 0.010 75);
+  --gc-dark-ink-muted: oklch(75% 0.013 70);
+  --gc-dark-ink-subtle: oklch(59% 0.012 65);
+  --gc-dark-ink-faint: oklch(48% 0.010 60);
+  --gc-dark-paper: oklch(13% 0.006 70);
+  --gc-dark-surface: oklch(16.5% 0.007 70);
+  --gc-dark-surface-elevated: oklch(19% 0.008 70);
+  /* Red, reserved for destructive actions */
+  --gc-dark-danger: oklch(68% 0.20 25);
+  --gc-dark-divider: color-mix(in oklab, var(--gc-dark-ink) 11%, transparent);
+  --gc-dark-divider-strong: color-mix(in oklab, var(--gc-dark-ink) 22%, transparent);
+  --gc-dark-shadow-color: oklch(4% 0.004 70);
+  --gc-dark-shadow-sm: 0 1px 2px color-mix(in oklab, var(--gc-dark-shadow-color) 40%, transparent),
+                       0 2px 8px color-mix(in oklab, var(--gc-dark-shadow-color) 30%, transparent);
+  /* On near-black the top-edge highlight, not the shadow, carries depth */
+  --gc-dark-inner-highlight: inset 0 1px 0 0 oklch(100% 0 0 / 0.05);
+
+  /* --- Light --- */
+  --gc-light-ink: oklch(30% 0.012 85);
+  --gc-light-ink-muted: oklch(46% 0.012 85);
+  --gc-light-ink-subtle: oklch(58% 0.010 85);
+  --gc-light-ink-faint: oklch(72% 0.008 85);
+  --gc-light-paper: oklch(95% 0.020 85);
+  --gc-light-surface: oklch(97.5% 0.012 85);
+  --gc-light-surface-elevated: oklch(99% 0.006 85);
+  --gc-light-danger: oklch(52% 0.22 25);
+  /* Stronger on light surfaces */
+  --gc-light-divider: color-mix(in oklab, var(--gc-light-ink) 24%, transparent);
+  --gc-light-divider-strong: color-mix(in oklab, var(--gc-light-ink) 42%, transparent);
+  --gc-light-shadow-color: oklch(35% 0.01 85);
+  --gc-light-shadow-sm: 0 1px 2px color-mix(in oklab, var(--gc-light-shadow-color) 6%, transparent),
+                        0 2px 8px color-mix(in oklab, var(--gc-light-shadow-color) 5%, transparent);
+  --gc-light-inner-highlight: inset 0 1px 0 0 oklch(100% 0 0 / 0.5);
+}

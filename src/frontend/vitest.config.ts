@@ -12,8 +12,10 @@ export default defineConfig({
     exclude: ["node_modules", ".next"],
   },
   resolve: {
-    alias: {
-      "@": path.resolve(__dirname),
-    },
+    alias: [
+      { find: /^@gigachad\/chat-ui$/, replacement: path.resolve(__dirname, "packages/chat-ui/src/index.ts") },
+      { find: /^@gigachad\/chat-ui\//, replacement: `${path.resolve(__dirname, "packages/chat-ui/src")}/` },
+      { find: /^@\//, replacement: `${path.resolve(__dirname)}/` },
+    ],
   },
 })

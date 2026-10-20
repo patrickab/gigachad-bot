@@ -1,0 +1,236 @@
+/* Q&A turn cards (`Turn.tsx`), the one definition gigachad-bot's chat and the ompweb fork's embedded chat render.
+
+   Reads the host's role tokens: --paper, --surface, --surface-elevated, --ink, --ink-muted, --ink-subtle,
+   --ink-faint, --divider-strong, --danger, --shadow-sm. A host with other token names maps them on `.gc-turn`. */
+
+.gc-turn {
+  position: relative;
+  margin: 12px;
+  border: 1px solid transparent;
+  border-radius: 24px;
+  overflow: hidden;
+  background-color: color-mix(in oklab, var(--surface) 65%, var(--paper));
+  box-shadow: var(--shadow-sm);
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 24px;
+  transition: box-shadow 200ms;
+}
+.gc-turn[data-expanded="true"] {
+  margin: 16px 12px;
+}
+.gc-turn[data-focused] {
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--ink-muted) 50%, transparent), var(--shadow-sm);
+}
+
+.gc-turn-avatar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 12px;
+  background: var(--surface-elevated);
+  color: var(--ink-muted);
+}
+.gc-turn-region[data-role="answer"] .gc-turn-avatar {
+  color: var(--ink);
+}
+
+/* Collapsed: header, then tool rows and the answer preview */
+.gc-turn-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px;
+  border: 0;
+  border-radius: 24px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.gc-turn-header .gc-turn-avatar {
+  border-radius: 50%;
+}
+.gc-turn-label {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: 14px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gc-turn-header:hover .gc-turn-label {
+  color: var(--ink);
+}
+.gc-turn-chevron {
+  flex: none;
+  color: var(--ink-faint);
+}
+.gc-turn-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 14px 14px;
+}
+.gc-turn-preview > .gc-turn-surface {
+  margin: 0;
+  padding: 14px;
+}
+.gc-turn-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.gc-turn-tool {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid transparent;
+  border-radius: 18px;
+  background-color: color-mix(in oklab, var(--surface-elevated) 45%, var(--surface));
+  color: var(--ink-subtle);
+  font-size: 12px;
+  line-height: 16px;
+}
+.gc-turn-tool > svg {
+  flex: none;
+}
+.gc-turn-preview-scroll {
+  max-height: 12.5vh;
+  overflow-y: auto;
+  color: var(--ink-muted);
+}
+
+/* Expanded: question region, then inset surfaces for tools and the answer, 20px all round */
+.gc-turn-surface {
+  margin: 0 20px 20px;
+  border: 1px solid transparent;
+  border-radius: 18px;
+  overflow: hidden;
+  background-color: color-mix(in oklab, var(--surface-elevated) 45%, var(--surface));
+}
+.gc-turn-region {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 20px;
+}
+/* The text's first line is centered on the 28px avatar. */
+.gc-turn-body {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  padding-top: 3px;
+}
+.gc-turn-content {
+  min-width: 0;
+}
+.gc-turn-collapse {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-start;
+  width: 20px;
+  height: 20px;
+  margin-top: 4px;
+  padding: 2px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--ink-faint);
+  cursor: pointer;
+}
+.gc-turn-collapse:hover {
+  color: var(--ink);
+}
+
+/* Actions: below the content, or on its last line when it ends in a paragraph.
+   Shown on hover or focus anywhere in the card, always on touch. */
+.gc-turn-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  height: 22px;
+  opacity: 0;
+  transition: opacity 150ms;
+}
+.gc-turn:hover .gc-turn-actions,
+.gc-turn-actions:focus-within {
+  opacity: 1;
+}
+@media (hover: none) {
+  .gc-turn-actions {
+    opacity: 1;
+  }
+}
+.gc-turn-body[data-tail="text"]:has(> .gc-turn-actions):has(> .gc-turn-content > :last-child [data-markdown-root]:last-child > div > p:last-child) {
+  & > .gc-turn-actions {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+  }
+
+  & > .gc-turn-content > :last-child [data-markdown-root]:last-child > div > p:last-child {
+    margin-bottom: 0;
+
+    &::after {
+      content: "";
+      display: inline-block;
+      width: min(100%, var(--gc-turn-actions-space));
+      height: 22px;
+      vertical-align: bottom;
+    }
+  }
+}
+.gc-turn-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--ink-subtle);
+  cursor: pointer;
+}
+.gc-turn-action:hover:not(:disabled) {
+  background: var(--surface-elevated);
+  color: var(--ink);
+}
+.gc-turn-action[data-tone="danger"]:hover:not(:disabled) {
+  color: var(--danger);
+}
+.gc-turn-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.gc-turn :is(.gc-turn-header, .gc-turn-collapse, .gc-turn-action, .gc-turn-preview-scroll):focus-visible {
+  outline: 2px solid var(--divider-strong);
+  outline-offset: 2px;
+}
+.gc-turn-spin {
+  animation: gc-turn-spin 1s linear infinite;
+}
+@keyframes gc-turn-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gc-turn,
+  .gc-turn-actions { transition: none; }
+  .gc-turn-spin { animation: none; }
+}

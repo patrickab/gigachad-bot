@@ -1,13 +1,9 @@
 "use client"
 
-import { Streamdown, defaultRemarkPlugins, type Components } from "streamdown"
-import { createMathPlugin } from "@streamdown/math"
-import remarkBreaks from "remark-breaks"
-import { memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type CSSProperties, type ReactNode } from "react"
+import { MarkdownRenderer, fenceCode, type CodeRenderers, type MarkdownComponents } from "@gigachad/chat-ui"
+import { memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react"
 import type { Markmap } from "markmap-view"
-import { cn } from "@/lib/utils"
 import { apiOrigin } from "@/lib/backend/urls"
-import { fenceCode, selectionToMarkdown } from "@/components/content/selectionToMarkdown"
 import { HostScaleContext } from "@/contexts/HostScaleContext"
 import { offsetToCamera } from "@/lib/domain/viewport"
 import { createPortal } from "react-dom"
@@ -16,14 +12,7 @@ import { CodeBlock } from "./CodeBlock"
 import { useThemeName } from "@/hooks/useThemeName"
 import type { ThemeName } from "@/lib/palette"
 import "katex/dist/katex.min.css"
-
-const mathPlugin = createMathPlugin({ singleDollarTextMath: true })
-const PLUGINS = { math: mathPlugin }
-
-// Detect mermaid code in fences without a language tag by its diagram keyword.
-function isMermaidCode(code: string): boolean {
-  return /^\s*(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitGraph|journey|requirementDiagram|mindmap|timeline|sankey|xychart|block-beta|packet-beta|architecture-beta)\b/i.test(code)
-}
+import "@gigachad/chat-ui/markdown.css"
 
 // ponytail: mutex serializes mermaid renders, it's a singleton that corrupts on concurrent calls
 let mermaidQueue = Promise.resolve()
@@ -242,80 +231,20 @@ function MarkmapDiagram({ code }: { code: string }) {
   return <div ref={containerRef} data-markdown-source={fenceCode("markmap", code)} className="my-3 overflow-hidden rounded-md" style={{ height: canvasViewportHeight === null ? "var(--markmap-height, 400px)" : `${canvasViewportHeight}px` }} />
 }
 
-const REMARK_PLUGINS = [...Object.values(defaultRemarkPlugins), remarkBreaks]
-const LINK_SAFETY_OFF = { enabled: false }
-
-// Rewrite \( \) and \[ \] to $ and $$ outside code spans and fences.
-function normalizeMathDelimiters(input: string): string {
-  if (input.indexOf("\\(") === -1 && input.indexOf("\\[") === -1) return input
-  const segments = input.split(/(```[\s\S]*?```|`[^`]*`)/g)
-  return segments
-    .map((seg, i) => {
-      if (i % 2 === 1) return seg
-      return seg
-        .replace(/\\\[/g, () => "$$")
-        .replace(/\\\]/g, () => "$$")
-        .replace(/\\\(/g, () => "$")
-        .replace(/\\\)/g, () => "$")
-    })
-    .join("")
+// Mermaid and Markmap are gigachad-only: the shared renderer routes fences to them, it does not know them.
+const CODE_RENDERERS: CodeRenderers = {
+  code: CodeBlock,
+  mermaid: MermaidDiagram,
+  markmap: MarkmapDiagram,
 }
 
-// Box-drawing (U+2500-257F) and block element (U+2580-259F) chars: treat as a diagram when dense enough.
-function containsAsciiTableArt(code: string): boolean {
-  const boxChars = (code.match(/[─-╿▀-▟]/g) || []).length
-  const lines = code.split("\n").length
-  return boxChars >= 8 && lines >= 3
-}
-
-
-const PROSE_COMPONENTS: Components = {
-  h1: "h1",
-  h2: "h2",
-  h3: "h3",
-  h4: "h4",
-  h5: "h5",
-  h6: "h6",
-  p: "p",
-  ul: "ul",
-  ol: "ol",
-  li: "li",
-  blockquote: "blockquote",
-  hr: "hr",
-  strong: "strong",
-  em: "em",
-  del: "del",
+const SHELL_COMPONENTS: MarkdownComponents = {
   // Backend-emitted image paths (e.g. /mineru/images/...) are root-relative and
   // resolve against the backend, not whichever origin serves the frontend.
   img: ({ src, alt, ...props }) => (
     // eslint-disable-next-line @next/next/no-img-element -- backend/blob URLs resolved at runtime under Tauri static export, next/image can't optimize them
     <img alt={alt ?? ""} src={typeof src === "string" && src.startsWith("/") && !src.startsWith("//") ? `${apiOrigin()}${src}` : src} {...props} />
   ),
-  table: ({ children, ...props }) => (
-    <div className="overflow-x-auto my-3">
-      <table {...props}>{children}</table>
-    </div>
-  ),
-  thead: "thead",
-  tbody: "tbody",
-  tr: "tr",
-  th: "th",
-  td: "td",
-  inlineCode: (props) => <code {...props} />,
-  code: ({ className, children }) => {
-    const match = /language-(\w+)/.exec(className || "")
-    const codeString = String(children).replace(/\n$/, "")
-    if (match?.[1] === "markmap" || className?.includes("markmap")) {
-      return <MarkmapDiagram code={codeString} />
-    }
-    if (match?.[1] === "mermaid" || isMermaidCode(codeString)) {
-      return <MermaidDiagram code={codeString} />
-    }
-    if (!match && containsAsciiTableArt(codeString)) {
-      return <CodeBlock codeString={codeString} language="text" plain />
-    }
-    return <CodeBlock codeString={codeString} language={match?.[1] || "text"} />
-  },
 }
 
 // Hover pill for numeric citation links. The popup is portaled and hides after a short delay so the pointer can reach it.
@@ -388,106 +317,41 @@ function LaTeXMarkdownInner({
   onContentChange?: (newContent: string) => void
   style?: CSSProperties
 }) {
-  const processed = useMemo(() => normalizeMathDelimiters(content), [content])
-
-  // Source line index of each task item, only tracked when toggling is enabled.
-  const togglingEnabled = !!onContentChange
-  const checkboxLines = useMemo(() => {
-    if (!togglingEnabled) return []
-    const lines = content.split("\n")
-    const indices: number[] = []
-    for (let i = 0; i < lines.length; i++) {
-      if (/^- \[[ x]\]/.test(lines[i].trimStart())) indices.push(i)
-    }
-    return indices
-  }, [content, togglingEnabled])
-
-  // Rendered checkboxes follow source order, so a checkbox's index among its root's checkboxes is its task index.
-  // Read from the DOM at toggle time: Streamdown re-renders blocks independently, so render order can't number them.
-  const handleToggle = useCallback((checkbox: HTMLInputElement, wasChecked: boolean) => {
-    if (!onContentChange) return
-    const root = checkbox.closest("[data-markdown-root]")
-    const idx = root ? [...root.querySelectorAll("input[type=checkbox]")].indexOf(checkbox) : -1
-    const lineIdx = checkboxLines[idx]
-    if (lineIdx === undefined) return
-    const lines = content.split("\n")
-    lines[lineIdx] = wasChecked
-      ? lines[lineIdx].replace("- [x]", "- [ ]")
-      : lines[lineIdx].replace("- [ ]", "- [x]")
-    onContentChange(lines.join("\n"))
-  }, [content, checkboxLines, onContentChange])
-
-  const components = useMemo<Components>(() => {
-    const base: Components = {
-      ...PROSE_COMPONENTS,
-      a({ children, href, title, ...props }) {
-        const num = String(children)
-        const info = citationMap?.[num]
-        if (info) {
-          return (
-            <CitationPill source={info}>
-              {children}
-            </CitationPill>
-          )
-        }
+  const components = useMemo<MarkdownComponents>(() => ({
+    ...SHELL_COMPONENTS,
+    a({ children, href, title, ...props }) {
+      const num = String(children)
+      const info = citationMap?.[num]
+      if (info) {
         return (
-          <a
-            href={href}
-            title={title}
-            className="text-ink-muted hover:text-ink underline underline-offset-2 decoration-divider-strong hover:decoration-ink-muted transition-colors"
-            {...props}
-          >
+          <CitationPill source={info}>
             {children}
-          </a>
-        )
-      },
-    }
-    if (onContentChange) {
-      base.input = ({ checked, type, ...rest }) => {
-        if (type !== "checkbox") return <input type={type} checked={checked} {...rest} />
-        return (
-          <input
-            type="checkbox"
-            checked={checked}
-            className="mr-1.5 accent-ink cursor-pointer"
-            onChange={(event) => handleToggle(event.currentTarget, !!checked)}
-          />
+          </CitationPill>
         )
       }
-    }
-    return base
-  }, [citationMap, onContentChange, handleToggle])
-
-  // Copy the underlying markdown (headings, math, code fences) instead of the rendered text.
-  const handleCopy = useCallback((event: ReactClipboardEvent<HTMLDivElement>) => {
-    const selection = window.getSelection()
-    const markdown = selection && selectionToMarkdown(selection, event.currentTarget)
-    if (!markdown) return
-    event.preventDefault()
-    event.clipboardData.setData("text/plain", markdown)
-  }, [])
+      return (
+        <a
+          href={href}
+          title={title}
+          {...props}
+        >
+          {children}
+        </a>
+      )
+    },
+  }), [citationMap])
 
   return (
-    <div
-      data-markdown-root
-      className={cn("text-[13px] leading-relaxed", compact ? "markdown-body-compact" : "markdown-body")}
+    <MarkdownRenderer
+      content={content}
+      streaming={streaming}
+      compact={compact}
       style={style}
-      onCopy={handleCopy}
-    >
-      <Streamdown
-        mode={streaming ? "streaming" : "static"}
-        isAnimating={false}
-        animated={false}
-        caret={undefined}
-        controls={{ code: false, table: { copy: true, download: true }, mermaid: false }}
-        plugins={PLUGINS}
-        remarkPlugins={REMARK_PLUGINS}
-        linkSafety={LINK_SAFETY_OFF}
-        components={components}
-      >
-        {processed}
-      </Streamdown>
-    </div>
+      codeRenderers={CODE_RENDERERS}
+      components={components}
+      onContentChange={onContentChange}
+      checkboxClassName="mr-1.5 accent-ink cursor-pointer"
+    />
   )
 }
 

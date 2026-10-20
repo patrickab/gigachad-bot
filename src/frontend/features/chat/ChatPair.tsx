@@ -1,8 +1,9 @@
 "use client"
 
-import { ChevronRight, User, Wrench } from "lucide-react"
+import { Wrench } from "lucide-react"
 import type { Attachment, Message } from "@/lib/domain/types"
-import { cn } from "@/lib/utils"
+import { TurnCard, TurnHeader, TurnPreview, TurnSurface } from "@gigachad/chat-ui"
+import "@gigachad/chat-ui/turn.css"
 import { AssistantMessageContent, ChatMessage } from "@/features/chat/messages/ChatMessage"
 import { ToolCallElement } from "@/features/chat/messages/ToolCallElement"
 import { TOOL_META } from "@/features/chat/tools"
@@ -26,7 +27,6 @@ interface ChatPairProps {
   /** Keyboard focus is on this pair. */
   focused: boolean
   isStreaming: boolean
-  /** The collapsed header was clicked. */
   onExpand: () => void
   onCollapse: () => void
   collapsedRef: (el: HTMLDivElement | null) => void
@@ -52,75 +52,57 @@ export function ChatPair({
   onRegenerate,
   onBranch,
 }: ChatPairProps) {
+  if (!expanded) {
+    const tools = (assistant.tool_calls ?? []).map((call) => {
+      const meta = TOOL_META[call.name]
+      const Icon = meta?.icon ?? Wrench
+      return { key: call.id, label: meta?.cardLabel ?? call.name, icon: <Icon size={14} aria-hidden="true" /> }
+    })
+    return (
+      <div data-qa-index={globalIndex}>
+        <TurnCard expanded={false} focused={focused} ref={collapsedRef}>
+          <TurnHeader label={abbreviate(user.content, user)} onExpand={onExpand} />
+          <TurnPreview tools={tools}>
+            {assistant.content ? <AssistantMessageContent content={assistant.content} compact /> : null}
+          </TurnPreview>
+        </TurnCard>
+      </div>
+    )
+  }
+
   return (
-    <div data-qa-index={globalIndex} className="group relative">
-      {!expanded && (
-        <div
-          ref={collapsedRef}
-          onClick={onExpand}
-          className={cn(
-            "chat-pair-surface mx-3 my-3 rounded-3xl border border-transparent overflow-hidden cursor-pointer text-ink",
-            focused && "ring-1 ring-ink-muted/50"
-          )}
-        >
-          <div className="flex gap-3 p-3.5 items-center">
-            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-surface-elevated">
-              <User className="h-3.5 w-3.5 text-ink-muted" />
-            </div>
-            <span className="min-w-0 flex-1 text-sm text-ink-muted truncate">{abbreviate(user.content, user)}</span>
-            <ChevronRight className="h-4 w-4 shrink-0 text-ink-faint" />
-          </div>
-          {(assistant.content || assistant.tool_calls?.length) ? <div className="space-y-1.5 px-3.5 pb-3.5">
-            {assistant.tool_calls?.map((call) => {
-              const meta = TOOL_META[call.name]
-              const Icon = meta?.icon ?? Wrench
-              return <div key={call.id} className="chat-response-surface flex items-center gap-2 rounded-[1.125rem] border border-transparent p-3.5 text-xs text-ink-subtle">
-                <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                <span>{meta?.cardLabel ?? call.name}</span>
-              </div>
-            })}
-            {assistant.content && <div className="chat-response-surface rounded-[1.125rem] border border-transparent overflow-hidden p-3.5">
-              <div className="max-h-[12.5vh] overflow-y-auto text-ink-muted">
-                <AssistantMessageContent content={assistant.content} compact />
-              </div>
-            </div>}
-          </div> : null}
-        </div>
-      )}
-      {expanded && (
-        <div className={cn("chat-pair-surface mx-3 my-4 rounded-3xl border border-transparent overflow-hidden text-ink", focused && "ring-1 ring-ink-muted/50")}>
+    <div data-qa-index={globalIndex}>
+      <TurnCard expanded focused={focused}>
+        <ChatMessage
+          role="user"
+          content={user.content}
+          attachments={user.attachments}
+          index={globalIndex}
+          onAttachmentClick={onAttachmentClick}
+          onDelete={onDelete}
+          onCollapse={onCollapse}
+        />
+        {assistant.tool_calls?.map((call) => (
+          <TurnSurface key={call.id}>
+            <ToolCallElement call={call} />
+          </TurnSurface>
+        ))}
+        <TurnSurface>
           <ChatMessage
-            role="user"
-            content={user.content}
-            attachments={user.attachments}
+            role="assistant"
+            content={assistant.content}
+            search_result={assistant.search_result}
+            research_steps={assistant.research_steps}
+            research_progress={assistant.research_progress}
+            toolRunning={assistant.tool_calls?.some((c) => c.status === "running")}
+            isStreaming={isStreaming}
             index={globalIndex}
-            onAttachmentClick={onAttachmentClick}
             onDelete={onDelete}
-            collapsibleUser
-            onCollapse={onCollapse}
+            onRegenerate={onRegenerate}
+            onBranch={onBranch}
           />
-          {assistant.tool_calls?.map((call) => (
-            <div key={call.id} className="chat-response-surface mx-5 mb-5 rounded-[1.125rem] border border-transparent overflow-hidden">
-              <ToolCallElement call={call} />
-            </div>
-          ))}
-          <div className="chat-response-surface mx-5 mb-5 rounded-[1.125rem] border border-transparent overflow-hidden">
-            <ChatMessage
-              role="assistant"
-              content={assistant.content}
-              search_result={assistant.search_result}
-              research_steps={assistant.research_steps}
-              research_progress={assistant.research_progress}
-              toolRunning={assistant.tool_calls?.some((c) => c.status === "running")}
-              isStreaming={isStreaming}
-              index={globalIndex}
-              onDelete={onDelete}
-              onRegenerate={onRegenerate}
-              onBranch={onBranch}
-            />
-          </div>
-        </div>
-      )}
+        </TurnSurface>
+      </TurnCard>
     </div>
   )
 }

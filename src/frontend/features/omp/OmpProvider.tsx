@@ -2,11 +2,12 @@
 
 import { createContext, useCallback, useContext, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react"
 import { useSettings } from "@/contexts/SettingsContext"
+import { useOpenFileHoverView } from "@/features/editor/FileHoverView"
 import { useThemeName } from "@/hooks/useThemeName"
 import { fetchOmpOverview } from "@/lib/backend/api"
 import type { OmpOverview, OmpView } from "@/lib/domain/types"
 import type { ComposerState } from "./composer"
-import { EMBED_CHANNEL, EMBED_PROTOCOL_VERSION, type BranchNode, type Envelope, type FrameMessage, type KeyChord, type ShellMessage } from "./protocol"
+import { EMBED_CHANNEL, EMBED_PROTOCOL_VERSION, type BranchNode, type Envelope, type FrameMessage, type KeyChord, type ShellMessage } from "@gigachad/chat-ui/protocol"
 
 export type ComposerCommand = Extract<ShellMessage, { type: `composer-${string}` }>
 /** Frame messages for one composer, not state: delivered to `onComposerEvent` listeners, never kept. */
@@ -148,6 +149,7 @@ export function OmpProvider({ children }: { children: ReactNode }) {
   const { ompWebUrl } = useSettings()
   const { overview, refreshOverview } = useOverviewPolling()
   const theme = useThemeName()
+  const openFileHoverView = useOpenFileHoverView()
   const [attachment, setAttachment] = useState<FrameAttachment | null>(null)
   /** View the frame (re)loaded with, null until the first omp tab attached. */
   const [loadedView, setLoadedView] = useState<OmpView | null>(null)
@@ -221,10 +223,11 @@ export function OmpProvider({ children }: { children: ReactNode }) {
         const { key, altKey, ctrlKey, metaKey, shiftKey } = message
         document.dispatchEvent(new KeyboardEvent("keydown", { key, altKey, ctrlKey, metaKey, shiftKey, bubbles: true, cancelable: true }))
       }
+      else if (message.type === "open-file") openFileHoverView(message.path)
     }
     window.addEventListener("message", onMessage)
     return () => window.removeEventListener("message", onMessage)
-  }, [frameOrigin])
+  }, [frameOrigin, openFileHoverView])
 
   useEffect(() => {
     if (readyRef.current) post({ type: "set-theme", theme })

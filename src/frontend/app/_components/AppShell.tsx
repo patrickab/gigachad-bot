@@ -8,6 +8,7 @@ import { TabManager, nextTab, type TabManagerHandle } from "@/features/navigatio
 import { BranchProvider, useBranches } from "@/features/navigation/BranchContext"
 import { EnabledToolsProvider } from "@/features/chat/EnabledToolsContext"
 import { MemoryViewerProvider } from "@/features/memory/MemoryViewerContext"
+import { FileHoverViewProvider } from "@/features/editor/FileHoverView"
 import { useProject } from "@/contexts/ProjectContext"
 import { useSettings } from "@/contexts/SettingsContext"
 import { SidebarProvider } from "@/features/navigation/SidebarContext"
@@ -95,13 +96,15 @@ export function AppShell() {
     <BranchProvider onFileClick={handleOpenChat} onHistoriesMoved={handleHistoriesMoved}>
       <SidebarProvider>
         <MemoryViewerProvider>
-          <OmpProvider>
-            <TabManager ref={tabManagerRef} onActiveTabChange={handleActiveTabChange} defaultConfig={settings.tabDefaults}>
-              <EnabledToolsProvider>
-                <TabContent onOpenChat={handleOpenChat} onOpenProject={handleOpenProject} onNewChat={handleNewChat} onOpenItem={handleOpenItem} focus={focus} />
-              </EnabledToolsProvider>
-            </TabManager>
-          </OmpProvider>
+          <FileHoverViewProvider>
+            <OmpProvider>
+              <TabManager ref={tabManagerRef} onActiveTabChange={handleActiveTabChange} defaultConfig={settings.tabDefaults}>
+                <EnabledToolsProvider>
+                  <TabContent onOpenChat={handleOpenChat} onOpenProject={handleOpenProject} onNewChat={handleNewChat} onOpenItem={handleOpenItem} focus={focus} />
+                </EnabledToolsProvider>
+              </TabManager>
+            </OmpProvider>
+          </FileHoverViewProvider>
           {dashboardSlug && <ProjectDashboard key={dashboardSlug} slug={dashboardSlug} onClose={closeDashboard} />}
           <ProjectListSync />
           <MemoryViewer />
