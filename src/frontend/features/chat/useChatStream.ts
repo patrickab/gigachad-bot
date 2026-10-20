@@ -26,6 +26,8 @@ export interface UseChatStreamReturn {
   cancel: () => void
   deleteMessagePair: (index: number) => void
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>
+  /** Update the latest messages so a `send` or `regenerateAt` right after builds its history from them, without waiting for a render. Returns the result. */
+  replaceMessages: (update: (current: Message[]) => Message[]) => Message[]
   totalUsage: Usage
   setTotalUsage: React.Dispatch<React.SetStateAction<Usage>>
 }
@@ -171,5 +173,12 @@ export function useChatStream(): UseChatStreamReturn {
     })
   }, [])
 
-  return { messages, isStreaming, send, regenerateAt, cancel, deleteMessagePair, setMessages, totalUsage, setTotalUsage }
+  const replaceMessages = useCallback((update: (current: Message[]) => Message[]) => {
+    const next = update(messagesRef.current)
+    messagesRef.current = next
+    setMessages(next)
+    return next
+  }, [])
+
+  return { messages, isStreaming, send, regenerateAt, cancel, deleteMessagePair, setMessages, replaceMessages, totalUsage, setTotalUsage }
 }

@@ -1,5 +1,6 @@
 import type { Attachment, ChatRequest, Message, ToolCallRecord } from "@/lib/domain/types"
 import { apiOrigin, chatFileUrl, fileViewerRawUrl } from "@/lib/backend/urls"
+import { ApiError, writeReference } from "@/lib/backend/api"
 import { toolPayload } from "./toolCalls"
 
 
@@ -122,6 +123,61 @@ export async function withParsedAttachments(attachments: Attachment[], chatId: s
   })
 }
 
+/** Re-read a document reference by its path (`attachReference` in the API module). */
+export type AttachReference = (path: string) => Promise<Attachment>
+
+/** Result per re-read path: the fresh attachment, `"missing"` for a 404, null for any other failure (kept as is, retried next time). */
+export type ReferenceReads = Map<string, Attachment | "missing" | null>
+
+/** Paths a send re-reads: active references found last time. Inactive ones never reach the model, a missing one keeps its last known text. */
+export function liveReferencePaths(attachments: Attachment[]): string[] {
+  return attachments.flatMap((a) => a.vaultPath && a.active && !a.missing ? [a.vaultPath] : [])
+}
+
+/** Read each distinct path in `paths` once. */
+export async function readReferences(paths: string[], attachReference: AttachReference): Promise<ReferenceReads> {
+  const unique = [...new Set(paths)]
+  const results = await Promise.all(unique.map((path) => attachReference(path).catch((error) =>
+    error instanceof ApiError && error.status === 404 ? "missing" as const : null)))
+  return new Map(unique.map((path, i) => [path, results[i]]))
+}
+
+/**
+ * `attachment` updated from the read of its source, itself when it was not read or the read failed.
+ *
+ * - Follows a moved file: the fresh `vaultPath` and `url` replace the old ones
+ * - A missing source keeps the last known content and is marked `missing`. A PDF then shows its PDF-library copy
+ * - A PDF whose extraction is still running keeps its previous extraction
+ */
+export function withReferenceRead(attachment: Attachment, reads: ReferenceReads): Attachment {
+  const read = attachment.vaultPath ? reads.get(attachment.vaultPath) : null
+  if (read == null) return attachment
+  if (read === "missing") {
+    const url = attachment.mime === "application/pdf" ? fileViewerRawUrl(`PDFs/${attachment.name}`) : attachment.url
+    return { ...attachment, url, missing: true }
+  }
+  return { ...attachment, content: read.content, parsedMd: read.parsedMd ?? attachment.parsedMd, vaultPath: read.vaultPath, url: read.url, missing: undefined }
+}
+
+/** `messages` with every reference in `reads` updated and the text the model reads rebuilt. Untouched messages keep their identity. */
+export function applyReferenceReads(messages: Message[], reads: ReferenceReads): Message[] {
+  if (reads.size === 0) return messages
+  return messages.map((m) => m.attachments?.some((a) => a.vaultPath && reads.has(a.vaultPath))
+    ? withAttachments(m, m.attachments.map((a) => withReferenceRead(a, reads)))
+    : m)
+}
+
+/**
+ * `attachment` with `text` as its edited text (`parsedMd` wins over `content`), saved to its source first when it is a reference.
+ *
+ * - A missing reference is a read-only snapshot: saving it would recreate the deleted file
+ */
+export async function saveAttachmentEdit(attachment: Attachment, text: string): Promise<Attachment> {
+  if (attachment.missing) throw new Error(`${attachment.name} no longer exists`)
+  if (attachment.vaultPath) await writeReference(attachment.vaultPath, text)
+  return attachment.parsedMd != null ? { ...attachment, parsedMd: text } : { ...attachment, content: text }
+}
+
 // Pure attachment-intake transform: parses unparsed non-image attachments (via injected
 // `parse`), merges results back, and assembles the ChatRequest with prior + new image
 // paths. The optimistic placeholder and post-parse patch stay in the caller. Throws if
@@ -136,27 +192,10 @@ export async function buildAttachedSend(
     baseParams: Omit<ChatRequest, "chat_id" | "user_msg" | "img_paths" | "project_slug">
   },
   parse: ParseAttachments,
-  refreshRootFile?: (path: string) => Promise<Attachment>,
 ): Promise<{ enriched: Attachment[]; request: ChatRequest }> {
   const { text, attachments, priorMessages, chatId, slug, baseParams } = opts
 
-  // File root refs are live: re-read content from the source at send time (also
-  // picks up a PDF extraction that finished after attach). No upload copy
-  // exists, so they never go through the chat-upload parse endpoint.
-  let enriched = attachments
-  if (refreshRootFile) {
-    enriched = await Promise.all(enriched.map(async (a) => {
-      if (!a.vaultPath) return a
-      try {
-        const fresh = await refreshRootFile(a.vaultPath)
-        return { ...a, content: fresh.content, parsedMd: fresh.parsedMd ?? a.parsedMd }
-      } catch {
-        return a // dangling ref (deleted file / unmounted file root): keep last known content
-      }
-    }))
-  }
-
-  enriched = await withParsedAttachments(enriched, chatId, slug, parse)
+  const enriched = await withParsedAttachments(attachments, chatId, slug, parse)
 
   const priorImgPaths = collectActiveImagePaths(priorMessages)
   const newImgPaths = enriched.filter((a) => a.active && isImageAttachment(a)).map((a) => a.name)

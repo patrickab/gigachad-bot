@@ -8,7 +8,7 @@ type MockImpl = (...args: unknown[]) => unknown
 const { impls } = vi.hoisted(() => ({
   impls: {
     listRootFiles: async () => ({ enabled: false, files: [] }),
-    attachRootFile: async () => ({ name: "att", mime: "text/plain", url: "u", active: true }),
+    attachReference: async () => ({ name: "att", mime: "text/plain", url: "u", active: true }),
   } as Record<string, MockImpl>,
 }))
 
@@ -16,10 +16,10 @@ vi.mock("@/lib/backend/api", () => ({
   __setImpl: (k: string, fn: (...a: never[]) => unknown) => { impls[k] = fn as MockImpl },
   __resetImpls: () => {
     impls.listRootFiles = async () => ({ enabled: false, files: [] })
-    impls.attachRootFile = async () => ({ name: "att", mime: "text/plain", url: "u", active: true })
+    impls.attachReference = async () => ({ name: "att", mime: "text/plain", url: "u", active: true })
   },
   listRootFiles: (...a: unknown[]) => impls.listRootFiles(...a),
-  attachRootFile: (...a: unknown[]) => impls.attachRootFile(...a),
+  attachReference: (...a: unknown[]) => impls.attachReference(...a),
 }))
 
 import * as apiMock from "@/lib/backend/api"
@@ -89,7 +89,7 @@ describe("useFilePicker", () => {
       active: true,
       vaultPath: "vault/v.txt",
     }))
-    mockControls.__setImpl("attachRootFile", attachSpy)
+    mockControls.__setImpl("attachReference", attachSpy)
 
     const setExtracting = vi.fn()
     const { result } = renderHook(() =>

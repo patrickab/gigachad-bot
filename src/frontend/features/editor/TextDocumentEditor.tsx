@@ -25,7 +25,7 @@ export interface DocumentEditorProps {
   path: string
   slug: string
   onClose: () => void
-  onSaved?: (filename?: string, content?: string) => void
+  onSaved?: () => void
   onLiveContent?: (path: string, content: string | null) => void
   overlay?: boolean
   persistOverride?: (content: string) => Promise<void>
@@ -112,11 +112,10 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent
     else if (path.startsWith("/")) await writeRootFile(path, next)
     else await writeDocument(slug, filename, next)
   }, [slug, filename, path, persistOverride])
-  const notifySaved = useCallback((next: string) => onSaved?.(filename, next), [filename, onSaved])
   // A confirmed-missing document legitimately starts blank. The server prunes uses of removed elements
   // from a hand-edited `.c4`, so its saves read back what it stored.
   const { content, loadedPath, loadError, dirty, reload: loadFromServer, handleTextChange, persist, saveFromNeovim } = useRootFileDocument({
-    path, write, blankWhenMissing: true, readBackAfterSave: isArchitecturePath(path), onSaved: notifySaved,
+    path, write, blankWhenMissing: true, readBackAfterSave: isArchitecturePath(path), onSaved,
   })
 
   const language = editorLanguage(path)

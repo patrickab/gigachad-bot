@@ -11,8 +11,10 @@ export interface Attachment {
   content?: string
   parsedMd?: string
   active: boolean
-  /** Live reference to a FileRoots file: no upload copy exists, edits write back to this path. */
+  /** Live reference to its source document (mount path or app document key): no upload copy exists, it is re-read on every send. */
   vaultPath?: string
+  /** The reference's source could not be found on the last send, the content is the last known one. */
+  missing?: boolean
 }
 
 export interface RootFile {

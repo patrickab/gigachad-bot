@@ -43,8 +43,6 @@ interface FileViewerProps {
   emptyLabel?: string
   /** Scope/location row shown above the list (e.g. picker scope indicator). */
   statusLabel?: React.ReactNode
-  /** Controls rendered at the right of the search bar (e.g. an upload button). */
-  headerActions?: React.ReactNode
   /** Per-row trailing control (e.g. an add-to-project button). */
   renderRowSuffix?: (path: string) => React.ReactNode
   onArrowLeft?: () => void
@@ -59,7 +57,6 @@ export function FileViewer({
   placeholder = "Search files…",
   emptyLabel = "No files",
   statusLabel,
-  headerActions,
   renderRowSuffix,
   onArrowLeft,
   onArrowRight,
@@ -216,7 +213,6 @@ export function FileViewer({
                 <><Folder className="h-3 w-3 shrink-0" /><span className="truncate">{breadcrumb}</span></>
               )}
             </div>
-            {headerActions}
           </div>
 
           <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto py-1">

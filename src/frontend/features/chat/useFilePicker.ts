@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState, type Dispatch, type RefObject, type SetStateAction } from "react"
 import type { ChatInputHandle } from "@/features/chat/composer/ChatInput"
-import { attachRootFile, listRootFiles } from "@/lib/backend/api"
+import { attachReference, listRootFiles } from "@/lib/backend/api"
 import type { RootFile } from "@/lib/domain/types"
 
 export function useFilePicker({ isActive, hasMessages, chatInputRef, setExtracting }: {
@@ -48,7 +48,7 @@ export function useFilePicker({ isActive, hasMessages, chatInputRef, setExtracti
       else setFileEditPath(path)
     } else {
       setExtracting((n) => n + 1)
-      try { chatInputRef.current?.addAttachment(await attachRootFile(path)) } catch { /* attach failure leaves the input unchanged */ }
+      try { chatInputRef.current?.addAttachment(await attachReference(path)) } catch { /* attach failure leaves the input unchanged */ }
       finally { setExtracting((n) => n - 1) }
     }
   }, [hasMessages, chatInputRef, setExtracting])

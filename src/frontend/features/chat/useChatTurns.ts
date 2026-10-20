@@ -5,14 +5,19 @@ import type { TabConfig } from "@/contexts/SettingsContext"
 import { useEnabledTools } from "@/features/chat/EnabledToolsContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import type { ChatStreamCompletion, UseChatStreamReturn } from "@/features/chat/useChatStream"
-import { attachRootFile, deleteAttachment, parseFiles, writeDocument } from "@/lib/backend/api"
+import { attachReference, deleteAttachment, parseFiles, writeDocument } from "@/lib/backend/api"
 import {
+  applyReferenceReads,
   buildAttachedSend,
   buildHiddenContent,
   collectActiveImagePaths,
   composeUserMessage,
+  liveReferencePaths,
+  readReferences,
+  saveAttachmentEdit,
   toolArtifactDocument,
   withAttachments,
+  withReferenceRead,
 } from "@/features/chat/attachments"
 import { updateLastAssistant } from "@/lib/backend/streaming"
 import type { Attachment, ChatRequest, Message, Usage } from "@/lib/domain/types"
@@ -53,7 +58,7 @@ export function useChatTurns({
   refreshDocuments,
   runSlashCommand,
 }: {
-  chat: Pick<UseChatStreamReturn, "messages" | "isStreaming" | "send" | "regenerateAt" | "deleteMessagePair" | "setMessages">
+  chat: Pick<UseChatStreamReturn, "messages" | "isStreaming" | "send" | "regenerateAt" | "deleteMessagePair" | "setMessages" | "replaceMessages">
   chatId: string
   projectSlug: string | null
   config: TabConfig
@@ -64,7 +69,7 @@ export function useChatTurns({
   /** Resolves true when `text` was a slash command and has been handled. */
   runSlashCommand: (text: string) => Promise<boolean>
 }) {
-  const { messages, isStreaming, send, regenerateAt, deleteMessagePair, setMessages } = chat
+  const { messages, isStreaming, send, regenerateAt, deleteMessagePair, setMessages, replaceMessages } = chat
   const { schedule: scheduleDelete } = useUndoDelete()
   const { enabledTools } = useEnabledTools()
   const baseParams = useMemo(
@@ -88,35 +93,54 @@ export function useChatTurns({
     void autosave(completion.messages, completion.usage)
   }, [projectSlug, refreshDocuments, autosave])
 
+  /**
+   * Re-read the chat's live references and those of `draft`, patched into the latest chat for the next `send` or `regenerateAt`.
+   *
+   * - Each source is read once, the patch applies to whatever the chat holds once the reads finish
+   */
+  const refreshForSend = useCallback(async (draft: Attachment[] = []) => {
+    const reads = await readReferences(liveReferencePaths([...messages.flatMap((m) => m.attachments ?? []), ...draft]), attachReference)
+    return {
+      history: replaceMessages((current) => applyReferenceReads(current, reads)),
+      draft: draft.map((a) => withReferenceRead(a, reads)),
+    }
+  }, [messages, replaceMessages])
+
+  /** Re-read `paths` and patch them into whatever the chat holds once the reads finish. */
+  const syncReferences = useCallback(async (paths: string[]) => {
+    const reads = await readReferences(paths, attachReference)
+    setMessages((current) => applyReferenceReads(current, reads))
+  }, [setMessages])
+
   const handleSend = useCallback(async (text: string, attachments: Attachment[]) => {
     if (await runSlashCommand(text.trim())) return
+    const { history, draft } = await refreshForSend(attachments.map((a) => ({ ...a, active: true })))
 
-    if (attachments.length === 0) {
+    if (draft.length === 0) {
       await finishTurn(await send({
         ...baseParams,
         chat_id: chatId,
         user_msg: text,
-        img_paths: collectActiveImagePaths(messages),
+        img_paths: collectActiveImagePaths(history),
         project_slug: projectSlug,
       }))
       return
     }
 
-    const activeAttachments = attachments.map((a) => ({ ...a, active: true }))
-    setMessages(prev => [
-      ...prev,
-      { role: "user" as const, content: text, attachments: activeAttachments },
+    replaceMessages((current) => [
+      ...current,
+      { role: "user" as const, content: text, attachments: draft },
       { role: "assistant" as const, content: "" },
     ])
 
     const built = await buildAttachedSend({
       text,
-      attachments: activeAttachments,
-      priorMessages: messages,
+      attachments: draft,
+      priorMessages: history,
       chatId,
       slug: projectSlug,
       baseParams,
-    }, parseFiles, attachRootFile).catch(() => null)
+    }, parseFiles).catch(() => null)
     if (!built) {
       updateLastAssistant(setMessages, m => ({ ...m, content: "Failed to parse attached documents. You can try again or re-upload the file." }))
       return
@@ -129,14 +153,14 @@ export function useChatTurns({
       return copy
     })
     await finishTurn(await send(built.request, true))
-  }, [runSlashCommand, finishTurn, send, baseParams, chatId, messages, projectSlug, setMessages])
+  }, [runSlashCommand, refreshForSend, finishTurn, send, baseParams, chatId, projectSlug, setMessages, replaceMessages])
 
   const handleRegenerate = useCallback(async (globalIndex: number) => {
     if (isStreaming) return
-    const userMsg = messages[globalIndex]
-    if (!userMsg || userMsg.role !== "user") return
     const assistantMsg = messages[globalIndex + 1]
-    if (assistantMsg?.search_result || assistantMsg?.research_steps?.length) return
+    if (messages[globalIndex]?.role !== "user" || assistantMsg?.search_result || assistantMsg?.research_steps?.length) return
+    const { history } = await refreshForSend()
+    const userMsg = history[globalIndex]
 
     const attachments = userMsg.attachments ?? []
     const user_msg = attachments.length > 0
@@ -146,10 +170,10 @@ export function useChatTurns({
       ...baseParams,
       chat_id: chatId,
       user_msg,
-      img_paths: collectActiveImagePaths(messages, { userIndex: globalIndex }),
+      img_paths: collectActiveImagePaths(history, { userIndex: globalIndex }),
       project_slug: projectSlug,
     }))
-  }, [isStreaming, messages, regenerateAt, finishTurn, baseParams, chatId, projectSlug])
+  }, [isStreaming, messages, refreshForSend, regenerateAt, finishTurn, baseParams, chatId, projectSlug])
 
   const handleToggleAttachmentActive = useCallback((messageIndex: number, attachmentName: string) => {
     setMessages(prev => {
@@ -200,17 +224,19 @@ export function useChatTurns({
     }))
   }, [messages, deleteMessagePair, setMessages, chatId, scheduleDelete])
 
-  // Edit the text the panel shows (`parsedMd` wins over `content`), and rebuild what the model reads from it.
-  const handleAttachmentContentChange = useCallback((messageIndex: number, attachmentName: string, newContent: string) => {
+  /** Save an edit of the attachment's text (see `saveAttachmentEdit`) and rebuild what the model reads. A failed save leaves the chat unchanged and rejects. */
+  const handleAttachmentContentChange = useCallback(async (messageIndex: number, attachmentName: string, newContent: string) => {
+    const attachment = messages[messageIndex]?.attachments?.find((a) => a.name === attachmentName)
+    if (!attachment) return
+    const saved = await saveAttachmentEdit(attachment, newContent)
     setMessages(prev => {
       const msg = prev[messageIndex]
       if (!msg?.attachments) return prev
       const copy = [...prev]
-      copy[messageIndex] = withAttachments(msg, msg.attachments.map(a =>
-        a.name !== attachmentName ? a : a.parsedMd != null ? { ...a, parsedMd: newContent } : { ...a, content: newContent }))
+      copy[messageIndex] = withAttachments(msg, msg.attachments.map(a => a.name === attachmentName ? saved : a))
       return copy
     })
-  }, [setMessages])
+  }, [messages, setMessages])
 
   return {
     handleSend,
@@ -219,5 +245,6 @@ export function useChatTurns({
     handleRemoveAttachment,
     handleDeletePair,
     handleAttachmentContentChange,
+    syncReferences,
   }
 }

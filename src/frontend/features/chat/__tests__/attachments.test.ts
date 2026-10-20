@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { getApiBase, setApiBase } from "@/lib/backend/config"
-import { buildAttachedSend, composeUserMessage, normalizeAttachment, normalizeMessageAttachments, toolArtifactDocument, withAttachments } from "@/features/chat/attachments"
+import { applyReferenceReads, buildAttachedSend, composeUserMessage, liveReferencePaths, normalizeAttachment, normalizeMessageAttachments, readReferences, toolArtifactDocument, withAttachments, type AttachReference } from "@/features/chat/attachments"
+import { ApiError } from "@/lib/backend/api"
 import type { Attachment, Message } from "@/lib/domain/types"
 
 const originalApiBase = getApiBase()
@@ -173,5 +174,63 @@ describe("buildAttachedSend", () => {
       img_paths: ["old.png", "new.png"],
       project_slug: "proj",
     })
+  })
+})
+
+describe("reference refresh", () => {
+  const reference = (vaultPath: string, content: string): Attachment => ({ name: "notes.md", mime: "text/markdown", url: "", active: true, vaultPath, content })
+  const asked = (path: string): Message => withAttachments({ role: "user", content: "q" }, [reference(path, "old")])
+  // What a send does: re-read the chat's live references, then patch them in.
+  const refresh = async (messages: Message[], read: AttachReference) =>
+    applyReferenceReads(messages, await readReferences(liveReferencePaths(messages.flatMap((m) => m.attachments ?? [])), read))
+
+  it("puts the source's current text into every earlier message the model reads", async () => {
+    const history: Message[] = [asked("/notes.md"), { role: "assistant", content: "a" }, asked("/notes.md")]
+    const read = vi.fn(async (path: string): Promise<Attachment> => ({ ...reference(path, "new"), url: "fresh" }))
+
+    const refreshed = await refresh(history, read)
+
+    expect(read).toHaveBeenCalledTimes(1)
+    expect(refreshed[0].hiddenContent).toContain("new")
+    expect(refreshed[2].hiddenContent).not.toContain("old")
+    expect(refreshed[1]).toBe(history[1])
+  })
+
+  it("follows a moved file to its new path", async () => {
+    const refreshed = await refresh([asked("/old/notes.md")], async () => reference("/new/notes.md", "moved"))
+
+    expect(refreshed[0].attachments?.[0].vaultPath).toBe("/new/notes.md")
+  })
+
+  it("keeps the last known text of a vanished source and marks it missing", async () => {
+    const refreshed = await refresh([asked("/gone.md")], async () => { throw new ApiError("gone", 404) })
+
+    expect(refreshed[0].attachments?.[0]).toMatchObject({ missing: true, content: "old" })
+    expect(refreshed[0].hiddenContent).toContain("old")
+  })
+
+  it("does not mark a source missing when the backend merely failed", async () => {
+    const refreshed = await refresh([asked("/notes.md")], async () => { throw new ApiError("down", 500) })
+
+    expect(refreshed[0].attachments?.[0].missing).toBeUndefined()
+  })
+
+  it("leaves inactive and missing references alone on a send, but re-reading one by path revives it", async () => {
+    const missing = withAttachments({ role: "user", content: "q" }, [{ ...reference("/gone.md", "old"), missing: true }])
+    const inactive = withAttachments({ role: "user", content: "q" }, [{ ...reference("/off.md", "old"), active: false }])
+    const read = vi.fn(async (path: string) => reference(path, "back"))
+
+    const sent = await refresh([missing, inactive], read)
+    const previewed = applyReferenceReads([missing, inactive], await readReferences(["/gone.md"], read))
+
+    expect(sent).toEqual([missing, inactive])
+    expect(previewed[0].attachments?.[0]).toMatchObject({ content: "back", missing: undefined })
+    expect(read).toHaveBeenCalledTimes(1)
+  })
+
+  it("leaves a chat without references untouched", async () => {
+    const history: Message[] = [{ role: "user", content: "q" }]
+
+    expect(await refresh(history, vi.fn())).toBe(history)
   })
 })

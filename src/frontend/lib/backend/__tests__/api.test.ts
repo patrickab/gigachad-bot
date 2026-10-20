@@ -54,12 +54,11 @@ describe("api.ts — fileForm helper", () => {
   it("uploads use multipart FormData with the file under 'file'", async () => {
     const calls: Call[] = []
     vi.stubGlobal("fetch", fetchRecorder(calls))
-    // response body: { name: "x.pdf", mime: "application/pdf" }
 
-    await api.uploadDocument("proj", new File(["%PDF"], "x.pdf"))
+    await api.uploadFile("chat-1", new File(["%PDF"], "x.pdf"))
 
     const { url, init } = lastCall(calls)
-    expect(url.endsWith("/documents/upload?slug=proj")).toBe(true)
+    expect(url).toContain("/files/upload?chat_id=chat-1")
     expect(init.method).toBe("POST")
     expect(init.body).toBeInstanceOf(FormData)
     const form = init.body as FormData

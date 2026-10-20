@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 import type React from "react"
 import { fetchModels, fetchPrompts, saveModelDefaults as saveModelDefaultsRequest, saveModelProviders as saveModelProvidersRequest, saveModelTabOrder as saveModelTabOrderRequest } from "@/lib/backend/api"
 import type { ChatRequest, Message, ModelDefaults, ModelProvider, ModelsResponse, Usage } from "@/lib/domain/types"
-import { useChatStream, type ChatStreamCompletion } from "./useChatStream"
+import { useChatStream, type ChatStreamCompletion, type UseChatStreamReturn } from "./useChatStream"
 
 interface UseChatReturn {
   messages: Message[]
@@ -21,13 +21,14 @@ interface UseChatReturn {
   setPrompts: React.Dispatch<React.SetStateAction<Record<string, string>>>
   deleteMessagePair: (index: number) => void
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>
+  replaceMessages: UseChatStreamReturn["replaceMessages"]
   totalUsage: Usage
   setTotalUsage: React.Dispatch<React.SetStateAction<Usage>>
 }
 
 /** Compose chat streaming with the model and prompt config loaded on mount. */
 export function useChat(): UseChatReturn {
-  const { messages, isStreaming, send, regenerateAt, cancel, deleteMessagePair, setMessages, totalUsage, setTotalUsage } = useChatStream()
+  const { messages, isStreaming, send, regenerateAt, cancel, deleteMessagePair, setMessages, replaceMessages, totalUsage, setTotalUsage } = useChatStream()
 
   const [models, setModels] = useState<ModelsResponse | null>(null)
   const [prompts, setPrompts] = useState<Record<string, string>>({})
@@ -67,6 +68,7 @@ export function useChat(): UseChatReturn {
     setPrompts,
     deleteMessagePair,
     setMessages,
+    replaceMessages,
     totalUsage,
     setTotalUsage,
   }

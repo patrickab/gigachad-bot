@@ -6,6 +6,8 @@ import type { ArchitectureOperation, ArchitectureWorkspace } from "@/lib/domain/
 import type { CanvasMutation, CanvasSnapshot } from "@/lib/domain/canvasDocument"
 import { deviceHeaders } from "./deviceId"
 import { chatFileUrl, encodePath, fileViewerRawUrl, toQuery } from "./urls"
+import { baseName, extOf, kindOf } from "@/lib/paths"
+import { architectureSlug, architectureSource, isArchitecturePath } from "@/lib/domain/architecturePaths"
 
 /** Carries the HTTP status so callers can tell a stale-revision rejection from a real failure. */
 export class ApiError extends Error {
@@ -366,19 +368,60 @@ export async function submitCanvasMutations(canvasKey: string, mutations: Canvas
   return post<{ revision: number }>(`/canvases/${encodePath(canvasKey)}/mutations`, { mutations })
 }
 
-/** Materialise a file at *path* into the chat's upload dir as an Attachment. */
-async function attachFileByPath(endpoint: string, chatId: string, path: string, slug: string | null): Promise<Attachment> {
-  const data = await request<AttachmentPayload>(`/${endpoint}/attach${toQuery({ path, chat_id: chatId, slug })}`, { method: "POST" })
-  return toChatAttachment(data, chatId, slug)
-}
-
 /** Attach a FileRoots file as a live reference: no copy, content is read from the source. */
-export async function attachRootFile(path: string): Promise<Attachment> {
+async function attachRootFile(path: string): Promise<Attachment> {
   const data = await request<{ name: string; mime: string; path: string; content?: string; parsedMd?: string }>(
     `/fileroots/attach?path=${encodeURIComponent(path)}`,
     { method: "POST" },
   )
   return { ...data, active: true, vaultPath: data.path, url: fileViewerRawUrl(data.path) }
+}
+
+/** MIME by extension for app documents, matching the backend's guess for the kinds the chat tells apart. */
+function documentMime(path: string): string {
+  const kind = kindOf(path)
+  if (kind === "image") return `image/${extOf(path)}`
+  if (kind === "pdf") return "application/pdf"
+  return kind === "markdown" ? "text/markdown" : "text/plain"
+}
+
+/**
+ * Attach any document as a live reference, re-read on every send.
+ *
+ * - Mount files (absolute paths) and library PDFs (`PDFs/<name>`) go through the file roots, which follow moved files
+ * - App documents (logical keys) are read by key, text only
+ */
+export async function attachReference(path: string): Promise<Attachment> {
+  if (path.startsWith("/") || path.startsWith("PDFs/")) return attachRootFile(path)
+  const mime = documentMime(path)
+  const content = mime.startsWith("text/") ? await loadFileViewerText(path) : undefined
+  return { name: baseName(path), mime, url: fileViewerRawUrl(path), active: true, vaultPath: path, content }
+}
+
+/**
+ * Save `content` to the source of the text reference `path` (an `Attachment.vaultPath`).
+ *
+ * - Mount files in place, project documents (`project/<slug>/document/<name>`) and loose notes (`note/<name>`) by name, architecture sources in their workspace
+ * - Throws for sources that are not text documents (PDFs, images), so a text edit never overwrites them
+ */
+export async function writeReference(path: string, content: string): Promise<void> {
+  if (!documentMime(path).startsWith("text/")) throw new Error(`Not a text document: ${path}`)
+  if (path.startsWith("/")) return writeRootFile(path, content)
+  if (isArchitecturePath(path)) {
+    await writeArchitectureSource(architectureSlug(path), architectureSource(path), content)
+    return
+  }
+  const projectDocument = /^project\/([^/]+)\/document\/([^/]+)$/.exec(path)
+  if (projectDocument) {
+    await writeDocument(projectDocument[1], projectDocument[2], content)
+    return
+  }
+  const note = /^note\/([^/]+)$/.exec(path)
+  if (note) {
+    await writeDocument("", note[1], content)
+    return
+  }
+  throw new Error(`Not a text document: ${path}`)
 }
 
 export async function listProjectDocuments(slug: string): Promise<ProjectDocument[]> {
@@ -396,10 +439,6 @@ export async function listNotes(): Promise<ProjectDocument[]> {
   return data.documents
 }
 
-export async function uploadDocument(slug: string, file: File): Promise<ProjectDocument> {
-  return request(`/documents/upload?slug=${encodeURIComponent(slug)}`, { method: "POST", body: fileForm(file) })
-}
-
 export async function addDocument(slug: string, path: string): Promise<ProjectDocument> {
   return post<ProjectDocument>(`/documents/add?slug=${encodeURIComponent(slug)}`, { path })
 }
@@ -414,10 +453,6 @@ export async function moveDocument(path: string, fromSlug: string, toSlug: strin
 
 export async function renameDocument(slug: string, path: string, name: string): Promise<ProjectDocument> {
   return post<ProjectDocument>("/documents/rename", { slug, path, name })
-}
-
-export function attachDocument(chatId: string, path: string, slug: string | null = null): Promise<Attachment> {
-  return attachFileByPath("documents", chatId, path, slug)
 }
 
 export async function writeDocument(slug: string, name: string, content: string = ""): Promise<ProjectDocument> {
