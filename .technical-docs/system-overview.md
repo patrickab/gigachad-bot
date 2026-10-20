@@ -56,9 +56,9 @@ at 19%, low-chroma yellow warmth (hue 70), not red-brown. Light mode is independ
 ## Chat sizing
 
 Q&A columns use the collapsed-sidebar width derived from the viewport, not the
-remaining pane width. Opening navigation or context panels preserves that width
-until the available space cannot fit it, then the column shrinks without horizontal
-overflow. Wide mode continues to fill the available pane.
+remaining pane width. Opening navigation preserves that width until the available
+space cannot fit it, then the column shrinks without horizontal overflow. Wide mode
+continues to fill the available pane.
 
 Q&A pairs use Soft styling: borderless rounded tonal panels, with answers and tool
 outputs on a slightly raised surface. Collapsed previews share the same treatment.
@@ -77,6 +77,66 @@ so a visual change to either chat lands in both.
 Chat uses plain panels rather than nesting the shared elevation context, which
 remains available to memory and project views. Message action eligibility is
 shared between toolbar rendering and its reserved text space.
+
+## Chat context
+
+The chat has no side panel. Context lives in the composer:
+
+- **Chip row** above the input: one chip per attachment of earlier messages, then
+  the draft's own. A chip's icon switches it in or out of context (faded when
+  out), its name opens the full preview, the x removes it. Hovering a chip or a
+  message attachment shows a preview card centered above it after 300 ms: the
+  image, every PDF page at its own aspect ratio, or the rendered text. The card
+  stays open while the pointer is on it and scrolls
+  (`features/chat/preview/AttachmentHoverCard.tsx`)
+- **Full preview** opens in a floating window (`AttachmentPreview`). A header
+  switch picks the view: PDF or its rendered MinerU markdown, and for text
+  attachments Neovim (whenever the backend runs it, first when the device's Neovim
+  setting is on, `:w` stores the
+  edit, `:q` closes) or rendered: markdown files as themselves (task-list
+  checkboxes edit them), other text as a code block highlighted by extension
+- **"+" menu**: mounted file, project document (the picker, Alt+X, attaches
+  project or global documents), architecture, drawing. There is no file upload:
+  files come from file mounts
+- **Sources** of a web search answer sit in a collapsed "N sources" row under it
+
+New project documents come from the project row's hover "New document" icon in the
+sidebar, which opens the created file. Documents are added through file mounts.
+
+**Documents are references.** A mounted file or project document in a chat is
+stored by its path (`Attachment.vaultPath`), never copied:
+
+- **Re-read on send, chat open and preview open.** Every send re-reads every
+  active reference in the chat, earlier messages and the draft included, and
+  rebuilds the text the model reads (`readReferences` + `applyReferenceReads`
+  in `features/chat/attachments.ts`), so a file edited in a terminal or by an
+  agent reaches the next answer. Each source is read once per pass, and the
+  result is patched into whatever the chat holds once the reads finish.
+  Opening a chat does the same in the background. Opening a preview re-reads
+  that one file: a text preview waits for it, so Neovim never edits a stale
+  copy, PDFs and images open at once. Inactive references are skipped until
+  switched on again
+- **Moved files are followed**: a mount file whose path is gone is looked up by
+  name in the mount that held it (`FileRoots.relocate`). Exactly one match
+  relinks the reference. None or several (a 404) leave it `missing`: red file
+  icon on its chip, last known text kept for the model and the preview as a
+  read-only snapshot, a PDF shown from its PDF-library copy. Sends skip missing
+  references, so the mount is searched once. Opening the preview retries. Other
+  read failures keep the reference as it was. Project listings rewrite moved
+  references the same way
+- **Edits write through**: Neovim `:w` and checkbox ticks on a reference save
+  its source (`saveAttachmentEdit` → `writeReference`: mount file, project
+  document, note or architecture source) before the chat updates. PDFs and
+  images are never written
+- **PDFs** stay referenced by their mount path. Their bytes are synced into the
+  PDF library, and a changed PDF drops its cached MinerU extraction so it is
+  re-extracted (`sync_library_pdf`). Until that finishes the previous
+  extraction is used, so the first send after a change still answers from the
+  old text. The extraction queue runs the same bytes once however often they
+  are attached, and drops an extraction whose PDF changed meanwhile. Older
+  chats that stored `PDFs/<name>` still resolve
+- **Not yet references**: pasted images, drawings, a canvas attached as an
+  image and the architecture attachment are one-time snapshots
 
 ## Canvas background
 
@@ -236,18 +296,16 @@ database copy under `graph/<slug>/` is used.
   `features/editor/architecture/diagramGraph.ts` diffs each surface edit into operations. The window
   sends writes and rereads through one queue, so an older read never replaces
   a newer write's answer. A change from another device while a write is in
-  flight triggers one reread after it. Each `.c4`
-  file also opens in the ordinary text editor (with its assistant sidebar and
-  inline edit) from the chat's Documents panel, where "New Document >
-  Architecture" creates an empty one to write by hand. Saves go through
-  `PUT /api/architecture/{slug}/source`.
-  When the project has architecture sources, the chat Documents panel offers
-  "Attach architecture to chat". It uploads one text snapshot with a fenced
+  flight triggers one reread after it. The project row's "New document >
+  Architecture" in the sidebar creates an empty source to write by hand and
+  opens the window. Saves go through `PUT /api/architecture/{slug}/source`.
+  When the project has architecture sources, the composer's "+" menu offers
+  "Architecture". It uploads one text snapshot with a fenced
   LikeC4 block for each `graph/<slug>/**/*.c4` source, labeled by its path
   inside the workspace. The existing attachment pipeline includes that
   snapshot in the next chat request; edits made afterwards need a new
   attachment. There is no separate stored chat architecture context. The
-  ordinary document list still attaches individual sources. `DirectoryFiles`
+  document picker still attaches individual sources. `DirectoryFiles`
   remains available for a future git-backed workspace, but the current
   project routes store sources in PostgreSQL only.
   Deletes of history files and folders, projects, file roots, sidebar
@@ -314,7 +372,8 @@ Dragging files from a file mount onto a project's "files" adds them by reference
 project stores the file's absolute path (`POST /api/fileroots/add-to-project`),
 so it always shows the current file, and saving it in the editor writes the
 mounted file. Deleting it from the project only removes the reference, the
-file stays on disk. PDFs still go into the shared PDF library as before.
+file stays on disk. PDFs are referenced the same way, and also synced into the
+shared PDF library for extraction.
 
 ## Diff viewer
 
