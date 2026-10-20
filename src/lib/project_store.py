@@ -259,6 +259,10 @@ class ProjectStore:
     def remove_file(self, slug: str, path: str) -> list[str]:
         return self._mutate_files(slug, lambda files: [f for f in files if f != path])
 
+    def replace_file(self, slug: str, old: str, new: str) -> list[str]:
+        """Point the reference *old* at *new*, in place, merging when *new* is already referenced."""
+        return self._mutate_files(slug, lambda files: [f for f in files if f != old] if new in files else [new if f == old else f for f in files])
+
     def _mutate_files(self, slug: str, transform: Callable[[list[str]], list[str]]) -> list[str]:
         """Read, transform, and (when changed) persist a project's document list."""
         meta = self._read_meta()

@@ -14,13 +14,14 @@ from pathlib import Path, PurePosixPath
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
-from backend.routes.deps import get_architecture_store, get_asset_store, get_document_store, get_project_store
+from backend.routes.deps import get_architecture_store, get_asset_store, get_document_store, get_file_roots, get_project_store
 from backend.routes.schemas import FileListResponse, FileMeta
 from lib import document_library as lib_docs
 from lib.architecture_workspace import ArchitectureStore
 from lib.asset_store import Asset, AssetStore
 from lib.attachment_materialize import materialize, store_library_pdf
 from lib.data_store import DataStore, DataStorePath, StorageConflictError, StorageNotFoundError, validate_key, write_text
+from lib.file_roots import FileRoots
 from lib.project_store import ProjectStore
 from lib.storage_namespace import (
     ATTACHMENT,
@@ -111,16 +112,31 @@ def _promote_pdf_document(assets: AssetStore, name: str, content: bytes) -> Asse
     return asset
 
 
+def _follow_moved_reference(store: ProjectStore, roots: FileRoots, slug: str, path: str) -> str:
+    """*path*, or where the mount file it names moved to (rewriting the project's reference), unchanged when it exists or cannot be found."""
+    if not Path(path).is_absolute() or Path(path).exists():
+        return path
+    moved = roots.relocate(path)
+    if moved is None:
+        return path
+    store.replace_file(slug, path, str(moved))
+    return str(moved)
+
+
 @router.get("", response_model=FileListResponse)
 async def list_documents(
     slug: str = Query(...),
     store: ProjectStore = Depends(get_project_store),
     architecture: ArchitectureStore = Depends(get_architecture_store),
+    roots: FileRoots = Depends(get_file_roots),
 ):
     """The project's referenced documents plus every architecture source, found
-    from the workspace root downward and named by their path inside it."""
+    from the workspace root downward and named by their path inside it.
+
+    - A referenced mount file that moved is followed and the project's reference rewritten
+    """
     try:
-        files = store.list_files(slug)
+        files = [_follow_moved_reference(store, roots, slug, f) for f in store.list_files(slug)]
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     sources = [

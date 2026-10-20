@@ -21,7 +21,7 @@ from backend.routes.deps import get_asset_store, get_file_roots, get_project_sto
 from backend.routes.schemas import AttachResult, FileContent, FileListResponse, FileMeta
 from lib import document_library as lib_docs
 from lib.asset_store import AssetStore
-from lib.attachment_materialize import materialize, store_library_pdf
+from lib.attachment_materialize import materialize, sync_library_pdf
 from lib.data_store import StorageNotFoundError
 from lib import git_diff, git_worktree
 from lib.file_roots import FileRoots, list_directories
@@ -136,42 +136,30 @@ def attach_file(
     """Attach a file as a live reference: validate the path, return current content.
 
     - Idempotent and copy-free, the frontend re-calls it at send time to refresh content
-    - PDFs are promoted into the shared library (`PDFs/<name>`) on first attach, the library copy wins afterwards
-    - The library key is also accepted as `path`, since that is what this endpoint returns for promoted PDFs
+    - A file that moved inside its mount is followed, the returned `path` is where it is now
+    - PDFs are synced into the shared library (`PDFs/<name>`), which drops the cached extraction when the file changed
+    - A library key (`PDFs/<name>`, what older chats stored) is still accepted and reads the library copy
     """
-    mime = lib_docs.mime_for(path)
-
-    if Path(path).suffix.lower() == ".pdf":
-        if Path(path).is_absolute():
-            try:
-                root_resolved = roots.resolve(path)
-            except (FileNotFoundError, ValueError) as exc:
-                raise HTTPException(status_code=404, detail=str(exc)) from exc
-            name = root_resolved.name
-            # Library copy wins so a parsed PDF is never clobbered, else promote by name (no "<name> (n).pdf" dupes)
-            if assets.list(f"{PDFS}/{name}"):
-                content = assets.read(f"{PDFS}/{name}").content or b""
-            else:
-                content = root_resolved.read_bytes()
-                store_library_pdf(assets, name, content)
-        else:
-            # Send-time refresh: `path` is the logical library key this
-            # endpoint returned on first attach.
-            name = Path(path).name
-            try:
-                content = assets.read(f"{PDFS}/{name}").content or b""
-            except StorageNotFoundError as exc:
-                raise HTTPException(status_code=404, detail=str(exc)) from exc
-        parsed = materialize(name, content, assets, enqueue_on_miss=True)
-        return AttachResult(name=name, mime=mime, path=f"{PDFS}/{name}", parsedMd=parsed)
+    if Path(path).suffix.lower() == ".pdf" and not Path(path).is_absolute():
+        name = Path(path).name
+        try:
+            content = assets.read(f"{PDFS}/{name}").content or b""
+        except StorageNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return AttachResult(name=name, mime=lib_docs.mime_for(path), path=f"{PDFS}/{name}", parsedMd=materialize(name, content, assets, enqueue_on_miss=True))
 
     try:
-        root_resolved = roots.resolve(path)
+        resolved = roots.resolve_reference(path)
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    result = AttachResult(name=root_resolved.name, mime=mime, path=str(root_resolved))
+    result = AttachResult(name=resolved.name, mime=lib_docs.mime_for(resolved), path=str(resolved))
+    if resolved.suffix.lower() == ".pdf":
+        content = resolved.read_bytes()
+        sync_library_pdf(assets, resolved.name, content)
+        result.parsedMd = materialize(resolved.name, content, assets, enqueue_on_miss=True)
+        return result
     try:
-        result.content = roots.read(path)
+        result.content = resolved.read_text(encoding="utf-8")
     except UnicodeDecodeError:
         result.content = None
     return result
@@ -191,10 +179,10 @@ def add_to_project(
 ) -> FileListResponse:
     """Reference file-root files (folders expand recursively) from a project.
 
-    - Text files are stored as their absolute path, so the project always sees the mounted file
+    - Every file is stored as its absolute path, so the project always sees the mounted file
       and removing it from the project never touches the filesystem
-    - PDFs are promoted into the shared library, as on attach
-    - Files that are not valid UTF-8 text are skipped
+    - PDFs are also synced into the shared library and queued for extraction, as on attach
+    - Files that are neither PDF nor valid UTF-8 text are skipped
     """
     try:
         store.list_files(body.slug)  # validates project exists
@@ -208,14 +196,14 @@ def add_to_project(
     for file in files:
         if file.suffix.lower() == ".pdf":
             content = file.read_bytes()
-            key = store_library_pdf(assets, file.name, content).logical_path
+            sync_library_pdf(assets, file.name, content)
             materialize(file.name, content, assets, enqueue_on_miss=True)
         else:
             try:
                 file.read_text(encoding="utf-8")
             except UnicodeDecodeError:
                 continue
-            key = str(file)
+        key = str(file)
         store.add_file(body.slug, key)
         added.append(FileMeta(**lib_docs.document_meta(key)))
     return FileListResponse(documents=added)

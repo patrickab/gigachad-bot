@@ -6,6 +6,7 @@ Postgres library cache (the Nextcloud mirror is never read back).
 """
 
 import asyncio
+import hashlib
 import logging
 import tempfile
 from pathlib import Path
@@ -23,6 +24,12 @@ log = logging.getLogger(__name__)
 _queue: asyncio.Queue[tuple[str, bytes, AssetStore] | None] = asyncio.Queue()
 _worker_task: asyncio.Task | None = None
 _in_progress: str | None = None
+# PDFs queued or extracting, by name and content hash: live references re-attach the same PDF on every send.
+_pending: set[tuple[str, str]] = set()
+
+
+def _pending_key(name: str, content: bytes) -> tuple[str, str]:
+    return name, hashlib.sha256(content).hexdigest()
 
 
 async def _worker() -> None:
@@ -40,17 +47,25 @@ async def _worker() -> None:
                 pdf_path = Path(tmp) / name
                 pdf_path.write_bytes(content)
                 md_path, images_dir = await mineru.parse_pdf(pdf_path, DIRECTORY_OUTPUT_MINERU)
-                attachment_materialize.store_library_output(assets, pdf_path.stem, md_path, images_dir)
+                if attachment_materialize.is_superseded(assets, name, content):
+                    log.info("Discarding extraction of %s: the PDF changed meanwhile", name)
+                else:
+                    attachment_materialize.store_library_output(assets, pdf_path.stem, md_path, images_dir)
             log.info("Extraction complete: %s", name)
         except Exception:
             log.exception("Background MinerU extraction failed for %s", name)
         finally:
             _in_progress = None
+            _pending.discard(_pending_key(name, content))
             _queue.task_done()
 
 
 def enqueue(name: str, content: bytes, assets: AssetStore) -> None:
-    """Queue a PDF for background extraction and Postgres persistence."""
+    """Queue a PDF for background extraction and Postgres persistence, unless these bytes are already queued or extracting."""
+    key = _pending_key(name, content)
+    if key in _pending:
+        return
+    _pending.add(key)
     _queue.put_nowait((name, content, assets))
     log.info("Queued for extraction: %s (queue depth: %d)", name, _queue.qsize())
 

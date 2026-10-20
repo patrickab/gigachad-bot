@@ -292,6 +292,31 @@ class FileRoots:
                 found[target] = None
         return list(found)
 
+    def relocate(self, path: str) -> Path | None:
+        """Where the missing file *path* moved: the one visible file with its name in the root that held it, else None.
+
+        - Several files with that name are ambiguous, and a path outside every root has no mount to search, so None rather than a guess
+        """
+        try:
+            root = self.root_of(path)
+        except ValueError:
+            return None
+        entries: list[dict[str, str]] = []
+        if root.is_dir():
+            self._collect_files(root, entries)
+        matches = {entry["path"] for entry in entries if entry["name"] == Path(path).name}
+        return Path(matches.pop()) if len(matches) == 1 else None
+
+    def resolve_reference(self, path: str) -> Path:
+        """`resolve` *path*, following the file to its new place when it moved. FileNotFoundError when it is gone or ambiguous."""
+        try:
+            return self.resolve(path)
+        except FileNotFoundError:
+            moved = self.relocate(path)
+            if moved is None:
+                raise
+            return self.resolve(str(moved))
+
     def tree(self, active_worktrees: Iterable[str] = ()) -> list[dict]:
         """Nested folder/file tree per root for the sidebar FileTree. Empty folders are pruned.
 
