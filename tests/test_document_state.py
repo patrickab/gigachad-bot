@@ -8,11 +8,10 @@ writes a test can produce are deliberate PDF mirrors. Any other file below that
 root is a policy violation.
 """
 
-from io import BytesIO
 import os
 from uuid import uuid4
 
-from fastapi import HTTPException, UploadFile
+from fastapi import HTTPException
 from psycopg_pool import ConnectionPool
 import pytest
 
@@ -45,9 +44,10 @@ def clean_database(postgres_pool):
 
 @pytest.fixture(autouse=True)
 def documents_root(tmp_path, monkeypatch):
-    """Point the mirror root at a tmp dir; ``attachment_materialize.py`` reads it at call time."""
+    """Point the mirror root at a tmp dir: ``attachment_materialize`` and the routes read it at call time."""
     root = tmp_path / "Documents"
     monkeypatch.setattr(attachment_materialize, "DOCUMENTS", root, raising=True)
+    monkeypatch.setattr(route, "DOCUMENTS", root, raising=True)
     return root
 
 
@@ -80,10 +80,6 @@ def bob(postgres_pool):
     return Stores(postgres_pool, "bob@example.test")
 
 
-def upload(name, content):
-    return UploadFile(file=BytesIO(content), filename=name)
-
-
 async def test_writing_a_project_document_registers_it_in_database(alice, documents_root):
     slug = alice.projects.create_project("Thesis")["slug"]
 
@@ -108,65 +104,6 @@ async def test_writing_a_document_refreshes_the_chat_upload_copies(alice):
 
     assert alice.assets.read(f"attachment/project/{slug}/chat/chat-1/spec.md").content == b"fresh"
     assert alice.assets.read(f"attachment/project/{slug}/chat/chat-1/other.md").content == b"untouched"
-
-
-async def test_upload_promotes_into_the_pdf_library_and_mirrors_it(alice, documents_root, no_enqueue):
-    slug = alice.projects.create_project("Thesis")["slug"]
-
-    meta = await route.upload_document(upload("paper.pdf", b"%PDF-1.7 body"), slug, alice.projects, alice.assets)
-
-    assert meta.path == "PDFs/paper.pdf"
-    asset = alice.assets.read("PDFs/paper.pdf")
-    assert (asset.kind, asset.content) == ("pdf", b"%PDF-1.7 body")
-    assert alice.projects.list_files(slug) == ["PDFs/paper.pdf"]
-    assert written_files(documents_root) == ["PDFs/paper.pdf"]
-    # MinerU needs bytes to extract: extraction is queued straight from the upload.
-    assert no_enqueue == ["paper.pdf"]
-
-
-async def test_non_pdf_upload_cannot_enter_the_persisted_pdf_library(alice, documents_root):
-    slug = alice.projects.create_project("Thesis")["slug"]
-
-    with pytest.raises(HTTPException) as exc:
-        await route.upload_document(upload("notes.txt", b"database-only"), slug, alice.projects, alice.assets)
-
-    assert exc.value.status_code == 400
-    assert alice.assets.list() == []
-    assert written_files(documents_root) == []
-
-
-async def test_non_pdf_chat_upload_cannot_enter_the_persisted_pdf_library(alice, documents_root):
-    alice.assets.write("upload", "attachment/chat/chat-1/notes.txt", b"database-only")
-
-    with pytest.raises(HTTPException) as exc:
-        await route.register_upload(
-            route.RegisterUploadRequest(chat_id="chat-1", filename="notes.txt"), None, alice.projects, alice.assets
-        )
-
-    assert exc.value.status_code == 400
-    assert [asset.logical_path for asset in alice.assets.list()] == ["attachment/chat/chat-1/notes.txt"]
-    assert written_files(documents_root) == []
-
-
-async def test_register_upload_promotes_a_stored_chat_upload(alice, documents_root, no_enqueue):
-    alice.assets.write("upload", "attachment/chat/chat-1/paper.pdf", b"%PDF-1.7 attached")
-
-    meta = await route.register_upload(
-        route.RegisterUploadRequest(chat_id="chat-1", filename="paper.pdf"), None, alice.projects, alice.assets
-    )
-
-    assert meta.path == "PDFs/paper.pdf"
-    assert alice.assets.read("PDFs/paper.pdf").content == b"%PDF-1.7 attached"
-    assert written_files(documents_root) == ["PDFs/paper.pdf"]
-    assert no_enqueue == ["paper.pdf"]
-
-
-async def test_register_upload_without_a_stored_upload_is_not_found(alice):
-    with pytest.raises(HTTPException) as exc:
-        await route.register_upload(
-            route.RegisterUploadRequest(chat_id="chat-1", filename="ghost.pdf"), None, alice.projects, alice.assets
-        )
-    assert exc.value.status_code == 404
 
 
 async def test_move_relocates_the_document_key_leaving_nothing_behind(alice):
@@ -207,14 +144,15 @@ async def test_rename_keeps_project_document_content_and_extension(alice):
     assert alice.projects.list_files(slug) == [meta.path]
 
 
-async def test_rename_keeps_pdf_content_and_updates_every_project_reference(alice, documents_root, no_enqueue):
+async def test_rename_keeps_pdf_content_and_updates_every_project_reference(alice, documents_root):
     first = alice.projects.create_project("First")["slug"]
     second = alice.projects.create_project("Second")["slug"]
-    original = await route.upload_document(upload("source.pdf", b"%PDF-1.7 body"), first, alice.projects, alice.assets)
-    await route.add_document(route.AddDocumentRequest(path=original.path), second, alice.projects, alice.docs, alice.assets)
+    original = attachment_materialize.store_library_pdf(alice.assets, "source.pdf", b"%PDF-1.7 body")
+    for slug in (first, second):
+        await route.add_document(route.AddDocumentRequest(path=original.logical_path), slug, alice.projects, alice.docs, alice.assets)
 
     renamed = await route.rename_document(
-        route.RenameDocumentRequest(path=original.path, slug=first, name="renamed"),
+        route.RenameDocumentRequest(path=original.logical_path, slug=first, name="renamed"),
         alice.projects,
         alice.docs,
         alice.assets,
@@ -222,7 +160,7 @@ async def test_rename_keeps_pdf_content_and_updates_every_project_reference(alic
 
     assert renamed.path == "PDFs/renamed.pdf"
     assert alice.assets.read(renamed.path).content == b"%PDF-1.7 body"
-    assert not any(asset.logical_path == original.path for asset in alice.assets.list())
+    assert not any(asset.logical_path == original.logical_path for asset in alice.assets.list())
     assert alice.projects.list_files(first) == [renamed.path]
     assert alice.projects.list_files(second) == [renamed.path]
     assert written_files(documents_root) == ["PDFs/renamed.pdf"]
@@ -265,26 +203,11 @@ async def test_another_users_document_is_invisible_and_answers_404(alice, bob):
     listed = await route.list_all_documents(bob.projects)
     assert listed.documents == []
 
-    for call in (
-        route.add_document(route.AddDocumentRequest(path=meta.path), slug, bob.projects, bob.docs, bob.assets),
-        route.attach_document(meta.path, "chat-1", None, bob.projects, bob.docs, bob.assets),
-    ):
-        with pytest.raises(HTTPException) as exc:
-            await call
-        assert exc.value.status_code == 404
+    with pytest.raises(HTTPException) as exc:
+        await route.add_document(route.AddDocumentRequest(path=meta.path), slug, bob.projects, bob.docs, bob.assets)
+    assert exc.value.status_code == 404
 
     with pytest.raises(StorageNotFoundError):
         bob.docs.read_bytes(meta.path)
     assert alice.docs.read_bytes(meta.path)[0] == b"mine"
 
-
-async def test_attaching_a_registered_document_copies_it_into_the_chat_uploads(alice):
-    slug = alice.projects.create_project("Thesis")["slug"]
-    meta = await route.write_document(
-        route.WriteDocumentRequest(slug=slug, name="spec.md", content="# spec"), alice.projects, alice.docs, alice.assets
-    )
-
-    result = await route.attach_document(meta.path, "chat-1", slug, alice.projects, alice.docs, alice.assets)
-
-    assert (result.name, result.mime, result.content) == ("spec.md", "text/markdown", "# spec")
-    assert alice.assets.read(f"attachment/project/{slug}/chat/chat-1/spec.md").content == b"# spec"
