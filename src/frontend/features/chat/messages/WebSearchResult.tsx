@@ -3,6 +3,7 @@
 import { memo, useMemo } from "react"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
 import type { Message } from "@/lib/domain/types"
+import { WebSources } from "./WebSources"
 
 /** Cut the answer at raw JSON UI blocks and at trailing sections the UI renders separately (references, related questions). */
 function truncateAtSections(text: string): string {
@@ -61,7 +62,12 @@ function WebSearchResultInner({ content, search_result }: Props) {
     return text
   }, [content, search_result])
 
-  return <LaTeXMarkdown content={text} citationMap={search_result.citationMap} />
+  return (
+    <>
+      <LaTeXMarkdown content={text} citationMap={search_result.citationMap} />
+      <WebSources result={search_result} />
+    </>
+  )
 }
 
 export const WebSearchResult = memo(WebSearchResultInner)
