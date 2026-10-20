@@ -1,11 +1,11 @@
 "use client"
 
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
-import { PanelLeft, PanelLeftClose, X } from "lucide-react"
+import { FolderOpen, Library, PanelLeft, PanelLeftClose, X } from "lucide-react"
 import { Sidebar } from "@/features/navigation/Sidebar"
 import { ChatContainer, type ChatFocus } from "@/features/chat/ChatContainer"
-import { ChatSidebarProvider, type ChatSidebarContextValue } from "@/features/chat/context-panel/ChatContextPanel"
-import type { ChatInputHandle } from "@/features/chat/composer/ChatInput"
+import type { AttachMenuItem, ChatInputHandle } from "@/features/chat/composer/ChatInput"
+import { ArchitectureIcon } from "@/components/ui/ArchitectureIcon"
 import { ModelDropdown } from "@/features/settings/ModelDropdown"
 import { SettingsMenu } from "@/features/settings/SettingsMenu"
 import { PromptEditor } from "@/features/settings/PromptEditor"
@@ -16,7 +16,6 @@ import { FileViewer } from "@/features/editor/FileViewer"
 import { DocumentPicker } from "@/features/editor/DocumentPicker"
 import { DocumentEditor } from "@/features/editor/DocumentEditor"
 import { DiffViewer } from "@/features/editor/diff/DiffViewer"
-import { CreateDocumentPanel } from "@/features/editor/CreateDocumentPanel"
 import { CanvasWorkspace } from "@/features/editor/canvas/CanvasWorkspace"
 import { ArchitectureWindow } from "@/features/editor/architecture/ArchitectureWindow"
 import { OmpModelSelector, OmpReasoningSelector } from "@/features/omp/OmpComposer"
@@ -39,7 +38,7 @@ import { useMemoryCommandBar } from "@/features/memory/useMemoryCommandBar"
 import { useProjectDocuments } from "@/features/chat/useProjectDocuments"
 import { useSlashCommands } from "@/features/navigation/useSlashCommands"
 import { loadChatHistory, writeRootFile } from "@/lib/backend/api"
-import { normalizeMessageAttachments } from "@/features/chat/attachments"
+import { liveReferencePaths, normalizeMessageAttachments } from "@/features/chat/attachments"
 import { parseHistoryFile } from "@/lib/domain/historyFile"
 import { fileViewerRawUrl } from "@/lib/backend/urls"
 import { isNeovimKeyEvent } from "@/lib/utils"
@@ -77,16 +76,14 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
   const branchMessageIdx = loadedBranch.historyFile === tab.historyFile ? loadedBranch.messageIdx : null
   const [extracting, setExtracting] = useState(0)
   const [promptEditorOpen, setPromptEditorOpen] = useState(false)
-  const [contextToggleSlot, setContextToggleSlot] = useState<HTMLElement | null>(null)
   const [wideToggleSlot, setWideToggleSlot] = useState<HTMLElement | null>(null)
   const [chatColumn, setChatColumn] = useState<HTMLDivElement | null>(null)
   const chatInputRef = useRef<ChatInputHandle>(null)
-  const liveCanvasRef = useRef<{ path: string; content: string } | null>(null)
   const loadIdRef = useRef(0)
 
   const { view: canvasView, sidebarProps: canvasSidebarProps, navigateArchitecture, closeCanvas, openCreatedCanvas, architectureEdgeStyle, setArchitectureEdgeStyle, toolbarSlots, setDrawingSlot, setViewSlot } = useCanvasView()
   const filePicker = useFilePicker({ isActive, hasMessages: messages.length > 0, chatInputRef, setExtracting })
-  const docs = useProjectDocuments({ isActive, appMode, projectSlug, chatId, chatInputRef, liveCanvasRef, setExtracting, setMessages })
+  const docs = useProjectDocuments({ isActive, appMode, projectSlug, chatId, chatInputRef, setExtracting })
   const persistence = useChatPersistence({ tab, projectSlug, messages, chatId, usage, refreshAll, setHistoryFile })
   const memory = useMemoryCommandBar({ messages, chatId, branchMessageIdx })
   const { menuItems, runSlashCommand } = useSlashCommands({
@@ -106,6 +103,7 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
     refreshDocuments: docs.refreshDocuments,
     runSlashCommand,
   })
+  const { syncReferences } = turns
 
   // A new tab has a blank selectedModel (DEFAULT_TAB_CONFIG). Seed it from the
   // configured default chat model. Never hardcode a fallback name here.
@@ -134,7 +132,9 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
     loadChatHistory(historyFile).then((data) => {
       if (loadIdRef.current !== loadId) return
       if (data.messages.length > 0) {
-        setMessages(data.messages.map((m) => normalizeMessageAttachments(m, data.chat_id, slug)))
+        const loaded = data.messages.map((m) => normalizeMessageAttachments(m, data.chat_id, slug))
+        setMessages(loaded)
+        void syncReferences(liveReferencePaths(loaded.flatMap((m) => m.attachments ?? [])))
       }
       if (data.chat_id) setChatId(data.chat_id)
       if (data.title) setTitle(data.title)
@@ -142,7 +142,7 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
       setLoadedBranch({ historyFile, messageIdx: data.branch_message_idx ?? null })
     }).catch(() => { })
     return () => { loadIdRef.current++ }
-  }, [tab.historyFile, setMessages, setTitle, setTotalUsage])
+  }, [tab.historyFile, setMessages, setTitle, setTotalUsage, syncReferences])
 
   const onKeyDown = useEffectEvent((e: KeyboardEvent) => {
     if (isNeovimKeyEvent(e)) return
@@ -194,32 +194,19 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
     void runSlashCommand(command)
   }, [closeMemoryMenu, runSlashCommand])
 
-  const { setCreateDocOpen } = docs
-  const sidebarContext = useMemo<ChatSidebarContextValue>(() => ({
-    onRemoveAttachment: turns.handleRemoveAttachment,
-    onToggleAttachmentActive: turns.handleToggleAttachmentActive,
-    onAttachmentContentChange: turns.handleAttachmentContentChange,
-    filesEnabled: filePicker.filesEnabled,
-    onOpenFilePicker: filePicker.openFilePicker,
-    documents: docs.visibleDocuments,
-    onSelectDocument: docs.handleDocumentSelect,
-    onAttachArchitecture: docs.handleAttachArchitecture,
-    architectureError: docs.architectureError,
-    onOpenDocuments: projectSlug ? docs.openDocuments : undefined,
-    onCreateDocument: projectSlug ? () => setCreateDocOpen(true) : undefined,
-    onDeleteDocument: docs.handleDeleteDocument,
-    onRenameDocument: docs.handleRenameDocument,
-    onDocumentSaved: docs.handleDocumentSaved,
-    liveCanvasRef,
-    editorModel: config.selectedModel,
-  }), [
-    turns.handleRemoveAttachment, turns.handleToggleAttachmentActive, turns.handleAttachmentContentChange,
-    filePicker.filesEnabled, filePicker.openFilePicker,
-    docs.visibleDocuments, docs.handleDocumentSelect, docs.openDocuments, setCreateDocOpen,
-    docs.handleDeleteDocument, docs.handleRenameDocument, docs.handleDocumentSaved,
-    docs.handleAttachArchitecture, docs.architectureError,
-    projectSlug, config.selectedModel,
-  ])
+  const attachmentActions = useMemo(() => ({
+    onToggleActive: turns.handleToggleAttachmentActive,
+    onRemove: turns.handleRemoveAttachment,
+    onContentChange: turns.handleAttachmentContentChange,
+    onPreviewOpen: (path: string) => syncReferences([path]),
+  }), [turns.handleToggleAttachmentActive, turns.handleRemoveAttachment, turns.handleAttachmentContentChange, syncReferences])
+
+  const { handleAttachArchitecture } = docs
+  const attachMenuItems = useMemo<AttachMenuItem[]>(() => [
+    ...(filePicker.filesEnabled ? [{ label: "Mounted file", icon: FolderOpen, onClick: filePicker.openFilePicker }] : []),
+    ...(projectSlug ? [{ label: "Project document", icon: Library, onClick: docs.openDocuments }] : []),
+    ...(handleAttachArchitecture ? [{ label: "Architecture", icon: ArchitectureIcon, onClick: () => void handleAttachArchitecture() }] : []),
+  ], [filePicker.filesEnabled, filePicker.openFilePicker, projectSlug, docs.openDocuments, handleAttachArchitecture])
 
   const handleBranch = useCallback((qaIndex: number) => {
     if (!tab.historyFile) return
@@ -328,7 +315,6 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
                 <TokenCounter usage={totalUsage} />
                 <ThemeToggle />
               </TopBarPill>
-              <TopBarTransparent ref={setContextToggleSlot} />
             </>}
           />
         )}
@@ -347,7 +333,7 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
                 overlay
                 persistOverride={documentItem.rootFile ? (content) => writeRootFile(documentItem.path, content) : undefined}
                 onClose={() => setAppMode("chat")}
-                onSaved={docs.handleDocumentSaved}
+                onSaved={docs.refreshDocuments}
                 onModeLabel={setModeLabel}
                 onNavigate={(path) => setWorkspaceItem({ ...documentItem, path })}
                 model={config.selectedModel}
@@ -366,26 +352,26 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
               editorModel={config.selectedModel}
             />
           ) : (
-            <ChatSidebarProvider value={sidebarContext}>
-              <ChatContainer
-                chatId={chatId}
-                onChatColumnChange={setChatColumn}
-                messages={messages}
-                isStreaming={isStreaming}
-                onDeletePair={turns.handleDeletePair}
-                extracting={extracting > 0}
-                onSend={turns.handleSend}
-                onCancel={cancel}
-                onRegenerate={turns.handleRegenerate}
-                onBranch={tab.historyFile ? handleBranch : undefined}
-                focus={focus}
-                branchMessageIdx={branchMessageIdx}
-                chatInputRef={chatInputRef}
-                slug={projectSlug}
-                contextToggleSlot={contextToggleSlot}
-                wideToggleSlot={wideToggleSlot}
-              />
-            </ChatSidebarProvider>
+            <ChatContainer
+              chatId={chatId}
+              onChatColumnChange={setChatColumn}
+              messages={messages}
+              isStreaming={isStreaming}
+              onDeletePair={turns.handleDeletePair}
+              extracting={extracting > 0}
+              onSend={turns.handleSend}
+              onCancel={cancel}
+              onRegenerate={turns.handleRegenerate}
+              onBranch={tab.historyFile ? handleBranch : undefined}
+              focus={focus}
+              branchMessageIdx={branchMessageIdx}
+              chatInputRef={chatInputRef}
+              slug={projectSlug}
+              attachmentActions={attachmentActions}
+              attachMenuItems={attachMenuItems}
+              composerNotice={docs.architectureError || undefined}
+              wideToggleSlot={wideToggleSlot}
+            />
           )}
           {isActive && filePicker.fileEditPath && (
             <DocumentEditor
@@ -412,7 +398,6 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
         </div>
       </main>
       <SaveAsModal open={persistence.saveModalOpen} onClose={() => persistence.setSaveModalOpen(false)} onSave={persistence.handleSaveSubmit} />
-      <CreateDocumentPanel open={docs.createDocOpen} onClose={() => docs.setCreateDocOpen(false)} onCreate={docs.handleCreateDocument} />
       <PromptEditor open={promptEditorOpen} onClose={() => setPromptEditorOpen(false)} onPromptsChanged={setPrompts} />
       {isActive && filePicker.filePickerOpen && filePicker.filesEnabled && (
         <FileViewer
@@ -430,7 +415,6 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
           allDocuments={docs.allDocuments}
           onAttach={docs.handleDocumentSelect}
           onAddToProject={docs.handleAddDocToProject}
-          onUpload={docs.handleDocumentUpload}
           onClose={() => docs.setDocumentOpen(false)}
         />
       )}

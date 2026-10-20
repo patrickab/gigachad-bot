@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react"
 import { createPortal } from "react-dom"
 import { Document, Page, pdfjs, type DocumentProps } from "react-pdf"
-import { ChevronsLeftRight, ChevronsRightLeft, Maximize2, Minimize2, Minus, Plus } from "lucide-react"
+import { Maximize2, Minimize2, Minus, Plus } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import "react-pdf/dist/esm/Page/AnnotationLayer.css"
 import "react-pdf/dist/esm/Page/TextLayer.css"
@@ -94,8 +94,6 @@ function PdfViewerInner({
   url,
   isFullscreen,
   onToggleFullscreen,
-  isWide,
-  onToggleWide,
   fitWidth,
   onPageAspect,
   initialPage = 1,
@@ -104,8 +102,6 @@ function PdfViewerInner({
   url: string
   isFullscreen: boolean
   onToggleFullscreen: () => void
-  isWide?: boolean
-  onToggleWide?: () => void
   // when set, the parent controls width and the viewer sizes its own height to
   // fit exactly one page. Otherwise it fills its parent in both dimensions.
   fitWidth?: boolean
@@ -414,18 +410,6 @@ function PdfViewerInner({
         >
           <Plus className="h-3.5 w-3.5" strokeWidth={2} />
         </button>
-        {onToggleWide && (
-          <>
-            <div className="w-px h-4 bg-divider" />
-            <button
-              aria-label={isWide ? "Narrow PDF viewer" : "Widen PDF viewer"}
-              onClick={onToggleWide}
-              className="p-1.5 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
-            >
-              {isWide ? <ChevronsRightLeft className="h-3.5 w-3.5" /> : <ChevronsLeftRight className="h-3.5 w-3.5" />}
-            </button>
-          </>
-        )}
         <div className="w-px h-4 bg-divider" />
         <button
           aria-label={isFullscreen ? "Exit PDF fullscreen" : "Enter PDF fullscreen"}
@@ -501,16 +485,12 @@ function getNoBody() {
 /** PDF viewer with zoom, page tracking and fullscreen. Fullscreen reparents one mounted viewer via a portal. */
 export function PdfViewer({
   url,
-  isWide,
-  onToggleWide,
   fitWidth,
   onPageAspect,
   initialPage,
   onPageChange,
 }: {
   url: string
-  isWide?: boolean
-  onToggleWide?: () => void
   fitWidth?: boolean
   onPageAspect?: (ratio: number) => void
   initialPage?: number
@@ -541,8 +521,6 @@ export function PdfViewer({
       url={url}
       isFullscreen={isFullscreen}
       onToggleFullscreen={toggleFullscreen}
-      isWide={isFullscreen ? undefined : isWide}
-      onToggleWide={isFullscreen ? undefined : onToggleWide}
       fitWidth={isFullscreen ? undefined : fitWidth}
       onPageAspect={isFullscreen ? undefined : onPageAspect}
       initialPage={initialPage}
@@ -566,5 +544,28 @@ export function PdfViewer({
       )}
       {portalTarget && createPortal(inner, portalTarget)}
     </>
+  )
+}
+
+/** Every page of a PDF stacked at `width` px, each at its own aspect ratio, without text or annotation layers. `onFirstPageAspect` gets page 1's height / width. */
+export function PdfPages({ url, width, onFirstPageAspect }: { url: string; width: number; onFirstPageAspect?: (ratio: number) => void }) {
+  const [pageCount, setPageCount] = useState(0)
+  return (
+    <Document file={url} loading={null} error={null} onLoadSuccess={({ numPages }) => setPageCount(numPages)}>
+      <div className="flex flex-col gap-2">
+        {Array.from({ length: pageCount }, (_, index) => (
+          <Page
+            key={index}
+            pageNumber={index + 1}
+            width={width}
+            renderTextLayer={false}
+            renderAnnotationLayer={false}
+            loading={null}
+            onLoadSuccess={index === 0 && onFirstPageAspect ? (page) => onFirstPageAspect(page.originalHeight / page.originalWidth) : undefined}
+            className="overflow-hidden rounded"
+          />
+        ))}
+      </div>
+    </Document>
   )
 }

@@ -1,22 +1,21 @@
 "use client"
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react"
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type ElementType } from "react"
 import { createPortal } from "react-dom"
 import { motion } from "framer-motion"
-import { ArrowUp, Loader2, Plus, LayoutGrid, Mic, Square, X, File as FileIcon, FileUp, Pencil } from "lucide-react"
+import { ArrowUp, Loader2, Plus, LayoutGrid, Mic, Square, Pencil } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { uploadFile as apiUploadFile } from "@/lib/backend/api"
+import { attachReference, uploadFile as apiUploadFile } from "@/lib/backend/api"
+import { readReferences, saveAttachmentEdit, withReferenceRead } from "@/features/chat/attachments"
 import type { Attachment } from "@/lib/domain/types"
-import { isImageAttachment } from "@/features/chat/attachments"
 import { useClickOutside } from "@/hooks/useClickOutside"
 import { useEnabledTools } from "@/features/chat/EnabledToolsContext"
 import { TOOLS } from "@/features/chat/tools"
 import { useSettings } from "@/contexts/SettingsContext"
 import { DrawingCanvas } from "./DrawingCanvas"
 import { OCRPanel } from "@/features/editor/OCRPanel"
-import { AttachmentIcon } from "@/features/chat/context-panel/AttachmentView"
-import { AttachmentPreview } from "./AttachmentPreview"
-import { ImageThumbnail } from "@/features/chat/messages/MessageAttachments"
+import { AttachmentPreview } from "@/features/chat/preview/AttachmentPreview"
+import { AttachmentChip, type ContextAttachment } from "./AttachmentChip"
 import { ToolMenuItem, ToolMenuSection } from "./ToolMenuItem"
 import { CompletionMenu, useCompletions, type CompleteDraft } from "./CompletionMenu"
 
@@ -35,13 +34,31 @@ interface ChatInputProps {
   complete?: CompleteDraft
   /** Mode note under the draft, e.g. that `!ls` runs in a shell, null for none. */
   hint?: (text: string, attachmentCount: number) => string | null
+  /** Attachments of earlier messages, shown as chips before the draft's own. */
+  context?: ChatContext
+  /** Extra entries of the "+" menu after the built-in ones. */
+  attachMenuItems?: AttachMenuItem[]
+}
+
+/** Attachments already in the chat with their context actions. */
+export interface ChatContext {
+  attachments: ContextAttachment[]
+  onToggleActive: (messageIndex: number, attachmentName: string) => void
+  onRemove: (messageIndex: number, attachmentName: string) => void
+  onOpen: (messageIndex: number, attachment: Attachment) => void
+}
+
+export interface AttachMenuItem {
+  label: string
+  icon: ElementType
+  onClick: () => void
 }
 
 export interface ChatInputHandle {
   addAttachment: (att: Attachment) => void
   /** Replace the draft text with `update(current)` and focus the input. */
   updateText: (update: (current: string) => string) => void
-  /** Upload and attach files, like picking them in the file dialog. */
+  /** Upload and attach files, e.g. images pasted into an omp tab. */
   addFiles: (files: File[]) => void
 }
 
@@ -85,6 +102,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   placeholder = "Send a Message",
   complete,
   hint,
+  context,
+  attachMenuItems = [],
 }, ref) {
   const { enabledTools, toggleTool } = useEnabledTools()
   const { ocrModel } = useSettings()
@@ -105,11 +124,11 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const [showDrawing, setShowDrawing] = useState(false)
   const [drawingOcrActive, setDrawingOcrActive] = useState(false)
   const [drawingOcrImage, setDrawingOcrImage] = useState<string | null>(null)
-  const [previewAttachment, setPreviewAttachment] = useState<Attachment | null>(null)
+  // Name of the draft attachment whose full preview is open. Earlier messages' chips open the chat's preview.
+  const [previewName, setPreviewName] = useState<string | null>(null)
   const [isListening, setIsListening] = useState(false)
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const fileRef = useRef<HTMLInputElement>(null)
   const toolsRef = useRef<HTMLDivElement>(null)
   const attachMenuRef = useRef<HTMLDivElement>(null)
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
@@ -163,6 +182,12 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
 
   const clearAttachments = useCallback(() => setAttachments([]), [])
   const removeAttachment = useCallback((name: string) => setAttachments(prev => prev.filter(a => a.name !== name)), [])
+  const changeDraftContent = useCallback(async (name: string, content: string) => {
+    const attachment = attachments.find((a) => a.name === name)
+    if (!attachment) return
+    const saved = await saveAttachmentEdit(attachment, content)
+    setAttachments((prev) => prev.map((a) => a.name === name ? saved : a))
+  }, [attachments])
 
   const handleSubmit = useCallback(() => {
     const trimmed = text.trim()
@@ -197,11 +222,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       }
     }
   }, [chatId, slug])
-
-  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    uploadFiles(Array.from(e.target.files ?? []))
-    e.target.value = ""
-  }, [uploadFiles])
 
   // Stale `recognitionRef` checks ignore events from a recognizer that was already replaced or stopped
   const toggleListening = useCallback(() => {
@@ -241,47 +261,41 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
 
   const canSend = text.trim().length > 0 || attachments.length > 0
   const hintText = hint?.(text, attachments.length) ?? null
+  // Resolved each render so the window follows edits and closes once its attachment is removed.
+  const previewAttachment = attachments.find((a) => a.name === previewName) ?? null
+
+  /** Open a draft attachment's preview, a reference re-read first so Neovim never edits a stale copy. */
+  const openPreview = async (attachment: Attachment) => {
+    if (attachment.vaultPath) {
+      const reads = await readReferences([attachment.vaultPath], attachReference)
+      setAttachments((prev) => prev.map((a) => a.name === attachment.name ? withReferenceRead(a, reads) : a))
+    }
+    setPreviewName(attachment.name)
+  }
 
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mx-auto w-full max-w-2xl">
-      {attachments.length > 0 && (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.96 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="relative z-10 mb-2 flex flex-wrap gap-2"
-        >
-          {attachments.map((att) => {
-            const uploading = uploadingNames.has(att.name)
-            const spinner = <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-ink-faint border-t-ink" />
-            const isImage = isImageAttachment(att)
-            return (
-              <motion.div key={att.name} layout className={isImage ? "relative" : "relative w-44"}>
-                {isImage ? (
-                  <button aria-label={`Preview ${att.name}`}
-                    onClick={() => setPreviewAttachment(att)}
-                    className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-xl border border-divider-strong bg-surface-elevated hover:border-ink-muted transition-colors"
-                  >
-                    {uploading ? spinner : <ImageThumbnail attachment={att} />}
-                  </button>
-                ) : (
-                  <div
-                    onClick={() => setPreviewAttachment(att)}
-                    className="flex items-center gap-1.5 rounded-xl border border-divider-strong bg-surface-elevated px-2.5 py-1.5 pr-6 cursor-pointer hover:border-ink-muted transition-colors"
-                  >
-                    {uploading ? spinner : <AttachmentIcon mime={att.mime} generic={FileIcon} size="h-3.5 w-3.5" genericMuted={false} />}
-                    <span className="max-w-[160px] truncate text-xs text-ink">{att.name}</span>
-                  </div>
-                )}
-                <button aria-label={`Remove ${att.name}`}
-                  onClick={() => removeAttachment(att.name)}
-                  className="absolute -right-1 -top-1 rounded-full bg-surface-elevated p-0.5 text-ink-muted hover:text-danger"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </motion.div>
-            )
-          })}
-        </motion.div>
+      {((context?.attachments.length ?? 0) > 0 || attachments.length > 0) && (
+        <div className="relative z-10 mb-2 flex flex-wrap gap-1.5">
+          {context?.attachments.map(({ messageIndex, attachment }) => (
+            <AttachmentChip
+              key={`${messageIndex}-${attachment.name}`}
+              attachment={attachment}
+              onOpen={() => context.onOpen(messageIndex, attachment)}
+              onRemove={() => context.onRemove(messageIndex, attachment.name)}
+              onToggleActive={() => context.onToggleActive(messageIndex, attachment.name)}
+            />
+          ))}
+          {attachments.map((attachment) => (
+            <AttachmentChip
+              key={attachment.name}
+              attachment={attachment}
+              uploading={uploadingNames.has(attachment.name)}
+              onOpen={() => void openPreview(attachment)}
+              onRemove={() => removeAttachment(attachment.name)}
+            />
+          ))}
+        </div>
       )}
 
       <div className="relative z-20 rounded-2xl border border-divider/50 p-4 transition-all duration-300 bg-surface shadow-[var(--shadow-xl),var(--inner-highlight)] focus-within:shadow-[var(--shadow-xl),var(--inner-highlight-strong)]">
@@ -312,7 +326,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
           {hintText && <p className="mt-1 text-xs text-ink-muted">{hintText}</p>}
           <div className="mt-3 flex items-center justify-between">
             <div className="flex min-w-0 items-center gap-1">
-              <input ref={fileRef} type="file" accept="image/*,application/pdf,.md,.txt,.csv,.json,.xml,.yaml,.yml,.toml,.rst,.log,.py,.js,.ts,.jsx,.tsx,.css,.html,.sh,.bash,.zsh,.go,.rs,.java,.c,.cpp,.h,.hpp,.rb,.php,.sql,.r,.tex,.bib" multiple onChange={handleFileSelect} className="hidden" />
               <div className="relative" ref={attachMenuRef}>
                 <button aria-label="Add attachment"
                   onClick={() => setShowAttachMenu(!showAttachMenu)}
@@ -327,12 +340,15 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                 </button>
                 {showAttachMenu && (
                   <div className="absolute bottom-full left-0 mb-2 w-48 rounded-xl border border-divider bg-paper p-2 shadow-[var(--shadow-xl)]">
-                    <button
-                      onClick={() => { fileRef.current?.click(); setShowAttachMenu(false) }}
-                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-ink hover:bg-surface-elevated/50 transition-colors"
-                    >
-                      <FileUp className="h-3.5 w-3.5 text-ink-muted" />Upload File
-                    </button>
+                    {attachMenuItems.map(({ label, icon: Icon, onClick }) => (
+                      <button
+                        key={label}
+                        onClick={() => { setShowAttachMenu(false); onClick() }}
+                        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-ink hover:bg-surface-elevated/50 transition-colors"
+                      >
+                        <Icon className="h-3.5 w-3.5 text-ink-muted" />{label}
+                      </button>
+                    ))}
                     <button
                       onClick={() => { setShowAttachMenu(false); setShowDrawing(true) }}
                       className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-ink hover:bg-surface-elevated/50 transition-colors"
@@ -449,7 +465,11 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
         </div>,
         document.body,
       )}
-      <AttachmentPreview attachment={previewAttachment} onClose={() => setPreviewAttachment(null)} />
+      <AttachmentPreview
+        attachment={previewAttachment}
+        onClose={() => setPreviewName(null)}
+        onContentChange={previewName == null ? undefined : (newContent) => changeDraftContent(previewName, newContent)}
+      />
     </motion.div>
   )
 })

@@ -4,11 +4,11 @@ import { createPortal } from "react-dom"
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence } from "framer-motion"
 import type { Message, Attachment } from "@/lib/domain/types"
-import { ChatInput, type ChatInputHandle } from "@/features/chat/composer/ChatInput"
-import { SidePanel } from "@/components/ui/SidePanel"
-import { ChevronsLeftRight, ChevronsRightLeft, GitFork, PanelRight, PanelRightClose } from "lucide-react"
+import { ChatInput, type AttachMenuItem, type ChatContext, type ChatInputHandle } from "@/features/chat/composer/ChatInput"
+import type { ContextAttachment } from "@/features/chat/composer/AttachmentChip"
+import { AttachmentPreview } from "@/features/chat/preview/AttachmentPreview"
+import { ChevronsLeftRight, ChevronsRightLeft, GitFork } from "lucide-react"
 import { ChatPair } from "./ChatPair"
-import { useSidebarElements, type AttachmentEntry, type ExpandedAttachment } from "@/features/chat/context-panel/ChatContextPanel"
 import { usePairFocus } from "@/features/chat/usePairFocus"
 import { MAX_SIDEBAR_WIDTH } from "@/components/ui/SidePanel"
 
@@ -25,6 +25,15 @@ export interface ChatFocus {
   key: number
 }
 
+/** What the chat does with its attachments: composer chips and the previews of message attachments. */
+export interface AttachmentActions {
+  onToggleActive: (messageIndex: number, attachmentName: string) => void
+  onRemove: (messageIndex: number, attachmentName: string) => void
+  onContentChange: (messageIndex: number, attachmentName: string, newContent: string) => void | Promise<void>
+  /** Re-read the reference `path`, so its preview shows the file as it is now. */
+  onPreviewOpen: (path: string) => Promise<void>
+}
+
 interface ChatContainerProps {
   chatId: string
   messages: Message[]
@@ -39,8 +48,12 @@ interface ChatContainerProps {
   slug?: string | null
   extracting?: boolean
   chatInputRef?: React.RefObject<ChatInputHandle | null>
-  /** Top-bar element the context-panel toggle renders into. */
-  contextToggleSlot?: HTMLElement | null
+  /** Context actions of the chat's attachments (composer chips and previews). */
+  attachmentActions?: AttachmentActions
+  /** Extra entries of the composer's "+" menu. */
+  attachMenuItems?: AttachMenuItem[]
+  /** Note under the draft, e.g. why the last attach failed. */
+  composerNotice?: string
   /** Top-bar element the wide-mode toggle renders into. */
   wideToggleSlot?: HTMLElement | null
   /** Expose the message column for top-bar overlap measurement. */
@@ -61,28 +74,22 @@ export function ChatContainer({
   slug = null,
   extracting,
   chatInputRef,
-  contextToggleSlot,
+  attachmentActions,
+  attachMenuItems,
+  composerNotice,
   wideToggleSlot,
   onChatColumnChange,
 }: ChatContainerProps) {
   const focusQaIndex = focus?.qaIndex ?? null
   const focusKey = focus?.key
   const bottomRef = useRef<HTMLDivElement>(null)
-  const [editingDocPath, setEditingDocPath] = useState<string | null>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   // Ref, not state: updated on every scroll and read by the message effect without re-rendering
   const isPinnedToBottomRef = useRef(true)
 
-  const lastSearchResult = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].search_result) return messages[i].search_result
-    }
-    return undefined
-  }, [messages])
-
-  const allAttachments = useMemo<AttachmentEntry[]>(() => {
+  const contextAttachments = useMemo<ContextAttachment[]>(() => {
     const seen = new Set<string>()
-    const entries: AttachmentEntry[] = []
+    const entries: ContextAttachment[] = []
     for (let i = 0; i < messages.length; i++) {
       const atts = messages[i].attachments
       if (!atts) continue
@@ -96,43 +103,19 @@ export function ChatContainer({
     return entries
   }, [messages])
 
-  const [contextOpen, setContextOpen] = useState(false)
-  const [expandedEntries, setExpandedEntries] = useState<ExpandedAttachment[]>([])
-  const [sidebarWidth, setSidebarWidth] = useState(320)
-  const [openElements, setOpenElements] = useState<Set<string>>(new Set())
   const [isWideMode, setIsWideMode] = useState(false)
-  const [pdfWide, setPdfWide] = useState(false)
-  const containerRef = useRef<HTMLDivElement>(null)
-  const savedSidebarWidth = useRef(320)
+  const [previewTarget, setPreviewTarget] = useState<{ messageIndex: number; name: string } | null>(null)
+  const previewAttachment = previewTarget
+    ? messages[previewTarget.messageIndex]?.attachments?.find((a) => a.name === previewTarget.name) ?? null
+    : null
 
-  // Widen the sidebar to half the container for PDFs, restoring the previous width on exit
-  const togglePdfWide = useCallback(() => {
-    setPdfWide((prev) => {
-      if (!prev) {
-        savedSidebarWidth.current = sidebarWidth
-        const total = containerRef.current?.clientWidth ?? 0
-        if (total > 0) setSidebarWidth(Math.round(total / 2))
-      } else {
-        setSidebarWidth(savedSidebarWidth.current)
-      }
-      return !prev
-    })
-  }, [sidebarWidth])
-
-  const handleAttachmentClick = useCallback((messageIndex: number, attachment: Attachment) => {
-    setContextOpen(true)
-    setExpandedEntries([{ messageIndex, attachmentName: attachment.name }])
-  }, [])
-
-  const handleToggleExpand = useCallback((mi: number, name: string) => {
-    setExpandedEntries(prev => {
-      const idx = prev.findIndex(e => e.messageIndex === mi && e.attachmentName === name)
-      if (idx >= 0) {
-        return prev.filter((_, i) => i !== idx)
-      }
-      return [...prev, { messageIndex: mi, attachmentName: name }]
-    })
-  }, [])
+  // Neovim starts from the text it is given, so a text preview waits for the fresh file. PDFs and images open at once and update.
+  const onPreviewOpen = attachmentActions?.onPreviewOpen
+  const openPreview = useCallback(async (messageIndex: number, attachment: Attachment) => {
+    const reread = attachment.vaultPath ? onPreviewOpen?.(attachment.vaultPath) : undefined
+    if (attachment.content != null) await reread
+    setPreviewTarget({ messageIndex, name: attachment.name })
+  }, [onPreviewOpen])
 
   useEffect(() => {
     const el = scrollContainerRef.current
@@ -164,15 +147,11 @@ export function ChatContainer({
   }
 
   // Depend on the length, not the array: in an empty chat every re-render hands
-  // down a fresh [] and this would slam the sidebar shut again, including right
-  // after you opened the Documents expander.
+  // down a fresh [] and would reset the overrides each time.
   const [seenMessageCount, setSeenMessageCount] = useState(messages.length)
   if (seenMessageCount !== messages.length) {
     setSeenMessageCount(messages.length)
-    if (messages.length === 0) {
-      setManualOverrides(new Map())
-      setOpenElements(new Set())
-    }
+    if (messages.length === 0) setManualOverrides(new Map())
   }
 
   // Scroll to the pair before the focused one so the target sits just below a collapsed header
@@ -233,31 +212,6 @@ export function ChatContainer({
     onSend(text, attachments)
   }, [onSend])
 
-  const isElementOpen = useCallback((id: string) => openElements.has(id), [openElements])
-  const onElementOpenChange = useCallback((id: string, open: boolean) => {
-    setOpenElements((prev) => {
-      const next = new Set(prev)
-      if (open) next.add(id)
-      else next.delete(id)
-      return next
-    })
-  }, [])
-
-  const sidebarElements = useSidebarElements({
-    slug,
-    allAttachments,
-    expandedEntries,
-    onToggleExpand: handleToggleExpand,
-    lastSearchResult,
-    editingDocPath,
-    onEditDocument: setEditingDocPath,
-    isElementOpen,
-    onElementOpenChange,
-    pdfWide,
-    onTogglePdfWide: togglePdfWide,
-  })
-
-  const hasSidebarContent = sidebarElements.length > 0
   const inputAreaRef = useRef<HTMLDivElement>(null)
   const [inputAreaHeight, setInputAreaHeight] = useState(0)
 
@@ -274,16 +228,22 @@ export function ChatContainer({
     return () => observer.disconnect()
   }, [])
 
-  // Nothing left to show, or leaving the context panel, drops the panel and PDF wide mode
-  if (!hasSidebarContent && contextOpen) setContextOpen(false)
-  if (!contextOpen && pdfWide) setPdfWide(false)
+  const context = useMemo<ChatContext | undefined>(
+    () => attachmentActions && {
+      attachments: contextAttachments,
+      onToggleActive: attachmentActions.onToggleActive,
+      onRemove: attachmentActions.onRemove,
+      onOpen: (messageIndex, attachment) => void openPreview(messageIndex, attachment),
+    },
+    [attachmentActions, contextAttachments, openPreview],
+  )
 
   // Match the collapsed-sidebar width, shrinking only when the available column cannot fit it.
   const effectiveMaxWidth = isWideMode ? undefined : `max(${MIN_CHAT_COLUMN_PX}px, calc(100vw - ${MAX_SIDEBAR_WIDTH}px))`
   const toggleWideMode = useCallback(() => setIsWideMode((w) => !w), [])
 
   return (
-    <div ref={containerRef} className="absolute inset-x-0 -top-11 bottom-0 flex">
+    <div className="absolute inset-x-0 -top-11 bottom-0 flex">
       <div className="flex-1 min-w-0 flex flex-col relative">
         <div
           ref={scrollContainerRef}
@@ -308,7 +268,7 @@ export function ChatContainer({
                   }}
                   onCollapse={() => togglePair(globalIndex)}
                   collapsedRef={collapsedRef(globalIndex)}
-                  onAttachmentClick={(att) => handleAttachmentClick(globalIndex, att)}
+                  onAttachmentClick={(att) => void openPreview(globalIndex, att)}
                   onDelete={onDeletePair}
                   onRegenerate={onRegenerate}
                   onBranch={onBranch ? () => onBranch(qaIndex) : undefined}
@@ -338,21 +298,12 @@ export function ChatContainer({
               isStreaming={isStreaming}
               onCancel={onCancel}
               slug={slug}
+              context={context}
+              attachMenuItems={attachMenuItems}
+              hint={composerNotice ? () => composerNotice : undefined}
             />
           </div>
         </div>
-        {hasSidebarContent && contextToggleSlot && createPortal(
-          <button
-            type="button"
-            onClick={() => setContextOpen((c) => !c)}
-            aria-label={contextOpen ? "Close context panel" : "Open context panel"}
-            aria-expanded={contextOpen}
-            className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
-          >
-            {contextOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRight className="h-4 w-4" />}
-          </button>,
-          contextToggleSlot,
-        )}
         {wideToggleSlot && createPortal(
           <button
             type="button"
@@ -365,9 +316,13 @@ export function ChatContainer({
           wideToggleSlot,
         )}
       </div>
-      {hasSidebarContent && contextOpen && chatId && (
-        <SidePanel sections={sidebarElements} width={sidebarWidth} onWidthChange={setSidebarWidth} maxWidth={pdfWide ? sidebarWidth : undefined} />
-      )}
+      <AttachmentPreview
+        attachment={previewAttachment}
+        onClose={() => setPreviewTarget(null)}
+        onContentChange={previewTarget && attachmentActions
+          ? (newContent) => attachmentActions.onContentChange(previewTarget.messageIndex, previewTarget.name, newContent)
+          : undefined}
+      />
     </div>
   )
 }

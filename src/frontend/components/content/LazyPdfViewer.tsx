@@ -10,3 +10,8 @@ export const LazyPdfViewer = dynamic(
   () => import("./PdfViewer").then((m) => ({ default: m.PdfViewer })),
   { ssr: false },
 )
+
+export const LazyPdfPages = dynamic(
+  () => import("./PdfViewer").then((m) => ({ default: m.PdfPages })),
+  { ssr: false },
+)
