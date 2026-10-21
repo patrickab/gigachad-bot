@@ -508,8 +508,13 @@ repo's `.omp/agents/<name>.md`. This repo only describes what is specific to it:
 `run-factory.sh` (started by `run.sh`, opt out with `GIGACHAD_FACTORY=0`) serves
 the engine from the Agents-in-a-box checkout (`GIGACHAD_FACTORY_REPO_DIR`, default
 `~/git/Agents-in-a-box`) with its state in the dev PostgreSQL's `factory`
-database, reusing an engine already on `127.0.0.1:8090`. It waits up to 60 s for
-the PostgreSQL that `run-backend.sh` starts and skips itself without a checkout.
+database, reusing an engine already on `127.0.0.1:8090`. On first startup it
+clones a missing checkout, installs the locked factory extra, creates the default
+engine config, and creates the `factory` database if absent. Existing checkouts,
+config and data are preserved. It waits up to 60 s for the PostgreSQL that
+`run-backend.sh` starts. `run.sh` first loads `~/.secrets` and runs the guided
+`scripts/setup-postgres.sh` when `POSTGRES_PASSWORD_DEV` is missing, stopping if
+setup is declined.
 
 **Adapter and routes.** `lib/factory.py` is the only code that knows the engine's
 URLs, like `lib/omp_web.py` for omp-web: `GIGACHAD_FACTORY_URL`

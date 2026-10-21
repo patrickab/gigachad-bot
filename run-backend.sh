@@ -115,7 +115,9 @@ trap cleanup EXIT
 trap interrupt INT TERM
 
 cd "$root_dir"
-source "$HOME/.secrets"
+if [[ -f "$HOME/.secrets" ]]; then
+    source "$HOME/.secrets"
+fi
 source "$root_dir/deploy/load-env.sh"
 
 if [[ "$profile" == production ]]; then

@@ -12,6 +12,20 @@ then
     printf 'usage: %s [--tailscale]\n' "${BASH_SOURCE[0]}" >&2
     exit 2
 fi
+
+if [[ -f "$HOME/.secrets" ]]; then
+    source "$HOME/.secrets"
+fi
+if [[ -z "${POSTGRES_PASSWORD_DEV:-}" ]]; then
+    "$root_dir/scripts/setup-postgres.sh"
+    if [[ -f "$HOME/.secrets" ]]; then
+        source "$HOME/.secrets"
+    fi
+    if [[ -z "${POSTGRES_PASSWORD_DEV:-}" ]]; then
+        printf 'Startup cancelled: development database credentials are missing.\n' >&2
+        exit 1
+    fi
+fi
 backend_pid=''
 frontend_pid=''
 omp_pid=''

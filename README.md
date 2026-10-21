@@ -26,33 +26,27 @@ https://github.com/user-attachments/assets/57864372-dac2-49f3-97f7-5bceecf53c49
 Requires Linux, Bash, Python 3.12 or 3.13, [uv](https://docs.astral.sh/uv/), and Docker with Compose. Docker must be running and accessible to your user.
 
 1. Clone the repository and enter its directory.
-2. Add a database password to `~/.secrets`:
-
-   ```bash
-   export POSTGRES_PASSWORD_DEV='replace-with-a-strong-password'
-   ```
-
-   Add credentials for your chosen model providers to the same file as `export NAME=value` lines. Keep this file private and outside the repository.
-
-3. Start the app:
+2. Start the app:
 
    ```bash
    ./run.sh
    ```
 
-4. Open [localhost:2999](http://localhost:2999). The development API runs on `127.0.0.1:8001`.
+   Startup checks `POSTGRES_PASSWORD_DEV` in `~/.secrets` or your environment. If missing, it runs `scripts/setup-postgres.sh`, which asks before generating a password and creating the database. Declining stops startup without changes. Credentials are saved privately in `~/.secrets`, and PostgreSQL starts through Docker Compose on `127.0.0.1:5432`. Existing credentials and database volumes are reused. If an existing database has no password configured, restore its original password rather than generating a replacement.
+
+   Add credentials for your chosen model providers to `~/.secrets` as `export NAME=value` lines. Keep this file private and outside the repository. You can still run `./scripts/setup-postgres.sh` separately.
+
+3. Open [localhost:2999](http://localhost:2999). The development API runs on `127.0.0.1:8001`.
 
 The launcher installs dependencies, including Node.js, and starts the development services and PostgreSQL. The default dependency install includes MinerU's large local OCR stack, so allow extra time and disk space on the first run.
 
 To run services separately, use `./run-frontend.sh` or `./run-backend.sh`. Optional nonsecret configuration goes in `${XDG_CONFIG_HOME:-$HOME/.config}/gigachad-bot/env` as plain `KEY=value` lines.
 
-`./run.sh` also serves omp-web on `127.0.0.1:30177` for the omp tabs. It needs `omp` on `PATH` and the private ompweb fork checked out at `~/git/ompweb` on branch `custom`:
-
-```bash
-git clone --branch custom https://github.com/patrickab/ompweb.git ~/git/ompweb
-```
+`./run.sh` also serves omp-web on `127.0.0.1:30177` for the omp tabs. It needs `omp` on `PATH`. If the checkout is missing, startup automatically clones the private `patrickab/ompweb` fork's `custom` branch into `~/git/ompweb`. Your Git credentials must have access to that repository. Set `GIGACHAD_OMP_WEB_REPO` to use another checkout path. Existing checkouts are left untouched.
 
 The first start builds it in a separate worktree, which takes a few minutes. Set `GIGACHAD_OMP_WEB=0` to skip it. Updating omp-web means updating both repos together, see the [deployment runbook](.technical-docs/deployment.md#update-omp-web).
+
+`./run.sh` also starts the factory engine on `127.0.0.1:8090`. First startup clones `patrickab/Agents-in-a-box` into `~/git/Agents-in-a-box`, installs its factory dependencies, creates `~/.config/agent-sandbox/factory.yaml`, and creates the `factory` database in the development PostgreSQL instance. Existing checkouts, configuration, and data are preserved. Set `GIGACHAD_FACTORY_REPO_DIR` to use another checkout or `GIGACHAD_FACTORY=0` to skip the factory. Running sandboxed agent tasks still requires the [sandbox runtime setup](.technical-docs/deployment.md#provision-the-code-sandbox).
 
 ## Further reading
 

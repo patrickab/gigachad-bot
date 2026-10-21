@@ -48,9 +48,14 @@ if ! command -v omp >/dev/null 2>&1; then
     exit 0
 fi
 if [[ ! -d "$dir" ]]; then
-    if [[ ! -d "$repo/.git" ]]; then
-        printf 'No ompweb fork at %s (set GIGACHAD_OMP_WEB_REPO); skipping omp-web\n' "$repo" >&2
-        exit 0
+    if [[ ! -e "$repo" ]]; then
+        printf 'Cloning the ompweb fork into %s (%s)\n' "$repo" "$ref"
+        mkdir -p "$(dirname -- "$repo")"
+        git clone --branch "$ref" https://github.com/patrickab/ompweb.git "$repo"
+    fi
+    if [[ ! -e "$repo/.git" ]]; then
+        printf 'error: %s is not an ompweb Git checkout (set GIGACHAD_OMP_WEB_REPO)\n' "$repo" >&2
+        exit 1
     fi
     printf 'Creating the omp-web worktree %s at %s\n' "$dir" "$ref"
     mkdir -p "$(dirname -- "$dir")"

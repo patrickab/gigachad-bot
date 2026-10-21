@@ -420,19 +420,15 @@ Task previews listen on the host's loopback ports 8100-8199, which a browser on
 another device cannot reach, so production turns them off in the engine's
 defaults. Board, Changes, the agent panel and merging work without them.
 
-Once per host:
+`run-factory.sh --prod` clones a missing engine checkout, installs its locked
+factory dependencies, creates the default engine config when absent, and creates
+the `factory` database in production PostgreSQL if needed. Existing checkout
+contents, configuration and database state are preserved.
+
+Once per production host, disable task previews before starting the service:
 
 ```bash
-cd "$PROD" && source ~/.secrets && export PGPASSWORD="$POSTGRES_PASSWORD_PROD"
-psql -h 127.0.0.2 -p 5433 -U "$USER" -d gigachad -c 'CREATE DATABASE factory'
 install -d -m 0700 ~/.config/agent-sandbox/factory
-cat > ~/.config/agent-sandbox/factory.yaml <<'EOF'
-listen: 127.0.0.1:8090
-database_url: ${FACTORY_DATABASE_URL}
-preview_ports: [8100, 8199]
-limits:
-  in_progress: 4
-EOF
 printf 'preview: false\n' > ~/.config/agent-sandbox/factory/defaults.yaml
 "$PROD/deploy/install-systemd-service.sh"
 systemctl --user start gigachad-bot-factory.service
