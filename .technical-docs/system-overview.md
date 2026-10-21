@@ -473,6 +473,101 @@ the launcher sets it from `GIGACHAD_OMP_WEB_FRAME_ANCESTORS`
 - **Limits**: DOCX/PDF previews stay blank inside the frame (`/api/files` keeps
   `SAMEORIGIN`)
 
+## Agent factory
+
+The factory turns a written request into a reviewed change: an engine
+(`agent-sandbox factory serve`, from the Agents-in-a-box repo, `127.0.0.1:8090`)
+runs agents in a git worktree per task and gigachad shows the board, the diff
+and a running preview. The engine knows nothing about gigachad and a repo needs
+no files to use it: the engine ships built-in settings, agents
+(`scout`, `planner`, `coder`, `reviewer`) and workflows (`code`, `scout-code`,
+`scout-plan-code`, `scout-plan-code-review`). Settings are layered, later wins:
+built-in defaults, the user's defaults (edited in the board's settings dialog
+and kept by the engine), the repo's optional `factory.yaml`, the workflow file,
+the request's overrides. An agent is the built-in one, the user's default or the
+repo's `.omp/agents/<name>.md`. This repo only describes what is specific to it:
+
+- `factory.yaml`: the sandbox `profile` (`gigachad`), hooks, gates and the
+  `preview:` processes. The preview backend is checked on `/healthz` and runs
+  as the development login with an empty database, the frontend is pointed at it
+  through `NEXT_PUBLIC_API_BASE`, and the scenario gets the backend's URL from
+  `preview.api_url`. Gates and the preview backend run on the main checkout's
+  `.venv`, which hooks, gates and preview fields name through the engine
+  placeholder `{repo_path}` (the checkout's path as registered). Worktrees
+  install frontend packages only
+- `.omp/agents/coder.md`: overrides the generic coder with gigachad's conventions
+  and the preview scenario example. Agents answer with a JSON envelope in
+  `.factory/out/<phase>.json`, which is git-ignored (`.factory/.gitignore`)
+- `factory.yaml`, `.factory/**` and `.omp/agents/**` are protected: agent edits
+  to them are reverted, so a task cannot rewrite its own rules
+
+`.omp/agents/` is the one tracked part of the otherwise ignored `.omp/`.
+
+`run-factory.sh` (started by `run.sh`, opt out with `GIGACHAD_FACTORY=0`) serves
+the engine from the Agents-in-a-box checkout (`GIGACHAD_FACTORY_REPO_DIR`, default
+`~/git/Agents-in-a-box`) with its state in the dev PostgreSQL's `factory`
+database, reusing an engine already on `127.0.0.1:8090`. It waits up to 60 s for
+the PostgreSQL that `run-backend.sh` starts and skips itself without a checkout.
+
+**Adapter and routes.** `lib/factory.py` is the only code that knows the engine's
+URLs, like `lib/omp_web.py` for omp-web: `GIGACHAD_FACTORY_URL`
+(default `http://127.0.0.1:8090`), Pydantic contract models validate
+every response. `routes/factory.py` (`/api/factory`) forwards one to one in the
+engine's snake_case shapes and requires the host capability, because tasks edit
+and run code on the machine: `GET /repos` (name and main checkout of each
+registered repo), `POST /repos` (`{path}`, registers a git checkout, repeating a
+path returns the same repo), `GET /defaults` and `PUT /defaults` (the user's
+settings plus each agent's markdown, the engine refuses an invalid agent with
+422), `GET /workflows?repo=`, `GET /tasks?repo=`, `POST /tasks`
+(the body names its repo), `GET /tasks/{id}`, `GET /events?repo=&after=`,
+`GET /events/latest` (the newest `seq`, where a poller starts; engine-wide on
+purpose, `GET /events` is filtered by repo so a cursor past other repos' events
+is harmless), `POST /tasks/{id}/{start|approve|cancel|retry}`,
+`POST /tasks/{id}/messages`, `POST /tasks/{id}/preview/restart`. Engine down is
+503, an unknown response shape 502, a refusal (404 unknown task, 409 wrong state,
+422 invalid) keeps the engine's status and message.
+
+Both adapters (`lib/omp_web.py`, `lib/factory.py`) send their requests through
+`lib/upstream.py` and share its three exceptions, and both routers use the
+host-access dependency and the error mapping of `backend/routes/upstream.py`.
+
+**Changes view.** A task's worktree stays uncommitted until it merges, so the diff
+viewer shows it as working tree against `HEAD`. `FileRoots.root_of` (what
+`/api/fileroots/diff*` checks) admits any directory inside a git linked worktree
+(its `.git` is a file starting with `gitdir:`) for host-access logins, whether or
+not the repo is a mounted file root, so it does not depend on where the engine
+keeps worktrees. Only `root_of` does: the file viewer still refuses secrets
+inside a worktree.
+
+**Frontend.** `GET /api/config` reports `host_access`. For those logins every omp
+workspace row (an OMP-section workspace or a project's code category) carries a
+factory icon. It opens that repo's board (a `factory` workspace item, path `<repo>`
+or `<repo>/<task id>`, `features/factory/`), after registering the directory with
+`POST /factory/repos` when `GET /factory/repos` does not list it yet (a failure,
+such as "not a git checkout", shows in the OMP section's error line). The board
+header's gear opens "Factory defaults": merge mode, maximum rounds, sandbox,
+preview, a model per agent and each agent's markdown, saved through
+`PUT /factory/defaults` (the engine's 422 detail shows inline). The board has the
+columns Backlog, Todo, Working (`in_progress` and
+`rework`), Needs you (`human_review` and `blocked`), Merging and Done, cancelled
+tasks are hidden, and "New task" picks a workflow and the request. It polls
+`/events` every 3 seconds while its tab is in front, starting at `/events/latest`
+and moving the cursor on only after the refresh succeeded. A task opens in a
+view with Preview (an iframe on `preview.open_url`), Changes (`DiffViewer` on the
+task's worktree) and an agent side panel with phases, gate output, findings,
+messages, a composer and Approve, Cancel and Retry.
+
+**Preview scenario.** A preview database starts empty. The coder may write
+`.factory/out/scenario.py` (never committed), which the engine runs against the
+ready preview. Its last stdout line, `{"open": "<path and query>"}`, is where the
+preview opens. Gigachad's deep link is `?open=<base64url JSON>`, parsed once on
+startup: `{"kind": "chat", "history_file": ...}` or
+`{"kind": "canvas" | "document" | "architecture", "path": ..., "project_slug": ...}`,
+then removed from the address bar.
+
+Previews are the one exception to "never start the dev server": the engine starts
+them on ports 8100-8199 (`AGENTS.md`).
+
 ## Neovim editor
 
 Text documents can be edited in a real Neovim with the backend user's own
