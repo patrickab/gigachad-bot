@@ -53,6 +53,14 @@ dark, `:root.light`) and owns the shell-only ones, ompweb's
 surface stack: paper at 13% OKLCH lightness, surface at 16.5%, elevated panels
 at 19%, low-chroma yellow warmth (hue 70), not red-brown. Light mode is independent.
 
+`features/settings/ThemeToggle.tsx` switches palettes with a constant-speed 450 ms
+View Transition expanding from the viewport center. A narrow 11-27 px mask edge
+softens the reveal without blurring the content. `app/globals.css` owns the
+animation instead of globally fading every
+element's colors. Reduced motion and browsers without View Transitions switch
+instantly. The theme remains persisted locally and reaches the omp frame through
+the existing theme bridge.
+
 ## Chat sizing
 
 Q&A columns use the collapsed-sidebar width derived from the viewport, not the
