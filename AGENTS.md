@@ -8,6 +8,9 @@ started via `run.sh` or manually by the user, in a terminal they control.
 - If you need to see the app running (UI check, manual test, screenshot),
   ask the user to start it and confirm it's up, then use their already-running
   instance. Do not launch your own copy alongside theirs.
+- Exception: the agent factory engine starts previews of task worktrees (backend
+  and frontend on ports 8100-8199, `.technical-docs/system-overview.md`, "Agent
+  factory"). That is the engine's job, you still never start one yourself.
 
 ## UI hints
 
