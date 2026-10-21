@@ -569,7 +569,13 @@ or `<repo>/<task id>`, `features/factory/`), after registering the directory wit
 such as "not a git checkout", shows in the OMP section's error line). The board
 header's gear opens "Factory defaults": merge mode, maximum rounds, sandbox,
 preview, a model per agent and each agent's markdown, saved through
-`PUT /factory/defaults` (the engine's 422 detail shows inline). The board has the
+`PUT /factory/defaults` (the engine's 422 detail shows inline). Each model selector
+lists only OMP models added in Providers / Models, using the `source: "omp"`
+provider rows from `GET /models`. Values are native `provider/model` selectors,
+without the chat-only `litellm_proxy/` prefix. "Agent's own model" removes the
+override. Saved selectors no longer added remain selectable, and a model-list
+failure displays inline without clearing them. Defaults apply to new
+tasks, existing task configurations stay frozen. The board has the
 columns Backlog, Todo, Working (`in_progress` and
 `rework`), Needs you (`human_review` and `blocked`), Merging and Done, cancelled
 tasks are hidden, and "New task" picks a workflow and the request. It polls

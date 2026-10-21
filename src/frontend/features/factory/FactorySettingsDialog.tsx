@@ -5,8 +5,8 @@ import { Settings } from "lucide-react"
 import { Dialog } from "@/components/ui/Dialog"
 import { StyledSelect } from "@/components/ui/StyledSelect"
 import { cn } from "@/lib/utils"
-import { fetchFactoryDefaults, saveFactoryDefaults } from "@/lib/backend/api"
-import { FACTORY_AGENT_NAMES, type FactoryAgentName, type FactoryDefaults, type FactorySettings, type MergeMode } from "@/lib/domain/types"
+import { fetchFactoryDefaults, fetchModels, saveFactoryDefaults } from "@/lib/backend/api"
+import { FACTORY_AGENT_NAMES, type FactoryAgentName, type FactoryDefaults, type FactorySettings, type MergeMode, type ModelsResponse } from "@/lib/domain/types"
 import { FIELD_CLASS, PRIMARY_BUTTON_CLASS, QUIET_BUTTON_CLASS } from "./styles"
 
 const MERGE_OPTIONS = [
@@ -42,6 +42,8 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
 /** Modal that edits the engine-wide factory defaults: workflow settings, a model per agent and each agent's prompt file. */
 export function FactorySettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [draft, setDraft] = useState<FactoryDefaults | null>(null)
+  const [catalog, setCatalog] = useState<ModelsResponse | null>(null)
+  const [modelError, setModelError] = useState("")
   const [agent, setAgent] = useState<FactoryAgentName>(FACTORY_AGENT_NAMES[0])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
@@ -52,6 +54,8 @@ export function FactorySettingsDialog({ open, onClose }: { open: boolean; onClos
     setWasOpen(open)
     if (open) {
       setDraft(null)
+      setCatalog(null)
+      setModelError("")
       setAgent(FACTORY_AGENT_NAMES[0])
       setError("")
     }
@@ -65,6 +69,11 @@ export function FactorySettingsDialog({ open, onClose }: { open: boolean; onClos
     }).catch((cause: unknown) => {
       if (!cancelled) setError(cause instanceof Error ? cause.message : "Could not load the defaults")
     })
+    fetchModels().then((loaded) => {
+      if (!cancelled) setCatalog(loaded)
+    }).catch((cause: unknown) => {
+      if (!cancelled) setModelError(cause instanceof Error ? cause.message : "Could not load OMP models")
+    })
     return () => { cancelled = true }
   }, [open])
 
@@ -74,6 +83,14 @@ export function FactorySettingsDialog({ open, onClose }: { open: boolean; onClos
     setDraft((current) => current && { ...current, settings: { ...current.settings, models: { ...current.settings.models, [name]: selector } } })
   const changeAgent = (markdown: string) =>
     setDraft((current) => current && { ...current, agents: { ...current.agents, [agent]: markdown } })
+
+  const modelOptions = [
+    { value: "", label: "Agent's own model" },
+    ...(catalog?.providers.filter((provider) => provider.source === "omp").flatMap((provider) => provider.models.map((model) => ({
+      value: model,
+      label: model,
+    }))) ?? []),
+  ]
 
   const save = async () => {
     if (!draft || busy) return
@@ -116,21 +133,26 @@ export function FactorySettingsDialog({ open, onClose }: { open: boolean; onClos
               <Toggle label="Preview" checked={draft.settings.preview} onChange={(preview) => changeSettings({ preview })} />
             </div>
             <div className="grid grid-cols-2 gap-3">
-              {FACTORY_AGENT_NAMES.map((name) => (
-                <Field key={name} label={`Model of ${name}`}>
-                  <input
-                    type="text"
-                    aria-label={`Model of ${name}`}
-                    placeholder="Agent's own model"
-                    value={draft.settings.models[name] ?? ""}
-                    onChange={(event) => changeModel(name, event.target.value)}
-                    className={FIELD_CLASS}
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                </Field>
-              ))}
+              {FACTORY_AGENT_NAMES.map((name) => {
+                const selected = draft.settings.models[name] ?? ""
+                const options = modelOptions.some((option) => option.value === selected)
+                  ? modelOptions
+                  : [...modelOptions, { value: selected, label: `${selected} (saved, not added)` }]
+                return (
+                  <Field key={name} label={`Model of ${name}`}>
+                    <StyledSelect
+                      ariaLabel={`Model of ${name}`}
+                      value={selected}
+                      onChange={(value) => changeModel(name, value)}
+                      options={options}
+                    />
+                  </Field>
+                )
+              })}
             </div>
+            {modelError
+              ? <p role="alert" className="text-xs text-danger">{modelError}</p>
+              : <p role="status" className="text-[11px] text-ink-faint">{catalog ? "OMP models added in Providers / Models. Applies to new tasks." : "Loading OMP models"}</p>}
             <div className="flex flex-col gap-2">
               <div role="tablist" aria-label="Agent" className="flex gap-1">
                 {FACTORY_AGENT_NAMES.map((name) => (
