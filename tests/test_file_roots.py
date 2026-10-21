@@ -1,3 +1,4 @@
+import subprocess
 from types import SimpleNamespace
 
 from fastapi import FastAPI
@@ -213,6 +214,42 @@ def test_diff_routes_serve_mounted_repositories_and_refuse_other_directories(tmp
 
     assert listing.json() == {"is_git_repository": False, "files": []}
     assert outside.status_code == 403
+
+
+def _git(directory, *args: str) -> None:
+    subprocess.run(["git", "-C", str(directory), *args], check=True, capture_output=True)
+
+
+@pytest.mark.parametrize("host_access", [True, False])
+def test_diff_routes_admit_linked_worktrees_anywhere_for_host_access_only(tmp_path, host_access):
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    _git(clone, "init", "-q", "-b", "main")
+    _git(clone, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init")
+    linked = tmp_path / "elsewhere" / "task"
+    _git(clone, "worktree", "add", "-q", str(linked), "-b", "task")
+    (linked / "src").mkdir()
+    (linked / "src" / "new.md").write_text("hi\n")
+    pointing_elsewhere = tmp_path / "not-a-worktree"
+    pointing_elsewhere.mkdir()
+    (pointing_elsewhere / ".git").write_text("something else\n")
+    roots = FileRoots(repository=SimpleNamespace(load=lambda: [], save=lambda roots: None), host_access=host_access)
+    app = FastAPI()
+    app.include_router(file_roots_route.router)
+    app.dependency_overrides[file_roots_route.get_file_roots] = lambda: roots
+    client = TestClient(app)
+
+    def status(directory) -> int:
+        return client.get("/api/fileroots/diff/files", params={"root": str(directory)}).status_code
+
+    assert status(linked) == (200 if host_access else 403)
+    assert status(linked / "src") == (200 if host_access else 403)
+    assert status(clone) == 403
+    assert status(tmp_path / "elsewhere") == 403
+    assert status(pointing_elsewhere) == 403
+    assert not roots.contains(linked / ".env")
+    if host_access:
+        assert roots.root_of(str(linked / "src" / "new.md")) == linked
 
 
 @pytest.mark.parametrize("host_access", [False, True])

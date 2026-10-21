@@ -55,6 +55,15 @@ def is_secret_path(path: Path) -> bool:
     return ".omp" in path.parts and name.startswith(_OMP_SECRET_NAMES)
 
 
+def _is_gitdir_pointer(git_file: Path) -> bool:
+    """Whether a `.git` file is a linked worktree's pointer (`gitdir: <clone>/.git/worktrees/<name>`)."""
+    try:
+        with git_file.open(encoding="utf-8") as handle:
+            return handle.read(len("gitdir:")) == "gitdir:"
+    except (OSError, UnicodeDecodeError):
+        return False
+
+
 def _with_gitignore(directory: Path | str, inherited: _IgnoreLayers) -> _IgnoreLayers:
     """*inherited* plus *directory*'s own `.gitignore`, if it has a readable one."""
     try:
@@ -232,6 +241,18 @@ class FileRoots:
         holding = [root for root in self._roots if target.is_relative_to(root)]
         return holding or [worktree for root in self._roots for worktree in self.worktrees_of(root) if target.is_relative_to(worktree)]
 
+    def _linked_worktree(self, target: Path) -> list[Path]:
+        """The git linked worktree holding *target* (a `.git` file pointing at the clone), for host-access logins only."""
+        if not self._host_access:
+            return []
+        for directory in (target, *target.parents):
+            marker = directory / ".git"
+            if marker.is_file():
+                return [directory] if _is_gitdir_pointer(marker) else []
+            if marker.exists():
+                return []
+        return []
+
     def _root_for(self, path: str) -> Path:
         """Resolve *path*, rejecting anything outside all roots and their worktrees, unless host access reaches it."""
         target = Path(path).expanduser().resolve()
@@ -247,9 +268,9 @@ class FileRoots:
             return False
 
     def root_of(self, path: str) -> Path:
-        """Innermost registered root or clone worktree holding *path*, ValueError outside all of them."""
+        """Innermost registered root or clone worktree, else (host access) any linked git worktree holding *path*, else ValueError."""
         target = Path(path).expanduser().resolve()
-        holding = self._accessible_roots(target)
+        holding = self._accessible_roots(target) or self._linked_worktree(target)
         if not holding:
             raise ValueError(f"Path outside file roots: {path}")
         return max(holding, key=lambda root: len(root.parts))
