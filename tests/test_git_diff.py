@@ -4,7 +4,7 @@ import subprocess
 
 import pytest
 
-from lib.git_diff import UnsupportedDiffContent, changed_files, file_contents, file_patch
+from lib.git_diff import UnsupportedDiffContent, changed_files, file_contents, file_patch, line_counts
 
 
 def _git(directory, *args):
@@ -29,6 +29,21 @@ def test_changes_are_classified_and_sorted(repository):
     files = {file.path: file.status for file in changed_files(repository)}
 
     assert files == {"gone.txt": "deleted", "kept.txt": "modified", "new.txt": "untracked"}
+
+
+def test_line_counts_cover_tracked_untracked_renamed_and_binary_files(repository):
+    (repository / "kept.txt").write_text("one\nTWO\nthree\n")
+    (repository / "gone.txt").unlink()
+    (repository / "new.txt").write_text("a\nb")
+    (repository / "blob.bin").write_bytes(b"\0\1")
+    (repository / "old.txt").write_text("1\n2\n3\n4\n")
+    _git(repository, "add", "old.txt")
+    _git(repository, "commit", "-q", "-m", "old")
+    _git(repository, "mv", "old.txt", "moved.txt")
+
+    counts = line_counts(repository, changed_files(repository))
+
+    assert counts == {"kept.txt": (2, 1), "gone.txt": (0, 1), "new.txt": (2, 0), "moved.txt": (0, 0)}
 
 
 def test_only_changes_below_the_inspected_directory_are_listed(repository):

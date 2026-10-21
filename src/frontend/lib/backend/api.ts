@@ -313,7 +313,7 @@ export type DiffStatus = "modified" | "added" | "deleted" | "renamed" | "untrack
 
 export interface RootDiffFiles {
   is_git_repository: boolean
-  files: { path: string; status: DiffStatus }[]
+  files: { path: string; status: DiffStatus; stamp: string; added: number | null; removed: number | null }[]
 }
 
 /** Files of the git working tree at a mounted root that differ from HEAD. */

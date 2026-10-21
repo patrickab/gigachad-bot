@@ -77,12 +77,16 @@ def _relative_to(directory: Path, path: Path) -> str:
     return (path.relative_to(directory) if path.is_relative_to(directory) else path).as_posix()
 
 
-def changed_files(directory: Path) -> list[ChangedFile] | None:
-    """Changed files at or below *directory*, None when it is not inside a git repository."""
+def changed_files(directory: Path, only: str | None = None) -> list[ChangedFile] | None:
+    """Changed files at or below *directory*, None when it is not inside a git repository.
+
+    - *only* limits the scan to one file below *directory*, but then git cannot pair a staged rename
+    """
     repository = _repository_root(directory)
     if repository is None:
         return None
-    output = _git(repository, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+    pathspec = ["--", str(directory / only)] if only else []
+    output = _git(repository, "--literal-pathspecs", "status", "--porcelain=v1", "-z", "--untracked-files=all", *pathspec)
     files = []
     for path, pair, original in _parse_porcelain(output):
         if not (repository / path).is_relative_to(directory):
@@ -113,9 +117,17 @@ def _added_file_patch(path: str, content: str) -> str:
     ])
 
 
+def _find_change(directory: Path, relative_path: str) -> ChangedFile | None:
+    """Change of one file, scanning the whole tree only when it may be the new side of a staged rename."""
+    change = next(iter(changed_files(directory, relative_path) or []), None)
+    if change is None or change.status != "added":
+        return change
+    return next((file for file in changed_files(directory) or [] if file.path == relative_path), None)
+
+
 def file_patch(directory: Path, relative_path: str) -> tuple[ChangeStatus, str] | None:
     """Unified patch of one changed file against HEAD, None when it is unchanged, binary or too large."""
-    change = next((file for file in changed_files(directory) or [] if file.path == relative_path), None)
+    change = _find_change(directory, relative_path)
     if change is None:
         return None
     target = directory / relative_path
@@ -137,6 +149,63 @@ def file_patch(directory: Path, relative_path: str) -> tuple[ChangeStatus, str] 
     if "\n@@ " not in patch or len(patch) > MAX_DIFF_BYTES:
         return None
     return change.status, patch
+
+
+def file_stamp(directory: Path, relative_path: str) -> str:
+    """Modification fingerprint of a working file, empty when it is gone, lets clients spot content edits."""
+    try:
+        stat = (directory / relative_path).stat()
+    except OSError:
+        return ""
+    return f"{stat.st_mtime_ns}-{stat.st_size}"
+
+
+def _parse_numstat(output: str) -> dict[str, tuple[int, int]]:
+    """`git diff --numstat -z` as ``{path: (added, removed)}``, binary files are left out."""
+    records = output.split("\0")
+    counts: dict[str, tuple[int, int]] = {}
+    index = 0
+    while index < len(records):
+        parts = records[index].split("\t", 2)
+        index += 1
+        if len(parts) != 3:
+            continue
+        added, removed, path = parts
+        if not path:  # rename: the next two records are the old and the new path
+            path = records[index + 1] if index + 1 < len(records) else ""
+            index += 2
+        if added.isdigit() and removed.isdigit():
+            counts[path] = (int(added), int(removed))
+    return counts
+
+
+def _added_line_count(target: Path) -> tuple[int, int] | None:
+    """Line count of a file that is new, None when `file_patch` would show no text diff."""
+    try:
+        if target.stat().st_size > MAX_DIFF_BYTES:
+            return None
+        content = target.read_bytes()
+    except OSError:
+        return None
+    if b"\0" in content:
+        return None
+    return content.count(b"\n") + (0 if not content or content.endswith(b"\n") else 1), 0
+
+
+def line_counts(directory: Path, files: list[ChangedFile]) -> dict[str, tuple[int, int]]:
+    """``{path: (added, removed)}`` of *files* against HEAD, one git call for all tracked files."""
+    has_head = _has_head(directory)
+    try:
+        tracked = _parse_numstat(_git(directory, "diff", "--numstat", "-z", "--no-color", "--no-ext-diff", "--relative", "HEAD")) if has_head else {}
+    except (subprocess.SubprocessError, OSError):
+        tracked = {}
+    counts: dict[str, tuple[int, int]] = {}
+    for file in files:
+        is_new = file.status == "untracked" or (file.status == "added" and not has_head)
+        count = _added_line_count(directory / file.path) if is_new else tracked.get(file.path)
+        if count is not None:
+            counts[file.path] = count
+    return counts
 
 
 def _has_head(directory: Path) -> bool:
@@ -209,7 +278,7 @@ def file_contents(directory: Path, relative_path: str) -> tuple[str, str]:
     if head_path is None:
         return "", content
     try:
-        change = next((file for file in changed_files(directory) or [] if file.path == lexical.relative_to(directory).as_posix()), None)
+        change = _find_change(directory, lexical.relative_to(directory).as_posix())
         if change is not None and change.status == "untracked":
             return "", content
         if change is not None and change.original_path:

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, within } from "@testing-library/react"
+import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react"
 import { DiffViewer } from "@/features/editor/diff/DiffViewer"
 
 const api = vi.hoisted(() => ({
@@ -20,7 +20,7 @@ const PATCH = ["diff --git a/a.txt b/a.txt", "--- a/a.txt", "+++ b/a.txt", "@@ -
 
 beforeEach(() => {
   neovim.enabled = false
-  api.fetchRootDiffFiles.mockReset().mockResolvedValue({ is_git_repository: true, files: [{ path: "a.txt", status: "modified" }, { path: "dir/b.png", status: "added" }] })
+  api.fetchRootDiffFiles.mockReset().mockResolvedValue({ is_git_repository: true, files: [{ path: "a.txt", status: "modified", stamp: "1", added: 1, removed: 1 }, { path: "dir/b.png", status: "added", stamp: "1", added: null, removed: null }] })
   api.fetchRootFileDiff.mockReset().mockImplementation(async (_root, path) => path === "a.txt" ? { supported: true, status: "modified", patch: PATCH } : { supported: false })
   api.fetchRootDiffContent.mockReset().mockReturnValue(new Promise(() => {}))
 })
@@ -58,12 +58,12 @@ describe("DiffViewer", () => {
     expect(view.getByText("old")).toBeVisible()
     container.scrollTop = 0
     fireEvent.scroll(container)
-    expect(view.getByRole("button", { name: /^a\.txt/ })).toHaveAttribute("aria-current", "page")
+    await waitFor(() => expect(view.getByRole("button", { name: /^a\.txt/ })).toHaveAttribute("aria-current", "page"))
   })
 
   it("edits the file whose header button was clicked, deleted files have none", async () => {
     neovim.enabled = true
-    api.fetchRootDiffFiles.mockResolvedValue({ is_git_repository: true, files: [{ path: "a.txt", status: "modified" }, { path: "dir/b.png", status: "added" }, { path: "gone.txt", status: "deleted" }] })
+    api.fetchRootDiffFiles.mockResolvedValue({ is_git_repository: true, files: [{ path: "a.txt", status: "modified", stamp: "1", added: null, removed: null }, { path: "dir/b.png", status: "added", stamp: "1", added: null, removed: null }, { path: "gone.txt", status: "deleted", stamp: "1", added: null, removed: null }] })
     const view = render(<DiffViewer root="/repo" />)
     const second = within(await view.findByLabelText("Diff for dir/b.png"))
     expect(within(view.getByLabelText("Diff for gone.txt")).queryByRole("button")).toBeNull()
@@ -74,7 +74,7 @@ describe("DiffViewer", () => {
   })
 
   it("merges folder chains without files into one sidebar row, branching folders stay separate", async () => {
-    api.fetchRootDiffFiles.mockResolvedValue({ is_git_repository: true, files: [{ path: "src/ui/tree/a.ts", status: "modified" }, { path: "src/ui/tree/b.ts", status: "modified" }, { path: "src/lib/c.ts", status: "added" }] })
+    api.fetchRootDiffFiles.mockResolvedValue({ is_git_repository: true, files: [{ path: "src/ui/tree/a.ts", status: "modified", stamp: "1", added: null, removed: null }, { path: "src/ui/tree/b.ts", status: "modified", stamp: "1", added: null, removed: null }, { path: "src/lib/c.ts", status: "added", stamp: "1", added: null, removed: null }] })
     const sidebar = within(render(<DiffViewer root="/repo" />).getByLabelText("Changed files"))
     expect(await sidebar.findByRole("button", { name: "ui/tree" })).toHaveAttribute("aria-expanded", "true")
     expect(sidebar.getByRole("button", { name: "src" })).toBeVisible()
@@ -91,5 +91,19 @@ describe("DiffViewer", () => {
     api.fetchRootDiffFiles.mockResolvedValue({ is_git_repository: true, files: [] })
     const view = render(<DiffViewer root="/clean" />)
     expect(await view.findByText("No changes")).toBeVisible()
+  })
+
+  it("refetches only the file whose stamp changed and updates its counts", async () => {
+    const view = render(<DiffViewer root="/repo" />)
+    await view.findByText("old")
+    expect(api.fetchRootFileDiff).toHaveBeenCalledTimes(2)
+    const edited = ["diff --git a/a.txt b/a.txt", "--- a/a.txt", "+++ b/a.txt", "@@ -1,1 +1,3 @@", " keep", "+x", "+y"].join("\n")
+    api.fetchRootFileDiff.mockImplementation(async (_root, path) => path === "a.txt" ? { supported: true, status: "modified", patch: edited } : { supported: false })
+    api.fetchRootDiffFiles.mockResolvedValue({ is_git_repository: true, files: [{ path: "a.txt", status: "modified", stamp: "2", added: 2, removed: 0 }, { path: "dir/b.png", status: "added", stamp: "1", added: null, removed: null }] })
+
+    expect(await view.findByText("y", {}, { timeout: 4000 })).toBeVisible()
+    expect(view.getByLabelText("Line changes in a.txt")).toHaveTextContent("+2−0")
+    expect(view.queryByText("old")).toBeNull()
+    expect(api.fetchRootFileDiff).toHaveBeenCalledTimes(3)
   })
 })

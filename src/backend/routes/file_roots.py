@@ -212,6 +212,9 @@ def add_to_project(
 class DiffFile(BaseModel):
     path: str
     status: git_diff.ChangeStatus
+    stamp: str
+    added: int | None = None
+    removed: int | None = None
 
 
 class DiffStatusResponse(BaseModel):
@@ -239,10 +242,15 @@ def _git_directory(root: str, roots: FileRoots) -> Path:
 @router.get("/diff/files", response_model=DiffStatusResponse)
 def list_changed_files(root: str = Query(...), roots: FileRoots = Depends(get_file_roots)) -> DiffStatusResponse:
     """Files of the git working tree at *root* that differ from HEAD."""
-    files = git_diff.changed_files(_git_directory(root, roots))
+    directory = _git_directory(root, roots)
+    files = git_diff.changed_files(directory)
     if files is None:
         return DiffStatusResponse(is_git_repository=False, files=[])
-    return DiffStatusResponse(is_git_repository=True, files=[DiffFile(path=file.path, status=file.status) for file in files])
+    counts = git_diff.line_counts(directory, files)
+    return DiffStatusResponse(is_git_repository=True, files=[
+        DiffFile(path=file.path, status=file.status, stamp=git_diff.file_stamp(directory, file.path), **dict(zip(("added", "removed"), counts.get(file.path, (None, None)))))
+        for file in files
+    ])
 
 
 @router.get("/diff", response_model=FileDiffResponse)
