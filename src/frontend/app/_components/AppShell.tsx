@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react"
 import type { ChatFocus } from "@/features/chat/ChatContainer"
 import { MemoryViewer } from "@/features/memory/MemoryViewer"
 import { ProjectDashboard } from "@/features/projects/ProjectDashboard"
@@ -15,6 +15,7 @@ import { SidebarProvider } from "@/features/navigation/SidebarContext"
 import { OmpProvider } from "@/features/omp/OmpProvider"
 import { surfaceOf, type Tab, type WorkspaceItem } from "@/contexts/TabContext"
 import { TabContent } from "./TabContent"
+import { parseOpenParam, withoutOpenParam } from "./deepLink"
 
 /** Keep each project's list entry (saved chat labels) current: histories refresh after every chat save. */
 function ProjectListSync() {
@@ -74,6 +75,17 @@ export function AppShell() {
     const tab = nextTab(settings.tabDefaults)
     tabManagerRef.current?.openTab({ ...tab, workspaceItem: item, projectSlug: item.projectSlug, appMode: surfaceOf(item) })
   }, [settings.tabDefaults])
+
+  // A factory preview opens its scenario's chat, canvas, document or architecture through `?open=`, once at startup.
+  const openFromLink = useEffectEvent(() => {
+    const target = parseOpenParam(window.location.search)
+    if (!target) return
+    window.history.replaceState(window.history.state, "", withoutOpenParam(new URL(window.location.href)))
+    if (target.kind === "chat") handleOpenChat(target.historyFile)
+    else handleOpenItem(target.item)
+  })
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- opening the linked item is a one-shot startup action that must follow the commit, once the tab manager's handle exists
+  useEffect(() => openFromLink(), [])
 
   const handleHistoriesMoved = useCallback((moves: ReadonlyMap<string, string>) => {
     tabManagerRef.current?.relocateHistories(moves)
