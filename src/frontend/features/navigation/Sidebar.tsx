@@ -180,7 +180,6 @@ export function Sidebar({
         id: mount,
         label: node.name,
         type: "folder",
-        badge: worktrees.shownBranch(mount),
         // Dragging a mount adds its path, only unambiguous while it shows the clone itself.
         multiSelect: node.path === mount,
         actions: [{ label: `Open diff for ${node.name}`, icon: GitCompare, onClick: () => onDiffSelect?.(node.path) }],

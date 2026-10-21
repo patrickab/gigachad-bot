@@ -159,19 +159,33 @@ describe("Project navigation", () => {
   it("switches a clone mount to a worktree, then removes it and keeps the branch unless confirmed", async () => {
     const { ApiError } = await vi.importActual<typeof import("@/lib/backend/api")>("@/lib/backend/api")
     const listWorktrees = api.fetchWorktrees.getMockImplementation()
-    api.fetchWorktrees.mockImplementation(async () => ({ is_clone: true, default_base: "dev", branches: ["dev", "feature"], worktrees: [
-      { path: "/source", branch: "dev", is_main: true, changed_files: 0, ahead: 0, behind: 0 },
+    api.fetchWorktrees.mockImplementation(async () => ({ is_clone: true, default_base: "dev", default_branch: "dev", branches: ["dev", "feature"], worktrees: [
       { path: "/wt/feature", branch: "feature", is_main: false, changed_files: 2, ahead: 1, behind: 0 },
+      { path: "/source", branch: "dev", is_main: true, changed_files: 0, ahead: 0, behind: 0 },
     ] }))
     api.removeWorktree.mockRejectedValueOnce(new ApiError("contains modified or untracked files", 409))
     try {
       const view = render(<Sidebar appMode="chat" />)
       const fileMounts = within(view.getByLabelText("File mounts"))
       fireEvent.click(await fileMounts.findByRole("button", { name: "source" }))
-      fireEvent.click(await fileMounts.findByRole("button", { name: "worktrees" }))
+      fireEvent.click(await fileMounts.findByRole("button", { name: /^worktrees/ }))
+      const mainCheckout = fileMounts.getByRole("button", { name: "dev", exact: true })
+      const feature = fileMounts.getByRole("button", { name: "feature 2 changed ↑1" })
+      expect(mainCheckout.compareDocumentPosition(feature) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(mainCheckout).toHaveAttribute("aria-current", "page")
 
       fireEvent.click(fileMounts.getByRole("button", { name: "feature 2 changed ↑1" }))
       await waitFor(() => expect(api.fileRootTree).toHaveBeenLastCalledWith(["/wt/feature"]))
+      expect(fileMounts.getByRole("button", { name: "source", exact: true })).toBeVisible()
+      expect(fileMounts.getByLabelText("Selected checkout: feature")).toBeVisible()
+      expect(feature).toHaveAttribute("aria-current", "page")
+
+      fireEvent.click(mainCheckout)
+      await waitFor(() => expect(api.fileRootTree).toHaveBeenLastCalledWith([]))
+      expect(mainCheckout).toHaveAttribute("aria-current", "page")
+      expect(fileMounts.getByLabelText("Selected checkout: dev")).toBeVisible()
+      fireEvent.click(feature)
+      await waitFor(() => expect(feature).toHaveAttribute("aria-current", "page"))
 
       fireEvent.click(fileMounts.getByRole("button", { name: "Delete feature" }))
       fireEvent.click(await fileMounts.findByRole("button", { name: "Yes" }))

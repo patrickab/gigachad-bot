@@ -37,6 +37,79 @@ def clone(tmp_path, monkeypatch):
     return SimpleNamespace(upstream=upstream, repository=(tmp_path / "repo").resolve(), home=tmp_path / "worktrees")
 
 
+def test_default_branch_falls_back_to_main_checkout_not_an_arbitrary_branch(clone):
+    _git(clone.repository, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
+    assert git_worktree.default_branch(clone.repository) == "dev"
+    _git(clone.repository, "checkout", "--detach")
+    assert git_worktree.default_branch(clone.repository) is None
+    with pytest.raises(git_worktree.WorktreeError, match="Cannot infer"):
+        git_worktree.default_worktree(clone.repository)
+
+
+@pytest.mark.parametrize("local_branch", [False, True])
+def test_default_checkout_creates_and_reuses_without_pulling_or_changing_main(clone, local_branch):
+    assert git_worktree.default_branch(clone.repository) == "main"
+    assert git_worktree.default_base_branch(clone.repository) == "dev"
+    if local_branch:
+        _git(clone.repository, "branch", "main", "origin/main")
+    before = _git(clone.repository, "rev-parse", "HEAD")
+    (clone.repository / "readme.md").write_text("unsaved changes\n")
+    (clone.repository / "draft.md").write_text("untracked\n")
+    _commit(clone.upstream, "later.md", "not fetched\n")
+    _git(clone.upstream, "branch", "-f", "dev", "main")
+
+    worktree = git_worktree.default_worktree(clone.repository)
+
+    assert worktree.branch == "main"
+    assert git_worktree.default_worktree(clone.repository) == worktree
+    assert _git(worktree.path, "rev-parse", "HEAD") == before
+    assert not (Path(worktree.path) / "later.md").exists()
+    assert _git(clone.repository, "symbolic-ref", "--short", "HEAD") == "dev"
+    assert _git(clone.repository, "rev-parse", "HEAD") == before
+    assert (clone.repository / "readme.md").read_text() == "unsaved changes\n"
+    assert (clone.repository / "draft.md").read_text() == "untracked\n"
+    if not local_branch:
+        assert _git(clone.repository, "rev-parse", "--abbrev-ref", "main@{upstream}") == "origin/main"
+
+
+def test_default_checkout_reuses_an_existing_checkout_outside_standard_home(clone, tmp_path):
+    path = tmp_path / "elsewhere"
+    _git(clone.repository, "worktree", "add", "-b", "main", str(path), "origin/main")
+    (path / "draft.md").write_text("keep me\n")
+
+    assert git_worktree.default_worktree(clone.repository) == git_worktree.Worktree(str(path.resolve()), "main", False)
+    assert (path / "draft.md").read_text() == "keep me\n"
+    assert not clone.home.exists()
+
+
+def test_default_checkout_reuses_the_main_checkout_when_it_has_the_default_branch(clone):
+    _git(clone.repository, "checkout", "-b", "main", "origin/main")
+
+    assert git_worktree.default_worktree(clone.repository) == git_worktree.Worktree(str(clone.repository), "main", True)
+    assert not clone.home.exists()
+
+
+@pytest.mark.parametrize("collision", ["directory", "broken_symlink", "worktree"])
+def test_default_checkout_refuses_existing_destination_without_creating_a_branch(clone, tmp_path, collision):
+    path = clone.home / "repo" / "main"
+    path.parent.mkdir(parents=True)
+    if collision == "broken_symlink":
+        path.symlink_to(tmp_path / "missing")
+    elif collision == "worktree":
+        _git(clone.repository, "worktree", "add", "-b", "other", str(path), "dev")
+    else:
+        path.mkdir()
+        (path / "keep.md").write_text("keep me\n")
+
+    with pytest.raises(git_worktree.WorktreeError, match="Directory already exists"):
+        git_worktree.default_worktree(clone.repository)
+
+    assert _git(clone.repository, "branch", "--list", "main") == ""
+    assert _git(clone.repository, "symbolic-ref", "--short", "HEAD") == "dev"
+    if collision == "directory":
+        assert (path / "keep.md").read_text() == "keep me\n"
+
+
 def test_a_new_worktree_branches_off_the_freshly_pulled_base(clone):
     _commit(clone.upstream, "later.md", "pushed after cloning\n")
     _git(clone.upstream, "branch", "-f", "dev", "main")
@@ -131,6 +204,9 @@ def test_worktree_routes_refuse_unmounted_roots_and_report_conflicts(clone):
     unmounted = client.get("/api/fileroots/worktrees", params={"root": str(clone.upstream)})
 
     assert (listing["default_base"], [entry["branch"] for entry in listing["worktrees"]]) == ("dev", ["dev", "feature"])
+    assert listing["default_branch"] == "main"
     assert listing["worktrees"][1]["changed_files"] == 1
     assert dirty.status_code == 409
     assert unmounted.status_code == 403
+
+

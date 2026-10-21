@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState, useSyncExternalStore } from "react"
 import type { FileTreeItem } from "@/components/ui/file-tree/FileTree"
 import { InlineConfirm } from "@/components/ui/InlineConfirm"
-import { ApiError, createWorktree, deleteWorktreeBranch, fetchWorktrees, removeWorktree, type Worktree, type WorktreeList } from "@/lib/backend/api"
+import { ApiError, createWorktree, deleteWorktreeBranch, fetchWorktrees, openDefaultWorktree, removeWorktree, type Worktree, type WorktreeList } from "@/lib/backend/api"
 import { baseName } from "@/lib/paths"
 
 const ACTIVE_STORAGE_KEY = "active_worktrees"
@@ -52,6 +52,7 @@ export function worktreeStatus(worktree: Worktree): string | undefined {
 export function useWorktrees(mounts: string[]) {
   const [lists, setLists] = useState<Record<string, WorktreeList>>({})
   const [removal, setRemoval] = useState<Removal | null>(null)
+  const [defaultError, setDefaultError] = useState<{ mount: string; error: string } | null>(null)
   const stored = useSyncExternalStore(subscribeActive, () => localStorage.getItem(ACTIVE_STORAGE_KEY) ?? "{}", () => "{}")
   const active = useMemo(() => parseActive(stored), [stored])
   const mountsKey = mounts.join("\n")
@@ -74,6 +75,17 @@ export function useWorktrees(mounts: string[]) {
   const shown = (mount: string): Worktree | undefined => {
     const worktrees = lists[mount]?.worktrees ?? []
     return worktrees.find((worktree) => worktree.path === active[mount]) ?? worktrees.find((worktree) => worktree.is_main)
+  }
+
+  const selectDefault = async (mount: string) => {
+    setDefaultError(null)
+    try {
+      const checkout = await openDefaultWorktree(mount)
+      setActive(mount, checkout.path === mount ? null : checkout.path)
+      await load(mount)
+    } catch (error) {
+      setDefaultError({ mount, error: errorText(error) })
+    }
   }
 
   const finish = (mount: string) => {
@@ -130,8 +142,31 @@ export function useWorktrees(mounts: string[]) {
     if (!list?.is_clone) return null
     const current = shown(mount)
     const base = list.default_base
+    const defaultBranch = list.default_branch
+    const defaultCheckout = list.worktrees.find((worktree) => worktree.branch === defaultBranch)
+    const children: FileTreeItem<string>[] = [...list.worktrees]
+      .sort((left, right) => Number(right === defaultCheckout) - Number(left === defaultCheckout) || Number(right.is_main) - Number(left.is_main))
+      .map((worktree) => ({
+        id: `worktree:${worktree.path}`, label: worktree.branch ?? baseName(worktree.path), type: "element",
+        badge: worktreeStatus(worktree),
+        isActive: worktree.path === current?.path,
+        onSelect: () => setActive(mount, worktree.is_main ? null : worktree.path),
+        onDelete: worktree.is_main || removal ? undefined : () => void startRemoval(mount, worktree),
+        detail: removal?.worktree.path === worktree.path ? removalDetail(removal) : undefined,
+      }))
+    if (defaultBranch && !defaultCheckout) children.unshift({
+      id: `default-worktree:${mount}`, label: defaultBranch, type: "element",
+      onSelect: () => void selectDefault(mount),
+      detail: defaultError?.mount === mount ? <p role="alert" className="flex items-center gap-1 py-0.5 text-[11px] text-danger">
+        <span className="min-w-0 flex-1">{defaultError.error}</span>
+        <button onClick={() => setDefaultError(null)} className="rounded px-1 text-ink-muted hover:bg-hover hover:text-ink">Dismiss</button>
+      </p> : undefined,
+    })
     return {
       id: `worktrees:${mount}`, label: "worktrees", type: "folder",
+      meta: current && <span aria-label={`Selected checkout: ${current.branch ?? baseName(current.path)}`} className="max-w-28 truncate text-ink-faint">
+        {current.branch ?? baseName(current.path)}
+      </span>,
       create: base ? {
         label: `New worktree of ${baseName(mount)}`, placeholder: "Worktree name",
         choice: { label: "from", options: list.branches, initial: base },
@@ -141,25 +176,12 @@ export function useWorktrees(mounts: string[]) {
           await load(mount)
         },
       } : undefined,
-      children: list.worktrees.map((worktree) => ({
-        id: `worktree:${worktree.path}`, label: worktree.branch ?? baseName(worktree.path), type: "element",
-        badge: worktreeStatus(worktree),
-        isActive: worktree.path === current?.path,
-        onSelect: () => setActive(mount, worktree.is_main ? null : worktree.path),
-        onDelete: worktree.is_main || removal ? undefined : () => void startRemoval(mount, worktree),
-        detail: removal?.worktree.path === worktree.path ? removalDetail(removal) : undefined,
-      })),
+      children,
     }
   }
 
   /** Worktree paths the mounts show instead of their clone, for the file tree request. */
   const activeWorktrees = mountsKey.split("\n").map((mount) => active[mount]).filter(Boolean)
 
-  /** Branch of the worktree a mount shows, unless it shows the clone. */
-  const shownBranch = (mount: string): string | undefined => {
-    const worktree = shown(mount)
-    return worktree && !worktree.is_main ? worktree.branch ?? baseName(worktree.path) : undefined
-  }
-
-  return { activeWorktrees, folder, shownBranch, reload }
+  return { activeWorktrees, folder, reload }
 }

@@ -402,6 +402,13 @@ A file mount holding a `.git` folder is a clone, the integration checkout its
 worktrees branch off. Its "worktrees" folder in the sidebar lists every worktree
 git knows, wherever it was created (`lib/git_worktree.py`, `/api/fileroots/worktrees`).
 Each row shows uncommitted files and commits ahead of and behind the base branch.
+The default branch is the first clickable entry, inferred from `origin/HEAD`
+or the main checkout's branch when no remote default is recorded. Clicking it
+reuses its checkout or creates a dedicated worktree through
+`POST /api/fileroots/worktrees/default`, without pulling or switching the main
+checkout. This is distinct from the preferred `dev` base for new task branches.
+Mount names stay unchanged when switching. A muted, truncated branch hint on
+the "worktrees" folder identifies the selected checkout without crowding the mount row.
 
 - **Switch**: clicking a worktree makes the mount show it. The choice is kept
   per mount in `localStorage` (`active_worktrees`), `GET /api/fileroots/tree?worktree=`

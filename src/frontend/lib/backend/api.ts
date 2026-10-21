@@ -280,6 +280,7 @@ export interface WorktreeList {
   /** The mount holds a `.git` folder, only clones have worktrees. */
   is_clone: boolean
   default_base: string | null
+  default_branch?: string | null
   branches: string[]
   worktrees: Worktree[]
 }
@@ -291,6 +292,11 @@ export async function fetchWorktrees(root: string): Promise<WorktreeList> {
 /** Pull `base`, then branch worktree `name` off it, returns the new worktree's path. */
 export async function createWorktree(root: string, name: string, base: string): Promise<RootFile> {
   return post("/fileroots/worktrees", { root, name, base })
+}
+
+/** Open the inferred default branch without pulling or switching the main checkout. */
+export async function openDefaultWorktree(root: string): Promise<RootFile> {
+  return post("/fileroots/worktrees/default", { root })
 }
 
 /** Throws ApiError 409 when the worktree holds uncommitted changes and `force` is off. */

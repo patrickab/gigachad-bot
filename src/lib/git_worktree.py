@@ -106,11 +106,8 @@ def branches(repository: Path) -> list[str]:
     return sorted(short, key=str.casefold)
 
 
-def default_base_branch(repository: Path) -> str | None:
-    """`dev` when it exists locally or on origin, else origin's default branch, else the clone's branch."""
-    known = branches(repository)
-    if PREFERRED_BASE_BRANCH in known:
-        return PREFERRED_BASE_BRANCH
+def default_branch(repository: Path) -> str | None:
+    """Origin's symbolic default branch, falling back to the main checkout's branch."""
     try:
         return _git(repository, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").strip().removeprefix("origin/")
     except WorktreeError:
@@ -118,7 +115,15 @@ def default_base_branch(repository: Path) -> str | None:
     try:
         return _git(repository, "symbolic-ref", "--short", "HEAD").strip()
     except WorktreeError:
-        return known[0] if known else None
+        return None
+
+
+def default_base_branch(repository: Path) -> str | None:
+    """`dev` when it exists locally or on origin, else origin's default branch, else the clone's branch."""
+    known = branches(repository)
+    if PREFERRED_BASE_BRANCH in known:
+        return PREFERRED_BASE_BRANCH
+    return default_branch(repository) or (known[0] if known else None)
 
 
 def status(worktree: Path, base: str | None) -> WorktreeStatus:
@@ -133,6 +138,35 @@ def status(worktree: Path, base: str | None) -> WorktreeStatus:
 def worktree_name(name: str) -> str:
     """The skill's slug: lowercase, non-alphanumerics to single hyphens, trimmed."""
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+
+
+def default_worktree(repository: Path) -> Worktree:
+    """Reuse or check out the default branch without fetching or changing another checkout."""
+    branch = default_branch(repository)
+    if not branch:
+        raise WorktreeError("Cannot infer the repository's default branch")
+    checkout = next((worktree for worktree in list_worktrees(repository) if worktree.branch == branch), None)
+    if checkout:
+        return checkout
+    name = worktree_name(branch)
+    if not name:
+        raise WorktreeError(f"Invalid worktree name: {branch!r}")
+    _git(repository, "check-ref-format", "--branch", branch)
+    path = WORKTREES_HOME / repository.name / name
+    if path.exists() or path.is_symlink():
+        raise WorktreeError(f"Directory already exists: {path}")
+    local = _ref_exists(repository, f"refs/heads/{branch}")
+    if not local and not _ref_exists(repository, f"refs/remotes/origin/{branch}"):
+        raise WorktreeError(f"Unknown default branch: {branch}")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise WorktreeError(str(exc)) from exc
+    if local:
+        _git(repository, "worktree", "add", str(path), branch)
+    else:
+        _git(repository, "worktree", "add", "--track", "-b", branch, str(path), f"refs/remotes/origin/{branch}")
+    return Worktree(path=str(path.resolve()), branch=branch, is_main=False)
 
 
 def _update_base(repository: Path, base: str) -> None:

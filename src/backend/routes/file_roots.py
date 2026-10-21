@@ -289,8 +289,13 @@ class WorktreeEntry(BaseModel):
 class WorktreeListResponse(BaseModel):
     is_clone: bool
     default_base: str | None = None
+    default_branch: str | None = None
     branches: list[str] = []
     worktrees: list[WorktreeEntry] = []
+
+
+class DefaultWorktreeBody(BaseModel):
+    root: str
 
 
 class CreateWorktreeBody(BaseModel):
@@ -324,7 +329,10 @@ def list_worktrees(root: str = Query(...), roots: FileRoots = Depends(get_file_r
             WorktreeEntry(path=worktree.path, branch=worktree.branch, is_main=worktree.is_main, **vars(git_worktree.status(Path(worktree.path), base)))
             for worktree in git_worktree.list_worktrees(repository)
         ]
-        return WorktreeListResponse(is_clone=True, default_base=base, branches=git_worktree.branches(repository), worktrees=entries)
+        return WorktreeListResponse(
+            is_clone=True, default_base=base, default_branch=git_worktree.default_branch(repository),
+            branches=git_worktree.branches(repository), worktrees=entries,
+        )
     except git_worktree.WorktreeError as exc:
         raise _git_refusal(exc) from exc
 
@@ -335,6 +343,17 @@ def create_worktree(body: CreateWorktreeBody, roots: FileRoots = Depends(get_fil
     repository = _clone_root(body.root, roots)
     try:
         worktree = git_worktree.create_worktree(repository, body.name, body.base)
+    except git_worktree.WorktreeError as exc:
+        raise _git_refusal(exc) from exc
+    return RootFile(path=worktree.path, name=worktree.branch or Path(worktree.path).name)
+
+
+@router.post("/worktrees/default", response_model=RootFile)
+def default_worktree(body: DefaultWorktreeBody, roots: FileRoots = Depends(get_file_roots)) -> RootFile:
+    """Open the inferred default branch, creating its checkout only when needed."""
+    repository = _clone_root(body.root, roots)
+    try:
+        worktree = git_worktree.default_worktree(repository)
     except git_worktree.WorktreeError as exc:
         raise _git_refusal(exc) from exc
     return RootFile(path=worktree.path, name=worktree.branch or Path(worktree.path).name)
