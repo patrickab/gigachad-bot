@@ -18,6 +18,7 @@ import { DocumentEditor } from "@/features/editor/DocumentEditor"
 import { DiffViewer } from "@/features/editor/diff/DiffViewer"
 import { CanvasWorkspace } from "@/features/editor/canvas/CanvasWorkspace"
 import { ArchitectureWindow } from "@/features/editor/architecture/ArchitectureWindow"
+import { FactorySurface } from "@/features/factory/FactorySurface"
 import { OmpModelSelector, OmpReasoningSelector } from "@/features/omp/OmpComposer"
 import { OmpSurface } from "@/features/omp/OmpSurface"
 import { OmpSystemPrompt } from "@/features/omp/OmpSystemPrompt"
@@ -57,6 +58,7 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
   const documentItem = tab.workspaceItem?.kind === "document" ? tab.workspaceItem : null
   const diffItem = tab.workspaceItem?.kind === "diff" ? tab.workspaceItem : null
   const ompItem = tab.workspaceItem?.kind === "omp" ? tab.workspaceItem : null
+  const factoryItem = tab.workspaceItem?.kind === "factory" ? tab.workspaceItem : null
   const ompView = ompItem?.omp ?? null
   const chat = useChat()
   const { messages, isStreaming, cancel, reset, models, saveModelProviders, saveModelTabOrder, saveModelDefaults, prompts, setPrompts, setMessages, totalUsage, setTotalUsage } = chat
@@ -239,7 +241,7 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
         activeDocumentPath={appMode === "document" ? documentItem?.path : null}
         onCanvasSelect={(path, scope) => onOpenItem({ kind: "canvas", path, projectSlug: scope || null })}
         onArchitectureSelect={(slug) => onOpenItem({ kind: "architecture", path: `graph/${slug}/`, projectSlug: slug })}
-        onOmpOpen={onOpenItem}
+        onItemOpen={onOpenItem}
         renderSettings={() => (
           <SettingsMenu prompts={prompts} config={config} onConfigChange={updateConfig} onEditPrompts={() => setPromptEditorOpen(true)} models={models} researchEnabled={researchEnabled} />
         )}
@@ -278,6 +280,12 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
               {ompView && <OmpSystemPrompt view={ompView} />}
               <ThemeToggle />
             </TopBarPill>}
+          />
+        ) : appMode === "factory" ? (
+          <TopBar
+            center={<TabSwitcher />}
+            left={<TopBarTransparent>{sidebarToggle}</TopBarTransparent>}
+            right={<TopBarPill><ThemeToggle /></TopBarPill>}
           />
         ) : appMode === "document" ? (
           <TopBar
@@ -321,6 +329,8 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
         <div data-workspace-surface className={`flex-1 min-h-0 relative ${appMode === "canvas" ? "overflow-hidden" : ""}`}>
           {appMode === "omp" && ompItem && ompView ? (
             <OmpSurface view={ompView} onViewChange={(omp) => setWorkspaceItem({ ...ompItem, omp })} />
+          ) : appMode === "factory" && factoryItem ? (
+            <FactorySurface item={factoryItem} />
           ) : appMode === "document" && diffItem ? (
             <DiffViewer key={diffItem.path} root={diffItem.path} />
           ) : appMode === "document" && documentItem ? (

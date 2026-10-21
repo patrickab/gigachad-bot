@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion } from "framer-motion"
-import { Brain, FilePlus, GitCompare } from "lucide-react"
+import { Brain, Factory, FilePlus, GitCompare } from "lucide-react"
 import { ArchitectureIcon } from "@/components/ui/ArchitectureIcon"
 import { CreateDocumentPanel } from "./CreateDocumentPanel"
 import { ProviderUsage } from "./ProviderUsage"
@@ -20,6 +20,9 @@ import { FileMountPicker } from "./FileMountPicker"
 import { useWorktrees } from "./useWorktrees"
 import { addRootFilesToProject, addFileRoot, createArchitectureSource, fileRootTree, removeFileRoot, listNotes, listProjectDocuments, moveDocument, removeDocument, writeDocument } from "@/lib/backend/api"
 import { useTab, useTabActive, type AppSurface, type WorkspaceItem } from "@/contexts/TabContext"
+import { useHostAccess } from "@/contexts/SettingsContext"
+import { factoryItem } from "@/features/factory/items"
+import { useFactoryRepos } from "@/features/factory/useFactoryRepos"
 import { projectMount } from "@/features/omp/sessions"
 import { useOmpSidebar } from "@/features/omp/useOmpSidebar"
 import { isArchitecturePath } from "@/lib/domain/architecturePaths"
@@ -38,18 +41,19 @@ interface SidebarProps {
   onCanvasSelect?: (path: string, scope: string) => void
   onCanvasDeleted?: (path: string) => void
   onArchitectureSelect?: (slug: string) => void
-  /** Show an omp-web session, new session or settings, in the current tab unless `inNewTab`. */
-  onOmpOpen?: (item: WorkspaceItem, inNewTab?: boolean) => void
+  /** Show an omp-web session, new session or settings, or the factory board, in the current tab unless `inNewTab`. */
+  onItemOpen?: (item: WorkspaceItem, inNewTab?: boolean) => void
   renderSettings?: () => React.ReactNode
   appMode: AppSurface
 }
 
 export function Sidebar({
   onFileSelect, onDiffSelect, onRootsChanged, onDocumentsChanged, onDocumentSelect, onProjectSelect, onNewChat,
-  activeCanvasPath, onCanvasSelect, onCanvasDeleted, onArchitectureSelect, onOmpOpen,
+  activeCanvasPath, onCanvasSelect, onCanvasDeleted, onArchitectureSelect, onItemOpen,
   activeDocumentPath, renderSettings, appMode,
 }: SidebarProps) {
   const { collapsed } = useSidebar()
+  const hostAccess = useHostAccess()
   const isActive = useTabActive()
   const { tab } = useTab()
   const { branchMeta, visibleRootFiles, historiesLoading, moveHistory, onFileClick, activeFile, activeQaIndex, cascadeDelete } = useBranches()
@@ -93,7 +97,22 @@ export function Sidebar({
   }, [projects, activeCanvasPath, appMode, isActive])
 
   const mounts = rootTreeData.map((node) => node.mount ?? node.path)
-  const omp = useOmpSidebar({ onOpen: onOmpOpen })
+  const openFactoryRepo = useFactoryRepos(hostAccess)
+  const omp = useOmpSidebar({
+    onOpen: onItemOpen,
+    workspaceActions: (directory, label, reportError) => !hostAccess ? [] : [{
+      label: `Open factory for ${label}`,
+      icon: Factory,
+      onClick: async () => {
+        reportError("")
+        try {
+          onItemOpen?.(factoryItem((await openFactoryRepo(directory)).name))
+        } catch (cause) {
+          reportError(cause instanceof Error ? cause.message : "Could not open the factory")
+        }
+      },
+    }],
+  })
   const worktrees = useWorktrees(mounts)
   const { reload: reloadWorktrees } = worktrees
   const activeWorktreesKey = worktrees.activeWorktrees.join("\n")

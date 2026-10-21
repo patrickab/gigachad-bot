@@ -55,6 +55,8 @@ interface SettingsValue {
   neovim: NeovimSetting
   /** omp-web's address for the omp tabs' frame, null until the backend config loaded. */
   ompWebUrl: string | null
+  /** This login may use host-only features such as the factory. */
+  hostAccess: boolean
 }
 
 const SettingsContext = createContext<SettingsValue | null>(null)
@@ -70,6 +72,11 @@ export function useNeovimSetting(): NeovimSetting {
   return useContext(SettingsContext)?.neovim ?? NEOVIM_UNAVAILABLE
 }
 
+/** Whether this login has host access, false outside a `SettingsProvider`. */
+export function useHostAccess(): boolean {
+  return useContext(SettingsContext)?.hostAccess ?? false
+}
+
 function readNeovimPreference(): boolean {
   try { return localStorage.getItem(STORAGE_KEY_NEOVIM) === "true" } catch { return false }
 }
@@ -81,6 +88,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [neovimAvailable, setNeovimAvailable] = useState(false)
   const [neovimPreferred, setNeovimPreferred] = useState(readNeovimPreference)
   const [ompWebUrl, setOmpWebUrl] = useState<string | null>(null)
+  const [hostAccess, setHostAccess] = useState(false)
 
   useEffect(() => {
     fetchBackendConfig()
@@ -94,6 +102,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         setOCRModel((prev) => prev || cfg.vision_model)
         setNeovimAvailable(cfg.neovim_available)
         setOmpWebUrl(cfg.omp_web_url)
+        setHostAccess(cfg.host_access)
       })
       .catch(() => {
         // backend unreachable, keep hardcoded fallbacks
@@ -110,7 +119,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <SettingsContext.Provider value={{ tabDefaults, ocrModel, neovim, ompWebUrl }}>
+    <SettingsContext.Provider value={{ tabDefaults, ocrModel, neovim, ompWebUrl, hostAccess }}>
       {children}
     </SettingsContext.Provider>
   )

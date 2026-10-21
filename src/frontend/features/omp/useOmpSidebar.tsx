@@ -25,7 +25,11 @@ const SESSION_LIMIT = 5
  * - Sessions archive from their row, the OMP section's "archived" folder restores them
  * - Everything is empty while omp-web never answered
  */
-export function useOmpSidebar({ onOpen }: { onOpen?: (item: WorkspaceItem, inNewTab?: boolean) => void }) {
+export function useOmpSidebar({ onOpen, workspaceActions }: {
+  onOpen?: (item: WorkspaceItem, inNewTab?: boolean) => void
+  /** Extra icon actions on a workspace row (a project's code category or an omp workspace), keyed by its directory, `reportError` fills the section's error line. */
+  workspaceActions?: (directory: string, label: string, reportError: (message: string) => void) => NonNullable<FileTreeItem["actions"]>
+}) {
   const { tab, isActive } = useTab()
   const { overview, refreshOverview } = useOmp()
   const [archived, setArchived] = useState<OmpArchivedSession[]>([])
@@ -97,6 +101,7 @@ export function useOmpSidebar({ onOpen }: { onOpen?: (item: WorkspaceItem, inNew
       label: "code",
       type: "folder",
       create: { label: `New session in ${project.name}`, onClick: () => onOpen?.(ompItem({ kind: "new", cwd: mount }, mount, project.slug), true) },
+      actions: workspaceActions?.(mount, project.name, setError),
       childLimit: SESSION_LIMIT,
       children: sessionForest(sessionsInside(sessions, mount)).map((node) => sessionItem(node, mount, project.slug)),
     }
@@ -110,6 +115,7 @@ export function useOmpSidebar({ onOpen }: { onOpen?: (item: WorkspaceItem, inNew
       label: workspace.label,
       type: "root",
       create: { label: `New session in ${workspace.label}`, onClick: () => onOpen?.(ompItem({ kind: "new", cwd: workspace.path }, workspace.path, null), true) },
+      actions: workspaceActions?.(workspace.path, workspace.label, setError),
       childLimit: SESSION_LIMIT,
       children: sessionForest(workspace.sessions).map((node) => sessionItem(node, workspace.path, null)),
     }))

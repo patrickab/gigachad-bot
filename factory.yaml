@@ -1,0 +1,28 @@
+profile: gigachad
+# Tests and previews run on the main checkout's virtualenv (`{repo_path}`, the engine fills it in), the sandbox profile mounts it at the same path.
+# Worktrees get frontend packages only: `uv sync` per worktree would carry a second venv (and the OCR group) around.
+hooks:
+  after_create:
+    - [npm, ci, --prefix, src/frontend, --ignore-scripts, --prefer-offline, --no-audit, --no-fund]
+  after_code: []
+  before_remove: []
+gates:
+  - ["{repo_path}/.venv/bin/python3", -m, pytest, -q]
+preview:
+  processes:
+    - name: backend
+      argv: ["{repo_path}/.venv/bin/python3", -m, uvicorn, src.backend.server:app, --host, 127.0.0.1, --port, "{port.backend}"]
+      ready_url: "http://127.0.0.1:{port.backend}/healthz"
+    - name: frontend
+      argv: [npm, --prefix, src/frontend, exec, --, next, dev, --webpack, -p, "{port.frontend}", src/frontend]
+      ready_url: "http://127.0.0.1:{port.frontend}/"
+  env:
+    GIGACHAD_ENV: development
+    GIGACHAD_DEV_USER: factory-preview
+    GIGACHAD_DATABASE_URL: "{database_url}"
+    GIGACHAD_BASE_DIR: "{data_dir}"
+    NEXT_PUBLIC_API_BASE: "http://127.0.0.1:{port.backend}/api"
+  database: true
+  url: "http://127.0.0.1:{port.frontend}"
+  api_url: "http://127.0.0.1:{port.backend}/api"
+  ready_timeout_s: 180

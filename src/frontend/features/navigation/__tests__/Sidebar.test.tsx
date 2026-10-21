@@ -44,6 +44,13 @@ const api = vi.hoisted(() => ({
   fetchOmpArchive: vi.fn<typeof import("@/lib/backend/api").fetchOmpArchive>(async () => []),
   archiveOmpSession: vi.fn<typeof import("@/lib/backend/api").archiveOmpSession>(async () => {}),
   restoreOmpSession: vi.fn<typeof import("@/lib/backend/api").restoreOmpSession>(async () => "restored"),
+  fetchFactoryRepos: vi.fn<typeof import("@/lib/backend/api").fetchFactoryRepos>(async () => []),
+  registerFactoryRepo: vi.fn<typeof import("@/lib/backend/api").registerFactoryRepo>(),
+}))
+const login = vi.hoisted(() => ({ hostAccess: false }))
+vi.mock("@/contexts/SettingsContext", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/contexts/SettingsContext")>(),
+  useHostAccess: () => login.hostAccess,
 }))
 vi.mock("@/lib/backend/api", async (importOriginal) => ({
   ...api,
@@ -224,19 +231,19 @@ describe("Project navigation", () => {
       ],
     }
     try {
-      const onOmpOpen = vi.fn()
-      const view = render(<Sidebar appMode="chat" onOmpOpen={onOmpOpen} />)
+      const onItemOpen = vi.fn()
+      const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
       fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
       const code = within(await within(view.getByLabelText("Proj contents")).findByRole("group", { name: "code contents" }))
       expect(code.getByRole("button", { name: "worktree" })).toBeVisible()
       expect(code.queryByRole("button", { name: "elsewhere" })).not.toBeInTheDocument()
 
       fireEvent.click(code.getByRole("button", { name: "main" }))
-      expect(onOmpOpen).toHaveBeenLastCalledWith({ kind: "omp", path: "/git/proj", projectSlug: "proj", omp: { kind: "session", sessionId: "main" } })
+      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "omp", path: "/git/proj", projectSlug: "proj", omp: { kind: "session", sessionId: "main" } })
       expect(code.getByRole("button", { name: "fork running" })).toBeVisible()
 
       fireEvent.click(view.getByRole("button", { name: "New session in Proj" }))
-      expect(onOmpOpen).toHaveBeenLastCalledWith({ kind: "omp", path: "/git/proj", projectSlug: "proj", omp: { kind: "new", cwd: "/git/proj" } }, true)
+      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "omp", path: "/git/proj", projectSlug: "proj", omp: { kind: "new", cwd: "/git/proj" } }, true)
     } finally {
       omp.overview = null
       api.fileRootTree.mockImplementation(listTree!)
@@ -252,8 +259,8 @@ describe("Project navigation", () => {
       sessions: [ompSession("linked", "/git/proj"), ompSession("tooling", "/git/tool/src")],
     }
     try {
-      const onOmpOpen = vi.fn()
-      const view = render(<Sidebar appMode="chat" onOmpOpen={onOmpOpen} />)
+      const onItemOpen = vi.fn()
+      const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
       const section = within(view.getByLabelText("OMP"))
       await waitFor(() => expect(section.queryByRole("button", { name: "proj" })).not.toBeInTheDocument())
       fireEvent.click(section.getByRole("button", { name: "tool" }))
@@ -261,18 +268,60 @@ describe("Project navigation", () => {
       expect(section.queryByRole("button", { name: "linked" })).not.toBeInTheDocument()
 
       fireEvent.click(section.getByRole("button", { name: "Open omp settings" }))
-      expect(onOmpOpen).toHaveBeenLastCalledWith({ kind: "omp", path: "", projectSlug: null, omp: { kind: "settings" } })
+      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "omp", path: "", projectSlug: null, omp: { kind: "settings" } })
       fireEvent.click(section.getByRole("button", { name: "New session in tool" }))
-      expect(onOmpOpen).toHaveBeenLastCalledWith({ kind: "omp", path: "/git/tool", projectSlug: null, omp: { kind: "new", cwd: "/git/tool" } }, true)
+      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "omp", path: "/git/tool", projectSlug: null, omp: { kind: "new", cwd: "/git/tool" } }, true)
 
       omp.overview = null
       view.rerender(<TabContext.Provider value={{ tab: nextTab(), isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), setAppMode: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
-        <Sidebar appMode="chat" onOmpOpen={onOmpOpen} />
+        <Sidebar appMode="chat" onItemOpen={onItemOpen} />
       </TabContext.Provider>)
       expect(view.queryByLabelText("OMP")).not.toBeInTheDocument()
     } finally {
       omp.overview = null
       api.fileRootTree.mockImplementation(listTree!)
+    }
+  })
+
+  it("opens the factory of any workspace, registering its checkout first unless the engine knows it, for host access only", async () => {
+    omp.overview = {
+      running_session_ids: [],
+      workspaces: [{ path: "/git/known", alias: null, added_at: null }, { path: "/git/fresh", alias: null, added_at: null }, { path: "/git/broken", alias: null, added_at: null }],
+      sessions: [],
+    }
+    login.hostAccess = true
+    api.fetchFactoryRepos.mockResolvedValue([{ name: "known-repo", path: "/git/known" }])
+    api.registerFactoryRepo.mockResolvedValueOnce({ name: "fresh", path: "/git/fresh" }).mockRejectedValueOnce(new Error("Not a git checkout: /git/broken"))
+    try {
+      const onItemOpen = vi.fn()
+      const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
+      await waitFor(() => expect(api.fetchFactoryRepos).toHaveBeenCalled())
+      await act(async () => {})
+
+      fireEvent.click(view.getByRole("button", { name: "Open factory for known" }))
+      await waitFor(() => expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "factory", path: "known-repo", projectSlug: null }))
+      expect(api.registerFactoryRepo).not.toHaveBeenCalled()
+
+      fireEvent.click(view.getByRole("button", { name: "Open factory for fresh" }))
+      await waitFor(() => expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "factory", path: "fresh", projectSlug: null }))
+      expect(api.registerFactoryRepo).toHaveBeenCalledWith("/git/fresh")
+
+      fireEvent.click(view.getByRole("button", { name: "Open factory for fresh" }))
+      await waitFor(() => expect(onItemOpen).toHaveBeenCalledTimes(3))
+      expect(api.registerFactoryRepo).toHaveBeenCalledTimes(1)
+
+      fireEvent.click(view.getByRole("button", { name: "Open factory for broken" }))
+      expect(await view.findByRole("alert")).toHaveTextContent("Not a git checkout: /git/broken")
+      expect(onItemOpen).toHaveBeenCalledTimes(3)
+
+      login.hostAccess = false
+      view.rerender(<TabContext.Provider value={{ tab: nextTab(), isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), setAppMode: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
+        <Sidebar appMode="chat" onItemOpen={onItemOpen} />
+      </TabContext.Provider>)
+      expect(view.queryByRole("button", { name: /Open factory for/ })).not.toBeInTheDocument()
+    } finally {
+      omp.overview = null
+      login.hostAccess = false
     }
   })
 

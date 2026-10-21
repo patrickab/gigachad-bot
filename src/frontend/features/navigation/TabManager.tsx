@@ -100,6 +100,9 @@ function tabLocation(tab: Tab) {
   if (tab.appMode === "omp") {
     return { category: tab.projectSlug ? "code" : "omp", file: tab.name ?? tab.title ?? "omp" }
   }
+  if (tab.appMode === "factory") {
+    return { category: "factory", file: tab.name ?? (tab.workspaceItem?.path.includes("/") ? "task" : tab.workspaceItem?.path ?? "board") }
+  }
   if (tab.appMode === "canvas") {
     return tab.workspaceItem?.kind === "architecture"
       ? { category: "architecture", file: tab.name ?? "System overview" }
@@ -401,6 +404,7 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
     labelOf: (tab) => {
       if (tab.appMode !== "chat" && tab.workspaceItem) {
         if (tab.appMode === "omp") return tab.name ?? tab.title ?? "omp"
+        if (tab.appMode === "factory") return tab.name ?? "Factory"
         return tab.name ?? (tab.workspaceItem.kind === "architecture" ? "Architecture" : baseName(tab.workspaceItem.path))
       }
       const label = modeLabels[tab.id]

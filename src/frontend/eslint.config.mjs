@@ -46,6 +46,8 @@ export default defineConfig([
           { from: { element: { type: "app" } }, allow: { to: { element: { type: "feature", fileInternalPath: publicEntry } } } },
           { from: { element: { type: "feature", captured: { feature: "omp" } } }, allow: { to: { element: { type: "package" } } } },
           crossFeature("chat", "editor"),
+          crossFeature("factory", "editor"),
+          crossFeature("navigation", "factory"),
           crossFeature("navigation", "memory"),
           crossFeature("navigation", "omp"),
           crossFeature("omp", "chat"),

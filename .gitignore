@@ -32,4 +32,5 @@ src/frontend/src-tauri/target
 src/frontend/build
 src/frontend/.env.local
 src/frontend/tsconfig.tsbuildinfo
-.omp/
+.omp/*
+!.omp/agents/

@@ -5,11 +5,11 @@ import type { TabConfig } from "@/contexts/SettingsContext"
 import type { OmpView } from "@/lib/domain/types"
 
 /** Top-level workspace mode of a tab. */
-export type AppSurface = "chat" | "canvas" | "document" | "omp"
+export type AppSurface = "chat" | "canvas" | "document" | "omp" | "factory"
 
 export interface WorkspaceItem {
-  kind: "canvas" | "architecture" | "document" | "diff" | "omp"
-  /** A `diff` item holds the mounted directory it compares against HEAD, an `omp` item its workspace directory ("" for settings). */
+  kind: "canvas" | "architecture" | "document" | "diff" | "omp" | "factory"
+  /** A `diff` item holds the mounted directory it compares against HEAD, an `omp` item its workspace directory ("" for settings), a `factory` item `<repo>` for its board or `<repo>/<task id>`. */
   path: string
   projectSlug: string | null
   rootFile?: boolean
@@ -20,6 +20,7 @@ export interface WorkspaceItem {
 /** Surface that shows `item`. */
 export function surfaceOf(item: WorkspaceItem): AppSurface {
   if (item.kind === "omp") return "omp"
+  if (item.kind === "factory") return "factory"
   return item.kind === "document" || item.kind === "diff" ? "document" : "canvas"
 }
 
