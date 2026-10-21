@@ -31,7 +31,7 @@ interface ChatMessageProps {
   isStreaming?: boolean
   attachments?: Attachment[]
   onAttachmentClick?: (attachment: Attachment) => void
-  /** Adds the collapse chevron to the question. */
+  /** Makes the question area clickable and adds a keyboard-accessible collapse chevron. */
   onCollapse?: () => void
 }
 

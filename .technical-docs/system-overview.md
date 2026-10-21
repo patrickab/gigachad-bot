@@ -62,8 +62,10 @@ continues to fill the available pane.
 
 Q&A pairs use Soft styling: borderless rounded tonal panels, with answers and tool
 outputs on a slightly raised surface. Collapsed previews share the same treatment.
-Q&A interactions are unchanged. Surface colors derive from the shared
-theme tokens in both dark and light modes.
+The entire expanded question area collapses its pair, including the avatar and
+padding. Links, attachments, action buttons and text selection retain their own
+behavior. The chevron remains keyboard-accessible. Surface colors derive from the
+shared theme tokens in both dark and light modes.
 Collapsed pairs use tighter padding and gaps, omit role headings, and always show a compact answer preview and
 each called tool's icon and name, without hovering. Long previews scroll within
 12.5% of viewport height. Expanded messages use equal 20px padding on every side

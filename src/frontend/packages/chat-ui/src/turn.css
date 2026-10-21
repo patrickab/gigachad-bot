@@ -126,6 +126,9 @@
   gap: 12px;
   padding: 20px;
 }
+.gc-turn-region:has(> .gc-turn-collapse) {
+  cursor: pointer;
+}
 /* The text's first line is centered on the 28px avatar. */
 .gc-turn-body {
   position: relative;

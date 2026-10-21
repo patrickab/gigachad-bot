@@ -74,7 +74,7 @@ export function TurnSurface({ children }: { children: ReactNode }) {
  * Avatar, content and hover actions for one side of a turn.
  *
  * - `tail="text"`: the content may end in a paragraph, whose last line then also holds the actions
- * - `onCollapse`: adds the collapse chevron, the question side only
+ * - `onCollapse`: makes the question area clickable, retaining the chevron for keyboard access
  */
 export function TurnRegion({ role, tail = "text", actions, onCollapse, collapseRef, children }: {
   role: TurnRole
@@ -88,7 +88,13 @@ export function TurnRegion({ role, tail = "text", actions, onCollapse, collapseR
   const actionSpace = actionCount * ACTION_SIZE_PX + Math.max(0, actionCount - 1) * ACTION_GAP_PX + ACTION_END_GUTTER_PX
   const Avatar = role === "question" ? User : Bot
   return (
-    <div className="gc-turn-region" data-role={role}>
+    <div className="gc-turn-region" data-role={role} onClick={onCollapse ? (event) => {
+      const target = event.target as Element
+      if (!event.currentTarget.contains(target)) return
+      if (target.closest('a, button, input, textarea, select, summary, [role="button"], [role="link"], [contenteditable="true"]')) return
+      if (event.currentTarget.ownerDocument.getSelection()?.isCollapsed === false) return
+      onCollapse()
+    } : undefined}>
       <span className="gc-turn-avatar"><Avatar size={14} aria-hidden="true" /></span>
       <div className="gc-turn-body" data-tail={tail} style={{ "--gc-turn-actions-space": `${actionSpace}px` } as CSSProperties}>
         <div className="gc-turn-content">{children}</div>
