@@ -408,6 +408,41 @@ Known limit: on a fresh omp-web load whose first omp tab is a new session, the
 frame ignores that tab's folder and opens omp-web's last-used one. Tabs opened
 after the frame loaded are unaffected.
 
+### Provision the agent factory
+
+The factory engine (Agents-in-a-box, `.technical-docs/system-overview.md`, "Agent
+factory") runs as `gigachad-bot-factory.service`, which execs `run-factory.sh
+--prod`: loopback `127.0.0.1:8090`, state in the `factory` database of the
+production PostgreSQL. It uses the Agents-in-a-box checkout from "Provision the
+code sandbox". `run.sh` is development only, it never starts the production engine.
+
+Task previews listen on the host's loopback ports 8100-8199, which a browser on
+another device cannot reach, so production turns them off in the engine's
+defaults. Board, Changes, the agent panel and merging work without them.
+
+Once per host:
+
+```bash
+cd "$PROD" && source ~/.secrets && export PGPASSWORD="$POSTGRES_PASSWORD_PROD"
+psql -h 127.0.0.2 -p 5433 -U "$USER" -d gigachad -c 'CREATE DATABASE factory'
+install -d -m 0700 ~/.config/agent-sandbox/factory
+cat > ~/.config/agent-sandbox/factory.yaml <<'EOF'
+listen: 127.0.0.1:8090
+database_url: ${FACTORY_DATABASE_URL}
+preview_ports: [8100, 8199]
+limits:
+  in_progress: 4
+EOF
+printf 'preview: false\n' > ~/.config/agent-sandbox/factory/defaults.yaml
+"$PROD/deploy/install-systemd-service.sh"
+systemctl --user start gigachad-bot-factory.service
+curl -sf http://127.0.0.1:8090/v1/repos
+```
+
+Update the engine with `git -C ~/git/Agents-in-a-box pull --ff-only` and
+`systemctl --user restart gigachad-bot-factory.service`, preferably while no
+task is in progress: a restart ends a running agent turn.
+
 ## 2. Publish the private HTTPS ingress
 
 On the backend host, inspect any existing Serve configuration before changing

@@ -1,0 +1,19 @@
+[Unit]
+Description=gigachad-bot agent factory engine (Agents-in-a-box)
+Wants=network-online.target gigachad-bot.service
+After=network-online.target gigachad-bot.service
+
+[Service]
+Type=exec
+WorkingDirectory=%h/git/gigachad-bot-prod
+Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/git/gigachad-bot-prod/run-factory.sh --prod
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=60s
+# No PrivateTmp: the rootless Docker daemon must see the sandbox staging files in /tmp
+NoNewPrivileges=true
+UMask=0077
+
+[Install]
+WantedBy=default.target
