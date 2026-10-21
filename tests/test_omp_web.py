@@ -11,6 +11,7 @@ import pytest
 from backend.identity import RequestIdentity, get_request_identity
 from backend.routes.omp import router
 from lib import omp_web
+from lib.upstream import UpstreamContractError
 
 # Trimmed from a live omp-web 0.5.2 (patrickab fork) response.
 SESSIONS = {
@@ -67,7 +68,7 @@ async def test_a_dropped_field_names_the_field(monkeypatch):
     broken = {**SESSIONS, "sessions": [{key: value for key, value in SESSIONS["sessions"][0].items() if key != "messageCount"}]}
     _serve(monkeypatch, {"GET /api/sessions": (200, broken), "GET /api/projects": (200, PROJECTS)})
 
-    with pytest.raises(omp_web.OmpWebContractError, match=r"/api/sessions: field `sessions\.0\.messageCount` field required"):
+    with pytest.raises(UpstreamContractError, match=r"/api/sessions: field `sessions\.0\.messageCount` field required"):
         await omp_web.overview()
 
 

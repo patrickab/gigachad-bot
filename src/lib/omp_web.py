@@ -11,33 +11,18 @@ import os
 from typing import Literal, TypeVar
 
 import httpx
-from pydantic import AliasGenerator, BaseModel, ConfigDict, ValidationError
+from pydantic import AliasGenerator, BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
+
+from lib.upstream import request_json
 
 DEFAULT_URL = "http://127.0.0.1:30177"
 TRUSTED_HEADER = "x-omp-web-auth"
-TIMEOUT_SECONDS = 10.0
 
 # Tests swap in an `httpx.MockTransport`, None is the real network.
 _transport: httpx.AsyncBaseTransport | None = None
 
 Model = TypeVar("Model", bound=BaseModel)
-
-
-class OmpWebUnavailable(Exception):
-    """omp-web does not answer."""
-
-
-class OmpWebContractError(Exception):
-    """omp-web answered with a shape this adapter does not know."""
-
-
-class OmpWebRequestFailed(Exception):
-    """omp-web refused the request, `status` and `message` are its own."""
-
-    def __init__(self, status: int, message: str) -> None:
-        super().__init__(message)
-        self.status = status
 
 
 class ContractModel(BaseModel):
@@ -138,34 +123,8 @@ def _headers() -> dict[str, str]:
     return {TRUSTED_HEADER: auth} if auth else {}
 
 
-def _contract_violation(path: str, error: ValidationError) -> OmpWebContractError:
-    first = error.errors()[0]
-    field = ".".join(str(part) for part in first["loc"]) or "<root>"
-    return OmpWebContractError(f"omp-web {path}: field `{field}` {first['msg'].lower()}")
-
-
-def _error_message(response: httpx.Response) -> str:
-    try:
-        body = response.json()
-    except ValueError:
-        return response.text[:200] or f"HTTP {response.status_code}"
-    return str(body.get("error") or body) if isinstance(body, dict) else str(body)
-
-
 async def _request(method: str, path: str, model: type[Model], json: object = None) -> Model:
-    try:
-        async with httpx.AsyncClient(
-            base_url=omp_web_url(), timeout=TIMEOUT_SECONDS, headers=_headers(), transport=_transport
-        ) as client:
-            response = await client.request(method, path, json=json)
-    except httpx.HTTPError as exc:
-        raise OmpWebUnavailable(f"omp-web at {omp_web_url()} does not answer: {exc}") from exc
-    if response.is_error:
-        raise OmpWebRequestFailed(response.status_code, _error_message(response))
-    try:
-        return model.model_validate_json(response.content)
-    except ValidationError as exc:
-        raise _contract_violation(path, exc) from exc
+    return await request_json(omp_web_url(), method, path, model, label="omp-web", headers=_headers(), json=json, transport=_transport)
 
 
 async def overview() -> OmpOverview:
