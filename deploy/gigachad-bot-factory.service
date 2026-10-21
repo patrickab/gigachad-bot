@@ -6,7 +6,7 @@ After=network-online.target gigachad-bot.service
 [Service]
 Type=exec
 WorkingDirectory=%h/git/gigachad-bot-prod
-Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:/home/linuxbrew/.linuxbrew/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin
 ExecStart=%h/git/gigachad-bot-prod/run-factory.sh --prod
 Restart=on-failure
 RestartSec=5s
