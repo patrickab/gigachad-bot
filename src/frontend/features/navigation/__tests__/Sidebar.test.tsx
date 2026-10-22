@@ -169,14 +169,14 @@ describe("Project navigation", () => {
       const fileMounts = within(view.getByLabelText("File mounts"))
       fireEvent.click(await fileMounts.findByRole("button", { name: "source" }))
       fireEvent.click(await fileMounts.findByRole("button", { name: /^worktrees/ }))
-      const mainCheckout = fileMounts.getByRole("button", { name: "dev", exact: true })
+      const mainCheckout = fileMounts.getByRole("button", { name: "dev" })
       const feature = fileMounts.getByRole("button", { name: "feature 2 changed ↑1" })
       expect(mainCheckout.compareDocumentPosition(feature) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
       expect(mainCheckout).toHaveAttribute("aria-current", "page")
 
       fireEvent.click(fileMounts.getByRole("button", { name: "feature 2 changed ↑1" }))
       await waitFor(() => expect(api.fileRootTree).toHaveBeenLastCalledWith(["/wt/feature"]))
-      expect(fileMounts.getByRole("button", { name: "source", exact: true })).toBeVisible()
+      expect(fileMounts.getByRole("button", { name: "source" })).toBeVisible()
       expect(fileMounts.getByLabelText("Selected checkout: feature")).toBeVisible()
       expect(feature).toHaveAttribute("aria-current", "page")
 

@@ -1,14 +1,15 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { ArrowLeft } from "lucide-react"
 import { SidePanelFrame } from "@/components/ui/SidePanel"
 import { DiffViewer } from "@/features/editor/diff/DiffViewer"
+import { discardReviewNotes } from "@/features/editor/diff/review"
 import { cn } from "@/lib/utils"
-import { fetchFactoryTask } from "@/lib/backend/api"
+import { fetchFactoryTask, sendFactoryMessage } from "@/lib/backend/api"
 import { AgentPanel } from "./AgentPanel"
 import { PreviewPane } from "./PreviewPane"
-import { FINISHED_STATES, statusTone, taskStatusLine } from "./states"
+import { FINISHED_STATES, allowedActions, statusTone, taskStatusLine } from "./states"
 import { StatusDot } from "./StatusDot"
 import { ICON_BUTTON_CLASS } from "./styles"
 import type { FactoryTaskDetail } from "@/lib/domain/types"
@@ -44,6 +45,12 @@ export function TaskView({ repo, taskId, onBack }: { repo: string; taskId: strin
   const current = task?.id === taskId ? task : null
   const pane: TaskPane = chosenPane ?? (current?.preview ? "preview" : "changes")
   const hasWorktree = current !== null && current.worktree !== null && !FINISHED_STATES.includes(current.state)
+  const finishedWorktree = current?.worktree && FINISHED_STATES.includes(current.state) ? current.worktree : null
+
+  // Pending review notes outlive the diff view, but not the worktree they point into.
+  useEffect(() => {
+    if (finishedWorktree) discardReviewNotes(finishedWorktree)
+  }, [finishedWorktree])
 
   return (
     <div className="flex h-full min-h-0">
@@ -86,7 +93,17 @@ export function TaskView({ repo, taskId, onBack }: { repo: string; taskId: strin
           ) : pane === "preview" ? (
             <PreviewPane task={current} onChanged={reload} />
           ) : hasWorktree ? (
-            <DiffViewer key={changesKey(current)} root={current.worktree!} />
+            <DiffViewer
+              key={changesKey(current)}
+              root={current.worktree!}
+              review={{
+                canSend: allowedActions(current.state).message,
+                send: async (text) => {
+                  await sendFactoryMessage(current.id, text)
+                  reload()
+                },
+              }}
+            />
           ) : (
             <div className="flex h-full items-center justify-center text-xs text-ink-faint">No worktree to show changes for</div>
           )}

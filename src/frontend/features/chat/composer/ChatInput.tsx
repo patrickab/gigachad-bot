@@ -90,6 +90,12 @@ async function toDataUrl(url: string): Promise<string> {
   })
 }
 
+const ICON_BUTTON = "rounded-full p-1.5 text-ink-faint transition-colors hover:bg-surface-elevated hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted disabled:opacity-30"
+/** Send and stop share one circle: raised surface when actionable, outlined when not. */
+const SEND_BUTTON = "ml-1.5 flex h-8 w-8 items-center justify-center rounded-full border transition-all duration-200 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-ink-muted"
+const SEND_READY = "border-divider bg-surface-elevated text-ink hover:border-divider-strong active:scale-[0.96]"
+const SEND_IDLE = "border-divider/50 text-ink-faint"
+
 export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({
   chatId,
   onSend,
@@ -99,7 +105,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   onCancel,
   slug = null,
   toolsMenu = true,
-  placeholder = "Send a Message",
+  placeholder = "Message",
   complete,
   hint,
   context,
@@ -298,7 +304,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
         </div>
       )}
 
-      <div className="relative z-20 rounded-2xl border border-divider/50 p-4 transition-all duration-300 bg-surface shadow-[var(--shadow-xl),var(--inner-highlight)] focus-within:shadow-[var(--shadow-xl),var(--inner-highlight-strong)]">
+      <div className="relative z-20 rounded-2xl border border-divider/50 px-4 pb-2.5 pt-3.5 transition-all duration-300 bg-surface shadow-[var(--shadow-xl),var(--inner-highlight)] focus-within:border-divider focus-within:shadow-[var(--shadow-xl),var(--inner-highlight-strong)]">
           <CompletionMenu
             items={completions.items}
             activeIndex={completions.activeIndex}
@@ -321,20 +327,16 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             data-gramm="false"
             data-gramm_editor="false"
             data-enable-grammarly="false"
-            className="w-full resize-none bg-transparent text-sm text-ink placeholder:text-ink-subtle outline-none"
+            className="w-full resize-none bg-transparent text-sm leading-6 text-ink placeholder:text-ink-faint outline-none"
           />
           {hintText && <p className="mt-1 text-xs text-ink-muted">{hintText}</p>}
-          <div className="mt-3 flex items-center justify-between">
-            <div className="flex min-w-0 items-center gap-1">
+          <div className="mt-2 flex items-center justify-between">
+            <div className="-ml-1.5 flex min-w-0 items-center gap-0.5">
               <div className="relative" ref={attachMenuRef}>
                 <button aria-label="Add attachment"
                   onClick={() => setShowAttachMenu(!showAttachMenu)}
                   disabled={disabled}
-                  className={cn(
-                    "rounded-full p-2 text-ink-muted hover:bg-surface-elevated hover:text-ink transition-colors disabled:opacity-30",
-                    showAttachMenu && "bg-surface-elevated text-ink"
-                  )}
-
+                  className={cn(ICON_BUTTON, showAttachMenu && "bg-surface-elevated text-ink")}
                 >
                   <Plus className="h-4 w-4" />
                 </button>
@@ -365,16 +367,12 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                 )}
               </div>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-0.5">
               {toolsMenu && <div className="relative" ref={toolsRef}>
                 <button aria-label="Toggle tools"
                   onClick={() => setShowTools(!showTools)}
                   disabled={disabled}
-                  className={cn(
-                    "rounded-full p-2 text-ink-muted hover:bg-surface-elevated hover:text-ink transition-colors disabled:opacity-30",
-                    showTools && "bg-surface-elevated text-ink"
-                  )}
-
+                  className={cn(ICON_BUTTON, showTools && "bg-surface-elevated text-ink")}
                 >
                   <LayoutGrid className="h-4 w-4" />
                 </button>
@@ -392,34 +390,27 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               <button aria-label={`${isListening ? "Stop listening" : "Start listening"}`}
                 onClick={toggleListening}
                 disabled={disabled}
-                className={cn(
-                  "rounded-full p-2 transition-colors disabled:opacity-30",
-                  isListening ? "bg-danger-soft text-danger hover:bg-danger-soft" : "text-ink-muted hover:bg-surface-elevated hover:text-ink"
-                )}
-
+                className={cn(ICON_BUTTON, isListening && "bg-danger-soft text-danger hover:bg-danger-soft hover:text-danger")}
               >
                 <Mic className={cn("h-4 w-4", isListening && "animate-pulse")} />
               </button>
               {isStreaming ? (
                 <button
                   onClick={onCancel}
-                  className="rounded-full p-2.5 transition-all duration-300 bg-ink text-paper hover:opacity-90 active:scale-[0.96]"
+                  className={cn(SEND_BUTTON, SEND_READY)}
                   aria-label="Stop generating"
                 >
-                  <Square className="h-4 w-4 fill-current" />
+                  <Square className="h-3 w-3 fill-current" />
                 </button>
               ) : extracting ? (
-                <button aria-label="Extracting attachment" disabled className="rounded-full p-2.5 bg-surface-elevated text-ink-subtle">
+                <button aria-label="Extracting attachment" disabled className={cn(SEND_BUTTON, SEND_IDLE)}>
                   <Loader2 className="h-4 w-4 animate-spin" />
                 </button>
               ) : (
                 <button aria-label="Send message"
                   onClick={handleSubmit}
                   disabled={disabled || !canSend}
-                  className={cn(
-                    "rounded-full p-2.5 transition-all duration-300",
-                    canSend && !disabled ? "bg-ink text-paper hover:opacity-90 active:scale-[0.96]" : "bg-surface-elevated text-ink-subtle"
-                  )}
+                  className={cn(SEND_BUTTON, canSend && !disabled ? SEND_READY : SEND_IDLE)}
                 >
                   <ArrowUp className="h-4 w-4" />
                 </button>

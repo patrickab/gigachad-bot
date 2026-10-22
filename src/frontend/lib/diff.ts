@@ -76,3 +76,25 @@ export function parsePatch(patch: string): PatchLine[] {
   }
   return lines
 }
+
+/** Patch indices per split row, full-width for headers and patch notes. */
+export type SplitRow = { full: number } | { old: number | null; new: number | null }
+
+/** Pair each run of removed lines with the added run after it, context lines appear on both sides. */
+export function toSplitRows(lines: PatchLine[]): SplitRow[] {
+  const rows: SplitRow[] = []
+  let index = 0
+  while (index < lines.length) {
+    const kind = lines[index]!.kind
+    if (kind === "hunk" || kind === "note") rows.push({ full: index++ })
+    else if (kind === "context") rows.push({ old: index, new: index++ })
+    else {
+      const removed: number[] = []
+      const added: number[] = []
+      while (lines[index]?.kind === "removed") removed.push(index++)
+      while (lines[index]?.kind === "added") added.push(index++)
+      for (let pair = 0; pair < Math.max(removed.length, added.length); pair++) rows.push({ old: removed[pair] ?? null, new: added[pair] ?? null })
+    }
+  }
+  return rows
+}
