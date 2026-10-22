@@ -1,43 +1,29 @@
 # Private deployment: Vercel + Tailscale Serve
 
-This runbook deploys the Next.js frontend to Vercel while FastAPI and its local
-runtime stay on one private host. Production runs from a code-isolated worktree
-while deliberately sharing the deploying user's default Documents store with
-development.
+## Deployment model
 
-```text
-Tailnet-enrolled browser ── HTTPS ──> <tailnet-hostname>
-                                      Tailscale Serve ──> 127.0.0.1:8002 FastAPI
-Vercel ── serves the Next.js bundle ──> browser
-```
+- Prefer serving the UI and `/api` from one private HTTPS origin for browser
+  compatibility. See [README](../README.md).
+- Use this split-origin runbook for existing Vercel + private Tailscale deployments.
 
-The Vercel project hosts the frontend; it is not an API proxy. The browser calls
-`NEXT_PUBLIC_API_BASE` directly, so each browser using the app must be enrolled
-in the Tailnet and allowed by its ACLs to reach the Serve HTTPS endpoint.
-
-Do not use Tailscale Funnel. Public ingress is outside this design and requires
-a separately designed authenticated gateway and security review. Keep FastAPI
-bound to loopback.
+| Boundary | Contract |
+| --- | --- |
+| Vercel | Serve the frontend bundle, not an API proxy |
+| Browser | Call the private API directly. Require Tailnet enrollment and ACL permission. |
+| Backend | Bind loopback. Never use Funnel or a public fallback. |
+| Production isolation | Separate code worktree and PostgreSQL container/volume |
+| Shared state | Development/production share the default Documents/PDF mirror, not PostgreSQL data. Code rollback does not roll back state. |
 
 ## Values to choose
 
-Replace these placeholders once and use the resulting values consistently:
+| Placeholder | Meaning |
+| --- | --- |
+| `<tailnet-hostname>` | Host's stable MagicDNS name, e.g. `gigachad-backend.example.ts.net` |
+| `<vercel-production-origin>` | Exact HTTPS production origin, without path or trailing slash |
+| `<vercel-preview-origin>` | Exact preview origin, authorized only while testing |
 
-| Placeholder | Meaning | Example |
-| --- | --- | --- |
-| `<tailnet-hostname>` | Stable MagicDNS name assigned to the host | `gigachad-backend.example.ts.net` |
-| `<vercel-production-origin>` | Exact production browser origin, with scheme and no path or trailing slash | `https://gigachad-bot.vercel.app` |
-| `<vercel-preview-origin>` | Exact preview origin to authorize temporarily | `https://gigachad-bot-git-main-team.vercel.app` |
-
-The Vercel API base is always:
-
-```text
-https://<tailnet-hostname>/api
-```
-
-## 1. Prepare the private host
-
-In the deploying user's shell, define:
+- Set the split-origin API base to `https://<tailnet-hostname>/api`.
+- Define paths in the deploying user's shell:
 
 ```bash
 REPO="$HOME/git/gigachad-bot"
@@ -45,10 +31,11 @@ PROD="$HOME/git/gigachad-bot-prod"
 ENV="${XDG_CONFIG_HOME:-"$HOME/.config"}/gigachad-bot/env"
 ```
 
+## 1. Prepare the private host
+
 ### Install and join Tailscale on Arch / Omarchy
 
-Omarchy is Arch-based. Do not use Tailscale's universal installer here: it can
-fail to identify Omarchy. Install the Arch package and enable its daemon:
+- Install the Arch package. The universal installer may not recognize Omarchy.
 
 ```bash
 sudo pacman -Syu tailscale
@@ -57,24 +44,19 @@ sudo tailscale up --hostname=gigachad-backend
 sudo tailscale status
 ```
 
-Complete any interactive Tailnet login and confirm the Tailnet ACL permits the
-intended users and devices to reach this host over HTTPS. Record the MagicDNS
-hostname as `<tailnet-hostname>`. Tailscale Serve requires Tailnet HTTPS
-certificates; complete any first-use Tailnet consent prompt. Do not enable
-Funnel.
+- Complete login and permit intended devices through Tailnet ACLs.
+- Record the MagicDNS hostname and enable HTTPS certificates when prompted.
 
 ### Create the production worktree
 
-Keep the regular checkout at `$REPO` for development.
-Create a separate production worktree that tracks `origin/master`:
+Keep development at `$REPO`. Create production from `origin/master`:
 
 ```bash
 git -C "$REPO" fetch origin master
 git -C "$REPO" worktree add --track -b production "$PROD" origin/master
 ```
 
-For each reviewed production update, fast-forward that worktree and install its
-production dependencies:
+For each reviewed update:
 
 ```bash
 git -C "$PROD" fetch origin master
@@ -82,42 +64,32 @@ git -C "$PROD" merge --ff-only origin/master
 cd "$PROD" && uv sync --python 3.12 --locked --no-dev
 ```
 
-`--locked` installs exactly `uv.lock` and fails if it no longer matches
-`pyproject.toml`, so production runs the same Python packages as a development
-checkout of that commit. The service never syncs on start, so restarts keep that
-environment. Do not run `run.sh` in production: it installs development dependencies,
-enables reload mode, and starts a development frontend. The production sync
-includes the local OCR runtime. Leave `MINERU_SERVER_URL` unset to parse PDFs
-locally; set it only when intentionally using a remote MinerU service.
-
-Development and production intentionally use the same default Documents tree.
-Do not configure `GIGACHAD_BASE_DIR` in the environment file, service unit, or
-another production artifact. The worktree isolates code, not application state.
+- Never use `run.sh` in production: it installs dev dependencies and starts reload
+  mode and a development frontend. Services do not resync Python on restart.
+- Production sync includes local OCR. Leave `MINERU_SERVER_URL` unset unless
+  intentionally using remote OCR.
+- Never set `GIGACHAD_BASE_DIR` in production artifacts. Keep the shared default
+  Documents mirror, the worktree isolates code rather than that filesystem data.
 
 ### Dependency supply chain
 
-- Lockfiles are the source of truth: `uv.lock`, `src/frontend/package-lock.json`
-  and `src/c4/package-lock.json`. Installs use `uv sync --locked` and `npm ci`.
-- Development launchers automatically repair a missing or out-of-sync lock:
-  Python uses `uv lock` without `--upgrade`, npm uses
-  `npm install --package-lock-only`, then retries `npm ci` once. Review and commit
-  regenerated locks with the manifest changes. Unchanged pins are retained where
-  the new constraints allow them. Never treat automatic resolution as a security review.
-- Production never regenerates locks. Integrity, network, resolution, and other
-  install errors stop startup rather than triggering lock regeneration.
-- New resolutions retain the 7-day release cooldown (`exclude-newer` in
-  `pyproject.toml`, `min-release-age` in each `.npmrc`). A cooldown reduces exposure
-  to fresh releases but cannot guarantee that a package is safe.
-- npm dependency install scripts are disabled (`ignore-scripts` in each `.npmrc`).
-  A new dependency that needs one must be reviewed and run explicitly.
-- Dependabot opens update PRs for all three lockfiles. Review each lockfile diff.
+- Install from `uv.lock`, `src/frontend/package-lock.json`, and
+  `src/c4/package-lock.json` with `uv sync --locked` and `npm ci`.
+- Development launchers repair missing/outdated locks with `uv lock` without
+  `--upgrade` or `npm install --package-lock-only`, then retry installation once.
+  Review and commit regenerated locks with manifests. Production never regenerates
+  locks, other installation failures stop startup.
+- Retain the seven-day release cooldown (`exclude-newer`, `.npmrc`'s
+  `min-release-age`) and disabled npm install scripts (`ignore-scripts`). Review
+  required scripts before explicitly running them. Neither cooldown nor automated
+  lock resolution replaces security review. Review Dependabot diffs for all three locks.
 
 ### Create the shared runtime configuration file
 
-There is one shared, nonsecret runtime configuration file for both development
-and production: `$ENV`. Backend credentials stay in `~/.secrets`.
-
-Create its parent directory and protect the file as the deploying user:
+| File | Contents |
+| --- | --- |
+| `$ENV` | Shared development/production nonsecret configuration |
+| `~/.secrets` | Backend credentials as `export NAME=value`: provider keys, `BRAVE_API_KEY`, `POSTGRES_PASSWORD_DEV`, `POSTGRES_PASSWORD_PROD` |
 
 ```bash
 install -d -m 0700 "$(dirname "$ENV")"
@@ -126,68 +98,41 @@ ${EDITOR:?Set EDITOR} "$ENV"
 chmod 0600 "$ENV"
 ```
 
-Its syntax is deliberately strict. Only whitespace-only lines and lines that
-begin with `#` are ignored. Every other line must be `NAME=value`, where `NAME`
-is a shell variable name; values are literal and untrimmed, and may contain
-`=`. Do not use `export`, shell quotes, command substitution, variable
-expansion, or any other shell syntax. The backend runner first sources
-`~/.secrets`, then its shared loader rejects malformed records and never
-sources or evaluates this configuration file. It loads only variables absent
-from the inherited environment, so credentials in `~/.secrets` take precedence.
+- Write literal, untrimmed `NAME=value` records. Allow `=` inside values,
+  whitespace-only lines, and comments starting with `#`.
+- Do not use `export`, quotes, expansion, or command substitution in `$ENV`.
+- Preserve loader semantics: no evaluation, malformed-record rejection,
+  inherited-variable precedence.
+- Source `~/.secrets` first. Its values win without entering the systemd manager.
 
-Use this as a starting file, substituting real values before use:
+Example, substituting your production origin:
 
 ```dotenv
-# Browser origins allowed to call the backend. Keep the production origin and
-# both local frontend origins because this one file is shared with development.
 GIGACHAD_CORS_ORIGINS=<vercel-production-origin>,http://127.0.0.1:2999,http://localhost:2999
-
-# Local frontend API base. Vercel receives its own public build-time value below.
 NEXT_PUBLIC_API_BASE=http://127.0.0.1:8001/api
-
-# Configure only host-local capabilities in use.
 OLLAMA_BASE_URL=http://127.0.0.1:11434
 ```
 
-| Variable | Required | Secret? | Purpose |
-| --- | --- | --- | --- |
-| `GIGACHAD_CORS_ORIGINS` | Yes | No | Comma-separated exact production and local browser origins. The backend refuses to start in production with `*` or an empty list: identity comes from the tailnet connection, not a cookie, so with `*` any web page open on a tailnet device could act as that user. |
-| `NEXT_PUBLIC_API_BASE` | For local frontend development | No | Local browser API base; it is intentionally public configuration. |
-| `OLLAMA_BASE_URL` | When using local models | No | Host-local Ollama endpoint. |
-| `MINERU_SERVER_URL` | No | No | Remote MinerU endpoint. Leave unset for required local OCR. |
-
-URL and model settings are configuration, not secrets. Keep every backend
-credential—including `POSTGRES_PASSWORD_DEV`, `POSTGRES_PASSWORD_PROD`,
-`BRAVE_API_KEY`, and provider API keys—only in `~/.secrets` as
-`export NAME=value` records. The backend runner sources it directly, so
-provider values never enter the systemd manager. `NEXT_PUBLIC_API_BASE` is
-public browser configuration and is not a secret. Web search calls Brave from
-the backend, so `BRAVE_API_KEY` never reaches the browser.
+- `GIGACHAD_CORS_ORIGINS`: required exact origins. Production rejects `*` and empty
+  lists because Tailnet identity alone would let arbitrary pages act as the user.
+- `NEXT_PUBLIC_API_BASE`: public, build-time frontend configuration. The example
+  serves local development, configure Vercel's private HTTPS value separately.
+- `OLLAMA_BASE_URL`: needed only for Ollama. `MINERU_SERVER_URL`: optional remote OCR.
+- URLs and model names are configuration, not credentials. Brave requests run
+  server-side, its API key must never reach the browser.
 
 ### Provision the systemd services
 
-Install, reload, and enable both repository user units: the FastAPI backend
-and its optional OMP model-source supervisor (`gigachad-bot-omp.service`,
-running `omp auth-broker serve` and `omp auth-gateway serve` so OMP logins are
-callable as chat models). The installer validates the tracked production
-runners and virtual-environment Uvicorn executable before installing either
-unit, and deliberately does not start them:
+Install the backend and optional OMP model-source supervisor without starting them:
 
 ```bash
 "$PROD/deploy/install-systemd-service.sh"
-```
-
-To keep the user unit running after logout and start it at boot, enable
-lingering once:
-
-```bash
 loginctl enable-linger "$USER"
 ```
 
-After the shared environment file and production worktree are ready, start the
-backend explicitly and verify the loopback health endpoint. Its `Wants=`/
-`After=` ordering on `gigachad-bot-omp.service` starts the OMP supervisor
-first automatically; no separate start step is required:
+- Require installer validation of production runners and the venv's Uvicorn.
+- Enable lingering to retain services after logout and start them at boot.
+- Start only after configuration is ready:
 
 ```bash
 systemctl --user start gigachad-bot.service
@@ -195,55 +140,30 @@ systemctl --user status gigachad-bot.service gigachad-bot-omp.service
 curl --fail --show-error http://127.0.0.1:8002/healthz
 ```
 
-`gigachad-bot-omp.service` is best-effort: when the `omp` binary or its
-credential store (`~/.omp/agent/agent.db` by default, override with
-`PI_CONFIG_DIR`) is absent, its runner logs a notice and exits `0` rather than
-failing, and the backend simply hides the OMP model source. It reuses an
-already-listening `auth-broker`/`auth-gateway` instead of starting a second
-one, so it never conflicts with a manually started `omp auth-broker serve`.
+- `gigachad-bot.service` runs `run-backend.sh --prod`, loading credentials/config,
+  starting or reusing production PostgreSQL, and serving loopback Uvicorn without
+  reload. Keep `NoNewPrivileges`, `PrivateTmp`, `UMask=0077`, restart handling,
+  and stop timeout. Never bind FastAPI to a LAN, Tailnet, or wildcard address.
+- Units use `%h` and `GIGACHAD_ENV_FILE`, not `EnvironmentFile`, to avoid systemd
+  parsing credentials. The OMP unit also supplies a `PATH` including mise shims.
+- The backend orders startup after `gigachad-bot-omp.service`. Its runner starts
+  or reuses OMP's auth broker/gateway, hides the model source when OMP or its
+  credentials are absent, and exits successfully in that case. Credential root:
+  `~/.omp/agent/agent.db`, overridden by `PI_CONFIG_DIR`.
+- OMP runner: `deploy/run-production-omp.sh` → `run-omp.sh`. Override binds with
+  `GIGACHAD_OMP_BROKER_BIND` and `GIGACHAD_OMP_GATEWAY_BIND` if needed.
+- The backend starts the stateless LikeC4 service, points `C4_SERVICE_URL` at it,
+  and stops it on exit. Each start uses `npm ci` against its lockfile. If unavailable,
+  architecture routes return 503, other features remain available.
 
-The user unit uses systemd's `%h` home-directory specifier. Its only
-environment entry is the nonsecret configuration path:
+| Service | Development | Production |
+| --- | --- | --- |
+| FastAPI | `127.0.0.1:8001` | `127.0.0.1:8002` |
+| LikeC4 | `127.0.0.1:8011` | `127.0.0.1:8012` |
+| PostgreSQL | `gigachad-dev` container/volume | `gigachad-prod` container/volume |
+| OMP auth broker / gateway | `127.0.0.1:8765` / `127.0.0.1:4000` | Same defaults, reuse existing listeners |
 
-```text
-GIGACHAD_ENV_FILE=$ENV
-```
-
-It has no `EnvironmentFile`. Its `ExecStart` runs `run-backend.sh --prod`,
-which sources `~/.secrets`, loads the shared nonsecret configuration file,
-starts or reuses the production PostgreSQL container, then starts loopback
-Uvicorn without reload. Provider values are never parsed or loaded by the
-systemd manager, only by the backend child.
-
-It intentionally has neither `--reload` nor a non-loopback host. It retains
-restart handling, a stop timeout, `NoNewPrivileges=true`, `PrivateTmp=true`, and
-`UMask=0077` hardening. Do not bind Uvicorn to `0.0.0.0`, a LAN address, or the
-Tailscale address.
-
-The development backend runs on `127.0.0.1:8001`; the systemd backend runs on
-`127.0.0.1:8002`. They may run concurrently, and each uses its own isolated
-PostgreSQL container and data volume (`gigachad-dev` vs `gigachad-prod`), so
-their stored data never mixes.
-
-`run-backend.sh` also starts the LikeC4 service (`node src/c4/server.ts`) that
-parses and edits architecture workspaces, on `127.0.0.1:8011` (dev) or
-`127.0.0.1:8012` (systemd), and points the backend at it through
-`C4_SERVICE_URL`. It is stateless, loopback-only, and stopped with the backend.
-Every start runs `npm ci` for it, so the service always runs exactly
-`src/c4/package-lock.json`, served from the npm cache when possible.
-Without it, the architecture routes answer 503 and everything else keeps working.
-
-The OMP unit follows the same pattern: no `EnvironmentFile`, only
-`GIGACHAD_ENV_FILE` and an explicit `PATH` covering the mise shims directory
-(systemd user units do not inherit a login shell's PATH). Its `ExecStart` runs
-`deploy/run-production-omp.sh`, which loads `$ENV` the same way before it
-execs `run-omp.sh`. Override the loopback bind addresses with
-`GIGACHAD_OMP_BROKER_BIND`/`GIGACHAD_OMP_GATEWAY_BIND` in `$ENV` if the
-defaults (`127.0.0.1:8765`/`127.0.0.1:4000`) collide with something else on
-the host.
-
-If the loopback health check fails, inspect the service rather than exposing
-another listener:
+Inspect failures rather than exposing another listener:
 
 ```bash
 journalctl --user -u gigachad-bot.service -n 100 --no-pager
@@ -252,9 +172,8 @@ journalctl --user -u gigachad-bot-omp.service -n 100 --no-pager
 
 ### Provision the code sandbox
 
-The workspace agent and image-based plot requests run OMP inside
-[Agents-in-a-box](https://github.com/patrickab/Agents-in-a-box) (rootless
-Docker + gVisor). Clone it once per host to provision the sandbox:
+- Run workspace agents and image-based plot requests through OMP in
+  [Agents-in-a-box](https://github.com/patrickab/Agents-in-a-box), using rootless Docker and gVisor.
 
 ```bash
 git clone https://github.com/patrickab/Agents-in-a-box.git "$HOME/git/Agents-in-a-box"
@@ -263,26 +182,19 @@ cd "$HOME/git/Agents-in-a-box"
 cd "$PROD" && uv run agent-sandbox doctor --profile gigachad
 ```
 
-`setup_agent_sandbox.sh` installs rootless Docker and `runsc`, builds the
-image, and runs `scripts/setup_host_services.sh`. That script makes Ollama
-reachable from sandbox containers at `10.200.200.1:11434` through a persistent
-`lo` alias and a user socket proxy, while Ollama itself stays bound to
-`127.0.0.1`. On a host that already has the sandbox, run only
-`./scripts/setup_host_services.sh`.
-
-The bundled `gigachad` profile holds absolute host paths: the OMP executable
-(mount the binary, not a `mise` shim), the Python interpreters, and `~/.omp`.
-`uv sync` overwrites edits to the installed copy. For a different user or
-layout, put an adjusted `gigachad.yaml` in a directory listed in
-`AGENT_SANDBOX_PROFILE_PATH`, which is searched before the bundled profiles.
-Doctor must pass every check.
+- Setup installs Docker/runsc, builds the image, and configures host services.
+  Existing installations need only `./scripts/setup_host_services.sh`.
+- Ollama stays on loopback, a persistent alias/socket proxy exposes it to sandbox
+  containers at `10.200.200.1:11434`.
+- The bundled `gigachad` profile uses absolute paths for the real OMP binary,
+  Python interpreters, and `~/.omp`. Do not mount a mise shim or edit installed
+  profiles, `uv sync` replaces them. Put custom profiles in a directory named by
+  `AGENT_SANDBOX_PROFILE_PATH`, searched before bundled profiles. Doctor must pass.
 
 ### Provision omp-web (omp tabs)
 
-omp tabs frame omp-web, served from the private fork
-[patrickab/ompweb](https://github.com/patrickab/ompweb), branch `custom` (embed
-mode, postMessage bridge, composer adapter). It needs `omp` on `PATH` and GitHub
-access to the private fork. Clone it once per host:
+- Use private [patrickab/ompweb](https://github.com/patrickab/ompweb), branch `custom`.
+- Put `omp` on `PATH` and authorize Git credentials for the fork.
 
 ```bash
 git clone --branch custom https://github.com/patrickab/ompweb.git "$HOME/git/ompweb"
@@ -290,52 +202,36 @@ git -C "$HOME/git/ompweb" remote add upstream https://github.com/kahme247/ompweb
 git -C "$HOME/git/ompweb" remote set-url --push upstream no-push
 ```
 
-The `upstream` remote is only needed to rebase the fork, see its
-`custom/AGENTS.md`. `run-omp-web.sh` (started by `run.sh`) serves omp-web on
-`127.0.0.1:30177` from a detached worktree at
-`~/.local/share/gigachad-bot/ompweb`, created from `custom` on first start and
-moved to the latest commit of `custom` on every start, so its `next build` never
-touches the fork checkout. The first start installs and builds, about 2 minutes,
-later starts rebuild only when that commit changed sources. An omp-web already
-listening on the port is reused, so a new commit needs an omp-web restart.
+- Use `upstream` for rebasing. Follow the fork's `custom/AGENTS.md`.
+- Let `run-omp-web.sh` serve a detached worktree and resolve its ref on each start.
+- Install/build initially and rebuild on source changes.
+- Restart after updates: an existing listener is reused.
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `GIGACHAD_OMP_WEB_REPO` | `~/git/ompweb` | Fork checkout the worktree comes from |
-| `GIGACHAD_OMP_WEB_DIR` | `~/.local/share/gigachad-bot/ompweb` | Served worktree |
-| `GIGACHAD_OMP_WEB_REF` | `custom` | Ref the worktree follows, re-resolved on every start |
-| `GIGACHAD_OMP_WEB_BIND` | `127.0.0.1:30177` | omp-web listen address |
-| `GIGACHAD_OMP_WEB_FRAME_ANCESTORS` | `http://127.0.0.1:2999 http://localhost:2999` | Origins allowed to frame omp-web. A frontend origin missing here gets a blank frame |
-| `GIGACHAD_OMP_WEB_URL` | `http://127.0.0.1:30177` | Backend and gate: where omp-web listens |
-| `GIGACHAD_OMP_WEB_FRAME_URL` | `GIGACHAD_OMP_WEB_URL` | Frame source the browser loads (`/api/config`), the gate's Serve URL in production |
-| `GIGACHAD_OMP_WEB_GATE_PORT` | `30179` | Gate listen port (loopback) |
-| `GIGACHAD_OMP_WEB_AUTH` | unset | Backend: trusted header for a password-protected omp-web |
-| `GIGACHAD_OMP_WEB` | `1` | `0` makes `run.sh` skip omp-web |
+| Variable | Default / purpose |
+| --- | --- |
+| `GIGACHAD_OMP_WEB_REPO` | `~/git/ompweb`, fork checkout |
+| `GIGACHAD_OMP_WEB_DIR` | `~/.local/share/gigachad-bot/ompweb`, served worktree |
+| `GIGACHAD_OMP_WEB_REF` | `custom`, use `origin/custom` in production |
+| `GIGACHAD_OMP_WEB_BIND` | `127.0.0.1:30177` |
+| `GIGACHAD_OMP_WEB_FRAME_ANCESTORS` | Local `:2999` origins, production units default to `GIGACHAD_CORS_ORIGINS` |
+| `GIGACHAD_OMP_WEB_URL` | `http://127.0.0.1:30177`, upstream for backend/gate |
+| `GIGACHAD_OMP_WEB_FRAME_URL` | Defaults to upstream URL, use the gate's HTTPS URL in production |
+| `GIGACHAD_OMP_WEB_GATE_PORT` | `30179`, loopback identity gate |
+| `GIGACHAD_OMP_WEB_AUTH` | Optional trusted upstream auth header |
+| `GIGACHAD_OMP_WEB` | `1`, set `0` to skip development startup |
 
 #### Production: units and the Tailnet gate
 
-The browser loads omp-web in a frame, so on a deployed host omp-web has to be
-reachable over the Tailnet. omp-web runs shell commands as the host user, and
-every Tailnet device can reach the host unless the ACL says otherwise, so it is
-never served directly: Tailscale Serve `:8443` goes to an identity gate
-(`src/backend/omp_web_gate.py`), which forwards only logins granted the host
-capability (see "Host access" below) to omp-web on loopback. omp-web's own password cannot do
-this job, its `SameSite=Lax` cookie is not sent inside the cross-site frame.
-
 ```text
-browser (Vercel page, iframe) ── HTTPS ──> <tailnet-hostname>:8443
-                                           Tailscale Serve ──> 127.0.0.1:30179 gate ──> 127.0.0.1:30177 omp-web
+private Serve :8443 -> identity gate 127.0.0.1:30179 -> omp-web 127.0.0.1:30177
 ```
 
-Two user units run it, both from `deploy/run-production-omp-web.sh`:
+- Treat OMP as host-user command execution. Never publish omp-web directly.
+- Require host capability in `src/backend/omp_web_gate.py` before forwarding.
+- Do not rely on omp-web's `SameSite=Lax` password cookie for a cross-site iframe.
+- Configure allowed frame origins. Missing origins produce a blank frame.
 
-- `gigachad-bot-omp-web.service` (`server`): omp-web through `run-omp-web.sh`.
-  Frame ancestors default to `GIGACHAD_CORS_ORIGINS`. No sandboxing flags: the omp
-  agents it runs need the real `/tmp`, `sudo` and normal file modes
-- `gigachad-bot-omp-web-gate.service` (`gate`): the gate, refuses every login
-  without the host capability
-
-Add to `$ENV`, then install the units and publish the gate:
+Add to `$ENV`:
 
 ```dotenv
 GIGACHAD_OMP_WEB_FRAME_URL=https://<tailnet-hostname>:8443
@@ -349,28 +245,28 @@ systemctl --user start gigachad-bot-omp-web.service gigachad-bot-omp-web-gate.se
 systemctl --user restart gigachad-bot.service
 ```
 
-Find logins with `tailscale status --json` (`User.*.LoginName`). The backend
-restart picks up `GIGACHAD_OMP_WEB_FRAME_URL`.
+- Run both units through `deploy/run-production-omp-web.sh` with `server` or `gate`.
+- Keep normal `/tmp`, sudo, and file modes available to agents. The server
+  deliberately lacks sandboxing flags.
+- Refuse non-host logins at the gate.
+- Find login names with `tailscale status --json`, field `User.*.LoginName`.
 
 #### Update omp-web
 
-gigachad-bot and the fork share `@gigachad/chat-ui`: the postMessage protocol
-(`protocol.ts`), the role palette (`palette.css`), Q&A cards and markdown. Its
-canonical source is gigachad-bot's `src/frontend/packages/chat-ui/`, and ompweb
-installs the checked-in `custom/vendor/gigachad-chat-ui-<version>.tgz` through its
-lockfile. The deployed fork needs no sibling gigachad checkout. Ordinary
-deployment uses its lockfile and does not repack sources.
+- Keep protocol, palette, Q&A cards, and Markdown in `src/frontend/packages/chat-ui/`.
+- Install versioned `custom/vendor/*.tgz` through the fork's lockfile.
+  Require no sibling checkout and no repacking during ordinary deployment.
+- For shared-package changes, bump its version and run from `src/frontend`:
 
-Package changes bump its version, then `npm run sync:ompweb` from gigachad's
-`src/frontend` packs the tarball into the fork (`GIGACHAD_OMP_WEB_REPO`, default
-`~/git/ompweb`), removes older ones and installs it there. Commit the fork's
-tarball, manifest and lock together. `npm run check:ompweb` fails on a stale
-tarball. Pack with the project's npm (`.venv/bin` first on `PATH`), another npm
-version writes different tarball bytes.
+```bash
+npm run sync:ompweb
+npm run check:ompweb
+```
 
-Nothing checks `EMBED_PROTOCOL_VERSION` at runtime: a mismatch fails silently
-(missing composer controls, dropped messages). Always deploy both sides together
-and confirm the version is equal:
+- Use project npm (`.venv/bin` first on `PATH`) for reproducible tarball bytes.
+- Commit fork tarball, manifest, and lock together. Deploy matching sides.
+- Check `EMBED_PROTOCOL_VERSION`: no runtime handshake exists, so mismatches
+  silently drop messages.
 
 ```bash
 grep -h 'EMBED_PROTOCOL_VERSION =' \
@@ -378,54 +274,31 @@ grep -h 'EMBED_PROTOCOL_VERSION =' \
   "$HOME/.local/share/gigachad-bot/ompweb/node_modules/@gigachad/chat-ui/dist/protocol.js"
 ```
 
-On the production host `~/git/gigachad-bot/redeploy.sh` runs these steps after
-restarting the backend. By hand:
+1. Ensure no session is running before restart, which ends agent processes.
+   `curl -s http://127.0.0.1:30177/api/sessions` must show no `runningSessionIds`.
+2. Fetch rather than pull the rebased/force-pushed fork:
+   `git -C "$HOME/git/ompweb" fetch origin custom`.
+3. Restart `gigachad-bot-omp-web.service` and verify
+   `curl -sf http://127.0.0.1:30177/login`. The worktree follows its configured ref.
+4. Update Gigachad to the matching commit and reload the frontend.
+5. Smoke session loading, history, turn rendering, and tab switching. Test prompt
+   sending, Stop, model/thinking controls, and completion only in an explicitly
+   approved disposable session, never an existing conversation.
 
-1. Make sure no omp session is mid-run, a restart ends its omp process:
-   `curl -s http://127.0.0.1:30177/api/sessions` must list no
-   `runningSessionIds`.
-2. Fetch the fork's `custom` branch. The fork is rebased and force-pushed, so
-   fetch instead of pulling. The served worktree follows
-   `GIGACHAD_OMP_WEB_REF` (`origin/custom` in production) on start:
-
-   ```bash
-   git -C "$HOME/git/ompweb" fetch origin custom
-   ```
-
-3. Restart omp-web (`systemctl --user restart gigachad-bot-omp-web.service`, or
-   stop it and start `./run-omp-web.sh` in development). It rebuilds because the
-   sources are newer than the last build, then answers
-   `curl -sf http://127.0.0.1:30177/login`.
-4. Update gigachad-bot to the matching commit and reload the frontend.
-5. Smoke an omp tab: inspect old and recent Q&A cards, scroll an answer preview,
-   expand/collapse a turn, page to older available history, and switch tabs.
-   Confirm tools/thinking and standalone omp-web retain their native behavior.
-   Exercise sending, Stop, model/thinking changes and `/` / `@` completion only
-   in an explicitly approved disposable session, never by prompting in an
-   existing session.
-
-Known limit: on a fresh omp-web load whose first omp tab is a new session, the
-frame ignores that tab's folder and opens omp-web's last-used one. Tabs opened
-after the frame loaded are unaffected.
+**Known limitation:** after a fresh frame load, a session created by the first tab
+uses omp-web's last folder rather than that tab's folder. Later tabs are unaffected.
 
 ### Provision the agent factory
 
-The factory engine (Agents-in-a-box, `.technical-docs/system-overview.md`, "Agent
-factory") runs as `gigachad-bot-factory.service`, which execs `run-factory.sh
---prod`: loopback `127.0.0.1:8090`, state in the `factory` database of the
-production PostgreSQL. It uses the Agents-in-a-box checkout from "Provision the
-code sandbox". `run.sh` is development only, it never starts the production engine.
+| Concern | Contract |
+| --- | --- |
+| Unit | `gigachad-bot-factory.service` runs `run-factory.sh --prod` on loopback `:8090` |
+| Dependencies | Agents-in-a-box checkout and production PostgreSQL `factory` database |
+| Backend upstream | Set `GIGACHAD_FACTORY_URL` to the engine base URL, default `http://127.0.0.1:8090` |
+| Startup | Provision missing checkout/dependencies/config/database. Preserve existing state. `run.sh` never starts this production engine. |
+| Previews | Disable in production: remote browsers cannot reach host-loopback ports 8100–8199. Boards, diffs, messages, and merges remain usable. |
 
-Task previews listen on the host's loopback ports 8100-8199, which a browser on
-another device cannot reach, so production turns them off in the engine's
-defaults. Board, Changes, the agent panel and merging work without them.
-
-`run-factory.sh --prod` clones a missing engine checkout, installs its locked
-factory dependencies, creates the default engine config when absent, and creates
-the `factory` database in production PostgreSQL if needed. Existing checkout
-contents, configuration and database state are preserved.
-
-Once per production host, disable task previews before starting the service:
+- Configure once per production host, before service startup:
 
 ```bash
 install -d -m 0700 ~/.config/agent-sandbox/factory
@@ -435,56 +308,42 @@ systemctl --user start gigachad-bot-factory.service
 curl -sf http://127.0.0.1:8090/v1/repos
 ```
 
-Update the engine with `git -C ~/git/Agents-in-a-box pull --ff-only` and
-`systemctl --user restart gigachad-bot-factory.service`, preferably while no
-task is in progress: a restart ends a running agent turn.
+- Update with `git -C ~/git/Agents-in-a-box pull --ff-only`.
+- Restart `gigachad-bot-factory.service` only when no task is running.
+  Restart ends an active turn.
+- Follow [Agent factory](system-overview.md#agent-factory) for repository contracts.
 
 ## 2. Publish the private HTTPS ingress
 
-On the backend host, inspect any existing Serve configuration before changing
-it. This runbook assumes the host is dedicated to this app at its Serve root:
+- Inspect existing Serve configuration. Require this app to own the host's Serve root.
+- Use the helper to preserve `/api` and `/healthz`:
 
 ```bash
 tailscale serve status
-```
-
-Configure the persistent private HTTPS root proxy with the tracked helper. It
-preserves `/api` and `/healthz`, so no path rewrite is needed:
-
-```bash
 "$PROD/deploy/tailscale-serve.sh" 8002
 tailscale serve status
 ```
 
-The helper runs exactly `tailscale serve --bg --https=443 --accept-app-caps=gigachad.local/cap/host http://127.0.0.1:8002`.
-
-The status output should show a proxy to `http://127.0.0.1:8002` available only
-inside the Tailnet. `--bg` persists the Serve configuration across Tailscale
-restarts and reboots. Use `tailscale serve`, never `tailscale funnel`.
-
-From a different device enrolled in the Tailnet and permitted by its ACL,
-verify the external leg:
+- Expect persistent private HTTPS from the helper:
+  `tailscale serve --bg --https=443 --accept-app-caps=gigachad.local/cap/host http://127.0.0.1:8002`.
+- Verify from another permitted Tailnet device. Never add a public fallback:
 
 ```bash
 curl --fail --show-error https://<tailnet-hostname>/healthz
 curl --fail --show-error https://<tailnet-hostname>/api/config
 ```
 
-Do not use a device outside the Tailnet for this check or supply a public
-fallback URL.
-
 ### Host access
 
-Logins with host access act as the host user: omp tabs, the Neovim editor and
-every file outside their mounts (credential stores excepted, `lib/file_roots.py`).
-Everyone else on the tailnet keeps the normal app on their own mounts. The grant
-lives in the tailnet policy, not in `$ENV`: the helper starts Serve with
-`--accept-app-caps=gigachad.local/cap/host` (Tailscale v1.92+), Serve forwards the
-grant as `Tailscale-App-Capabilities`, and the backend and the gate read it
-(`backend/identity.py`). Serve strips client-sent copies, the backend listens on
-loopback only, so the header cannot be forged from the tailnet.
+| Identity | Authority |
+| --- | --- |
+| Host-capable login | Host-user execution through OMP, Neovim, factory, and files outside mounts, excluding credential stores |
+| Other login | Own mounted roots only |
+| Trusted ingress | Tailscale v1.92+ accepts `gigachad.local/cap/host` and forwards `Tailscale-App-Capabilities`, stripping client-supplied copies |
+| Backend / gate | Trust only private ingress to loopback (`backend/identity.py`) |
 
-In the admin console, Access controls, add to the policy file (keep existing rules):
+- Grant host access in Tailnet policy, not `$ENV`.
+- Add Access controls without removing existing rules:
 
 ```jsonc
 "hosts": { "gigachad-backend": "<backend tailnet IP>" },
@@ -498,38 +357,23 @@ In the admin console, Access controls, add to the policy file (keep existing rul
 ]
 ```
 
-A missing grant or an old Serve without the flag fails closed: nobody gets host
-access. Check with `curl https://<tailnet-hostname>/api/config` from a granted
-device: `omp_web_url` is set, from any other login it is `null`.
+- Fail closed on missing grants or unsupported Serve flags.
+- Check `/api/config`: `omp_web_url` is set for granted logins, `null` otherwise.
 
 ## 3. Configure the Vercel frontend
 
-In the Vercel project settings:
-
 | Setting | Value |
 | --- | --- |
-| Framework preset | Next.js (auto-detected is fine) |
+| Framework | Next.js |
 | Root Directory | `src/frontend` |
-| Install Command | `npm ci` |
-| Build Command | `npm run build` |
-| Output Directory | Leave at Vercel's Next.js default; do not configure a static export directory. |
+| Install / build | `npm ci` / `npm run build` |
+| Output Directory | Vercel default, not a static-export directory |
+| Production/Preview environment | `NEXT_PUBLIC_API_BASE=https://<tailnet-hostname>/api` |
 
-Add this variable for Production and Preview before the corresponding Vercel
-deployment:
-
-```text
-NEXT_PUBLIC_API_BASE=https://<tailnet-hostname>/api
-```
-
-This Vercel value is public build-time configuration, not a credential. A
-change requires a new Vercel deployment because it is bundled into browser
-code. Vercel does not need Tailnet access to build the frontend; the browser,
-not Vercel, makes API calls.
-
-The shared environment file must retain the exact production Vercel origin and
-both local origins in `GIGACHAD_CORS_ORIGINS`. Origins have scheme and host
-only—no `/api`, path, or trailing slash. Restart the backend after changing its
-environment file:
+- Redeploy after changing the API base: it is baked into the bundle.
+- Give Tailnet access to browsers, not Vercel. Browsers make API requests.
+- Retain exact production/local origins in `$ENV`'s `GIGACHAD_CORS_ORIGINS`.
+- Restart after backend configuration changes:
 
 ```bash
 systemctl --user restart gigachad-bot.service
@@ -537,58 +381,34 @@ systemctl --user restart gigachad-bot.service
 
 ### Preview deployments and CORS
 
-A preview bundle calls the same private API base, so its exact browser origin
-must also be temporarily added to `GIGACHAD_CORS_ORIGINS` before testing it.
-The allow-list is exact and comma-separated; Vercel preview wildcards are not
-supported.
+1. Append the exact preview origin and restart the backend.
+2. Test from an enrolled browser.
+3. Remove the origin and restart when finished.
 
-1. Obtain the complete `https://…vercel.app` preview origin.
-2. Append that exact origin to the shared environment file.
-3. Restart `gigachad-bot.service`.
-4. Deploy and test from a Tailnet-enrolled browser.
-5. Remove the preview origin and restart the service when it is no longer
-   needed.
-
-Do not replace the allow-list with `*` for previews. CORS is not a substitute
-for Tailnet ACLs, but it prevents arbitrary web origins from reading API
-responses in an enrolled browser.
+- Reject wildcard shortcuts, including `*`, in production.
+- Keep Tailnet ACLs. CORS complements identity, never replaces it.
 
 ## 4. Deployment sequence
 
-For a first deployment or an update:
+1. Update the production worktree and install locked dependencies.
+2. Confirm nonsecret `$ENV` and separate `~/.secrets`. Leave `GIGACHAD_BASE_DIR`
+   unset, leave `MINERU_SERVER_URL` unset when using local OCR.
+3. Provision sandbox/optional OMP/factory services, then pass sandbox doctor.
+4. Start or restart the backend and verify loopback health.
+5. Publish private Serve ingress and verify it from another permitted device.
+6. Deploy the frontend with the matching API base and authorized origin.
+7. Perform the verification below before use.
 
-1. Create or fast-forward the production worktree from `origin/master`, then
-   run `uv sync --python 3.12 --locked --no-dev` in it. Do not run `run.sh`.
-2. Confirm `$ENV` has the exact production and local CORS origins, host-local
-   dependency URLs, and only the required provider secrets. Leave
-   `GIGACHAD_BASE_DIR` and `MINERU_SERVER_URL` unset.
-3. On a new host, provision the code sandbox (see above) and confirm
-   `agent-sandbox doctor --profile gigachad` passes.
-4. For omp tabs, clone the ompweb fork, set the omp-web variables in `$ENV`, start
-   both omp-web units and publish the gate on `:8443` (see "Provision omp-web").
-   Keep the fork on the `custom` commit matching this gigachad-bot commit.
-5. Start or restart `gigachad-bot.service` and confirm its loopback health
-   check.
-6. Run `"$PROD/deploy/tailscale-serve.sh" 8002` and confirm Tailnet HTTPS health
-   from another enrolled device.
-7. Configure Vercel's root directory, build settings, and public
-   `NEXT_PUBLIC_API_BASE`, then deploy production.
-8. From an enrolled browser, open the Vercel production URL and use the app. A
-   browser outside the Tailnet cannot reach its API by design.
-
-Before an update that could affect stored state, take a non-destructive backup
-of the shared Documents tree. Do not use `--delete` on the backup command or
-mistake the production worktree for application data.
+- Back up PostgreSQL and the shared Documents/PDF mirror before state-affecting updates.
+- Avoid destructive backup synchronization.
+- Do not treat code worktrees as application-data backups.
 
 ## 5. Verify the deployed path
 
-Perform browser-facing checks from a device enrolled in the Tailnet and allowed
-by its ACL.
+From a permitted Tailnet device:
 
-1. **Health and path routing.** Confirm both
-   `https://<tailnet-hostname>/healthz` and
-   `https://<tailnet-hostname>/api/config` return successfully.
-2. **CORS.** Check the production browser origin is accepted:
+1. Check HTTPS `/healthz` and `/api/config`.
+2. Check CORS for the exact authorized browser origin:
 
    ```bash
    curl --silent --show-error --dump-header - --output /dev/null \
@@ -598,52 +418,33 @@ by its ACL.
      --header 'Access-Control-Request-Headers: content-type'
    ```
 
-   The response must include
-   `access-control-allow-origin: <vercel-production-origin>`. The local
-   `http://127.0.0.1:2999` and `http://localhost:2999` origins are also
-   intentionally accepted for development. Repeat with a preview origin only
-   while it is intentionally authorized.
-3. **SSE.** In the deployed Vercel UI, send a short chat using a configured
-   model and confirm `POST /api/chat` stays open while streamed events arrive,
-   then completes. This verifies the browser → Tailnet Serve → FastAPI
-   streaming route; a health check alone does not.
-4. **Persistence.** Create a clearly labelled disposable chat, refresh, and
-   reopen it. Its messages must remain. Delete the disposable chat afterwards;
-   it belongs to the shared Postgres database, not either code worktree.
-5. **Boundary.** Confirm `sudo ss -ltnp '( sport = :8002 )'` shows FastAPI only
-   on `127.0.0.1:8002` and `tailscale serve status` shows the private proxy. Do
-   not test with Funnel.
+   Require `access-control-allow-origin: <vercel-production-origin>`. Local
+   `:2999` origins remain intentional, preview origins only while authorized.
+3. Send a disposable chat and verify `/api/chat` SSE streams and completes.
+   Health checks alone do not prove streaming.
+4. Refresh and reopen that chat to verify persistence, then delete it.
+5. Confirm `sudo ss -ltnp '( sport = :8002 )'` shows loopback only and
+   `tailscale serve status` shows private ingress. Never test with Funnel.
 
 ## 6. Roll back safely
 
-Keep the Serve hostname and loopback port unchanged during a normal application
-rollback so clients retain `https://<tailnet-hostname>/api`.
+Keep the private hostname and loopback port stable:
 
-1. Stop the backend:
-
-   ```bash
-   systemctl --user stop gigachad-bot.service
-   ```
-
-2. Restore the last known-good `origin/master` revision in `$PROD`, run its
-   matching production sync, and restore the previous shared environment file
-   only if configuration changed. Restore a Documents backup only when the
-   incident requires reverting data; do not overwrite newer user data merely to
-   roll back code.
-3. Start the backend and repeat loopback and Tailnet health checks:
+1. `systemctl --user stop gigachad-bot.service`.
+2. Restore a known-good code revision in `$PROD` and its matching locked
+   dependencies. Restore configuration only if changed, restore database or
+   mirror backups only when reverting data is necessary. Do not overwrite newer
+   user data merely to roll back code.
+3. Start the service and repeat loopback/Tailnet health checks:
 
    ```bash
    systemctl --user start gigachad-bot.service
    curl --fail --show-error http://127.0.0.1:8002/healthz
    ```
 
-4. In Vercel, promote or redeploy the last known-good deployment and ensure its
-   baked `NEXT_PUBLIC_API_BASE` remains the private Serve API URL. If its origin
-   differs, restore the corresponding exact CORS allow-list and restart the
-   backend.
-5. If private ingress must be withdrawn immediately, run `tailscale serve off`.
-   This removes Serve exposure without making the loopback backend public.
-   Re-establish it later with the Serve command in section 2.
+4. Restore the matching frontend deployment, preserving its private API base and
+   exact CORS origin. Restart the backend if its origin configuration changes.
+5. To withdraw ingress immediately, use `tailscale serve off`. Restore it with
+   the section 2 helper, never by exposing the backend directly.
 
-After rollback, repeat the health, CORS, SSE, and persistence checks before
-resuming use.
+Repeat health, CORS, SSE, and persistence verification before resuming use.

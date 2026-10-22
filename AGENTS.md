@@ -12,9 +12,23 @@ started via `run.sh` or manually by the user, in a terminal they control.
   and frontend on ports 8100-8199, `.technical-docs/system-overview.md`, "Agent
   factory"). That is the engine's job, you still never start one yourself.
 
+## Documentation
+
+- Keep `.technical-docs/system-overview.md` focused on what the system does, how its parts interact, and how to use its main workflows.
+- Include agent-relevant context: component ownership, source entry points, data flow, persistence, integration contracts, security boundaries, and important limitations.
+- Omit cosmetic UI details, exact control placement, colors, spacing, animation, and incidental implementation history. Describe interactions only when needed to use a feature or understand its behavior.
+- Keep setup, configuration, recovery commands, and operational caveats in the deployment or remote-inference runbook, not duplicated in the overview.
+- Prefer concise, imperative, topic-based bullets and a skimmable layout. Convey all meaningful information in as few words as practical, preserving constraints and failure behavior.
+- Use tables, ASCII overviews, and small conceptual code snippets when they explain concepts more clearly and concisely than prose. Avoid repeating the same information in multiple forms.
+- Use sentences and prose paragraphs when they clarify an idea, not by default. They must earn their place.
+- Link to canonical details and remove stale or contradictory statements.
+
 ## UI hints
 
-No hover tooltips, except on rendered markdown.
+- Prefer intuitive, minimal UI over explanatory hints for every input or keybinding. Do not add routine helper text or instructional placeholders.
+- Use consistent keybindings: Enter confirms, Esc cancels or closes, Shift+Enter inserts a newline in multiline inputs.
+- Keep accessible labels and meaningful errors, they are not instructional hints.
+- No hover tooltips, except on rendered markdown.
 
 ## UI style
 
