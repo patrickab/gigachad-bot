@@ -9,19 +9,15 @@ started via `run.sh` or manually by the user, in a terminal they control.
   ask the user to start it and confirm it's up, then use their already-running
   instance. Do not launch your own copy alongside theirs.
 - Exception: the agent factory engine starts previews of task worktrees (backend
-  and frontend on ports 8100-8199, `.technical-docs/system-overview.md`, "Agent
-  factory"). That is the engine's job, you still never start one yourself.
+  and frontend on ports 8100-8199, `.docs/architecture.md`, "Agent factory").
+  That is the engine's job, you still never start one yourself.
 
 ## Documentation
 
-- Keep `.technical-docs/system-overview.md` focused on what the system does, how its parts interact, and how to use its main workflows.
-- Include agent-relevant context: component ownership, source entry points, data flow, persistence, integration contracts, security boundaries, and important limitations.
-- Omit cosmetic UI details, exact control placement, colors, spacing, animation, and incidental implementation history. Describe interactions only when needed to use a feature or understand its behavior.
-- Keep setup, configuration, recovery commands, and operational caveats in the deployment or remote-inference runbook, not duplicated in the overview.
-- Prefer concise, imperative, topic-based bullets and a skimmable layout. Convey all meaningful information in as few words as practical, preserving constraints and failure behavior.
-- Use tables, ASCII overviews, and small conceptual code snippets when they explain concepts more clearly and concisely than prose. Avoid repeating the same information in multiple forms.
-- Use sentences and prose paragraphs when they clarify an idea, not by default. They must earn their place.
-- Link to canonical details and remove stale or contradictory statements.
+- Follow the global documentation standard. Keep generated context complementary: system overview for concepts/workflows, architecture for implementation contracts, module map for source ownership and navigation.
+- Regenerate `.docs/system-overview.md`, `.docs/architecture.md`, and `.docs/module-map.md` through `/repomix`. Preserve operational details in maintained runbooks and load them only for relevant tasks.
+- `.docs/deployment.md` — Private production deployment, identity, service configuration, verification, and rollback.
+- `.docs/remote-inference.md`: Remote OCR/Ollama setup, SSH tunnels, and environment configuration.
 
 ## UI hints
 
@@ -45,7 +41,7 @@ Clean, calm UI that lets the user focus on the content (chat, document, canvas).
 
 ## omp-web integration
 
-omp tabs embed omp-web from the fork `patrickab/ompweb` (branch `custom`), itself a fork of `kahme247/ompweb`. Both repos must keep rebasing onto upstream without conflicts, so gigachad-bot adapts to omp-web, never the reverse. Architecture: `.technical-docs/system-overview.md`, "omp tabs".
+omp tabs embed omp-web from the fork `patrickab/ompweb` (branch `custom`), itself a fork of `kahme247/ompweb`. Both repos must keep rebasing onto upstream without conflicts, so gigachad-bot adapts to omp-web, never the reverse. Architecture: `.docs/architecture.md`, "omp tabs (omp-web)".
 
 - **Minimal delta upstream**: never ask for or make changes to omp-web's server API, session handling or protocol logic. Read what it already serves. A feature omp-web lacks is built here, or added in the fork's `custom/` following its `custom/AGENTS.md`
 - **Drop before you change**: omp-web UI gigachad-bot does not want is hidden in the fork's embed mode (`custom/theme/embed.css`), not rewritten. Prefer hiding a feature over porting or patching it

@@ -44,14 +44,16 @@ To run services separately, use `./run-frontend.sh` or `./run-backend.sh`. Optio
 
 `./run.sh` also serves omp-web on `127.0.0.1:30177` for the omp tabs. It needs `omp` on `PATH`. If the checkout is missing, startup automatically clones the private `patrickab/ompweb` fork's `custom` branch into `~/git/ompweb`. Your Git credentials must have access to that repository. Set `GIGACHAD_OMP_WEB_REPO` to use another checkout path. Existing checkouts are left untouched.
 
-The first start builds it in a separate worktree, which takes a few minutes. Set `GIGACHAD_OMP_WEB=0` to skip it. Updating omp-web means updating both repos together, see the [deployment runbook](.technical-docs/deployment.md#update-omp-web).
+The first start builds it in a separate worktree, which takes a few minutes. Set `GIGACHAD_OMP_WEB=0` to skip it. Updating omp-web means updating both repos together. See the [repository documentation index](AGENTS.md#documentation) for operational guidance.
 
-`./run.sh` also starts the factory engine on `127.0.0.1:8090`. First startup clones `patrickab/Agents-in-a-box` into `~/git/Agents-in-a-box`, installs its factory dependencies, creates `~/.config/agent-sandbox/factory.yaml`, and creates the `factory` database in the development PostgreSQL instance. Existing checkouts, configuration, and data are preserved. Set `GIGACHAD_FACTORY_REPO_DIR` to use another checkout or `GIGACHAD_FACTORY=0` to skip the factory. Running sandboxed agent tasks still requires the [sandbox runtime setup](.technical-docs/deployment.md#provision-the-code-sandbox).
+`./run.sh` also starts the factory engine on `127.0.0.1:8090`. First startup clones `patrickab/Agents-in-a-box` into `~/git/Agents-in-a-box`, installs its factory dependencies, creates `~/.config/agent-sandbox/factory.yaml`, and creates the `factory` database in the development PostgreSQL instance. Existing checkouts, configuration, and data are preserved. Set `GIGACHAD_FACTORY_REPO_DIR` to use another checkout or `GIGACHAD_FACTORY=0` to skip the factory. Running sandboxed agent tasks still requires sandbox runtime setup. Find the runbook in the [repository documentation index](AGENTS.md#documentation).
 
 ## Further reading
 
-- [System overview](.technical-docs/system-overview.md): architecture, storage, and backend services.
-- [Remote inference](.technical-docs/remote-inference.md): connect inference services on another machine.
-- [Deployment runbook](.technical-docs/deployment.md): private-host configuration and service management. The runbook currently describes a split Vercel/Tailscale setup. For browser-compatible production access, serve the UI and `/api` from the same private HTTPS origin instead.
+- [System overview](.docs/system-overview.md): purpose, concepts, and main workflows.
+- [Architecture](.docs/architecture.md): components, data flow, persistence, and integration contracts.
+- [Module map](.docs/module-map.md): ASCII source tree, ownership, and implementation entry points.
+- [Repository documentation index](AGENTS.md#documentation): task-specific operational runbooks.
+- Prefer one private HTTPS origin for the UI and `/api` in production. The existing split Vercel/Tailscale setup remains documented for current deployments.
 
 The local launchers are for development, not production. Keep the backend private rather than exposing it directly to the internet.

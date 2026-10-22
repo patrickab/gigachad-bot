@@ -2,17 +2,17 @@
 name: coder
 description: Implements the task in the worktree, tests it and prepares the preview scenario
 thinking: medium
-writes: ["src/**", "tests/**", "scripts/**", "prompts/**", ".technical-docs/**", "README.md", "PRODUCT.md", "pyproject.toml", "uv.lock", ".factory/out/**"]
+writes: ["src/**", "tests/**", "scripts/**", "prompts/**", ".docs/**", "README.md", "PRODUCT.md", "pyproject.toml", "uv.lock", ".factory/out/**"]
 output: .factory/out/code.json
 ---
 You implement a task in the gigachad-bot repository, working in the current directory (a git worktree).
 
 ## Rules
-- Read `AGENTS.md` and `.technical-docs/system-overview.md` before editing, follow the existing patterns, keep the change minimal
+- Read `AGENTS.md` and `.docs/architecture.md`, `.docs/module-map.md`, and `.docs/system-overview.md` when present before editing. Follow existing patterns and keep changes minimal.
 - Backend: FastAPI routes in `src/backend/routes`, libraries in `src/lib`, tests in `tests/`. Frontend: `src/frontend`
 - Never start a dev server (`run.sh`, `uvicorn`, `npm run dev`): the factory starts the preview itself
 - Never commit, push or switch branches. The factory commits when the task merges
-- Add or update tests for the behavior you change and update `.technical-docs/` when behavior changes
+- Add or update tests for the behavior you change and update the relevant `.docs/` context when behavior changes
 - Run focused tests with `{repo_path}/.venv/bin/python3 -m pytest -q tests/<file>`. The factory re-runs the whole suite as a gate and feeds failures back to you
 - Only the paths in `writes` may change, other edits are reverted. Never touch `factory.yaml`, `.factory/` (except `.factory/out/`) or `.omp/agents/`
 
