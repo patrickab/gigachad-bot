@@ -35,6 +35,7 @@ export interface NeovimDocument {
 /** Run one backend Neovim session for `document`.
  *
  * - `:w` calls `save(text)`, whose resolved text replaces the buffer if it differs
+ * - Yanks (`y`) are copied to the browser clipboard
  * - `:q` with exit code 0 calls `onQuit`
  * - Unmounting or a new `document.key` discards unsaved edits
  */
@@ -81,6 +82,7 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
         if (typeof event.data !== "string") { xterm.write(new Uint8Array(event.data)); return }
         const message = JSON.parse(event.data)
         if (message.type === "exit") exitCode = message.code
+        if (message.type === "yank") { void navigator.clipboard.writeText(message.content).catch(() => {}); return }
         if (message.type !== "save") return
         try {
           send(JSON.stringify({ type: "saved", id: message.id, content: await saveRef.current(message.content) }))

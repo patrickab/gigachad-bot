@@ -95,7 +95,7 @@ async def test_write_persists_through_save_and_failed_save_keeps_buffer_modified
     session = NeovimSession.spawn("notes.md", "# Title\nbody", rows=24, cols=80, cwd=neovim_home)
     drain = asyncio.create_task(_drain(session))
     try:
-        await asyncio.wait_for(session.connect(save), 15)
+        await asyncio.wait_for(session.connect(save, lambda text: None), 15)
 
         session.write_input(b"Goline\x1b:w\r")
         assert await asyncio.wait_for(saved.get(), 10) == "# Title\nbody\nline\n"
@@ -124,7 +124,7 @@ async def test_base_content_opens_readonly_left_diff_and_only_working_buffer_sav
     session = NeovimSession.spawn("notes.md", "one\nTWO\n", rows=24, cols=100, cwd=neovim_home, base_content="one\ntwo\n")
     drain = asyncio.create_task(_drain(session))
     try:
-        await asyncio.wait_for(session.connect(save), 15)
+        await asyncio.wait_for(session.connect(save, lambda text: None), 15)
         request = session._rpc.request
         state = await request(
             "nvim_exec_lua",
@@ -167,7 +167,7 @@ async def test_empty_base_content_still_opens_diff_and_no_base_means_single_wind
         session = NeovimSession.spawn("a.txt", "x\n", rows=24, cols=80, cwd=neovim_home, base_content=base_content)
         drain = asyncio.create_task(_drain(session))
         try:
-            await asyncio.wait_for(session.connect(save), 15)
+            await asyncio.wait_for(session.connect(save, lambda text: None), 15)
             return await session._rpc.request("nvim_exec_lua", "return #vim.api.nvim_tabpage_list_wins(0)", [])
         finally:
             await session.close()
@@ -187,3 +187,26 @@ def test_open_message_base_content_is_optional():
 async def _drain(session: NeovimSession) -> None:
     while await session.read_output() is not None:
         pass
+
+
+@requires_nvim
+async def test_yank_notifies_with_linewise_and_charwise_text(neovim_home):
+    yanked: asyncio.Queue[str] = asyncio.Queue()
+
+    async def save(text: str) -> str:
+        return text
+
+    session = NeovimSession.spawn("notes.md", "alpha beta\ngamma\n", rows=24, cols=80, cwd=neovim_home)
+    drain = asyncio.create_task(_drain(session))
+    try:
+        await asyncio.wait_for(session.connect(save, yanked.put_nowait), 15)
+        session.write_input(b"yw")
+        assert await asyncio.wait_for(yanked.get(), 10) == "alpha "
+        session.write_input(b"yj")
+        assert await asyncio.wait_for(yanked.get(), 10) == "alpha beta\ngamma\n"
+        session.write_input(b"dd")  # deletes are not yanks to the clipboard
+        session.write_input(b"yy")
+        assert await asyncio.wait_for(yanked.get(), 10) == "gamma\n"
+    finally:
+        await session.close()
+        await drain

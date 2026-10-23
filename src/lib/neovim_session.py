@@ -3,6 +3,7 @@
 - The browser renders the PTY through xterm.js, the backend only relays bytes
 - `:w` never writes the copy: a buffer-local `BufWriteCmd` sends the text over
   msgpack-RPC to the caller's `save`, which persists it and returns what was stored
+- A `TextYankPost` autocmd notifies the caller's `on_yank` with the yanked text, for the browser clipboard
 - Closing a session discards unsaved edits
 """
 
@@ -23,6 +24,7 @@ import termios
 import msgpack
 
 SaveDocument = Callable[[str], Awaitable[str]]
+YankText = Callable[[str], None]
 
 _STARTUP_SECONDS = 15
 _SHUTDOWN_SECONDS = 2
@@ -60,6 +62,15 @@ vim.api.nvim_create_autocmd("BufWriteCmd", {
     if stored ~= text then show_stored(stored) end
     vim.bo[buffer].modified = false
     vim.api.nvim_echo({ { "Saved " .. vim.fn.fnamemodify(path, ":t") } }, false, {})
+  end,
+})
+
+vim.api.nvim_create_autocmd("TextYankPost", {
+  callback = function()
+    if vim.v.event.operator ~= "y" then return end
+    local text = table.concat(vim.v.event.regcontents, "\n")
+    if vim.v.event.regtype == "V" then text = text .. "\n" end
+    vim.rpcnotify(channel, "yank", text)
   end,
 })
 
@@ -102,10 +113,12 @@ class _NeovimRpc:
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
         handle_request: Callable[[str, list], Awaitable[object]],
+        handle_notification: Callable[[str, list], None],
     ) -> None:
         self._reader = reader
         self._writer = writer
         self._handle_request = handle_request
+        self._handle_notification = handle_notification
         self._pending: dict[int, asyncio.Future] = {}
         self._next_id = 0
         self._answers: set[asyncio.Task] = set()
@@ -142,7 +155,7 @@ class _NeovimRpc:
                     future.set_exception(ConnectionError("Neovim RPC connection closed"))
 
     def _dispatch(self, message: list) -> None:
-        """Resolve responses, answer requests, ignore notifications."""
+        """Resolve responses, answer requests, forward notifications."""
         if message[0] == 1:
             _, message_id, error, result = message
             future = self._pending.pop(message_id, None)
@@ -157,6 +170,9 @@ class _NeovimRpc:
             task = asyncio.create_task(self._answer(message_id, method, params))
             self._answers.add(task)
             task.add_done_callback(self._answers.discard)
+        elif message[0] == 2:
+            _, method, params = message
+            self._handle_notification(method, params)
 
     async def _answer(self, message_id: int, method: str, params: list) -> None:
         try:
@@ -194,7 +210,7 @@ class NeovimSession:
     Examples
     --------
     >>> session = NeovimSession.spawn("notes.md", "# Notes\\n", rows=40, cols=120)
-    >>> await session.connect(save)  # `:w` now calls `save(text)`
+    >>> await session.connect(save, on_yank)  # `:w` calls `save(text)`, yanks call `on_yank(text)`
     >>> while (output := await session.read_output()) is not None: ...
     >>> await session.close()
     """
@@ -242,13 +258,17 @@ class NeovimSession:
             os.close(child_fd)
         return cls(process, terminal_fd, workdir, document, base)
 
-    async def connect(self, save: SaveDocument) -> None:
-        """Route `:w` of the document buffer to *save*, whose return value replaces the buffer if it differs."""
+    async def connect(self, save: SaveDocument, on_yank: YankText) -> None:
+        """Route `:w` of the document buffer to *save* (its return value replaces the buffer if it differs) and yanks to *on_yank*."""
 
         async def handle_request(method: str, params: list) -> object:
             if method != "save":
                 raise NeovimRpcError(f"Unknown request {method!r}")
             return await save(params[0])
+
+        def handle_notification(method: str, params: list) -> None:
+            if method == "yank":
+                on_yank(params[0])
 
         socket_path = self._workdir / "rpc.sock"
         deadline = self._loop.time() + _STARTUP_SECONDS
@@ -259,7 +279,7 @@ class NeovimSession:
                 raise TimeoutError("Neovim did not open its RPC socket")
             await asyncio.sleep(0.02)
         reader, writer = await asyncio.open_unix_connection(str(socket_path))
-        self._rpc = _NeovimRpc(reader, writer, handle_request)
+        self._rpc = _NeovimRpc(reader, writer, handle_request, handle_notification)
         channel, _ = await asyncio.wait_for(self._rpc.request("nvim_get_api_info"), _STARTUP_SECONDS)
         while not await asyncio.wait_for(self._rpc.request("nvim_eval", "v:vim_did_enter"), _STARTUP_SECONDS):
             if self._loop.time() > deadline + _STARTUP_SECONDS:

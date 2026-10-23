@@ -100,6 +100,9 @@ class _BrowserSaves:
             raise SaveFailed(str(result["error"]))
         return str(result.get("content", text))
 
+    async def yank(self, text: str) -> None:
+        await self._websocket.send_json({"type": "yank", "content": text})
+
     def resolve(self, reply: dict) -> None:
         pending = self._pending.get(reply.get("id"))
         if pending is not None and not pending.done():
@@ -135,7 +138,7 @@ async def _run(websocket: WebSocket, session: NeovimSession) -> None:
         asyncio.create_task(_relay_input(websocket, session, saves)),
     ]
     # Input flows while connecting, so a startup prompt from the user's config can be answered.
-    connecting = asyncio.create_task(session.connect(saves.save))
+    connecting = asyncio.create_task(session.connect(saves.save, lambda text: asyncio.create_task(saves.yank(text))))
     try:
         done, _ = await asyncio.wait([*relays, connecting], return_when=asyncio.FIRST_COMPLETED)
         if connecting in done and connecting.exception() is not None:
