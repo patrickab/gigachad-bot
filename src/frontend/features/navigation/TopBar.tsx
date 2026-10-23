@@ -34,7 +34,7 @@ export function TopBarPill({ children, ref }: { children?: ReactNode; ref?: Ref<
   </div>
 }
 
-/** Place a control straight on the content without a backing. `ref` serves as a portal slot. */
+/** Place a control straight on the content without a backing. Hidden when empty. `ref` serves as a portal slot. */
 export function TopBarTransparent({ children, ref }: { children?: ReactNode; ref?: Ref<HTMLDivElement> }) {
-  return <div ref={ref} className="pointer-events-auto flex items-center">{children}</div>
+  return <div ref={ref} className="pointer-events-auto flex items-center empty:hidden">{children}</div>
 }

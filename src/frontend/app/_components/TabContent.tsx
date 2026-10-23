@@ -16,6 +16,7 @@ import { FileViewer } from "@/features/editor/FileViewer"
 import { DocumentPicker } from "@/features/editor/DocumentPicker"
 import { DocumentEditor } from "@/features/editor/DocumentEditor"
 import { DiffViewer } from "@/features/editor/diff/DiffViewer"
+import { FilePanelSlot, FilePanelToggle } from "@/features/editor/FilePanel"
 import { CanvasWorkspace } from "@/features/editor/canvas/CanvasWorkspace"
 import { ArchitectureWindow } from "@/features/editor/architecture/ArchitectureWindow"
 import { FactorySurface } from "@/features/factory/FactorySurface"
@@ -227,6 +228,7 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
       {sidebarCollapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
     </button>
   )
+  const filePanelToggle = <TopBarTransparent><FilePanelToggle /></TopBarTransparent>
 
   return (
     <div className="relative flex h-full overflow-hidden">
@@ -264,6 +266,7 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
                 <div ref={setViewSlot} className="contents" />
                 <ThemeToggle />
               </TopBarPill>
+              {filePanelToggle}
             </>}
           />
         ) : appMode === "omp" ? (
@@ -278,16 +281,19 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
                 <OmpModelSelector view={ompView} models={models} loadError={modelLoadError} onProvidersChange={saveModelProviders} onTabOrderChange={saveModelTabOrder} onDefaultsChange={saveModelDefaults} placement="below" />
               </TopBarTransparent>}
             </>}
-            right={<TopBarPill>
-              {ompView && <OmpSystemPrompt view={ompView} />}
-              <ThemeToggle />
-            </TopBarPill>}
+            right={<>
+              <TopBarPill>
+                {ompView && <OmpSystemPrompt view={ompView} />}
+                <ThemeToggle />
+              </TopBarPill>
+              {filePanelToggle}
+            </>}
           />
         ) : appMode === "factory" ? (
           <TopBar
             center={<TabSwitcher />}
             left={<TopBarTransparent>{sidebarToggle}</TopBarTransparent>}
-            right={<TopBarPill><ThemeToggle /></TopBarPill>}
+            right={<><TopBarPill><ThemeToggle /></TopBarPill>{filePanelToggle}</>}
           />
         ) : appMode === "document" ? (
           <TopBar
@@ -305,6 +311,7 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
                   <X className="h-4 w-4" />
                 </button>
               </TopBarTransparent>
+              {filePanelToggle}
             </>}
           />
         ) : (
@@ -325,6 +332,7 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
                 <TokenCounter usage={totalUsage} />
                 <ThemeToggle />
               </TopBarPill>
+              {filePanelToggle}
             </>}
           />
         )}
@@ -409,6 +417,7 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
           )}
         </div>
       </main>
+      <FilePanelSlot />
       <SaveAsModal open={persistence.saveModalOpen} onClose={() => persistence.setSaveModalOpen(false)} onSave={persistence.handleSaveSubmit} />
       <PromptEditor open={promptEditorOpen} onClose={() => setPromptEditorOpen(false)} onPromptsChanged={setPrompts} />
       {isActive && filePicker.filePickerOpen && filePicker.filesEnabled && (

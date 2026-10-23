@@ -1,9 +1,8 @@
 "use client"
 
-import { createContext, useCallback, useContext, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useSettings } from "@/contexts/SettingsContext"
 import { useStartupRead } from "@/contexts/StartupReadContext"
-import { useOpenFileHoverView } from "@/features/editor/FileHoverView"
 import { useThemeName } from "@/hooks/useThemeName"
 import { fetchOmpOverview } from "@/lib/backend/api"
 import type { OmpOverview, OmpView } from "@/lib/domain/types"
@@ -37,6 +36,8 @@ export interface FrameAttachment {
   view: OmpView
   /** The user navigated inside the frame (fork, first message of a new session, session move). */
   onViewChange: (view: OmpView) => void
+  /** The user clicked a local file link inside the frame, `path` is absolute. */
+  onOpenFile: (path: string) => void
 }
 
 interface OmpContextValue {
@@ -115,25 +116,33 @@ function useOverviewPolling(enabled: boolean): { overview: OmpOverview | null; r
   return { overview, refreshOverview }
 }
 
-/** Viewport rect of `slot`, kept current so the fixed frame stays laid over it. The frame never moves in the DOM, moving an iframe reloads it. */
-function useSlotRect(slot: HTMLElement | null): DOMRect | null {
-  const [rect, setRect] = useState<DOMRect | null>(null)
-  useEffect(() => {
+/**
+ * Lay the fixed `frame` over `slot` and keep it there. The frame never moves in the DOM, moving an iframe reloads it.
+ *
+ * - Writes the frame's style directly, so it follows a resizing slot in the same paint (a render would trail it)
+ * - Without a slot it parks as a zero box at the viewport origin: Chrome throttles an off-screen
+ *   cross-origin frame, then omp-web never hydrates and never reports ready
+ */
+function useFrameOverSlot(frame: HTMLIFrameElement | null, slot: HTMLElement | null) {
+  useLayoutEffect(() => {
+    if (!frame) return
+    const place = () => {
+      const { top, left, width, height } = slot?.getBoundingClientRect() ?? { top: 0, left: 0, width: 0, height: 0 }
+      Object.assign(frame.style, { top: `${top}px`, left: `${left}px`, width: `${width}px`, height: `${height}px` })
+    }
+    place()
     if (!slot) return
-    const measure = () => setRect(slot.getBoundingClientRect())
-    measure()
-    const observer = new ResizeObserver(measure)
+    const observer = new ResizeObserver(place)
     observer.observe(slot)
     observer.observe(document.body)
-    window.addEventListener("resize", measure)
-    document.addEventListener("transitionend", measure, true)
+    window.addEventListener("resize", place)
+    document.addEventListener("transitionend", place, true)
     return () => {
       observer.disconnect()
-      window.removeEventListener("resize", measure)
-      document.removeEventListener("transitionend", measure, true)
+      window.removeEventListener("resize", place)
+      document.removeEventListener("transitionend", place, true)
     }
-  }, [slot])
-  return slot ? rect : null
+  }, [frame, slot])
 }
 
 /**
@@ -147,7 +156,6 @@ export function OmpProvider({ children }: { children: ReactNode }) {
   const { ompWebUrl, hostAccess } = useSettings()
   const { overview, refreshOverview } = useOverviewPolling(hostAccess)
   const theme = useThemeName()
-  const openFileHoverView = useOpenFileHoverView()
   const [attachment, setAttachment] = useState<FrameAttachment | null>(null)
   /** View the frame (re)loaded with, null until the first omp tab attached. */
   const [loadedView, setLoadedView] = useState<OmpView | null>(null)
@@ -156,12 +164,17 @@ export function OmpProvider({ children }: { children: ReactNode }) {
   const [branchTree, setBranchTree] = useState<BranchTree | null>(null)
   const [composer, setComposer] = useState<ComposerState | null>(null)
   const frameRef = useRef<HTMLIFrameElement>(null)
+  const [frame, setFrame] = useState<HTMLIFrameElement | null>(null)
+  const attachFrameElement = useCallback((element: HTMLIFrameElement | null) => {
+    frameRef.current = element
+    setFrame(element)
+  }, [])
   const frameViewRef = useRef<FrameView | null>(null)
   const lastNewCwdRef = useRef<string | null>(null)
   const pendingUntilRef = useRef(0)
   const readyRef = useRef(false)
   const composerListenersRef = useRef(new Set<ComposerEventListener>())
-  const rect = useSlotRect(attachment?.slot ?? null)
+  useFrameOverSlot(frame, attachment?.slot ?? null)
   const frameOrigin = useMemo(() => (ompWebUrl ? new URL(ompWebUrl).origin : null), [ompWebUrl])
 
   const post = useCallback((message: ShellMessage) => {
@@ -207,6 +220,8 @@ export function OmpProvider({ children }: { children: ReactNode }) {
     if (attachment) navigate(attachment.view, true)
   })
 
+  const onOpenFile = useEffectEvent((path: string) => attachment?.onOpenFile(path))
+
   useEffect(() => {
     function onMessage(event: MessageEvent) {
       if (event.source !== frameRef.current?.contentWindow || event.origin !== frameOrigin) return
@@ -221,11 +236,11 @@ export function OmpProvider({ children }: { children: ReactNode }) {
         const { key, altKey, ctrlKey, metaKey, shiftKey } = message
         document.dispatchEvent(new KeyboardEvent("keydown", { key, altKey, ctrlKey, metaKey, shiftKey, bubbles: true, cancelable: true }))
       }
-      else if (message.type === "open-file") openFileHoverView(message.path)
+      else if (message.type === "open-file") onOpenFile(message.path)
     }
     window.addEventListener("message", onMessage)
     return () => window.removeEventListener("message", onMessage)
-  }, [frameOrigin, openFileHoverView])
+  }, [frameOrigin])
 
   useEffect(() => {
     if (readyRef.current) post({ type: "set-theme", theme })
@@ -270,7 +285,7 @@ export function OmpProvider({ children }: { children: ReactNode }) {
     overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, reloadFrame, composer, sendToComposer, onComposerEvent,
   }), [overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, reloadFrame, composer, sendToComposer, onComposerEvent])
 
-  const visible = attachment !== null && rect !== null && frameStatus === "ready"
+  const visible = attachment !== null && frameStatus === "ready"
   useEffect(() => {
     // A hidden frame keeps focus, keystrokes would land in it (e.g. after Alt+T from inside it opened a chat tab).
     if (!visible && document.activeElement === frameRef.current) frameRef.current?.blur()
@@ -281,18 +296,15 @@ export function OmpProvider({ children }: { children: ReactNode }) {
       {loadedView && ompWebUrl && (
         <iframe
           key={frameKey}
-          ref={frameRef}
+          ref={attachFrameElement}
           src={frameUrl(ompWebUrl, loadedView)}
           title="omp"
           allow="clipboard-read; clipboard-write"
           className="fixed z-0 border-0 bg-paper"
-          style={{
-            top: rect?.top ?? 0,
-            left: rect?.left ?? 0,
-            width: rect?.width ?? 0,
-            height: rect?.height ?? 0,
-            visibility: visible ? "visible" : "hidden",
-          }}
+          // Position and size come from useFrameOverSlot, React never writes them. Hidden by opacity, not visibility:
+          // Chrome stops rendering a visibility-hidden cross-origin frame, and omp-web then never reports ready
+          inert={!visible}
+          style={{ opacity: visible ? 1 : 0, pointerEvents: visible ? undefined : "none" }}
         />
       )}
     </OmpContext.Provider>

@@ -2,6 +2,7 @@
 
 import { useEffect, useEffectEvent, useState } from "react"
 import { useTab } from "@/contexts/TabContext"
+import { useOpenFile } from "@/features/editor/FilePanel"
 import type { OmpView } from "@/lib/domain/types"
 import { useOmp } from "./OmpProvider"
 import { OmpComposer } from "./OmpComposer"
@@ -11,14 +12,15 @@ import { viewTitle } from "./sessions"
 export function OmpSurface({ view, onViewChange }: { view: OmpView; onViewChange: (view: OmpView) => void }) {
   const { tab, isActive, setTitle } = useTab()
   const { attachFrame, frameStatus, ompWebUrl, overview, reloadFrame } = useOmp()
+  const openFile = useOpenFile()
   const [slot, setSlot] = useState<HTMLDivElement | null>(null)
   const title = viewTitle(view, overview)
   const adoptView = useEffectEvent((next: OmpView) => onViewChange(next))
 
   useEffect(() => {
     if (!isActive || !slot) return
-    return attachFrame({ slot, view, onViewChange: (next) => adoptView(next) })
-  }, [isActive, slot, view, attachFrame])
+    return attachFrame({ slot, view, onViewChange: (next) => adoptView(next), onOpenFile: openFile })
+  }, [isActive, slot, view, attachFrame, openFile])
 
   useEffect(() => {
     setTitle(title)

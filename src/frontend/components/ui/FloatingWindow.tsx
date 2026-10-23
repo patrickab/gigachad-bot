@@ -12,16 +12,14 @@ interface FloatingWindowProps {
   label?: string
   overlayClassName?: string
   panelClassName?: string
-  /** Whether a click outside the panel calls `onClose`, false where that would lose unsaved work. */
-  dismissOnBackdrop?: boolean
 }
 
 /**
- * Modal overlay with a centered panel. Backdrop click (unless `dismissOnBackdrop` is false) and Escape call `onClose`.
+ * Modal overlay with a centered panel. Backdrop click and Escape call `onClose`.
  *
- * - Takes focus on open unless a child already focused itself, so Escape and keys reach it even when opened from the omp frame
+ * - Takes focus on open unless a child already focused itself, so Escape and keys reach it
  */
-export function FloatingWindow({ children, onClose, label, overlayClassName, panelClassName, dismissOnBackdrop = true }: FloatingWindowProps) {
+export function FloatingWindow({ children, onClose, label, overlayClassName, panelClassName }: FloatingWindowProps) {
   const panelRef = useRef<HTMLDivElement>(null)
   useEscapeLayer(() => onClose?.(), onClose !== undefined)
   useEffect(() => {
@@ -36,7 +34,7 @@ export function FloatingWindow({ children, onClose, label, overlayClassName, pan
       exit={{ opacity: 0 }}
       transition={{ duration: 0.15 }}
       className={cn("fixed inset-0 z-[90] flex items-center justify-center bg-backdrop p-3 backdrop-blur-[2px] sm:p-6", overlayClassName)}
-      onClick={dismissOnBackdrop ? onClose : undefined}
+      onClick={onClose}
     >
       <motion.div
         ref={panelRef}

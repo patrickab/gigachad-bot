@@ -9,6 +9,15 @@ const FONT_SIZE = 13
 // Local Nerd Fonts first, so icons from the user's config render as in a terminal. "Mono" keeps icons one cell wide.
 const NERD_FONTS = "'JetBrainsMono Nerd Font Mono', 'Symbols Nerd Font Mono'"
 const POLICY_VIOLATION = 1008
+/** Quiet time after the last size change before the terminal refits. */
+const FIT_SETTLE_MS = 150
+/** Longest wait for Neovim's redraw after a resize before xterm resizes anyway. */
+const REDRAW_TIMEOUT_MS = 500
+// Synchronized output (DEC mode 2026): xterm holds rendering in between, Neovim wraps each redraw in it.
+const SYNC_START = "\x1b[?2026h"
+const SYNC_END = "\x1b[?2026l"
+// One char per byte, so the ASCII marker can be found in raw PTY output
+const BYTE_DECODER = new TextDecoder("latin1")
 
 /** A running terminal whose host element survives React remounts (fullscreen, overlay). */
 export interface NeovimTerminal {
@@ -74,12 +83,45 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
       let exitCode: number | null = null
       const send = (data: string | Uint8Array<ArrayBuffer>) => { if (socket.readyState === WebSocket.OPEN) socket.send(data) }
       const encoder = new TextEncoder()
+      let sentSize = ""
+      const sendSize = (rows: number, cols: number) => {
+        if (`${rows}x${cols}` === sentSize) return
+        sentSize = `${rows}x${cols}`
+        send(JSON.stringify({ type: "resize", rows, cols }))
+      }
+
+      // A resize swaps in one frame, so the text never flickers: Neovim redraws for the new size first, its
+      // output is held, then xterm resizes and parses it under synchronized output, painting only the result.
+      // `scanned` keeps the held output's tail, so a sync end split across two messages is still found
+      let pendingResize: { rows: number; cols: number; held: Uint8Array[]; scanned: string; timer: ReturnType<typeof setTimeout> } | null = null
+      const applyResize = (redrawn: boolean) => {
+        const resize = pendingResize
+        if (!resize) return
+        pendingResize = null
+        clearTimeout(resize.timer)
+        xterm.write(SYNC_START, () => {
+          xterm.resize(resize.cols, resize.rows)
+          // The slot may have changed size again meanwhile
+          setTimeout(fit)
+        })
+        resize.held.forEach((chunk) => xterm.write(chunk))
+        if (!redrawn) xterm.write(SYNC_END)
+      }
 
       socket.onopen = () => {
+        sentSize = `${xterm.rows}x${xterm.cols}`
         send(JSON.stringify({ type: "open", path: opened.path, filename: opened.filename, content: opened.content, base_content: opened.base_content, rows: xterm.rows, cols: xterm.cols }))
       }
       socket.onmessage = async (event: MessageEvent<ArrayBuffer | string>) => {
-        if (typeof event.data !== "string") { xterm.write(new Uint8Array(event.data)); return }
+        if (typeof event.data !== "string") {
+          const chunk = new Uint8Array(event.data)
+          if (!pendingResize) { xterm.write(chunk); return }
+          pendingResize.held.push(chunk)
+          const scanned = pendingResize.scanned + BYTE_DECODER.decode(chunk)
+          if (scanned.includes(SYNC_END)) applyResize(true)
+          else pendingResize.scanned = scanned.slice(1 - SYNC_END.length)
+          return
+        }
         const message = JSON.parse(event.data)
         if (message.type === "exit") exitCode = message.code
         if (message.type === "yank") { void navigator.clipboard.writeText(message.content).catch(() => {}); return }
@@ -97,7 +139,7 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
       }
       xterm.onData((data) => send(encoder.encode(data)))
       xterm.onBinary((data) => send(Uint8Array.from(data, (char) => char.charCodeAt(0))))
-      xterm.onResize(({ rows, cols }) => send(JSON.stringify({ type: "resize", rows, cols })))
+      xterm.onResize(({ rows, cols }) => sendSize(rows, cols))
 
       // xterm measures cells on open, so open only once the host is visible. Canvas cannot
       // resolve CSS variables, so the app font is the computed one.
@@ -113,8 +155,15 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
             webgl.onContextLoss(() => webgl.dispose())
             xterm.loadAddon(webgl)
           } catch { /* no WebGL2 */ }
+          fitAddon.fit()
+          return
         }
-        fitAddon.fit()
+        const size = fitAddon.proposeDimensions()
+        if (!size || Number.isNaN(size.cols) || Number.isNaN(size.rows) || pendingResize) return
+        if (size.cols === xterm.cols && size.rows === xterm.rows) return
+        if (socket.readyState !== WebSocket.OPEN) { xterm.resize(size.cols, size.rows); return }
+        pendingResize = { ...size, held: [], scanned: "", timer: setTimeout(() => applyResize(false), REDRAW_TIMEOUT_MS) }
+        sendSize(size.rows, size.cols)
       }
 
       setStatus({ state: "running" })
@@ -124,7 +173,7 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
         fit,
         focus: () => xterm.focus(),
       })
-      dispose = () => { socket.close(); xterm.dispose() }
+      dispose = () => { if (pendingResize) clearTimeout(pendingResize.timer); socket.close(); xterm.dispose() }
     })()
 
     return () => {
@@ -164,10 +213,17 @@ export function NeovimEditor({ terminal, status, onRestart, className }: {
     const slot = slotRef.current
     if (!slot || !terminal) return
     terminal.attach(slot)
-    const observer = new ResizeObserver(() => terminal.fit())
+    // Fit once the size settles: a resize redraws all of Neovim, so fitting during a drag or panel animation flickers.
+    // Meanwhile the terminal keeps its size, clipped or padded by the slot.
+    let fitTimer: ReturnType<typeof setTimeout> | undefined
+    const observer = new ResizeObserver(() => {
+      clearTimeout(fitTimer)
+      fitTimer = setTimeout(() => terminal.fit(), FIT_SETTLE_MS)
+    })
     observer.observe(slot)
     terminal.focus()
     return () => {
+      clearTimeout(fitTimer)
       observer.disconnect()
       terminal.detach()
     }

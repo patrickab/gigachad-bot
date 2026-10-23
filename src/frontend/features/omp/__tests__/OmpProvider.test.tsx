@@ -9,7 +9,6 @@ const fetchOmpOverview = vi.hoisted(() => vi.fn(async () => {
 }))
 vi.mock("@/contexts/SettingsContext", () => ({ useSettings: () => settings }))
 vi.mock("@/lib/backend/api", () => ({ fetchOmpOverview }))
-vi.mock("@/features/editor/FileHoverView", () => ({ useOpenFileHoverView: () => vi.fn() }))
 vi.mock("@/hooks/useThemeName", () => ({ useThemeName: () => "light" }))
 
 function Workspace() {
