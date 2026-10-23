@@ -90,6 +90,7 @@ class ProjectStore:
                 {
                     "name": p["name"],
                     "slug": p["slug"],
+                    "archived": p.get("archived", False),
                     "tabs": data.get("tabs", []),
                 }
             )
@@ -120,7 +121,7 @@ class ProjectStore:
         self._write_project(project_dir, {"name": name, "kanban": [], "tabs": []})
         return {"name": name, "slug": slug, "kanban": [], "tabs": []}
 
-    def update_project(self, slug: str, name: str | None = None) -> dict[str, str]:
+    def update_project(self, slug: str, name: str | None = None, *, archived: bool | None = None) -> dict[str, Any]:
         meta = self._read_meta()
         entry = self._find_entry(meta, slug)
         if not entry:
@@ -135,8 +136,11 @@ class ProjectStore:
             data = self._read_project(project_dir)
             data["name"] = name
             self._write_project(project_dir, data)
+        if archived is not None:
+            entry["archived"] = archived
+            entry["updatedAt"] = _now_iso()
         self._write_meta(meta)
-        return {"name": entry["name"], "slug": entry["slug"]}
+        return {"name": entry["name"], "slug": entry["slug"], "archived": entry.get("archived", False)}
 
     def delete_project(self, slug: str, *, cleanup_uploads_fn: Callable[[str, str | None], None] | None = None) -> dict[str, str]:
         meta = self._read_meta()

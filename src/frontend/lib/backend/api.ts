@@ -525,6 +525,10 @@ export async function deleteProject(name: string): Promise<void> {
   await del(`/projects/${encodeURIComponent(name)}`)
 }
 
+export async function setProjectArchived(slug: string, archived: boolean): Promise<void> {
+  await patch(`/projects/${encodeURIComponent(slug)}`, { archived })
+}
+
 export async function updateProjectKanban(name: string, data: ProjectStateUpdate): Promise<ProjectData> {
   return put<ProjectData>(`/projects/${encodeURIComponent(name)}/state`, data)
 }

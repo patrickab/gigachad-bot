@@ -58,6 +58,7 @@ class SaveTabRequest(BaseModel):
 
 class UpdateProjectRequest(BaseModel):
     name: str | None = None
+    archived: bool | None = None
 
 
 class ProjectStateModel(BaseModel):
@@ -103,7 +104,7 @@ async def create_project(req: CreateProjectRequest, store: ProjectStore = Depend
 @router.patch("/{slug}")
 async def update_project(slug: str, req: UpdateProjectRequest, store: ProjectStore = Depends(get_project_store)) -> dict[str, Any]:
     try:
-        return store.update_project(slug, name=req.name)
+        return store.update_project(slug, name=req.name, archived=req.archived)
     except FileNotFoundError:
         raise _not_found()
     except ValueError as e:

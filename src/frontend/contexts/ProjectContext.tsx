@@ -7,6 +7,7 @@ import {
   listProjects as apiListProjects,
   createProject as apiCreateProject,
   deleteProject as apiDeleteProject,
+  setProjectArchived as apiSetProjectArchived,
 } from "@/lib/backend/api"
 
 interface ProjectContextState {
@@ -14,6 +15,7 @@ interface ProjectContextState {
   refreshProjects: () => Promise<void>
   createProject: (name: string) => Promise<string>
   deleteProject: (name: string) => Promise<void>
+  setProjectArchived: (slug: string, archived: boolean) => Promise<void>
 }
 
 const ProjectContext = createContext<ProjectContextState | null>(null)
@@ -45,9 +47,14 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     await refreshProjects()
   }, [refreshProjects])
 
+  const setProjectArchived = useCallback(async (slug: string, archived: boolean) => {
+    await apiSetProjectArchived(slug, archived)
+    await refreshProjects()
+  }, [refreshProjects])
+
   const value = useMemo<ProjectContextState>(
-    () => ({ projects, refreshProjects, createProject, deleteProject }),
-    [projects, refreshProjects, createProject, deleteProject],
+    () => ({ projects, refreshProjects, createProject, deleteProject, setProjectArchived }),
+    [projects, refreshProjects, createProject, deleteProject, setProjectArchived],
   )
 
   return (

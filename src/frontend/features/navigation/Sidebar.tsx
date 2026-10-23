@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion } from "framer-motion"
-import { Brain, Factory, FilePlus, GitCompare } from "lucide-react"
+import { Archive, ArchiveRestore, Brain, Factory, FilePlus, GitCompare } from "lucide-react"
 import { ArchitectureIcon } from "@/components/ui/ArchitectureIcon"
+import { PopoverSelector } from "@/components/ui/PopoverSelector"
 import { CreateDocumentPanel } from "./CreateDocumentPanel"
 import { ProviderUsage } from "./ProviderUsage"
 import { cn } from "@/lib/utils"
@@ -58,7 +59,7 @@ export function Sidebar({
   const isActive = useTabActive()
   const { tab } = useTab()
   const { branchMeta, visibleRootFiles, historiesLoading, moveHistory, onFileClick, activeFile, activeQaIndex, cascadeDelete } = useBranches()
-  const { projects, createProject, deleteProject } = useProject()
+  const { projects, createProject, deleteProject, setProjectArchived } = useProject()
   const { openMemoryViewer } = useMemoryViewer()
   const { schedule, pending } = useUndoDelete()
   const defaultExpanded = useMemo(() => [
@@ -73,6 +74,20 @@ export function Sidebar({
   const [createDocumentSlug, setCreateDocumentSlug] = useState<string | null>(null)
   const [fileMountPickerOpen, setFileMountPickerOpen] = useState(false)
   const [ompWorkspacePickerOpen, setOmpWorkspacePickerOpen] = useState(false)
+  const [projectArchiveError, setProjectArchiveError] = useState("")
+  const [archivingProject, setArchivingProject] = useState<string | null>(null)
+
+  const changeProjectArchive = async (slug: string, archived: boolean) => {
+    setProjectArchiveError("")
+    setArchivingProject(slug)
+    try {
+      await setProjectArchived(slug, archived)
+    } catch (cause) {
+      setProjectArchiveError(cause instanceof Error ? cause.message : "Could not update project archive")
+    } finally {
+      setArchivingProject(null)
+    }
+  }
 
   const refreshDocuments = useCallback(async () => {
     const [loose, entries] = await Promise.all([
@@ -283,11 +298,12 @@ export function Sidebar({
   }
 
   const items: FileTreeItem<string>[] = [
-    ...projects.filter((project) => !pending(`project:${project.slug}`)).map((project): FileTreeItem<string> => ({
+    ...projects.filter((project) => !project.archived && !pending(`project:${project.slug}`)).map((project): FileTreeItem<string> => ({
       id: project.slug, label: project.name, type: "root", isActive: tab.projectSlug === project.slug,
       onSelect: () => onProjectSelect?.(project.slug),
       onDelete: () => schedule(`project:${project.slug}`, project.name, () => deleteProject(project.slug)),
       actions: [
+        { label: `Archive ${project.name}`, icon: Archive, onClick: () => { if (!archivingProject) void changeProjectArchive(project.slug, true) } },
         { label: `New document in ${project.name}`, icon: FilePlus, onClick: () => setCreateDocumentSlug(project.slug) },
         { label: `${hasArchitecture(project.slug) ? "Open" : "Create"} architecture for ${project.name}`, icon: ArchitectureIcon,
           onClick: () => openArchitecture(project.slug) },
@@ -316,6 +332,22 @@ export function Sidebar({
       </div>
       <nav aria-label="Workspace" className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
         <FileTree label="Projects" items={items} controller={controller} loading={historiesLoading}
+          headerActions={<PopoverSelector
+            triggerLabel="Show all projects" triggerContent={<Archive className="h-3 w-3" />}
+            triggerClassName="h-auto rounded p-1 text-ink-faint opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100 aria-expanded:opacity-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
+            label="All projects" placement="below" panelClassName="left-auto right-0 w-56"
+            categories={[{ key: "projects", label: "All projects", items: projects.filter((project) => !pending(`project:${project.slug}`)) }]}
+            itemKey={(project) => project.slug} isSelected={(project) => !project.archived}
+            renderItem={(project) => <>
+              <span className="min-w-0 flex-1 truncate">{project.name}</span>
+              {project.archived ? <span className="flex shrink-0 items-center gap-1.5 text-xs text-ink-subtle"><ArchiveRestore className="h-3 w-3" />Restore</span>
+                : <span className="text-xs text-ink-faint">Active</span>}
+            </>}
+            onSelect={(project) => {
+              if (project.archived && !archivingProject) void changeProjectArchive(project.slug, false)
+            }}
+            emptyText="No projects"
+          />}
           create={{ label: "New project", placeholder: "Project name", onSubmit: async (name) => {
             const slug = await createProject(name)
             controller.expand(slug)
@@ -324,6 +356,7 @@ export function Sidebar({
           renderBeforeItem={(item) => item.data ? <ChatBranchPreview file={item.data} /> : null}
           onMoveToRoot={(path) => moveToProject(path, "")}
         />
+        {projectArchiveError && <p role="alert" className="px-2 py-1 text-xs text-danger">{projectArchiveError}</p>}
         <div role="separator" className="my-4 border-t border-divider/50" />
         <FileTree label="General" items={[...(generalChats.children ?? []), ...generalCategories]} controller={controller} loading={historiesLoading}
           create={generalChats.create}

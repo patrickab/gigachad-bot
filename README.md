@@ -12,6 +12,7 @@ A self-hosted LLM workspace for chat, research, and working with your own docume
 - **Work in worktrees**: a mounted git clone lists its worktrees, switches the mount to one, creates new ones from a pulled base branch and removes them.
 - **Code with omp agents**: open omp-web sessions in tabs. A project linked to a file mount lists the sessions of that directory under "code", the "OMP" section lists every other omp workspace.
 - **Organize projects**: keep conversations, files, canvases, architecture diagrams, and project memory together. Each chat uses its containing project's memory, independently of the selected tab.
+- **Archive projects**: hover a project row to archive it without deleting its content. Hover **Projects** and open the archive icon for an anchored popover of all projects, then select **Restore** to return an archived project to the active sidebar.
 - **Explore conversations**: branch from any message and merge branches back.
 - **Work with documents**: extract PDF content with [MinerU](https://github.com/opendatalab/mineru), attach live file references, and edit Obsidian vault files in place.
 - **Think visually**: draw on an infinite canvas, attach PDFs, and share canvas snapshots with a model.

@@ -60,6 +60,7 @@ interface FileTreeProps<T> {
   label: string
   loading?: boolean
   create?: FileTreeCreateAction
+  headerActions?: ReactNode
   renderBeforeItem?: (item: FileTreeItem<T>) => ReactNode
   onMoveToRoot?: (id: string) => Promise<void>
   /** Makes the section label a button named `label`, e.g. to open the section's settings. */
@@ -69,7 +70,7 @@ interface FileTreeProps<T> {
 const FILE_DRAG_TYPE = "application/x-file-tree-ids"
 const INDENT_BASE = 8
 const INDENT_STEP = 16
-const ACTIONS_CLASS = "flex shrink-0 items-center gap-0.5 max-w-0 overflow-hidden opacity-0 transition-opacity group-hover/row:max-w-24 group-hover/row:opacity-100 group-focus-within/row:max-w-24 group-focus-within/row:opacity-100"
+const ACTIONS_CLASS = "flex shrink-0 items-center gap-0.5 max-w-0 overflow-hidden opacity-0 transition-opacity group-hover/row:max-w-32 group-hover/row:opacity-100 group-focus-within/row:max-w-32 group-focus-within/row:opacity-100"
 const ACTION_CLASS = "shrink-0 rounded p-1 text-ink-faint hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
 
 /** Children `item` renders: up to `childLimit` unless `uncapped`, plus any later child holding the active item. */
@@ -93,7 +94,7 @@ function selectableIds<T>(items: FileTreeItem<T>[], controller: FileBranchContro
 }
 
 /** Render every hierarchy level with the same indentation, disclosure, selection and action rules. */
-export function FileTree<T>({ items, controller, label, loading, create, renderBeforeItem, onMoveToRoot, labelAction }: FileTreeProps<T>) {
+export function FileTree<T>({ items, controller, label, loading, create, headerActions, renderBeforeItem, onMoveToRoot, labelAction }: FileTreeProps<T>) {
   const [creation, setCreation] = useState<{
     parentId: string | null
     action: Extract<FileTreeCreateAction, { onSubmit: unknown }>
@@ -264,11 +265,14 @@ export function FileTree<T>({ items, controller, label, loading, create, renderB
       {labelAction
         ? <button type="button" aria-label={labelAction.label} onClick={labelAction.onClick} className="rounded text-xs font-medium text-ink-subtle hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">{label}</button>
         : <span className="text-xs font-medium text-ink-subtle">{label}</span>}
-      {create && <div className={ACTIONS_CLASS}>
-        <button aria-label={create.label} onClick={() => { void startCreate(null, create) }} className={ACTION_CLASS}>
-          <Plus className="h-3 w-3" />
-        </button>
-      </div>}
+      <div className="flex items-center gap-0.5">
+        {headerActions}
+        {create && <div className={ACTIONS_CLASS}>
+          <button aria-label={create.label} onClick={() => { void startCreate(null, create) }} className={ACTION_CLASS}>
+            <Plus className="h-3 w-3" />
+          </button>
+        </div>}
+      </div>
     </div>
     {creation?.parentId === null && <InlineCreateForm action={creation.action} depth={0}
       onDone={() => setCreation((current) => current === creation ? null : current)} onCancel={() => setCreation(null)} />}

@@ -338,6 +338,7 @@ export interface ProjectTab {
 export interface ProjectListItem {
   name: string
   slug: string
+  archived?: boolean
   tabs?: ProjectTab[]
 }
 
