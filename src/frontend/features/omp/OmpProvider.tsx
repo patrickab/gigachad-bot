@@ -86,11 +86,12 @@ function navigationMessage(view: OmpView): ShellMessage {
   return { type: "open-settings" }
 }
 
-/** Frame URL for a (re)load. A session loads as omp-web's own deep link, an `open-session` sent during its startup gets lost. */
+/** Deep-link the initial destination so omp-web's startup cannot select another workspace. */
 function frameUrl(ompWebUrl: string, view: OmpView): string {
-  if (view.kind !== "session") return ompWebUrl
+  if (view.kind === "settings") return ompWebUrl
   const url = new URL(ompWebUrl)
-  url.searchParams.set("session", view.sessionId)
+  if (view.kind === "session") url.searchParams.set("session", view.sessionId)
+  else url.searchParams.set("cwd", view.cwd)
   return url.href
 }
 
