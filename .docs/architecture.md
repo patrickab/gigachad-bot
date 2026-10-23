@@ -160,6 +160,7 @@ diagram / source edit -> serialized frontend reads/writes -> architecture route
 ## Git diffs and worktrees
 
 - Manage mounted git clones through `/api/fileroots/worktrees` and its operation endpoints.
+- `POST /api/fileroots/clone` clones an https/ssh link into `~/git/<repo>` (`git_worktree.clone_repository`, link validated by regex, `--` before the URL) and mounts it. It is not gated to mounted roots, since it creates one.
 
 | Concern | Contract |
 | --- | --- |

@@ -340,6 +340,11 @@ export async function addFileRoot(path: string): Promise<{ enabled: boolean; tre
   return post("/fileroots/roots", { path })
 }
 
+/** Clone an https or ssh git link into `~/git/<repository>` on the backend host and mount it. */
+export async function cloneFileRoot(url: string): Promise<{ enabled: boolean; tree: FileTreeNode[] }> {
+  return post("/fileroots/clone", { url })
+}
+
 export async function removeFileRoot(path: string): Promise<{ enabled: boolean; tree: FileTreeNode[] }> {
   return del(`/fileroots/roots?path=${encodeURIComponent(path)}`)
 }

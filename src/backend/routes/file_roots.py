@@ -61,6 +61,10 @@ class RootBody(BaseModel):
     path: str
 
 
+class CloneBody(BaseModel):
+    url: str
+
+
 class DirectoryListing(BaseModel):
     path: str
     parent: str | None
@@ -84,6 +88,16 @@ def add_root(body: RootBody, roots: FileRoots = Depends(get_file_roots)) -> File
         roots.add_root(body.path)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return FileTreeResponse(enabled=roots.enabled, tree=roots.tree())
+
+
+@router.post("/clone", response_model=FileTreeResponse)
+def clone_root(body: CloneBody, roots: FileRoots = Depends(get_file_roots)) -> FileTreeResponse:
+    """Clone an https or ssh repository link into `~/git/<repository>` and mount it."""
+    try:
+        roots.add_root(str(git_worktree.clone_repository(body.url)))
+    except git_worktree.WorktreeError as exc:
+        raise _git_refusal(exc) from exc
     return FileTreeResponse(enabled=roots.enabled, tree=roots.tree())
 
 

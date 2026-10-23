@@ -21,7 +21,7 @@ import { ChatBranchPreview } from "./ChatBranchPreview"
 import { FileMountPicker } from "./FileMountPicker"
 import { useWorktrees } from "./useWorktrees"
 import { useArchivedDirectories } from "./useArchivedDirectories"
-import { addRootFilesToProject, addFileRoot, createArchitectureSource, fileRootTree, removeFileRoot, listNotes, listProjectDocuments, moveDocument, removeDocument, writeDocument } from "@/lib/backend/api"
+import { addRootFilesToProject, addFileRoot, cloneFileRoot, createArchitectureSource, fileRootTree, removeFileRoot, listNotes, listProjectDocuments, moveDocument, removeDocument, writeDocument } from "@/lib/backend/api"
 import { useTab, useTabActive, type AppSurface, type WorkspaceItem } from "@/contexts/TabContext"
 import { useHostAccess } from "@/contexts/SettingsContext"
 import { factoryItem } from "@/features/factory/items"
@@ -390,6 +390,10 @@ export function Sidebar({
     </>}
     <FileMountPicker open={fileMountPickerOpen} onClose={() => setFileMountPickerOpen(false)} onConfirm={async (path) => {
       await addFileRoot(path)
+      await loadRootTree()
+      onRootsChanged?.()
+    }} onClone={async (url) => {
+      await cloneFileRoot(url)
       await loadRootTree()
       onRootsChanged?.()
     }} />

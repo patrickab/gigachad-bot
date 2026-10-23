@@ -1,5 +1,6 @@
-"""Worktrees of a cloned repository: list, create, remove, and delete their branches.
+"""Clones and their worktrees: clone, list, create, remove, and delete branches.
 
+- Clones live in `~/git/<repository>`
 - The clone (a directory holding a `.git` folder) is the integration checkout, worktrees branch off it
 - Worktrees live in `~/git/worktrees/<repository>/<name>`, the same layout as the `worktree` agent skill
 - Listing asks git, so worktrees made by the skill or by hand show up too
@@ -9,14 +10,25 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-WORKTREES_HOME = Path.home() / "git" / "worktrees"
+CLONES_HOME = Path.home() / "git"
+WORKTREES_HOME = CLONES_HOME / "worktrees"
 PREFERRED_BASE_BRANCH = "dev"
 _LOCAL_TIMEOUT_SECONDS = 10
 _NETWORK_TIMEOUT_SECONDS = 120
+_CLONE_TIMEOUT_SECONDS = 600
+
+_HOST = r"[A-Za-z0-9][A-Za-z0-9.-]*"
+_USER = r"(?:[\w.~-]+@)?"
+_REPOSITORY_URL = re.compile(
+    rf"(?:https://{_USER}{_HOST}(?::\d+)?/|ssh://{_USER}{_HOST}(?::\d+)?/|{_USER}{_HOST}:)"
+    r"(?:[\w.~-]+/)*(?P<name>[A-Za-z0-9][\w.-]*?)(?:\.git)?/?",
+    re.ASCII,
+)
 
 
 class WorktreeError(RuntimeError):
@@ -229,3 +241,26 @@ def delete_branch(repository: Path, branch: str, *, force: bool = False) -> None
         if "not fully merged" in str(exc):
             raise BranchNotMerged(str(exc)) from exc
         raise
+
+
+def clone_repository(url: str) -> Path:
+    """Clone an https or ssh repository *url* into `~/git/<repository>`.
+
+    - Accepts `https://host/owner/repo(.git)`, `ssh://git@host/owner/repo(.git)` and `git@host:owner/repo(.git)`
+    - An existing folder is refused, never reused
+    - A failed or timed out clone leaves no folder behind
+    """
+    url = url.strip()
+    match = _REPOSITORY_URL.fullmatch(url)
+    if match is None:
+        raise WorktreeError(f"Not an https or ssh git repository link: {url!r}")
+    target = CLONES_HOME / match["name"]
+    if target.exists():
+        raise WorktreeError(f"Directory already exists: {target}")
+    CLONES_HOME.mkdir(parents=True, exist_ok=True)
+    try:
+        _git(CLONES_HOME, "clone", "--", url, match["name"], timeout=_CLONE_TIMEOUT_SECONDS)
+    except WorktreeError:
+        shutil.rmtree(target, ignore_errors=True)
+        raise
+    return target.resolve()

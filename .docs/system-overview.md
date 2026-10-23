@@ -105,6 +105,7 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 
 ## Worktrees
 
+- Paste an https or ssh git link into the Code `+` dialog to clone it into `~/git/<repo>` and mount it. An existing folder is refused, a failed clone leaves nothing behind.
 - Switch a mounted git clone between worktrees without renaming its mount. The file tree, diff, and editor follow the selection, which persists per mount.
 - Find the remote default through `origin/HEAD`, falling back to the main checkout's branch. Reuse or create that checkout without pulling or switching the main checkout merely to find it.
 - Create a worktree from `dev` by default, otherwise the remote default. Creation fetches and fast-forwards the checked-out base before creating `~/git/worktrees/<repo>/<name>`; existing branches or folders are refused.

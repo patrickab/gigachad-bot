@@ -7,17 +7,23 @@ import { browseDirectories } from "@/lib/backend/api"
 import type { DirectoryListing } from "@/lib/domain/types"
 
 const HOME = "~"
+const REPOSITORY_LINK = /^(https:\/\/|ssh:\/\/|[\w.~-]+@[\w.-]+:)/
+
+/** Whether *text* reads as an https or ssh git link, the backend decides if it is a valid one. */
+const isRepositoryLink = (text: string) => REPOSITORY_LINK.test(text.trim())
 
 /** Pick a backend directory to add as file mount.
  *
  * - Starts at the backend user's home, the list follows what is typed into the path
  * - Clicking a directory opens it, the up button opens its parent
  * - Enter or "Add" adds the typed path
+ * - A pasted https or ssh git link is cloned instead, "Clone" replaces "Add"
  */
-export function FileMountPicker({ open, onClose, onConfirm }: {
+export function FileMountPicker({ open, onClose, onConfirm, onClone }: {
   open: boolean
   onClose: () => void
   onConfirm: (path: string) => Promise<void>
+  onClone: (url: string) => Promise<void>
 }) {
   const [path, setPath] = useState(HOME)
   const [listing, setListing] = useState<DirectoryListing | null>(null)
@@ -56,6 +62,13 @@ export function FileMountPicker({ open, onClose, onConfirm }: {
     if (open) void loadEvent(HOME, true)
   }, [open])
 
+  // A git link is no directory: drop the pending listing and its error instead of browsing it.
+  const typeTarget = (target: string) => {
+    if (!isRepositoryLink(target)) return void load(target, false)
+    requestRef.current++
+    setListingError("")
+  }
+
   const openDirectory = (target: string) => {
     void load(target, true)
     inputRef.current?.focus()
@@ -67,10 +80,10 @@ export function FileMountPicker({ open, onClose, onConfirm }: {
     setConfirming(true)
     setConfirmError("")
     try {
-      await onConfirm(target)
+      await (isRepositoryLink(target) ? onClone(target) : onConfirm(target))
       onClose()
     } catch (error) {
-      setConfirmError(error instanceof Error ? error.message : "Could not add this file mount")
+      setConfirmError(error instanceof Error ? error.message : isRepositoryLink(target) ? "Could not clone this repository" : "Could not add this file mount")
     }
     setConfirming(false)
   }
@@ -93,7 +106,7 @@ export function FileMountPicker({ open, onClose, onConfirm }: {
           ref={inputRef}
           aria-label="File mount path"
           value={path}
-          onChange={(event) => { setPath(event.target.value); void load(event.target.value, false) }}
+          onChange={(event) => { setPath(event.target.value); typeTarget(event.target.value) }}
           autoComplete="off"
           spellCheck={false}
           className="min-w-0 flex-1 rounded-lg border border-divider bg-surface/60 px-3 py-2 font-mono text-xs text-ink placeholder-ink-faint outline-none transition-all duration-200 focus:border-ink-muted"
@@ -103,7 +116,7 @@ export function FileMountPicker({ open, onClose, onConfirm }: {
           disabled={confirming || !path.trim()}
           className="shrink-0 rounded-lg border border-divider bg-surface/60 px-3 py-2 text-xs text-ink-muted hover:text-ink disabled:opacity-30 focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted transition-colors"
         >
-          Add
+          {isRepositoryLink(path) ? (confirming ? "Cloning…" : "Clone") : "Add"}
         </button>
       </form>
       {(confirmError || listingError) && <p role="alert" className="px-5 pb-2 text-xs text-danger">{confirmError || listingError}</p>}

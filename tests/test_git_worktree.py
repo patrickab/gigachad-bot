@@ -210,3 +210,63 @@ def test_worktree_routes_refuse_unmounted_roots_and_report_conflicts(clone):
     assert unmounted.status_code == 403
 
 
+@pytest.fixture
+def remote(tmp_path, monkeypatch):
+    """Clones go to `tmp_path/git`, git rewrites the `owner/repo` links below to a local upstream."""
+    monkeypatch.setattr(git_worktree, "CLONES_HOME", tmp_path / "git")
+    upstream = tmp_path / "upstream"
+    _git(tmp_path, "init", "-q", "-b", "main", str(upstream))
+    _commit(upstream, "readme.md", "hi\n")
+    rewrites = {"https://example.com/owner/repo.git": upstream, "git@example.com:owner/repo.git": upstream, "ssh://git@example.com/owner/repo": upstream}
+    monkeypatch.setenv("GIT_CONFIG_COUNT", str(len(rewrites)))
+    for index, (link, target) in enumerate(rewrites.items()):
+        monkeypatch.setenv(f"GIT_CONFIG_KEY_{index}", f"url.{target}.insteadOf")
+        monkeypatch.setenv(f"GIT_CONFIG_VALUE_{index}", link)
+    return SimpleNamespace(links=list(rewrites), home=tmp_path / "git")
+
+
+@pytest.mark.parametrize("link_index", [0, 1, 2])
+def test_clone_accepts_https_and_both_ssh_spellings_into_the_repository_folder(remote, link_index):
+    cloned = git_worktree.clone_repository(f"  {remote.links[link_index]}\n")
+
+    assert cloned == (remote.home / "repo").resolve()
+    assert (cloned / "readme.md").read_text() == "hi\n"
+    assert git_worktree.is_clone(cloned)
+
+
+@pytest.mark.parametrize("link", [
+    "", "repo", "/tmp/repo", "file:///tmp/repo", "http://example.com/owner/repo", "ext::sh -c touch% /tmp/pwned",
+    "--upload-pack=touch /tmp/pwned", "-oProxyCommand=x:owner/repo", "https://example.com/owner/..", "https://example.com/owner/re po",
+])
+def test_clone_refuses_links_that_are_not_https_or_ssh_repositories(remote, link):
+    with pytest.raises(git_worktree.WorktreeError, match="Not an https or ssh"):
+        git_worktree.clone_repository(link)
+    assert not remote.home.exists()
+
+
+def test_clone_refuses_existing_folder_and_leaves_no_folder_after_failure(remote, tmp_path):
+    (remote.home / "taken").mkdir(parents=True)
+    with pytest.raises(git_worktree.WorktreeError, match="already exists"):
+        git_worktree.clone_repository("https://example.com/owner/taken.git")
+
+    with pytest.raises(git_worktree.WorktreeError):
+        git_worktree.clone_repository("https://127.0.0.1:1/owner/unreachable.git")
+    assert not (remote.home / "unreachable").exists()
+
+
+def test_clone_route_mounts_the_clone_and_reports_refusals(remote):
+    saved = []
+    roots = FileRoots(repository=SimpleNamespace(load=lambda: [], save=saved.append))
+    app = FastAPI()
+    app.include_router(file_roots_route.router)
+    app.dependency_overrides[file_roots_route.get_file_roots] = lambda: roots
+    client = TestClient(app)
+
+    cloned = client.post("/api/fileroots/clone", json={"url": remote.links[1]})
+    again = client.post("/api/fileroots/clone", json={"url": remote.links[1]})
+    invalid = client.post("/api/fileroots/clone", json={"url": "nonsense"})
+
+    assert cloned.status_code == 200
+    assert saved == [[str((remote.home / "repo").resolve())]]
+    assert [node["name"] for node in cloned.json()["tree"]] == ["repo"]
+    assert (again.status_code, invalid.status_code) == (400, 400)
