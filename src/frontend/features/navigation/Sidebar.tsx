@@ -64,7 +64,7 @@ export function Sidebar({
   const { openMemoryViewer } = useMemoryViewer()
   const { schedule, pending } = useUndoDelete()
   const defaultExpanded = useMemo(() => [
-    "shared:canvases",
+    "shared", "shared:canvases",
     ...projects.flatMap((project) => ["chats", "canvases", "files"].map((category) => `project:${project.slug}:${category}`)),
   ], [projects])
   const controller = useFileTree({ storageKey: "expanded_workspace_projects", defaultExpanded })
@@ -318,6 +318,7 @@ export function Sidebar({
     ]
   }
 
+  const [generalChats, ...generalCategories] = buildCategories(null)
   const items: FileTreeItem<string>[] = [
     ...projects.filter((project) => !project.archived && !pending(`project:${project.slug}`)).map((project): FileTreeItem<string> => ({
       id: project.slug, label: project.name, type: "root", isActive: tab.projectSlug === project.slug,
@@ -335,8 +336,13 @@ export function Sidebar({
       onDropFiles: (paths) => importFiles(project.slug, paths),
       children: buildCategories(project),
     })),
+    {
+      id: "shared", label: "general", type: "root",
+      create: generalChats.create,
+      onMoveHere: (path) => moveToProject(path, ""),
+      children: [...generalCategories, ...(generalChats.children ?? [])],
+    },
   ]
-  const [generalChats, ...generalCategories] = buildCategories(null)
   const archivedSessions = omp.archivedSessions()
   const directoryEntries = [
     ...rootTreeData.filter((node) => !pending(`root:${node.mount ?? node.path}`)).map((node) => ({ key: node.mount ?? node.path, name: node.name })),
@@ -371,12 +377,6 @@ export function Sidebar({
           onMoveToRoot={(path) => moveToProject(path, "")}
         />
         {projectArchiveError && <p role="alert" className="px-2 py-1 text-xs text-danger">{projectArchiveError}</p>}
-        <div role="separator" className="my-4 border-t border-divider/50" />
-        <FileTree label="General" items={[...(generalChats.children ?? []), ...generalCategories]} controller={controller} loading={historiesLoading}
-          create={generalChats.create}
-          renderBeforeItem={(item) => item.data ? <ChatBranchPreview file={item.data} /> : null}
-          onMoveToRoot={(path) => moveToProject(path, "")}
-        />
         <div role="separator" className="my-4 border-t border-divider/50" />
         <FileTree label="Code | Filemounts" items={[...buildMounts(rootTreeData), ...buildUnmounted(), ...(archivedSessions ? [archivedSessions] : [])]} controller={fileMountController}
           headerActions={<ArchiveSelector noun="directories" entries={directoryEntries} onRestore={(path) => setDirectoryArchived(path, false)} />}

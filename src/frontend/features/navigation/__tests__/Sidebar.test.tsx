@@ -110,7 +110,7 @@ describe("Project navigation", () => {
   it("opens immediate categories by default and lists mounted roots collapsed under Code | Filemounts", async () => {
     localStorage.setItem("expanded_workspace_projects", "[]")
     const view = render(<Sidebar appMode="chat" />)
-    const general = within(view.getByLabelText("General"))
+    const general = within(view.getByLabelText("general contents"))
     expect(general.getByRole("button", { name: "canvases" })).toHaveAttribute("aria-expanded", "true")
     expect(general.queryByRole("button", { name: "files" })).not.toBeInTheDocument()
     const fileMounts = within(view.getByLabelText("Code | Filemounts"))
@@ -437,7 +437,7 @@ describe("Project navigation", () => {
     fireEvent.click(empty.getByRole("button", { name: "New chat in Empty project" }))
     expect(onNewChat).toHaveBeenLastCalledWith("empty")
 
-    const general = within(view.getByLabelText("General"))
+    const general = within(view.getByLabelText("general contents"))
     fireEvent.click(await general.findByText("loose-board"))
     expect(onCanvasSelect).toHaveBeenLastCalledWith("chat_histories/_notes/loose-board.canvas", "")
   })
@@ -530,7 +530,7 @@ describe("Project navigation", () => {
     })
     fireEvent.change(view.getByRole("textbox", { name: "Draft Branch" }), { target: { value: "Keep this draft" } })
     const navigation = within(view.getByRole("navigation", { name: "Workspace" }))
-    const general = within(navigation.getByLabelText("General"))
+    const general = within(await navigation.findByLabelText("general contents"))
     const history = await general.findByRole("button", { name: "loose" })
     expect(general.queryByRole("button", { name: "child" })).not.toBeInTheDocument()
     expect(navigation.queryByLabelText("Proj contents")).not.toBeInTheDocument()
@@ -559,7 +559,7 @@ describe("Project navigation", () => {
     api.listChatHistories.mockResolvedValue({ files: ["loose.json"] })
     api.moveHistoryItem.mockRejectedValue(new Error("Storage unavailable"))
     const view = render(<BranchProvider onFileClick={vi.fn()}><Sidebar appMode="chat" /></BranchProvider>)
-    const general = within(view.getByLabelText("General"))
+    const general = within(await view.findByLabelText("general contents"))
     const history = await general.findByRole("button", { name: "loose" })
     const dataTransfer = { types: ["text/plain"], getData: (type: string) => type === "text/plain" ? "loose.json" : "" }
     fireEvent.drop(view.getByRole("button", { name: "Proj" }), { dataTransfer })
