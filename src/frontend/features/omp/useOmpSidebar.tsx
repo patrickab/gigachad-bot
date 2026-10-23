@@ -22,7 +22,7 @@ const SESSION_LIMIT = 5
  *
  * - Sessions nest their forks, the running ones carry a "running" badge
  * - Selecting a session shows it in the current tab, `+` starts a session in a new tab like a new chat
- * - Sessions archive from their row, the "archived" folder of the Code | Filemounts section restores them
+ * - Sessions archive from their row, the "archived" folder of the Code section restores them
  * - Everything is empty while omp-web never answered
  */
 export function useOmpSidebar({ onOpen, workspaceActions }: {

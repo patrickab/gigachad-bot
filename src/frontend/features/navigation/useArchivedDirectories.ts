@@ -21,7 +21,7 @@ function parse(stored: string): string[] {
   } catch { return [] }
 }
 
-/** Directories of the Code | Filemounts section archived on this device, shared across tabs. */
+/** Directories of the Code section archived on this device, shared across tabs. */
 export function useArchivedDirectories() {
   const stored = useSyncExternalStore(subscribe, () => localStorage.getItem(STORAGE_KEY) ?? "[]", () => "[]")
   const archived = useMemo(() => new Set(parse(stored)), [stored])

@@ -107,13 +107,13 @@ function WorkspaceDraft() {
 }
 
 describe("Project navigation", () => {
-  it("opens immediate categories by default and lists mounted roots collapsed under Code | Filemounts", async () => {
+  it("opens immediate categories by default and lists mounted roots collapsed under Code", async () => {
     localStorage.setItem("expanded_workspace_projects", "[]")
     const view = render(<Sidebar appMode="chat" />)
-    const general = within(view.getByLabelText("General"))
+    const general = within(view.getByLabelText("general contents"))
     expect(general.getByRole("button", { name: "canvases" })).toHaveAttribute("aria-expanded", "true")
     expect(general.queryByRole("button", { name: "files" })).not.toBeInTheDocument()
-    const fileMounts = within(view.getByLabelText("Code | Filemounts"))
+    const fileMounts = within(view.getByLabelText("Code"))
     expect(await fileMounts.findByRole("button", { name: "source" })).toHaveAttribute("aria-expanded", "false")
     expect(fileMounts.queryByRole("button", { name: "first.md" })).not.toBeInTheDocument()
 
@@ -137,7 +137,7 @@ describe("Project navigation", () => {
   it("reopens a file mount with its contents collapsed, ignoring saved expansion", async () => {
     localStorage.setItem("expanded_workspace_projects", JSON.stringify({ "/source": true }))
     const view = render(<Sidebar appMode="chat" />)
-    const fileMounts = within(view.getByLabelText("Code | Filemounts"))
+    const fileMounts = within(view.getByLabelText("Code"))
     const source = await fileMounts.findByRole("button", { name: "source" })
     expect(source).toHaveAttribute("aria-expanded", "false")
     fireEvent.click(source)
@@ -152,7 +152,7 @@ describe("Project navigation", () => {
   it("opens the diff of a file mount from its hover action", async () => {
     const onDiffSelect = vi.fn()
     const view = render(<Sidebar appMode="chat" onDiffSelect={onDiffSelect} />)
-    fireEvent.click(await within(view.getByLabelText("Code | Filemounts")).findByRole("button", { name: "Open diff for source" }))
+    fireEvent.click(await within(view.getByLabelText("Code")).findByRole("button", { name: "Open diff for source" }))
     expect(onDiffSelect).toHaveBeenCalledWith("/source")
   })
 
@@ -166,7 +166,7 @@ describe("Project navigation", () => {
     api.removeWorktree.mockRejectedValueOnce(new ApiError("contains modified or untracked files", 409))
     try {
       const view = render(<Sidebar appMode="chat" />)
-      const fileMounts = within(view.getByLabelText("Code | Filemounts"))
+      const fileMounts = within(view.getByLabelText("Code"))
       fireEvent.click(await fileMounts.findByRole("button", { name: "source" }))
       fireEvent.click(await fileMounts.findByRole("button", { name: /^Worktrees/ }))
       const mainCheckout = fileMounts.getByRole("button", { name: "dev" })
@@ -247,7 +247,7 @@ describe("Project navigation", () => {
       const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
       fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
       expect(within(view.getByLabelText("Proj contents")).queryByRole("button", { name: "Sessions" })).not.toBeInTheDocument()
-      const section = within(view.getByLabelText("Code | Filemounts"))
+      const section = within(view.getByLabelText("Code"))
       fireEvent.click(await section.findByRole("button", { name: "proj" }))
       fireEvent.click(within(section.getByRole("group", { name: "proj contents" })).getByRole("button", { name: "Sessions" }))
       const code = within(section.getByRole("group", { name: "Sessions contents" }))
@@ -277,7 +277,7 @@ describe("Project navigation", () => {
     try {
       const onItemOpen = vi.fn()
       const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
-      const section = within(view.getByLabelText("Code | Filemounts"))
+      const section = within(view.getByLabelText("Code"))
       fireEvent.click(await section.findByRole("button", { name: "proj" }))
       const mount = within(section.getByRole("group", { name: "proj contents" }))
       fireEvent.click(mount.getByRole("button", { name: "Sessions" }))
@@ -318,7 +318,7 @@ describe("Project navigation", () => {
     }
     try {
       const view = render(<Sidebar appMode="chat" />)
-      const section = within(view.getByLabelText("Code | Filemounts"))
+      const section = within(view.getByLabelText("Code"))
       await section.findByRole("button", { name: "source" })
 
       fireEvent.click(section.getByRole("button", { name: "Archive source" }))
@@ -388,7 +388,7 @@ describe("Project navigation", () => {
     api.archiveOmpSession.mockRejectedValueOnce(new ApiError("session_has_children", 409))
     try {
       const view = render(<Sidebar appMode="chat" />)
-      const section = within(view.getByLabelText("Code | Filemounts"))
+      const section = within(view.getByLabelText("Code"))
       fireEvent.click(section.getByRole("button", { name: "tool" }))
       fireEvent.click(within(section.getByRole("group", { name: "tool contents" })).getByRole("button", { name: "Sessions" }))
 
@@ -437,7 +437,7 @@ describe("Project navigation", () => {
     fireEvent.click(empty.getByRole("button", { name: "New chat in Empty project" }))
     expect(onNewChat).toHaveBeenLastCalledWith("empty")
 
-    const general = within(view.getByLabelText("General"))
+    const general = within(view.getByLabelText("general contents"))
     fireEvent.click(await general.findByText("loose-board"))
     expect(onCanvasSelect).toHaveBeenLastCalledWith("chat_histories/_notes/loose-board.canvas", "")
   })
@@ -474,7 +474,7 @@ describe("Project navigation", () => {
     const view = render(<Sidebar appMode="chat" />)
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
-    const shared = within(view.getByLabelText("Code | Filemounts"))
+    const shared = within(view.getByLabelText("Code"))
     fireEvent.click(await shared.findByRole("button", { name: "source" }))
     const first = shared.getByRole("button", { name: "first.md" })
     const second = shared.getByRole("button", { name: "second.md" })
@@ -530,7 +530,7 @@ describe("Project navigation", () => {
     })
     fireEvent.change(view.getByRole("textbox", { name: "Draft Branch" }), { target: { value: "Keep this draft" } })
     const navigation = within(view.getByRole("navigation", { name: "Workspace" }))
-    const general = within(navigation.getByLabelText("General"))
+    const general = within(await navigation.findByLabelText("general contents"))
     const history = await general.findByRole("button", { name: "loose" })
     expect(general.queryByRole("button", { name: "child" })).not.toBeInTheDocument()
     expect(navigation.queryByLabelText("Proj contents")).not.toBeInTheDocument()
@@ -559,7 +559,7 @@ describe("Project navigation", () => {
     api.listChatHistories.mockResolvedValue({ files: ["loose.json"] })
     api.moveHistoryItem.mockRejectedValue(new Error("Storage unavailable"))
     const view = render(<BranchProvider onFileClick={vi.fn()}><Sidebar appMode="chat" /></BranchProvider>)
-    const general = within(view.getByLabelText("General"))
+    const general = within(await view.findByLabelText("general contents"))
     const history = await general.findByRole("button", { name: "loose" })
     const dataTransfer = { types: ["text/plain"], getData: (type: string) => type === "text/plain" ? "loose.json" : "" }
     fireEvent.drop(view.getByRole("button", { name: "Proj" }), { dataTransfer })
