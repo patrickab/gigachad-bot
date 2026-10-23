@@ -32,6 +32,7 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 - OMP tabs require `omp` on backend `PATH` and access to the private `patrickab/ompweb` fork. Startup can provision its checkout; set `GIGACHAD_OMP_WEB=0` to skip it.
 - The factory launcher can provision its separate engine checkout, configuration, and database while preserving existing state. Set `GIGACHAD_FACTORY=0` to skip it. Running sandboxed tasks still requires the sandbox runtime setup.
 - Keep production backend services private. Development launchers are not production deployment. Remote inference, identity, production setup, and service updates belong to the maintained runbooks indexed in [AGENTS.md](../AGENTS.md#documentation).
+- Failed startup reads show a shared warning after an error or a 15-second timeout. Retry reloads only failed data without losing drafts or already-loaded content.
 
 ## Model chat, context, and projects
 

@@ -1,7 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useState } from "react"
 import type React from "react"
+import { useStartupRead } from "@/contexts/StartupReadContext"
 import { fetchModels, fetchPrompts, saveModelDefaults as saveModelDefaultsRequest, saveModelProviders as saveModelProvidersRequest, saveModelTabOrder as saveModelTabOrderRequest } from "@/lib/backend/api"
 import type { ChatRequest, Message, ModelDefaults, ModelProvider, ModelsResponse, Usage } from "@/lib/domain/types"
 import { useChatStream, type ChatStreamCompletion, type UseChatStreamReturn } from "./useChatStream"
@@ -14,6 +15,7 @@ interface UseChatReturn {
   cancel: () => void
   reset: () => Promise<void>
   models: ModelsResponse | null
+  modelLoadError: string | null
   saveModelProviders: (providers: ModelProvider[]) => Promise<void>
   saveModelTabOrder: (order: string[]) => Promise<void>
   saveModelDefaults: (defaults: ModelDefaults) => Promise<void>
@@ -33,10 +35,8 @@ export function useChat(): UseChatReturn {
   const [models, setModels] = useState<ModelsResponse | null>(null)
   const [prompts, setPrompts] = useState<Record<string, string>>({})
 
-  useEffect(() => {
-    fetchModels().then(setModels).catch(console.error)
-    fetchPrompts().then(setPrompts).catch(console.error)
-  }, [])
+  const { error: modelLoadError } = useStartupRead("Models", fetchModels, setModels)
+  useStartupRead("Prompts", fetchPrompts, setPrompts)
 
   const saveModelProviders = useCallback(async (providers: ModelProvider[]) => {
     setModels(await saveModelProvidersRequest(providers))
@@ -61,6 +61,7 @@ export function useChat(): UseChatReturn {
     cancel,
     reset,
     models,
+    modelLoadError,
     saveModelProviders,
     saveModelTabOrder,
     saveModelDefaults,

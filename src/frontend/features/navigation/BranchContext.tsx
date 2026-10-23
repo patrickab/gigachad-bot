@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react"
 import {
   createBranch as apiCreateBranch,
   mergeBranch as apiMergeBranch,
@@ -10,6 +10,7 @@ import {
   moveHistoryItem as apiMoveHistoryItem,
 } from "@/lib/backend/api"
 import type { BranchMeta } from "@/lib/domain/types"
+import { useStartupRead } from "@/contexts/StartupReadContext"
 
 /** Chat id -> history filename. */
 type ChatIdMap = Map<string, string>
@@ -39,11 +40,11 @@ interface Histories {
   branchData: Record<string, BranchMeta>
 }
 
-/** Fetch the chat history list and branch metadata; either failing yields an empty value. */
+/** Fetch both history sources before applying an explicit refresh. */
 async function fetchHistories(): Promise<Histories> {
   const [histData, branchData] = await Promise.all([
-    listChatHistories().catch(() => ({ files: [] as string[] })),
-    fetchBranchMeta().catch(() => ({} as Record<string, BranchMeta>)),
+    listChatHistories(),
+    fetchBranchMeta(),
   ])
   const sortedFiles = (histData.files ?? []).slice().sort((a: string, b: string) => a.localeCompare(b))
   return { sortedFiles, branchData }
@@ -57,23 +58,23 @@ export function BranchProvider({ onFileClick, onHistoriesMoved, children }: {
 }) {
   const [branchMeta, setBranchMeta] = useState<Record<string, BranchMeta>>({})
   const [rootFiles, setRootFiles] = useState<string[]>([])
-  const [historiesLoading, setHistoriesLoading] = useState(true)
   const [activeFile, setActiveFile] = useState<string | null>(null)
   const [activeQaIndex, setActiveQaIndex] = useState<number | null>(null)
 
   const applyHistories = useCallback(({ sortedFiles, branchData }: Histories) => {
     setRootFiles(sortedFiles)
     setBranchMeta(branchData)
-    setHistoriesLoading(false)
   }, [])
 
   const refreshAll = useCallback(async () => {
     applyHistories(await fetchHistories())
   }, [applyHistories])
 
-  useEffect(() => {
-    fetchHistories().then(applyHistories)
-  }, [applyHistories])
+  const { loading: historiesLoading } = useStartupRead("Chat histories", listChatHistories, (histData) => {
+    setRootFiles((histData.files ?? []).slice().sort((a: string, b: string) => a.localeCompare(b)))
+  })
+  const loadBranchMeta = useCallback((signal: AbortSignal) => fetchBranchMeta(undefined, signal), [])
+  useStartupRead("Branch metadata", loadBranchMeta, setBranchMeta)
 
   const chatIdMap = useMemo(() => buildChatIdMap(branchMeta), [branchMeta])
 

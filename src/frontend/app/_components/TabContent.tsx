@@ -61,7 +61,7 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
   const factoryItem = tab.workspaceItem?.kind === "factory" ? tab.workspaceItem : null
   const ompView = ompItem?.omp ?? null
   const chat = useChat()
-  const { messages, isStreaming, cancel, reset, models, saveModelProviders, saveModelTabOrder, saveModelDefaults, prompts, setPrompts, setMessages, totalUsage, setTotalUsage } = chat
+  const { messages, isStreaming, cancel, reset, models, modelLoadError, saveModelProviders, saveModelTabOrder, saveModelDefaults, prompts, setPrompts, setMessages, totalUsage, setTotalUsage } = chat
   const { refreshAll, createBranch, setActiveFile, setActiveQaIndex } = useBranches()
   const { researchEnabled } = useEnabledTools()
   const { collapsed: sidebarCollapsed, toggleCollapsed: toggleSidebar } = useSidebar()
@@ -273,7 +273,7 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
                 <OmpReasoningSelector view={ompView} />
               </TopBarPill>}
               {ompView && <TopBarTransparent>
-                <OmpModelSelector view={ompView} models={models} onProvidersChange={saveModelProviders} onTabOrderChange={saveModelTabOrder} onDefaultsChange={saveModelDefaults} placement="below" />
+                <OmpModelSelector view={ompView} models={models} loadError={modelLoadError} onProvidersChange={saveModelProviders} onTabOrderChange={saveModelTabOrder} onDefaultsChange={saveModelDefaults} placement="below" />
               </TopBarTransparent>}
             </>}
             right={<TopBarPill>
@@ -293,7 +293,7 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
             left={<>
               <TopBarTransparent>{sidebarToggle}</TopBarTransparent>
               <TopBarTransparent>
-                <ModelDropdown models={models} selectedModel={config.selectedModel} onSelect={(model) => updateConfig({ selectedModel: model })} onProvidersChange={saveModelProviders} onTabOrderChange={saveModelTabOrder} onDefaultsChange={saveModelDefaults} placement="below" />
+                <ModelDropdown models={models} loadError={modelLoadError} selectedModel={config.selectedModel} onSelect={(model) => updateConfig({ selectedModel: model })} onProvidersChange={saveModelProviders} onTabOrderChange={saveModelTabOrder} onDefaultsChange={saveModelDefaults} placement="below" />
               </TopBarTransparent>
             </>}
             right={<>
@@ -314,7 +314,7 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
                 <ReasoningSelector levels={reasoningLevels} reasoningEffort={reasoningEffort} onReasoningChange={(v) => updateConfig({ reasoningEffort: v })} placement="below" />
               </TopBarPill>
               <TopBarTransparent>
-                <ModelDropdown models={models} selectedModel={config.selectedModel} onSelect={(m) => updateConfig({ selectedModel: m })} onProvidersChange={saveModelProviders} onTabOrderChange={saveModelTabOrder} onDefaultsChange={saveModelDefaults} placement="below" chatColumn={chatColumn} />
+                <ModelDropdown models={models} loadError={modelLoadError} selectedModel={config.selectedModel} onSelect={(m) => updateConfig({ selectedModel: m })} onProvidersChange={saveModelProviders} onTabOrderChange={saveModelTabOrder} onDefaultsChange={saveModelDefaults} placement="below" chatColumn={chatColumn} />
               </TopBarTransparent>
               <TopBarTransparent ref={setWideToggleSlot} />
             </>}

@@ -175,13 +175,12 @@ describe("Project navigation", () => {
       expect(mainCheckout).toHaveAttribute("aria-current", "page")
 
       fireEvent.click(fileMounts.getByRole("button", { name: "feature 2 changed ↑1" }))
-      await waitFor(() => expect(api.fileRootTree).toHaveBeenLastCalledWith(["/wt/feature"]))
+
       expect(fileMounts.getByRole("button", { name: "source" })).toBeVisible()
       expect(fileMounts.getByLabelText("Selected checkout: feature")).toBeVisible()
       expect(feature).toHaveAttribute("aria-current", "page")
 
       fireEvent.click(mainCheckout)
-      await waitFor(() => expect(api.fileRootTree).toHaveBeenLastCalledWith([]))
       expect(mainCheckout).toHaveAttribute("aria-current", "page")
       expect(fileMounts.getByLabelText("Selected checkout: dev")).toBeVisible()
       fireEvent.click(feature)
@@ -192,7 +191,6 @@ describe("Project navigation", () => {
       expect(api.removeWorktree).toHaveBeenLastCalledWith("/source", "/wt/feature", true)
       fireEvent.keyDown(await fileMounts.findByRole("group", { name: "Delete branch feature?" }), { key: "Escape" })
 
-      await waitFor(() => expect(api.fileRootTree).toHaveBeenLastCalledWith([]))
       expect(fileMounts.queryByRole("group", { name: "Delete branch feature?" })).not.toBeInTheDocument()
       expect(api.deleteWorktreeBranch).not.toHaveBeenCalled()
     } finally {

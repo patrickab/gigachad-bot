@@ -74,8 +74,8 @@ function fileForm(file: File | Blob, filename?: string): FormData {
   return form
 }
 
-export async function fetchModels(): Promise<ModelsResponse> {
-  return request<ModelsResponse>("/models")
+export async function fetchModels(signal?: AbortSignal): Promise<ModelsResponse> {
+  return request<ModelsResponse>("/models", { signal })
 }
 
 export interface ProviderUsageWindow {
@@ -98,8 +98,8 @@ export async function fetchProviderUsage(refresh = false): Promise<{ reports: Pr
   return request<{ reports: ProviderUsageReport[] }>(`/provider-usage${refresh ? "?refresh=true" : ""}`)
 }
 
-export async function fetchReasoningLevels(model: string): Promise<ReasoningLevels> {
-  return request<ReasoningLevels>(`/models/reasoning-levels?model=${encodeURIComponent(model)}`)
+export async function fetchReasoningLevels(model: string, signal?: AbortSignal): Promise<ReasoningLevels> {
+  return request<ReasoningLevels>(`/models/reasoning-levels?model=${encodeURIComponent(model)}`, { signal })
 }
 
 export async function saveModelProviders(providers: ModelProvider[]): Promise<ModelsResponse> {
@@ -122,12 +122,12 @@ export async function saveModelDefaults(defaults: ModelDefaults): Promise<Models
   return put<ModelsResponse>("/models/defaults", defaults)
 }
 
-export async function fetchBackendConfig(): Promise<BackendConfig> {
-  return request<BackendConfig>("/config")
+export async function fetchBackendConfig(signal?: AbortSignal): Promise<BackendConfig> {
+  return request<BackendConfig>("/config", { signal })
 }
 
-export async function fetchPrompts(): Promise<Record<string, string>> {
-  const data = await request<{ prompts: Record<string, string> }>("/prompts")
+export async function fetchPrompts(signal?: AbortSignal): Promise<Record<string, string>> {
+  const data = await request<{ prompts: Record<string, string> }>("/prompts", { signal })
   return data.prompts
 }
 
@@ -179,13 +179,13 @@ export function createChatStream(req: ChatRequest): SSEStreamResult {
   return createSSEStream("/chat", body)
 }
 
-export async function listChatHistories(): Promise<ChatHistoriesResponse> {
-  return request<ChatHistoriesResponse>("/chat-histories")
+export async function listChatHistories(signal?: AbortSignal): Promise<ChatHistoriesResponse> {
+  return request<ChatHistoriesResponse>("/chat-histories", { signal })
 }
 
-export async function fetchBranchMeta(dirs?: string[]): Promise<Record<string, BranchMeta>> {
+export async function fetchBranchMeta(dirs?: string[], signal?: AbortSignal): Promise<Record<string, BranchMeta>> {
   const params = dirs && dirs.length > 0 ? `?dirs=${dirs.map(encodeURIComponent).join(",")}` : ""
-  return request(`/chat-histories/branch-meta${params}`)
+  return request(`/chat-histories/branch-meta${params}`, { signal })
 }
 
 export async function loadChatHistory(filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null; title: string | null; usage: Usage | null; parent_id: string | null; branch_message_idx: number | null; children: BranchMeta["children"] }> {
@@ -258,13 +258,13 @@ export async function deleteAttachment(chatId: string, filename: string, slug: s
   await del(`/files/chat/${chatId}/att/${encodeURIComponent(filename)}${toQuery({ slug })}`)
 }
 
-export async function listRootFiles(): Promise<{ enabled: boolean; files: RootFile[] }> {
-  return request("/fileroots/files")
+export async function listRootFiles(signal?: AbortSignal): Promise<{ enabled: boolean; files: RootFile[] }> {
+  return request("/fileroots/files", { signal })
 }
 
 /** Every mount's tree, a mount listed with one of its `worktrees` shows that worktree instead. */
-export async function fileRootTree(worktrees: string[] = []): Promise<{ enabled: boolean; tree: FileTreeNode[] }> {
-  return request(`/fileroots/tree${toQuery({ worktree: worktrees })}`)
+export async function fileRootTree(worktrees: string[] = [], signal?: AbortSignal): Promise<{ enabled: boolean; tree: FileTreeNode[] }> {
+  return request(`/fileroots/tree${toQuery({ worktree: worktrees })}`, { signal })
 }
 
 export interface Worktree {
@@ -430,8 +430,8 @@ export async function writeReference(path: string, content: string): Promise<voi
   throw new Error(`Not a text document: ${path}`)
 }
 
-export async function listProjectDocuments(slug: string): Promise<ProjectDocument[]> {
-  const data = await request<{ documents: ProjectDocument[] }>(`/documents?slug=${encodeURIComponent(slug)}`)
+export async function listProjectDocuments(slug: string, signal?: AbortSignal): Promise<ProjectDocument[]> {
+  const data = await request<{ documents: ProjectDocument[] }>(`/documents?slug=${encodeURIComponent(slug)}`, { signal })
   return data.documents
 }
 
@@ -440,8 +440,8 @@ export async function listAllDocuments(): Promise<ProjectDocument[]> {
   return data.documents
 }
 
-export async function listNotes(): Promise<ProjectDocument[]> {
-  const data = await request<{ documents: ProjectDocument[] }>("/documents/notes")
+export async function listNotes(signal?: AbortSignal): Promise<ProjectDocument[]> {
+  const data = await request<{ documents: ProjectDocument[] }>("/documents/notes", { signal })
   return data.documents
 }
 
@@ -508,8 +508,8 @@ export async function storeDrawing(filename: string, blob: Blob): Promise<void> 
   await request("/documents/store-drawing", { method: "POST", body: fileForm(blob, filename) })
 }
 
-export async function listProjects(): Promise<ProjectListItem[]> {
-  const data = await request<{ projects: ProjectListItem[] }>("/projects")
+export async function listProjects(signal?: AbortSignal): Promise<ProjectListItem[]> {
+  const data = await request<{ projects: ProjectListItem[] }>("/projects", { signal })
   return data.projects
 }
 
@@ -604,8 +604,8 @@ export async function getMemories(scope: "global" | "project", projectSlug?: str
   return request(`/memory/memories${toQuery({ scope, project_slug: projectSlug })}`)
 }
 
-export async function getCategories(scope: "global" | "project", projectSlug?: string | null): Promise<{ categories: CategoryDef[] }> {
-  return request(`/memory/categories${toQuery({ scope, project_slug: projectSlug })}`)
+export async function getCategories(scope: "global" | "project", projectSlug?: string | null, signal?: AbortSignal): Promise<{ categories: CategoryDef[] }> {
+  return request(`/memory/categories${toQuery({ scope, project_slug: projectSlug })}`, { signal })
 }
 
 export async function saveCategories(scope: "global" | "project", categories: CategoryDef[], projectSlug?: string | null): Promise<void> {
@@ -624,8 +624,8 @@ export async function remapOrphanedCategory(
   })
 }
 
-export async function fetchOmpOverview(): Promise<OmpOverview> {
-  return request<OmpOverview>("/omp/overview")
+export async function fetchOmpOverview(signal?: AbortSignal): Promise<OmpOverview> {
+  return request<OmpOverview>("/omp/overview", { signal })
 }
 
 export async function addOmpWorkspace(path: string): Promise<OmpWorkspace> {

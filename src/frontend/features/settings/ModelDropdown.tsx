@@ -14,6 +14,7 @@ interface ProviderTab { label: string; models: string[] }
 
 interface ModelDropdownProps {
   models: ModelsResponse | null
+  loadError?: string | null
   selectedModel: string
   onSelect: (model: string) => void
   onProvidersChange: (providers: ModelProvider[]) => Promise<void>
@@ -145,7 +146,7 @@ function shortName(model: string): string {
   return model.slice(model.lastIndexOf("/") + 1)
 }
 
-export function ModelDropdown({ models, selectedModel, onSelect, onProvidersChange, onTabOrderChange, onDefaultsChange, placement = "above", chatColumn }: ModelDropdownProps) {
+export function ModelDropdown({ models, loadError, selectedModel, onSelect, onProvidersChange, onTabOrderChange, onDefaultsChange, placement = "above", chatColumn }: ModelDropdownProps) {
   const [configuring, setConfiguring] = useState(false)
   const [settingsTab, setSettingsTab] = useState<"providers" | "defaults">("providers")
   const [error, setError] = useState<string | null>(null)
@@ -194,7 +195,9 @@ export function ModelDropdown({ models, selectedModel, onSelect, onProvidersChan
     fetchOmpCatalog().then(setOmpCatalog).catch(() => undefined)
   }, [configuring, ompCatalog])
 
-  if (models === null) return <Skeleton className="mx-2 h-4 w-28" />
+  if (models === null) return loadError
+    ? <span className="mx-2 text-xs text-ink-muted">Models unavailable</span>
+    : <Skeleton className="mx-2 h-4 w-28" />
 
   const byDisplayName = (a: string, b: string) => displayName(a).localeCompare(displayName(b))
   const available: ProviderTab[] = [

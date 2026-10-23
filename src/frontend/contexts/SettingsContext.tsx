@@ -1,8 +1,9 @@
 "use client"
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
+import { createContext, useContext, useState, type ReactNode } from "react"
 import { fetchBackendConfig } from "@/lib/backend/api"
 import { STORAGE_KEY_NEOVIM } from "@/lib/backend/config"
+import { useStartupRead } from "@/contexts/StartupReadContext"
 
 export interface TabConfig {
   selectedModel: string
@@ -90,24 +91,18 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [ompWebUrl, setOmpWebUrl] = useState<string | null>(null)
   const [hostAccess, setHostAccess] = useState(false)
 
-  useEffect(() => {
-    fetchBackendConfig()
-      .then((cfg) => {
-        setTabDefaults((prev) => ({
-          ...prev,
-          selectedModel: prev.selectedModel || cfg.default_model,
-          // Backend value applies only while the flag is still the `true` default.
-          downscaleImages: prev.downscaleImages ? cfg.downscale_images : prev.downscaleImages,
-        }))
-        setOCRModel((prev) => prev || cfg.vision_model)
-        setNeovimAvailable(cfg.neovim_available)
-        setOmpWebUrl(cfg.omp_web_url)
-        setHostAccess(cfg.host_access)
-      })
-      .catch(() => {
-        // backend unreachable, keep hardcoded fallbacks
-      })
-  }, [])
+  useStartupRead("Settings", fetchBackendConfig, (cfg) => {
+    setTabDefaults((prev) => ({
+      ...prev,
+      selectedModel: prev.selectedModel || cfg.default_model,
+      // Backend value applies only while the flag is still the `true` default.
+      downscaleImages: prev.downscaleImages ? cfg.downscale_images : prev.downscaleImages,
+    }))
+    setOCRModel((prev) => prev || cfg.vision_model)
+    setNeovimAvailable(cfg.neovim_available)
+    setOmpWebUrl(cfg.omp_web_url)
+    setHostAccess(cfg.host_access)
+  })
 
   const neovim: NeovimSetting = {
     available: neovimAvailable,

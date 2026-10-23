@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useState } from "react"
+import { useStartupRead } from "@/contexts/StartupReadContext"
 import { fetchReasoningLevels } from "@/lib/backend/api"
 import { PopoverSelector } from "@/components/ui/PopoverSelector"
 
@@ -32,21 +33,11 @@ export function useReasoningLevels(model: string): string[] | undefined {
   const [fetched, setFetched] = useState<{ model: string; levels: string[] } | null>(null)
   const levels = levelsCache.get(model) ?? (fetched?.model === model ? fetched.levels : undefined)
 
-  useEffect(() => {
-    if (levelsCache.has(model)) return
-    let cancelled = false
-    fetchReasoningLevels(model)
-      .then(({ levels: result }) => {
-        levelsCache.set(model, result)
-        if (!cancelled) setFetched({ model, levels: result })
-      })
-      .catch(() => {
-        if (!cancelled) setFetched({ model, levels: [] })
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [model])
+  const loadLevels = useCallback((signal: AbortSignal) => fetchReasoningLevels(model, signal), [model])
+  useStartupRead("Reasoning levels", loadLevels, ({ levels: result }) => {
+    levelsCache.set(model, result)
+    setFetched({ model, levels: result })
+  }, Boolean(model) && !levelsCache.has(model))
 
   return levels
 }

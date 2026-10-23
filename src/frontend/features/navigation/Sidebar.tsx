@@ -14,6 +14,7 @@ import { useProject } from "@/contexts/ProjectContext"
 import { useBranches } from "@/features/navigation/BranchContext"
 import { useSidebar } from "@/features/navigation/SidebarContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
+import { useStartupRead } from "@/contexts/StartupReadContext"
 import type { BranchMeta, FileTreeNode, ProjectListItem, ProjectDocument } from "@/lib/domain/types"
 import { ChatBranchPreview } from "./ChatBranchPreview"
 import { FileMountPicker } from "./FileMountPicker"
@@ -82,19 +83,19 @@ export function Sidebar({
     setDocuments(Object.fromEntries(entries))
   }, [projects])
 
+  const loadProjectDocuments = useCallback(async (signal: AbortSignal) => {
+    const entries = await Promise.all(projects.map(async (project) =>
+      [project.slug, await listProjectDocuments(project.slug, signal)] as const))
+    return Object.fromEntries(entries)
+  }, [projects])
+
+  const { retry: reloadNotes } = useStartupRead("Sidebar notes", listNotes, setNotes, isActive)
+  const { retry: reloadDocuments } = useStartupRead("Sidebar project documents", loadProjectDocuments, setDocuments, isActive)
   useEffect(() => {
     if (!isActive) return
-    let cancelled = false
-    Promise.all([
-      listNotes(),
-      Promise.all(projects.map(async (project) => [project.slug, await listProjectDocuments(project.slug)] as const)),
-    ]).then(([loose, entries]) => {
-      if (cancelled) return
-      setNotes(loose)
-      setDocuments(Object.fromEntries(entries))
-    }).catch(() => {})
-    return () => { cancelled = true }
-  }, [projects, activeCanvasPath, appMode, isActive])
+    reloadNotes()
+    reloadDocuments()
+  }, [activeCanvasPath, appMode, isActive, reloadNotes, reloadDocuments])
 
   const mounts = rootTreeData.map((node) => node.mount ?? node.path)
   const openFactoryRepo = useFactoryRepos(hostAccess)
@@ -120,12 +121,9 @@ export function Sidebar({
   const loadRootTree = useCallback(() => fileRootTree(activeWorktreesKey.split("\n").filter(Boolean))
     .then((result) => setRootTreeData(result.tree)), [activeWorktreesKey])
 
-  useEffect(() => {
-    if (!isActive) return
-    let cancelled = false
-    fileRootTree(activeWorktreesKey.split("\n").filter(Boolean)).then((result) => { if (!cancelled) setRootTreeData(result.tree) }).catch(() => {})
-    return () => { cancelled = true }
-  }, [isActive, activeWorktreesKey])
+  const readRootTree = useCallback((signal: AbortSignal) =>
+    fileRootTree(activeWorktreesKey.split("\n").filter(Boolean), signal), [activeWorktreesKey])
+  useStartupRead("Sidebar file mounts", readRootTree, (result) => setRootTreeData(result.tree), isActive)
 
   useEffect(() => {
     if (isActive) reloadWorktrees()

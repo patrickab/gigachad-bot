@@ -37,6 +37,13 @@ change log + SSE        LikeC4  omp-web   factory
 | omp-web | `127.0.0.1:30177` | Same upstream behind identity gate |
 | Factory | `127.0.0.1:8090` | Same default, separate production configuration/database |
 
+## Frontend read recovery
+
+- `contexts/StartupReadContext.tsx` bounds initial settings, models, prompts, projects, histories, sidebar listings, memory categories, reasoning levels, and OMP overview reads to 15 seconds.
+- Report failures in a shared banner. Retry only failed reads without remounting the workspace or clearing drafts and loaded data.
+- Abort timed-out or disposed requests and ignore obsolete responses. Do not add automatic retries to these startup reads.
+- Keep streams, uploads, writes, and explicit post-mutation refreshes unchanged. OMP retains focus and interval polling through the bounded read, only for host-access logins.
+
 ## Identity and filesystem policy
 
 - Keep production listeners on loopback behind trusted private Tailscale Serve. Prefer one private HTTPS origin for frontend and `/api`.

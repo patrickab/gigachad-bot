@@ -158,6 +158,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |       `-- SettingsMenu.tsx
 |       |-- contexts/                 Shared project/settings/tab/undo/host-scale state
 |       |   |-- ProjectContext.tsx
+|       |   |-- StartupReadContext.tsx Bounded initial reads, failure banner and targeted retry
 |       |   |-- TabContext.tsx
 |       |   `-- UndoDeleteContext.tsx
 |       |-- components/

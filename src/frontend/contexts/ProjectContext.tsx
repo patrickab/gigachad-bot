@@ -1,7 +1,8 @@
 "use client"
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react"
 import type { ProjectListItem } from "@/lib/domain/types"
+import { useStartupRead } from "@/contexts/StartupReadContext"
 import {
   listProjects as apiListProjects,
   createProject as apiCreateProject,
@@ -31,9 +32,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setProjects(await apiListProjects())
   }, [])
 
-  useEffect(() => {
-    apiListProjects().then(setProjects).catch(() => {})
-  }, [])
+  useStartupRead("Projects", apiListProjects, setProjects)
 
   const createProject = useCallback(async (name: string) => {
     const created = await apiCreateProject(name)

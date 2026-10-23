@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useState } from "react"
+import { useStartupRead } from "@/contexts/StartupReadContext"
 import { getCategories } from "@/lib/backend/api"
 import type { CategoryDef } from "@/lib/domain/types"
 
@@ -8,22 +9,15 @@ export function useMemoryCategories(projectSlug?: string | null) {
   const [globalCategories, setGlobalCategories] = useState<CategoryDef[]>([])
   const [projectCategories, setProjectCategories] = useState<CategoryDef[]>([])
 
-  useEffect(() => {
-    let cancelled = false
-    Promise.all([
-      getCategories("global"),
-      projectSlug ? getCategories("project", projectSlug) : Promise.resolve({ categories: [] }),
-    ])
-      .then(([globalRes, projectRes]) => {
-        if (cancelled) return
-        setGlobalCategories(globalRes.categories)
-        setProjectCategories(projectRes.categories)
-      })
-      .catch((e) => {
-        console.error("Failed to load memory categories:", e)
-      })
-    return () => { cancelled = true }
-  }, [projectSlug])
+  const loadCategories = useCallback((signal: AbortSignal) => Promise.all([
+    getCategories("global", null, signal),
+    projectSlug ? getCategories("project", projectSlug, signal) : Promise.resolve({ categories: [] }),
+  ]), [projectSlug])
+
+  useStartupRead("Memory categories", loadCategories, ([globalRes, projectRes]) => {
+    setGlobalCategories(globalRes.categories)
+    setProjectCategories(projectRes.categories)
+  })
 
   return { globalCategories, projectCategories }
 }

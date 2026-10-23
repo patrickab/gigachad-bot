@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react"
 import { useSettings } from "@/contexts/SettingsContext"
+import { useStartupRead } from "@/contexts/StartupReadContext"
 import { useOpenFileHoverView } from "@/features/editor/FileHoverView"
 import { useThemeName } from "@/hooks/useThemeName"
 import { fetchOmpOverview } from "@/lib/backend/api"
@@ -93,16 +94,12 @@ function frameUrl(ompWebUrl: string, view: OmpView): string {
   return url.href
 }
 
-function useOverviewPolling(): { overview: OmpOverview | null; refreshOverview: () => void } {
+function useOverviewPolling(enabled: boolean): { overview: OmpOverview | null; refreshOverview: () => void } {
   const [overview, setOverview] = useState<OmpOverview | null>(null)
-  const refreshOverview = useCallback(() => {
-    fetchOmpOverview().then(setOverview).catch(() => {
-      // omp-web down or disabled, keep the last good overview
-    })
-  }, [])
+  const { retry: refreshOverview } = useStartupRead("OMP overview", fetchOmpOverview, setOverview, enabled)
 
   useEffect(() => {
-    refreshOverview()
+    if (!enabled) return
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") refreshOverview()
     }, OVERVIEW_POLL_MS)
@@ -112,7 +109,7 @@ function useOverviewPolling(): { overview: OmpOverview | null; refreshOverview: 
       window.clearInterval(timer)
       window.removeEventListener("focus", onFocus)
     }
-  }, [refreshOverview])
+  }, [enabled, refreshOverview])
 
   return { overview, refreshOverview }
 }
@@ -146,8 +143,8 @@ function useSlotRect(slot: HTMLElement | null): DOMRect | null {
  * - Polls the overview every 15s and on window focus
  */
 export function OmpProvider({ children }: { children: ReactNode }) {
-  const { ompWebUrl } = useSettings()
-  const { overview, refreshOverview } = useOverviewPolling()
+  const { ompWebUrl, hostAccess } = useSettings()
+  const { overview, refreshOverview } = useOverviewPolling(hostAccess)
   const theme = useThemeName()
   const openFileHoverView = useOpenFileHoverView()
   const [attachment, setAttachment] = useState<FrameAttachment | null>(null)

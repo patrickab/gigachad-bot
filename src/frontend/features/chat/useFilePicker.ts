@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState, type Dispatch, type RefObject, type SetStateAction } from "react"
+import { useStartupRead } from "@/contexts/StartupReadContext"
 import type { ChatInputHandle } from "@/features/chat/composer/ChatInput"
 import { attachReference, listRootFiles } from "@/lib/backend/api"
 import type { RootFile } from "@/lib/domain/types"
@@ -17,14 +18,10 @@ export function useFilePicker({ isActive, hasMessages, chatInputRef, setExtracti
   const [fileEditPath, setFileEditPath] = useState<string | null>(null)
   const [filePdfPath, setFilePdfPath] = useState<string | null>(null)
 
-  // Initial load, guarded against setting state after unmount.
-  useEffect(() => {
-    let cancelled = false
-    listRootFiles()
-      .then((r) => { if (!cancelled) { setFilesEnabled(r.enabled); setRootFiles(r.files) } })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [])
+  useStartupRead("Root files", listRootFiles, (result) => {
+    setFilesEnabled(result.enabled)
+    setRootFiles(result.files)
+  })
 
   const refreshFileList = useCallback(() => {
     listRootFiles()
