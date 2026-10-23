@@ -96,10 +96,6 @@ class _AgentStatus(ContractModel):
     state: _AgentState | None = None
 
 
-class _Added(ContractModel):
-    project: OmpWorkspace
-
-
 class _Archived(ContractModel):
     ok: bool
 
@@ -138,11 +134,6 @@ async def overview() -> OmpOverview:
         running_session_ids=session_list.running_session_ids,
         workspaces=workspace_list.projects,
     )
-
-
-async def add_workspace(path: str) -> OmpWorkspace:
-    """Register a directory as workspace, worktrees resolve to their main repository."""
-    return (await _request("POST", "/api/projects", _Added, json={"cwd": path})).project
 
 
 async def archived_sessions() -> list[OmpArchivedSession]:

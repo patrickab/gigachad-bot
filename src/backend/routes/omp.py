@@ -12,10 +12,6 @@ router = APIRouter(prefix="/api/omp", tags=["omp"], dependencies=[host_access_on
 SessionId = Annotated[str, Path(pattern=r"^[A-Za-z0-9-]+$")]
 
 
-class WorkspaceBody(BaseModel):
-    path: str
-
-
 class RestoreBody(BaseModel):
     key: str
 
@@ -27,11 +23,6 @@ class RestoredSession(BaseModel):
 @router.get("/overview")
 async def get_overview() -> omp_web.OmpOverview:
     return await call_upstream(omp_web.overview())
-
-
-@router.post("/workspaces")
-async def post_workspace(body: WorkspaceBody) -> omp_web.OmpWorkspace:
-    return await call_upstream(omp_web.add_workspace(body.path))
 
 
 @router.get("/archive")

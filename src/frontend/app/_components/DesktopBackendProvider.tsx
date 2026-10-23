@@ -37,7 +37,7 @@ export function DesktopBackendProvider({ children }: { children: ReactNode }) {
   return (
     <main className="flex h-dvh items-center justify-center bg-paper px-6 text-ink">
       <div className="max-w-md space-y-3 text-center">
-        <p className="text-lg font-medium">{state === "starting" ? "Starting GigaChat Bot…" : "GigaChat Bot could not start"}</p>
+        <p className="text-lg font-medium">{state === "starting" ? "Starting GigaChad Bot…" : "GigaChad Bot could not start"}</p>
         {state === "error" && <p className="text-sm text-ink/70">{error}</p>}
       </div>
     </main>

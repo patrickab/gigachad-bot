@@ -1,8 +1,8 @@
-# GigaChat Bot
+# GigaChad Bot
 
 A self-hosted LLM workspace for chat, research, and working with your own documents. Use cloud or local models and keep histories and artifacts on infrastructure you control.
 
-<img width="500" height="500" alt="GigaChat Bot interface" src="https://github.com/user-attachments/assets/34727936-ddbd-44d7-b191-d57084b30984" />
+<img width="500" height="500" alt="GigaChad Bot interface" src="https://github.com/user-attachments/assets/34727936-ddbd-44d7-b191-d57084b30984" />
 
 ## What you can do
 
@@ -10,9 +10,10 @@ A self-hosted LLM workspace for chat, research, and working with your own docume
 - **Watch subscription limits**: the sidebar shows how much of each [OMP](https://github.com/can1357/oh-my-pi) login's 5h, 7d and monthly limits you have used.
 - **Review changes**: open the git diff of any mounted file directory from the sidebar.
 - **Work in worktrees**: a mounted git clone lists its worktrees, switches the mount to one, creates new ones from a pulled base branch and removes them.
-- **Code with omp agents**: open omp-web sessions in tabs. A project linked to a file mount lists the sessions of that directory under "code", the "OMP" section lists every other omp workspace.
+- **Code with omp agents**: open omp-web sessions in tabs. The **Code | Filemounts** section holds one row per directory, a file mount or any other directory omp sessions ran in, with its **Worktrees**, **Sessions** and files.
 - **Organize projects**: keep conversations, files, canvases, architecture diagrams, and project memory together. Each chat uses its containing project's memory, independently of the selected tab.
 - **Archive projects**: hover a project row to archive it without deleting its content. Hover **Projects** and open the archive icon for an anchored popover of all projects, then select **Restore** to return an archived project to the active sidebar.
+- **Archive directories**: the archive icon and **Restore** popover of **Code | Filemounts** work like the project archive. The archive is kept per device.
 - **Explore conversations**: branch from any message and merge branches back.
 - **Work with documents**: extract PDF content with [MinerU](https://github.com/opendatalab/mineru), attach live file references, and edit Obsidian vault files in place.
 - **Think visually**: draw on an infinite canvas, attach PDFs, and share canvas snapshots with a model.

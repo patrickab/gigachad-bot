@@ -36,6 +36,10 @@ export interface FileTreeItem<T = unknown> {
   childLimit?: number
   isActive?: boolean
   badge?: string | number
+  /** Replaces the chevron of an app-generated branch (worktrees, sessions), marking it apart from the files beside it. */
+  icon?: ElementType
+  /** Space below the row and its contents, separating it from the next sibling. */
+  gapAfter?: boolean
   /** Right-aligned row end, e.g. line change counts. The label truncates first. */
   meta?: ReactNode
   draggable?: boolean
@@ -187,7 +191,11 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
     // A lone selection is just the last click, so only a Ctrl/Shift multi-selection is shown.
     const selected = selectedIds.size > 1 && selectedIds.has(item.id)
     const paddingLeft = INDENT_BASE + depth * INDENT_STEP
-    return <div key={item.id} className={item.type === "root" ? "mt-2 first:mt-0" : undefined}>
+    // A row's icon replaces its chevron, brightening while open.
+    const disclosure = item.icon
+      ? <item.icon className={cn("h-3 w-3 shrink-0 transition-colors", expanded ? "text-ink" : "text-ink-faint")} />
+      : <ChevronRight className={cn("h-3 w-3 shrink-0 transition-transform", expanded && "rotate-90")} />
+    return <div key={item.id} className={cn(item.type === "root" && "mt-2 first:mt-0", item.gapAfter && "mb-2")}>
       {!branch && renderBeforeItem && <div style={{ paddingLeft: paddingLeft + 20 }}>
         {renderBeforeItem(item)}
       </div>}
@@ -212,7 +220,7 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
           aria-expanded={expanded}
           onClick={() => controller.toggleBranch(item.id)}
           className="flex h-6 w-3 shrink-0 items-center text-ink-subtle hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
-        ><ChevronRight className={cn("h-3 w-3 transition-transform", expanded && "rotate-90")} /></button>}
+        >{disclosure}</button>}
         <button
           aria-expanded={branch && !item.onSelect ? expanded : undefined}
           aria-current={!branch && item.isActive ? "page" : undefined}
@@ -222,9 +230,7 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
           className={cn("flex h-6 min-w-0 flex-1 items-center gap-2 rounded text-left text-xs focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted",
             item.isActive ? "font-medium text-ink" : item.type === "root" ? "font-medium text-ink-muted hover:text-ink" : branch ? "text-ink-subtle hover:text-ink" : "text-ink-muted hover:text-ink")}
         >
-          {!(branch && item.onSelect) && (branch
-            ? <ChevronRight className={cn("h-3 w-3 shrink-0 transition-transform", expanded && "rotate-90")} />
-            : <span className="w-3 shrink-0" />)}
+          {!(branch && item.onSelect) && (branch ? disclosure : <span className="w-3 shrink-0" />)}
           <span
             data-workspace-highlight={item.type === "element" && item.isActive || selected || undefined}
             className={cn("flex min-w-0 items-center gap-2 rounded px-1 transition-colors duration-160 motion-reduce:transition-none",

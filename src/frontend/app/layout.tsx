@@ -37,11 +37,11 @@ const symbolsNerdFont = localFont({
 })
 
 export const metadata: Metadata = {
-  title: "GigaChat Bot",
+  title: "GigaChad Bot",
   description: "Personal AI chat interface with branching, deep research, and multi-model support",
   icons: "/assets/icon.png",
   openGraph: {
-    title: "GigaChat Bot",
+    title: "GigaChad Bot",
     description: "Personal AI chat interface",
     type: "website",
   },

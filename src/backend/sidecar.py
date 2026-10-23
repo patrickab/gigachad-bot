@@ -10,7 +10,7 @@ from backend.server import app
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run GigaChat Bot's local API")
+    parser = argparse.ArgumentParser(description="Run GigaChad Bot's local API")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8001)
     return parser.parse_args(argv)

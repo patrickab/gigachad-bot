@@ -107,13 +107,13 @@ function WorkspaceDraft() {
 }
 
 describe("Project navigation", () => {
-  it("opens immediate categories by default and lists mounted roots collapsed under File mounts", async () => {
+  it("opens immediate categories by default and lists mounted roots collapsed under Code | Filemounts", async () => {
     localStorage.setItem("expanded_workspace_projects", "[]")
     const view = render(<Sidebar appMode="chat" />)
     const general = within(view.getByLabelText("General"))
     expect(general.getByRole("button", { name: "canvases" })).toHaveAttribute("aria-expanded", "true")
     expect(general.queryByRole("button", { name: "files" })).not.toBeInTheDocument()
-    const fileMounts = within(view.getByLabelText("File mounts"))
+    const fileMounts = within(view.getByLabelText("Code | Filemounts"))
     expect(await fileMounts.findByRole("button", { name: "source" })).toHaveAttribute("aria-expanded", "false")
     expect(fileMounts.queryByRole("button", { name: "first.md" })).not.toBeInTheDocument()
 
@@ -137,7 +137,7 @@ describe("Project navigation", () => {
   it("reopens a file mount with its contents collapsed, ignoring saved expansion", async () => {
     localStorage.setItem("expanded_workspace_projects", JSON.stringify({ "/source": true }))
     const view = render(<Sidebar appMode="chat" />)
-    const fileMounts = within(view.getByLabelText("File mounts"))
+    const fileMounts = within(view.getByLabelText("Code | Filemounts"))
     const source = await fileMounts.findByRole("button", { name: "source" })
     expect(source).toHaveAttribute("aria-expanded", "false")
     fireEvent.click(source)
@@ -152,7 +152,7 @@ describe("Project navigation", () => {
   it("opens the diff of a file mount from its hover action", async () => {
     const onDiffSelect = vi.fn()
     const view = render(<Sidebar appMode="chat" onDiffSelect={onDiffSelect} />)
-    fireEvent.click(await within(view.getByLabelText("File mounts")).findByRole("button", { name: "Open diff for source" }))
+    fireEvent.click(await within(view.getByLabelText("Code | Filemounts")).findByRole("button", { name: "Open diff for source" }))
     expect(onDiffSelect).toHaveBeenCalledWith("/source")
   })
 
@@ -166,9 +166,9 @@ describe("Project navigation", () => {
     api.removeWorktree.mockRejectedValueOnce(new ApiError("contains modified or untracked files", 409))
     try {
       const view = render(<Sidebar appMode="chat" />)
-      const fileMounts = within(view.getByLabelText("File mounts"))
+      const fileMounts = within(view.getByLabelText("Code | Filemounts"))
       fireEvent.click(await fileMounts.findByRole("button", { name: "source" }))
-      fireEvent.click(await fileMounts.findByRole("button", { name: /^worktrees/ }))
+      fireEvent.click(await fileMounts.findByRole("button", { name: /^Worktrees/ }))
       const mainCheckout = fileMounts.getByRole("button", { name: "dev" })
       const feature = fileMounts.getByRole("button", { name: "feature 2 changed ↑1" })
       expect(mainCheckout.compareDocumentPosition(feature) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -229,7 +229,7 @@ describe("Project navigation", () => {
     expect(vi.mocked((await import("@/lib/backend/api")).createArchitectureSource)).toHaveBeenCalledWith("empty", "system.c4")
   })
 
-  it("lists the omp sessions of the mount named like a project under its code category and starts new ones there", async () => {
+  it("lists a mount's sessions (worktrees included) under its Sessions, not under the project named like it, and keeps the project link", async () => {
     const listTree = api.fileRootTree.getMockImplementation()
     api.fileRootTree.mockImplementation(async () => ({ enabled: true, tree: [{ path: "/git/proj", name: "proj", type: "root", children: [] }] }))
     omp.overview = {
@@ -246,7 +246,11 @@ describe("Project navigation", () => {
       const onItemOpen = vi.fn()
       const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
       fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
-      const code = within(await within(view.getByLabelText("Proj contents")).findByRole("group", { name: "code contents" }))
+      expect(within(view.getByLabelText("Proj contents")).queryByRole("button", { name: "Sessions" })).not.toBeInTheDocument()
+      const section = within(view.getByLabelText("Code | Filemounts"))
+      fireEvent.click(await section.findByRole("button", { name: "proj" }))
+      fireEvent.click(within(section.getByRole("group", { name: "proj contents" })).getByRole("button", { name: "Sessions" }))
+      const code = within(section.getByRole("group", { name: "Sessions contents" }))
       expect(code.getByRole("button", { name: "worktree" })).toBeVisible()
       expect(code.queryByRole("button", { name: "elsewhere" })).not.toBeInTheDocument()
 
@@ -254,7 +258,7 @@ describe("Project navigation", () => {
       expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "omp", path: "/git/proj", projectSlug: "proj", omp: { kind: "session", sessionId: "main" } })
       expect(code.getByRole("button", { name: "fork running" })).toBeVisible()
 
-      fireEvent.click(view.getByRole("button", { name: "New session in Proj" }))
+      fireEvent.click(section.getByRole("button", { name: "New session in proj" }))
       expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "omp", path: "/git/proj", projectSlug: "proj", omp: { kind: "new", cwd: "/git/proj" } }, true)
     } finally {
       omp.overview = null
@@ -262,7 +266,7 @@ describe("Project navigation", () => {
     }
   })
 
-  it("lists omp workspaces no project covers in the OMP section, which opens omp settings and hides while omp-web never answered", async () => {
+  it("lists omp-only directories beside the mounts, each with its sessions under Sessions, and hides them while omp-web never answered", async () => {
     const listTree = api.fileRootTree.getMockImplementation()
     api.fileRootTree.mockImplementation(async () => ({ enabled: true, tree: [{ path: "/git/proj", name: "proj", type: "root", children: [] }] }))
     omp.overview = {
@@ -273,25 +277,61 @@ describe("Project navigation", () => {
     try {
       const onItemOpen = vi.fn()
       const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
-      const section = within(view.getByLabelText("OMP"))
-      await waitFor(() => expect(section.queryByRole("button", { name: "proj" })).not.toBeInTheDocument())
+      const section = within(view.getByLabelText("Code | Filemounts"))
+      fireEvent.click(await section.findByRole("button", { name: "proj" }))
+      const mount = within(section.getByRole("group", { name: "proj contents" }))
+      fireEvent.click(mount.getByRole("button", { name: "Sessions" }))
+      expect(mount.getByRole("button", { name: "linked" })).toBeVisible()
+      expect(mount.queryByRole("button", { name: "tooling" })).not.toBeInTheDocument()
+
       fireEvent.click(section.getByRole("button", { name: "tool" }))
-      expect(section.getByRole("button", { name: "tooling" })).toBeVisible()
-      expect(section.queryByRole("button", { name: "linked" })).not.toBeInTheDocument()
+      const tool = within(section.getByRole("group", { name: "tool contents" }))
+      fireEvent.click(tool.getByRole("button", { name: "Sessions" }))
+      expect(tool.getByRole("button", { name: "tooling" })).toBeVisible()
+      expect(tool.queryByRole("button", { name: "linked" })).not.toBeInTheDocument()
 
       fireEvent.click(section.getByRole("button", { name: "Open omp settings" }))
       expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "omp", path: "", projectSlug: null, omp: { kind: "settings" } })
       fireEvent.click(section.getByRole("button", { name: "New session in tool" }))
       expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "omp", path: "/git/tool", projectSlug: null, omp: { kind: "new", cwd: "/git/tool" } }, true)
+      fireEvent.click(tool.getByRole("button", { name: "tooling" }))
+      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "omp", path: "/git/tool", projectSlug: null, omp: { kind: "session", sessionId: "tooling" } })
 
       omp.overview = null
       view.rerender(<TabContext.Provider value={{ tab: nextTab(), isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), setAppMode: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
         <Sidebar appMode="chat" onItemOpen={onItemOpen} />
       </TabContext.Provider>)
-      expect(view.queryByLabelText("OMP")).not.toBeInTheDocument()
+      expect(section.queryByRole("button", { name: "tool" })).not.toBeInTheDocument()
+      expect(section.queryByRole("button", { name: "Open omp settings" })).not.toBeInTheDocument()
+      expect(section.getByRole("button", { name: "proj" })).toBeVisible()
     } finally {
       omp.overview = null
       api.fileRootTree.mockImplementation(listTree!)
+    }
+  })
+
+  it("archives a directory like a project, listing it in the header popover until restored, for mounts and omp-only directories alike", async () => {
+    omp.overview = {
+      running_session_ids: [],
+      workspaces: [{ path: "/git/tool", alias: null, added_at: null }],
+      sessions: [],
+    }
+    try {
+      const view = render(<Sidebar appMode="chat" />)
+      const section = within(view.getByLabelText("Code | Filemounts"))
+      await section.findByRole("button", { name: "source" })
+
+      fireEvent.click(section.getByRole("button", { name: "Archive source" }))
+      fireEvent.click(section.getByRole("button", { name: "Archive tool" }))
+      expect(section.queryByRole("button", { name: "source" })).not.toBeInTheDocument()
+      expect(section.queryByRole("button", { name: "tool" })).not.toBeInTheDocument()
+
+      fireEvent.click(section.getByRole("button", { name: "Show all directories" }))
+      fireEvent.click(await view.findByText("source"))
+      expect(await section.findByRole("button", { name: "source" })).toBeVisible()
+      expect(section.queryByRole("button", { name: "tool" })).not.toBeInTheDocument()
+    } finally {
+      omp.overview = null
     }
   })
 
@@ -348,8 +388,9 @@ describe("Project navigation", () => {
     api.archiveOmpSession.mockRejectedValueOnce(new ApiError("session_has_children", 409))
     try {
       const view = render(<Sidebar appMode="chat" />)
-      const section = within(view.getByLabelText("OMP"))
+      const section = within(view.getByLabelText("Code | Filemounts"))
       fireEvent.click(section.getByRole("button", { name: "tool" }))
+      fireEvent.click(within(section.getByRole("group", { name: "tool contents" })).getByRole("button", { name: "Sessions" }))
 
       fireEvent.click(section.getByRole("button", { name: "Archive parent" }))
       expect(await view.findByRole("alert")).toHaveTextContent("Archive the forks of parent first")
@@ -433,7 +474,7 @@ describe("Project navigation", () => {
     const view = render(<Sidebar appMode="chat" />)
     fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
     const project = within(view.getByLabelText("Proj contents"))
-    const shared = within(view.getByLabelText("File mounts"))
+    const shared = within(view.getByLabelText("Code | Filemounts"))
     fireEvent.click(await shared.findByRole("button", { name: "source" }))
     const first = shared.getByRole("button", { name: "first.md" })
     const second = shared.getByRole("button", { name: "second.md" })

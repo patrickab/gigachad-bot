@@ -6,7 +6,7 @@ Working-tree caveat: generated from the inspected working tree, including uncomm
 
 ## Purpose and concepts
 
-GigaChat Bot is a self-hosted, local-first LLM workspace for conversations, research, documents, visual thinking, and coding agents. Connect cloud or local models and keep histories and artifacts on infrastructure you control.
+GigaChad Bot is a self-hosted, local-first LLM workspace for conversations, research, documents, visual thinking, and coding agents. Connect cloud or local models and keep histories and artifacts on infrastructure you control.
 
 | Concept | Meaning |
 | --- | --- |
@@ -120,7 +120,7 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 
 ## Agent factory
 
-The independent Agents-in-a-box engine runs agent workflows in task git worktrees. GigaChat provides repository boards, task messages, review findings, gates, diffs, and previews.
+The independent Agents-in-a-box engine runs agent workflows in task git worktrees. GigaChad provides repository boards, task messages, review findings, gates, diffs, and previews.
 
 1. Open a repository's factory board and register the repository if needed.
 2. Choose a workflow and submit a request. Use native OMP `provider/model` overrides, not `litellm_proxy/` model names.

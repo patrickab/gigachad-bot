@@ -20,6 +20,7 @@ import type { BranchMeta, FileTreeNode, ProjectListItem, ProjectDocument } from 
 import { ChatBranchPreview } from "./ChatBranchPreview"
 import { FileMountPicker } from "./FileMountPicker"
 import { useWorktrees } from "./useWorktrees"
+import { useArchivedDirectories } from "./useArchivedDirectories"
 import { addRootFilesToProject, addFileRoot, createArchitectureSource, fileRootTree, removeFileRoot, listNotes, listProjectDocuments, moveDocument, removeDocument, writeDocument } from "@/lib/backend/api"
 import { useTab, useTabActive, type AppSurface, type WorkspaceItem } from "@/contexts/TabContext"
 import { useHostAccess } from "@/contexts/SettingsContext"
@@ -64,7 +65,7 @@ export function Sidebar({
   const { schedule, pending } = useUndoDelete()
   const defaultExpanded = useMemo(() => [
     "shared:canvases",
-    ...projects.flatMap((project) => ["chats", "canvases", "files", "code"].map((category) => `project:${project.slug}:${category}`)),
+    ...projects.flatMap((project) => ["chats", "canvases", "files"].map((category) => `project:${project.slug}:${category}`)),
   ], [projects])
   const controller = useFileTree({ storageKey: "expanded_workspace_projects", defaultExpanded })
   const fileMountController = usePathTree()
@@ -73,7 +74,7 @@ export function Sidebar({
   const [rootTreeData, setRootTreeData] = useState<FileTreeNode[]>([])
   const [createDocumentSlug, setCreateDocumentSlug] = useState<string | null>(null)
   const [fileMountPickerOpen, setFileMountPickerOpen] = useState(false)
-  const [ompWorkspacePickerOpen, setOmpWorkspacePickerOpen] = useState(false)
+  const { archived: archivedDirectories, setArchived: setDirectoryArchived } = useArchivedDirectories()
   const [projectArchiveError, setProjectArchiveError] = useState("")
   const [archivingProject, setArchivingProject] = useState<string | null>(null)
 
@@ -185,23 +186,46 @@ export function Sidebar({
 
   /** Mounts keep their registered path as id, so switching worktrees keeps them expanded. */
   const buildMounts = (nodes: FileTreeNode[]): FileTreeItem<string>[] => nodes
-    .filter((node) => !pending(`root:${node.mount ?? node.path}`))
+    .filter((node) => !pending(`root:${node.mount ?? node.path}`) && !archivedDirectories.has(node.mount ?? node.path))
     .map((node) => {
       const mount = node.mount ?? node.path
       const folder = worktrees.folder(mount)
+      const code = omp.directoryCode(mount, node.name, projects.find((project) => projectMount(project.slug, mounts) === mount)?.slug ?? null)
       return {
         id: mount,
         label: node.name,
         type: "folder",
         // Dragging a mount adds its path, only unambiguous while it shows the clone itself.
         multiSelect: node.path === mount,
-        actions: [{ label: `Open diff for ${node.name}`, icon: GitCompare, onClick: () => onDiffSelect?.(node.path) }],
+        actions: [
+          { label: `Archive ${node.name}`, icon: Archive, onClick: () => setDirectoryArchived(mount, true) },
+          { label: `Open diff for ${node.name}`, icon: GitCompare, onClick: () => onDiffSelect?.(node.path) },
+          ...omp.directoryActions(mount, node.name),
+        ],
         onDelete: () => schedule(`root:${mount}`, node.name, async () => {
           await removeFileRoot(mount)
           await loadRootTree()
           onRootsChanged?.()
         }),
-        children: [...(folder ? [folder] : []), ...buildRootFiles(node.children ?? [])],
+        children: [...generatedRows([folder, code]), ...buildRootFiles(node.children ?? [])],
+      }
+    })
+
+  /** Omp workspaces outside every mount: a directory row holding only its sessions. */
+  const unmounted = omp.unmountedWorkspaces(mounts)
+  const buildUnmounted = (): FileTreeItem<string>[] => unmounted
+    .filter((workspace) => !archivedDirectories.has(workspace.path))
+    .map((workspace) => {
+      const code = omp.directoryCode(workspace.path, workspace.label, null, workspace.sessions)
+      return {
+        id: workspace.path,
+        label: workspace.label,
+        type: "folder",
+        actions: [
+          { label: `Archive ${workspace.label}`, icon: Archive, onClick: () => setDirectoryArchived(workspace.path, true) },
+          ...omp.directoryActions(workspace.path, workspace.label),
+        ],
+        children: code ? [code] : [],
       }
     })
 
@@ -240,8 +264,6 @@ export function Sidebar({
     const docs = (project ? documents[scope] ?? [] : notes)
       .filter((doc) => !pending(`document:${scope}:${doc.path}`))
     const chats = project ? buildChats(project, branchMeta) : visibleRootFiles.map((path) => ({ path, label: path.replace(/\.json$/, "") }))
-    const mount = project ? projectMount(project.slug, mounts) : null
-    const code = project && mount ? omp.codeCategory(project, mount) : null
     return [
       {
         id: `${prefix}:chats`, label: "chats", type: "folder",
@@ -293,7 +315,6 @@ export function Sidebar({
           onDelete: () => deleteDocument(doc.path, scope),
         })),
       }] : []),
-      ...(code ? [code] : []),
     ]
   }
 
@@ -316,7 +337,11 @@ export function Sidebar({
     })),
   ]
   const [generalChats, ...generalCategories] = buildCategories(null)
-  const linkedMounts = projects.flatMap((project) => projectMount(project.slug, mounts) ?? [])
+  const archivedSessions = omp.archivedSessions()
+  const directoryEntries = [
+    ...rootTreeData.filter((node) => !pending(`root:${node.mount ?? node.path}`)).map((node) => ({ key: node.mount ?? node.path, name: node.name })),
+    ...unmounted.map((workspace) => ({ key: workspace.path, name: workspace.label })),
+  ].map((entry) => ({ ...entry, archived: archivedDirectories.has(entry.key) }))
 
   return <motion.aside
     initial={false} animate={{ width: collapsed ? 0 : 280 }} transition={{ duration: 0.25, ease: "easeInOut" }}
@@ -332,21 +357,10 @@ export function Sidebar({
       </div>
       <nav aria-label="Workspace" className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
         <FileTree label="Projects" items={items} controller={controller} loading={historiesLoading}
-          headerActions={<PopoverSelector
-            triggerLabel="Show all projects" triggerContent={<Archive className="h-3 w-3" />}
-            triggerClassName="h-auto rounded p-1 text-ink-faint opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100 aria-expanded:opacity-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
-            label="All projects" placement="below" panelClassName="left-auto right-0 w-56"
-            categories={[{ key: "projects", label: "All projects", items: projects.filter((project) => !pending(`project:${project.slug}`)) }]}
-            itemKey={(project) => project.slug} isSelected={(project) => !project.archived}
-            renderItem={(project) => <>
-              <span className="min-w-0 flex-1 truncate">{project.name}</span>
-              {project.archived ? <span className="flex shrink-0 items-center gap-1.5 text-xs text-ink-subtle"><ArchiveRestore className="h-3 w-3" />Restore</span>
-                : <span className="text-xs text-ink-faint">Active</span>}
-            </>}
-            onSelect={(project) => {
-              if (project.archived && !archivingProject) void changeProjectArchive(project.slug, false)
-            }}
-            emptyText="No projects"
+          headerActions={<ArchiveSelector
+            noun="projects"
+            entries={projects.filter((project) => !pending(`project:${project.slug}`)).map((project) => ({ key: project.slug, name: project.name, archived: Boolean(project.archived) }))}
+            onRestore={(slug) => { if (!archivingProject) void changeProjectArchive(slug, false) }}
           />}
           create={{ label: "New project", placeholder: "Project name", onSubmit: async (name) => {
             const slug = await createProject(name)
@@ -364,17 +378,12 @@ export function Sidebar({
           onMoveToRoot={(path) => moveToProject(path, "")}
         />
         <div role="separator" className="my-4 border-t border-divider/50" />
-        <FileTree label="File mounts" items={buildMounts(rootTreeData)} controller={fileMountController}
+        <FileTree label="Code | Filemounts" items={[...buildMounts(rootTreeData), ...buildUnmounted(), ...(archivedSessions ? [archivedSessions] : [])]} controller={fileMountController}
+          headerActions={<ArchiveSelector noun="directories" entries={directoryEntries} onRestore={(path) => setDirectoryArchived(path, false)} />}
+          labelAction={omp.available ? { label: "Open omp settings", onClick: omp.openSettings } : undefined}
           create={{ label: "Add file mount", onClick: () => setFileMountPickerOpen(true) }}
         />
-        {omp.available && <>
-          <div role="separator" className="my-4 border-t border-divider/50" />
-          <FileTree label="OMP" items={omp.workspaceItems(linkedMounts)} controller={controller}
-            labelAction={{ label: "Open omp settings", onClick: omp.openSettings }}
-            create={{ label: "Add omp workspace", onClick: () => setOmpWorkspacePickerOpen(true) }}
-          />
-          {omp.error && <p role="alert" className="px-2 py-1 text-xs text-danger">{omp.error}</p>}
-        </>}
+        {omp.error && <p role="alert" className="px-2 py-1 text-xs text-danger">{omp.error}</p>}
       </nav>
       <ProviderUsage />
       {renderSettings && <div className="shrink-0 p-2">{renderSettings()}</div>}
@@ -384,10 +393,33 @@ export function Sidebar({
       await loadRootTree()
       onRootsChanged?.()
     }} />
-    <FileMountPicker noun="omp workspace" open={ompWorkspacePickerOpen} onClose={() => setOmpWorkspacePickerOpen(false)} onConfirm={omp.addWorkspace} />
     <CreateDocumentPanel open={createDocumentSlug != null} onClose={() => setCreateDocumentSlug(null)}
       onCreate={(name) => { if (createDocumentSlug) void createDocument(createDocumentSlug, name) }} />
   </motion.aside>
+}
+
+interface ArchiveEntry {
+  key: string
+  name: string
+  archived: boolean
+}
+
+/** Header popover of every entry of a section, selecting an archived one restores it. */
+function ArchiveSelector({ noun, entries, onRestore }: { noun: string; entries: ArchiveEntry[]; onRestore: (key: string) => void }) {
+  return <PopoverSelector
+    triggerLabel={`Show all ${noun}`} triggerContent={<Archive className="h-3 w-3" />}
+    triggerClassName="h-auto rounded p-1 text-ink-faint opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100 aria-expanded:opacity-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
+    label={`All ${noun}`} placement="below" panelClassName="left-auto right-0 w-56"
+    categories={[{ key: noun, label: `All ${noun}`, items: entries }]}
+    itemKey={(entry) => entry.key} isSelected={(entry) => !entry.archived}
+    renderItem={(entry) => <>
+      <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+      {entry.archived ? <span className="flex shrink-0 items-center gap-1.5 text-xs text-ink-subtle"><ArchiveRestore className="h-3 w-3" />Restore</span>
+        : <span className="text-xs text-ink-faint">Active</span>}
+    </>}
+    onSelect={(entry) => { if (entry.archived) onRestore(entry.key) }}
+    emptyText={`No ${noun}`}
+  />
 }
 
 function buildChats(project: ProjectListItem, branchMeta: Record<string, BranchMeta>): {
@@ -403,4 +435,10 @@ function buildChats(project: ProjectListItem, branchMeta: Record<string, BranchM
     const tab = tabs.get(filename)
     return [{ path, label: tab?.name ?? tab?.title ?? filename.replace(/\.json$/, "") }]
   })
+}
+
+/** Worktrees and Sessions rows that exist, the last one spaced from the files below it. */
+function generatedRows(rows: (FileTreeItem<string> | null)[]): FileTreeItem<string>[] {
+  const present = rows.filter((row) => row !== null)
+  return present.map((row, index) => index === present.length - 1 ? { ...row, gapAfter: true } : row)
 }

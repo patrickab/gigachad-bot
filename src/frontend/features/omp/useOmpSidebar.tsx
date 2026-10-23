@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react"
-import { Archive, RotateCcw } from "lucide-react"
+import { Archive, Bot, RotateCcw } from "lucide-react"
 import { useTab } from "@/contexts/TabContext"
 import type { WorkspaceItem } from "@/contexts/TabContext"
 import type { FileTreeItem } from "@/components/ui/file-tree/FileTree"
-import { ApiError, addOmpWorkspace, archiveOmpSession, fetchOmpArchive, restoreOmpSession } from "@/lib/backend/api"
-import type { OmpArchivedSession, OmpSession, OmpView, ProjectListItem } from "@/lib/domain/types"
+import { ApiError, archiveOmpSession, fetchOmpArchive, restoreOmpSession } from "@/lib/backend/api"
+import type { OmpArchivedSession, OmpSession, OmpView } from "@/lib/domain/types"
 import { OmpBranchTree } from "./OmpBranchTree"
 import { useOmp } from "./OmpProvider"
 import { sessionForest, sessionTitle, sessionsInside, unlinkedWorkspaces, type SessionNode } from "./sessions"
@@ -14,7 +14,7 @@ export function ompItem(view: OmpView, path: string, projectSlug: string | null)
   return { kind: "omp", path, projectSlug, omp: view }
 }
 
-/** Session rows a code category or omp workspace shows before "Show more", like omp-web's project list. */
+/** Session rows a Sessions folder shows before "Show more", like omp-web's project list. */
 const SESSION_LIMIT = 5
 
 /**
@@ -22,12 +22,12 @@ const SESSION_LIMIT = 5
  *
  * - Sessions nest their forks, the running ones carry a "running" badge
  * - Selecting a session shows it in the current tab, `+` starts a session in a new tab like a new chat
- * - Sessions archive from their row, the OMP section's "archived" folder restores them
+ * - Sessions archive from their row, the "archived" folder of the Code | Filemounts section restores them
  * - Everything is empty while omp-web never answered
  */
 export function useOmpSidebar({ onOpen, workspaceActions }: {
   onOpen?: (item: WorkspaceItem, inNewTab?: boolean) => void
-  /** Extra icon actions on a workspace row (a project's code category or an omp workspace), keyed by its directory, `reportError` fills the section's error line. */
+  /** Extra icon actions on a directory row, keyed by its directory, `reportError` fills the section's error line. */
   workspaceActions?: (directory: string, label: string, reportError: (message: string) => void) => NonNullable<FileTreeItem["actions"]>
 }) {
   const { tab, isActive } = useTab()
@@ -93,50 +93,38 @@ export function useOmpSidebar({ onOpen, workspaceActions }: {
     }
   }
 
-  /** A project's "code" category: sessions in its linked mount (worktrees included), `+` starts one there. */
-  const codeCategory = (project: ProjectListItem, mount: string): FileTreeItem<string> | null => {
+  /** The "Sessions" folder of a directory row, from `directorySessions` or every session inside `directory`. Null while omp-web never answered. */
+  const directoryCode = (directory: string, name: string, projectSlug: string | null, directorySessions: readonly OmpSession[] = sessionsInside(sessions, directory)): FileTreeItem<string> | null => {
     if (!overview) return null
     return {
-      id: `project:${project.slug}:code`,
-      label: "code",
+      id: `${directory}/:code`,
+      label: "Sessions",
+      icon: Bot,
       type: "folder",
-      create: { label: `New session in ${project.name}`, onClick: () => onOpen?.(ompItem({ kind: "new", cwd: mount }, mount, project.slug), true) },
-      actions: workspaceActions?.(mount, project.name, setError),
+      create: { label: `New session in ${name}`, onClick: () => onOpen?.(ompItem({ kind: "new", cwd: directory }, directory, projectSlug), true) },
       childLimit: SESSION_LIMIT,
-      children: sessionForest(sessionsInside(sessions, mount)).map((node) => sessionItem(node, mount, project.slug)),
+      children: sessionForest(directorySessions).map((node) => sessionItem(node, directory, projectSlug)),
     }
   }
 
-  /** OMP section rows: every omp-web workspace no project's code category covers, with its sessions, then the archive. */
-  const workspaceItems = (linkedMounts: readonly string[]): FileTreeItem<string>[] => {
-    if (!overview) return []
-    const workspaces = unlinkedWorkspaces({ ...overview, sessions }, linkedMounts).map((workspace): FileTreeItem<string> => ({
-      id: `omp-workspace:${workspace.path}`,
-      label: workspace.label,
-      type: "root",
-      create: { label: `New session in ${workspace.label}`, onClick: () => onOpen?.(ompItem({ kind: "new", cwd: workspace.path }, workspace.path, null), true) },
-      actions: workspaceActions?.(workspace.path, workspace.label, setError),
-      childLimit: SESSION_LIMIT,
-      children: sessionForest(workspace.sessions).map((node) => sessionItem(node, workspace.path, null)),
-    }))
-    if (archived.length === 0) return workspaces
-    return [...workspaces, {
-      id: "omp-archived",
-      label: "archived",
-      type: "folder",
-      children: archived.map((entry) => {
-        const title = entry.name || entry.first_message.trim() || "Untitled session"
-        return { id: `omp-archived:${entry.key}`, label: title, type: "element", actions: [{ label: `Restore ${title}`, icon: RotateCcw, onClick: () => { void restore(entry) } }] }
-      }),
-    }]
+  /** Extra icon actions of a directory row, none while omp-web never answered. */
+  const directoryActions = (directory: string, name: string) => overview ? workspaceActions?.(directory, name, setError) ?? [] : []
+
+  /** Every omp-web workspace outside all `mounts`, with the sessions it holds. */
+  const unmountedWorkspaces = (mounts: readonly string[]) => overview ? unlinkedWorkspaces({ ...overview, sessions }, mounts) : []
+
+  /** The "archived" folder restoring archived sessions, null while there are none. */
+  const archivedSessions = (): FileTreeItem<string> | null => archived.length === 0 ? null : {
+    id: "omp-archived",
+    label: "archived",
+    type: "folder",
+    children: archived.map((entry) => {
+      const title = entry.name || entry.first_message.trim() || "Untitled session"
+      return { id: `omp-archived:${entry.key}`, label: title, type: "element", actions: [{ label: `Restore ${title}`, icon: RotateCcw, onClick: () => { void restore(entry) } }] }
+    }),
   }
 
   const openSettings = () => onOpen?.(ompItem({ kind: "settings" }, "", null))
 
-  const addWorkspace = async (path: string) => {
-    await addOmpWorkspace(path)
-    refreshOverview()
-  }
-
-  return { available, error, codeCategory, workspaceItems, openSettings, addWorkspace }
+  return { available, error, directoryCode, directoryActions, unmountedWorkspaces, archivedSessions, openSettings }
 }

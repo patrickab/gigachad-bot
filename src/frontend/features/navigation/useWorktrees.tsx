@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useState, useSyncExternalStore } from "react"
 import type { FileTreeItem } from "@/components/ui/file-tree/FileTree"
 import { InlineConfirm } from "@/components/ui/InlineConfirm"
+import { WorktreesIcon } from "@/components/ui/WorktreesIcon"
 import { ApiError, createWorktree, deleteWorktreeBranch, fetchWorktrees, openDefaultWorktree, removeWorktree, type Worktree, type WorktreeList } from "@/lib/backend/api"
 import { baseName } from "@/lib/paths"
 
@@ -48,7 +49,7 @@ export function worktreeStatus(worktree: Worktree): string | undefined {
   return parts.length ? parts.join(" ") : undefined
 }
 
-/** Worktrees of every clone mount: which one each mount shows, and its sidebar "worktrees" folder. */
+/** Worktrees of every clone mount: which one each mount shows, and its sidebar "Worktrees" folder. */
 export function useWorktrees(mounts: string[]) {
   const [lists, setLists] = useState<Record<string, WorktreeList>>({})
   const [removal, setRemoval] = useState<Removal | null>(null)
@@ -163,7 +164,7 @@ export function useWorktrees(mounts: string[]) {
       </p> : undefined,
     })
     return {
-      id: `worktrees:${mount}`, label: "worktrees", type: "folder",
+      id: `worktrees:${mount}`, label: "Worktrees", icon: WorktreesIcon, type: "folder",
       meta: current && <span aria-label={`Selected checkout: ${current.branch ?? baseName(current.path)}`} className="max-w-28 truncate text-ink-faint">
         {current.branch ?? baseName(current.path)}
       </span>,
