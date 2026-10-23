@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -61,12 +62,18 @@ class WorktreeStatus:
     behind: int
 
 
+def _ssh_command() -> str:
+    """Skip `/etc/ssh` configs: the service's user namespace maps root to nobody, ssh then rejects them."""
+    user_config = Path.home() / ".ssh" / "config"
+    return f"ssh -F {shlex.quote(str(user_config) if user_config.is_file() else os.devnull)}"
+
+
 def _git(directory: Path, *args: str, timeout: float = _LOCAL_TIMEOUT_SECONDS) -> str:
     try:
         result = subprocess.run(
             ["git", "-C", str(directory), *args],
             capture_output=True, text=True, timeout=timeout, check=True,
-            env={**os.environ, "LC_ALL": "C", "GIT_TERMINAL_PROMPT": "0"},
+            env={"GIT_SSH_COMMAND": _ssh_command(), **os.environ, "LC_ALL": "C", "GIT_TERMINAL_PROMPT": "0"},
         )
     except subprocess.CalledProcessError as exc:
         raise WorktreeError((exc.stderr or exc.stdout or str(exc)).strip()) from exc
