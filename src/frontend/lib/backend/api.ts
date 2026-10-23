@@ -655,6 +655,11 @@ export async function fetchOmpSystemPrompt(sessionId: string): Promise<OmpSystem
   return request<OmpSystemPrompt>(`/omp/sessions/${encodeURIComponent(sessionId)}/system-prompt`)
 }
 
+/** Start the production redeploy, the backend restarts shortly after. Host-access logins only. */
+export async function startRedeploy(): Promise<void> {
+  await ensureOk(await fetch(`${getApiBase()}/deploy/redeploy`, { method: "POST", headers: deviceHeaders() }))
+}
+
 export function fetchLatestFactoryEventSeq(): Promise<number> {
   return request<{ seq: number }>("/factory/events/latest").then((cursor) => cursor.seq)
 }

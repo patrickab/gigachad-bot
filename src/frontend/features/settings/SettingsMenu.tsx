@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback } from "react"
 import { AnimatePresence, motion } from "framer-motion"
-import { Check, ChevronDown, ChevronUp, ImageDown, Settings, BookOpen, Pencil, Telescope, SquareTerminal } from "lucide-react"
+import { Check, ChevronDown, ChevronUp, ImageDown, Settings, BookOpen, Pencil, Telescope, SquareTerminal, Rocket } from "lucide-react"
 import { ParamSlider } from "./ParamSlider"
 import { StyledSelect } from "@/components/ui/StyledSelect"
 import { cn } from "@/lib/utils"
@@ -10,7 +10,8 @@ import { REASONING_LEVELS } from "@/lib/backend/config"
 import { displayName, qualifiedModelIds } from "@/lib/models"
 import { useClickOutside } from "@/hooks/useClickOutside"
 import type { ModelsResponse } from "@/lib/domain/types"
-import { useNeovimSetting, type TabConfig } from "@/contexts/SettingsContext"
+import { useHostAccess, useNeovimSetting, type TabConfig } from "@/contexts/SettingsContext"
+import { startRedeploy } from "@/lib/backend/api"
 
 interface SettingsMenuProps {
   prompts: Record<string, string>
@@ -67,6 +68,18 @@ export function SettingsMenu({
   const [promptOpen, setPromptOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const neovim = useNeovimSetting()
+  const hostAccess = useHostAccess()
+  const [redeploy, setRedeploy] = useState<"idle" | "starting" | "started" | string>("idle")
+
+  const onRedeploy = async () => {
+    setRedeploy("starting")
+    try {
+      await startRedeploy()
+      setRedeploy("started")
+    } catch (error) {
+      setRedeploy(error instanceof Error ? error.message : "Redeploy failed")
+    }
+  }
 
   const close = useCallback(() => { setOpen(false) }, [])
   useClickOutside(ref, close)
@@ -237,6 +250,26 @@ export function SettingsMenu({
                 </div>
                 <Switch label="Neovim editor" checked={neovim.enabled} onToggle={() => neovim.setPreferred(!neovim.enabled)} />
               </div>
+            )}
+
+            {hostAccess && (
+              <div className="flex items-center justify-between pt-2 border-t border-divider/50">
+                <div className="flex items-center gap-2 text-xs font-medium text-ink-subtle">
+                  <Rocket className="h-3.5 w-3.5" />
+                  Redeploy
+                </div>
+                <button
+                  type="button"
+                  onClick={onRedeploy}
+                  disabled={redeploy === "starting" || redeploy === "started"}
+                  className="rounded px-2 py-1 text-xs text-ink-subtle transition-colors hover:bg-hover hover:text-ink disabled:opacity-60"
+                >
+                  {redeploy === "starting" ? "Starting…" : redeploy === "started" ? "Started" : "Redeploy"}
+                </button>
+              </div>
+            )}
+            {redeploy !== "idle" && redeploy !== "starting" && redeploy !== "started" && (
+              <p role="alert" className="text-xs text-danger">{redeploy}</p>
             )}
           </motion.div>
         )}
