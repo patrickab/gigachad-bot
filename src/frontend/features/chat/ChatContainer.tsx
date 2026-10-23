@@ -86,6 +86,7 @@ export function ChatContainer({
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   // Ref, not state: updated on every scroll and read by the message effect without re-rendering
   const isPinnedToBottomRef = useRef(true)
+  const previousMessageCount = useRef(0)
 
   const contextAttachments = useMemo<ContextAttachment[]>(() => {
     const seen = new Set<string>()
@@ -130,8 +131,11 @@ export function ChatContainer({
   }, [])
 
   useEffect(() => {
+    const wasEmpty = previousMessageCount.current === 0
+    previousMessageCount.current = messages.length
     if (!isPinnedToBottomRef.current) return
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" })
+    // Restored histories jump straight to the end, avoiding work in every preview along a smooth scroll.
+    bottomRef.current?.scrollIntoView({ behavior: wasEmpty ? "instant" : "smooth" })
   }, [messages])
 
   // Per-pair expand/collapse overrides keyed by global message index

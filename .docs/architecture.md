@@ -106,6 +106,12 @@ committed user write -> durable changes row -> PostgreSQL NOTIFY
 | Sandboxed tools | Agents-in-a-box executes workspace code and image-based plot tasks. Distinguish this execution service from the external task factory. |
 | Optional service failure | Report dependency unavailability for affected capabilities, do not silently substitute a local service. |
 
+### Collapsed chat rendering
+
+- `features/chat/ChatPair.tsx` defers collapsed Markdown and equation rendering until within 400px of the viewport or focused. Hidden tabs stay deferred until shown, while headers, tool labels, and screen-reader text remain available.
+- Reserve the 12.5vh preview cap offscreen, allowing short answers to shrink when activated. Expanding a turn renders its full content and plots.
+- `ChatContainer.tsx` jumps directly to the end on initial history restoration. Subsequent streaming updates retain smooth scrolling while pinned to the bottom.
+
 ### Sandbox checkpoint boundary
 
 - Keep workspace-agent and plot slots scoped by user, chat, and sandbox scope. `SandboxRuntimeState` survives request-scoped service facades within one backend process and serializes each slot, not all chats. Uncheckpointed state is not shared across worker processes or recovered after process loss.

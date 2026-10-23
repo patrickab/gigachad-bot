@@ -39,6 +39,7 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 - Select cloud/provider models through LiteLLM or local Ollama models. Configure model defaults and editable system prompts for the task; supported models expose reasoning controls.
 - Distinguish OMP-backed models in local chat from OMP coding-session tabs. The former use OMP's model gateway through LiteLLM, the latter use the separate omp-web service.
 - Stream replies, revisit saved histories, branch from a message, and merge branches back into a conversation.
+- Collapsed answers render their rich text when nearby or focused, reducing work in long chats. Hidden tabs wait until shown, and expanding a turn reveals its full answer.
 - Organize related chats and artifacts in a project. Use its task board for lightweight planning; factory boards run agent workflows and are separate.
 - Keep each chat's project membership independent of the currently selected project elsewhere. Its containing project determines project memory, even when another tab is active.
 - Attach uploads, mounted files, global/project documents, architecture sources, or drawings. Toggle attachments out of model context without deleting their source; open them to preview or edit.
