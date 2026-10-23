@@ -12,6 +12,7 @@ A self-hosted LLM workspace for chat, research, and working with your own docume
 - **Work in worktrees**: a mounted git clone lists its worktrees, switches the mount to one, creates new ones from a pulled base branch and removes them.
 - **Code with omp agents**: open omp-web sessions in tabs. The **Code** section holds one row per directory, a file mount or any other directory omp sessions ran in, with its **Worktrees**, **Sessions** and files.
 - **Organize projects**: keep conversations, files, canvases, architecture diagrams, and project memory together. Each chat uses its containing project's memory, independently of the selected tab.
+- **Rename projects**: use the project's Rename action. The slug follows the name, and stored chats, documents, memory, architecture, attachments and the links between them move with it. A name whose slug another project already uses is rejected. Open tabs follow the project and reload its content. Linked disk folders keep their original names. Deep links and URLs copied outside the app are not redirected.
 - **Archive projects**: hover a project row to archive it without deleting its content. Hover **Projects** and open the archive icon for an anchored popover of all projects, then select **Restore** to return an archived project to the active sidebar.
 - **Archive directories**: the archive icon and **Restore** popover of **Code** work like the project archive. The archive is kept per device.
 - **Explore conversations**: branch from any message and merge branches back.

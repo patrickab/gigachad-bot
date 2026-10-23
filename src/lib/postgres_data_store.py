@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 from uuid import UUID
 
+from psycopg.errors import UniqueViolation
+from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from lib.data_store import (
@@ -14,6 +16,7 @@ from lib.data_store import (
     StorageNotFoundError,
     validate_key,
 )
+from lib.project_rename import ProjectReferences, renamed_documents
 
 
 class PostgresDataStore:
@@ -219,3 +222,49 @@ class PostgresDataStore:
                 )
             self._change(connection, source, None, "move")
             self._change(connection, destination, None, "move")
+
+    def rename_project(self, chat_prefix: str, slug: str, new_slug: str, name: str) -> None:
+        """Move a project's documents and assets to `new_slug` and rewrite references to them, in one transaction."""
+        refs = ProjectReferences(slug, new_slug, chat_prefix)
+        try:
+            with self._pool.connection() as connection, connection.transaction():
+                rows = connection.execute(
+                    "SELECT key, content, is_dir FROM documents WHERE user_id = %s ORDER BY key FOR UPDATE",
+                    (self._user_id,),
+                ).fetchall()
+                roots = [path for (path,) in connection.execute(
+                    "SELECT path FROM vault_roots WHERE user_id = %s ORDER BY created_at, path", (self._user_id,),
+                ).fetchall()]
+                documents = [(key, bytes(content), is_dir) for key, content, is_dir in rows]
+                for source, target, content in renamed_documents(documents, refs, name, roots):
+                    version = connection.execute(
+                        "UPDATE documents SET key = %s, content = %s, version = version + 1, updated_at = now() WHERE user_id = %s AND key = %s RETURNING version",
+                        (target, content, self._user_id, source),
+                    ).fetchone()[0]
+                    # Canvas shares and log keys follow the document FK ON UPDATE CASCADE.
+                    if source != target:
+                        self._change(connection, source, None, "move")
+                    self._change(connection, target, version, "move" if source != target else "write")
+                assets = connection.execute("SELECT logical_path FROM assets WHERE user_id = %s FOR UPDATE", (self._user_id,)).fetchall()
+                for (source,) in assets:
+                    target = refs.key(source)
+                    if target == source:
+                        continue
+                    version = connection.execute(
+                        "UPDATE assets SET logical_path = %s, version = version + 1, updated_at = now() WHERE user_id = %s AND logical_path = %s RETURNING version",
+                        (target, self._user_id, source),
+                    ).fetchone()[0]
+                    for key, key_version in ((source, None), (target, version)):
+                        connection.execute(
+                            "INSERT INTO changes (user_id, resource_kind, resource_key, version, operation, device_id) VALUES (%s, 'asset', %s, %s, 'move', %s)",
+                            (self._user_id, key, key_version, self._device_id),
+                        )
+                mutations = connection.execute(
+                    "SELECT mutation_id, value FROM canvas_mutations WHERE user_id = %s AND value IS NOT NULL FOR UPDATE", (self._user_id,),
+                ).fetchall()
+                for mutation_id, value in mutations:
+                    updated = refs.value(value)
+                    if updated != value:
+                        connection.execute("UPDATE canvas_mutations SET value = %s WHERE mutation_id = %s", (Jsonb(updated), mutation_id))
+        except UniqueViolation as exc:
+            raise StorageConflictError("Project rename destination already exists; reload before saving") from exc

@@ -46,9 +46,10 @@ import { isNeovimKeyEvent } from "@/lib/utils"
 import { MemoryCommandLayer } from "./MemoryCommandLayer"
 
 /** One tab's workspace: the chat (or canvas) with its sidebar, top bar, modals and keyboard shortcuts. */
-export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, focus }: {
+export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewChat, onOpenItem, focus }: {
   onOpenChat: (historyFile: string, qaIndex?: number) => void
   onOpenProject: (slug: string) => void
+  onProjectRenamed: (oldSlug: string, newSlug: string) => void
   onNewChat: (slug: string | null) => void
   onOpenItem: (item: WorkspaceItem, inNewTab?: boolean) => void
   focus: ChatFocus
@@ -236,6 +237,7 @@ export function TabContent({ onOpenChat, onOpenProject, onNewChat, onOpenItem, f
         onDocumentsChanged={docs.refreshDocuments}
         {...canvasSidebarProps}
         onProjectSelect={onOpenProject}
+        onProjectRenamed={onProjectRenamed}
         onNewChat={onNewChat}
         onDocumentSelect={(path, scope) => onOpenItem({ kind: "document", path, projectSlug: scope || null })}
         activeDocumentPath={appMode === "document" ? documentItem?.path : null}

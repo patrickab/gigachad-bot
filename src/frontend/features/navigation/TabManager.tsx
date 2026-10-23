@@ -27,6 +27,25 @@ export interface TabManagerHandle {
   showChat: (historyFile: string) => void
   showItem: (item: WorkspaceItem) => void
   relocateHistories: (moves: ReadonlyMap<string, string>) => void
+  /** Point every tab of project `oldSlug` at `newSlug`, its content then reloads from the moved keys. */
+  relocateProject: (oldSlug: string, newSlug: string) => void
+}
+
+/** `tab` with its project references moved from `oldSlug` to `newSlug`, or `tab` itself when it has none. */
+function relocatedTab(tab: Tab, oldSlug: string, newSlug: string): Tab {
+  const relocate = (path: string, prefix: string) => path.startsWith(`${prefix}${oldSlug}/`) ? `${prefix}${newSlug}${path.slice(prefix.length + oldSlug.length)}` : path
+  const historyFile = tab.historyFile && relocate(tab.historyFile, "")
+  const item = tab.workspaceItem
+  const isInProject = tab.projectSlug === oldSlug || historyFile !== tab.historyFile || item?.projectSlug === oldSlug
+  if (!isInProject) return tab
+  return {
+    ...tab,
+    historyFile,
+    projectSlug: tab.projectSlug === oldSlug ? newSlug : tab.projectSlug,
+    workspaceItem: item?.projectSlug === oldSlug
+      ? { ...item, projectSlug: newSlug, path: relocate(relocate(item.path, "project/"), "graph/") }
+      : item,
+  }
 }
 
 /** Tab state and actions shared by toolbar workspace switchers. */
@@ -310,6 +329,9 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
           projectSlug: tab.appMode === "chat" ? parseHistoryFile(historyFile).slug : tab.projectSlug,
         } : tab
       }))
+    },
+    relocateProject: (oldSlug, newSlug) => {
+      setTabs((current) => current.map((tab) => relocatedTab(tab, oldSlug, newSlug)))
     },
   }), [tabs, activeTab, updateTab, setActiveTab])
 

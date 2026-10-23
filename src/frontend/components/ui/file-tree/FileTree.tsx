@@ -45,6 +45,7 @@ export interface FileTreeItem<T = unknown> {
   draggable?: boolean
   multiSelect?: boolean
   onSelect?: () => void
+  onDoubleClick?: () => void
   onDelete?: () => void
   /** Shown under the row, e.g. an inline confirmation. */
   detail?: ReactNode
@@ -227,6 +228,7 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
           draggable={item.draggable || item.multiSelect}
           onDragStart={(event) => handleDragStart(event, item)}
           onClick={(event) => handleSelect(item, event)}
+          onDoubleClick={item.onDoubleClick}
           className={cn("flex h-6 min-w-0 flex-1 items-center gap-2 rounded text-left text-xs focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted",
             item.isActive ? "font-medium text-ink" : item.type === "root" ? "font-medium text-ink-muted hover:text-ink" : branch ? "text-ink-subtle hover:text-ink" : "text-ink-muted hover:text-ink")}
         >

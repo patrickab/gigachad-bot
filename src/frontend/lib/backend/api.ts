@@ -534,6 +534,10 @@ export async function setProjectArchived(slug: string, archived: boolean): Promi
   await patch(`/projects/${encodeURIComponent(slug)}`, { archived })
 }
 
+export function renameProject(slug: string, name: string): Promise<{ name: string; slug: string; archived: boolean }> {
+  return patch(`/projects/${encodeURIComponent(slug)}`, { name })
+}
+
 export async function updateProjectKanban(name: string, data: ProjectStateUpdate): Promise<ProjectData> {
   return put<ProjectData>(`/projects/${encodeURIComponent(name)}/state`, data)
 }

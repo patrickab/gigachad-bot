@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from backend.routes.deps import get_asset_store, get_project_store, get_sandbox_service
 from backend.routes.histories import cleanup_after_delete
 from lib.asset_store import AssetStore
+from lib.data_store import StorageConflictError
 from lib.project_store import ProjectStore
 from lib.sandbox_service import SandboxService
 
@@ -105,6 +106,8 @@ async def create_project(req: CreateProjectRequest, store: ProjectStore = Depend
 async def update_project(slug: str, req: UpdateProjectRequest, store: ProjectStore = Depends(get_project_store)) -> dict[str, Any]:
     try:
         return store.update_project(slug, name=req.name, archived=req.archived)
+    except StorageConflictError as e:
+        raise _conflict(str(e))
     except FileNotFoundError:
         raise _not_found()
     except ValueError as e:

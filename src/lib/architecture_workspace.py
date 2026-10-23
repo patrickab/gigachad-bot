@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 import hashlib
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -171,9 +172,17 @@ class ArchitectureStore:
 
     @classmethod
     def for_project(cls, docs: DataStore, slug: str, workspace_roots: Iterable[str] = ()) -> ArchitectureStore:
-        """``<root>/docs/architecture`` of the file root named *slug* once that directory exists, else the database's ``graph/<slug>/``."""
+        """``docs/architecture`` of the project's linked file root once that directory exists, else the database's ``graph/<slug>/``.
+
+        - Linked root: `linked_root` of the project, else the file root named *slug*
+        """
+        try:
+            linked_root = json.loads(read_text(docs, f"chat/{slug}/project.json")[0]).get("linked_root")
+        except (StorageNotFoundError, ValueError):
+            linked_root = None
         for root in map(Path, workspace_roots):
-            if root.name == slug and (root / WORKSPACE_ARCHITECTURE_DIR).is_dir():
+            is_linked = str(root) == linked_root if linked_root else root.name == slug
+            if is_linked and (root / WORKSPACE_ARCHITECTURE_DIR).is_dir():
                 return cls(DirectoryFiles(root), WORKSPACE_ARCHITECTURE_DIR)
         return cls(docs, architecture_prefix(slug))
 

@@ -320,6 +320,7 @@ export interface KanbanCard {
 export interface ProjectData {
   name: string
   slug: string
+  linked_root?: string | null
   kanban: KanbanCard[]
   tabs: ProjectTab[]
 }
@@ -339,6 +340,7 @@ export interface ProjectListItem {
   name: string
   slug: string
   archived?: boolean
+  linked_root?: string | null
   tabs?: ProjectTab[]
 }
 

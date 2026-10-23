@@ -91,6 +91,10 @@ export function AppShell() {
     tabManagerRef.current?.relocateHistories(moves)
   }, [])
 
+  const handleProjectRenamed = useCallback((oldSlug: string, newSlug: string) => {
+    tabManagerRef.current?.relocateProject(oldSlug, newSlug)
+  }, [])
+
   useEffect(() => {
     function handler(event: KeyboardEvent) {
       if (!event.altKey || event.key !== "d") return
@@ -112,7 +116,7 @@ export function AppShell() {
             <OmpProvider>
               <TabManager ref={tabManagerRef} onActiveTabChange={handleActiveTabChange} defaultConfig={settings.tabDefaults}>
                 <EnabledToolsProvider>
-                  <TabContent onOpenChat={handleOpenChat} onOpenProject={handleOpenProject} onNewChat={handleNewChat} onOpenItem={handleOpenItem} focus={focus} />
+                  <TabContent onOpenChat={handleOpenChat} onOpenProject={handleOpenProject} onProjectRenamed={handleProjectRenamed} onNewChat={handleNewChat} onOpenItem={handleOpenItem} focus={focus} />
                 </EnabledToolsProvider>
               </TabManager>
             </OmpProvider>

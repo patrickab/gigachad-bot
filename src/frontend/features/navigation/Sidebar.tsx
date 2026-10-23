@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion } from "framer-motion"
-import { Archive, ArchiveRestore, Brain, Factory, FilePlus, GitCompare } from "lucide-react"
+import { Archive, ArchiveRestore, Brain, Factory, FilePlus, GitCompare, Pencil } from "lucide-react"
 import { ArchitectureIcon } from "@/components/ui/ArchitectureIcon"
 import { PopoverSelector } from "@/components/ui/PopoverSelector"
+import { SaveAsModal } from "@/components/ui/SaveAsModal"
 import { CreateDocumentPanel } from "./CreateDocumentPanel"
 import { ProviderUsage } from "./ProviderUsage"
 import { cn } from "@/lib/utils"
@@ -38,6 +39,7 @@ interface SidebarProps {
   onDocumentsChanged?: () => void
   onDocumentSelect?: (path: string, scope: string) => void
   onProjectSelect?: (slug: string) => void
+  onProjectRenamed?: (oldSlug: string, newSlug: string) => void
   onNewChat?: (slug: string | null) => void
   activeCanvasPath?: string | null
   activeDocumentPath?: string | null
@@ -51,7 +53,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({
-  onFileSelect, onDiffSelect, onRootsChanged, onDocumentsChanged, onDocumentSelect, onProjectSelect, onNewChat,
+  onFileSelect, onDiffSelect, onRootsChanged, onDocumentsChanged, onDocumentSelect, onProjectSelect, onProjectRenamed, onNewChat,
   activeCanvasPath, onCanvasSelect, onCanvasDeleted, onArchitectureSelect, onItemOpen,
   activeDocumentPath, renderSettings, appMode,
 }: SidebarProps) {
@@ -59,8 +61,8 @@ export function Sidebar({
   const hostAccess = useHostAccess()
   const isActive = useTabActive()
   const { tab } = useTab()
-  const { branchMeta, visibleRootFiles, historiesLoading, moveHistory, onFileClick, activeFile, activeQaIndex, cascadeDelete } = useBranches()
-  const { projects, createProject, deleteProject, setProjectArchived } = useProject()
+  const { branchMeta, visibleRootFiles, historiesLoading, moveHistory, onFileClick, activeFile, activeQaIndex, cascadeDelete, refreshAll } = useBranches()
+  const { projects, createProject, deleteProject, setProjectArchived, renameProject } = useProject()
   const { openMemoryViewer } = useMemoryViewer()
   const { schedule, pending } = useUndoDelete()
   const defaultExpanded = useMemo(() => [
@@ -77,6 +79,24 @@ export function Sidebar({
   const { archived: archivedDirectories, setArchived: setDirectoryArchived } = useArchivedDirectories()
   const [projectArchiveError, setProjectArchiveError] = useState("")
   const [archivingProject, setArchivingProject] = useState<string | null>(null)
+  const [renameTarget, setRenameTarget] = useState<ProjectListItem | null>(null)
+  const [renamePending, setRenamePending] = useState(false)
+  const [renameError, setRenameError] = useState("")
+  const submitRename = async (name: string) => {
+    if (!renameTarget || renamePending) return
+    setRenamePending(true)
+    setRenameError("")
+    try {
+      const slug = await renameProject(renameTarget.slug, name)
+      if (slug !== renameTarget.slug) {
+        onProjectRenamed?.(renameTarget.slug, slug)
+        void refreshAll().catch(() => {})
+      }
+      setRenameTarget(null)
+    } catch (cause) {
+      setRenameError(cause instanceof Error ? cause.message : "Could not rename project")
+    } finally { setRenamePending(false) }
+  }
 
   const changeProjectArchive = async (slug: string, archived: boolean) => {
     setProjectArchiveError("")
@@ -190,7 +210,7 @@ export function Sidebar({
     .map((node) => {
       const mount = node.mount ?? node.path
       const folder = worktrees.folder(mount)
-      const code = omp.directoryCode(mount, node.name, projects.find((project) => projectMount(project.slug, mounts) === mount)?.slug ?? null)
+      const code = omp.directoryCode(mount, node.name, projects.find((project) => (project.linked_root ?? projectMount(project.slug, mounts)) === mount)?.slug ?? null)
       return {
         id: mount,
         label: node.name,
@@ -323,6 +343,7 @@ export function Sidebar({
     ...projects.filter((project) => !project.archived && !pending(`project:${project.slug}`)).map((project): FileTreeItem<string> => ({
       id: project.slug, label: project.name, type: "root", isActive: tab.projectSlug === project.slug,
       onSelect: () => onProjectSelect?.(project.slug),
+      onDoubleClick: () => { setRenameError(""); setRenameTarget(project) },
       onDelete: () => schedule(`project:${project.slug}`, project.name, () => deleteProject(project.slug)),
       actions: [
         { label: `Archive ${project.name}`, icon: Archive, onClick: () => { if (!archivingProject) void changeProjectArchive(project.slug, true) } },
@@ -397,6 +418,9 @@ export function Sidebar({
       await loadRootTree()
       onRootsChanged?.()
     }} />
+    <SaveAsModal open={renameTarget != null} onClose={() => { if (!renamePending) setRenameTarget(null) }}
+      title="Rename project" icon={Pencil} initialName={renameTarget?.name} pending={renamePending} error={renameError}
+      submitLabel="Rename" onSave={(name) => { void submitRename(name) }} />
     <CreateDocumentPanel open={createDocumentSlug != null} onClose={() => setCreateDocumentSlug(null)}
       onCreate={(name) => { if (createDocumentSlug) void createDocument(createDocumentSlug, name) }} />
   </motion.aside>

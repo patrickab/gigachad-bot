@@ -88,7 +88,7 @@ def test_paths_cannot_leave_the_workspace(tmp_path):
 def test_a_project_reads_docs_architecture_of_the_workspace_named_like_it(tmp_path):
     workspace = tmp_path / "shop"
     _write(workspace, "docs/architecture/model.c4", "model {\n}\n")
-    database = object()
+    database = DirectoryFiles(tmp_path / "database")
 
     linked = ArchitectureStore.for_project(database, "shop", [str(workspace)])
     assert linked.source_paths() == ["model.c4"]

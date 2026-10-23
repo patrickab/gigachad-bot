@@ -15,6 +15,7 @@ const render = (element: ReactElement) => testingRender(
 
 const fixtures = vi.hoisted(() => ({
   projects: [{ slug: "proj", name: "Proj", tabs: [] }, { slug: "empty", name: "Empty project", tabs: [] }],
+  renameProject: vi.fn<(slug: string, name: string) => Promise<string>>(),
   documents: [
     { path: "project/proj/document/board.canvas", name: "board.canvas", mime: "text/plain" },
     { path: "graph/proj/backend/backend.c4", name: "backend/backend.c4", mime: "text/plain" },
@@ -69,6 +70,7 @@ vi.mock("@/contexts/ProjectContext", () => ({
   useProject: () => ({
     projects: fixtures.projects,
     createProject: vi.fn(), deleteProject: vi.fn(),
+    renameProject: fixtures.renameProject,
   }),
 }))
 vi.mock("@/features/memory/MemoryViewerContext", () => ({ useMemoryViewer: () => ({ openMemoryViewer: vi.fn() }) }))
@@ -107,6 +109,53 @@ function WorkspaceDraft() {
 }
 
 describe("Project navigation", () => {
+  it("renames with Enter, blocks duplicate submits, retains failures for retry and cancels with Escape", async () => {
+    let resolveRename!: (slug: string) => void
+    fixtures.renameProject.mockImplementationOnce(() => new Promise((resolve) => { resolveRename = resolve }))
+    const onProjectRenamed = vi.fn()
+    const view = render(<Sidebar appMode="chat" onProjectRenamed={onProjectRenamed} />)
+    fireEvent.doubleClick(view.getByRole("button", { name: "Proj" }))
+    const input = view.getByRole("textbox", { name: "Rename project" })
+    expect(input).toHaveValue("Proj")
+    fireEvent.change(input, { target: { value: "  New project  " } })
+    fireEvent.submit(input.closest("form")!)
+    expect(fixtures.renameProject).toHaveBeenCalledWith("proj", "New project")
+    expect(input).toBeDisabled()
+    fireEvent.submit(input.closest("form")!)
+    expect(fixtures.renameProject).toHaveBeenCalledTimes(1)
+    await act(async () => resolveRename("new-project"))
+    expect(onProjectRenamed).toHaveBeenCalledWith("proj", "new-project")
+    expect(view.queryByRole("dialog", { name: "Rename project" })).not.toBeInTheDocument()
+
+    fixtures.renameProject.mockRejectedValueOnce(new Error("Name could not be saved"))
+    fireEvent.doubleClick(view.getByRole("button", { name: "Proj" }))
+    const retry = view.getByRole("textbox", { name: "Rename project" })
+    fireEvent.change(retry, { target: { value: "Try again" } })
+    fireEvent.submit(retry.closest("form")!)
+    expect(await view.findByRole("alert")).toHaveTextContent("Name could not be saved")
+    expect(retry).toHaveValue("Try again")
+    expect(retry).not.toBeDisabled()
+    fireEvent.keyDown(document, { key: "Escape" })
+    expect(view.queryByRole("dialog", { name: "Rename project" })).not.toBeInTheDocument()
+  })
+
+  it("relocates the renamed project's tabs without replacing their mounted drafts", async () => {
+    const manager = createRef<TabManagerHandle>()
+    const view = testingRender(<TabManager ref={manager}><WorkspaceDraft /></TabManager>)
+    const tab = { ...nextTab(), projectSlug: "proj", historyFile: "proj/chat.json", workspaceItem: { kind: "canvas" as const, path: "project/proj/document/board.canvas", projectSlug: "proj" }, appMode: "canvas" as const }
+    const other = { ...nextTab(), projectSlug: "proj2", historyFile: "proj2/chat.json" }
+    act(() => { manager.current!.openTab(other); manager.current!.openTab(tab) })
+    const draft = view.getAllByRole("textbox", { hidden: true }).at(-1)!
+    fireEvent.change(draft, { target: { value: "unsaved content" } })
+    act(() => manager.current!.relocateProject("proj", "renamed"))
+    const tabs = manager.current!.getTabs()
+    expect(tabs.find((current) => current.id === tab.id)).toMatchObject({
+      id: tab.id, chatId: tab.chatId, historyFile: "renamed/chat.json", projectSlug: "renamed",
+      workspaceItem: { path: "project/renamed/document/board.canvas", projectSlug: "renamed" },
+    })
+    expect(tabs.find((current) => current.id === other.id)).toBe(other)
+    expect(draft).toHaveValue("unsaved content")
+  })
   it("opens immediate categories by default and lists mounted roots collapsed under Code", async () => {
     localStorage.setItem("expanded_workspace_projects", "[]")
     const view = render(<Sidebar appMode="chat" />)

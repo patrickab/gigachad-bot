@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from lib.chat_store import META_JSON, PROJECT_JSON, ChatStore
-from lib.data_store import DataStore, StorageNotFoundError, read_text, write_text
+from lib.data_store import DataStore, StorageConflictError, StorageNotFoundError, read_text, write_text
 from lib.naming import slugify
 from lib.storage_namespace import CHAT
 
@@ -92,6 +92,7 @@ class ProjectStore:
                     "slug": p["slug"],
                     "archived": p.get("archived", False),
                     "tabs": data.get("tabs", []),
+                    "linked_root": data.get("linked_root"),
                 }
             )
         return projects
@@ -103,7 +104,8 @@ class ProjectStore:
             raise FileNotFoundError(f"Project not found: {slug}")
         project_dir = self._resolve_project_dir(slug)
         data = self._read_project(project_dir)
-        return {"name": entry["name"], "slug": entry["slug"], "kanban": data.get("kanban", []), "tabs": data.get("tabs", [])}
+        return {"name": entry["name"], "slug": entry["slug"], "kanban": data.get("kanban", []), "tabs": data.get("tabs", []),
+                "linked_root": data.get("linked_root")}
 
     def create_project(self, name: str) -> dict[str, Any]:
         name = name.strip()
@@ -122,6 +124,7 @@ class ProjectStore:
         return {"name": name, "slug": slug, "kanban": [], "tabs": []}
 
     def update_project(self, slug: str, name: str | None = None, *, archived: bool | None = None) -> dict[str, Any]:
+        """Update archival and name. A name with another slug moves the whole project to that slug."""
         meta = self._read_meta()
         entry = self._find_entry(meta, slug)
         if not entry:
@@ -130,17 +133,24 @@ class ProjectStore:
             name = name.strip()
             if not name:
                 raise ValueError("Project name required")
+            new_slug = slugify(name, fallback="project")
+            if new_slug == slug:
+                project_dir = self._resolve_project_dir(slug)
+                self._write_project(project_dir, {**self._read_project(project_dir), "name": name})
+            elif self._find_entry(meta, new_slug):
+                raise StorageConflictError(f"Project already exists: {new_slug}")
+            else:
+                self._data.rename_project(self._prefix, slug, new_slug, name)
+                self._store.invalidate_index()
+                slug, meta = new_slug, self._read_meta()
+                entry = self._find_entry(meta, slug)
             entry["name"] = name
             entry["updatedAt"] = _now_iso()
-            project_dir = self._resolve_project_dir(slug)
-            data = self._read_project(project_dir)
-            data["name"] = name
-            self._write_project(project_dir, data)
         if archived is not None:
             entry["archived"] = archived
             entry["updatedAt"] = _now_iso()
         self._write_meta(meta)
-        return {"name": entry["name"], "slug": entry["slug"], "archived": entry.get("archived", False)}
+        return {"name": entry["name"], "slug": slug, "archived": entry.get("archived", False)}
 
     def delete_project(self, slug: str, *, cleanup_uploads_fn: Callable[[str, str | None], None] | None = None) -> dict[str, str]:
         meta = self._read_meta()

@@ -15,18 +15,22 @@ interface SaveAsModalProps {
   placeholder?: string
   /** Rendered between the header and the input. */
   beforeInput?: ReactNode
+  initialName?: string
+  pending?: boolean
+  error?: string
+  submitLabel?: string
 }
 
 /** Modal with one text input; Enter submits the trimmed value. */
-export function SaveAsModal({ open, onClose, onSave, title = "Save Chat", icon = Save, placeholder, beforeInput }: SaveAsModalProps) {
-  const [name, setName] = useState("")
+export function SaveAsModal({ open, onClose, onSave, title = "Save Chat", icon = Save, placeholder, beforeInput, initialName = "", pending = false, error, submitLabel }: SaveAsModalProps) {
+  const [name, setName] = useState(initialName)
   const [wasOpen, setWasOpen] = useState(open)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Start every opening with an empty name.
+  // Reset to the supplied name on each opening.
   if (open !== wasOpen) {
     setWasOpen(open)
-    if (open) setName("")
+    if (open) setName(initialName)
   }
 
   return (
@@ -35,13 +39,15 @@ export function SaveAsModal({ open, onClose, onSave, title = "Save Chat", icon =
       <form
         onSubmit={(e) => {
           e.preventDefault()
-          if (name.trim()) onSave(name.trim())
+          if (name.trim() && !pending) onSave(name.trim())
         }}
         className="px-5 pb-5"
       >
         <input
           ref={inputRef}
           type="text"
+          aria-label={title}
+          disabled={pending}
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder={placeholder}
@@ -53,6 +59,8 @@ export function SaveAsModal({ open, onClose, onSave, title = "Save Chat", icon =
           autoComplete="off"
           spellCheck={false}
         />
+        {error && <p role="alert" className="mt-2 text-xs text-danger">{error}</p>}
+        {submitLabel && <button type="submit" disabled={pending || !name.trim()} className="mt-3 rounded-md px-3 py-1.5 text-sm text-ink hover:bg-hover disabled:opacity-40">{pending ? "Renaming…" : submitLabel}</button>}
       </form>
     </Dialog>
   )
