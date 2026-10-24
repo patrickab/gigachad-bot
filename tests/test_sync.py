@@ -135,6 +135,20 @@ def test_replay_returns_rows_after_since_in_seq_order(postgres_pool, monkeypatch
     assert replay_changes(user_id, seqs[-1]) == []
 
 
+def test_replay_keeps_only_the_latest_change_per_resource(postgres_pool, monkeypatch):
+    monkeypatch.setattr("backend.routes.sync.get_postgres_pool", lambda: postgres_pool)
+    user_id = _user(postgres_pool, "alice@example.test")
+    first = _change(postgres_pool, user_id, "a.md")
+    other = _change(postgres_pool, user_id, "b.md")
+    latest = _change(postgres_pool, user_id, "a.md", version=2)
+
+    rows = replay_changes(user_id, 0)
+
+    assert [(row["seq"], row["resource_key"]) for row in rows] == [(other, "b.md"), (latest, "a.md")]
+    assert replay_changes(user_id, first) == rows
+    assert replay_changes(user_id, other) == rows[1:]
+
+
 def test_replay_excludes_other_users(postgres_pool, monkeypatch):
     monkeypatch.setattr("backend.routes.sync.get_postgres_pool", lambda: postgres_pool)
     alice = _user(postgres_pool, "alice@example.test")

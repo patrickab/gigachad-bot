@@ -1,7 +1,7 @@
 """Server-sent delivery of the Postgres change log.
 
-`GET /api/sync/stream?since=<seq>` emits one `change` event per change-log row that
-belongs to the requesting user, first replaying everything with `seq > since`, then
+`GET /api/sync/stream?since=<seq>` emits one `change` event per resource the requesting user
+changed, first replaying each resource's latest change with `seq > since`, then
 streaming live rows as they are committed. Event data is JSON::
 
     event: change
@@ -36,13 +36,21 @@ EVENT_KEYS = ("seq", "resource_kind", "resource_key", "version", "device_id")
 
 
 def replay_changes(user_id: UUID, since: int) -> list[dict]:
-    """Return this user's change-log rows after `since`, oldest first."""
+    """Return this user's latest change per resource after `since`, oldest first.
+
+    - Clients reload by resource, so superseded rows add replay size and no information
+    - Autosaved canvases write thousands of rows each
+    """
     with get_postgres_pool().connection() as connection:
         rows = connection.execute(
             """
-            SELECT seq, resource_kind, resource_key, version, device_id
-            FROM changes
-            WHERE user_id = %s AND seq > %s
+            SELECT seq, resource_kind, resource_key, version, device_id FROM (
+                SELECT DISTINCT ON (resource_kind, resource_key)
+                    seq, resource_kind, resource_key, version, device_id
+                FROM changes
+                WHERE user_id = %s AND seq > %s
+                ORDER BY resource_kind, resource_key, seq DESC
+            ) latest
             ORDER BY seq
             """,
             (user_id, since),
