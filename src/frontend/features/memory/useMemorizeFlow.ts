@@ -47,9 +47,9 @@ export interface BoundMemoryActions {
   cancelMemory: (memoryId: string) => Promise<void>
   addMemory: (scope: "global" | "project", memory: string) => void
   editMemory: (memoryId: string, text: string) => void
-  editMemoryCategory: (memoryId: string, category: string) => void
+  editMemoryTopic: (memoryId: string, topic: string) => void
   editRevisedMemory: (scope: "global" | "project", memoryId: string, text: string) => void
-  editRevisedMemoryCategory: (scope: "global" | "project", memoryId: string, category: string) => void
+  editRevisedMemoryTopic: (scope: "global" | "project", memoryId: string, topic: string) => void
   removeRevisedMemory: (scope: "global" | "project", memoryId: string) => void
   commitDocuments: () => Promise<void>
 }
@@ -83,10 +83,10 @@ type Action =
   | { type: "DECIDE_ONE"; memoryId: string; accept: boolean }
   | { type: "ACCEPT_ALL" }
   | { type: "ADD_MEMORY"; scope: "global" | "project"; memory: ProposedMemory }
-  | { type: "UPDATE_MEMORY"; memoryId: string; updates: Partial<Pick<ProposedMemory, "memory" | "category">> }
+  | { type: "UPDATE_MEMORY"; memoryId: string; updates: Partial<Pick<ProposedMemory, "memory" | "topic">> }
   | { type: "BEGIN_PREVIEW"; reviewId: string; acceptedMemories: ProposedMemory[]; rejectedMemories: ProposedMemory[]; loadingScopes: ("global" | "project")[] }
   | { type: "PREVIEW_OK"; scope: "global" | "project"; preview: DocPreview; reviewId: string }
-  | { type: "UPDATE_REVISED"; scope: "global" | "project"; memoryId: string; updates: Partial<Pick<PreviewMemory, "text" | "category">> }
+  | { type: "UPDATE_REVISED"; scope: "global" | "project"; memoryId: string; updates: Partial<Pick<PreviewMemory, "text" | "topic">> }
   | { type: "REMOVE_REVISED"; scope: "global" | "project"; memoryId: string }
 
 function revisedPreview(state: Extract<MemorizeFlowState, { phase: "doc-review" }>, scope: "global" | "project", fn: (ms: PreviewMemory[]) => PreviewMemory[]): MemorizeFlowState {
@@ -274,21 +274,21 @@ export function useMemorizeFlow(): UseMemorizeFlowReturn {
     if (!trimmed) return
     dispatch({
       type: "ADD_MEMORY", scope,
-      memory: { id: newManualMemoryId(), memory: trimmed, scope, category: "manual" },
+      memory: { id: newManualMemoryId(), memory: trimmed, scope, topic: "manual" },
     })
   }, [])
 
   const editMemory = useCallback((memoryId: string, text: string) =>
     dispatch({ type: "UPDATE_MEMORY", memoryId, updates: { memory: text } }), [])
 
-  const editMemoryCategory = useCallback((memoryId: string, category: string) =>
-    dispatch({ type: "UPDATE_MEMORY", memoryId, updates: { category } }), [])
+  const editMemoryTopic = useCallback((memoryId: string, topic: string) =>
+    dispatch({ type: "UPDATE_MEMORY", memoryId, updates: { topic } }), [])
 
   const editRevisedMemory = useCallback((scope: "global" | "project", memoryId: string, text: string) =>
     dispatch({ type: "UPDATE_REVISED", scope, memoryId, updates: { text } }), [])
 
-  const editRevisedMemoryCategory = useCallback((scope: "global" | "project", memoryId: string, category: string) =>
-    dispatch({ type: "UPDATE_REVISED", scope, memoryId, updates: { category } }), [])
+  const editRevisedMemoryTopic = useCallback((scope: "global" | "project", memoryId: string, topic: string) =>
+    dispatch({ type: "UPDATE_REVISED", scope, memoryId, updates: { topic } }), [])
 
   const removeRevisedMemory = useCallback((scope: "global" | "project", memoryId: string) =>
     dispatch({ type: "REMOVE_REVISED", scope, memoryId }), [])
@@ -299,11 +299,11 @@ export function useMemorizeFlow(): UseMemorizeFlowReturn {
       cancelRemaining: () => cancel(projectSlug),
       acceptMemory: (id: string) => decideOne(id, true, projectSlug),
       cancelMemory: (id: string) => decideOne(id, false, projectSlug),
-      addMemory, editMemory, editMemoryCategory,
-      editRevisedMemory, editRevisedMemoryCategory, removeRevisedMemory,
+      addMemory, editMemory, editMemoryTopic,
+      editRevisedMemory, editRevisedMemoryTopic, removeRevisedMemory,
       commitDocuments: () => commitDocs(projectSlug),
     }),
-    [accept, addMemory, cancel, commitDocs, decideOne, editMemory, editMemoryCategory, editRevisedMemory, editRevisedMemoryCategory, removeRevisedMemory],
+    [accept, addMemory, cancel, commitDocs, decideOne, editMemory, editMemoryTopic, editRevisedMemory, editRevisedMemoryTopic, removeRevisedMemory],
   )
 
   return { state, extract, bindProject }

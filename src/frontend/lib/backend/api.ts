@@ -1,4 +1,4 @@
-import type { Attachment, BackendConfig, BranchMeta, CategoryDef, ChatHistoriesResponse, ChatRequest, DirectoryListing, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpArchivedSession, OmpCatalog, OmpOverview, OmpSystemPrompt, FactoryDefaults, FactoryEvent, FactoryMessage, FactoryPreview, FactoryRepo, FactoryTask, FactoryTaskDetail, FactoryWorkflow, TaskAction, TaskCreate, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ReasoningLevels, Usage, RootFile, FileTreeNode } from "@/lib/domain/types"
+import type { Attachment, BackendConfig, BranchMeta, ChatHistoriesResponse, ChatRequest, DirectoryListing, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, MemoryTopic, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpArchivedSession, OmpCatalog, OmpOverview, OmpSystemPrompt, FactoryDefaults, FactoryEvent, FactoryMessage, FactoryPreview, FactoryRepo, FactoryTask, FactoryTaskDetail, FactoryWorkflow, TaskAction, TaskCreate, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ReasoningLevels, Usage, RootFile, FileTreeNode } from "@/lib/domain/types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { getApiBase } from "./config"
@@ -623,24 +623,12 @@ export async function getMemories(scope: "global" | "project", projectSlug?: str
   return request(`/memory/memories${toQuery({ scope, project_slug: projectSlug })}`)
 }
 
-export async function getCategories(scope: "global" | "project", projectSlug?: string | null, signal?: AbortSignal): Promise<{ categories: CategoryDef[] }> {
-  return request(`/memory/categories${toQuery({ scope, project_slug: projectSlug })}`, { signal })
+export async function getTopics(scope: "global" | "project", projectSlug?: string | null, signal?: AbortSignal): Promise<{ topics: MemoryTopic[] }> {
+  return request(`/memory/topics${toQuery({ scope, project_slug: projectSlug })}`, { signal })
 }
 
-export async function saveCategories(scope: "global" | "project", categories: CategoryDef[], projectSlug?: string | null): Promise<void> {
-  await put("/memory/categories", { scope, categories, project_slug: projectSlug ?? null })
-}
-
-export async function remapOrphanedCategory(
-  orphanedMemories: PreviewMemory[],
-  remainingCategories: CategoryDef[],
-  projectSlug?: string | null,
-): Promise<{ memories: PreviewMemory[] }> {
-  return post("/memory/remap-category", {
-    orphaned_memories: orphanedMemories,
-    remaining_categories: remainingCategories,
-    project_slug: projectSlug ?? null,
-  })
+export async function saveTopics(scope: "global" | "project", topics: MemoryTopic[], projectSlug?: string | null): Promise<void> {
+  await put("/memory/topics", { scope, topics, project_slug: projectSlug ?? null })
 }
 
 export async function fetchOmpOverview(signal?: AbortSignal): Promise<OmpOverview> {

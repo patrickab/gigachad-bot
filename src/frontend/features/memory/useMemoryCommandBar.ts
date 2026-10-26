@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react"
 import { useTab } from "@/contexts/TabContext"
 import { useMemorizeFlow, type BoundMemoryActions, type MemoryPanelState } from "@/features/memory/useMemorizeFlow"
-import { useMemoryCategories } from "@/features/memory/useMemoryCategories"
-import type { CategoryDef, Message } from "@/lib/domain/types"
+import { useMemoryTopics } from "@/features/memory/useMemoryTopics"
+import type { MemoryTopic, Message } from "@/lib/domain/types"
 
 /** Which memory stores an extraction targets: `null` is both global and project. */
 export type MemorizeScope = "global" | "project" | null
@@ -22,7 +22,7 @@ export interface MemoryCommandBar {
   /** Null while no memorize flow is running. */
   panelState: MemoryPanelState | null
   panelActions: BoundMemoryActions
-  categories: { globalCategories: CategoryDef[]; projectCategories: CategoryDef[] }
+  topics: { globalTopics: MemoryTopic[]; projectTopics: MemoryTopic[] }
 }
 
 /** Own the workspace command menu and the memory flow it launches. */
@@ -35,7 +35,7 @@ export function useMemoryCommandBar({ messages, chatId, branchMessageIdx }: {
   const { tab, setModeLabel } = useTab()
   const projectSlug = tab.projectSlug
   const flow = useMemorizeFlow()
-  const categories = useMemoryCategories(projectSlug)
+  const topics = useMemoryTopics(projectSlug)
   const [menuOpen, setMenuOpen] = useState(false)
   const [query, setQuery] = useState("")
 
@@ -78,6 +78,6 @@ export function useMemoryCommandBar({ messages, chatId, branchMessageIdx }: {
     memorize,
     panelState: flow.state.phase === "idle" ? null : flow.state,
     panelActions: flow.bindProject(projectSlug),
-    categories,
+    topics,
   }
 }

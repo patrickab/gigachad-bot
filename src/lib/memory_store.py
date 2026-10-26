@@ -3,13 +3,13 @@
 Pipeline (all local-friendly, no vector DB):
 
 1. ``extract``  – one JSON call to a small model produces atomic candidate
-   memories, each tagged with a category from ``DEFAULT_GLOBAL_CATEGORIES`` or
-   ``DEFAULT_PROJECT_CATEGORIES``. Candidates are buffered to
+   memories, each tagged with a topic from ``DEFAULT_GLOBAL_TOPICS`` or
+   ``DEFAULT_PROJECT_TOPICS``. Candidates are buffered to
    ``memory/pending/<review_id>.json``.
 2. user review  – the frontend gates which candidates are accepted.
 3. ``_reconcile_with_status`` – accepted candidates are merged into the canonical store
-   *per category* (1-to-n within a single category bucket), so only memories of
-   the same category are ever compared. Unaffected categories are left untouched.
+   *per topic* (1-to-n within a single topic bucket), so only memories of
+   the same topic are ever compared. Unaffected topics are left untouched.
 4. ``commit``   – the canonical JSON + rendered markdown are written.
 """
 
@@ -42,7 +42,7 @@ def _now_iso() -> str:
 
 PROJECT_MEMORY = "memory/memory.md"
 EXTRACT_TIMEOUT = 60
-FALLBACK_CATEGORY = "note"
+FALLBACK_TOPIC = "note"
 
 # Per-scope framing fed into the extraction prompt (fills "You extract durable ___").
 GLOBAL_SCOPE_GUIDANCE = "facts about the user, valid across all projects (identity, preferences, working style, goals)"
@@ -51,41 +51,41 @@ PROJECT_SCOPE_GUIDANCE = (
 )
 
 
-# Categories define which *types* of memory are extracted. Tuned to be useful
+# Topics define which *types* of memory are extracted. Tuned to be useful
 # for both studying lectures and hobby programming. Add entries here to teach the
-# extractor new buckets (extraction and per-category dedup pick them up
+# extractor new buckets (extraction and per-topic dedup pick them up
 # automatically).
-DEFAULT_GLOBAL_CATEGORIES: list[dict[str, str]] = [
+DEFAULT_GLOBAL_TOPICS: list[dict[str, str]] = [
     {
         "name": "identity",
-        "description": "Stable facts about who the user is: name, role, field of study, spoken/programming languages, background.",
+        "summary": "Stable facts about who the user is: name, role, field of study, spoken/programming languages, background.",
     },
     {
         "name": "communication_preference",
-        "description": "How the user wants the assistant to respond: tone, verbosity, language, formatting.",
+        "summary": "How the user wants the assistant to respond: tone, verbosity, language, formatting.",
     },
     {
         "name": "learning_preference",
-        "description": "How the user likes to study and learn: preferred explanations, examples, pace, analogies, formats.",
+        "summary": "How the user likes to study and learn: preferred explanations, examples, pace, analogies, formats.",
     },
     {
         "name": "engineering_preference",
-        "description": "General coding and tooling preferences across projects: languages, frameworks, libraries, code style.",
+        "summary": "General coding and tooling preferences across projects: languages, frameworks, libraries, code style.",
     },
-    {"name": "goals", "description": "Longer-term personal, academic, or career goals the user is working toward."},
+    {"name": "goals", "summary": "Longer-term personal, academic, or career goals the user is working toward."},
 ]
 
-DEFAULT_PROJECT_CATEGORIES: list[dict[str, str]] = [
-    {"name": "purpose", "description": "What this project or course/subject is about and what it aims to achieve."},
-    {"name": "current_focus", "description": "What is being worked on or studied right now."},
+DEFAULT_PROJECT_TOPICS: list[dict[str, str]] = [
+    {"name": "purpose", "summary": "What this project or course/subject is about and what it aims to achieve."},
+    {"name": "current_focus", "summary": "What is being worked on or studied right now."},
     {
         "name": "key_concept",
-        "description": "Important concepts, definitions, formulas, or facts worth retaining (e.g. from lectures).",
+        "summary": "Important concepts, definitions, formulas, or facts worth retaining (e.g. from lectures).",
     },
-    {"name": "decisions", "description": "Design, architecture, or technical decisions that were made, with their rationale."},
-    {"name": "constraint", "description": "Requirements, limitations, deadlines, or rules that apply to the project."},
-    {"name": "resource", "description": "Useful references, files, links, datasets, tools, or commands tied to this project."},
-    {"name": "open_questions", "description": "Unresolved questions, blockers, or pending tasks to follow up on."},
+    {"name": "decisions", "summary": "Design, architecture, or technical decisions that were made, with their rationale."},
+    {"name": "constraint", "summary": "Requirements, limitations, deadlines, or rules that apply to the project."},
+    {"name": "resource", "summary": "Useful references, files, links, datasets, tools, or commands tied to this project."},
+    {"name": "open_questions", "summary": "Unresolved questions, blockers, or pending tasks to follow up on."},
 ]
 
 
@@ -94,7 +94,7 @@ class ProposedMemory:
     id: str
     memory: str
     scope: str
-    category: str = FALLBACK_CATEGORY
+    topic: str = FALLBACK_TOPIC
 
 
 @dataclass
@@ -108,7 +108,7 @@ class ExtractResult:
 class StoredMemory:
     id: str
     text: str
-    category: str
+    topic: str
     scope: str  # "global" | "project"
     created_at: str = field(default_factory=_now_iso)
     updated_at: str = field(default_factory=_now_iso)
@@ -178,7 +178,7 @@ class MemoryStore:
         """Extract candidate memories from messages since this conversation's last memorization.
 
         *scope* targets which scope to extract: ``"global"``, ``"project"``, or ``None`` for both.
-        Requested scopes are extracted in parallel; each prompt carries only its own categories
+        Requested scopes are extracted in parallel; each prompt carries only its own topics
         plus the memories already on record, so the model emits *deltas* (new or corrected facts)
         instead of re-proposing known ones. Watermarks are tracked **per (chat_id, scope)** and
         advance only when that scope's review is committed. So a scope-targeted ``/memorize-global``
@@ -193,24 +193,24 @@ class MemoryStore:
         do_project = scope in (None, "project") and bool(project_slug)
 
         async def run_scope(
-            scope_name: str, guidance: str, categories: list[dict[str, str]], json_path: DataStorePath
+            scope_name: str, guidance: str, topics: list[dict[str, str]], json_path: DataStorePath
         ) -> list[ProposedMemory]:
             start = self._watermark_for(chat_id, scope_name) if chat_id else 0
             tail = messages[start:]
             if not tail:
                 return []
             return await self._extract_scope(
-                llm, scope_name, guidance, self._get_transcript(tail), categories, self._read_stored_memories(json_path)
+                llm, scope_name, guidance, self._get_transcript(tail), topics, self._read_stored_memories(json_path)
             )
 
         tasks: list[Any] = []
         if do_global:
             global_json, _, _ = self._scope_paths("global", None)
-            tasks.append(("global", run_scope("global", GLOBAL_SCOPE_GUIDANCE, self.get_categories("global"), global_json)))
+            tasks.append(("global", run_scope("global", GLOBAL_SCOPE_GUIDANCE, self.get_topics("global"), global_json)))
         if do_project:
             project_json, _, _ = self._scope_paths("project", project_slug)
             tasks.append(
-                ("project", run_scope("project", PROJECT_SCOPE_GUIDANCE, self.get_categories("project", project_slug), project_json))
+                ("project", run_scope("project", PROJECT_SCOPE_GUIDANCE, self.get_topics("project", project_slug), project_json))
             )
 
         results = await asyncio.gather(*(coro for _, coro in tasks))
@@ -229,24 +229,24 @@ class MemoryStore:
         scope: str,
         scope_guidance: str,
         transcript: str,
-        categories: list[dict[str, str]],
+        topics: list[dict[str, str]],
         existing: list[StoredMemory],
     ) -> list[ProposedMemory]:
         """One scope's extraction call: emit only new/corrected memories given what's on record."""
-        cats_block = self._format_categories(categories)
+        topics_block = self._format_topics(topics)
         existing_block = self._format_existing(existing) or "(nothing on record yet)"
 
         system_prompt = (
             f"You extract durable {scope_guidance} from a conversation for a user-reviewed "
             "learning system. Output valid JSON only, no prose.\n\n"
-            "You are given the allowed categories and the memories already on record. Output only "
+            "You are given the allowed topics and the memories already on record. Output only "
             "NEW information as a delta:\n"
             "- SKIP anything the conversation merely repeats — never re-output a fact already on record.\n"
             "- When the conversation refines or CONTRADICTS a recorded memory, output the corrected "
             "statement as a new memory; a later step replaces the stale one.\n"
             "- Output genuinely new durable facts not yet on record.\n\n"
             "Rules:\n"
-            "- Tag each memory with exactly one allowed category.\n"
+            "- Tag each memory with exactly one allowed topic.\n"
             "- Prefer atomic memories: maximal information in minimal words; a longer form is "
             "acceptable only when compressing would lose meaning.\n"
             "- Omit session-transient details.\n"
@@ -256,18 +256,18 @@ class MemoryStore:
 Conversation:
 {transcript}
 
-Allowed categories:
-{cats_block}
+Allowed topics:
+{topics_block}
 
 Already on record (current knowledge, may be outdated):
 {existing_block}
 
 Return JSON with this exact shape:
-{{"memories": [{{"memory": "...", "category": "<one allowed category name>"}}]}}
+{{"memories": [{{"memory": "...", "topic": "<one allowed topic name>"}}]}}
 """.strip()
 
         data = await self._generate_json(llm, system_prompt, user_prompt, timeout=EXTRACT_TIMEOUT)
-        return self._build_candidates(data.get("memories", []), scope, categories)
+        return self._build_candidates(data.get("memories", []), scope, topics)
 
     # ------------------------------------------------------------------
     # Commit / Cancel (stateless & idempotent)
@@ -296,7 +296,7 @@ Return JSON with this exact shape:
                 StoredMemory(
                     id=m["id"],
                     text=m["text"],
-                    category=m["category"],
+                    topic=m["topic"],
                     scope=m["scope"],
                     created_at=str(m.get("created_at") or now),
                     updated_at=str(m.get("updated_at") or now),
@@ -348,7 +348,7 @@ Return JSON with this exact shape:
         }
 
     # ------------------------------------------------------------------
-    # Per-category reconciliation (1-to-n within a single category bucket)
+    # Per-topic reconciliation (1-to-n within a single topic bucket)
     # ------------------------------------------------------------------
 
     async def _reconcile_with_status(
@@ -362,43 +362,43 @@ Return JSON with this exact shape:
 
         Status is one of ``pre-existing`` (unchanged), ``new`` (a candidate kept
         verbatim), or ``combined`` (a model-synthesized merge of old and/or new).
-        Categories with no new candidates are passed through untouched. For each
-        touched category the model receives just that category's existing + new
+        Topics with no new candidates are passed through untouched. For each
+        touched topic the model receives just that topic's existing + new
         memories and returns the merged canonical list for it.
         """
         if not candidates:
             return [(m, "pre-existing") for m in existing]
 
-        existing_by_cat: dict[str, list[StoredMemory]] = {}
+        existing_by_topic: dict[str, list[StoredMemory]] = {}
         for m in existing:
-            existing_by_cat.setdefault(m.category, []).append(m)
+            existing_by_topic.setdefault(m.topic, []).append(m)
 
-        candidates_by_cat: dict[str, list[ProposedMemory]] = {}
+        candidates_by_topic: dict[str, list[ProposedMemory]] = {}
         for c in candidates:
-            candidates_by_cat.setdefault(c.category, []).append(c)
+            candidates_by_topic.setdefault(c.topic, []).append(c)
 
         result: list[tuple[StoredMemory, str]] = []
 
-        # Untouched categories pass through verbatim.
-        for cat, mems in existing_by_cat.items():
-            if cat not in candidates_by_cat:
+        # Untouched topics pass through verbatim.
+        for topic, mems in existing_by_topic.items():
+            if topic not in candidates_by_topic:
                 result.extend((m, "pre-existing") for m in mems)
 
-        # Touched categories get reconciled (independent per category, so run concurrently).
-        touched = list(candidates_by_cat.items())
+        # Touched topics get reconciled (independent per topic, so run concurrently).
+        touched = list(candidates_by_topic.items())
         reconciled = await asyncio.gather(
-            *(self._reconcile_category(llm, scope, cat, existing_by_cat.get(cat, []), cands) for cat, cands in touched)
+            *(self._reconcile_topic(llm, scope, topic, existing_by_topic.get(topic, []), cands) for topic, cands in touched)
         )
-        for cat_result in reconciled:
-            result.extend(cat_result)
+        for topic_result in reconciled:
+            result.extend(topic_result)
 
         return result
 
-    async def _reconcile_category(
+    async def _reconcile_topic(
         self,
         llm: MemoryLLM,
         scope: str,
-        category: str,
+        topic: str,
         existing: list[StoredMemory],
         candidates: list[ProposedMemory],
     ) -> list[tuple[StoredMemory, str]]:
@@ -409,21 +409,21 @@ Return JSON with this exact shape:
         if not existing_texts:
             final_texts = self._dedup_keep_order(candidate_texts)
         else:
-            final_texts = await self._merge_category_with_llm(llm, category, existing_texts, candidate_texts)
+            final_texts = await self._merge_topic_with_llm(llm, topic, existing_texts, candidate_texts)
 
-        return self._classify_texts(final_texts, category, scope, existing, existing_texts, candidate_texts)
+        return self._classify_texts(final_texts, topic, scope, existing, existing_texts, candidate_texts)
 
-    async def _merge_category_with_llm(
+    async def _merge_topic_with_llm(
         self,
         llm: MemoryLLM,
-        category: str,
+        topic: str,
         existing_texts: list[str],
         candidate_texts: list[str],
     ) -> list[str]:
         system_prompt = (
-            "You maintain a deduplicated list of memories within a single category. "
+            "You maintain a deduplicated list of memories within a single topic. "
             "You are given the current memories and some new candidate memories. "
-            "Return the updated canonical list for this category as JSON only. "
+            "Return the updated canonical list for this topic as JSON only. "
             "Merge overlapping old and new memories into a single clear statement. "
             "When a new memory updates or contradicts an old one, keep the new information "
             "and drop the stale one. Keep genuinely distinct memories separate. "
@@ -431,7 +431,7 @@ Return JSON with this exact shape:
             "Keep each memory atomic and concise."
         )
         user_prompt = f"""
-Category: {category}
+Topic: {topic}
 
 Current memories:
 {json.dumps(existing_texts, indent=2, ensure_ascii=False)}
@@ -447,25 +447,25 @@ Return JSON with this exact shape:
         try:
             data = await self._generate_json(llm, system_prompt, user_prompt, timeout=EXTRACT_TIMEOUT)
         except Exception as e:
-            log.error("Category reconcile failed for %r — keeping existing + new: %s", category, e)
+            log.error("Topic reconcile failed for %r — keeping existing + new: %s", topic, e)
             return fallback
 
         raw = data.get("memories")
         if not isinstance(raw, list):
-            log.error("Category reconcile for %r returned non-list — keeping existing + new", category)
+            log.error("Topic reconcile for %r returned non-list — keeping existing + new", topic)
             return fallback
 
         final = self._dedup_keep_order(str(t).strip() for t in raw if str(t).strip())
-        # Guard against a model that wipes a populated category.
+        # Guard against a model that wipes a populated topic.
         if not final and (existing_texts or candidate_texts):
-            log.error("Category reconcile for %r returned empty — keeping existing + new", category)
+            log.error("Topic reconcile for %r returned empty — keeping existing + new", topic)
             return fallback
         return final
 
     def _classify_texts(
         self,
         texts: list[str],
-        category: str,
+        topic: str,
         scope: str,
         existing: list[StoredMemory],
         existing_texts: list[str],
@@ -486,7 +486,7 @@ Return JSON with this exact shape:
                 mem = StoredMemory(
                     id=prev.id,
                     text=text,
-                    category=category,
+                    topic=topic,
                     scope=scope,
                     created_at=prev.created_at,
                     updated_at=prev.updated_at,
@@ -497,7 +497,7 @@ Return JSON with this exact shape:
                 mem = StoredMemory(
                     id=str(uuid.uuid4()),
                     text=text,
-                    category=category,
+                    topic=topic,
                     scope=scope,
                     created_at=now,
                     updated_at=now,
@@ -509,7 +509,7 @@ Return JSON with this exact shape:
                 mem = StoredMemory(
                     id=prev.id if prev else str(uuid.uuid4()),
                     text=text,
-                    category=category,
+                    topic=topic,
                     scope=scope,
                     created_at=created_at,
                     updated_at=now,
@@ -631,85 +631,30 @@ Return JSON with this exact shape:
         safe_write_json(self._watermarks_path(), marks)
 
     # ------------------------------------------------------------------
-    # Category management
+    # Topic management
     # ------------------------------------------------------------------
 
-    def _categories_path(self, scope: str, project_slug: str | None) -> DataStorePath:
+    def _topics_path(self, scope: str, project_slug: str | None) -> DataStorePath:
         if scope == "global":
-            return self.memory_root / "global-categories.json"
-        return self._project_dir(project_slug) / "memory/categories.json"
+            return self.memory_root / "global-topics.json"
+        return self._project_dir(project_slug) / "memory/topics.json"
 
-    def get_categories(self, scope: str, project_slug: str | None = None) -> list[dict[str, str]]:
-        """Return the active category list for *scope*, falling back to defaults."""
-        path = self._categories_path(scope, project_slug)
+    def get_topics(self, scope: str, project_slug: str | None = None) -> list[dict[str, str]]:
+        """Return the active topic list for *scope*, falling back to defaults."""
+        path = self._topics_path(scope, project_slug)
         if not path.exists():
-            return DEFAULT_GLOBAL_CATEGORIES if scope == "global" else DEFAULT_PROJECT_CATEGORIES
+            return DEFAULT_GLOBAL_TOPICS if scope == "global" else DEFAULT_PROJECT_TOPICS
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
-            cats = [c for c in raw if isinstance(c, dict) and "name" in c and "description" in c]
-            return cats or (DEFAULT_GLOBAL_CATEGORIES if scope == "global" else DEFAULT_PROJECT_CATEGORIES)
+            topics = [c for c in raw if isinstance(c, dict) and "name" in c and "summary" in c]
+            return topics or (DEFAULT_GLOBAL_TOPICS if scope == "global" else DEFAULT_PROJECT_TOPICS)
         except Exception as e:
-            log.error("Failed to read categories for %r: %s", scope, e)
-            return DEFAULT_GLOBAL_CATEGORIES if scope == "global" else DEFAULT_PROJECT_CATEGORIES
+            log.error("Failed to read topics for %r: %s", scope, e)
+            return DEFAULT_GLOBAL_TOPICS if scope == "global" else DEFAULT_PROJECT_TOPICS
 
-    def set_categories(self, scope: str, categories: list[dict[str, str]], project_slug: str | None = None) -> None:
-        """Persist *categories* for *scope*."""
-        safe_write_json(self._categories_path(scope, project_slug), categories)
-
-    async def remap_orphaned(
-        self,
-        llm: MemoryLLM,
-        orphaned_memories: list[dict[str, Any]],
-        remaining_categories: list[dict[str, str]],
-    ) -> list[dict[str, Any]]:
-        """Reassign *orphaned_memories* to *remaining_categories* via LLM.
-
-        Falls back to the first remaining category on any failure so that
-        memories are never silently lost.
-        """
-        if not orphaned_memories:
-            return []
-        if not remaining_categories:
-            return []
-
-        fallback_cat = remaining_categories[0]["name"]
-
-        categories_block = self._format_categories(remaining_categories)
-        system_prompt = "You reassign memory items to the best-fitting category from a given list. Output valid JSON only, no prose."
-        user_prompt = f"""
-Memories to reassign:
-{json.dumps([m["text"] for m in orphaned_memories], indent=2, ensure_ascii=False)}
-
-Available categories:
-{categories_block}
-
-Return JSON with this exact shape:
-{{"assignments": [{{"memory": "...", "category": "<one category name>"}}]}}
-
-Rules:
-- "category" MUST be one of the listed category names.
-- Keep the memory text unchanged.
-- One entry per input memory, in the same order.
-""".strip()
-
-        try:
-            data = await self._generate_json(llm, system_prompt, user_prompt, timeout=EXTRACT_TIMEOUT)
-        except Exception as e:
-            log.error("remap_orphaned LLM call failed: %s — using fallback category %r", e, fallback_cat)
-            return [{**m, "category": fallback_cat} for m in orphaned_memories]
-
-        assignments = data.get("assignments", [])
-        allowed = {c["name"] for c in remaining_categories}
-        result: list[dict[str, Any]] = []
-        for idx, m in enumerate(orphaned_memories):
-            if idx < len(assignments):
-                cat = str(assignments[idx].get("category", "")).strip()
-                if cat not in allowed:
-                    cat = fallback_cat
-            else:
-                cat = fallback_cat
-            result.append({**m, "category": cat})
-        return result
+    def set_topics(self, scope: str, topics: list[dict[str, str]], project_slug: str | None = None) -> None:
+        """Persist *topics* for *scope*."""
+        safe_write_json(self._topics_path(scope, project_slug), topics)
 
     # ------------------------------------------------------------------
     # Profile management
@@ -742,7 +687,7 @@ Rules:
                     StoredMemory(
                         id=str(m.get("id") or uuid.uuid4()),
                         text=str(m.get("text", "")),
-                        category=str(m.get("category") or FALLBACK_CATEGORY),
+                        topic=str(m.get("topic") or FALLBACK_TOPIC),
                         scope=str(m.get("scope") or "global"),
                         created_at=str(m.get("created_at") or now),
                         updated_at=str(m.get("updated_at") or now),
@@ -771,19 +716,19 @@ Rules:
 
         groups: dict[str, list[str]] = defaultdict(list)
         for m in memories:
-            groups[m.category].append(m.text)
+            groups[m.topic].append(m.text)
 
         if scope is not None:
-            category_names = [c["name"] for c in self.get_categories(scope, project_slug)]
-            ordered = [name for name in category_names if name in groups]
-            ordered.extend(name for name in groups if name not in category_names)
+            topic_names = [c["name"] for c in self.get_topics(scope, project_slug)]
+            ordered = [name for name in topic_names if name in groups]
+            ordered.extend(name for name in groups if name not in topic_names)
         else:
             ordered = list(groups.keys())
 
         parts = [f"# {title}"]
-        for category in ordered:
-            items = groups[category]
-            parts.append(f"\n## {category.replace('_', ' ').title()}")
+        for topic in ordered:
+            items = groups[topic]
+            parts.append(f"\n## {topic.replace('_', ' ').title()}")
             parts.extend(f"- {item}" for item in items)
         return "\n".join(parts)
 
@@ -801,20 +746,20 @@ Rules:
         )
 
     @staticmethod
-    def _format_categories(categories: list[dict[str, str]]) -> str:
-        return "\n".join(f'  - "{c["name"]}": {c["description"]}' for c in categories)
+    def _format_topics(topics: list[dict[str, str]]) -> str:
+        return "\n".join(f'  - "{c["name"]}": {c["summary"]}' for c in topics)
 
     @staticmethod
     def _format_existing(memories: list[StoredMemory]) -> str:
-        """Render stored memories grouped by category, for injection into the extraction prompt."""
+        """Render stored memories grouped by topic, for injection into the extraction prompt."""
         groups: dict[str, list[str]] = {}
         for m in memories:
             text = m.text.strip()
             if text:
-                groups.setdefault(m.category, []).append(text)
+                groups.setdefault(m.topic, []).append(text)
         lines: list[str] = []
-        for cat, texts in groups.items():
-            lines.append(f"{cat}:")
+        for topic, texts in groups.items():
+            lines.append(f"{topic}:")
             lines.extend(f"  - {t}" for t in texts)
         return "\n".join(lines)
 
@@ -849,11 +794,11 @@ Rules:
         self,
         raw_items: object,
         scope: str,
-        categories: list[dict[str, str]],
+        topics: list[dict[str, str]],
     ) -> list[ProposedMemory]:
         if not isinstance(raw_items, list):
             return []
-        allowed = {c["name"] for c in categories}
+        allowed = {c["name"] for c in topics}
         candidates: list[ProposedMemory] = []
         seen: set[str] = set()
         for item in raw_items:
@@ -866,10 +811,10 @@ Rules:
             if key in seen:
                 continue
             seen.add(key)
-            category = str(item.get("category") or "").strip()
-            if category not in allowed:
-                category = FALLBACK_CATEGORY
-            candidates.append(ProposedMemory(id=str(uuid.uuid4()), memory=memory, scope=scope, category=category))
+            topic = str(item.get("topic") or "").strip()
+            if topic not in allowed:
+                topic = FALLBACK_TOPIC
+            candidates.append(ProposedMemory(id=str(uuid.uuid4()), memory=memory, scope=scope, topic=topic))
         return candidates
 
     def _get_transcript(self, messages: list[dict[str, str]]) -> str:

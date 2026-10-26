@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from backend.routes.deps import get_memory_store, request_client
-from lib.memory_store import MemoryStore, ProposedMemory as MemoryProposedMemory
+from lib.memory_store import FALLBACK_TOPIC, MemoryStore
+from lib.memory_store import ProposedMemory as MemoryProposedMemory
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 
@@ -29,7 +30,7 @@ class ProposedMemoryModel(BaseModel):
     id: str
     memory: str
     scope: str
-    category: str | None = None
+    topic: str | None = None
 
 
 class MemoryCommitRequest(BaseModel):
@@ -61,8 +62,8 @@ async def extract_memories(
         raise HTTPException(status_code=502, detail=str(e)) from e
     return {
         "review_id": result.review_id,
-        "global": [{"id": m.id, "memory": m.memory, "scope": m.scope, "category": m.category} for m in result.global_memories],
-        "project": [{"id": m.id, "memory": m.memory, "scope": m.scope, "category": m.category} for m in result.project_memories]
+        "global": [{"id": m.id, "memory": m.memory, "scope": m.scope, "topic": m.topic} for m in result.global_memories],
+        "project": [{"id": m.id, "memory": m.memory, "scope": m.scope, "topic": m.topic} for m in result.project_memories]
         if result.project_memories
         else None,
     }
@@ -76,7 +77,7 @@ async def commit_memory_docs(
     """Merge accepted memories into the stored memory documents."""
     try:
         with request_client() as client:
-            accepted = [MemoryProposedMemory(m.id, m.memory, m.scope, m.category or "note") for m in req.accepted_memories]
+            accepted = [MemoryProposedMemory(m.id, m.memory, m.scope, m.topic or FALLBACK_TOPIC) for m in req.accepted_memories]
             await store.commit_async(
                 llm=client,
                 scope=req.scope,
@@ -98,7 +99,7 @@ async def preview_memory_docs(
     """Dry-run a commit, return the resulting memory documents without saving."""
     try:
         with request_client() as client:
-            accepted = [MemoryProposedMemory(m.id, m.memory, m.scope, m.category or "note") for m in req.accepted_memories]
+            accepted = [MemoryProposedMemory(m.id, m.memory, m.scope, m.topic or FALLBACK_TOPIC) for m in req.accepted_memories]
             result = await store.preview(
                 llm=client,
                 scope=req.scope,
@@ -136,49 +137,29 @@ def list_memories(
     return {"memories": memories}
 
 
-@router.get("/categories")
-def get_categories(
+@router.get("/topics")
+def get_topics(
     store: MemoryStoreDep,
     scope: str = Query(...),
     project_slug: str | None = Query(None, alias="project_slug"),
 ) -> dict:
     try:
-        categories = store.get_categories(scope=scope, project_slug=project_slug)
+        topics = store.get_topics(scope=scope, project_slug=project_slug)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
-    return {"categories": categories}
+    return {"topics": topics}
 
 
-class CategorySetRequest(BaseModel):
+class TopicSetRequest(BaseModel):
     scope: str
-    categories: list[dict]
+    topics: list[dict]
     project_slug: str | None = None
 
 
-@router.put("/categories")
-def set_categories(req: CategorySetRequest, store: MemoryStoreDep) -> dict:
+@router.put("/topics")
+def set_topics(req: TopicSetRequest, store: MemoryStoreDep) -> dict:
     try:
-        store.set_categories(scope=req.scope, categories=req.categories, project_slug=req.project_slug)
+        store.set_topics(scope=req.scope, topics=req.topics, project_slug=req.project_slug)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     return {"status": "saved"}
-
-
-class RemapRequest(BaseModel):
-    orphaned_memories: list[dict]
-    remaining_categories: list[dict]
-    project_slug: str | None = None
-
-
-@router.post("/remap-category")
-async def remap_category(req: RemapRequest, store: MemoryStoreDep) -> dict:
-    try:
-        with request_client() as client:
-            remapped = await store.remap_orphaned(
-                llm=client,
-                orphaned_memories=req.orphaned_memories,
-                remaining_categories=req.remaining_categories,
-            )
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
-    return {"memories": remapped}

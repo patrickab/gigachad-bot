@@ -350,8 +350,6 @@ export function Sidebar({
         { label: `New document in ${project.name}`, icon: FilePlus, onClick: () => setCreateDocumentSlug(project.slug) },
         { label: `${hasArchitecture(project.slug) ? "Open" : "Create"} architecture for ${project.name}`, icon: ArchitectureIcon,
           onClick: () => openArchitecture(project.slug) },
-        { label: `Open memory for ${project.name}`, icon: Brain,
-          onClick: () => openMemoryViewer({ scope: "project", projectSlug: project.slug }) },
       ],
       onMoveHere: (path) => moveToProject(path, project.slug),
       onDropFiles: (paths) => importFiles(project.slug, paths),
@@ -377,7 +375,7 @@ export function Sidebar({
   >
     {!collapsed && <>
       <div className="flex h-10 shrink-0 items-center px-4">
-        <button onClick={() => openMemoryViewer({ scope: "global" })} aria-label="Open global memory profile"
+        <button onClick={openMemoryViewer} aria-label="Open memory"
           className="rounded-md p-1 text-ink-subtle hover:bg-surface-elevated hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted transition-colors">
           <Brain className="h-4 w-4" />
         </button>

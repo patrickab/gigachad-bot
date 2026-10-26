@@ -1,8 +1,8 @@
 "use client"
 
 import { useCallback, useMemo } from "react"
-import type { CategoryDef } from "@/lib/domain/types"
-import { type MemoryRecord, groupByCategoryOrder, formatCategoryName, normalizeMemoryCategory } from "@/features/memory/memoryUtils"
+import type { MemoryTopic } from "@/lib/domain/types"
+import { type MemoryRecord, groupByTopicOrder, formatTopicName, normalizeMemoryTopic } from "@/features/memory/memoryUtils"
 import { ElevationProvider, ElevatedContainer } from "@/components/ui/ElevatedContainer"
 import { MemoryCard } from "@/features/memory/MemoryCard"
 import { useDropZone } from "@/hooks/useDropZone"
@@ -12,11 +12,11 @@ const PLACEHOLDER_DELAY_MS = 300
 
 interface MemoryBoardProps {
   memories: MemoryRecord[]
-  categoryOrder: CategoryDef[]
+  topicOrder: MemoryTopic[]
   disabled?: boolean
   mode?: "review" | "display"
   onChange?: (memoryId: string, text: string) => void
-  onChangeCategory: (memoryId: string, category: string) => void
+  onChangeTopic: (memoryId: string, topic: string) => void
   onRemove?: (memoryId: string) => void
   onAccept?: (memoryId: string) => void
   onCancel?: (memoryId: string) => void
@@ -24,11 +24,11 @@ interface MemoryBoardProps {
 
 export function MemoryBoard({
   memories,
-  categoryOrder,
+  topicOrder,
   disabled = false,
   mode = "display",
   onChange,
-  onChangeCategory,
+  onChangeTopic,
   onRemove,
   onAccept,
   onCancel,
@@ -38,18 +38,18 @@ export function MemoryBoard({
     [memories],
   )
 
-  // Dropping a card on its current category is a no-op, so don't highlight that zone
-  const isValidTarget = useCallback((catName: string, itemId: string) => {
+  // Dropping a card on its current topic is a no-op, so don't highlight that zone
+  const isValidTarget = useCallback((topicName: string, itemId: string) => {
     const mem = memoryById.get(itemId)
-    return mem ? normalizeMemoryCategory(mem) !== catName : false
+    return mem ? normalizeMemoryTopic(mem) !== topicName : false
   }, [memoryById])
 
-  const handleDrop = useCallback((catName: string, itemId: string) => {
+  const handleDrop = useCallback((topicName: string, itemId: string) => {
     const mem = memoryById.get(itemId)
-    if (mem && normalizeMemoryCategory(mem) !== catName) {
-      onChangeCategory(itemId, catName)
+    if (mem && normalizeMemoryTopic(mem) !== topicName) {
+      onChangeTopic(itemId, topicName)
     }
-  }, [memoryById, onChangeCategory])
+  }, [memoryById, onChangeTopic])
 
   const drop = useDropZone({
     onDrop: handleDrop,
@@ -58,8 +58,8 @@ export function MemoryBoard({
   })
 
   const sections = useMemo(
-    () => groupByCategoryOrder(categoryOrder, memories),
-    [categoryOrder, memories],
+    () => groupByTopicOrder(topicOrder, memories),
+    [topicOrder, memories],
   )
 
   if (sections.length === 0) {
@@ -70,12 +70,12 @@ export function MemoryBoard({
     <ElevationProvider>
       <ElevatedContainer className="rounded-2xl border border-divider/30 p-3">
         <div className="space-y-3">
-          {sections.map(({ category, items }) => {
-            const zone = drop.bindZone(category.name)
+          {sections.map(({ topic, items }) => {
+            const zone = drop.bindZone(topic.name)
 
             return (
               <ElevatedContainer
-                key={category.name}
+                key={topic.name}
                 onDragOver={zone.onDragOver}
                 onDragEnter={zone.onDragEnter}
                 onDragLeave={zone.onDragLeave}
@@ -87,7 +87,7 @@ export function MemoryBoard({
               >
                 <div className="flex items-center gap-2 px-3 pt-3 pb-2 select-none">
                   <span className="text-[11px] font-bold text-ink-muted uppercase tracking-[0.15em] truncate">
-                    {formatCategoryName(category.name)}
+                    {formatTopicName(topic.name)}
                   </span>
                   <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-surface-elevated text-ink tabular-nums shrink-0">
                     {items.length}

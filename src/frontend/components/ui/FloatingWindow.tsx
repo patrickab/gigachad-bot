@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, type ReactNode } from "react"
+import { useEffect, useRef, type CSSProperties, type ReactNode } from "react"
 import { motion } from "framer-motion"
 import { cn } from "@/lib/utils"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
@@ -11,6 +11,8 @@ interface FloatingWindowProps {
   /** Accessible name of the dialog. */
   label?: string
   overlayClassName?: string
+  /** Inline overlay style, e.g. padding that centers the panel over part of the screen. */
+  overlayStyle?: CSSProperties
   panelClassName?: string
 }
 
@@ -19,7 +21,7 @@ interface FloatingWindowProps {
  *
  * - Takes focus on open unless a child already focused itself, so Escape and keys reach it
  */
-export function FloatingWindow({ children, onClose, label, overlayClassName, panelClassName }: FloatingWindowProps) {
+export function FloatingWindow({ children, onClose, label, overlayClassName, overlayStyle, panelClassName }: FloatingWindowProps) {
   const panelRef = useRef<HTMLDivElement>(null)
   useEscapeLayer(() => onClose?.(), onClose !== undefined)
   useEffect(() => {
@@ -35,6 +37,7 @@ export function FloatingWindow({ children, onClose, label, overlayClassName, pan
       transition={{ duration: 0.15 }}
       className={cn("fixed inset-0 z-[90] flex items-center justify-center bg-backdrop p-3 backdrop-blur-[2px] sm:p-6", overlayClassName)}
       onClick={onClose}
+      style={overlayStyle}
     >
       <motion.div
         ref={panelRef}

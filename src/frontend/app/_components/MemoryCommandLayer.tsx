@@ -34,8 +34,8 @@ export function MemoryCommandLayer({ bar, items, onRun }: {
           state={bar.panelState}
           projectEnabled={!!tab.projectSlug}
           actions={bar.panelActions}
-          globalCategories={bar.categories.globalCategories}
-          projectCategories={bar.categories.projectCategories}
+          globalTopics={bar.topics.globalTopics}
+          projectTopics={bar.topics.projectTopics}
         />
       )}
     </>

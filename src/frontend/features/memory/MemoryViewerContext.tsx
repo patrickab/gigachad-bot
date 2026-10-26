@@ -1,17 +1,10 @@
 "use client"
 
-import { createContext, useCallback, useContext, useState, type ReactNode } from "react"
-
-type MemoryViewerScope = "global" | "project"
-
-interface MemoryViewerTarget {
-  scope: MemoryViewerScope
-  projectSlug?: string | null
-}
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react"
 
 interface MemoryViewerContextState {
-  target: MemoryViewerTarget | null
-  openMemoryViewer: (target: MemoryViewerTarget) => void
+  isOpen: boolean
+  openMemoryViewer: () => void
   closeMemoryViewer: () => void
 }
 
@@ -23,21 +16,12 @@ export function useMemoryViewer(): MemoryViewerContextState {
   return ctx
 }
 
-/** Owns which memory scope the viewer modal shows, `null` when closed. */
+/** Owns whether the central memory window is open. */
 export function MemoryViewerProvider({ children }: { children: ReactNode }) {
-  const [target, setTarget] = useState<MemoryViewerTarget | null>(null)
+  const [isOpen, setIsOpen] = useState(false)
+  const openMemoryViewer = useCallback(() => setIsOpen(true), [])
+  const closeMemoryViewer = useCallback(() => setIsOpen(false), [])
+  const value = useMemo(() => ({ isOpen, openMemoryViewer, closeMemoryViewer }), [isOpen, openMemoryViewer, closeMemoryViewer])
 
-  const openMemoryViewer = useCallback((next: MemoryViewerTarget) => {
-    setTarget(next)
-  }, [])
-
-  const closeMemoryViewer = useCallback(() => {
-    setTarget(null)
-  }, [])
-
-  return (
-    <MemoryViewerContext.Provider value={{ target, openMemoryViewer, closeMemoryViewer }}>
-      {children}
-    </MemoryViewerContext.Provider>
-  )
+  return <MemoryViewerContext.Provider value={value}>{children}</MemoryViewerContext.Provider>
 }

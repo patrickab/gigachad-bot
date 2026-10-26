@@ -344,19 +344,21 @@ export interface ProjectListItem {
   tabs?: ProjectTab[]
 }
 
+/** Atomic memory candidate from an extraction, awaiting user review. */
 export interface ProposedMemory {
   id: string
   memory: string
   scope: "global" | "project"
-  category?: string
+  topic?: string
 }
 
 export type MemoryStatus = "pre-existing" | "combined" | "new"
 
+/** Committed atomic memory, one fact within a topic. */
 export interface PreviewMemory {
   id: string
   text: string
-  category: string
+  topic: string
   scope: "global" | "project"
   status?: MemoryStatus
   created_at?: string
@@ -376,9 +378,10 @@ export interface MemoryPreviewResponse {
   revised_memories: PreviewMemory[]
 }
 
-export interface CategoryDef {
+/** Complete memory: a named bundle of atomic memories, also the extraction's tagging vocabulary. */
+export interface MemoryTopic {
   name: string
-  description: string
+  summary: string
 }
 
 /** One omp session file (`src/lib/omp_web.py` `OmpSession`). */

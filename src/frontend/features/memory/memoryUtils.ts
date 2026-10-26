@@ -1,23 +1,29 @@
-import type { CategoryDef, PreviewMemory, ProposedMemory } from "@/lib/domain/types"
+import type { MemoryTopic, PreviewMemory, ProposedMemory } from "@/lib/domain/types"
 
 export type MemoryRecord = ProposedMemory | PreviewMemory
 
 type MemorySection = {
-  category: CategoryDef | { name: string; description: string }
+  topic: MemoryTopic | { name: string; summary: string }
   items: MemoryRecord[]
 }
 
-export function formatCategoryName(name: string): string {
+export function formatTopicName(name: string): string {
   return name.replace(/_/g, " ")
 }
 
-function formatCategoryHeading(name: string): string {
+/** Display title of a stored topic name: `dev_environment` -> `Dev Environment`. */
+export function formatTopicHeading(name: string): string {
   return name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
-/** Missing or empty categories group under "uncategorized". */
-export function normalizeMemoryCategory(m: MemoryRecord): string {
-  return m.category || "uncategorized"
+/** Stored topic name of a typed title: `Dev Environment` -> `dev_environment`. */
+export function topicNameFromTitle(title: string): string {
+  return title.trim().toLowerCase().replace(/\s+/g, "_")
+}
+
+/** Missing or empty topics group under "note", the backend fallback. */
+export function normalizeMemoryTopic(m: MemoryRecord): string {
+  return m.topic || "note"
 }
 
 export function memoryText(m: MemoryRecord): string {
@@ -38,51 +44,46 @@ function sortByUpdated(mems: MemoryRecord[]): MemoryRecord[] {
   })
 }
 
-/** Group memories into sections in definition order (empty categories included), then any unknown categories last. */
-export function groupByCategoryOrder(
-  categoryOrder: CategoryDef[],
+/** Group memories into sections in definition order (empty topics included), then any unknown topics last. */
+export function groupByTopicOrder(
+  topicOrder: MemoryTopic[],
   memories: MemoryRecord[],
 ): MemorySection[] {
-  const byCategory = new Map<string, MemoryRecord[]>()
+  const byTopic = new Map<string, MemoryRecord[]>()
   for (const m of memories) {
-    const cat = normalizeMemoryCategory(m)
-    const arr = byCategory.get(cat) ?? []
+    const cat = normalizeMemoryTopic(m)
+    const arr = byTopic.get(cat) ?? []
     arr.push(m)
-    byCategory.set(cat, arr)
+    byTopic.set(cat, arr)
   }
 
   const sections: MemorySection[] = []
   const seen = new Set<string>()
 
-  for (const cat of categoryOrder) {
+  for (const cat of topicOrder) {
     seen.add(cat.name)
-    sections.push({ category: cat, items: sortByUpdated(byCategory.get(cat.name) ?? []) })
+    sections.push({ topic: cat, items: sortByUpdated(byTopic.get(cat.name) ?? []) })
   }
 
-  for (const [name, items] of byCategory) {
+  for (const [name, items] of byTopic) {
     if (!seen.has(name)) {
-      sections.push({ category: { name, description: "" }, items: sortByUpdated(items) })
+      sections.push({ topic: { name, summary: "" }, items: sortByUpdated(items) })
     }
   }
 
   return sections
 }
 
-/** Flatten sections back into a category-ordered memory list. */
-export function sortMemoriesByCategoryOrder(mems: PreviewMemory[], categoryOrder: CategoryDef[]): PreviewMemory[] {
-  return groupByCategoryOrder(categoryOrder, mems).flatMap((s) => s.items) as PreviewMemory[]
-}
-
 /** Mirror the backend `render_memories_as_markdown` so live edits update the diff without a round-trip. */
 export function renderMemoriesMarkdown(
   memories: PreviewMemory[],
   title: string,
-  categoryOrder?: CategoryDef[],
+  topicOrder?: MemoryTopic[],
 ): string {
   const parts = [`# ${title}`]
-  for (const { category, items } of groupByCategoryOrder(categoryOrder ?? [], memories)) {
+  for (const { topic, items } of groupByTopicOrder(topicOrder ?? [], memories)) {
     if (items.length === 0) continue
-    parts.push(`\n## ${formatCategoryHeading(category.name)}`)
+    parts.push(`\n## ${formatTopicHeading(topic.name)}`)
     for (const m of items) parts.push(`- ${memoryText(m)}`)
   }
   return parts.join("\n")

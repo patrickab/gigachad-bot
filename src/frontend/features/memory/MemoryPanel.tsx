@@ -9,15 +9,15 @@ import { AddMemoryCard, MemoryErrorCard } from "@/features/memory/MemoryCard"
 import { MemoryBoard } from "@/features/memory/MemoryBoard"
 import { computeLineDiff } from "@/lib/diff"
 import type { BoundMemoryActions, MemoryPanelState } from "@/features/memory/useMemorizeFlow"
-import type { CategoryDef, PreviewMemory, ProposedMemory } from "@/lib/domain/types"
-import { groupByCategoryOrder, renderMemoriesMarkdown } from "@/features/memory/memoryUtils"
+import type { MemoryTopic, PreviewMemory, ProposedMemory } from "@/lib/domain/types"
+import { groupByTopicOrder, renderMemoriesMarkdown } from "@/features/memory/memoryUtils"
 
 interface MemoryPanelProps {
   state: MemoryPanelState
   projectEnabled: boolean
   actions: BoundMemoryActions
-  globalCategories: CategoryDef[]
-  projectCategories: CategoryDef[]
+  globalTopics: MemoryTopic[]
+  projectTopics: MemoryTopic[]
 }
 
 function LoadingWorkspace({ message }: { message: string }) {
@@ -59,28 +59,28 @@ function CandidateWorkspace({
   globalMemories,
   projectMemories,
   projectEnabled,
-  globalCategories,
-  projectCategories,
+  globalTopics,
+  projectTopics,
   onAcceptRemaining,
   onCancelRemaining,
   onAcceptMemory,
   onCancelMemory,
   onAddMemory,
   onEditMemory,
-  onEditCategory,
+  onEditTopic,
 }: {
   globalMemories: ProposedMemory[]
   projectMemories: ProposedMemory[] | null
   projectEnabled: boolean
-  globalCategories: CategoryDef[]
-  projectCategories: CategoryDef[]
+  globalTopics: MemoryTopic[]
+  projectTopics: MemoryTopic[]
   onAcceptRemaining: () => void
   onCancelRemaining: () => void
   onAcceptMemory: (memoryId: string) => void
   onCancelMemory: (memoryId: string) => void
   onAddMemory: (scope: "global" | "project", memory: string) => void
   onEditMemory: (memoryId: string, text: string) => void
-  onEditCategory: (memoryId: string, category: string) => void
+  onEditTopic: (memoryId: string, topic: string) => void
 }) {
   const total = globalMemories.length + (projectMemories?.length ?? 0)
   const [addingScope, setAddingScope] = useState<"global" | "project" | null>(null)
@@ -120,13 +120,13 @@ function CandidateWorkspace({
             {addingScope === "global" && (
               <AddMemoryCard scope="global" onAddMemory={onAddMemory} onCancel={() => setAddingScope(null)} />
             )}
-            {globalMemories.length > 0 || globalCategories.length > 0 ? (
+            {globalMemories.length > 0 || globalTopics.length > 0 ? (
               <MemoryBoard
                 memories={globalMemories}
-                categoryOrder={globalCategories}
+                topicOrder={globalTopics}
                 mode="review"
                 onChange={onEditMemory}
-                onChangeCategory={onEditCategory}
+                onChangeTopic={onEditTopic}
                 onAccept={onAcceptMemory}
                 onCancel={onCancelMemory}
               />
@@ -151,13 +151,13 @@ function CandidateWorkspace({
             {addingScope === "project" && projectEnabled && (
               <AddMemoryCard scope="project" onAddMemory={onAddMemory} onCancel={() => setAddingScope(null)} />
             )}
-            {projectEnabled && (projectMemories && projectMemories.length > 0 || projectCategories.length > 0) ? (
+            {projectEnabled && (projectMemories && projectMemories.length > 0 || projectTopics.length > 0) ? (
               <MemoryBoard
                 memories={projectMemories ?? []}
-                categoryOrder={projectCategories}
+                topicOrder={projectTopics}
                 mode="review"
                 onChange={onEditMemory}
-                onChangeCategory={onEditCategory}
+                onChangeTopic={onEditTopic}
                 onAccept={onAcceptMemory}
                 onCancel={onCancelMemory}
               />
@@ -185,21 +185,21 @@ interface PreviewTab {
 
 function DocumentWorkspace({
   previews,
-  globalCategories,
-  projectCategories,
+  globalTopics,
+  projectTopics,
   onCommitDocuments,
   onCancelRemaining,
   onEditMemory,
-  onEditCategory,
+  onEditTopic,
   onRemoveMemory,
 }: {
   previews: PreviewTab[]
-  globalCategories: CategoryDef[]
-  projectCategories: CategoryDef[]
+  globalTopics: MemoryTopic[]
+  projectTopics: MemoryTopic[]
   onCommitDocuments: () => Promise<void>
   onCancelRemaining: () => void
   onEditMemory: (scope: "global" | "project", memoryId: string, text: string) => void
-  onEditCategory: (scope: "global" | "project", memoryId: string, category: string) => void
+  onEditTopic: (scope: "global" | "project", memoryId: string, topic: string) => void
   onRemoveMemory: (scope: "global" | "project", memoryId: string) => void
 }) {
   const [activeIdx, setActiveIdx] = useState(0)
@@ -216,8 +216,8 @@ function DocumentWorkspace({
   const anyLoading = previews.some((p) => p.loading)
   const ActiveIcon = active.icon
   const memories = active.revised_memories
-  const activeCategories = active.scope === "global" ? globalCategories : projectCategories
-  const revisedMarkdown = renderMemoriesMarkdown(memories, active.title, activeCategories).trimEnd() + "\n"
+  const activeTopics = active.scope === "global" ? globalTopics : projectTopics
+  const revisedMarkdown = renderMemoriesMarkdown(memories, active.title, activeTopics).trimEnd() + "\n"
   const diff = active.loading ? "" : computeLineDiff(active.existing_markdown || "", revisedMarkdown)
 
   return (
@@ -271,10 +271,10 @@ function DocumentWorkspace({
             <div className="flex-1 overflow-y-auto p-4">
               <MemoryBoard
                 memories={memories}
-                categoryOrder={activeCategories}
+                topicOrder={activeTopics}
                 mode="display"
                 onChange={(id, text) => onEditMemory(active.scope, id, text)}
-                onChangeCategory={(id, cat) => onEditCategory(active.scope, id, cat)}
+                onChangeTopic={(id, cat) => onEditTopic(active.scope, id, cat)}
                 onRemove={(id) => onRemoveMemory(active.scope, id)}
               />
             </div>
@@ -301,7 +301,7 @@ const NO_MEMORIES: ProposedMemory[] = []
 
 // Main MemoryPanel
 export function MemoryPanel({
-  state, projectEnabled, actions, globalCategories, projectCategories,
+  state, projectEnabled, actions, globalTopics, projectTopics,
 }: MemoryPanelProps) {
   const extractingMode = state.phase === "extracting"
   const errorMode = state.phase === "error"
@@ -345,8 +345,8 @@ export function MemoryPanel({
       }
       // +/- act on the first candidate as displayed (global before project)
       if (candidatesMode) {
-        const globalSections = groupByCategoryOrder(globalCategories, globalMemories)
-        const projectSections = groupByCategoryOrder(projectCategories, projectMemories ?? [])
+        const globalSections = groupByTopicOrder(globalTopics, globalMemories)
+        const projectSections = groupByTopicOrder(projectTopics, projectMemories ?? [])
         const firstGlobal = globalSections.find(s => s.items.length > 0)?.items[0]
         const firstProject = projectSections.find(s => s.items.length > 0)?.items[0]
         const nextId = (firstGlobal ?? firstProject)?.id
@@ -362,7 +362,7 @@ export function MemoryPanel({
     }
     document.addEventListener("keydown", onKey)
     return () => document.removeEventListener("keydown", onKey)
-  }, [actions, documentsMode, candidatesMode, globalCategories, projectCategories, globalMemories, projectMemories])
+  }, [actions, documentsMode, candidatesMode, globalTopics, projectTopics, globalMemories, projectMemories])
 
   return (
     <AnimatePresence>
@@ -378,12 +378,12 @@ export function MemoryPanel({
         ) : documentsMode ? (
           <DocumentWorkspace
             previews={previews}
-            globalCategories={globalCategories}
-            projectCategories={projectEnabled ? projectCategories : []}
+            globalTopics={globalTopics}
+            projectTopics={projectEnabled ? projectTopics : []}
             onCommitDocuments={actions.commitDocuments}
             onCancelRemaining={actions.cancelRemaining}
             onEditMemory={actions.editRevisedMemory}
-            onEditCategory={actions.editRevisedMemoryCategory}
+            onEditTopic={actions.editRevisedMemoryTopic}
             onRemoveMemory={actions.removeRevisedMemory}
           />
         ) : (
@@ -391,15 +391,15 @@ export function MemoryPanel({
             globalMemories={globalMemories}
             projectMemories={projectMemories}
             projectEnabled={projectEnabled}
-            globalCategories={globalCategories}
-            projectCategories={projectEnabled ? projectCategories : []}
+            globalTopics={globalTopics}
+            projectTopics={projectEnabled ? projectTopics : []}
             onAcceptRemaining={actions.acceptRemaining}
             onCancelRemaining={actions.cancelRemaining}
             onAcceptMemory={actions.acceptMemory}
             onCancelMemory={actions.cancelMemory}
             onAddMemory={actions.addMemory}
             onEditMemory={actions.editMemory}
-            onEditCategory={actions.editMemoryCategory}
+            onEditTopic={actions.editMemoryTopic}
           />
         )}
       </FloatingWindow>

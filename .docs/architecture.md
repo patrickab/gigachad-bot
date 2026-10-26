@@ -39,7 +39,7 @@ change log + SSE        LikeC4  omp-web   factory
 
 ## Frontend read recovery
 
-- `contexts/StartupReadContext.tsx` bounds initial settings, models, prompts, projects, histories, sidebar listings, memory categories, reasoning levels, and OMP overview reads to 15 seconds.
+- `contexts/StartupReadContext.tsx` bounds initial settings, models, prompts, projects, histories, sidebar listings, memory topics, reasoning levels, and OMP overview reads to 15 seconds.
 - Report failures in a shared banner. Retry only failed reads without remounting the workspace or clearing drafts and loaded data.
 - Abort timed-out or disposed requests and ignore obsolete responses. Do not add automatic retries to these startup reads.
 - Keep streams, uploads, writes, and explicit post-mutation refreshes unchanged. OMP retains focus and interval polling through the bounded read, only for host-access logins.
@@ -249,12 +249,12 @@ Encode one payload as `?open=<base64url JSON>`:
 
 | Memory stage | Contract |
 | --- | --- |
-| Scope | Document-backed JSON/Markdown, not vector search. Global user facts and project facts have configurable categories. |
+| Scope | Document-backed JSON/Markdown, not vector search. Atomic memories (`{id, text, topic, scope, ...}`) belong to topics (`{name, summary}`), the complete memories. Global: `memory/global-topics.json` + `global-profile.json`. Project: `memory/project/<slug>/memory/topics.json` + `memory.json`. Schema step `0010_memory_topics.sql` migrated the former category files and fields. |
 | Extract | Use the stored `memory_model` selection. Propose new/corrected facts after independent `(chat_id, scope)` watermarks. |
-| Review / reconcile | Buffer candidates, accept/edit/reject, merge within affected categories, leave untouched categories unchanged, preview before canonical writes. |
+| Review / reconcile | Buffer candidates, accept/edit/reject, merge within affected topics, leave untouched topics unchanged, preview before canonical writes. |
 | Commit / cancel | Save canonical JSON/rendered Markdown, then advance that scope's watermark. Cancellation discards candidates without advancing. |
 | Injection | `MemoryStore.augment_system_prompt` appends global and containing-project Markdown under `Persistent Memory Context`. |
-| Maintenance | Edit categories, move between scopes, remap orphaned entries through the app. |
+| Maintenance | One memory window (sidebar brain button, `features/memory/MemoryViewer.tsx`) lists global and per-project topics. Every edit writes immediately: `PUT /api/memory/topics`, then `/api/memory/commit` with the full memory list, queued per scope. Deleting a topic deletes its memories, undoable via `UndoDeleteContext`. |
 
 - Use `UndoDeleteContext` for deferred resource deletions. Scheduling the next deletion commits the previous one, refusal restores it.
 - Remove chat pairs/attachments from model context immediately while allowing undo. Keep canvas history independent.
