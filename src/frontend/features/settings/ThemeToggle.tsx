@@ -3,39 +3,17 @@
 import { Sun, Moon } from "lucide-react"
 import { STORAGE_KEY_THEME } from "@/lib/backend/config"
 import { useThemeName } from "@/hooks/useThemeName"
-
-// Theme switches share one document, even when several workspace tabs are mounted.
-let activeTransition: ViewTransition | undefined
+import { switchColors } from "@/lib/themeTransition"
 
 export function ThemeToggle() {
   const theme = useThemeName()
 
   function toggle() {
-    const root = document.documentElement
-    const applyTheme = () => {
+    switchColors(() => {
+      const root = document.documentElement
       const light = !root.classList.contains("light")
       root.classList.toggle("light", light)
       try { localStorage.setItem(STORAGE_KEY_THEME, light ? "light" : "dark") } catch {}
-    }
-
-    activeTransition?.skipTransition()
-    if (!document.startViewTransition || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      applyTheme()
-      return
-    }
-
-    const radius = Math.hypot(window.innerWidth / 2, window.innerHeight / 2)
-    root.style.setProperty("--theme-radius", `${radius}px`)
-    root.classList.add("theme-transition")
-    const transition = document.startViewTransition(applyTheme)
-    activeTransition = transition
-    // Rapid switches skip the old animation, but still apply each requested theme.
-    void transition.ready.catch(() => {})
-    void transition.finished.finally(() => {
-      if (activeTransition !== transition) return
-      activeTransition = undefined
-      root.classList.remove("theme-transition")
-      root.style.removeProperty("--theme-radius")
     })
   }
 
