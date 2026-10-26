@@ -15,7 +15,6 @@ import { useCanvasHistory } from "@/features/editor/canvas/useCanvasHistory"
 import { useCanvasInsert } from "@/features/editor/canvas/attachments/useCanvasInsert"
 import { useTabActive } from "@/contexts/TabContext"
 import { useCanvasSelection } from "@/features/editor/canvas/selection/useCanvasSelection"
-import { useThemeName } from "@/hooks/useThemeName"
 import { cn } from "@/lib/utils"
 import { CanvasAddMenu } from "@/features/editor/canvas/attachments/CanvasAddMenu"
 import { CanvasAttachmentWindow } from "@/features/editor/canvas/attachments/CanvasAttachmentWindow"
@@ -77,7 +76,6 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
   const containerRef = useRef<HTMLDivElement>(null)
   // gates the window/document key listeners below to the frontmost tab
   const active = useTabActive()
-  const isDark = useThemeName() === "dark"
 
   const { scale, offset, settledScale, scaleRef, offsetRef, screenToCanvas, pointAtCenter, isPanning, startPan, movePan, endPan } = useCanvasCamera(containerRef, { viewport: doc.viewport, hostScale, depth })
   const { liveRef, applyChange, commit, snapshot, snapshotOnce, endGesture, undo: undoHistory, redo: redoHistory, canUndo, canRedo } = useCanvasHistory(doc, onChange)
@@ -612,7 +610,6 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
         onCycleStrokeSize={() => setStrokeSize((w) => w === "thin" ? "medium" : w === "medium" ? "thick" : "thin")}
         color={color}
         onColorChange={setColor}
-        isDark={isDark}
         tool={tool}
         onToggleTool={toggleTool}
         isErasing={isErasing}
@@ -662,9 +659,9 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
               />
             ))}
             {/* Committed strokes (selected ones are hidden while a drag preview draws them) */}
-            <CanvasStrokeLayer strokes={doc.strokes} hidden={selection.preview && selection.selectedIds} isDark={isDark} />
+            <CanvasStrokeLayer strokes={doc.strokes} hidden={selection.preview && selection.selectedIds} />
             {/* In-progress stroke — d is set imperatively by redrawLive */}
-            <path ref={livePathRef} fill={inkColor(color, isDark)} />
+            <path ref={livePathRef} fill={inkColor(color)} />
 
             {selection.lasso && selection.bounds && (
               <CanvasSelectionOutline
@@ -674,7 +671,6 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
                 selectedIds={selection.selectedIds}
                 preview={selection.preview}
                 scale={scale}
-                isDark={isDark}
                 onDragStart={selection.startDrag}
               />
             )}
@@ -718,7 +714,6 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
             note={t}
             scale={scale}
             offset={offset}
-            isDark={isDark}
             editing={t.id === editingTextId}
             autoFocus={t.id === autoFocusId}
             onStartEditing={() => { setEditingTextId(t.id); setAutoFocusId(t.id) }}

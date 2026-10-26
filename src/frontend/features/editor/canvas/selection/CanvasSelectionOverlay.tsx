@@ -13,7 +13,6 @@ interface CanvasSelectionOutlineProps {
   /** Strokes of an in-flight drag; the committed layer hides them, so they are drawn here instead. */
   preview: StrokeData[] | null
   scale: number
-  isDark: boolean
   onDragStart: (handle: "move" | "resize", clientX: number, clientY: number) => void
 }
 
@@ -22,7 +21,7 @@ interface CanvasSelectionOutlineProps {
  * what you drag to move them together. One handle at the shape's bottom-right scales it
  * diagonally; it is sized in `u` so it stays a constant, thumb-findable size at any zoom.
  */
-export function CanvasSelectionOutline({ lasso, bounds: b, strokes, selectedIds, preview, scale, isDark, onDragStart }: CanvasSelectionOutlineProps) {
+export function CanvasSelectionOutline({ lasso, bounds: b, strokes, selectedIds, preview, scale, onDragStart }: CanvasSelectionOutlineProps) {
   const u = 1 / scale
   const hit = 13 * u  // invisible grab area — bigger than the dot you see
   const dot = 5 * u
@@ -36,7 +35,7 @@ export function CanvasSelectionOutline({ lasso, bounds: b, strokes, selectedIds,
         if (!d) return null
         return (
           <g key={`sel-${s.id}`}>
-            {preview && <path d={d} fill={inkColor(s.color, isDark)} />}
+            {preview && <path d={d} fill={inkColor(s.color)} />}
             <path d={d} fill="none" stroke="var(--ink)" strokeWidth={1.5 * u} strokeDasharray={`${3 * u} ${3 * u}`} />
           </g>
         )

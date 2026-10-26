@@ -16,7 +16,11 @@ const RECENT_COLORS = 3
 export const SEPARATOR = <div className="w-px h-4 bg-divider/50 mx-0.5" />
 
 /** Preset, recent and custom ink colours behind a popover. */
-function ColorPicker({ color, isDark, onChange }: { color: string; isDark: boolean; onChange: (color: string) => void }) {
+export function ColorPicker({ color, onChange, presets = PRESET_COLORS }: {
+  color: string
+  onChange: (color: string) => void
+  presets?: ReadonlyArray<{ value: string }>
+}) {
   const [open, setOpen] = useState(false)
   const [recent, setRecent] = useState<string[]>([])
   const ref = useRef<HTMLDivElement>(null)
@@ -47,7 +51,7 @@ function ColorPicker({ color, isDark, onChange }: { color: string; isDark: boole
         "w-5 h-5 rounded-full border-2 transition-all",
         color === c ? "border-ink scale-110" : "border-transparent hover:border-ink-faint"
       )}
-      style={{ backgroundColor: inkColor(c, isDark) }}
+      style={{ backgroundColor: inkColor(c) }}
     />
   )
 
@@ -56,13 +60,13 @@ function ColorPicker({ color, isDark, onChange }: { color: string; isDark: boole
       <button
         onClick={() => setOpen((o) => !o)}
         className="flex items-center gap-1.5 rounded px-2 py-1 text-[10px] font-medium hover:bg-hover transition-colors"
-        style={{ color: inkColor(color, isDark) }}
+        style={{ color: inkColor(color) }}
       >
         Color
       </button>
       {open && (
         <div className="absolute top-full left-0 mt-1 z-10 rounded-lg border border-divider bg-paper shadow-[var(--shadow-lg)] p-2 min-w-[100px]">
-          <div className="grid grid-cols-4 gap-1 mb-1.5">{PRESET_COLORS.map((c) => swatch(c.value))}</div>
+          <div className="grid grid-cols-4 gap-1 mb-1.5">{presets.map((c) => swatch(c.value))}</div>
           {recent.length > 0 && (
             <>
               <div className="text-[9px] text-ink-faint uppercase tracking-wider mb-1">Recent</div>
@@ -95,7 +99,6 @@ interface CanvasToolbarProps {
   onCycleStrokeSize: () => void
   color: string
   onColorChange: (color: string) => void
-  isDark: boolean
   tool: CanvasTool
   onToggleTool: (tool: Exclude<CanvasTool, "draw">) => void
   isErasing: boolean
@@ -111,7 +114,7 @@ export const toolButton = (active: boolean) => cn("rounded p-1 transition-colors
 
 /** Drawing tools on the left, view and history controls on the right. */
 export function CanvasToolbar({
-  slots, addMenu, strokeSize, onCycleStrokeSize, color, onColorChange, isDark, tool, onToggleTool, isErasing, selectedCount,
+  slots, addMenu, strokeSize, onCycleStrokeSize, color, onColorChange, tool, onToggleTool, isErasing, selectedCount,
   onUndo, onRedo, canUndo, canRedo, zoomPercent,
 }: CanvasToolbarProps) {
   const drawingTools = (
@@ -127,7 +130,7 @@ export function CanvasToolbar({
         </svg>
       </button>
       {SEPARATOR}
-      <ColorPicker color={color} isDark={isDark} onChange={onColorChange} />
+      <ColorPicker color={color} onChange={onColorChange} />
       {SEPARATOR}
       <button aria-label="Select on canvas" onClick={() => onToggleTool("select")} className={toolButton(tool === "select")}>
         <CircleDashed className="h-3.5 w-3.5" />

@@ -9,7 +9,6 @@ interface CanvasTextNoteProps {
   /** Effective canvas zoom and pan: the note is positioned HTML over the SVG. */
   scale: number
   offset: { x: number; y: number }
-  isDark: boolean
   editing: boolean
   autoFocus: boolean
   onStartEditing: () => void
@@ -22,7 +21,7 @@ interface CanvasTextNoteProps {
 const DRAG_BAND_PX = 6
 
 /** A text note: Markdown while unfocused, a source textarea once clicked. Rasterized as source text in canvas exports. */
-export function CanvasTextNote({ note: t, scale, offset, isDark, editing, autoFocus, onStartEditing, onEdit, onFocusNote, onBlurNote, onDragStart }: CanvasTextNoteProps) {
+export function CanvasTextNote({ note: t, scale, offset, editing, autoFocus, onStartEditing, onEdit, onFocusNote, onBlurNote, onDragStart }: CanvasTextNoteProps) {
   return (
     <div className="absolute group/text" style={{ left: t.x * scale + offset.x, top: t.y * scale + offset.y, width: t.width * scale, height: t.height * scale }}>
       {editing ? (
@@ -47,7 +46,7 @@ export function CanvasTextNote({ note: t, scale, offset, isDark, editing, autoFo
           style={{
             fontSize: t.size * scale,
             lineHeight: 1.2,
-            color: inkColor(t.color, isDark),
+            color: inkColor(t.color),
           }}
         />
       ) : (
@@ -59,7 +58,7 @@ export function CanvasTextNote({ note: t, scale, offset, isDark, editing, autoFo
             onStartEditing()
           }}
         >
-          <LaTeXMarkdown content={t.text} style={{ fontSize: t.size * scale, color: inkColor(t.color, isDark) }} />
+          <LaTeXMarkdown content={t.text} style={{ fontSize: t.size * scale, color: inkColor(t.color) }} />
         </div>
       )}
       {/* top drag-band (move) — thin sliver above the textarea, dim until hover */}

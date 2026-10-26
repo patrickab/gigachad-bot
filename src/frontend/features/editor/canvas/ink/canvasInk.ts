@@ -10,9 +10,9 @@ export const PRESET_COLORS = [
 export type StrokeSize = "thin" | "medium" | "thick"
 export const STROKE_WIDTHS: Record<StrokeSize, number> = { thin: 2, medium: 5, thick: 10 }
 
-/** Swap black and white for display only; the stored colour stays unchanged. */
-export function inkColor(color: string, isDark: boolean): string {
-  return isDark && color === "#000000" ? "#ffffff" : color
+/** Display colour of stored ink. The default pen (stored black) follows the theme's text colour (--ink, as the selected sidebar file). */
+export function inkColor(color: string): string {
+  return color === "#000000" ? "var(--ink)" : color
 }
 
 /**
@@ -68,7 +68,7 @@ function distToSegment(px: number, py: number, ax: number, ay: number, bx: numbe
 }
 
 /** Strokes that survive an eraser of radius `threshold` centred at (ex, ey), all in canvas units. */
-export function strokesAfterErase(strokes: StrokeData[], ex: number, ey: number, threshold: number): StrokeData[] {
+export function strokesAfterErase<Stroke extends StrokeData>(strokes: Stroke[], ex: number, ey: number, threshold: number): Stroke[] {
   return strokes.filter((stroke) => {
     const [minX, minY, maxX, maxY] = strokeBounds(stroke)
     if (ex < minX - threshold || ex > maxX + threshold || ey < minY - threshold || ey > maxY + threshold) return true
