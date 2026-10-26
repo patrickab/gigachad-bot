@@ -308,9 +308,9 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
               <TopBarTransparent>
                 <ModelDropdown models={models} loadError={modelLoadError} selectedModel={config.selectedModel} onSelect={(model) => updateConfig({ selectedModel: model })} onProvidersChange={saveModelProviders} onTabOrderChange={saveModelTabOrder} onDefaultsChange={saveModelDefaults} placement="below" />
               </TopBarTransparent>
-              {isPdfDocument && <TopBarPill ref={setPdfToolbarSlot} />}
             </>}
             right={<>
+              {isPdfDocument && <TopBarPill ref={setPdfToolbarSlot} />}
               <TopBarTransparent>
                 <ThemeToggle />
                 <button aria-label="Close file" onClick={() => setAppMode("chat")} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover">
