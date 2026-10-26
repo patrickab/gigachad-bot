@@ -725,6 +725,13 @@ code {
 }
 .pdf-page-tint { background-color: var(--surface-elevated); mix-blend-mode: darken; }
 .pdf-page-ink  { background-color: var(--ink-subtle);       mix-blend-mode: lighten; }
+/* Link text gets one blue in every mode: the thin URL text's apparent color. Bold citations reach full
+   strength, thin URL glyphs blend with the paper, so the cap sits at the URL's core and catches both:
+     dark text on light paper (light theme, light-paper mode): `lighten` raises the navy to the link blue
+     light text on dark paper (dark theme, inverted canvas):   `darken` lowers it to the link blue */
+.pdf-page-link { background-color: oklch(58.6% 0.094 273); mix-blend-mode: lighten; }
+:root:not(.light) .pdf-page-link { mix-blend-mode: darken; }
+:root:not(.light) .pdf-light-paper .pdf-page-link { mix-blend-mode: lighten; }
 
 :root:not(.light) .pdf-page-surface { background-color: #000; }
 :root:not(.light) .react-pdf__Page__canvas { filter: invert(1) hue-rotate(180deg); }
@@ -748,13 +755,8 @@ code {
 :root:not(.light) .pdf-light-paper .pdf-page-ink,
 :root:not(.light) .pdf-light-paper .pdf-image-mask { display: none; }
 
-/* Links: a soft pastel-pink underline marks every clickable link area, no pdf.js yellow hover glow.
-   Citations are often split into several adjacent link pieces (author, year), an underline joins them visually.
-   The annotation layer sits above the theme color layers, so the underline is the same in every theme.
-   :is() in react-pdf's rule counts two classes, `.pdf-page` outranks it. */
-.pdf-page .annotationLayer .linkAnnotation:has(> a) {
-  box-shadow: inset 0 -1px 0 oklch(82% 0.09 350 / 0.7);
-}
+/* Links: shown only by their blue text (the ink layer skips link areas, .pdf-page-link evens out their blue),
+   no pdf.js yellow hover glow. :is() in react-pdf's rule counts two classes, `.pdf-page` outranks it. */
 .pdf-page .annotationLayer :is(.linkAnnotation, .buttonWidgetAnnotation.pushButton) > a:hover {
   opacity: 0;
   background: none;

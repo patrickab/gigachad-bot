@@ -1,9 +1,9 @@
 "use client"
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
-import { createPortal, flushSync } from "react-dom"
+import { flushSync } from "react-dom"
 import { Document, Page, pdfjs, type DocumentProps } from "react-pdf"
-import { Maximize2, Minimize2, Minus, Moon, Plus, Sun } from "lucide-react"
+import { Minus, Moon, Plus, Sun } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import "react-pdf/dist/esm/Page/AnnotationLayer.css"
 import "react-pdf/dist/esm/Page/TextLayer.css"
@@ -29,6 +29,8 @@ if (typeof window !== "undefined") {
 const RENDER_WIDTH = 900
 const PAGE_GAP = 12
 const CONTROLS_PADDING = 12
+// controls show while the pointer is within this many px of them
+const CONTROLS_VICINITY = 80
 const MIN_ZOOM = 1
 const MAX_ZOOM = 2.5
 const ZOOM_STEP = 0.25
@@ -88,6 +90,23 @@ async function collectImageRects(page: PdfPage): Promise<ImageRect[]> {
   return rects
 }
 
+/** Bounding box of every link annotation, so link text keeps the PDF's own link color. */
+async function collectLinkRects(page: PdfPage): Promise<ImageRect[]> {
+  const vp = page.getViewport({ scale: 1 })
+  const annotations = await page.getAnnotations()
+  return annotations
+    .filter((annotation) => annotation.subtype === "Link")
+    .map((annotation) => {
+      const [x1, y1, x2, y2] = vp.convertToViewportRectangle(annotation.rect)
+      return {
+        left: Math.min(x1, x2) / vp.width,
+        top: Math.min(y1, y2) / vp.height,
+        width: Math.abs(x2 - x1) / vp.width,
+        height: Math.abs(y2 - y1) / vp.height,
+      }
+    })
+}
+
 // vertical scrollbar gutter reserved so a fitted page never triggers horizontal scroll
 const SCROLLBAR = 16
 
@@ -122,42 +141,47 @@ function mapCanvasToDevicePixels(canvas: HTMLCanvasElement | null | undefined, d
   canvas.style.height = `${canvas.height / devicePixelRatio}px`
 }
 
-/** CSS mask that keeps a page-wide color layer off `rects`, so raster images keep their full range. */
-function imageHoleMask(rects: ImageRect[]): React.CSSProperties | undefined {
-  if (!rects.length) return undefined
-  const holes = rects.map((r) => `M${r.left} ${r.top}h${r.width}v${r.height}h${-r.width}Z`).join("")
-  const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1' preserveAspectRatio='none'><path fill-rule='evenodd' d='M0 0H1V1H0Z${holes}'/></svg>`
+/** CSS mask for a page-wide color layer: `holes` -> layer everywhere except `rects`, else -> layer only on `rects`. */
+function rectMask(rects: ImageRect[], holes: boolean): React.CSSProperties | undefined {
+  if (!rects.length) return holes ? undefined : { display: "none" }
+  const shapes = rects.map((r) => `M${r.left} ${r.top}h${r.width}v${r.height}h${-r.width}Z`).join("")
+  const path = holes ? `M0 0H1V1H0Z${shapes}` : shapes
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1' preserveAspectRatio='none'><path fill-rule='evenodd' d='${path}'/></svg>`
   const image = `url("data:image/svg+xml,${encodeURIComponent(svg)}")`
   return { maskImage: image, WebkitMaskImage: image, maskSize: "100% 100%", WebkitMaskSize: "100% 100%" }
 }
 
-function PdfViewerInner({
+/** PDF viewer with zoom and page tracking.
+ *
+ * - `topInset` px of the viewer sit under a floating bar: pages start below it and scroll on underneath
+ * - `renderPageOverlay` draws over each page, unclipped, given the page's rendered width in px
+ * - `onScrollerChange` hands out the scrolling element, e.g. for pointer input over the pages
+ * - Controls show only while the pointer is within CONTROLS_VICINITY px of them
+ */
+export function PdfViewer({
   url,
-  isFullscreen,
-  onToggleFullscreen,
   fitWidth,
   onPageAspect,
   initialPage = 1,
   onPageChange,
-  topInset,
+  topInset = 0,
   renderPageOverlay,
   onScrollerChange,
 }: {
   url: string
-  isFullscreen: boolean
-  onToggleFullscreen: () => void
   // when set, the parent controls width and the viewer sizes its own height to
   // fit exactly one page. Otherwise it fills its parent in both dimensions.
   fitWidth?: boolean
   onPageAspect?: (ratio: number) => void
   initialPage?: number
   onPageChange?: (page: number) => void
-  topInset: number
+  topInset?: number
   renderPageOverlay?: (page: number, pageWidth: number) => ReactNode
   onScrollerChange?: (scroller: HTMLDivElement | null) => void
 }) {
   const [numPages, setNumPages] = useState<number | null>(null)
   const [imageRects, setImageRects] = useState<Record<number, ImageRect[]>>({})
+  const [linkRects, setLinkRects] = useState<Record<number, ImageRect[]>>({})
   // pages whose canvas has drawn once; masks over an empty page would show as light boxes
   const [renderedPages, setRenderedPages] = useState<ReadonlySet<number>>(() => new Set())
   const rootRef = useRef<HTMLDivElement>(null)
@@ -167,8 +191,7 @@ function PdfViewerInner({
   const [zoom, setZoom] = useState(1)
   const zoomRef = useRef(1)
   const anchorRef = useRef<ScrollAnchor | null>(null)
-  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [controlsVisible, setControlsVisible] = useState(false)
+  const [nearControls, setNearControls] = useState(false)
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [lightPaper, setLightPaper] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -218,15 +241,6 @@ function PdfViewerInner({
     return () => document.removeEventListener("mousedown", handleClick)
   }, [dropdownOpen])
 
-  const showControls = useCallback(() => {
-    if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
-    setControlsVisible(true)
-    hideTimerRef.current = setTimeout(() => {
-      setControlsVisible(false)
-      setDropdownOpen(false)
-    }, 2500)
-  }, [])
-
   /** Zooms to `nextZoom`, keeping the client point under it (default: viewport center) fixed. */
   const zoomAt = useCallback((nextZoom: number, point?: { x: number; y: number }) => {
     const el = scrollRef.current
@@ -247,8 +261,17 @@ function PdfViewerInner({
 
     zoomRef.current = clamped
     setZoom(clamped)
-    showControls()
-  }, [showControls])
+  }, [])
+
+  // Controls show while the pointer is near them, or while the zoom menu is open.
+  const trackControlsVicinity = useCallback((event: React.MouseEvent) => {
+    const rect = dropdownRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const dx = Math.max(rect.left - event.clientX, 0, event.clientX - rect.right)
+    const dy = Math.max(rect.top - event.clientY, 0, event.clientY - rect.bottom)
+    setNearControls(Math.hypot(dx, dy) <= CONTROLS_VICINITY)
+  }, [])
+  const controlsVisible = nearControls || dropdownOpen
 
   useEffect(() => {
     const el = scrollRef.current
@@ -304,6 +327,7 @@ function PdfViewerInner({
     async (pdf: PdfDocument) => {
       setNumPages(pdf.numPages)
       setImageRects({})
+      setLinkRects({})
       setRenderedPages(new Set())
       // read the real first-page dimensions (works for any page size, not just A4)
       try {
@@ -315,13 +339,15 @@ function PdfViewerInner({
       } catch {
         /* leave pageAspect null → falls back to fill-parent rendering */
       }
-      // collect raster-image regions per page so dark mode can leave them un-inverted.
-      // ponytail: eager loop over all pages — fine for typical docs; lazy per-page on
-      // scroll only if huge PDFs feel slow on open.
+      // collect raster-image and link regions per page: images skip both color layers, link
+      // text skips the ink layer. ponytail: eager loop over all pages — fine for typical docs;
+      // lazy per-page on scroll only if huge PDFs feel slow on open.
       for (let n = 1; n <= pdf.numPages; n++) {
         try {
-          const rects = await collectImageRects(await pdf.getPage(n))
-          if (rects.length) setImageRects((prev) => ({ ...prev, [n]: rects }))
+          const page = await pdf.getPage(n)
+          const [images, links] = await Promise.all([collectImageRects(page), collectLinkRects(page)])
+          if (images.length) setImageRects((prev) => ({ ...prev, [n]: images }))
+          if (links.length) setLinkRects((prev) => ({ ...prev, [n]: links }))
         } catch { /* skip pages that fail to parse */ }
       }
     },
@@ -422,18 +448,23 @@ function PdfViewerInner({
   const controlsRight = Math.max(0, pageRightGap) + CONTROLS_PADDING
 
   // Holes only once a page has drawn: before that the hole would show the bare page background.
+  // The tint skips images, the ink layer also skips links, and the link layer caps link text at one link blue.
   const overlayMasks = useMemo(() => {
-    const masks: Record<number, React.CSSProperties | undefined> = {}
-    for (const page of renderedPages) masks[page] = imageHoleMask(imageRects[page] ?? [])
+    const masks: Record<number, { tint?: React.CSSProperties; ink?: React.CSSProperties; link?: React.CSSProperties }> = {}
+    for (const page of renderedPages) {
+      const images = imageRects[page] ?? []
+      const links = linkRects[page] ?? []
+      masks[page] = { tint: rectMask(images, true), ink: rectMask([...images, ...links], true), link: rectMask(links, false) }
+    }
     return masks
-  }, [imageRects, renderedPages])
+  }, [imageRects, linkRects, renderedPages])
 
   return (
     <div
       ref={rootRef}
       className={`relative flex flex-col${lightPaper ? " pdf-light-paper" : ""}`}
-      onMouseEnter={showControls}
-      onMouseMove={showControls}
+      onMouseMove={trackControlsVicinity}
+      onMouseLeave={() => setNearControls(false)}
       style={rootStyle}
     >
       <div
@@ -485,7 +516,7 @@ function PdfViewerInner({
         <button aria-label="Zoom in"
           onClick={() => zoomAt(zoomRef.current + ZOOM_STEP)}
           disabled={zoom >= MAX_ZOOM}
-          className="p-1.5 text-ink-subtle hover:text-ink hover:bg-hover disabled:text-ink-faint disabled:pointer-events-none transition-colors"
+          className="p-1.5 text-ink-subtle hover:text-ink hover:bg-hover disabled:text-ink-faint disabled:pointer-events-none transition-colors in-[.light]:rounded-r-lg"
         >
           <Plus className="h-3.5 w-3.5" strokeWidth={2} />
         </button>
@@ -494,19 +525,11 @@ function PdfViewerInner({
           <button
             aria-label={lightPaper ? "Dark PDF pages" : "Light PDF pages"}
             onClick={() => switchColors(() => flushSync(() => setLightPaper((light) => !light)))}
-            className="p-1.5 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
+            className="rounded-r-lg p-1.5 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
           >
             {lightPaper ? <Moon className="h-3.5 w-3.5" /> : <Sun className="h-3.5 w-3.5" />}
           </button>
         </div>
-        <div className="w-px h-4 bg-divider" />
-        <button
-          aria-label={isFullscreen ? "Exit PDF fullscreen" : "Enter PDF fullscreen"}
-          onClick={onToggleFullscreen}
-          className="rounded-r-lg p-1.5 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
-        >
-          {isFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-        </button>
       </div>
       <div
         ref={setScroller}
@@ -551,8 +574,9 @@ function PdfViewerInner({
                       }}
                       renderTextLayer
                     />
-                    <div className="pdf-page-tint absolute inset-0 pointer-events-none" style={overlayMasks[i + 1]} />
-                    <div className="pdf-page-ink absolute inset-0 pointer-events-none" style={overlayMasks[i + 1]} />
+                    <div className="pdf-page-tint absolute inset-0 pointer-events-none" style={overlayMasks[i + 1]?.tint} />
+                    <div className="pdf-page-ink absolute inset-0 pointer-events-none" style={overlayMasks[i + 1]?.ink} />
+                    <div className="pdf-page-link absolute inset-0 pointer-events-none" style={overlayMasks[i + 1]?.link ?? { display: "none" }} />
                     {renderedPages.has(i + 1) && (imageRects[i + 1] ?? []).map((r, k) => (
                       <div
                         key={k}
@@ -569,97 +593,6 @@ function PdfViewerInner({
         </Document>
       </div>
     </div>
-  )
-}
-
-function subscribeNever() {
-  return () => {}
-}
-
-function getDocumentBody() {
-  return document.body
-}
-
-function getNoBody() {
-  return null
-}
-
-/** PDF viewer with zoom, page tracking and fullscreen. Fullscreen reparents one mounted viewer via a portal.
- *
- * - `topInset` px of the viewer sit under a floating bar: pages start below it and scroll on underneath
- * - `renderPageOverlay` draws over each page, unclipped, given the page's rendered width in px
- * - `onScrollerChange` hands out the scrolling element, e.g. for pointer input over the pages
- */
-export function PdfViewer({
-  url,
-  fitWidth,
-  onPageAspect,
-  initialPage,
-  onPageChange,
-  topInset = 0,
-  renderPageOverlay,
-  onScrollerChange,
-}: {
-  url: string
-  fitWidth?: boolean
-  onPageAspect?: (ratio: number) => void
-  initialPage?: number
-  onPageChange?: (page: number) => void
-  topInset?: number
-  renderPageOverlay?: (page: number, pageWidth: number) => ReactNode
-  onScrollerChange?: (scroller: HTMLDivElement | null) => void
-}) {
-  const [isFullscreen, setIsFullscreen] = useState(false)
-  const [inlineEl, setInlineEl] = useState<HTMLDivElement | null>(null)
-  const [overlayEl, setOverlayEl] = useState<HTMLDivElement | null>(null)
-  // document.body exists only on the client, so the overlay is skipped during SSR and hydration.
-  const body = useSyncExternalStore(subscribeNever, getDocumentBody, getNoBody)
-
-  const toggleFullscreen = useCallback(() => setIsFullscreen((f) => !f), [])
-
-  useEffect(() => {
-    if (!isFullscreen) return
-    function handler(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        e.preventDefault()
-        setIsFullscreen(false)
-      }
-    }
-    document.addEventListener("keydown", handler)
-    return () => document.removeEventListener("keydown", handler)
-  }, [isFullscreen])
-
-  const inner = (
-    <PdfViewerInner
-      url={url}
-      isFullscreen={isFullscreen}
-      onToggleFullscreen={toggleFullscreen}
-      fitWidth={isFullscreen ? undefined : fitWidth}
-      onPageAspect={isFullscreen ? undefined : onPageAspect}
-      initialPage={initialPage}
-      onPageChange={onPageChange}
-      topInset={isFullscreen ? 0 : topInset}
-      renderPageOverlay={renderPageOverlay}
-      onScrollerChange={onScrollerChange}
-    />
-  )
-
-  const portalTarget = isFullscreen ? overlayEl : inlineEl
-
-  // Keep one viewer mounted so fullscreen preserves its scroll and zoom state.
-  return (
-    <>
-      <div ref={setInlineEl} className="contents" />
-      {body && createPortal(
-        <div
-          ref={setOverlayEl}
-          className="fixed inset-0 z-[100] bg-backdrop backdrop-blur-xl transition-opacity duration-150"
-          style={{ opacity: isFullscreen ? 1 : 0, pointerEvents: isFullscreen ? "auto" : "none" }}
-        />,
-        body,
-      )}
-      {portalTarget && createPortal(inner, portalTarget)}
-    </>
   )
 }
 
