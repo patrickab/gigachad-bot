@@ -229,6 +229,11 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
     </button>
   )
   const filePanelToggle = <TopBarTransparent><FilePanelToggle /></TopBarTransparent>
+  const isPdfDocument = appMode === "document" && !diffItem && !!documentItem?.path.toLowerCase().endsWith(".pdf")
+  // Scrolling surfaces run on under the floating TopBar. The rest start below it.
+  const surfaceRunsUnderTopBar = appMode === "canvas" ? canvasView.kind !== "architecture"
+    : appMode === "document" ? isPdfDocument
+    : appMode !== "omp" && appMode !== "factory"
 
   return (
     <div className="relative flex h-full overflow-hidden">
@@ -253,9 +258,7 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
       />
       <main className="flex-1 min-w-0 flex flex-col relative bg-paper">
         {appMode === "canvas" ? (
-          // The canvas spans the full height, the bar floats over it. Architecture keeps its own header strip visible.
           <TopBar
-            overlay={canvasView.kind !== "architecture"}
             center={<TabSwitcher />}
             left={<>
               <TopBarTransparent>{sidebarToggle}</TopBarTransparent>
@@ -336,7 +339,7 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
             </>}
           />
         )}
-        <div data-workspace-surface className={`flex-1 min-h-0 relative ${appMode === "canvas" ? "overflow-hidden" : ""}`}>
+        <div data-workspace-surface className={`absolute inset-x-0 bottom-0 ${surfaceRunsUnderTopBar ? "top-0" : "top-11"} ${appMode === "canvas" ? "overflow-hidden" : ""}`}>
           {appMode === "omp" && ompItem && ompView ? (
             <OmpSurface view={ompView} onViewChange={(omp) => setWorkspaceItem({ ...ompItem, omp })} />
           ) : appMode === "factory" && factoryItem ? (
@@ -344,8 +347,8 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
           ) : appMode === "document" && diffItem ? (
             <DiffViewer key={diffItem.path} root={diffItem.path} />
           ) : appMode === "document" && documentItem ? (
-            documentItem.path.toLowerCase().endsWith(".pdf") ? (
-              <LazyPdfViewer url={fileViewerRawUrl(documentItem.path)} />
+            isPdfDocument ? (
+              <LazyPdfViewer url={fileViewerRawUrl(documentItem.path)} topInset={44} />
             ) : (
               <DocumentEditor
                 path={documentItem.path}
@@ -393,29 +396,34 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
               wideToggleSlot={wideToggleSlot}
             />
           )}
-          {isActive && filePicker.fileEditPath && (
-            <DocumentEditor
-              path={filePicker.fileEditPath}
-              slug=""
-              overlay
-              persistOverride={(content) => writeRootFile(filePicker.fileEditPath!, content)}
-              onClose={() => filePicker.setFileEditPath(null)}
-              onModeLabel={setModeLabel}
-              onNavigate={filePicker.setFileEditPath}
-              model={config.selectedModel}
-            />
-          )}
-          {isActive && filePicker.filePdfPath && (
-            <div className="absolute inset-0 z-50 flex flex-col bg-paper">
-              <div className="flex h-9 shrink-0 items-center border-b border-divider/50 px-4">
-                <span className="truncate text-xs font-medium text-ink">{filePicker.filePdfPath.split("/").pop()}</span>
-              </div>
-              <div className="min-h-0 flex-1">
-                <LazyPdfViewer url={fileViewerRawUrl(filePicker.filePdfPath)} />
-              </div>
-            </div>
-          )}
         </div>
+        {isActive && (filePicker.fileEditPath || filePicker.filePdfPath) && (
+          // File-picker overlays sit below the bar, over whatever surface is open.
+          <div className="absolute inset-x-0 top-11 bottom-0">
+            {filePicker.fileEditPath && (
+              <DocumentEditor
+                path={filePicker.fileEditPath}
+                slug=""
+                overlay
+                persistOverride={(content) => writeRootFile(filePicker.fileEditPath!, content)}
+                onClose={() => filePicker.setFileEditPath(null)}
+                onModeLabel={setModeLabel}
+                onNavigate={filePicker.setFileEditPath}
+                model={config.selectedModel}
+              />
+            )}
+            {filePicker.filePdfPath && (
+              <div className="absolute inset-0 z-50 flex flex-col bg-paper">
+                <div className="flex h-9 shrink-0 items-center border-b border-divider/50 px-4">
+                  <span className="truncate text-xs font-medium text-ink">{filePicker.filePdfPath.split("/").pop()}</span>
+                </div>
+                <div className="min-h-0 flex-1">
+                  <LazyPdfViewer url={fileViewerRawUrl(filePicker.filePdfPath)} />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </main>
       <FilePanelSlot />
       <SaveAsModal open={persistence.saveModalOpen} onClose={() => persistence.setSaveModalOpen(false)} onSave={persistence.handleSaveSubmit} />

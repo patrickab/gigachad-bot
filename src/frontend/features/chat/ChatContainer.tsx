@@ -247,7 +247,7 @@ export function ChatContainer({
   const toggleWideMode = useCallback(() => setIsWideMode((w) => !w), [])
 
   return (
-    <div className="absolute inset-x-0 -top-11 bottom-0 flex">
+    <div className="absolute inset-0 flex">
       <div className="flex-1 min-w-0 flex flex-col relative">
         <div
           ref={scrollContainerRef}
