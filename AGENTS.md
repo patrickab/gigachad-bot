@@ -1,16 +1,17 @@
-## Never start the dev server autonomously
+## Running the dev server
 
-The backend (`uvicorn`, port 8001) and frontend (`next dev`, port 2999) are
-started via `run.sh` or manually by the user, in a terminal they control.
+The backend (`uvicorn`, port 8001) and frontend (`next dev`, port 2999) start
+via `run.sh`.
 
-- Never run `run.sh`, `uvicorn`, `npm run dev`, or equivalent yourself —
-  even in the background, even to verify a change.
-- If you need to see the app running (UI check, manual test, screenshot),
-  ask the user to start it and confirm it's up, then use their already-running
-  instance. Do not launch your own copy alongside theirs.
+- Check whether the app is already up first (ports 2999 and 8001). If it is,
+  use that instance. Never launch a second copy alongside it.
+- Otherwise start it yourself in tmux via `agent-proc start app './run.sh'`
+  (global AGENTS.md, "Long-Running Processes"), tell the user
+  `tmux attach -t gigachad-bot`, and `agent-proc stop app` when done.
+- Never start it with plain background jobs, `nohup` or raw tmux.
 - Exception: the agent factory engine starts previews of task worktrees (backend
   and frontend on ports 8100-8199, `.docs/architecture.md`, "Agent factory").
-  That is the engine's job, you still never start one yourself.
+  That is the engine's job, you never start one yourself.
 
 ## Documentation
 
