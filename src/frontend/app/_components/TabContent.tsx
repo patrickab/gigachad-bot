@@ -27,6 +27,7 @@ import { TabSwitcher } from "@/features/navigation/TabManager"
 import { TokenCounter } from "@/features/chat/TokenCounter"
 import { TopBar, TopBarPill, TopBarTransparent } from "@/features/navigation/TopBar"
 import { LazyPdfViewer } from "@/components/content/LazyPdfViewer"
+import { LazyAnnotatedPdfViewer } from "@/features/editor/pdf/LazyAnnotatedPdfViewer"
 import { useBranches } from "@/features/navigation/BranchContext"
 import { useEnabledTools } from "@/features/chat/EnabledToolsContext"
 import { useSidebar } from "@/features/navigation/SidebarContext"
@@ -81,6 +82,7 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
   const [extracting, setExtracting] = useState(0)
   const [promptEditorOpen, setPromptEditorOpen] = useState(false)
   const [wideToggleSlot, setWideToggleSlot] = useState<HTMLElement | null>(null)
+  const [pdfToolbarSlot, setPdfToolbarSlot] = useState<HTMLElement | null>(null)
   const [chatColumn, setChatColumn] = useState<HTMLDivElement | null>(null)
   const chatInputRef = useRef<ChatInputHandle>(null)
   const loadIdRef = useRef(0)
@@ -306,6 +308,7 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
               <TopBarTransparent>
                 <ModelDropdown models={models} loadError={modelLoadError} selectedModel={config.selectedModel} onSelect={(model) => updateConfig({ selectedModel: model })} onProvidersChange={saveModelProviders} onTabOrderChange={saveModelTabOrder} onDefaultsChange={saveModelDefaults} placement="below" />
               </TopBarTransparent>
+              {isPdfDocument && <TopBarPill ref={setPdfToolbarSlot} />}
             </>}
             right={<>
               <TopBarTransparent>
@@ -348,7 +351,7 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
             <DiffViewer key={diffItem.path} root={diffItem.path} />
           ) : appMode === "document" && documentItem ? (
             isPdfDocument ? (
-              <LazyPdfViewer url={fileViewerRawUrl(documentItem.path)} topInset={44} />
+              <LazyAnnotatedPdfViewer path={documentItem.path} topInset={44} toolbarSlot={pdfToolbarSlot} />
             ) : (
               <DocumentEditor
                 path={documentItem.path}

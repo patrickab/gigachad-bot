@@ -699,6 +699,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
             onPatch={(patch) => patchAttachment(att.id, patch)}
             onRetitle={(title) => { void retitleAttachment(att.id, title) }}
             onPdfAspect={(r) => setAspect(att.id, r)}
+            pdfPen={{ color, width: baseWidth }}
             renderNestedCanvas={renderNestedCanvas}
           />
         ))}

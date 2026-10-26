@@ -21,6 +21,7 @@ MODEL = "model"
 PDFS = "PDFs"
 MINERU = "Mineru"
 SANDBOX = "sandbox"
+PDF_ANNOTATION = "pdf-annotation"
 
 def _part(value: str, label: str) -> str:
     """Validate *value* as a single key segment (no separators)."""
@@ -101,3 +102,8 @@ def sandbox_manifest_prefix(chat_id: str, scope: str = "workspace") -> str:
 def sandbox_asset(sha256: str) -> str:
     """Content-addressed asset key shared across all chats."""
     return f"{SANDBOX}/assets/{_part(sha256, 'asset sha256')}"
+
+
+def pdf_annotations(sha256: str) -> str:
+    """Annotation canvas of a PDF, keyed by the SHA-256 of its bytes."""
+    return f"{PDF_ANNOTATION}/{_part(sha256, 'PDF sha256')}.canvas"

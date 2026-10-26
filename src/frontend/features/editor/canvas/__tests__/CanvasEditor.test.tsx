@@ -36,8 +36,8 @@ function TabActiveProvider({ value, children }: { value: boolean; children: Reac
   return <TabContext.Provider value={tab}>{children}</TabContext.Provider>
 }
 
-vi.mock("@/components/content/PdfViewer", () => ({
-  PdfViewer: ({ initialPage = 1, onPageChange }: { initialPage?: number; onPageChange?: (page: number) => void }) =>
+vi.mock("@/features/editor/pdf/AnnotatedPdfViewer", () => ({
+  AnnotatedPdfViewer: ({ initialPage = 1, onPageChange }: { initialPage?: number; onPageChange?: (page: number) => void }) =>
     <button type="button" data-testid="pdf-viewer" onClick={() => onPageChange?.(4)}>{initialPage}</button>,
 }))
 vi.mock("@/components/content/LaTeXMarkdown", () => ({

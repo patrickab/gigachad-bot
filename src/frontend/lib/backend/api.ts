@@ -369,6 +369,12 @@ export async function loadFileViewerText(path: string): Promise<string> {
   return data.content
 }
 
+/** Annotation canvas key of a PDF, shared by every copy with the same bytes. Creates the empty canvas on first use. */
+export async function openPdfAnnotations(path: string): Promise<string> {
+  const data = await request<{ key: string }>(`/fileviewer/annotations?path=${encodeURIComponent(path)}`, { method: "POST" })
+  return data.key
+}
+
 /** Canvas snapshots carry their durable mutation revision for gapless stream resume. */
 export async function loadCanvasSnapshot(canvasKey: string): Promise<CanvasSnapshot> {
   return request<CanvasSnapshot>(`/canvases/${encodePath(canvasKey)}`)

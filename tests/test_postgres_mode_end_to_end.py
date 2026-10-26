@@ -339,3 +339,27 @@ def test_library_pdf_serves_from_storage_after_its_files_are_gone(client, tmp_pa
     served = client.get("/api/fileviewer/raw?path=PDFs/exercise.pdf", headers=alice)
     assert served.status_code == 200
     assert served.content == pdf_bytes
+
+
+def test_pdf_annotations_follow_content_not_path(client, tmp_path):
+    """Copies of a PDF share one annotation canvas, reopening keeps its ink, other bytes get their own."""
+    alice = headers("alice@example.test", str(uuid4()))
+    assert client.post("/api/fileroots/roots", json={"path": str(tmp_path)}, headers=alice).status_code == 200
+    (tmp_path / "paper.pdf").write_bytes(b"%PDF-1.7 paper")
+    (tmp_path / "moved").mkdir()
+    (tmp_path / "moved" / "renamed.pdf").write_bytes(b"%PDF-1.7 paper")
+    (tmp_path / "other.pdf").write_bytes(b"%PDF-1.7 other")
+
+    def annotations(path) -> str:
+        opened = client.post("/api/fileviewer/annotations", params={"path": str(path)}, headers=alice)
+        assert opened.status_code == 200
+        return opened.json()["key"]
+
+    key = annotations(tmp_path / "paper.pdf")
+    stroke = {"id": "s1", "page": 1, "points": [[1, 2, 0.5], [3, 4, 0.5]], "color": "#000000", "width": 2}
+    mutation = {"mutationId": str(uuid4()), "kind": "upsert", "entity": "stroke", "id": "s1", "value": stroke}
+    assert client.post(f"/api/canvases/{key}/mutations", json={"mutations": [mutation]}, headers=alice).status_code == 200
+
+    assert annotations(tmp_path / "moved" / "renamed.pdf") == key
+    assert client.get(f"/api/canvases/{key}", headers=alice).json()["document"]["strokes"] == [stroke]
+    assert annotations(tmp_path / "other.pdf") != key

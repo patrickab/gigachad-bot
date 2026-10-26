@@ -18,6 +18,7 @@ A self-hosted LLM workspace for chat, research, and working with your own docume
 - **Explore conversations**: branch from any message and merge branches back.
 - **Work with documents**: extract PDF content with [MinerU](https://github.com/opendatalab/mineru), attach live file references, and edit Obsidian vault files in place.
 - **Think visually**: draw on an infinite canvas, attach PDFs, and share canvas snapshots with a model.
+- **Annotate PDFs**: write and highlight on PDFs with pen or mouse. Every copy of a PDF shares its annotations, on a canvas and in its own tab.
 - **Research and remember**: search the web, generate multi-step research reports, and extract facts and preferences into persistent memory.
 
 ## Demo

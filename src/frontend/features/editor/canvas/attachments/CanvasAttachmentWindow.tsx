@@ -3,11 +3,10 @@
 import { useState, type ReactNode } from "react"
 import { FileType, Maximize2, Minimize2, SquarePen, X } from "lucide-react"
 import { CANVAS_ASPECT, type CanvasAttachment } from "@/lib/domain/canvasDocument"
-import { fileViewerRawUrl } from "@/lib/backend/urls"
 import { cn } from "@/lib/utils"
 import { ArchitectureWindow } from "@/features/editor/architecture/ArchitectureWindow"
+import { AnnotatedPdfViewer } from "@/features/editor/pdf/AnnotatedPdfViewer"
 import { CanvasDocumentAttachment } from "./CanvasDocumentAttachment"
-import { PdfViewer } from "@/components/content/PdfViewer"
 
 const PDF_LAYOUT_CAP = 916 // PdfViewer caps rendering at 900px + scrollbar gutter — wider layout gains no resolution
 const PLOT_MIN_LAYOUT_WIDTH = 960 // plots lay out at least this wide and scale down, so legends/titles never collide
@@ -31,6 +30,8 @@ interface CanvasAttachmentWindowProps {
   onPatch: (patch: Partial<CanvasAttachment>) => void
   onRetitle: (title: string) => void
   onPdfAspect: (aspect: number) => void
+  /** The canvas pen, a stylus on a PDF window writes on the PDF with it. */
+  pdfPen: { color: string; width: number }
   /** Body of a canvas window. A prop, not an import, so editor and window stay out of an import cycle. */
   renderNestedCanvas: (attachment: CanvasAttachment, name: string) => ReactNode
 }
@@ -38,7 +39,7 @@ interface CanvasAttachmentWindowProps {
 /** A live, scrollable window over the canvas for a PDF, document, architecture diagram or nested canvas. Never baked into export. */
 export function CanvasAttachmentWindow({
   attachment: att, scale, settledScale, offset, pdfAspect, full, inert,
-  onDragStart, onToggleFullscreen, onRemove, onPatch, onRetitle, onPdfAspect, renderNestedCanvas,
+  onDragStart, onToggleFullscreen, onRemove, onPatch, onRetitle, onPdfAspect, pdfPen, renderNestedCanvas,
 }: CanvasAttachmentWindowProps) {
   const [editingTitle, setEditingTitle] = useState(false)
   const nested = att.kind === "canvas"
@@ -135,8 +136,10 @@ export function CanvasAttachmentWindow({
         ) : nested ? (
           renderNestedCanvas(att, name)
         ) : (
-          <PdfViewer
-            url={fileViewerRawUrl(att.path!)}
+          <AnnotatedPdfViewer
+            path={att.path!}
+            pen={pdfPen}
+            clipToPages
             onPageAspect={onPdfAspect}
             initialPage={att.page}
             onPageChange={(page) => onPatch({ page })}

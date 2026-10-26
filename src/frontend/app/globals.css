@@ -755,6 +755,19 @@ code {
 :root:not(.light) .pdf-light-paper .pdf-page-ink,
 :root:not(.light) .pdf-light-paper .pdf-image-mask { display: none; }
 
+/* Annotation ink over the pages (AnnotatedPdfViewer). z-index 1 keeps a stroke spilling into the
+   margin or the next page above that page's surface.
+   - Default black ink shows as the theme text color (--ink), like canvas ink
+   - Highlights blend into the page: multiply darkens light paper, screen lights up dark paper,
+     so text under them stays readable */
+.pdf-ink { z-index: 1; }
+/* Default pen (stored black) follows the theme's text colour (--ink, as the selected sidebar file), black on light paper. */
+.pdf-ink-default { fill: var(--ink); }
+:root:not(.light) .pdf-light-paper .pdf-ink-default { fill: #000; }
+.pdf-ink-highlight { opacity: 0.4; mix-blend-mode: multiply; }
+:root:not(.light) .pdf-ink-highlight { mix-blend-mode: screen; }
+:root:not(.light) .pdf-light-paper .pdf-ink-highlight { mix-blend-mode: multiply; }
+
 /* Links: shown only by their blue text (the ink layer skips link areas, .pdf-page-link evens out their blue),
    no pdf.js yellow hover glow. :is() in react-pdf's rule counts two classes, `.pdf-page` outranks it. */
 .pdf-page .annotationLayer :is(.linkAnnotation, .buttonWidgetAnnotation.pushButton) > a:hover {
