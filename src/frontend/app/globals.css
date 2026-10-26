@@ -699,30 +699,54 @@ code {
   background-size: 200% 100%;
 }
 
-/* PDF pages render on an opaque white canvas. We retint that page to the
-   assistant-message color (--surface-elevated = ElevatedContainer level 2/3) in
-   every theme, so it never sits as a stark white rectangle:
-     dark       : invert the page (text → white, paper → black), then a `lighten`
-                  tint floors the black up to the surface color, text stays white.
-     light      : no invert needed (text already black); a `darken` tint pulls the
-                  white page down to the surface color, text stays black.
-   Raster images are re-inverted back to normal in dark via .pdf-image-mask
-   overlays; light needs none (darken only clips near-pure-white). `isolate`
-   keeps the blend contained to the page. */
-.pdf-page { isolation: isolate; }
-.pdf-page-tint { background-color: var(--surface-elevated); }
+/* PDF pages render on an opaque white canvas. Every theme clamps the page between
+   two theme colors, so it reads like the app: paper → --surface-elevated (two levels
+   above --paper), text → --ink-subtle (sidebar tree text color).
+     dark  : invert the page (text → white, paper → black), a `lighten` tint lifts
+             paper, a `darken` ink layer caps text.
+     light : no invert, a `darken` tint pulls paper down, a `lighten` ink layer lifts text.
+   Raster images keep their colors: the tint and ink layers carry holes over them
+   (imageHoleMask), and in dark .pdf-image-mask re-inverts the canvas underneath.
+   `isolate` keeps the blend contained to the page. */
+.pdf-page {
+  isolation: isolate;
+  /* raw paper color, so a page still rendering already looks like paper */
+  background-color: #fff;
+  border-radius: 1rem; /* rounded-2xl, same as the sidebar */
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+}
+.pdf-page-tint { background-color: var(--surface-elevated); mix-blend-mode: darken; }
+.pdf-page-ink  { background-color: var(--ink-subtle);       mix-blend-mode: lighten; }
 
-:root:not(.light) .react-pdf__Page__canvas {
-  /* ponytail: 0.88 instead of 1 — dark-gray paper, not near-black */
-  filter: invert(0.88) hue-rotate(180deg);
+:root:not(.light) .pdf-page { background-color: #000; }
+:root:not(.light) .react-pdf__Page__canvas { filter: invert(1) hue-rotate(180deg); }
+:root:not(.light) .pdf-page-tint { mix-blend-mode: lighten; }
+:root:not(.light) .pdf-page-ink  { mix-blend-mode: darken; }
+:root:not(.light) .pdf-image-mask {
+  -webkit-backdrop-filter: invert(1) hue-rotate(180deg);
+  backdrop-filter: invert(1) hue-rotate(180deg);
 }
 
-:root:not(.light) .pdf-page-tint { mix-blend-mode: lighten; }
-.light            .pdf-page-tint { mix-blend-mode: darken; }
+/* Light-paper toggle (dark theme only, light theme ignores the toggle state): the page in
+   the light palette's darkest color (--gc-light-paper) on a --surface-elevated desk, the
+   lightest dark palette color.
+   - A `darken` tint sets the paper color, image holes keep figures untouched
+   - Text stays the PDF's own black */
+.light .pdf-paper-toggle { display: none; }
+:root:not(.light) .pdf-light-paper .pdf-scroll { background-color: var(--surface-elevated); }
+:root:not(.light) .pdf-light-paper .react-pdf__Page__canvas { filter: none; }
+:root:not(.light) .pdf-light-paper .pdf-page { background-color: var(--gc-light-paper); }
+:root:not(.light) .pdf-light-paper .pdf-page-tint { background-color: var(--gc-light-paper); mix-blend-mode: darken; }
+:root:not(.light) .pdf-light-paper .pdf-page-ink,
+:root:not(.light) .pdf-light-paper .pdf-image-mask { display: none; }
 
-:root:not(.light) .pdf-image-mask {
-  -webkit-backdrop-filter: invert(0.88) hue-rotate(180deg);
-  backdrop-filter: invert(0.88) hue-rotate(180deg);
+/* Links: no pdf.js yellow hover glow, the colored link text and pointer cursor are enough.
+   :is() in react-pdf's rule counts two classes, `.pdf-page` outranks it. */
+.pdf-page .annotationLayer :is(.linkAnnotation, .buttonWidgetAnnotation.pushButton) > a:hover {
+  opacity: 0;
+  background: none;
+  box-shadow: none;
 }
 
 /* Reveal palettes through a narrow softened edge without blurring captured content. */
