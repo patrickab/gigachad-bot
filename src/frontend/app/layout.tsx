@@ -1,29 +1,27 @@
 import type { Metadata } from "next"
-import { Outfit } from "next/font/google"
-import { JetBrains_Mono } from "next/font/google"
-import { Architects_Daughter } from "next/font/google"
 import localFont from "next/font/local"
 import "./globals.css"
 
-const outfit = Outfit({
-  subsets: ["latin"],
+// Latin subsets self-hosted from Google Fonts, so builds never fetch fonts over the network.
+const outfit = localFont({
+  src: "./fonts/Outfit-Variable.woff2",
   variable: "--font-sans",
   display: "swap",
-  weight: ["300", "400", "500", "600", "700"],
+  weight: "300 700",
 })
 
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ["latin"],
+const jetbrainsMono = localFont({
+  src: "./fonts/JetBrainsMono-Variable.woff2",
   variable: "--font-mono",
   display: "swap",
-  weight: ["400", "500"],
+  weight: "400 500",
 })
 
-const architectsDaughter = Architects_Daughter({
-  subsets: ["latin"],
+const architectsDaughter = localFont({
+  src: "./fonts/ArchitectsDaughter-Regular.woff2",
   variable: "--font-handwriting",
   display: "swap",
-  weight: ["400"],
+  weight: "400",
 })
 
 // Nerd Font icons (omp session titles start with one). PUA only, fetched when a page shows such a glyph.
