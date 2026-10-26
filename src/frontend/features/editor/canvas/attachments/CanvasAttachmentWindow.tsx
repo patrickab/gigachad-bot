@@ -30,8 +30,8 @@ interface CanvasAttachmentWindowProps {
   onPatch: (patch: Partial<CanvasAttachment>) => void
   onRetitle: (title: string) => void
   onPdfAspect: (aspect: number) => void
-  /** The canvas pen, a stylus on a PDF window writes on the PDF with it. */
-  pdfPen: { color: string; width: number }
+  /** The canvas pen or highlighter, a stylus on a PDF window writes on the PDF with it. */
+  pdfPen: { color: string; width: number; highlight: boolean }
   /** Body of a canvas window. A prop, not an import, so editor and window stay out of an import cycle. */
   renderNestedCanvas: (attachment: CanvasAttachment, name: string) => ReactNode
 }

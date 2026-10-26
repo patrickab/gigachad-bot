@@ -35,7 +35,7 @@ export function CanvasSelectionOutline({ lasso, bounds: b, strokes, selectedIds,
         if (!d) return null
         return (
           <g key={`sel-${s.id}`}>
-            {preview && <path d={d} fill={inkColor(s.color)} />}
+            {preview && <path d={d} fill={inkColor(s.color)} className={s.highlight ? "ink-highlight" : undefined} />}
             <path d={d} fill="none" stroke="var(--ink)" strokeWidth={1.5 * u} strokeDasharray={`${3 * u} ${3 * u}`} />
           </g>
         )

@@ -1,4 +1,4 @@
-import { strokeOutlinePath, type StrokeData } from "@/lib/drawing"
+import { inkOutlinePath, type StrokeData } from "@/lib/drawing"
 
 export const PRESET_COLORS = [
   { name: "Black", value: "#000000" },
@@ -7,12 +7,31 @@ export const PRESET_COLORS = [
   { name: "Blue", value: "#2563eb" },
 ] as const
 
+/** Highlighter presets, the first is the default. */
+export const HIGHLIGHT_COLORS = [
+  { name: "Green", value: "#4ade80" },
+  { name: "Yellow", value: "#facc15" },
+  { name: "Pink", value: "#f472b6" },
+  { name: "Blue", value: "#60a5fa" },
+] as const
+
+/** Selected ink tool. None selected: the stylus writes with the pen, the mouse keeps its default (pan, read). */
+export type InkTool = "pen" | "highlighter" | "eraser"
+
 export type StrokeSize = "thin" | "medium" | "thick"
-export const STROKE_WIDTHS: Record<StrokeSize, number> = { thin: 2, medium: 5, thick: 10 }
+const STROKE_WIDTHS: Record<StrokeSize, number> = { thin: 2, medium: 5, thick: 10 }
+const HIGHLIGHT_WIDTHS: Record<StrokeSize, number> = { thin: 10, medium: 16, thick: 24 }
+
+export function strokeWidth(size: StrokeSize, highlight: boolean): number {
+  return highlight ? HIGHLIGHT_WIDTHS[size] : STROKE_WIDTHS[size]
+}
+
+/** Stored colour of the default pen, displayed in the theme's text colour. */
+export const DEFAULT_PEN_COLOR = "#000000"
 
 /** Display colour of stored ink. The default pen (stored black) follows the theme's text colour (--ink, as the selected sidebar file). */
 export function inkColor(color: string): string {
-  return color === "#000000" ? "var(--ink)" : color
+  return color === DEFAULT_PEN_COLOR ? "var(--ink)" : color
 }
 
 /**
@@ -34,7 +53,7 @@ const strokeBoundsCache = new WeakMap<StrokeData, [number, number, number, numbe
 export function strokePath(stroke: StrokeData): string {
   let d = strokePathCache.get(stroke)
   if (d === undefined) {
-    d = strokeOutlinePath(stroke.points, stroke.width)
+    d = inkOutlinePath(stroke.points, stroke.width, !!stroke.highlight)
     strokePathCache.set(stroke, d)
   }
   return d

@@ -6,6 +6,8 @@ export interface StrokeData {
   points: number[][]
   color: string
   width: number
+  /** Highlighter stroke: constant width, translucent, under the pen ink. */
+  highlight?: boolean
 }
 
 /** Ray-casting point-in-polygon test, used by the lasso selection tools. */
@@ -25,6 +27,10 @@ export const STROKE_OPTIONS = {
   simulatePressure: false,
   last: true,
 } as const
+
+// A marker keeps its width regardless of pressure.
+const HIGHLIGHT_STROKE_OPTIONS = { ...STROKE_OPTIONS, thinning: 0 }
+const HIGHLIGHT_OPACITY = 0.4
 
 /** Closed quadratic path through midpoints of the outline points. Returns "" when fewer than 4 points. */
 function outlinePath(points: number[][]): string {
@@ -51,6 +57,11 @@ function outlinePath(points: number[][]): string {
 /** SVG path of a freehand stroke's outline. Returns "" when the stroke is too short to outline. */
 export function strokeOutlinePath(points: number[][], size: number, options: Parameters<typeof getStroke>[1] = STROKE_OPTIONS): string {
   return outlinePath(getStroke(points, { ...options, size }))
+}
+
+/** SVG outline of a pen or highlighter stroke. */
+export function inkOutlinePath(points: number[][], size: number, highlight: boolean): string {
+  return strokeOutlinePath(points, size, highlight ? HIGHLIGHT_STROKE_OPTIONS : STROKE_OPTIONS)
 }
 
 /** Pen pressure of a pointer event, with a mid value for mice and pens that report none. */
@@ -188,15 +199,37 @@ async function drawCanvas(
     const dh = embed.width * embed.aspect
     ctx.drawImage(embed.image, dx, dy, embed.width, dh)
   }
+  // Highlights share one translucent layer under the pen ink, so overlapping highlights don't stack darker.
+  const highlights = strokes.filter((stroke) => stroke.highlight)
+  if (highlights.length > 0) {
+    const layer = document.createElement("canvas")
+    layer.width = canvas.width
+    layer.height = canvas.height
+    const layerContext = layer.getContext("2d")
+    if (layerContext) {
+      layerContext.scale(dpr, dpr)
+      fillStrokes(layerContext, highlights, offsetX, offsetY)
+      ctx.save()
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      ctx.globalAlpha = HIGHLIGHT_OPACITY
+      ctx.globalCompositeOperation = "multiply"
+      ctx.drawImage(layer, 0, 0)
+      ctx.restore()
+    }
+  }
+  fillStrokes(ctx, strokes.filter((stroke) => !stroke.highlight), offsetX, offsetY)
+  if (texts.length > 0) await document.fonts.ready
+  drawTexts(ctx, texts, offsetX, offsetY)
+  return canvas
+}
+
+function fillStrokes(ctx: CanvasRenderingContext2D, strokes: StrokeData[], offsetX: number, offsetY: number) {
   for (const stroke of strokes) {
-    const d = strokeOutlinePath(stroke.points.map((p) => [p[0]! - offsetX, p[1]! - offsetY, p[2] ?? 0.5]), stroke.width)
+    const d = inkOutlinePath(stroke.points.map((p) => [p[0]! - offsetX, p[1]! - offsetY, p[2] ?? 0.5]), stroke.width, !!stroke.highlight)
     if (!d) continue
     ctx.fillStyle = stroke.color
     ctx.fill(new Path2D(d))
   }
-  if (texts.length > 0) await document.fonts.ready
-  drawTexts(ctx, texts, offsetX, offsetY)
-  return canvas
 }
 
 function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob> {

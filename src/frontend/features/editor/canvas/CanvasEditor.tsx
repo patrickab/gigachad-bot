@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { ImageIcon } from "lucide-react"
 import { A4_ASPECT, FALLBACK_ASPECT, TEXT_DEFAULT_HEIGHT, TEXT_DEFAULT_WIDTH, canvasEntityId, emptyCanvasDoc, type CanvasAttachment, type CanvasDocument, type CanvasFrame } from "@/lib/domain/canvasDocument"
-import { STROKE_WIDTHS, appendStrokePoint, inkColor, strokesAfterErase, type StrokeSize } from "@/features/editor/canvas/ink/canvasInk"
+import { appendStrokePoint, inkColor, strokesAfterErase } from "@/features/editor/canvas/ink/canvasInk"
 import type { Poly } from "@/features/editor/canvas/selection/canvasSelection"
-import { penPressure, renderPageToPng, strokeOutlinePath, type CanvasEmbedRect, type EmbedRect } from "@/lib/drawing"
+import { inkOutlinePath, penPressure, renderPageToPng, type CanvasEmbedRect, type EmbedRect } from "@/lib/drawing"
 import { renameDocument } from "@/lib/backend/api"
 import { fileViewerRawUrl } from "@/lib/backend/urls"
 import { useCollaborativeCanvas } from "@/features/editor/canvas/useCollaborativeCanvas"
@@ -23,7 +23,7 @@ import { CanvasFrameView } from "@/features/editor/canvas/attachments/CanvasFram
 import { CanvasLassoTrace, CanvasScreenshotBox, CanvasSelectionActions, CanvasSelectionOutline } from "@/features/editor/canvas/selection/CanvasSelectionOverlay"
 import { CanvasStrokeLayer } from "@/features/editor/canvas/ink/CanvasStrokeLayer"
 import { CanvasTextNote } from "./CanvasTextNote"
-import { CanvasToolbar, type CanvasTool, type CanvasToolbarSlots } from "./CanvasToolbar"
+import { CanvasToolbar, useInkSettings, type CanvasTool, type CanvasToolbarSlots } from "./CanvasToolbar"
 
 const MAX_NEST_DEPTH = 2 // canvas windows stop opening files here, so A→B→A can't recurse
 const PEN_HOLD_MS = 400 // press-and-hold the pen button to activate selection mode
@@ -89,9 +89,8 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
   const redo = useCallback(() => { if (redoHistory()) clearSelection() }, [redoHistory, clearSelection])
 
   const [tool, setTool] = useState<CanvasTool>("draw")
-  const [strokeSize, setStrokeSize] = useState<StrokeSize>("thin")
-  const [color, setColor] = useState("#000000")
-  const baseWidth = STROKE_WIDTHS[strokeSize]
+  const ink = useInkSettings()
+  const { tool: inkTool, width: inkWidth, highlighting, color: inkStrokeColor, penColor, clearTool: clearInkTool } = ink
 
   // Hide the cursor for pen input without updating state on every move.
   const [pointerIsPen, setPointerIsPen] = useState(false)
@@ -111,8 +110,8 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
     const el = livePathRef.current
     if (!el) return
     const pts = currentPointsRef.current
-    el.setAttribute("d", pts.length >= 2 ? strokeOutlinePath(pts, baseWidth) : "")
-  }, [baseWidth])
+    el.setAttribute("d", pts.length >= 2 ? inkOutlinePath(pts, inkWidth, highlighting) : "")
+  }, [inkWidth, highlighting])
 
   // --- Rubber band: a lasso (select) or a rectangle (screenshot) dragged on the canvas.
   // The ref is the synchronous truth for the pointer handlers; the state drives rendering. ---
@@ -154,10 +153,10 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
     const cur = liveRef.current.doc
     // The gesture stays open until the note blurs, so what is typed into it undoes together with its creation.
     snapshot()
-    applyChange({ ...cur, texts: [...cur.texts, { id, x, y, width, height, text, color, size: TEXT_DEFAULT_SIZE }] })
+    applyChange({ ...cur, texts: [...cur.texts, { id, x, y, width, height, text, color: penColor, size: TEXT_DEFAULT_SIZE }] })
     setAutoFocusId(id)
     setEditingTextId(id)
-  }, [liveRef, color, snapshot, applyChange])
+  }, [liveRef, penColor, snapshot, applyChange])
 
   const editText = useCallback((id: string, text: string) => {
     const cur = liveRef.current.doc
@@ -455,23 +454,24 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
     }
     // drawing/erasing directly on the canvas counts as "outside" the selection
     clearSelection()
-    // The mouse never draws: its drag falls through to the container and pans.
-    if (e.pointerType === "mouse") return
+    // The mouse draws only with a selected ink tool, otherwise its drag falls through to the container and pans.
+    if (e.pointerType === "mouse" && !inkTool) return
     // button 5 is the pen's eraser end
     if (e.button === 5) { setIsErasing(true); return }
     if (e.button !== 0) return
     e.stopPropagation()
+    if (inkTool === "eraser") { setIsErasing(true); return }
     e.currentTarget.setPointerCapture(e.pointerId)
     setIsDrawing(true)
     const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
     currentPointsRef.current = [[cx, cy, penPressure(e)]]
     drawingPointerId.current = e.pointerId
     redrawLive()
-    // the long-press context menu (incl. "Paste image") is a touch/mouse affordance —
-    // a pen stroke that pauses mid-draw must never be mistaken for a long-press
-    if (e.pointerType !== "pen") startLongPress(e.clientX, e.clientY)
+    // the long-press context menu (incl. "Paste image") is a touch affordance — a pen or
+    // mouse stroke that pauses mid-draw must never be mistaken for a long-press
+    if (e.pointerType !== "pen" && e.pointerType !== "mouse") startLongPress(e.clientX, e.clientY)
     armStraighten(e.clientX, e.clientY)
-  }, [tool, screenToCanvas, startBand, startLongPress, armStraighten, clearSelection, redrawLive])
+  }, [tool, inkTool, screenToCanvas, startBand, startLongPress, armStraighten, clearSelection, redrawLive])
 
   const handleSvgPointerMove = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
     if (e.pointerType === "touch") return
@@ -549,8 +549,8 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
     redrawLive()
     if (pts.length < 2) return
     const cur = liveRef.current.doc
-    commit({ ...cur, strokes: [...cur.strokes, { id: canvasEntityId(), points: pts, color, width: baseWidth }] })
-  }, [isDrawing, isErasing, color, baseWidth, liveRef, selection, cancelLongPress, cancelStraighten, captureScreenshot, writeBand, screenToCanvas, redrawLive, commit, endGesture])
+    commit({ ...cur, strokes: [...cur.strokes, { id: canvasEntityId(), points: pts, color: inkStrokeColor, width: inkWidth, ...(highlighting && { highlight: true }) }] })
+  }, [isDrawing, isErasing, inkStrokeColor, inkWidth, highlighting, liveRef, selection, cancelLongPress, cancelStraighten, captureScreenshot, writeBand, screenToCanvas, redrawLive, commit, endGesture])
 
   // --- Keyboard: undo/redo, and Escape to cancel a band or drop the stroke selection ---
   useEffect(() => {
@@ -573,16 +573,17 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
   }, [undo, redo, active])
 
   useEffect(() => {
-    if (tool === "draw" && selection.selectedIds.size === 0) return
+    if (tool === "draw" && selection.selectedIds.size === 0 && !inkTool) return
     const esc = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return
       writeBand(null)
       setTool("draw")
       clearSelection()
+      clearInkTool()
     }
     document.addEventListener("keydown", esc)
     return () => document.removeEventListener("keydown", esc)
-  }, [tool, selection.selectedIds, writeBand, clearSelection])
+  }, [tool, inkTool, selection.selectedIds, writeBand, clearSelection, clearInkTool])
 
   const addMenu = (
     <CanvasAddMenu
@@ -606,10 +607,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
       <CanvasToolbar
         slots={toolbarSlots}
         addMenu={addMenu}
-        strokeSize={strokeSize}
-        onCycleStrokeSize={() => setStrokeSize((w) => w === "thin" ? "medium" : w === "medium" ? "thick" : "thin")}
-        color={color}
-        onColorChange={setColor}
+        ink={ink}
         tool={tool}
         onToggleTool={toggleTool}
         isErasing={isErasing}
@@ -625,7 +623,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
       <div
         ref={containerRef}
         tabIndex={0}
-        className={cn("flex-1 min-h-0 overflow-hidden relative", isDrawing || pointerIsPen ? "cursor-none" : isPanning ? "cursor-grabbing" : tool !== "draw" ? "cursor-crosshair" : "cursor-grab")}
+        className={cn("flex-1 min-h-0 overflow-hidden relative", isDrawing || pointerIsPen ? "cursor-none" : isPanning ? "cursor-grabbing" : tool !== "draw" || inkTool ? "cursor-crosshair" : "cursor-grab")}
         style={{ touchAction: "none", WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none", fontFamily: "var(--font-handwriting), cursive" }}
         onKeyDown={handleCanvasKeyDown}
         onPointerDown={handleContainerPointerDown}
@@ -661,7 +659,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
             {/* Committed strokes (selected ones are hidden while a drag preview draws them) */}
             <CanvasStrokeLayer strokes={doc.strokes} hidden={selection.preview && selection.selectedIds} />
             {/* In-progress stroke — d is set imperatively by redrawLive */}
-            <path ref={livePathRef} fill={inkColor(color)} />
+            <path ref={livePathRef} fill={inkColor(inkStrokeColor)} className={highlighting ? "ink-highlight" : undefined} />
 
             {selection.lasso && selection.bounds && (
               <CanvasSelectionOutline
@@ -699,7 +697,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
             onPatch={(patch) => patchAttachment(att.id, patch)}
             onRetitle={(title) => { void retitleAttachment(att.id, title) }}
             onPdfAspect={(r) => setAspect(att.id, r)}
-            pdfPen={{ color, width: baseWidth }}
+            pdfPen={{ color: inkStrokeColor, width: inkWidth, highlight: highlighting }}
             renderNestedCanvas={renderNestedCanvas}
           />
         ))}

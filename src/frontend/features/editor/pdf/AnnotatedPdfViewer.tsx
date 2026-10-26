@@ -2,27 +2,26 @@
 
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type RefObject } from "react"
 import { createPortal } from "react-dom"
-import { Eraser, Highlighter, PenLine, Redo2, Undo2 } from "lucide-react"
+import { Redo2, Undo2 } from "lucide-react"
 import { PdfViewer } from "@/components/content/PdfViewer"
 import { useTabActive } from "@/contexts/TabContext"
-import { ColorPicker, SEPARATOR, toolButton } from "@/features/editor/canvas/CanvasToolbar"
-import { appendStrokePoint, strokesAfterErase, type StrokeSize } from "@/features/editor/canvas/ink/canvasInk"
+import { InkTools, SEPARATOR, useInkSettings } from "@/features/editor/canvas/CanvasToolbar"
+import { DEFAULT_PEN_COLOR, appendStrokePoint, strokePath, strokesAfterErase } from "@/features/editor/canvas/ink/canvasInk"
 import { useCanvasHistory } from "@/features/editor/canvas/useCanvasHistory"
 import { useCollaborativeCanvas } from "@/features/editor/canvas/useCollaborativeCanvas"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { openPdfAnnotations } from "@/lib/backend/api"
 import { fileViewerRawUrl } from "@/lib/backend/urls"
 import { canvasEntityId, emptyCanvasDoc } from "@/lib/domain/canvasDocument"
-import { penPressure } from "@/lib/drawing"
+import { inkOutlinePath, penPressure } from "@/lib/drawing"
 import { cn } from "@/lib/utils"
-import {
-  HIGHLIGHT_COLORS, PAGE_UNITS, cachedStrokeOutline, pageAt, strokeOutline, strokeWidth, strokesByPage, toPagePoint,
-  type PageBox, type PdfInkTool, type PdfStroke,
-} from "./pdfInk"
+import { PAGE_UNITS, pageAt, strokesByPage, toPagePoint, type PageBox, type PdfStroke } from "./pdfInk"
 
 const ERASER_RADIUS_PX = 15
-const DEFAULT_PEN_COLOR = "#000000" // shown white on dark pages, see .pdf-ink-default
 const EMPTY_DOC = emptyCanvasDoc()
+
+/** Ink a stylus writes with when no tool of the viewer's own is selected. */
+type HostPen = { color: string; width: number; highlight: boolean }
 
 type ViewerProps = Omit<ComponentProps<typeof PdfViewer>, "url" | "renderPageOverlay" | "onScrollerChange">
 
@@ -30,8 +29,8 @@ interface AnnotatedPdfViewerProps extends ViewerProps {
   path: string
   /** Top-bar element the annotation tools render into. Without it the stylus writes with `pen` and nothing else annotates. */
   toolbarSlot?: HTMLElement | null
-  /** Stylus ink when there is no toolbar, e.g. the host canvas's pen. */
-  pen?: { color: string; width: number }
+  /** Stylus ink when there is no toolbar, e.g. the host canvas's pen or highlighter. */
+  pen?: HostPen
   /** Show and accept ink on the pages only, margin notes stay hidden. */
   clipToPages?: boolean
 }
@@ -65,7 +64,7 @@ function InkedPdfViewer({ canvasKey, path, toolbarSlot, pen, clipToPages, viewer
   canvasKey: string
   path: string
   toolbarSlot?: HTMLElement | null
-  pen?: { color: string; width: number }
+  pen?: HostPen
   clipToPages: boolean
   viewerProps: ViewerProps
 }) {
@@ -76,18 +75,15 @@ function InkedPdfViewer({ canvasKey, path, toolbarSlot, pen, clipToPages, viewer
   const loaded = document !== null
 
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null)
-  const [tool, setTool] = useState<PdfInkTool | null>(null)
-  const [size, setSize] = useState<StrokeSize>("thin")
-  const [penColor, setPenColor] = useState(DEFAULT_PEN_COLOR)
-  const [highlightColor, setHighlightColor] = useState<string>(HIGHLIGHT_COLORS[0].value)
+  const ink = useInkSettings()
   const [live, setLive] = useState<LiveStroke | null>(null)
   const livePathRef = useRef<SVGPathElement>(null)
 
   const pages = useMemo(() => strokesByPage(doc.strokes as PdfStroke[]), [doc.strokes])
 
   // Pointer handlers read the latest settings without re-binding mid-stroke.
-  const settingsRef = useRef({ tool, size, penColor, highlightColor, pen, loaded })
-  useLayoutEffect(() => { settingsRef.current = { tool, size, penColor, highlightColor, pen, loaded } })
+  const settingsRef = useRef({ ink, pen, loaded })
+  useLayoutEffect(() => { settingsRef.current = { ink, pen, loaded } })
 
   useEffect(() => {
     if (!scroller) return
@@ -99,7 +95,7 @@ function InkedPdfViewer({ canvasKey, path, toolbarSlot, pen, clipToPages, viewer
     )
 
     const redrawLive = (current: Extract<Gesture, { kind: "draw" }>) => {
-      livePathRef.current?.setAttribute("d", strokeOutline(current.points, current.width, current.highlight))
+      livePathRef.current?.setAttribute("d", inkOutlinePath(current.points, current.width, current.highlight))
     }
 
     const eraseAt = (clientX: number, clientY: number) => {
@@ -124,7 +120,7 @@ function InkedPdfViewer({ canvasKey, path, toolbarSlot, pen, clipToPages, viewer
 
     /** Which gesture a press starts: the pen's eraser end always erases, the stylus writes even without a tool, the mouse needs one. */
     const gestureKind = (event: PointerEvent): "draw" | "erase" | null => {
-      const { tool: selected, loaded: ready } = settingsRef.current
+      const { ink: { tool: selected }, loaded: ready } = settingsRef.current
       if (!ready || event.pointerType === "touch") return null
       if (event.pointerType === "pen" && (event.button === 5 || (event.buttons & 32) !== 0)) return "erase"
       if (event.button !== 0) return null
@@ -142,10 +138,11 @@ function InkedPdfViewer({ canvasKey, path, toolbarSlot, pen, clipToPages, viewer
         const target = pageAt(pageBoxes(), event.clientX, event.clientY, clipToPages)
         const page = target && scroller.querySelector<HTMLElement>(`[data-page-number="${target.page}"]`)
         if (!target || !page) return
-        const { tool: selected, size, penColor, highlightColor, pen: hostPen } = settingsRef.current
-        const highlight = selected === "highlighter"
-        const color = highlight ? highlightColor : hostPen && !selected ? hostPen.color : penColor
-        const width = hostPen && !selected ? hostPen.width : strokeWidth(size, highlight)
+        const { ink: settings, pen: hostPen } = settingsRef.current
+        const host = !settings.tool ? hostPen : undefined
+        const highlight = host ? host.highlight : settings.highlighting
+        const color = host ? host.color : settings.color
+        const width = host ? host.width : settings.width
         gesture = { kind, pointerId: event.pointerId, page, pageNumber: target.page, points: [[...toPagePoint(target.rect, event.clientX, event.clientY), penPressure(event)]], highlight, color, width }
         setLive({ page: target.page, highlight, color })
       }
@@ -208,6 +205,7 @@ function InkedPdfViewer({ canvasKey, path, toolbarSlot, pen, clipToPages, viewer
   }, [scroller, clipToPages, liveRef, applyChange, commit, snapshotOnce, endGesture])
 
   // A selected tool turns the mouse into that tool over the pages.
+  const tool = ink.tool
   useEffect(() => {
     if (!scroller || !tool) return
     scroller.classList.add("cursor-crosshair")
@@ -215,7 +213,7 @@ function InkedPdfViewer({ canvasKey, path, toolbarSlot, pen, clipToPages, viewer
   }, [scroller, tool])
 
   const hasToolbar = !!toolbarSlot
-  useEscapeLayer(() => setTool(null), hasToolbar && active && tool !== null)
+  useEscapeLayer(ink.clearTool, hasToolbar && active && tool !== null)
 
   // Undo and redo belong to the top-bar owner, a canvas host keeps its own.
   useEffect(() => {
@@ -245,8 +243,6 @@ function InkedPdfViewer({ canvasKey, path, toolbarSlot, pen, clipToPages, viewer
     />
   ), [pages, clipToPages, live])
 
-  const toggleTool = (next: PdfInkTool) => setTool((current) => current === next ? null : next)
-  const highlighting = tool === "highlighter"
   const saveFailed = status === "error" || status === "offline"
 
   return (
@@ -254,26 +250,7 @@ function InkedPdfViewer({ canvasKey, path, toolbarSlot, pen, clipToPages, viewer
       <PdfViewer url={fileViewerRawUrl(path)} {...viewerProps} renderPageOverlay={renderPageOverlay} onScrollerChange={setScroller} />
       {toolbarSlot && createPortal(
         <div className="flex items-center gap-1">
-          <button aria-label="Pen" aria-pressed={tool === "pen"} onClick={() => toggleTool("pen")} className={toolButton(tool === "pen")}>
-            <PenLine className="h-3.5 w-3.5" />
-          </button>
-          <button aria-label="Highlighter" aria-pressed={highlighting} onClick={() => toggleTool("highlighter")} className={toolButton(highlighting)}>
-            <Highlighter className="h-3.5 w-3.5" />
-          </button>
-          <button aria-label="Eraser" aria-pressed={tool === "eraser"} onClick={() => toggleTool("eraser")} className={toolButton(tool === "eraser")}>
-            <Eraser className="h-3.5 w-3.5" />
-          </button>
-          {SEPARATOR}
-          <button aria-label="Change stroke width" onClick={() => setSize((current) => current === "thin" ? "medium" : current === "medium" ? "thick" : "thin")} className={toolButton(false)}>
-            <svg width="10" height="10" viewBox="0 0 10 10" className="shrink-0">
-              <circle cx="5" cy="5" r={size === "thin" ? 1.5 : size === "medium" ? 2.5 : 4} fill="currentColor" />
-            </svg>
-          </button>
-          <ColorPicker
-            color={highlighting ? highlightColor : penColor}
-            onChange={highlighting ? setHighlightColor : setPenColor}
-            presets={highlighting ? HIGHLIGHT_COLORS : undefined}
-          />
+          <InkTools ink={ink} />
           {SEPARATOR}
           <button aria-label="Undo" onClick={undo} disabled={!canUndo} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors">
             <Undo2 className="h-3.5 w-3.5" />
@@ -309,15 +286,15 @@ const PageInk = memo(function PageInk({ strokes, scale, clip, live, livePathRef 
   )
   return (
     <>
-      <svg className={cn(layer, "pdf-ink-highlight")} aria-hidden>
+      <svg className={cn(layer, "ink-highlight")} aria-hidden>
         <g transform={transform}>
-          {strokes?.map((stroke) => stroke.highlight && <path key={stroke.id} d={cachedStrokeOutline(stroke)} fill={stroke.color} />)}
+          {strokes?.map((stroke) => stroke.highlight && <path key={stroke.id} d={strokePath(stroke)} fill={stroke.color} />)}
           {livePath(true)}
         </g>
       </svg>
       <svg className={layer} aria-hidden>
         <g transform={transform}>
-          {strokes?.map((stroke) => !stroke.highlight && <path key={stroke.id} d={cachedStrokeOutline(stroke)} fill={stroke.color} className={inkClass(stroke.color)} />)}
+          {strokes?.map((stroke) => !stroke.highlight && <path key={stroke.id} d={strokePath(stroke)} fill={stroke.color} className={inkClass(stroke.color)} />)}
           {livePath(false)}
         </g>
       </svg>

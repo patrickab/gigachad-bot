@@ -1,9 +1,9 @@
 "use client"
 
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom"
-import { Camera, CircleDashed, Redo2, Undo2 } from "lucide-react"
-import { PRESET_COLORS, inkColor, type StrokeSize } from "@/features/editor/canvas/ink/canvasInk"
+import { Camera, CircleDashed, Eraser, Highlighter, PenLine, Redo2, Undo2 } from "lucide-react"
+import { DEFAULT_PEN_COLOR, HIGHLIGHT_COLORS, PRESET_COLORS, inkColor, strokeWidth, type InkTool, type StrokeSize } from "@/features/editor/canvas/ink/canvasInk"
 import { cn } from "@/lib/utils"
 
 /** Header elements the canvas toolbar portals into: drawing tools left, view and history controls right. */
@@ -16,7 +16,7 @@ const RECENT_COLORS = 3
 export const SEPARATOR = <div className="w-px h-4 bg-divider/50 mx-0.5" />
 
 /** Preset, recent and custom ink colours behind a popover. */
-export function ColorPicker({ color, onChange, presets = PRESET_COLORS }: {
+function ColorPicker({ color, onChange, presets = PRESET_COLORS }: {
   color: string
   onChange: (color: string) => void
   presets?: ReadonlyArray<{ value: string }>
@@ -90,15 +90,71 @@ export function ColorPicker({ color, onChange, presets = PRESET_COLORS }: {
   )
 }
 
+// the size button steps through the widths
+const NEXT_SIZE: Record<StrokeSize, StrokeSize> = { thin: "medium", medium: "thick", thick: "thin" }
+
+/** Pen and highlighter settings behind `InkTools`. `color` and `width` are what a new stroke gets. */
+export interface InkSettings {
+  tool: InkTool | null
+  toggleTool: (tool: InkTool) => void
+  clearTool: () => void
+  size: StrokeSize
+  cycleSize: () => void
+  penColor: string
+  highlighting: boolean
+  color: string
+  width: number
+  setColor: (color: string) => void
+}
+
+/** Ink tool state: pen and highlighter keep their own colour, the size applies to both. */
+export function useInkSettings(): InkSettings {
+  const [tool, setTool] = useState<InkTool | null>(null)
+  const [size, setSize] = useState<StrokeSize>("thin")
+  const [penColor, setPenColor] = useState(DEFAULT_PEN_COLOR)
+  const [highlightColor, setHighlightColor] = useState<string>(HIGHLIGHT_COLORS[0].value)
+  const highlighting = tool === "highlighter"
+  const toggleTool = useCallback((next: InkTool) => setTool((current) => current === next ? null : next), [])
+  const clearTool = useCallback(() => setTool(null), [])
+  const cycleSize = useCallback(() => setSize((current) => NEXT_SIZE[current]), [])
+  return useMemo(() => ({
+    tool, toggleTool, clearTool, size, cycleSize, penColor, highlighting,
+    color: highlighting ? highlightColor : penColor,
+    width: strokeWidth(size, highlighting),
+    setColor: highlighting ? setHighlightColor : setPenColor,
+  }), [tool, toggleTool, clearTool, size, cycleSize, penColor, highlightColor, highlighting])
+}
+
+/** Pen, highlighter and eraser, stroke width and the selected tool's colour. */
+export function InkTools({ ink }: { ink: InkSettings }) {
+  return (
+    <>
+      <button aria-label="Pen" aria-pressed={ink.tool === "pen"} onClick={() => ink.toggleTool("pen")} className={toolButton(ink.tool === "pen")}>
+        <PenLine className="h-3.5 w-3.5" />
+      </button>
+      <button aria-label="Highlighter" aria-pressed={ink.highlighting} onClick={() => ink.toggleTool("highlighter")} className={toolButton(ink.highlighting)}>
+        <Highlighter className="h-3.5 w-3.5" />
+      </button>
+      <button aria-label="Eraser" aria-pressed={ink.tool === "eraser"} onClick={() => ink.toggleTool("eraser")} className={toolButton(ink.tool === "eraser")}>
+        <Eraser className="h-3.5 w-3.5" />
+      </button>
+      {SEPARATOR}
+      <button aria-label="Change stroke width" onClick={ink.cycleSize} className={toolButton(false)}>
+        <svg width="10" height="10" viewBox="0 0 10 10" className="shrink-0">
+          <circle cx="5" cy="5" r={ink.size === "thin" ? 1.5 : ink.size === "medium" ? 2.5 : 4} fill="currentColor" />
+        </svg>
+      </button>
+      <ColorPicker color={ink.color} onChange={ink.setColor} presets={ink.highlighting ? HIGHLIGHT_COLORS : undefined} />
+    </>
+  )
+}
+
 interface CanvasToolbarProps {
   /** When given, the toolbar renders into these external elements (the app header pills in canvas mode) instead of above the drawing surface. */
   slots?: CanvasToolbarSlots | null
   /** The "+" popover. */
   addMenu: ReactNode
-  strokeSize: StrokeSize
-  onCycleStrokeSize: () => void
-  color: string
-  onColorChange: (color: string) => void
+  ink: InkSettings
   tool: CanvasTool
   onToggleTool: (tool: Exclude<CanvasTool, "draw">) => void
   isErasing: boolean
@@ -114,23 +170,14 @@ export const toolButton = (active: boolean) => cn("rounded p-1 transition-colors
 
 /** Drawing tools on the left, view and history controls on the right. */
 export function CanvasToolbar({
-  slots, addMenu, strokeSize, onCycleStrokeSize, color, onColorChange, tool, onToggleTool, isErasing, selectedCount,
+  slots, addMenu, ink, tool, onToggleTool, isErasing, selectedCount,
   onUndo, onRedo, canUndo, canRedo, zoomPercent,
 }: CanvasToolbarProps) {
   const drawingTools = (
     <div className="flex items-center gap-1 shrink-0 min-w-0">
       {addMenu}
       {SEPARATOR}
-      <button aria-label="Change pen width"
-        onClick={onCycleStrokeSize}
-        className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
-      >
-        <svg width="10" height="10" viewBox="0 0 10 10" className="shrink-0">
-          <circle cx="5" cy="5" r={strokeSize === "thin" ? 1.5 : strokeSize === "medium" ? 2.5 : 4} fill="currentColor" />
-        </svg>
-      </button>
-      {SEPARATOR}
-      <ColorPicker color={color} onChange={onColorChange} />
+      <InkTools ink={ink} />
       {SEPARATOR}
       <button aria-label="Select on canvas" onClick={() => onToggleTool("select")} className={toolButton(tool === "select")}>
         <CircleDashed className="h-3.5 w-3.5" />
