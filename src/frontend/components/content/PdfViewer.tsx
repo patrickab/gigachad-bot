@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import { flushSync } from "react-dom"
 import { Document, Page, pdfjs, type DocumentProps } from "react-pdf"
 import { Minus, Moon, Plus, Sun } from "lucide-react"
@@ -35,6 +35,10 @@ const MIN_ZOOM = 1
 const MAX_ZOOM = 2.5
 const ZOOM_STEP = 0.25
 const ZOOM_PRESETS = [1, 1.25, 1.5, 1.75, 2, 2.5]
+// zoom steps scale the current bitmaps, pages re-rasterize once the zoom rests this long
+const ZOOM_SETTLE_MS = 150
+// pages within one viewport height above or below the visible area keep a rendered canvas
+const MOUNT_MARGIN = "100% 0px"
 
 interface ScrollAnchor {
   mouseX: number
@@ -151,12 +155,166 @@ function rectMask(rects: ImageRect[], holes: boolean): React.CSSProperties | und
   return { maskImage: image, WebkitMaskImage: image, maskSize: "100% 100%", WebkitMaskSize: "100% 100%" }
 }
 
+/** Free a canvas' bitmap and hide it. */
+function releaseCanvas(canvas: HTMLCanvasElement | null) {
+  if (!canvas) return
+  canvas.width = 0
+  canvas.height = 0
+  canvas.style.display = "none"
+}
+
+/** Every page's height / width, `fallback` for pages that fail to load. */
+async function readPageAspects(pdf: PdfDocument, fallback: number): Promise<number[]> {
+  return Promise.all(Array.from({ length: pdf.numPages }, async (_, index) => {
+    try {
+      const viewport = (await pdf.getPage(index + 1)).getViewport({ scale: 1 })
+      return viewport.height / viewport.width
+    } catch {
+      return fallback
+    }
+  }))
+}
+
+/** Top offset of every page at `pageWidth`, relative to the first page. */
+function pageTops(aspects: number[], pageWidth: number): number[] {
+  const tops: number[] = []
+  let top = 0
+  for (const aspect of aspects) {
+    tops.push(top)
+    top += Math.round(pageWidth * aspect) + PAGE_GAP
+  }
+  return tops
+}
+
+interface PageRegions { images: ImageRect[]; links: ImageRect[] }
+
+/** One page's box at its final size, its canvas exists only while `mounted`.
+ *
+ * - `rasterWidth` is the canvas' render width, CSS-scaled to `width` while a zoom settles
+ * - Re-rasterizing blanks the canvas, a backup copy of the last bitmap covers the page until the new one lands
+ */
+const PdfPageSlot = memo(function PdfPageSlot({
+  pageNumber,
+  width,
+  height,
+  rasterWidth,
+  devicePixelRatio,
+  mounted,
+  snap,
+  registerSlot,
+  renderPageOverlay,
+}: {
+  pageNumber: number
+  width: number
+  height: number
+  rasterWidth: number
+  devicePixelRatio: number
+  mounted: boolean
+  snap: boolean
+  registerSlot: (pageNumber: number, slot: HTMLDivElement | null) => void
+  renderPageOverlay?: (page: number, pageWidth: number) => ReactNode
+}) {
+  const [regions, setRegions] = useState<PageRegions | null>(null)
+  // masks over a blank canvas would show as light boxes
+  const [drawn, setDrawn] = useState(false)
+  if (!mounted && drawn) setDrawn(false)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const drawnCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const backupRef = useRef<HTMLCanvasElement>(null)
+  const regionsRequestedRef = useRef(false)
+
+  const slotRef = useCallback((slot: HTMLDivElement | null) => registerSlot(pageNumber, slot), [registerSlot, pageNumber])
+
+  // Layout effects run before react-pdf's passive effects clear the canvas, so the last bitmap is still intact here.
+  useLayoutEffect(() => {
+    const drawnCanvas = drawnCanvasRef.current
+    const backup = backupRef.current
+    drawnCanvasRef.current = null
+    // a backup still showing is from an earlier, unfinished re-render, keep it
+    if (!drawnCanvas?.width || !backup || backup.width) return
+    backup.width = drawnCanvas.width
+    backup.height = drawnCanvas.height
+    backup.getContext("2d")?.drawImage(drawnCanvas, 0, 0)
+    backup.style.display = ""
+  }, [rasterWidth, devicePixelRatio])
+
+  useLayoutEffect(() => {
+    if (mounted) return
+    drawnCanvasRef.current = null
+    releaseCanvas(backupRef.current)
+  }, [mounted])
+
+  const onRenderSuccess = useCallback(() => {
+    mapCanvasToDevicePixels(canvasRef.current, devicePixelRatio)
+    drawnCanvasRef.current = canvasRef.current
+    releaseCanvas(backupRef.current)
+    setDrawn(true)
+  }, [devicePixelRatio])
+
+  // Images skip both color layers, link text skips the ink layer. Shares the operator list the canvas render fetches.
+  const collectRegions = useCallback((page: PdfPage) => {
+    if (regionsRequestedRef.current) return
+    regionsRequestedRef.current = true
+    Promise.all([collectImageRects(page), collectLinkRects(page)])
+      .then(([images, links]) => setRegions({ images, links }))
+      .catch(() => { /* page without regions keeps plain layers */ })
+  }, [])
+
+  // The tint skips images, the ink layer also skips links, and the link layer caps link text at one link blue.
+  const masks = useMemo(() => {
+    if (!drawn) return null
+    const images = regions?.images ?? []
+    const links = regions?.links ?? []
+    return { tint: rectMask(images, true), ink: rectMask([...images, ...links], true), link: rectMask(links, false) }
+  }, [drawn, regions])
+
+  const scale = width / rasterWidth
+  return (
+    <div
+      ref={slotRef}
+      className="pdf-page relative"
+      style={{ width, height, marginBottom: PAGE_GAP, scrollSnapAlign: snap ? "start" : undefined }}
+      data-page-number={pageNumber}
+    >
+      <div className="pdf-page-surface">
+        {mounted && (
+          <div style={{ width: rasterWidth, transformOrigin: "0 0", transform: scale === 1 ? undefined : `scale(${scale})` }}>
+            <Page
+              pageNumber={pageNumber}
+              width={rasterWidth}
+              devicePixelRatio={devicePixelRatio}
+              canvasRef={canvasRef}
+              loading={null}
+              onLoadSuccess={collectRegions}
+              onRenderSuccess={onRenderSuccess}
+              renderTextLayer
+            />
+          </div>
+        )}
+        <canvas ref={backupRef} width={0} height={0} aria-hidden className="pdf-page-backup absolute inset-0 h-full w-full pointer-events-none" style={{ display: "none" }} />
+        <div className="pdf-page-tint absolute inset-0 pointer-events-none" style={masks?.tint} />
+        <div className="pdf-page-ink absolute inset-0 pointer-events-none" style={masks?.ink} />
+        <div className="pdf-page-link absolute inset-0 pointer-events-none" style={masks?.link ?? { display: "none" }} />
+        {drawn && regions?.images.map((r, k) => (
+          <div
+            key={k}
+            className="pdf-image-mask absolute pointer-events-none"
+            style={{ left: `${r.left * 100}%`, top: `${r.top * 100}%`, width: `${r.width * 100}%`, height: `${r.height * 100}%` }}
+          />
+        ))}
+      </div>
+      {renderPageOverlay?.(pageNumber, width)}
+    </div>
+  )
+})
+
 /** PDF viewer with zoom and page tracking.
  *
  * - `topInset` px of the viewer sit under a floating bar: pages start below it and scroll on underneath
  * - `renderPageOverlay` draws over each page, unclipped, given the page's rendered width in px
  * - `onScrollerChange` hands out the scrolling element, e.g. for pointer input over the pages
  * - Controls show only while the pointer is within CONTROLS_VICINITY px of them
+ * - Only pages near the viewport hold a canvas, the rest are sized placeholders
  */
 export function PdfViewer({
   url,
@@ -180,15 +338,14 @@ export function PdfViewer({
   onScrollerChange?: (scroller: HTMLDivElement | null) => void
 }) {
   const [numPages, setNumPages] = useState<number | null>(null)
-  const [imageRects, setImageRects] = useState<Record<number, ImageRect[]>>({})
-  const [linkRects, setLinkRects] = useState<Record<number, ImageRect[]>>({})
-  // pages whose canvas has drawn once; masks over an empty page would show as light boxes
-  const [renderedPages, setRenderedPages] = useState<ReadonlySet<number>>(() => new Set())
+  const [pageAspects, setPageAspects] = useState<number[] | null>(null) // height / width per page
+  const [nearPages, setNearPages] = useState<ReadonlySet<number>>(() => new Set())
+  const documentRef = useRef<PdfDocument | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [availWidth, setAvailWidth] = useState<number | null>(null)
-  const [pageAspect, setPageAspect] = useState<number | null>(null) // height / width
   const [zoom, setZoom] = useState(1)
+  const [rasterZoom, setRasterZoom] = useState(1)
   const zoomRef = useRef(1)
   const anchorRef = useRef<ScrollAnchor | null>(null)
   const [nearControls, setNearControls] = useState(false)
@@ -208,7 +365,50 @@ export function PdfViewer({
     onScrollerChangeRef.current?.(scroller)
   }, [])
   const pageRefs = useRef(new Map<number, HTMLDivElement>())
+  const pageObserverRef = useRef<IntersectionObserver | null>(null)
   const devicePixelRatio = useDevicePixelRatio()
+  const pageAspect = pageAspects?.[0] ?? null
+
+  // Mount pages near the viewport. A hidden scroller (inactive tab) reports nothing visible, its pages stay as they are.
+  useEffect(() => {
+    const scroller = scrollRef.current
+    if (!scroller) return
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries[0]?.rootBounds?.height) return
+      setNearPages((previous) => {
+        const next = new Set(previous)
+        for (const entry of entries) {
+          const pageNumber = Number((entry.target as HTMLElement).dataset.pageNumber)
+          if (entry.isIntersecting) next.add(pageNumber)
+          else next.delete(pageNumber)
+        }
+        return next
+      })
+    }, { root: scroller, rootMargin: MOUNT_MARGIN })
+    pageObserverRef.current = observer
+    for (const slot of pageRefs.current.values()) observer.observe(slot)
+    return () => {
+      observer.disconnect()
+      pageObserverRef.current = null
+    }
+  }, [])
+
+  const registerSlot = useCallback((pageNumber: number, slot: HTMLDivElement | null) => {
+    const previous = pageRefs.current.get(pageNumber)
+    if (previous) pageObserverRef.current?.unobserve(previous)
+    if (slot) {
+      pageRefs.current.set(pageNumber, slot)
+      pageObserverRef.current?.observe(slot)
+    } else {
+      pageRefs.current.delete(pageNumber)
+    }
+  }, [])
+
+  // Re-rasterize once the zoom rests, until then the current bitmaps scale with it.
+  useEffect(() => {
+    const timer = setTimeout(() => setRasterZoom(zoom), ZOOM_SETTLE_MS)
+    return () => clearTimeout(timer)
+  }, [zoom])
 
   // measure the parent-controlled dimension — debounced so resizing doesn't re-render every frame
   useEffect(() => {
@@ -325,31 +525,21 @@ export function PdfViewer({
 
   const onDocumentLoadSuccess = useCallback(
     async (pdf: PdfDocument) => {
-      setNumPages(pdf.numPages)
-      setImageRects({})
-      setLinkRects({})
-      setRenderedPages(new Set())
-      // read the real first-page dimensions (works for any page size, not just A4)
+      documentRef.current = pdf
+      // first page's real dimensions (any page size, not just A4) lay out every page until all are read
+      let firstAspect = Math.SQRT2
       try {
-        const page = await pdf.getPage(1)
-        const vp = page.getViewport({ scale: 1 })
-        const ratio = vp.height / vp.width
-        setPageAspect(ratio)
-        onPageAspect?.(ratio)
+        const viewport = (await pdf.getPage(1)).getViewport({ scale: 1 })
+        firstAspect = viewport.height / viewport.width
+        onPageAspect?.(firstAspect)
       } catch {
-        /* leave pageAspect null → falls back to fill-parent rendering */
+        /* lay out at A4 */
       }
-      // collect raster-image and link regions per page: images skip both color layers, link
-      // text skips the ink layer. ponytail: eager loop over all pages — fine for typical docs;
-      // lazy per-page on scroll only if huge PDFs feel slow on open.
-      for (let n = 1; n <= pdf.numPages; n++) {
-        try {
-          const page = await pdf.getPage(n)
-          const [images, links] = await Promise.all([collectImageRects(page), collectLinkRects(page)])
-          if (images.length) setImageRects((prev) => ({ ...prev, [n]: images }))
-          if (links.length) setLinkRects((prev) => ({ ...prev, [n]: links }))
-        } catch { /* skip pages that fail to parse */ }
-      }
+      if (documentRef.current !== pdf) return
+      setNumPages(pdf.numPages)
+      setPageAspects(Array.from({ length: pdf.numPages }, () => firstAspect))
+      const aspects = await readPageAspects(pdf, firstAspect)
+      if (documentRef.current === pdf) setPageAspects(aspects)
     },
     [onPageAspect],
   )
@@ -370,28 +560,30 @@ export function PdfViewer({
     }
   }
 
-  const ready = numPages != null && availWidth != null && (!fitWidth || pageAspect != null)
+  const ready = numPages != null && availWidth != null && pageAspects != null
+  const pageWidth = Math.round(renderWidth * zoom)
+  const rasterPageWidth = Math.round(renderWidth * rasterZoom)
 
   // Keep the document spot at the viewport's top edge fixed across width
   // changes (container resize). Pages scale with width but the PAGE_GAPs
   // don't, so map scrollTop exactly: page index + fraction within that page,
-  // re-projected onto the new page height. Runs before paint; the minHeight
-  // floor below guarantees the new scrollHeight already exists, so the
-  // assignment can't be clamped away. Requires overflow-anchor: none on the
-  // scroller — otherwise native scroll anchoring makes its own correction and
-  // this one lands past the right spot.
+  // re-projected onto the new page height. Runs before paint, page slots have
+  // their final heights, so the assignment can't be clamped away. Requires
+  // overflow-anchor: none on the scroller, otherwise native scroll anchoring
+  // makes its own correction and this one lands past the right spot.
   const prevRenderWidthRef = useRef(renderWidth)
   useLayoutEffect(() => {
     const prev = prevRenderWidthRef.current
     prevRenderWidthRef.current = renderWidth
     const el = scrollRef.current
     if (!el || prev === renderWidth || prev <= 0) return
-    if (pageAspect != null) {
-      const pageOld = prev * zoom * pageAspect
-      const pageNew = renderWidth * zoom * pageAspect
-      const page = Math.floor(el.scrollTop / (pageOld + PAGE_GAP))
-      const frac = (el.scrollTop - page * (pageOld + PAGE_GAP)) / pageOld
-      el.scrollTop = page * (pageNew + PAGE_GAP) + frac * pageNew
+    if (pageAspects?.length) {
+      const oldTops = pageTops(pageAspects, Math.round(prev * zoom))
+      const newTops = pageTops(pageAspects, pageWidth)
+      let page = 0
+      while (page + 1 < oldTops.length && oldTops[page + 1] <= el.scrollTop) page++
+      const fraction = (el.scrollTop - oldTops[page]) / (Math.round(prev * zoom) * pageAspects[page])
+      el.scrollTop = newTops[page] + fraction * pageWidth * pageAspects[page]
     } else {
       el.scrollTop *= renderWidth / prev
     }
@@ -411,7 +603,7 @@ export function PdfViewer({
     el.scrollTop = pageEl.offsetTop - firstPageEl.offsetTop
     pageRef.current = page
     restoredPageUrlRef.current = url
-  }, [ready, url, initialPage, numPages, renderWidth, zoom, pageAspect])
+  }, [ready, url, initialPage, numPages, renderWidth, zoom, pageAspects])
 
   // Internal links (references within this PDF) jump to their page, which lands just below the floating bar.
   const goToPage = useCallback(({ pageNumber }: { pageNumber: number }) => {
@@ -444,20 +636,8 @@ export function PdfViewer({
     : { width: "100%", height: "100%", minHeight: 0 }
 
   // Controls sit CONTROLS_PADDING px inside the page's top-right corner (pages are centered in the scroller).
-  const pageRightGap = availWidth == null ? 0 : (availWidth - Math.round(renderWidth * zoom)) / 2
+  const pageRightGap = availWidth == null ? 0 : (availWidth - pageWidth) / 2
   const controlsRight = Math.max(0, pageRightGap) + CONTROLS_PADDING
-
-  // Holes only once a page has drawn: before that the hole would show the bare page background.
-  // The tint skips images, the ink layer also skips links, and the link layer caps link text at one link blue.
-  const overlayMasks = useMemo(() => {
-    const masks: Record<number, { tint?: React.CSSProperties; ink?: React.CSSProperties; link?: React.CSSProperties }> = {}
-    for (const page of renderedPages) {
-      const images = imageRects[page] ?? []
-      const links = linkRects[page] ?? []
-      masks[page] = { tint: rectMask(images, true), ink: rectMask([...images, ...links], true), link: rectMask(links, false) }
-    }
-    return masks
-  }, [imageRects, linkRects, renderedPages])
 
   return (
     <div
@@ -541,52 +721,21 @@ export function PdfViewer({
         style={{ overflowAnchor: "none", paddingTop: topInset, ...(fitWidth ? { scrollSnapType: "y proximity" as const } : undefined) }}
       >
         <Document file={url} onLoadSuccess={onDocumentLoadSuccess} onItemClick={goToPage} externalLinkTarget="_blank" externalLinkRel="noopener noreferrer">
-          {ready && (
-            <div style={{ width: Math.round(renderWidth * zoom) }} className="mx-auto">
-              {Array.from({ length: numPages! }, (_, i) => (
-                <div
-                  key={i}
-                  ref={(el) => {
-                    if (el) pageRefs.current.set(i + 1, el)
-                    else pageRefs.current.delete(i + 1)
-                  }}
-                  className="pdf-page relative"
-                  // minHeight floor: react-pdf pages collapse to a tiny placeholder
-                  // while re-rasterizing, which caves in scrollHeight and clamps
-                  // scrollTop to 0 — "the PDF jumped back to page 1". ponytail:
-                  // floor uses the first page's aspect; mixed page sizes drift a
-                  // little but never collapse.
-                  style={{
-                    marginBottom: PAGE_GAP,
-                    minHeight: pageAspect != null ? Math.round(renderWidth * zoom * pageAspect) : undefined,
-                    scrollSnapAlign: fitWidth ? "start" : undefined,
-                  }}
-                  data-page-number={i + 1}
-                >
-                  <div className="pdf-page-surface">
-                    <Page
-                      pageNumber={i + 1}
-                      width={Math.round(renderWidth * zoom)}
-                      devicePixelRatio={devicePixelRatio}
-                      onRenderSuccess={() => {
-                        mapCanvasToDevicePixels(pageRefs.current.get(i + 1)?.querySelector("canvas"), devicePixelRatio)
-                        setRenderedPages((pages) => pages.has(i + 1) ? pages : new Set(pages).add(i + 1))
-                      }}
-                      renderTextLayer
-                    />
-                    <div className="pdf-page-tint absolute inset-0 pointer-events-none" style={overlayMasks[i + 1]?.tint} />
-                    <div className="pdf-page-ink absolute inset-0 pointer-events-none" style={overlayMasks[i + 1]?.ink} />
-                    <div className="pdf-page-link absolute inset-0 pointer-events-none" style={overlayMasks[i + 1]?.link ?? { display: "none" }} />
-                    {renderedPages.has(i + 1) && (imageRects[i + 1] ?? []).map((r, k) => (
-                      <div
-                        key={k}
-                        className="pdf-image-mask absolute pointer-events-none"
-                        style={{ left: `${r.left * 100}%`, top: `${r.top * 100}%`, width: `${r.width * 100}%`, height: `${r.height * 100}%` }}
-                      />
-                    ))}
-                  </div>
-                  {renderPageOverlay?.(i + 1, Math.round(renderWidth * zoom))}
-                </div>
+          {ready && pageAspects && (
+            <div style={{ width: pageWidth }} className="mx-auto">
+              {pageAspects.map((aspect, index) => (
+                <PdfPageSlot
+                  key={`${url}:${index}`}
+                  pageNumber={index + 1}
+                  width={pageWidth}
+                  height={Math.round(pageWidth * aspect)}
+                  rasterWidth={rasterPageWidth}
+                  devicePixelRatio={devicePixelRatio}
+                  mounted={nearPages.has(index + 1)}
+                  snap={!!fitWidth}
+                  registerSlot={registerSlot}
+                  renderPageOverlay={renderPageOverlay}
+                />
               ))}
             </div>
           )}
