@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import { createPortal, flushSync } from "react-dom"
 import { Document, Page, pdfjs, type DocumentProps } from "react-pdf"
 import { Maximize2, Minimize2, Minus, Moon, Plus, Sun } from "lucide-react"
@@ -140,6 +140,8 @@ function PdfViewerInner({
   initialPage = 1,
   onPageChange,
   topInset,
+  renderPageOverlay,
+  onScrollerChange,
 }: {
   url: string
   isFullscreen: boolean
@@ -151,6 +153,8 @@ function PdfViewerInner({
   initialPage?: number
   onPageChange?: (page: number) => void
   topInset: number
+  renderPageOverlay?: (page: number, pageWidth: number) => ReactNode
+  onScrollerChange?: (scroller: HTMLDivElement | null) => void
 }) {
   const [numPages, setNumPages] = useState<number | null>(null)
   const [imageRects, setImageRects] = useState<Record<number, ImageRect[]>>({})
@@ -171,9 +175,15 @@ function PdfViewerInner({
   const restoredPageUrlRef = useRef<string | null>(null)
   const pageRef = useRef(1)
   const onPageChangeRef = useRef(onPageChange)
+  const onScrollerChangeRef = useRef(onScrollerChange)
   useLayoutEffect(() => {
     onPageChangeRef.current = onPageChange
+    onScrollerChangeRef.current = onScrollerChange
   })
+  const setScroller = useCallback((scroller: HTMLDivElement | null) => {
+    scrollRef.current = scroller
+    onScrollerChangeRef.current?.(scroller)
+  }, [])
   const pageRefs = useRef(new Map<number, HTMLDivElement>())
   const devicePixelRatio = useDevicePixelRatio()
 
@@ -377,6 +387,15 @@ function PdfViewerInner({
     restoredPageUrlRef.current = url
   }, [ready, url, initialPage, numPages, renderWidth, zoom, pageAspect])
 
+  // Internal links (references within this PDF) jump to their page, which lands just below the floating bar.
+  const goToPage = useCallback(({ pageNumber }: { pageNumber: number }) => {
+    const el = scrollRef.current
+    const firstPageEl = pageRefs.current.get(1)
+    const pageEl = pageRefs.current.get(pageNumber)
+    if (!el || !firstPageEl || !pageEl) return
+    el.scrollTo({ top: pageEl.offsetTop - firstPageEl.offsetTop, behavior: "smooth" })
+  }, [])
+
   const trackVisiblePage = useCallback(() => {
     const el = scrollRef.current
     if (!el || numPages == null) return
@@ -490,7 +509,7 @@ function PdfViewerInner({
         </button>
       </div>
       <div
-        ref={scrollRef}
+        ref={setScroller}
         className="pdf-scroll flex-1 min-h-0 overflow-auto focus:outline-none"
         tabIndex={0}
         onScroll={trackVisiblePage}
@@ -498,7 +517,7 @@ function PdfViewerInner({
         // position; native scroll anchoring would apply a second correction
         style={{ overflowAnchor: "none", paddingTop: topInset, ...(fitWidth ? { scrollSnapType: "y proximity" as const } : undefined) }}
       >
-        <Document file={url} onLoadSuccess={onDocumentLoadSuccess}>
+        <Document file={url} onLoadSuccess={onDocumentLoadSuccess} onItemClick={goToPage} externalLinkTarget="_blank" externalLinkRel="noopener noreferrer">
           {ready && (
             <div style={{ width: Math.round(renderWidth * zoom) }} className="mx-auto">
               {Array.from({ length: numPages! }, (_, i) => (
@@ -521,25 +540,28 @@ function PdfViewerInner({
                   }}
                   data-page-number={i + 1}
                 >
-                  <Page
-                    pageNumber={i + 1}
-                    width={Math.round(renderWidth * zoom)}
-                    devicePixelRatio={devicePixelRatio}
-                    onRenderSuccess={() => {
-                      mapCanvasToDevicePixels(pageRefs.current.get(i + 1)?.querySelector("canvas"), devicePixelRatio)
-                      setRenderedPages((pages) => pages.has(i + 1) ? pages : new Set(pages).add(i + 1))
-                    }}
-                    renderTextLayer
-                  />
-                  <div className="pdf-page-tint absolute inset-0 pointer-events-none" style={overlayMasks[i + 1]} />
-                  <div className="pdf-page-ink absolute inset-0 pointer-events-none" style={overlayMasks[i + 1]} />
-                  {renderedPages.has(i + 1) && (imageRects[i + 1] ?? []).map((r, k) => (
-                    <div
-                      key={k}
-                      className="pdf-image-mask absolute pointer-events-none"
-                      style={{ left: `${r.left * 100}%`, top: `${r.top * 100}%`, width: `${r.width * 100}%`, height: `${r.height * 100}%` }}
+                  <div className="pdf-page-surface">
+                    <Page
+                      pageNumber={i + 1}
+                      width={Math.round(renderWidth * zoom)}
+                      devicePixelRatio={devicePixelRatio}
+                      onRenderSuccess={() => {
+                        mapCanvasToDevicePixels(pageRefs.current.get(i + 1)?.querySelector("canvas"), devicePixelRatio)
+                        setRenderedPages((pages) => pages.has(i + 1) ? pages : new Set(pages).add(i + 1))
+                      }}
+                      renderTextLayer
                     />
-                  ))}
+                    <div className="pdf-page-tint absolute inset-0 pointer-events-none" style={overlayMasks[i + 1]} />
+                    <div className="pdf-page-ink absolute inset-0 pointer-events-none" style={overlayMasks[i + 1]} />
+                    {renderedPages.has(i + 1) && (imageRects[i + 1] ?? []).map((r, k) => (
+                      <div
+                        key={k}
+                        className="pdf-image-mask absolute pointer-events-none"
+                        style={{ left: `${r.left * 100}%`, top: `${r.top * 100}%`, width: `${r.width * 100}%`, height: `${r.height * 100}%` }}
+                      />
+                    ))}
+                  </div>
+                  {renderPageOverlay?.(i + 1, Math.round(renderWidth * zoom))}
                 </div>
               ))}
             </div>
@@ -565,6 +587,8 @@ function getNoBody() {
 /** PDF viewer with zoom, page tracking and fullscreen. Fullscreen reparents one mounted viewer via a portal.
  *
  * - `topInset` px of the viewer sit under a floating bar: pages start below it and scroll on underneath
+ * - `renderPageOverlay` draws over each page, unclipped, given the page's rendered width in px
+ * - `onScrollerChange` hands out the scrolling element, e.g. for pointer input over the pages
  */
 export function PdfViewer({
   url,
@@ -573,6 +597,8 @@ export function PdfViewer({
   initialPage,
   onPageChange,
   topInset = 0,
+  renderPageOverlay,
+  onScrollerChange,
 }: {
   url: string
   fitWidth?: boolean
@@ -580,6 +606,8 @@ export function PdfViewer({
   initialPage?: number
   onPageChange?: (page: number) => void
   topInset?: number
+  renderPageOverlay?: (page: number, pageWidth: number) => ReactNode
+  onScrollerChange?: (scroller: HTMLDivElement | null) => void
 }) {
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [inlineEl, setInlineEl] = useState<HTMLDivElement | null>(null)
@@ -611,6 +639,8 @@ export function PdfViewer({
       initialPage={initialPage}
       onPageChange={onPageChange}
       topInset={isFullscreen ? 0 : topInset}
+      renderPageOverlay={renderPageOverlay}
+      onScrollerChange={onScrollerChange}
     />
   )
 
