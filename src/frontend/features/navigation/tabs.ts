@@ -1,7 +1,15 @@
 import { createContext } from "react"
 import { DEFAULT_TAB_CONFIG, type TabConfig } from "@/contexts/SettingsContext"
-import type { Tab } from "@/contexts/TabContext"
+import type { Tab, WorkspaceItem } from "@/contexts/TabContext"
 import { baseName } from "@/lib/paths"
+
+/** The display name project `slug` gives its file `path`, if any. */
+type ShownName = (slug: string | null, path: string) => string | undefined
+
+/** The name a canvas or document item shows: its project's display name, else its file name. */
+function itemName(item: WorkspaceItem, shownName: ShownName): string {
+  return shownName(item.projectSlug, item.path) ?? baseName(item.path)
+}
 
 /** A fresh chat tab with `config` over the default tab config. */
 export function nextTab(config?: Partial<TabConfig>): Tab {
@@ -31,8 +39,8 @@ export function tabAfterClosing(tabs: Tab[], id: string): string {
   return remaining[Math.max(0, tabs.findIndex((tab) => tab.id === id) - 1)]?.id ?? ""
 }
 
-/** Describe the visible surface, not a background item retained by the tab. */
-export function tabLocation(tab: Tab) {
+/** Describe the visible surface, not a background item retained by the tab; `shownName` resolves project display names. */
+export function tabLocation(tab: Tab, shownName: ShownName) {
   if (tab.appMode === "omp") {
     return { category: tab.projectSlug ? "code" : "omp", file: tab.name ?? tab.title ?? "omp" }
   }
@@ -42,23 +50,23 @@ export function tabLocation(tab: Tab) {
   if (tab.appMode === "canvas") {
     return tab.workspaceItem?.kind === "architecture"
       ? { category: "architecture", file: tab.name ?? "System overview" }
-      : { category: "canvases", file: tab.name ?? (tab.workspaceItem?.kind === "canvas" ? baseName(tab.workspaceItem.path) : "new.canvas") }
+      : { category: "canvases", file: tab.name ?? (tab.workspaceItem?.kind === "canvas" ? itemName(tab.workspaceItem, shownName) : "new.canvas") }
   }
   if (tab.appMode === "document" && tab.workspaceItem?.kind === "diff") {
     return { category: "diff", file: tab.name ?? baseName(tab.workspaceItem.path) }
   }
   if (tab.appMode === "document") {
-    return { category: "files", file: tab.name ?? (tab.workspaceItem ? baseName(tab.workspaceItem.path) : "New file") }
+    return { category: "files", file: tab.name ?? (tab.workspaceItem ? itemName(tab.workspaceItem, shownName) : "New file") }
   }
   return { category: "chats", file: tab.name ?? tab.title ?? (tab.historyFile ? baseName(tab.historyFile) : "New chat") }
 }
 
 /** Activity description of `tab` for screen readers; a chat shows its latest mode label. */
-export function tabLabel(tab: Tab, modeLabel: string | undefined): string {
+export function tabLabel(tab: Tab, modeLabel: string | undefined, shownName: ShownName): string {
   if (tab.appMode !== "chat" && tab.workspaceItem) {
     if (tab.appMode === "omp") return tab.name ?? tab.title ?? "omp"
     if (tab.appMode === "factory") return tab.name ?? "Factory"
-    return tab.name ?? (tab.workspaceItem.kind === "architecture" ? "Architecture" : baseName(tab.workspaceItem.path))
+    return tab.name ?? (tab.workspaceItem.kind === "architecture" ? "Architecture" : itemName(tab.workspaceItem, shownName))
   }
   return tab.name ?? (modeLabel || "Chat")
 }

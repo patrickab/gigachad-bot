@@ -78,7 +78,7 @@ async def delete_project(
     cleanup: ChatCleanup = Depends(get_chat_cleanup),
 ) -> dict[str, str]:
     with http_errors(_PROJECT_NOT_FOUND):
-        return await cleanup.after(lambda purge: store.delete_project(slug, cleanup_uploads_fn=purge))
+        return await cleanup.after(lambda released: store.delete_project(slug, released=released))
 
 
 @router.post("/{slug}/cards")

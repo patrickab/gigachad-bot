@@ -4,6 +4,7 @@ import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState 
 import { isEditableTarget } from "@/lib/utils"
 import { DEFAULT_TAB_CONFIG, type TabConfig } from "@/contexts/SettingsContext"
 import { TabContext, showingItem, type Tab, type TabActions, type TabContextValue, type WorkspaceItem } from "@/contexts/TabContext"
+import { useDisplayName } from "@/contexts/ProjectContext"
 import { parseHistoryFile } from "@/lib/domain/historyFile"
 import { useEventListener } from "@/hooks/useEventListener"
 import { TabStripContext, nextTab, relocatedTab, tabAfterClosing, tabLabel, type TabStripValue } from "./tabs"
@@ -160,6 +161,7 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
     }
   })
 
+  const shownName = useDisplayName()
   const setMode = useCallback((id: string, label: string, loading = false) => {
     setModes((prev) => (prev[id]?.label === label && prev[id].loading === loading ? prev : { ...prev, [id]: { label, loading } }))
   }, [])
@@ -167,12 +169,12 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
   const strip = useMemo<TabStripValue>(() => ({
     tabs,
     activeTabId: activeTab,
-    labelOf: (tab) => tabLabel(tab, modes[tab.id]?.label),
+    labelOf: (tab) => tabLabel(tab, modes[tab.id]?.label, shownName),
     isLoading: (tab) => tab.name == null && (modes[tab.id]?.loading ?? false),
     select: setActiveTab,
     close: closeTab,
     add: addTab,
-  }), [tabs, activeTab, modes, closeTab, addTab, setActiveTab])
+  }), [tabs, activeTab, modes, shownName, closeTab, addTab, setActiveTab])
 
   return (
     <TabStripContext.Provider value={strip}>

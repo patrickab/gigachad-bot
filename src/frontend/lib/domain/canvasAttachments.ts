@@ -25,8 +25,8 @@ export const attachmentTraits: Record<AttachmentKind, AttachmentTraits> = {
   document: { name: "Document", namedAfterFile: true, fixedHeight: true, defaultSize: GRAPH_SIZE, renamesFile: true, excludedFromExport: false },
 }
 
-/** Title shown on an attachment window. */
-export function attachmentName(attachment: CanvasAttachment): string {
+/** Title shown on an attachment window; `shownName` is the display name its project gives the file, if any. */
+export function attachmentName(attachment: CanvasAttachment, shownName?: string): string {
   const traits = attachmentTraits[attachment.kind]
-  return attachment.title ?? (traits.namedAfterFile ? attachment.path?.split("/").pop() : undefined) ?? traits.name
+  return attachment.title ?? (traits.namedAfterFile ? shownName ?? attachment.path?.split("/").pop() : undefined) ?? traits.name
 }

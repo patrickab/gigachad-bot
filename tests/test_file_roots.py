@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -72,6 +73,9 @@ class _Project:
 
     def list_files(self, slug: str) -> list[str]:
         return list(self.files)
+
+    def list_named_files(self, slug: str) -> list[tuple[str, str]]:
+        return [(f, Path(f).name) for f in self.files]
 
     def add_file(self, slug: str, path: str) -> list[str]:
         if path not in self.files:

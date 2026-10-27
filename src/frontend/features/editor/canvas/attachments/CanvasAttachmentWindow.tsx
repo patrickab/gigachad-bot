@@ -18,6 +18,8 @@ const TITLE_BAR_PX = 31
 
 interface CanvasAttachmentWindowProps {
   attachment: CanvasAttachment
+  /** Display name the canvas's project gives the attachment's file, if any. */
+  shownName?: string
   /** Effective canvas zoom, the zoom it last settled at, and pan: the window is positioned HTML over the SVG. */
   scale: number
   settledScale: number
@@ -42,7 +44,7 @@ interface CanvasAttachmentWindowProps {
 
 /** A live, scrollable window over the canvas for a PDF, document, architecture diagram or nested canvas. Never baked into export. */
 export function CanvasAttachmentWindow({
-  attachment: att, scale, settledScale, offset, pdfAspect, full, inert,
+  attachment: att, shownName, scale, settledScale, offset, pdfAspect, full, inert,
   onDragStart, onToggleFullscreen, onRemove, onPatch, onRetitle, onPdfAspect, pdfPen, renderNestedCanvas,
 }: CanvasAttachmentWindowProps) {
   const [editingTitle, setEditingTitle] = useState(false)
@@ -50,7 +52,7 @@ export function CanvasAttachmentWindow({
   const pdf = att.kind === "pdf"
   const fixedSize = attachmentTraits[att.kind].fixedHeight
   const aspect = pdf ? pdfAspect : CANVAS_ASPECT
-  const name = attachmentName(att)
+  const name = attachmentName(att, shownName)
   // PDFs rasterize through a settled layout size. Interactive viewport frames
   // use their actual screen size so pointer coordinates stay exact.
   const screenX = att.x * scale + offset.x

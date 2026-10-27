@@ -7,7 +7,6 @@ import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { addRootFilesToProject, createArchitectureSource, listNotes, listProjectDocuments, moveDocument, removeDocument, writeDocument } from "@/lib/backend/api"
 import { isArchitecturePath } from "@/lib/domain/architecturePaths"
 import type { ProjectDocument, ProjectListItem } from "@/lib/domain/projects"
-import { baseName } from "@/lib/paths"
 
 interface WorkspaceDocumentsOptions {
   projects: ProjectListItem[]
@@ -69,8 +68,8 @@ export function useWorkspaceDocuments({
     }
   }
 
-  const remove = (path: string, scope: string) => {
-    schedule(`document:${scope}:${path}`, baseName(path), async () => {
+  const remove = ({ path, name }: ProjectDocument, scope: string) => {
+    schedule(`document:${scope}:${path}`, name, async () => {
       await removeDocument(scope, path)
       await refresh()
       onDocumentsChanged?.()

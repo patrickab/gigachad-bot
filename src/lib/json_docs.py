@@ -42,12 +42,18 @@ class JsonDocs:
         stored = self._store.read_many(keys)
         return {key: _parse(stored[key][0], default) if key in stored else default for key in keys}
 
-    def list_meta(self, prefix: str, select: Callable[[str], bool], derive: Callable[[Any], Meta | None]) -> dict[str, Meta | None]:
-        """Meta of each file under *prefix* that *select* accepts, in listing order. Missing meta is derived and stored back."""
+    def list_meta(
+        self, prefix: str, select: Callable[[str], bool], derive: Callable[[Any], Meta | None], *, require: str | None = None
+    ) -> dict[str, Meta | None]:
+        """Meta of each file under *prefix* that *select* accepts, in listing order.
+
+        Missing meta, or meta without the field *require* (stored by code predating that field), is derived and stored back.
+        """
         found = {key: meta for key, meta in self._store.list_meta(prefix).items() if select(key)}
-        missing = [key for key, meta in found.items() if meta is None]
+        missing = [key for key, meta in found.items() if meta is None or (require is not None and require not in meta)]
         if not missing:
             return found
+        found.update(dict.fromkeys(missing))
         derived: dict[str, tuple[Meta, str]] = {}
         for key, (content, _) in self._store.read_many(missing).items():
             meta = found[key] = derive(_parse(content, None))

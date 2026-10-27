@@ -61,18 +61,3 @@ def test_histories_are_every_chat_outside_a_project_and_move_only_targets_projec
     assert store.list_histories() == {"files": []}
     assert store.move(moved, "")["new_path"] == "loose.json"
     assert store.list_histories() == {"files": ["loose.json"]}
-
-
-def test_failing_upload_cleanup_aborts_cascade_delete_before_anything_is_removed(chat_store: ChatStore) -> None:
-    store = chat_store
-    store.save("root.json", {"messages": [{"role": "user", "content": "a"}], "chat_id": "root"})
-    child = store.branch("root.json", 0)["child_file"]
-
-    def fail(chat_id: str, _slug: str | None) -> None:
-        raise RuntimeError(f"cleanup failed for {chat_id}")
-
-    with pytest.raises(RuntimeError):
-        store.cascade_delete("root.json", cleanup_uploads_fn=fail)
-
-    assert store.load("root.json") is not None
-    assert store.load(child) is not None

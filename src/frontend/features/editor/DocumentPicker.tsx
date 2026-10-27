@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react"
 import { Plus, Layers, FolderOpen } from "lucide-react"
 import type { ProjectDocument } from "@/lib/domain/projects"
 import { FileViewer } from "@/features/editor/FileViewer"
+import { baseName } from "@/lib/paths"
 
 type Scope = "project" | "global"
 
@@ -29,6 +30,8 @@ export function DocumentPicker({
 
   const docs = scope === "project" ? projectDocuments : allDocuments
   const files = useMemo(() => docs.map((d) => d.path), [docs])
+  const names = useMemo(() => new Map(docs.map((d) => [d.path, d.name])), [docs])
+  const nameOf = useCallback((path: string) => names.get(path) ?? baseName(path), [names])
   const projectPaths = useMemo(() => new Set(projectDocuments.map((d) => d.path)), [projectDocuments])
   const statusLabel = scope === "project" ? (
     <><FolderOpen className="h-3 w-3 shrink-0" /><span className="truncate">project — {projectSlug}</span></>
@@ -61,6 +64,7 @@ export function DocumentPicker({
       statusLabel={statusLabel}
       renderRowSuffix={renderRowSuffix}
       onArrowLeft={projectSlug ? () => setScope((s) => (s === "project" ? "global" : "project")) : undefined}
+      nameOf={nameOf}
     />
   )
 }

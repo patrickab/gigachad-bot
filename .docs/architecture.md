@@ -81,6 +81,7 @@ change log + SSE        LikeC4  omp-web   factory
 - Read several documents with `DataStore.read_many` (one query) instead of a read per key: project listings and prompt libraries depend on it. Content columns (`documents`, `assets`) are fetched in binary result format, half the bytes of hex text, and stored uncompressed out of line (`STORAGE EXTERNAL`, schema step `0011`), so a byte range fetches only the TOAST chunks it covers. Values written before `0011` keep their compression until rewritten.
 - `documents.meta` (jsonb) holds chat tree metadata (`chat_id`, `parent_id`, `branch_message_idx`, `children`, `qa_count`). `ChatStore` writes it in the same statement as the content, stamped with the row version, every other write clears it. Branch metadata, the chat ID index and project cleanup read it with one `DataStore.list_meta` query, never chat bodies. Meta that is missing or stamped with an older version (code predating `0011`, project rename) is derived from the body and stored back by `write_meta`, guarded by the content hash, without a new revision or change row. Meta jsonb would not return unchanged (NUL, floats, unsorted object keys) stays NULL and is derived on every read.
 - `documents.sha256` is a stored generated column (`sha256(content)`), so document hashes (PDF annotation keys) never read the content.
+- Meta also carries `refs`, the keys an item references, for delete cleanup: a chat's attachments (each `vaultPath`, and `PDFs/<name>` for a PDF) written by `ChatStore`, a canvas's frame and attachment paths written by `CanvasMutationStore` with each accepted batch (other canvas writes leave it to be derived), a `project.json`'s `files` derived on read. Meta without `refs` (stored before it existed, or by older code after a rollback) counts as missing and is derived again, so no schema step backfills it. An annotation canvas's meta also keeps `hosts`, the host files it was opened with, which cannot be derived from content (see Delete cleanup).
 - Keep development/production PostgreSQL containers and volumes separate. Their default Documents/PDF mirror is intentionally shared. Back up both database and mirror, not only code worktrees.
 - Load user model defaults from persistent provider configuration. Seed shipped prompts only for an uninitialized collection, never overwrite an existing collection or restore deliberately deleted defaults. `get_prompt_store` checks each user's collection once per process, later prompt requests skip the check.
 - Apply numbered `db/schema/` steps under a PostgreSQL advisory transaction lock. Record checksums in `applied_schema_steps`, reject modified applied steps, and apply pending steps in one transaction. Add migrations rather than rewriting applied history.
@@ -91,6 +92,13 @@ change log + SSE        LikeC4  omp-web   factory
 - The rename moves document and asset keys under `chat/`, `project/`, `graph/`, `memory/project/`, `attachment/project/`, rewrites slug/history fields and app-relative links inside JSON/`.md`/`.txt`/`.c4`/`.canvas`/`.snap` documents of app namespaces, and rewrites canvas mutation values. Prose, absolute disk paths and similarly named projects stay unchanged. Every move records change rows.
 - A disk folder linked by the old slug's folder name stays linked through `linked_root` in `project.json`.
 - `archived` is a catalog flag (`PATCH /api/projects/{slug}`) that hides the project from the sidebar. Archiving Code directories is per device (`localStorage` `archived_code_directories`). OMP session archive/restore goes through omp-web.
+
+### Project file names
+
+- `project.json` `files` lists each referenced key as a plain string, or as `{"path", "name"}` when the project shows it under a display name. `ProjectStore` reads both forms and writes the object form only while a display name is set.
+- Renaming a project file (`POST /api/documents/rename` with a slug) only sets that project's display name, keeping the file's suffixes. Stored key, chat and canvas attachments, library PDF, mirror and annotation key stay untouched, and the same file can carry another name in another project. Renaming back to the file name drops the display name. A note (empty slug) has no catalog entry, so its key moves to the new name.
+- `GET /api/documents` and `/all` return the display name as `name`, the project list returns each project's `file_names` (path to display name). The frontend resolves tabs, editor headers, canvas window titles and chat attachment chips through `useDisplayName` in `ProjectContext`, which every rename refreshes.
+- Moving a canvas keeps the name it is shown under: into a project as display name, into the notes as its key.
 
 ### Change delivery and canvases
 
@@ -279,6 +287,25 @@ Encode one payload as `?open=<base64url JSON>`:
 
 - Use `UndoDeleteContext` for deferred resource deletions. Scheduling the next deletion commits the previous one, refusal restores it.
 - Remove chat pairs/attachments from model context immediately while allowing undo. Undo restores by message identity: a pair goes back before the message that followed it (at the end once that is gone), an attachment only into the message it was removed from. Keep canvas history independent.
+
+### Delete cleanup
+
+`lib/references.py` is the one reference model. Every delete path records what it let go of in a `Released` (`owned` keys it deletes itself, released `refs`, deleted `chats`), commits its own delete, and only then calls `References.release`, so a failed delete never loses shared data.
+
+| Delete | Removes | Unless |
+| --- | --- | --- |
+| Chat, cascade, merge child (`ChatCleanup.after`) | Its uploads and sidecars, sandbox state, then the library PDF and annotation canvas of each PDF it referenced | Another chat, project, held canvas or upload still references the PDF name (library) or the bytes (annotation) |
+| Project (`ProjectStore.delete_project`) | Its chats as above, its stored documents `project/<slug>/document/...` (canvases release what they show) and what its files derived | Another project lists the document, a chat or held canvas references it |
+| Project file (`DELETE /api/documents`) | The reference, then the file and its derived data | As for a project. A note (empty slug) is deleted outright, its derived data released |
+| One chat upload (`DELETE /api/files/chat/...`) | The upload and its sidecar, then its library copy and annotations | As for a chat |
+| Canvas | Its mutation log and share rows (foreign keys `ON DELETE CASCADE`), annotation canvases included | |
+
+- Held canvases: every `note/` canvas, and project canvases a chat, a project's `files` or another held canvas reaches. Annotation canvases count PDF bytes: stored uploads, library PDFs and document PDFs, plus host PDFs a chat, project or held canvas references, hashed from disk.
+- Annotation canvases of host PDFs opened from the file tree: `POST /api/fileviewer/annotations` records each resolved host path in the canvas's meta `hosts` (`annotation_canvas`, kept by `CanvasMutationStore` across batches). The canvas stays while any recorded file still exists with its hash. Cleanup stats a recorded file and hashes it only when nothing stored keeps the canvas.
+- MinerU output (`Mineru/<stem>.md`, `Mineru/images/<stem>/...`) is never deleted by a release nor listed by the dry run.
+- Host files are references only: hashed, never written or deleted. The PDF/MinerU convenience mirror on disk is left alone.
+- Cleanup failures after the commit are logged, not raised. Nothing purges older orphans automatically: `python -m lib.references --dry-run [--database-url URL]` (from `src/`) lists them per user with sizes, plus uploads of chats that are not stored. Its reads may store missing meta, never content.
+- omp sessions: gigachad-bot stores nothing per session. The omp composer's uploads are keyed by the shell tab's chat ID and show up in the dry-run report once no stored chat has that ID.
 
 ## Provider usage
 

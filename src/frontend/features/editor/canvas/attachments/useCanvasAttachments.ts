@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useState } from "react"
-import { renameDocument } from "@/lib/backend/api"
+import { useRenameDocument } from "@/contexts/ProjectContext"
 import { attachmentTraits } from "@/lib/domain/canvasAttachments"
 import { A4_ASPECT, FALLBACK_ASPECT, omitKey, type AttachmentPatch, type CanvasAttachment, type CanvasDocument, type CanvasFrame } from "@/lib/domain/canvasDocument"
 
@@ -14,6 +14,7 @@ interface CanvasAttachmentsOptions {
 
 /** Frames and attachment windows once placed: measured aspects, removal, fullscreen, patches, retitles and the add menu's file renames and deletes. */
 export function useCanvasAttachments({ liveRef, commit, applyChange, slug }: CanvasAttachmentsOptions) {
+  const renameDocument = useRenameDocument()
   // Aspect cache (image frames + pdf attachments), keyed by element id
   const [aspects, setAspects] = useState<Record<string, number>>({})
   const setAspect = useCallback((id: string, r: number) => {
@@ -65,9 +66,9 @@ export function useCanvasAttachments({ liveRef, commit, applyChange, slug }: Can
       const renamed = await renameDocument(slug ?? "", attachment.path, title)
       patchAttachment(id, { path: renamed.path, title })
     } catch { /* the stored name stays authoritative when rename fails */ }
-  }, [liveRef, patchAttachment, slug])
+  }, [liveRef, patchAttachment, renameDocument, slug])
 
-  // Attachments on this canvas follow a file the add menu renames; they go once its delete commits, since the file is then gone for good.
+  // Attachments on this canvas follow a note the add menu renames (a project file keeps its key); they go once its delete commits, since the file is then gone for good.
   const followRenamedDocument = useCallback((oldPath: string, newPath: string) => {
     editAttachments((all) => all.some((a) => a.path === oldPath) ? all.map((a) => a.path === oldPath ? { ...a, path: newPath } : a) : all)
   }, [editAttachments])

@@ -1,17 +1,21 @@
 """Single seam for all chat-file I/O, validation, indexing, and cleanup."""
 
-from collections.abc import Sequence
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 import re
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any
 import uuid
 
 from lib.data_store import DataStore, Meta, Revision, validate_key
 from lib.json_docs import JsonDocs
-from lib.storage_namespace import CHAT, MEMORY, META_JSON, PROJECT_JSON, project_dir, project_json
+from lib.storage_namespace import CHAT, MEMORY, META_JSON, PROJECT_JSON, library_pdf, project_json
 
-CleanupUploads = Callable[[str, str | None], None]
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
+    from lib.references import Released
 
 
 class ParentDiverged(ValueError):
@@ -100,7 +104,7 @@ class ChatStore:
         if self._chat_id_index is None:
             self._chat_id_index = {}
             # Listing order, so a duplicated ID resolves to the last chat listed.
-            for key, meta in self._docs.list_meta(CHAT, _is_chat_key, _tree_meta).items():
+            for key, meta in self._metas(CHAT, _is_chat_key).items():
                 if meta and meta["chat_id"]:
                     self._chat_id_index[meta["chat_id"]] = key
         return self._chat_id_index.get(chat_id)
@@ -148,7 +152,7 @@ class ChatStore:
         self._reindex({key: payload}, [])
         return {"status": "ok", "filename": str(filename), "revision": revision.token}
 
-    def delete(self, filename: str, *, cleanup_uploads_fn: CleanupUploads | None = None) -> dict[str, str]:
+    def delete(self, filename: str, *, released: Released | None = None) -> dict[str, str]:
         """Delete a single chat file. Updates parent children array and project tab registry if applicable."""
         key = self._key(filename)
         if not self._docs.exists(key):
@@ -156,12 +160,14 @@ class ChatStore:
         nodes = {key: self._read(key)}
         if self._docs.is_dir(key):
             # A folder holds no chat of its own: it goes with everything under it.
+            if released is not None:
+                self.release_chats_under(key, self._project_slug(f"{key}/_"), released)
             self._docs.delete(key, recursive=True)
             self.invalidate_index()
-        self._delete_nodes(nodes, cleanup_uploads_fn)
+        self._delete_nodes(nodes, released)
         return {"status": "ok"}
 
-    def cascade_delete(self, filename: str, *, cleanup_uploads_fn: CleanupUploads | None = None) -> dict[str, Any]:
+    def cascade_delete(self, filename: str, *, released: Released | None = None) -> dict[str, Any]:
         """Delete a root conversation and all its descendants."""
         root = self._key(filename)
         if not self._docs.exists(root):
@@ -175,27 +181,39 @@ class ChatStore:
                 child_key = self._find(child.get("chat_id", ""))
                 if child_key and child_key not in nodes and child_key not in queue and self._docs.exists(child_key):
                     queue.append(child_key)
-        self._delete_nodes(nodes, cleanup_uploads_fn)
+        self._delete_nodes(nodes, released)
         return {"status": "ok", "deleted": [self._rel(key) for key in nodes]}
 
-    def _delete_nodes(self, nodes: dict[str, Chat | None], cleanup_uploads_fn: CleanupUploads | None) -> None:
-        """Clean up the uploads of *nodes*, then delete them, detaching them from parents and project tabs in the same commit."""
+    def release_chats_under(self, directory: str, slug: str | None, released: Released) -> None:
+        """Record every chat stored under the storage key *directory* in *released*, read from meta, before it is deleted."""
+        for meta in self._metas(directory, _is_chat_key).values():
+            if meta is None:
+                continue
+            if isinstance(chat_id := meta["chat_id"], str) and chat_id:
+                released.chat(chat_id, slug, meta["refs"])
+            else:
+                released.refs.update(meta["refs"])
+
+    def _delete_nodes(self, nodes: dict[str, Chat | None], released: Released | None) -> None:
+        """Delete *nodes*, detaching them from parents and project tabs in the same commit, and record them in *released*.
+
+        Their uploads and derived data are cleaned up by the caller after this commit, never before.
+        """
         txn = ChatTxn(deletes=list(nodes))
-        released: list[tuple[str, str | None]] = []
         for key, chat in nodes.items():
             slug = self._project_slug(key)
+            if chat and released is not None:
+                if chat.chat_id:
+                    released.chat(chat.chat_id, slug, _attachment_refs(chat.messages))
+                else:
+                    released.refs.update(_attachment_refs(chat.messages))
             if chat and chat.chat_id:
-                released.append((chat.chat_id, slug))
                 parent_key = self._find(chat.parent_id) if chat.parent_id else None
                 # A parent that is deleted too needs no update.
                 if parent_key and parent_key not in nodes:
                     self._stage_detach(txn, parent_key, chat.chat_id)
             if slug:
                 self._stage_tab_removal(txn, slug, PurePosixPath(key).name)
-        # A failing cleanup aborts before anything is removed, so the delete stays retryable.
-        if cleanup_uploads_fn:
-            for chat_id, slug in released:
-                cleanup_uploads_fn(chat_id, slug)
         self._commit(txn)
 
     def _stage_detach(self, txn: ChatTxn, parent_key: str, child_chat_id: str) -> None:
@@ -298,7 +316,7 @@ class ChatStore:
         self._commit(ChatTxn(writes={parent_key: parent.as_dict(), child_key: child}))
         return {"status": "ok", "child_file": child_filename, "chat_id": child_chat_id}
 
-    def merge(self, child_file: str, *, cleanup_uploads_fn: CleanupUploads | None = None) -> dict[str, Any]:
+    def merge(self, child_file: str, *, released: Released | None = None) -> dict[str, Any]:
         """Fold a child branch back into its parent, re-parent its own children, and delete it."""
         child_key = self._key(child_file)
         if not self._docs.exists(child_key):
@@ -336,8 +354,8 @@ class ChatStore:
                 parent.children.append({"chat_id": sub_ref.get("chat_id", ""), "branch_message_idx": sub_idx})
         parent.children = [c for c in parent.children if c.get("chat_id") != child.chat_id]
         txn.writes[parent_key] = parent.as_dict()
-        if child.chat_id and cleanup_uploads_fn:
-            cleanup_uploads_fn(child.chat_id, self._project_slug(child_key))
+        if child.chat_id and released is not None:
+            released.chat(child.chat_id, self._project_slug(child_key), _attachment_refs(child.messages))
         self._commit(txn)
         return {"status": "ok"}
 
@@ -356,14 +374,13 @@ class ChatStore:
             files.append(rel)
         return {"files": files}
 
-    def chat_ids_in(self, slug: str) -> list[str]:
-        """Chat IDs of every chat file in project *slug*, for cleanup before its directory is removed."""
-        chat_ids: list[str] = []
-        for meta in self._docs.list_meta(project_dir(slug), _is_chat_key, _tree_meta).values():
-            chat_id = meta["chat_id"] if meta else None
-            if isinstance(chat_id, str) and chat_id:
-                chat_ids.append(chat_id)
-        return chat_ids
+    def tree_metas(self) -> dict[str, Meta | None]:
+        """Stored tree meta (chat ID and attachment references included) of every chat, without reading chat bodies."""
+        return self._metas(CHAT, _is_chat_key)
+
+    def _metas(self, prefix: str, select: Callable[[str], bool]) -> dict[str, Meta | None]:
+        """Tree meta of the chats under *prefix* that *select* accepts. Meta stored before `refs` existed is derived again."""
+        return self._docs.list_meta(prefix, select, _tree_meta, require="refs")
 
     def get_branch_meta(self, dirs: str | None = None) -> dict[str, dict[str, Any]]:
         """Tree metadata for each chat file. *dirs* is comma-separated project dirs (empty entry for root), None scans all."""
@@ -385,7 +402,7 @@ class ChatStore:
             rel = PurePosixPath(key.removeprefix(root_prefix))
             return _is_chat_file(rel.name) and not rel.name.startswith("_") and not _in_hidden_dir(rel.parts[:-1])
 
-        metas = self._docs.list_meta(root, listed, _tree_meta)
+        metas = self._metas(root, listed)
         known = {meta["chat_id"] for meta in metas.values() if meta and meta["chat_id"]}
         return {
             f"{rel_prefix}{PurePosixPath(key.removeprefix(root_prefix))}": self._extract_meta(key, metas[key], known)
@@ -460,8 +477,26 @@ def _in_hidden_dir(dirs: Sequence[str]) -> bool:
     return any(d.startswith("_") or d == MEMORY for d in dirs)
 
 
+def _attachment_refs(messages: object) -> list[str]:
+    """What the attachments of *messages* reference: each `vaultPath`, and the library copy `PDFs/<name>` of a PDF."""
+    refs: set[str] = set()
+    for message in messages if isinstance(messages, list) else []:
+        attachments = message.get("attachments") if isinstance(message, dict) else None
+        for attachment in attachments if isinstance(attachments, list) else []:
+            if not isinstance(attachment, dict):
+                continue
+            if isinstance(path := attachment.get("vaultPath"), str) and path:
+                refs.add(path)
+            name = attachment.get("name")
+            pdf = attachment.get("mime") == "application/pdf" or (isinstance(name, str) and name.lower().endswith(".pdf"))
+            # A PDF upload is copied into the library, and a missing reference falls back to that copy.
+            if pdf and isinstance(name, str) and name and "/" not in name:
+                refs.add(library_pdf(name))
+    return sorted(refs)
+
+
 def _tree_meta(raw: object) -> Meta | None:
-    """The tree fields branch metadata reports for a parsed chat, stored beside it. None when *raw* is not a chat."""
+    """Tree fields and attachment references of a parsed chat, stored beside it. None when *raw* is not a chat."""
     if not isinstance(raw, (dict, list)):
         return None
     chat = Chat.from_raw(raw)
@@ -476,6 +511,7 @@ def _tree_meta(raw: object) -> Meta | None:
         "branch_message_idx": chat.branch_message_idx,
         "children": chat.children,
         "qa_count": qa_count,
+        "refs": _attachment_refs(chat.messages),
     }
 
 

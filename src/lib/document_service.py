@@ -4,16 +4,13 @@ Also the writes, moves and renames that keep project references in step.
 """
 
 from dataclasses import dataclass
-import logging
 from pathlib import Path, PurePosixPath
 
-from config import DOCUMENTS
 from lib.asset_store import AssetStore
-from lib.data_store import DataStore, StorageConflictError, StorageNotFoundError, validate_key, write_text
+from lib.data_store import DataStore, validate_key, write_text
 from lib.project_store import ProjectStore
+from lib.references import Released
 from lib.storage_namespace import GRAPH, NOTE, PDFS, project_attachment_prefix, project_document, project_document_prefix
-
-log = logging.getLogger(__name__)
 
 
 class DocumentNotFound(Exception):
@@ -73,26 +70,32 @@ class DocumentScope:
         except FileNotFoundError as exc:
             raise ProjectNotFound(str(exc)) from exc
 
-    def link(self, store: ProjectStore, key: str) -> None:
+    def link(self, store: ProjectStore, key: str, name: str | None = None) -> None:
+        """Reference *key* from the project, shown as *name* when given."""
         if self.slug:
             store.add_file(self.slug, key)
+            if name is not None:
+                store.set_file_name(self.slug, key, name)
 
     def unlink(self, store: ProjectStore, key: str) -> None:
         if self.slug:
             store.remove_file(self.slug, key)
 
-    def relink(self, store: ProjectStore, old: str, new: str) -> None:
+    def shown_name(self, store: ProjectStore, key: str) -> str:
+        """The name *key* is shown under here: the project's display name, else its file name."""
         if self.slug:
-            store.replace_file(self.slug, old, new)
+            return dict(store.list_named_files(self.slug)).get(key, PurePosixPath(key).name)
+        return PurePosixPath(key).name
 
-    def delete_stored(self, docs: DataStore, path: str) -> None:
-        """Delete *path* only when it is a valid key of a file stored under this scope."""
+    def removal(self, path: str) -> Released:
+        """What removing *path* from here releases: a note is deleted outright, a project file once nothing else references it."""
+        if self.slug:
+            return Released(refs={path})
         try:
             key = validate_key(path)
         except ValueError:
-            return
-        if under(key, self.prefix) and docs.is_file(key):
-            docs.delete(key)
+            return Released()
+        return Released(owned={key}) if under(key, NOTE) else Released()
 
 
 def is_known(store: ProjectStore, key: str) -> bool:
@@ -129,22 +132,29 @@ def write(store: ProjectStore, docs: DataStore, assets: AssetStore, scope: Docum
 
 
 def move(store: ProjectStore, docs: DataStore, key: str, source: DocumentScope, target: DocumentScope) -> str:
-    """Move the stored document *key* from *source* to *target*, keeping its name, returning its new key."""
+    """Move the stored document *key* from *source* to *target*, keeping the name it is shown under, returning its new key.
+
+    A project keeps the file name in the key and the shown name as display name, a note is stored under the shown name.
+    """
     if not source.owns(store, key) or not docs.is_file(key):
         raise DocumentNotFound(key)
     target.require(store)
-    destination = target.key_for(PurePosixPath(key).name)
+    shown = source.shown_name(store, key)
+    destination = target.key_for(PurePosixPath(key).name if target.slug else shown)
     if destination != key:
         if docs.exists(destination):
             raise DocumentNameConflict(destination)
         docs.move(key, destination)
     source.unlink(store, key)
-    target.link(store, destination)
+    target.link(store, destination, shown)
     return destination
 
 
-def rename(store: ProjectStore, docs: DataStore, assets: AssetStore, scope: DocumentScope, key: str, name: str) -> str:
-    """Rename *key* (a stored document of *scope*, else a library PDF) to *name*, keeping its suffixes, returning its new key."""
+def rename(store: ProjectStore, docs: DataStore, scope: DocumentScope, key: str, name: str) -> tuple[str, str]:
+    """Rename *key* of *scope* to *name*, keeping its suffixes, returning its key and the name it is shown under.
+
+    A project file keeps its key and only takes *name* as display name, a note moves to the key *name* gives it.
+    """
     if not scope.owns(store, key):
         raise DocumentNotFound(key)
     name = Path(name).name.strip()
@@ -153,49 +163,14 @@ def rename(store: ProjectStore, docs: DataStore, assets: AssetStore, scope: Docu
     suffix = "".join(Path(PurePosixPath(key).name).suffixes)
     if suffix and not name.endswith(suffix):
         name += suffix
-    if docs.is_file(key):
-        return _rename_stored(store, docs, scope, key, name)
-    return _rename_pdf(store, assets, key, name)
-
-
-def _rename_stored(store: ProjectStore, docs: DataStore, scope: DocumentScope, key: str, name: str) -> str:
-    """Rename a stored document inside its scope, repointing the project's reference."""
-    if not under(key, scope.prefix):
+    if scope.slug:
+        store.set_file_name(scope.slug, key, name)
+        return key, name
+    if not docs.is_file(key):
         raise DocumentNotFound(key)
     destination = scope.key_for(name)
-    if destination == key:
-        return key
-    if docs.exists(destination):
-        raise DocumentNameConflict(destination)
-    docs.move(key, destination)
-    scope.relink(store, key, destination)
-    return destination
-
-
-def _rename_pdf(store: ProjectStore, assets: AssetStore, key: str, name: str) -> str:
-    """Rename a library PDF, repointing every project that references it."""
-    if not under(key, PDFS):
-        raise DocumentNotFound(key)
-    try:
-        asset = assets.read(key)
-    except StorageNotFoundError as exc:
-        raise DocumentNotFound(key) from exc
-    if asset.kind != "pdf":
-        raise DocumentNotFound(key)
-
-    destination = f"{PDFS}/{name}"
-    if destination == key:
-        return key
-    try:
-        renamed = assets.move(key, destination)
-    except StorageConflictError as exc:
-        raise DocumentNameConflict(destination) from exc
-
-    # Keep Nextcloud's convenience mirror aligned with the database authority.
-    Path(DOCUMENTS, *key.split("/")).unlink(missing_ok=True)
-    try:
-        assets.mirror(renamed, DOCUMENTS)
-    except OSError:
-        log.exception("Failed to mirror renamed PDF %s into Nextcloud", destination)
-    store.replace_file_everywhere(key, destination)
-    return destination
+    if destination != key:
+        if docs.exists(destination):
+            raise DocumentNameConflict(destination)
+        docs.move(key, destination)
+    return destination, name

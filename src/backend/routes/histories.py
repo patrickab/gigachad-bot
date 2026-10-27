@@ -79,7 +79,7 @@ async def cascade_delete(
 ) -> dict[str, Any]:
     """Delete a chat and all its descendant branches, purging uploads and sandbox state."""
     with http_errors((FileNotFoundError, 404, "Chat history not found")):
-        return await cleanup.after(lambda purge: store.cascade_delete(filename, cleanup_uploads_fn=purge))
+        return await cleanup.after(lambda released: store.cascade_delete(filename, released=released))
 
 
 @router.delete("/{filename:path}")
@@ -89,7 +89,7 @@ async def delete_chat_history(
     cleanup: ChatCleanup = Depends(get_chat_cleanup),
 ) -> dict[str, str]:
     with http_errors((FileNotFoundError, 404, "Chat history not found")):
-        return await cleanup.after(lambda purge: store.delete(filename, cleanup_uploads_fn=purge))
+        return await cleanup.after(lambda released: store.delete(filename, released=released))
 
 
 @router.post("/move")
@@ -112,4 +112,4 @@ async def merge_branch(
 ) -> dict[str, Any]:
     """Merge a branch back into its parent and delete the child, 409 when the parent diverged."""
     with http_errors((FileNotFoundError, 404, "Child chat history not found"), (ParentDiverged, 409, None), (ValueError, 400, None)):
-        return await cleanup.after(lambda purge: store.merge(req.child_file, cleanup_uploads_fn=purge))
+        return await cleanup.after(lambda released: store.merge(req.child_file, released=released))

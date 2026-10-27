@@ -3,11 +3,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { FileType, ImageIcon, Network, Pencil, PenLine, Plus, SquarePen, X } from "lucide-react"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
+import { useRenameDocument } from "@/contexts/ProjectContext"
 import { useMenuPopover } from "@/components/ui/MenuPopover"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
-import { listNotes, listProjectDocuments, removeDocument, renameDocument } from "@/lib/backend/api"
+import { listNotes, listProjectDocuments, removeDocument } from "@/lib/backend/api"
 import type { ProjectDocument } from "@/lib/domain/projects"
-import { baseName } from "@/lib/paths"
 
 const ITEM = "flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink hover:bg-hover transition-colors truncate"
 
@@ -23,7 +23,7 @@ interface CanvasAddMenuProps {
   onAddArchitecture: () => void
   onAddNewCanvas: () => void
   onAddCanvasFile: (path: string) => void
-  /** Attachments on the canvas follow a renamed file. */
+  /** Attachments on the canvas follow a renamed note, whose key moves. */
   onDocumentRenamed: (oldPath: string, newPath: string) => void
   /** A deleted file's attachments go once the delete commits. */
   onDocumentDeleted: (path: string) => void
@@ -52,7 +52,7 @@ function FileButton({ icon, name, onClick }: { icon: ReactNode; name: string; on
  * The toolbar's "+" popover: pages, project images/PDFs/documents, an architecture window and canvases.
  * It fetches project assets itself, so chat and canvas mode share one data path. Only the outermost
  * editor offers other canvases, so a canvas window can hold a file without handing out more.
- * Documents (generated tool artifacts included) are renamed and deleted in place.
+ * Documents (generated tool artifacts included) are renamed and deleted in place: a project file only takes a display name.
  */
 export function CanvasAddMenu({ slug, depth, docPath, onAddPage, onAddImage, onAddPdf, onAddDocument, onAddArchitecture, onAddNewCanvas, onAddCanvasFile, onDocumentRenamed, onDocumentDeleted }: CanvasAddMenuProps) {
   const { ref: menuRef, open, toggle, close } = useMenuPopover({ escape: false })
@@ -63,6 +63,7 @@ export function CanvasAddMenu({ slug, depth, docPath, onAddPage, onAddImage, onA
   // The rename input owns Escape while open: cancel it without closing an enclosing overlay.
   useEscapeLayer(() => { cancelRename.current = true; renameInputRef.current?.blur() }, renamingPath !== null)
   const { schedule: scheduleDelete, pending: deletePending } = useUndoDelete()
+  const renameDocument = useRenameDocument()
   const deleteKey = (path: string) => `canvas-document:${slug ?? ""}:${path}`
 
   useEffect(() => {
@@ -87,13 +88,13 @@ export function CanvasAddMenu({ slug, depth, docPath, onAddPage, onAddImage, onA
     try {
       const renamed = await renameDocument(slug ?? "", path, name)
       setDocs((all) => all.map((d) => d.path === path ? { ...d, path: renamed.path, name: renamed.name } : d))
-      onDocumentRenamed(path, renamed.path)
+      if (renamed.path !== path) onDocumentRenamed(path, renamed.path)
     } catch { /* the stored name stays authoritative when rename fails */ }
   }
 
   // The row hides during its undo window; the file and its attachments go once the delete commits.
-  const deleteDocumentRow = (path: string) => {
-    scheduleDelete(deleteKey(path), baseName(path), async () => {
+  const deleteDocumentRow = ({ path, name }: ProjectDocument) => {
+    scheduleDelete(deleteKey(path), name, async () => {
       await removeDocument(slug ?? "", path)
       setDocs((all) => all.filter((d) => d.path !== path))
       onDocumentDeleted(path)
@@ -155,7 +156,7 @@ export function CanvasAddMenu({ slug, depth, docPath, onAddPage, onAddImage, onA
                     <Pencil className="h-3 w-3" />
                   </button>
                   <button
-                    onClick={() => deleteDocumentRow(docItem.path)}
+                    onClick={() => deleteDocumentRow(docItem)}
                     aria-label={`Delete ${docItem.name}`}
                     className="rounded p-0.5 text-ink-faint hover:text-danger transition-colors shrink-0"
                   >

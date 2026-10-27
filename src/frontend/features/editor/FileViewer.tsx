@@ -21,12 +21,12 @@ function iconFor(kind: FileKind) {
   return FileText
 }
 
-function sortFiles(paths: string[]): string[] {
+function sortFiles(paths: string[], nameOf: (path: string) => string): string[] {
   return [...paths].sort((a, b) => {
     const ea = extOf(a)
     const eb = extOf(b)
     if (ea !== eb) return ea.localeCompare(eb)
-    return baseName(a).toLowerCase().localeCompare(baseName(b).toLowerCase())
+    return nameOf(a).toLowerCase().localeCompare(nameOf(b).toLowerCase())
   })
 }
 
@@ -45,6 +45,8 @@ interface FileViewerProps {
   /** Per-row trailing control (e.g. an add-to-project button). */
   renderRowSuffix?: (path: string) => React.ReactNode
   onArrowLeft?: () => void
+  /** Name a file row shows, its file name without. */
+  nameOf?: (path: string) => string
 }
 
 /** Floating file picker with fuzzy search, directory drill-down and a type-aware preview pane. */
@@ -57,6 +59,7 @@ export function FileViewer({
   statusLabel,
   renderRowSuffix,
   onArrowLeft,
+  nameOf = baseName,
 }: FileViewerProps) {
   const [query, setQuery] = useState("")
   const [idx, setIdx] = useState(0)
@@ -77,9 +80,9 @@ export function FileViewer({
     const q = query.trim()
     if (q) {
       // Search ignores the directory context: flat fuzzy across every file, name matches get a +1 bonus.
-      return sortFiles(files)
+      return sortFiles(files, nameOf)
         .map((path) => {
-          const byName = fuzzyScore(baseName(path), q)
+          const byName = fuzzyScore(nameOf(path), q)
           const byPath = fuzzyScore(path, q)
           const s = Math.max(byName === null ? -Infinity : byName + 1, byPath ?? -Infinity)
           return { path, s }
@@ -87,14 +90,14 @@ export function FileViewer({
         .filter((x) => x.s > -Infinity)
         .sort((a, b) => b.s - a.s)
         .slice(0, RESULT_CAP)
-        .map((x) => ({ type: "file" as const, label: baseName(x.path), path: x.path }))
+        .map((x) => ({ type: "file" as const, label: nameOf(x.path), path: x.path }))
     }
     const dirRows: Row[] = [...currentNode.dirs]
       .map((node) => ({ type: "dir" as const, label: relativeName(currentNode.path, node.path), path: node.path, node }))
       .sort((a, b) => a.label.toLowerCase().localeCompare(b.label.toLowerCase()))
-    const fileRows: Row[] = sortFiles(currentNode.files).map((path) => ({ type: "file" as const, label: baseName(path), path }))
+    const fileRows: Row[] = sortFiles(currentNode.files, nameOf).map((path) => ({ type: "file" as const, label: nameOf(path), path }))
     return [...dirRows, ...fileRows]
-  }, [files, query, currentNode])
+  }, [files, query, currentNode, nameOf])
 
   // Highlight the first row whenever the search or directory changes
   useResetOnChange(query, () => setIdx(0))

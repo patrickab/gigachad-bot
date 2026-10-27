@@ -27,6 +27,7 @@ from lib.postgres_pool import get_postgres_pool
 from lib.project_rename import PostgresProjectRenamer
 from lib.project_store import ProjectStore
 from lib.prompt_store import PromptStore, seed_prompts
+from lib.references import References
 from lib.sandbox_service import SandboxRuntimeState, SandboxService
 
 _client: LLMClient | None = None
@@ -101,11 +102,18 @@ def get_sandbox_service(
     )
 
 
-def get_chat_cleanup(
+def get_references(
+    docs: DataStore = Depends(get_document_store),
     assets: AssetStore = Depends(get_asset_store),
+) -> References:
+    return References(docs, assets)
+
+
+def get_chat_cleanup(
+    references: References = Depends(get_references),
     sandbox: SandboxService = Depends(get_sandbox_service),
 ) -> ChatCleanup:
-    return ChatCleanup(assets, sandbox)
+    return ChatCleanup(references, sandbox)
 
 
 def get_project_store(

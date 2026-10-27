@@ -1,7 +1,7 @@
 "use client"
 
-import { createContext, useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
-import type { ProjectListItem } from "@/lib/domain/projects"
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
+import { displayName, type ProjectDocument, type ProjectListItem } from "@/lib/domain/projects"
 import { useStartupRead } from "@/contexts/StartupReadContext"
 import { useRequiredContext } from "@/hooks/useRequiredContext"
 import { subscribeToChanges } from "@/lib/backend/syncStream"
@@ -11,6 +11,7 @@ import {
   deleteProject as apiDeleteProject,
   setProjectArchived as apiSetProjectArchived,
   renameProject as apiRenameProject,
+  renameDocument as apiRenameDocument,
 } from "@/lib/backend/api"
 
 const PROJECT_CATALOG_KEY = "chat/projects-meta.json"
@@ -28,6 +29,24 @@ const ProjectContext = createContext<ProjectContextState | null>(null)
 
 export function useProject(): ProjectContextState {
   return useRequiredContext(ProjectContext, "useProject must be used within ProjectProvider")
+}
+
+const NO_PROJECTS: ProjectListItem[] = []
+
+/** `(slug, path)` to the display name project `slug` gives its file `path`; none outside a ProjectProvider. */
+export function useDisplayName(): (slug: string | null | undefined, path: string) => string | undefined {
+  const projects = useContext(ProjectContext)?.projects ?? NO_PROJECTS
+  return useCallback((slug, path) => displayName(projects, slug, path), [projects])
+}
+
+/** Rename `path` of project `slug` (a note when empty), then read the projects again so every view shows the new name. */
+export function useRenameDocument(): (slug: string, path: string, name: string) => Promise<ProjectDocument> {
+  const refreshProjects = useContext(ProjectContext)?.refreshProjects
+  return useCallback(async (slug, path, name) => {
+    const renamed = await apiRenameDocument(slug, path, name)
+    await refreshProjects?.().catch(() => {})
+    return renamed
+  }, [refreshProjects])
 }
 
 /** Whether two project lists hold the same entries, so a refresh that changed nothing keeps the list's identity. */

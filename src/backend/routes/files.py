@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 
 from backend.http_plumbing import http_errors
-from backend.routes.deps import get_asset_store
+from backend.routes.deps import get_asset_store, get_references
 from lib.asset_store import AssetStore
 from lib.attachments import AttachResult, ChatUploads
 from lib.data_store import InvalidStorageKey
+from lib.references import References, Released
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -40,15 +41,18 @@ async def parse_attachments(
 
 
 @router.delete("/chat/{chat_id}/att/{filename:path}")
-async def delete_single_file(
+def delete_single_file(
     chat_id: str,
     filename: str,
     slug: str | None = Query(default=None),
     assets: AssetStore = Depends(get_asset_store),
+    references: References = Depends(get_references),
 ):
+    """Delete an upload with its sidecar, then its library PDF copy, extraction and annotations unless still used."""
     uploads = ChatUploads(assets, chat_id, slug)
     with http_errors(_INVALID_FILENAME):
-        deleted = uploads.delete(filename)
-    if not deleted:
+        keys = uploads.stored_keys(filename)
+    if not keys:
         raise HTTPException(status_code=404, detail="File not found")
+    references.release(Released(owned=set(keys)))
     return {"status": "ok"}

@@ -74,9 +74,10 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- storage_namespace.py      Canonical database namespaces and key builders
 |   |   |-- db_schema.py              Checksum-protected migration application
 |   |   |-- chat_store.py             Chat model, I/O, indexing and atomic tree operations
-|   |   |-- project_store.py          Catalog, slugs, kanban and tab persistence
-|   |   |-- document_service.py       `DocumentScope` (notes or a project), document write/move/rename with reference repointing
-|   |   |-- chat_cleanup.py           `ChatCleanup`: purge uploads and sandbox state after chat deletion
+|   |   |-- project_store.py          Catalog, slugs, kanban and tab persistence, project file references with display names
+|   |   |-- document_service.py       `DocumentScope` (notes or a project), document write/move with reference repointing, display-name rename
+|   |   |-- chat_cleanup.py           `ChatCleanup`: release uploads, derived data and sandbox state after chat deletion
+|   |   |-- references.py             Reference model, post-delete cleanup of unused derived data, `--dry-run` orphan report, `annotation_canvas` (PDF annotation key, recorded host files)
 |   |   |-- project_rename.py         Project rename transaction and reference rewriting
 |   |   |-- memory_store.py           `MemoryScope`, `MemoryOperation`, topic/fact persistence, pending buffer, watermarks, atomic commit
 |   |   |-- memory_extract.py         `MemoryExtractor`: LLM extraction proposals and regroup

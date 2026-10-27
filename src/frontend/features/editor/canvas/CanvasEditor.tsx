@@ -15,6 +15,7 @@ import { useCanvasScreenshot } from "@/features/editor/canvas/attachments/useCan
 import { useCanvasHistory } from "@/features/editor/canvas/useCanvasHistory"
 import { useCollaborativeCanvas } from "@/features/editor/canvas/useCollaborativeCanvas"
 import { useTabActive } from "@/contexts/TabContext"
+import { useDisplayName } from "@/contexts/ProjectContext"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { useUndoRedoKeys } from "@/hooks/useUndoRedoKeys"
 import { cn } from "@/lib/utils"
@@ -61,6 +62,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, docPath, depth
   const { clear: clearSelection, select } = selection
   const insert = useCanvasInsert({ liveRef, commit, pointAtCenter, slug, depth, active, onImageAdded })
   const attachments = useCanvasAttachments({ liveRef, commit, applyChange, slug })
+  const shownName = useDisplayName()
   const captureScreenshot = useCanvasScreenshot({ liveRef, containerRef, screenToCanvas })
 
   // Selections hold stroke ids, but a restore can still resurrect or drop strokes under the highlight — both directions drop it.
@@ -188,6 +190,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, docPath, depth
             <CanvasAttachmentWindow
               key={att.id}
               attachment={att}
+              shownName={att.path ? shownName(slug, att.path) : undefined}
               scale={scale}
               settledScale={settledScale}
               offset={offset}

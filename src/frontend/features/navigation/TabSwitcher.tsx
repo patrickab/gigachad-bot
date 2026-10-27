@@ -5,7 +5,7 @@ import { ArrowRightLeft, Check, ChevronDown, Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useTab } from "@/contexts/TabContext"
 import { PATH_COLLATOR } from "@/lib/paths"
-import { useProject } from "@/contexts/ProjectContext"
+import { useDisplayName, useProject } from "@/contexts/ProjectContext"
 import { useOutsidePress } from "@/hooks/useOutsidePress"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { TabStripContext, tabLocation } from "./tabs"
@@ -35,6 +35,7 @@ export function TabSwitcher() {
   const strip = useContext(TabStripContext)
   const { tab, isActive } = useTab()
   const { projects } = useProject()
+  const shownName = useDisplayName()
   const activityDescriptionId = useId()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
@@ -63,10 +64,10 @@ export function TabSwitcher() {
   if (!strip) return null
 
   const projectName = (slug: string | null) => projects.find((project) => project.slug === slug)?.name ?? slug ?? "general"
-  const location = tabLocation(tab)
+  const location = tabLocation(tab, shownName)
   const breadcrumb = `${projectName(tab.projectSlug)} / ${location.category} / ${location.file}`
   const search = query.trim().toLowerCase()
-  const orderedTabs = strip.tabs.map((item) => ({ item, project: projectName(item.projectSlug), ...tabLocation(item) }))
+  const orderedTabs = strip.tabs.map((item) => ({ item, project: projectName(item.projectSlug), ...tabLocation(item, shownName) }))
     .sort((left, right) => Number(left.project === "general") - Number(right.project === "general")
       || PATH_COLLATOR.compare(left.project, right.project)
       || PATH_COLLATOR.compare(left.category, right.category)

@@ -6,6 +6,7 @@ import pytest
 
 from lib.chat_store import ChatStore
 from lib.postgres_data_store import PostgresDataStore
+from lib.references import Released
 
 
 @pytest.fixture
@@ -130,6 +131,8 @@ def test_index_and_project_cleanup_use_meta(chat_store: ChatStore, data_store: P
     data_store.write_bytes("chat/proj/one.json", json.dumps({"messages": [], "chat_id": "one"}).encode())
     chat_store.save("proj/two.json", {"messages": pair("a"), "chat_id": "two"})
 
-    assert sorted(chat_store.chat_ids_in("proj")) == ["one", "two"]
+    released = Released()
+    chat_store.release_chats_under("chat/proj", "proj", released)
+    assert sorted(released.chats) == [("one", "proj"), ("two", "proj")]
     assert chat_store._find("one") == "chat/proj/one.json"
     assert stored_meta(data_store, "proj/project.json")[0] is None

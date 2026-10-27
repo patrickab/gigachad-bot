@@ -34,7 +34,7 @@ from lib.asset_store import Asset, AssetStore
 from lib.data_store import DataStore, Entry, StorageNotFoundError, read_text
 from lib.file_roots import FileRoots
 from lib.mime import mime_for
-from lib.storage_namespace import pdf_annotations
+from lib.references import annotation_canvas
 
 router = APIRouter(prefix="/api/fileviewer", tags=["fileviewer"])
 
@@ -261,9 +261,9 @@ def open_pdf_annotations(
 
     - Keyed by the SHA-256 of the PDF bytes: every copy shares annotations, renames keep them
     - Changed PDF content gets a new, empty canvas
+    - A host file is recorded in the canvas's meta, so delete cleanup keeps the canvas while that file still has the hash
     """
     # Stored PDFs are not read here: assets and documents both keep the hash of their content.
-    key = pdf_annotations(_raw_source(path, roots, docs, assets).sha256())
-    if not docs.exists(key):
-        docs.write_bytes(key, b"")
-    return {"key": key}
+    source = _raw_source(path, roots, docs, assets)
+    host = str(source.path) if isinstance(source, _HostFile) else None
+    return {"key": annotation_canvas(docs, source.sha256(), host)}

@@ -5,6 +5,7 @@ import type { Attachment } from "@/lib/domain/types"
 import { cn } from "@/lib/utils"
 import { AttachmentIcon } from "@/features/chat/preview/AttachmentView"
 import { useAttachmentHoverCard } from "@/features/chat/preview/AttachmentHoverCard"
+import { useAttachmentLabel } from "@/features/chat/useAttachmentLabel"
 
 /** Attachment of an earlier message, still part of the chat's context unless switched inactive. */
 export interface ContextAttachment {
@@ -29,6 +30,7 @@ export function AttachmentChip({ attachment, uploading, onOpen, onRemove, onTogg
   onToggleActive?: () => void
 }) {
   const hover = useAttachmentHoverCard(attachment)
+  const label = useAttachmentLabel(attachment)
   const icon = uploading
     ? <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-ink-faint border-t-ink" />
     : attachment.missing
@@ -44,7 +46,7 @@ export function AttachmentChip({ attachment, uploading, onOpen, onRemove, onTogg
       {onToggleActive ? (
         <button
           type="button"
-          aria-label={attachment.active ? `Exclude ${attachment.name} from context` : `Include ${attachment.name} in context`}
+          aria-label={attachment.active ? `Exclude ${label} from context` : `Include ${label} in context`}
           aria-pressed={attachment.active}
           onClick={onToggleActive}
           className={cn(CHIP_BUTTON_CLASS, "group/toggle text-ink-muted hover:text-ink")}
@@ -55,16 +57,16 @@ export function AttachmentChip({ attachment, uploading, onOpen, onRemove, onTogg
       ) : <span className="p-0.5">{icon}</span>}
       <button
         type="button"
-        aria-label={attachment.missing ? `Preview ${attachment.name}, file not found, last known version` : `Preview ${attachment.name}`}
+        aria-label={attachment.missing ? `Preview ${label}, file not found, last known version` : `Preview ${label}`}
         onClick={onOpen}
         {...hover.anchorProps}
         className="min-w-0 truncate rounded text-ink hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
       >
-        {attachment.name}
+        {label}
       </button>
       <button
         type="button"
-        aria-label={`Remove ${attachment.name}`}
+        aria-label={`Remove ${label}`}
         onClick={onRemove}
         className={cn(CHIP_BUTTON_CLASS, "text-ink-faint opacity-0 hover:text-danger focus-visible:opacity-100 group-hover/chip:opacity-100")}
       >

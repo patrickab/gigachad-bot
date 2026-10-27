@@ -7,6 +7,7 @@ import { isImageAttachment } from "@/features/chat/attachments"
 import type { Attachment } from "@/lib/domain/types"
 import { AttachmentIcon } from "@/features/chat/preview/AttachmentView"
 import { useAttachmentHoverCard } from "@/features/chat/preview/AttachmentHoverCard"
+import { useAttachmentLabel } from "@/features/chat/useAttachmentLabel"
 
 interface MessageAttachmentsProps {
   attachments: Attachment[]
@@ -33,11 +34,12 @@ function ImageThumbnail({ attachment }: { attachment: Attachment }) {
 // The card renders beside its anchor, not inside: React events bubble through portals, so a press in the card would reach the button.
 function MessageAttachment({ attachment, onClick }: { attachment: Attachment; onClick: (attachment: Attachment) => void }) {
   const hover = useAttachmentHoverCard(attachment)
+  const label = useAttachmentLabel(attachment)
   return (
     <>
       {isImageAttachment(attachment) ? (
         <button
-          aria-label={attachment.name}
+          aria-label={label}
           onClick={() => onClick(attachment)}
           {...hover.anchorProps}
           className={cn(
@@ -59,7 +61,7 @@ function MessageAttachment({ attachment, onClick }: { attachment: Attachment; on
           )}
         >
           <AttachmentIcon mime={attachment.mime} generic={File} size="h-3 w-3" />
-          <span className="max-w-[140px] truncate">{attachment.name}</span>
+          <span className="max-w-[140px] truncate">{label}</span>
         </button>
       )}
       {hover.card}

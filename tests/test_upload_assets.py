@@ -6,7 +6,8 @@ from starlette.datastructures import Headers, UploadFile
 
 from backend.routes import files
 from backend.routes.assets import get_asset
-from lib.attachments import ChatUploads
+from lib.postgres_data_store import PostgresDataStore
+from lib.references import References, Released
 from tests.conftest import make_asset_store
 
 pytestmark = pytest.mark.usefixtures("clean_database", "documents_root")
@@ -76,32 +77,37 @@ async def test_overwrite_reuses_the_same_logical_path(asset_store):
     ]
 
 
-async def test_delete_removes_the_asset_and_its_markdown_sidecar(asset_store):
+def references_of(asset_store) -> References:
+    return References(PostgresDataStore(asset_store._scope), asset_store)
+
+
+def test_delete_removes_the_asset_and_its_markdown_sidecar(asset_store):
     asset_store.write("upload", "attachment/chat/chat-5/paper.pdf", b"%PDF-1.7")
     asset_store.write("upload", "attachment/chat/chat-5/paper.md", b"# parsed")
     asset_store.write("upload", "attachment/chat/chat-5/keep.txt", b"keep")
 
-    assert await files.delete_single_file("chat-5", "paper.pdf", slug=None, assets=asset_store) == {"status": "ok"}
+    deleted = files.delete_single_file("chat-5", "paper.pdf", slug=None, assets=asset_store, references=references_of(asset_store))
 
+    assert deleted == {"status": "ok"}
     assert [asset.logical_path for asset in asset_store.list("attachment/chat/chat-5")] == [
         "attachment/chat/chat-5/keep.txt"
     ]
 
 
-async def test_delete_of_a_missing_attachment_is_404(asset_store):
+def test_delete_of_a_missing_attachment_is_404(asset_store):
     with pytest.raises(HTTPException) as raised:
-        await files.delete_single_file("chat-6", "ghost.txt", slug=None, assets=asset_store)
+        files.delete_single_file("chat-6", "ghost.txt", slug=None, assets=asset_store, references=references_of(asset_store))
 
     assert raised.value.status_code == 404
 
 
-def test_delete_all_chat_uploads_clears_only_that_chats_prefix(asset_store):
+def test_releasing_a_deleted_chat_clears_only_that_chats_uploads(asset_store):
     asset_store.write("upload", "attachment/chat/chat-7/a.txt", b"a")
     asset_store.write("upload", "attachment/chat/chat-7/sub/b.txt", b"b")
     asset_store.write("upload", "attachment/chat/chat-70/c.txt", b"c")
     asset_store.write("upload", "attachment/project/proj/chat/chat-7/d.txt", b"d")
 
-    ChatUploads(asset_store, "chat-7").delete_all()
+    references_of(asset_store).release(Released(chats=[("chat-7", None)]))
 
     assert [asset.logical_path for asset in asset_store.list()] == [
         "attachment/chat/chat-70/c.txt",

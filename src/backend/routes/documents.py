@@ -5,7 +5,7 @@ A *document* is a logical key or a mounted file path listed in a project's
 MinerU for a parsed markdown preview. The UI only passes back opaque keys the API
 handed it, and every read/write is scoped to the requesting user. PDFs and MinerU
 output are also mirrored into Nextcloud as a convenience copy the app never reads back.
-Where a document lives and how a move or rename repoints its references is `lib.document_service`.
+Where a document lives, how a move repoints its references and how a rename names it is `lib.document_service`.
 """
 
 from pathlib import Path
@@ -20,6 +20,7 @@ from backend.routes.deps import (
     get_document_store,
     get_file_roots,
     get_project_store,
+    get_references,
 )
 from backend.routes.schemas import FileListResponse, FileMeta, file_meta
 from lib import document_service
@@ -29,6 +30,7 @@ from lib.data_store import DataStore, validate_key
 from lib.document_service import DocumentNameConflict, DocumentNotFound, DocumentScope, InvalidDocumentName, ProjectNotFound, under
 from lib.file_roots import FileRoots
 from lib.project_store import ProjectStore
+from lib.references import References
 from lib.storage_namespace import DRAWING, GRAPH, NOTE, architecture_prefix, project_document
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
@@ -85,10 +87,11 @@ def _upload_name(file: UploadFile) -> str:
     return _safe_filename(file.filename)
 
 
-def _meta_list(paths: list[str]) -> list[FileMeta]:
+def _meta_list(files: list[tuple[str, str]]) -> list[FileMeta]:
+    """The API description of each `(path, display name)` pair."""
     # ponytail: canvas-pasted images stay registered (so /fileviewer can serve them)
     # but never surface as documents (they'd flood the sidebar and the canvas add menu).
-    return [file_meta(p) for p in paths if not Path(p).name.startswith("pasted-")]
+    return [file_meta(p, name=name) for p, name in files if not Path(p).name.startswith("pasted-")]
 
 
 def _follow_moved_reference(store: ProjectStore, roots: FileRoots, slug: str, path: str) -> str:
@@ -120,23 +123,27 @@ def list_documents(
     - A referenced mount file that moved is followed and the project's reference rewritten
     """
     with http_errors((FileNotFoundError, 404, None)):
-        files = [_follow_moved_reference(store, roots, slug, f) for f in store.list_files(slug)]
+        files = []
+        for path, name in store.list_named_files(slug):
+            followed = _follow_moved_reference(store, roots, slug, path)
+            # A file shown under its own name keeps doing so where it moved.
+            files.append((followed, Path(followed).name if name == Path(path).name else name))
     sources = [file_meta(f"{architecture_prefix(slug)}/{relative}", name=relative) for relative in architecture.source_paths()]
     # The workspace is the source of truth for its files, so a stray reference never duplicates one.
-    return FileListResponse(documents=_meta_list([f for f in files if not under(f, GRAPH)]) + sources)
+    return FileListResponse(documents=_meta_list([(path, name) for path, name in files if not under(path, GRAPH)]) + sources)
 
 
 @router.get("/all", response_model=FileListResponse)
 def list_all_documents(store: ProjectStore = Depends(get_project_store)):
     """Every document referenced by any project."""
-    return FileListResponse(documents=_meta_list(store.list_all_files()))
+    return FileListResponse(documents=_meta_list(store.list_all_named_files()))
 
 
 @router.get("/notes", response_model=FileListResponse)
 def list_notes(docs: DataStore = Depends(get_document_store)) -> FileListResponse:
     """List non-project canvases/notes."""
     paths = [entry.key for entry in docs.list(NOTE) if not entry.is_dir]
-    return FileListResponse(documents=_meta_list(paths))
+    return FileListResponse(documents=_meta_list([(path, Path(path).name) for path in paths]))
 
 
 @router.post("/write", response_model=FileMeta)
@@ -201,15 +208,15 @@ def remove_document(
     slug: str = Query(...),
     path: str = Query(...),
     store: ProjectStore = Depends(get_project_store),
-    docs: DataStore = Depends(get_document_store),
+    references: References = Depends(get_references),
 ):
-    """Unassign a document from a project. If it lives in the project's
-    documents/ directory, also delete the file itself. Empty slug = non-project
+    """Unassign a document from a project, then delete it with what was derived from it (library PDF copy,
+    extraction, annotations, a canvas's references) once nothing else references it. Empty slug = non-project
     note, deleted directly since there's no project to unlink from."""
     scope = DocumentScope(slug)
     with http_errors((FileNotFoundError, 404, None)):
         scope.unlink(store, path)
-    scope.delete_stored(docs, path)
+    references.release(scope.removal(path))
     return {"status": "ok"}
 
 
@@ -233,9 +240,9 @@ def rename_document(
     req: RenameDocumentRequest,
     store: ProjectStore = Depends(get_project_store),
     docs: DataStore = Depends(get_document_store),
-    assets: AssetStore = Depends(get_asset_store),
 ):
-    """Rename a database-owned document, retaining its content and project links."""
+    """Rename a document: a project file only changes the name it is shown under, a note moves to its new name."""
     key = _valid_key(req.path)
     with http_errors(*_DOCUMENT_ERRORS):
-        return file_meta(document_service.rename(store, docs, assets, DocumentScope(req.slug), key, req.name))
+        path, name = document_service.rename(store, docs, DocumentScope(req.slug), key, req.name)
+    return file_meta(path, name=name)

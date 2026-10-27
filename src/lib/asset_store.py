@@ -16,7 +16,7 @@ import tempfile
 from uuid import UUID
 
 from lib.changes import UserScope, like_prefix
-from lib.data_store import StorageConflictError, StorageNotFoundError, validate_key
+from lib.data_store import StorageNotFoundError, validate_key
 from lib.mime import mime_for
 from lib.storage_namespace import MINERU, PDFS
 
@@ -164,36 +164,6 @@ class AssetStore:
             ).rowcount
             if deleted:
                 self._scope.record(connection, kind="asset", key=logical_path, operation="delete")
-
-    def move(self, source: str, destination: str) -> Asset:
-        """Rename one asset while retaining its content and identity."""
-        source, destination = validate_key(source), validate_key(destination)
-        if source == destination:
-            return self.read(source)
-        with self._scope.connection() as connection, connection.transaction():
-            exists = connection.execute(
-                "SELECT 1 FROM assets WHERE user_id = %s AND logical_path = %s FOR UPDATE",
-                (self._scope.user_id, source),
-            ).fetchone()
-            if exists is None:
-                raise StorageNotFoundError(source)
-            collision = connection.execute(
-                "SELECT 1 FROM assets WHERE user_id = %s AND logical_path = %s",
-                (self._scope.user_id, destination),
-            ).fetchone()
-            if collision is not None:
-                raise StorageConflictError(f"Destination already exists: {destination}")
-            row = connection.execute(
-                f"""
-                UPDATE assets SET logical_path = %s, version = version + 1, updated_at = now()
-                WHERE user_id = %s AND logical_path = %s
-                RETURNING {_COLUMNS}, content
-                """,
-                (destination, self._scope.user_id, source),
-            ).fetchone()
-            self._scope.record(connection, kind="asset", key=source, operation="move")
-            self._scope.record(connection, kind="asset", key=destination, operation="move", version=row[6])
-        return self._asset(row, bytes(row[7]))
 
     def mirror(self, asset: Asset, root: Path) -> Path:
         """Atomically write an allowed PDF or MinerU asset beneath *root*.

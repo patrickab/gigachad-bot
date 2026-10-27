@@ -7,6 +7,7 @@ import { useNeovimSetting, type NeovimSetting } from "@/contexts/SettingsContext
 import { FilePanel } from "@/features/editor/FilePanel"
 import { NeovimEditor, useNeovimTerminal } from "@/features/editor/NeovimEditor"
 import { PDF_MIME, RawAttachment, RenderedAttachment, isMarkdownAttachment, renderableMarkdown, type ContentChange } from "./AttachmentView"
+import { useAttachmentLabel } from "@/features/chat/useAttachmentLabel"
 
 type PreviewView = "raw" | "rendered" | "neovim"
 
@@ -50,6 +51,7 @@ function AttachmentPanel({ attachment, onClose, onContentChange }: {
   onContentChange?: ContentChange
 }) {
   const neovim = useNeovimSetting()
+  const label = useAttachmentLabel(attachment)
   const views = viewsOf(attachment, neovim)
   const [chosenView, setView] = useState<PreviewView | null>(null)
   const view = chosenView && views.includes(chosenView) ? chosenView : views[0]
@@ -66,7 +68,7 @@ function AttachmentPanel({ attachment, onClose, onContentChange }: {
   )
 
   return (
-    <FilePanel label={attachment.name} onClose={onClose} actions={viewPicker}>
+    <FilePanel label={label} onClose={onClose} actions={viewPicker}>
       {view === "raw" ? <RawAttachment attachment={attachment} />
         : view === "neovim" && attachment.content != null ? <NeovimAttachment attachment={attachment} content={attachment.content} onContentChange={onContentChange} onClose={onClose} />
           : view === "rendered" && markdown != null ? <RenderedAttachment attachment={attachment} markdown={markdown} onContentChange={isMarkdownAttachment(attachment) ? onContentChange : undefined} />

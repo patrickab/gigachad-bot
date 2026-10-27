@@ -5,6 +5,7 @@ import { motion } from "framer-motion"
 import { CanvasEditor } from "./CanvasEditor"
 import { emptyCanvasDoc, parseCanvasDoc, serializeCanvasDoc, type CanvasDocument } from "@/lib/domain/canvasDocument"
 import { baseName } from "@/lib/paths"
+import { useDisplayName } from "@/contexts/ProjectContext"
 import { isModKey } from "@/lib/utils"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { useEventListener } from "@/hooks/useEventListener"
@@ -37,7 +38,8 @@ export function FileCanvasEditor({ path, slug, onClose, onSaved, persistOverride
     path, codec: CANVAS_CODEC, write: persistOverride, blankWhenMissing: true, onSaved,
   })
   useEffect(() => { reload() }, [reload])
-  useModeLabel(baseName(path), true, onModeLabel)
+  const shownName = useDisplayName()(slug, path) ?? baseName(path)
+  useModeLabel(shownName, true, onModeLabel)
 
   // Autosave once the canvas has been quiet for a second; a forced save also writes unchanged text.
   const flush = useDebouncedSave(canvasDoc, (doc, force) => { persist(doc, !force).catch(() => {}) }, AUTOSAVE_DELAY_MS)

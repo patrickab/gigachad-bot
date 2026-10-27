@@ -12,6 +12,7 @@ import { readFileRootRendered, writeArchitectureSource, writeDocument, writeRoot
 import { architectureSlug, architectureSource, isArchitecturePath } from "@/lib/domain/architecturePaths"
 import { baseName } from "@/lib/paths"
 import { useTabActive } from "@/contexts/TabContext"
+import { useDisplayName } from "@/contexts/ProjectContext"
 import { useNeovimSetting } from "@/contexts/SettingsContext"
 import { TEXT_CODEC, useRootFileDocument } from "./useRootFileDocument"
 import { isToolArtifact, useEditorView } from "./useEditorView"
@@ -66,6 +67,7 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, overlay, pers
   const [isFullscreen, setIsFullscreen] = useState(!!overlay)
 
   const filename = baseName(path)
+  const shownName = useDisplayName()(slug, path) ?? filename
   const write = useCallback(async (next: string) => {
     if (persistOverride) await persistOverride(next)
     // An absolute path is a file mount file, referenced by a project or opened directly: save it in place.
@@ -83,7 +85,7 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, overlay, pers
   const isArtifact = isToolArtifact(path, content ?? "")
   const plotFigure = useMemo(() => path.endsWith(".plot.json") && content !== null ? parsePlotFigure(content) : null, [content, path])
 
-  useModeLabel(filename, !!overlay, onModeLabel)
+  useModeLabel(shownName, !!overlay, onModeLabel)
 
   // Drop the rendered preview of the previous document or mode
   useResetOnChange(overlay ? path : null, () => setRenderedContent(null))
@@ -174,7 +176,7 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, overlay, pers
       ) : (
         <>
           <div className="flex h-6 shrink-0 items-center gap-2 border-b border-divider/50 px-2 text-[10px] text-ink-faint">
-            <span className="min-w-0 flex-1 truncate">{filename}{dirty && " (modified)"}</span>
+            <span className="min-w-0 flex-1 truncate">{shownName}{dirty && " (modified)"}</span>
             {isArtifact && <ShowAsToggle view={view} onViewChange={setView} />}
             <button aria-label={isFullscreen ? "Exit document fullscreen" : "Enter document fullscreen"} onClick={() => setIsFullscreen((f) => !f)} className="rounded p-0.5 hover:text-ink">
               {isFullscreen ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}

@@ -60,7 +60,7 @@ const api = vi.hoisted(() => ({
   loadFileViewerText: vi.fn(async () => ""),
   listNotes: vi.fn(async () => [] as { path: string; name: string; mime: string }[]),
   writeDocument: vi.fn<typeof import("@/lib/backend/api").writeDocument>(async () => ({ path: "project/proj/document/notes.canvas", name: "notes.canvas", mime: "application/json" })),
-  renameDocument: vi.fn(async (_slug: string, _path: string, name: string) => ({ path: `project/proj/document/${name}.md`, name: `${name}.md`, mime: "text/markdown" })),
+  renameDocument: vi.fn(async (_slug: string, path: string, name: string) => ({ path, name: `${name}.md`, mime: "text/markdown" })),
   removeDocument: vi.fn<typeof import("@/lib/backend/api").removeDocument>(async () => undefined),
   ApiError: class ApiError extends Error {
     status: number
@@ -722,7 +722,7 @@ describe("document attachments", () => {
     expect(without.container.textContent).toContain("Architecture: open a project canvas")
   })
 
-  it("renames a document's file on a header edit, but only retitles an architecture window", async () => {
+  it("names a document's file on a header edit without moving it, but only retitles an architecture window", async () => {
     const seen: CanvasDocument[] = []
     const initialDoc: CanvasDocument = {
       version: 1, frames: [], strokes: [], texts: [],
@@ -738,8 +738,9 @@ describe("document attachments", () => {
     fireEvent.change(input, { target: { value: "Research map" } })
     fireEvent.blur(input)
     await waitFor(() => expect(latest(seen).attachments[0]).toMatchObject({
-      path: "project/proj/document/Research map.md", title: "Research map",
+      path: "project/proj/document/mindmap.md", title: "Research map",
     }))
+    expect(api.renameDocument).toHaveBeenLastCalledWith("proj", "project/proj/document/mindmap.md", "Research map")
 
     api.renameDocument.mockClear()
     fireEvent.doubleClick(getByText("Architecture"))
@@ -752,12 +753,12 @@ describe("document attachments", () => {
     expect(api.renameDocument).not.toHaveBeenCalled()
   })
 
-  it("renames and deletes documents from the add menu, keeping canvas attachments in step", async () => {
+  it("renames and deletes documents from the add menu, attachments keeping the renamed file's key", async () => {
     api.listProjectDocuments.mockResolvedValueOnce([
       { path: "project/proj/document/sandbox_plot-toolu_1.plot.json", name: "sandbox_plot-toolu_1.plot.json", mime: "application/json" },
       { path: "project/proj/document/diagram-toolu_2.md", name: "diagram-toolu_2.md", mime: "text/markdown" },
     ])
-    api.renameDocument.mockResolvedValueOnce({ path: "project/proj/document/Loss.plot.json", name: "Loss.plot.json", mime: "application/json" })
+    api.renameDocument.mockResolvedValueOnce({ path: "project/proj/document/sandbox_plot-toolu_1.plot.json", name: "Loss.plot.json", mime: "application/json" })
     const seen: CanvasDocument[] = []
     const initialDoc: CanvasDocument = {
       version: 1, frames: [], strokes: [], texts: [],
@@ -777,7 +778,7 @@ describe("document attachments", () => {
     fireEvent.blur(input)
     await waitFor(() => expect(container.textContent).toContain("Loss.plot.json"))
     expect(api.renameDocument).toHaveBeenLastCalledWith("proj", "project/proj/document/sandbox_plot-toolu_1.plot.json", "Loss")
-    expect(latest(seen).attachments[0]!.path).toBe("project/proj/document/Loss.plot.json")
+    expect(latest(seen).attachments[0]!.path).toBe("project/proj/document/sandbox_plot-toolu_1.plot.json")
 
     // Deleting hides the row at once; the request and the attachment removal wait for the undo window.
     fireEvent.click(getByLabelText("Delete diagram-toolu_2.md"))

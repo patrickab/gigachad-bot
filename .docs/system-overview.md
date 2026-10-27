@@ -44,6 +44,7 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 - Attach uploads, mounted files, global/project documents, architecture sources, or drawings. Toggle attachments out of model context without deleting their source; open them to preview or edit.
 - Create project documents in their intended project. Reuse generated tool artifacts as documents and retain source references from web research.
 - Remove chat turns or attachments from context with undo available; resource deletion also offers a deferred undo window. Canvas editing has its own history.
+- Deleting a project, chat (with its branches), canvas, project file or chat upload also deletes what was derived from it, such as uploads, the library PDF copy and its annotation canvas, once no other project, chat or canvas uses them. Annotations of a mounted PDF opened from the file tree stay while that file keeps its bytes. Extracted Markdown and images are kept, and mounted disk files are never deleted.
 - Inspect provider subscription usage when available: five-hour limits are distinct from weekly/monthly windows. Missing five-hour data is not replaced with a weekly value.
 
 ### Live references versus snapshots
@@ -63,6 +64,7 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 
 - Mount an existing backend directory, including an Obsidian vault, to work on its files in place. Browse its filtered tree and open the type-aware text, PDF, canvas, architecture, plot, or mind-map view.
 - Add a mounted file to a project as a reference. Editing changes the original disk file; removing the project reference does not delete that source.
+- Rename a file in a project to change only the name that project shows for it. The file, its chat and canvas attachments and its PDF annotations keep pointing at the original, and renaming back to the original name restores it.
 - Upload PDFs or attach mounted PDFs, view their pages, and use MinerU extraction to supply readable Markdown to chat. Image OCR can transcribe text and LaTeX with the configured vision model.
 - Annotate PDFs with pen and highlighter. Annotations belong to the PDF's content, so every copy shares them and a renamed file keeps them, while changed bytes start empty.
 - Ask about a mounted or library PDF in a side chat grounded in its extracted text, or ask about a selected passage. This chat is not saved.

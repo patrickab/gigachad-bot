@@ -3,7 +3,7 @@
 The route functions are called directly with explicit request-scoped stores —
 the same objects ``get_document_store``/``get_asset_store`` hand FastAPI — so a
 test needs no HTTP client and no environment fiddling.
-``document_service.DOCUMENTS`` is redirected at a tmp_path so the only filesystem
+The ``documents_root`` fixture redirects the Nextcloud mirror at a tmp_path so the only filesystem
 writes a test can produce are deliberate PDF mirrors. Any other file below that
 root is a policy violation.
 """
@@ -12,24 +12,19 @@ from fastapi import HTTPException
 import pytest
 
 from backend.routes import documents as route
-from lib import attachment_materialize, document_service
+from lib import attachment_materialize
 from lib.asset_store import AssetStore
 from lib.changes import UserScope
 from lib.chat_store import ChatStore
 from lib.data_store import StorageNotFoundError
+from lib.json_docs import JsonDocs
 from lib.postgres_data_store import PostgresDataStore
 from lib.project_rename import PostgresProjectRenamer
 from lib.project_store import ProjectStore
+from lib.references import References
 from tests.conftest import create_user_and_device
 
-pytestmark = pytest.mark.usefixtures("clean_database")
-
-
-@pytest.fixture(autouse=True)
-def documents_root(documents_root, monkeypatch):
-    """The document service reads its own ``DOCUMENTS`` at call time, alongside ``attachment_materialize``'s."""
-    monkeypatch.setattr(document_service, "DOCUMENTS", documents_root, raising=True)
-    return documents_root
+pytestmark = pytest.mark.usefixtures("clean_database", "documents_root")
 
 
 def written_files(root):
@@ -103,45 +98,99 @@ def test_move_relocates_the_document_key_leaving_nothing_behind(alice):
 
 
 
-def test_rename_keeps_project_document_content_and_extension(alice):
+def test_rename_only_changes_the_name_a_project_document_is_shown_under(alice):
     slug = alice.projects.create_project("Thesis")["slug"]
+    key = f"project/{slug}/document/mindmap.md"
     route.write_document(
         route.WriteDocumentRequest(slug=slug, name="mindmap.md", content="# Mind map"), alice.projects, alice.docs, alice.assets
     )
 
-    meta = route.rename_document(
-        route.RenameDocumentRequest(path=f"project/{slug}/document/mindmap.md", slug=slug, name="Research map"),
-        alice.projects,
-        alice.docs,
-        alice.assets,
-    )
+    meta = route.rename_document(route.RenameDocumentRequest(path=key, slug=slug, name="Research map"), alice.projects, alice.docs)
 
-    assert meta.path == f"project/{slug}/document/Research map.md"
-    assert alice.docs.read_bytes(meta.path)[0] == b"# Mind map"
-    assert not alice.docs.exists(f"project/{slug}/document/mindmap.md")
-    assert alice.projects.list_files(slug) == [meta.path]
+    assert (meta.path, meta.name) == (key, "Research map.md")
+    assert alice.docs.read_bytes(key)[0] == b"# Mind map"
+    assert not alice.docs.exists(f"project/{slug}/document/Research map.md")
+    assert alice.projects.list_files(slug) == [key]
+    listed = route.list_documents(slug, alice.projects, _NoArchitecture(), _NoRoots())
+    assert [(doc.path, doc.name) for doc in listed.documents] == [(key, "Research map.md")]
+    assert alice.projects.list_projects()[0]["file_names"] == {key: "Research map.md"}
 
 
-def test_rename_keeps_pdf_content_and_updates_every_project_reference(alice, documents_root):
+def test_renaming_back_to_the_file_name_clears_the_display_name(alice):
+    slug = alice.projects.create_project("Thesis")["slug"]
+    key = f"project/{slug}/document/mindmap.md"
+    route.write_document(route.WriteDocumentRequest(slug=slug, name="mindmap.md"), alice.projects, alice.docs, alice.assets)
+    route.rename_document(route.RenameDocumentRequest(path=key, slug=slug, name="Research map"), alice.projects, alice.docs)
+
+    meta = route.rename_document(route.RenameDocumentRequest(path=key, slug=slug, name="mindmap"), alice.projects, alice.docs)
+
+    assert (meta.path, meta.name) == (key, "mindmap.md")
+    assert JsonDocs(alice.docs).read(f"chat/{slug}/project.json")["files"] == [key]
+    assert alice.projects.list_projects()[0]["file_names"] == {}
+
+
+def test_renaming_a_library_pdf_names_it_in_one_project_and_keeps_the_pdf(alice, documents_root):
     first = alice.projects.create_project("First")["slug"]
     second = alice.projects.create_project("Second")["slug"]
     original = attachment_materialize.store_library_pdf(alice.assets, "source.pdf", b"%PDF-1.7 body")
     for slug in (first, second):
         route.add_document(route.AddDocumentRequest(path=original.logical_path), slug, alice.projects, alice.docs, alice.assets)
+    mirrored = written_files(documents_root)
 
     renamed = route.rename_document(
-        route.RenameDocumentRequest(path=original.logical_path, slug=first, name="renamed"),
-        alice.projects,
-        alice.docs,
-        alice.assets,
+        route.RenameDocumentRequest(path=original.logical_path, slug=first, name="renamed"), alice.projects, alice.docs,
     )
 
-    assert renamed.path == "PDFs/renamed.pdf"
-    assert alice.assets.read(renamed.path).content == b"%PDF-1.7 body"
-    assert not any(asset.logical_path == original.logical_path for asset in alice.assets.list())
-    assert alice.projects.list_files(first) == [renamed.path]
-    assert alice.projects.list_files(second) == [renamed.path]
-    assert written_files(documents_root) == ["PDFs/renamed.pdf"]
+    assert (renamed.path, renamed.name) == (original.logical_path, "renamed.pdf")
+    assert alice.assets.read(original.logical_path).content == b"%PDF-1.7 body"
+    assert alice.projects.list_named_files(first) == [(original.logical_path, "renamed.pdf")]
+    assert alice.projects.list_named_files(second) == [(original.logical_path, "source.pdf")]
+    assert written_files(documents_root) == mirrored
+
+
+def test_a_project_still_reads_plain_string_file_entries(alice):
+    slug = alice.projects.create_project("Thesis")["slug"]
+    project_key = f"chat/{slug}/project.json"
+    project = JsonDocs(alice.docs)
+    project.overwrite(project_key, {**project.read(project_key), "files": ["PDFs/b.pdf", {"path": "PDFs/a.pdf", "name": "Zeta.pdf"}]})
+
+    assert alice.projects.list_named_files(slug) == [("PDFs/b.pdf", "b.pdf"), ("PDFs/a.pdf", "Zeta.pdf")]
+
+
+def test_moving_a_renamed_canvas_keeps_the_name_it_is_shown_under(alice):
+    first = alice.projects.create_project("First")["slug"]
+    second = alice.projects.create_project("Second")["slug"]
+    key = f"project/{first}/document/sketch.canvas"
+    request = route.WriteDocumentRequest(slug=first, name="sketch.canvas", content="{}")
+    route.write_document(request, alice.projects, alice.docs, alice.assets)
+    route.rename_document(route.RenameDocumentRequest(path=key, slug=first, name="Plan"), alice.projects, alice.docs)
+
+    moved = route.move_document(route.MoveDocumentRequest(path=key, from_slug=first, to_slug=second), alice.projects, alice.docs)
+    assert alice.projects.list_named_files(second) == [(moved.path, "Plan.canvas")]
+
+    note = route.move_document(route.MoveDocumentRequest(path=moved.path, from_slug=second, to_slug=""), alice.projects, alice.docs)
+    assert note.path == "note/Plan.canvas"
+
+
+def test_renaming_a_note_moves_it_to_the_new_name(alice):
+    route.write_document(route.WriteDocumentRequest(slug="", name="idea.md", content="x"), alice.projects, alice.docs, alice.assets)
+
+    meta = route.rename_document(route.RenameDocumentRequest(path="note/idea.md", slug="", name="plan"), alice.projects, alice.docs)
+
+    assert (meta.path, meta.name) == ("note/plan.md", "plan.md")
+    assert alice.docs.read_bytes("note/plan.md")[0] == b"x"
+    assert not alice.docs.exists("note/idea.md")
+
+
+class _NoArchitecture:
+    def source_paths(self) -> list[str]:
+        return []
+
+
+class _NoRoots:
+    def relocate(self, path: str) -> None:
+        return None
+
 
 def test_move_onto_an_existing_name_is_a_conflict(alice):
     slug = alice.projects.create_project("Thesis")["slug"]
@@ -167,7 +216,7 @@ def test_delete_refuses_to_touch_a_document_outside_the_project_directory(alice)
         route.WriteDocumentRequest(slug="", name="idea.md", content="x"), alice.projects, alice.docs, alice.assets
     )
 
-    route.remove_document(slug, "note/idea.md", alice.projects, alice.docs)
+    route.remove_document(slug, "note/idea.md", alice.projects, References(alice.docs, alice.assets))
 
     assert alice.docs.read_bytes("note/idea.md")[0] == b"x"
 

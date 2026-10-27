@@ -110,11 +110,11 @@ function categoryItems(context: ProjectTreeContext, project: ProjectListItem | n
         label: `New canvas in ${owner}`, placeholder: "Canvas name",
         onSubmit: (name) => createAndOpen(scope, name.endsWith(".canvas") ? name : `${name}.canvas`, (path) => onCanvasSelect?.(path, scope)),
       },
-      children: docs.filter((doc) => doc.name.endsWith(".canvas")).map((doc) => ({
+      children: docs.filter((doc) => doc.path.endsWith(".canvas")).map((doc) => ({
         id: doc.path, label: doc.name.replace(/\.canvas$/, ""), type: "element", draggable: true,
         isActive: appMode === "canvas" && context.activeCanvasPath === doc.path,
         onSelect: () => onCanvasSelect?.(doc.path, scope),
-        onDelete: () => remove(doc.path, scope),
+        onDelete: () => remove(doc, scope),
       })),
     },
     ...(project ? [{
@@ -124,10 +124,10 @@ function categoryItems(context: ProjectTreeContext, project: ProjectListItem | n
         onSubmit: (name: string) => createAndOpen(scope, name, (path) => onDocumentSelect?.(path, scope)),
       },
       onDropFiles: (paths: string[]) => context.importFiles(scope, paths),
-      children: docs.filter((doc) => !doc.name.endsWith(".canvas") && !isArchitecturePath(doc.path)).map((doc): FileTreeItem<string> => ({
+      children: docs.filter((doc) => !doc.path.endsWith(".canvas") && !isArchitecturePath(doc.path)).map((doc): FileTreeItem<string> => ({
         id: doc.path, label: doc.name, type: "element", isActive: context.activeDocumentPath === doc.path,
         onSelect: () => onDocumentSelect?.(doc.path, scope),
-        onDelete: () => remove(doc.path, scope),
+        onDelete: () => remove(doc, scope),
       })),
     }] : []),
   ]

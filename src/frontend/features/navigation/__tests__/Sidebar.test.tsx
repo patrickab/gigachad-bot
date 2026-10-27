@@ -16,7 +16,7 @@ const render = (element: ReactElement) => testingRender(
 )
 
 const fixtures = vi.hoisted(() => ({
-  projects: [{ slug: "proj", name: "Proj", tabs: [] }, { slug: "empty", name: "Empty project", tabs: [] }],
+  projects: [{ slug: "proj", name: "Proj", tabs: [], file_names: { "project/proj/document/plan.md": "Roadmap.md" } }, { slug: "empty", name: "Empty project", tabs: [] }],
   renameProject: vi.fn<(slug: string, name: string) => Promise<string>>(),
   documents: [
     { path: "project/proj/document/board.canvas", name: "board.canvas", mime: "text/plain" },
@@ -68,13 +68,17 @@ vi.mock("@/features/navigation/BranchContext", async (importOriginal) => ({
     branchMeta: {}, visibleRootFiles: [], historiesLoading: false, refreshAll: vi.fn(async () => {}), moveHistory: vi.fn(),
   })),
 }))
-vi.mock("@/contexts/ProjectContext", () => ({
-  useProject: () => ({
-    projects: fixtures.projects,
-    createProject: vi.fn(), deleteProject: vi.fn(),
-    renameProject: fixtures.renameProject,
-  }),
-}))
+vi.mock("@/contexts/ProjectContext", async () => {
+  const { displayName } = await import("@/lib/domain/projects")
+  return {
+    useProject: () => ({
+      projects: fixtures.projects,
+      createProject: vi.fn(), deleteProject: vi.fn(),
+      renameProject: fixtures.renameProject,
+    }),
+    useDisplayName: () => (slug: string | null, path: string) => displayName(fixtures.projects, slug, path),
+  }
+})
 vi.mock("@/features/memory/MemoryViewerContext", () => ({ useMemoryViewer: () => ({ openMemoryViewer: vi.fn() }) }))
 vi.mock("@/contexts/UndoDeleteContext", () => ({ useUndoDelete: () => ({ schedule: vi.fn(), pending: () => false }) }))
 const omp = vi.hoisted(() => ({ overview: null as import("@/lib/domain/types").OmpOverview | null, refreshOverview: () => {} }))
@@ -268,6 +272,20 @@ describe("Project navigation", () => {
     expect(project.queryByText("board.canvas")).not.toBeInTheDocument()
     expect(project.queryByText("backend/backend.c4")).not.toBeInTheDocument()
     expect(onProjectSelect).toHaveBeenCalledTimes(1)
+  })
+
+  it("lists a renamed project file under its display name while it keeps its key", async () => {
+    api.listProjectDocuments.mockImplementation(async (slug) => slug === "proj"
+      ? [{ path: "project/proj/document/plan.md", name: "Roadmap.md", mime: "text/markdown" }]
+      : [])
+    const onDocumentSelect = vi.fn()
+    const view = render(<Sidebar appMode="chat" onDocumentSelect={onDocumentSelect} />)
+
+    fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
+    const project = within(view.getByLabelText("Proj contents"))
+    fireEvent.click(await project.findByText("Roadmap.md"))
+    expect(onDocumentSelect).toHaveBeenLastCalledWith("project/proj/document/plan.md", "proj")
+    expect(project.queryByText("plan.md")).not.toBeInTheDocument()
   })
 
   it("creates the architecture of a project without one when its icon is used", async () => {
@@ -700,6 +718,18 @@ describe("Toolbar tab switching", () => {
     }
     act(() => manager.current!.showChat("proj/session.json"))
     expect(view.getByRole("button", { name: "Switch tabs: Proj / chats / session.json" })).toBeVisible()
+  })
+
+  it("names a project file's tab after its display name, other projects' tabs after the file", () => {
+    const manager = createRef<TabManagerHandle>()
+    const view = render(<TabManager ref={manager}><TabSwitcher /></TabManager>)
+    const named = { ...nextTab(), appMode: "document" as const, projectSlug: "proj", workspaceItem: { kind: "document" as const, path: "project/proj/document/plan.md", projectSlug: "proj" } }
+    const unnamed = { ...nextTab(), appMode: "document" as const, projectSlug: "empty", workspaceItem: { kind: "document" as const, path: "project/proj/document/plan.md", projectSlug: "empty" } }
+    act(() => { for (const tab of [named, unnamed]) manager.current!.openTab(tab) })
+    fireEvent.click(view.getByRole("button", { name: /^Switch tabs:/ }))
+    const dialog = within(view.getByRole("dialog", { name: "Open tabs" }))
+    expect(dialog.getByRole("button", { name: "Switch to Proj / files / Roadmap.md" })).toBeInTheDocument()
+    expect(dialog.getByRole("button", { name: "Switch to Empty project / files / plan.md" })).toBeInTheDocument()
   })
 
   it("keeps search usable after closing a filtered tab and preserves keyboard focus", () => {

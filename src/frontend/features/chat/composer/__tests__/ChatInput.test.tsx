@@ -1,12 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { Attachment } from "@/lib/domain/types"
+import { TabContext } from "@/contexts/TabContext"
+import { nextTab } from "@/features/navigation/tabs"
 import { ChatInput, type ChatContext } from "../ChatInput"
 
 vi.mock("@/features/chat/EnabledToolsContext", () => ({ useEnabledTools: () => ({ enabledTools: [], toggleTool: () => {} }) }))
-vi.mock("@/contexts/SettingsContext", () => ({
+vi.mock("@/contexts/SettingsContext", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/contexts/SettingsContext")>(),
   useSettings: () => ({ ocrModel: "" }),
   useNeovimSetting: () => ({ available: false, enabled: false, setPreferred: () => {} }),
+}))
+vi.mock("@/contexts/ProjectContext", () => ({
+  useDisplayName: () => (slug: string | null, path: string) => slug === "proj" && path === "project/proj/document/plan.md" ? "Roadmap.md" : undefined,
 }))
 
 const notes = (content: string): Attachment => ({ name: "notes.md", mime: "text/markdown", url: "", content, active: true })
@@ -35,5 +41,19 @@ describe("ChatInput context chips", () => {
     expect(context.onOpen).toHaveBeenCalledWith(2, second)
     expect(context.onToggleActive).toHaveBeenCalledWith(2, "notes.md")
     expect(context.onRemove).toHaveBeenCalledWith(2, "notes.md")
+  })
+
+  it("labels a referenced project file by the display name its chat's project gives it", () => {
+    const plan: Attachment = { name: "plan.md", mime: "text/markdown", url: "", content: "", active: true, vaultPath: "project/proj/document/plan.md" }
+    const context = contextOf([{ messageIndex: 0, attachment: plan }])
+    render(
+      <TabContext.Provider value={{ tab: { ...nextTab(), projectSlug: "proj" }, isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), setAppMode: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
+        <ChatInput chatId="c1" onSend={() => {}} context={context} />
+      </TabContext.Provider>,
+    )
+
+    expect(screen.getByRole("button", { name: "Preview Roadmap.md" })).toHaveTextContent("Roadmap.md")
+    fireEvent.click(screen.getByRole("button", { name: "Remove Roadmap.md" }))
+    expect(context.onRemove).toHaveBeenCalledWith(0, "plan.md")
   })
 })

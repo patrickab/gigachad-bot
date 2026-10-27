@@ -176,16 +176,9 @@ class ChatUploads:
         self._assets.write("upload", _sidecar_key(key), parsed_md.encode("utf-8"), mime="text/markdown")
         return AttachResult(name=filename, mime=mime, parsedMd=parsed_md)
 
-    def delete(self, filename: str) -> bool:
-        """Delete an upload and its markdown sidecar, False when there is no such upload."""
+    def stored_keys(self, filename: str) -> list[str]:
+        """Keys of an upload and its markdown sidecar, which deleting the upload removes. Empty when there is no such upload."""
         key = self._key(filename)
         if not any(asset.logical_path == key for asset in self._assets.list(key)):
-            return False
-        self._assets.delete(key)
-        self._assets.delete(_sidecar_key(key))
-        return True
-
-    def delete_all(self) -> None:
-        """Delete every upload of the chat."""
-        for asset in self._assets.list(self._prefix):
-            self._assets.delete(asset.logical_path)
+            return []
+        return [key, _sidecar_key(key)]

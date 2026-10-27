@@ -18,6 +18,7 @@ from psycopg.types.json import Jsonb
 
 from lib.changes import UserScope
 from lib.data_store import InvalidStorageKey, validate_key
+from lib.references import canvas_meta
 
 Entity = Literal["stroke", "frame", "attachment", "text"]
 MutationKind = Literal["upsert", "delete"]
@@ -262,13 +263,17 @@ class CanvasMutationStore:
                 ).fetchone()[0]
             for mutation in accepted:
                 _apply_mutation(document, mutation)
+            # The references stored beside the snapshot let delete cleanup find what canvases use without reading them.
+            # Recorded `hosts` (host files an annotation canvas was opened with) are not derived from content, so they stay.
             version = connection.execute(
                 """
-                UPDATE documents SET content = %s, version = version + 1, updated_at = now()
+                UPDATE documents SET content = %s, version = version + 1, updated_at = now(),
+                    meta = %s::jsonb || jsonb_strip_nulls(jsonb_build_object('hosts', meta -> 'hosts'))
+                        || jsonb_build_object('version', version + 1)
                 WHERE user_id = %s AND key = %s
                 RETURNING version
                 """,
-                (json.dumps(document, ensure_ascii=False, separators=(",", ":")).encode(), user_id, key),
+                (json.dumps(document, ensure_ascii=False, separators=(",", ":")).encode(), Jsonb(canvas_meta(document)), user_id, key),
             ).fetchone()[0]
             self._scope.record(connection, kind="document", key=key, operation="write", version=version)
         return revision

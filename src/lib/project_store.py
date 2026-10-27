@@ -1,14 +1,19 @@
 """Single seam for all project catalog I/O, slug logic, kanban CRUD, and tab management."""
 
+from __future__ import annotations
+
 from pathlib import PurePosixPath
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 import uuid
 
-from lib.chat_store import ChatStore, CleanupUploads
+from lib.chat_store import ChatStore
 from lib.clock import utc_now_iso
 from lib.data_store import StorageConflictError
 from lib.naming import slugify
-from lib.storage_namespace import META_JSON, PROJECT_JSON, chat_root, project_dir
+from lib.storage_namespace import META_JSON, PROJECT_JSON, chat_root, project_dir, project_document_prefix
+
+if TYPE_CHECKING:
+    from lib.references import Released
 
 # Moves a project to a new slug: `(slug, new_slug, name)`.
 Rename = Callable[[str, str, str], None]
@@ -20,8 +25,30 @@ class ProjectExists(ValueError):
     """A new project's directory is already taken."""
 
 
-def _by_file_name(path: str) -> str:
-    return PurePosixPath(path).name.lower()
+def _files_of(data: dict[str, Any]) -> dict[str, str | None]:
+    """A project state's display names by referenced path, in reference order (None: shown under its file name).
+
+    `files` entries are a plain path, or `{"path", "name"}` for a file with a display name.
+    """
+    files: dict[str, str | None] = {}
+    for entry in data.get("files", []):
+        if isinstance(entry, dict):
+            if entry.get("path"):
+                files[str(entry["path"])] = str(entry["name"]) if entry.get("name") else None
+        else:
+            files[str(entry)] = None
+    return files
+
+
+def _file_names(data: dict[str, Any]) -> dict[str, str]:
+    """The display names a project state *data* sets, by path; files shown under their own name are left out."""
+    return {path: name for path, name in _files_of(data).items() if name is not None}
+
+
+def _sorted_by_name(files: dict[str, str | None]) -> list[tuple[str, str]]:
+    """`(path, display name)` pairs, a missing name filled in by the file name, sorted case-insensitively by name."""
+    named = [(path, name or PurePosixPath(path).name) for path, name in files.items()]
+    return sorted(named, key=lambda item: item[1].lower())
 
 
 def _project_key(slug: str) -> str:
@@ -102,6 +129,7 @@ class ProjectStore:
                 "archived": p.get("archived", False),
                 "tabs": data.get("tabs", []),
                 "linked_root": data.get("linked_root"),
+                "file_names": _file_names(data),
             }
             for p, data in zip(entries, self._read_projects([p["slug"] for p in entries]), strict=True)
         ]
@@ -152,12 +180,15 @@ class ProjectStore:
         self._write_meta(meta)
         return {"name": entry["name"], "slug": slug, "archived": entry.get("archived", False)}
 
-    def delete_project(self, slug: str, *, cleanup_uploads_fn: CleanupUploads | None = None) -> dict[str, str]:
+    def delete_project(self, slug: str, *, released: Released | None = None) -> dict[str, str]:
+        """Delete the project's chats and catalog entry, recording its chats, files and stored documents in *released*."""
         meta, _ = self._require(slug)
+        if released is not None:
+            released.refs.update(self.list_files(slug))
+            released.refs.update(e.key for e in self._docs.list(project_document_prefix(slug), recursive=True) if not e.is_dir)
         if self._docs.exists(project_dir(slug)):
-            if cleanup_uploads_fn:
-                for chat_id in self._chats.chat_ids_in(slug):
-                    cleanup_uploads_fn(chat_id, slug)
+            if released is not None:
+                self._chats.release_chats_under(project_dir(slug), slug, released)
             self._docs.delete(project_dir(slug), recursive=True)
             self._chats.invalidate_index()
         meta["projects"] = [p for p in meta.get("projects", []) if p.get("slug") != slug]
@@ -209,45 +240,57 @@ class ProjectStore:
         return {"status": "ok"}
 
     def list_files(self, slug: str) -> list[str]:
-        """List document paths from project.json (arbitrary absolute paths), sorted by file name."""
-        return sorted(self._mutate_files(slug, lambda files: files), key=_by_file_name)
+        """List document paths from project.json (arbitrary absolute paths), sorted by display name."""
+        return [path for path, _ in self.list_named_files(slug)]
 
-    def add_file(self, slug: str, path: str) -> list[str]:
-        return self._mutate_files(slug, lambda files: files if path in files else [*files, path])
+    def list_named_files(self, slug: str) -> list[tuple[str, str]]:
+        """The project's `(path, display name)` pairs, sorted by display name."""
+        return _sorted_by_name(self._mutate_files(slug, lambda files: files))
 
-    def remove_file(self, slug: str, path: str) -> list[str]:
-        return self._mutate_files(slug, lambda files: [f for f in files if f != path])
+    def add_file(self, slug: str, path: str) -> None:
+        self._mutate_files(slug, lambda files: files if path in files else {**files, path: None})
 
-    def replace_file(self, slug: str, old: str, new: str) -> list[str]:
-        """Point the reference *old* at *new*, in place, merging when *new* is already referenced."""
-        return self._mutate_files(
-            slug, lambda files: [f for f in files if f != old] if new in files else [new if f == old else f for f in files],
-        )
+    def remove_file(self, slug: str, path: str) -> None:
+        self._mutate_files(slug, lambda files: {f: name for f, name in files.items() if f != path})
 
-    def replace_file_everywhere(self, old: str, new: str) -> None:
-        """In every project referencing *old*, drop it and reference *new* last unless it already is."""
-        slugs = [entry["slug"] for entry in self._read_meta().get("projects", [])]
-        for slug, data in zip(slugs, self._read_projects(slugs), strict=True):
-            files = [str(p) for p in data.get("files", [])]
-            if old in files:
-                kept = [f for f in files if f != old]
-                data["files"] = kept if new in kept else [*kept, new]
-                self._write_project(slug, data)
+    def replace_file(self, slug: str, old: str, new: str) -> None:
+        """Point the reference *old* at *new*, in place and keeping its display name, merging when *new* is already referenced."""
+        self._mutate_files(slug, lambda files: {
+            new if f == old else f: name for f, name in files.items() if f != old or old == new or new not in files
+        })
 
-    def _mutate_files(self, slug: str, transform: Callable[[list[str]], list[str]]) -> list[str]:
-        """Read, transform, and (when changed) persist a project's document list."""
+    def set_file_name(self, slug: str, path: str, name: str) -> None:
+        """Show the referenced *path* as *name*; its own file name clears the display name.
+
+        Raises FileNotFoundError when the project does not reference *path*.
+        """
+        def rename(files: dict[str, str | None]) -> dict[str, str | None]:
+            if path not in files:
+                raise FileNotFoundError(f"Project file not found: {path}")
+            return {**files, path: None if name == PurePosixPath(path).name else name}
+
+        self._mutate_files(slug, rename)
+
+    def _mutate_files(self, slug: str, transform: Callable[[dict[str, str | None]], dict[str, str | None]]) -> dict[str, str | None]:
+        """Read, transform, and (when changed) persist a project's display names by path, in reference order."""
         self._require(slug)
         data = self._read_project(slug)
-        current = [str(p) for p in data.get("files", [])]
+        current = _files_of(data)
         updated = transform(current)
-        if updated != current:
-            data["files"] = updated
+        if list(updated.items()) != list(current.items()):
+            data["files"] = [path if name is None else {"path": path, "name": name} for path, name in updated.items()]
             self._write_project(slug, data)
         return updated
 
     def list_all_files(self) -> list[str]:
         """Union of every project's documents (the global document pool)."""
-        files: dict[str, None] = {}
+        return [path for path, _ in self.list_all_named_files()]
+
+    def list_all_named_files(self) -> list[tuple[str, str]]:
+        """The global document pool as `(path, display name)`, named by the first project that names it."""
+        files: dict[str, str | None] = {}
         for data in self._read_projects([p["slug"] for p in self._read_meta().get("projects", [])]):
-            files.update(dict.fromkeys(str(f) for f in data.get("files", [])))
-        return sorted(files, key=_by_file_name)
+            for path, name in _files_of(data).items():
+                if files.get(path) is None:
+                    files[path] = name
+        return _sorted_by_name(files)

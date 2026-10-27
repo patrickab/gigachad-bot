@@ -11,6 +11,7 @@ import { storeDrawing, writeBinaryDocument } from "@/lib/backend/api"
 import { renderPageToPng, renderCanvasToJpeg } from "@/lib/canvasExport"
 import { useCollaborativeCanvas } from "@/features/editor/canvas/useCollaborativeCanvas"
 import { baseName } from "@/lib/paths"
+import { useDisplayName } from "@/contexts/ProjectContext"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { useModeLabel } from "@/hooks/useModeLabel"
 import { LoadFailure, LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
@@ -19,6 +20,7 @@ import { LoadFailure, LoadingPlaceholder } from "@/components/ui/DocumentLoadSta
 export function CanvasDocumentEditor({ path, slug, onClose, onSaved, overlay, onModeLabel }: DocumentEditorProps) {
   const { document: canvasDocument, replace, status, retry } = useCollaborativeCanvas(path)
   const filename = baseName(path)
+  const shownName = useDisplayName()(slug, path) ?? filename
   const [exporting, setExporting] = useState(false)
   // Only local edits refresh the drawing JPEG, otherwise every open client would
   // re-render and upload it for each remote change.
@@ -42,7 +44,7 @@ export function CanvasDocumentEditor({ path, slug, onClose, onSaved, overlay, on
     return () => clearTimeout(timer)
   }, [filename, canvasDocument])
 
-  useModeLabel(filename, !!overlay, onModeLabel)
+  useModeLabel(shownName, !!overlay, onModeLabel)
 
   const handleExportPdf = useCallback(async () => {
     if (!canvasDocument || exporting) return
@@ -97,7 +99,7 @@ export function CanvasDocumentEditor({ path, slug, onClose, onSaved, overlay, on
   return (
     <ResizableEditor>
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-divider/50 shrink-0">
-        <span className="text-[11px] font-medium text-ink truncate">{filename}</span>
+        <span className="text-[11px] font-medium text-ink truncate">{shownName}</span>
         <div className="flex items-center gap-1 shrink-0">
           <button
             aria-label="Export PDF"

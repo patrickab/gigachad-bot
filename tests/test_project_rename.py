@@ -40,6 +40,14 @@ def test_renamed_documents_names_catalog_and_keeps_linked_folder():
     assert "chat/new" in changed and "project/older/document/a.md" not in changed
 
 
+def test_project_rename_moves_named_file_entries_and_keeps_their_names():
+    refs = ProjectReferences("old", "new")
+    files = ["project/old/document/a.md", {"path": "project/old/document/b.md", "name": "Plan.md"}]
+    assert refs.value({"files": files}) == {
+        "files": ["project/new/document/a.md", {"path": "project/new/document/b.md", "name": "Plan.md"}],
+    }
+
+
 @pytest.fixture
 def stores(postgres_pool, clean_database):
     user = create_user(postgres_pool)
