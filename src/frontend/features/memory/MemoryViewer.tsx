@@ -12,7 +12,6 @@ import { getMemories, getTopics, regroupMemories, saveMemories, saveTopics } fro
 import { errorMessage, toggled, cn } from "@/lib/utils"
 import { EditableText } from "@/features/memory/EditableText"
 import { formatTopicHeading, groupByTopicOrder, newManualMemoryId, normalizeMemoryTopic, topicNameFromTitle } from "@/features/memory/memoryUtils"
-import { useChatColumnPadding } from "@/features/memory/useChatColumnPadding"
 import { useMemoryViewer } from "@/features/memory/MemoryViewerContext"
 import type { MemoryScope, MemoryTopic, StoredMemory } from "@/lib/domain/types"
 
@@ -156,7 +155,6 @@ function useMemoryLibrary() {
 
 function MemoryWindow({ onClose }: { onClose: () => void }) {
   const library = useMemoryLibrary()
-  const columnPadding = useChatColumnPadding()
   const { schedule } = useUndoDelete()
   const [view, setView] = useState<View>({ kind: "overview" })
   const [expanded, setExpanded] = useState<Set<string> | null>(null)
@@ -301,7 +299,7 @@ function MemoryWindow({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <FloatingWindow onClose={onClose} label="Memory" overlayClassName="z-[95]" overlayStyle={columnPadding}
+    <FloatingWindow onClose={onClose} label="Memory" overlayClassName="z-[95]"
       panelClassName="h-auto max-h-[min(86vh,840px)] max-w-4xl bg-surface">
       {content}
       {library.error && (

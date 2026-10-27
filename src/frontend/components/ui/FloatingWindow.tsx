@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, type CSSProperties, type ReactNode } from "react"
+import { useEffect, useRef, type ReactNode } from "react"
 import { motion } from "framer-motion"
 import { cn } from "@/lib/utils"
 import { ModalBackdrop } from "@/components/ui/ModalBackdrop"
@@ -12,17 +12,15 @@ interface FloatingWindowProps {
   /** Accessible name of the dialog. */
   label?: string
   overlayClassName?: string
-  /** Inline overlay style, e.g. padding that centers the panel over part of the screen. */
-  overlayStyle?: CSSProperties
   panelClassName?: string
 }
 
 /**
- * Modal overlay with a centered panel. Backdrop click and Escape call `onClose`.
+ * Modal overlay with a panel centered over the content area. Backdrop click and Escape call `onClose`.
  *
  * - Takes focus on open unless a child already focused itself, so Escape and keys reach it
  */
-export function FloatingWindow({ children, onClose, label, overlayClassName, overlayStyle, panelClassName }: FloatingWindowProps) {
+export function FloatingWindow({ children, onClose, label, overlayClassName, panelClassName }: FloatingWindowProps) {
   const panelRef = useRef<HTMLDivElement>(null)
   useEscapeLayer(() => onClose?.(), onClose !== undefined)
   useEffect(() => {
@@ -31,7 +29,7 @@ export function FloatingWindow({ children, onClose, label, overlayClassName, ove
   }, [])
 
   return (
-    <ModalBackdrop onClose={onClose} className={cn("z-[90] p-3 sm:p-6", overlayClassName)} style={overlayStyle}>
+    <ModalBackdrop onClose={onClose} className={cn("z-[90] p-3 sm:p-6", overlayClassName)}>
       <motion.div
         ref={panelRef}
         role="dialog"

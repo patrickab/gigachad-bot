@@ -8,7 +8,6 @@ import { cn } from "@/lib/utils"
 import { EditableText } from "@/features/memory/EditableText"
 import { countOperations, type MemoryPanelState, type MemoryReviewActions, type ReviewOperation, type ReviewScope, type ReviewTopic } from "@/features/memory/useMemorizeFlow"
 import { formatTopicHeading } from "@/features/memory/memoryUtils"
-import { useChatColumnPadding } from "@/features/memory/useChatColumnPadding"
 import type { MemoryScope, MemoryTopic } from "@/lib/domain/types"
 
 const SCOPE_LABELS: Record<MemoryScope, string> = { global: "You", project: "Project" }
@@ -29,7 +28,6 @@ function topicGroups(review: ReviewScope, stored: MemoryTopic[]) {
 
 /** Review proposed memory changes in one screen: Ctrl+Enter commits accepted ones, Esc cancels. */
 export function MemoryPanel({ state, actions }: { state: MemoryPanelState; actions: MemoryReviewActions }) {
-  const columnPadding = useChatColumnPadding()
   const reviewing = state.phase === "review"
 
   useEventListener("document", "keydown", (e) => {
@@ -43,7 +41,7 @@ export function MemoryPanel({ state, actions }: { state: MemoryPanelState; actio
 
   return (
     <FloatingWindow onClose={state.phase === "extracting" ? undefined : () => void actions.cancel()} label="Review memory"
-      overlayClassName="z-[80]" overlayStyle={columnPadding} panelClassName="h-auto max-h-[min(86vh,840px)] max-w-4xl bg-surface">
+      overlayClassName="z-[80]" panelClassName="h-auto max-h-[min(86vh,840px)] max-w-4xl bg-surface">
       {state.phase === "extracting" && (
         <div className="flex items-center gap-2 px-6 py-5 text-sm text-ink-muted">
           <Loader2 className="h-4 w-4 animate-spin" />Reading the conversation

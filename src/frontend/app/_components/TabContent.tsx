@@ -6,6 +6,7 @@ import { Sidebar } from "@/features/navigation/Sidebar"
 import { ChatContainer, type ChatFocus } from "@/features/chat/ChatContainer"
 import type { AttachMenuItem, ChatInputHandle } from "@/features/chat/composer/ChatInput"
 import { ArchitectureIcon } from "@/components/ui/ArchitectureIcon"
+import { useContentAreaRef } from "@/components/ui/ContentArea"
 import { ModelDropdown } from "@/features/settings/ModelDropdown"
 import { SettingsMenu } from "@/features/settings/SettingsMenu"
 import { PromptEditor } from "@/features/settings/PromptEditor"
@@ -69,6 +70,7 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
   const { refreshAll, createBranch, setActiveFile, setActiveQaIndex } = useBranches()
   const { researchEnabled } = useEnabledTools()
   const { collapsed: sidebarCollapsed, toggleCollapsed: toggleSidebar } = useSidebar()
+  const contentAreaRef = useContentAreaRef()
 
   const config = tab.config
   const appMode = tab.appMode
@@ -254,7 +256,7 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
         )}
         appMode={appMode}
       />
-      <main className="flex-1 min-w-0 flex flex-col relative bg-paper">
+      <main ref={contentAreaRef} className="flex-1 min-w-0 flex flex-col relative bg-paper">
         {appMode === "canvas" ? topBar(
           <TopBarPill ref={setDrawingSlot} />,
           <>

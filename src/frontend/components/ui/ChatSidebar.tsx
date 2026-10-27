@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react"
 import { AssistantChat, type AssistantChatState } from "@/components/content/AssistantChat"
 import { PanelToggleButton } from "@/components/ui/PanelToggleButton"
 import { SidePanelFrame } from "@/components/ui/SidePanel"
+import { useContentAreaRef } from "@/components/ui/ContentArea"
 
 /** Opening width, narrow so the main content keeps the space. */
 const OPEN_WIDTH_PX = 320
@@ -34,10 +35,11 @@ export function ChatSidebar({ open, onOpenChange, chat, inputLabel, disabled = f
   children: ReactNode
 }) {
   const [width, setWidth] = useState(OPEN_WIDTH_PX)
+  const contentAreaRef = useContentAreaRef()
 
   return (
     <div className="relative flex h-full">
-      <div className="relative min-w-0 flex-1">{children}</div>
+      <div ref={contentAreaRef} className="relative min-w-0 flex-1">{children}</div>
       {open ? (
         <div className="flex shrink-0 flex-col" style={{ paddingTop: topInset ? topInset + TOP_GAP_PX : 0 }}>
           <SidePanelFrame

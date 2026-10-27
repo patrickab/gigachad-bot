@@ -15,6 +15,7 @@ import { SidebarProvider } from "@/features/navigation/SidebarContext"
 import { useEventListener } from "@/hooks/useEventListener"
 import { OmpProvider } from "@/features/omp/OmpProvider"
 import { surfaceOf, type Tab, type WorkspaceItem } from "@/contexts/TabContext"
+import { ContentAreaProvider } from "@/components/ui/ContentArea"
 import { TabContent } from "./TabContent"
 import { parseOpenParam, withoutOpenParam } from "./deepLink"
 
@@ -107,23 +108,25 @@ export function AppShell() {
   const closeDashboard = useCallback(() => setDashboardSlug(null), [])
 
   return (
-    <BranchProvider onFileClick={handleOpenChat} onHistoriesMoved={handleHistoriesMoved}>
-      <SidebarProvider>
-        <MemoryViewerProvider>
-          <OmpProvider>
-            <TabManager ref={tabManagerRef} onActiveTabChange={handleActiveTabChange} defaultConfig={settings.tabDefaults}>
-              <EnabledToolsProvider>
-                <FilePanelProvider>
-                  <TabContent onOpenChat={handleOpenChat} onOpenProject={handleOpenProject} onProjectRenamed={handleProjectRenamed} onNewChat={handleNewChat} onOpenItem={handleOpenItem} focus={focus} />
-                </FilePanelProvider>
-              </EnabledToolsProvider>
-            </TabManager>
-          </OmpProvider>
-          {dashboardSlug && <ProjectDashboard key={dashboardSlug} slug={dashboardSlug} onClose={closeDashboard} />}
-          <ProjectListSync />
-          <MemoryViewer />
-        </MemoryViewerProvider>
-      </SidebarProvider>
-    </BranchProvider>
+    <ContentAreaProvider>
+      <BranchProvider onFileClick={handleOpenChat} onHistoriesMoved={handleHistoriesMoved}>
+        <SidebarProvider>
+          <MemoryViewerProvider>
+            <OmpProvider>
+              <TabManager ref={tabManagerRef} onActiveTabChange={handleActiveTabChange} defaultConfig={settings.tabDefaults}>
+                <EnabledToolsProvider>
+                  <FilePanelProvider>
+                    <TabContent onOpenChat={handleOpenChat} onOpenProject={handleOpenProject} onProjectRenamed={handleProjectRenamed} onNewChat={handleNewChat} onOpenItem={handleOpenItem} focus={focus} />
+                  </FilePanelProvider>
+                </EnabledToolsProvider>
+              </TabManager>
+            </OmpProvider>
+            {dashboardSlug && <ProjectDashboard key={dashboardSlug} slug={dashboardSlug} onClose={closeDashboard} />}
+            <ProjectListSync />
+            <MemoryViewer />
+          </MemoryViewerProvider>
+        </SidebarProvider>
+      </BranchProvider>
+    </ContentAreaProvider>
   )
 }
