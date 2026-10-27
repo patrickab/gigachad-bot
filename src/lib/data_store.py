@@ -8,11 +8,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Mapping
     from datetime import datetime
+
+# A small JSON object a writer derives from a file's content (chat tree fields), stored beside it.
+Meta = dict[str, Any]
 
 
 class StorageError(RuntimeError):
@@ -60,10 +63,22 @@ class ByteStore(Protocol):
 
 class DataStore(ByteStore, Protocol):
     """Key-addressed byte store. A stale `expected` revision raises StorageConflictError."""
+    # Every write replaces a file's meta (none given clears it), so stored meta never describes older content.
     def read_many(self, keys: Iterable[str]) -> dict[str, tuple[bytes, Revision]]:
         """Content and revision of every file among *keys* at once. Missing keys and directories are left out."""
         ...
-    def write_bytes(self, key: str, content: bytes, *, expected: Revision | None = None) -> Revision: ...
+    def apply(
+        self, writes: list[tuple[str, bytes, Revision | None]], deletes: list[str], *, meta: Mapping[str, Meta] | None = None
+    ) -> list[Revision]:
+        """`ByteStore.apply`, storing ``meta[key]`` with each written key that has one."""
+        ...
+    def write_bytes(self, key: str, content: bytes, *, expected: Revision | None = None, meta: Meta | None = None) -> Revision: ...
+    def list_meta(self, prefix: str) -> dict[str, Meta | None]:
+        """Meta of every file under *prefix* in listing order, None when none was stored with its current content."""
+        ...
+    def write_meta(self, entries: Mapping[str, tuple[Meta, str]]) -> None:
+        """Store ``(meta, sha256)`` per key on each file whose content still has that hex SHA-256, without a new revision."""
+        ...
     def is_file(self, key: str) -> bool: ...
     def is_dir(self, key: str) -> bool: ...
     def exists(self, key: str) -> bool: ...
@@ -74,7 +89,7 @@ class DataStore(ByteStore, Protocol):
         """Up to *length* bytes of the file at *key* from offset *start*. Raises StorageNotFoundError."""
         ...
     def sha256(self, key: str) -> str:
-        """Hex SHA-256 of the file at *key*, hashed where it is stored. Raises StorageNotFoundError."""
+        """Hex SHA-256 of the file at *key*, kept where it is stored so the content is not read. Raises StorageNotFoundError."""
         ...
     def delete(self, key: str, *, recursive: bool = False) -> None: ...
     def move(self, source: str, destination: str) -> None: ...

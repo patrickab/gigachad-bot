@@ -16,7 +16,7 @@ const api = vi.hoisted(() => ({
 }))
 vi.mock("@/lib/backend/api", () => api)
 const sync = vi.hoisted(() => ({ receive: null as null | ((event: { resource_kind: string; resource_key: string }) => void) }))
-vi.mock("@/lib/backend/syncStream", () => ({ subscribeToChanges: (receive: typeof sync.receive) => { sync.receive = receive; return () => { sync.receive = null } } }))
+vi.mock("@/lib/backend/syncStream", () => ({ syncCursorReady: () => Promise.resolve(), subscribeToChanges: (receive: typeof sync.receive) => { sync.receive = receive; return () => { sync.receive = null } } }))
 
 const wrapper = ({ children }: { children: ReactNode }) => <ProjectProvider>{children}</ProjectProvider>
 

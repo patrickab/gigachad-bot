@@ -143,9 +143,12 @@ def test_checkpoint_writes_every_record_in_one_transaction(
 ):
     applied: list[list[str]] = []
     apply = data_store.apply
-    monkeypatch.setattr(
-        data_store, "apply", lambda writes, deletes: applied.append([key for key, _, _ in writes]) or apply(writes, deletes)
-    )
+
+    def spy(writes, deletes, **kwargs):
+        applied.append([key for key, _, _ in writes])
+        return apply(writes, deletes, **kwargs)
+
+    monkeypatch.setattr(data_store, "apply", spy)
     latest = RunRecord(tool_call_id="latest", status="completed", started_at=1.0, result={"status": "completed"})
     other = RunRecord(tool_call_id="other", status="completed", started_at=2.0)
 

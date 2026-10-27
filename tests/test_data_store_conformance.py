@@ -211,3 +211,29 @@ def test_stat_slices_and_hashes_files_without_reading_them_whole(data_store: Dat
     data_store.write_bytes("stat/file.pdf", content)
     rewritten = data_store.stat("stat/file.pdf")
     assert (rewritten.revision, rewritten.modified) != (entry.revision, entry.modified)
+    assert data_store.sha256("stat/file.pdf") == hashlib.sha256(content).hexdigest()
+    data_store.write_bytes("stat/file.pdf", b"changed")
+    assert data_store.sha256("stat/file.pdf") == hashlib.sha256(b"changed").hexdigest()
+
+
+def test_meta_follows_the_content_it_was_written_with(data_store: DataStore):
+    first = data_store.write_bytes("meta/a.json", b"one", meta={"n": 1})
+    data_store.apply([("meta/b.json", b"two", None), ("meta/c.json", b"three", None)], [], meta={"b": {}, "meta/b.json": {"n": 2}})
+    data_store.mkdir("meta/folder")
+    data_store.write_bytes("meta-sibling.json", b"x", meta={"n": 0})
+    assert data_store.list_meta("meta") == {"meta/a.json": {"n": 1}, "meta/b.json": {"n": 2}, "meta/c.json": None}
+
+    # A write without meta clears it, a guarded fill only lands on the content it was derived from.
+    data_store.write_bytes("meta/a.json", b"one again")
+    data_store.write_meta({
+        "meta/a.json": ({"n": 3}, hashlib.sha256(b"one again").hexdigest()),
+        "meta/c.json": ({"n": 4}, hashlib.sha256(b"older").hexdigest()),
+    })
+    assert data_store.list_meta("meta") == {"meta/a.json": {"n": 3}, "meta/b.json": {"n": 2}, "meta/c.json": None}
+    assert data_store.read_bytes("meta/a.json")[1] != first
+    revision = data_store.read_bytes("meta/a.json")[1]
+    data_store.write_meta({"meta/a.json": ({"n": 5}, hashlib.sha256(b"one again").hexdigest())})
+    assert data_store.read_bytes("meta/a.json")[1] == revision
+
+    data_store.move("meta/a.json", "meta/moved.json")
+    assert data_store.list_meta("meta")["meta/moved.json"] == {"n": 5}

@@ -18,6 +18,7 @@ vi.mock("@/features/editor/TextDocumentEditor", () => ({
 
 const feed = vi.hoisted(() => ({ listener: null as ((event: ChangeEvent) => void) | null }))
 vi.mock("@/lib/backend/syncStream", () => ({
+  syncCursorReady: () => Promise.resolve(),
   subscribeToChanges: (listener: (event: ChangeEvent) => void) => {
     feed.listener = listener
     return () => { feed.listener = null }

@@ -5,9 +5,12 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
+from psycopg.types.json import Jsonb
+
 from lib.changes import UserScope, like_prefix
 from lib.data_store import (
     Entry,
+    Meta,
     Revision,
     StorageConflictError,
     StorageNotFoundError,
@@ -15,7 +18,9 @@ from lib.data_store import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Mapping
+
+    from psycopg import Connection
 
 
 class PostgresDataStore:
@@ -57,20 +62,60 @@ class PostgresDataStore:
             ).fetchall()
         return {key: (bytes(content), self._revision(version)) for key, content, version in rows}
 
-    def _write(self, connection, key: str, content: bytes, expected: Revision | None) -> Revision:
+    def list_meta(self, prefix: str) -> dict[str, Meta | None]:
+        """Meta of every file under *prefix* in listing order, None when none was stored with its current content."""
+        prefix = validate_key(prefix, allow_empty=True)
+        with self._scope.connection() as connection:
+            # Meta is stamped with the version it was written for: a writer that leaves the column alone
+            # (code predating it, project rename, canvas mutations) bumps the version and so retires it.
+            rows = connection.execute(
+                """
+                SELECT key, CASE WHEN meta -> 'version' = to_jsonb(version) THEN meta - 'version' END
+                FROM documents
+                WHERE user_id = %s AND key LIKE %s ESCAPE '\\' AND NOT is_dir
+                ORDER BY key
+                """,
+                (self._scope.user_id, like_prefix(prefix)),
+            ).fetchall()
+        return dict(rows)
+
+    def write_meta(self, entries: Mapping[str, tuple[Meta, str]]) -> None:
+        """Store ``(meta, sha256)`` per key on each file whose content still has that hex SHA-256, without a new revision."""
+        params = [
+            (stored, self._scope.user_id, validate_key(key), bytes.fromhex(sha256))
+            for key, (meta, sha256) in entries.items()
+            if (stored := _jsonb(meta)) is not None
+        ]
+        if not params:
+            return
+        # Guarded by content, not version, so meta derived from replaced content never lands on its successor.
+        # Neither the version nor the change log moves: this is a cache fill, not a write.
+        with self._scope.connection() as connection, connection.transaction(), connection.cursor() as cursor:
+            cursor.executemany(
+                """
+                UPDATE documents SET meta = %s::jsonb || jsonb_build_object('version', version)
+                WHERE user_id = %s AND key = %s AND NOT is_dir AND sha256 = %s
+                """,
+                params,
+            )
+
+    def _write(self, connection: Connection, key: str, content: bytes, expected: Revision | None, meta: Meta | None) -> Revision:
         """Upsert when *expected* is None, otherwise update only if the stored version matches, else raise StorageConflictError."""
         key = validate_key(key)
+        stored = _jsonb(meta)
+        # Meta is stamped with the version this statement writes, see `read_meta`.
         if expected is None:
             row = connection.execute(
                 """
-                INSERT INTO documents (user_id, key, content, is_dir)
-                VALUES (%s, %s, %s, false)
+                INSERT INTO documents (user_id, key, content, is_dir, meta)
+                VALUES (%s, %s, %s, false, %s::jsonb || jsonb_build_object('version', 1))
                 ON CONFLICT (user_id, key) DO UPDATE
                 SET content = EXCLUDED.content, is_dir = false,
-                    version = documents.version + 1, updated_at = now()
+                    version = documents.version + 1, updated_at = now(),
+                    meta = EXCLUDED.meta || jsonb_build_object('version', documents.version + 1)
                 RETURNING version
                 """,
-                (self._scope.user_id, key, content),
+                (self._scope.user_id, key, content, stored),
             ).fetchone()
         else:
             try:
@@ -80,11 +125,12 @@ class PostgresDataStore:
             row = connection.execute(
                 """
                 UPDATE documents
-                SET content = %s, is_dir = false, version = version + 1, updated_at = now()
+                SET content = %s, is_dir = false, version = version + 1, updated_at = now(),
+                    meta = %s::jsonb || jsonb_build_object('version', version + 1)
                 WHERE user_id = %s AND key = %s AND NOT is_dir AND version = %s
                 RETURNING version
                 """,
-                (content, self._scope.user_id, key, expected_version),
+                (content, stored, self._scope.user_id, key, expected_version),
             ).fetchone()
             if row is None:
                 raise StorageConflictError(f"{key} changed on another device; reload before saving")
@@ -108,13 +154,16 @@ class PostgresDataStore:
         )
         self._scope.record(connection, kind="document", key=key, operation="delete")
 
-    def write_bytes(self, key: str, content: bytes, *, expected: Revision | None = None) -> Revision:
+    def write_bytes(self, key: str, content: bytes, *, expected: Revision | None = None, meta: Meta | None = None) -> Revision:
         with self._scope.connection() as connection, connection.transaction():
-            return self._write(connection, key, content, expected)
+            return self._write(connection, key, content, expected, meta)
 
-    def apply(self, writes: list[tuple[str, bytes, Revision | None]], deletes: list[str]) -> list[Revision]:
+    def apply(
+        self, writes: list[tuple[str, bytes, Revision | None]], deletes: list[str], *, meta: Mapping[str, Meta] | None = None
+    ) -> list[Revision]:
+        meta = meta or {}
         with self._scope.connection() as connection, connection.transaction():
-            revisions = [self._write(connection, key, content, expected) for key, content, expected in writes]
+            revisions = [self._write(connection, key, content, expected, meta.get(key)) for key, content, expected in writes]
             for key in deletes:
                 self._delete(connection, key, recursive=False)
             return revisions
@@ -213,11 +262,11 @@ class PostgresDataStore:
         return bytes(row[0])
 
     def sha256(self, key: str) -> str:
-        """Hex SHA-256 of the file at *key*, hashed in the database so the content never crosses the connection."""
+        """Hex SHA-256 of the file at *key*, kept by the database on every write, so the content is never read."""
         key = validate_key(key)
         with self._scope.connection() as connection:
             row = connection.execute(
-                "SELECT encode(sha256(content), 'hex') FROM documents WHERE user_id = %s AND key = %s AND NOT is_dir",
+                "SELECT encode(sha256, 'hex') FROM documents WHERE user_id = %s AND key = %s AND NOT is_dir",
                 (self._scope.user_id, key),
             ).fetchone()
         if row is None:
@@ -269,3 +318,40 @@ class PostgresDataStore:
                 )
             self._scope.record(connection, kind="document", key=source, operation="move")
             self._scope.record(connection, kind="document", key=destination, operation="move")
+
+
+def _jsonb(meta: Meta | None) -> Jsonb | None:
+    """*meta* as a jsonb parameter, None when absent or when jsonb would not hand its values back unchanged."""
+    # Top-level key order is free (readers pick fields by name), nested values must survive exactly.
+    if meta is None or not all(isinstance(key, str) and _jsonb_exact(key) and _jsonb_exact(value) for key, value in meta.items()):
+        return None
+    return Jsonb(meta)
+
+
+def _jsonb_exact(value: object) -> bool:
+    """Whether *value* survives a jsonb round trip as the same Python value with the same key order."""
+    # jsonb rejects NUL and lone surrogates, may turn a float into an int, and sorts object keys
+    # (shorter first, then bytewise). Such meta is not stored: readers derive it from the content.
+    if value is None or isinstance(value, (bool, int)):
+        return True
+    if isinstance(value, str):
+        return "\x00" not in value and (value.isascii() or _encodes(value))
+    if isinstance(value, list):
+        return all(_jsonb_exact(item) for item in value)
+    if isinstance(value, dict):
+        keys = list(value)
+        return (
+            all(isinstance(key, str) and _jsonb_exact(key) for key in keys)
+            and keys == sorted(keys, key=lambda key: (len(key.encode()), key.encode()))
+            and all(_jsonb_exact(item) for item in value.values())
+        )
+    return False
+
+
+def _encodes(text: str) -> bool:
+    """Whether *text* encodes as UTF-8, which a lone surrogate does not."""
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True

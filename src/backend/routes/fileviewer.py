@@ -262,7 +262,7 @@ def open_pdf_annotations(
     - Keyed by the SHA-256 of the PDF bytes: every copy shares annotations, renames keep them
     - Changed PDF content gets a new, empty canvas
     """
-    # Stored PDFs are not read here: assets keep their hash, documents are hashed in the database.
+    # Stored PDFs are not read here: assets and documents both keep the hash of their content.
     key = pdf_annotations(_raw_source(path, roots, docs, assets).sha256())
     if not docs.exists(key):
         docs.write_bytes(key, b"")

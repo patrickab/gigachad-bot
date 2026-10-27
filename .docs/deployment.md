@@ -438,7 +438,10 @@ Keep the private hostname and loopback port stable:
 2. Restore a known-good code revision in `$PROD` and its matching locked
    dependencies. Restore configuration only if changed, restore database or
    mirror backups only when reverting data is necessary. Do not overwrite newer
-   user data merely to roll back code.
+   user data merely to roll back code. Applied `db/schema/` steps stay applied:
+   older code ignores additive ones such as `0011` (document `meta` and
+   `sha256` columns, `STORAGE EXTERNAL`), and chat metadata it leaves stale is
+   rederived from the chat body once newer code runs again.
 3. Start the service and repeat loopback/Tailnet health checks:
 
    ```bash
@@ -450,5 +453,11 @@ Keep the private hostname and loopback port stable:
    exact CORS origin. Restart the backend if its origin configuration changes.
 5. To withdraw ingress immediately, use `tailscale serve off`. Restore it with
    the section 2 helper, never by exposing the backend directly.
+
+Schema steps stay applied after a code rollback. Older code runs against them
+unchanged: step 0013 only deleted superseded `changes` rows (replay output is
+identical) and added an index, older code merely stops pruning. The sync
+stream tolerates a frontend and backend from different revisions in both
+directions, an older backend just replays from `since=0` again.
 
 Repeat health, CORS, SSE, and persistence verification before resuming use.

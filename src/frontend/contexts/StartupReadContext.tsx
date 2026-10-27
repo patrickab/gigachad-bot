@@ -1,6 +1,7 @@
 "use client"
 
 import { createContext, useCallback, useContext, useEffect, useEffectEvent, useId, useMemo, useRef, useState, type ReactNode } from "react"
+import { syncCursorReady } from "@/lib/backend/syncStream"
 import { errorMessage } from "@/lib/utils"
 
 const STARTUP_TIMEOUT_MS = 15_000
@@ -70,7 +71,8 @@ export function useStartupRead<T>(label: string, load: (signal: AbortSignal) => 
             attempt.abort()
           }, STARTUP_TIMEOUT_MS)
         })
-        const value = await Promise.race([load(attempt.signal), timeout])
+        // Reading after the change feed holds its head means every later change arrives as an event, none is replayed.
+        const value = await Promise.race([syncCursorReady().then(() => load(attempt.signal)), timeout])
         if (disposed) return
         applyValue(value)
         failed = false

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import random
 from uuid import uuid4
 
 import psycopg
@@ -8,7 +9,8 @@ import pytest
 from backend.identity import RequestIdentity
 from backend.routes.sync import stream_changes
 from backend.sync import CHANNEL, QUEUE_MAXSIZE, ChangeBroker
-from lib.changes import latest_changes
+from lib.changes import UserScope, head_cursor, latest_changes
+from lib.db_schema import SCHEMA_DIRECTORY
 from tests.conftest import create_device, create_user
 
 pytestmark = pytest.mark.usefixtures("clean_database")
@@ -123,6 +125,65 @@ def test_replay_excludes_other_users(postgres_pool):
     assert [(row["seq"], row["resource_key"]) for row in latest_changes(postgres_pool, alice, 0)] == [(alice_seq, "alice.md")]
 
 
+def _rows(pool) -> list[tuple]:
+    with pool.connection() as connection:
+        return connection.execute("SELECT user_id, resource_kind, resource_key FROM changes ORDER BY seq").fetchall()
+
+
+def test_pruning_superseded_rows_keeps_replay_identical_for_every_cursor(postgres_pool):
+    users = [create_user(postgres_pool, "alice@example.test"), create_user(postgres_pool, "bob@example.test")]
+    shuffle = random.Random(13)
+    for version in range(1, 121):
+        user, kind, key = shuffle.choice(users), shuffle.choice(("document", "asset")), shuffle.choice(("a", "b", "c", "d"))
+        _change(postgres_pool, user, key, kind=kind, version=version)
+    head = max(head_cursor(postgres_pool, user) for user in users)
+    before = {(user, since): latest_changes(postgres_pool, user, since) for user in users for since in range(head + 1)}
+
+    with postgres_pool.connection() as connection:
+        connection.execute((SCHEMA_DIRECTORY / "0013_prune_superseded_changes.sql").read_text())
+
+    remaining = _rows(postgres_pool)
+    assert len(remaining) == len(set(remaining))
+    assert before == {(user, since): latest_changes(postgres_pool, user, since) for user in users for since in range(head + 1)}
+
+
+def test_record_prunes_only_superseded_rows_of_the_same_resource(postgres_pool):
+    alice = create_user(postgres_pool, "alice@example.test")
+    bob = create_user(postgres_pool, "bob@example.test")
+    alice_scope, bob_scope = UserScope(postgres_pool, alice), UserScope(postgres_pool, bob)
+    with postgres_pool.connection() as connection:
+        bob_scope.record(connection, kind="document", key="a.md", operation="write", version=1)
+        alice_scope.record(connection, kind="asset", key="a.md", operation="write", version=1)
+        for version in (1, 2, 3):
+            alice_scope.record(connection, kind="document", key="a.md", operation="write", version=version)
+        alice_scope.record(connection, kind="document", key="b.md", operation="write", version=1)
+        alice_scope.record(connection, kind="document", key="a.md", operation="delete")
+
+    assert _rows(postgres_pool) == [
+        (bob, "document", "a.md"), (alice, "asset", "a.md"), (alice, "document", "b.md"), (alice, "document", "a.md"),
+    ]
+    assert [(row["resource_key"], row["version"]) for row in latest_changes(postgres_pool, alice, 0)][-1] == ("a.md", None)
+
+
+def test_record_skips_rows_another_transaction_holds(postgres_pool, database_url):
+    user_id = create_user(postgres_pool, "alice@example.test")
+    scope = UserScope(postgres_pool, user_id)
+    held = _change(postgres_pool, user_id, "a.md")
+    with psycopg.connect(database_url) as holder:
+        holder.execute("SELECT seq FROM changes WHERE seq = %s FOR UPDATE", (held,))
+        with postgres_pool.connection() as connection:
+            connection.execute("SET LOCAL lock_timeout = '2s'")
+            scope.record(connection, kind="document", key="a.md", operation="write", version=2)
+        holder.rollback()
+
+    assert len(_rows(postgres_pool)) == 2
+    assert [row["version"] for row in latest_changes(postgres_pool, user_id, 0)] == [2]
+    with postgres_pool.connection() as connection:
+        scope.record(connection, kind="document", key="a.md", operation="write", version=3)
+    assert len(_rows(postgres_pool)) == 1
+
+
+
 async def test_broker_delivers_only_the_subscribed_user(postgres_pool, database_url):
     alice = create_user(postgres_pool, "alice@example.test")
     bob = create_user(postgres_pool, "bob@example.test")
@@ -186,6 +247,30 @@ async def test_stream_replays_missed_changes_then_live_ones(postgres_pool, datab
         "version": 2,
         "device_id": None,
     }
+
+
+async def test_stream_without_since_announces_the_head_then_only_later_changes(postgres_pool, database_url, monkeypatch):
+    broker = ChangeBroker()
+    monkeypatch.setattr("backend.routes.sync.get_postgres_pool", lambda: postgres_pool)
+    monkeypatch.setattr("backend.routes.sync.get_change_broker", lambda: broker)
+    user_id = create_user(postgres_pool, "alice@example.test")
+    _change(postgres_pool, user_id, "old.md")
+    head = _change(postgres_pool, user_id, "older.md")
+    identity = RequestIdentity(user_id=user_id, login="alice@example.test", device_id=create_device(postgres_pool, user_id))
+    await broker.start(database_url)
+    try:
+        response = await stream_changes(since=None, identity=identity)
+        events = response.body_iterator
+        cursor = await asyncio.wait_for(anext(events), timeout=5)
+        await _await_listener(postgres_pool)
+        live_seq = await asyncio.to_thread(_change, postgres_pool, user_id, "new.md")
+        live = await asyncio.wait_for(anext(events), timeout=5)
+        await events.aclose()
+    finally:
+        await broker.stop()
+
+    assert cursor == {"event": "cursor", "data": json.dumps({"seq": head})}
+    assert (json.loads(live["data"])["seq"], json.loads(live["data"])["resource_key"]) == (live_seq, "new.md")
 
 
 async def test_broker_reconnects_after_its_connection_is_terminated(postgres_pool, database_url):

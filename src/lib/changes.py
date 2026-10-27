@@ -1,4 +1,4 @@
-"""Per-user change log: `UserScope` (pool, user, device) writes rows, `latest_changes` reads them for sync replay."""
+"""Per-user change log: `UserScope` (pool, user, device) writes rows, `latest_changes` and `head_cursor` read them for sync."""
 
 from __future__ import annotations
 
@@ -33,13 +33,23 @@ class UserScope:
         return self.pool.connection()
 
     def record(self, connection: Connection, *, kind: str, key: str, operation: str, version: int | None = None) -> None:
-        """Insert one change row. ``version`` is None for deletes, vacated move sources and vault roots."""
+        """Insert one change row and prune the rows it supersedes. ``version`` is None for deletes, vacated sources and vault roots."""
+        # Replay sends only the latest row per resource, so older rows of it carry nothing.
+        # Rows another open transaction holds are skipped, not waited for: the next write of the resource prunes them.
         connection.execute(
             """
+            WITH superseded AS (
+                SELECT seq FROM changes
+                WHERE user_id = %(user_id)s AND resource_kind = %(kind)s AND resource_key = %(key)s
+                FOR UPDATE SKIP LOCKED
+            ), pruned AS (
+                DELETE FROM changes WHERE seq IN (SELECT seq FROM superseded)
+            )
             INSERT INTO changes (user_id, resource_kind, resource_key, version, operation, device_id)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            VALUES (%(user_id)s, %(kind)s, %(key)s, %(version)s, %(operation)s, %(device_id)s)
             """,
-            (self.user_id, kind, key, version, operation, self.device_id),
+            {"user_id": self.user_id, "kind": kind, "key": key, "version": version, "operation": operation,
+             "device_id": self.device_id},
         )
 
 
@@ -47,7 +57,7 @@ def latest_changes(pool: ConnectionPool, user_id: UUID, since: int) -> list[dict
     """Return this user's latest change per resource after `since`, oldest first, keyed by `EVENT_KEYS`.
 
     - Clients reload by resource, so superseded rows add replay size and no information
-    - Autosaved canvases write thousands of rows each
+    - `UserScope.record` prunes them, this query still collapses rows a concurrent write left behind
     """
     with pool.connection() as connection:
         rows = connection.execute(
@@ -64,3 +74,9 @@ def latest_changes(pool: ConnectionPool, user_id: UUID, since: int) -> list[dict
             (user_id, since),
         ).fetchall()
     return [dict(zip(EVENT_KEYS, row, strict=True)) for row in rows]
+
+
+def head_cursor(pool: ConnectionPool, user_id: UUID) -> int:
+    """Return this user's highest change sequence, 0 before their first change."""
+    with pool.connection() as connection:
+        return connection.execute("SELECT coalesce(max(seq), 0) FROM changes WHERE user_id = %s", (user_id,)).fetchone()[0]

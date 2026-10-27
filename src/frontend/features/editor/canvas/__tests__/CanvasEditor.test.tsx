@@ -92,7 +92,7 @@ const collaboration = vi.hoisted(() => {
   }
 })
 vi.mock("@/features/editor/canvas/useCollaborativeCanvas", () => collaboration)
-vi.mock("@/lib/backend/syncStream", () => ({ subscribeToChanges: () => () => {} }))
+vi.mock("@/lib/backend/syncStream", () => ({ syncCursorReady: () => Promise.resolve(), subscribeToChanges: () => () => {} }))
 
 import { CanvasEditor } from "@/features/editor/canvas/CanvasEditor"
 import { FileCanvasEditor } from "@/features/editor/canvas/FileCanvasEditor"

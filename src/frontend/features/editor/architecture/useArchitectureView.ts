@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { applyArchitectureOperations, readArchitecture } from "@/lib/backend/api"
 import type { ArchitectureOperation, ArchitectureWorkspace } from "@/lib/domain/architecture"
-import { subscribeToChanges } from "@/lib/backend/syncStream"
+import { subscribeToChanges, syncCursorReady } from "@/lib/backend/syncStream"
 import { useResetOnChange } from "@/hooks/useResetOnChange"
 import { errorMessage } from "@/lib/utils"
 import { diffGraph, fitGraph, graphFromView, type DiagramGraph, type DiagramNode } from "./diagramGraph"
@@ -54,7 +54,8 @@ export function useArchitectureView(slug: string, file: string) {
     queuedReadRef.current = slug
     mutate(() => {
       queuedReadRef.current = null
-      return readArchitecture(slug)
+      // After the change feed holds its head, so a change racing this read still arrives as an event.
+      return syncCursorReady().then(() => readArchitecture(slug))
     }).then(() => setLoadError(null), (cause: unknown) => setLoadError(errorMessage(cause, "Could not load the architecture")))
   }, [mutate, slug])
 

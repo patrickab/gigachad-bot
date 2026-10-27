@@ -92,19 +92,17 @@ def test_one_user_cannot_touch_another_users_identical_path(postgres_pool):
         bob.read_by_id(alice_asset.id)
 
 
-def test_each_mutation_appends_a_change_row(postgres_pool):
+def test_each_mutation_records_a_change_row_superseding_the_last(postgres_pool):
     store, device_id = make_asset_store(postgres_pool)
 
     store.write("upload", "PDFs/a.pdf", b"a")
+    assert changes_for(postgres_pool) == [("PDFs/a.pdf", 1, "write", device_id)]
     store.write("upload", "PDFs/a.pdf", b"aa")
+    assert changes_for(postgres_pool) == [("PDFs/a.pdf", 2, "write", device_id)]
     store.delete("PDFs/a.pdf")
     store.delete("PDFs/absent.pdf")
 
-    assert changes_for(postgres_pool) == [
-        ("PDFs/a.pdf", 1, "write", device_id),
-        ("PDFs/a.pdf", 2, "write", device_id),
-        ("PDFs/a.pdf", None, "delete", device_id),
-    ]
+    assert changes_for(postgres_pool) == [("PDFs/a.pdf", None, "delete", device_id)]
 
 
 def test_mirror_writes_allowed_mineru_asset_bytes_under_root(asset_store, tmp_path):

@@ -26,7 +26,7 @@ const sync = vi.hoisted(() => {
 })
 
 vi.mock("@/lib/backend/api", () => api)
-vi.mock("@/lib/backend/syncStream", () => ({ subscribeToChanges: sync.subscribeToChanges }))
+vi.mock("@/lib/backend/syncStream", () => ({ syncCursorReady: () => Promise.resolve(), subscribeToChanges: sync.subscribeToChanges }))
 const collaboration = vi.hoisted(() => ({
   useCollaborativeCanvas: vi.fn(),
   replace: vi.fn(),

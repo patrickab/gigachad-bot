@@ -33,12 +33,17 @@ class MemoryDataStore:
             raise StorageNotFoundError(key) from exc
         return content, Revision(hashlib.sha256(content).hexdigest())
 
-    def write_bytes(self, key: str, content: bytes, *, expected: Revision | None = None) -> Revision:
-        del expected
+    def write_bytes(
+        self, key: str, content: bytes, *, expected: Revision | None = None, meta: dict[str, Any] | None = None
+    ) -> Revision:
+        del expected, meta
         self._documents[key] = content
         return Revision(hashlib.sha256(content).hexdigest())
 
-    def apply(self, writes: list[tuple[str, bytes, Revision | None]], deletes: list[str]) -> list[Revision]:
+    def apply(
+        self, writes: list[tuple[str, bytes, Revision | None]], deletes: list[str], *, meta: dict[str, dict[str, Any]] | None = None
+    ) -> list[Revision]:
+        del meta
         revisions = [self.write_bytes(key, content, expected=expected) for key, content, expected in writes]
         for key in deletes:
             self.delete(key)

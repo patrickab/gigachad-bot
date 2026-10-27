@@ -7,7 +7,7 @@ import re
 from typing import Any, Callable
 import uuid
 
-from lib.data_store import DataStore, Entry, Revision, validate_key
+from lib.data_store import DataStore, Meta, Revision, validate_key
 from lib.json_docs import JsonDocs
 from lib.storage_namespace import CHAT, MEMORY, META_JSON, PROJECT_JSON, project_dir, project_json
 
@@ -99,15 +99,11 @@ class ChatStore:
         """Key of the chat with this ID, building the index on first use."""
         if self._chat_id_index is None:
             self._chat_id_index = {}
-            for key, raw in self._docs.read_many(self._chat_keys(self._docs.list(CHAT, recursive=True))).items():
-                if isinstance(raw, dict) and raw.get("chat_id"):
-                    self._chat_id_index[raw["chat_id"]] = key
+            # Listing order, so a duplicated ID resolves to the last chat listed.
+            for key, meta in self._docs.list_meta(CHAT, _is_chat_key, _tree_meta).items():
+                if meta and meta["chat_id"]:
+                    self._chat_id_index[meta["chat_id"]] = key
         return self._chat_id_index.get(chat_id)
-
-    @staticmethod
-    def _chat_keys(entries: Sequence[Entry]) -> list[str]:
-        """Keys of the chat files among *entries*, in listing order."""
-        return [e.key for e in entries if not e.is_dir and _is_chat_file(PurePosixPath(e.key).name)]
 
     def invalidate_index(self) -> None:
         self._chat_id_index = None
@@ -119,12 +115,13 @@ class ChatStore:
         touched = set(deletes) | set(writes)
         self._chat_id_index = {chat_id: key for chat_id, key in self._chat_id_index.items() if key not in touched}
         for key, data in writes.items():
-            if key not in deletes and data.get("chat_id") and _is_chat_file(PurePosixPath(key).name):
+            if key not in deletes and data.get("chat_id") and _is_chat_key(key):
                 self._chat_id_index[data["chat_id"]] = key
 
     def _commit(self, txn: ChatTxn) -> None:
         """Apply a tree operation in one transaction. Unguarded, so the last writer still wins."""
-        self._docs.apply(txn.writes.items(), txn.deletes)
+        meta = {key: m for key, data in txn.writes.items() if _is_chat_key(key) and (m := _tree_meta(data)) is not None}
+        self._docs.apply(txn.writes.items(), txn.deletes, meta=meta)
         self._reindex(txn.writes, txn.deletes)
 
     def load(self, filename: str) -> dict[str, Any] | None:
@@ -146,7 +143,8 @@ class ChatStore:
             raise ValueError("Chat ID mismatch")
         payload = _build_payload(data, existing.as_dict() if existing else None, title=title)
         expected = None if expected_revision is None else Revision(expected_revision)
-        revision = self._docs.write(key, payload, expected=expected)
+        meta = _tree_meta(payload) if _is_chat_key(key) else None
+        revision = self._docs.write(key, payload, expected=expected, meta=meta)
         self._reindex({key: payload}, [])
         return {"status": "ok", "filename": str(filename), "revision": revision.token}
 
@@ -361,8 +359,8 @@ class ChatStore:
     def chat_ids_in(self, slug: str) -> list[str]:
         """Chat IDs of every chat file in project *slug*, for cleanup before its directory is removed."""
         chat_ids: list[str] = []
-        for raw in self._docs.read_many(self._chat_keys(self._docs.list(project_dir(slug), recursive=True))).values():
-            chat_id = raw.get("chat_id") if isinstance(raw, dict) else None
+        for meta in self._docs.list_meta(project_dir(slug), _is_chat_key, _tree_meta).values():
+            chat_id = meta["chat_id"] if meta else None
             if isinstance(chat_id, str) and chat_id:
                 chat_ids.append(chat_id)
         return chat_ids
@@ -379,35 +377,37 @@ class ChatStore:
 
     def _scan_dir_for_meta(self, root: str, rel_prefix: str = "") -> dict[str, dict[str, Any]]:
         """Per-chat tree metadata keyed by path. Prunes dead children from chat files as a side effect."""
-        # One recursive listing and one batch read. Chat IDs read here vouch for their own
-        # existence, so pruning only falls back to the full index for genuinely missing children.
+        # One query for the metadata stored beside each chat, no chat bodies. Chat IDs read here vouch
+        # for their own existence, so pruning only falls back to the full index for genuinely missing children.
         root_prefix = f"{root}/"
-        paths: dict[str, str] = {}
-        for entry in sorted(self._docs.list(root, recursive=True), key=lambda e: e.key):
-            if entry.is_dir:
-                continue
-            rel = PurePosixPath(entry.key.removeprefix(root_prefix))
-            if not _is_chat_file(rel.name) or rel.name.startswith("_") or _in_hidden_dir(rel.parts[:-1]):
-                continue
-            paths[f"{rel_prefix}{rel}"] = entry.key
-        raws = self._docs.read_many(paths.values())
-        loaded = {rel: (key, None if raws[key] is None else Chat.from_raw(raws[key])) for rel, key in paths.items()}
-        known = {chat.chat_id for _, chat in loaded.values() if chat and chat.chat_id}
-        return {rel: self._extract_meta(key, chat, known) for rel, (key, chat) in loaded.items()}
 
-    def _extract_meta(self, key: str, chat: Chat | None, known_chat_ids: set[str]) -> dict[str, Any]:
-        if chat is None:
-            return {}
-        children = self._prune_children_list(chat.children, known_chat_ids)
-        if children != chat.children:
-            chat.children = children
-            self._docs.write(key, chat.as_dict())
+        def listed(key: str) -> bool:
+            rel = PurePosixPath(key.removeprefix(root_prefix))
+            return _is_chat_file(rel.name) and not rel.name.startswith("_") and not _in_hidden_dir(rel.parts[:-1])
+
+        metas = self._docs.list_meta(root, listed, _tree_meta)
+        known = {meta["chat_id"] for meta in metas.values() if meta and meta["chat_id"]}
         return {
-            "chat_id": chat.chat_id,
-            "parent_id": chat.parent_id,
-            "branch_message_idx": chat.branch_message_idx,
+            f"{rel_prefix}{PurePosixPath(key.removeprefix(root_prefix))}": self._extract_meta(key, metas[key], known)
+            for key in sorted(metas)
+        }
+
+    def _extract_meta(self, key: str, meta: Meta | None, known_chat_ids: set[str]) -> dict[str, Any]:
+        if meta is None:
+            return {}
+        children = self._prune_children_list(meta["children"], known_chat_ids)
+        if children != meta["children"]:
+            chat = self._read(key)
+            if chat is not None:
+                chat.children = self._prune_children_list(chat.children, known_chat_ids)
+                payload = chat.as_dict()
+                self._docs.write(key, payload, meta=_tree_meta(payload))
+        return {
+            "chat_id": meta["chat_id"],
+            "parent_id": meta["parent_id"],
+            "branch_message_idx": meta["branch_message_idx"],
             "children": children,
-            "qa_count": chat.qa_count,
+            "qa_count": meta["qa_count"],
         }
 
     def _descendants(self, chat: Chat) -> dict[str, Chat | None]:
@@ -450,9 +450,33 @@ def _is_chat_file(name: str) -> bool:
     return PurePosixPath(name).suffix == ".json" and name not in (PROJECT_JSON, META_JSON)
 
 
+def _is_chat_key(key: str) -> bool:
+    """Whether the file at storage *key* is a chat."""
+    return _is_chat_file(PurePosixPath(key).name)
+
+
 def _in_hidden_dir(dirs: Sequence[str]) -> bool:
     """Whether a folder on the path is private (`_` prefix) or the memory store's, both left out of chat listings."""
     return any(d.startswith("_") or d == MEMORY for d in dirs)
+
+
+def _tree_meta(raw: object) -> Meta | None:
+    """The tree fields branch metadata reports for a parsed chat, stored beside it. None when *raw* is not a chat."""
+    if not isinstance(raw, (dict, list)):
+        return None
+    chat = Chat.from_raw(raw)
+    try:
+        qa_count = chat.qa_count
+    except (AttributeError, TypeError):
+        # Malformed messages: the chat still counts for the ID index, it just has no pair count.
+        qa_count = None
+    return {
+        "chat_id": chat.chat_id,
+        "parent_id": chat.parent_id,
+        "branch_message_idx": chat.branch_message_idx,
+        "children": chat.children,
+        "qa_count": qa_count,
+    }
 
 
 def _build_payload(

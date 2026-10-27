@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react"
 import { ApiError, loadFileViewerText } from "@/lib/backend/api"
-import { subscribeToChanges, type ChangeEvent } from "@/lib/backend/syncStream"
+import { subscribeToChanges, syncCursorReady, type ChangeEvent } from "@/lib/backend/syncStream"
 
 export type FileLoadFailure = "failed" | "binary" | "forbidden" | "missing"
 
@@ -64,7 +64,8 @@ export function useRootFileDocument<T>({ path, codec, write, blankWhenMissing, r
       setLoadedPath(path)
       savedRef.current = { value: loaded, text: codec.serialize(loaded) }
     }
-    return loadFileViewerText(path).then(apply).catch((error: unknown) => {
+    // After the change feed holds its head, so a change racing this read still arrives as an event.
+    return syncCursorReady().then(() => loadFileViewerText(path)).then(apply).catch((error: unknown) => {
       const failure = loadFailureOf(error)
       if (failure === "missing" && blankWhenMissing) apply("")
       else setLoadError(failure)
