@@ -8,7 +8,8 @@
      (`--gc-<mode>-*`), the values the shell uses
    - Upstream hooks, scoped to `.gc-turn-content`: `.chat-message-card` (user bubble) and its wrappers, `.chat-message`
      (assistant row), `.message-copy-actions` and `.message-model-label` (native chrome the card replaces),
-     `.message-overflow-toggle` (a control after the question's text) */
+     `.message-overflow-toggle` (a control after the question's text), `.message-assistant-footer` (dropped in the
+     collapsed preview) */
 
 :is(.gc-turn, [data-markdown-root]) {
   --paper: var(--cf-paper);
@@ -78,6 +79,10 @@
 /* The card's copy replaces native copy. Fork, edit and timestamp footers stay, tools keep their own controls. */
 .gc-turn-content .message-copy-actions,
 .gc-turn-content .message-model-label {
+  display: none !important;
+}
+/* A collapsed preview is read-only, its footer actions (read aloud, fork, timestamp) wait for the expanded card. */
+.gc-turn-preview .message-assistant-footer {
   display: none !important;
 }
 /* Upstream's "show full input" toggle and the native footers follow the text, so the actions keep their own row.

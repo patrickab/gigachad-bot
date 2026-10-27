@@ -102,12 +102,24 @@ test("standalone or a non-prompt anchor, the group row renders exactly as upstre
   assert.equal(renderTranscriptGroupRow(row, groupContext(summary))[0].key, "message-0");
 });
 
-test("turn previews and copying exclude reasoning and tool results, retaining answer order", () => {
+test("turn copying excludes reasoning and tool results, retaining answer order", () => {
   assert.deepEqual(summarizeTurn(messages, 0, 4), {
     question: "Inspect **this** file", label: "Inspect **this** file",
     answer: "First **finding**.\n\nFinal answer: $x^2$.",
-    tools: [{ name: "read", count: 2 }], endsWithText: true,
+    endsWithText: true,
   });
+});
+
+test("embedded, a collapsed turn previews upstream's answer nodes, tools folded into its Process details row", () => {
+  setEmbedded(true);
+  window.history.replaceState(null, "", "/?session=qa-preview");
+  const [row] = planTranscriptRows(messages);
+  const renderMessage = (idx, options = {}) => React.createElement(MessageView, { key: `${options.keyPrefix ?? "message"}-${idx}`, message: options.messageOverride ?? messages[idx] });
+  const view = render(React.createElement(React.Fragment, null, renderTranscriptGroupRow(row, { ...groupContext(messages), renderMessage })));
+  assert.equal(view.container.querySelector(".gc-turn").dataset.expanded, "false");
+  const preview = view.getByRole("region", { name: "Answer preview" });
+  assert.match(preview.querySelector(".process-details-toggle").textContent, /Process details/);
+  assert.equal(view.queryByRole("list", { name: "Tools used" }), null);
 });
 
 test("preview interactions do not expand a turn, and explicit expansion survives remounting per session", () => {
@@ -117,7 +129,7 @@ test("preview interactions do not expand a turn, and explicit expansion survives
   fireEvent.click(preview);
   fireEvent.scroll(preview, { target: { scrollTop: 40 } });
   assert.equal(view.container.querySelector(".gc-turn").dataset.expanded, "false");
-  assert.ok(view.getByText("read ×2"));
+  assert.ok(view.getByText(/Final answer/));
   fireEvent.click(view.getByRole("button", { name: /Inspect/ }));
   assert.equal(view.container.querySelector(".gc-turn").dataset.expanded, "true");
   assert.ok(view.getByRole("button", { name: "Copy question as markdown" }));

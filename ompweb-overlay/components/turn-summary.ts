@@ -1,10 +1,5 @@
 import type { AgentMessage, AssistantMessage, CustomMessage, UserMessage } from "@/lib/types";
 
-export interface ToolUse {
-  name: string;
-  count: number;
-}
-
 /** What a Q&A card shows and copies, derived from the turn's messages. */
 export interface TurnSummary {
   /** The prompt's markdown source. */
@@ -13,8 +8,6 @@ export interface TurnSummary {
   label: string;
   /** Every text block the agent wrote in the turn, markdown source, in order. */
   answer: string;
-  /** Tools the turn called, by first use. */
-  tools: ToolUse[];
   /** The turn ends with agent text, the only tail the card can put actions beside. */
   endsWithText: boolean;
 }
@@ -71,7 +64,6 @@ export function summarizeTurn(messages: readonly AgentMessage[], userIndex: numb
   const skill = skillInvocation(messages[userIndex]);
   const { text: question, images } = skill === null ? userBlocks(messages[userIndex] as UserMessage) : { text: skill, images: 0 };
   const answers: string[] = [];
-  const counts = new Map<string, number>();
   let lastMessage: AgentMessage | undefined;
   for (let idx = userIndex + 1; idx < endIndex; idx++) {
     const message = messages[idx];
@@ -80,14 +72,12 @@ export function summarizeTurn(messages: readonly AgentMessage[], userIndex: numb
     if (message.role !== "assistant") continue;
     for (const block of (message as AssistantMessage).content ?? []) {
       if (block.type === "text" && block.text.trim()) answers.push(block.text);
-      else if (block.type === "toolCall") counts.set(block.toolName, (counts.get(block.toolName) ?? 0) + 1);
     }
   }
   return {
     question,
     label: questionLabel(question, images),
     answer: answers.join("\n\n"),
-    tools: [...counts].map(([name, count]) => ({ name, count })),
     endsWithText: endsInText(lastMessage),
   };
 }

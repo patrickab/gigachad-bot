@@ -2,7 +2,6 @@
 
 import { Children, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CopyAction, TurnCard, TurnHeader, TurnPreview, TurnRegion, TurnSurface } from "@gigachad/chat-ui";
-import { SafeMarkdownBody } from "../../components/MessageView";
 import type { AgentMessage } from "@/lib/types";
 import { summarizeTurn } from "./turn-summary";
 
@@ -46,9 +45,10 @@ function copyAction(text: string, subject: "question" | "answer") {
 }
 
 /**
- * One user turn as gigachad-bot's shared Q&A card (`@gigachad/chat-ui`): a collapsed header with a scrollable answer preview, or the turn's upstream nodes.
+ * One user turn as gigachad-bot's shared Q&A card (`@gigachad/chat-ui`): a collapsed header over a scrollable preview of the answer, or the whole turn.
  *
- * - Collapsed: the upstream nodes are not mounted. Marker elements keep `data-message-index` for ChatMinimap's lookup
+ * - Collapsed: the question's upstream node is not mounted, marker elements keep `data-message-index` for ChatMinimap's lookup.
+ *   The preview shows the answer's upstream nodes, tools stay in omp-web's own "Process details" rows
  * - Expanded: the question and the answer's nodes untouched, upstream's per-message fork/edit stay inside; the card owns copy
  * - The newest turn starts expanded, older ones collapsed; the reader's choice sticks per session and turn
  * - A running turn stays expanded and has no actions
@@ -86,20 +86,19 @@ export function QaTurn({ messages, userIndex, endIndex, live, question, children
     return indices;
   }, [messages, userIndex, endIndex]);
 
+  const hasAnswer = Children.toArray(children).length > 0;
   if (!expanded) {
-    const tools = summary.tools.map((tool) => ({ key: tool.name, label: tool.count > 1 ? `${tool.name} \u00d7${tool.count}` : tool.name }));
     return (
       <TurnCard expanded={false}>
         {anchors.map((idx) => <span key={idx} className="cf-turn-anchor" data-message-index={idx} aria-hidden="true" />)}
         <TurnHeader label={summary.label} onExpand={toggle} ref={toggleRef} />
-        <TurnPreview tools={tools}>
-          {summary.answer.trim() ? <SafeMarkdownBody className="gc-markdown-compact">{summary.answer}</SafeMarkdownBody> : null}
+        <TurnPreview tools={[]}>
+          {hasAnswer ? <div className="gc-turn-content">{children}</div> : null}
         </TurnPreview>
       </TurnCard>
     );
   }
 
-  const hasAnswer = Children.toArray(children).length > 0;
   return (
     <TurnCard expanded>
       <TurnRegion
