@@ -58,9 +58,7 @@
 
    /* --- Shadows (dark mode: layered, near-black) --- */
    --shadow-sm:  var(--gc-dark-shadow-sm);
-   --shadow-md:  0 1px 3px color-mix(in oklab, var(--shadow-color) 40%, transparent),
-                 0 4px 12px color-mix(in oklab, var(--shadow-color) 35%, transparent),
-                 0 8px 20px color-mix(in oklab, var(--shadow-color) 25%, transparent);
+   --shadow-md:  var(--gc-dark-shadow-md);
    --shadow-lg:  0 2px 4px color-mix(in oklab, var(--shadow-color) 35%, transparent),
                  0 8px 20px color-mix(in oklab, var(--shadow-color) 30%, transparent),
                  0 16px 40px color-mix(in oklab, var(--shadow-color) 25%, transparent);
@@ -99,9 +97,7 @@
   
     /* --- Shadows (light mode — layered, softer) --- */
     --shadow-sm:  var(--gc-light-shadow-sm);
-    --shadow-md:  0 1px 3px color-mix(in oklab, var(--shadow-color) 8%, transparent),
-                  0 4px 12px color-mix(in oklab, var(--shadow-color) 5%, transparent),
-                  0 8px 20px color-mix(in oklab, var(--shadow-color) 3%, transparent);
+    --shadow-md:  var(--gc-light-shadow-md);
     --shadow-lg:  0 2px 4px color-mix(in oklab, var(--shadow-color) 6%, transparent),
                   0 8px 20px color-mix(in oklab, var(--shadow-color) 5%, transparent),
                   0 16px 40px color-mix(in oklab, var(--shadow-color) 3%, transparent);

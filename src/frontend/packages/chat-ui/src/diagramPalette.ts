@@ -1,6 +1,6 @@
-// Mirrors the globals.css role tokens (sRGB of the oklch palette). Hardcoded because mermaid
+// Mirrors the role colors in palette.css (sRGB of the oklch palette). Hardcoded because mermaid
 // can't parse oklch() and the browser preserves it through getComputedStyle/canvas. If the
-// palette warmth is retuned in globals.css, regenerate these to match.
+// palette warmth is retuned in palette.css, regenerate these to match.
 export const DIAGRAM_DARK = {
   ink: "rgb(239, 234, 228)", inkMuted: "rgb(179, 173, 165)", inkSubtle: "rgb(130, 124, 118)",
   inkFaint: "rgb(98, 92, 88)", paper: "rgb(12, 8, 6)", surface: "rgb(21, 17, 14)",

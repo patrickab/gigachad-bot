@@ -1,20 +1,21 @@
-/* Prose presentation of @gigachad/chat-ui, the only copy: the shell imports this file from source, the ompweb fork
-   imports it through the package export `@gigachad/chat-ui/markdown.css`.
+/* Prose presentation of @gigachad/chat-ui, the only copy: the shell imports this file from source, the omp-web
+   overlay imports it through the package export `@gigachad/chat-ui/markdown.css`.
 
    Scope
    - Every rule hangs off the renderer's root, `.gc-markdown` (full) or `.gc-markdown-compact` (compact, the `compact`
      prop). Both carry `data-markdown-root`. Nothing outside the root is styled, a host's own markdown surfaces
      (tool output, thinking, `.markdown-body`) are untouched.
-   - Fenced code, diagrams, citations and images are the host's components, only the prose around them is styled here.
+   - Fenced code and diagrams are the package's renderers, styled by `code.css`. Citations and images are the host's
+     components. Only the prose around them is styled here.
 
    Host contract: the role tokens this file reads. The shell defines them in `app/globals.css`, a host with another
-   palette maps them on `[data-markdown-root]` (the ompweb fork does in `custom/theme/chat-ui.css`).
+   palette maps them on `[data-markdown-root]` (`ompweb-overlay/theme/chat-ui.css` does).
      --ink  --ink-muted  --divider  --divider-strong  --surface  --surface-elevated
      --radius-sm  --radius-md  --inner-highlight  --font-mono  --font-symbols
 
    Utilities layer: Streamdown wraps its output in a div classed `space-y-4 whitespace-normal [&>*:first-child]:mt-0
    [&>*:last-child]:mb-0`, Tailwind utilities that only exist where Tailwind scans Streamdown's dist (the shell does,
-   the fork does not). The block spacing is replicated below inside the same `utilities` layer, so unlayered prose
+   omp-web does not). The block spacing is replicated below inside the same `utilities` layer, so unlayered prose
    rules and a host's own utilities (e.g. `my-3`) win over it exactly as they do over the generated classes. */
 
 @layer theme, base, components, utilities;

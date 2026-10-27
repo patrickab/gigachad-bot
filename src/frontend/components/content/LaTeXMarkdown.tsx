@@ -1,20 +1,44 @@
 "use client"
 
-import { MarkdownRenderer, type CodeRenderers, type MarkdownComponents } from "@gigachad/chat-ui"
-import { memo, useMemo, type CSSProperties } from "react"
+import { CodeBlock, MarkdownRenderer, MarkmapDiagram, MermaidDiagram, type CodeBlockProps, type CodeRenderers, type MarkdownComponents, type MarkmapViewport } from "@gigachad/chat-ui"
+import { memo, useContext, useMemo, useRef, type CSSProperties, type RefObject } from "react"
+import { HostScaleContext } from "@/contexts/HostScaleContext"
+import { useThemeName } from "@/hooks/useThemeName"
+import { useViewportReframe } from "@/hooks/useViewportReframe"
 import { apiOrigin } from "@/lib/backend/urls"
-import { CodeBlock } from "./CodeBlock"
+import { offsetToCamera } from "@/lib/domain/viewport"
 import { CitationPill, type CitationSource } from "./diagrams/CitationPill"
-import { MarkmapDiagram } from "./diagrams/MarkmapDiagram"
-import { MermaidDiagram } from "./diagrams/MermaidDiagram"
 import "katex/dist/katex.min.css"
 import "@gigachad/chat-ui/markdown.css"
+import "@gigachad/chat-ui/code.css"
 
-// Mermaid and Markmap are gigachad-only: the shared renderer routes fences to them, it does not know them.
+function ShellCodeBlock(props: CodeBlockProps) {
+  return <CodeBlock {...props} theme={useThemeName()} />
+}
+
+function ShellMermaid({ code }: { code: string }) {
+  return <MermaidDiagram code={code} theme={useThemeName()} />
+}
+
+/** A markmap in the shell's theme. Inside a canvas it magnifies with the canvas's zoom, and it keeps the world point at its center centered when its frame resizes. */
+function ShellMarkmap({ code }: { code: string }) {
+  const viewport = useRef<MarkmapViewport>(null)
+  const frame = useMemo<RefObject<HTMLElement | null>>(() => ({ get current() { return viewport.current?.element ?? null } }), [])
+  useViewportReframe(frame, {
+    hostScale: useContext(HostScaleContext),
+    ready: true,
+    skipFromEmpty: true,
+    read: () => viewport.current?.camera() ?? null,
+    write: (offset, scale, size) => viewport.current?.setCamera(offsetToCamera(offset, scale, size), size),
+  })
+  return <MarkmapDiagram code={code} theme={useThemeName()} viewportRef={viewport} />
+}
+
+// The shared renderer routes fences to the package's renderers, these supply the shell's theme.
 const CODE_RENDERERS: CodeRenderers = {
-  code: CodeBlock,
-  mermaid: MermaidDiagram,
-  markmap: MarkmapDiagram,
+  code: ShellCodeBlock,
+  mermaid: ShellMermaid,
+  markmap: ShellMarkmap,
 }
 
 const SHELL_COMPONENTS: MarkdownComponents = {

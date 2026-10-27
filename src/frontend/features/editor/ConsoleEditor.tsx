@@ -2,7 +2,7 @@
 
 import { useCallback, useRef } from "react"
 import { cn, isModKey } from "@/lib/utils"
-import { useHighlightedHtml } from "@/components/content/useHighlightedHtml"
+import { useHighlightedHtml } from "@gigachad/chat-ui"
 
 export const LINE_HEIGHT_PX = 12 * 1.625  // 0.75rem × 1.625
 export const PADDING_PX = 16              // 1rem — matches p-4

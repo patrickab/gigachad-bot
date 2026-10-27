@@ -1,7 +1,7 @@
 {
   "name": "@gigachad/chat-ui",
-  "version": "1.1.3",
-  "description": "gigachad-bot UI shared with the ompweb fork: Q&A turn cards, the Streamdown/KaTeX markdown renderer, the role palette and the omp embed protocol",
+  "version": "1.2.0",
+  "description": "gigachad-bot UI shared with its omp-web overlay: Q&A turn cards, the Streamdown/KaTeX markdown renderer with its code, Mermaid and Markmap renderers, the role palette and the omp embed protocol",
   "license": "UNLICENSED",
   "type": "module",
   "sideEffects": true,
@@ -16,6 +16,7 @@
       "types": "./dist/protocol.d.ts",
       "default": "./dist/protocol.js"
     },
+    "./code.css": "./dist/code.css",
     "./markdown.css": "./dist/markdown.css",
     "./turn.css": "./dist/turn.css",
     "./palette.css": "./dist/palette.css"
@@ -25,7 +26,11 @@
   ],
   "dependencies": {
     "@streamdown/math": "^1.0.2",
+    "markmap-lib": "^0.18.12",
+    "markmap-view": "^0.18.12",
+    "mermaid": "^11.15.0",
     "remark-breaks": "^4.0.0",
+    "shiki": "^4.2.0",
     "streamdown": "^2.5.0",
     "turndown": "^7.2.4",
     "turndown-plugin-gfm": "^1.0.2"

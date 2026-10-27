@@ -1,20 +1,18 @@
 "use client"
 
-import { fenceCode } from "@gigachad/chat-ui"
 import { useEffect, useState } from "react"
-import { useThemeName } from "@/hooks/useThemeName"
-import { CodeBlock } from "../CodeBlock"
-import { DIAGRAM_DARK, DIAGRAM_LIGHT } from "./diagramPalette"
+import { CodeBlock, type ColorScheme } from "./CodeBlock.tsx"
+import { DIAGRAM_DARK, DIAGRAM_LIGHT } from "./diagramPalette.ts"
+import { fenceCode } from "./selectionToMarkdown.ts"
 
 // ponytail: mutex serializes mermaid renders, it's a singleton that corrupts on concurrent calls
 let mermaidQueue = Promise.resolve()
 
-function enqueueMermaidRender(id: string, code: string): Promise<string> {
+function enqueueMermaidRender(id: string, code: string, theme: ColorScheme): Promise<string> {
   const job = mermaidQueue.then(async () => {
+    // Loaded on the first diagram: mermaid is large and most messages have none.
     const mermaid = (await import("mermaid")).default
-    const isLight =
-      typeof document !== "undefined" && document.documentElement.classList.contains("light")
-    const c = isLight ? DIAGRAM_LIGHT : DIAGRAM_DARK
+    const c = theme === "light" ? DIAGRAM_LIGHT : DIAGRAM_DARK
 
     // theme: "base" is the only mermaid theme fully driven by themeVariables; named
     // themes recompute their own palette and ignore overrides. Re-initialize every
@@ -53,10 +51,9 @@ function enqueueMermaidRender(id: string, code: string): Promise<string> {
   return job
 }
 
-/** A mermaid fence rendered to SVG in the current theme, the source as a code block when it fails. */
-export function MermaidDiagram({ code }: { code: string }) {
-  const themeName = useThemeName()
-  const key = `${themeName}:${code}`
+/** A mermaid fence rendered to SVG in the host's color scheme, the source as a code block when it fails. Styled by `code.css`. */
+export function MermaidDiagram({ code, theme }: { code: string; theme: ColorScheme }) {
+  const key = `${theme}:${code}`
   // svg null: the render failed
   const [result, setResult] = useState<{ key: string; svg: string | null } | null>(null)
 
@@ -65,21 +62,21 @@ export function MermaidDiagram({ code }: { code: string }) {
     // Fresh id per render. Reusing one collides with the previous SVG still in the DOM
     // (re-render on theme switch), which makes mermaid.render fail.
     const id = `mmd-${Math.random().toString(36).slice(2)}`
-    enqueueMermaidRender(id, code)
+    enqueueMermaidRender(id, code, theme)
       .then((rendered) => { if (!cancelled) setResult({ key, svg: rendered }) })
       .catch(() => { if (!cancelled) setResult({ key, svg: null }) })
     return () => { cancelled = true }
-  }, [code, key])
+  }, [code, theme, key])
 
   // Results from a previous code/theme are stale and show as pending.
   const current = result?.key === key ? result : null
-  if (current?.svg === null) return <CodeBlock codeString={code} language="mermaid" />
-  if (!current?.svg) return <div className="my-3 text-xs text-ink-subtle">Rendering diagram…</div>
+  if (current?.svg === null) return <CodeBlock codeString={code} language="mermaid" theme={theme} />
+  if (!current?.svg) return <div className="gc-diagram-pending">Rendering diagram…</div>
 
   return (
     <div
       data-markdown-source={fenceCode("mermaid", code)}
-      className="my-3 flex justify-center overflow-x-auto [&_svg]:max-w-full [&_svg]:h-auto"
+      className="gc-diagram"
       dangerouslySetInnerHTML={{ __html: current.svg }}
     />
   )

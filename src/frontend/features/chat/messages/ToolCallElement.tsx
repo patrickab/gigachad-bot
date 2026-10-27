@@ -1,15 +1,17 @@
 "use client"
 
+import { CodeBlock } from "@gigachad/chat-ui"
 import { memo, useEffect, useState, type ReactNode } from "react"
 import { ChevronDown, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toolDisplay } from "@/features/chat/tools"
 import { toolPayload } from "@/features/chat/toolCalls"
 import type { ToolCallRecord } from "@/lib/domain/types"
-import { CodeBlock } from "@/components/content/CodeBlock"
+import { useThemeName } from "@/hooks/useThemeName"
 import { PlotElement } from "@/components/content/PlotElement"
 import { SandboxOutputElement } from "./SandboxOutputElement"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
+import "@gigachad/chat-ui/code.css"
 
 interface ToolCallElementProps {
   call: ToolCallRecord
@@ -44,6 +46,11 @@ function Disclosure({ label, children }: { label: string; children: ReactNode })
     </button>
     {open && children}
   </>
+}
+
+/** The call's script, highlighted in the shell's theme. */
+function ScriptBlock({ script }: { script: string }) {
+  return <CodeBlock codeString={script} language="python" theme={useThemeName()} />
 }
 
 /** Sits between the question and the answer, wearing the same container optic as the
@@ -161,7 +168,7 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
         {shown.script && (
           <div className="px-6 pb-3 pl-[3.25rem]">
             <Disclosure label="Code">
-              <div className="mt-2"><CodeBlock codeString={shown.script} language="python" /></div>
+              <div className="mt-2"><ScriptBlock script={shown.script} /></div>
             </Disclosure>
           </div>
         )}

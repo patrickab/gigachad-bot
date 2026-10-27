@@ -12,7 +12,8 @@ vi.mock("@/components/content/PlotElement", () => ({
   },
 }))
 
-vi.mock("@/components/content/CodeBlock", () => ({
+vi.mock("@gigachad/chat-ui", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@gigachad/chat-ui")>()),
   CodeBlock: ({ codeString, language }: { codeString: string; language: string }) => {
     codeBlockCalls(codeString, language)
     return <div data-testid="code-block">{codeString}</div>

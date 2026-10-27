@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { highlightCode } from "@/components/content/syntaxHighlighting"
+import { highlightCode } from "../src/syntaxHighlighting"
 
 describe("highlightCode", () => {
   // An unknown or unloadable grammar falls back to plain text without an error,

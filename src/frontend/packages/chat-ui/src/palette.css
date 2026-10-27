@@ -1,8 +1,8 @@
 /* gigachad-bot's role colors per mode, the one place their values live.
 
    - Hosts map them onto their own role tokens per theme: the shell in `app/globals.css` (`:root` dark, `:root.light`),
-     the ompweb fork in `custom/theme/palette.css` (`html.cf-embed`). The package's components read the mapped roles
-     (`--ink`, `--paper`, ...), never these
+     the omp-web overlay in `ompweb-overlay/theme/palette.css` (`html.cf-embed`). The package's components read the
+     mapped roles (`--ink`, `--paper`, ...), never these
    - Namespaced `--gc-<mode>-<role>` and defined for both modes at once, so no host token collides and no theme
      selector is shared
    - OKLCH with a warm hue and tiny chroma, monochromatic. Dark is cream on near-black, light is charcoal on
@@ -24,6 +24,9 @@
   --gc-dark-shadow-color: oklch(4% 0.004 70);
   --gc-dark-shadow-sm: 0 1px 2px color-mix(in oklab, var(--gc-dark-shadow-color) 40%, transparent),
                        0 2px 8px color-mix(in oklab, var(--gc-dark-shadow-color) 30%, transparent);
+  --gc-dark-shadow-md: 0 1px 3px color-mix(in oklab, var(--gc-dark-shadow-color) 40%, transparent),
+                       0 4px 12px color-mix(in oklab, var(--gc-dark-shadow-color) 35%, transparent),
+                       0 8px 20px color-mix(in oklab, var(--gc-dark-shadow-color) 25%, transparent);
   /* On near-black the top-edge highlight, not the shadow, carries depth */
   --gc-dark-inner-highlight: inset 0 1px 0 0 oklch(100% 0 0 / 0.05);
 
@@ -42,5 +45,8 @@
   --gc-light-shadow-color: oklch(35% 0.01 85);
   --gc-light-shadow-sm: 0 1px 2px color-mix(in oklab, var(--gc-light-shadow-color) 6%, transparent),
                         0 2px 8px color-mix(in oklab, var(--gc-light-shadow-color) 5%, transparent);
+  --gc-light-shadow-md: 0 1px 3px color-mix(in oklab, var(--gc-light-shadow-color) 8%, transparent),
+                        0 4px 12px color-mix(in oklab, var(--gc-light-shadow-color) 5%, transparent),
+                        0 8px 20px color-mix(in oklab, var(--gc-light-shadow-color) 3%, transparent);
   --gc-light-inner-highlight: inset 0 1px 0 0 oklch(100% 0 0 / 0.5);
 }
