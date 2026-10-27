@@ -17,6 +17,7 @@ import { DocumentPicker } from "@/features/editor/DocumentPicker"
 import { DocumentEditor } from "@/features/editor/DocumentEditor"
 import { DiffViewer } from "@/features/editor/diff/DiffViewer"
 import { FilePanelSlot, FilePanelToggle } from "@/features/editor/FilePanel"
+import { PdfAssistant } from "@/features/editor/pdf/PdfAssistant"
 import { CanvasWorkspace } from "@/features/editor/canvas/CanvasWorkspace"
 import { ArchitectureWindow } from "@/features/editor/architecture/ArchitectureWindow"
 import { FactorySurface } from "@/features/factory/FactorySurface"
@@ -83,6 +84,7 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
   const [promptEditorOpen, setPromptEditorOpen] = useState(false)
   const [wideToggleSlot, setWideToggleSlot] = useState<HTMLElement | null>(null)
   const [pdfToolbarSlot, setPdfToolbarSlot] = useState<HTMLElement | null>(null)
+  const [pdfChatOpen, setPdfChatOpen] = useState(false)
   const [chatColumn, setChatColumn] = useState<HTMLDivElement | null>(null)
   const chatInputRef = useRef<ChatInputHandle>(null)
   const loadIdRef = useRef(0)
@@ -317,7 +319,7 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
                   <X className="h-4 w-4" />
                 </button>
               </TopBarTransparent>
-              {filePanelToggle}
+              {!isPdfDocument && filePanelToggle}
             </>}
           />
         ) : (
@@ -351,7 +353,9 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
             <DiffViewer key={diffItem.path} root={diffItem.path} />
           ) : appMode === "document" && documentItem ? (
             isPdfDocument ? (
-              <LazyAnnotatedPdfViewer path={documentItem.path} topInset={44} toolbarSlot={pdfToolbarSlot} />
+              <PdfAssistant key={documentItem.path} path={documentItem.path} model={config.selectedModel} chatOpen={pdfChatOpen} onChatOpenChange={setPdfChatOpen} topInset={44}>
+                <LazyAnnotatedPdfViewer path={documentItem.path} topInset={44} toolbarSlot={pdfToolbarSlot} />
+              </PdfAssistant>
             ) : (
               <DocumentEditor
                 path={documentItem.path}
