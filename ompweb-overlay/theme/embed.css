@@ -30,9 +30,11 @@ html.cf-embed :has(> :has(> [role=log])) {
   position: relative;
 }
 
+/* `scroll-padding-bottom`: upstream follows a run by scrolling its end marker into view, which then clears the shell composer too */
 html.cf-embed [data-selection-scope="chat"][role=log] {
   padding-top: calc(var(--cf-inset-top, 0px) + 24px) !important;
   padding-bottom: calc(var(--cf-inset-bottom, 0px) + var(--cf-composer-area, 0px) + 16px);
+  scroll-padding-bottom: calc(var(--cf-inset-bottom, 0px) + var(--cf-composer-area, 0px) + 16px);
 }
 
 html.cf-embed :has(> [role=log]) ~ div:has(.chat-input-shell) {

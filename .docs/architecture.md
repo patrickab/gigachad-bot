@@ -131,7 +131,7 @@ committed user write -> durable changes row -> PostgreSQL NOTIFY
 
 - `features/chat/ChatPair.tsx` defers collapsed Markdown and equation rendering until within 400px of the viewport or focused. Hidden tabs stay deferred until shown, while headers, tool labels, and screen-reader text remain available.
 - Reserve the 12.5vh preview cap offscreen, allowing short answers to shrink when activated. Expanding a turn renders its full content and plots.
-- `features/chat/useStickToBottom.ts` jumps directly to the end on initial history restoration. Subsequent streaming updates retain smooth scrolling while pinned to the bottom.
+- Chats and omp sessions open at their end and hold it through late layout until reader input (`features/chat/useStickToBottom.ts`, overlay `embed/insets.ts`). Streaming follows while pinned.
 
 ### Sandbox checkpoint boundary
 

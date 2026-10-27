@@ -86,7 +86,7 @@ export function ChatContainer({
   const previewAttachment = previewTarget ? findAttachment(messages[previewTarget.messageIndex], previewTarget.name) ?? null : null
 
   const pairs = useMemo(() => pairMessages(messages), [messages])
-  const { pin } = useStickToBottom(scrollContainerRef, bottomRef, messages)
+  const { pin } = useStickToBottom(scrollContainerRef, bottomRef, chatId, messages, focus)
   const { isExpanded, toggle: togglePair } = usePairExpansion({ pairs, focus, messageCount: messages.length, scrollContainerRef })
   const { focusedGlobalIndex, clearKeyboardFocus, collapsedRef } = usePairFocus({ pairs, scrollContainerRef, togglePair })
 
