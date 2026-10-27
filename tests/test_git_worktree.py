@@ -44,7 +44,9 @@ def test_default_branch_falls_back_to_main_checkout_not_an_arbitrary_branch(clon
 @pytest.mark.parametrize("local_branch", [False, True])
 def test_default_checkout_creates_and_reuses_without_pulling_or_changing_main(clone, local_branch):
     assert git_worktree.default_branch(clone.repository) == "main"
-    assert git_worktree.default_base_branch(clone.repository) == "dev"
+    assert git_worktree.default_base_branch(git_worktree.branches(clone.repository), "main") == "dev"
+    assert git_worktree.default_base_branch(["feature", "main"], "main") == "main"
+    assert git_worktree.default_base_branch(["feature"], None) == "feature"
     if local_branch:
         git(clone.repository, "branch", "main", "origin/main")
     before = git(clone.repository, "rev-parse", "HEAD")
@@ -141,6 +143,9 @@ def test_status_counts_uncommitted_files_and_commits_against_the_base(clone):
     _commit(clone.repository, "base.md", "moved on\n")
 
     assert git_worktree.status(Path(worktree.path), "dev") == git_worktree.WorktreeStatus(changed_files=1, ahead=2, behind=1)
+    assert git_worktree.local_branch(clone.repository, "dev") == "dev"
+    assert git_worktree.local_branch(clone.repository, "missing") is None
+    assert git_worktree.local_branch(clone.repository, None) is None
 
 
 def test_removal_needs_force_for_uncommitted_work_and_keeps_the_branch(clone):

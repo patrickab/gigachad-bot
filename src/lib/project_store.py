@@ -78,26 +78,33 @@ class ProjectStore:
             i += 1
         return slug
 
+    @staticmethod
+    def _default_project(slug: str) -> dict[str, Any]:
+        return {"name": slug, "kanban": [], "tabs": [], "files": []}
+
     def _read_project(self, slug: str) -> dict[str, Any]:
-        return self._read_json(_project_key(slug), {"name": slug, "kanban": [], "tabs": [], "files": []})
+        return self._read_json(_project_key(slug), self._default_project(slug))
+
+    def _read_projects(self, slugs: list[str]) -> list[dict[str, Any]]:
+        """The state of each project in *slugs*, read in one round trip, defaulted like `_read_project`."""
+        stored = self._docs.read_many(_project_key(slug) for slug in slugs)
+        return [data if isinstance(data := stored[_project_key(slug)], dict) else self._default_project(slug) for slug in slugs]
 
     def _write_project(self, slug: str, data: dict[str, Any]) -> None:
         self._write_json(_project_key(slug), data)
 
     def list_projects(self) -> list[dict[str, Any]]:
-        projects: list[dict[str, Any]] = []
-        for p in self._read_meta().get("projects", []):
-            data = self._read_project(p["slug"])
-            projects.append(
-                {
-                    "name": p["name"],
-                    "slug": p["slug"],
-                    "archived": p.get("archived", False),
-                    "tabs": data.get("tabs", []),
-                    "linked_root": data.get("linked_root"),
-                }
-            )
-        return projects
+        entries = self._read_meta().get("projects", [])
+        return [
+            {
+                "name": p["name"],
+                "slug": p["slug"],
+                "archived": p.get("archived", False),
+                "tabs": data.get("tabs", []),
+                "linked_root": data.get("linked_root"),
+            }
+            for p, data in zip(entries, self._read_projects([p["slug"] for p in entries]), strict=True)
+        ]
 
     def get_project(self, slug: str) -> dict[str, Any]:
         _, entry = self._require(slug)
@@ -219,9 +226,8 @@ class ProjectStore:
 
     def replace_file_everywhere(self, old: str, new: str) -> None:
         """In every project referencing *old*, drop it and reference *new* last unless it already is."""
-        for entry in self._read_meta().get("projects", []):
-            slug = entry["slug"]
-            data = self._read_project(slug)
+        slugs = [entry["slug"] for entry in self._read_meta().get("projects", [])]
+        for slug, data in zip(slugs, self._read_projects(slugs), strict=True):
             files = [str(p) for p in data.get("files", [])]
             if old in files:
                 kept = [f for f in files if f != old]
@@ -242,7 +248,6 @@ class ProjectStore:
     def list_all_files(self) -> list[str]:
         """Union of every project's documents (the global document pool)."""
         files: dict[str, None] = {}
-        for p in self._read_meta().get("projects", []):
-            data = self._read_project(p["slug"])
+        for data in self._read_projects([p["slug"] for p in self._read_meta().get("projects", [])]):
             files.update(dict.fromkeys(str(f) for f in data.get("files", [])))
         return sorted(files, key=_by_file_name)

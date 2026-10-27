@@ -15,7 +15,7 @@ import sys
 
 import yaml
 
-from lib.data_store import DataStore, overwrite_text, read_text, read_text_or
+from lib.data_store import DataStore, StorageNotFoundError, overwrite_text, read_text_or
 from lib.storage_namespace import PROMPT
 
 log = logging.getLogger(__name__)
@@ -92,10 +92,13 @@ class PromptStore:
         return (0, self._order.index(stem)) if stem in self._order else (1, stem.lower())
 
     def _md_entries(self, prefix: str) -> Iterator[tuple[str, str]]:
-        """Yield `(stem, raw text)` of every `.md` file directly under *prefix*, ordered by key."""
-        for entry in sorted(self._store.list(prefix), key=lambda item: item.key):
-            if not entry.is_dir and entry.key.endswith(".md"):
-                yield Path(entry.key).stem, read_text(self._store, entry.key)[0]
+        """Yield `(stem, raw text)` of every `.md` file directly under *prefix*, ordered by key, read in one round trip."""
+        keys = sorted(entry.key for entry in self._store.list(prefix) if not entry.is_dir and entry.key.endswith(".md"))
+        stored = self._store.read_many(keys)
+        for key in keys:
+            if key not in stored:
+                raise StorageNotFoundError(key)
+            yield Path(key).stem, stored[key][0].decode("utf-8")
 
     def _ranked_prompts(self) -> list[tuple[tuple, str, dict[str, object], str]]:
         """Every prompt as `(rank, stem, frontmatter, body)` in display order."""

@@ -12,6 +12,7 @@ Writes go through ``lib/architecture_service.apply``: read -> C4 service -> comm
 retried when another edit committed first.
 """
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
@@ -20,7 +21,7 @@ from pydantic import BaseModel, Field
 from backend.routes.deps import get_architecture_store, get_project_store
 from lib import architecture_service, c4_service
 from lib.architecture_service import Change, require_project
-from lib.architecture_workspace import ArchitectureError, ArchitectureNotFound, ArchitectureStore
+from lib.architecture_workspace import ArchitectureError, ArchitectureNotFound, ArchitectureStore, Snapshot
 from lib.c4_service import ApplyResult, C4Model
 from lib.project_store import ProjectStore
 
@@ -60,8 +61,13 @@ async def read_workspace(
     projects: ProjectStore = Depends(get_project_store),
 ) -> WorkspaceResponse:
     """The whole model; a project without an architecture yet has an empty one."""
-    require_project(projects, slug)
-    snapshot = store.read(allow_empty=True)
+
+    def read() -> Snapshot:
+        require_project(projects, slug)
+        return store.read(allow_empty=True)
+
+    # The project check and source reads block on Postgres or the mount, so they run off the event loop.
+    snapshot = await asyncio.to_thread(read)
     return WorkspaceResponse(model=(await c4_service.render(snapshot.sources, snapshot.snapshots)).model)
 
 

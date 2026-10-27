@@ -98,9 +98,11 @@ class AssetStore:
 
     def _fetch(self, column: str, value: object, missing: str) -> Asset:
         with self._scope.connection() as connection:
+            # Binary results move bytea as raw bytes instead of hex text, half the size and no decoding.
             row = connection.execute(
                 f"SELECT {_COLUMNS}, content FROM assets WHERE user_id = %s AND {column} = %s",
                 (self._scope.user_id, value),
+                binary=True,
             ).fetchone()
         if row is None:
             raise StorageNotFoundError(missing)
@@ -112,6 +114,29 @@ class AssetStore:
 
     def read_by_id(self, asset_id: UUID) -> Asset:
         return self._fetch("id", asset_id, str(asset_id))
+
+    def stat(self, logical_path: str) -> Asset | None:
+        """The asset at *logical_path* without its content (size, hash and version only), or None when it is not stored."""
+        logical_path = validate_key(logical_path)
+        with self._scope.connection() as connection:
+            row = connection.execute(
+                f"SELECT {_COLUMNS} FROM assets WHERE user_id = %s AND logical_path = %s",
+                (self._scope.user_id, logical_path),
+            ).fetchone()
+        return None if row is None else self._asset(row)
+
+    def read_range(self, logical_path: str, start: int, length: int) -> bytes:
+        """Up to *length* bytes from offset *start*, sliced in the database: uncompressed TOAST fetches only the chunks it covers."""
+        logical_path = validate_key(logical_path)
+        with self._scope.connection() as connection:
+            row = connection.execute(
+                "SELECT substring(content FROM %s FOR %s) FROM assets WHERE user_id = %s AND logical_path = %s",
+                (start + 1, length, self._scope.user_id, logical_path),
+                binary=True,
+            ).fetchone()
+        if row is None:
+            raise StorageNotFoundError(logical_path)
+        return bytes(row[0])
 
     def list(self, prefix: str = "", *, kind: str | None = None) -> list[Asset]:
         """Assets under *prefix* (directory semantics) without content, ordered by path."""

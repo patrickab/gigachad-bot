@@ -19,6 +19,8 @@ router = APIRouter(prefix="/api", tags=["models"])
 Slug = Annotated[str, Path(pattern=r"^[A-Za-z0-9_-]+$")]
 
 
+# Store calls block on Postgres, so they run in a worker thread (or the handler is sync, run in FastAPI's threadpool):
+# a blocking call on the event loop would stall every concurrent request, SSE streams included.
 async def _models_payload(
     store: ModelProviderStore,
     *,
@@ -27,12 +29,24 @@ async def _models_payload(
     tab_order: list[str] | None = None,
 ) -> dict:
     """The models catalog, where a part the caller just saved replaces re-reading it from the store."""
-    visible = providers_for_ui(store.load() if providers is None else providers)
+
+    def stored() -> tuple[dict, dict, list[str]]:
+        return (
+            store.load() if providers is None else providers,
+            store.load_defaults() if defaults is None else defaults,
+            store.load_tab_order() if tab_order is None else tab_order,
+        )
+
+    # `ollama list` is a subprocess, so it runs alongside the store reads instead of after them.
+    ollama, (all_providers, all_defaults, all_tab_order) = await asyncio.gather(
+        asyncio.to_thread(discover_ollama_models), asyncio.to_thread(stored)
+    )
+    visible = providers_for_ui(all_providers)
     return {
-        "ollama": await asyncio.to_thread(discover_ollama_models),
+        "ollama": ollama,
         "providers": [{"label": label, **provider} for label, provider in visible.items()],
-        "defaults": store.load_defaults() if defaults is None else defaults,
-        "tab_order": store.load_tab_order() if tab_order is None else tab_order,
+        "defaults": all_defaults,
+        "tab_order": all_tab_order,
     }
 
 
@@ -91,21 +105,21 @@ async def save_model_providers(
     body: ProviderCatalog, store: ModelProviderStore = Depends(get_model_provider_store)
 ) -> dict:
     with http_errors((ValueError, 422, None)):
-        providers = store.save({label: provider.model_dump() for label, provider in body.providers.items()})
+        providers = await asyncio.to_thread(store.save, {label: provider.model_dump() for label, provider in body.providers.items()})
     return await _models_payload(store, providers=providers)
 
 
 @router.put("/models/defaults")
 async def save_model_defaults(body: ModelDefaults, store: ModelProviderStore = Depends(get_model_provider_store)) -> dict:
     with http_errors((ValueError, 422, None)):
-        defaults = store.save_defaults(body.model_dump())
+        defaults = await asyncio.to_thread(store.save_defaults, body.model_dump())
     return await _models_payload(store, defaults=defaults)
 
 
 @router.put("/models/tab-order")
 async def save_model_tab_order(body: OrderBody, store: ModelProviderStore = Depends(get_model_provider_store)) -> dict:
     with http_errors((ValueError, 422, None)):
-        tab_order = store.save_tab_order(body.order)
+        tab_order = await asyncio.to_thread(store.save_tab_order, body.order)
     return await _models_payload(store, tab_order=tab_order)
 
 
@@ -121,22 +135,22 @@ async def get_omp_models(refresh: bool = False) -> dict:
 
 
 @router.get("/prompts")
-async def get_prompts(store: PromptStore = Depends(get_prompt_store)) -> dict[str, dict[str, str]]:
+def get_prompts(store: PromptStore = Depends(get_prompt_store)) -> dict[str, dict[str, str]]:
     return {"prompts": store.prompt_map()}
 
 
 @router.get("/prompts/list")
-async def list_prompts(store: PromptStore = Depends(get_prompt_store)) -> list[dict]:
+def list_prompts(store: PromptStore = Depends(get_prompt_store)) -> list[dict]:
     return store.list_prompts()
 
 
 @router.get("/prompts/blocks")
-async def list_blocks(store: PromptStore = Depends(get_prompt_store)) -> dict[str, str]:
+def list_blocks(store: PromptStore = Depends(get_prompt_store)) -> dict[str, str]:
     return store.blocks()
 
 
 @router.get("/prompts/{slug}")
-async def get_prompt(slug: Slug, store: PromptStore = Depends(get_prompt_store)) -> dict[str, str]:
+def get_prompt(slug: Slug, store: PromptStore = Depends(get_prompt_store)) -> dict[str, str]:
     raw = store.get_raw(slug)
     if raw is None:
         raise HTTPException(status_code=404, detail="Prompt not found")
@@ -144,7 +158,7 @@ async def get_prompt(slug: Slug, store: PromptStore = Depends(get_prompt_store))
 
 
 @router.put("/prompt-order")
-async def set_prompt_order(body: OrderBody, store: PromptStore = Depends(get_prompt_store)) -> dict[str, bool]:
+def set_prompt_order(body: OrderBody, store: PromptStore = Depends(get_prompt_store)) -> dict[str, bool]:
     store.set_order(body.order)
     return {"ok": True}
 
@@ -154,13 +168,13 @@ class PromptSave(BaseModel):
 
 
 @router.put("/prompts/{slug}")
-async def save_prompt(slug: Slug, body: PromptSave, store: PromptStore = Depends(get_prompt_store)) -> dict[str, str]:
+def save_prompt(slug: Slug, body: PromptSave, store: PromptStore = Depends(get_prompt_store)) -> dict[str, str]:
     name = store.save(slug, body.content)
     return {"slug": slug, "name": name}
 
 
 @router.delete("/prompts/{slug}")
-async def delete_prompt(slug: Slug, store: PromptStore = Depends(get_prompt_store)) -> dict[str, bool]:
+def delete_prompt(slug: Slug, store: PromptStore = Depends(get_prompt_store)) -> dict[str, bool]:
     ok = store.delete(slug)
     if not ok:
         raise HTTPException(status_code=404, detail="Prompt not found")

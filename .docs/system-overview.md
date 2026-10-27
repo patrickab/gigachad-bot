@@ -1,6 +1,4 @@
-Generated from d6bc359 on 2026-10-22
-
-Working-tree caveat: generated from the inspected working tree, including uncommitted documentation migration, README, and instruction updates. The revision identifies the source baseline, not a reproducible committed snapshot.
+Generated from 9f773d5 on 2026-10-27
 
 # System overview
 
@@ -31,7 +29,7 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 - Keep provider credentials in private `~/.secrets` or the environment. Optional nonsecret configuration belongs in `${XDG_CONFIG_HOME:-$HOME/.config}/gigachad-bot/env`.
 - OMP tabs require `omp` on backend `PATH` and access to the private `patrickab/ompweb` fork. Startup can provision its checkout; set `GIGACHAD_OMP_WEB=0` to skip it.
 - The factory launcher can provision its separate engine checkout, configuration, and database while preserving existing state. Set `GIGACHAD_FACTORY=0` to skip it. Running sandboxed tasks still requires the sandbox runtime setup.
-- Keep production backend services private. Development launchers are not production deployment. Remote inference, identity, production setup, and service updates belong to the maintained runbooks indexed in [AGENTS.md](../AGENTS.md#documentation).
+- Keep production backend services private. Development launchers are not production deployment. Host-access users can trigger a production redeploy from settings. Remote inference, identity, production setup, and service updates belong to the maintained runbooks indexed in [AGENTS.md](../AGENTS.md#documentation).
 - Failed startup reads show a shared warning after an error or a 15-second timeout. Retry reloads only failed data without losing drafts or already-loaded content.
 
 ## Model chat, context, and projects
@@ -41,6 +39,7 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 - Stream replies, revisit saved histories, branch from a message, and merge branches back into a conversation.
 - Collapsed answers render their rich text when nearby or focused, reducing work in long chats. Hidden tabs wait until shown, and expanding a turn reveals its full answer.
 - Organize related chats and artifacts in a project. Use its task board for lightweight planning; factory boards run agent workflows and are separate.
+- Rename a project to move all its chats, documents, canvases, architecture, memory and attachments to the new slug, with internal links updated. A name whose slug is taken is refused. Archive projects (and, per device, Code directories) to hide them from the sidebar, restore from the section's archive list.
 - Keep each chat's project membership independent of the currently selected project elsewhere. Its containing project determines project memory, even when another tab is active.
 - Attach uploads, mounted files, global/project documents, architecture sources, or drawings. Toggle attachments out of model context without deleting their source; open them to preview or edit.
 - Create project documents in their intended project. Reuse generated tool artifacts as documents and retain source references from web research.
@@ -65,6 +64,8 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 - Mount an existing backend directory, including an Obsidian vault, to work on its files in place. Browse its filtered tree and open the type-aware text, PDF, canvas, architecture, plot, or mind-map view.
 - Add a mounted file to a project as a reference. Editing changes the original disk file; removing the project reference does not delete that source.
 - Upload PDFs or attach mounted PDFs, view their pages, and use MinerU extraction to supply readable Markdown to chat. Image OCR can transcribe text and LaTeX with the configured vision model.
+- Annotate PDFs with pen and highlighter. Annotations belong to the PDF's content, so every copy shares them and a renamed file keeps them, while changed bytes start empty.
+- Ask about a mounted or library PDF in a side chat grounded in its extracted text, or ask about a selected passage. This chat is not saved.
 - Keep PDF library names unique within your account. Uploading or syncing another PDF with the same filename replaces the shared library entry, rather than creating a separate library item. Extraction is also keyed by filename stem.
 - For study, attach extracted lecture/document material, choose a tutoring prompt, and ask for explanations, active-recall material, diagrams, or mind maps. The current sources do not expose a separate automatic **Study** generation workflow.
 - Enable tools for the current conversation rather than assuming every reply uses them. Use web search for current or source-dependent facts and deep research for broad, multi-part investigations; deep research can take minutes.
@@ -101,7 +102,7 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 - When anchors cannot be resolved uniquely, preserve original locations and mark the note outdated. Failed sends retain notes; successful sends clear only submitted notes that have not changed. Sent reviews appear in task messages, not inline reply threads.
 - Optionally edit a diff in Neovim with read-only `HEAD` beside the working file. Save with `:w` and return with `:qa`. Deleted, binary, oversized, and symlinked diff files cannot use this path.
 - Enable Neovim per device when available: host-access identity, `nvim` on backend `PATH`, and an existing `$XDG_CONFIG_HOME/nvim` configuration directory (default `~/.config/nvim`). Otherwise use the built-in editor.
-- Neovim `:w` uses the document's normal save path, including architecture validation; failed saves leave the buffer modified. Preview/fullscreen switches preserve the session, but closing/quitting/disconnecting terminates it and loses unsaved edits. While focused, its terminal owns all keys, including Escape.
+- Neovim `:w` uses the document's normal save path, including architecture validation; failed saves leave the buffer modified. Yanks are copied to the browser clipboard. Preview/fullscreen switches preserve the session, but closing/quitting/disconnecting terminates it and loses unsaved edits. While focused, its terminal owns all keys, including Escape.
 
 ## Worktrees
 
@@ -143,7 +144,7 @@ The independent Agents-in-a-box engine runs agent workflows in task git worktree
 
 ## User-visible access and failure limits
 
-- Require host access for OMP, factory, Neovim, and files outside ordinary mounts. Other identities remain restricted to mounted roots. Outside those roots, credential-store protection limits host file access. Do not mount secret directories expecting a blanket denylist to protect their contents.
+- Require host access for OMP, factory, Neovim, production redeploy, and files outside ordinary mounts. Other identities remain restricted to mounted roots. Outside those roots, credential-store protection limits host file access. Do not mount secret directories expecting a blanket denylist to protect their contents.
 - Mounted trees omit ignored/internal directories. Text editing refuses non-UTF-8 data rather than risking a lossy binary overwrite.
 - A reference is not a backup of the original file; missing references retain only their last available snapshot. PDF extraction may lag a changed file, and visual attachments do not update a previously sent snapshot automatically.
 - Model/provider, OCR, research, sandbox, architecture, OMP, and factory services have independent prerequisites. Service unavailability, invalid upstream responses, rejected edits, and failed saves must remain visible rather than being represented as successful empty results.

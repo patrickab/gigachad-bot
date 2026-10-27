@@ -186,10 +186,11 @@ class CanvasMutationStore:
         """Return the canonical materialized snapshot and the revision that produced it."""
         key = normalize_canvas_key(canvas_key)
         with self._scope.connection() as connection:
-            # One statement reads content and revision from the same MVCC snapshot.
+            # One statement reads content and revision from the same MVCC snapshot, as raw bytes rather than hex text.
             row = connection.execute(
                 f"SELECT content, ({_REVISION_SQL}) FROM documents WHERE user_id = %s AND key = %s AND NOT is_dir",
                 (self._scope.user_id, key, self._scope.user_id, key),
+                binary=True,
             ).fetchone()
         if row is None:
             raise CanvasNotFound("Canvas not found")

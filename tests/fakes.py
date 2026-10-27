@@ -71,6 +71,10 @@ class StoredAsset:
     kind: str
     mime: str | None
 
+    @property
+    def sha256(self) -> str:
+        return hashlib.sha256(self.content).hexdigest()
+
 
 class MemoryAssetStore:
     """Asset store over a dict keyed by logical path, recording every key it is asked to read."""
@@ -85,6 +89,9 @@ class MemoryAssetStore:
             return self.assets[key]
         except KeyError as exc:
             raise StorageNotFoundError(key) from exc
+
+    def stat(self, key: str) -> StoredAsset | None:
+        return self.assets.get(key)
 
     def list(self, prefix: str = "", *, kind: str | None = None) -> list[StoredAsset]:
         return [asset for key, asset in self.assets.items() if key.startswith(prefix) and kind in (None, asset.kind)]

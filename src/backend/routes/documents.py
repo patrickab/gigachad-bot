@@ -105,8 +105,10 @@ def _follow_moved_reference(store: ProjectStore, roots: FileRoots, slug: str, pa
     return str(moved)
 
 
+# Every handler is sync: FastAPI runs it in its threadpool, so blocking store and file IO never stalls the event loop.
+# Uploads are read through `UploadFile.file`, the spooled body FastAPI already received.
 @router.get("", response_model=FileListResponse)
-async def list_documents(
+def list_documents(
     slug: str = Query(...),
     store: ProjectStore = Depends(get_project_store),
     architecture: ArchitectureStore = Depends(get_architecture_store),
@@ -125,20 +127,20 @@ async def list_documents(
 
 
 @router.get("/all", response_model=FileListResponse)
-async def list_all_documents(store: ProjectStore = Depends(get_project_store)):
+def list_all_documents(store: ProjectStore = Depends(get_project_store)):
     """Every document referenced by any project."""
     return FileListResponse(documents=_meta_list(store.list_all_files()))
 
 
 @router.get("/notes", response_model=FileListResponse)
-async def list_notes(docs: DataStore = Depends(get_document_store)) -> FileListResponse:
+def list_notes(docs: DataStore = Depends(get_document_store)) -> FileListResponse:
     """List non-project canvases/notes."""
     paths = [entry.key for entry in docs.list(NOTE) if not entry.is_dir]
     return FileListResponse(documents=_meta_list(paths))
 
 
 @router.post("/write", response_model=FileMeta)
-async def write_document(
+def write_document(
     req: WriteDocumentRequest,
     store: ProjectStore = Depends(get_project_store),
     docs: DataStore = Depends(get_document_store),
@@ -152,7 +154,7 @@ async def write_document(
 
 
 @router.post("/write-binary", response_model=FileMeta)
-async def write_binary_document(
+def write_binary_document(
     file: UploadFile = File(...),
     slug: str = Query(...),
     store: ProjectStore = Depends(get_project_store),
@@ -162,23 +164,23 @@ async def write_binary_document(
     with http_errors((FileNotFoundError, 404, "Project not found")):
         store.require(slug)
     key = project_document(slug, _upload_name(file))
-    docs.write_bytes(key, await file.read())
+    docs.write_bytes(key, file.file.read())
     store.add_file(slug, key)
     return file_meta(key)
 
 
 @router.post("/store-drawing")
-async def store_drawing(
+def store_drawing(
     file: UploadFile = File(...),
     assets: AssetStore = Depends(get_asset_store),
 ):
     """Store a rendered canvas image without creating a Nextcloud copy."""
-    assets.write("drawing", f"{DRAWING}/{_upload_name(file)}", await file.read())
+    assets.write("drawing", f"{DRAWING}/{_upload_name(file)}", file.file.read())
     return {"status": "ok"}
 
 
 @router.post("/add", response_model=FileMeta)
-async def add_document(
+def add_document(
     req: AddDocumentRequest,
     slug: str = Query(...),
     store: ProjectStore = Depends(get_project_store),
@@ -195,7 +197,7 @@ async def add_document(
 
 
 @router.delete("")
-async def remove_document(
+def remove_document(
     slug: str = Query(...),
     path: str = Query(...),
     store: ProjectStore = Depends(get_project_store),
@@ -212,7 +214,7 @@ async def remove_document(
 
 
 @router.post("/move", response_model=FileMeta)
-async def move_document(
+def move_document(
     req: MoveDocumentRequest,
     store: ProjectStore = Depends(get_project_store),
     docs: DataStore = Depends(get_document_store),
@@ -227,7 +229,7 @@ async def move_document(
 
 
 @router.post("/rename", response_model=FileMeta)
-async def rename_document(
+def rename_document(
     req: RenameDocumentRequest,
     store: ProjectStore = Depends(get_project_store),
     docs: DataStore = Depends(get_document_store),

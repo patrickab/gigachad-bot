@@ -1,6 +1,8 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
 import hashlib
+from typing import Annotated
+from uuid import UUID
 
 from fastapi import Depends
 from llm_baseclient.client import LLMClient
@@ -133,8 +135,16 @@ def get_architecture_store(
     return ArchitectureStore.for_project(docs, slug, roots.roots())
 
 
-def get_prompt_store(docs: DataStore = Depends(get_document_store)) -> PromptStore:
-    seed_prompts(docs)
+# Users whose prompt collection this process has seeded or found. Seeding never re-runs once the collection exists.
+_seeded_prompt_users: set[UUID] = set()
+
+
+def get_prompt_store(
+    scope: Annotated[UserScope, Depends(get_user_scope)], docs: Annotated[DataStore, Depends(get_document_store)],
+) -> PromptStore:
+    if scope.user_id not in _seeded_prompt_users:
+        seed_prompts(docs)
+        _seeded_prompt_users.add(scope.user_id)
     return PromptStore(docs)
 
 

@@ -10,13 +10,19 @@ request's storage. Postgres is authoritative, so serving from disk would
 hand every caller the last filesystem write instead of the current one. Only
 a live FileRoots reference, which was never stored in Postgres, is read off
 disk, and only after storage has been checked and found not to own the path.
+
+``/raw`` revalidates on every open: an unchanged file answers 304 from its
+metadata alone, and a byte range (pdf.js fetches the pages it renders first)
+reads only that slice. Handlers are plain ``def``, so their blocking storage
+reads run in the threadpool instead of stalling the event loop.
 """
 
 from dataclasses import dataclass
 import hashlib
 from pathlib import Path
+import re
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 
 from backend.http_plumbing import http_errors
@@ -24,13 +30,17 @@ from backend.routes.deps import get_asset_store, get_document_store, get_file_ro
 from backend.routes.schemas import FileContent
 from lib import document_library as lib_docs
 from lib.architecture_workspace import ArchitectureError, ArchitectureStore, split_source_path
-from lib.asset_store import AssetStore
-from lib.data_store import DataStore, StorageNotFoundError, read_text
+from lib.asset_store import Asset, AssetStore
+from lib.data_store import DataStore, Entry, StorageNotFoundError, read_text
 from lib.file_roots import FileRoots
 from lib.mime import mime_for
 from lib.storage_namespace import pdf_annotations
 
 router = APIRouter(prefix="/api/fileviewer", tags=["fileviewer"])
+
+# Cacheable per browser, but revalidated on every use, so an edit shows on the next open.
+_CACHE_CONTROL = "private, no-cache"
+_SINGLE_RANGE = re.compile(r"bytes=(\d*)-(\d*)")
 
 
 def _resolve_allowed(path: str, roots: FileRoots) -> Path:
@@ -48,22 +58,8 @@ def _stored(path: str, docs: DataStore) -> str | None:
     return key if key is not None and docs.exists(key) else None
 
 
-def _stored_asset(path: str, assets: AssetStore) -> bytes | None:
-    """Binary asset bytes for *path* (PDFs, MinerU output), or None when the asset store does not hold it.
-
-    These live in the `assets` table, not `documents`, under the same key `document_meta` returns.
-    """
-    key = lib_docs.storage_key(path)
-    if key is None:
-        return None
-    try:
-        return assets.read(key).content
-    except StorageNotFoundError:
-        return None
-
-
 @router.get("/text", response_model=FileContent)
-async def read_text_content(
+def read_text_content(
     path: str = Query(...),
     roots: FileRoots = Depends(get_file_roots),
     docs: DataStore = Depends(get_document_store),
@@ -89,18 +85,118 @@ async def read_text_content(
     return FileContent(path=path, content=content)
 
 
+def _not_modified(request: Request, etag: str) -> Response | None:
+    """A 304 when the request's ``If-None-Match`` lists *etag* (weak comparison), else None."""
+    header = request.headers.get("if-none-match")
+    if header is None:
+        return None
+    tags = {tag.strip().removeprefix("W/") for tag in header.split(",")}
+    if "*" not in tags and etag.removeprefix("W/") not in tags:
+        return None
+    return Response(status_code=304, headers={"ETag": etag, "Cache-Control": _CACHE_CONTROL})
+
+
+def _byte_range(request: Request, etag: str, size: int) -> tuple[int, int] | None:
+    """The request's ``Range`` as (start, end exclusive), None for the whole file, 416 when it starts past the end."""
+    # No, several, malformed or stale (`If-Range`) ranges get the whole file, a valid answer to any range request.
+    header = request.headers.get("range")
+    if header is None or request.headers.get("if-range", etag) != etag:
+        return None
+    match = _SINGLE_RANGE.fullmatch(header.strip())
+    if match is None or match.groups() == ("", ""):
+        return None
+    first, last = match.groups()
+    if first:
+        start, end = int(first), min(size, int(last) + 1) if last else size
+    else:
+        start, end = max(0, size - int(last)), size
+    if start >= size:
+        raise HTTPException(status_code=416, detail="Range not satisfiable", headers={"Content-Range": f"bytes */{size}"})
+    return (start, end) if start < end else None
+
+
 @dataclass(frozen=True)
 class _StoredFile:
-    """Bytes read from storage, with their MIME type."""
+    """A file in storage, known by its metadata: a revalidation or a range never reads all of its bytes."""
 
-    content: bytes
+    etag: str
+    size: int
     media_type: str
 
-    def response(self) -> Response:
-        return Response(content=self.content, media_type=self.media_type, headers={"Content-Disposition": "inline"})
+    def read(self) -> tuple[bytes, str | None]:
+        """The whole content and the ETag of what was read, None when it changed since the metadata was read."""
+        raise NotImplementedError
+
+    def read_range(self, start: int, length: int) -> bytes:
+        raise NotImplementedError
 
     def sha256(self) -> str:
-        return hashlib.sha256(self.content).hexdigest()
+        raise NotImplementedError
+
+    def response(self, request: Request) -> Response:
+        if (not_modified := _not_modified(request, self.etag)) is not None:
+            return not_modified
+        headers = {"Content-Disposition": "inline", "Accept-Ranges": "bytes", "Cache-Control": _CACHE_CONTROL}
+        span = _byte_range(request, self.etag, self.size)
+        with http_errors((StorageNotFoundError, 404, "File not found")):
+            if span is None:
+                content, etag = self.read()
+                if etag is not None:
+                    headers["ETag"] = etag
+                return Response(content=content, media_type=self.media_type, headers=headers)
+            start, end = span
+            content = self.read_range(start, end - start)
+        headers |= {"ETag": self.etag, "Content-Range": f"bytes {start}-{start + len(content) - 1}/{self.size}"}
+        return Response(content=content, status_code=206, media_type=self.media_type, headers=headers)
+
+
+@dataclass(frozen=True)
+class _StoredDocument(_StoredFile):
+    """A file in the document store."""
+
+    docs: DataStore
+    key: str
+    entry: Entry
+
+    @classmethod
+    def of(cls, docs: DataStore, key: str, entry: Entry) -> "_StoredDocument":
+        """*entry* is a file's `stat`, which sets its size, revision and last write."""
+        # Version and last write together: a deleted and re-created key restarts at version 1.
+        etag = f'"{entry.revision.token}-{int(entry.modified.timestamp() * 1_000_000)}"'
+        return cls(etag, entry.size, mime_for(key), docs, key, entry)
+
+    def read(self) -> tuple[bytes, str | None]:
+        content, revision = self.docs.read_bytes(self.key)
+        return content, self.etag if revision == self.entry.revision else None
+
+    def read_range(self, start: int, length: int) -> bytes:
+        return self.docs.read_range(self.key, start, length)
+
+    def sha256(self) -> str:
+        with http_errors((StorageNotFoundError, 404, "File not found")):
+            return self.docs.sha256(self.key)
+
+
+@dataclass(frozen=True)
+class _StoredAsset(_StoredFile):
+    """A binary asset (PDFs, MinerU output), its ETag is the content hash the asset store keeps."""
+
+    assets: AssetStore
+    asset: Asset
+
+    @classmethod
+    def of(cls, assets: AssetStore, asset: Asset, media_type: str) -> "_StoredAsset":
+        return cls(f'"{asset.sha256}"', asset.size_bytes, media_type, assets, asset)
+
+    def read(self) -> tuple[bytes, str | None]:
+        asset = self.assets.read(self.asset.logical_path)
+        return asset.content or b"", f'"{asset.sha256}"'
+
+    def read_range(self, start: int, length: int) -> bytes:
+        return self.assets.read_range(self.asset.logical_path, start, length)
+
+    def sha256(self) -> str:
+        return self.asset.sha256
 
 
 @dataclass(frozen=True)
@@ -109,8 +205,18 @@ class _HostFile:
 
     path: Path
 
-    def response(self) -> Response:
-        return FileResponse(self.path, media_type=mime_for(self.path), content_disposition_type="inline")
+    def response(self, request: Request) -> Response:
+        with http_errors((OSError, 404, "File not found")):
+            stat = self.path.stat()
+        # FileResponse serves ranges and sets ETag and Last-Modified, but never answers a matching ETag with 304.
+        response = FileResponse(
+            self.path,
+            media_type=mime_for(self.path),
+            content_disposition_type="inline",
+            stat_result=stat,
+            headers={"Cache-Control": _CACHE_CONTROL},
+        )
+        return _not_modified(request, response.headers["etag"]) or response
 
     def sha256(self) -> str:
         with http_errors((OSError, 404, "File not found")), self.path.open("rb") as file:
@@ -118,30 +224,34 @@ class _HostFile:
 
 
 def _raw_source(path: str, roots: FileRoots, docs: DataStore, assets: AssetStore) -> _StoredFile | _HostFile:
-    """Stored bytes with their MIME type, or the allowed host path when storage does not own *path*."""
-    key = _stored(path, docs)
+    """The stored file at *path* (documents first, then assets), or the allowed host path when storage does not own it."""
+    key = lib_docs.storage_key(path)
     if key is not None:
-        with http_errors((StorageNotFoundError, 404, "File not found")):
-            content, _ = docs.read_bytes(key)
-        return _StoredFile(content, mime_for(key))
-    asset_content = _stored_asset(path, assets)
-    if asset_content is not None:
-        return _StoredFile(asset_content, mime_for(path))
+        entry = docs.stat(key)
+        if entry is not None:
+            if entry.is_dir:
+                raise HTTPException(status_code=404, detail="File not found")
+            return _StoredDocument.of(docs, key, entry)
+        # Binary assets live in the `assets` table under the same key `document_meta` returns.
+        asset = assets.stat(key)
+        if asset is not None:
+            return _StoredAsset.of(assets, asset, mime_for(path))
     return _HostFile(_resolve_allowed(path, roots))
 
 
 @router.get("/raw")
-async def read_raw(
+def read_raw(
+    request: Request,
     path: str = Query(...),
     roots: FileRoots = Depends(get_file_roots),
     docs: DataStore = Depends(get_document_store),
     assets: AssetStore = Depends(get_asset_store),
 ) -> Response:
-    return _raw_source(path, roots, docs, assets).response()
+    return _raw_source(path, roots, docs, assets).response(request)
 
 
 @router.post("/annotations")
-async def open_pdf_annotations(
+def open_pdf_annotations(
     path: str = Query(...),
     roots: FileRoots = Depends(get_file_roots),
     docs: DataStore = Depends(get_document_store),
@@ -152,6 +262,7 @@ async def open_pdf_annotations(
     - Keyed by the SHA-256 of the PDF bytes: every copy shares annotations, renames keep them
     - Changed PDF content gets a new, empty canvas
     """
+    # Stored PDFs are not read here: assets keep their hash, documents are hashed in the database.
     key = pdf_annotations(_raw_source(path, roots, docs, assets).sha256())
     if not docs.exists(key):
         docs.write_bytes(key, b"")

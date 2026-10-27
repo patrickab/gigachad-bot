@@ -11,8 +11,9 @@ from .deps import get_model_provider_store
 router = APIRouter(prefix="/api", tags=["config"])
 
 
+# Sync handler: FastAPI runs it in its threadpool, so the store read never stalls the event loop.
 @router.get("/config")
-async def get_config(
+def get_config(
     store: ModelProviderStore = Depends(get_model_provider_store),
     identity: RequestIdentity = Depends(get_request_identity),
 ) -> dict:

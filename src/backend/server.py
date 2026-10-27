@@ -1,4 +1,6 @@
+import asyncio
 from collections.abc import Awaitable, Callable
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
 import signal
@@ -64,9 +66,23 @@ def _signal_handler(signum: int, frame: object) -> None:
 signal.signal(signal.SIGTERM, _signal_handler)
 signal.signal(signal.SIGINT, _signal_handler)
 
+# `asyncio.to_thread` runs on the loop's default executor, only `min(32, cpus + 4)` workers (12 on 8 cores).
+# Streaming chats hold one worker per pending token, sandbox runs and Neovim sessions one for their whole
+# lifetime, so a few of those starved short calls (chat save, canvas load, change replay) for seconds.
+# Workers start lazily, and database work stays bounded by the connection pool.
+DEFAULT_EXECUTOR_WORKERS = 64
+
+
+def widen_default_executor() -> None:
+    """Give the running loop a default executor that long-lived blocking work cannot exhaust."""
+    asyncio.get_running_loop().set_default_executor(
+        ThreadPoolExecutor(max_workers=DEFAULT_EXECUTOR_WORKERS, thread_name_prefix="to-thread")
+    )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    widen_default_executor()
     # Must precede the first LiteLLM call: it teaches the `litellm_proxy/`
     # prefix where the local OMP gateway lives, which is how OMP-sourced
     # models (including OAuth subscription quota) reach a provider.
@@ -93,6 +109,8 @@ app.add_middleware(
     allow_origins=CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
+    # pdf.js only requests the byte ranges it needs when it can read these on a split-origin deployment.
+    expose_headers=["Accept-Ranges", "Content-Range"],
     # Chrome's Private Network Access check blocks a public origin (e.g. the
     # Vercel frontend) from fetching a server whose resolved address is in a
     # private range (Tailscale's CGNAT 100.64.0.0/10) unless the preflight

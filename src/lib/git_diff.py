@@ -70,12 +70,13 @@ def _relative_to(directory: Path, path: Path) -> str:
     return (path.relative_to(directory) if path.is_relative_to(directory) else path).as_posix()
 
 
-def changed_files(directory: Path, only: str | None = None) -> list[ChangedFile] | None:
+def changed_files(directory: Path, only: str | None = None, repository: Path | None = None) -> list[ChangedFile] | None:
     """Changed files at or below *directory*, None when it is not inside a git repository.
 
     - *only* limits the scan to one file below *directory*, but then git cannot pair a staged rename
+    - *repository* is the already known top level of *directory*'s repository, saving the git call that finds it
     """
-    repository = _repository_root(directory)
+    repository = repository or _repository_root(directory)
     if repository is None:
         return None
     pathspec = ["--", str(directory / only)] if only else []
@@ -110,12 +111,15 @@ def _added_file_patch(path: str, content: str) -> str:
     ])
 
 
-def _find_change(directory: Path, relative_path: str) -> ChangedFile | None:
+def _find_change(directory: Path, relative_path: str, repository: Path | None = None) -> ChangedFile | None:
     """Change of one file, scanning the whole tree only when it may be the new side of a staged rename."""
-    change = next(iter(changed_files(directory, relative_path) or []), None)
+    repository = repository or _repository_root(directory)
+    if repository is None:
+        return None
+    change = next(iter(changed_files(directory, relative_path, repository) or []), None)
     if change is None or change.status != "added":
         return change
-    return next((file for file in changed_files(directory) or [] if file.path == relative_path), None)
+    return next((file for file in changed_files(directory, repository=repository) or [] if file.path == relative_path), None)
 
 
 def _read_text_candidate(target: Path) -> bytes | None:
@@ -254,7 +258,7 @@ def _checked_target(directory: Path, relative_path: str) -> Path:
 def _head_baseline(repository: Path, directory: Path, target: Path) -> str:
     """HEAD text of *target*: empty when untracked, the original path's for a staged rename."""
     try:
-        change = _find_change(directory, target.relative_to(directory).as_posix())
+        change = _find_change(directory, target.relative_to(directory).as_posix(), repository)
     except (GitError, ValueError) as exc:
         # ValueError covers non-UTF-8 porcelain output, such as a staged rename's undecodable original path.
         raise UnsupportedDiffContent(_HEAD_UNREADABLE) from exc

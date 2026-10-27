@@ -8,7 +8,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+    from datetime import datetime
 
 
 class StorageError(RuntimeError):
@@ -36,11 +40,12 @@ class Revision:
 
 @dataclass(frozen=True)
 class Entry:
-    """Listing item. `size` and `revision` are None for directories."""
+    """Listing item. `size` and `revision` are None for directories, `modified` (last write) is set by `stat` only."""
     key: str
     is_dir: bool
     size: int | None = None
     revision: Revision | None = None
+    modified: datetime | None = None
 
 
 class ByteStore(Protocol):
@@ -55,11 +60,22 @@ class ByteStore(Protocol):
 
 class DataStore(ByteStore, Protocol):
     """Key-addressed byte store. A stale `expected` revision raises StorageConflictError."""
+    def read_many(self, keys: Iterable[str]) -> dict[str, tuple[bytes, Revision]]:
+        """Content and revision of every file among *keys* at once. Missing keys and directories are left out."""
+        ...
     def write_bytes(self, key: str, content: bytes, *, expected: Revision | None = None) -> Revision: ...
     def is_file(self, key: str) -> bool: ...
     def is_dir(self, key: str) -> bool: ...
     def exists(self, key: str) -> bool: ...
-    def mkdir(self, key: str) -> None: ...
+    def stat(self, key: str) -> Entry | None:
+        """The file or directory at *key* (one implied by descendants is a directory) without content, or None when absent."""
+        ...
+    def read_range(self, key: str, start: int, length: int) -> bytes:
+        """Up to *length* bytes of the file at *key* from offset *start*. Raises StorageNotFoundError."""
+        ...
+    def sha256(self, key: str) -> str:
+        """Hex SHA-256 of the file at *key*, hashed where it is stored. Raises StorageNotFoundError."""
+        ...
     def delete(self, key: str, *, recursive: bool = False) -> None: ...
     def move(self, source: str, destination: str) -> None: ...
 

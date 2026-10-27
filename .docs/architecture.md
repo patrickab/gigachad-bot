@@ -1,6 +1,4 @@
-Generated from d6bc359 on 2026-10-22
-
-Working-tree caveat: generated from the inspected working tree, including uncommitted documentation migration, README, and instruction updates. The revision identifies the source baseline, not a reproducible committed snapshot.
+Generated from 9f773d5 on 2026-10-27
 
 # Architecture
 
@@ -24,7 +22,7 @@ change log + SSE        LikeC4  omp-web   factory
 | Component | Authority / lifecycle |
 | --- | --- |
 | Frontend | Workspace tabs, feature state, API clients. Use server-issued paths, never browser filesystem authority. |
-| FastAPI | Identity, per-user storage, filesystem access, integrations. Keep routes at HTTP/WebSocket boundaries and reuse domain services. |
+| FastAPI | Identity, per-user storage, filesystem access, integrations. Keep routes at HTTP/WebSocket boundaries and reuse domain services. Store and file IO blocks, so a handler that calls it is a plain `def` (FastAPI's threadpool) or moves the call into `asyncio.to_thread`; a blocking call inside `async def` stalls every request and SSE stream (`tests/test_route_concurrency.py`). |
 | Startup | Configure the OMP LiteLLM proxy before model calls, apply database migrations, start extraction and change brokers. Shutdown closes clients/pool and stops workers/MinerU children. |
 | LikeC4 | Stateless model parsing and syntax-tree operations. Backend launcher starts/stops it and waits for health before FastAPI. Architecture routes return 503 if unavailable, but managed launch fails when startup health fails and tears down/restarts both processes if LikeC4 exits. |
 | Development | User-controlled launchers. Agents must not start servers, except through engine-managed factory previews. |
@@ -43,6 +41,7 @@ change log + SSE        LikeC4  omp-web   factory
 - Report failures in a shared banner. Retry only failed reads without remounting the workspace or clearing drafts and loaded data.
 - Abort timed-out or disposed requests and ignore obsolete responses. Do not add automatic retries to these startup reads.
 - Keep streams, uploads, writes, and explicit post-mutation refreshes unchanged. OMP retains focus and interval polling through the bounded read, only for host-access logins.
+- `ProjectProvider` keeps the project list's identity when a refresh returns it unchanged, so startup refreshes (change-feed replay, first branch metadata) do not re-run reads keyed on it, such as the sidebar's per-project document lists.
 
 ## Identity and filesystem policy
 
@@ -51,11 +50,12 @@ change log + SSE        LikeC4  omp-web   factory
 - Grant host execution through `gigachad.local/cap/host`, carried in `Tailscale-App-Capabilities`. Missing/malformed grants do not grant host access.
 - Development identity requires `GIGACHAD_ENV=development` and `GIGACHAD_DEV_USER`. That local login has host access.
 - Treat `X-Device-Id` as a UUID for write attribution/echo suppression, never authorization. SSE may omit it.
+- Resolve identity with one read per request. `resolve_user` writes only for a new login, a new or reassigned device, or a device last seen over `DEVICE_SEEN_INTERVAL` (one minute) ago, so concurrent requests never queue on the users row lock or a commit.
 - Reject wildcard/empty production `GIGACHAD_CORS_ORIGINS`. Explicitly validate WebSocket origins too: CORS does not protect sockets.
 
 | Operation | Policy |
 | --- | --- |
-| OMP, factory, Neovim, mounting/cloning roots, directory browser | Require host access. A mounted root is readable in full, so mounting is a host action. |
+| OMP, factory, Neovim, mounting/cloning roots, directory browser, redeploy | Require host access. A mounted root is readable in full, so mounting is a host action. |
 | Ordinary file access | Restrict to that user's registered mounted roots and admitted linked worktrees |
 | Host-access file content | Allow outside mounts only under the service user's home directory, retaining credential-store protection. Unreadable files return 403, not 500. |
 | Git/tree/worktree endpoints | Require a mounted/admitted root. Host-gated factory diff explicitly admits linked git worktrees without mounting the repo. |
@@ -72,14 +72,23 @@ change log + SSE        LikeC4  omp-web   factory
 | Uploads, PDF library, extracted Markdown/images | PostgreSQL asset records. PDF/MinerU files also have a convenience filesystem mirror, never read back as canonical data. |
 | Mounted file contents | Original disk files. Projects/attachments reference them rather than creating independently editable copies. |
 | Architecture | Linked clone `docs/architecture/` when present, otherwise PostgreSQL `graph/<slug>/` |
-| Diff notes/layout, per-device preferences | Browser-local state, not shared database artifacts |
+| Diff notes/layout, per-device preferences, archived Code directories | Browser-local state, not shared database artifacts |
+| PDF annotations | Canvas document `pdf-annotation/<sha256>.canvas`, keyed by the PDF bytes' SHA-256. `POST /api/fileviewer/annotations` creates it empty on first use. Every copy of the same bytes shares annotations, renames keep them, changed bytes start a fresh canvas. Strokes sync through the collaborative canvas path. |
 
 - Keep logical namespaces independent of the physical Documents layout. Validate storage keys against absolute paths and traversal.
 - Scope `PostgresDataStore`, assets, projects, file-root registry, and other domain dependencies to authenticated users.
 - Check expected revisions on conditional writes. PostgreSQL `apply(writes, deletes)` is atomic: one stale revision aborts the whole batch, deletes included.
+- Read several documents with `DataStore.read_many` (one query) instead of a read per key: chat indexes, branch metadata, project listings, and prompt libraries depend on it. Content columns (`documents`, `assets`) are fetched in binary result format, half the bytes of hex text.
 - Keep development/production PostgreSQL containers and volumes separate. Their default Documents/PDF mirror is intentionally shared. Back up both database and mirror, not only code worktrees.
-- Load user model defaults from persistent provider configuration. Seed shipped prompts only for an uninitialized collection, never overwrite an existing collection or restore deliberately deleted defaults.
+- Load user model defaults from persistent provider configuration. Seed shipped prompts only for an uninitialized collection, never overwrite an existing collection or restore deliberately deleted defaults. `get_prompt_store` checks each user's collection once per process, later prompt requests skip the check.
 - Apply numbered `db/schema/` steps under a PostgreSQL advisory transaction lock. Record checksums in `applied_schema_steps`, reject modified applied steps, and apply pending steps in one transaction. Add migrations rather than rewriting applied history.
+
+### Project rename and archive
+
+- `ProjectStore.update_project` slugifies a new name. Same slug only renames, another slug runs `PostgresProjectRenamer` in one transaction; an existing destination raises `StorageConflictError`.
+- The rename moves document and asset keys under `chat/`, `project/`, `graph/`, `memory/project/`, `attachment/project/`, rewrites slug/history fields and app-relative links inside JSON/`.md`/`.txt`/`.c4`/`.canvas`/`.snap` documents of app namespaces, and rewrites canvas mutation values. Prose, absolute disk paths and similarly named projects stay unchanged. Every move records change rows.
+- A disk folder linked by the old slug's folder name stays linked through `linked_root` in `project.json`.
+- `archived` is a catalog flag (`PATCH /api/projects/{slug}`) that hides the project from the sidebar. Archiving Code directories is per device (`localStorage` `archived_code_directories`). OMP session archive/restore goes through omp-web.
 
 ### Change delivery and canvases
 
@@ -88,7 +97,7 @@ committed user write -> durable changes row -> PostgreSQL NOTIFY
   -> process ChangeBroker -> user-scoped SSE -> resource-specific refetch
 ```
 
-- Resume `/api/sync/stream?since=<seq>` from the applied sequence. Subscribe before replay and suppress overlap to avoid missing concurrent commits.
+- Resume `/api/sync/stream?since=<seq>` from the applied sequence. Subscribe before replay and suppress overlap to avoid missing concurrent commits. Replay (`changes.latest_changes`) sends only the latest change per resource, since clients reload by resource.
 - Send metadata, not document contents. Bound subscriber queues, close lagging streams, and recover through durable replay.
 - Keep `.canvas` snapshots in documents and accepted mutation batches in `canvas_mutations`.
 - Serialize canvas writers with a document row lock. Apply snapshot/log/change-row updates transactionally, deduplicate mutation IDs, and replay accepted batches by revision.
@@ -100,7 +109,7 @@ committed user write -> durable changes row -> PostgreSQL NOTIFY
 | --- | --- |
 | Chat stream | `/api/chat` SSE carries tokens, usage/tool events, completion, and failures. Keep proxy buffering disabled for streaming. |
 | Project context | Bind memory scope to the chat's containing project/tab, not the project selected elsewhere. Support branch/merge histories: branch, merge, move and (cascade) delete commit all their chat and `project.json` writes and deletes in one unguarded `DataStore.apply` transaction, upload cleanup runs after it. |
-| Providers | LiteLLM routes cloud/local calls, including the configured OMP model source. Use stored model defaults, not hard-coded production models. |
+| Providers | LiteLLM routes cloud/local calls, including the configured OMP model source. Use stored model defaults, not hard-coded production models. `lib/llm_resilience.py` retries a call once with `allowed_openai_params` when stale LiteLLM metadata rejects parameters. |
 | Search | Brave LLM Context retrieves passages with backend-only `BRAVE_API_KEY`, then the selected model generates cited answers. |
 | Research | GPT-Researcher uses its DuckDuckGo retriever for multi-step research. Serialize runs with `RESEARCH_ENV_LOCK` because model/reasoning configuration temporarily changes process-wide environment, restoring it and deleting temporary config afterward. |
 | Sandboxed tools | Agents-in-a-box executes workspace code and image-based plot tasks. Distinguish this execution service from the external task factory. |
@@ -114,7 +123,7 @@ committed user write -> durable changes row -> PostgreSQL NOTIFY
 
 ### Sandbox checkpoint boundary
 
-- Keep workspace-agent and plot slots scoped by user, chat, and sandbox scope. `SandboxRuntimeState` survives request-scoped service facades within one backend process and serializes each slot, not all chats. Uncheckpointed state is not shared across worker processes or recovered after process loss.
+- Keep workspace-agent and plot slots scoped by user, chat, and sandbox scope. `SandboxRuntimeState` survives request-scoped service facades within one backend process and serializes each slot, not all chats. Uncheckpointed state is not shared across worker processes or recovered after process loss. Checkpoints and `delete_chat_state` run their store IO in a worker thread while holding the slot lock and `SandboxRuntimeState.assets_lock`, so asset garbage collection never sees a half-written checkpoint. Its asset deletes stay on the event loop, atomic with runs staging outputs there.
 - Persist rich output assets immediately, but stage the latest workspace archive/manifest in memory. `routes/histories.py` checkpoints that workspace only after saving the corresponding chat successfully. Do not treat a finished tool call as a durable workspace checkpoint. `SandboxStore.checkpoint` writes the slot, manifest, active pointer and every run record in one `DataStore.apply` transaction; `recover_completed_run` only heals records written before that.
 - Reuse completed `tool_call_id` results. Refuse a still-running record as busy, allow abandoned records older than five minutes to run again, and release native run/restore resources even on cancellation.
 
@@ -130,6 +139,12 @@ committed user write -> durable changes row -> PostgreSQL NOTIFY
 - Key the per-user PDF library by filename (`PDFs/<name>`) and extraction by filename stem (`Mineru/<stem>.md`, `Mineru/images/<stem>/`). Reusing a filename replaces that library entry, not a second independent document.
 - Keep pasted images, drawings, canvas images, and architecture source attachments as snapshots. Reattach for later changes.
 - Use `MINERU_SERVER_URL` for external OCR. Without it, the backend can spawn local MinerU per parse.
+
+### PDF viewer, annotations and assistant
+
+- `features/editor/pdf/AnnotatedPdfViewer.tsx` draws pen/highlighter strokes anchored to pages (page units, margins allowed), reusing canvas ink, history and collaboration. Save failures show as unsaved. The PDF starts loading alongside the annotation key request, ink joins the same viewer once the key arrives.
+- `GET /api/fileviewer/raw` sends `ETag` with `Cache-Control: private, no-cache`: a reopened, unchanged file answers 304 from metadata (asset `sha256`, document version and `updated_at`, host file stat). Stored files serve single byte ranges sliced in Postgres, so pdf.js fetches the pages it renders first. The CORS middleware exposes `Accept-Ranges` and `Content-Range` for split-origin deployments. `POST /api/fileviewer/annotations` hashes without loading the PDF: assets keep their `sha256`, documents are hashed in the database.
+- `PdfAssistant.tsx` chats about a PDF in the tab's file panel. Its system prompt embeds the MinerU Markdown, only for mounted (`/…`) and library (`PDFs/…`) PDFs, polled every 5 seconds while extraction runs. Selection questions add the selected passage and page. History lives only as long as the component, it is not a saved chat.
 
 ## Architecture workspaces
 
@@ -161,6 +176,7 @@ diagram / source edit -> serialized frontend reads/writes -> architecture route
 
 - Manage mounted git clones through `/api/fileroots/worktrees` and its operation endpoints.
 - `POST /api/fileroots/clone` clones an https/ssh link into `~/git/<repo>` (`git_worktree.clone_repository`, link validated by regex, `--` before the URL) and mounts it. It is not gated to mounted roots, since it creates one.
+- Remote git operations run non-interactively (`GIT_TERMINAL_PROMPT=0`) with `ssh -F ~/.ssh/config` (or `/dev/null`) to skip `/etc/ssh`, which the service sandbox's user namespace makes unreadable. An explicit `GIT_SSH_COMMAND` wins.
 
 | Concern | Contract |
 | --- | --- |
@@ -243,6 +259,7 @@ Encode one payload as `?open=<base64url JSON>`:
 - Run one `nvim -n` PTY per document through `WS /api/neovim/session`, rendered by xterm.js. Edit a private temporary copy, start in the innermost containing mount or home for database documents.
 - Route `:w` through RPC to the browser's normal document API, including architecture validation. Replace the buffer with stored text if rewritten. Leave modified on failure. The temporary copy is not canonical storage.
 - Terminate/remove the copy on `:q`, document close, or disconnect. Unsaved edits are unrecoverable. Preserve the session across preview/fullscreen switches. Terminal focus owns all keys, including Escape.
+- Yanks reach the browser clipboard: a `TextYankPost` autocmd notifies over RPC, the socket sends `{"type":"yank"}`, the browser writes it best effort.
 - Treat as host code execution. Match WebSocket origins to `GIGACHAD_CORS_ORIGINS`, or loopback for development `*`.
 
 ## Memory and deletion semantics
@@ -264,3 +281,8 @@ Encode one payload as `?open=<base64url JSON>`:
 - Serve `GET /api/provider-usage` from `omp usage --json` through `lib/provider_usage.py`. Cache for five minutes, invalidate OMP's cache first for `?refresh=true`.
 - Return 502 for missing/failing OMP. Reuse last reports for dropped providers for up to an hour, adjusting reset times. Report unavailable accounts without retained reports explicitly.
 - Summarize five-hour limits and expose other provider windows. Never substitute weekly values for missing five-hour limits.
+
+## Production redeploy
+
+- `POST /api/deploy/redeploy` (host access, settings menu) starts `redeploy.sh` as transient user unit `gigachad-bot-redeploy` via `systemd-run`, so restarting the backend does not kill it. Returns 202, or 409 with stderr while one runs or when the start fails.
+- The script rebases the production worktree onto `origin/master`, refusing tracked changes, and restarts `gigachad-bot.service` from a clean environment. It then moves omp-web to `origin/custom`, refusing a fork whose `EMBED_PROTOCOL_VERSION` differs, never restarting it while an OMP session runs, and restarts its gate. Steps and rollback: [deployment](deployment.md).

@@ -1,6 +1,4 @@
-Generated from d6bc359 on 2026-10-22
-
-Working-tree caveat: generated from the inspected working tree, including uncommitted documentation migration, README, and instruction updates. The revision identifies the source baseline, not a reproducible committed snapshot.
+Generated from 9f773d5 on 2026-10-27
 
 # Module map
 
@@ -27,7 +25,8 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |-- 0002_change_notify.sql    Change notification trigger
 |       |-- 0004_canvas_mutation_log.sql
 |       |-- 0005_canvas_shares.sql
-|       `-- 0007_model_reasoning_levels.sql
+|       |-- 0007_model_reasoning_levels.sql
+|       `-- 0010_memory_topics.sql    Memory topics migration
 |-- src/
 |   |-- config.py                     Env-derived backend settings (imports nothing from lib)
 |   |-- backend/
@@ -37,6 +36,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- sync.py                   PostgreSQL notification broker
 |   |   |-- omp_web_gate.py           Identity-checking frame proxy
 |   |   |-- install_deps.py           gigachad-install entry point
+|   |   |-- sidecar.py                Desktop (Tauri) entry: prints `{"event":"ready","port":…}` once FastAPI listens
 |   |   `-- routes/                   HTTP, SSE and WebSocket boundaries
 |   |       |-- deps.py               Identity-scoped store/service injection
 |   |       |-- schemas.py            Shared file-route request/response models
@@ -60,6 +60,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |       |-- sync.py               Durable change-log SSE
 |   |       |-- omp.py                omp-web API boundary
 |   |       |-- factory.py            Agent factory API boundary
+|   |       |-- deploy.py             Host-gated production redeploy trigger
 |   |       `-- upstream.py           Host-access dependency and adapter error mapping
 |   |-- lib/                          Python domain services, stores and external adapters
 |   |   |-- data_store.py             Storage contract, logical keys and errors
@@ -115,6 +116,9 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |   |-- omp_web.py                omp-web URL/response-contract owner
 |   |   |-- factory.py                External factory engine adapter
 |   |   |-- upstream.py               Shared server-to-server request/validation plumbing, `UpstreamClient`
+|   |   |-- llm_resilience.py         One retry for stale LiteLLM parameter rejections, `completion_text`
+|   |   |-- omp_cli.py                `run_omp`: one runner for the `omp` CLI
+|   |   |-- naming.py                 `slugify` for project slugs
 |   |   |-- ttl_cache.py              Lock-free single-value TTL cache
 |   |   |-- provider_usage.py         OMP subscription usage reader/cache
 |   |   |-- neovim_session.py         Neovim PTY/process lifecycle
@@ -147,6 +151,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |       |-- WorkspaceSurface.tsx Per-mode table of top-bar controls and surface body
 |       |       |-- useTabChat.ts     Tab chat hooks, kept mounted in every mode
 |       |       |-- deepLink.ts       Preview/open-target parsing
+|       |       |-- DesktopBackendProvider.tsx Tauri-only API base discovery
 |       |       `-- MemoryCommandLayer.tsx
 |       |-- features/                 Domain-owned interactive surfaces
 |       |   |-- chat/                 Turns, attachments, persistence and streaming
@@ -161,7 +166,9 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- useRootFileDocument.ts Load, dirty, remote reload and chained saves of one file, codec-aware
 |       |   |   |-- useDebouncedSave.ts Quiet-time autosave plus unmount and forced flush
 |       |   |   |-- FileViewer.tsx
+|       |   |   |-- FilePanel.tsx     Per-tab side panel slot (Neovim, PDF assistant), one owner at a time
 |       |   |   |-- NeovimEditor.tsx
+|       |   |   |-- pdf/              AnnotatedPdfViewer (ink over pages), pdfInk.ts, PdfAssistant (MinerU-grounded chat)
 |       |   |   |-- architecture/     LikeC4 graph/source editing
 |       |   |   |   `-- ArchitectureWindow.tsx
 |       |   |   |-- canvas/           Canvas entities, collaboration, history and camera
@@ -181,6 +188,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- workspaceTree.ts  Pure Projects and Code tree builders
 |       |   |   |-- useWorkspaceDocuments.ts, useCodeMounts.ts, useProjectActions.ts
 |       |   |   |-- TabManager.tsx    Tab state provider; tabs.ts pure helpers, useWorkspaceSwitch.ts, TabSwitcher.tsx
+|       |   |   |-- ArchiveSelector.tsx, useArchivedDirectories.ts Restore archived projects/Code directories
 |       |   |   `-- useWorktrees.tsx
 |       |   |-- omp/                  Single-frame surface, bridge, composer and sessions
 |       |   |   |-- OmpProvider.tsx
@@ -215,6 +223,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   `-- file-tree/        Shared file tree component and hook
 |       |   `-- content/              Markdown, code, PDF and plot rendering
 |       |       |-- LaTeXMarkdown.tsx Markdown renderer shell
+|       |       |-- AssistantChat.tsx Ephemeral side chat shared by the editor sidebar and PDF assistant
 |       |       |-- diagrams/         MermaidDiagram, MarkmapDiagram, CitationPill
 |       |       |-- PdfViewer.tsx     PDF viewer orchestrator plus PdfPages
 |       |       |-- pdf/              Page slots, page window, zoom, zoom controls, layout and canvas helpers
@@ -263,7 +272,9 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |   |-- test_file_roots.py
 |   `-- test_omp_web.py
 |-- scripts/
-|   `-- setup-postgres.sh              PostgreSQL setup helper
+|   |-- setup-postgres.sh              PostgreSQL setup helper
+|   `-- build-tauri-linux.sh           Desktop sidecar/AppImage build (expects absent `src/frontend/src-tauri/`)
+|-- redeploy.sh                       Production rebase/restart, also for omp-web and its gate
 |-- run.sh                            Development launcher composition
 |-- run-backend.sh                    Backend and LikeC4 launch/setup
 |-- run-frontend.sh                   Frontend launch/setup
@@ -275,6 +286,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
     |-- gigachad-bot.service
     |-- gigachad-bot-omp-web-gate.service
     |-- gigachad-bot-factory.service
+    |-- lib.sh                        Shared launcher helpers (ports, waits, deps, secrets, Postgres profile)
     |-- install-systemd-service.sh
     |-- load-env.sh                   Literal runtime configuration loader
     `-- tailscale-serve.sh
@@ -326,13 +338,13 @@ Full paths are repository-relative. Abbreviated sibling filenames share the prec
 | Chat generation, streaming or tool behavior | `src/backend/routes/chat.py`, `src/lib/toolcalling.py`, `src/lib/tools.py` | `src/frontend/features/chat/useChatStream.ts`, `useChat.ts`; `tests/test_toolcalling.py`, `tests/test_builtin_tools.py`, `tests/test_sandbox_plot.py`, `tests/test_chat_route.py`, chat `__tests__/useChatStream.test.tsx` |
 | Chat save, branches or merge | `src/lib/chat_store.py`, `src/backend/routes/histories.py` | `features/chat/useChatPersistence.ts`, `features/navigation/BranchContext.tsx`; `tests/test_histories.py`, `tests/test_chat_store_message_preservation.py` |
 | Attachment live references, uploads or PDF extraction | `src/frontend/features/chat/attachments.ts`, `src/lib/attachments.py`, `attachment_materialize.py`, `extract_queue.py`, `mineru.py` | `src/backend/routes/files.py`, `documents.py`, `file_attach.py`; `tests/test_attachment_materialize.py`, `tests/test_extract_queue.py`, `tests/test_upload_assets.py`, chat `__tests__/attachments.test.ts` |
-| Text/PDF/plot viewing or editing | `src/frontend/features/editor/DocumentEditor.tsx`, `FileViewer.tsx`, `src/frontend/components/content/` | `src/backend/routes/documents.py`, `src/lib/document_service.py`, `fileviewer.py`; `tests/test_document_state.py`, editor/content `__tests__/` |
+| Text/PDF/plot viewing or editing | `src/frontend/features/editor/DocumentEditor.tsx`, `FileViewer.tsx`, `features/editor/pdf/`, `src/frontend/components/content/` | `src/backend/routes/documents.py`, `src/lib/document_service.py`, `fileviewer.py` (PDF annotation canvas key); `tests/test_document_state.py`, `tests/test_postgres_mode_end_to_end.py`, editor/content `__tests__/` |
 | Collaborative canvas or canvas entity shape | `src/frontend/features/editor/canvas/`, `src/frontend/lib/domain/canvasDocument.ts` | `src/lib/canvas_store.py`, `routes/canvases.py`, `lib/backend/canvasStream.ts`; `tests/test_canvas_mutations.py`, canvas `__tests__/` |
 | Architecture syntax edits, diagram or layout | `src/c4/ops/`, `workspace.ts`, `payload.ts`, `layout.ts`; `src/frontend/features/editor/architecture/` | `src/lib/architecture_workspace.py`, `architecture_service.py`, `c4_service.py`, `src/backend/routes/architecture.py`; `src/c4/operations.test.ts`, `tests/test_architecture_workspace.py` |
 | Mount browsing or filesystem access policy | `src/lib/file_roots.py`, `host_access.py`, `file_walk.py`, `src/backend/routes/file_roots.py` | `features/navigation/FileMountPicker.tsx`, `components/ui/file-tree/`; `tests/test_file_roots.py` |
 | Git diffs, review drafts or worktree switching | `src/lib/git_diff.py`, `git_worktree.py`; `src/frontend/features/editor/diff/`, `features/navigation/useWorktrees.tsx` | `src/backend/routes/file_git.py`; `tests/test_git_diff.py`, `tests/test_git_worktree.py`, diff `__tests__/` |
 | Neovim editing or terminal save bridge | `src/lib/neovim_session.py`, `neovim_rpc.py`, `src/backend/routes/neovim.py`, `src/frontend/features/editor/NeovimEditor.tsx` | `tests/test_neovim.py`; filesystem/identity policy stays with its existing owners |
-| Projects, kanban or persisted tabs | `src/lib/project_store.py`, `src/backend/routes/projects.py`, `src/frontend/features/projects/` | `src/frontend/contexts/ProjectContext.tsx`, `features/navigation/TabManager.tsx`; `tests/test_document_state.py`, projects/context `__tests__/` |
+| Projects, kanban, rename, archive or persisted tabs | `src/lib/project_store.py`, `project_rename.py`, `src/backend/routes/projects.py`, `src/frontend/features/projects/` | `src/frontend/contexts/ProjectContext.tsx`, `features/navigation/TabManager.tsx`, `useProjectActions.ts`; `tests/test_document_state.py`, `tests/test_project_rename.py`, projects/context `__tests__/` |
 | Memory extraction/review/scope | `src/lib/memory_store.py`, `memory_extract.py`, `memory_context.py`, `src/backend/routes/memory.py`, `src/frontend/features/memory/` | Chat request project scope and `src/frontend/contexts/ProjectContext.tsx` |
 | Model providers, reasoning or prompts | `src/lib/model_provider_store.py`, `reasoning_levels.py`, `prompt_store.py`, `src/backend/routes/models.py`, `src/frontend/features/settings/` | `prompts/` for user seeds, `src/lib/prompts/` for internal instructions; `tests/test_model_provider_store.py`, `tests/test_reasoning_levels.py` |
 | Provider usage or OMP model gateway | `src/lib/provider_usage.py`, `omp_source.py`, `src/frontend/features/navigation/ProviderUsage.tsx` | `src/backend/routes/models.py`, `run-omp.sh`; `tests/test_provider_usage.py`, `tests/test_omp_source.py` |
@@ -340,6 +352,7 @@ Full paths are repository-relative. Abbreviated sibling filenames share the prec
 | Factory tasks, review submission or preview UI | `src/lib/factory.py`, `src/backend/routes/factory.py`, `src/frontend/features/factory/` | `src/frontend/features/editor/diff/review.ts`, `app/_components/deepLink.ts`, `factory.yaml`; `tests/test_factory.py`, factory/diff `__tests__/` |
 | Sandbox execution or durable rich outputs | `src/lib/agent_sandbox_adapter.py`, `fake_sandbox_runner.py`, `sandbox_service.py`, `sandbox_store.py`, `sandbox_plot.py` | `src/lib/tools.py`, chat message renderers; `tests/test_sandbox_service.py`, `tests/test_sandbox_runtime_state.py`, `tests/test_sandbox_native_runs.py`, `tests/test_agent_sandbox_adapter.py` |
 | Identity, host capability or ingress | `src/backend/identity.py`, `routes/upstream.py`, `omp_web_gate.py`, `src/config.py` | `deploy/`; `tests/test_identity.py`, `tests/test_omp_web_gate.py` |
+| Production redeploy | `redeploy.sh`, `src/backend/routes/deploy.py`, `features/settings/SettingsMenu.tsx` | `deploy/lib.sh`, `.docs/deployment.md` |
 | Storage schema, change streams or API transport | `db/schema/`, `src/lib/db_schema.py`, `postgres_data_store.py`, `asset_store.py`; `src/backend/sync.py` | `routes/sync.py`, `src/frontend/lib/backend/`; `tests/test_data_store_conformance.py`, `tests/test_sync.py`, `tests/test_postgres_mode_end_to_end.py` |
 | Reusable interaction or content rendering | `src/frontend/components/ui/`, `components/content/`, `hooks/`, `packages/chat-ui/` | Colocated `__tests__/`; preserve feature-independent imports and package distribution boundaries |
 
@@ -352,6 +365,6 @@ Full paths are repository-relative. Abbreviated sibling filenames share the prec
 
 ## Refresh evidence and scope
 
-- Refresh with Repomix 1.18.0 compressed, parsable XML, default ignore filtering and security scanning enabled. The inspected final inventory contains 428 files across backend routes/services, browser features/shared layers/package, LikeC4, schemas, launchers, deployment, prompts, maintained docs, and Python/browser/service regressions.
-- Exclude only these three generated context docs from documentation inputs. Retain maintained guidance through the [repository documentation index](../AGENTS.md#documentation). Exclude dependencies, outputs/caches, public/generated assets, fonts, lockfile bodies, credentials/runtime state, prior packs, and unsupported integration remnants from architecture evidence.
+- Refresh with Repomix 1.18.0 compressed, parsable XML, default ignore filtering and security scanning enabled. The inspected final inventory contains 620 files across backend routes/services, browser features/shared layers/package, LikeC4, schemas, launchers, deployment, prompts, maintained docs, and Python/browser/service regressions.
+- Exclude only these three generated context docs from documentation inputs. Retain maintained guidance through the [repository documentation index](../AGENTS.md#documentation). Exclude dependencies, lockfile bodies, public assets, fonts, images, caches and Tauri build output. The Tauri host project (`src/frontend/src-tauri/`) is not in the repository, only its sidecar entry, provider and build script.
 - Treat compressed declarations as navigation evidence, not proof of behavior. Check original implementations for persistence authority, revision conflicts, access precedence, capability flags, integration defaults/errors, environment loading, and sandbox checkpoints. External engine/fork internals and deployed service behavior are outside this source refresh.

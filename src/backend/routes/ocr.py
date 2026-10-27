@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
@@ -19,10 +21,12 @@ class OCRRequest(BaseModel):
 @router.post("/ocr")
 async def ocr(req: OCRRequest, store: ModelProviderStore = Depends(get_model_provider_store)) -> EventSourceResponse:
     """Stream OCR text and LaTeX from an image as SSE, defaulting to the configured vision model."""
+    # The defaults read blocks on Postgres, so it runs off the event loop.
+    model = req.model or (await asyncio.to_thread(store.load_defaults))["vision_model"]
     with request_client() as c:
         return await stream_completion(
             c,
-            model=req.model or store.load_defaults()["vision_model"],
+            model=model,
             user_msg="Extract all text and LaTeX from this image.",
             system_prompt=SYS_OCR_TEXT_EXTRACTION,
             img=decode_image(req.img_base64),

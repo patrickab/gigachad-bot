@@ -7,6 +7,7 @@ reads back. This module is the one place that writes those namespaces.
 """
 
 from functools import partial
+import hashlib
 import logging
 from pathlib import Path
 
@@ -39,18 +40,15 @@ def store_library_pdf(assets: AssetStore, name: str, content: bytes) -> Asset:
     return asset
 
 
-def _library_pdf(assets: AssetStore, name: str) -> Asset | None:
-    """The library copy of the PDF *name*, or None when it is not stored."""
-    try:
-        return assets.read(library_pdf(name))
-    except StorageNotFoundError:
-        return None
+def _library_pdf_sha256(assets: AssetStore, name: str) -> str | None:
+    """The stored hash of the library PDF *name*, read without its content, or None when it is not stored."""
+    stored = assets.stat(library_pdf(name))
+    return None if stored is None else stored.sha256
 
 
 def sync_library_pdf(assets: AssetStore, name: str, content: bytes) -> None:
     """Make the library copy of the PDF *name* equal *content*, dropping its cached extraction when it changed, so the next `materialize` re-extracts."""
-    stored = _library_pdf(assets, name)
-    if stored is not None and stored.content == content:
+    if _library_pdf_sha256(assets, name) == hashlib.sha256(content).hexdigest():
         return
     store_library_pdf(assets, name, content)
     images = assets.list(f"{library_images_prefix(pdf_stem(name))}/")
@@ -72,11 +70,19 @@ def store_library_output(assets: AssetStore, stem: str, md_path: Path, images_di
 
 def _store_extraction(assets: AssetStore, name: str, content: bytes, stem: str, md_path: Path, images_dir: Path) -> None:
     """Persist a background parse of *content*, unless the library copy of the PDF *name* changed meanwhile."""
-    stored = _library_pdf(assets, name)
-    if stored is not None and stored.content != content:
+    stored = _library_pdf_sha256(assets, name)
+    if stored is not None and stored != hashlib.sha256(content).hexdigest():
         log.info("Discarding extraction of %s: the PDF changed meanwhile", name)
     else:
         store_library_output(assets, stem, md_path, images_dir)
+
+
+def cached_markdown(assets: AssetStore, name: str) -> str | None:
+    """This user's cached MinerU markdown for the PDF *name*, or None when it is not extracted yet."""
+    try:
+        return (assets.read(library_markdown(pdf_stem(name))).content or b"").decode("utf-8")
+    except StorageNotFoundError:
+        return None
 
 
 def materialize(name: str, content: bytes, assets: AssetStore, *, enqueue_on_miss: bool = True) -> str | None:
@@ -85,9 +91,7 @@ def materialize(name: str, content: bytes, assets: AssetStore, *, enqueue_on_mis
     A miss queues background extraction unless *enqueue_on_miss* is False
     (for callers that parse synchronously). *content* is all extraction needs.
     """
-    try:
-        return (assets.read(library_markdown(pdf_stem(name))).content or b"").decode("utf-8")
-    except StorageNotFoundError:
-        if enqueue_on_miss:
-            extract_queue.enqueue(name, content, partial(_store_extraction, assets, name, content))
-        return None
+    markdown = cached_markdown(assets, name)
+    if markdown is None and enqueue_on_miss:
+        extract_queue.enqueue(name, content, partial(_store_extraction, assets, name, content))
+    return markdown

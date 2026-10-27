@@ -7,7 +7,7 @@ import re
 from typing import Any, Callable
 import uuid
 
-from lib.data_store import DataStore, Revision, validate_key
+from lib.data_store import DataStore, Entry, Revision, validate_key
 from lib.json_docs import JsonDocs
 from lib.storage_namespace import CHAT, MEMORY, META_JSON, PROJECT_JSON, project_dir, project_json
 
@@ -99,13 +99,15 @@ class ChatStore:
         """Key of the chat with this ID, building the index on first use."""
         if self._chat_id_index is None:
             self._chat_id_index = {}
-            for entry in self._docs.list(CHAT, recursive=True):
-                if entry.is_dir or not _is_chat_file(PurePosixPath(entry.key).name):
-                    continue
-                raw = self._docs.read(entry.key)
+            for key, raw in self._docs.read_many(self._chat_keys(self._docs.list(CHAT, recursive=True))).items():
                 if isinstance(raw, dict) and raw.get("chat_id"):
-                    self._chat_id_index[raw["chat_id"]] = entry.key
+                    self._chat_id_index[raw["chat_id"]] = key
         return self._chat_id_index.get(chat_id)
+
+    @staticmethod
+    def _chat_keys(entries: Sequence[Entry]) -> list[str]:
+        """Keys of the chat files among *entries*, in listing order."""
+        return [e.key for e in entries if not e.is_dir and _is_chat_file(PurePosixPath(e.key).name)]
 
     def invalidate_index(self) -> None:
         self._chat_id_index = None
@@ -359,10 +361,7 @@ class ChatStore:
     def chat_ids_in(self, slug: str) -> list[str]:
         """Chat IDs of every chat file in project *slug*, for cleanup before its directory is removed."""
         chat_ids: list[str] = []
-        for entry in self._docs.list(project_dir(slug), recursive=True):
-            if entry.is_dir or not _is_chat_file(PurePosixPath(entry.key).name):
-                continue
-            raw = self._docs.read(entry.key)
+        for raw in self._docs.read_many(self._chat_keys(self._docs.list(project_dir(slug), recursive=True))).values():
             chat_id = raw.get("chat_id") if isinstance(raw, dict) else None
             if isinstance(chat_id, str) and chat_id:
                 chat_ids.append(chat_id)
@@ -380,17 +379,19 @@ class ChatStore:
 
     def _scan_dir_for_meta(self, root: str, rel_prefix: str = "") -> dict[str, dict[str, Any]]:
         """Per-chat tree metadata keyed by path. Prunes dead children from chat files as a side effect."""
-        # One recursive listing, one read per chat. Chat IDs read here vouch for their own
+        # One recursive listing and one batch read. Chat IDs read here vouch for their own
         # existence, so pruning only falls back to the full index for genuinely missing children.
         root_prefix = f"{root}/"
-        loaded: dict[str, tuple[str, Chat | None]] = {}
+        paths: dict[str, str] = {}
         for entry in sorted(self._docs.list(root, recursive=True), key=lambda e: e.key):
             if entry.is_dir:
                 continue
             rel = PurePosixPath(entry.key.removeprefix(root_prefix))
             if not _is_chat_file(rel.name) or rel.name.startswith("_") or _in_hidden_dir(rel.parts[:-1]):
                 continue
-            loaded[f"{rel_prefix}{rel}"] = (entry.key, self._read(entry.key))
+            paths[f"{rel_prefix}{rel}"] = entry.key
+        raws = self._docs.read_many(paths.values())
+        loaded = {rel: (key, None if raws[key] is None else Chat.from_raw(raws[key])) for rel, key in paths.items()}
         known = {chat.chat_id for _, chat in loaded.values() if chat and chat.chat_id}
         return {rel: self._extract_meta(key, chat, known) for rel, (key, chat) in loaded.items()}
 

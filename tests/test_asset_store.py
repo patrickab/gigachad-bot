@@ -1,3 +1,4 @@
+from dataclasses import replace
 import hashlib
 from uuid import uuid4
 
@@ -132,3 +133,16 @@ def test_mirror_rejects_non_pdf_and_non_mineru_assets(asset_store, tmp_path):
         asset_store.mirror(drawing, tmp_path)
 
     assert list(tmp_path.iterdir()) == []
+
+
+def test_stat_and_read_range_leave_the_content_in_the_database(asset_store):
+    content = b"%PDF-1.7 " + bytes(range(256))
+    written = asset_store.write("pdf", "PDFs/paper.pdf", content)
+
+    stat = asset_store.stat("PDFs/paper.pdf")
+
+    assert stat == replace(written, content=None)
+    assert asset_store.stat("PDFs/missing.pdf") is None
+    assert asset_store.read_range("PDFs/paper.pdf", 9, 4) == content[9:13]
+    with pytest.raises(StorageNotFoundError):
+        asset_store.read_range("PDFs/missing.pdf", 0, 1)

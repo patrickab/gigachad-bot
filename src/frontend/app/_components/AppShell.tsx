@@ -25,9 +25,15 @@ function ProjectListSync() {
   const { branchMeta } = useBranches()
   const { refreshProjects } = useProject()
   const seen = useRef(branchMeta)
+  // The project list's own startup read already reflects the first branch metadata load.
+  const startup = useRef(true)
   useEffect(() => {
     if (seen.current === branchMeta) return
     seen.current = branchMeta
+    if (startup.current) {
+      startup.current = false
+      return
+    }
     void refreshProjects().catch(() => {})
   }, [branchMeta, refreshProjects])
   return null

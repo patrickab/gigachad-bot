@@ -58,10 +58,10 @@ def bob(postgres_pool):
     return Stores(postgres_pool, "bob@example.test")
 
 
-async def test_writing_a_project_document_registers_it_in_database(alice, documents_root):
+def test_writing_a_project_document_registers_it_in_database(alice, documents_root):
     slug = alice.projects.create_project("Thesis")["slug"]
 
-    meta = await route.write_document(
+    meta = route.write_document(
         route.WriteDocumentRequest(slug=slug, name="spec.md", content="# spec"), alice.projects, alice.docs, alice.assets
     )
 
@@ -71,12 +71,12 @@ async def test_writing_a_project_document_registers_it_in_database(alice, docume
     assert written_files(documents_root) == []
 
 
-async def test_writing_a_document_refreshes_the_chat_upload_copies(alice):
+def test_writing_a_document_refreshes_the_chat_upload_copies(alice):
     slug = alice.projects.create_project("Thesis")["slug"]
     alice.assets.write("upload", f"attachment/project/{slug}/chat/chat-1/spec.md", b"stale")
     alice.assets.write("upload", f"attachment/project/{slug}/chat/chat-1/other.md", b"untouched")
 
-    await route.write_document(
+    route.write_document(
         route.WriteDocumentRequest(slug=slug, name="spec.md", content="fresh"), alice.projects, alice.docs, alice.assets
     )
 
@@ -84,13 +84,13 @@ async def test_writing_a_document_refreshes_the_chat_upload_copies(alice):
     assert alice.assets.read(f"attachment/project/{slug}/chat/chat-1/other.md").content == b"untouched"
 
 
-async def test_move_relocates_the_document_key_leaving_nothing_behind(alice):
+def test_move_relocates_the_document_key_leaving_nothing_behind(alice):
     slug = alice.projects.create_project("Thesis")["slug"]
-    await route.write_document(
+    route.write_document(
         route.WriteDocumentRequest(slug="", name="sketch.canvas", content="{}"), alice.projects, alice.docs, alice.assets
     )
 
-    meta = await route.move_document(
+    meta = route.move_document(
         route.MoveDocumentRequest(path="note/sketch.canvas", from_slug="", to_slug=slug),
         alice.projects,
         alice.docs,
@@ -103,13 +103,13 @@ async def test_move_relocates_the_document_key_leaving_nothing_behind(alice):
 
 
 
-async def test_rename_keeps_project_document_content_and_extension(alice):
+def test_rename_keeps_project_document_content_and_extension(alice):
     slug = alice.projects.create_project("Thesis")["slug"]
-    await route.write_document(
+    route.write_document(
         route.WriteDocumentRequest(slug=slug, name="mindmap.md", content="# Mind map"), alice.projects, alice.docs, alice.assets
     )
 
-    meta = await route.rename_document(
+    meta = route.rename_document(
         route.RenameDocumentRequest(path=f"project/{slug}/document/mindmap.md", slug=slug, name="Research map"),
         alice.projects,
         alice.docs,
@@ -122,14 +122,14 @@ async def test_rename_keeps_project_document_content_and_extension(alice):
     assert alice.projects.list_files(slug) == [meta.path]
 
 
-async def test_rename_keeps_pdf_content_and_updates_every_project_reference(alice, documents_root):
+def test_rename_keeps_pdf_content_and_updates_every_project_reference(alice, documents_root):
     first = alice.projects.create_project("First")["slug"]
     second = alice.projects.create_project("Second")["slug"]
     original = attachment_materialize.store_library_pdf(alice.assets, "source.pdf", b"%PDF-1.7 body")
     for slug in (first, second):
-        await route.add_document(route.AddDocumentRequest(path=original.logical_path), slug, alice.projects, alice.docs, alice.assets)
+        route.add_document(route.AddDocumentRequest(path=original.logical_path), slug, alice.projects, alice.docs, alice.assets)
 
-    renamed = await route.rename_document(
+    renamed = route.rename_document(
         route.RenameDocumentRequest(path=original.logical_path, slug=first, name="renamed"),
         alice.projects,
         alice.docs,
@@ -143,16 +143,16 @@ async def test_rename_keeps_pdf_content_and_updates_every_project_reference(alic
     assert alice.projects.list_files(second) == [renamed.path]
     assert written_files(documents_root) == ["PDFs/renamed.pdf"]
 
-async def test_move_onto_an_existing_name_is_a_conflict(alice):
+def test_move_onto_an_existing_name_is_a_conflict(alice):
     slug = alice.projects.create_project("Thesis")["slug"]
     for request in (
         route.WriteDocumentRequest(slug="", name="spec.md", content="note"),
         route.WriteDocumentRequest(slug=slug, name="spec.md", content="project"),
     ):
-        await route.write_document(request, alice.projects, alice.docs, alice.assets)
+        route.write_document(request, alice.projects, alice.docs, alice.assets)
 
     with pytest.raises(HTTPException) as exc:
-        await route.move_document(
+        route.move_document(
             route.MoveDocumentRequest(path="note/spec.md", from_slug="", to_slug=slug),
             alice.projects,
             alice.docs,
@@ -161,28 +161,28 @@ async def test_move_onto_an_existing_name_is_a_conflict(alice):
     assert alice.docs.read_bytes("note/spec.md")[0] == b"note"
 
 
-async def test_delete_refuses_to_touch_a_document_outside_the_project_directory(alice):
+def test_delete_refuses_to_touch_a_document_outside_the_project_directory(alice):
     slug = alice.projects.create_project("Thesis")["slug"]
-    await route.write_document(
+    route.write_document(
         route.WriteDocumentRequest(slug="", name="idea.md", content="x"), alice.projects, alice.docs, alice.assets
     )
 
-    await route.remove_document(slug, "note/idea.md", alice.projects, alice.docs)
+    route.remove_document(slug, "note/idea.md", alice.projects, alice.docs)
 
     assert alice.docs.read_bytes("note/idea.md")[0] == b"x"
 
 
-async def test_another_users_document_is_invisible_and_answers_404(alice, bob):
+def test_another_users_document_is_invisible_and_answers_404(alice, bob):
     slug = alice.projects.create_project("Thesis")["slug"]
-    meta = await route.write_document(
+    meta = route.write_document(
         route.WriteDocumentRequest(slug=slug, name="secret.md", content="mine"), alice.projects, alice.docs, alice.assets
     )
 
-    listed = await route.list_all_documents(bob.projects)
+    listed = route.list_all_documents(bob.projects)
     assert listed.documents == []
 
     with pytest.raises(HTTPException) as exc:
-        await route.add_document(route.AddDocumentRequest(path=meta.path), slug, bob.projects, bob.docs, bob.assets)
+        route.add_document(route.AddDocumentRequest(path=meta.path), slug, bob.projects, bob.docs, bob.assets)
     assert exc.value.status_code == 404
 
     with pytest.raises(StorageNotFoundError):

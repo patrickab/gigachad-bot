@@ -125,19 +125,23 @@ def default_branch(repository: Path) -> str | None:
         return None
 
 
-def default_base_branch(repository: Path) -> str | None:
-    """`dev` when it exists locally or on origin, else origin's default branch, else the clone's branch."""
-    known = branches(repository)
+def default_base_branch(known: list[str], default: str | None) -> str | None:
+    """`dev` when among the *known* `branches`, else *default* (`default_branch`), else the first known branch."""
     if PREFERRED_BASE_BRANCH in known:
         return PREFERRED_BASE_BRANCH
-    return default_branch(repository) or (known[0] if known else None)
+    return default or (known[0] if known else None)
+
+
+def local_branch(repository: Path, name: str | None) -> str | None:
+    """*name* when it is a local branch of *repository*, else None. Its worktrees share the refs, so one probe serves all."""
+    return name if name and _ref_exists(repository, f"refs/heads/{name}") else None
 
 
 def status(worktree: Path, base: str | None) -> WorktreeStatus:
-    """Uncommitted files of *worktree* and its commits ahead of / behind *base*."""
+    """Uncommitted files of *worktree* and its commits ahead of / behind the local branch *base* (`local_branch`), none without one."""
     changed_files = len(_git(worktree, "status", "--porcelain").splitlines())
     ahead = behind = 0
-    if base and _ref_exists(worktree, f"refs/heads/{base}"):
+    if base:
         behind, ahead = map(int, _git(worktree, "rev-list", "--left-right", "--count", f"{base}...HEAD").split())
     return WorktreeStatus(changed_files=changed_files, ahead=ahead, behind=behind)
 

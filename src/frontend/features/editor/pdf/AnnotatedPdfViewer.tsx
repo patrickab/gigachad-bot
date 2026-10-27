@@ -1,6 +1,6 @@
 "use client"
 
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type RefObject } from "react"
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from "react"
 import { PdfViewer } from "@/components/content/PdfViewer"
 import { useTabActive } from "@/contexts/TabContext"
 import { InkTools, SEPARATOR, UndoRedoButtons, useInkSettings } from "@/features/editor/canvas/CanvasToolbar"
@@ -24,6 +24,8 @@ type HostPen = { color: string; width: number; highlight: boolean }
 
 type ViewerProps = Omit<ComponentProps<typeof PdfViewer>, "url" | "renderPageOverlay" | "onScrollerChange">
 
+type PageOverlay = (page: number, pageWidth: number) => ReactNode
+
 interface AnnotatedPdfViewerProps extends ViewerProps {
   path: string
   /** Stylus ink when the tab's top bar has no pdf slot for the annotation tools, e.g. the host canvas's pen or highlighter. Then nothing else annotates. */
@@ -35,6 +37,9 @@ interface AnnotatedPdfViewerProps extends ViewerProps {
 /** PDF viewer with ink and highlighter annotations, shared by every copy of the same PDF. Falls back to the plain viewer when annotations are unavailable. */
 export function AnnotatedPdfViewer({ path, pen, clipToPages = false, ...viewerProps }: AnnotatedPdfViewerProps) {
   const [annotations, setAnnotations] = useState<{ path: string; key: string | null } | null>(null)
+  const [scroller, setScroller] = useState<HTMLDivElement | null>(null)
+  const [renderPageOverlay, setRenderPageOverlay] = useState<PageOverlay | undefined>(undefined)
+  const publishPageOverlay = useCallback((render: PageOverlay | undefined) => setRenderPageOverlay(() => render), [])
 
   useEffect(() => {
     let cancelled = false
@@ -44,10 +49,14 @@ export function AnnotatedPdfViewer({ path, pen, clipToPages = false, ...viewerPr
     return () => { cancelled = true }
   }, [path])
 
-  // Wait for the key, so the PDF loads once instead of again when ink arrives.
-  if (annotations?.path !== path) return null
-  if (!annotations.key) return <PdfViewer url={fileViewerRawUrl(path)} {...viewerProps} />
-  return <InkedPdfViewer canvasKey={annotations.key} path={path} pen={pen} clipToPages={clipToPages} viewerProps={viewerProps} />
+  // The PDF loads alongside the key instead of after it, ink joins the same viewer once the key arrives.
+  const canvasKey = annotations?.path === path ? annotations.key : null
+  return (
+    <>
+      <PdfViewer key={path} url={fileViewerRawUrl(path)} {...viewerProps} renderPageOverlay={renderPageOverlay} onScrollerChange={setScroller} />
+      {canvasKey && <PdfInk canvasKey={canvasKey} scroller={scroller} pen={pen} clipToPages={clipToPages} onPageOverlay={publishPageOverlay} />}
+    </>
+  )
 }
 
 type Gesture =
@@ -57,12 +66,16 @@ type Gesture =
 /** Stroke being drawn, rendered by its page's overlay. */
 type LiveStroke = { page: number; highlight: boolean; color: string }
 
-function InkedPdfViewer({ canvasKey, path, pen, clipToPages, viewerProps }: {
+/** Ink and highlighter annotations over the pages in `scroller`: hands `onPageOverlay` the per-page ink and renders the annotation tools.
+ *
+ * - Memoized: publishing the overlay re-renders the host, which must not re-render this with it
+ */
+const PdfInk = memo(function PdfInk({ canvasKey, scroller, pen, clipToPages, onPageOverlay }: {
   canvasKey: string
-  path: string
+  scroller: HTMLDivElement | null
   pen?: HostPen
   clipToPages: boolean
-  viewerProps: ViewerProps
+  onPageOverlay: (render: PageOverlay | undefined) => void
 }) {
   const active = useTabActive()
   const { document, replace, status } = useCollaborativeCanvas(canvasKey)
@@ -70,7 +83,6 @@ function InkedPdfViewer({ canvasKey, path, pen, clipToPages, viewerProps }: {
   const { liveRef, applyChange, commit, snapshotOnce, endGesture, undo, redo, canUndo, canRedo } = useCanvasHistory(doc, replace)
   const loaded = document !== null
 
-  const [scroller, setScroller] = useState<HTMLDivElement | null>(null)
   const ink = useInkSettings()
   const [live, setLive] = useState<LiveStroke | null>(null)
   const livePathRef = useRef<SVGPathElement>(null)
@@ -214,22 +226,25 @@ function InkedPdfViewer({ canvasKey, path, pen, clipToPages, viewerProps }: {
     />
   ), [pages, clipToPages, live])
 
+  // Layout effect: the viewer re-renders with the new ink before the browser paints.
+  useLayoutEffect(() => {
+    onPageOverlay(renderPageOverlay)
+    return () => onPageOverlay(undefined)
+  }, [onPageOverlay, renderPageOverlay])
+
   const saveFailed = status === "error" || status === "offline"
 
   return (
-    <>
-      <PdfViewer url={fileViewerRawUrl(path)} {...viewerProps} renderPageOverlay={renderPageOverlay} onScrollerChange={setScroller} />
-      <InTopBar name="pdf">
-        <div className="flex items-center gap-1">
-          <InkTools ink={ink} />
-          {SEPARATOR}
-          <UndoRedoButtons onUndo={undo} onRedo={redo} canUndo={canUndo} canRedo={canRedo} />
-          {saveFailed && <span role="status" className="ml-1 text-[10px] text-danger">Annotations not saved</span>}
-        </div>
-      </InTopBar>
-    </>
+    <InTopBar name="pdf">
+      <div className="flex items-center gap-1">
+        <InkTools ink={ink} />
+        {SEPARATOR}
+        <UndoRedoButtons onUndo={undo} onRedo={redo} canUndo={canUndo} canRedo={canRedo} />
+        {saveFailed && <span role="status" className="ml-1 text-[10px] text-danger">Annotations not saved</span>}
+      </div>
+    </InTopBar>
   )
-}
+})
 
 /** One page's ink: highlights blend into the page under the pen strokes. Unclipped strokes spill into the margins. */
 const PageInk = memo(function PageInk({ strokes, scale, clip, live, livePathRef }: {

@@ -130,6 +130,8 @@ class SandboxRuntimeState:
         self._states: dict[str, _StagedState] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._locks_guard = asyncio.Lock()
+        # Serializes checkpoints against asset garbage collection: both hop off the event loop between store reads and writes.
+        self.assets_lock = asyncio.Lock()
 
     async def lock(self, slot_key: str) -> asyncio.Lock:
         async with self._locks_guard:
@@ -496,20 +498,25 @@ class SandboxService:
         """Promote the latest runtime-only workspace after its chat is saved."""
         chat_id = _validate_chat_id(chat_id)
         for scope_name in _scopes(scope):
-            async with self._slot(chat_id, scope_name) as slot:
+            async with self._slot(chat_id, scope_name) as slot, self._runtime.assets_lock:
                 staged = self._runtime.get(slot.key)
                 if staged is None:
                     continue
-                if staged.manifest is not None:
-                    self._persist_assets(staged.assets, {staged.manifest.workspace.sha256: "application/x-tar"})
-                    slot.store.checkpoint(
-                        chat_id,
-                        profile=self._profile,
-                        manifest=staged.manifest,
-                        runs=staged.runs,
-                        latest_run_id=staged.last_completed_run_id,
-                    )
+                if (manifest := staged.manifest) is not None:
+                    # Asset writes and the checkpoint block on Postgres or the mount, so they run off the event loop.
+                    await asyncio.to_thread(self._persist_checkpoint, chat_id, slot.store, staged, manifest)
                 self._runtime.pop(slot.key)
+
+    def _persist_checkpoint(self, chat_id: str, store: SandboxStore, staged: _StagedState, manifest: SandboxManifest) -> None:
+        """Write the staged workspace snapshot, then the checkpoint naming *manifest*."""
+        self._persist_assets(staged.assets, {manifest.workspace.sha256: "application/x-tar"})
+        store.checkpoint(
+            chat_id,
+            profile=self._profile,
+            manifest=manifest,
+            runs=staged.runs,
+            latest_run_id=staged.last_completed_run_id,
+        )
 
     def _persist_assets(self, assets: dict[str, bytes], media_types: dict[str, str]) -> None:
         for sha256, content in assets.items():
@@ -535,17 +542,23 @@ class SandboxService:
     async def delete_chat_state(self, *, chat_id: str, scope: str | None = None) -> None:
         chat_id = _validate_chat_id(chat_id)
         for scope_name in _scopes(scope):
-            async with self._slot(chat_id, scope_name) as slot:
+            async with self._slot(chat_id, scope_name) as slot, self._runtime.assets_lock:
                 staged = self._runtime.pop(slot.key)
-                shas = slot.store.delete_chat_state(chat_id)
-                if staged is not None:
-                    shas.update(staged.output_shas)
+                staged_shas = staged.output_shas if staged is not None else set()
+                # Store IO blocks on Postgres, so it runs off the event loop.
+                shas, still_referenced = await asyncio.to_thread(self._delete_durable_state, chat_id, slot, staged_shas)
                 if not shas:
                     continue
-                # Keep assets still referenced by other chats, scopes, or staged runtime state.
-                still_referenced = slot.store.referenced_shas(exclude_chat_id=chat_id, exclude_scope=slot.scope)
+                # Keep assets still referenced by other chats, scopes, or staged runtime state. Runs staged while the
+                # assets are deleted are not seen here, so the deletes stay on the event loop to stay atomic with them.
                 still_referenced.update(self._runtime.referenced_output_shas(exclude_slot=slot.key))
                 for sha256 in shas:
                     if sha256 not in still_referenced:
                         with suppress(StorageNotFoundError):
                             self._assets.delete(sandbox_asset(sha256))
+
+    @staticmethod
+    def _delete_durable_state(chat_id: str, slot: _Slot, staged_shas: set[str]) -> tuple[set[str], set[str]]:
+        """Delete the chat's durable state, returning its asset shas and those other chats or scopes still reference."""
+        shas = slot.store.delete_chat_state(chat_id) | staged_shas
+        return shas, slot.store.referenced_shas(exclude_chat_id=chat_id, exclude_scope=slot.scope) if shas else set()

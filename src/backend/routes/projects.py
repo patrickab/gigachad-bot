@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -45,25 +46,27 @@ class UpdateProjectRequest(BaseModel):
     archived: bool | None = None
 
 
+# Store calls block on Postgres, so handlers are sync (FastAPI's threadpool) or move the call to a thread:
+# a blocking call on the event loop would stall every concurrent request, SSE streams included.
 @router.get("")
-async def list_projects(store: ProjectStore = Depends(get_project_store)) -> dict[str, Any]:
+def list_projects(store: ProjectStore = Depends(get_project_store)) -> dict[str, Any]:
     return {"projects": store.list_projects()}
 
 
 @router.get("/{slug}")
-async def get_project(slug: str, store: ProjectStore = Depends(get_project_store)) -> dict[str, Any]:
+def get_project(slug: str, store: ProjectStore = Depends(get_project_store)) -> dict[str, Any]:
     with http_errors(_PROJECT_NOT_FOUND):
         return store.get_project(slug)
 
 
 @router.post("")
-async def create_project(req: CreateProjectRequest, store: ProjectStore = Depends(get_project_store)) -> dict[str, Any]:
+def create_project(req: CreateProjectRequest, store: ProjectStore = Depends(get_project_store)) -> dict[str, Any]:
     with http_errors((ProjectExists, 409, None), (ValueError, 400, None)):
         return store.create_project(req.name)
 
 
 @router.patch("/{slug}")
-async def update_project(slug: str, req: UpdateProjectRequest, store: ProjectStore = Depends(get_project_store)) -> dict[str, Any]:
+def update_project(slug: str, req: UpdateProjectRequest, store: ProjectStore = Depends(get_project_store)) -> dict[str, Any]:
     with http_errors((StorageConflictError, 409, None), _PROJECT_NOT_FOUND, (ValueError, 400, None)):
         return store.update_project(slug, name=req.name, archived=req.archived)
 
@@ -79,13 +82,13 @@ async def delete_project(
 
 
 @router.post("/{slug}/cards")
-async def add_card(slug: str, req: AddCardRequest, store: ProjectStore = Depends(get_project_store)) -> dict[str, Any]:
+def add_card(slug: str, req: AddCardRequest, store: ProjectStore = Depends(get_project_store)) -> dict[str, Any]:
     with http_errors(_PROJECT_NOT_FOUND):
         return store.add_card(slug, req.title, req.description, req.state)
 
 
 @router.patch("/{slug}/cards/{card_id}")
-async def move_card(
+def move_card(
     slug: str,
     card_id: str,
     req: MoveCardRequest | UpdateCardRequest | None = None,
@@ -106,7 +109,7 @@ async def move_card(
 
 
 @router.delete("/{slug}/cards/{card_id}")
-async def delete_card(slug: str, card_id: str, store: ProjectStore = Depends(get_project_store)) -> dict[str, str]:
+def delete_card(slug: str, card_id: str, store: ProjectStore = Depends(get_project_store)) -> dict[str, str]:
     with http_errors(_PROJECT_NOT_FOUND):
         return store.delete_card(slug, card_id)
 
@@ -120,7 +123,7 @@ async def save_project_tab(
     sandbox_service: SandboxService = Depends(get_sandbox_service),
 ) -> dict[str, str]:
     with http_errors(_PROJECT_NOT_FOUND, (ValueError, 409, None)):
-        result = store.save_tab(slug, filename, data.model_dump())
+        result = await asyncio.to_thread(store.save_tab, slug, filename, data.model_dump())
         if data.chat_id:
             await sandbox_service.checkpoint(chat_id=data.chat_id)
         return result

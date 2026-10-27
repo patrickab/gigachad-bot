@@ -66,3 +66,15 @@ it("refreshes the list when another device changes the project catalog", async (
   await act(async () => { sync.receive?.({ resource_kind: "document", resource_key: "chat/projects-meta.json" }) })
   expect(result.current.projects[0].slug).toBe("renamed")
 })
+
+it("keeps the list's identity when a refresh returns it unchanged", async () => {
+  api.listProjects.mockResolvedValue([{ name: "Proj", slug: "proj" }])
+  const { result } = renderHook(() => useProject(), { wrapper })
+  await waitFor(() => expect(result.current.projects).toHaveLength(1))
+  const loaded = result.current.projects
+
+  await act(async () => { await result.current.refreshProjects() })
+
+  expect(api.listProjects).toHaveBeenCalledTimes(2)
+  expect(result.current.projects).toBe(loaded)
+})

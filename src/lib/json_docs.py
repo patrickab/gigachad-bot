@@ -35,6 +35,12 @@ class JsonDocs:
                 logger.error("Failed to read %s at %s: %s", log, key, exc)
             return default
 
+    def read_many(self, keys: Iterable[str], default: object = None) -> dict[str, Any]:
+        """Parsed JSON of every key in *keys*, read in one round trip, *default* for a missing or malformed one."""
+        keys = list(keys)
+        stored = self._store.read_many(keys)
+        return {key: _parse(stored[key][0], default) if key in stored else default for key in keys}
+
     def read_with_revision(self, key: str) -> tuple[Any, Revision]:
         """Parsed JSON at *key* plus its revision. StorageNotFoundError when missing, ValueError when malformed."""
         content, revision = self._store.read_bytes(key)
@@ -74,3 +80,11 @@ class JsonDocs:
 def _encode(data: JsonValue) -> bytes:
     """*data* in the stored byte format."""
     return dump_json(data).encode("utf-8")
+
+
+def _parse(content: bytes, default: object) -> Any:  # noqa: ANN401 - untyped until the caller checks it
+    """*content* parsed as JSON, *default* when it is malformed."""
+    try:
+        return json.loads(content.decode("utf-8"))
+    except ValueError:
+        return default

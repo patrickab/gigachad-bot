@@ -4,6 +4,7 @@ Exercises the real ASGI app so route wiring, dependencies, and exception handler
 covered together rather than per module.
 """
 
+import hashlib
 import json
 import os
 from uuid import uuid4
@@ -12,6 +13,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from backend.identity import CAPABILITIES_HEADER, HOST_CAPABILITY
+from lib.storage_namespace import pdf_annotations
 from tests.conftest import TRUNCATE_ALL
 
 
@@ -362,3 +364,74 @@ def test_pdf_annotations_follow_content_not_path(client, tmp_path):
     assert annotations(tmp_path / "moved" / "renamed.pdf") == key
     assert client.get(f"/api/canvases/{key}", headers=alice).json()["document"]["strokes"] == [stroke]
     assert annotations(tmp_path / "other.pdf") != key
+
+
+def _upload_project_pdf(client, alice, slug: str, content: bytes) -> str:
+    """Upload *content* as ``paper.pdf`` into *slug*'s documents and return its key."""
+    uploaded = client.post(
+        "/api/documents/write-binary", params={"slug": slug}, files={"file": ("paper.pdf", content, "application/pdf")}, headers=alice
+    )
+    assert uploaded.status_code == 200
+    return uploaded.json()["path"]
+
+
+def _library_pdf(client, alice, tmp_path, monkeypatch, content: bytes) -> str:
+    """Sync a mounted PDF into the asset library (``PDFs/paper.pdf``) and return that key."""
+    import lib.attachment_materialize as attachment_materialize
+    import lib.document_library as lib_docs
+
+    mirror, mount = tmp_path / "mirror", tmp_path / "mount"
+    mount.mkdir()
+    monkeypatch.setattr(lib_docs, "DOCUMENTS", mirror)
+    monkeypatch.setattr(attachment_materialize, "DOCUMENTS", mirror)
+    monkeypatch.setattr(attachment_materialize.extract_queue, "enqueue", lambda name, content, store: None)
+    slug = f"lib-{uuid4().hex[:8]}"
+    assert client.post("/api/projects", json={"name": slug}, headers=alice).status_code == 200
+    assert client.post("/api/fileroots/roots", json={"path": str(mount)}, headers=alice).status_code == 200
+    (mount / "paper.pdf").write_bytes(content)
+    added = client.post("/api/fileroots/add-to-project", json={"slug": slug, "paths": [str(mount / "paper.pdf")]}, headers=alice)
+    assert added.status_code == 200
+    (mount / "paper.pdf").unlink()
+    return "PDFs/paper.pdf"
+
+
+@pytest.mark.parametrize("store", ["documents", "assets"])
+def test_stored_pdfs_revalidate_serve_ranges_and_hash_without_changing_keys(client, tmp_path, monkeypatch, store):
+    """Reopening an unchanged PDF answers 304, pdf.js gets the byte ranges it asks for, annotation keys stay the bytes' SHA-256."""
+    alice = headers("alice@example.test", str(uuid4()), host=True)
+    pdf = b"%PDF-1.7 " + bytes(range(256)) * 4
+    if store == "documents":
+        slug = f"pdf-{uuid4().hex[:8]}"
+        assert client.post("/api/projects", json={"name": slug}, headers=alice).status_code == 200
+        key = _upload_project_pdf(client, alice, slug, pdf)
+    else:
+        key = _library_pdf(client, alice, tmp_path, monkeypatch, pdf)
+
+    def raw(**sent: str):
+        return client.get("/api/fileviewer/raw", params={"path": key}, headers={**alice, **sent})
+
+    full = raw()
+    assert (full.status_code, full.content, full.headers["content-type"]) == (200, pdf, "application/pdf")
+    assert full.headers["accept-ranges"] == "bytes" and full.headers["cache-control"] == "private, no-cache"
+    etag = full.headers["etag"]
+
+    reopened = raw(**{"If-None-Match": etag})
+    assert (reopened.status_code, reopened.content, reopened.headers["etag"]) == (304, b"", etag)
+    assert raw(**{"If-None-Match": '"stale"'}).status_code == 200
+
+    head = raw(Range="bytes=2-5")
+    assert (head.status_code, head.content, head.headers["content-range"]) == (206, pdf[2:6], f"bytes 2-5/{len(pdf)}")
+    assert raw(Range="bytes=-3").content == pdf[-3:]
+    assert raw(Range="bytes=1000-").content == pdf[1000:]
+    assert raw(Range=f"bytes={len(pdf)}-").status_code == 416
+    # Several ranges, or a range of an older version, get the whole current file.
+    assert (raw(Range="bytes=0-1,4-5").status_code, raw(Range="bytes=0-1", **{"If-Range": '"stale"'}).status_code) == (200, 200)
+
+    opened = client.post("/api/fileviewer/annotations", params={"path": key}, headers=alice)
+    assert opened.json()["key"] == pdf_annotations(hashlib.sha256(pdf).hexdigest())
+
+    if store == "documents":
+        _upload_project_pdf(client, alice, slug, pdf + b"v2")
+        changed = raw(**{"If-None-Match": etag})
+        assert (changed.status_code, changed.content) == (200, pdf + b"v2")
+        assert changed.headers["etag"] != etag

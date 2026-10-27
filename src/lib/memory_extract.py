@@ -159,6 +159,16 @@ def build_proposal(
     return ScopeProposal(operations, list(proposals.values()))
 
 
+@dataclass(frozen=True)
+class _ScopeInput:
+    """What one scope's extraction prompt is built from."""
+
+    scope: MemoryScope
+    transcript: str
+    topics: list[dict[str, str]]
+    short_ids: dict[str, StoredMemory]
+
+
 @dataclass
 class MemoryExtractor:
     """Runs the memory model over a store's facts. *model* is the user's stored default, nothing here names one."""
@@ -180,25 +190,39 @@ class MemoryExtractor:
         are tracked per ``(chat_id, scope)`` and advance only when that scope commits, so cancelling
         leaves the messages eligible next time.
         """
-        self.store.ensure_pending_dir()
         review_id = str(uuid.uuid4())
         kinds: list[ScopeKind] = [k for k in ("global", "project") if scope in (None, k) and (k == "global" or project_slug)]
 
+        def load() -> dict[ScopeKind, _ScopeInput | None]:
+            """Each scope's new messages with its topics and facts, None when nothing is new."""
+            self.store.ensure_pending_dir()
+            loaded: dict[ScopeKind, _ScopeInput | None] = {}
+            for kind in kinds:
+                tail = messages[self.store.watermark(chat_id, kind):]
+                memory_scope = MemoryScope.of(kind, project_slug)
+                loaded[kind] = _ScopeInput(
+                    memory_scope, _transcript(tail), self.store.get_topics(memory_scope),
+                    _short_ids(self.store.read_memories(memory_scope)),
+                ) if tail else None
+            return loaded
+
+        # Store reads and writes block on Postgres, so each block runs off the event loop.
+        inputs = await asyncio.to_thread(load)
+
         async def run(kind: ScopeKind) -> ScopeProposal | None:
-            tail = messages[self.store.watermark(chat_id, kind):]
-            if not tail:
-                return None
-            return await self._extract_scope(MemoryScope.of(kind, project_slug), _transcript(tail))
+            scope_input = inputs[kind]
+            return await self._extract_scope(scope_input) if scope_input else None
 
         results = dict(zip(kinds, await asyncio.gather(*(run(k) for k in kinds)), strict=True))
         committable = [k for k, proposal in results.items() if proposal and not proposal.is_empty()]
         if committable:
-            self.store.write_pending(review_id, chat_id, len(messages), committable)
+            await asyncio.to_thread(self.store.write_pending, review_id, chat_id, len(messages), committable)
         return ExtractResult(review_id, results.get("global"), results.get("project"))
 
-    async def _extract_scope(self, scope: MemoryScope, transcript: str) -> ScopeProposal:
-        topics = self.store.get_topics(scope)
-        short_ids = _short_ids(self.store.read_memories(scope))
+    async def _extract_scope(self, scope_input: _ScopeInput) -> ScopeProposal:
+        scope, transcript, topics, short_ids = (
+            scope_input.scope, scope_input.transcript, scope_input.topics, scope_input.short_ids,
+        )
         system_prompt = (
             f"You maintain a user's long-term memory of {SCOPE_GUIDANCE[scope.kind]}. Memory is organized in topics: "
             "named subjects with a one-line summary, each holding atomic facts. Compare the conversation "
@@ -239,9 +263,15 @@ Return JSON with this exact shape:
 
     async def propose_regroup(self, scope: MemoryScope) -> dict[str, Any]:
         """Propose subject topics for every fact in *scope*, returned as `{topics, memories}` without writing."""
-        memories = self.store.read_memories(scope)
+
+        def load() -> tuple[list[StoredMemory], list[dict[str, str]] | None]:
+            memories = self.store.read_memories(scope)
+            return memories, None if memories else self.store.get_topics(scope)
+
+        # Store reads block on Postgres, so they run off the event loop.
+        memories, topics_on_record = await asyncio.to_thread(load)
         if not memories:
-            return {"topics": self.store.get_topics(scope), "memories": []}
+            return {"topics": topics_on_record, "memories": []}
         short_ids = _short_ids(memories)
         system_prompt = (
             "You reorganize a user's memory facts into topics: named subjects (1-3 words) with a one-line "
@@ -271,7 +301,7 @@ Return JSON with this exact shape:
 
         # Unassigned facts keep their topic, which keeps its summary.
         regrouped = [{**asdict(m), "topic": assignments.get(m.id, m.topic)} for m in memories]
-        previous_summaries = {t["name"]: t["summary"] for t in self.store.get_topics(scope)}
+        previous_summaries = {t["name"]: t["summary"] for t in await asyncio.to_thread(self.store.get_topics, scope)}
         add_missing_topics(topics, (m["topic"] for m in regrouped), previous_summaries)
         used = {m["topic"] for m in regrouped}
         return {"topics": [t for t in topics if t["name"] in used], "memories": regrouped}

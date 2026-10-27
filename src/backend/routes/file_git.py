@@ -137,18 +137,19 @@ def list_worktrees(root: str = Query(...), roots: FileRoots = Depends(get_file_r
     if not git_worktree.is_clone(repository):
         return WorktreeListResponse(is_clone=False)
     with http_errors(*_GIT_REFUSALS):
-        base = git_worktree.default_base_branch(repository)
+        # One lookup each for the branches, the default branch and the base ref, shared by every worktree.
+        known = git_worktree.branches(repository)
+        default = git_worktree.default_branch(repository)
+        base = git_worktree.default_base_branch(known, default)
+        compared = git_worktree.local_branch(repository, base)
         entries = [
             WorktreeEntry(
                 path=worktree.path, branch=worktree.branch, is_main=worktree.is_main,
-                **vars(git_worktree.status(Path(worktree.path), base)),
+                **vars(git_worktree.status(Path(worktree.path), compared)),
             )
             for worktree in git_worktree.list_worktrees(repository)
         ]
-        return WorktreeListResponse(
-            is_clone=True, default_base=base, default_branch=git_worktree.default_branch(repository),
-            branches=git_worktree.branches(repository), worktrees=entries,
-        )
+        return WorktreeListResponse(is_clone=True, default_base=base, default_branch=default, branches=known, worktrees=entries)
 
 
 @router.post("/worktrees", response_model=RootFile)

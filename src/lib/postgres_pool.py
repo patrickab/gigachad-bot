@@ -17,7 +17,8 @@ def get_postgres_pool() -> ConnectionPool:
     if _postgres_pool is None:
         _postgres_pool = ConnectionPool(
             database_url(),
-            min_size=int(os.environ.get("GIGACHAD_PG_POOL_MIN_SIZE", "1")),
+            # A few warm connections let a page load's burst of requests start without opening connections one by one.
+            min_size=int(os.environ.get("GIGACHAD_PG_POOL_MIN_SIZE", "4")),
             max_size=int(os.environ.get("GIGACHAD_PG_POOL_MAX_SIZE", "10")),
         )
     return _postgres_pool

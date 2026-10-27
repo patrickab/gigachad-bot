@@ -7,13 +7,14 @@ files read but not changed are not revision-checked: two devices racing on those
 still overwrite each other. That is accepted, as one user edits one workspace.
 """
 
+import asyncio
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 import re
 from typing import Any
 
 from lib import c4_service
-from lib.architecture_workspace import ArchitectureError, ArchitectureNotFound, ArchitectureStore
+from lib.architecture_workspace import ArchitectureError, ArchitectureNotFound, ArchitectureStore, Snapshot
 from lib.c4_service import ApplyResult, C4Error
 from lib.data_store import StorageConflictError
 from lib.project_store import ProjectStore
@@ -65,17 +66,23 @@ async def apply(store: ArchitectureStore, change: Change, *, check_project: Call
     """
     if change.file is not None:
         store.source_key(change.file)
-    for attempt in range(_COMMIT_ATTEMPTS):
+
+    def read() -> Snapshot:
         snapshot = store.read(allow_empty=check_project is not None)
         if check_project is not None and not snapshot.sources:
             check_project()
+        return snapshot
+
+    for attempt in range(_COMMIT_ATTEMPTS):
+        # Store reads, the project check and the commit block on Postgres or the mount, so they run off the event loop.
+        snapshot = await asyncio.to_thread(read)
         sources = change.edit(snapshot.sources) if change.edit else snapshot.sources
         deleted = set(snapshot.sources) - set(sources)
         result = await c4_service.apply_operations(sources, snapshot.snapshots, change.ops, change.file)
         if change.strict and (errors := result.model.errors):
             raise ArchitectureError(_refusal(errors[0], deleted))
         try:
-            store.commit(snapshot, result.sources, result.snapshots, deleted=deleted)
+            await asyncio.to_thread(store.commit, snapshot, result.sources, result.snapshots, deleted=deleted)
             return result
         except StorageConflictError:
             if attempt == _COMMIT_ATTEMPTS - 1:

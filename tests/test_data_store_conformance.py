@@ -1,3 +1,5 @@
+import hashlib
+
 import pytest
 
 from lib.changes import UserScope
@@ -92,6 +94,24 @@ def test_prefix_with_children_exists_without_explicit_directory(data_store: Data
     assert data_store.exists("implied")
 
 
+def test_read_many_returns_stored_files_and_skips_missing_keys_and_directories(data_store: DataStore):
+    revision = data_store.write_bytes("batch/one.json", b"\x00binary\xff")
+    data_store.write_bytes("batch/two.json", b"two")
+    data_store.mkdir("batch/folder")
+
+    stored = data_store.read_many(["batch/one.json", "batch/two.json", "batch/folder", "batch/missing.json"])
+
+    assert stored == {"batch/one.json": (b"\x00binary\xff", revision), "batch/two.json": data_store.read_bytes("batch/two.json")}
+    assert data_store.read_many([]) == {}
+
+
+def test_exists_is_false_for_a_sibling_sharing_the_prefix(data_store: DataStore):
+    data_store.write_bytes("prefix-sibling/child.json", b"{}")
+
+    assert data_store.exists("prefix") is False
+    assert data_store.exists("prefix-sibling/child.json")
+
+
 def test_delete_handles_single_keys_and_recursive_prefixes(data_store: DataStore):
     data_store.write_bytes("single.txt", b"one")
     data_store.write_bytes("tree/first.txt", b"one")
@@ -158,7 +178,36 @@ def test_invalid_storage_keys_are_rejected(data_store: DataStore, key: str):
     ]
     if key:
         operations.append(lambda: data_store.list(key))
+        operations.append(lambda: data_store.read_many([key]))
 
     for operation in operations:
         with pytest.raises(InvalidStorageKey):
             operation()
+
+
+def test_stat_slices_and_hashes_files_without_reading_them_whole(data_store: DataStore):
+    content = b"\x00binary\xff" * 100
+    revision = data_store.write_bytes("stat/file.pdf", content)
+    data_store.write_bytes("stat/implied/child.json", b"{}")
+    data_store.write_bytes("stat-sibling/child.json", b"{}")
+    data_store.mkdir("stat/folder")
+
+    entry = data_store.stat("stat/file.pdf")
+    assert (entry.is_dir, entry.size, entry.revision) == (False, len(content), revision)
+    assert entry.modified is not None
+    assert data_store.stat("stat/implied").is_dir
+    assert data_store.stat("stat/folder").is_dir
+    assert data_store.stat("stat-s") is None and data_store.stat("missing") is None
+
+    assert data_store.read_range("stat/file.pdf", 3, 5) == content[3:8]
+    assert data_store.read_range("stat/file.pdf", len(content) - 2, 10) == content[-2:]
+    assert data_store.sha256("stat/file.pdf") == hashlib.sha256(content).hexdigest()
+    for missing in ("stat/folder", "missing"):
+        with pytest.raises(StorageNotFoundError):
+            data_store.read_range(missing, 0, 1)
+        with pytest.raises(StorageNotFoundError):
+            data_store.sha256(missing)
+
+    data_store.write_bytes("stat/file.pdf", content)
+    rewritten = data_store.stat("stat/file.pdf")
+    assert (rewritten.revision, rewritten.modified) != (entry.revision, entry.modified)

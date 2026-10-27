@@ -17,24 +17,48 @@ if TYPE_CHECKING:
 
 # Directories that hold app internals (e.g. Obsidian's) or noise rather than files, skipped even without a .gitignore.
 _SKIP_DIRS = frozenset({".obsidian", ".trash", ".git", "node_modules"})
-# Each layer is one directory's `.gitignore`: (directory path, compiled patterns), outermost first.
+# Each layer is one directory's `.gitignore`: (directory path with a trailing separator, compiled patterns), outermost first.
 _IgnoreLayers = tuple[tuple[str, GitIgnoreSpec], ...]
+# Compiled `.gitignore` files by path with the stat stamp they were read at, so a listing recompiles only edited ones.
+_compiled_gitignores: dict[str, tuple[tuple[int, ...], GitIgnoreSpec | None]] = {}
+_MAX_COMPILED_GITIGNORES = 1024
 
 
 def _with_gitignore(directory: Path | str, inherited: _IgnoreLayers) -> _IgnoreLayers:
     """*inherited* plus *directory*'s own `.gitignore`, if it has a readable one."""
+    path = os.path.join(directory, ".gitignore")
     try:
-        lines = (Path(directory) / ".gitignore").read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeDecodeError):
+        stat = os.stat(path)
+    except OSError:
         return inherited
-    return (*inherited, (str(directory), GitIgnoreSpec.from_lines(lines)))
+    spec = _compiled_gitignore(path, (stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size, stat.st_ino))
+    return inherited if spec is None else (*inherited, (os.path.join(directory, ""), spec))
+
+
+def _compiled_gitignore(path: str, stamp: tuple[int, ...]) -> GitIgnoreSpec | None:
+    """Compiled patterns of the `.gitignore` at *path*, None when unreadable, reused while its *stamp* is unchanged."""
+    cached = _compiled_gitignores.get(path)
+    if cached is not None and cached[0] == stamp:
+        return cached[1]
+    try:
+        spec = GitIgnoreSpec.from_lines(Path(path).read_text(encoding="utf-8").splitlines())
+    except (OSError, UnicodeDecodeError):
+        spec = None
+    if len(_compiled_gitignores) >= _MAX_COMPILED_GITIGNORES:
+        _compiled_gitignores.clear()
+    _compiled_gitignores[path] = (stamp, spec)
+    return spec
 
 
 def _is_ignored(path: str, is_dir: bool, layers: _IgnoreLayers) -> bool:
-    """Git precedence: the last matching pattern wins, and deeper `.gitignore` files override shallower ones."""
+    """Git precedence: the last matching pattern wins, and deeper `.gitignore` files override shallower ones.
+
+    *path* is a scandir path below every layer's directory, so slicing off the prefix is its relative path (pathlib's
+    `relative_to` was most of a listing's cost).
+    """
     ignored = False
-    for base, spec in layers:
-        relative = Path(path).relative_to(base).as_posix()
+    for prefix, spec in layers:
+        relative = path[len(prefix):].replace(os.sep, "/")
         verdict = spec.check_file(f"{relative}/" if is_dir else relative).include
         if verdict is not None:
             ignored = verdict

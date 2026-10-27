@@ -11,7 +11,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from lib.asset_store import AssetStore
-from lib.attachment_materialize import materialize, store_library_output, store_library_pdf, sync_library_pdf
+from lib.attachment_materialize import cached_markdown, materialize, store_library_output, store_library_pdf, sync_library_pdf
 from lib.data_store import StorageNotFoundError, validate_key
 from lib.mime import mime_for
 from lib.mineru import parse_pdf, should_cancel
@@ -80,10 +80,14 @@ def attach_host_file(assets: AssetStore, file: Path) -> AttachResult:
 
 def attach_library_pdf(assets: AssetStore, path: str) -> AttachResult:
     """A library PDF key (`PDFs/<name>`, what older chats stored) with its cached markdown. Raises StorageNotFoundError."""
+    # The PDF's bytes are read only to queue an extraction that is not cached yet.
     name = Path(path).name
     key = library_pdf(name)
-    content = assets.read(key).content or b""
-    parsed_md = materialize(name, content, assets, enqueue_on_miss=True)
+    if assets.stat(key) is None:
+        raise StorageNotFoundError(key)
+    parsed_md = cached_markdown(assets, name)
+    if parsed_md is None:
+        parsed_md = materialize(name, assets.read(key).content or b"", assets, enqueue_on_miss=True)
     return AttachResult(name=name, mime=mime_for(path), path=key, parsedMd=parsed_md)
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import PurePosixPath
+from typing import TYPE_CHECKING
 
 from lib.changes import UserScope, like_prefix
 from lib.data_store import (
@@ -12,6 +13,9 @@ from lib.data_store import (
     StorageNotFoundError,
     validate_key,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 class PostgresDataStore:
@@ -30,13 +34,28 @@ class PostgresDataStore:
     def read_bytes(self, key: str) -> tuple[bytes, Revision]:
         key = validate_key(key)
         with self._scope.connection() as connection:
+            # Binary results move bytea as raw bytes instead of hex text, half the size and no decoding.
             row = connection.execute(
                 "SELECT content, version FROM documents WHERE user_id = %s AND key = %s AND NOT is_dir",
                 (self._scope.user_id, key),
+                binary=True,
             ).fetchone()
         if row is None:
             raise StorageNotFoundError(key)
         return bytes(row[0]), self._revision(row[1])
+
+    def read_many(self, keys: Iterable[str]) -> dict[str, tuple[bytes, Revision]]:
+        """Content and revision of every file among *keys* in one query. Missing keys and directories are left out."""
+        keys = [validate_key(key) for key in keys]
+        if not keys:
+            return {}
+        with self._scope.connection() as connection:
+            rows = connection.execute(
+                "SELECT key, content, version FROM documents WHERE user_id = %s AND key = ANY(%s) AND NOT is_dir",
+                (self._scope.user_id, keys),
+                binary=True,
+            ).fetchall()
+        return {key: (bytes(content), self._revision(version)) for key, content, version in rows}
 
     def _write(self, connection, key: str, content: bytes, expected: Revision | None) -> Revision:
         """Upsert when *expected* is None, otherwise update only if the stored version matches, else raise StorageConflictError."""
@@ -151,7 +170,59 @@ class PostgresDataStore:
             ).fetchone()[0]
 
     def exists(self, key: str) -> bool:
-        return self.is_file(key) or self.is_dir(key)
+        """A file or directory at *key*, or any descendant of it: is_file or is_dir in one query."""
+        key = validate_key(key)
+        with self._scope.connection() as connection:
+            return connection.execute(
+                "SELECT EXISTS (SELECT 1 FROM documents WHERE user_id = %s AND (key = %s OR key LIKE %s ESCAPE '\\'))",
+                (self._scope.user_id, key, like_prefix(key)),
+            ).fetchone()[0]
+
+    def stat(self, key: str) -> Entry | None:
+        """The file or directory at *key*, or None: `exists` plus the file's size, revision and last write, without its content."""
+        key = validate_key(key)
+        with self._scope.connection() as connection:
+            row = connection.execute(
+                """
+                SELECT key = %s, is_dir, octet_length(content), version, updated_at
+                FROM documents
+                WHERE user_id = %s AND (key = %s OR key LIKE %s ESCAPE '\\')
+                ORDER BY key = %s DESC
+                LIMIT 1
+                """,
+                (key, self._scope.user_id, key, like_prefix(key), key),
+            ).fetchone()
+        if row is None:
+            return None
+        exact, is_dir, size, version, modified = row
+        if not exact or is_dir:
+            return Entry(key, is_dir=True)
+        return Entry(key, is_dir=False, size=size, revision=self._revision(version), modified=modified)
+
+    def read_range(self, key: str, start: int, length: int) -> bytes:
+        """Up to *length* bytes from offset *start*, sliced in the database: uncompressed TOAST fetches only the chunks it covers."""
+        key = validate_key(key)
+        with self._scope.connection() as connection:
+            row = connection.execute(
+                "SELECT substring(content FROM %s FOR %s) FROM documents WHERE user_id = %s AND key = %s AND NOT is_dir",
+                (start + 1, length, self._scope.user_id, key),
+                binary=True,
+            ).fetchone()
+        if row is None:
+            raise StorageNotFoundError(key)
+        return bytes(row[0])
+
+    def sha256(self, key: str) -> str:
+        """Hex SHA-256 of the file at *key*, hashed in the database so the content never crosses the connection."""
+        key = validate_key(key)
+        with self._scope.connection() as connection:
+            row = connection.execute(
+                "SELECT encode(sha256(content), 'hex') FROM documents WHERE user_id = %s AND key = %s AND NOT is_dir",
+                (self._scope.user_id, key),
+            ).fetchone()
+        if row is None:
+            raise StorageNotFoundError(key)
+        return row[0]
 
     def mkdir(self, key: str) -> None:
         key = validate_key(key)

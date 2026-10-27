@@ -1,3 +1,4 @@
+import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
@@ -68,13 +69,19 @@ async def chat(
     """Stream a completion as SSE, running the tool loop when `req.tools` is non-empty."""
     with request_client() as c:
         kwargs = reasoning_levels.effort_kwargs(req.reasoning_effort, req.model)
-        img = _resolve_images(c, req, assets)
-        system_prompt = augment_system_prompt(memory_store, req.system_prompt, req.project_slug)
-        prompt_images = (
-            resolve_sandbox_prompt_images(req.chat_id, req.project_slug, req.img_paths, assets)
-            if {"workspace_agent", "sandbox_plot"}.intersection(req.tools)
-            else ()
-        )
+
+        def prepare() -> tuple[list | bytes | str | None, str, tuple]:
+            img = _resolve_images(c, req, assets)
+            system_prompt = augment_system_prompt(memory_store, req.system_prompt, req.project_slug)
+            prompt_images = (
+                resolve_sandbox_prompt_images(req.chat_id, req.project_slug, req.img_paths, assets)
+                if {"workspace_agent", "sandbox_plot"}.intersection(req.tools)
+                else ()
+            )
+            return img, system_prompt, prompt_images
+
+        # Upload reads, downscaling and the memory lookup block, so they run off the event loop.
+        img, system_prompt, prompt_images = await asyncio.to_thread(prepare)
         if req.tools:
             # The tool loop owns its own model calls, so it needs the client to outlive this
             # `with` block; `request_client` only guards conversation state, which the loop

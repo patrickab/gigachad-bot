@@ -47,3 +47,34 @@ def test_postgres_identity_registers_one_user_and_device(postgres_identity):
 
     assert first is not None
     assert second == first
+
+
+def _device_row(pool, device_id: str) -> tuple:
+    """The device's owner, last_seen_at and row version (xmin changes with every write)."""
+    with pool.connection() as connection:
+        return connection.execute("SELECT user_id, last_seen_at, xmin::text FROM devices WHERE id = %s", (device_id,)).fetchone()
+
+
+def test_postgres_identity_reads_a_recently_seen_device_without_writing(postgres_identity, postgres_pool):
+    device_id = str(uuid4())
+    identity.get_request_identity(tailscale_login="alice@example.test", capabilities_header=None, device_id=device_id)
+    before = _device_row(postgres_pool, device_id)
+
+    identity.get_request_identity(tailscale_login="alice@example.test", capabilities_header=None, device_id=device_id)
+
+    assert _device_row(postgres_pool, device_id) == before
+
+
+def test_postgres_identity_refreshes_a_stale_device_and_moves_a_device_to_its_new_login(postgres_identity, postgres_pool):
+    device_id = str(uuid4())
+    alice = identity.get_request_identity(tailscale_login="alice@example.test", capabilities_header=None, device_id=device_id)
+    with postgres_pool.connection() as connection:
+        connection.execute("UPDATE devices SET last_seen_at = now() - interval '1 hour' WHERE id = %s", (device_id,))
+    stale = _device_row(postgres_pool, device_id)[1]
+
+    identity.get_request_identity(tailscale_login="alice@example.test", capabilities_header=None, device_id=device_id)
+    assert _device_row(postgres_pool, device_id)[1] > stale
+
+    bob = identity.get_request_identity(tailscale_login="bob@example.test", capabilities_header=None, device_id=device_id)
+    assert bob.user_id != alice.user_id
+    assert _device_row(postgres_pool, device_id)[0] == bob.user_id
