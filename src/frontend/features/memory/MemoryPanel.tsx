@@ -4,11 +4,12 @@ import { Loader2, Minus, Pencil, Plus, RotateCcw, X } from "lucide-react"
 import { FloatingWindow } from "@/components/ui/FloatingWindow"
 import { StyledSelect } from "@/components/ui/StyledSelect"
 import { useEventListener } from "@/hooks/useEventListener"
-import { cn } from "@/lib/utils"
+import { cn, isModKey } from "@/lib/utils"
 import { EditableText } from "@/features/memory/EditableText"
 import { countOperations, type MemoryPanelState, type MemoryReviewActions, type ReviewOperation, type ReviewScope, type ReviewTopic } from "@/features/memory/useMemorizeFlow"
 import { formatTopicHeading } from "@/features/memory/memoryUtils"
-import type { MemoryScope, MemoryTopic } from "@/lib/domain/types"
+import { MEMORY_BUTTON_CLASS, MEMORY_TEXT_BUTTON_CLASS } from "@/features/memory/styles"
+import type { MemoryScope, MemoryTopic } from "@/lib/domain/memory"
 
 const SCOPE_LABELS: Record<MemoryScope, string> = { global: "You", project: "Project" }
 const OP_ICONS = { add: Plus, update: Pencil, delete: Minus }
@@ -31,7 +32,7 @@ export function MemoryPanel({ state, actions }: { state: MemoryPanelState; actio
   const reviewing = state.phase === "review"
 
   useEventListener("document", "keydown", (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+    if (isModKey(e) && e.key === "Enter") {
       e.preventDefault()
       void actions.commit()
     }
@@ -61,9 +62,9 @@ export function MemoryPanel({ state, actions }: { state: MemoryPanelState; actio
             <h2 className="text-base font-semibold text-ink">Review memory</h2>
             <div className="flex items-center gap-2">
               <button onClick={() => void actions.cancel()} disabled={state.committing}
-                className="px-2 py-1.5 text-sm text-ink-muted transition-colors hover:text-ink disabled:opacity-40">Cancel</button>
+                className={`${MEMORY_TEXT_BUTTON_CLASS} disabled:opacity-40`}>Cancel</button>
               <button onClick={() => void actions.commit()} disabled={state.committing}
-                className="flex items-center gap-1.5 rounded-md bg-surface-elevated px-3 py-1.5 text-sm text-ink transition-colors hover:bg-hover disabled:opacity-40 focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">
+                className={`flex items-center gap-1.5 ${MEMORY_BUTTON_CLASS}`}>
                 {state.committing && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                 {acceptedCount > 0 ? `Commit ${acceptedCount}` : "Commit"}
               </button>

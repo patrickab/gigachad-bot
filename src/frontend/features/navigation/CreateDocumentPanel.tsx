@@ -2,13 +2,18 @@
 
 import { useState } from "react"
 import { FilePlus } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { PillTabs } from "@/components/ui/PillTabs"
 import { SaveAsModal } from "@/components/ui/SaveAsModal"
 import { useResetOnOpen } from "@/hooks/useResetOnChange"
 
 type DocType = "md" | "tex" | "canvas" | "c4"
 
-const DOC_TYPE_LABELS: Record<DocType, string> = { md: "Markdown", tex: "LaTeX", canvas: "Drawing", c4: "Architecture" }
+const DOC_TYPES: readonly { value: DocType; label: string }[] = [
+  { value: "md", label: "Markdown" },
+  { value: "tex", label: "LaTeX" },
+  { value: "canvas", label: "Drawing" },
+  { value: "c4", label: "Architecture" },
+]
 
 interface CreateDocumentPanelProps {
   open: boolean
@@ -36,22 +41,7 @@ export function CreateDocumentPanel({ open, onClose, onCreate }: CreateDocumentP
       placeholder={type === "c4" ? "backend/backend.c4" : `filename${ext}`}
       beforeInput={
         <div className="px-5 pb-2">
-          <div className="flex gap-1">
-            {(Object.keys(DOC_TYPE_LABELS) as DocType[]).map((t) => (
-              <button
-                key={t}
-                onClick={() => setType(t)}
-                className={cn(
-                  "rounded-full px-3 py-1 text-[11px] font-medium transition-colors",
-                  type === t
-                    ? "bg-surface-elevated text-ink"
-                    : "text-ink-muted hover:text-ink hover:bg-surface/50"
-                )}
-              >
-                {DOC_TYPE_LABELS[t]}
-              </button>
-            ))}
-          </div>
+          <PillTabs options={DOC_TYPES} value={type} onChange={setType} />
         </div>
       }
     />

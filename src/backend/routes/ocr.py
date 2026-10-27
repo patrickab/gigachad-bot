@@ -2,10 +2,11 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
+from backend.http_plumbing import decode_image, stream_completion
 from lib.model_provider_store import ModelProviderStore
-from lib.prompts.internal import SYS_OCR_TEXT_EXTRACTION
+from lib.prompts.non_user_prompts import SYS_OCR_TEXT_EXTRACTION
 
-from .deps import decode_image, get_model_provider_store, request_client, stream_completion
+from .deps import get_model_provider_store, request_client
 
 router = APIRouter(prefix="/api", tags=["ocr"])
 

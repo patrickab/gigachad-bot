@@ -40,11 +40,7 @@ if [[ ! -f "$repo/pyproject.toml" ]]; then
     exit 1
 fi
 # run.sh starts PostgreSQL through run-backend.sh in parallel, so give it time to come up.
-for _ in {1..60}; do
-    port_open "$pg_host:$pg_port" && break
-    sleep 1
-done
-if ! port_open "$pg_host:$pg_port"; then
+if ! wait_until 60 1 port_open "$pg_host:$pg_port"; then
     printf 'PostgreSQL is not up on %s:%s, start it with ./run-backend.sh first\n' "$pg_host" "$pg_port" >&2
     exit 1
 fi

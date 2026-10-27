@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { FileMountPicker } from "@/features/navigation/FileMountPicker"
-import type { DirectoryListing } from "@/lib/domain/types"
+import type { DirectoryListing } from "@/lib/domain/files"
 
 const tree: Record<string, DirectoryListing> = {
   "~": { path: "/home/noob", parent: "/home", directories: [".config", "git"] },

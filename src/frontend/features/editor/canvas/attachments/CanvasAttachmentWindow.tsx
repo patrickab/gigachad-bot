@@ -2,14 +2,14 @@
 
 import { useState, type ReactNode } from "react"
 import { FileType, Maximize2, Minimize2, SquarePen, X } from "lucide-react"
-import { CANVAS_ASPECT, type CanvasAttachment } from "@/lib/domain/canvasDocument"
+import { attachmentName, attachmentTraits } from "@/lib/domain/canvasAttachments"
+import { CANVAS_ASPECT, type AttachmentPatch, type CanvasAttachment, type NestedCanvasAttachment } from "@/lib/domain/canvasDocument"
 import type { Point } from "@/lib/domain/edgeRouting"
 import { cn } from "@/lib/utils"
 import { ArchitectureWindow } from "@/features/editor/architecture/ArchitectureWindow"
 import { CanvasResizeHandle } from "@/features/editor/canvas/CanvasResizeHandle"
 import { AnnotatedPdfViewer } from "@/features/editor/pdf/AnnotatedPdfViewer"
 import { CanvasDocumentAttachment } from "./CanvasDocumentAttachment"
-import { useTabActive } from "@/contexts/TabContext"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 
 const PDF_LAYOUT_CAP = 916 // PdfViewer caps rendering at 900px + its 8px side gaps — wider layout gains no resolution
@@ -31,13 +31,13 @@ interface CanvasAttachmentWindowProps {
   onDragStart: (mode: "move" | "resize", clientX: number, clientY: number) => void
   onToggleFullscreen: () => void
   onRemove: () => void
-  onPatch: (patch: Partial<CanvasAttachment>) => void
+  onPatch: (patch: AttachmentPatch) => void
   onRetitle: (title: string) => void
   onPdfAspect: (aspect: number) => void
   /** The canvas pen or highlighter, a stylus on a PDF window writes on the PDF with it. */
   pdfPen: { color: string; width: number; highlight: boolean }
   /** Body of a canvas window. A prop, not an import, so editor and window stay out of an import cycle. */
-  renderNestedCanvas: (attachment: CanvasAttachment, name: string) => ReactNode
+  renderNestedCanvas: (attachment: NestedCanvasAttachment, name: string) => ReactNode
 }
 
 /** A live, scrollable window over the canvas for a PDF, document, architecture diagram or nested canvas. Never baked into export. */
@@ -46,14 +46,11 @@ export function CanvasAttachmentWindow({
   onDragStart, onToggleFullscreen, onRemove, onPatch, onRetitle, onPdfAspect, pdfPen, renderNestedCanvas,
 }: CanvasAttachmentWindowProps) {
   const [editingTitle, setEditingTitle] = useState(false)
-  const tabActive = useTabActive()
-  useEscapeLayer(() => setEditingTitle(false), editingTitle && tabActive)
-  const nested = att.kind === "canvas"
-  const architectureDiagram = att.kind === "architecture-graph"
-  const isDocument = att.kind === "document"
-  const fixedSize = architectureDiagram || isDocument
-  const aspect = nested ? CANVAS_ASPECT : pdfAspect
-  const name = att.title ?? (architectureDiagram ? "Architecture" : att.path?.split("/").pop()) ?? (nested ? "Canvas" : isDocument ? "Document" : "PDF")
+  useEscapeLayer(() => setEditingTitle(false), editingTitle)
+  const pdf = att.kind === "pdf"
+  const fixedSize = attachmentTraits[att.kind].fixedHeight
+  const aspect = pdf ? pdfAspect : CANVAS_ASPECT
+  const name = attachmentName(att)
   // PDFs rasterize through a settled layout size. Interactive viewport frames
   // use their actual screen size so pointer coordinates stay exact.
   const screenX = att.x * scale + offset.x
@@ -61,7 +58,37 @@ export function CanvasAttachmentWindow({
   const contentHeight = att.height ?? att.width * CANVAS_ASPECT
   const screenW = att.width * scale
   const screenH = contentHeight * scale
-  const layoutW = nested || fixedSize ? screenW : Math.min(att.width * settledScale, PDF_LAYOUT_CAP)
+  const layoutW = pdf ? Math.min(att.width * settledScale, PDF_LAYOUT_CAP) : screenW
+
+  // One body per kind; each sees its own fields.
+  const body = () => {
+    switch (att.kind) {
+      case "architecture-graph":
+        return <ArchitectureWindow path={att.path} maximized={full} hostScale={full ? 1 : scale} edgeStyle={att.edgeStyle} onEdgeStyleChange={(edgeStyle) => onPatch({ edgeStyle })} onNavigate={(path) => onPatch({ path })} />
+      case "document":
+        return (
+          <CanvasDocumentAttachment
+            path={att.path}
+            hostScale={scale}
+            plotFrame={full ? null : { width: Math.max(att.width * settledScale, PLOT_MIN_LAYOUT_WIDTH), scale: screenW / Math.max(att.width * settledScale, PLOT_MIN_LAYOUT_WIDTH) }}
+            collapsed={!full && scale !== settledScale}
+          />
+        )
+      case "canvas":
+        return renderNestedCanvas(att, name)
+      case "pdf":
+        return (
+          <AnnotatedPdfViewer
+            path={att.path}
+            pen={pdfPen}
+            clipToPages
+            onPageAspect={onPdfAspect}
+            initialPage={att.page}
+            onPageChange={(page) => onPatch({ page })}
+          />
+        )
+    }
+  }
 
   const commitTitle = (title: string) => {
     setEditingTitle(false)
@@ -88,7 +115,7 @@ export function CanvasAttachmentWindow({
         )}
         onPointerDown={(e) => { e.stopPropagation(); if (!full) onDragStart("move", e.clientX, e.clientY) }}
       >
-        {nested ? <SquarePen className="h-3 w-3 text-ink-faint shrink-0" /> : <FileType className="h-3 w-3 text-ink-faint shrink-0" />}
+        {att.kind === "canvas" ? <SquarePen className="h-3 w-3 text-ink-faint shrink-0" /> : <FileType className="h-3 w-3 text-ink-faint shrink-0" />}
         {editingTitle ? (
           <input
             autoFocus
@@ -127,27 +154,7 @@ export function CanvasAttachmentWindow({
         style={{ height: full ? undefined : fixedSize ? screenH - TITLE_BAR_PX : layoutW * aspect }}
         onPointerDown={(e) => e.stopPropagation()}
       >
-        {architectureDiagram ? (
-          <ArchitectureWindow path={att.path!} maximized={full} hostScale={full ? 1 : scale} edgeStyle={att.edgeStyle} onEdgeStyleChange={(edgeStyle) => onPatch({ edgeStyle })} onNavigate={(path) => onPatch({ path })} />
-        ) : isDocument ? (
-          <CanvasDocumentAttachment
-            path={att.path!}
-            hostScale={scale}
-            plotFrame={full ? null : { width: Math.max(att.width * settledScale, PLOT_MIN_LAYOUT_WIDTH), scale: screenW / Math.max(att.width * settledScale, PLOT_MIN_LAYOUT_WIDTH) }}
-            collapsed={!full && scale !== settledScale}
-          />
-        ) : nested ? (
-          renderNestedCanvas(att, name)
-        ) : (
-          <AnnotatedPdfViewer
-            path={att.path!}
-            pen={pdfPen}
-            clipToPages
-            onPageAspect={onPdfAspect}
-            initialPage={att.page}
-            onPageChange={(page) => onPatch({ page })}
-          />
-        )}
+        {body()}
       </div>
       {!full && <CanvasResizeHandle className="w-4 h-4" onDragStart={onDragStart} />}
     </div>

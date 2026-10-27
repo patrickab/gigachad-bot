@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react"
 import { useTab } from "@/contexts/TabContext"
 import { countOperations, useMemorizeFlow, type MemoryPanelState, type MemoryReviewActions } from "@/features/memory/useMemorizeFlow"
-import type { MemoryScope, Message } from "@/lib/domain/types"
+import type { Message } from "@/lib/domain/types"
+import type { MemoryScope } from "@/lib/domain/memory"
 
 /** Which memory stores an extraction targets: `null` is both global and project. */
 export type MemorizeScope = MemoryScope | null

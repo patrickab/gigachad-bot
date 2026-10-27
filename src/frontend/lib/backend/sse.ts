@@ -1,6 +1,3 @@
-import { getApiBase } from "./config"
-import { deviceHeaders } from "./deviceId"
-
 export interface SSEEvent {
   event: string
   data: string
@@ -34,16 +31,11 @@ async function* readLines(res: Response): AsyncGenerator<string> {
   }
 }
 
-/** POST-based SSE (EventSource cannot POST). Aborting cancels the request. Iteration throws on non-2xx. */
-export function createSSEStream(path: string, body: Record<string, unknown>): SSEStreamResult {
+/** POST-based SSE (EventSource cannot POST): `open` sends the request. Aborting cancels it. Iteration throws on non-2xx. */
+export function createSSEStream(open: (signal: AbortSignal) => Promise<Response>): SSEStreamResult {
   const controller = new AbortController()
 
-  const promise = fetch(`${getApiBase()}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...deviceHeaders() },
-    body: JSON.stringify(body),
-    signal: controller.signal,
-  })
+  const promise = open(controller.signal)
 
   async function* iterate(): AsyncGenerator<SSEEvent> {
     const res = await promise

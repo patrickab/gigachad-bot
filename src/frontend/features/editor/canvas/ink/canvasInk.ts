@@ -48,9 +48,14 @@ export function appendStrokePoint(points: number[][], point: number[]): void {
   points.push(point)
 }
 
+/** Stroke sample at a pointer position: its point in stroke units plus the pen pressure. */
+export function pointerSample(e: { clientX: number; clientY: number; pressure: number }, toPoint: (clientX: number, clientY: number) => readonly number[]): number[] {
+  return [...toPoint(e.clientX, e.clientY), penPressure(e)]
+}
+
 /** Appends every coalesced sample of a pointer move: they carry the pen's full sample rate (~240Hz) instead of one point per frame. */
 export function appendPointerSamples(points: number[][], e: PointerEvent, toPoint: (clientX: number, clientY: number) => readonly number[]): void {
-  for (const sample of e.getCoalescedEvents?.() ?? [e]) appendStrokePoint(points, [...toPoint(sample.clientX, sample.clientY), penPressure(sample)])
+  for (const sample of e.getCoalescedEvents?.() ?? [e]) appendStrokePoint(points, pointerSample(sample, toPoint))
 }
 
 /**
@@ -59,8 +64,23 @@ export function appendPointerSamples(points: number[][], e: PointerEvent, toPoin
  * only pointerup appends one and the latest move sample is otherwise the end.
  */
 export function finishStroke(points: number[][], e: { type: string; clientX: number; clientY: number; pressure: number }, toPoint: (clientX: number, clientY: number) => readonly number[]): number[][] | null {
-  if (e.type === "pointerup") appendStrokePoint(points, [...toPoint(e.clientX, e.clientY), penPressure(e)])
+  if (e.type === "pointerup") appendStrokePoint(points, pointerSample(e, toPoint))
   return points.length >= 2 ? points : null
+}
+
+/**
+ * What a press does with ink, shared by the canvas and the PDF viewer.
+ *
+ * - Touch never inks, it pans and zooms
+ * - The pen's eraser end always erases
+ * - Otherwise only the primary button inks: the selected tool decides, a stylus writes even without one, the mouse needs one
+ */
+export function pointerInkRole(e: { pointerType: string; button: number; buttons: number }, tool: InkTool | null): "draw" | "erase" | null {
+  if (e.pointerType === "touch") return null
+  if (e.pointerType === "pen" && (e.button === 5 || (e.buttons & 32) !== 0)) return "erase"
+  if (e.button !== 0) return null
+  if (e.pointerType === "mouse" && !tool) return null
+  return tool === "eraser" ? "erase" : "draw"
 }
 
 /** New stroke of the given ink. */

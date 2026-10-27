@@ -12,7 +12,11 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
-from backend.canvas import (
+from backend.http_plumbing import http_errors, live_stream
+from backend.identity import RequestIdentity, get_request_identity
+from backend.routes.deps import get_canvas_store
+from backend.sync import get_change_broker
+from lib.canvas_store import (
     CanvasMutation,
     CanvasMutationStore,
     CanvasNotFound,
@@ -22,9 +26,6 @@ from backend.canvas import (
     MutationKind,
     normalize_canvas_key,
 )
-from backend.identity import RequestIdentity, get_request_identity
-from backend.routes.deps import get_canvas_store, http_errors, live_stream
-from backend.sync import get_change_broker
 
 router = APIRouter(prefix="/api/canvases", tags=["canvases"])
 

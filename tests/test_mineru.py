@@ -1,7 +1,7 @@
 """Regression test for ``lib.mineru.parse_pdf``'s local-output-to-global-Nextcloud handoff.
 
 A direct-chat parse gives MinerU a scratch temp directory as ``output_dir`` (see
-``backend/routes/files.py::_parse_assets``), distinct from the global
+``lib/attachments.py::ChatUploads.parse``), distinct from the global
 ``DIRECTORY_OUTPUT_MINERU`` Nextcloud mirror tree that a prior library/queue
 extraction would have created. The final handoff copies the parsed markdown
 and images into that global tree — it must not depend on the tree already

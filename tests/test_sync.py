@@ -6,8 +6,9 @@ import psycopg
 import pytest
 
 from backend.identity import RequestIdentity
-from backend.routes.sync import replay_changes, stream_changes
+from backend.routes.sync import stream_changes
 from backend.sync import CHANNEL, QUEUE_MAXSIZE, ChangeBroker
+from lib.changes import latest_changes
 from tests.conftest import create_device, create_user
 
 pytestmark = pytest.mark.usefixtures("clean_database")
@@ -88,41 +89,38 @@ def test_insert_notifies_once_with_metadata_only(postgres_pool, listener):
     assert list(listener.notifies(timeout=0.5)) == []
 
 
-def test_replay_returns_rows_after_since_in_seq_order(postgres_pool, monkeypatch):
-    monkeypatch.setattr("backend.routes.sync.get_postgres_pool", lambda: postgres_pool)
+def test_replay_returns_rows_after_since_in_seq_order(postgres_pool):
     user_id = create_user(postgres_pool, "alice@example.test")
     seqs = [_change(postgres_pool, user_id, key) for key in ("c.md", "a.md", "b.md")]
 
-    rows = replay_changes(user_id, 0)
+    rows = latest_changes(postgres_pool, user_id, 0)
 
     assert [row["seq"] for row in rows] == sorted(seqs)
     assert [row["resource_key"] for row in rows] == ["c.md", "a.md", "b.md"]
-    assert replay_changes(user_id, seqs[0]) == rows[1:]
-    assert replay_changes(user_id, seqs[-1]) == []
+    assert latest_changes(postgres_pool, user_id, seqs[0]) == rows[1:]
+    assert latest_changes(postgres_pool, user_id, seqs[-1]) == []
 
 
-def test_replay_keeps_only_the_latest_change_per_resource(postgres_pool, monkeypatch):
-    monkeypatch.setattr("backend.routes.sync.get_postgres_pool", lambda: postgres_pool)
+def test_replay_keeps_only_the_latest_change_per_resource(postgres_pool):
     user_id = create_user(postgres_pool, "alice@example.test")
     first = _change(postgres_pool, user_id, "a.md")
     other = _change(postgres_pool, user_id, "b.md")
     latest = _change(postgres_pool, user_id, "a.md", version=2)
 
-    rows = replay_changes(user_id, 0)
+    rows = latest_changes(postgres_pool, user_id, 0)
 
     assert [(row["seq"], row["resource_key"]) for row in rows] == [(other, "b.md"), (latest, "a.md")]
-    assert replay_changes(user_id, first) == rows
-    assert replay_changes(user_id, other) == rows[1:]
+    assert latest_changes(postgres_pool, user_id, first) == rows
+    assert latest_changes(postgres_pool, user_id, other) == rows[1:]
 
 
-def test_replay_excludes_other_users(postgres_pool, monkeypatch):
-    monkeypatch.setattr("backend.routes.sync.get_postgres_pool", lambda: postgres_pool)
+def test_replay_excludes_other_users(postgres_pool):
     alice = create_user(postgres_pool, "alice@example.test")
     bob = create_user(postgres_pool, "bob@example.test")
     _change(postgres_pool, bob, "bob.md")
     alice_seq = _change(postgres_pool, alice, "alice.md")
 
-    assert [(row["seq"], row["resource_key"]) for row in replay_changes(alice, 0)] == [(alice_seq, "alice.md")]
+    assert [(row["seq"], row["resource_key"]) for row in latest_changes(postgres_pool, alice, 0)] == [(alice_seq, "alice.md")]
 
 
 async def test_broker_delivers_only_the_subscribed_user(postgres_pool, database_url):

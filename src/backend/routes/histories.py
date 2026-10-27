@@ -1,46 +1,18 @@
 import asyncio
-from collections.abc import Callable
-import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from backend.routes.deps import get_asset_store, get_chat_store, get_sandbox_service, http_errors
-from backend.routes.files import delete_chat_upload_dir
+from backend.http_plumbing import http_errors
+from backend.routes.deps import get_chat_cleanup, get_chat_store, get_sandbox_service
 from backend.routes.schemas import ChatSnapshot
-from lib.asset_store import AssetStore
-from lib.chat_store import ChatStore
+from lib.chat_cleanup import ChatCleanup
+from lib.chat_store import ChatStore, ParentDiverged
 from lib.data_store import StorageConflictError
 from lib.sandbox_service import SandboxService
 
 router = APIRouter(prefix="/api/chat-histories", tags=["histories"])
-logger = logging.getLogger(__name__)
-
-
-async def cleanup_after_delete[T](
-    assets: AssetStore,
-    sandbox_service: SandboxService,
-    run: Callable[[Callable[[str, str | None], None]], T],
-) -> T:
-    """Delete sandbox state after chat deletion succeeds.
-
-    Log cleanup failures because the chat is already gone.
-    """
-    deleted_chat_ids: list[str] = []
-
-    def cleanup(chat_id: str, slug: str | None = None) -> None:
-        delete_chat_upload_dir(chat_id, slug, assets)
-        # ChatStore's cleanup callback cannot await, so sandbox deletion waits for the IDs recorded here.
-        deleted_chat_ids.append(chat_id)
-
-    result = await asyncio.to_thread(run, cleanup)
-    for chat_id in deleted_chat_ids:
-        try:
-            await sandbox_service.delete_chat_state(chat_id=chat_id)
-        except Exception:
-            logger.exception("sandbox cleanup failed for chat %s after history deletion", chat_id)
-    return result
 
 
 class SaveRequest(ChatSnapshot):
@@ -103,25 +75,21 @@ async def save_chat_history(
 async def cascade_delete(
     filename: str,
     store: ChatStore = Depends(get_chat_store),
-    assets: AssetStore = Depends(get_asset_store),
-    sandbox_service: SandboxService = Depends(get_sandbox_service),
+    cleanup: ChatCleanup = Depends(get_chat_cleanup),
 ) -> dict[str, Any]:
     """Delete a chat and all its descendant branches, purging uploads and sandbox state."""
     with http_errors((FileNotFoundError, 404, "Chat history not found")):
-        return await cleanup_after_delete(
-            assets, sandbox_service, lambda cleanup: store.cascade_delete(filename, cleanup_uploads_fn=cleanup)
-        )
+        return await cleanup.after(lambda purge: store.cascade_delete(filename, cleanup_uploads_fn=purge))
 
 
 @router.delete("/{filename:path}")
 async def delete_chat_history(
     filename: str,
     store: ChatStore = Depends(get_chat_store),
-    assets: AssetStore = Depends(get_asset_store),
-    sandbox_service: SandboxService = Depends(get_sandbox_service),
+    cleanup: ChatCleanup = Depends(get_chat_cleanup),
 ) -> dict[str, str]:
     with http_errors((FileNotFoundError, 404, "Chat history not found")):
-        return await cleanup_after_delete(assets, sandbox_service, lambda cleanup: store.delete(filename, cleanup_uploads_fn=cleanup))
+        return await cleanup.after(lambda purge: store.delete(filename, cleanup_uploads_fn=purge))
 
 
 @router.post("/move")
@@ -140,14 +108,8 @@ def create_branch(req: BranchRequest, store: ChatStore = Depends(get_chat_store)
 async def merge_branch(
     req: MergeRequest,
     store: ChatStore = Depends(get_chat_store),
-    assets: AssetStore = Depends(get_asset_store),
-    sandbox_service: SandboxService = Depends(get_sandbox_service),
+    cleanup: ChatCleanup = Depends(get_chat_cleanup),
 ) -> dict[str, Any]:
     """Merge a branch back into its parent and delete the child, 409 when the parent diverged."""
-    with http_errors((FileNotFoundError, 404, "Child chat history not found")):
-        try:
-            return await cleanup_after_delete(
-                assets, sandbox_service, lambda cleanup: store.merge(req.child_file, cleanup_uploads_fn=cleanup)
-            )
-        except ValueError as e:
-            raise HTTPException(status_code=409 if "diverged" in str(e) else 400, detail=str(e)) from e
+    with http_errors((FileNotFoundError, 404, "Child chat history not found"), (ParentDiverged, 409, None), (ValueError, 400, None)):
+        return await cleanup.after(lambda purge: store.merge(req.child_file, cleanup_uploads_fn=purge))

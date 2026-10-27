@@ -1,5 +1,6 @@
 import pytest
 
+from lib.changes import UserScope
 from lib.data_store import (
     DataStore,
     InvalidStorageKey,
@@ -10,64 +11,62 @@ from lib.postgres_data_store import PostgresDataStore
 from tests.conftest import create_user
 
 
-@pytest.fixture
-def store(postgres_pool, clean_database) -> DataStore:
-    return PostgresDataStore(postgres_pool, create_user(postgres_pool))
+def entries_by_key(data_store: DataStore, prefix: str = "", *, recursive: bool = False):
+    return {entry.key: entry for entry in data_store.list(prefix, recursive=recursive)}
 
 
-def entries_by_key(store: DataStore, prefix: str = "", *, recursive: bool = False):
-    return {entry.key: entry for entry in store.list(prefix, recursive=recursive)}
-
-
-def test_missing_read_raises_storage_not_found(store: DataStore):
+def test_missing_read_raises_storage_not_found(data_store: DataStore):
     with pytest.raises(StorageNotFoundError):
-        store.read_bytes("missing.json")
+        data_store.read_bytes("missing.json")
 
 
-def test_write_reads_back_and_enforces_revision(store: DataStore):
-    first = store.write_bytes("state.json", b"one")
-    content, read_revision = store.read_bytes("state.json")
+def test_write_reads_back_and_enforces_revision(data_store: DataStore):
+    first = data_store.write_bytes("state.json", b"one")
+    content, read_revision = data_store.read_bytes("state.json")
 
     assert content == b"one"
     assert read_revision == first
 
-    second = store.write_bytes("state.json", b"two", expected=first)
+    second = data_store.write_bytes("state.json", b"two", expected=first)
     assert second != first
 
     with pytest.raises(StorageConflictError):
-        store.write_bytes("state.json", b"three", expected=first)
+        data_store.write_bytes("state.json", b"three", expected=first)
 
 
-def test_stale_write_rejects_deleted_key(store: DataStore):
-    revision = store.write_bytes("state.json", b"one")
-    store.delete("state.json")
-
-    with pytest.raises(StorageConflictError):
-        store.write_bytes("state.json", b"two", expected=revision)
-
-
-def test_write_many_is_all_or_nothing(store: DataStore):
-    first = store.write_bytes("ws/a.c4", b"a1")
-    second = store.write_bytes("ws/b.c4", b"b1")
-    store.write_bytes("ws/b.c4", b"b2", expected=second)
+def test_stale_write_rejects_deleted_key(data_store: DataStore):
+    revision = data_store.write_bytes("state.json", b"one")
+    data_store.delete("state.json")
 
     with pytest.raises(StorageConflictError):
-        store.write_many([("ws/a.c4", b"a2", first), ("ws/new.json", b"{}", None), ("ws/b.c4", b"b3", second)])
-
-    assert store.read_bytes("ws/a.c4")[0] == b"a1"
-    assert not store.exists("ws/new.json")
-
-    current = store.read_bytes("ws/b.c4")[1]
-    store.write_many([("ws/a.c4", b"a2", first), ("ws/b.c4", b"b3", current)])
-    assert [store.read_bytes(key)[0] for key in ("ws/a.c4", "ws/b.c4")] == [b"a2", b"b3"]
+        data_store.write_bytes("state.json", b"two", expected=revision)
 
 
-def test_list_reports_direct_children_and_recursive_descendants(store: DataStore):
-    store.write_bytes("parent/one.txt", b"1")
-    store.write_bytes("parent/nested/two.txt", b"22")
+def test_apply_is_all_or_nothing(data_store: DataStore):
+    first = data_store.write_bytes("ws/a.c4", b"a1")
+    second = data_store.write_bytes("ws/b.c4", b"b1")
+    data_store.write_bytes("ws/b.c4", b"b2", expected=second)
+    data_store.write_bytes("ws/gone.c4", b"g")
 
-    direct = entries_by_key(store, "parent")
-    recursive = entries_by_key(store, "parent", recursive=True)
+    with pytest.raises(StorageConflictError):
+        data_store.apply([("ws/a.c4", b"a2", first), ("ws/new.json", b"{}", None), ("ws/b.c4", b"b3", second)], ["ws/gone.c4"])
+
+    assert data_store.read_bytes("ws/a.c4")[0] == b"a1"
+    assert not data_store.exists("ws/new.json")
+    assert data_store.exists("ws/gone.c4")
+
+    current = data_store.read_bytes("ws/b.c4")[1]
+    data_store.apply([("ws/a.c4", b"a2", first), ("ws/b.c4", b"b3", current)], ["ws/gone.c4"])
+    assert [data_store.read_bytes(key)[0] for key in ("ws/a.c4", "ws/b.c4")] == [b"a2", b"b3"]
+    assert not data_store.exists("ws/gone.c4")
+
+
+def test_list_reports_direct_children_and_recursive_descendants(data_store: DataStore):
+    data_store.write_bytes("parent/one.txt", b"1")
+    data_store.write_bytes("parent/nested/two.txt", b"22")
+
+    direct = entries_by_key(data_store, "parent")
+    recursive = entries_by_key(data_store, "parent", recursive=True)
 
     assert set(direct) == {"parent/one.txt", "parent/nested"}
     assert direct["parent/one.txt"].is_dir is False
@@ -77,69 +76,63 @@ def test_list_reports_direct_children_and_recursive_descendants(store: DataStore
     assert recursive["parent/nested/two.txt"].size == 2
 
 
-def test_explicit_empty_directory_exists_and_is_listed(store: DataStore):
-    store.mkdir("empty")
+def test_explicit_empty_directory_exists_and_is_listed(data_store: DataStore):
+    data_store.mkdir("empty")
 
-    assert store.exists("empty")
-    entry = entries_by_key(store)["empty"]
+    assert data_store.exists("empty")
+    entry = entries_by_key(data_store)["empty"]
     assert entry.is_dir is True
     assert entry.size is None
     assert entry.revision is None
 
 
-def test_prefix_with_children_exists_without_explicit_directory(store: DataStore):
-    store.write_bytes("implied/child.json", b"{}")
+def test_prefix_with_children_exists_without_explicit_directory(data_store: DataStore):
+    data_store.write_bytes("implied/child.json", b"{}")
 
-    assert store.exists("implied")
-
-
-def test_delete_handles_single_keys_and_recursive_prefixes(store: DataStore):
-    store.write_bytes("single.txt", b"one")
-    store.write_bytes("tree/first.txt", b"one")
-    store.write_bytes("tree/nested/second.txt", b"two")
-
-    store.delete("single.txt")
-    store.delete("tree", recursive=True)
-
-    assert store.exists("single.txt") is False
-    assert store.exists("tree") is False
-    assert store.list("tree", recursive=True) == []
+    assert data_store.exists("implied")
 
 
-def test_non_recursive_delete_rejects_non_empty_directory(store: DataStore):
-    store.write_bytes("tree/child.txt", b"one")
+def test_delete_handles_single_keys_and_recursive_prefixes(data_store: DataStore):
+    data_store.write_bytes("single.txt", b"one")
+    data_store.write_bytes("tree/first.txt", b"one")
+    data_store.write_bytes("tree/nested/second.txt", b"two")
+
+    data_store.delete("single.txt")
+    data_store.delete("tree", recursive=True)
+
+    assert data_store.exists("single.txt") is False
+    assert data_store.exists("tree") is False
+    assert data_store.list("tree", recursive=True) == []
+
+
+def test_non_recursive_delete_rejects_non_empty_directory(data_store: DataStore):
+    data_store.write_bytes("tree/child.txt", b"one")
 
     with pytest.raises(OSError):
-        store.delete("tree")
+        data_store.delete("tree")
 
 
-def test_move_handles_single_key_and_prefix(store: DataStore):
-    store.write_bytes("source.txt", b"single")
-    store.write_bytes("tree/first.txt", b"one")
-    store.write_bytes("tree/nested/second.txt", b"two")
+def test_move_handles_single_key_and_prefix(data_store: DataStore):
+    data_store.write_bytes("source.txt", b"single")
+    data_store.write_bytes("tree/first.txt", b"one")
+    data_store.write_bytes("tree/nested/second.txt", b"two")
 
-    store.move("source.txt", "destination.txt")
-    store.move("tree", "moved")
+    data_store.move("source.txt", "destination.txt")
+    data_store.move("tree", "moved")
 
-    assert store.exists("source.txt") is False
-    assert store.read_bytes("destination.txt")[0] == b"single"
-    assert store.exists("tree") is False
-    assert store.read_bytes("moved/first.txt")[0] == b"one"
-    assert store.read_bytes("moved/nested/second.txt")[0] == b"two"
+    assert data_store.exists("source.txt") is False
+    assert data_store.read_bytes("destination.txt")[0] == b"single"
+    assert data_store.exists("tree") is False
+    assert data_store.read_bytes("moved/first.txt")[0] == b"one"
+    assert data_store.read_bytes("moved/nested/second.txt")[0] == b"two"
 
 
-def test_postgres_store_cannot_read_another_users_key(postgres_pool):
-    with postgres_pool.connection() as connection, connection.transaction():
-        connection.execute("TRUNCATE changes, assets, vault_roots, devices, documents, users CASCADE")
-        first_user = connection.execute(
-            "INSERT INTO users (tailscale_login) VALUES (%s) RETURNING id", ("first@example.test",)
-        ).fetchone()[0]
-        second_user = connection.execute(
-            "INSERT INTO users (tailscale_login) VALUES (%s) RETURNING id", ("second@example.test",)
-        ).fetchone()[0]
+def test_postgres_store_cannot_read_another_users_key(postgres_pool, clean_database):
+    first_user = create_user(postgres_pool, "first@example.test")
+    second_user = create_user(postgres_pool, "second@example.test")
 
-    PostgresDataStore(postgres_pool, first_user).write_bytes("private.json", b"first")
-    second_store = PostgresDataStore(postgres_pool, second_user)
+    PostgresDataStore(UserScope(postgres_pool, first_user)).write_bytes("private.json", b"first")
+    second_store = PostgresDataStore(UserScope(postgres_pool, second_user))
 
     assert second_store.exists("private.json") is False
     assert second_store.list(recursive=True) == []
@@ -147,24 +140,24 @@ def test_postgres_store_cannot_read_another_users_key(postgres_pool):
         second_store.read_bytes("private.json")
 
 
-def test_move_missing_source_raises_storage_not_found(store: DataStore):
+def test_move_missing_source_raises_storage_not_found(data_store: DataStore):
     with pytest.raises(StorageNotFoundError):
-        store.move("missing", "destination")
+        data_store.move("missing", "destination")
 
 
 @pytest.mark.parametrize("key", ["", "/absolute", "../outside", "parent/../../outside"])
-def test_invalid_storage_keys_are_rejected(store: DataStore, key: str):
+def test_invalid_storage_keys_are_rejected(data_store: DataStore, key: str):
     operations = [
-        lambda: store.read_bytes(key),
-        lambda: store.write_bytes(key, b"content"),
-        lambda: store.exists(key),
-        lambda: store.mkdir(key),
-        lambda: store.delete(key),
-        lambda: store.move(key, "destination"),
-        lambda: store.move("source", key),
+        lambda: data_store.read_bytes(key),
+        lambda: data_store.write_bytes(key, b"content"),
+        lambda: data_store.exists(key),
+        lambda: data_store.mkdir(key),
+        lambda: data_store.delete(key),
+        lambda: data_store.move(key, "destination"),
+        lambda: data_store.move("source", key),
     ]
     if key:
-        operations.append(lambda: store.list(key))
+        operations.append(lambda: data_store.list(key))
 
     for operation in operations:
         with pytest.raises(InvalidStorageKey):

@@ -148,8 +148,7 @@ fi
 # Production uses its reviewed deployment environment and never regenerates locks.
 if [[ "$profile" == development ]]; then
     printf 'Installing backend dependencies\n'
-    python3 "$root_dir/src/backend/install_deps.py" python-lock "$root_dir"
-    uv sync --locked
+    sync_python_deps
 fi
 # A user unit started at boot has systemd's bare PATH, without the mise shims node lives behind.
 export PATH="$root_dir/.venv/bin:$HOME/.local/share/mise/shims:$HOME/.local/bin:$PATH"
@@ -172,18 +171,20 @@ printf 'Starting C4 service on http://127.0.0.1:%s\n' "$c4_port"
 C4_SERVICE_HOST=127.0.0.1 C4_SERVICE_PORT="$c4_port" node "$root_dir/src/c4/server.ts" &
 c4_pid=$!
 export C4_SERVICE_URL="http://127.0.0.1:${c4_port}"
-# The backend answers 503 on every architecture route while this service is down, so it
-# only starts once the service is healthy, and one that never gets there fails the unit.
-for _ in {1..60}; do
-    curl -sf -o /dev/null "$C4_SERVICE_URL/health" && break
+# True once the C4 service answers its health check, and exits when it died during startup.
+c4_ready() {
+    curl -sf -o /dev/null "$C4_SERVICE_URL/health" && return 0
     if ! kill -0 "$c4_pid" 2>/dev/null; then
         printf 'error: the C4 service exited during startup\n' >&2
         c4_pid=''
         exit 1
     fi
-    sleep 0.5
-done
-if ! curl -sf -o /dev/null "$C4_SERVICE_URL/health"; then
+    return 1
+}
+
+# The backend answers 503 on every architecture route while this service is down, so it
+# only starts once the service is healthy, and one that never gets there fails the unit.
+if ! wait_until 60 0.5 c4_ready; then
     printf 'error: the C4 service did not become healthy within 30s\n' >&2
     exit 1
 fi

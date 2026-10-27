@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { readPins, snapshotPath, type Pins } from './layout.ts'
-import { applyOperations, idFromTitle, OperationError, titleFromName, type ApplyResult, type Operation } from './operations.ts'
+import { applyOperations } from './ops/apply.ts'
+import { idFromTitle, titleFromName } from './ops/ids.ts'
+import { OperationError, type ApplyResult, type Operation } from './ops/operation.ts'
 
 const SOURCE = `specification {
   element system

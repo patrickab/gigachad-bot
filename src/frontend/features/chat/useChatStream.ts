@@ -11,6 +11,7 @@ import {
 } from "@/lib/backend/streaming"
 import { toolPayload } from "@/features/chat/toolCalls"
 import type { ChatRequest, Message, Usage } from "@/lib/domain/types"
+import { errorMessage } from "@/lib/utils"
 
 export interface ChatStreamCompletion {
   messages: Message[]
@@ -24,7 +25,8 @@ export interface UseChatStreamReturn {
   send: (req: ChatRequest, skipAddMessages?: boolean) => Promise<ChatStreamCompletion | null>
   regenerateAt: (userIndex: number, req: ChatRequest) => Promise<ChatStreamCompletion | null>
   cancel: () => void
-  deleteMessagePair: (index: number) => void
+  /** Take the pair starting at `user` out of the chat; the returned restore puts it back before the message that followed it, or at its old index (clamped) once that is gone. Null when `user` heads no pair. */
+  removePair: (user: Message) => (() => void) | null
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>
   /** Update the latest messages so a `send` or `regenerateAt` right after builds its history from them, without waiting for a render. Returns the result. */
   replaceMessages: (update: (current: Message[]) => Message[]) => Message[]
@@ -99,8 +101,7 @@ export function useChatStream(): UseChatStreamReturn {
         }
       } catch (e) {
         // Abort and transport failure are both swallowed: the turn keeps what it streamed.
-        const err = e as Error
-        unresolvedReason = err.name === "AbortError" ? "Cancelled" : err.message || "Stream failed"
+        unresolvedReason = e instanceof Error && e.name === "AbortError" ? "Cancelled" : errorMessage(e, "Stream failed")
       } finally {
         settleRunningToolCalls(assistantMsg, unresolvedReason)
         publish()
@@ -165,14 +166,6 @@ export function useChatStream(): UseChatStreamReturn {
     setIsStreaming(false)
   }, [])
 
-  const deleteMessagePair = useCallback((index: number) => {
-    setMessages((prev) => {
-      const copy = [...prev]
-      copy.splice(index, 2)
-      return copy
-    })
-  }, [])
-
   const replaceMessages = useCallback((update: (current: Message[]) => Message[]) => {
     const next = update(messagesRef.current)
     messagesRef.current = next
@@ -180,5 +173,23 @@ export function useChatStream(): UseChatStreamReturn {
     return next
   }, [])
 
-  return { messages, isStreaming, send, regenerateAt, cancel, deleteMessagePair, setMessages, replaceMessages, totalUsage, setTotalUsage }
+  const removePair = useCallback((user: Message) => {
+    const current = messagesRef.current
+    const index = current.indexOf(user)
+    if (index < 0 || !current[index + 1]) return null
+    const pair = current.slice(index, index + 2)
+    const follower = current[index + 2]
+    replaceMessages((latest) => latest.filter((m) => !pair.includes(m)))
+    return () => {
+      replaceMessages((latest) => {
+        if (latest.includes(user)) return latest
+        const at = follower ? latest.indexOf(follower) : -1
+        const insertAt = at < 0 ? Math.min(index, latest.length) : at
+        return [...latest.slice(0, insertAt), ...pair, ...latest.slice(insertAt)]
+      })
+    }
+  }, [replaceMessages])
+
+
+  return { messages, isStreaming, send, regenerateAt, cancel, removePair, setMessages, replaceMessages, totalUsage, setTotalUsage }
 }

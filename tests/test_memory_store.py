@@ -4,15 +4,20 @@ from types import SimpleNamespace
 
 import pytest
 
-from lib import memory_store
-from lib.memory_store import MemoryStore
-from lib.postgres_data_store import PostgresDataStore
-from tests.conftest import create_user
+from lib import memory_context, memory_store
+from lib.memory_extract import MemoryExtractor
+from lib.memory_store import MemoryOperation, MemoryScope, MemoryStore
+
+GLOBAL = MemoryScope("global")
 
 
 @pytest.fixture
-def store(postgres_pool, clean_database) -> MemoryStore:
-    return MemoryStore(data_store=PostgresDataStore(postgres_pool, create_user(postgres_pool)), model="test")
+def store(data_store) -> MemoryStore:
+    return MemoryStore(data_store)
+
+
+def extract(store: MemoryStore, llm: object, messages: list[dict[str, str]]):
+    return asyncio.run(MemoryExtractor(store, llm, "test").extract(messages, chat_id="c1", scope="global"))
 
 
 class ScriptedLLM:
@@ -29,7 +34,7 @@ class ScriptedLLM:
 
 
 def seed(store: MemoryStore) -> None:
-    store.write_memories("global", [
+    store.write_memories(GLOBAL, [
         {"id": "a", "text": "Uses Arch Linux", "topic": "profile"},
         {"id": "b", "text": "Prefers terse answers", "topic": "preferences"},
     ])
@@ -53,7 +58,7 @@ def test_extract_keeps_only_valid_changes_and_proposes_new_topics(store):
         ],
     })
 
-    result = asyncio.run(store.extract(llm, [{"role": "user", "content": "hi"}], chat_id="c1", scope="global"))
+    result = extract(store, llm, [{"role": "user", "content": "hi"}])
 
     proposal = result.global_proposal
     assert [(o.op, o.target_id, o.topic, o.text) for o in proposal.operations] == [
@@ -73,45 +78,45 @@ def test_commit_applies_operations_and_advances_only_the_committed_scope(store):
     seed(store)
     llm = ScriptedLLM({"operations": [{"op": "delete", "id": "m2"}], "topics": []})
     messages = [{"role": "user", "content": "x"}, {"role": "assistant", "content": "y"}]
-    review = asyncio.run(store.extract(llm, messages, chat_id="c1", scope="global"))
+    review = extract(store, llm, messages)
 
-    store.commit("global", [
-        memory_store.MemoryOperation("1", "add", "global", "Dev Environment", "Runs iwd"),
-        memory_store.MemoryOperation("2", "update", "global", "profile", "Uses Debian", target_id="a"),
-        memory_store.MemoryOperation("3", "delete", "global", "preferences", target_id="b"),
-        memory_store.MemoryOperation("4", "update", "global", "profile", "Ghost", target_id="gone"),
+    store.commit(GLOBAL, [
+        MemoryOperation("1", "add", "global", "Dev Environment", "Runs iwd"),
+        MemoryOperation("2", "update", "global", "profile", "Uses Debian", target_id="a"),
+        MemoryOperation("3", "delete", "global", "preferences", target_id="b"),
+        MemoryOperation("4", "update", "global", "profile", "Ghost", target_id="gone"),
     ], [{"name": "dev_environment", "summary": "Linux setup"}], review_id=review.review_id)
 
-    assert sorted((m["topic"], m["text"]) for m in store.list_memories("global")) == [
+    assert sorted((m["topic"], m["text"]) for m in store.list_memories(GLOBAL)) == [
         ("dev_environment", "Runs iwd"), ("profile", "Uses Debian"),
     ]
-    assert {"name": "dev_environment", "summary": "Linux setup"} in store.get_topics("global")
-    assert store._watermark_for("c1", "global") == 2
-    assert store._watermark_for("c1", "project") == 0
+    assert {"name": "dev_environment", "summary": "Linux setup"} in store.get_topics(GLOBAL)
+    assert store.watermark("c1", "global") == 2
+    assert store.watermark("c1", "project") == 0
 
 
 def test_cancel_leaves_messages_eligible(store):
     seed(store)
     llm = ScriptedLLM({"operations": [{"op": "delete", "id": "m2"}], "topics": []})
-    review = asyncio.run(store.extract(llm, [{"role": "user", "content": "x"}], chat_id="c1", scope="global"))
+    review = extract(store, llm, [{"role": "user", "content": "x"}])
     store.cancel(review.review_id)
-    assert store._watermark_for("c1", "global") == 0
+    assert store.watermark("c1", "global") == 0
 
 
 def test_prompt_keeps_pinned_topics_and_indexes_overflow(store, monkeypatch):
-    monkeypatch.setattr(memory_store, "PROMPT_CHAR_BUDGET", 120)
-    store.write_memories("global", [
+    monkeypatch.setattr(memory_context, "PROMPT_CHAR_BUDGET", 120)
+    store.write_memories(GLOBAL, [
         {"id": "a", "text": "Old preference " + "x" * 200, "topic": "preferences", "updated_at": "2020-01-01"},
         {"id": "b", "text": "Recent hobby", "topic": "gardening", "updated_at": "2026-01-02"},
         {"id": "c", "text": "Older hobby " + "y" * 100, "topic": "chess", "updated_at": "2026-01-01"},
     ])
-    store.set_topics("global", [
+    store.set_topics(GLOBAL, [
         {"name": "preferences", "summary": "How to respond"},
         {"name": "chess", "summary": "Chess openings"},
         {"name": "gardening", "summary": "Pond plants"},
     ])
 
-    prompt = store.augment_system_prompt("Base")
+    prompt = memory_context.augment_system_prompt(store, "Base")
 
     assert "Old preference" in prompt  # pinned beats the budget
     assert "- Recent hobby" in prompt  # newest unpinned topic fills the remaining budget

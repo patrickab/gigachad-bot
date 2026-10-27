@@ -15,7 +15,8 @@ from agent_sandbox.manifest import Execution, Outputs, WorkspaceRef
 import pytest
 
 from config import TEST_MODEL
-from lib.agent_sandbox_adapter import AgentSandboxRunnerAdapter, FakeSandboxRunner, SandboxScriptError
+from lib.agent_sandbox_adapter import AgentSandboxRunnerAdapter, SandboxScriptError
+from lib.fake_sandbox_runner import FakeSandboxRunner
 
 SANDBOX_MODEL = TEST_MODEL
 

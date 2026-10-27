@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react"
 import type { Tab } from "@/contexts/TabContext"
-import { saveChatHistory as apiSaveChatHistory, saveProjectTab } from "@/lib/backend/api"
+import { saveChat } from "@/lib/backend/api"
 import { buildHistoryFile, parseHistoryFile } from "@/lib/domain/historyFile"
 import type { Message, Usage } from "@/lib/domain/types"
 
@@ -32,13 +32,8 @@ export function useChatPersistence({
   // No-op for untitled chats. Saved histories retain their own project scope.
   const saveHistory = useCallback(async (messagesToSave: Message[], usageToSave: Usage | undefined) => {
     if (!tab.historyFile) return
-    const { slug, filename } = parseHistoryFile(tab.historyFile)
-    const title = tab.title ?? filename.replace(".json", "")
-    if (slug && slug === projectSlug) {
-      await saveProjectTab(projectSlug, filename, messagesToSave, { chatId, tabName: tab.name ?? undefined, title, usage: usageToSave })
-    } else {
-      await apiSaveChatHistory(tab.historyFile, messagesToSave, { chatId, title, usage: usageToSave })
-    }
+    const title = tab.title ?? parseHistoryFile(tab.historyFile).filename.replace(".json", "")
+    await saveChat(tab.historyFile, projectSlug, messagesToSave, { chatId, tabName: tab.name ?? undefined, title, usage: usageToSave })
     await refreshAll()
   }, [tab.historyFile, tab.title, tab.name, projectSlug, chatId, refreshAll])
 
@@ -55,20 +50,10 @@ export function useChatPersistence({
   }, [tab.historyFile, saveHistory])
 
   const handleSaveSubmit = useCallback(async (name: string) => {
-    const newFilename = name + ".json"
-
-    // Save failures are swallowed so the tab still adopts the new history file.
-    if (projectSlug) {
-      try {
-        await saveProjectTab(projectSlug, newFilename, messages, { chatId, tabName: tab.name ?? undefined, title: name, usage })
-      } catch { }
-      setHistoryFile(buildHistoryFile(newFilename, projectSlug))
-    } else {
-      try {
-        await apiSaveChatHistory(newFilename, messages, { chatId, title: name, usage })
-      } catch { }
-      setHistoryFile(newFilename)
-    }
+    const historyFile = buildHistoryFile(name + ".json", projectSlug)
+    // A failed save is swallowed so the tab still adopts the new history file.
+    await saveChat(historyFile, projectSlug, messages, { chatId, tabName: tab.name ?? undefined, title: name, usage }).catch(() => {})
+    setHistoryFile(historyFile)
     await refreshAll()
     setSaveModalOpen(false)
   }, [messages, chatId, tab.name, projectSlug, usage, setHistoryFile, refreshAll])

@@ -76,7 +76,7 @@ change log + SSE        LikeC4  omp-web   factory
 
 - Keep logical namespaces independent of the physical Documents layout. Validate storage keys against absolute paths and traversal.
 - Scope `PostgresDataStore`, assets, projects, file-root registry, and other domain dependencies to authenticated users.
-- Check expected revisions on conditional writes. PostgreSQL `write_many` is atomic: one stale revision aborts the batch.
+- Check expected revisions on conditional writes. PostgreSQL `apply(writes, deletes)` is atomic: one stale revision aborts the whole batch, deletes included.
 - Keep development/production PostgreSQL containers and volumes separate. Their default Documents/PDF mirror is intentionally shared. Back up both database and mirror, not only code worktrees.
 - Load user model defaults from persistent provider configuration. Seed shipped prompts only for an uninitialized collection, never overwrite an existing collection or restore deliberately deleted defaults.
 - Apply numbered `db/schema/` steps under a PostgreSQL advisory transaction lock. Record checksums in `applied_schema_steps`, reject modified applied steps, and apply pending steps in one transaction. Add migrations rather than rewriting applied history.
@@ -99,7 +99,7 @@ committed user write -> durable changes row -> PostgreSQL NOTIFY
 | Boundary | Contract |
 | --- | --- |
 | Chat stream | `/api/chat` SSE carries tokens, usage/tool events, completion, and failures. Keep proxy buffering disabled for streaming. |
-| Project context | Bind memory scope to the chat's containing project/tab, not the project selected elsewhere. Support branch/merge histories. |
+| Project context | Bind memory scope to the chat's containing project/tab, not the project selected elsewhere. Support branch/merge histories: branch, merge, move and (cascade) delete commit all their chat and `project.json` writes and deletes in one unguarded `DataStore.apply` transaction, upload cleanup runs after it. |
 | Providers | LiteLLM routes cloud/local calls, including the configured OMP model source. Use stored model defaults, not hard-coded production models. |
 | Search | Brave LLM Context retrieves passages with backend-only `BRAVE_API_KEY`, then the selected model generates cited answers. |
 | Research | GPT-Researcher uses its DuckDuckGo retriever for multi-step research. Serialize runs with `RESEARCH_ENV_LOCK` because model/reasoning configuration temporarily changes process-wide environment, restoring it and deleting temporary config afterward. |
@@ -110,12 +110,12 @@ committed user write -> durable changes row -> PostgreSQL NOTIFY
 
 - `features/chat/ChatPair.tsx` defers collapsed Markdown and equation rendering until within 400px of the viewport or focused. Hidden tabs stay deferred until shown, while headers, tool labels, and screen-reader text remain available.
 - Reserve the 12.5vh preview cap offscreen, allowing short answers to shrink when activated. Expanding a turn renders its full content and plots.
-- `ChatContainer.tsx` jumps directly to the end on initial history restoration. Subsequent streaming updates retain smooth scrolling while pinned to the bottom.
+- `features/chat/useStickToBottom.ts` jumps directly to the end on initial history restoration. Subsequent streaming updates retain smooth scrolling while pinned to the bottom.
 
 ### Sandbox checkpoint boundary
 
 - Keep workspace-agent and plot slots scoped by user, chat, and sandbox scope. `SandboxRuntimeState` survives request-scoped service facades within one backend process and serializes each slot, not all chats. Uncheckpointed state is not shared across worker processes or recovered after process loss.
-- Persist rich output assets immediately, but stage the latest workspace archive/manifest in memory. `routes/histories.py` checkpoints that workspace only after saving the corresponding chat successfully. Do not treat a finished tool call as a durable workspace checkpoint.
+- Persist rich output assets immediately, but stage the latest workspace archive/manifest in memory. `routes/histories.py` checkpoints that workspace only after saving the corresponding chat successfully. Do not treat a finished tool call as a durable workspace checkpoint. `SandboxStore.checkpoint` writes the slot, manifest, active pointer and every run record in one `DataStore.apply` transaction; `recover_completed_run` only heals records written before that.
 - Reuse completed `tool_call_id` results. Refuse a still-running record as busy, allow abandoned records older than five minutes to run again, and release native run/restore resources even on cancellation.
 
 ### Live attachments and extraction
@@ -249,15 +249,15 @@ Encode one payload as `?open=<base64url JSON>`:
 
 | Memory stage | Contract |
 | --- | --- |
-| Scope | Document-backed JSON, not vector search. Atomic memories (`{id, text, topic, scope, ...}`) belong to topics (`{name, summary}`), the complete memories. Global: `memory/global-topics.json` + `global-profile.json`, seeded with `profile` and `preferences`. Project: `memory/project/<slug>/memory/topics.json` + `memory.json`, no seed topics. Schema step `0010_memory_topics.sql` migrated the former category files and fields. |
-| Extract | Manual (`/memorize*`), using the stored `memory_model`. One call per scope after its `(chat_id, scope)` watermark returns operations (`add`, `update`/`delete` by short fact id) plus summaries for new or outgrown topics. `_build_proposal` drops unknown ids, repeated targets, duplicates and no-ops, and gives every new topic a proposal. |
+| Scope | Document-backed JSON, not vector search. Atomic memories (`{id, text, topic, scope, ...}`) belong to topics (`{name, summary}`), the complete memories. A `MemoryScope(kind, slug)` names the global profile or one project. Global: `memory/global-topics.json` + `global-profile.json`, seeded with `profile` and `preferences`. Project: `memory/project/<slug>/memory/topics.json` + `memory.json`, no seed topics. Schema step `0010_memory_topics.sql` migrated the former category files and fields. Persistence lives in `memory_store.py`, LLM extraction/regroup in `memory_extract.py` (`MemoryExtractor`), prompt injection in `memory_context.py`. |
+| Extract | Manual (`/memorize*`), using the stored `memory_model`. One call per scope after its `(chat_id, scope)` watermark returns operations (`add`, `update`/`delete` by short fact id) plus summaries for new or outgrown topics. `build_proposal` drops unknown ids, repeated targets, duplicates and no-ops, and gives every new topic a proposal. |
 | Review | One screen (`MemoryPanel`): accept, edit, move or deny each operation, rename or summarize new topics (renaming onto an existing topic merges), accept or deny summary revisions. |
-| Commit / cancel | `POST /api/memory/commit` applies accepted operations deterministically (stale targets skipped), upserts topics, then advances that scope's watermark, also when every operation was denied. Cancellation discards the review without advancing. |
-| Injection | `MemoryStore.augment_system_prompt` renders topics with summaries under `Persistent Memory Context`. Pinned global topics always render in full, other topics fill `PROMPT_CHAR_BUDGET` newest first, the rest appear as a summary index. |
+| Commit / cancel | `POST /api/memory/commit` applies accepted operations deterministically (stale targets skipped), upserts topics, then advances that scope's watermark, also when every operation was denied. Topics, memories, watermark and pending buffer are written in one `DataStore.apply` transaction. Cancellation discards the review without advancing. |
+| Injection | `memory_context.augment_system_prompt` renders topics with summaries under `Persistent Memory Context`. Pinned global topics always render in full, other topics fill `PROMPT_CHAR_BUDGET` newest first, the rest appear as a summary index. |
 | Maintenance | One memory window (sidebar brain button, `features/memory/MemoryViewer.tsx`) lists global and per-project topics. Every edit writes immediately (`PUT /api/memory/topics`, then `PUT /api/memory/memories`), queued per scope. Facts move between topics, a title naming another topic merges into it after confirmation. `POST /api/memory/regroup` proposes subject topics for a scope, applied only after review. Deleting a topic deletes its memories, undoable via `UndoDeleteContext`. |
 
 - Use `UndoDeleteContext` for deferred resource deletions. Scheduling the next deletion commits the previous one, refusal restores it.
-- Remove chat pairs/attachments from model context immediately while allowing undo. Keep canvas history independent.
+- Remove chat pairs/attachments from model context immediately while allowing undo. Undo restores by message identity: a pair goes back before the message that followed it (at the end once that is gone), an attachment only into the message it was removed from. Keep canvas history independent.
 
 ## Provider usage
 

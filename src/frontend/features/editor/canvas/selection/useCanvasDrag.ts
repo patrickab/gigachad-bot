@@ -2,27 +2,31 @@
 
 import { useCallback, useRef } from "react"
 import { useEventListener } from "@/hooks/useEventListener"
-import type { CanvasAttachment, CanvasDocument, CanvasFrame, CanvasText } from "@/lib/domain/canvasDocument"
+import { attachmentTraits } from "@/lib/domain/canvasAttachments"
+import type { CanvasDocument } from "@/lib/domain/canvasDocument"
 
 type DragTarget = "frames" | "attachments" | "texts"
-type DragEntity = CanvasFrame | CanvasAttachment | CanvasText
 type DragMode = "move" | "resize"
+type DragPatch = { x?: number; y?: number; width?: number; height?: number }
+
+/** One pointer drag: `move` gets the travel since the press in canvas units, `end` the release. */
+export interface DragSession {
+  move: (dx: number, dy: number) => void
+  end?: (e: PointerEvent) => void
+}
 
 const MIN_WIDTH: Record<DragTarget, number> = { frames: 120, attachments: 200, texts: 80 }
 const MIN_HEIGHT: Record<"attachments" | "texts", number> = { attachments: 180, texts: 40 }
 
-type ActiveDrag = {
-  id: string; target: DragTarget; mode: DragMode
-  startX: number; startY: number; origX: number; origY: number; origW: number; origH: number
-}
+const withPatch = <T extends { id: string }>(items: T[], id: string, patch: DragPatch): T[] => items.map((item) => item.id === id ? { ...item, ...patch } : item)
 
-// A move shifts the origin. A resize grows the width; text notes and the fixed-height
-// attachments (architecture, document) also grow their height — frames and PDFs keep their aspect.
-function dragPatch(d: ActiveDrag, entity: DragEntity, dx: number, dy: number): Partial<DragEntity> {
-  if (d.mode === "move") return { x: d.origX + dx, y: d.origY + dy }
-  const width = Math.max(MIN_WIDTH[d.target], d.origW + dx)
-  const growsHeight = d.target === "texts" || (d.target === "attachments" && "kind" in entity && (entity.kind === "architecture-graph" || entity.kind === "document"))
-  return growsHeight ? { width, height: Math.max(MIN_HEIGHT[d.target as "attachments" | "texts"], d.origH + dy) } : { width }
+/** The document with `patch` applied to entity `id` of `target`. */
+function patchEntity(doc: CanvasDocument, target: DragTarget, id: string, patch: DragPatch): CanvasDocument {
+  switch (target) {
+    case "frames": return { ...doc, frames: withPatch(doc.frames, id, patch) }
+    case "attachments": return { ...doc, attachments: withPatch(doc.attachments, id, patch) }
+    case "texts": return { ...doc, texts: withPatch(doc.texts, id, patch) }
+  }
 }
 
 interface CanvasDragOptions {
@@ -31,43 +35,53 @@ interface CanvasDragOptions {
   snapshotOnce: () => void
   applyChange: (next: CanvasDocument) => void
   endGesture: () => void
-  /** Offered every window pointermove first; returns true when a stroke-selection drag consumed it. */
-  moveSelectionDrag: (e: PointerEvent) => boolean
-  endSelectionDrag: (e: PointerEvent) => void
 }
 
 /**
- * Shared move / resize for frames, attachments and text notes, plus the window-level pointer
- * listeners that also drive stroke-selection drags. One undo step per drag.
+ * Window-level pointer drags: one session at a time follows the pointer until release, which also closes the history gesture.
+ * `startDrag` moves or resizes frames, attachments and text notes, one undo step per drag.
  */
-export function useCanvasDrag({ liveRef, scaleRef, snapshotOnce, applyChange, endGesture, moveSelectionDrag, endSelectionDrag }: CanvasDragOptions) {
-  const dragRef = useRef<ActiveDrag | null>(null)
+export function useCanvasDrag({ liveRef, scaleRef, snapshotOnce, applyChange, endGesture }: CanvasDragOptions) {
+  const sessionRef = useRef<{ session: DragSession; startX: number; startY: number } | null>(null)
 
+  const beginDrag = useCallback((session: DragSession, clientX: number, clientY: number) => {
+    sessionRef.current = { session, startX: clientX, startY: clientY }
+  }, [])
+
+  // A move shifts the origin. A resize grows the width; text notes and the fixed-height
+  // attachments (architecture, document) also grow their height, frames and PDFs keep their aspect.
   const startDrag = useCallback((target: DragTarget, id: string, mode: DragMode, clientX: number, clientY: number) => {
-    const item = (liveRef.current.doc[target] as DragEntity[]).find((e) => e.id === id)
+    const doc = liveRef.current.doc
+    const item = doc[target].find((entity) => entity.id === id)
     if (!item) return
-    dragRef.current = {
-      id, target, mode, startX: clientX, startY: clientY, origX: item.x, origY: item.y,
-      origW: item.width, origH: "height" in item ? (item.height ?? 0) : 0,
+    const origH = "height" in item ? (item.height ?? 0) : 0
+    const growsHeight = target === "texts" || (target === "attachments" && doc.attachments.some((a) => a.id === id && attachmentTraits[a.kind].fixedHeight))
+    const resize = (dx: number, dy: number): DragPatch => {
+      const width = Math.max(MIN_WIDTH[target], item.width + dx)
+      return growsHeight ? { width, height: Math.max(MIN_HEIGHT[target], origH + dy) } : { width }
     }
-  }, [liveRef])
+    beginDrag({
+      move: (dx, dy) => {
+        snapshotOnce()
+        applyChange(patchEntity(liveRef.current.doc, target, id, mode === "move" ? { x: item.x + dx, y: item.y + dy } : resize(dx, dy)))
+      },
+    }, clientX, clientY)
+  }, [liveRef, beginDrag, snapshotOnce, applyChange])
 
   useEventListener("window", "pointermove", (e) => {
-    if (moveSelectionDrag(e)) return
-    const d = dragRef.current
-    if (!d) return
-    const dx = (e.clientX - d.startX) / scaleRef.current
-    const dy = (e.clientY - d.startY) / scaleRef.current
+    const active = sessionRef.current
+    if (!active) return
+    const dx = (e.clientX - active.startX) / scaleRef.current
+    const dy = (e.clientY - active.startY) / scaleRef.current
     if (dx === 0 && dy === 0) return
-    snapshotOnce()
-    const cur = liveRef.current.doc
-    applyChange({ ...cur, [d.target]: (cur[d.target] as DragEntity[]).map((entity) => entity.id === d.id ? { ...entity, ...dragPatch(d, entity, dx, dy) } : entity) })
+    active.session.move(dx, dy)
   })
   useEventListener("window", "pointerup", (e) => {
-    endSelectionDrag(e)
-    dragRef.current = null
+    const active = sessionRef.current
+    sessionRef.current = null
+    active?.session.end?.(e)
     endGesture()
   })
 
-  return startDrag
+  return { beginDrag, startDrag }
 }

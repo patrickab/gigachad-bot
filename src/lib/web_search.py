@@ -12,6 +12,7 @@ from llm_baseclient.client import LLMClient
 
 from lib.llm_json import extract_json_from_llm
 from lib.llm_resilience import completion_text
+from lib.toolcalling import Source
 
 BRAVE_CONTEXT_URL = "https://api.search.brave.com/res/v1/llm/context"
 
@@ -64,11 +65,11 @@ def source_label(url: str, used: set[str]) -> str:
     return label
 
 
-def sources_from_payload(payload: dict) -> list[dict[str, str]]:
+def sources_from_payload(payload: dict) -> list[Source]:
     """Flatten Brave `grounding` groups into unique-URL sources with snippets joined as content."""
     seen_urls: set[str] = set()
     used_labels: set[str] = set()
-    sources: list[dict[str, str]] = []
+    sources: list[Source] = []
     grounding = payload.get("grounding", {})
     for group in grounding.values():
         if not isinstance(group, list):
@@ -93,7 +94,7 @@ def sources_from_payload(payload: dict) -> list[dict[str, str]]:
     return sources
 
 
-def evidence_prompt(sources: list[dict[str, str]]) -> str:
+def evidence_prompt(sources: list[Source]) -> str:
     evidence = "\n\n".join(f"[{source['label']}] {source['title']}\nURL: {source['url']}\n{source['content']}" for source in sources)
     return (
         "Answer using only the supplied web evidence. Cite every factual claim with its "
@@ -134,7 +135,7 @@ def plan_query(client: LLMClient, raw_query: str, model: str) -> tuple[str, dict
         return search_plan(raw_query, {"complexity": "medium", "search_query": raw_query})
 
 
-async def brave_sources(query: str, profile: dict[str, int]) -> list[dict[str, str]]:
+async def brave_sources(query: str, profile: dict[str, int]) -> list[Source]:
     """Raises on a misconfigured key or an exhausted quota; the caller renders the message."""
     key = os.environ.get("BRAVE_API_KEY")
     if not key:

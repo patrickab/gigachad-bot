@@ -3,7 +3,7 @@
 The route functions are called directly with explicit request-scoped stores —
 the same objects ``get_document_store``/``get_asset_store`` hand FastAPI — so a
 test needs no HTTP client and no environment fiddling.
-``documents.DOCUMENTS`` is redirected at a tmp_path so the only filesystem
+``document_service.DOCUMENTS`` is redirected at a tmp_path so the only filesystem
 writes a test can produce are deliberate PDF mirrors. Any other file below that
 root is a policy violation.
 """
@@ -12,11 +12,13 @@ from fastapi import HTTPException
 import pytest
 
 from backend.routes import documents as route
-from lib import attachment_materialize
+from lib import attachment_materialize, document_service
 from lib.asset_store import AssetStore
+from lib.changes import UserScope
 from lib.chat_store import ChatStore
 from lib.data_store import StorageNotFoundError
 from lib.postgres_data_store import PostgresDataStore
+from lib.project_rename import PostgresProjectRenamer
 from lib.project_store import ProjectStore
 from tests.conftest import create_user_and_device
 
@@ -25,8 +27,8 @@ pytestmark = pytest.mark.usefixtures("clean_database")
 
 @pytest.fixture(autouse=True)
 def documents_root(documents_root, monkeypatch):
-    """The routes read their own ``DOCUMENTS`` at call time, alongside ``attachment_materialize``'s."""
-    monkeypatch.setattr(route, "DOCUMENTS", documents_root, raising=True)
+    """The document service reads its own ``DOCUMENTS`` at call time, alongside ``attachment_materialize``'s."""
+    monkeypatch.setattr(document_service, "DOCUMENTS", documents_root, raising=True)
     return documents_root
 
 
@@ -39,9 +41,11 @@ class Stores:
 
     def __init__(self, pool, login):
         self.user_id, device_id = create_user_and_device(pool, login)
-        self.docs = PostgresDataStore(pool, self.user_id, device_id=device_id)
-        self.assets = AssetStore(pool, self.user_id, device_id=device_id)
-        self.projects = ProjectStore(chat_store=ChatStore(data_store=self.docs), data_store=self.docs)
+        scope = UserScope(pool, self.user_id, device_id)
+        self.docs = PostgresDataStore(scope)
+        self.assets = AssetStore(scope)
+        rename = PostgresProjectRenamer(scope).rename
+        self.projects = ProjectStore(ChatStore(data_store=self.docs), rename=rename)
 
 
 @pytest.fixture

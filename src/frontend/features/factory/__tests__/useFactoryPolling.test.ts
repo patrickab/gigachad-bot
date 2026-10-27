@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
-import type { FactoryEvent } from "@/lib/domain/types"
+import type { FactoryEvent } from "@/lib/domain/factory"
 
 const api = vi.hoisted(() => ({
   fetchLatestFactoryEventSeq: vi.fn<() => Promise<number>>(),

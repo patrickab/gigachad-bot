@@ -1,19 +1,13 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState, type Dispatch, type RefObject, type SetStateAction } from "react"
+import { useCallback, useEffect, useMemo, useState, type RefObject } from "react"
 import type { ChatInputHandle } from "@/features/chat/composer/ChatInput"
 import type { AppSurface } from "@/contexts/TabContext"
-import {
-  addDocument,
-  attachReference,
-  listAllDocuments,
-  listProjectDocuments,
-  loadFileViewerText,
-  uploadFile,
-} from "@/lib/backend/api"
+import { addDocument, listAllDocuments, listProjectDocuments, loadFileViewerText, uploadFile } from "@/lib/backend/api"
+import { attachToComposer } from "@/features/chat/attachToComposer"
 import { architectureSource, isArchitecturePath } from "@/lib/domain/architecturePaths"
 import { renderCanvasTextToJpeg } from "@/lib/domain/canvasRender"
-import type { ProjectDocument } from "@/lib/domain/types"
+import type { ProjectDocument } from "@/lib/domain/projects"
 import { baseName } from "@/lib/paths"
 import { errorMessage } from "@/lib/utils"
 import { useEventListener } from "@/hooks/useEventListener"
@@ -25,14 +19,14 @@ export function useProjectDocuments({
   projectSlug,
   chatId,
   chatInputRef,
-  setExtracting,
+  track,
 }: {
   isActive: boolean
   appMode: AppSurface
   projectSlug: string | null
   chatId: string
   chatInputRef: RefObject<ChatInputHandle | null>
-  setExtracting: Dispatch<SetStateAction<number>>
+  track: <T>(work: () => Promise<T>) => Promise<T>
 }) {
   const [documentOpen, setDocumentOpen] = useState(false)
   const [projectDocuments, setProjectDocuments] = useState<ProjectDocument[]>([])
@@ -54,11 +48,9 @@ export function useProjectDocuments({
         chatInputRef.current?.addAttachment(att)
       } catch { /* */ }
     } else {
-      setExtracting((n) => n + 1)
-      try { chatInputRef.current?.addAttachment(await attachReference(path)) } catch { /* */ }
-      finally { setExtracting((n) => n - 1) }
+      await attachToComposer(chatInputRef, track, path)
     }
-  }, [chatInputRef, setExtracting, chatId, projectSlug])
+  }, [chatInputRef, track, chatId, projectSlug])
 
   const loadProjectDocs = useCallback(() => {
     if (projectSlug) listProjectDocuments(projectSlug).then(setProjectDocuments).catch(() => {})
@@ -78,19 +70,18 @@ export function useProjectDocuments({
   const handleAttachArchitecture = useCallback(async () => {
     if (!projectSlug) return
     setArchitectureError("")
-    setExtracting((count) => count + 1)
     try {
-      const texts = await Promise.all(architectureSources.map(async (source) => ({ path: architectureSource(source.path), text: await loadFileViewerText(source.path) })))
-      const content = `# ${projectSlug} architecture\n\n${texts.map(({ path, text }) => `## ${path}\n\n\`\`\`likec4\n${text}\n\`\`\``).join("\n\n")}`
-      const file = new File([content], `${projectSlug}-architecture-${crypto.randomUUID().slice(0, 8)}.txt`, { type: "text/plain" })
-      const attachment = await uploadFile(chatId, file, projectSlug)
-      chatInputRef.current?.addAttachment({ ...attachment, content })
+      await track(async () => {
+        const texts = await Promise.all(architectureSources.map(async (source) => ({ path: architectureSource(source.path), text: await loadFileViewerText(source.path) })))
+        const content = `# ${projectSlug} architecture\n\n${texts.map(({ path, text }) => `## ${path}\n\n\`\`\`likec4\n${text}\n\`\`\``).join("\n\n")}`
+        const file = new File([content], `${projectSlug}-architecture-${crypto.randomUUID().slice(0, 8)}.txt`, { type: "text/plain" })
+        const attachment = await uploadFile(chatId, file, projectSlug)
+        chatInputRef.current?.addAttachment({ ...attachment, content })
+      })
     } catch (cause) {
       setArchitectureError(errorMessage(cause, "Could not attach architecture"))
-    } finally {
-      setExtracting((count) => count - 1)
     }
-  }, [projectSlug, architectureSources, chatId, chatInputRef, setExtracting])
+  }, [projectSlug, architectureSources, chatId, chatInputRef, track])
 
   const openDocuments = useCallback(() => {
     refreshDocuments()

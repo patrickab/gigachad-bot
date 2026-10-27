@@ -40,10 +40,8 @@ class FileContent(BaseModel):
     content: str
 
 
-class AttachResult(BaseModel):
+class RootFile(BaseModel):
+    """A file under a file root, or a worktree checkout named by its branch."""
+
+    path: str
     name: str
-    mime: str
-    # Set by file-root attaches only, stored on the Attachment and used to re-read content
-    path: str | None = None
-    content: str | None = None
-    parsedMd: str | None = None

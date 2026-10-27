@@ -3,37 +3,25 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 import json
 import logging
 from pathlib import Path
 import re
 import tomllib
-from typing import Any, Protocol
-
-from agent_sandbox import PromptImage
-from llm_baseclient.client import LLMClient
+from typing import Any
 
 from lib.agent_sandbox_adapter import SandboxScriptError
 from lib.llm_resilience import completion_text
 from lib.sandbox_service import SANDBOX_PLOT_SCOPE, SandboxService
-from lib.toolcalling import ToolOutcome, sandbox_unavailable
+from lib.tool_context import ToolContext
+from lib.toolcalling import ToolOutcome
 
-__all__ = ["PLOTLY_MEDIA_TYPE", "PlotContext", "create_sandbox_plot", "sandbox_plot_dependencies"]
+__all__ = ["PLOTLY_MEDIA_TYPE", "create_sandbox_plot", "sandbox_plot_dependencies"]
 
 logger = logging.getLogger(__name__)
 
 PLOTLY_MEDIA_TYPE = "application/vnd.plotly.v1+json"
-
-
-class PlotContext(Protocol):
-    client: LLMClient
-    model: str
-    user_msg: str
-    sandbox_service: SandboxService | None
-    chat_id: str
-    tool_call_id: str
-    prompt_images: tuple[PromptImage, ...]
-    history: tuple[dict[str, Any], ...]
 
 
 def sandbox_plot_dependencies() -> str:
@@ -46,6 +34,8 @@ def sandbox_plot_dependencies() -> str:
     return ", ".join(re.split(r"[\s<>=!~\[@]", dependency, maxsplit=1)[0] for dependency in dependencies)
 
 
+_DEPENDENCIES = sandbox_plot_dependencies()
+
 _SANDBOX_PLOT_APPEND_SYSTEM = f"""\
 # Plot workspace protocol
 Work iteratively in the sandbox workspace. Create or update `plot.py` for this request; on later
@@ -53,7 +43,7 @@ calls, revise that same file rather than starting elsewhere. Use the dependencie
 script to inspect and correct the chart before finishing.
 
 # Available Dependencies
-{sandbox_plot_dependencies()}
+{_DEPENDENCIES}
 
 # Figure requirements
 - Use numpy as np, plotly.express as px, and plotly.graph_objects as go.
@@ -89,7 +79,7 @@ unless they are essential to the concept.
 - Optimize the plot for visual understanding and visual appeal.
 
 # Available dependencies
-{sandbox_plot_dependencies()}
+{_DEPENDENCIES}
 
 # Figure design
 
@@ -129,7 +119,7 @@ def _plot_script(text: str) -> str:
     return match.group("body").strip() if match else text.strip()
 
 
-def _generate_plot(context: PlotContext) -> str:
+def _generate_plot(context: ToolContext) -> str:
     """Ask the chat model for the plot script, guided by the styling prompt."""
     images = [image.content for image in context.prompt_images]
     return _plot_script(
@@ -144,7 +134,7 @@ def _generate_plot(context: PlotContext) -> str:
     )
 
 
-def _repair_plot_script(context: PlotContext, script: str, error: str) -> str:
+def _repair_plot_script(context: ToolContext, script: str, error: str) -> str:
     """Ask for a corrected script, given the broken one and what the sandbox reported."""
     request = f"# Script\n{script}\n\n# Error\n{error}"
     return _plot_script(completion_text(context.client, model=context.model, user_msg=request, system_prompt=_REPAIR_SYSTEM))
@@ -162,17 +152,47 @@ def _figure_from_sandbox_outputs(outputs: tuple[str, ...]) -> dict[str, Any] | N
     return None
 
 
-async def _fast_plot(context: PlotContext) -> tuple[dict[str, Any], str] | None:
+@dataclass(frozen=True)
+class _Plot:
+    figure: dict[str, Any]
+    # The fast-path script that drew the figure, None when the workspace agent drew it.
+    script: str | None
+
+    def brief(self) -> str:
+        """What the answer round sees of the chart: the code when there is one, else a short note."""
+        traces = self.traces()
+        if self.script is None:
+            return (
+                f"Rendered an interactive plot with {traces} trace(s). The user can already see and interact with it. "
+                "Give an extremely concise companion explanation of how the concept works and how the graphic encodes it. "
+                "Do not explain code or restate the visible chart."
+            )
+        # The code is the model's only view of the chart, so give it a focused explanation brief.
+        return (
+            f"The chart rendered and the user can already see it ({traces} trace(s)). "
+            "Give an extremely concise companion explanation: explain how the"
+            "underlying concept works and how the graphic encodes that mechanism. Make the graphic easier to grasp."
+            "Do not explain every little detail - focus on whats important for the user to understand."
+            "Use layered, skimmable layout with clean markdown-flavored latex.\n\n"
+            f"```python\n{self.script}\n```"
+        )
+
+    def traces(self) -> int:
+        data = self.figure.get("data")
+        return len(data) if isinstance(data, list) else 0
+
+
+async def _fast_plot(context: ToolContext, sandbox: SandboxService) -> _Plot | None:
     """Generate and execute a disposable plot, repairing a broken script once."""
     try:
         script = await asyncio.to_thread(_generate_plot, context)
         for attempt in range(2):
             try:
-                figure = json.loads(await context.sandbox_service.run_script(script))
+                figure = json.loads(await sandbox.run_script(script))
                 if not isinstance(figure, dict) or not isinstance(figure.get("data"), list):
                     raise ValueError("script did not print a Plotly figure")
-                return figure, script
-            except (SandboxScriptError, ValueError, json.JSONDecodeError) as exc:
+                return _Plot(figure, script)
+            except (SandboxScriptError, ValueError) as exc:
                 # Keep the tail of the error, where tracebacks put the cause.
                 error = str(exc)[-2000:]
                 logger.info("fast plot attempt failed: %s", error)
@@ -183,18 +203,12 @@ async def _fast_plot(context: PlotContext) -> tuple[dict[str, Any], str] | None:
     return None
 
 
-async def create_sandbox_plot(context: PlotContext) -> ToolOutcome:
+async def create_sandbox_plot(context: ToolContext, sandbox: SandboxService) -> ToolOutcome:
     """Create a Plotly figure, then hand the answer round the code that drew it."""
-    if context.sandbox_service is None:
-        return sandbox_unavailable("sandbox plot")
-
     # Fast path is a throwaway script. On failure fall back to the persistent workspace agent.
-    script = ""
-    fast = await _fast_plot(context)
-    if fast is not None:
-        figure, script = fast
-    else:
-        result = await context.sandbox_service.invoke(
+    plot = await _fast_plot(context, sandbox)
+    if plot is None:
+        result = await sandbox.invoke(
             chat_id=context.chat_id,
             tool_call_id=context.tool_call_id,
             prompt=context.user_msg,
@@ -210,31 +224,18 @@ async def create_sandbox_plot(context: PlotContext) -> ToolOutcome:
                 summary=result.summary or "Failed",
                 error=result.error or "sandbox_runner_error",
             )
-        figure = _figure_from_sandbox_outputs(context.sandbox_service.output_texts(result, media_type=PLOTLY_MEDIA_TYPE))
+        figure = _figure_from_sandbox_outputs(sandbox.output_texts(result, media_type=PLOTLY_MEDIA_TYPE))
+        if figure is None:
+            return ToolOutcome(
+                content="The sandbox plot did not produce a valid figure. Explain that briefly or offer a simpler chart.",
+                summary="Failed",
+                error="invalid_figure",
+            )
+        plot = _Plot(figure, None)
 
-    if figure is None:
-        return ToolOutcome(
-            content="The sandbox plot did not produce a valid figure. Explain that briefly or offer a simpler chart.",
-            summary="Failed",
-            error="invalid_figure",
-        )
-
-    traces = len(figure.get("data", [])) if isinstance(figure.get("data"), list) else 0
-    # The code is the model's only view of the chart, so give it a focused explanation brief.
-    seen = (
-        f"The chart rendered and the user can already see it ({traces} trace(s)). "
-        "Give an extremely concise companion explanation: explain how the"
-        "underlying concept works and how the graphic encodes that mechanism. Make the graphic easier to grasp."
-        "Do not explain every little detail - focus on whats important for the user to understand."
-        "Use layered, skimmable layout with clean markdown-flavored latex.\n\n"
-        f"```python\n{script}\n```"
-        if script
-        else f"Rendered an interactive plot with {traces} trace(s). The user can already see and interact with it. "
-        "Give an extremely concise companion explanation of how the concept works and how the graphic encodes it. "
-        "Do not explain code or restate the visible chart."
-    )
+    traces = plot.traces()
     return ToolOutcome(
-        content=seen,
+        content=plot.brief(),
         summary=f"{traces} trace{'s' if traces != 1 else ''}",
-        detail={"figure": figure, "script": script},
+        detail={"figure": plot.figure, "script": plot.script or ""},
     )

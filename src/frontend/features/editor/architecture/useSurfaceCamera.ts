@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, type RefObject, type WheelEvent as ReactWheelEvent } from "react"
+import { useCallback, useEffect, useRef, type RefObject, type WheelEvent as ReactWheelEvent } from "react"
 import type { NodeChange } from "@xyflow/react"
 import type { GraphFlowInstance, GraphFlowNode } from "@/features/editor/architecture/architectureFlow"
-import { reframeCamera } from "@/lib/domain/viewport"
+import { useViewportReframe } from "@/hooks/useViewportReframe"
 import { useTwoFingerGesture } from "@/hooks/useTwoFingerGesture"
 
 /**
@@ -57,38 +57,16 @@ export function useSurfaceCamera({ flow, viewportRef, onNodesChange, autoFit, ho
     },
   })
   // React Flow pins its viewport to the top-left corner, so when the frame
-  // resizes (fullscreen, a resize drag) the view's middle would drift. Both
-  // this and host zoom re-project from the size the current viewport was set
-  // for, keeping whatever sat in the center before in the center after.
-  const viewportSizeRef = useRef({ width: 0, height: 0 })
-  const hostScaleRef = useRef(hostScale)
-  const reframe = useCallback((factor: number) => {
-    const el = viewportRef.current
-    if (!el || !flow) return
-    const next = { width: el.clientWidth, height: el.clientHeight }
-    const { x, y, zoom } = flow.getViewport()
-    const view = reframeCamera({ x, y }, zoom, viewportSizeRef.current, next, factor)
-    viewportSizeRef.current = next
-    void flow.setViewport({ ...view.offset, zoom: view.scale })
-  }, [flow, viewportRef])
-  useEffect(() => {
-    const el = viewportRef.current
-    if (!el || !flow || typeof ResizeObserver === "undefined") return
-    viewportSizeRef.current = { width: el.clientWidth, height: el.clientHeight }
-    const observer = new ResizeObserver(() => {
-      const { width, height } = viewportSizeRef.current
-      if (el.clientWidth !== width || el.clientHeight !== height) reframe(1)
-    })
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [flow, reframe, viewportRef])
-  // Embedded in a canvas, the frame grows and shrinks with the host's zoom;
-  // magnify the graph by the same factor so the frame shows the same view,
-  // just bigger or smaller. Runs before the ResizeObserver sees the new size.
-  useLayoutEffect(() => {
-    const factor = hostScale / hostScaleRef.current
-    hostScaleRef.current = hostScale
-    if (factor !== 1) reframe(factor)
-  }, [hostScale, reframe])
+  // resizes (fullscreen, a resize drag) or the host canvas zooms, keep whatever
+  // sat in the center before in the center after.
+  useViewportReframe(viewportRef, {
+    hostScale,
+    ready: !!flow,
+    read: () => {
+      const { x, y, zoom } = flow!.getViewport()
+      return { offset: { x, y }, scale: zoom }
+    },
+    write: (offset, scale) => void flow!.setViewport({ ...offset, zoom: scale }),
+  })
   return { fitView, takeCamera, handleNodesChange, zoomGraphAtCenter }
 }

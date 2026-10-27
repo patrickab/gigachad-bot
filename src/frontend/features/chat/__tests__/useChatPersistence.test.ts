@@ -4,19 +4,16 @@ type MockImplementation = (...args: never[]) => unknown
 
 const { impls } = vi.hoisted(() => ({
   impls: {
-    saveChatHistory: async () => undefined,
-    saveProjectTab: async () => undefined,
+    saveChat: async () => undefined,
   } as Record<string, MockImplementation>,
 }))
 
 vi.mock("@/lib/backend/api", () => ({
   __setImpl: (key: string, fn: MockImplementation) => { impls[key] = fn },
   __resetImpls: () => {
-    impls.saveChatHistory = async () => undefined
-    impls.saveProjectTab = async () => undefined
+    impls.saveChat = async () => undefined
   },
-  saveChatHistory: (...args: never[]) => impls.saveChatHistory(...args),
-  saveProjectTab: (...args: never[]) => impls.saveProjectTab(...args),
+  saveChat: (...args: never[]) => impls.saveChat(...args),
 }))
 
 import * as apiMock from "@/lib/backend/api"
@@ -54,7 +51,7 @@ describe("useChatPersistence", () => {
     it("persists a completed response for a saved chat", async () => {
       const saveSpy = vi.fn(async () => undefined)
       const refreshAll = vi.fn(async () => undefined)
-      apiMockControls.__setImpl("saveChatHistory", saveSpy)
+      apiMockControls.__setImpl("saveChat", saveSpy)
       const completedMessages = [
         { role: "user" as const, content: "q" },
         { role: "assistant" as const, content: "a" },
@@ -75,8 +72,9 @@ describe("useChatPersistence", () => {
 
       await act(async () => { await result.current.handleAutosave(completedMessages, usage) })
 
-      expect(saveSpy).toHaveBeenCalledWith("saved.json", completedMessages, {
+      expect(saveSpy).toHaveBeenCalledWith("saved.json", null, completedMessages, {
         chatId: "c",
+        tabName: "Tab",
         title: "Saved",
         usage,
       })
@@ -85,7 +83,7 @@ describe("useChatPersistence", () => {
 
     it("skips an unsaved chat", async () => {
       const saveSpy = vi.fn(async () => undefined)
-      apiMockControls.__setImpl("saveChatHistory", saveSpy)
+      apiMockControls.__setImpl("saveChat", saveSpy)
       const { result } = renderHook(() =>
         useChatPersistence({
           tab: makeTab(),
@@ -114,7 +112,7 @@ describe("useChatPersistence", () => {
     it("saves a new chat and adopts its history file", async () => {
       const saveSpy = vi.fn(async () => undefined)
       const setHistoryFile = vi.fn()
-      apiMockControls.__setImpl("saveChatHistory", saveSpy)
+      apiMockControls.__setImpl("saveChat", saveSpy)
       const messages = [{ role: "user" as const, content: "q" }]
 
       const { result } = renderHook(() =>
@@ -132,9 +130,30 @@ describe("useChatPersistence", () => {
       act(() => result.current.setSaveModalOpen(true))
       await act(async () => { await result.current.handleSaveSubmit("notes") })
 
-      expect(saveSpy).toHaveBeenCalledWith("notes.json", messages, { chatId: "c", title: "notes", usage: undefined })
+      expect(saveSpy).toHaveBeenCalledWith("notes.json", null, messages, { chatId: "c", tabName: "Tab", title: "notes", usage: undefined })
       expect(setHistoryFile).toHaveBeenCalledWith("notes.json")
       expect(result.current.saveModalOpen).toBe(false)
+    })
+
+    it("adopts the project history file even when the save fails", async () => {
+      const setHistoryFile = vi.fn()
+      apiMockControls.__setImpl("saveChat", async () => { throw new Error("offline") })
+
+      const { result } = renderHook(() =>
+        useChatPersistence({
+          tab: makeTab(),
+          projectSlug: "proj",
+          messages: [],
+          chatId: "c",
+          usage: undefined,
+          refreshAll: async () => {},
+          setHistoryFile,
+        }),
+      )
+
+      await act(async () => { await result.current.handleSaveSubmit("notes") })
+
+      expect(setHistoryFile).toHaveBeenCalledWith("proj/notes.json")
     })
   })
 })

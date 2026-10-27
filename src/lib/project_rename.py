@@ -1,4 +1,4 @@
-"""Rewrite stored references from one project slug to another."""
+"""Rename a project: move its documents and assets to a new slug and rewrite stored references to it."""
 from __future__ import annotations
 
 import json
@@ -6,14 +6,19 @@ from pathlib import Path
 import re
 from typing import Any, Iterable, Iterator
 
+from psycopg.errors import UniqueViolation
+from psycopg.types.json import Jsonb
+
+from lib.changes import UserScope
 from lib.clock import utc_now_iso
+from lib.data_store import StorageConflictError
 from lib.json_io import dump_json
-from lib.storage_namespace import PROJECT_JSON
+from lib.storage_namespace import ATTACHMENT, CHAT, GRAPH, MEMORY, META_JSON, NOTE, PROJECT, PROJECT_JSON, PROMPT, SANDBOX
 
 SLUG_FIELDS = {"project_slug", "projectSlug", "slug"}
 HISTORY_FIELDS = {"history_file", "historyFile", "parent_file", "filename"}
 # App namespaces whose documents may link into a project; others (e.g. `model/`) are never interpreted.
-CONTENT_NAMESPACES = {"project", "note", "memory", "graph", "sandbox", "prompt"}
+CONTENT_NAMESPACES = {CHAT, PROJECT, NOTE, MEMORY, GRAPH, SANDBOX, PROMPT}
 JSON_SUFFIXES = (".json", ".canvas", ".snap")
 TEXT_SUFFIXES = (".md", ".txt", ".c4")
 
@@ -21,13 +26,13 @@ TEXT_SUFFIXES = (".md", ".txt", ".c4")
 class ProjectReferences:
     """Map keys, JSON fields and app-relative links of project `old` to project `new`.
 
-    - Owned namespaces: `<chat_prefix>/`, `project/`, `graph/`, `memory/project/`, `attachment/project/`
+    - Owned namespaces: `chat/`, `project/`, `graph/`, `memory/project/`, `attachment/project/`
     - Prose, absolute disk paths and similarly named projects stay unchanged
     """
 
-    def __init__(self, old: str, new: str, chat_prefix: str) -> None:
-        self.old, self.new, self.chat_prefix = old, new, chat_prefix
-        self._namespaces = [f"{prefix}/" for prefix in (chat_prefix, "project", "graph", "memory/project", "attachment/project")]
+    def __init__(self, old: str, new: str) -> None:
+        self.old, self.new = old, new
+        self._namespaces = [f"{prefix}/" for prefix in (CHAT, PROJECT, GRAPH, f"{MEMORY}/project", f"{ATTACHMENT}/project")]
         sources = "|".join(re.escape(namespace + old) for namespace in self._namespaces)
         self._link = re.compile(rf"(?<![\w/.-])({sources})(?=/|[?#\s)\]\"']|$)")
 
@@ -56,7 +61,7 @@ class ProjectReferences:
 
     def content(self, key: str, content: bytes) -> bytes:
         """Rewrite JSON and text documents of app namespaces, leave anything else untouched."""
-        if key.split("/", 1)[0] not in CONTENT_NAMESPACES | {self.chat_prefix} or not key.endswith(JSON_SUFFIXES + TEXT_SUFFIXES):
+        if key.split("/", 1)[0] not in CONTENT_NAMESPACES or not key.endswith(JSON_SUFFIXES + TEXT_SUFFIXES):
             return content
         try:
             text = content.decode()
@@ -78,8 +83,8 @@ def renamed_documents(
     - Catalog entry and `project.json` take the new name
     - A disk folder linked by the old slug's folder name stays linked through `linked_root`
     """
-    meta_key = f"{refs.chat_prefix}/projects-meta.json"
-    project_key = f"{refs.chat_prefix}/{refs.old}/{PROJECT_JSON}"
+    meta_key = f"{CHAT}/{META_JSON}"
+    project_key = f"{CHAT}/{refs.old}/{PROJECT_JSON}"
     for key, content, is_dir in rows:
         target = refs.key(key)
         updated = content if is_dir else refs.content(key, content)
@@ -97,3 +102,60 @@ def renamed_documents(
             updated = dump_json(project).encode()
         if target != key or updated != content:
             yield key, target, updated
+
+
+class PostgresProjectRenamer:
+    """Renames projects of one user in a single Postgres transaction over documents, assets and canvas mutations."""
+
+    def __init__(self, scope: UserScope) -> None:
+        self._scope = scope
+
+    def rename(self, slug: str, new_slug: str, name: str) -> None:
+        """Move a project's documents and assets to `new_slug` and rewrite references to them, in one transaction."""
+        refs = ProjectReferences(slug, new_slug)
+        user_id = self._scope.user_id
+        try:
+            with self._scope.connection() as connection, connection.transaction():
+                rows = connection.execute(
+                    "SELECT key, content, is_dir FROM documents WHERE user_id = %s ORDER BY key FOR UPDATE",
+                    (user_id,),
+                ).fetchall()
+                roots = [path for (path,) in connection.execute(
+                    "SELECT path FROM vault_roots WHERE user_id = %s ORDER BY created_at, path", (user_id,),
+                ).fetchall()]
+                documents = [(key, bytes(content), is_dir) for key, content, is_dir in rows]
+                for source, target, content in renamed_documents(documents, refs, name, roots):
+                    version = connection.execute(
+                        "UPDATE documents SET key = %s, content = %s, version = version + 1, updated_at = now()"
+                        " WHERE user_id = %s AND key = %s RETURNING version",
+                        (target, content, user_id, source),
+                    ).fetchone()[0]
+                    # Canvas shares and log keys follow the document FK ON UPDATE CASCADE.
+                    if source != target:
+                        self._scope.record(connection, kind="document", key=source, operation="move")
+                    self._scope.record(
+                        connection, kind="document", key=target, operation="move" if source != target else "write", version=version,
+                    )
+                assets = connection.execute("SELECT logical_path FROM assets WHERE user_id = %s FOR UPDATE", (user_id,)).fetchall()
+                for (source,) in assets:
+                    target = refs.key(source)
+                    if target == source:
+                        continue
+                    version = connection.execute(
+                        "UPDATE assets SET logical_path = %s, version = version + 1, updated_at = now()"
+                        " WHERE user_id = %s AND logical_path = %s RETURNING version",
+                        (target, user_id, source),
+                    ).fetchone()[0]
+                    self._scope.record(connection, kind="asset", key=source, operation="move")
+                    self._scope.record(connection, kind="asset", key=target, operation="move", version=version)
+                mutations = connection.execute(
+                    "SELECT mutation_id, value FROM canvas_mutations WHERE user_id = %s AND value IS NOT NULL FOR UPDATE", (user_id,),
+                ).fetchall()
+                for mutation_id, value in mutations:
+                    updated = refs.value(value)
+                    if updated != value:
+                        connection.execute(
+                            "UPDATE canvas_mutations SET value = %s WHERE mutation_id = %s", (Jsonb(updated), mutation_id),
+                        )
+        except UniqueViolation as exc:
+            raise StorageConflictError("Project rename destination already exists; reload before saving") from exc

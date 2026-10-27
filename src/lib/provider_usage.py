@@ -9,6 +9,7 @@ import time
 from typing import Any
 
 from lib.omp_cli import run_omp
+from lib.ttl_cache import TtlCache
 
 _CLI_TIMEOUT_SECONDS = 30
 _CACHE_SECONDS = 5 * 60
@@ -18,8 +19,9 @@ _WINDOW_DURATIONS_MS = {"5h": 5 * 3_600_000, "7d": 7 * 86_400_000, "30d": 30 * 8
 # omp's own window ids, folded onto the three the UI shows.
 _WINDOW_ALIASES = {"monthly": "30d", "daily": "5h"}
 
+# Spans the CLI fetch and the `_last_reports` update, so concurrent callers apply reports in fetch order.
 _lock = threading.RLock()
-_cache: tuple[float, str] | None = None
+_usage_output = TtlCache[str](_CACHE_SECONDS)
 _last_reports: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
@@ -34,17 +36,15 @@ def _run_omp(*arguments: str) -> str:
         raise UsageUnavailable(str(exc)) from exc
 
 
+def _fetch_output(refresh: bool) -> str:
+    if refresh:
+        _run_omp("usage", "invalidate")
+    return _run_omp("usage", "--json")
+
+
 def _output(refresh: bool) -> str:
     """Raw CLI output, cached for a few minutes; *refresh* makes omp refetch from the providers first."""
-    global _cache
-    with _lock:
-        if not refresh and _cache is not None and time.monotonic() - _cache[0] < _CACHE_SECONDS:
-            return _cache[1]
-        if refresh:
-            _run_omp("usage", "invalidate")
-        output = _run_omp("usage", "--json")
-        _cache = (time.monotonic(), output)
-        return output
+    return _usage_output.get(lambda: _fetch_output(refresh), refresh=refresh)
 
 
 def _window_id(limit: dict[str, Any]) -> str | None:
@@ -92,10 +92,15 @@ def parse_usage(output: str, now_ms: float) -> dict[str, Any]:
         raise UsageUnavailable("omp usage returned invalid JSON") from exc
     if not isinstance(payload, dict):
         raise UsageUnavailable("omp usage returned an invalid response")
-    reports = [_summarize(report, now_ms) for report in payload.get("reports") or [] if isinstance(report, dict) and report.get("provider")]
+    reports = [
+        _summarize(report, now_ms) for report in payload.get("reports") or [] if isinstance(report, dict) and report.get("provider")
+    ]
     # Accounts whose usage fetch failed this time, e.g. a rate-limited provider usage API.
     reports += [
-        {"provider": account["provider"], "account": account.get("email") or None, "no_limits": False, "unavailable": True, "windows": []}
+        {
+            "provider": account["provider"], "account": account.get("email") or None,
+            "no_limits": False, "unavailable": True, "windows": [],
+        }
         for account in payload.get("accountsWithoutUsage") or []
         if isinstance(account, dict) and account.get("provider")
     ]
@@ -105,7 +110,8 @@ def parse_usage(output: str, now_ms: float) -> dict[str, Any]:
 def _aged_report(report: dict[str, Any], elapsed_minutes: int) -> dict[str, Any]:
     """*report* with every window's reset countdown reduced by the minutes since it was read."""
     windows = [
-        {**window, "resets_in_minutes": max(0, window["resets_in_minutes"] - elapsed_minutes)} if window["resets_in_minutes"] is not None else window
+        window if window["resets_in_minutes"] is None
+        else {**window, "resets_in_minutes": max(0, window["resets_in_minutes"] - elapsed_minutes)}
         for window in report["windows"]
     ]
     return {**report, "windows": windows}
@@ -131,6 +137,10 @@ def _with_dropped_providers(usage: dict[str, Any], now: float) -> dict[str, Any]
 
 
 def provider_usage(refresh: bool = False) -> dict[str, Any]:
-    """`{"generated_at", "reports": [{"provider", "account", "no_limits", "unavailable"?, "windows": [{"id", "percent", "resets_in_minutes"}]}]}`."""
+    """Usage per account, the shape the route returns as is.
+
+    `{"generated_at", "reports": [{"provider", "account", "no_limits", "unavailable"?, "windows": [window]}]}`,
+    a window being `{"id", "percent", "resets_in_minutes"}`.
+    """
     with _lock:
         return _with_dropped_providers(parse_usage(_output(refresh), time.time() * 1000), time.monotonic())

@@ -1,5 +1,7 @@
+import type { ReactNode } from "react"
 import { renderHook } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
+import { TabContext, type TabContextValue } from "@/contexts/TabContext"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 
 const pressEscape = () => document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))
@@ -41,5 +43,21 @@ describe("useEscapeLayer", () => {
     expect(closeWindow).toHaveBeenCalledOnce()
     terminal.remove()
     layer.unmount()
+  })
+
+  it("gives Escape to the visible tab only, so a layer in a hidden tab stays out of the way", () => {
+    const visibleClose = vi.fn()
+    const hiddenClose = vi.fn()
+    const inTab = (isActive: boolean) => function TabWrapper({ children }: { children: ReactNode }) {
+      return <TabContext.Provider value={{ isActive } as TabContextValue}>{children}</TabContext.Provider>
+    }
+    const visible = renderHook(() => useEscapeLayer(visibleClose), { wrapper: inTab(true) })
+    const hidden = renderHook(() => useEscapeLayer(hiddenClose), { wrapper: inTab(false) })
+
+    pressEscape()
+    expect(visibleClose).toHaveBeenCalledOnce()
+    expect(hiddenClose).not.toHaveBeenCalled()
+    visible.unmount()
+    hidden.unmount()
   })
 })

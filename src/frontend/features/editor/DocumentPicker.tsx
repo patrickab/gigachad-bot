@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react"
 import { Plus, Layers, FolderOpen } from "lucide-react"
-import type { ProjectDocument } from "@/lib/domain/types"
+import type { ProjectDocument } from "@/lib/domain/projects"
 import { FileViewer } from "@/features/editor/FileViewer"
 
 type Scope = "project" | "global"

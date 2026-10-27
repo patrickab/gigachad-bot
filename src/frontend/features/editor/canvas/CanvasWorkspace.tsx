@@ -3,13 +3,13 @@
 import { useCallback, useEffect, useEffectEvent, useState } from "react"
 import { PenLine } from "lucide-react"
 import { CanvasEditor } from "./CanvasEditor"
-import type { CanvasToolbarSlots } from "./CanvasToolbar"
 import { emptyCanvasDoc, parseCanvasDoc, serializeCanvasDoc, type CanvasDocument } from "@/lib/domain/canvasDocument"
 import { DocumentEditor } from "@/features/editor/DocumentEditor"
 import { SaveAsModal } from "@/components/ui/SaveAsModal"
 import { writeDocument } from "@/lib/backend/api"
 import { useTabActive } from "@/contexts/TabContext"
 import { useEventListener } from "@/hooks/useEventListener"
+import { useModeLabel } from "@/hooks/useModeLabel"
 import { readStorage, writeStorage } from "@/lib/storage"
 
 // A canvas selection carries its owning scope: "" = chat_histories/_notes, otherwise a project slug.
@@ -21,7 +21,6 @@ export interface CanvasSelection {
 interface CanvasWorkspaceProps {
   selected: CanvasSelection | null
   slug: string | null
-  toolbarSlots: CanvasToolbarSlots | null
   onCloseEditor: () => void
   onCreated: (sel: CanvasSelection) => void
   onModeLabel?: (label: string) => void
@@ -40,7 +39,7 @@ function loadScratchDoc(): CanvasDocument {
   return emptyCanvasDoc()
 }
 
-export function CanvasWorkspace({ selected, slug, toolbarSlots, onCloseEditor, onCreated, onModeLabel, editorModel }: CanvasWorkspaceProps) {
+export function CanvasWorkspace({ selected, slug, onCloseEditor, onCreated, onModeLabel, editorModel }: CanvasWorkspaceProps) {
   const isActive = useTabActive()
   // Scratch canvas shown by default. It has no backing file until saved, so it
   // persists to localStorage on every change and survives unmounting.
@@ -58,10 +57,7 @@ export function CanvasWorkspace({ selected, slug, toolbarSlots, onCloseEditor, o
   // Unmount skips the pending debounce, so flush the latest doc here.
   useEffect(() => () => { saveScratch() }, [])
 
-  const announceScratchLabel = useEffectEvent(() => { onModeLabel?.("new.canvas") })
-  useEffect(() => {
-    if (!selected) announceScratchLabel()
-  }, [selected])
+  useModeLabel("new.canvas", !selected, onModeLabel)
 
   // Alt+S opens the save-as dialog for the scratch canvas
   useEventListener("document", "keydown", (e) => {
@@ -89,7 +85,6 @@ export function CanvasWorkspace({ selected, slug, toolbarSlots, onCloseEditor, o
         path={selected.path}
         slug={selected.scope}
         overlay
-        canvasToolbarSlots={toolbarSlots}
         onClose={onCloseEditor}
         onModeLabel={onModeLabel}
         model={editorModel}
@@ -100,7 +95,7 @@ export function CanvasWorkspace({ selected, slug, toolbarSlots, onCloseEditor, o
   return (
     <div className="relative h-full">
       {/* The scratch canvas belongs to the open project (it is saved there too), so it offers that project's documents and architecture. */}
-      <CanvasEditor doc={doc} onChange={setDoc} slug={slug ?? undefined} toolbarSlots={toolbarSlots} />
+      <CanvasEditor doc={doc} onChange={setDoc} slug={slug ?? undefined} />
       <SaveAsModal
         open={saveOpen}
         onClose={() => setSaveOpen(false)}

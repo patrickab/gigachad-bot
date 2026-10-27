@@ -5,7 +5,6 @@ import { Check, X } from "lucide-react"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
 import { AssistantChat, SendStopButton, useAssistantChat, useOneShotStream } from "@/components/content/AssistantChat"
 import { SidePanelFrame } from "@/components/ui/SidePanel"
-import { useTabActive } from "@/contexts/TabContext"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 
 const SYS_NOTE_EDIT = (doc: string) =>
@@ -57,11 +56,10 @@ export function InlineEditPanel({ selectedText, model, onApply, onClose }: Inlin
   const [input, setInput] = useState("")
   const { text: response, isStreaming, ask, abort, stop } = useOneShotStream(model, { appendErrors: false })
   const inputRef = useRef<HTMLInputElement>(null)
-  const tabActive = useTabActive()
 
   useEffect(() => { inputRef.current?.focus() }, [])
 
-  useEscapeLayer(() => { abort(); onClose() }, tabActive)
+  useEscapeLayer(() => { abort(); onClose() })
 
   const handleSend = () => ask(input, SYS_INLINE_EDIT(selectedText))
 

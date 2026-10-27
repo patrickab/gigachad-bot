@@ -4,69 +4,28 @@ from __future__ import annotations
 
 import asyncio
 import re
-from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass, replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agent_sandbox import PromptImage
 from llm_baseclient.client import LLMClient
-from pydantic import BaseModel, Field
 
 from lib.llm_resilience import completion_text
-from lib.prompts.internal import SYS_OCR_TEXT_EXTRACTION
-from lib.prompts.non_user_prompts import SYS_DIAGRAM_MERMAID, SYS_STUDY_MINDMAP
+from lib.prompts.non_user_prompts import SYS_DIAGRAM_MERMAID, SYS_OCR_TEXT_EXTRACTION, SYS_STUDY_MINDMAP
 from lib.research import run_deep_research
 from lib.sandbox_plot import create_sandbox_plot
-from lib.sandbox_service import WORKSPACE_AGENT_SCOPE, SandboxService
-from lib.toolcalling import ToolCatalog, ToolDefinition, ToolOutcome, sandbox_unavailable, stream_tool_turn
+from lib.sandbox_service import PROMPT_MAX_LEN, WORKSPACE_AGENT_SCOPE, SandboxService
+from lib.tool_context import ToolContext, ToolOptions
+from lib.toolcalling import Stage, ToolCatalog, ToolDefinition, ToolOutcome, sandbox_unavailable, stream_tool_turn
 from lib.web_search import brave_sources, evidence_prompt, plan_query, source_label
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 TOOL_GUIDANCE = (
     "Call tools yourself when a request needs them; never ask permission and never claim you cannot "
     "browse. A short, vague, or nonsense message is not automatically a lookup request — respond "
     "normally, or ask what the user means, instead of guessing at what it 'means' via search."
 )
-
-
-class ToolOptions(BaseModel):
-    """Hold the per-request settings the browser already owns."""
-
-    search_system_instructions: str = ""
-    search_domain: str = ""
-    research_fast_model: str = ""
-    research_smart_model: str = ""
-    research_strategic_model: str = ""
-    research_depth: int = Field(default=2, ge=1, le=5)
-    research_breadth: int = Field(default=4, ge=1, le=10)
-    research_reasoning: str | None = None
-    research_report_type: str = "deep"
-
-
-@dataclass(frozen=True)
-class ToolContext:
-    """Provide one tool call with request-owned dependencies."""
-
-    client: LLMClient
-    model: str
-    opts: ToolOptions
-    chat_id: str = ""
-    sandbox_service: SandboxService | None = None
-    tool_call_id: str = ""
-    prompt_images: tuple[PromptImage, ...] = ()
-    small_model: str = ""
-    history: tuple[dict[str, Any], ...] = ()
-    user_msg: str = ""
-    img: Any = None
-    vision_model: str = ""
-    progress: Callable[[str], None] | None = None
-
-    def with_progress(self, progress: Callable[[str], None]) -> ToolContext:
-        return replace(self, progress=progress)
-
-    def stage(self, label: str) -> None:
-        """Report a progress stage if the runtime installed a hook."""
-        if self.progress is not None:
-            self.progress(label)
 
 
 def _single_text_parameter(name: str, description: str, *, max_length: int | None = None) -> dict[str, Any]:
@@ -84,15 +43,15 @@ def _single_text_parameter(name: str, description: str, *, max_length: int | Non
 _NO_ARGUMENTS: dict[str, Any] = {"type": "object", "additionalProperties": False, "properties": {}}
 
 
-async def _web_search(args: dict[str, Any], context: ToolContext) -> ToolOutcome:
-    context.stage("Planning search")
+async def _web_search(args: dict[str, Any], context: ToolContext, stage: Stage) -> ToolOutcome:
+    stage("Planning search")
     planner_model = context.small_model or context.model
     search_query, profile = await asyncio.to_thread(plan_query, context.client, args["query"], planner_model)
     # Domain scoping is a plain keyword prefix on the planned query.
     domain = context.opts.search_domain.strip()
     if domain:
         search_query = f"{domain} {search_query}"
-    context.stage("Searching sources")
+    stage("Searching sources")
     sources = await brave_sources(search_query, profile)
     if not sources:
         return ToolOutcome(
@@ -109,8 +68,8 @@ async def _web_search(args: dict[str, Any], context: ToolContext) -> ToolOutcome
     )
 
 
-async def _deep_research(args: dict[str, Any], context: ToolContext) -> ToolOutcome:
-    context.stage("Researching sources")
+async def _deep_research(args: dict[str, Any], context: ToolContext, stage: Stage) -> ToolOutcome:
+    stage("Researching sources")
     report, urls, costs = await run_deep_research(
         args["query"],
         fast_model=context.opts.research_fast_model,
@@ -131,15 +90,17 @@ async def _deep_research(args: dict[str, Any], context: ToolContext) -> ToolOutc
     )
 
 
-async def _sandbox_plot(_args: dict[str, Any], context: ToolContext) -> ToolOutcome:
-    context.stage("Generating chart")
-    return await create_sandbox_plot(context)
+async def _sandbox_plot(_args: dict[str, Any], context: ToolContext, stage: Stage) -> ToolOutcome:
+    stage("Generating chart")
+    if context.sandbox_service is None:
+        return sandbox_unavailable("sandbox plot")
+    return await create_sandbox_plot(context, context.sandbox_service)
 
 
-async def _workspace_agent(args: dict[str, Any], context: ToolContext) -> ToolOutcome:
+async def _workspace_agent(args: dict[str, Any], context: ToolContext, stage: Stage) -> ToolOutcome:
     if context.sandbox_service is None:
         return sandbox_unavailable("workspace agent")
-    context.stage("Running workspace agent")
+    stage("Running workspace agent")
     result = await context.sandbox_service.invoke(
         chat_id=context.chat_id,
         tool_call_id=context.tool_call_id,
@@ -147,17 +108,7 @@ async def _workspace_agent(args: dict[str, Any], context: ToolContext) -> ToolOu
         prompt_images=context.prompt_images,
         scope=WORKSPACE_AGENT_SCOPE,
     )
-    return ToolOutcome(
-        content=result.summary,
-        summary=result.summary,
-        sandbox={
-            "status": result.status,
-            "manifest_id": f"sha256:{result.manifest_id}" if result.manifest_id else None,
-            "workspace_changed": result.workspace_changed,
-            "outputs": [output.to_json() for output in result.outputs],
-        },
-        error=result.error,
-    )
+    return ToolOutcome(content=result.summary, summary=result.summary, sandbox=result.chat_payload(), error=result.error)
 
 
 # Whole-reply fenced block, capturing the body without the fence lines.
@@ -183,8 +134,8 @@ async def _transcript_completion(context: ToolContext, instruction: str, system_
     return text.strip()
 
 
-async def _diagram(_args: dict[str, Any], context: ToolContext) -> ToolOutcome:
-    context.stage("Creating diagram")
+async def _diagram(_args: dict[str, Any], context: ToolContext, stage: Stage) -> ToolOutcome:
+    stage("Creating diagram")
     content = await _transcript_completion(context, "Create a Mermaid diagram from this conversation.", SYS_DIAGRAM_MERMAID)
     # Strip a Markdown fence if the model wrapped the source despite the prompt.
     if match := _FENCED_CODE.fullmatch(content):
@@ -200,20 +151,20 @@ async def _diagram(_args: dict[str, Any], context: ToolContext) -> ToolOutcome:
     return ToolOutcome(content=seen, summary="Diagram ready", detail={"mermaid": content})
 
 
-async def _mindmap(_args: dict[str, Any], context: ToolContext) -> ToolOutcome:
-    context.stage("Creating mind map")
+async def _mindmap(_args: dict[str, Any], context: ToolContext, stage: Stage) -> ToolOutcome:
+    stage("Creating mind map")
     mindmap = await _transcript_completion(context, "Produce a mind map from this conversation.", SYS_STUDY_MINDMAP)
     return ToolOutcome(content=mindmap, summary="Mind map ready", detail={"mindmap": mindmap})
 
 
-async def _latex_ocr(_args: dict[str, Any], context: ToolContext) -> ToolOutcome:
+async def _latex_ocr(_args: dict[str, Any], context: ToolContext, stage: Stage) -> ToolOutcome:
     if context.img is None:
         return ToolOutcome(
             content="LaTeX OCR needs an attached image.",
             summary="No image attached",
             error="Attach an image before requesting LaTeX OCR.",
         )
-    context.stage("Extracting text and LaTeX")
+    stage("Extracting text and LaTeX")
     text = await asyncio.to_thread(
         completion_text,
         context.client,
@@ -269,6 +220,8 @@ BUILTIN_TOOLS: ToolCatalog[ToolContext] = ToolCatalog(
             "Takes no arguments because the conversation already supplies the material.",
             _NO_ARGUMENTS,
             _mindmap,
+            # The mind map card is the whole reply, so no answer round follows.
+            answers=False,
         ),
         ToolDefinition(
             "latex_ocr",
@@ -282,11 +235,7 @@ BUILTIN_TOOLS: ToolCatalog[ToolContext] = ToolCatalog(
             "Perform work in this chat's persistent code workspace: write and edit files, run code, "
             "and produce charts, tables, or other rich artifacts. The workspace persists between calls "
             "within this chat. Give one clear natural-language instruction describing the work to do.",
-            _single_text_parameter(
-                "prompt",
-                "Describe the work to perform in the chat workspace.",
-                max_length=12000,
-            ),
+            _single_text_parameter("prompt", "Describe the work to perform in the chat workspace.", max_length=PROMPT_MAX_LEN),
             _workspace_agent,
         ),
     )

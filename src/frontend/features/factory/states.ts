@@ -1,4 +1,4 @@
-import type { Phase, TaskState } from "@/lib/domain/types"
+import type { Phase, TaskState } from "@/lib/domain/factory"
 
 interface BoardColumn {
   id: string

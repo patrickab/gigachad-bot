@@ -1,15 +1,17 @@
 "use client"
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react"
+import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
-import { SendStopButton, useAssistantChat, useOneShotStream } from "@/components/content/AssistantChat"
-import { ChatSidebar } from "@/components/ui/ChatSidebar"
+import { AssistantChat, SendStopButton, useAssistantChat, useOneShotStream } from "@/components/content/AssistantChat"
+import { FilePanel } from "@/features/editor/FilePanel"
 import { SelectionBubble } from "@/components/ui/SelectionBubble"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { useEventListener } from "@/hooks/useEventListener"
-import { attachReference } from "@/lib/backend/api"
-import { errorMessage } from "@/lib/utils"
+import { usePolling } from "@/hooks/usePolling"
+import { useSelectionAction } from "@/hooks/useSelectionAction"
+import { attachReference } from "@/lib/backend/references"
+import { errorMessage, isModKey } from "@/lib/utils"
 
 /** Poll interval while MinerU extracts the PDF. */
 const EXTRACTION_POLL_MS = 5000
@@ -17,6 +19,8 @@ const CARD_WIDTH_PX = 380
 const CARD_GAP_PX = 8
 /** Room a card needs below the selection before it flips above it. */
 const CARD_MIN_ROOM_PX = 260
+/** Narrow, so the pages keep the space. */
+const CHAT_PANEL_WIDTH_PX = 320
 
 type PdfMarkdown =
   | { status: "loading" | "extracting" }
@@ -43,28 +47,17 @@ function hasExtraction(path: string): boolean {
 function usePdfMarkdown(path: string): PdfMarkdown {
   const [state, setState] = useState<PdfMarkdown>(() =>
     hasExtraction(path) ? { status: "loading" } : { status: "error", message: "This PDF has no text extraction." })
+  const pending = state.status === "loading" || state.status === "extracting"
 
-  useEffect(() => {
-    if (!hasExtraction(path)) return
-    let cancelled = false
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const load = async () => {
-      try {
-        const attachment = await attachReference(path)
-        if (cancelled) return
-        if (attachment.parsedMd) {
-          setState({ status: "ready", markdown: attachment.parsedMd })
-          return
-        }
-        setState({ status: "extracting" })
-        timer = setTimeout(load, EXTRACTION_POLL_MS)
-      } catch (error) {
-        if (!cancelled) setState({ status: "error", message: errorMessage(error, "Could not load the document text.") })
-      }
+  usePolling(async (signal) => {
+    try {
+      const attachment = await attachReference(path)
+      if (signal.aborted) return
+      setState(attachment.parsedMd ? { status: "ready", markdown: attachment.parsedMd } : { status: "extracting" })
+    } catch (error) {
+      if (!signal.aborted) setState({ status: "error", message: errorMessage(error, "Could not load the document text.") })
     }
-    void load()
-    return () => { cancelled = true; clearTimeout(timer) }
-  }, [path])
+  }, { intervalMs: pending ? EXTRACTION_POLL_MS : null, runWhileHidden: true })
 
   return state
 }
@@ -78,15 +71,14 @@ function DocumentStatus({ pdfText }: { pdfText: PdfMarkdown }) {
 /**
  * Wrap a PDF viewer with an LLM assistant grounded in the PDF's MinerU Markdown.
  *
- * - `chatOpen` shows a `ChatSidebar` right of the viewer, under a top bar `topInset` high. Its history lives as long as this component
+ * - `chatOpen` shows the chat in the tab's file panel, closing it calls `onChatOpenChange(false)`. Its history lives as long as this component
  * - Selecting text opens a one-shot question card, closed by Escape or any click outside it
  */
-export function PdfAssistant({ model, path, chatOpen, onChatOpenChange, topInset, children }: {
+export function PdfAssistant({ model, path, chatOpen, onChatOpenChange, children }: {
   path: string
   model: string
   chatOpen: boolean
   onChatOpenChange: (open: boolean) => void
-  topInset: number
   children: ReactNode
 }) {
   const pdfText = usePdfMarkdown(path)
@@ -96,15 +88,13 @@ export function PdfAssistant({ model, path, chatOpen, onChatOpenChange, topInset
   const [asking, setAsking] = useState<PdfSelection | null>(null)
 
   return (
-    <ChatSidebar
-      open={chatOpen}
-      onOpenChange={onChatOpenChange}
-      chat={chat}
-      inputLabel="Ask about this PDF"
-      disabled={pdfText.status !== "ready"}
-      status={<DocumentStatus pdfText={pdfText} />}
-      topInset={topInset}
-    >
+    <div className="relative h-full">
+      {chatOpen && (
+        <FilePanel label="Chat" onClose={() => onChatOpenChange(false)} width={CHAT_PANEL_WIDTH_PX}>
+          <DocumentStatus pdfText={pdfText} />
+          <AssistantChat chat={chat} inputLabel="Ask about this PDF" disabled={pdfText.status !== "ready"} surfaceClassName="bg-surface-elevated" />
+        </FilePanel>
+      )}
       {/* No scrollbar between the pages and the open chat, wheel and keys still scroll. Important: the global `* { scrollbar-width }` is unlayered */}
       <div ref={containerRef} className={chatOpen ? "h-full [&_.pdf-scroll]:[scrollbar-width:none]!" : "h-full"}>
         {children}
@@ -127,7 +117,7 @@ export function PdfAssistant({ model, path, chatOpen, onChatOpenChange, topInset
         />,
         document.body,
       )}
-    </ChatSidebar>
+    </div>
   )
 }
 
@@ -147,39 +137,11 @@ interface PdfSelection {
  */
 function usePdfSelection() {
   const containerRef = useRef<HTMLDivElement>(null)
-  const [selected, setSelected] = useState<PdfSelection | null>(null)
-
-  useEffect(() => {
-    const container = containerRef.current
-    if (!container) return
-    let changed = false
-    let nextId = 0
-    const onSelectionChange = () => {
-      changed = true
-      if (window.getSelection()?.isCollapsed) setSelected(null)
-    }
-    const capture = () => {
-      if (!changed) return
-      changed = false
-      const found = readPageSelection(container)
-      if (found) setSelected({ ...found, id: nextId++ })
-    }
-    const dismiss = () => setSelected(null)
-    document.addEventListener("selectionchange", onSelectionChange)
-    container.addEventListener("pointerup", capture)
-    container.addEventListener("keyup", capture)
-    window.addEventListener("scroll", dismiss, true)
-    window.addEventListener("resize", dismiss)
-    return () => {
-      document.removeEventListener("selectionchange", onSelectionChange)
-      container.removeEventListener("pointerup", capture)
-      container.removeEventListener("keyup", capture)
-      window.removeEventListener("scroll", dismiss, true)
-      window.removeEventListener("resize", dismiss)
-    }
-  }, [])
-
-  const clear = useCallback(() => setSelected(null), [])
+  const nextId = useRef(0)
+  const { selected, clear } = useSelectionAction(containerRef, (container) => {
+    const found = readPageSelection(container)
+    return found && { ...found, id: nextId.current++ }
+  })
   return { containerRef, selected, clear }
 }
 
@@ -207,7 +169,7 @@ function cardPosition(anchor: DOMRect): CSSProperties {
 }
 
 function isCopyShortcut(event: KeyboardEvent<HTMLInputElement>): boolean {
-  return (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c"
+  return isModKey(event) && event.key.toLowerCase() === "c"
 }
 
 /** Stateless question about one selection: every question is a fresh call with the document and the selection. */

@@ -12,19 +12,22 @@ a live FileRoots reference, which was never stored in Postgres, is read off
 disk, and only after storage has been checked and found not to own the path.
 """
 
+from dataclasses import dataclass
 import hashlib
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import FileResponse
 
-from backend.routes.deps import get_asset_store, get_document_store, get_file_roots, http_errors
+from backend.http_plumbing import http_errors
+from backend.routes.deps import get_asset_store, get_document_store, get_file_roots
 from backend.routes.schemas import FileContent
 from lib import document_library as lib_docs
 from lib.architecture_workspace import ArchitectureError, ArchitectureStore, split_source_path
 from lib.asset_store import AssetStore
 from lib.data_store import DataStore, StorageNotFoundError, read_text
 from lib.file_roots import FileRoots
+from lib.mime import mime_for
 from lib.storage_namespace import pdf_annotations
 
 router = APIRouter(prefix="/api/fileviewer", tags=["fileviewer"])
@@ -86,17 +89,45 @@ async def read_text_content(
     return FileContent(path=path, content=content)
 
 
-def _raw_source(path: str, roots: FileRoots, docs: DataStore, assets: AssetStore) -> tuple[bytes, str] | Path:
+@dataclass(frozen=True)
+class _StoredFile:
+    """Bytes read from storage, with their MIME type."""
+
+    content: bytes
+    media_type: str
+
+    def response(self) -> Response:
+        return Response(content=self.content, media_type=self.media_type, headers={"Content-Disposition": "inline"})
+
+    def sha256(self) -> str:
+        return hashlib.sha256(self.content).hexdigest()
+
+
+@dataclass(frozen=True)
+class _HostFile:
+    """An allowed host path that storage does not own."""
+
+    path: Path
+
+    def response(self) -> Response:
+        return FileResponse(self.path, media_type=mime_for(self.path), content_disposition_type="inline")
+
+    def sha256(self) -> str:
+        with http_errors((OSError, 404, "File not found")), self.path.open("rb") as file:
+            return hashlib.file_digest(file, "sha256").hexdigest()
+
+
+def _raw_source(path: str, roots: FileRoots, docs: DataStore, assets: AssetStore) -> _StoredFile | _HostFile:
     """Stored bytes with their MIME type, or the allowed host path when storage does not own *path*."""
     key = _stored(path, docs)
     if key is not None:
         with http_errors((StorageNotFoundError, 404, "File not found")):
             content, _ = docs.read_bytes(key)
-        return content, lib_docs.mime_for(key)
+        return _StoredFile(content, mime_for(key))
     asset_content = _stored_asset(path, assets)
     if asset_content is not None:
-        return asset_content, lib_docs.mime_for(path)
-    return _resolve_allowed(path, roots)
+        return _StoredFile(asset_content, mime_for(path))
+    return _HostFile(_resolve_allowed(path, roots))
 
 
 @router.get("/raw")
@@ -106,11 +137,7 @@ async def read_raw(
     docs: DataStore = Depends(get_document_store),
     assets: AssetStore = Depends(get_asset_store),
 ) -> Response:
-    source = _raw_source(path, roots, docs, assets)
-    if isinstance(source, Path):
-        return FileResponse(source, media_type=lib_docs.mime_for(source), content_disposition_type="inline")
-    content, media_type = source
-    return Response(content=content, media_type=media_type, headers={"Content-Disposition": "inline"})
+    return _raw_source(path, roots, docs, assets).response()
 
 
 @router.post("/annotations")
@@ -125,13 +152,7 @@ async def open_pdf_annotations(
     - Keyed by the SHA-256 of the PDF bytes: every copy shares annotations, renames keep them
     - Changed PDF content gets a new, empty canvas
     """
-    source = _raw_source(path, roots, docs, assets)
-    if isinstance(source, Path):
-        with http_errors((OSError, 404, "File not found")), source.open("rb") as file:
-            digest = hashlib.file_digest(file, "sha256").hexdigest()
-    else:
-        digest = hashlib.sha256(source[0]).hexdigest()
-    key = pdf_annotations(digest)
+    key = pdf_annotations(_raw_source(path, roots, docs, assets).sha256())
     if not docs.exists(key):
         docs.write_bytes(key, b"")
     return {"key": key}

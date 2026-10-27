@@ -19,7 +19,7 @@ export interface WorkspaceItem {
 }
 
 /** Surface that shows `item`. */
-export function surfaceOf(item: WorkspaceItem): AppSurface {
+function surfaceOf(item: WorkspaceItem): AppSurface {
   if (item.kind === "omp") return "omp"
   if (item.kind === "factory") return "factory"
   return item.kind === "document" || item.kind === "diff" ? "document" : "canvas"
@@ -35,6 +35,17 @@ export interface Tab {
   appMode: AppSurface
   projectSlug: string | null
   workspaceItem: WorkspaceItem | null
+}
+
+/** The tab's workspace item when it is of `kind`, else null. */
+export function itemOf<K extends WorkspaceItem["kind"]>(tab: Tab, kind: K): (WorkspaceItem & { kind: K }) | null {
+  const item = tab.workspaceItem
+  return item?.kind === kind ? item as WorkspaceItem & { kind: K } : null
+}
+
+/** Tab fields that show `item` on its surface, in its project. */
+export function showingItem(item: WorkspaceItem): Pick<Tab, "workspaceItem" | "projectSlug" | "appMode"> {
+  return { workspaceItem: item, projectSlug: item.projectSlug, appMode: surfaceOf(item) }
 }
 
 /** Actions bound to one tab; each is stable for the tab's lifetime. */

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 import os
 from pathlib import Path
 import subprocess
 from typing import Literal
 
-from lib.git import run_git
+from lib.git import GitError, git_ok, git_text, run_git
 
 MAX_DIFF_BYTES = 1_000_000
 
@@ -25,14 +26,10 @@ class ChangedFile:
     original_path: str | None = None
 
 
-def _git(directory: Path, *args: str) -> str:
-    return run_git(directory, *args).stdout
-
-
 def _repository_root(directory: Path) -> Path | None:
     try:
-        return Path(_git(directory, "rev-parse", "--show-toplevel").strip())
-    except (subprocess.SubprocessError, OSError):
+        return Path(git_text(directory, "rev-parse", "--show-toplevel").strip())
+    except GitError:
         return None
 
 
@@ -82,7 +79,7 @@ def changed_files(directory: Path, only: str | None = None) -> list[ChangedFile]
     if repository is None:
         return None
     pathspec = ["--", str(directory / only)] if only else []
-    output = _git(repository, "--literal-pathspecs", "status", "--porcelain=v1", "-z", "--untracked-files=all", *pathspec)
+    output = git_text(repository, "--literal-pathspecs", "status", "--porcelain=v1", "-z", "--untracked-files=all", *pathspec)
     files = []
     for path, pair, original in _parse_porcelain(output):
         if not (repository / path).is_relative_to(directory):
@@ -145,8 +142,8 @@ def file_patch(directory: Path, relative_path: str) -> tuple[ChangeStatus, str] 
         return change.status, _added_file_patch(relative_path, content.decode("utf-8", errors="replace"))
     paths = [change.original_path, relative_path] if change.original_path else [relative_path]
     try:
-        patch = _git(directory, "diff", "--no-color", "--no-ext-diff", "--relative", "--unified=3", "HEAD", "--", *paths)
-    except (subprocess.SubprocessError, OSError):
+        patch = git_text(directory, "diff", "--no-color", "--no-ext-diff", "--relative", "--unified=3", "HEAD", "--", *paths)
+    except GitError:
         return None
     if "\n@@ " not in patch or len(patch) > MAX_DIFF_BYTES:
         return None
@@ -192,10 +189,11 @@ def _added_line_count(target: Path) -> tuple[int, int] | None:
 def line_counts(directory: Path, files: list[ChangedFile]) -> dict[str, tuple[int, int]]:
     """``{path: (added, removed)}`` of *files* against HEAD, one git call for all tracked files."""
     has_head = _has_head(directory)
-    try:
-        tracked = _parse_numstat(_git(directory, "diff", "--numstat", "-z", "--no-color", "--no-ext-diff", "--relative", "HEAD")) if has_head else {}
-    except (subprocess.SubprocessError, OSError):
-        tracked = {}
+    tracked: dict[str, tuple[int, int]] = {}
+    if has_head:
+        with contextlib.suppress(GitError):
+            output = git_text(directory, "diff", "--numstat", "-z", "--no-color", "--no-ext-diff", "--relative", "HEAD")
+            tracked = _parse_numstat(output)
     counts: dict[str, tuple[int, int]] = {}
     for file in files:
         is_new = file.status == "untracked" or (file.status == "added" and not has_head)
@@ -206,28 +204,30 @@ def line_counts(directory: Path, files: list[ChangedFile]) -> dict[str, tuple[in
 
 
 def _has_head(directory: Path) -> bool:
-    try:
-        _git(directory, "rev-parse", "--verify", "HEAD")
-    except (subprocess.SubprocessError, OSError):
-        return False
-    return True
+    return git_ok(directory, "rev-parse", "--verify", "HEAD")
 
 
 class UnsupportedDiffContent(ValueError):
     """The file cannot be edited in a native diff (outside the mount, deleted, binary, oversized, not UTF-8)."""
 
 
+_HEAD_UNREADABLE = "Could not read the HEAD version"
+
+
 def _head_blob(repository: Path, repository_path: str) -> bytes:
     """Bytes of *repository_path* at HEAD; empty when HEAD or the path does not exist there."""
     spec = f"HEAD:{repository_path}"
     env = {"GIT_EXTERNAL_DIFF": "", "GIT_LITERAL_PATHSPECS": "1"}
+    # Bytes, not text, so git_text does not apply: a timeout, an odd size or a failed blob read is an unreadable HEAD.
     try:
-        size = run_git(repository, "--no-pager", "cat-file", "-s", spec, env=env).stdout.strip()
-    except subprocess.CalledProcessError:
-        return b""
-    if int(size) > MAX_DIFF_BYTES:
-        raise UnsupportedDiffContent("File is too large for a native diff")
-    return run_git(repository, "--no-pager", "cat-file", "blob", spec, text=False, env=env).stdout
+        probe = run_git(repository, "--no-pager", "cat-file", "-s", spec, check=False, env=env)
+        if probe.returncode:
+            return b""
+        if int(probe.stdout.strip()) <= MAX_DIFF_BYTES:
+            return run_git(repository, "--no-pager", "cat-file", "blob", spec, text=False, env=env).stdout
+    except (subprocess.SubprocessError, OSError, ValueError) as exc:
+        raise UnsupportedDiffContent(_HEAD_UNREADABLE) from exc
+    raise UnsupportedDiffContent("File is too large for a native diff")
 
 
 def _decode(data: bytes) -> str:
@@ -239,6 +239,36 @@ def _decode(data: bytes) -> str:
         raise UnsupportedDiffContent("File is not valid UTF-8") from exc
 
 
+def _checked_target(directory: Path, relative_path: str) -> Path:
+    """*relative_path* below the resolved *directory*, refused when it escapes it or passes through a symlink."""
+    if not relative_path or "\0" in relative_path or Path(relative_path).is_absolute():
+        raise UnsupportedDiffContent("Invalid path")
+    lexical = Path(os.path.normpath(directory / relative_path))
+    if not lexical.is_relative_to(directory) or lexical == directory:
+        raise UnsupportedDiffContent("Path is outside the mount")
+    if lexical.resolve() != lexical:
+        raise UnsupportedDiffContent("Symlinked paths are not supported")
+    return lexical
+
+
+def _head_baseline(repository: Path, directory: Path, target: Path) -> str:
+    """HEAD text of *target*: empty when untracked, the original path's for a staged rename."""
+    try:
+        change = _find_change(directory, target.relative_to(directory).as_posix())
+    except (GitError, ValueError) as exc:
+        # ValueError covers non-UTF-8 porcelain output, such as a staged rename's undecodable original path.
+        raise UnsupportedDiffContent(_HEAD_UNREADABLE) from exc
+    if change is not None and change.status == "untracked":
+        return ""
+    if change is not None and change.original_path:
+        target = Path(os.path.normpath(directory / change.original_path))
+        if not target.is_relative_to(directory):
+            raise UnsupportedDiffContent("Original path is outside the mount")
+        if not target.is_relative_to(repository):
+            raise UnsupportedDiffContent(_HEAD_UNREADABLE)
+    return _decode(_head_blob(repository, target.relative_to(repository).as_posix()))
+
+
 def file_contents(directory: Path, relative_path: str) -> tuple[str, str]:
     """``(HEAD content, working content)`` of one regular file below *directory*.
 
@@ -246,40 +276,20 @@ def file_contents(directory: Path, relative_path: str) -> tuple[str, str]:
     Raises UnsupportedDiffContent for paths escaping *directory* (including through symlinks), deleted,
     binary, non-UTF-8 or oversized files.
     """
-    if not relative_path or "\0" in relative_path or Path(relative_path).is_absolute():
-        raise UnsupportedDiffContent("Invalid path")
     directory = directory.resolve()
-    lexical = Path(os.path.normpath(directory / relative_path))
-    if not lexical.is_relative_to(directory) or lexical == directory:
-        raise UnsupportedDiffContent("Path is outside the mount")
-    if lexical.resolve() != lexical:
-        raise UnsupportedDiffContent("Symlinked paths are not supported")
+    target = _checked_target(directory, relative_path)
     try:
-        if not lexical.is_file():
+        if not target.is_file():
             raise UnsupportedDiffContent("Not an existing regular file")
-        if lexical.stat().st_size > MAX_DIFF_BYTES:
+        if target.stat().st_size > MAX_DIFF_BYTES:
             raise UnsupportedDiffContent("File is too large for a native diff")
-        content = _decode(lexical.read_bytes())
+        content = _decode(target.read_bytes())
     except OSError as exc:
         raise UnsupportedDiffContent(str(exc)) from exc
     repository = _repository_root(directory)
     if repository is None:
         return "", content
     repository = repository.resolve()
-    head_path = lexical.relative_to(repository).as_posix() if lexical.is_relative_to(repository) else None
-    if head_path is None:
+    if not target.is_relative_to(repository):
         return "", content
-    try:
-        change = _find_change(directory, lexical.relative_to(directory).as_posix())
-        if change is not None and change.status == "untracked":
-            return "", content
-        if change is not None and change.original_path:
-            original = Path(os.path.normpath(directory / change.original_path))
-            if not original.is_relative_to(directory):
-                raise UnsupportedDiffContent("Original path is outside the mount")
-            head_path = original.relative_to(repository).as_posix()
-        return _decode(_head_blob(repository, head_path)), content
-    except (subprocess.SubprocessError, OSError, ValueError) as exc:
-        if isinstance(exc, UnsupportedDiffContent):
-            raise
-        raise UnsupportedDiffContent("Could not read the HEAD version") from exc
+    return _head_baseline(repository, directory, target), content

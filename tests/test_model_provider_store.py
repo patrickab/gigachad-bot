@@ -9,22 +9,16 @@ from lib.model_provider_store import (
     ModelProviderStore,
     providers_for_ui,
 )
-from lib.postgres_data_store import PostgresDataStore
-from tests.conftest import create_user
+from lib.storage_namespace import MODEL
 
 
-@pytest.fixture
-def postgres_store(postgres_pool, clean_database):
-    return PostgresDataStore(postgres_pool, create_user(postgres_pool))
-
-
-def test_provider_catalog_round_trips_yaml_and_rejects_duplicates(postgres_store):
-    catalog = ModelProviderStore(postgres_store)
+def test_provider_catalog_round_trips_yaml_and_rejects_duplicates(data_store):
+    catalog = ModelProviderStore(data_store)
     providers = {"Together": {"litellm_id": "together_ai", "models": ["meta-llama/Llama-3.3-70B"]}}
 
     assert catalog.save(providers) == providers
     assert catalog.load() == providers
-    content, _ = postgres_store.read_bytes(MODEL_PROVIDERS_FILE)
+    content, _ = data_store.read_bytes(f"{MODEL}/{MODEL_PROVIDERS_FILE}")
     assert "Together:" in content.decode()
 
     try:
@@ -57,10 +51,10 @@ def test_openai_provider_is_visible_only_with_an_api_key(monkeypatch):
     assert providers_for_ui({})["OpenAI"] == OPENAI_PROVIDER
 
 
-def test_model_defaults_file_with_unknown_keys_is_reset(postgres_store):
+def test_model_defaults_file_with_unknown_keys_is_reset(data_store):
     """Dev setting: a mismatched file is replaced, never migrated."""
-    postgres_store.write_bytes(MODEL_DEFAULTS_FILE, b"default_model: provider/only-key\n")
+    data_store.write_bytes(f"{MODEL}/{MODEL_DEFAULTS_FILE}", b"default_model: provider/only-key\n")
 
-    defaults = ModelProviderStore(postgres_store).load_defaults()
+    defaults = ModelProviderStore(data_store).load_defaults()
 
     assert defaults == DEFAULT_MODEL_DEFAULTS

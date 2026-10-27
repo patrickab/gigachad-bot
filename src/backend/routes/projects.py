@@ -1,14 +1,14 @@
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from backend.routes.deps import get_asset_store, get_project_store, get_sandbox_service, http_errors
-from backend.routes.histories import cleanup_after_delete
+from backend.http_plumbing import http_errors
+from backend.routes.deps import get_chat_cleanup, get_project_store, get_sandbox_service
 from backend.routes.schemas import ChatSnapshot
-from lib.asset_store import AssetStore
+from lib.chat_cleanup import ChatCleanup
 from lib.data_store import StorageConflictError
-from lib.project_store import ProjectStore
+from lib.project_store import ProjectExists, ProjectStore
 from lib.sandbox_service import SandboxService
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -58,10 +58,8 @@ async def get_project(slug: str, store: ProjectStore = Depends(get_project_store
 
 @router.post("")
 async def create_project(req: CreateProjectRequest, store: ProjectStore = Depends(get_project_store)) -> dict[str, Any]:
-    try:
+    with http_errors((ProjectExists, 409, None), (ValueError, 400, None)):
         return store.create_project(req.name)
-    except ValueError as e:
-        raise HTTPException(status_code=409 if "already exists" in str(e) else 400, detail=str(e)) from e
 
 
 @router.patch("/{slug}")
@@ -74,13 +72,10 @@ async def update_project(slug: str, req: UpdateProjectRequest, store: ProjectSto
 async def delete_project(
     slug: str,
     store: ProjectStore = Depends(get_project_store),
-    assets: AssetStore = Depends(get_asset_store),
-    sandbox_service: SandboxService = Depends(get_sandbox_service),
+    cleanup: ChatCleanup = Depends(get_chat_cleanup),
 ) -> dict[str, str]:
     with http_errors(_PROJECT_NOT_FOUND):
-        return await cleanup_after_delete(
-            assets, sandbox_service, lambda cleanup: store.delete_project(slug, cleanup_uploads_fn=cleanup)
-        )
+        return await cleanup.after(lambda purge: store.delete_project(slug, cleanup_uploads_fn=purge))
 
 
 @router.post("/{slug}/cards")

@@ -17,33 +17,6 @@ export interface Attachment {
   missing?: boolean
 }
 
-export interface RootFile {
-  path: string
-  name: string
-}
-
-export interface FileTreeNode {
-  name: string
-  path: string
-  type: "root" | "folder" | "file"
-  /** Root nodes: the registered mount, `path` differs when one of its worktrees is shown. */
-  mount?: string
-  children?: FileTreeNode[]
-}
-
-/** Subdirectories of `path` on the backend host; `parent` is null at the filesystem root. */
-export interface DirectoryListing {
-  path: string
-  parent: string | null
-  directories: string[]
-}
-
-export interface ProjectDocument {
-  path: string
-  name: string
-  mime: string
-}
-
 /** The tools this build can actually offer the model. */
 export type ToolName = "web_search" | "deep_research" | "sandbox_plot" | "diagram" | "mindmap" | "latex_ocr" | "workspace_agent"
 
@@ -64,6 +37,11 @@ export interface PlotFigure {
   data?: unknown[]
   layout?: Record<string, unknown>
   frames?: unknown[]
+}
+
+/** Any JSON object passes: Plotly validates the interior, so the guard only rejects non-objects. */
+export function isPlotFigure(value: unknown): value is PlotFigure {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 /** Per-tool detail, flattened: one record holds whichever tool ran, and saved chats may carry
@@ -250,22 +228,22 @@ export interface BackendConfig {
   omp_web_url: string
 }
 
-export interface ChatHistoriesResponse {
-  files: string[]
+interface ProviderUsageWindow {
+  id: "5h" | "7d" | "30d"
+  percent: number
+  resets_in_minutes: number | null
 }
 
-export interface BranchMeta {
-  chat_id: string | null
-  parent_id: string | null
-  branch_message_idx: number | null
-  children: BranchChild[]
-  qa_count: number
+export interface ProviderUsageReport {
+  provider: string
+  account: string | null
+  no_limits: boolean
+  /** omp could not read this account's usage this time, e.g. a rate-limited usage API. */
+  unavailable?: boolean
+  windows: ProviderUsageWindow[]
 }
 
-export interface BranchChild {
-  chat_id: string
-  branch_message_idx: number
-}
+export interface PromptMeta { slug: string; name: string; includes: string[] }
 
 export interface ResearchTraceStep {
   step: string
@@ -305,86 +283,6 @@ export interface WebSearchResult {
   images: string[]
   videos: WebSearchVideo[]
   citationMap?: Record<string, WebSearchResultItem>
-}
-
-
-export type KanbanColumnId = "backlog" | "doing" | "done"
-
-export interface KanbanCard {
-  id: string
-  title: string
-  description: string
-  state: KanbanColumnId
-}
-
-export interface ProjectData {
-  name: string
-  slug: string
-  linked_root?: string | null
-  kanban: KanbanCard[]
-}
-
-interface ProjectTab {
-  filename: string
-  name: string | null
-  title: string | null
-}
-
-export interface ProjectListItem {
-  name: string
-  slug: string
-  archived?: boolean
-  linked_root?: string | null
-  tabs?: ProjectTab[]
-}
-
-export type MemoryScope = "global" | "project"
-
-/** Atomic memory: one stored fact within a topic. */
-export interface StoredMemory {
-  id: string
-  text: string
-  topic: string
-  scope: MemoryScope
-  created_at?: string
-  updated_at?: string
-}
-
-/** Complete memory: a named subject bundling atomic memories. */
-export interface MemoryTopic {
-  name: string
-  summary: string
-}
-
-/** Proposed change to one fact, `target_*` name the stored fact an update or delete replaces. */
-export interface MemoryOperation {
-  id: string
-  op: "add" | "update" | "delete"
-  scope: MemoryScope
-  topic: string
-  text: string
-  target_id: string | null
-  target_text: string | null
-}
-
-/** New topic (`previous_summary` null) or a revised summary of an existing one. */
-export interface TopicProposal {
-  scope: MemoryScope
-  name: string
-  summary: string
-  previous_summary: string | null
-}
-
-export interface ScopeProposal {
-  operations: MemoryOperation[]
-  topics: TopicProposal[]
-}
-
-/** A scope is null when it was not extracted. */
-export interface MemoryExtractResponse {
-  review_id: string
-  global: ScopeProposal | null
-  project: ScopeProposal | null
 }
 
 /** One omp session file (`src/lib/omp_web.py` `OmpSession`). */
@@ -440,134 +338,3 @@ export type OmpView =
   /** New-session composer in `cwd`. */
   | { kind: "new"; cwd: string }
   | { kind: "settings" }
-
-// Factory engine JSON models (snake_case), served unchanged by `/api/factory`.
-
-export type TaskState = "backlog" | "todo" | "in_progress" | "human_review" | "rework" | "blocked" | "merging" | "done" | "cancelled"
-
-export type Phase = "prepare" | "scout" | "plan" | "code" | "hooks" | "gates" | "review" | "preview" | "merge"
-
-export type MergeMode = "auto" | "review"
-
-export interface FactoryOverrides {
-  merge?: MergeMode
-  max_rounds?: number
-  preview?: boolean
-  sandbox?: boolean
-  models?: Record<string, string>
-}
-
-/** Agents a workflow phase runs, in pipeline order. */
-export const FACTORY_AGENT_NAMES = ["scout", "planner", "coder", "reviewer"] as const
-
-export type FactoryAgentName = (typeof FACTORY_AGENT_NAMES)[number]
-
-/** Engine-wide settings every repo and workflow may override, `models` maps an agent name to a model selector. */
-export interface FactorySettings {
-  merge: MergeMode
-  max_rounds: number
-  sandbox: boolean
-  preview: boolean
-  models: Record<string, string>
-  agent_timeout_s: number
-  command_timeout_s: number
-}
-
-/** The user's factory defaults: settings plus each agent's full markdown (front matter and prompt). */
-export interface FactoryDefaults {
-  settings: FactorySettings
-  agents: Record<string, string>
-}
-
-/** A repo registered with the factory engine, `path` is its main checkout. */
-export interface FactoryRepo {
-  name: string
-  path: string
-}
-
-export interface FactoryWorkflow {
-  id: string
-  name: string
-  phases: Phase[]
-  merge: MergeMode
-  preview: boolean
-}
-
-export interface TaskCreate {
-  repo: string
-  workflow: string
-  title: string
-  request: string
-  overrides: FactoryOverrides
-  /** False saves the task to the backlog instead of starting it. */
-  start: boolean
-}
-
-export interface GateResult {
-  argv: string[]
-  exit_code: number
-  output_tail: string
-}
-
-export interface PhaseRun {
-  id: number
-  phase: Phase
-  round: number
-  status: "running" | "ok" | "failed"
-  started_at: string
-  ended_at: string | null
-  summary: string
-  /** Agent output envelope, shape depends on the phase. */
-  envelope: Record<string, unknown> | null
-  gate_results: GateResult[]
-}
-
-export interface FactoryMessage {
-  id: number
-  role: "user" | "agent"
-  text: string
-  phase_run_id: number | null
-  created_at: string
-}
-
-export interface FactoryPreview {
-  status: "starting" | "ready" | "failed" | "stopped"
-  url: string
-  open_url: string
-  error: string | null
-}
-
-export interface FactoryTask {
-  id: string
-  repo: string
-  workflow: string
-  title: string
-  request: string
-  state: TaskState
-  phase: Phase | null
-  round: number
-  config: Record<string, unknown>
-  worktree: string | null
-  branch: string | null
-  base_sha: string | null
-  error: string | null
-  created_at: string
-  updated_at: string
-}
-
-export interface FactoryTaskDetail extends FactoryTask {
-  phases: PhaseRun[]
-  messages: FactoryMessage[]
-  preview: FactoryPreview | null
-}
-
-/** Task transitions the engine accepts without a body. */
-export type TaskAction = "start" | "approve" | "cancel" | "retry"
-
-export interface FactoryEvent {
-  seq: number
-  task_id: string
-  kind: string
-  data: Record<string, unknown>
-  created_at: string
-}

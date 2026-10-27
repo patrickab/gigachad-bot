@@ -7,14 +7,15 @@ after the corresponding chat history has been saved.
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field, replace
 import hashlib
 import json
 import logging
 import os
+import tempfile
 import time
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from agent_sandbox import (
     AgentSandboxError,
@@ -29,12 +30,16 @@ from agent_sandbox import (
     WorkspaceArchive,
 )
 from agent_sandbox.manifest import Artifact, Outputs
+from pydantic import BaseModel, ConfigDict
 
-from lib.agent_sandbox_adapter import SandboxRunner, write_temp_tar
+from lib.agent_sandbox_adapter import SandboxRunner
 from lib.asset_store import AssetStore
 from lib.data_store import DataStore, StorageNotFoundError
 from lib.sandbox_store import RunRecord, SandboxStore
-from lib.storage_namespace import sandbox_asset, sandbox_scope
+from lib.storage_namespace import DEFAULT_SANDBOX_SCOPE, sandbox_asset, sandbox_scope
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 logger = logging.getLogger(__name__)
 PROMPT_MAX_LEN = 12000
@@ -44,7 +49,6 @@ SCRIPT_TIMEOUT_SECONDS = 60.0
 
 MAX_OUTPUTS = 20
 MAX_INLINE_TEXT_CHARS = 8000
-DEFAULT_SANDBOX_SCOPE = "workspace"
 WORKSPACE_AGENT_SCOPE = "workspace_agent"
 SANDBOX_PLOT_SCOPE = "sandbox_plot"
 KNOWN_SANDBOX_SCOPES = (DEFAULT_SANDBOX_SCOPE, WORKSPACE_AGENT_SCOPE, SANDBOX_PLOT_SCOPE)
@@ -58,34 +62,47 @@ class SandboxBusyError(SandboxServiceError):
     pass
 
 
-@dataclass(frozen=True)
-class SandboxOutputRecord:
-    display_id: str | None
-    title: str | None
-    mime_bundle: dict[str, dict[str, Any]]
-    text: str | None
+class SandboxOutputRecord(BaseModel):
+    model_config = ConfigDict(frozen=True)
 
-    def to_json(self) -> dict[str, Any]:
-        return {"display_id": self.display_id, "title": self.title, "mime_bundle": self.mime_bundle, "text": self.text}
+    display_id: str | None = None
+    title: str | None = None
+    mime_bundle: dict[str, dict[str, Any]] = {}
+    text: str | None = None
 
 
-@dataclass(frozen=True)
-class SandboxToolResult:
+class SandboxToolResult(BaseModel):
+    """One workspace-agent run; its JSON dump is the stored run record result."""
+
+    model_config = ConfigDict(frozen=True)
+
     status: Literal["completed", "failed", "cancelled"]
     summary: str
-    manifest_id: str | None
-    workspace_changed: bool
+    manifest_id: str | None = None
+    workspace_changed: bool = False
     outputs: tuple[SandboxOutputRecord, ...] = ()
     error: str | None = None
 
-    def to_json(self) -> dict[str, Any]:
+    @classmethod
+    def from_record(cls, record: RunRecord) -> SandboxToolResult:
+        """Rebuild a recorded result, or a failure placeholder when the record lost it."""
+        if record.result is None:
+            return cls(
+                status="failed" if record.status != "completed" else "completed",
+                summary="Sandbox result unavailable.",
+                manifest_id=record.manifest_id,
+                workspace_changed=False,
+                error="missing_result_record",
+            )
+        return cls.model_validate(record.result)
+
+    def chat_payload(self) -> dict[str, Any]:
+        """The `sandbox` field of the browser's tool result."""
         return {
             "status": self.status,
-            "summary": self.summary,
-            "manifest_id": self.manifest_id,
+            "manifest_id": f"sha256:{self.manifest_id}" if self.manifest_id else None,
             "workspace_changed": self.workspace_changed,
-            "outputs": [output.to_json() for output in self.outputs],
-            "error": self.error,
+            "outputs": [output.model_dump(mode="json") for output in self.outputs],
         }
 
 
@@ -147,6 +164,19 @@ def _validate_chat_id(chat_id: str) -> str:
     return chat_id
 
 
+def write_temp_tar(content: bytes, prefix: str) -> str:
+    """Write *content* to a fresh temporary `.tar` file and return its path, removing it again on failure."""
+    fd, path = tempfile.mkstemp(prefix=prefix, suffix=".tar")
+    try:
+        with os.fdopen(fd, "wb") as archive:
+            archive.write(content)
+    except BaseException:
+        with suppress(FileNotFoundError):
+            os.unlink(path)
+        raise
+    return path
+
+
 def _discard_restore(restore: WorkspaceArchive | None) -> None:
     if restore is not None:
         with suppress(FileNotFoundError):
@@ -156,41 +186,26 @@ def _discard_restore(restore: WorkspaceArchive | None) -> None:
 def _failed_result(prior_manifest: SandboxManifest | None, error: str) -> SandboxToolResult:
     """The result of a run that could not complete, still pointing at the manifest it started from."""
     return SandboxToolResult(
-        "failed",
-        "The workspace agent could not complete this run.",
-        prior_manifest.manifest_id if prior_manifest else None,
-        False,
+        status="failed",
+        summary="The workspace agent could not complete this run.",
+        manifest_id=prior_manifest.manifest_id if prior_manifest else None,
+        workspace_changed=False,
         error=error,
     )
 
 
-def _result_from_record(record: RunRecord) -> SandboxToolResult:
-    if record.result is None:
-        return SandboxToolResult(
-            status="failed" if record.status != "completed" else "completed",
-            summary="Sandbox result unavailable.",
-            manifest_id=record.manifest_id,
-            workspace_changed=False,
-            error="missing_result_record",
-        )
-    data = record.result
-    outputs = tuple(
-        SandboxOutputRecord(
-            display_id=output.get("display_id"),
-            title=output.get("title"),
-            mime_bundle=output.get("mime_bundle", {}),
-            text=output.get("text"),
-        )
-        for output in data.get("outputs", [])
-    )
-    return SandboxToolResult(
-        status=data["status"],
-        summary=data["summary"],
-        manifest_id=data.get("manifest_id"),
-        workspace_changed=data.get("workspace_changed", False),
-        outputs=outputs,
-        error=data.get("error"),
-    )
+def _scopes(scope: str | None) -> tuple[str, ...]:
+    """The one validated scope, or every known scope when none is named."""
+    return (sandbox_scope(scope),) if scope is not None else KNOWN_SANDBOX_SCOPES
+
+
+@dataclass(frozen=True)
+class _Slot:
+    """One chat's sandbox state in one scope: its runtime key and its durable store."""
+
+    scope: str
+    key: str
+    store: SandboxStore
 
 
 class SandboxService:
@@ -227,8 +242,12 @@ class SandboxService:
         scoped_chat = f"{scope}:{chat_id}"
         return f"{self._slot_prefix}:{scoped_chat}" if self._slot_prefix else scoped_chat
 
-    def _store_for(self, scope: str) -> SandboxStore:
-        return SandboxStore(self._data_store, scope=scope)
+    @asynccontextmanager
+    async def _slot(self, chat_id: str, scope: str) -> AsyncIterator[_Slot]:
+        """Hold the slot's lock for the duration of the block."""
+        slot = _Slot(scope, self._slot_key(chat_id, scope), SandboxStore(self._data_store, scope=scope))
+        async with await self._runtime.lock(slot.key):
+            yield slot
 
     async def run_script(self, script: str, *, interpreter: str = "venv", timeout: float = SCRIPT_TIMEOUT_SECONDS) -> str:
         """Run one throwaway script with no workspace or secrets."""
@@ -239,17 +258,17 @@ class SandboxService:
         """The recorded result of a finished call, None when the call must run. Raises while it is still running."""
         staged_record = staged.runs.get(tool_call_id)
         if staged_record is not None:
-            return _result_from_record(staged_record)
-
+            return SandboxToolResult.from_record(staged_record)
         existing = store.read_run(chat_id, tool_call_id)
-        if existing is not None and existing.status == "running":
-            recovered = store.recover_completed_run(chat_id, tool_call_id)
-            if recovered is not None:
-                return _result_from_record(recovered)
-        if existing is not None and existing.status != "running":
-            return _result_from_record(existing)
+        if existing is None:
+            return None
+        if existing.status != "running":
+            return SandboxToolResult.from_record(existing)
+        # A running record may belong to a finished run whose record write was interrupted.
+        if (recovered := store.recover_completed_run(chat_id, tool_call_id)) is not None:
+            return SandboxToolResult.from_record(recovered)
         # Fresh running record means a live run. Stale ones fall through and re-run.
-        if existing is not None and time.time() - existing.started_at < STALE_RUN_TIMEOUT_SECONDS:
+        if time.time() - existing.started_at < STALE_RUN_TIMEOUT_SECONDS:
             raise SandboxBusyError(f"sandbox run {tool_call_id} is already in progress")
         return None
 
@@ -272,11 +291,9 @@ class SandboxService:
         chat_id = _validate_chat_id(chat_id)
         prompt = _normalize_prompt(prompt)
         scope = sandbox_scope(scope)
-        store = self._store_for(scope)
-        slot_key = self._slot_key(chat_id, scope)
 
-        lock = await self._runtime.lock(slot_key)
-        async with lock:
+        async with self._slot(chat_id, scope) as slot:
+            store, slot_key = slot.store, slot.key
             staged = self._runtime.stage(slot_key)
             if (replayed := self._replay_or_busy(store, staged, chat_id, tool_call_id)) is not None:
                 return replayed
@@ -339,7 +356,7 @@ class SandboxService:
                 started_at=started_at,
                 finished_at=time.time(),
                 manifest_id=result.manifest_id,
-                result=result.to_json(),
+                result=result.model_dump(mode="json"),
             )
             return result
 
@@ -478,25 +495,21 @@ class SandboxService:
     async def checkpoint(self, *, chat_id: str, scope: str | None = None) -> None:
         """Promote the latest runtime-only workspace after its chat is saved."""
         chat_id = _validate_chat_id(chat_id)
-        scopes = (sandbox_scope(scope),) if scope is not None else KNOWN_SANDBOX_SCOPES
-        for state_scope in scopes:
-            store = self._store_for(state_scope)
-            slot_key = self._slot_key(chat_id, state_scope)
-            lock = await self._runtime.lock(slot_key)
-            async with lock:
-                staged = self._runtime.get(slot_key)
+        for scope_name in _scopes(scope):
+            async with self._slot(chat_id, scope_name) as slot:
+                staged = self._runtime.get(slot.key)
                 if staged is None:
                     continue
                 if staged.manifest is not None:
                     self._persist_assets(staged.assets, {staged.manifest.workspace.sha256: "application/x-tar"})
-                    store.checkpoint(
+                    slot.store.checkpoint(
                         chat_id,
                         profile=self._profile,
                         manifest=staged.manifest,
                         runs=staged.runs,
                         latest_run_id=staged.last_completed_run_id,
                     )
-                self._runtime.pop(slot_key)
+                self._runtime.pop(slot.key)
 
     def _persist_assets(self, assets: dict[str, bytes], media_types: dict[str, str]) -> None:
         for sha256, content in assets.items():
@@ -521,21 +534,17 @@ class SandboxService:
 
     async def delete_chat_state(self, *, chat_id: str, scope: str | None = None) -> None:
         chat_id = _validate_chat_id(chat_id)
-        scopes = (sandbox_scope(scope),) if scope is not None else KNOWN_SANDBOX_SCOPES
-        for state_scope in scopes:
-            store = self._store_for(state_scope)
-            slot_key = self._slot_key(chat_id, state_scope)
-            lock = await self._runtime.lock(slot_key)
-            async with lock:
-                staged = self._runtime.pop(slot_key)
-                shas = store.delete_chat_state(chat_id)
+        for scope_name in _scopes(scope):
+            async with self._slot(chat_id, scope_name) as slot:
+                staged = self._runtime.pop(slot.key)
+                shas = slot.store.delete_chat_state(chat_id)
                 if staged is not None:
                     shas.update(staged.output_shas)
                 if not shas:
                     continue
                 # Keep assets still referenced by other chats, scopes, or staged runtime state.
-                still_referenced = store.referenced_shas(exclude_chat_id=chat_id, exclude_scope=state_scope)
-                still_referenced.update(self._runtime.referenced_output_shas(exclude_slot=slot_key))
+                still_referenced = slot.store.referenced_shas(exclude_chat_id=chat_id, exclude_scope=slot.scope)
+                still_referenced.update(self._runtime.referenced_output_shas(exclude_slot=slot.key))
                 for sha256 in shas:
                     if sha256 not in still_referenced:
                         with suppress(StorageNotFoundError):

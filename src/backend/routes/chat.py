@@ -1,26 +1,26 @@
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
-import litellm
 from llm_baseclient.client import LLMClient
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
+from backend.http_plumbing import sse_tool_event_stream, stream_completion
+from lib import reasoning_levels
 from lib.asset_store import AssetStore
 from lib.image_paths import resolve_chat_image_paths, resolve_sandbox_prompt_images
+from lib.memory_context import augment_system_prompt
 from lib.memory_store import MemoryStore
-from lib.model_provider_store import ModelProviderStore
 from lib.sandbox_service import SandboxService
-from lib.tools import ToolOptions, stream_chat_with_tools
+from lib.tool_context import ToolOptions
+from lib.tools import stream_chat_with_tools
 
 from .deps import (
     get_asset_store,
     get_memory_store,
-    get_model_provider_store,
+    get_model_defaults,
     get_sandbox_service,
     request_client,
-    sse_tool_event_stream,
-    stream_completion,
 )
 
 router = APIRouter(prefix="/api", tags=["chat"])
@@ -43,26 +43,6 @@ class ChatRequest(BaseModel):
     tool_options: ToolOptions = ToolOptions()
 
 
-def _build_kwargs(req: ChatRequest) -> dict[str, Any]:
-    kwargs: dict[str, Any] = {}
-    if req.reasoning_effort and req.reasoning_effort != "none" and _supports_reasoning_effort(req.model):
-        kwargs["reasoning_effort"] = req.reasoning_effort
-    return kwargs
-
-
-def _supports_reasoning_effort(model: str) -> bool:
-    """Whether litellm lists `reasoning_effort` as supported for *model*.
-
-    Some providers (e.g. nvidia_nim) reject the param outright, so consult litellm's
-    table instead of an allowlist. Fail closed on lookup errors: dropping the param
-    is harmless, forwarding it blind can crash the request.
-    """
-    try:
-        return "reasoning_effort" in (litellm.get_supported_openai_params(model=model) or [])
-    except Exception:
-        return False
-
-
 def _resolve_images(c: LLMClient, req: ChatRequest, assets: AssetStore) -> list | None:
     paths = resolve_chat_image_paths(
         c,
@@ -77,22 +57,19 @@ def _resolve_images(c: LLMClient, req: ChatRequest, assets: AssetStore) -> list 
     return paths if len(paths) > 1 else paths[0]
 
 
-
-
 @router.post("/chat")
 async def chat(
     req: ChatRequest,
     memory_store: MemoryStoreDep,
     assets: Annotated[AssetStore, Depends(get_asset_store)],
     sandbox_service: Annotated[SandboxService, Depends(get_sandbox_service)],
-    models: Annotated[ModelProviderStore, Depends(get_model_provider_store)],
+    model_defaults: Annotated[dict[str, str], Depends(get_model_defaults)],
 ) -> EventSourceResponse:
     """Stream a completion as SSE, running the tool loop when `req.tools` is non-empty."""
     with request_client() as c:
-        model_defaults = models.load_defaults()
-        kwargs = _build_kwargs(req)
+        kwargs = reasoning_levels.effort_kwargs(req.reasoning_effort, req.model)
         img = _resolve_images(c, req, assets)
-        system_prompt = memory_store.augment_system_prompt(req.system_prompt, req.project_slug)
+        system_prompt = augment_system_prompt(memory_store, req.system_prompt, req.project_slug)
         prompt_images = (
             resolve_sandbox_prompt_images(req.chat_id, req.project_slug, req.img_paths, assets)
             if {"workspace_agent", "sandbox_plot"}.intersection(req.tools)

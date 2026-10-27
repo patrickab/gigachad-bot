@@ -1,25 +1,23 @@
 import asyncio
-import os
 
 from fastapi import BackgroundTasks
-from psycopg_pool import ConnectionPool
 import pytest
 
-from backend.routes import models
-from backend.routes.models import _litellm_reasoning_levels, _resolve_reasoning_levels, get_reasoning_levels
-from lib.db_schema import upgrade
+from backend.routes.models import get_reasoning_levels
+from lib import reasoning_levels
+from lib.reasoning_levels import litellm_levels, resolve
 
 
 def _stub_litellm(monkeypatch: pytest.MonkeyPatch, supports_reasoning: bool, model_info: dict | Exception) -> None:
     """Replace LiteLLM's registry lookups with a fixed answer."""
-    monkeypatch.setattr(models.litellm, "supports_reasoning", lambda model: supports_reasoning)
+    monkeypatch.setattr(reasoning_levels.litellm, "supports_reasoning", lambda model: supports_reasoning)
 
     def get_model_info(model: str) -> dict:
         if isinstance(model_info, Exception):
             raise model_info
         return model_info
 
-    monkeypatch.setattr(models.litellm, "get_model_info", get_model_info)
+    monkeypatch.setattr(reasoning_levels.litellm, "get_model_info", get_model_info)
 
 
 @pytest.mark.parametrize(
@@ -43,12 +41,12 @@ def _stub_litellm(monkeypatch: pytest.MonkeyPatch, supports_reasoning: bool, mod
 )
 def test_levels_follow_litellm_effort_flags(monkeypatch: pytest.MonkeyPatch, model_info: dict | Exception, expected: list[str]) -> None:
     _stub_litellm(monkeypatch, supports_reasoning=True, model_info=model_info)
-    assert _litellm_reasoning_levels("some/model") == expected
+    assert litellm_levels("some/model") == expected
 
 
 def test_non_reasoning_model_has_no_levels(monkeypatch: pytest.MonkeyPatch) -> None:
     _stub_litellm(monkeypatch, supports_reasoning=False, model_info={"supports_xhigh_reasoning_effort": True})
-    assert _litellm_reasoning_levels("some/model") == []
+    assert litellm_levels("some/model") == []
 
 
 @pytest.mark.parametrize(
@@ -68,31 +66,22 @@ def test_omp_models_use_omp_registry_before_litellm(monkeypatch: pytest.MonkeyPa
         requested.append(model_id)
         return omp_levels
 
-    monkeypatch.setattr(models.omp_source, "thinking_levels", thinking_levels)
-    assert asyncio.run(_resolve_reasoning_levels("litellm_proxy/openai-codex/gpt-6-astra")) == expected
+    monkeypatch.setattr(reasoning_levels.omp_source, "thinking_levels", thinking_levels)
+    assert asyncio.run(resolve("litellm_proxy/openai-codex/gpt-6-astra")) == expected
     assert requested == ["openai-codex/gpt-6-astra"]
 
 
 @pytest.fixture
-def stored_levels(monkeypatch: pytest.MonkeyPatch):
+def stored_levels(monkeypatch: pytest.MonkeyPatch, postgres_pool, clean_database):
     """Route the levels table to the test database, emptied per test."""
-    url = os.environ.get("POSTGRES_TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("POSTGRES_TEST_DATABASE_URL is required")
-    upgrade(url)
-    pool = ConnectionPool(url, min_size=1, max_size=2)
-    with pool.connection() as connection:
-        connection.execute("TRUNCATE model_reasoning_levels")
-    monkeypatch.setattr(models, "get_postgres_pool", lambda: pool)
-    yield
-    pool.close()
+    monkeypatch.setattr(reasoning_levels, "get_postgres_pool", lambda: postgres_pool)
 
 
 def _stub_live_levels(monkeypatch: pytest.MonkeyPatch, live: dict[str, list[str] | None]) -> None:
-    async def resolve(model: str) -> list[str] | None:
+    async def resolve_live(model: str) -> list[str] | None:
         return live[model]
 
-    monkeypatch.setattr(models, "_resolve_reasoning_levels", resolve)
+    monkeypatch.setattr(reasoning_levels, "resolve", resolve_live)
 
 
 def _request_levels(model: str) -> tuple[list[str], BackgroundTasks]:

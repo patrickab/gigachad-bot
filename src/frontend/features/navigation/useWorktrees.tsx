@@ -1,13 +1,13 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useState } from "react"
 import type { FileTreeItem } from "@/components/ui/file-tree/FileTree"
 import { InlineConfirm } from "@/components/ui/InlineConfirm"
 import { WorktreesIcon } from "@/components/ui/WorktreesIcon"
-import { useStoredString } from "@/hooks/useStoredString"
-import { ApiError, createWorktree, deleteWorktreeBranch, fetchWorktrees, openDefaultWorktree, removeWorktree, type Worktree, type WorktreeList } from "@/lib/backend/api"
+import { useStoredJson } from "@/hooks/useStoredJson"
+import { ApiError, createWorktree, deleteWorktreeBranch, fetchWorktrees, openDefaultWorktree, removeWorktree } from "@/lib/backend/api"
+import type { Worktree, WorktreeList } from "@/lib/domain/files"
 import { baseName } from "@/lib/paths"
-import { readStorage } from "@/lib/storage"
 import { errorMessage } from "@/lib/utils"
 
 const ACTIVE_STORAGE_KEY = "active_worktrees"
@@ -20,8 +20,10 @@ function DismissibleError({ message, onDismiss }: { message: string; onDismiss: 
   </p>
 }
 
-function parseActive(stored: string): Record<string, string> {
-  try { return JSON.parse(stored) as Record<string, string> } catch { return {} }
+/** Stored mount to worktree map with only its string entries, empty when missing or not an object. */
+function parseActive(raw: unknown): Record<string, string> {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {}
+  return Object.fromEntries(Object.entries(raw).filter((entry): entry is [string, string] => typeof entry[1] === "string"))
 }
 
 /** Questions after the trash click: force a dirty worktree, offer deleting its branch, force an unmerged branch. */
@@ -59,8 +61,7 @@ export function useWorktrees(mounts: string[]) {
   const [lists, setLists] = useState<Record<string, WorktreeList>>({})
   const [removal, setRemoval] = useState<Removal | null>(null)
   const [defaultError, setDefaultError] = useState<{ mount: string; error: string } | null>(null)
-  const [stored, store] = useStoredString(ACTIVE_STORAGE_KEY)
-  const active = useMemo(() => parseActive(stored ?? "{}"), [stored])
+  const [active, updateActive] = useStoredJson(ACTIVE_STORAGE_KEY, parseActive)
   const mountsKey = mounts.join("\n")
 
   const load = useCallback((mount: string) => fetchWorktrees(mount).then(
@@ -69,12 +70,12 @@ export function useWorktrees(mounts: string[]) {
   ), [])
   const reload = useCallback(() => { for (const mount of mountsKey.split("\n").filter(Boolean)) void load(mount) }, [mountsKey, load])
 
-  const setActive = (mount: string, path: string | null) => {
-    const next = { ...parseActive(readStorage(ACTIVE_STORAGE_KEY) ?? "{}") }
+  const setActive = (mount: string, path: string | null) => updateActive((latest) => {
+    const next = { ...latest }
     if (path) next[mount] = path
     else delete next[mount]
-    store(JSON.stringify(next))
-  }
+    return next
+  })
 
   /** The stored worktree while it still exists, else the clone. */
   const shown = (mount: string): Worktree | undefined => {

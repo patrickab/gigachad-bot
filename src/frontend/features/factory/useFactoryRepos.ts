@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
+import { useLoadWhile } from "@/hooks/useLoadWhile"
 import { fetchFactoryRepos, registerFactoryRepo } from "@/lib/backend/api"
-import type { FactoryRepo } from "@/lib/domain/types"
+import type { FactoryRepo } from "@/lib/domain/factory"
 
 function trimSlash(path: string): string {
   return path.replace(/\/+$/, "")
@@ -10,12 +11,7 @@ function trimSlash(path: string): string {
 export function useFactoryRepos(enabled: boolean): (directory: string) => Promise<FactoryRepo> {
   const [repos, setRepos] = useState<FactoryRepo[]>([])
 
-  useEffect(() => {
-    if (!enabled) return
-    let cancelled = false
-    fetchFactoryRepos().then((loaded) => { if (!cancelled) setRepos(loaded) }, () => {})
-    return () => { cancelled = true }
-  }, [enabled])
+  useLoadWhile(enabled, fetchFactoryRepos, setRepos)
 
   /** The registered repo at *directory*, registering the checkout first when the engine does not know it yet. */
   return async (directory) => {

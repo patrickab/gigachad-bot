@@ -2,12 +2,14 @@
 
 import os
 from pathlib import Path
-import subprocess
 import sys
 
 import pytest
 
-SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "setup-postgres.sh"
+from tests.shell import REPOSITORY, bash_output, environment_with, fake_command, run_script
+
+SCRIPT = REPOSITORY / "scripts" / "setup-postgres.sh"
+LAUNCHER = REPOSITORY / "run.sh"
 
 
 @pytest.fixture
@@ -16,26 +18,26 @@ def setup_environment(tmp_path):
     home.mkdir()
     binaries = tmp_path / "bin"
     binaries.mkdir()
-    docker = binaries / "docker"
-    docker.write_text(
-        '#!/usr/bin/env bash\n'
+    fake_command(
+        binaries,
+        "docker",
         'if [[ "$1" == volume ]]; then\n'
         '    printf "%s\\n" "${SETUP_TEST_VOLUME:-}"\n'
-        'fi\n'
+        'fi\n',
     )
-    docker.chmod(0o755)
-    environment = os.environ.copy()
+    environment = environment_with(binaries, HOME=str(home))
     environment.pop("POSTGRES_PASSWORD_DEV", None)
     environment.pop("SETUP_TEST_VOLUME", None)
-    environment.update(HOME=str(home), PATH=f"{binaries}:{environment['PATH']}")
     return home, environment
 
 
 def run_setup(environment, answer):
-    return subprocess.run(
-        ["bash", str(SCRIPT)], input=answer, text=True, capture_output=True,
-        env=environment, check=False,
-    )
+    return run_script(SCRIPT, environment, input=answer)
+
+
+def fake_python(environment, body: str) -> None:
+    """Shadow python3 for the launcher with a bash *body*."""
+    fake_command(Path(environment["PATH"].split(os.pathsep)[0]), "python3", body)
 
 
 @pytest.mark.parametrize("answer", ["n\n", "\n", ""])
@@ -59,10 +61,7 @@ def test_confirming_generates_private_credentials_once(setup_environment):
     assert first.returncode == 0, first.stderr
     credentials = secrets_file.read_text()
     assert secrets_file.stat().st_mode & 0o777 == 0o600
-    loaded = subprocess.run(
-        ["bash", "-c", 'source "$HOME/.secrets" && printf %s "$POSTGRES_PASSWORD_DEV"'],
-        env=environment, text=True, capture_output=True, check=True,
-    ).stdout
+    loaded = bash_output('source "$HOME/.secrets" && printf %s "$POSTGRES_PASSWORD_DEV"', environment)
     assert len(bytes.fromhex(loaded)) == 32
     assert loaded not in first.stdout + first.stderr
 
@@ -89,22 +88,15 @@ def test_inherited_password_is_saved_without_prompting(setup_environment):
     result = run_setup(environment, "")
 
     assert result.returncode == 0, result.stderr
-    loaded = subprocess.run(
-        ["bash", "-c", 'unset POSTGRES_PASSWORD_DEV; source "$HOME/.secrets"; printf %s "$POSTGRES_PASSWORD_DEV"'],
-        env=environment, text=True, capture_output=True, check=True,
-    ).stdout
+    loaded = bash_output('unset POSTGRES_PASSWORD_DEV; source "$HOME/.secrets"; printf %s "$POSTGRES_PASSWORD_DEV"', environment)
     assert loaded == password
     assert password not in result.stdout + result.stderr
 
 
 def test_app_startup_stops_when_database_setup_is_declined(setup_environment):
     home, environment = setup_environment
-    launcher = SCRIPT.parents[1] / "run.sh"
 
-    result = subprocess.run(
-        ["bash", str(launcher)], input="n\n", text=True, capture_output=True,
-        env=environment, timeout=10, check=False,
-    )
+    result = run_script(LAUNCHER, environment, input="n\n", timeout=10)
 
     assert result.returncode == 1
     assert "Startup cancelled" in result.stderr
@@ -120,15 +112,9 @@ def test_app_startup_reuses_database_credentials_without_setup(setup_environment
         (home / ".secrets").write_text("export POSTGRES_PASSWORD_DEV=existing-password\n")
 
     # Stop at dependency installation, before any application service can launch.
-    binaries = Path(environment["PATH"].split(os.pathsep)[0])
-    python = binaries / "python3"
-    python.write_text("#!/usr/bin/env bash\nexit 79\n")
-    python.chmod(0o755)
+    fake_python(environment, "exit 79\n")
 
-    result = subprocess.run(
-        ["bash", str(SCRIPT.parents[1] / "run.sh")], input="", text=True,
-        capture_output=True, env=environment, timeout=10, check=False,
-    )
+    result = run_script(LAUNCHER, environment, input="", timeout=10)
 
     assert result.returncode == 79
     assert "Setup cancelled" not in result.stdout
@@ -137,28 +123,19 @@ def test_app_startup_reuses_database_credentials_without_setup(setup_environment
 
 def test_app_startup_creates_missing_database_credentials(setup_environment):
     home, environment = setup_environment
-    binaries = Path(environment["PATH"].split(os.pathsep)[0])
-    python = binaries / "python3"
-    python.write_text(
-        '#!/usr/bin/env bash\n'
+    fake_python(
+        environment,
         'if [[ "$1" == */src/backend/install_deps.py ]]; then\n'
         '    exit 79\n'
         'fi\n'
-        f'exec "{sys.executable}" "$@"\n'
+        f'exec "{sys.executable}" "$@"\n',
     )
-    python.chmod(0o755)
 
-    result = subprocess.run(
-        ["bash", str(SCRIPT.parents[1] / "run.sh")], input="y\n", text=True,
-        capture_output=True, env=environment, timeout=10, check=False,
-    )
+    result = run_script(LAUNCHER, environment, input="y\n", timeout=10)
 
     assert result.returncode == 79, result.stdout + result.stderr
     secrets_file = home / ".secrets"
     assert secrets_file.stat().st_mode & 0o777 == 0o600
-    loaded = subprocess.run(
-        ["bash", "-c", 'source "$HOME/.secrets"; printf %s "$POSTGRES_PASSWORD_DEV"'],
-        env=environment, text=True, capture_output=True, check=True,
-    ).stdout
+    loaded = bash_output('source "$HOME/.secrets"; printf %s "$POSTGRES_PASSWORD_DEV"', environment)
     assert len(bytes.fromhex(loaded)) == 32
     assert loaded not in result.stdout + result.stderr

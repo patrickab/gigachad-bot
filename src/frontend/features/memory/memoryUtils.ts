@@ -1,4 +1,4 @@
-import type { MemoryTopic, StoredMemory } from "@/lib/domain/types"
+import type { MemoryTopic, StoredMemory } from "@/lib/domain/memory"
 
 /** Backend fallback topic of a fact without one. */
 const FALLBACK_TOPIC = "note"
@@ -34,4 +34,27 @@ export function groupByTopicOrder(topics: MemoryTopic[], memories: StoredMemory[
     ...topics.map((topic) => ({ topic, items: byTopic.get(topic.name) ?? [] })),
     ...[...byTopic].filter(([name]) => !known.has(name)).map(([name, items]) => ({ topic: { name, summary: "" }, items })),
   ]
+}
+
+/** Apply `patch` to topic `name`, adding it when only memories reference it. */
+export function patchTopic(topics: MemoryTopic[], name: string, patch: Partial<MemoryTopic>): MemoryTopic[] {
+  if (!topics.some((t) => t.name === name)) return [...topics, { name, summary: "", ...patch }]
+  return topics.map((t) => t.name === name ? { ...t, ...patch } : t)
+}
+
+const DAY_MS = 86_400_000
+
+/** Relative "Updated ..." label of a timestamp, "Empty" without one. */
+export function formatUpdated(iso: string | null): string {
+  if (!iso) return "Empty"
+  const date = new Date(iso)
+  const now = new Date()
+  const days = Math.round((new Date(now.toDateString()).getTime() - new Date(date.toDateString()).getTime()) / DAY_MS)
+  if (days <= 0) return "Updated today"
+  if (days === 1) return "Updated yesterday"
+  if (days < 7) return `Updated ${days} days ago`
+  const options: Intl.DateTimeFormatOptions = date.getFullYear() === now.getFullYear()
+    ? { month: "short", day: "numeric" }
+    : { month: "short", day: "numeric", year: "numeric" }
+  return `Updated ${date.toLocaleDateString(undefined, options)}`
 }

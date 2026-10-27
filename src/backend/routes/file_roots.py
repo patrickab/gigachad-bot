@@ -1,56 +1,26 @@
-"""File-root routes. The API owns every filesystem access.
+"""File-root routes: mounts, their trees, host browsing, and reading and writing mounted files. The API owns every filesystem access.
 
 The UI never touches a file root directly: it lists files (`/files`), previews one
-(`/rendered`), writes one (`/file`), and *attaches* a chosen file (`/attach`).
-Attach is a **live reference**: nothing is copied, the returned `path` is
-stored on the Attachment and content is read from (and written back to) the
-actual file.
+(`/rendered`) and writes one (`/file`). Attaching lives in `file_attach`, git diffs
+and worktrees in `file_git`, all under the same `/api/fileroots` prefix.
 
 Handlers are plain `def`: they walk directories and read files synchronously,
 so FastAPI runs them in its threadpool instead of blocking the event loop.
 """
 
-from pathlib import Path
-
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
+from backend.http_plumbing import http_errors
 from backend.identity import host_access_only
-from backend.routes.deps import get_asset_store, get_file_roots, get_project_store, http_errors
-from backend.routes.schemas import AttachResult, FileContent, FileListResponse, FileMeta, file_meta
-from lib import document_library as lib_docs
-from lib.asset_store import AssetStore
-from lib.attachment_materialize import materialize, sync_library_pdf
-from lib.data_store import StorageNotFoundError
-from lib import git_diff, git_worktree
-from lib.file_roots import FileRoots, list_directories
-from lib.project_store import ProjectStore
-from lib.storage_namespace import PDFS
+from backend.routes.deps import get_file_roots
+from backend.routes.schemas import FileContent, RootFile
+from lib import git_worktree
+from lib.file_roots import FileRoots
+from lib.git import GitError
+from lib.host_access import list_directories
 
 router = APIRouter(prefix="/api/fileroots", tags=["fileroots"])
-
-# A dirty worktree or an unmerged branch needs the user's decision (409), any other git refusal is a bad request.
-_GIT_REFUSALS = (((git_worktree.WorktreeDirty, git_worktree.BranchNotMerged), 409, None), (git_worktree.WorktreeError, 400, None))
-
-
-def _read_text_or_none(path: Path) -> str | None:
-    """The UTF-8 text of *path*, `None` when it is not valid UTF-8."""
-    try:
-        return path.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        return None
-
-
-def _sync_pdf(assets: AssetStore, file: Path) -> str | None:
-    """Sync a mounted PDF into the shared library and queue its extraction, returning the parsed markdown when already cached."""
-    content = file.read_bytes()
-    sync_library_pdf(assets, file.name, content)
-    return materialize(file.name, content, assets, enqueue_on_miss=True)
-
-
-class RootFile(BaseModel):
-    path: str
-    name: str
 
 
 class RootFileListResponse(BaseModel):
@@ -111,7 +81,7 @@ def add_root(body: RootBody, roots: FileRoots = Depends(get_file_roots)) -> File
 @router.post("/clone", response_model=FileTreeResponse, dependencies=[_MOUNTING])
 def clone_root(body: CloneBody, roots: FileRoots = Depends(get_file_roots)) -> FileTreeResponse:
     """Clone an https or ssh repository link into `~/git/<repository>` and mount it."""
-    with http_errors(*_GIT_REFUSALS):
+    with http_errors((GitError, 400, None)):
         roots.add_root(str(git_worktree.clone_repository(body.url)))
     return FileTreeResponse(enabled=roots.enabled, tree=roots.tree())
 
@@ -143,224 +113,3 @@ def read_rendered(path: str = Query(...), roots: FileRoots = Depends(get_file_ro
     with http_errors(((FileNotFoundError, ValueError), 404, None)):
         raw = roots.read(path)
         return FileContent(path=path, content=roots.resolve_wiki_content(raw, path))
-
-
-@router.post("/attach", response_model=AttachResult)
-def attach_file(
-    path: str = Query(...),
-    roots: FileRoots = Depends(get_file_roots),
-    assets: AssetStore = Depends(get_asset_store),
-) -> AttachResult:
-    """Attach a file as a live reference: validate the path, return current content.
-
-    - Idempotent and copy-free, the frontend re-calls it at send time to refresh content
-    - A file that moved inside its mount is followed, the returned `path` is where it is now
-    - PDFs are synced into the shared library (`PDFs/<name>`), which drops the cached extraction when the file changed
-    - A library key (`PDFs/<name>`, what older chats stored) is still accepted and reads the library copy
-    """
-    if Path(path).suffix.lower() == ".pdf" and not Path(path).is_absolute():
-        name = Path(path).name
-        with http_errors((StorageNotFoundError, 404, None)):
-            content = assets.read(f"{PDFS}/{name}").content or b""
-        return AttachResult(name=name, mime=lib_docs.mime_for(path), path=f"{PDFS}/{name}", parsedMd=materialize(name, content, assets, enqueue_on_miss=True))
-
-    with http_errors(((FileNotFoundError, ValueError), 404, None)):
-        resolved = roots.resolve_reference(path)
-    result = AttachResult(name=resolved.name, mime=lib_docs.mime_for(resolved), path=str(resolved))
-    if resolved.suffix.lower() == ".pdf":
-        result.parsedMd = _sync_pdf(assets, resolved)
-    else:
-        result.content = _read_text_or_none(resolved)
-    return result
-
-
-class AddToProjectBody(BaseModel):
-    slug: str
-    paths: list[str]
-
-
-@router.post("/add-to-project", response_model=FileListResponse)
-def add_to_project(
-    body: AddToProjectBody,
-    roots: FileRoots = Depends(get_file_roots),
-    store: ProjectStore = Depends(get_project_store),
-    assets: AssetStore = Depends(get_asset_store),
-) -> FileListResponse:
-    """Reference file-root files (folders expand recursively) from a project.
-
-    - Every file is stored as its absolute path, so the project always sees the mounted file
-      and removing it from the project never touches the filesystem
-    - PDFs are also synced into the shared library and queued for extraction, as on attach
-    - Files that are neither PDF nor valid UTF-8 text are skipped
-    """
-    with http_errors((FileNotFoundError, 404, None), (ValueError, 400, None)):
-        store.require(body.slug)
-        files = roots.files_under(body.paths)
-
-    added: list[FileMeta] = []
-    for file in files:
-        if file.suffix.lower() == ".pdf":
-            _sync_pdf(assets, file)
-        elif _read_text_or_none(file) is None:
-            continue
-        key = str(file)
-        store.add_file(body.slug, key)
-        added.append(file_meta(key))
-    return FileListResponse(documents=added)
-
-
-class DiffFile(BaseModel):
-    path: str
-    status: git_diff.ChangeStatus
-    stamp: str
-    added: int | None = None
-    removed: int | None = None
-
-
-class DiffStatusResponse(BaseModel):
-    is_git_repository: bool
-    files: list[DiffFile]
-
-
-class FileDiffResponse(BaseModel):
-    supported: bool
-    status: git_diff.ChangeStatus | None = None
-    patch: str | None = None
-
-
-def _git_directory(root: str, roots: FileRoots) -> Path:
-    with http_errors((ValueError, 403, None)):
-        roots.root_of(root)
-        directory = Path(root).expanduser().resolve()
-    if not directory.is_dir():
-        raise HTTPException(status_code=404, detail=f"Not a directory: {root}")
-    return directory
-
-
-@router.get("/diff/files", response_model=DiffStatusResponse)
-def list_changed_files(root: str = Query(...), roots: FileRoots = Depends(get_file_roots)) -> DiffStatusResponse:
-    """Files of the git working tree at *root* that differ from HEAD."""
-    directory = _git_directory(root, roots)
-    files = git_diff.changed_files(directory)
-    if files is None:
-        return DiffStatusResponse(is_git_repository=False, files=[])
-    counts = git_diff.line_counts(directory, files)
-    changed: list[DiffFile] = []
-    for file in files:
-        added, removed = counts.get(file.path, (None, None))
-        stamp = git_diff.file_stamp(directory, file.path)
-        changed.append(DiffFile(path=file.path, status=file.status, stamp=stamp, added=added, removed=removed))
-    return DiffStatusResponse(is_git_repository=True, files=changed)
-
-
-@router.get("/diff", response_model=FileDiffResponse)
-def read_file_diff(root: str = Query(...), path: str = Query(...), roots: FileRoots = Depends(get_file_roots)) -> FileDiffResponse:
-    """Unified patch of *path* (relative to *root*) against HEAD, `supported=false` for binary or oversized files."""
-    patch = git_diff.file_patch(_git_directory(root, roots), path)
-    if patch is None:
-        return FileDiffResponse(supported=False)
-    return FileDiffResponse(supported=True, status=patch[0], patch=patch[1])
-
-
-class DiffContentResponse(BaseModel):
-    base_content: str
-    content: str
-
-
-@router.get("/diff/content", response_model=DiffContentResponse)
-def read_diff_content(root: str = Query(...), path: str = Query(...), roots: FileRoots = Depends(get_file_roots)) -> DiffContentResponse:
-    """HEAD and working-tree text of *path* (relative to *root*) for the native Neovim diff."""
-    with http_errors((git_diff.UnsupportedDiffContent, 422, None)):
-        base, content = git_diff.file_contents(_git_directory(root, roots), path)
-    return DiffContentResponse(base_content=base, content=content)
-
-
-class WorktreeEntry(BaseModel):
-    path: str
-    branch: str | None
-    is_main: bool
-    changed_files: int
-    ahead: int
-    behind: int
-
-
-class WorktreeListResponse(BaseModel):
-    is_clone: bool
-    default_base: str | None = None
-    default_branch: str | None = None
-    branches: list[str] = []
-    worktrees: list[WorktreeEntry] = []
-
-
-class DefaultWorktreeBody(BaseModel):
-    root: str
-
-
-class CreateWorktreeBody(BaseModel):
-    root: str
-    name: str
-    base: str
-
-
-def _clone_root(root: str, roots: FileRoots) -> Path:
-    """The registered mount *root*, 403 for anything else."""
-    directory = Path(root).expanduser().resolve()
-    if str(directory) not in roots.roots():
-        raise HTTPException(status_code=403, detail=f"Not a file mount: {root}")
-    return directory
-
-
-@router.get("/worktrees", response_model=WorktreeListResponse)
-def list_worktrees(root: str = Query(...), roots: FileRoots = Depends(get_file_roots)) -> WorktreeListResponse:
-    """Worktrees of the clone mounted at *root*, each with its uncommitted files and commits ahead/behind the base."""
-    repository = _clone_root(root, roots)
-    if not git_worktree.is_clone(repository):
-        return WorktreeListResponse(is_clone=False)
-    with http_errors(*_GIT_REFUSALS):
-        base = git_worktree.default_base_branch(repository)
-        entries = [
-            WorktreeEntry(path=worktree.path, branch=worktree.branch, is_main=worktree.is_main, **vars(git_worktree.status(Path(worktree.path), base)))
-            for worktree in git_worktree.list_worktrees(repository)
-        ]
-        return WorktreeListResponse(
-            is_clone=True, default_base=base, default_branch=git_worktree.default_branch(repository),
-            branches=git_worktree.branches(repository), worktrees=entries,
-        )
-
-
-@router.post("/worktrees", response_model=RootFile)
-def create_worktree(body: CreateWorktreeBody, roots: FileRoots = Depends(get_file_roots)) -> RootFile:
-    """Pull *base* and branch a new worktree off it, `name` is the branch."""
-    repository = _clone_root(body.root, roots)
-    with http_errors(*_GIT_REFUSALS):
-        worktree = git_worktree.create_worktree(repository, body.name, body.base)
-    return RootFile(path=worktree.path, name=worktree.branch or Path(worktree.path).name)
-
-
-@router.post("/worktrees/default", response_model=RootFile)
-def default_worktree(body: DefaultWorktreeBody, roots: FileRoots = Depends(get_file_roots)) -> RootFile:
-    """Open the inferred default branch, creating its checkout only when needed."""
-    repository = _clone_root(body.root, roots)
-    with http_errors(*_GIT_REFUSALS):
-        worktree = git_worktree.default_worktree(repository)
-    return RootFile(path=worktree.path, name=worktree.branch or Path(worktree.path).name)
-
-
-@router.delete("/worktrees")
-def remove_worktree(
-    root: str = Query(...), path: str = Query(...), force: bool = Query(default=False), roots: FileRoots = Depends(get_file_roots),
-) -> dict[str, bool]:
-    """Remove a worktree, keeping its branch. 409 when it holds uncommitted changes and *force* is off."""
-    with http_errors(*_GIT_REFUSALS):
-        git_worktree.remove_worktree(_clone_root(root, roots), path, force=force)
-    return {"ok": True}
-
-
-@router.delete("/worktrees/branch")
-def delete_worktree_branch(
-    root: str = Query(...), branch: str = Query(...), force: bool = Query(default=False), roots: FileRoots = Depends(get_file_roots),
-) -> dict[str, bool]:
-    """Delete a local branch. 409 when it is not fully merged and *force* is off."""
-    with http_errors(*_GIT_REFUSALS):
-        git_worktree.delete_branch(_clone_root(root, roots), branch, force=force)
-    return {"ok": True}

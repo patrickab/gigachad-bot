@@ -19,6 +19,9 @@ vi.mock("@/lib/backend/api", () => ({
     impls.attachReference = async () => ({ name: "att", mime: "text/plain", url: "u", active: true })
   },
   listRootFiles: (...a: unknown[]) => impls.listRootFiles(...a),
+}))
+
+vi.mock("@/lib/backend/references", () => ({
   attachReference: (...a: unknown[]) => impls.attachReference(...a),
 }))
 
@@ -41,14 +44,15 @@ function makeChatInputRef(handle: Partial<ChatInputHandle> = {}) {
 beforeEach(() => mockControls.__resetImpls())
 afterEach(() => vi.useRealTimers())
 
+const track = <T,>(work: () => Promise<T>) => work()
+
 describe("useFilePicker", () => {
   it("opens standalone PDF view when chat is empty", async () => {
     const { result } = renderHook(() =>
       useFilePicker({
-        isActive: true,
         hasMessages: false,
         chatInputRef: makeChatInputRef(),
-        setExtracting: vi.fn(),
+        track,
       }),
     )
 
@@ -56,18 +60,16 @@ describe("useFilePicker", () => {
       await result.current.handleFileSelect("vault/report.pdf")
     })
 
-    expect(result.current.filePdfPath).toBe("vault/report.pdf")
-    expect(result.current.fileEditPath).toBeNull()
+    expect(result.current.standaloneFile).toEqual({ kind: "pdf", path: "vault/report.pdf" })
     expect(result.current.filePickerOpen).toBe(false)
   })
 
   it("opens text editor standalone when chat is empty", async () => {
     const { result } = renderHook(() =>
       useFilePicker({
-        isActive: true,
         hasMessages: false,
         chatInputRef: makeChatInputRef(),
-        setExtracting: vi.fn(),
+        track,
       }),
     )
 
@@ -75,8 +77,7 @@ describe("useFilePicker", () => {
       await result.current.handleFileSelect("vault/notes.md")
     })
 
-    expect(result.current.fileEditPath).toBe("vault/notes.md")
-    expect(result.current.filePdfPath).toBeNull()
+    expect(result.current.standaloneFile).toEqual({ kind: "edit", path: "vault/notes.md" })
   })
 
   it("stages attachment on chat input when conversation is active", async () => {
@@ -91,13 +92,13 @@ describe("useFilePicker", () => {
     }))
     mockControls.__setImpl("attachReference", attachSpy)
 
-    const setExtracting = vi.fn()
+    let tracked = 0
+    const countingTrack = <T,>(work: () => Promise<T>) => { tracked += 1; return work() }
     const { result } = renderHook(() =>
       useFilePicker({
-        isActive: true,
         hasMessages: true,
         chatInputRef,
-        setExtracting,
+        track: countingTrack,
       }),
     )
 
@@ -107,29 +108,27 @@ describe("useFilePicker", () => {
 
     expect(attachSpy).toHaveBeenCalledWith("vault/v.txt")
     expect(addAttachment).toHaveBeenCalledOnce()
-    expect(result.current.filePdfPath).toBeNull()
-    expect(result.current.fileEditPath).toBeNull()
-    expect(setExtracting).toHaveBeenCalledTimes(2)
+    expect(result.current.standaloneFile).toBeNull()
+    expect(tracked).toBe(1)
   })
 
-  it("Escape closes the standalone PDF viewer when active", async () => {
+  it("Escape closes the standalone PDF viewer", async () => {
     const { result } = renderHook(() =>
       useFilePicker({
-        isActive: true,
         hasMessages: false,
         chatInputRef: makeChatInputRef(),
-        setExtracting: vi.fn(),
+        track,
       }),
     )
 
     await act(async () => {
       await result.current.handleFileSelect("v/x.pdf")
     })
-    expect(result.current.filePdfPath).toBe("v/x.pdf")
+    expect(result.current.standaloneFile).toEqual({ kind: "pdf", path: "v/x.pdf" })
 
     await act(() => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))
     })
-    expect(result.current.filePdfPath).toBeNull()
+    expect(result.current.standaloneFile).toBeNull()
   })
 })

@@ -6,8 +6,8 @@ import type { Point } from "@/lib/domain/edgeRouting"
 import { CanvasResizeHandle } from "@/features/editor/canvas/CanvasResizeHandle"
 import { inkColor } from "@/features/editor/canvas/ink/canvasInk"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
-import { useTabActive } from "@/contexts/TabContext"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
+import { isModKey } from "@/lib/utils"
 
 interface CanvasTextNoteProps {
   note: CanvasText
@@ -31,8 +31,7 @@ type NoteSourceEditorProps = Pick<CanvasTextNoteProps, "scale" | "autoFocus" | "
 function NoteSourceEditor({ note: t, scale, autoFocus, onEdit, onFocusNote, onBlurNote }: NoteSourceEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [focused, setFocused] = useState(false)
-  const tabActive = useTabActive()
-  useEscapeLayer(() => textareaRef.current?.blur(), focused && tabActive)
+  useEscapeLayer(() => textareaRef.current?.blur(), focused)
   return (
     <textarea
       ref={textareaRef}
@@ -43,7 +42,7 @@ function NoteSourceEditor({ note: t, scale, autoFocus, onEdit, onFocusNote, onBl
       onBlur={() => { setFocused(false); onBlurNote() }}
       onKeyDown={(e) => {
         e.stopPropagation()
-        if (e.key === "Enter" && !(e.ctrlKey || e.metaKey)) {
+        if (e.key === "Enter" && !isModKey(e)) {
           e.preventDefault()
           e.currentTarget.blur()
         }

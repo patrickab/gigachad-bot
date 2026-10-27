@@ -9,7 +9,7 @@ import {
   listChatHistories,
   moveHistoryItem as apiMoveHistoryItem,
 } from "@/lib/backend/api"
-import type { BranchMeta } from "@/lib/domain/types"
+import type { BranchMeta } from "@/lib/domain/histories"
 import { useStartupRead } from "@/contexts/StartupReadContext"
 import { useRequiredContext } from "@/hooks/useRequiredContext"
 

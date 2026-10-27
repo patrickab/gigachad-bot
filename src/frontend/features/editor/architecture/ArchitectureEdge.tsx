@@ -4,9 +4,8 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type K
 import { BaseEdge, type EdgeProps } from "@xyflow/react"
 import { edgeSketchPaths, roughSeed } from "@/features/editor/architecture/architectureSketch"
 import type { DiagramEdge } from "@/features/editor/architecture/diagramGraph"
-import { trackPointer } from "@/features/editor/architecture/trackPointer"
+import { trackPointer } from "@/lib/pointer"
 import { useResetOnChange } from "@/hooks/useResetOnChange"
-import { useTabActive } from "@/contexts/TabContext"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import {
   CORNER_RADIUS, arrowHeadPath, bendPoint, bendThrough, normalOffset, normalPoint, orthogonalRoute, polylineMidpoint, roundedPath,
@@ -135,8 +134,7 @@ export function ArchitectureEdge({ id, source, target, data, selected }: EdgePro
   const [editingLabel, setEditingLabel] = useState(false)
   // Deselecting ends label editing.
   useResetOnChange(selected, (isSelected) => { if (!isSelected) setEditingLabel(false) })
-  const tabActive = useTabActive()
-  useEscapeLayer(() => setEditingLabel(false), !!selected && editingLabel && !!edit && tabActive)
+  useEscapeLayer(() => setEditingLabel(false), !!selected && editingLabel && !!edit)
   // The label reaches the model once, when editing ends, not on every keystroke.
   const [labelDraft, setLabelDraft] = useState("")
   const commitLabel = () => {

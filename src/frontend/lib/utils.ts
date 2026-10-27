@@ -22,6 +22,11 @@ export function isEditableTarget(target: EventTarget | null, { includeSelect = f
   return tag === "INPUT" || tag === "TEXTAREA" || (includeSelect && tag === "SELECT") || target.isContentEditable
 }
 
+/** True when Ctrl or Cmd is held, the platform-neutral shortcut modifier. */
+export function isModKey(event: { ctrlKey: boolean; metaKey: boolean }): boolean {
+  return event.ctrlKey || event.metaKey
+}
+
 /** Copy of `set` with `value` removed when present, added otherwise. */
 export function toggled<T>(set: ReadonlySet<T>, value: T): Set<T> {
   const next = new Set(set)

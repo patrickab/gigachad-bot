@@ -4,7 +4,8 @@ import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react"
 import type { ChatFocus } from "@/features/chat/ChatContainer"
 import { MemoryViewer } from "@/features/memory/MemoryViewer"
 import { ProjectDashboard } from "@/features/projects/ProjectDashboard"
-import { TabManager, nextTab, type TabManagerHandle } from "@/features/navigation/TabManager"
+import { TabManager, type TabManagerHandle } from "@/features/navigation/TabManager"
+import { nextTab } from "@/features/navigation/tabs"
 import { BranchProvider, useBranches } from "@/features/navigation/BranchContext"
 import { EnabledToolsProvider } from "@/features/chat/EnabledToolsContext"
 import { MemoryViewerProvider } from "@/features/memory/MemoryViewerContext"
@@ -14,7 +15,7 @@ import { useSettings } from "@/contexts/SettingsContext"
 import { SidebarProvider } from "@/features/navigation/SidebarContext"
 import { useEventListener } from "@/hooks/useEventListener"
 import { OmpProvider } from "@/features/omp/OmpProvider"
-import { surfaceOf, type Tab, type WorkspaceItem } from "@/contexts/TabContext"
+import { showingItem, type Tab, type WorkspaceItem } from "@/contexts/TabContext"
 import { ContentAreaProvider } from "@/components/ui/ContentArea"
 import { TabContent } from "./TabContent"
 import { parseOpenParam, withoutOpenParam } from "./deepLink"
@@ -76,7 +77,7 @@ export function AppShell() {
       tabManagerRef.current?.showItem(item)
       return
     }
-    openNewTab({ workspaceItem: item, projectSlug: item.projectSlug, appMode: surfaceOf(item) })
+    openNewTab(showingItem(item))
   }, [openNewTab])
 
   // A factory preview opens its scenario's chat, canvas, document or architecture through `?open=`, once at startup.

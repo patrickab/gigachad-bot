@@ -1,15 +1,17 @@
 "use client"
 
-import { useState, useRef, useCallback } from "react"
+import { useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { Check, ChevronDown, ChevronUp, ImageDown, Settings, BookOpen, Pencil, Telescope, SquareTerminal, Rocket } from "lucide-react"
 import { ParamSlider } from "./ParamSlider"
 import { StyledSelect } from "@/components/ui/StyledSelect"
 import { ErrorText } from "@/components/ui/ErrorText"
-import { cn, errorMessage } from "@/lib/utils"
+import { Field } from "@/components/ui/Field"
+import { MenuPopover } from "@/components/ui/MenuPopover"
+import { cn } from "@/lib/utils"
 import { REASONING_LEVELS } from "@/lib/backend/config"
 import { displayName, qualifiedModelIds } from "@/lib/models"
-import { useClickOutside } from "@/hooks/useClickOutside"
+import { useAsyncAction } from "@/hooks/useAsyncAction"
 import type { ModelsResponse } from "@/lib/domain/types"
 import { useHostAccess, useNeovimSetting, type TabConfig } from "@/contexts/SettingsContext"
 import { startRedeploy } from "@/lib/backend/api"
@@ -64,26 +66,15 @@ export function SettingsMenu({
   models,
   researchEnabled,
 }: SettingsMenuProps) {
-  const [open, setOpen] = useState(false)
   const [researchOpen, setResearchOpen] = useState(false)
   const [promptOpen, setPromptOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
   const neovim = useNeovimSetting()
   const hostAccess = useHostAccess()
-  const [redeploy, setRedeploy] = useState<"idle" | "starting" | "started" | string>("idle")
-
-  const onRedeploy = async () => {
-    setRedeploy("starting")
-    try {
-      await startRedeploy()
-      setRedeploy("started")
-    } catch (error) {
-      setRedeploy(errorMessage(error, "Redeploy failed"))
-    }
-  }
-
-  const close = useCallback(() => { setOpen(false) }, [])
-  useClickOutside(ref, close)
+  const [redeployStarted, setRedeployStarted] = useState(false)
+  const redeploy = useAsyncAction(async () => {
+    await startRedeploy()
+    setRedeployStarted(true)
+  }, "Redeploy failed")
 
   // Ollama plus every configured provider, so the tiers can pick any model the chat picker
   // can, without pulling in its provider-editing UI.
@@ -92,9 +83,9 @@ export function SettingsMenu({
     : []
 
   return (
-    <div className="relative" ref={ref}>
+    <MenuPopover trigger={(open, toggle) => (
       <button aria-label="Settings"
-        onClick={() => setOpen(!open)}
+        onClick={toggle}
         className={cn(
           "w-full flex items-center justify-start gap-3 p-2 rounded-lg transition-colors text-ink-muted hover:bg-surface-elevated/60 hover:text-ink",
           open && "bg-surface-elevated/60 text-ink",
@@ -104,8 +95,8 @@ export function SettingsMenu({
         <span className="flex-1 text-left text-sm font-medium truncate">Settings</span>
         <ChevronUp className={cn("h-3.5 w-3.5 text-ink-faint transition-transform", open && "rotate-180")} />
       </button>
-
-      <AnimatePresence>
+    )}>
+      {(open, close) => <AnimatePresence>
         {open && (
           <motion.div
             initial={{ opacity: 0, y: 4, scale: 0.95 }}
@@ -174,8 +165,7 @@ export function SettingsMenu({
                       max={6}
                       step={1}
                     />
-                    <div className="space-y-1">
-                      <span className="text-[10px] text-ink-faint">Reasoning effort</span>
+                    <Field label="Reasoning effort" compact>
                       <StyledSelect
                         options={REASONING_LEVELS.map((l) => ({
                           value: l,
@@ -184,21 +174,17 @@ export function SettingsMenu({
                         value={config.researchReasoning}
                         onChange={(v) => onConfigChange({ researchReasoning: v })}
                       />
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-[10px] text-ink-faint">Fast model</span>
+                    </Field>
+                    <Field label="Fast model" compact>
                       <StyledSelect options={modelChoices} value={config.researchFastModel} onChange={(v) => onConfigChange({ researchFastModel: v })} />
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-[10px] text-ink-faint">Smart model</span>
+                    </Field>
+                    <Field label="Smart model" compact>
                       <StyledSelect options={modelChoices} value={config.researchSmartModel} onChange={(v) => onConfigChange({ researchSmartModel: v })} />
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-[10px] text-ink-faint">Strategic model</span>
+                    </Field>
+                    <Field label="Strategic model" compact>
                       <StyledSelect options={modelChoices} value={config.researchStrategicModel} onChange={(v) => onConfigChange({ researchStrategicModel: v })} />
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-[10px] text-ink-faint">Report type</span>
+                    </Field>
+                    <Field label="Report type" compact>
                       <StyledSelect
                         options={[
                           { value: "deep", label: "Deep (recursive)" },
@@ -207,10 +193,9 @@ export function SettingsMenu({
                         value={config.researchReportType}
                         onChange={(v) => onConfigChange({ researchReportType: v })}
                       />
-                    </div>
+                    </Field>
                     {/* Search guidance is only used by the deep-research tool. */}
-                    <div className="space-y-1">
-                      <span className="text-[10px] text-ink-faint">Domain filter</span>
+                    <Field label="Domain filter" compact>
                       <input
                         value={config.searchDomain}
                         onChange={(e) => onConfigChange({ searchDomain: e.target.value })}
@@ -218,9 +203,8 @@ export function SettingsMenu({
                         spellCheck={false}
                         className="w-full rounded-md border border-divider bg-surface px-2 py-1 text-xs text-ink placeholder:text-ink-faint outline-none focus:border-divider-strong"
                       />
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-[10px] text-ink-faint">System instructions</span>
+                    </Field>
+                    <Field label="System instructions" compact>
                       <textarea
                         value={config.searchSystemInstructions}
                         onChange={(e) => onConfigChange({ searchSystemInstructions: e.target.value })}
@@ -229,7 +213,7 @@ export function SettingsMenu({
                         spellCheck={false}
                         className="w-full resize-none rounded-md border border-divider bg-surface px-2 py-1 text-xs text-ink placeholder:text-ink-faint outline-none focus:border-divider-strong"
                       />
-                    </div>
+                    </Field>
                   </div>
                 )}
               </div>
@@ -261,18 +245,18 @@ export function SettingsMenu({
                 </div>
                 <button
                   type="button"
-                  onClick={onRedeploy}
-                  disabled={redeploy === "starting" || redeploy === "started"}
+                  onClick={() => void redeploy.run()}
+                  disabled={redeploy.pending || redeployStarted}
                   className="rounded px-2 py-1 text-xs text-ink-subtle transition-colors hover:bg-hover hover:text-ink disabled:opacity-60"
                 >
-                  {redeploy === "starting" ? "Starting…" : redeploy === "started" ? "Started" : "Redeploy"}
+                  {redeploy.pending ? "Starting…" : redeployStarted ? "Started" : "Redeploy"}
                 </button>
               </div>
             )}
-            {redeploy !== "idle" && redeploy !== "starting" && redeploy !== "started" && <ErrorText>{redeploy}</ErrorText>}
+            <ErrorText>{redeploy.error}</ErrorText>
           </motion.div>
         )}
-      </AnimatePresence>
-    </div>
+      </AnimatePresence>}
+    </MenuPopover>
   )
 }

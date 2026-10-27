@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils"
 import { fenceCode } from "@gigachad/chat-ui"
 import { NeovimEditor, useNeovimTerminal } from "./NeovimEditor"
 import { RawFileView } from "./RawFileView"
-import { useRootFileDocument, type FileLoadFailure } from "./useRootFileDocument"
+import { TEXT_CODEC, useRootFileDocument, type FileLoadFailure } from "./useRootFileDocument"
 
 /** Panel share of the width it splits with the main surface, on every open. */
 const OPEN_SHARE = 0.5
@@ -25,7 +25,9 @@ interface FilePanelContextValue {
   slot: HTMLElement | null
   setSlot: (slot: HTMLElement | null) => void
   ownerId: string | null
-  claim: (id: string, close: () => void) => void
+  /** Open width the owner asked for, null for the half share. */
+  ownerWidth: number | null
+  claim: (id: string, close: () => void, width: number | null) => void
   release: (id: string) => void
   openFile: (path: string) => void
   collapsed: boolean
@@ -53,14 +55,16 @@ export function useOpenFile(): (path: string) => void {
 export function FilePanelProvider({ children }: { children: ReactNode }) {
   const [slot, setSlot] = useState<HTMLElement | null>(null)
   const [ownerId, setOwnerId] = useState<string | null>(null)
+  const [ownerWidth, setOwnerWidth] = useState<number | null>(null)
   const [filePath, setFilePath] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState(false)
   const ownerRef = useRef<{ id: string; close: () => void } | null>(null)
 
-  const claim = useCallback((id: string, close: () => void) => {
+  const claim = useCallback((id: string, close: () => void, width: number | null) => {
     const previous = ownerRef.current
     ownerRef.current = { id, close }
     setOwnerId(id)
+    setOwnerWidth(width)
     setCollapsed(false)
     if (previous && previous.id !== id) previous.close()
   }, [])
@@ -78,8 +82,8 @@ export function FilePanelProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const value = useMemo(
-    () => ({ slot, setSlot, ownerId, claim, release, openFile, collapsed, toggleCollapsed }),
-    [slot, ownerId, claim, release, openFile, collapsed, toggleCollapsed],
+    () => ({ slot, setSlot, ownerId, ownerWidth, claim, release, openFile, collapsed, toggleCollapsed }),
+    [slot, ownerId, ownerWidth, claim, release, openFile, collapsed, toggleCollapsed],
   )
   return (
     <FilePanelContext.Provider value={value}>
@@ -96,7 +100,7 @@ export function FilePanelProvider({ children }: { children: ReactNode }) {
  * - Closed or collapsed it springs to zero width, so the slot stays mounted for the portal
  */
 export function FilePanelSlot() {
-  const { slot, setSlot, ownerId, collapsed } = useFilePanelContext()
+  const { slot, setSlot, ownerId, ownerWidth, collapsed } = useFilePanelContext()
   const [sharedWidth, setSharedWidth] = useState(0)
   const [openWidth, setOpenWidth] = useState(0)
   const shown = ownerId !== null
@@ -110,7 +114,7 @@ export function FilePanelSlot() {
     const opened = measureShared()
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the open width is measured from the laid-out surfaces
     setSharedWidth(opened)
-    setOpenWidth(Math.round(opened * OPEN_SHARE))
+    setOpenWidth(ownerWidth ?? Math.round(opened * OPEN_SHARE))
     // A window or left sidebar resize changes the shared width, the panel shrinks into the new limit
     const observer = new ResizeObserver(() => {
       const shared = measureShared()
@@ -119,7 +123,7 @@ export function FilePanelSlot() {
     })
     observer.observe(main)
     return () => observer.disconnect()
-  }, [shown, slot])
+  }, [shown, slot, ownerWidth])
 
   return (
     <SidePanelFrame
@@ -141,20 +145,21 @@ export function FilePanelToggle() {
   return <PanelToggleButton open={!collapsed} onClick={toggleCollapsed} openLabel="Open file panel" closeLabel="Close file panel" />
 }
 
-/** Show `children` in the tab's file panel under a header with `label`, `actions` and a close button. */
-export function FilePanel({ label, onClose, actions, children }: {
+/** Show `children` in the tab's file panel under a header with `label`, `actions` and a close button. `width` px replaces the half-share open width. */
+export function FilePanel({ label, onClose, actions, width, children }: {
   label: string
   onClose: () => void
   actions?: ReactNode
+  width?: number
   children: ReactNode
 }) {
   const { slot, ownerId, claim, release } = useFilePanelContext()
   const id = useId()
   const closeOwned = useEffectEvent(onClose)
   useEffect(() => {
-    claim(id, () => closeOwned())
+    claim(id, () => closeOwned(), width ?? null)
     return () => release(id)
-  }, [id, claim, release])
+  }, [id, claim, release, width])
 
   if (ownerId !== id || !slot) return null
   return createPortal(
@@ -195,7 +200,7 @@ function RootFileView({ path, onClose }: { path: string; onClose: () => void }) 
 function TextFileView({ path, onClose }: { path: string; onClose: () => void }) {
   const neovim = useNeovimSetting()
   const write = useCallback((text: string) => writeRootFile(path, text), [path])
-  const { content, loadError, reload, saveFromNeovim } = useRootFileDocument({ path, write, blankWhenMissing: false })
+  const { value: content, loadError, reload, saveFromNeovim } = useRootFileDocument({ path, codec: TEXT_CODEC, write, blankWhenMissing: false })
   useEffect(() => { reload() }, [reload])
   const neovimSession = useNeovimTerminal(neovim.enabled && content !== null ? { key: path, path, filename: baseName(path), content } : null, saveFromNeovim, onClose)
 

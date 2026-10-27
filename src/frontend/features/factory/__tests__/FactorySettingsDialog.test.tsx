@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { fireEvent, render, waitFor } from "@testing-library/react"
-import type { FactoryDefaults, ModelsResponse } from "@/lib/domain/types"
+import type { ModelsResponse } from "@/lib/domain/types"
+import type { FactoryDefaults } from "@/lib/domain/factory"
 
 const api = vi.hoisted(() => ({
   fetchFactoryDefaults: vi.fn<() => Promise<FactoryDefaults>>(),

@@ -4,7 +4,8 @@ import { useCallback, useMemo, useReducer } from "react"
 import { cancelMemories, commitMemories, extractMemories, getTopics } from "@/lib/backend/api"
 import { topicNameFromTitle } from "@/features/memory/memoryUtils"
 import { errorMessage } from "@/lib/utils"
-import type { MemoryOperation, MemoryScope, MemoryTopic, Message, ScopeProposal, TopicProposal } from "@/lib/domain/types"
+import type { Message } from "@/lib/domain/types"
+import type { MemoryOperation, MemoryScope, MemoryTopic, ScopeProposal, TopicProposal } from "@/lib/domain/memory"
 
 export interface ReviewOperation extends MemoryOperation { excluded: boolean }
 export interface ReviewTopic extends TopicProposal { excluded: boolean }

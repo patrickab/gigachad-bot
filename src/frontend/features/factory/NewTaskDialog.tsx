@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 import { ChevronRight, Factory } from "lucide-react"
 import { Dialog } from "@/components/ui/Dialog"
 import { StyledSelect } from "@/components/ui/StyledSelect"
@@ -8,10 +8,11 @@ import { ErrorText } from "@/components/ui/ErrorText"
 import { cn, errorMessage } from "@/lib/utils"
 import { createFactoryTask, fetchFactoryWorkflows } from "@/lib/backend/api"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
+import { useLoadWhile } from "@/hooks/useLoadWhile"
 import { useResetOnOpen } from "@/hooks/useResetOnChange"
-import { Field } from "./Field"
+import { Field } from "@/components/ui/Field"
 import { FIELD_CLASS, PRIMARY_BUTTON_CLASS, QUIET_BUTTON_CLASS } from "./styles"
-import type { FactoryOverrides, FactoryWorkflow, MergeMode } from "@/lib/domain/types"
+import type { FactoryOverrides, FactoryWorkflow, MergeMode } from "@/lib/domain/factory"
 
 const INHERIT = ""
 
@@ -60,18 +61,11 @@ export function NewTaskDialog({ repo, open, onClose }: {
     setError("")
   })
 
-  useEffect(() => {
-    if (!open) return
-    let cancelled = false
-    fetchFactoryWorkflows(repo).then((loaded) => {
-      if (cancelled) return
-      setWorkflows(loaded)
-      setWorkflowId((current) => loaded.some((workflow) => workflow.id === current) ? current : loaded[0]?.id ?? "")
-    }).catch((cause: unknown) => {
-      if (!cancelled) setError(errorMessage(cause, "Could not load workflows"))
-    })
-    return () => { cancelled = true }
-  }, [open, repo, setError])
+  const loadWorkflows = useCallback(() => fetchFactoryWorkflows(repo), [repo])
+  useLoadWhile(open, loadWorkflows, (loaded) => {
+    setWorkflows(loaded)
+    setWorkflowId((current) => loaded.some((workflow) => workflow.id === current) ? current : loaded[0]?.id ?? "")
+  }, (cause) => setError(errorMessage(cause, "Could not load workflows")))
 
   const workflow = workflows?.find((candidate) => candidate.id === workflowId)
   const canSubmit = !busy && workflow !== undefined && title.trim() !== "" && request.trim() !== ""

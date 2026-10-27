@@ -4,11 +4,9 @@ import type { StrokeData } from "@/lib/drawing"
 /** Page width in stroke units, so canvas pen widths look the same on a page. */
 export const PAGE_UNITS = A4_WIDTH
 
-/** A canvas stroke anchored to a PDF page, in page units. Points may lie outside the page (margin notes). */
-export type PdfStroke = StrokeData & { page: number }
-
-export function strokesByPage(strokes: PdfStroke[]): Map<number, PdfStroke[]> {
-  const pages = new Map<number, PdfStroke[]>()
+/** Strokes grouped by the PDF page they are anchored to, in first-seen order. Strokes carry page units, points may lie outside the page (margin notes). */
+export function strokesByPage(strokes: StrokeData[]): Map<number | undefined, StrokeData[]> {
+  const pages = new Map<number | undefined, StrokeData[]>()
   for (const stroke of strokes) {
     const list = pages.get(stroke.page)
     if (list) list.push(stroke)

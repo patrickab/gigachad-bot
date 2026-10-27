@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react"
 import { ProviderUsage, formatReset } from "@/features/navigation/ProviderUsage"
-import type { ProviderUsageReport } from "@/lib/backend/api"
+import type { ProviderUsageReport } from "@/lib/domain/types"
 
 const api = vi.hoisted(() => ({ fetchProviderUsage: vi.fn<(refresh?: boolean) => Promise<{ reports: ProviderUsageReport[] }>>() }))
 vi.mock("@/lib/backend/api", () => api)

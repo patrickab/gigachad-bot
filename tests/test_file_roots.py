@@ -1,16 +1,19 @@
 from types import SimpleNamespace
 
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
 from backend.routes import documents as documents_route
+from backend.routes import file_attach as file_attach_route
+from backend.routes import file_git as file_git_route
 from backend.routes import file_roots as file_roots_route
 from backend.routes import fileviewer as fileviewer_route
-from lib.attachment_materialize import library_images_prefix, library_markdown_key, sync_library_pdf
-from lib.data_store import StorageNotFoundError
-from lib.file_roots import FileRoots, list_directories
-from tests.conftest import git
+from lib.attachment_materialize import sync_library_pdf
+from lib.file_roots import FileRoots
+from lib.host_access import list_directories
+from lib.storage_namespace import library_images_prefix, library_markdown
+from tests.conftest import git, mounted_roots, route_client
+from tests.fakes import MemoryAssetStore
 
 
 def test_list_directories_lists_only_subdirectories_case_insensitively_with_hidden(tmp_path):
@@ -36,9 +39,7 @@ def test_tree_lists_every_non_ignored_file_by_full_name(tmp_path):
     for name in ("main.py", "App.tsx", "Untitled.md", "paper.pdf", "debug.log", "build/out.js"):
         (tmp_path / name).parent.mkdir(exist_ok=True)
         (tmp_path / name).write_text("")
-    roots = FileRoots(repository=SimpleNamespace(load=lambda: [str(tmp_path)], save=lambda roots: None))
-
-    [root] = roots.tree()
+    [root] = mounted_roots(tmp_path).tree()
 
     assert [child["name"] for child in root["children"]] == [".gitignore", "App.tsx", "main.py", "paper.pdf", "Untitled.md"]
 
@@ -69,40 +70,17 @@ class _Project:
         return self.files
 
 
-class _Assets:
-    """In-memory stand-in for the asset store, enough for the PDF library."""
-
-    def __init__(self) -> None:
-        self.assets: dict[str, bytes] = {}
-
-    def read(self, key: str) -> SimpleNamespace:
-        if key not in self.assets:
-            raise StorageNotFoundError(key)
-        return SimpleNamespace(content=self.assets[key], logical_path=key)
-
-    def list(self, prefix: str = "", *, kind: str | None = None) -> list[SimpleNamespace]:
-        return [SimpleNamespace(logical_path=key) for key in self.assets if key.startswith(prefix)]
-
-    def write(self, kind: str, key: str, content: bytes, *, mime: str | None = None) -> SimpleNamespace:
-        self.assets[key] = content
-        return SimpleNamespace(logical_path=key)
-
-    def delete(self, key: str) -> None:
-        self.assets.pop(key, None)
-
-    def mirror(self, asset: SimpleNamespace, root) -> None:
-        pass
-
-
 def _reference_client(roots: FileRoots, project: _Project) -> TestClient:
-    app = FastAPI()
-    app.include_router(file_roots_route.router)
-    app.include_router(documents_route.router)
-    app.dependency_overrides[file_roots_route.get_file_roots] = lambda: roots
-    app.dependency_overrides[file_roots_route.get_project_store] = lambda: project
-    app.dependency_overrides[file_roots_route.get_asset_store] = lambda: None
-    app.dependency_overrides[documents_route.get_architecture_store] = lambda: SimpleNamespace(source_paths=lambda: [])
-    return TestClient(app)
+    return route_client(
+        file_attach_route.router,
+        documents_route.router,
+        overrides={
+            file_attach_route.get_file_roots: roots,
+            file_attach_route.get_project_store: project,
+            file_attach_route.get_asset_store: None,
+            documents_route.get_architecture_store: SimpleNamespace(source_paths=lambda: []),
+        },
+    )
 
 
 def test_a_reference_follows_its_file_moved_inside_the_mount_but_never_guesses(tmp_path):
@@ -110,7 +88,7 @@ def test_a_reference_follows_its_file_moved_inside_the_mount_but_never_guesses(t
     (tmp_path / "new").mkdir()
     note = tmp_path / "old" / "notes.md"
     note.write_text("v1")
-    client = _reference_client(FileRoots(repository=SimpleNamespace(load=lambda: [str(tmp_path)], save=lambda roots: None)), _Project())
+    client = _reference_client(mounted_roots(tmp_path), _Project())
 
     note.rename(tmp_path / "new" / "notes.md")
     moved = client.post("/api/fileroots/attach", params={"path": str(note)})
@@ -128,7 +106,7 @@ def test_listing_a_project_rewrites_a_reference_whose_file_moved(tmp_path):
     note = tmp_path / "notes.md"
     note.write_text("v1")
     project = _Project()
-    client = _reference_client(FileRoots(repository=SimpleNamespace(load=lambda: [str(tmp_path)], save=lambda roots: None)), project)
+    client = _reference_client(mounted_roots(tmp_path), project)
     client.post("/api/fileroots/add-to-project", json={"slug": "test", "paths": [str(note)]})
 
     note.rename(tmp_path / "docs" / "notes.md")
@@ -140,9 +118,9 @@ def test_listing_a_project_rewrites_a_reference_whose_file_moved(tmp_path):
 
 
 def test_a_changed_pdf_drops_its_stale_extraction_and_an_unchanged_one_keeps_it():
-    assets = _Assets()
+    assets = MemoryAssetStore()
     sync_library_pdf(assets, "paper.pdf", b"%PDF v1")
-    assets.write("mineru_markdown", library_markdown_key("paper"), b"v1 text")
+    assets.write("mineru_markdown", library_markdown("paper"), b"v1 text")
     assets.write("mineru_image", f"{library_images_prefix('paper')}/paper_1.png", b"img")
     assets.write("mineru_image", f"{library_images_prefix('paper-2')}/paper-2_1.png", b"other")
 
@@ -150,9 +128,9 @@ def test_a_changed_pdf_drops_its_stale_extraction_and_an_unchanged_one_keeps_it(
     kept = set(assets.assets)
     sync_library_pdf(assets, "paper.pdf", b"%PDF v2")
 
-    assert library_markdown_key("paper") in kept
-    assert assets.assets["PDFs/paper.pdf"] == b"%PDF v2"
-    assert library_markdown_key("paper") not in assets.assets
+    assert library_markdown("paper") in kept
+    assert assets.assets["PDFs/paper.pdf"].content == b"%PDF v2"
+    assert library_markdown("paper") not in assets.assets
     assert f"{library_images_prefix('paper')}/paper_1.png" not in assets.assets
     assert f"{library_images_prefix('paper-2')}/paper-2_1.png" in assets.assets
 
@@ -161,15 +139,16 @@ def test_workspace_files_join_a_project_by_reference_and_leave_it_without_touchi
     note = tmp_path / "AGENTS.md"
     note.write_text("v1")
     project = _Project()
-    roots = FileRoots(repository=SimpleNamespace(load=lambda: [str(tmp_path)], save=lambda roots: None))
-    app = FastAPI()
-    app.include_router(file_roots_route.router)
-    app.include_router(documents_route.router)
-    app.dependency_overrides[file_roots_route.get_file_roots] = lambda: roots
-    app.dependency_overrides[file_roots_route.get_project_store] = lambda: project
-    app.dependency_overrides[file_roots_route.get_asset_store] = lambda: None
-    app.dependency_overrides[documents_route.get_document_store] = lambda: None
-    client = TestClient(app)
+    client = route_client(
+        file_attach_route.router,
+        documents_route.router,
+        overrides={
+            file_attach_route.get_file_roots: mounted_roots(tmp_path),
+            file_attach_route.get_project_store: project,
+            file_attach_route.get_asset_store: None,
+            documents_route.get_document_store: None,
+        },
+    )
 
     added = client.post("/api/fileroots/add-to-project", json={"slug": "test", "paths": [str(note)]})
 
@@ -187,13 +166,14 @@ def test_workspace_files_join_a_project_by_reference_and_leave_it_without_touchi
 def test_workspace_files_serve_raw_bytes_and_refuse_binary_as_text(tmp_path):
     (tmp_path / "paper.pdf").write_bytes(b"%PDF-1.4")
     (tmp_path / "image.png").write_bytes(b"\x89PNG\xff")
-    roots = FileRoots(repository=SimpleNamespace(load=lambda: [str(tmp_path)], save=lambda roots: None))
-    app = FastAPI()
-    app.include_router(fileviewer_route.router)
-    app.dependency_overrides[fileviewer_route.get_file_roots] = lambda: roots
-    app.dependency_overrides[fileviewer_route.get_document_store] = lambda: None
-    app.dependency_overrides[fileviewer_route.get_asset_store] = lambda: None
-    client = TestClient(app)
+    client = route_client(
+        fileviewer_route.router,
+        overrides={
+            fileviewer_route.get_file_roots: mounted_roots(tmp_path),
+            fileviewer_route.get_document_store: None,
+            fileviewer_route.get_asset_store: None,
+        },
+    )
 
     pdf = client.get("/api/fileviewer/raw", params={"path": str(tmp_path / "paper.pdf")})
     image_as_text = client.get("/api/fileviewer/text", params={"path": str(tmp_path / "image.png")})
@@ -206,11 +186,7 @@ def test_diff_routes_serve_mounted_repositories_and_refuse_other_directories(tmp
     mounted = tmp_path / "mounted"
     mounted.mkdir()
     (mounted / "note.md").write_text("hi\n")
-    roots = FileRoots(repository=SimpleNamespace(load=lambda: [str(mounted)], save=lambda roots: None))
-    app = FastAPI()
-    app.include_router(file_roots_route.router)
-    app.dependency_overrides[file_roots_route.get_file_roots] = lambda: roots
-    client = TestClient(app)
+    client = route_client(file_git_route.router, overrides={file_git_route.get_file_roots: mounted_roots(mounted)})
 
     listing = client.get("/api/fileroots/diff/files", params={"root": str(mounted)})
     outside = client.get("/api/fileroots/diff/files", params={"root": str(tmp_path)})
@@ -232,11 +208,8 @@ def test_diff_routes_admit_linked_worktrees_anywhere_for_host_access_only(tmp_pa
     pointing_elsewhere = tmp_path / "not-a-worktree"
     pointing_elsewhere.mkdir()
     (pointing_elsewhere / ".git").write_text("something else\n")
-    roots = FileRoots(repository=SimpleNamespace(load=lambda: [], save=lambda roots: None), host_access=host_access)
-    app = FastAPI()
-    app.include_router(file_roots_route.router)
-    app.dependency_overrides[file_roots_route.get_file_roots] = lambda: roots
-    client = TestClient(app)
+    roots = mounted_roots(host_access=host_access)
+    client = route_client(file_git_route.router, overrides={file_git_route.get_file_roots: roots})
 
     def status(directory) -> int:
         return client.get("/api/fileroots/diff/files", params={"root": str(directory)}).status_code
@@ -261,13 +234,14 @@ def test_host_access_reaches_unmounted_home_files_but_never_credentials(tmp_path
     secrets = (elsewhere / ".env", elsewhere / ".ssh" / "id_ed25519", elsewhere / ".netrc", elsewhere / ".config" / "gh" / "hosts.yml")
     for path in (mounted / ".env", elsewhere / "notes.md", outside / "shadow", *secrets):
         path.write_text("v1")
-    roots = FileRoots(repository=SimpleNamespace(load=lambda: [str(mounted)], save=lambda roots: None), host_access=host_access)
-    app = FastAPI()
-    app.include_router(fileviewer_route.router)
-    app.include_router(file_roots_route.router)
-    app.dependency_overrides[fileviewer_route.get_file_roots] = lambda: roots
-    app.dependency_overrides[fileviewer_route.get_document_store] = lambda: None
-    client = TestClient(app)
+    client = route_client(
+        fileviewer_route.router,
+        file_roots_route.router,
+        overrides={
+            fileviewer_route.get_file_roots: mounted_roots(mounted, host_access=host_access),
+            fileviewer_route.get_document_store: None,
+        },
+    )
 
     def read_status(path) -> int:
         return client.get("/api/fileviewer/text", params={"path": str(path)}).status_code
@@ -289,13 +263,12 @@ def test_unreadable_file_is_refused_not_a_server_error(tmp_path):
     locked = mounted / "locked.md"
     locked.write_text("x")
     locked.chmod(0)
-    roots = FileRoots(repository=SimpleNamespace(load=lambda: [str(mounted)], save=lambda roots: None))
-    app = FastAPI()
-    app.include_router(fileviewer_route.router)
-    app.dependency_overrides[fileviewer_route.get_file_roots] = lambda: roots
-    app.dependency_overrides[fileviewer_route.get_document_store] = lambda: None
+    client = route_client(
+        fileviewer_route.router,
+        overrides={fileviewer_route.get_file_roots: mounted_roots(mounted), fileviewer_route.get_document_store: None},
+    )
     try:
-        response = TestClient(app).get("/api/fileviewer/text", params={"path": str(locked)})
+        response = client.get("/api/fileviewer/text", params={"path": str(locked)})
     finally:
         locked.chmod(0o600)
     assert (response.status_code, response.json()["detail"]) == (403, "Unknown file path")

@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { Send } from "lucide-react"
 import { InlineConfirm } from "@/components/ui/InlineConfirm"
 import { cn, errorMessage } from "@/lib/utils"
@@ -9,7 +10,7 @@ import { runFactoryTaskAction, sendFactoryMessage } from "@/lib/backend/api"
 import { PHASE_LABELS, STATE_LABELS, allowedActions, type StatusTone } from "./states"
 import { StatusDot } from "./StatusDot"
 import { FIELD_CLASS, ICON_BUTTON_CLASS, PRIMARY_BUTTON_CLASS, QUIET_BUTTON_CLASS } from "./styles"
-import type { FactoryTaskDetail, GateResult, PhaseRun, TaskAction } from "@/lib/domain/types"
+import type { FactoryTaskDetail, GateResult, PhaseRun, TaskAction } from "@/lib/domain/factory"
 
 function stringList(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : []
@@ -121,31 +122,25 @@ const PRIMARY_ACTIONS = [
   { action: "retry", label: "Retry" },
 ] as const
 
+const actionFailure = (action: TaskAction) => `Could not ${action} the task`
+
 /** Side panel of a task: state actions, request, phase runs with gate results and review findings, messages and the composer. */
 export function AgentPanel({ task, onChanged }: { task: FactoryTaskDetail; onChanged: () => void }) {
-  const [busy, setBusy] = useState(false)
   const [confirmingCancel, setConfirmingCancel] = useState(false)
-  const [error, setError] = useState("")
+  const { run, pending: busy, error, setError } = useAsyncAction(async (action: TaskAction) => {
+    try {
+      await runFactoryTaskAction(task.id, action)
+      onChanged()
+    } finally {
+      setConfirmingCancel(false)
+    }
+  }, actionFailure)
   const scroller = useRef<HTMLDivElement>(null)
   const allowed = allowedActions(task.state)
 
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight })
   }, [task.messages.length])
-
-  const run = async (action: TaskAction) => {
-    setBusy(true)
-    setError("")
-    try {
-      await runFactoryTaskAction(task.id, action)
-      onChanged()
-    } catch (cause) {
-      setError(errorMessage(cause, `Could not ${action} the task`))
-    } finally {
-      setBusy(false)
-      setConfirmingCancel(false)
-    }
-  }
 
   return (
     <div className="flex h-full min-h-0 flex-col">

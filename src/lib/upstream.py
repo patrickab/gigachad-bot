@@ -4,6 +4,7 @@
 - Failures are one of three exceptions the routes map to HTTP: unreachable 503, unknown shape 502, refusal passed through
 """
 
+from collections.abc import Callable
 import os
 
 import httpx
@@ -53,7 +54,7 @@ async def request_json[Result](
     headers: dict[str, str] | None = None,
     json: object = None,
     params: dict[str, str | int] | None = None,
-    timeout: float = TIMEOUT_SECONDS,
+    timeout: float | httpx.Timeout = TIMEOUT_SECONDS,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> Result:
     """Send one request and validate the JSON answer as *result*. *label* names the service in errors, *transport* is for tests."""
@@ -70,3 +71,53 @@ async def request_json[Result](
         first = exc.errors()[0]
         field = ".".join(str(part) for part in first["loc"]) or "<root>"
         raise UpstreamContractError(f"{label} {path}: field `{field}` {first['msg'].lower()}") from exc
+
+
+class UpstreamClient:
+    """One upstream service: its URL (from *env*, else *default*), its *label* in errors, its headers and default timeout."""
+
+    def __init__(
+        self,
+        *,
+        env: str,
+        default: str,
+        label: str,
+        headers: Callable[[], dict[str, str]] | None = None,
+        timeout: float | httpx.Timeout = TIMEOUT_SECONDS,
+    ) -> None:
+        self._env = env
+        self._default = default
+        self._label = label
+        self._headers = headers
+        self._timeout = timeout
+        # Tests swap in an `httpx.MockTransport`, None is the real network.
+        self.transport: httpx.AsyncBaseTransport | None = None
+
+    @property
+    def url(self) -> str:
+        """Base URL, read from the environment on every access."""
+        return upstream_url(self._env, self._default)
+
+    async def request[Result](
+        self,
+        method: str,
+        path: str,
+        result: type[Result],
+        *,
+        json: object = None,
+        params: dict[str, str | int] | None = None,
+        timeout: float | httpx.Timeout | None = None,
+    ) -> Result:
+        """Send one request and validate the JSON answer as *result*, *timeout* overriding the client's default."""
+        return await request_json(
+            self.url,
+            method,
+            path,
+            result,
+            label=self._label,
+            headers=self._headers() if self._headers else None,
+            json=json,
+            params=params,
+            timeout=self._timeout if timeout is None else timeout,
+            transport=self.transport,
+        )

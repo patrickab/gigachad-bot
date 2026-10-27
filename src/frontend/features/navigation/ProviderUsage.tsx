@@ -1,10 +1,12 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useState } from "react"
 import { RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useStoredString } from "@/hooks/useStoredString"
-import { fetchProviderUsage, type ProviderUsageReport } from "@/lib/backend/api"
+import { usePolling } from "@/hooks/usePolling"
+import { fetchProviderUsage } from "@/lib/backend/api"
+import type { ProviderUsageReport } from "@/lib/domain/types"
 
 const REFRESH_INTERVAL_MS = 5 * 60_000
 const OPEN_STORAGE_KEY = "provider_usage_open"
@@ -66,20 +68,16 @@ export function ProviderUsage() {
   const [storedOpen, setOpen] = useStoredString(OPEN_STORAGE_KEY)
   const open = storedOpen === "true"
 
-  const load = useCallback((forced: boolean) => fetchProviderUsage(forced).then(
+  const load = (forced: boolean) => fetchProviderUsage(forced).then(
     (usage) => { setReports(usage.reports.filter((report) => !report.no_limits)); setFailed(false) },
     () => { setFailed(true) },
-  ), [])
+  )
   const refresh = async () => {
     setLoading(true)
     await load(true)
     setLoading(false)
   }
-  useEffect(() => {
-    void load(false)
-    const interval = window.setInterval(() => void load(false), REFRESH_INTERVAL_MS)
-    return () => window.clearInterval(interval)
-  }, [load])
+  usePolling(() => load(false), { intervalMs: REFRESH_INTERVAL_MS, runWhileHidden: true })
 
   if (!failed && reports?.length === 0) return null
   const leastUsed = (reports ?? []).reduce<number | null>((least, report) => {

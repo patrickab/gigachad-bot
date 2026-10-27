@@ -1,10 +1,9 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
-import { useTabActive } from "@/contexts/TabContext"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { useEventListener } from "@/hooks/useEventListener"
-import { isNeovimKeyEvent } from "@/lib/utils"
+import { isModKey, isNeovimKeyEvent } from "@/lib/utils"
 
 /** Ctrl+Up/Down keyboard focus over a chat's question/answer pairs. */
 export function usePairFocus({ pairs, scrollContainerRef, togglePair }: {
@@ -14,7 +13,6 @@ export function usePairFocus({ pairs, scrollContainerRef, togglePair }: {
   togglePair: (globalIndex: number) => void
 }) {
   const [keyboardFocusIdx, setKeyboardFocusIdx] = useState<number | null>(null)
-  const tabActive = useTabActive()
   const collapsedRefs = useRef<Map<number, HTMLDivElement>>(new Map())
 
   const focusedGlobalIndex =
@@ -43,8 +41,7 @@ export function usePairFocus({ pairs, scrollContainerRef, togglePair }: {
   useEventListener("window", "keydown", (e) => {
     const eat = () => { e.preventDefault(); e.stopPropagation() }
     if (isNeovimKeyEvent(e)) return
-    const ctrl = e.ctrlKey || e.metaKey
-    if (ctrl && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+    if (isModKey(e) && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
       eat()
       navigateFocus(e.key)
       scrollContainerRef.current?.focus()
@@ -54,7 +51,7 @@ export function usePairFocus({ pairs, scrollContainerRef, togglePair }: {
     }
   }, { capture: true })
 
-  useEscapeLayer(() => setKeyboardFocusIdx(null), keyboardFocusIdx !== null && tabActive)
+  useEscapeLayer(() => setKeyboardFocusIdx(null), keyboardFocusIdx !== null)
 
   useEffect(() => {
     if (keyboardFocusIdx === null) return

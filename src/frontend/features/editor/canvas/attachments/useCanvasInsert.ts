@@ -2,17 +2,16 @@
 
 import { useCallback } from "react"
 import { useEventListener } from "@/hooks/useEventListener"
-import { A4_WIDTH, CANVAS_ASPECT, FALLBACK_ASPECT, canvasEntityId, emptyCanvasDoc, type CanvasAttachment, type CanvasDocument } from "@/lib/domain/canvasDocument"
+import { attachmentTraits } from "@/lib/domain/canvasAttachments"
+import { A4_WIDTH, FALLBACK_ASPECT, canvasEntityId, emptyCanvasDoc, type CanvasAttachment, type CanvasDocument } from "@/lib/domain/canvasDocument"
 import { writeBinaryDocument } from "@/lib/backend/api"
 
 const PAGE_GAP = 40
-const DEFAULT_PDF_WIDTH = 500 // attachment default width (canvas units)
 const DEFAULT_IMAGE_WIDTH = 400 // image-frame default width (canvas units)
-const DEFAULT_CANVAS_WIDTH = 600 // nested canvas window default width (canvas units)
-const DEFAULT_GRAPH_WIDTH = 720
-const DEFAULT_GRAPH_HEIGHT = 480
 
-type NewAttachment = Pick<CanvasAttachment, "kind" | "path" | "canvas" | "height">
+/** A new attachment's own fields, per kind; placement and size come from its kind's traits. */
+type OwnFields<A> = A extends CanvasAttachment ? Omit<A, "id" | "x" | "y" | "width" | "height"> : never
+type NewAttachment = OwnFields<CanvasAttachment>
 
 interface CanvasInsertOptions {
   liveRef: { readonly current: { doc: CanvasDocument } }
@@ -45,30 +44,32 @@ export function useCanvasInsert({ liveRef, commit, pointAtCenter, slug, depth, a
     addImageFrameAt(path, cx, cy)
   }, [pointAtCenter, addImageFrameAt])
 
-  // One attachment window centered in the view. `dedupe` skips a path that is already on the canvas.
-  const insertAttachment = useCallback((fields: NewAttachment, width: number, aspect: number, dedupe = false) => {
+  // One attachment window of its kind's default size, centered in the view. `dedupe` skips a path that is already on the canvas.
+  const insertAttachment = useCallback((fields: NewAttachment, dedupe = false) => {
     const doc = liveRef.current.doc
     if (dedupe && doc.attachments.some((a) => a.path === fields.path)) return
-    const { cx, cy } = pointAtCenter(width, aspect)
-    commit({ ...doc, attachments: [...doc.attachments, { id: canvasEntityId(), ...fields, x: cx, y: cy, width }] })
+    const size = attachmentTraits[fields.kind].defaultSize
+    const { cx, cy } = pointAtCenter(size.width, "height" in size ? size.height / size.width : size.aspect)
+    const attachment: CanvasAttachment = { id: canvasEntityId(), ...fields, ...("height" in size && { height: size.height }), x: cx, y: cy, width: size.width }
+    commit({ ...doc, attachments: [...doc.attachments, attachment] })
   }, [liveRef, commit, pointAtCenter])
 
-  const addPdf = useCallback((path: string) => insertAttachment({ kind: "pdf", path }, DEFAULT_PDF_WIDTH, FALLBACK_ASPECT, true), [insertAttachment])
+  const addPdf = useCallback((path: string) => insertAttachment({ kind: "pdf", path }, true), [insertAttachment])
 
   // Nested canvas window — a full CanvasEditor living inside this one, contents stored inline in the parent document.
-  const addNewCanvas = useCallback(() => insertAttachment({ kind: "canvas", canvas: emptyCanvasDoc() }, DEFAULT_CANVAS_WIDTH, CANVAS_ASPECT), [insertAttachment])
+  const addNewCanvas = useCallback(() => insertAttachment({ kind: "canvas", canvas: emptyCanvasDoc() }), [insertAttachment])
 
   // A referenced canvas stores only its placement here; its document is owned by its own collaboration hook.
-  const addCanvasFile = useCallback((path: string) => insertAttachment({ kind: "canvas", path }, DEFAULT_CANVAS_WIDTH, CANVAS_ASPECT, true), [insertAttachment])
+  const addCanvasFile = useCallback((path: string) => insertAttachment({ kind: "canvas", path }, true), [insertAttachment])
 
   // A project has one architecture; each window browses it through its own tree, opening on the
   // first system. Several windows on one project are intended, so this never dedupes.
   const addArchitecture = useCallback(() => {
     if (!slug) return
-    insertAttachment({ kind: "architecture-graph", path: `graph/${slug}/`, height: DEFAULT_GRAPH_HEIGHT }, DEFAULT_GRAPH_WIDTH, DEFAULT_GRAPH_HEIGHT / DEFAULT_GRAPH_WIDTH)
+    insertAttachment({ kind: "architecture-graph", path: `graph/${slug}/` })
   }, [insertAttachment, slug])
 
-  const addDocument = useCallback((path: string) => insertAttachment({ kind: "document", path, height: DEFAULT_GRAPH_HEIGHT }, DEFAULT_GRAPH_WIDTH, DEFAULT_GRAPH_HEIGHT / DEFAULT_GRAPH_WIDTH, true), [insertAttachment])
+  const addDocument = useCallback((path: string) => insertAttachment({ kind: "document", path }, true), [insertAttachment])
 
   // Store a clipboard image in the project and drop it on the canvas at (x, y).
   const uploadPastedImage = useCallback(async (blob: Blob, mime: string, x: number, y: number) => {

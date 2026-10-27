@@ -1,8 +1,7 @@
 "use client"
 
-import { useRef, useState, type CSSProperties, type ReactNode } from "react"
-import { useClickOutside } from "@/hooks/useClickOutside"
-import { cn } from "@/lib/utils"
+import type { CSSProperties, ReactNode } from "react"
+import { MenuPopover } from "@/components/ui/MenuPopover"
 
 const MENU_STYLE: CSSProperties = {
   position: "absolute", zIndex: 10, top: "calc(100% + 4px)", padding: 4,
@@ -19,13 +18,9 @@ export function ArchitectureMenu({ label, trigger, align, menuStyle, className, 
   className?: string
   children: (close: () => void) => ReactNode
 }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  useClickOutside(ref, () => setOpen(false))
   return (
-    <div ref={ref} className={cn("relative", className)}>
-      {trigger(open, () => setOpen((current) => !current))}
-      {open && <div role="menu" aria-label={label} style={{ ...MENU_STYLE, [align]: 0, ...menuStyle }}>{children(() => setOpen(false))}</div>}
-    </div>
+    <MenuPopover className={className} trigger={trigger}>
+      {(open, close) => open && <div role="menu" aria-label={label} style={{ ...MENU_STYLE, [align]: 0, ...menuStyle }}>{children(close)}</div>}
+    </MenuPopover>
   )
 }

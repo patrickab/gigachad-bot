@@ -1,16 +1,13 @@
 "use client"
 
-import { createContext, useCallback, useContext, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore } from "react"
-import { ArrowRightLeft, Check, ChevronDown, Plus, X } from "lucide-react"
-import { cn, isEditableTarget } from "@/lib/utils"
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
+import { isEditableTarget } from "@/lib/utils"
 import { DEFAULT_TAB_CONFIG, type TabConfig } from "@/contexts/SettingsContext"
-import { TabContext, surfaceOf, useTab, type Tab, type TabActions, type TabContextValue, type WorkspaceItem } from "@/contexts/TabContext"
-import { PATH_COLLATOR, baseName } from "@/lib/paths"
+import { TabContext, showingItem, type Tab, type TabActions, type TabContextValue, type WorkspaceItem } from "@/contexts/TabContext"
 import { parseHistoryFile } from "@/lib/domain/historyFile"
-import { useProject } from "@/contexts/ProjectContext"
-import { useClickOutside } from "@/hooks/useClickOutside"
-import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { useEventListener } from "@/hooks/useEventListener"
+import { TabStripContext, nextTab, relocatedTab, tabAfterClosing, tabLabel, type TabStripValue } from "./tabs"
+import { WORKSPACE_SWITCH_MS, useWorkspaceSwitch } from "./useWorkspaceSwitch"
 
 interface TabManagerProps {
   /** Rendered once per tab inside that tab's `TabContext`. */
@@ -32,60 +29,20 @@ export interface TabManagerHandle {
   relocateProject: (oldSlug: string, newSlug: string) => void
 }
 
-/** `tab` with its project references moved from `oldSlug` to `newSlug`, or `tab` itself when it has none. */
-function relocatedTab(tab: Tab, oldSlug: string, newSlug: string): Tab {
-  const relocate = (path: string, prefix: string) => path.startsWith(`${prefix}${oldSlug}/`) ? `${prefix}${newSlug}${path.slice(prefix.length + oldSlug.length)}` : path
-  const historyFile = tab.historyFile && relocate(tab.historyFile, "")
-  const item = tab.workspaceItem
-  const isInProject = tab.projectSlug === oldSlug || historyFile !== tab.historyFile || item?.projectSlug === oldSlug
-  if (!isInProject) return tab
-  return {
-    ...tab,
-    historyFile,
-    projectSlug: tab.projectSlug === oldSlug ? newSlug : tab.projectSlug,
-    workspaceItem: item?.projectSlug === oldSlug
-      ? { ...item, projectSlug: newSlug, path: relocate(relocate(item.path, "project/"), "graph/") }
-      : item,
-  }
-}
-
-/** Tab state and actions shared by toolbar workspace switchers. */
-interface TabStripValue {
-  tabs: Tab[]
-  activeTabId: string
-  /** Activity description exposed alongside the workspace breadcrumb. */
-  labelOf: (tab: Tab) => string
-  isLoading: (tab: Tab) => boolean
-  select: (id: string) => void
-  close: (id: string) => void
-  add: () => void
-}
-const TabStripContext = createContext<TabStripValue | null>(null)
-
-
-export function nextTab(config?: Partial<TabConfig>): Tab {
-  return { id: `tab-${crypto.randomUUID()}`, name: null, chatId: crypto.randomUUID(), historyFile: null, title: null, config: { ...DEFAULT_TAB_CONFIG, ...config }, appMode: "chat", projectSlug: null, workspaceItem: null }
+/** A tab's latest activity description, and whether the switcher shows a spinner for it. */
+interface TabMode {
+  label: string
+  loading: boolean
 }
 
 const INITIAL_TAB: Tab = nextTab()
-const WORKSPACE_SWITCH_MS = 160
-
-function subscribeReducedMotion(onChange: () => void) {
-  const media = window.matchMedia?.("(prefers-reduced-motion: reduce)")
-  media?.addEventListener("change", onChange)
-  return () => media?.removeEventListener("change", onChange)
-}
-
-function prefersReducedMotion() {
-  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? true
-}
 
 /** Provides one tab's state and actions; memoized so the context only changes with the tab or its active flag. */
-function TabScope({ tab, isActive, updateTab, updateModeLabel, children }: {
+function TabScope({ tab, isActive, updateTab, setMode, children }: {
   tab: Tab
   isActive: boolean
   updateTab: (id: string, patch: (tab: Tab) => Partial<Tab>) => void
-  updateModeLabel: (id: string, label: string, loading?: boolean) => void
+  setMode: (id: string, label: string, loading?: boolean) => void
   children: React.ReactNode
 }) {
   // One stable action set per tab. Consumers list these as effect dependencies, so a
@@ -95,14 +52,10 @@ function TabScope({ tab, isActive, updateTab, updateModeLabel, children }: {
   const [actions] = useState<TabActions>(() => {
     const id = tab.id
     return {
-      setModeLabel: (label, loading) => updateModeLabel(id, label, loading),
+      setModeLabel: (label, loading) => setMode(id, label, loading),
       updateConfig: (config) => updateTab(id, (t) => ({ config: { ...t.config, ...config } })),
       setAppMode: (appMode) => updateTab(id, () => ({ appMode })),
-      setWorkspaceItem: (workspaceItem) => updateTab(id, (tab) => ({
-        workspaceItem,
-        projectSlug: workspaceItem ? workspaceItem.projectSlug : tab.projectSlug,
-        appMode: workspaceItem ? surfaceOf(workspaceItem) : "canvas",
-      })),
+      setWorkspaceItem: (workspaceItem) => updateTab(id, () => workspaceItem ? showingItem(workspaceItem) : { workspaceItem: null, appMode: "canvas" }),
       setHistoryFile: (historyFile) => updateTab(id, () => ({ historyFile })),
       setTitle: (title) => updateTab(id, () => ({ title })),
     }
@@ -111,204 +64,12 @@ function TabScope({ tab, isActive, updateTab, updateModeLabel, children }: {
   return <TabContext.Provider value={value}>{children}</TabContext.Provider>
 }
 
-function Spinner() {
-  return <span className="h-2.5 w-2.5 shrink-0 animate-spin rounded-full border border-ink-faint border-t-ink-muted" />
-}
-
-/** Describe the visible surface, not a background item retained by the tab. */
-function tabLocation(tab: Tab) {
-  if (tab.appMode === "omp") {
-    return { category: tab.projectSlug ? "code" : "omp", file: tab.name ?? tab.title ?? "omp" }
-  }
-  if (tab.appMode === "factory") {
-    return { category: "factory", file: tab.name ?? (tab.workspaceItem?.path.includes("/") ? "task" : tab.workspaceItem?.path ?? "board") }
-  }
-  if (tab.appMode === "canvas") {
-    return tab.workspaceItem?.kind === "architecture"
-      ? { category: "architecture", file: tab.name ?? "System overview" }
-      : { category: "canvases", file: tab.name ?? (tab.workspaceItem?.kind === "canvas" ? baseName(tab.workspaceItem.path) : "new.canvas") }
-  }
-  if (tab.appMode === "document" && tab.workspaceItem?.kind === "diff") {
-    return { category: "diff", file: tab.name ?? baseName(tab.workspaceItem.path) }
-  }
-  if (tab.appMode === "document") {
-    return { category: "files", file: tab.name ?? (tab.workspaceItem ? baseName(tab.workspaceItem.path) : "New file") }
-  }
-  return { category: "chats", file: tab.name ?? tab.title ?? (tab.historyFile ? baseName(tab.historyFile) : "New chat") }
-}
-
-const PILL_BUTTON_CLASS = "flex h-8.5 w-8.5 shrink-0 items-center justify-center rounded-full bg-paper text-ink-muted transition-colors hover:bg-surface-elevated hover:text-ink focus:bg-surface-elevated focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-subtle"
-
-function BreadcrumbLabel({ project, category, file }: { project: string, category: string, file: string }) {
-  return <>
-    <span className="max-w-24 truncate text-ink-subtle">{project}</span>
-    <span aria-hidden="true" className="text-ink-faint">/</span>
-    <span className="shrink-0 text-ink-subtle">{category}</span>
-    <span aria-hidden="true" className="text-ink-faint">/</span>
-    <span className="min-w-0 truncate text-ink">{file}</span>
-  </>
-}
-
-/**
- * Reveal centered workspace navigation on hover, keyboard focus, or while its menu is open.
- *
- * - Trigger is as wide as the widest open tab label and centered alone, so switching never moves it or its buttons
- */
-export function TabSwitcher() {
-  const strip = useContext(TabStripContext)
-  const { tab, isActive } = useTab()
-  const { projects } = useProject()
-  const activityDescriptionId = useId()
-  const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState("")
-  const [showSearch, setShowSearch] = useState(false)
-  const rootRef = useRef<HTMLDivElement>(null)
-  const triggerRef = useRef<HTMLButtonElement>(null)
-  const panelRef = useRef<HTMLDivElement>(null)
-  const close = useCallback(() => {
-    setOpen(false)
-    setQuery("")
-  }, [])
-  useClickOutside(rootRef, close)
-  useEscapeLayer(() => {
-    close()
-    triggerRef.current?.focus()
-  }, open && isActive)
-  useEffect(() => {
-    if (!open || !isActive) return
-    const panel = panelRef.current
-    const current = panel?.querySelector<HTMLElement>("[aria-current=page]")
-    current?.scrollIntoView?.({ block: "nearest" })
-    const input = panel?.querySelector<HTMLInputElement>("input")
-    const focusTarget = input ?? current
-    focusTarget?.focus()
-  }, [open, isActive])
-  if (!strip) return null
-
-  const projectName = (slug: string | null) => projects.find((project) => project.slug === slug)?.name ?? slug ?? "general"
-  const location = tabLocation(tab)
-  const breadcrumb = `${projectName(tab.projectSlug)} / ${location.category} / ${location.file}`
-  const search = query.trim().toLowerCase()
-  const orderedTabs = strip.tabs.map((item) => ({ item, project: projectName(item.projectSlug), ...tabLocation(item) }))
-    .sort((left, right) => Number(left.project === "general") - Number(right.project === "general")
-      || PATH_COLLATOR.compare(left.project, right.project)
-      || PATH_COLLATOR.compare(left.category, right.category)
-      || PATH_COLLATOR.compare(left.file, right.file)
-      || left.item.id.localeCompare(right.item.id))
-  const visibleTabs = orderedTabs.filter((entry) => `${entry.project} ${entry.category} ${entry.file}`.toLowerCase().includes(search))
-  const following = orderedTabs[(orderedTabs.findIndex(({ item }) => item.id === strip.activeTabId) + 1) % orderedTabs.length].item
-
-  return <div ref={rootRef} data-tab-switcher data-open={open} className="pointer-events-auto flex w-[32rem] max-w-full flex-col items-center opacity-0 transition-opacity duration-160 [&:hover]:opacity-100 focus-within:opacity-100 data-[open=true]:opacity-100 motion-reduce:transition-none"
-    onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) close() }}>
-    <div className="relative flex min-w-0 max-w-[calc(100%_-_9.5rem)]">
-      <button ref={triggerRef} type="button" aria-label={`Switch tabs: ${breadcrumb}`} aria-haspopup="dialog" aria-expanded={open}
-        aria-describedby={activityDescriptionId}
-        onClick={() => {
-          if (open) close()
-          else {
-            setShowSearch(strip.tabs.length > 8)
-            setOpen(true)
-          }
-        }}
-        className="flex h-8.5 max-w-full min-w-0 items-center gap-1.5 rounded-full bg-paper px-2 text-xs text-ink-muted transition-colors hover:bg-surface-elevated hover:text-ink focus:bg-surface-elevated focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-subtle">
-        <span className="grid min-w-0 grid-cols-[minmax(0,max-content)]">
-          {orderedTabs.filter(({ item }) => item.id !== tab.id).map(({ item, project, category, file }) =>
-            <span key={item.id} aria-hidden="true" className="invisible flex min-w-0 items-center gap-1.5 whitespace-nowrap [grid-area:1/1]">
-              <BreadcrumbLabel project={project} category={category} file={file} />
-            </span>)}
-          <span data-workspace-breadcrumb className="flex min-w-0 items-center gap-1.5 whitespace-nowrap [grid-area:1/1]">
-            <BreadcrumbLabel project={projectName(tab.projectSlug)} category={location.category} file={location.file} />
-          </span>
-        </span>
-        <ChevronDown aria-hidden="true" className="h-3 w-3 shrink-0 text-ink-subtle" />
-      </button>
-      <div className="absolute inset-y-0 left-full ml-1 flex items-center gap-1">
-        <button type="button" aria-label="Next tab" disabled={strip.tabs.length < 2}
-          onClick={() => {
-            close()
-            strip.select(following.id)
-          }}
-          className={`${PILL_BUTTON_CLASS} disabled:cursor-default disabled:text-ink-faint`}>
-          <ArrowRightLeft aria-hidden="true" className="h-3 w-3" />
-        </button>
-        <button type="button" data-new-chat aria-label="New chat" onClick={() => {
-          close()
-          strip.add()
-        }} className={PILL_BUTTON_CLASS}>
-          <Plus aria-hidden="true" className="h-3 w-3" />
-        </button>
-      </div>
-    </div>
-    <span id={activityDescriptionId} className="sr-only">{strip.labelOf(tab)}</span>
-    {open && isActive && <div ref={panelRef} role="dialog" aria-label="Open tabs"
-      className="absolute left-1/2 top-full z-50 mt-1 flex w-max max-w-[min(36rem,100%)] -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-divider bg-surface shadow-[var(--shadow-lg)]">
-      {showSearch && <div className="border-b border-divider p-2">
-        <input aria-label="Search open tabs" placeholder="Find a tab…" value={query} onChange={(event) => setQuery(event.target.value)}
-          className="w-full rounded-md bg-paper px-2 py-1.5 text-xs text-ink outline-none focus-visible:ring-1 focus-visible:ring-ink-faint" />
-      </div>}
-      <div role="group" aria-label="Workspaces" className="max-h-[min(28rem,60vh)] overflow-y-auto p-1.5">
-          {visibleTabs.map(({ item, project, category, file }) => {
-            const active = item.id === strip.activeTabId
-            return <div key={item.id} className={cn("group/tab flex items-center rounded-md transition-colors duration-160 motion-reduce:transition-none", active ? "bg-surface-elevated" : "hover:bg-surface-elevated/60")}>
-              <button type="button" aria-label={`Switch to ${project} / ${category} / ${file}`} aria-current={active ? "page" : undefined}
-                aria-describedby={`${activityDescriptionId}-${item.id}`}
-                onClick={() => {
-                  close()
-                  strip.select(item.id)
-                }}
-                className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-ink-muted focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-subtle">
-                <span className="min-w-0 flex-1 truncate whitespace-nowrap"><span className="text-ink-subtle">{project} / {category} / </span><span className={active ? "text-ink" : undefined}>{file}</span></span>
-                <span id={`${activityDescriptionId}-${item.id}`} className="sr-only">{strip.labelOf(item)}</span>
-                {strip.isLoading(item) && <Spinner />}
-                {active && <Check aria-hidden="true" className="h-3 w-3 shrink-0 text-ink-subtle" />}
-              </button>
-              {strip.tabs.length > 1 && <button type="button" aria-label={`Close ${project} / ${category} / ${file}`}
-                onClick={() => {
-                  if (active) close()
-                  else {
-                    const target = panelRef.current?.querySelector<HTMLInputElement>("input") ?? triggerRef.current
-                    target?.focus()
-                  }
-                  strip.close(item.id)
-                }}
-                className="mr-1 rounded p-1 text-ink-faint opacity-0 hover:text-ink group-hover/tab:opacity-100 group-focus-within/tab:opacity-100 focus-visible:opacity-100">
-                <X aria-hidden="true" className="h-3 w-3" />
-              </button>}
-            </div>
-          })}
-        {visibleTabs.length === 0 && <p className="px-2 py-3 text-xs text-ink-subtle">No matching tabs</p>}
-      </div>
-    </div>}
-  </div>
-}
-
-
 export function TabManager({ children, onTabsChange, onActiveTabChange, defaultConfig = DEFAULT_TAB_CONFIG, ref }: TabManagerProps) {
   const [tabs, setTabs] = useState<Tab[]>([INITIAL_TAB])
-  const reduceMotion = useSyncExternalStore(subscribeReducedMotion, prefersReducedMotion, () => true)
-  const [{ activeTab, outgoingTab }, setVisibleTabs] = useState<{ activeTab: string; outgoingTab: string | null }>({ activeTab: INITIAL_TAB.id, outgoingTab: null })
-  const [modeLabels, setModeLabels] = useState<Record<string, string>>({})
-  const [modeLoading, setModeLoading] = useState<Record<string, boolean>>({})
+  const { activeTab, setActiveTab, phaseOf, isShown, onAnimationEnd } = useWorkspaceSwitch(INITIAL_TAB.id)
+  const [modes, setModes] = useState<Record<string, TabMode>>({})
   const onTabsChangeRef = useRef(onTabsChange)
   useEffect(() => { onTabsChangeRef.current = onTabsChange }, [onTabsChange])
-
-  const setActiveTab = useCallback((next: React.SetStateAction<string>) => {
-    setVisibleTabs((current) => {
-      const id = typeof next === "function" ? next(current.activeTab) : next
-      if (id === current.activeTab) return current
-      return { activeTab: id, outgoingTab: reduceMotion ? null : current.activeTab }
-    })
-  }, [reduceMotion])
-
-  useEffect(() => {
-    if (!outgoingTab || !reduceMotion) return
-    const timer = window.setTimeout(() => {
-      setVisibleTabs((current) => current.activeTab === activeTab && current.outgoingTab === outgoingTab
-        ? { ...current, outgoingTab: null }
-        : current)
-    }, 0)
-    return () => window.clearTimeout(timer)
-  }, [activeTab, outgoingTab, reduceMotion])
 
   const updateTab = useCallback((id: string, patch: (tab: Tab) => Partial<Tab>) => {
     setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch(t) } : t)))
@@ -332,10 +93,10 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
     },
     showItem: (item) => {
       updateTab(activeTab, (tab) => ({
+        ...showingItem(item),
+        // Reopening the same project's architecture keeps the system it shows.
         workspaceItem: item.kind === "architecture" && tab.workspaceItem?.kind === "architecture"
           && tab.workspaceItem.projectSlug === item.projectSlug ? tab.workspaceItem : item,
-        projectSlug: item.projectSlug,
-        appMode: surfaceOf(item),
       }))
     },
     relocateHistories: (moves) => {
@@ -369,17 +130,10 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
   }, [defaultConfig, tabs, activeTab, setActiveTab])
 
   const closeTab = useCallback((id: string) => {
-    setTabs((prev) => {
-      if (prev.length <= 1) return prev
-      const next = prev.filter((t) => t.id !== id)
-      if (id === activeTab) {
-        const idx = prev.findIndex((t) => t.id === id)
-        const targetIdx = Math.max(0, idx - 1)
-        setActiveTab(next[targetIdx]?.id ?? "")
-      }
-      return next
-    })
-  }, [activeTab, setActiveTab])
+    if (tabs.length <= 1) return
+    setTabs((prev) => prev.filter((t) => t.id !== id))
+    if (id === activeTab) setActiveTab(tabAfterClosing(tabs, id))
+  }, [tabs, activeTab, setActiveTab])
 
   const cycleTab = useCallback((delta: 1 | -1) => {
     setActiveTab((current) => {
@@ -406,29 +160,19 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
     }
   })
 
-
-  const updateModeLabel = useCallback((id: string, label: string, loading = false) => {
-    setModeLabels((prev) => (prev[id] === label ? prev : { ...prev, [id]: label }))
-    setModeLoading((prev) => (prev[id] === loading ? prev : { ...prev, [id]: loading }))
+  const setMode = useCallback((id: string, label: string, loading = false) => {
+    setModes((prev) => (prev[id]?.label === label && prev[id].loading === loading ? prev : { ...prev, [id]: { label, loading } }))
   }, [])
 
   const strip = useMemo<TabStripValue>(() => ({
     tabs,
     activeTabId: activeTab,
-    labelOf: (tab) => {
-      if (tab.appMode !== "chat" && tab.workspaceItem) {
-        if (tab.appMode === "omp") return tab.name ?? tab.title ?? "omp"
-        if (tab.appMode === "factory") return tab.name ?? "Factory"
-        return tab.name ?? (tab.workspaceItem.kind === "architecture" ? "Architecture" : baseName(tab.workspaceItem.path))
-      }
-      const label = modeLabels[tab.id]
-      return tab.name ?? (label || "Chat")
-    },
-    isLoading: (tab) => tab.name == null && (modeLoading[tab.id] ?? false),
+    labelOf: (tab) => tabLabel(tab, modes[tab.id]?.label),
+    isLoading: (tab) => tab.name == null && (modes[tab.id]?.loading ?? false),
     select: setActiveTab,
     close: closeTab,
     add: addTab,
-  }), [tabs, activeTab, modeLabels, modeLoading, closeTab, addTab, setActiveTab])
+  }), [tabs, activeTab, modes, closeTab, addTab, setActiveTab])
 
   return (
     <TabStripContext.Provider value={strip}>
@@ -437,16 +181,13 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
           <div
             key={tab.id}
             className="workspace-tab absolute inset-0 h-full"
-            data-phase={tab.id === activeTab ? outgoingTab && !reduceMotion ? "incoming" : "idle" : "outgoing"}
+            data-phase={phaseOf(tab.id)}
             aria-hidden={tab.id !== activeTab}
             inert={tab.id !== activeTab}
-            onAnimationEnd={(event) => {
-              if (tab.id !== activeTab || event.animationName !== "workspace-dissolve-in") return
-              setVisibleTabs((current) => current.activeTab === tab.id ? { ...current, outgoingTab: null } : current)
-            }}
-            style={{ display: tab.id === activeTab || tab.id === outgoingTab && !reduceMotion ? undefined : "none" }}
+            onAnimationEnd={(event) => onAnimationEnd(tab.id, event.animationName)}
+            style={{ display: isShown(tab.id) ? undefined : "none" }}
           >
-            <TabScope key={tab.chatId} tab={tab} isActive={tab.id === activeTab} updateTab={updateTab} updateModeLabel={updateModeLabel}>
+            <TabScope key={tab.chatId} tab={tab} isActive={tab.id === activeTab} updateTab={updateTab} setMode={setMode}>
               {children}
             </TabScope>
           </div>
@@ -455,4 +196,3 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
     </TabStripContext.Provider>
   )
 }
-

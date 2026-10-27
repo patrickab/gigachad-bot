@@ -1,20 +1,21 @@
 "use client"
 
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type RefObject } from "react"
-import { createPortal } from "react-dom"
 import { PdfViewer } from "@/components/content/PdfViewer"
 import { useTabActive } from "@/contexts/TabContext"
 import { InkTools, SEPARATOR, UndoRedoButtons, useInkSettings } from "@/features/editor/canvas/CanvasToolbar"
-import { DEFAULT_PEN_COLOR, ERASER_RADIUS_PX, appendPointerSamples, finishStroke, newStroke, splitHighlights, strokePath, strokesAfterErase } from "@/features/editor/canvas/ink/canvasInk"
-import { useCanvasHistory, useUndoRedoKeys } from "@/features/editor/canvas/useCanvasHistory"
+import { InTopBar, useHasTopBarSlot } from "@/features/navigation/TopBarSlots"
+import { DEFAULT_PEN_COLOR, ERASER_RADIUS_PX, appendPointerSamples, finishStroke, newStroke, pointerInkRole, pointerSample, splitHighlights, strokePath, strokesAfterErase } from "@/features/editor/canvas/ink/canvasInk"
+import { useCanvasHistory } from "@/features/editor/canvas/useCanvasHistory"
 import { useCollaborativeCanvas } from "@/features/editor/canvas/useCollaborativeCanvas"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
+import { useUndoRedoKeys } from "@/hooks/useUndoRedoKeys"
 import { openPdfAnnotations } from "@/lib/backend/api"
 import { fileViewerRawUrl } from "@/lib/backend/urls"
 import { emptyCanvasDoc } from "@/lib/domain/canvasDocument"
-import { inkOutlinePath, penPressure } from "@/lib/drawing"
+import { inkOutlinePath, type StrokeData } from "@/lib/drawing"
 import { cn } from "@/lib/utils"
-import { PAGE_UNITS, pageAt, strokesByPage, toPagePoint, type PageBox, type PdfStroke } from "./pdfInk"
+import { PAGE_UNITS, pageAt, strokesByPage, toPagePoint, type PageBox } from "./pdfInk"
 
 const EMPTY_DOC = emptyCanvasDoc()
 
@@ -25,16 +26,14 @@ type ViewerProps = Omit<ComponentProps<typeof PdfViewer>, "url" | "renderPageOve
 
 interface AnnotatedPdfViewerProps extends ViewerProps {
   path: string
-  /** Top-bar element the annotation tools render into. Without it the stylus writes with `pen` and nothing else annotates. */
-  toolbarSlot?: HTMLElement | null
-  /** Stylus ink when there is no toolbar, e.g. the host canvas's pen or highlighter. */
+  /** Stylus ink when the tab's top bar has no pdf slot for the annotation tools, e.g. the host canvas's pen or highlighter. Then nothing else annotates. */
   pen?: HostPen
   /** Show and accept ink on the pages only, margin notes stay hidden. */
   clipToPages?: boolean
 }
 
 /** PDF viewer with ink and highlighter annotations, shared by every copy of the same PDF. Falls back to the plain viewer when annotations are unavailable. */
-export function AnnotatedPdfViewer({ path, toolbarSlot, pen, clipToPages = false, ...viewerProps }: AnnotatedPdfViewerProps) {
+export function AnnotatedPdfViewer({ path, pen, clipToPages = false, ...viewerProps }: AnnotatedPdfViewerProps) {
   const [annotations, setAnnotations] = useState<{ path: string; key: string | null } | null>(null)
 
   useEffect(() => {
@@ -48,7 +47,7 @@ export function AnnotatedPdfViewer({ path, toolbarSlot, pen, clipToPages = false
   // Wait for the key, so the PDF loads once instead of again when ink arrives.
   if (annotations?.path !== path) return null
   if (!annotations.key) return <PdfViewer url={fileViewerRawUrl(path)} {...viewerProps} />
-  return <InkedPdfViewer canvasKey={annotations.key} path={path} toolbarSlot={toolbarSlot} pen={pen} clipToPages={clipToPages} viewerProps={viewerProps} />
+  return <InkedPdfViewer canvasKey={annotations.key} path={path} pen={pen} clipToPages={clipToPages} viewerProps={viewerProps} />
 }
 
 type Gesture =
@@ -58,10 +57,9 @@ type Gesture =
 /** Stroke being drawn, rendered by its page's overlay. */
 type LiveStroke = { page: number; highlight: boolean; color: string }
 
-function InkedPdfViewer({ canvasKey, path, toolbarSlot, pen, clipToPages, viewerProps }: {
+function InkedPdfViewer({ canvasKey, path, pen, clipToPages, viewerProps }: {
   canvasKey: string
   path: string
-  toolbarSlot?: HTMLElement | null
   pen?: HostPen
   clipToPages: boolean
   viewerProps: ViewerProps
@@ -77,7 +75,7 @@ function InkedPdfViewer({ canvasKey, path, toolbarSlot, pen, clipToPages, viewer
   const [live, setLive] = useState<LiveStroke | null>(null)
   const livePathRef = useRef<SVGPathElement>(null)
 
-  const pages = useMemo(() => strokesByPage(doc.strokes as PdfStroke[]), [doc.strokes])
+  const pages = useMemo(() => strokesByPage(doc.strokes), [doc.strokes])
 
   // Pointer handlers read the latest settings without re-binding mid-stroke.
   const settingsRef = useRef({ ink, pen, loaded })
@@ -98,12 +96,11 @@ function InkedPdfViewer({ canvasKey, path, toolbarSlot, pen, clipToPages, viewer
 
     const eraseAt = (clientX: number, clientY: number) => {
       const current = liveRef.current.doc
-      const strokes = current.strokes as PdfStroke[]
       const rects = new Map(pageBoxes().map(({ page, rect }) => [page, rect]))
       let changed = false
-      const kept: PdfStroke[] = []
-      for (const [page, pageStrokes] of strokesByPage(strokes)) {
-        const rect = rects.get(page)
+      const kept: StrokeData[] = []
+      for (const [page, pageStrokes] of strokesByPage(current.strokes)) {
+        const rect = page === undefined ? undefined : rects.get(page)
         const outsidePage = !rect || (clipToPages && (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom))
         if (outsidePage) { kept.push(...pageStrokes); continue }
         const [x, y] = toPagePoint(rect, clientX, clientY)
@@ -116,14 +113,10 @@ function InkedPdfViewer({ canvasKey, path, toolbarSlot, pen, clipToPages, viewer
       applyChange({ ...current, strokes: kept })
     }
 
-    /** Which gesture a press starts: the pen's eraser end always erases, the stylus writes even without a tool, the mouse needs one. */
+    /** Which gesture a press starts, once the annotations have loaded. */
     const gestureKind = (event: PointerEvent): "draw" | "erase" | null => {
       const { ink: { tool: selected }, loaded: ready } = settingsRef.current
-      if (!ready || event.pointerType === "touch") return null
-      if (event.pointerType === "pen" && (event.button === 5 || (event.buttons & 32) !== 0)) return "erase"
-      if (event.button !== 0) return null
-      if (event.pointerType === "mouse" && !selected) return null
-      return selected === "eraser" ? "erase" : "draw"
+      return ready ? pointerInkRole(event, selected) : null
     }
 
     const onPointerDown = (event: PointerEvent) => {
@@ -141,7 +134,7 @@ function InkedPdfViewer({ canvasKey, path, toolbarSlot, pen, clipToPages, viewer
         const highlight = host ? host.highlight : settings.highlighting
         const color = host ? host.color : settings.color
         const width = host ? host.width : settings.width
-        gesture = { kind, pointerId: event.pointerId, page, pageNumber: target.page, points: [[...toPagePoint(target.rect, event.clientX, event.clientY), penPressure(event)]], highlight, color, width }
+        gesture = { kind, pointerId: event.pointerId, page, pageNumber: target.page, points: [pointerSample(event, (x, y) => toPagePoint(target.rect, x, y))], highlight, color, width }
         setLive({ page: target.page, highlight, color })
       }
       // No text selection, no focus change, no native scroll for this pointer.
@@ -169,7 +162,7 @@ function InkedPdfViewer({ canvasKey, path, toolbarSlot, pen, clipToPages, viewer
       const points = finishStroke(finished.points, event, (x, y) => toPagePoint(finished.page.getBoundingClientRect(), x, y))
       setLive(null)
       if (!points) return
-      const stroke: PdfStroke = { ...newStroke(points, finished), page: finished.pageNumber }
+      const stroke: StrokeData = { ...newStroke(points, finished), page: finished.pageNumber }
       const current = liveRef.current.doc
       commit({ ...current, strokes: [...current.strokes, stroke] })
     }
@@ -205,8 +198,8 @@ function InkedPdfViewer({ canvasKey, path, toolbarSlot, pen, clipToPages, viewer
     return () => scroller.classList.remove("cursor-crosshair")
   }, [scroller, tool])
 
-  const hasToolbar = !!toolbarSlot
-  useEscapeLayer(ink.clearTool, hasToolbar && active && tool !== null)
+  const hasToolbar = useHasTopBarSlot("pdf")
+  useEscapeLayer(ink.clearTool, hasToolbar && tool !== null)
 
   // Undo and redo belong to the top-bar owner, a canvas host keeps its own.
   useUndoRedoKeys(undo, redo, hasToolbar && active, true)
@@ -226,22 +219,21 @@ function InkedPdfViewer({ canvasKey, path, toolbarSlot, pen, clipToPages, viewer
   return (
     <>
       <PdfViewer url={fileViewerRawUrl(path)} {...viewerProps} renderPageOverlay={renderPageOverlay} onScrollerChange={setScroller} />
-      {toolbarSlot && createPortal(
+      <InTopBar name="pdf">
         <div className="flex items-center gap-1">
           <InkTools ink={ink} />
           {SEPARATOR}
           <UndoRedoButtons onUndo={undo} onRedo={redo} canUndo={canUndo} canRedo={canRedo} />
           {saveFailed && <span role="status" className="ml-1 text-[10px] text-danger">Annotations not saved</span>}
-        </div>,
-        toolbarSlot,
-      )}
+        </div>
+      </InTopBar>
     </>
   )
 }
 
 /** One page's ink: highlights blend into the page under the pen strokes. Unclipped strokes spill into the margins. */
 const PageInk = memo(function PageInk({ strokes, scale, clip, live, livePathRef }: {
-  strokes: PdfStroke[] | undefined
+  strokes: StrokeData[] | undefined
   scale: number
   clip: boolean
   live: LiveStroke | null

@@ -1,15 +1,16 @@
 "use client"
 
 import { useCallback, useEffect, useState, useRef } from "react"
-import { motion, AnimatePresence } from "framer-motion"
+import { motion } from "framer-motion"
 import { Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { loadProject, addProjectCard, moveProjectCard, deleteProjectCard } from "@/lib/backend/api"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { Dialog } from "@/components/ui/Dialog"
 import { useResetOnOpen } from "@/hooks/useResetOnChange"
-import type { KanbanColumnId, ProjectData } from "@/lib/domain/types"
+import type { KanbanColumnId, ProjectData } from "@/lib/domain/projects"
 import { ElevationProvider, ElevatedContainer } from "@/components/ui/ElevatedContainer"
+import { BoardColumn } from "@/components/ui/BoardColumn"
 import { FloatingWindow } from "@/components/ui/FloatingWindow"
 
 const COLUMNS: { id: KanbanColumnId; label: string }[] = [
@@ -110,43 +111,46 @@ function AddCardModal({ open, onClose, onAdd, defaultState }: AddCardModalProps)
 /** Load one project's board and apply card changes to it. Remount per `slug` (via `key`) so a late response never lands on another project. */
 function useProjectBoard(slug: string, onLoadFailed: () => void) {
   const [projectData, setProjectData] = useState<ProjectData | null>(null)
+  // Newest board, so a change can read the card it replaces without a side effect inside a state updater.
+  const latest = useRef<ProjectData | null>(null)
   const onLoadFailedRef = useRef(onLoadFailed)
   useEffect(() => { onLoadFailedRef.current = onLoadFailed }, [onLoadFailed])
+
+  const change = useCallback((next: (data: ProjectData | null) => ProjectData | null) => {
+    latest.current = next(latest.current)
+    setProjectData(latest.current)
+  }, [])
 
   useEffect(() => {
     let stale = false
     loadProject(slug).then(
-      (data) => { if (!stale) setProjectData(data) },
+      (data) => { if (!stale) change(() => data) },
       () => { if (!stale) onLoadFailedRef.current() },
     )
     return () => { stale = true }
-  }, [slug])
+  }, [slug, change])
 
   const addCard = useCallback(async (title: string, description: string, state: string = "backlog") => {
     const card = await addProjectCard(slug, title, description, state)
-    setProjectData((prev) => prev ? { ...prev, kanban: [...prev.kanban, card] } : prev)
-  }, [slug])
+    change((prev) => prev ? { ...prev, kanban: [...prev.kanban, card] } : prev)
+  }, [slug, change])
 
   const moveCard = useCallback(async (cardId: string, state: KanbanColumnId) => {
-    // Optimistic move. `originalCard` is captured inside the updater so a failed call can restore it.
-    let originalCard: Card | undefined
-    setProjectData((prev) => {
-      originalCard = prev?.kanban.find((c) => c.id === cardId)
-      return patchCard(prev, cardId, (card) => ({ ...card, state }))
-    })
+    // Optimistic move; a failed call restores the card as it was.
+    const original = latest.current?.kanban.find((c) => c.id === cardId)
+    change((prev) => patchCard(prev, cardId, (card) => ({ ...card, state })))
     try {
       const updated = await moveProjectCard(slug, cardId, state)
-      setProjectData((prev) => patchCard(prev, cardId, () => updated))
+      change((prev) => patchCard(prev, cardId, () => updated))
     } catch {
-      const original = originalCard
-      if (original) setProjectData((prev) => patchCard(prev, cardId, () => original))
+      if (original) change((prev) => patchCard(prev, cardId, () => original))
     }
-  }, [slug])
+  }, [slug, change])
 
   const deleteCard = useCallback(async (cardId: string) => {
     await deleteProjectCard(slug, cardId)
-    setProjectData((prev) => prev ? { ...prev, kanban: prev.kanban.filter((c) => c.id !== cardId) } : prev)
-  }, [slug])
+    change((prev) => prev ? { ...prev, kanban: prev.kanban.filter((c) => c.id !== cardId) } : prev)
+  }, [slug, change])
 
   return { projectData, addCard, moveCard, deleteCard }
 }
@@ -193,117 +197,105 @@ export function ProjectDashboard({ slug, onClose }: { slug: string; onClose: () 
                   const isOver = dragOverCol === col.id
 
                   return (
-                    <ElevatedContainer
+                    <BoardColumn
                       key={col.id}
-                      className={cn(
-                        "flex-1 flex flex-col min-w-0 min-h-0 rounded-2xl border overflow-hidden transition-all duration-200",
-                        isOver ? "border-divider-strong" : "border-divider/40",
-                      )}
-                    >
-                      <div className="flex items-center justify-between px-4 pt-4 pb-3 select-none shrink-0">
-                        <div className="flex items-center gap-2">
-                           <span className="text-[11px] font-bold text-ink-muted uppercase tracking-[0.2em] tabular-nums">
-                             {col.label}
-                           </span>
-                           <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-surface-elevated text-ink tabular-nums">
-                            {cards.length}
-                          </span>
-                        </div>
+                      title={col.label}
+                      count={cards.length}
+                      className={cn("min-w-0 transition-all duration-200", isOver ? "border-divider-strong" : "border-divider/40")}
+                      action={
                         <button aria-label={`Add card to ${col.label}`}
                           onClick={() => setAddModalState(col.id)}
                           className="p-1 rounded-md text-ink-subtle hover:text-ink hover:bg-hover transition-all duration-200"
                         >
                           <Plus className="h-4 w-4" />
                         </button>
-                      </div>
-
-                      <div
-                        onDragOver={(e) => { e.preventDefault() }}
-                        onDragEnter={(e) => {
+                      }
+                      bodyProps={{
+                        onDragOver: (e) => { e.preventDefault() },
+                        onDragEnter: (e) => {
                           e.preventDefault()
                           dragCounters.current[col.id] = (dragCounters.current[col.id] ?? 0) + 1
                           setDragOverCol(col.id)
-                        }}
-                        onDragLeave={() => {
+                        },
+                        onDragLeave: () => {
                           dragCounters.current[col.id] = Math.max(0, (dragCounters.current[col.id] ?? 1) - 1)
                           if (dragCounters.current[col.id] === 0) setDragOverCol(null)
-                        }}
-                        onDrop={(e) => {
+                        },
+                        onDrop: (e) => {
                           const cardId = e.dataTransfer.getData("text/plain")
                           dragCounters.current[col.id] = 0
                           setDragOverCol(null)
                           setDraggedCardId(null)
                           if (cardId) moveCard(cardId, col.id)
-                        }}
-                        className="flex-1 overflow-y-auto space-y-2.5 px-4 pb-4 scrollbar-thin transition-all duration-200"
-                      >
-                        <AnimatePresence mode="popLayout" initial={false}>
-                          {cards.map((card) => (
-                            <motion.div
-                              key={card.id}
-                              layout
-                              initial={{ opacity: 0, scale: 0.95 }}
-                              animate={{ 
-                                opacity: draggedCardId === card.id ? 0 : 1,
-                                scale: 1 
-                              }}
-                              exit={{ opacity: 0, scale: 0.95 }}
-                              transition={{ duration: 0.2 }}
-                            >
-                              <ElevatedContainer
-                                draggable
-                                onDragStart={(e) => {
-                                  e.dataTransfer.setData("text/plain", card.id)
-                                  // Defer so the drag image is captured before the original fades out
-                                  setTimeout(() => setDraggedCardId(card.id), 0)
-                                }}
-                                onDragEnd={() => {
-                                  dragCounters.current = emptyCounters()
-                                  setDraggedCardId(null)
-                                  setDragOverCol(null)
-                                }}
-                                // Click advances the card one column, cycling
-                                onClick={() => moveCard(card.id, NEXT_STATE[col.id])}
-                                // Right-click moves the card back one column
-                                onContextMenu={(e) => {
-                                  e.preventDefault()
-                                  moveCard(card.id, PREV_STATE[col.id])
-                                }}
-                                hoverLift
-                                className="group relative w-full rounded-xl border border-divider/40 overflow-hidden cursor-grab active:cursor-grabbing select-none transition-all duration-300 shadow-[var(--shadow-md)]"
-                              >
-                                <div className="p-4 flex flex-col gap-1 pr-6">
-                                  <span className="text-sm font-semibold text-ink">
-                                    {card.title}
-                                  </span>
-                                  {card.description && (
-                                    <span className="text-xs text-ink-muted leading-relaxed mt-1 line-clamp-2">
-                                      {card.description}
-                                    </span>
-                                  )}
-                                </div>
-
-                                <button
-                                  aria-label={`Delete ${card.title}`}
-                                  onClick={(event) => {
-                                    event.stopPropagation()
-                                    schedule(`card:${slug}:${card.id}`, card.title, () => deleteCard(card.id))
-                                  }}
-                                  className="absolute top-3 right-3 shrink-0 opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-danger-soft text-ink-faint hover:text-danger transition-all"
-                                >
-                                  <X className="h-3.5 w-3.5" />
-                                </button>
-                              </ElevatedContainer>
-                            </motion.div>
-                          ))}
-                        </AnimatePresence>
-
-                        {/* Placeholder showing where the dragged card will land */}
-                        {isOver && draggedCardId && (
+                        },
+                        className: "flex-1 space-y-2.5 transition-all duration-200",
+                      }}
+                      footer={
+                        // Placeholder showing where the dragged card will land
+                        isOver && draggedCardId && (
                           <div className="w-full p-4 rounded-xl border border-dashed border-divider bg-overlay/60 h-16" />
-                        )}
-                      </div>
-                    </ElevatedContainer>
+                        )
+                      }
+                    >
+                      {cards.map((card) => (
+                        <motion.div
+                          key={card.id}
+                          layout
+                          initial={{ opacity: 0, scale: 0.95 }}
+                          animate={{
+                            opacity: draggedCardId === card.id ? 0 : 1,
+                            scale: 1
+                          }}
+                          exit={{ opacity: 0, scale: 0.95 }}
+                          transition={{ duration: 0.2 }}
+                        >
+                          <ElevatedContainer
+                            draggable
+                            onDragStart={(e) => {
+                              e.dataTransfer.setData("text/plain", card.id)
+                              // Defer so the drag image is captured before the original fades out
+                              setTimeout(() => setDraggedCardId(card.id), 0)
+                            }}
+                            onDragEnd={() => {
+                              dragCounters.current = emptyCounters()
+                              setDraggedCardId(null)
+                              setDragOverCol(null)
+                            }}
+                            // Click advances the card one column, cycling
+                            onClick={() => moveCard(card.id, NEXT_STATE[col.id])}
+                            // Right-click moves the card back one column
+                            onContextMenu={(e) => {
+                              e.preventDefault()
+                              moveCard(card.id, PREV_STATE[col.id])
+                            }}
+                            hoverLift
+                            className="group relative w-full rounded-xl border border-divider/40 overflow-hidden cursor-grab active:cursor-grabbing select-none transition-all duration-300 shadow-[var(--shadow-md)]"
+                          >
+                            <div className="p-4 flex flex-col gap-1 pr-6">
+                              <span className="text-sm font-semibold text-ink">
+                                {card.title}
+                              </span>
+                              {card.description && (
+                                <span className="text-xs text-ink-muted leading-relaxed mt-1 line-clamp-2">
+                                  {card.description}
+                                </span>
+                              )}
+                            </div>
+
+                            <button
+                              aria-label={`Delete ${card.title}`}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                schedule(`card:${slug}:${card.id}`, card.title, () => deleteCard(card.id))
+                              }}
+                              className="absolute top-3 right-3 shrink-0 opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-danger-soft text-ink-faint hover:text-danger transition-all"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </ElevatedContainer>
+                        </motion.div>
+                      ))}
+                    </BoardColumn>
                   )
                 })}
               </div>

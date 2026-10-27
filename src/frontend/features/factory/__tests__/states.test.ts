@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { allowedActions } from "@/features/factory/states"
-import type { TaskState } from "@/lib/domain/types"
+import type { TaskState } from "@/lib/domain/factory"
 
 describe("allowedActions", () => {
   const none = { start: false, approve: false, retry: false, cancel: false, message: false, restartPreview: false }

@@ -1,239 +1,81 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { FolderOpen, Library, PanelLeft, PanelLeftClose, X } from "lucide-react"
+import { useState } from "react"
+import { PanelLeft, PanelLeftClose } from "lucide-react"
 import { Sidebar } from "@/features/navigation/Sidebar"
+import { useSidebar } from "@/features/navigation/SidebarContext"
 import { ChatContainer, type ChatFocus } from "@/features/chat/ChatContainer"
-import type { AttachMenuItem, ChatInputHandle } from "@/features/chat/composer/ChatInput"
-import { ArchitectureIcon } from "@/components/ui/ArchitectureIcon"
 import { useContentAreaRef } from "@/components/ui/ContentArea"
-import { ModelDropdown } from "@/features/settings/ModelDropdown"
 import { SettingsMenu } from "@/features/settings/SettingsMenu"
 import { PromptEditor } from "@/features/settings/PromptEditor"
-import { ReasoningSelector, effectiveReasoningEffort, useReasoningLevels } from "@/features/settings/ReasoningSelector"
-import { ThemeToggle } from "@/features/settings/ThemeToggle"
 import { SaveAsModal } from "@/components/ui/SaveAsModal"
 import { FileViewer } from "@/features/editor/FileViewer"
 import { DocumentPicker } from "@/features/editor/DocumentPicker"
 import { DocumentEditor } from "@/features/editor/DocumentEditor"
-import { DiffViewer } from "@/features/editor/diff/DiffViewer"
-import { FilePanelSlot, FilePanelToggle } from "@/features/editor/FilePanel"
-import { PdfAssistant } from "@/features/editor/pdf/PdfAssistant"
-import { CanvasWorkspace } from "@/features/editor/canvas/CanvasWorkspace"
-import { ArchitectureWindow } from "@/features/editor/architecture/ArchitectureWindow"
-import { FactorySurface } from "@/features/factory/FactorySurface"
-import { OmpModelSelector, OmpReasoningSelector } from "@/features/omp/OmpComposer"
-import { OmpSurface } from "@/features/omp/OmpSurface"
-import { OmpSystemPrompt } from "@/features/omp/OmpSystemPrompt"
-import { TabSwitcher } from "@/features/navigation/TabManager"
-import { TokenCounter } from "@/features/chat/TokenCounter"
-import { TopBar, TopBarPill, TopBarTransparent } from "@/features/navigation/TopBar"
+import { FilePanelSlot } from "@/features/editor/FilePanel"
+import { TopBarSlotProvider } from "@/features/navigation/TopBarSlots"
 import { RawFileView } from "@/features/editor/RawFileView"
-import { LazyAnnotatedPdfViewer } from "@/features/editor/pdf/LazyAnnotatedPdfViewer"
-import { useBranches } from "@/features/navigation/BranchContext"
 import { useEnabledTools } from "@/features/chat/EnabledToolsContext"
-import { useSidebar } from "@/features/navigation/SidebarContext"
-import { useTab, type WorkspaceItem } from "@/contexts/TabContext"
+import { itemOf, useTab, type WorkspaceItem } from "@/contexts/TabContext"
 import { useCanvasView } from "@/features/editor/canvas/useCanvasView"
-import { useChat } from "@/features/chat/useChat"
-import { useChatPersistence } from "@/features/chat/useChatPersistence"
-import { useChatTurns } from "@/features/chat/useChatTurns"
-import { useFilePicker } from "@/features/chat/useFilePicker"
-import { useMemoryCommandBar } from "@/features/memory/useMemoryCommandBar"
-import { useProjectDocuments } from "@/features/chat/useProjectDocuments"
-import { useSlashCommands } from "@/features/navigation/useSlashCommands"
-import { loadChatHistory, writeRootFile } from "@/lib/backend/api"
-import { liveReferencePaths, normalizeMessageAttachments } from "@/features/chat/attachments"
-import { parseHistoryFile } from "@/lib/domain/historyFile"
-import { isEditableTarget, isNeovimKeyEvent } from "@/lib/utils"
-import { useEventListener } from "@/hooks/useEventListener"
+import { writeRootFile } from "@/lib/backend/api"
 import { MemoryCommandLayer } from "./MemoryCommandLayer"
+import { useTabChat } from "./useTabChat"
+import { WorkspaceSurface, type ModelProps } from "./WorkspaceSurface"
 
-/** One tab's workspace: the chat (or canvas) with its sidebar, top bar, modals and keyboard shortcuts. */
-export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewChat, onOpenItem, focus }: {
+interface TabContentProps {
   onOpenChat: (historyFile: string, qaIndex?: number) => void
   onOpenProject: (slug: string) => void
   onProjectRenamed: (oldSlug: string, newSlug: string) => void
   onNewChat: (slug: string | null) => void
   onOpenItem: (item: WorkspaceItem, inNewTab?: boolean) => void
   focus: ChatFocus
-}) {
-  const { tab, isActive, setModeLabel, updateConfig, setAppMode, setWorkspaceItem, setHistoryFile, setTitle } = useTab()
-  const projectSlug = tab.projectSlug
-  const documentItem = tab.workspaceItem?.kind === "document" ? tab.workspaceItem : null
-  const diffItem = tab.workspaceItem?.kind === "diff" ? tab.workspaceItem : null
-  const ompItem = tab.workspaceItem?.kind === "omp" ? tab.workspaceItem : null
-  const factoryItem = tab.workspaceItem?.kind === "factory" ? tab.workspaceItem : null
-  const ompView = ompItem?.omp ?? null
-  const chat = useChat()
-  const { messages, isStreaming, cancel, reset, models, modelLoadError, saveModelProviders, saveModelTabOrder, saveModelDefaults, prompts, setPrompts, setMessages, totalUsage, setTotalUsage } = chat
-  const { refreshAll, createBranch, setActiveFile, setActiveQaIndex } = useBranches()
+}
+
+/** One tab's workspace: the chat (or canvas) with its sidebar, top bar, modals and keyboard shortcuts. */
+export function TabContent(props: TabContentProps) {
+  return <TopBarSlotProvider><TabWorkspace {...props} /></TopBarSlotProvider>
+}
+
+/** The tab's sidebar, surfaces and the top bar whose slots they render their controls into. */
+function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onNewChat, onOpenItem, focus }: TabContentProps) {
+  const { tab, isActive, setModeLabel, updateConfig } = useTab()
+  const { projectSlug, config, appMode } = tab
   const { researchEnabled } = useEnabledTools()
   const { collapsed: sidebarCollapsed, toggleCollapsed: toggleSidebar } = useSidebar()
   const contentAreaRef = useContentAreaRef()
-
-  const config = tab.config
-  const appMode = tab.appMode
-  const reasoningLevels = useReasoningLevels(config.selectedModel)
-  const reasoningEffort = effectiveReasoningEffort(reasoningLevels, config.reasoningEffort)
-  const usage = totalUsage.total_tokens > 0 ? totalUsage : undefined
-
-  const [chatId, setChatId] = useState(() => tab.chatId)
-  const [loadedBranch, setLoadedBranch] = useState<{ historyFile: string | undefined; messageIdx: number | null }>({ historyFile: undefined, messageIdx: null })
-  // Index where this chat branched off its parent, null for a main chat or while its history loads.
-  const branchMessageIdx = loadedBranch.historyFile === tab.historyFile ? loadedBranch.messageIdx : null
-  const [extracting, setExtracting] = useState(0)
   const [promptEditorOpen, setPromptEditorOpen] = useState(false)
-  const [wideToggleSlot, setWideToggleSlot] = useState<HTMLElement | null>(null)
-  const [pdfToolbarSlot, setPdfToolbarSlot] = useState<HTMLElement | null>(null)
-  const [pdfChatOpen, setPdfChatOpen] = useState(false)
   const [chatColumn, setChatColumn] = useState<HTMLDivElement | null>(null)
-  const chatInputRef = useRef<ChatInputHandle>(null)
-  const loadIdRef = useRef(0)
+  const canvas = useCanvasView()
+  const {
+    chat, chatId, branchMessageIdx, extracting, chatInputRef, reasoningLevels, reasoningEffort,
+    filePicker, docs, persistence, memory, menuItems, runMenuCommand, turns, attachmentActions, attachMenuItems, onBranch,
+  } = useTabChat({ focus, onOpenChat })
+  const { models, prompts, setPrompts } = chat
+  const { standaloneFile } = filePicker
+  const modelProps: ModelProps = { models, loadError: chat.modelLoadError, onProvidersChange: chat.saveModelProviders, onTabOrderChange: chat.saveModelTabOrder, onDefaultsChange: chat.saveModelDefaults, placement: "below" }
 
-  const { view: canvasView, sidebarProps: canvasSidebarProps, navigateArchitecture, closeCanvas, openCreatedCanvas, architectureEdgeStyle, setArchitectureEdgeStyle, toolbarSlots, setDrawingSlot, setViewSlot } = useCanvasView()
-  const filePicker = useFilePicker({ isActive, hasMessages: messages.length > 0, chatInputRef, setExtracting })
-  const docs = useProjectDocuments({ isActive, appMode, projectSlug, chatId, chatInputRef, setExtracting })
-  const persistence = useChatPersistence({ tab, projectSlug, messages, chatId, usage, refreshAll, setHistoryFile })
-  const memory = useMemoryCommandBar({ messages, chatId, branchMessageIdx })
-  const { menuItems, runSlashCommand } = useSlashCommands({
-    filesEnabled: filePicker.filesEnabled,
-    hasProject: projectSlug != null,
-    openFilePicker: filePicker.openFilePicker,
-    memorize: memory.memorize,
-  })
-  const turns = useChatTurns({
-    chat,
-    chatId,
-    projectSlug,
-    config,
-    reasoningEffort,
-    prompts,
-    autosave: persistence.handleAutosave,
-    refreshDocuments: docs.refreshDocuments,
-    runSlashCommand,
-  })
-  const { syncReferences } = turns
-
-  // A new tab has a blank selectedModel (DEFAULT_TAB_CONFIG). Seed it from the
-  // configured default chat model. Never hardcode a fallback name here.
-  useEffect(() => {
-    if (!config.selectedModel && models?.defaults.default_model) updateConfig({ selectedModel: models.defaults.default_model })
-  }, [config.selectedModel, models, updateConfig])
-
-  useEffect(() => {
-    if (isActive) setActiveFile(tab.historyFile)
-  }, [isActive, tab.historyFile, setActiveFile])
-
-  useEffect(() => {
-    if (isActive) setActiveQaIndex(focus.qaIndex)
-  }, [isActive, focus.qaIndex, setActiveQaIndex])
-  useEffect(() => cancel, [cancel])
-
-
-  useEffect(() => {
-    if (!tab.historyFile) return
-    const historyFile = tab.historyFile
-    const loadId = ++loadIdRef.current
-    setMessages([])
-    setTotalUsage({ total_tokens: 0, prompt_tokens: 0, completion_tokens: 0 })
-    // Project chats load by their own slug, so switching projects never reloads open tabs.
-    const { slug } = parseHistoryFile(historyFile)
-    loadChatHistory(historyFile).then((data) => {
-      if (loadIdRef.current !== loadId) return
-      if (data.messages.length > 0) {
-        const loaded = data.messages.map((m) => normalizeMessageAttachments(m, data.chat_id, slug))
-        setMessages(loaded)
-        void syncReferences(liveReferencePaths(loaded.flatMap((m) => m.attachments ?? [])))
-      }
-      if (data.chat_id) setChatId(data.chat_id)
-      if (data.title) setTitle(data.title)
-      if (data.usage) setTotalUsage(data.usage)
-      setLoadedBranch({ historyFile, messageIdx: data.branch_message_idx ?? null })
-    }).catch(() => { })
-    return () => { loadIdRef.current++ }
-  }, [tab.historyFile, setMessages, setTitle, setTotalUsage, syncReferences])
-
-  // Capture phase so the shortcuts win over handlers inside focused editors.
-  useEventListener("window", "keydown", (e) => {
-    if (isNeovimKeyEvent(e)) return
-    if (e.altKey && e.key === "s") {
-      e.preventDefault()
-      if (persistence.isTitled) persistence.handleQuickSave()
-      else persistence.setSaveModalOpen(true)
-    }
-    if (e.altKey && e.key === "r") { e.preventDefault(); reset() }
-    if (e.altKey && e.key.toLowerCase() === "m") {
-      e.preventDefault()
-      if (memory.isIdle) void memory.memorize(null)
-    }
-    if (e.altKey && e.key.toLowerCase() === "o") {
-      e.preventDefault()
-      if (filePicker.filesEnabled) filePicker.openFilePicker()
-    }
-
-    const isSlash = e.key === "/" && !e.altKey && !e.ctrlKey && !e.metaKey
-    const isCtrlK = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k"
-
-    if (isSlash || isCtrlK) {
-      if (isSlash && isEditableTarget(e.target)) return
-      e.preventDefault()
-      e.stopPropagation()
-      e.stopImmediatePropagation()
-      if (memory.isIdle) {
-        memory.openMenu()
-      }
-    }
-  }, { active: isActive && appMode === "chat", capture: true })
-
-  // Picking a menu entry always closes the menu first; memorizing then replaces it with the review panel.
-  const { closeMenu: closeMemoryMenu } = memory
-  const runMenuCommand = useCallback((command: string) => {
-    closeMemoryMenu()
-    void runSlashCommand(command)
-  }, [closeMemoryMenu, runSlashCommand])
-
-  const attachmentActions = useMemo(() => ({
-    onToggleActive: turns.handleToggleAttachmentActive,
-    onRemove: turns.handleRemoveAttachment,
-    onContentChange: turns.handleAttachmentContentChange,
-    onPreviewOpen: (path: string) => syncReferences([path]),
-  }), [turns.handleToggleAttachmentActive, turns.handleRemoveAttachment, turns.handleAttachmentContentChange, syncReferences])
-
-  const { handleAttachArchitecture } = docs
-  const attachMenuItems = useMemo<AttachMenuItem[]>(() => [
-    ...(filePicker.filesEnabled ? [{ label: "Mounted file", icon: FolderOpen, onClick: filePicker.openFilePicker }] : []),
-    ...(projectSlug ? [{ label: "Project document", icon: Library, onClick: docs.openDocuments }] : []),
-    ...(handleAttachArchitecture ? [{ label: "Architecture", icon: ArchitectureIcon, onClick: () => void handleAttachArchitecture() }] : []),
-  ], [filePicker.filesEnabled, filePicker.openFilePicker, projectSlug, docs.openDocuments, handleAttachArchitecture])
-
-  const handleBranch = useCallback((qaIndex: number) => {
-    if (!tab.historyFile) return
-    createBranch(tab.historyFile, qaIndex).then(({ childFile }) => {
-      onOpenChat(childFile)
-    })
-  }, [tab.historyFile, createBranch, onOpenChat])
-
-  const sidebarToggle = (
-    <button
-      aria-label={sidebarCollapsed ? "Open sidebar" : "Close sidebar"}
-      onClick={toggleSidebar}
-      className="shrink-0 rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
-    >
-      {sidebarCollapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-    </button>
+  const chatBody = (
+    <ChatContainer
+      chatId={chatId}
+      onChatColumnChange={setChatColumn}
+      messages={chat.messages}
+      isStreaming={chat.isStreaming}
+      onDeletePair={turns.handleDeletePair}
+      extracting={extracting}
+      onSend={turns.handleSend}
+      onCancel={chat.cancel}
+      onRegenerate={turns.handleRegenerate}
+      onBranch={onBranch}
+      focus={focus}
+      branchMessageIdx={branchMessageIdx}
+      chatInputRef={chatInputRef}
+      slug={projectSlug}
+      attachmentActions={attachmentActions}
+      attachMenuItems={attachMenuItems}
+      composerNotice={docs.architectureError || undefined}
+    />
   )
-  const filePanelToggle = <TopBarTransparent><FilePanelToggle /></TopBarTransparent>
-  const modelProps = { models, loadError: modelLoadError, onProvidersChange: saveModelProviders, onTabOrderChange: saveModelTabOrder, onDefaultsChange: saveModelDefaults, placement: "below" as const }
-  /** Top bar with the sidebar toggle and tab switcher every mode shows. */
-  const topBar = (left: ReactNode, right: ReactNode) => (
-    <TopBar center={<TabSwitcher />} left={<><TopBarTransparent>{sidebarToggle}</TopBarTransparent>{left}</>} right={right} />
-  )
-  const isPdfDocument = appMode === "document" && !diffItem && !!documentItem?.path.toLowerCase().endsWith(".pdf")
-  // Scrolling surfaces run on under the floating TopBar. The rest start below it.
-  const surfaceRunsUnderTopBar = appMode === "canvas" ? canvasView.kind !== "architecture"
-    : appMode === "document" ? isPdfDocument
-    : appMode !== "omp" && appMode !== "factory"
 
   return (
     <div className="relative flex h-full overflow-hidden">
@@ -242,12 +84,12 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
         onDiffSelect={(path) => onOpenItem({ kind: "diff", path, projectSlug: null })}
         onRootsChanged={filePicker.refreshFileList}
         onDocumentsChanged={docs.refreshDocuments}
-        {...canvasSidebarProps}
+        {...canvas.sidebarProps}
         onProjectSelect={onOpenProject}
         onProjectRenamed={onProjectRenamed}
         onNewChat={onNewChat}
         onDocumentSelect={(path, scope) => onOpenItem({ kind: "document", path, projectSlug: scope || null })}
-        activeDocumentPath={appMode === "document" ? documentItem?.path : null}
+        activeDocumentPath={appMode === "document" ? itemOf(tab, "document")?.path : null}
         onCanvasSelect={(path, scope) => onOpenItem({ kind: "canvas", path, projectSlug: scope || null })}
         onArchitectureSelect={(slug) => onOpenItem({ kind: "architecture", path: `graph/${slug}/`, projectSlug: slug })}
         onItemOpen={onOpenItem}
@@ -257,147 +99,49 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
         appMode={appMode}
       />
       <main ref={contentAreaRef} className="flex-1 min-w-0 flex flex-col relative bg-paper">
-        {appMode === "canvas" ? topBar(
-          <TopBarPill ref={setDrawingSlot} />,
-          <>
-            <TopBarPill>
-              <div ref={setViewSlot} className="contents" />
-              <ThemeToggle />
-            </TopBarPill>
-            {filePanelToggle}
-          </>,
-        ) : appMode === "omp" ? topBar(
-          <>
-            {ompView && <TopBarPill>
-              <OmpReasoningSelector view={ompView} />
-            </TopBarPill>}
-            {ompView && <TopBarTransparent>
-              <OmpModelSelector view={ompView} {...modelProps} />
-            </TopBarTransparent>}
-          </>,
-          <>
-            <TopBarPill>
-              {ompView && <OmpSystemPrompt view={ompView} />}
-              <ThemeToggle />
-            </TopBarPill>
-            {filePanelToggle}
-          </>,
-        ) : appMode === "factory" ? topBar(
-          null,
-          <><TopBarPill><ThemeToggle /></TopBarPill>{filePanelToggle}</>,
-        ) : appMode === "document" ? topBar(
-          <TopBarTransparent>
-            <ModelDropdown selectedModel={config.selectedModel} onSelect={(model) => updateConfig({ selectedModel: model })} {...modelProps} />
-          </TopBarTransparent>,
-          <>
-            {isPdfDocument && <TopBarPill ref={setPdfToolbarSlot} />}
-            <TopBarTransparent>
-              <ThemeToggle />
-              <button aria-label="Close file" onClick={() => setAppMode("chat")} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover">
-                <X className="h-4 w-4" />
-              </button>
-            </TopBarTransparent>
-            {!isPdfDocument && filePanelToggle}
-          </>,
-        ) : topBar(
-          <>
-            <TopBarPill>
-              <ReasoningSelector levels={reasoningLevels} reasoningEffort={reasoningEffort} onReasoningChange={(v) => updateConfig({ reasoningEffort: v })} placement="below" />
-            </TopBarPill>
-            <TopBarTransparent>
-              <ModelDropdown selectedModel={config.selectedModel} onSelect={(m) => updateConfig({ selectedModel: m })} {...modelProps} chatColumn={chatColumn} />
-            </TopBarTransparent>
-            <TopBarTransparent ref={setWideToggleSlot} />
-          </>,
-          <>
-            <TopBarPill>
-              <TokenCounter usage={totalUsage} />
-              <ThemeToggle />
-            </TopBarPill>
-            {filePanelToggle}
-          </>,
-        )}
-        <div data-workspace-surface className={`absolute inset-x-0 bottom-0 ${surfaceRunsUnderTopBar ? "top-0" : "top-11"} ${appMode === "canvas" ? "overflow-hidden" : ""}`}>
-          {appMode === "omp" && ompItem && ompView ? (
-            <OmpSurface view={ompView} onViewChange={(omp) => setWorkspaceItem({ ...ompItem, omp })} />
-          ) : appMode === "factory" && factoryItem ? (
-            <FactorySurface item={factoryItem} />
-          ) : appMode === "document" && diffItem ? (
-            <DiffViewer key={diffItem.path} root={diffItem.path} />
-          ) : appMode === "document" && documentItem ? (
-            isPdfDocument ? (
-              <PdfAssistant key={documentItem.path} path={documentItem.path} model={config.selectedModel} chatOpen={pdfChatOpen} onChatOpenChange={setPdfChatOpen} topInset={44}>
-                <LazyAnnotatedPdfViewer path={documentItem.path} topInset={44} toolbarSlot={pdfToolbarSlot} />
-              </PdfAssistant>
-            ) : (
-              <DocumentEditor
-                path={documentItem.path}
-                slug={documentItem.projectSlug ?? ""}
-                overlay
-                persistOverride={documentItem.rootFile ? (content) => writeRootFile(documentItem.path, content) : undefined}
-                onClose={() => setAppMode("chat")}
-                onSaved={docs.refreshDocuments}
-                onModeLabel={setModeLabel}
-                onNavigate={(path) => setWorkspaceItem({ ...documentItem, path })}
-                model={config.selectedModel}
-              />
-            )
-          ) : appMode === "canvas" && canvasView.kind === "architecture" ? (
-            <ArchitectureWindow path={canvasView.path} maximized hostScale={1} edgeStyle={architectureEdgeStyle} onEdgeStyleChange={setArchitectureEdgeStyle} onNavigate={navigateArchitecture} toolbarSlots={toolbarSlots} />
-          ) : appMode === "canvas" ? (
-            <CanvasWorkspace
-              selected={canvasView.kind === "canvas" ? canvasView.selection : null}
-              slug={projectSlug}
-              toolbarSlots={toolbarSlots}
-              onCloseEditor={closeCanvas}
-              onCreated={openCreatedCanvas}
-              onModeLabel={setModeLabel}
-              editorModel={config.selectedModel}
-            />
-          ) : (
-            <ChatContainer
-              chatId={chatId}
-              onChatColumnChange={setChatColumn}
-              messages={messages}
-              isStreaming={isStreaming}
-              onDeletePair={turns.handleDeletePair}
-              extracting={extracting > 0}
-              onSend={turns.handleSend}
-              onCancel={cancel}
-              onRegenerate={turns.handleRegenerate}
-              onBranch={tab.historyFile ? handleBranch : undefined}
-              focus={focus}
-              branchMessageIdx={branchMessageIdx}
-              chatInputRef={chatInputRef}
-              slug={projectSlug}
-              attachmentActions={attachmentActions}
-              attachMenuItems={attachMenuItems}
-              composerNotice={docs.architectureError || undefined}
-              wideToggleSlot={wideToggleSlot}
-            />
-          )}
-        </div>
-        {isActive && (filePicker.fileEditPath || filePicker.filePdfPath) && (
+        <WorkspaceSurface
+          sidebarToggle={
+            <button
+              aria-label={sidebarCollapsed ? "Open sidebar" : "Close sidebar"}
+              onClick={toggleSidebar}
+              className="shrink-0 rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
+            >
+              {sidebarCollapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+            </button>
+          }
+          canvas={canvas}
+          modelProps={modelProps}
+          reasoningLevels={reasoningLevels}
+          reasoningEffort={reasoningEffort}
+          totalUsage={chat.totalUsage}
+          chatColumn={chatColumn}
+          chatBody={chatBody}
+          refreshDocuments={docs.refreshDocuments}
+        />
+        {isActive && standaloneFile && (
           // File-picker overlays sit below the bar, over whatever surface is open.
           <div className="absolute inset-x-0 top-11 bottom-0">
-            {filePicker.fileEditPath && (
-              <DocumentEditor
-                path={filePicker.fileEditPath}
-                slug=""
-                overlay
-                persistOverride={(content) => writeRootFile(filePicker.fileEditPath!, content)}
-                onClose={() => filePicker.setFileEditPath(null)}
-                onModeLabel={setModeLabel}
-                onNavigate={filePicker.setFileEditPath}
-                model={config.selectedModel}
-              />
+            {/* Its own scope: a canvas opened here keeps its toolbar inline, the top bar belongs to the surface underneath. */}
+            {standaloneFile.kind === "edit" && (
+              <TopBarSlotProvider>
+                <DocumentEditor
+                  path={standaloneFile.path}
+                  slug=""
+                  overlay
+                  persistOverride={(content) => writeRootFile(standaloneFile.path, content)}
+                  onClose={() => filePicker.setStandaloneFile(null)}
+                  onModeLabel={setModeLabel}
+                  onNavigate={(path) => filePicker.setStandaloneFile({ kind: "edit", path })}
+                  model={config.selectedModel}
+                />
+              </TopBarSlotProvider>
             )}
-            {filePicker.filePdfPath && (
+            {standaloneFile.kind === "pdf" && (
               <div className="absolute inset-0 z-50 flex flex-col bg-paper">
                 <div className="flex h-9 shrink-0 items-center border-b border-divider/50 px-4">
-                  <span className="truncate text-xs font-medium text-ink">{filePicker.filePdfPath.split("/").pop()}</span>
+                  <span className="truncate text-xs font-medium text-ink">{standaloneFile.path.split("/").pop()}</span>
                 </div>
-                <RawFileView path={filePicker.filePdfPath} kind="pdf" />
+                <RawFileView path={standaloneFile.path} kind="pdf" />
               </div>
             )}
           </div>
@@ -406,9 +150,9 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
       <FilePanelSlot />
       <SaveAsModal open={persistence.saveModalOpen} onClose={() => persistence.setSaveModalOpen(false)} onSave={persistence.handleSaveSubmit} />
       <PromptEditor open={promptEditorOpen} onClose={() => setPromptEditorOpen(false)} onPromptsChanged={setPrompts} />
-      {isActive && filePicker.filePickerOpen && filePicker.filesEnabled && (
+      {isActive && filePicker.filePickerOpen && filePicker.rootFiles.enabled && (
         <FileViewer
-          files={filePicker.pickerFiles.map((f) => f.path)}
+          files={filePicker.rootFiles.files.map((f) => f.path)}
           onSelect={filePicker.handleFileSelect}
           onClose={() => filePicker.setFilePickerOpen(false)}
           placeholder="Search files…"

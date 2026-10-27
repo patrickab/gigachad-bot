@@ -2,9 +2,10 @@ import type { ComponentType, ReactNode } from "react"
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { useEffect, useState } from "react"
 import { describe, expect, it, vi } from "vitest"
-import { ArchitectureDiagramSurface, duplicateNodes, type ArchitectureDiagramSurfaceProps } from "@/features/editor/architecture/ArchitectureDiagramSurface"
+import { ArchitectureDiagramSurface, type ArchitectureDiagramSurfaceProps } from "@/features/editor/architecture/ArchitectureDiagramSurface"
 import { drawnBox } from "@/features/editor/architecture/useSurfaceDrawing"
 import { isDraft, type DiagramGraph, type DiagramNode } from "@/features/editor/architecture/diagramGraph"
+import { TopBarSlot, TopBarSlotProvider } from "@/features/navigation/TopBarSlots"
 
 const node = (id: string, title: string, position = { x: 0, y: 0 }, extra: Partial<DiagramNode> = {}): DiagramNode =>
   ({ id, title, bullets: [], kind: "system", parent: null, compound: false, position, width: 240, height: 160, ...extra })
@@ -156,12 +157,17 @@ describe("ArchitectureDiagramSurface", () => {
     expect(onChange).toHaveBeenCalledWith({ ...graph, edges: [{ id: "shop->bank", source: "shop", target: "bank", relations: ["r1"] }] })
   })
 
-  it("renders its toolbar into the given top-bar slots instead of above the diagram", () => {
-    const slots = { drawing: document.body.appendChild(document.createElement("div")), view: document.body.appendChild(document.createElement("div")) }
-    const { container } = render(<Surface graph={{ nodes: [node("shop", "Shop")], edges: [] }} onChange={() => {}} toolbarSlots={slots} />)
+  it("renders its toolbar into the tab's top-bar slots instead of above the diagram", () => {
+    const { container } = render(
+      <TopBarSlotProvider>
+        <TopBarSlot name="drawing">{(ref) => <div ref={ref} data-testid="drawing-slot" />}</TopBarSlot>
+        <TopBarSlot name="view">{(ref) => <div ref={ref} data-testid="view-slot" />}</TopBarSlot>
+        <Surface graph={{ nodes: [node("shop", "Shop")], edges: [] }} onChange={() => {}} />
+      </TopBarSlotProvider>,
+    )
 
-    expect(slots.drawing).toContainElement(screen.getByRole("button", { name: "Fit view" }))
-    expect(slots.view).toContainElement(screen.getByRole("button", { name: "Connection style" }))
+    expect(screen.getByTestId("drawing-slot")).toContainElement(screen.getByRole("button", { name: "Fit view" }))
+    expect(screen.getByTestId("view-slot")).toContainElement(screen.getByRole("button", { name: "Connection style" }))
     expect(container.querySelector(".architecture-diagram-toolbar")).toBeNull()
   })
 
@@ -261,21 +267,5 @@ describe("drawnBox", () => {
 
   it("rejects a stroke smaller than the minimum draw size", () => {
     expect(drawnBox(perimeter([[0, 0], [10, 0], [10, 10], [0, 10]]))).toBeNull()
-  })
-})
-
-describe("duplicateNodes", () => {
-  it("clones nodes as titled drafts at an offset position, with ids free of the graph and of each other", () => {
-    const nodes = [node("api", "A", { x: 100, y: 100 }), node("db", "B", { x: 300, y: 100 })]
-    const clones = duplicateNodes(nodes, ["api", "db", "~draft-1"])
-    // A draft id makes the copy a new element rather than a second view of `api`.
-    expect(clones.map((clone) => isDraft(clone.id))).toEqual([true, true])
-    expect(new Set([...clones.map((clone) => clone.id), "~draft-1"]).size).toBe(3)
-    expect(clones[0].title).toBe("A")
-    expect(clones[0].position).toEqual({ x: 128, y: 128 })
-  })
-
-  it("skips compounds, whose children would not come along", () => {
-    expect(duplicateNodes([node("shop", "Shop", { x: 0, y: 0 }, { compound: true })], ["shop"])).toEqual([])
   })
 })

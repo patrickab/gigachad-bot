@@ -1,19 +1,21 @@
 "use client"
 
-import { createPortal } from "react-dom"
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Fragment, useCallback, useMemo, useRef, useState } from "react"
 import { AnimatePresence } from "framer-motion"
 import type { Message, Attachment } from "@/lib/domain/types"
 import { ChatInput, type AttachMenuItem, type ChatContext, type ChatInputHandle } from "@/features/chat/composer/ChatInput"
-import type { ContextAttachment } from "@/features/chat/composer/AttachmentChip"
 import { AttachmentPreview } from "@/features/chat/preview/AttachmentPreview"
 import { ChevronsLeftRight, ChevronsRightLeft, GitFork } from "lucide-react"
 import { ChatPair } from "./ChatPair"
+import { findAttachment } from "@/features/chat/attachments"
+import { usePairExpansion } from "@/features/chat/usePairExpansion"
 import { usePairFocus } from "@/features/chat/usePairFocus"
+import { useStickToBottom } from "@/features/chat/useStickToBottom"
+import { useElementSize } from "@/hooks/useElementSize"
+import { pairMessages } from "@/lib/domain/pairs"
 import { MAX_SIDEBAR_WIDTH } from "@/components/ui/SidePanel"
+import { InTopBar } from "@/features/navigation/TopBarSlots"
 
-/** Trailing pairs expanded by default, older ones render collapsed. */
-const DEFAULT_EXPANDED_TAIL = 1
 /** Column width floor, matching the composer's max-w-2xl, so the chat is never narrower than the input. */
 const MIN_CHAT_COLUMN_PX = 672
 /** Extra scroll padding below the last pair, on top of the floating input height. */
@@ -54,8 +56,6 @@ interface ChatContainerProps {
   attachMenuItems?: AttachMenuItem[]
   /** Note under the draft, e.g. why the last attach failed. */
   composerNotice?: string
-  /** Top-bar element the wide-mode toggle renders into. */
-  wideToggleSlot?: HTMLElement | null
   /** Expose the message column for top-bar overlap measurement. */
   onChatColumnChange?: (element: HTMLDivElement | null) => void
 }
@@ -77,38 +77,24 @@ export function ChatContainer({
   attachmentActions,
   attachMenuItems,
   composerNotice,
-  wideToggleSlot,
   onChatColumnChange,
 }: ChatContainerProps) {
-  const focusQaIndex = focus?.qaIndex ?? null
-  const focusKey = focus?.key
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
-  // Ref, not state: updated on every scroll and read by the message effect without re-rendering
-  const isPinnedToBottomRef = useRef(true)
-  const previousMessageCount = useRef(0)
-
-  const contextAttachments = useMemo<ContextAttachment[]>(() => {
-    const seen = new Set<string>()
-    const entries: ContextAttachment[] = []
-    for (let i = 0; i < messages.length; i++) {
-      const atts = messages[i].attachments
-      if (!atts) continue
-      for (const att of atts) {
-        const key = `${i}-${att.name}`
-        if (seen.has(key)) continue
-        seen.add(key)
-        entries.push({ messageIndex: i, attachment: att })
-      }
-    }
-    return entries
-  }, [messages])
-
+  const inputAreaRef = useRef<HTMLDivElement>(null)
   const [isWideMode, setIsWideMode] = useState(false)
   const [previewTarget, setPreviewTarget] = useState<{ messageIndex: number; name: string } | null>(null)
-  const previewAttachment = previewTarget
-    ? messages[previewTarget.messageIndex]?.attachments?.find((a) => a.name === previewTarget.name) ?? null
-    : null
+  const previewAttachment = previewTarget ? findAttachment(messages[previewTarget.messageIndex], previewTarget.name) ?? null : null
+
+  const pairs = useMemo(() => pairMessages(messages), [messages])
+  const { pin } = useStickToBottom(scrollContainerRef, bottomRef, messages)
+  const { isExpanded, toggle: togglePair } = usePairExpansion({ pairs, focus, messageCount: messages.length, scrollContainerRef })
+  const { focusedGlobalIndex, clearKeyboardFocus, collapsedRef } = usePairFocus({ pairs, scrollContainerRef, togglePair })
+
+  // Preserve composer spacing while hidden so returning tabs do not jump.
+  const inputAreaSize = useElementSize(inputAreaRef)
+  const [inputAreaHeight, setInputAreaHeight] = useState(0)
+  if (inputAreaSize.height > 0 && inputAreaSize.height !== inputAreaHeight) setInputAreaHeight(inputAreaSize.height)
 
   // Neovim starts from the text it is given, so a text preview waits for the fresh file. PDFs and images open at once and update.
   const onPreviewOpen = attachmentActions?.onPreviewOpen
@@ -118,127 +104,20 @@ export function ChatContainer({
     setPreviewTarget({ messageIndex, name: attachment.name })
   }, [onPreviewOpen])
 
-  useEffect(() => {
-    const el = scrollContainerRef.current
-    if (!el) return
-    const handleScroll = () => {
-      // 80px slack so small overscrolls still count as pinned
-      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
-      isPinnedToBottomRef.current = nearBottom
-    }
-    el.addEventListener("scroll", handleScroll, { passive: true })
-    return () => el.removeEventListener("scroll", handleScroll)
-  }, [])
-
-  useEffect(() => {
-    const wasEmpty = previousMessageCount.current === 0
-    previousMessageCount.current = messages.length
-    if (!isPinnedToBottomRef.current) return
-    // Restored histories jump straight to the end, avoiding work in every preview along a smooth scroll.
-    bottomRef.current?.scrollIntoView({ behavior: wasEmpty ? "instant" : "smooth" })
-  }, [messages])
-
-  // Per-pair expand/collapse overrides keyed by global message index
-  const focusOverrides = () => new Map<number, boolean>(focusQaIndex == null ? [] : [[focusQaIndex * 2, true]])
-  const [manualOverrides, setManualOverrides] = useState(focusOverrides)
-
-  // A new focus request replaces the overrides: it expands only the focused pair
-  const [seenFocus, setSeenFocus] = useState({ qaIndex: focusQaIndex, key: focusKey })
-  if (seenFocus.qaIndex !== focusQaIndex || seenFocus.key !== focusKey) {
-    setSeenFocus({ qaIndex: focusQaIndex, key: focusKey })
-    setManualOverrides(focusOverrides())
-  }
-
-  // Depend on the length, not the array: in an empty chat every re-render hands
-  // down a fresh [] and would reset the overrides each time.
-  const [seenMessageCount, setSeenMessageCount] = useState(messages.length)
-  if (seenMessageCount !== messages.length) {
-    setSeenMessageCount(messages.length)
-    if (messages.length === 0) setManualOverrides(new Map())
-  }
-
-  // Scroll to the pair before the focused one so the target sits just below a collapsed header
-  useEffect(() => {
-    if (focusQaIndex == null) return
-    const gi = focusQaIndex * 2
-    requestAnimationFrame(() => {
-      const el = scrollContainerRef.current
-      if (!el) return
-      const anchorGi = gi - 2
-      const target = anchorGi >= 0
-        ? el.querySelector(`[data-qa-index="${anchorGi}"]`)
-        : el.querySelector(`[data-qa-index="${gi}"]`)
-      target?.scrollIntoView({ behavior: "smooth", block: "start" })
-    })
-  }, [focusQaIndex, focusKey])
-
-  // Pair user/assistant messages, padding a missing assistant reply with an empty one
-  const pairs = useMemo<{ user: Message; assistant: Message; globalIndex: number }[]>(() => {
-    const out: { user: Message; assistant: Message; globalIndex: number }[] = []
-    for (let i = 0; i < messages.length; i += 2) {
-      if (messages[i]?.role === "user") {
-        out.push({
-          user: messages[i],
-          assistant: messages[i + 1] ?? { role: "assistant", content: "" },
-          globalIndex: i,
-        })
-      }
-    }
-    return out
-  }, [messages])
-
-  // Pairs from this index on are expanded unless overridden
-  const tailStartGlobalIndex = pairs.length > DEFAULT_EXPANDED_TAIL
-    ? pairs[pairs.length - DEFAULT_EXPANDED_TAIL].globalIndex
-    : (pairs.length > 0 ? pairs[0].globalIndex : -1)
-
-  function isExpandedNormal(idx: number): boolean {
-    const override = manualOverrides.get(idx)
-    if (override !== undefined) return override
-    return idx >= tailStartGlobalIndex
-  }
-
-  function togglePair(idx: number) {
-    setManualOverrides(prev => {
-      const next = new Map(prev)
-      const current = isExpandedNormal(idx)
-      next.set(idx, !current)
-      return next
-    })
-  }
-
-  const { focusedGlobalIndex, clearKeyboardFocus, collapsedRef } = usePairFocus({ pairs, scrollContainerRef, togglePair })
-
   // Sending re-pins to bottom so the new answer streams into view
   const handleSend = useCallback((text: string, attachments: Attachment[]) => {
-    isPinnedToBottomRef.current = true
+    pin()
     onSend(text, attachments)
-  }, [onSend])
-
-  const inputAreaRef = useRef<HTMLDivElement>(null)
-  const [inputAreaHeight, setInputAreaHeight] = useState(0)
-
-  // Preserve composer spacing while hidden so returning tabs do not jump.
-  useEffect(() => {
-    const el = inputAreaRef.current
-    if (!el) return
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        if (entry.contentRect.height > 0) setInputAreaHeight(entry.contentRect.height)
-      }
-    })
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [])
+  }, [pin, onSend])
 
   const context = useMemo<ChatContext | undefined>(
     () => attachmentActions && {
-      attachments: contextAttachments,
+      attachments: messages.flatMap((m, messageIndex) => (m.attachments ?? []).map((attachment) => ({ messageIndex, attachment }))),
       onToggleActive: attachmentActions.onToggleActive,
       onRemove: attachmentActions.onRemove,
       onOpen: (messageIndex, attachment) => void openPreview(messageIndex, attachment),
     },
-    [attachmentActions, contextAttachments, openPreview],
+    [attachmentActions, messages, openPreview],
   )
 
   // Match the collapsed-sidebar width, shrinking only when the available column cannot fit it.
@@ -256,13 +135,13 @@ export function ChatContainer({
         >
           <div ref={onChatColumnChange} className="mx-auto" style={{ maxWidth: effectiveMaxWidth }}>
             <AnimatePresence>
-            {pairs.map(({ user, assistant, globalIndex }, qaIndex) => (
+            {pairs.map(({ user, assistant, globalIndex, qaIndex }) => (
               <Fragment key={globalIndex}>
                 <ChatPair
                   user={user}
                   assistant={assistant}
                   globalIndex={globalIndex}
-                  expanded={isExpandedNormal(globalIndex)}
+                  expanded={isExpanded(globalIndex)}
                   focused={focusedGlobalIndex === globalIndex}
                   isStreaming={isStreaming}
                   onExpand={() => {
@@ -307,7 +186,7 @@ export function ChatContainer({
             />
           </div>
         </div>
-        {wideToggleSlot && createPortal(
+        <InTopBar name="wideToggle">
           <button
             type="button"
             onClick={toggleWideMode}
@@ -315,9 +194,8 @@ export function ChatContainer({
             className="rounded-lg p-1.5 text-ink-subtle opacity-0 transition-opacity duration-200 hover:text-ink hover:opacity-100 focus-visible:opacity-100"
           >
             {isWideMode ? <ChevronsRightLeft className="h-4 w-4" /> : <ChevronsLeftRight className="h-4 w-4" />}
-          </button>,
-          wideToggleSlot,
-        )}
+          </button>
+        </InTopBar>
       </div>
       <AttachmentPreview
         attachment={previewAttachment}

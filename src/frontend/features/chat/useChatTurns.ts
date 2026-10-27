@@ -5,40 +5,27 @@ import type { TabConfig } from "@/contexts/SettingsContext"
 import { useEnabledTools } from "@/features/chat/EnabledToolsContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import type { ChatStreamCompletion, UseChatStreamReturn } from "@/features/chat/useChatStream"
-import { attachReference, deleteAttachment, parseFiles, writeDocument } from "@/lib/backend/api"
+import { deleteAttachment, parseFiles, writeDocument } from "@/lib/backend/api"
+import { attachReference } from "@/lib/backend/references"
 import {
   applyReferenceReads,
   buildAttachedSend,
   buildHiddenContent,
   collectActiveImagePaths,
   composeUserMessage,
+  findAttachment,
   liveReferencePaths,
   readReferences,
   saveAttachmentEdit,
   toolArtifactDocument,
+  withAttachment,
   withAttachments,
   withReferenceRead,
 } from "@/features/chat/attachments"
-import { updateLastAssistant } from "@/lib/backend/streaming"
+import { updateMessageAt } from "@/lib/backend/streaming"
 import type { Attachment, ChatRequest, Message, Usage } from "@/lib/domain/types"
 
 type BaseChatRequest = Omit<ChatRequest, "chat_id" | "user_msg" | "img_paths" | "project_slug">
-
-/** Replace the message at `index` (negative counts from the end) with `update(message)`; a missing message or a null result leaves state untouched. */
-function updateMessageAt(
-  setMessages: React.Dispatch<React.SetStateAction<Message[]>>,
-  index: number,
-  update: (message: Message) => Message | null,
-) {
-  setMessages((prev) => {
-    const at = index < 0 ? prev.length + index : index
-    const next = prev[at] && update(prev[at])
-    if (!next) return prev
-    const copy = [...prev]
-    copy[at] = next
-    return copy
-  })
-}
 
 /** Build the request fields a tab's config decides. UI-only "none" reasoning maps to null. */
 function baseRequest(config: TabConfig, reasoningEffort: string, prompts: Record<string, string>, enabledTools: ChatRequest["tools"]): BaseChatRequest {
@@ -74,7 +61,7 @@ export function useChatTurns({
   refreshDocuments,
   runSlashCommand,
 }: {
-  chat: Pick<UseChatStreamReturn, "messages" | "isStreaming" | "send" | "regenerateAt" | "deleteMessagePair" | "setMessages" | "replaceMessages">
+  chat: Pick<UseChatStreamReturn, "messages" | "isStreaming" | "send" | "regenerateAt" | "removePair" | "setMessages" | "replaceMessages">
   chatId: string
   projectSlug: string | null
   config: TabConfig
@@ -85,7 +72,7 @@ export function useChatTurns({
   /** Resolves true when `text` was a slash command and has been handled. */
   runSlashCommand: (text: string) => Promise<boolean>
 }) {
-  const { messages, isStreaming, send, regenerateAt, deleteMessagePair, setMessages, replaceMessages } = chat
+  const { messages, isStreaming, send, regenerateAt, removePair, setMessages, replaceMessages } = chat
   const { schedule: scheduleDelete } = useUndoDelete()
   const { enabledTools } = useEnabledTools()
   const baseParams = useMemo(
@@ -93,7 +80,7 @@ export function useChatTurns({
     [config, reasoningEffort, prompts, enabledTools],
   )
 
-  // Undo restores run up to six seconds later; they must not patch a different chat loaded into this tab meanwhile.
+  // Undo restores run up to six seconds later, they must not land in a different chat loaded into this tab meanwhile.
   const chatIdRef = useRef(chatId)
   useEffect(() => { chatIdRef.current = chatId }, [chatId])
 
@@ -158,7 +145,7 @@ export function useChatTurns({
       baseParams,
     }, parseFiles).catch(() => null)
     if (!built) {
-      updateLastAssistant(setMessages, m => ({ ...m, content: "Failed to parse attached documents. You can try again or re-upload the file." }))
+      updateMessageAt(setMessages, -1, (m) => m.role === "assistant" ? { ...m, content: "Failed to parse attached documents. You can try again or re-upload the file." } : null)
       return
     }
 
@@ -187,20 +174,26 @@ export function useChatTurns({
   }, [isStreaming, messages, refreshForSend, regenerateAt, finishTurn, baseParams, chatId, projectSlug])
 
   const handleToggleAttachmentActive = useCallback((messageIndex: number, attachmentName: string) => {
-    updateMessageAt(setMessages, messageIndex, (msg) => msg.attachments
-      ? withAttachments(msg, msg.attachments.map(a => a.name === attachmentName ? { ...a, active: !a.active } : a))
-      : null)
+    updateMessageAt(setMessages, messageIndex, (msg) => withAttachment(msg, attachmentName, (a) => ({ ...a, active: !a.active })))
   }, [setMessages])
 
   const handleRemoveAttachment = useCallback((messageIndex: number, attachmentName: string) => {
     const original = messages[messageIndex]
-    const att = original?.attachments?.find(a => a.name === attachmentName)
-    if (!original?.attachments || !att) return
+    const att = findAttachment(original, attachmentName)
+    const stripped = att ? withAttachment(original, attachmentName, () => null) : null
+    if (!att || !stripped) return
     const scheduledChat = chatId
-    const patch = ({ attachments, hiddenContent }: Message) => updateMessageAt(setMessages, messageIndex, (msg) =>
-      chatIdRef.current !== scheduledChat || !msg.attachments ? null : { ...msg, attachments, hiddenContent })
+    const position = original.attachments?.indexOf(att) ?? 0
     // Removed from the chat (and from what the model sees) at once; the upload goes after the undo window.
-    patch(withAttachments(original, original.attachments.filter(a => a.name !== attachmentName)))
+    if (!replaceMessages((current) => current.map((m) => m === original ? stripped : m)).includes(stripped)) return
+    /** Put `original` back; when the stripped message was replaced meanwhile, re-insert the attachment into the message at `messageIndex` unless it holds one with that name. */
+    const restore = () => replaceMessages((current) => {
+      if (current.includes(stripped)) return current.map((m) => m === stripped ? original : m)
+      const msg = chatIdRef.current === scheduledChat ? current[messageIndex] : undefined
+      if (!msg?.attachments || findAttachment(msg, attachmentName)) return current
+      const attachments = [...msg.attachments.slice(0, position), att, ...msg.attachments.slice(position)]
+      return current.map((m, i) => i === messageIndex ? withAttachments(msg, attachments) : m)
+    })
     scheduleDelete(
       `attachment:${chatId}:${messageIndex}:${attachmentName}`,
       attachmentName,
@@ -208,33 +201,26 @@ export function useChatTurns({
         // File root refs have no upload copy and the source file must never be deleted.
         if (!att.vaultPath) await deleteAttachment(chatId, attachmentName, projectSlug)
       },
-      () => patch(original),
+      restore,
     )
-  }, [messages, setMessages, chatId, projectSlug, scheduleDelete])
+  }, [messages, replaceMessages, chatId, projectSlug, scheduleDelete])
 
   // Nothing to commit: the pair leaves the chat (and what the model sees) at once; Undo puts it back.
   const handleDeletePair = useCallback((index: number) => {
-    const user = messages[index]
-    const assistant = messages[index + 1]
-    if (!user || !assistant) return
-    deleteMessagePair(index)
+    const restore = messages[index] && removePair(messages[index])
+    if (!restore) return
     const scheduledChat = chatId
-    scheduleDelete(`pair:${chatId}:${index}`, "message pair", async () => {}, () => setMessages((current) => {
-      if (chatIdRef.current !== scheduledChat) return current
-      const copy = [...current]
-      copy.splice(index, 0, user, assistant)
-      return copy
-    }))
-  }, [messages, deleteMessagePair, setMessages, chatId, scheduleDelete])
+    scheduleDelete(`pair:${chatId}:${index}`, "message pair", async () => {}, () => {
+      if (chatIdRef.current === scheduledChat) restore()
+    })
+  }, [messages, removePair, chatId, scheduleDelete])
 
   /** Save an edit of the attachment's text (see `saveAttachmentEdit`) and rebuild what the model reads. A failed save leaves the chat unchanged and rejects. */
   const handleAttachmentContentChange = useCallback(async (messageIndex: number, attachmentName: string, newContent: string) => {
-    const attachment = messages[messageIndex]?.attachments?.find((a) => a.name === attachmentName)
+    const attachment = findAttachment(messages[messageIndex], attachmentName)
     if (!attachment) return
     const saved = await saveAttachmentEdit(attachment, newContent)
-    updateMessageAt(setMessages, messageIndex, (msg) => msg.attachments
-      ? withAttachments(msg, msg.attachments.map(a => a.name === attachmentName ? saved : a))
-      : null)
+    updateMessageAt(setMessages, messageIndex, (msg) => withAttachment(msg, attachmentName, () => saved))
   }, [messages, setMessages])
 
   return {

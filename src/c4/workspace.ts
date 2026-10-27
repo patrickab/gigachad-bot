@@ -1,165 +1,33 @@
-// Parses a LikeC4 workspace held in memory and projects it into the plain JSON
-// the backend and UI consume. Also exposes the syntax-tree lookups that
-// operations.ts needs to edit source text surgically.
+// Parses a LikeC4 workspace held in memory and indexes the syntax-tree nodes
+// that ops/ edits surgically; payload.ts projects it into JSON for the UI.
 import type { LikeC4Model } from '@likec4/core/model'
-import type { LayoutedElementView } from '@likec4/core/types'
+import type { RelationId } from '@likec4/core/types'
 import { fromSources, type LikeC4 } from '@likec4/language-services/node'
 import { AstUtils, CstUtils, type AstNode, type LangiumDocument } from 'langium'
-import { edgeKey, pinView, snapshotPath, snapshotText, type Pins, type Snapshots, type ViewPins } from './layout.ts'
+import { expressionEntries, isAutoLayoutRule, isEditableExpression, isElement, isPredicate, isRelation, isView, langiumDocuments, type ElementNode, type RelationNode, type ViewNode } from './ast.ts'
+import { isWithin } from './fqn.ts'
 
 export type Sources = Record<string, string>
 
-interface WorkspaceError {
+export interface WorkspaceError {
   message: string
   file: string
   /** Zero-based, as LikeC4 reports it; shown to people as `line + 1`. */
   line: number
 }
 
-interface ElementPayload {
-  id: string
-  name: string
-  kind: string
-  title: string
-  description: string
-  parent: string | null
-  /** The source file declaring it (an `extend` elsewhere does not count). */
-  file: string | null
-}
-
-interface NodePayload {
-  id: string
-  title: string
-  kind: string
-  description: string
-  parent: string | null
-  compound: boolean
-  x: number
-  y: number
-  width: number
-  height: number
-}
-
-interface EdgePayload {
-  /** `source->target`: stable across parses, unlike LikeC4's hashed edge ids. */
-  id: string
-  source: string
-  target: string
-  label: string | null
-  relations: string[]
-  /** Saved curve offset, null when the connection is drawn straight. */
-  bend: number | null
-}
-
-interface ViewPayload {
-  id: string
-  title: string
-  /** The source file declaring the view; null for views LikeC4 generates, like a default `index`. */
-  file: string | null
-  /** Element the view is scoped to (`view x of shop`), null for landscape views. */
-  scope: string | null
-  /** Only views made of element includes and excludes map drawing gestures onto the source unambiguously. */
-  editable: boolean
-  /** Whether positions are saved (a `.likec4/<id>.likec4.snap` exists); otherwise LikeC4 lays it out afresh. */
-  manual: boolean
-  nodes: NodePayload[]
-  edges: EdgePayload[]
-}
-
-/**
- * How the UI lists a source file, from what it declares (never from its name):
- * a system declares one top-level element, a module one element nested in
- * another file's, a view file only views; anything else is a plain file.
- */
-interface TreeEntry {
-  path: string
-  role: 'system' | 'module' | 'view' | 'file'
-  /** The system's or module's element. */
-  element: string | null
-  /** The view a window opens for the file: a module opens its system's. */
-  view: string | null
-}
-
-export interface ModelPayload {
-  errors: WorkspaceError[]
-  kinds: string[]
-  elements: ElementPayload[]
-  views: ViewPayload[]
-  tree: TreeEntry[]
-}
-
-interface Rendered {
-  model: ModelPayload
-  /** A snapshot file for every pinned view that still exists. */
-  snapshots: Snapshots
-}
-
 /** Sources load under this virtual folder. Stripping it gives workspace-relative paths. */
 const WORKSPACE_URI_PREFIX = '/workspace/'
 
-/** Predicates an editable view may use: `*` and element references, optionally with `.*`, `.**`, `._`. */
-const EDITABLE_EXPRESSIONS = new Set(['WildcardExpression', 'FqnRefExpr'])
-
-export type ViewNode = AstNode & { name?: string, extends?: unknown, body?: { rules?: AstNode[] } }
-export type PredicateNode = AstNode & { isInclude?: boolean, exprs?: ExpressionsNode }
 type SourceLocation = { uri: string, range: { start: { line: number, character: number } } }
-export type ExpressionsNode = AstNode & { value?: AstNode, prev?: ExpressionsNode }
 
-/** Entries of a predicate's comma list, in source order. */
-export function expressionEntries(exprs: ExpressionsNode | undefined): AstNode[] {
-  const entries: AstNode[] = []
-  for (let cursor = exprs; cursor; cursor = cursor.prev) if (cursor.value) entries.unshift(cursor.value)
-  return entries
-}
-
-function viewPayload(view: LayoutedElementView, title: string, file: string | null, editable: boolean, pins: ViewPins | undefined): ViewPayload {
-  return {
-    id: view.id,
-    title,
-    file,
-    scope: view.viewOf ?? null,
-    editable,
-    manual: pins !== undefined,
-    nodes: view.nodes.map((node) => ({
-      id: node.id,
-      title: node.title,
-      kind: node.kind,
-      description: markdownText(node.description),
-      parent: node.parent ?? null,
-      compound: node.children.length > 0,
-      x: node.x,
-      y: node.y,
-      width: node.width,
-      height: node.height,
-    })),
-    edges: view.edges.map((edge) => {
-      const id = edgeKey(edge.source, edge.target)
-      return { id, source: edge.source, target: edge.target, label: edge.label ?? null, relations: [...edge.relations], bend: pins?.edges[id] ?? null }
-    }),
-  }
-}
-
-/** LikeC4 rich text is `{ txt }` or `{ md }`. A bare string passes through. */
-const markdownText = (value: unknown): string => {
-  if (!value || typeof value !== 'object') return typeof value === 'string' ? value : ''
-  const record = value as { txt?: string, md?: string }
-  return record.txt ?? record.md ?? ''
-}
-
-export const parentOf = (fqn: string): string | null => {
-  const index = fqn.lastIndexOf('.')
-  return index === -1 ? null : fqn.slice(0, index)
-}
-
-export const nameOf = (fqn: string) => fqn.slice(fqn.lastIndexOf('.') + 1)
-
-/** One parsed workspace: LikeC4's model plus the syntax-tree nodes `operations.ts` edits. Dispose when done. */
+/** One parsed workspace: LikeC4's model plus the syntax-tree nodes `ops/` edits. Dispose when done. */
 export class Workspace {
   readonly sources: Sources
   readonly errors: WorkspaceError[]
   private readonly lc: LikeC4
   /** FQN -> `Element` node and back, filled by `index()`. */
-  private readonly elementNodes = new Map<string, AstNode>()
+  private readonly elementNodes = new Map<string, ElementNode>()
   private readonly fqnByNode = new Map<AstNode, string>()
   private readonly viewNodes = new Map<string, ViewNode>()
   private computed: LikeC4Model.Computed | null = null
@@ -190,14 +58,8 @@ export class Workspace {
     return index === -1 ? fsPathOrUri : fsPathOrUri.slice(index + WORKSPACE_URI_PREFIX.length)
   }
 
-  private get langium() {
-    // `langium` is TypeScript-protected on LikeC4, not runtime-private; the
-    // public API stops at the model, but surgical edits need the syntax tree.
-    return (this.lc as unknown as { langium: { shared: { workspace: { LangiumDocuments: { all: { toArray(): LangiumDocument[] } } } } } }).langium
-  }
-
   documents(): Array<{ path: string, document: LangiumDocument }> {
-    return this.langium.shared.workspace.LangiumDocuments.all.toArray()
+    return langiumDocuments(this.lc)
       .filter((document) => document.uri.path.startsWith(WORKSPACE_URI_PREFIX))
       .map((document) => ({ path: this.relativePath(document.uri.path), document }))
       .sort((a, b) => a.path.localeCompare(b.path))
@@ -213,11 +75,15 @@ export class Workspace {
     return this.computed
   }
 
-  /** The nearest `type` node at or above a `locate` result, which lands on a leaf inside it. */
-  private enclosing(location: SourceLocation | null, type: string): AstNode | undefined {
-    let node = location ? this.nodeAt(location) : undefined
-    while (node && node.$type !== type) node = node.$container
-    return node
+  /** Laid-out model, for drawing. */
+  layoutedModel() {
+    return this.lc.layoutedModel()
+  }
+
+  /** The nearest node matching `is` at or above a `locate` result, which lands on a leaf inside it. */
+  private enclosing<T extends AstNode>(location: SourceLocation | null, is: (node: AstNode) => node is T): T | undefined {
+    for (let node = location ? this.nodeAt(location) : undefined; node; node = node.$container) if (is(node)) return node
+    return undefined
   }
 
   private nodeAt(location: SourceLocation): AstNode | undefined {
@@ -233,21 +99,20 @@ export class Workspace {
   private async index(): Promise<void> {
     for (const { document } of this.documents()) {
       for (const node of AstUtils.streamAst(document.parseResult.value)) {
-        const view = node as ViewNode
-        if (node.$type === 'ElementView' && view.name && !this.viewNodes.has(view.name)) this.viewNodes.set(view.name, view)
+        if (isView(node) && node.name && !this.viewNodes.has(node.name)) this.viewNodes.set(node.name, node)
       }
     }
     const model = await this.model()
     for (const element of model.elements()) {
       const location = this.lc.languageServices.locate({ element: element.id })
-      const node = this.enclosing(location, 'Element')
+      const node = this.enclosing(location, isElement)
       if (!node) continue
       this.elementNodes.set(element.id, node)
       this.fqnByNode.set(node, element.id)
     }
   }
 
-  elementNode(fqn: string): AstNode | undefined {
+  elementNode(fqn: string): ElementNode | undefined {
     return this.elementNodes.get(fqn)
   }
 
@@ -255,8 +120,8 @@ export class Workspace {
     return node ? this.fqnByNode.get(node) : undefined
   }
 
-  relationNode(id: string): AstNode | undefined {
-    return this.enclosing(this.lc.languageServices.locate({ relation: id as never }), 'Relation')
+  relationNode(id: string): RelationNode | undefined {
+    return this.enclosing(this.lc.languageServices.locate({ relation: id as RelationId }), isRelation)
   }
 
   async elementIds(): Promise<string[]> {
@@ -266,7 +131,7 @@ export class Workspace {
   /** Elements `file` declares under no ancestor it also declares, in model order. */
   rootsOf(file: string): string[] {
     const declared = [...this.elementNodes].filter(([, node]) => this.documentPath(node) === file).map(([fqn]) => fqn)
-    return declared.filter((fqn) => !declared.some((other) => fqn.startsWith(`${other}.`)))
+    return declared.filter((fqn) => !declared.some((other) => other !== fqn && isWithin(fqn, other)))
   }
 
   /** The `view <id> { ... }` declaration, for element views written in source. */
@@ -274,6 +139,7 @@ export class Workspace {
     return this.viewNodes.get(id)
   }
 
+  /** Ids of the element views written in source, in declaration order. */
   viewIds(): Set<string> {
     return new Set(this.viewNodes.keys())
   }
@@ -289,54 +155,9 @@ export class Workspace {
     const view = this.viewNodes.get(id)
     if (!view || view.extends) return false
     return (view.body?.rules ?? []).every((rule) => {
-      if (rule.$type === 'ViewRuleAutoLayout') return true
-      if (rule.$type !== 'ViewRulePredicate') return false
-      return expressionEntries((rule as PredicateNode).exprs).every((entry) => EDITABLE_EXPRESSIONS.has(entry.$type))
-    })
-  }
-
-  /** The model as the UI draws it, with `pins` applied, plus the snapshot file of every pinned view. */
-  async render(pins: Pins): Promise<Rendered> {
-    const layouted = await this.lc.layoutedModel()
-    const kinds = Object.keys(layouted.specification.elements).sort()
-    const elements: ElementPayload[] = [...layouted.elements()].map((element) => {
-      const node = this.elementNodes.get(element.id)
-      return {
-        id: element.id,
-        name: nameOf(element.id),
-        kind: element.kind,
-        title: element.title,
-        description: markdownText(element.$element.description),
-        parent: parentOf(element.id),
-        file: node ? this.documentPath(node) : null,
-      }
-    })
-    const views: ViewPayload[] = []
-    const snapshots: Snapshots = {}
-    for (const view of layouted.views()) {
-      const diagram = view.$view
-      if (diagram._type !== 'element') continue
-      const pinned = pinView(diagram, pins[view.id])
-      const node = this.viewNodes.get(view.id)
-      const title = diagram.title ?? (diagram.viewOf ? layouted.element(diagram.viewOf).title : diagram.id)
-      views.push(viewPayload(pinned, title, node ? this.documentPath(node) : null, this.isEditable(view.id), pins[view.id]))
-      if (pins[view.id]) snapshots[snapshotPath(view.id)] = snapshotText(pinned)
-    }
-    return { model: { errors: this.errors, kinds, elements, views, tree: this.tree(views) }, snapshots }
-  }
-
-  private tree(views: ViewPayload[]): TreeEntry[] {
-    // Views in source order, so "a file's view" is the first it declares.
-    const ordered = [...this.viewNodes.entries()].map(([id, node]) => ({ id, file: this.documentPath(node), scope: views.find((view) => view.id === id)?.scope ?? null }))
-    return Object.keys(this.sources).sort().map((path): TreeEntry => {
-      const roots = this.rootsOf(path)
-      const own = ordered.find((view) => view.file === path)?.id ?? null
-      const root = roots.length === 1 ? roots[0]! : null
-      if (root === null) return { path, role: roots.length === 0 && own ? 'view' : 'file', element: null, view: own }
-      const scoped = ordered.find((view) => view.scope === root.split('.')[0])?.id ?? null
-      return parentOf(root) === null
-        ? { path, role: 'system', element: root, view: own ?? scoped }
-        : { path, role: 'module', element: root, view: scoped ?? own }
+      if (isAutoLayoutRule(rule)) return true
+      if (!isPredicate(rule)) return false
+      return expressionEntries(rule.exprs).every(isEditableExpression)
     })
   }
 }

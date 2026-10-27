@@ -8,15 +8,14 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import os
+from pathlib import Path
 import re
 import shlex
 import shutil
-import subprocess
-from dataclasses import dataclass
-from pathlib import Path
 
-from lib.git import DEFAULT_TIMEOUT_SECONDS, run_git
+from lib.git import DEFAULT_TIMEOUT_SECONDS, GitError, git_ok, git_text
 
 CLONES_HOME = Path.home() / "git"
 WORKTREES_HOME = CLONES_HOME / "worktrees"
@@ -33,8 +32,8 @@ _REPOSITORY_URL = re.compile(
 )
 
 
-class WorktreeError(RuntimeError):
-    """A git refusal, with git's own message."""
+class WorktreeError(GitError):
+    """A worktree operation refused, with the reason. Other git failures surface as plain GitError."""
 
 
 class WorktreeDirty(WorktreeError):
@@ -70,15 +69,9 @@ def _ssh_command() -> str:
 
 
 def _git(directory: Path, *args: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> str:
-    try:
-        return run_git(
-            directory, *args, timeout=timeout,
-            env={"GIT_SSH_COMMAND": os.environ.get("GIT_SSH_COMMAND", _ssh_command()), "GIT_TERMINAL_PROMPT": "0"},
-        ).stdout
-    except subprocess.CalledProcessError as exc:
-        raise WorktreeError((exc.stderr or exc.stdout or str(exc)).strip()) from exc
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        raise WorktreeError(str(exc)) from exc
+    """`git_text` that can reach remotes non-interactively."""
+    env = {"GIT_SSH_COMMAND": os.environ.get("GIT_SSH_COMMAND", _ssh_command()), "GIT_TERMINAL_PROMPT": "0"}
+    return git_text(directory, *args, timeout=timeout, env=env)
 
 
 def is_clone(directory: Path) -> bool:
@@ -109,11 +102,7 @@ def _has_origin(repository: Path) -> bool:
 
 
 def _ref_exists(repository: Path, ref: str) -> bool:
-    try:
-        _git(repository, "rev-parse", "--verify", "--quiet", ref)
-    except WorktreeError:
-        return False
-    return True
+    return git_ok(repository, "rev-parse", "--verify", "--quiet", ref)
 
 
 def branches(repository: Path) -> list[str]:
@@ -128,11 +117,11 @@ def default_branch(repository: Path) -> str | None:
     """Origin's symbolic default branch, falling back to the main checkout's branch."""
     try:
         return _git(repository, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").strip().removeprefix("origin/")
-    except WorktreeError:
+    except GitError:
         pass
     try:
         return _git(repository, "symbolic-ref", "--short", "HEAD").strip()
-    except WorktreeError:
+    except GitError:
         return None
 
 
@@ -233,7 +222,7 @@ def remove_worktree(repository: Path, path: str, *, force: bool = False) -> None
         raise WorktreeError("The clone itself cannot be removed")
     try:
         _git(repository, "worktree", "remove", *(["--force"] if force else []), worktree.path)
-    except WorktreeError as exc:
+    except GitError as exc:
         if "contains modified or untracked files" in str(exc):
             raise WorktreeDirty(str(exc)) from exc
         raise
@@ -243,7 +232,7 @@ def delete_branch(repository: Path, branch: str, *, force: bool = False) -> None
     """Delete a local branch, never the remote one. Raises BranchNotMerged when commits would be lost."""
     try:
         _git(repository, "branch", "-D" if force else "-d", "--", branch)
-    except WorktreeError as exc:
+    except GitError as exc:
         if "not fully merged" in str(exc):
             raise BranchNotMerged(str(exc)) from exc
         raise
@@ -266,7 +255,7 @@ def clone_repository(url: str) -> Path:
     CLONES_HOME.mkdir(parents=True, exist_ok=True)
     try:
         _git(CLONES_HOME, "clone", "--", url, match["name"], timeout=_CLONE_TIMEOUT_SECONDS)
-    except WorktreeError:
+    except GitError:
         shutil.rmtree(target, ignore_errors=True)
         raise
     return target.resolve()

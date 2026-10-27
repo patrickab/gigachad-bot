@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react"
 import { motion } from "framer-motion"
-import { useTabActive } from "@/contexts/TabContext"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { useEventListener } from "@/hooks/useEventListener"
 import { useResetOnChange } from "@/hooks/useResetOnChange"
@@ -33,7 +32,7 @@ export function CommandMenu({ items, query, onRun, onClose }: CommandMenuProps) 
   // Restart at the first entry whenever the filtered list changes.
   useResetOnChange(filtered, () => setSelectedIdx(0))
 
-  useEscapeLayer(onClose, useTabActive())
+  useEscapeLayer(onClose)
 
   // Capture phase so the keys are handled before the focused input sees them.
   useEventListener("window", "keydown", (e) => {

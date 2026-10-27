@@ -19,43 +19,17 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import AsyncIterator
-from uuid import UUID
-
-from sse_starlette.sse import EventSourceResponse
 
 from fastapi import APIRouter, Depends, Query
+from sse_starlette.sse import EventSourceResponse
 
+from backend.http_plumbing import live_stream
 from backend.identity import RequestIdentity, get_request_identity
-from backend.routes.deps import live_stream
 from backend.sync import get_change_broker
-from config import get_postgres_pool
+from lib.changes import EVENT_KEYS, latest_changes
+from lib.postgres_pool import get_postgres_pool
 
 router = APIRouter(prefix="/api/sync", tags=["sync"])
-
-EVENT_KEYS = ("seq", "resource_kind", "resource_key", "version", "device_id")
-
-
-def replay_changes(user_id: UUID, since: int) -> list[dict]:
-    """Return this user's latest change per resource after `since`, oldest first.
-
-    - Clients reload by resource, so superseded rows add replay size and no information
-    - Autosaved canvases write thousands of rows each
-    """
-    with get_postgres_pool().connection() as connection:
-        rows = connection.execute(
-            """
-            SELECT seq, resource_kind, resource_key, version, device_id FROM (
-                SELECT DISTINCT ON (resource_kind, resource_key)
-                    seq, resource_kind, resource_key, version, device_id
-                FROM changes
-                WHERE user_id = %s AND seq > %s
-                ORDER BY resource_kind, resource_key, seq DESC
-            ) latest
-            ORDER BY seq
-            """,
-            (user_id, since),
-        ).fetchall()
-    return [dict(zip(EVENT_KEYS, row, strict=True)) for row in rows]
 
 
 def _event(payload: dict) -> dict[str, str]:
@@ -76,7 +50,7 @@ async def stream_changes(
         # The seq watermark then suppresses the overlap.
         async with broker.subscribe(user_id) as live:
             delivered = since
-            for row in await asyncio.to_thread(replay_changes, user_id, since):
+            for row in await asyncio.to_thread(latest_changes, get_postgres_pool(), user_id, since):
                 delivered = row["seq"]
                 yield _event(row)
             async for change in live:

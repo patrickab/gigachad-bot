@@ -17,7 +17,7 @@ import { render, act, fireEvent, waitFor } from "@testing-library/react"
 import { TabContext, type TabContextValue } from "@/contexts/TabContext"
 import { DEFAULT_TAB_CONFIG } from "@/contexts/SettingsContext"
 import { UndoDeleteProvider } from "@/contexts/UndoDeleteContext"
-import type { CanvasDocument } from "@/lib/domain/canvasDocument"
+import type { CanvasAttachment, CanvasDocument } from "@/lib/domain/canvasDocument"
 
 const noop = () => {}
 
@@ -154,6 +154,12 @@ function CollaborativeHarness({ seen }: { seen: CanvasDocument[] }) {
 
 const toolbarButton = (c: HTMLElement, label: string) => c.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!
 const latest = (seen: CanvasDocument[]) => seen[seen.length - 1]!
+
+/** The attachment as a window of `kind`, failing the test when it is another kind. */
+function ofKind<K extends CanvasAttachment["kind"]>(att: CanvasAttachment | undefined, kind: K): Extract<CanvasAttachment, { kind: K }> {
+  if (att?.kind !== kind) throw new Error(`expected a ${kind} attachment`)
+  return att as Extract<CanvasAttachment, { kind: K }>
+}
 
 function addPage(container: HTMLElement) {
   act(() => { toolbarButton(container, "Add to canvas").click() }) // open the + menu
@@ -541,7 +547,7 @@ describe("nested canvas", () => {
     addPage(container.querySelector("[data-canvas-attachment]") as HTMLElement)
 
     expect(latest(seen).frames).toHaveLength(0)
-    expect(latest(seen).attachments[0]!.canvas!.frames).toHaveLength(1)
+    expect(ofKind(latest(seen).attachments[0], "canvas").canvas!.frames).toHaveLength(1)
   })
 
   it("survives a save/load round-trip", () => {
@@ -552,7 +558,7 @@ describe("nested canvas", () => {
     addPage(container.querySelector("[data-canvas-attachment]") as HTMLElement)
 
     const reloaded = parseCanvasDoc(serializeCanvasDoc(latest(seen)))
-    expect(reloaded.attachments[0]!.canvas!.frames).toHaveLength(1)
+    expect(ofKind(reloaded.attachments[0], "canvas").canvas!.frames).toHaveLength(1)
   })
 })
 
@@ -571,7 +577,7 @@ describe("nested canvas file", () => {
     await openCanvas(container, "notes.canvas")
     const [att] = latest(seen).attachments
     expect(att).toMatchObject({ kind: "canvas", path: "project/proj/document/notes.canvas" })
-    expect(att!.canvas).toBeUndefined()
+    expect(ofKind(att, "canvas").canvas).toBeUndefined()
     expect(collaboration.useCollaborativeCanvas).toHaveBeenCalledWith("project/proj/document/notes.canvas")
   })
 
@@ -623,11 +629,11 @@ describe("PDF attachments", () => {
 
     expect(viewer).toHaveTextContent("1")
     act(() => { viewer.click() })
-    expect(latest(seen).attachments[0]!.page).toBe(4)
+    expect(ofKind(latest(seen).attachments[0], "pdf").page).toBe(4)
 
     addPage(container)
     act(() => { toolbarButton(container, "Undo").click() })
-    expect(latest(seen).attachments[0]!.page).toBe(4)
+    expect(ofKind(latest(seen).attachments[0], "pdf").page).toBe(4)
 
     const restored = parseCanvasDoc(serializeCanvasDoc(latest(seen)))
     const reopened = render(<Harness seen={[]} initialDoc={restored} />)
@@ -697,7 +703,7 @@ describe("document attachments", () => {
     const workspace = (slug: string | null) => (
       <UndoDeleteProvider>
         <TabActiveProvider value={true}>
-          <CanvasWorkspace selected={null} slug={slug} toolbarSlots={null} onCloseEditor={() => {}} onCreated={() => {}} />
+          <CanvasWorkspace selected={null} slug={slug} onCloseEditor={() => {}} onCreated={() => {}} />
         </TabActiveProvider>
       </UndoDeleteProvider>
     )

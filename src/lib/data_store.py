@@ -7,7 +7,6 @@ namespaces.
 from __future__ import annotations
 
 from dataclasses import dataclass
-import fnmatch
 from pathlib import PurePosixPath
 from typing import Protocol
 
@@ -44,125 +43,25 @@ class Entry:
     revision: Revision | None = None
 
 
-class DataStore(Protocol):
-    """Key-addressed byte store. A stale `expected` revision raises StorageConflictError."""
+class ByteStore(Protocol):
+    """The key-addressed byte operations shared by the database store and a workspace directory."""
     def read_bytes(self, key: str) -> tuple[bytes, Revision]: ...
-    def write_bytes(self, key: str, content: bytes, *, expected: Revision | None = None) -> Revision: ...
-    def write_many(self, writes: list[tuple[str, bytes, Revision | None]]) -> list[Revision]:
-        """Write every ``(key, content, expected)`` atomically: one stale revision aborts them all."""
+    def apply(self, writes: list[tuple[str, bytes, Revision | None]], deletes: list[str]) -> list[Revision]:
+        """Write every ``(key, content, expected)`` then delete *deletes*, atomically: one stale revision aborts them all."""
         ...
     def list(self, prefix: str = "", *, recursive: bool = False) -> list[Entry]: ...
+    def delete(self, key: str) -> None: ...
+
+
+class DataStore(ByteStore, Protocol):
+    """Key-addressed byte store. A stale `expected` revision raises StorageConflictError."""
+    def write_bytes(self, key: str, content: bytes, *, expected: Revision | None = None) -> Revision: ...
+    def is_file(self, key: str) -> bool: ...
+    def is_dir(self, key: str) -> bool: ...
     def exists(self, key: str) -> bool: ...
     def mkdir(self, key: str) -> None: ...
     def delete(self, key: str, *, recursive: bool = False) -> None: ...
     def move(self, source: str, destination: str) -> None: ...
-    def rename_project(self, chat_prefix: str, slug: str, new_slug: str, name: str) -> None:
-        """Move a project's namespaces to `new_slug` and rewrite stored references, atomically."""
-        ...
-
-
-class DataStorePath:
-    """Small ``Path`` compatibility layer for legacy domain-store algorithms.
-
-    It deliberately exposes only operations already used by the stores.  The
-    backing data still goes through ``DataStore``; new code should use logical
-    keys and the adapter directly.
-    """
-
-    def __init__(self, store: DataStore, key: str = "") -> None:
-        self.store = store
-        self.key = validate_key(key, allow_empty=True)
-
-    def __str__(self) -> str:
-        return self.key
-
-    def __eq__(self, other: object) -> bool:
-        return isinstance(other, DataStorePath) and self.store is other.store and self.key == other.key
-
-    def __hash__(self) -> int:
-        return hash((id(self.store), self.key))
-
-    def __fspath__(self) -> str:
-        return self.key
-
-    def __truediv__(self, child: str) -> "DataStorePath":
-        return DataStorePath(self.store, f"{self.key}/{child}" if self.key else child)
-
-    @property
-    def name(self) -> str:
-        return PurePosixPath(self.key).name
-
-    @property
-    def stem(self) -> str:
-        return PurePosixPath(self.key).stem
-
-    @property
-    def suffix(self) -> str:
-        return PurePosixPath(self.key).suffix
-
-    @property
-    def parent(self) -> "DataStorePath":
-        parent = PurePosixPath(self.key).parent.as_posix()
-        return DataStorePath(self.store, "" if parent == "." else parent)
-
-    def relative_to(self, other: "DataStorePath") -> PurePosixPath:
-        if self.store is not other.store:
-            raise ValueError("Paths belong to different data stores")
-        return PurePosixPath(self.key).relative_to(PurePosixPath(other.key))
-
-    def exists(self) -> bool:
-        return bool(self.key) and self.store.exists(self.key)
-
-    def is_file(self) -> bool:
-        # Backends may implement a cheaper single-query check.
-        fast = getattr(self.store, "is_file", None)
-        if callable(fast):
-            return fast(self.key)
-        return self.exists() and not any(entry.key == self.key and entry.is_dir for entry in self.store.list(self.parent.key))
-
-    def is_dir(self) -> bool:
-        # Backends may implement a cheaper single-query check.
-        fast = getattr(self.store, "is_dir", None)
-        if callable(fast):
-            return fast(self.key)
-        return self.exists() and not self.is_file()
-
-    def _children(self, recursive: bool) -> list["DataStorePath"]:
-        return [DataStorePath(self.store, entry.key) for entry in self.store.list(self.key, recursive=recursive)]
-
-    def glob(self, pattern: str):
-        """List direct children, matching on name only."""
-        return (child for child in self._children(False) if fnmatch.fnmatch(child.name, pattern))
-
-    def rglob(self, pattern: str):
-        """Recursively list descendants, matching on name only."""
-        return (child for child in self._children(True) if fnmatch.fnmatch(child.name, pattern))
-
-    def read_bytes(self) -> bytes:
-        return self.store.read_bytes(self.key)[0]
-
-    def read_text(self, *, encoding: str = "utf-8") -> str:
-        return self.read_bytes().decode(encoding)
-
-    def write_bytes(self, content: bytes) -> None:
-        self.store.write_bytes(self.key, content)
-
-    def write_text(self, content: str, *, encoding: str = "utf-8") -> None:
-        self.write_bytes(content.encode(encoding))
-
-    def mkdir(self, *, parents: bool = False, exist_ok: bool = False) -> None:
-        # Store mkdir is already idempotent for directories.
-        del exist_ok
-        if parents:
-            parent = self.parent
-            if parent.key and not parent.exists():
-                parent.mkdir(parents=True)
-        self.store.mkdir(self.key)
-
-    def unlink(self, *, missing_ok: bool = False) -> None:
-        if not missing_ok and not self.exists():
-            raise FileNotFoundError(self.key)
-        self.store.delete(self.key)
 
 
 def read_text(store: DataStore, key: str) -> tuple[str, Revision]:

@@ -8,7 +8,7 @@ import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { useResetOnOpen } from "@/hooks/useResetOnChange"
 import { browseDirectories } from "@/lib/backend/api"
 import { errorMessage } from "@/lib/utils"
-import type { DirectoryListing } from "@/lib/domain/types"
+import type { DirectoryListing } from "@/lib/domain/files"
 
 const HOME = "~"
 const REPOSITORY_LINK = /^(https:\/\/|ssh:\/\/|[\w.~-]+@[\w.-]+:)/

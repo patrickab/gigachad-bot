@@ -2,10 +2,12 @@ import { afterEach, beforeEach, describe, it, expect, vi } from "vitest"
 import { createRef, type ReactElement } from "react"
 import { act, cleanup, render as testingRender, fireEvent, waitFor, within } from "@testing-library/react"
 import { Sidebar } from "@/features/navigation/Sidebar"
-import { TabManager, TabSwitcher, nextTab, type TabManagerHandle } from "@/features/navigation/TabManager"
+import { TabManager, type TabManagerHandle } from "@/features/navigation/TabManager"
+import { TabSwitcher } from "@/features/navigation/TabSwitcher"
+import { nextTab } from "@/features/navigation/tabs"
 import { TabContext, useTab } from "@/contexts/TabContext"
 import { BranchProvider, useBranches } from "@/features/navigation/BranchContext"
-import type { BranchMeta } from "@/lib/domain/types"
+import type { BranchMeta } from "@/lib/domain/histories"
 
 const render = (element: ReactElement) => testingRender(
   <TabContext.Provider value={{ tab: nextTab(), isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), setAppMode: vi.fn(), setWorkspaceItem: vi.fn(), setHistoryFile: vi.fn(), setTitle: vi.fn() }}>

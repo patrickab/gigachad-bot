@@ -1,23 +1,18 @@
-from types import SimpleNamespace
-
 from agent_sandbox import PromptImage
 
 from lib.image_paths import resolve_chat_image_paths, resolve_sandbox_prompt_images
+from tests.fakes import MemoryAssetStore
 
 
-class AssetStoreStub:
-    def __init__(self, asset_path: str, content: bytes) -> None:
-        self.asset = SimpleNamespace(logical_path=asset_path, content=content)
-        self.read_keys: list[str] = []
-
-    def read(self, logical_path: str):
-        self.read_keys.append(logical_path)
-        return self.asset
+def _assets_with_upload(mime: str | None = None) -> MemoryAssetStore:
+    assets = MemoryAssetStore()
+    assets.write("upload", "attachment/chat/chat-123/diagram.png", b"image-bytes", mime=mime)
+    return assets
 
 
 def test_resolve_chat_images_reads_postgres_upload_without_nextcloud_copy() -> None:
     """A Postgres upload reaches the LLM through its database artifact key."""
-    assets = AssetStoreStub("attachment/chat/chat-123/diagram.png", b"image-bytes")
+    assets = _assets_with_upload()
 
     resolved = resolve_chat_image_paths(
         client=object(),
@@ -33,9 +28,7 @@ def test_resolve_chat_images_reads_postgres_upload_without_nextcloud_copy() -> N
 
 
 def test_resolve_sandbox_images_forwards_only_owned_image_uploads() -> None:
-    assets = AssetStoreStub("attachment/chat/chat-123/diagram.png", b"image-bytes")
-    assets.asset.kind = "upload"
-    assets.asset.mime = "image/png"
+    assets = _assets_with_upload("image/png")
 
     resolved = resolve_sandbox_prompt_images("chat-123", None, ["diagram.png", "../host-path.png"], assets)
 

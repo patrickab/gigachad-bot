@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
-import type { ProjectListItem } from "@/lib/domain/types"
+import type { ProjectListItem } from "@/lib/domain/projects"
 import { useStartupRead } from "@/contexts/StartupReadContext"
 import { useRequiredContext } from "@/hooks/useRequiredContext"
 import { subscribeToChanges } from "@/lib/backend/syncStream"

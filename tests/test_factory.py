@@ -1,16 +1,15 @@
 """Factory engine answers become gigachad's snake_case contract, and a changed shape or refusal is reported, not hidden."""
 
 import json
-from uuid import uuid4
 
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import httpx
 import pytest
 
-from backend.identity import RequestIdentity, get_request_identity
+from backend.identity import get_request_identity
 from backend.routes.factory import router
 from lib import factory
+from tests.conftest import request_identity, route_client
 
 TASK_ID = "k3x9a7bq"
 
@@ -57,7 +56,7 @@ class Engine:
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch, routes: dict[str, tuple[int, object]]) -> None:
         self.requests: list[httpx.Request] = []
-        monkeypatch.setattr(factory, "_transport", httpx.MockTransport(self._handle))
+        monkeypatch.setattr(factory._client, "transport", httpx.MockTransport(self._handle))
         self._routes = routes
 
     def _handle(self, request: httpx.Request) -> httpx.Response:
@@ -70,10 +69,7 @@ class Engine:
 
 
 def _client(has_host_access: bool) -> TestClient:
-    app = FastAPI()
-    app.include_router(router)
-    app.dependency_overrides[get_request_identity] = lambda: RequestIdentity(uuid4(), "me@example.test", None, has_host_access)
-    return TestClient(app)
+    return route_client(router, overrides={get_request_identity: request_identity(has_host_access)})
 
 
 @pytest.fixture

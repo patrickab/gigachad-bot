@@ -3,6 +3,7 @@ import pytest
 
 from backend.routes.histories import SaveRequest, save_chat_history
 from backend.routes.projects import SaveTabRequest, save_project_tab
+from tests.fakes import SandboxServiceStub
 
 
 class ChatStoreStub:
@@ -14,14 +15,6 @@ class ChatStoreStub:
         return {"status": "ok", "filename": filename, "revision": "rev"}
 
 
-class SandboxServiceStub:
-    def __init__(self, events: list[tuple[str, str | None]]) -> None:
-        self.events = events
-
-    async def checkpoint(self, *, chat_id: str) -> None:
-        self.events.append(("checkpoint", chat_id))
-
-
 @pytest.mark.asyncio
 async def test_history_save_checkpoints_staged_workspace_after_chat_save():
     events: list[tuple[str, str | None]] = []
@@ -30,7 +23,7 @@ async def test_history_save_checkpoints_staged_workspace_after_chat_save():
         "history.json",
         SaveRequest(chat_id="chat-1", messages=[]),
         ChatStoreStub(events),
-        SandboxServiceStub(events),
+        SandboxServiceStub(events=events),
     )
 
     assert result["status"] == "ok"
@@ -41,7 +34,7 @@ async def test_history_save_checkpoints_staged_workspace_after_chat_save():
 async def test_history_save_without_chat_id_does_not_checkpoint():
     events: list[tuple[str, str | None]] = []
 
-    await save_chat_history("history.json", SaveRequest(messages=[]), ChatStoreStub(events), SandboxServiceStub(events))
+    await save_chat_history("history.json", SaveRequest(messages=[]), ChatStoreStub(events), SandboxServiceStub(events=events))
 
     assert events == [("save", "history.json")]
 
@@ -67,7 +60,7 @@ async def test_project_tab_save_checkpoints_staged_workspace_after_chat_save():
         "tab.json",
         SaveTabRequest(filename="tab.json", chat_id="chat-1", messages=[]),
         ProjectStoreStub(events),
-        SandboxServiceStub(events),
+        SandboxServiceStub(events=events),
     )
 
     assert result["status"] == "ok"
@@ -84,7 +77,7 @@ async def test_project_tab_save_failure_does_not_checkpoint():
             "tab.json",
             SaveTabRequest(filename="tab.json", chat_id="chat-1", messages=[]),
             ProjectStoreStub(events, error=ValueError("stale revision")),
-            SandboxServiceStub(events),
+            SandboxServiceStub(events=events),
         )
 
     assert excinfo.value.status_code == 409

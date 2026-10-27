@@ -27,11 +27,14 @@ vi.mock("@/lib/backend/api", () => ({
   listAllDocuments: (...a: unknown[]) => impls.listAllDocuments(...a),
   addDocument: (...a: unknown[]) => impls.addDocument(...a),
   uploadFile: (...a: unknown[]) => impls.uploadFile(...a),
-  attachReference: (...a: unknown[]) => impls.attachReference(...a),
   loadFileViewerText: (...a: unknown[]) => impls.loadFileViewerText(...a),
 }))
 
-vi.mock("@/lib/drawing", () => ({
+vi.mock("@/lib/backend/references", () => ({
+  attachReference: (...a: unknown[]) => impls.attachReference(...a),
+}))
+
+vi.mock("@/lib/canvasExport", () => ({
   renderCanvasToJpeg: vi.fn(async () => new Blob([new Uint8Array([0])], { type: "image/jpeg" })),
 }))
 vi.mock("@/features/chat/attachments", () => ({
@@ -52,7 +55,7 @@ const mockControls = apiMock as unknown as {
 import { renderHook, act, waitFor } from "@testing-library/react"
 import type { ChatInputHandle } from "@/features/chat/composer/ChatInput"
 import { useProjectDocuments } from "@/features/chat/useProjectDocuments"
-import { renderCanvasToJpeg } from "@/lib/drawing"
+import { renderCanvasToJpeg } from "@/lib/canvasExport"
 import { fileViewerRawUrl } from "@/lib/backend/urls"
 
 function makeChatInputRef(handle: Partial<ChatInputHandle> = {}) {
@@ -68,7 +71,7 @@ const baseProps = (over: Partial<Parameters<typeof useProjectDocuments>[0]> = {}
   projectSlug: "proj",
   chatId: "c1",
   chatInputRef: makeChatInputRef(),
-  setExtracting: vi.fn(),
+  track: <T,>(work: () => Promise<T>) => work(),
   ...over,
 })
 
@@ -106,7 +109,7 @@ describe("useProjectDocuments", () => {
       await act(async () => { await result.current.handleDocumentSelect("/lib/x.canvas") })
 
       expect(renderCanvasToJpeg).toHaveBeenCalledWith([], 20, [
-        { url: fileViewerRawUrl("/lib/plot.png"), x: 10, y: 20, width: 30, aspect: 2 },
+        { url: fileViewerRawUrl("/lib/plot.png"), x: 10, y: 20, width: 30 },
       ], [])
     })
 
@@ -143,18 +146,21 @@ describe("useProjectDocuments", () => {
       expect(addAttachment).not.toHaveBeenCalled()
     })
 
-    it("restores extracting counter even if attach throws", async () => {
+    it("tracks the read and swallows an attach failure", async () => {
       mockControls.__setImpl("attachReference", async () => { throw new Error("boom") })
-      const setExtracting = vi.fn()
-      const chatInputRef = makeChatInputRef({ addAttachment: vi.fn() })
+      let tracked = 0
+      const track = <T,>(work: () => Promise<T>) => { tracked += 1; return work() }
+      const addAttachment = vi.fn()
+      const chatInputRef = makeChatInputRef({ addAttachment })
 
       const { result } = renderHook(() =>
-        useProjectDocuments(baseProps({ chatInputRef, setExtracting })),
+        useProjectDocuments(baseProps({ chatInputRef, track })),
       )
 
       await act(async () => { await result.current.handleDocumentSelect("/lib/doc.md") })
 
-      expect(setExtracting).toHaveBeenCalledTimes(2)
+      expect(tracked).toBe(1)
+      expect(addAttachment).not.toHaveBeenCalled()
     })
   })
 

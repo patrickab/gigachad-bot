@@ -1,190 +1,33 @@
 """Access seam for file roots: directories of Attachment-compatible files.
 
-A user can register several file roots (an Obsidian vault is just one flavor
-of file root). The list of roots is the single source of truth for file
-locations (nothing is configured in ``config.py``): it lives in ``vault_roots``
-rows for the authenticated user. With no registry the roots are simply empty
-until the user adds one.
+A user can register several file roots (an Obsidian vault is just one flavor of file root). The list of roots is the
+single source of truth for file locations (nothing is configured in ``config.py``): it lives in ``vault_roots`` rows
+for the authenticated user (``file_roots_repository``). With no registry the roots are empty until the user adds one.
 
-Listings (flat list, tree, folder expansion) honor ``.gitignore`` files found
-from each root downward, with git's precedence: the last matching pattern wins
-and deeper files override shallower ones. Ignored folders are never entered.
-Explicit paths (attach, read, write) are not filtered, only validated against
-the roots. A root that is a git clone also admits its worktrees (``git_worktree``).
+Listings (flat list, tree, relocation) honor ``.gitignore`` files (``file_walk``). Explicit paths (attach, read, write)
+are not filtered, only validated against the roots. A root that is a git clone also admits its worktrees (``git_worktree``).
 
-Root files are used as **live references**: attaching one to a chat stores its
-path, never a copy. Edits through the app write back to the actual file.
-
-All paths handed to the UI are absolute, and every read/write is validated to
-live under one of the roots (mirroring the path-traversal guard used by
-``ChatStore``). Logins with host access (they can already run commands as the
-host user) also reach every path outside the roots, except credential stores.
+Root files are used as **live references**: attaching one to a chat stores its path, never a copy. Edits through the
+app write back to the actual file. All paths handed to the UI are absolute, and every read/write is validated to live
+under one of the roots. Logins with host access also reach their home directory outside the roots, except credential
+stores (``host_access``).
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
-import re
-from typing import Iterable, Iterator, Protocol
-from urllib.parse import quote as _url_quote
-from uuid import UUID
-
-from pathspec import GitIgnoreSpec
-from psycopg_pool import ConnectionPool
+from typing import TYPE_CHECKING
 
 from lib import git_worktree
-from lib.changes import record_change
+from lib.file_walk import build_tree, walk_files
+from lib.git import GitError
+from lib.host_access import host_readable, linked_worktree_of
+from lib.wiki_links import resolve_wiki_content
 
-# Directories that hold app internals (e.g. Obsidian's) or noise rather than files, skipped even without a .gitignore.
-_SKIP_DIRS = frozenset({".obsidian", ".trash", ".git", "node_modules"})
-# Each layer is one directory's `.gitignore`: (directory path, compiled patterns), outermost first.
-_IgnoreLayers = tuple[tuple[str, GitIgnoreSpec], ...]
-IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp"})
-# Credential stores host access never opens outside the roots.
-_SECRET_DIRECTORIES = frozenset({".ssh", ".gnupg", ".secrets", ".aws", ".azure", ".kube", ".docker", ".password-store", ".pki", ".mozilla"})
-# Credential stores below `~/.config` and `~/.local/share`, matched as `(parent, child)` directory pairs.
-_SECRET_SUBDIRECTORIES = frozenset({
-    *((".config", name) for name in ("gh", "gcloud", "google-chrome", "chromium", "BraveSoftware", "op", "rclone")),
-    ("share", "keyrings"),
-})
-_SECRET_NAMES = frozenset({
-    ".netrc", ".git-credentials", ".pgpass", ".npmrc", ".pypirc",
-    ".bash_history", ".zsh_history", ".psql_history", ".python_history",
-})
-_OMP_SECRET_NAMES = ("agent.db", "models.yml")
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
-
-def is_secret_path(path: Path) -> bool:
-    """Whether *path* is a credential store: SSH/GPG/cloud keys, browser profiles, token files, env files, omp's API keys."""
-    name = path.name.lower()
-    if _SECRET_DIRECTORIES.intersection(path.parts) or _SECRET_SUBDIRECTORIES.intersection(zip(path.parts, path.parts[1:])):
-        return True
-    if name in _SECRET_NAMES or name == ".env" or name.startswith(".env.") or (name == "env" and path.parent.name == "gigachad-bot"):
-        return True
-    return ".omp" in path.parts and name.startswith(_OMP_SECRET_NAMES)
-
-
-def _host_readable(target: Path) -> bool:
-    """Whether host access may open *target* outside the roots: under the home directory and no credential store."""
-    return target.is_relative_to(Path.home().resolve()) and not is_secret_path(target)
-
-
-def _is_gitdir_pointer(git_file: Path) -> bool:
-    """Whether a `.git` file is a linked worktree's pointer (`gitdir: <clone>/.git/worktrees/<name>`)."""
-    try:
-        with git_file.open(encoding="utf-8") as handle:
-            return handle.read(len("gitdir:")) == "gitdir:"
-    except (OSError, UnicodeDecodeError):
-        return False
-
-
-def _with_gitignore(directory: Path | str, inherited: _IgnoreLayers) -> _IgnoreLayers:
-    """*inherited* plus *directory*'s own `.gitignore`, if it has a readable one."""
-    try:
-        lines = (Path(directory) / ".gitignore").read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeDecodeError):
-        return inherited
-    return (*inherited, (str(directory), GitIgnoreSpec.from_lines(lines)))
-
-
-def _is_ignored(path: str, is_dir: bool, layers: _IgnoreLayers) -> bool:
-    """Git precedence: the last matching pattern wins, and deeper `.gitignore` files override shallower ones."""
-    ignored = False
-    for base, spec in layers:
-        relative = Path(path).relative_to(base).as_posix()
-        verdict = spec.check_file(f"{relative}/" if is_dir else relative).include
-        if verdict is not None:
-            ignored = verdict
-    return ignored
-
-
-def _visible_entries(directory: Path | str, inherited: _IgnoreLayers) -> tuple[list[tuple[os.DirEntry, bool]], _IgnoreLayers]:
-    """Entries of *directory* as ``(entry, is_dir)`` minus skipped and git-ignored ones, plus the layers for its children.
-
-    An ignored folder is dropped whole, as in git, so nothing inside it can be re-included.
-    """
-    layers = _with_gitignore(directory, inherited)
-    try:
-        entries = list(os.scandir(directory))
-    except OSError:
-        return [], layers
-    visible = []
-    for entry in entries:
-        is_dir = entry.is_dir(follow_symlinks=False)
-        # A linked worktree's `.git` is a file pointing at the clone, skipped like the folder.
-        if (is_dir and entry.name in _SKIP_DIRS) or entry.name == ".git" or _is_ignored(entry.path, is_dir, layers):
-            continue
-        visible.append((entry, is_dir))
-    return visible, layers
-
-
-class FileRootRepository(Protocol):
-    """Where the *root registry* lives. File root file contents never pass through here."""
-
-    def load(self) -> list[str]:
-        """Registered root paths in registration order."""
-
-    def save(self, roots: list[str]) -> None:
-        """Replace the registry with *roots*."""
-
-
-class PostgresFileRootRepository:
-    """The registry is ``vault_roots`` rows for one authenticated user.
-
-    Stored paths are whatever spelling the caller registered; ``FileRoots``
-    re-resolves them on load, so a row migrated from another host is resolved
-    against *this* host's filesystem.
-    """
-
-    def __init__(self, pool: ConnectionPool, user_id: UUID, *, device_id: UUID | None = None) -> None:
-        self._pool = pool
-        self._user_id = user_id
-        self._device_id = device_id
-
-    def load(self) -> list[str]:
-        with self._pool.connection() as connection:
-            rows = connection.execute(
-                "SELECT path FROM vault_roots WHERE user_id = %s ORDER BY created_at, path",
-                (self._user_id,),
-            ).fetchall()
-        return [path for (path,) in rows]
-
-    def _change(self, connection, path: str, operation: str) -> None:
-        record_change(connection, user_id=self._user_id, device_id=self._device_id, kind="vault_root", key=path, operation=operation)
-
-    def save(self, roots: list[str]) -> None:
-        # ponytail: whole-registry replace, mirroring the JSON file it replaces,
-        # one statement per root. A user keeps a handful of roots; if that ever
-        # grows, give FileRoots per-root add/remove hooks instead of diffing here.
-        with self._pool.connection() as connection, connection.transaction():
-            for path in roots:
-                inserted = connection.execute(
-                    "INSERT INTO vault_roots (user_id, path) VALUES (%s, %s) ON CONFLICT (user_id, path) DO NOTHING",
-                    (self._user_id, path),
-                ).rowcount
-                if inserted:
-                    self._change(connection, path, "write")
-            removed = connection.execute(
-                "DELETE FROM vault_roots WHERE user_id = %s AND NOT (path = ANY(%s::text[])) RETURNING path",
-                (self._user_id, roots),
-            ).fetchall()
-            for (path,) in removed:
-                self._change(connection, path, "delete")
-
-
-def list_directories(path: str) -> tuple[Path, list[str]]:
-    """Resolve *path* (`~` expanded) and list its subdirectory names, hidden ones included.
-
-    - Used to pick a new root, so it browses the whole host, not only registered roots
-    - Raises NotADirectoryError for a missing or non-directory path, PermissionError when unreadable
-    """
-    directory = Path(path).expanduser().resolve()
-    if not directory.is_dir():
-        raise NotADirectoryError(path)
-    with os.scandir(directory) as entries:
-        names = [entry.name for entry in entries if entry.is_dir()]
-    return directory, sorted(names, key=str.casefold)
+    from lib.file_roots_repository import FileRootRepository
 
 
 class FileRoots:
@@ -195,10 +38,6 @@ class FileRoots:
         self._host_access = host_access
         self._roots: list[Path] = []
         self._worktrees: dict[Path, list[Path]] | None = None
-        self._reload()
-
-    def _reload(self) -> None:
-        self._roots = []
         for entry in self._repository.load():
             path = Path(entry).expanduser().resolve()
             if path not in self._roots:
@@ -240,7 +79,7 @@ class FileRoots:
                     continue
                 try:
                     listed = git_worktree.list_worktrees(candidate)
-                except git_worktree.WorktreeError:
+                except GitError:
                     continue
                 self._worktrees[candidate] = [Path(worktree.path) for worktree in listed if not worktree.is_main]
         return self._worktrees.get(root, [])
@@ -253,7 +92,7 @@ class FileRoots:
     def _root_for(self, path: str) -> Path:
         """Resolve *path*, rejecting anything outside all roots and their worktrees, unless host access reaches it."""
         target = Path(path).expanduser().resolve()
-        if self._accessible_roots(target) or (self._host_access and _host_readable(target)):
+        if self._accessible_roots(target) or (self._host_access and host_readable(target)):
             return target
         raise ValueError(f"Path outside file roots: {path}")
 
@@ -268,13 +107,8 @@ class FileRoots:
         """Innermost registered root or clone worktree, else (host access) any linked git worktree holding *path*, else ValueError."""
         target = Path(path).expanduser().resolve()
         holding = self._accessible_roots(target)
-        if not holding and self._host_access:
-            # A linked worktree is a directory whose `.git` file points at the clone.
-            for directory in (target, *target.parents):
-                marker = directory / ".git"
-                if marker.exists():
-                    holding = [directory] if marker.is_file() and _is_gitdir_pointer(marker) else []
-                    break
+        if not holding and self._host_access and (worktree := linked_worktree_of(target)):
+            holding = [worktree]
         if not holding:
             raise ValueError(f"Path outside file roots: {path}")
         return max(holding, key=lambda root: len(root.parts))
@@ -282,24 +116,10 @@ class FileRoots:
     # ─── listing ───
 
     def list_files(self) -> list[dict[str, str]]:
-        """Flat list of every file-root file as ``{path, name}`` (absolute paths).
-
-        Kept for the picker/attach flow, which wants a flat, searchable list
-        rather than the nested tree.
-        """
-        files = [{"path": entry.path, "name": entry.name} for root in self._roots if root.is_dir() for entry in self._walk_files(root)]
+        """Flat, searchable list of every file-root file as ``{path, name}`` (absolute paths) for the picker/attach flow."""
+        files = [{"path": entry.path, "name": entry.name} for root in self._roots if root.is_dir() for entry in walk_files(root)]
         files.sort(key=lambda f: f["path"].lower())
         return files
-
-    @staticmethod
-    def _walk_files(base: Path | str, inherited: _IgnoreLayers = ()) -> Iterator[os.DirEntry]:
-        """Yield listed files below *base*, skipping ignored entries and not following directory symlinks."""
-        entries, layers = _visible_entries(base, inherited)
-        for entry, is_dir in entries:
-            if is_dir:
-                yield from FileRoots._walk_files(entry.path, layers)
-            elif entry.is_file():
-                yield entry
 
     def files_under(self, paths: list[str]) -> list[Path]:
         """Files among *paths*, expanding folders recursively. Deduplicated, order kept."""
@@ -307,7 +127,7 @@ class FileRoots:
         for path in paths:
             target = self._root_for(path)
             if target.is_dir():
-                found.update(dict.fromkeys(Path(entry.path) for entry in self._walk_files(target)))
+                found.update(dict.fromkeys(Path(entry.path) for entry in walk_files(target)))
             elif target.is_file():
                 found[target] = None
         return list(found)
@@ -322,7 +142,7 @@ class FileRoots:
         except ValueError:
             return None
         name = Path(path).name
-        matches = {Path(entry.path) for entry in self._walk_files(root) if entry.name == name} if root.is_dir() else set()
+        matches = {Path(entry.path) for entry in walk_files(root) if entry.name == name} if root.is_dir() else set()
         return matches.pop() if len(matches) == 1 else None
 
     def resolve_reference(self, path: str) -> Path:
@@ -347,22 +167,11 @@ class FileRoots:
             if not root.is_dir():
                 continue
             shown = next((worktree for worktree in self.worktrees_of(root) if worktree in active), root) if active else root
-            nodes.append({"name": root.name, "path": str(shown), "mount": str(root), "type": "root", "children": self._build_children(shown)})
+            children = build_tree(shown)
+            nodes.append({"name": root.name, "path": str(shown), "mount": str(root), "type": "root", "children": children})
         return nodes
 
-    @staticmethod
-    def _build_children(directory: Path | str, inherited: _IgnoreLayers = ()) -> list[dict]:
-        # Folders first, then files, each alphabetical, matches a file browser.
-        entries, layers = _visible_entries(directory, inherited)
-        children: list[dict] = []
-        for entry, is_dir in sorted(entries, key=lambda item: (not item[1], item[0].name.lower())):
-            if is_dir:
-                sub = FileRoots._build_children(entry.path, layers)
-                if sub:  # prune folders with no file-root files
-                    children.append({"name": entry.name, "path": entry.path, "type": "folder", "children": sub})
-            elif entry.is_file():
-                children.append({"name": entry.name, "path": entry.path, "type": "file"})
-        return children
+    # ─── file access ───
 
     def resolve(self, path: str) -> Path:
         """Validate *path* against the roots and require it to be an existing file."""
@@ -377,66 +186,8 @@ class FileRoots:
 
     def write(self, path: str, content: str) -> None:
         """Overwrite a file-root file in place (validated under a file root)."""
-        resolved = self._root_for(path)
-        resolved.write_text(content, encoding="utf-8")
-
-    # ─── wiki-link resolution ───
-
-    def find_in_roots(self, name: str, source_dir: Path | None = None) -> Path | None:
-        """Find a file by name. Checks source directory first, then all roots."""
-        # ponytail: rglob(name) breaks if name has glob metacharacters
-        name = name.split("#")[0].strip()
-        if not name:
-            return None
-        candidates = [name] if Path(name).suffix else [name + ".md", name]
-        if source_dir and source_dir.is_dir():
-            for c in candidates:
-                p = (source_dir / c).resolve()
-                if p.is_file() and self.contains(p):
-                    return p
-        for root in self._roots:
-            if not root.is_dir():
-                continue
-            for c in candidates:
-                for hit in root.rglob(c):
-                    if hit.is_file():
-                        return hit
-        return None
+        self._root_for(path).write_text(content, encoding="utf-8")
 
     def resolve_wiki_content(self, content: str, source_path: str) -> str:
-        """Rewrite ``![[embed]]``, ``[[link]]``, and relative images to standard markdown."""
-        source_dir = Path(source_path).parent
-
-        def _repl_embed(m: re.Match[str]) -> str:
-            name = m.group(1).split("|")[0].strip()
-            found = self.find_in_roots(name, source_dir)
-            if not found:
-                return m.group(0)
-            if found.suffix.lower() in IMAGE_SUFFIXES:
-                return f"![{name}](/api/fileviewer/raw?path={_url_quote(str(found))})"
-            return f"[{name}](#file:{_url_quote(str(found))})"
-
-        # Embeds run first, since `![[x]]` would otherwise match the plain `[[x]]` link pass.
-        content = re.sub(r"!\[\[([^\]]+)\]\]", _repl_embed, content)
-
-        def _repl_link(m: re.Match[str]) -> str:
-            parts = m.group(1).split("|", 1)
-            name = parts[0].strip()
-            display = parts[1].strip() if len(parts) > 1 else name
-            found = self.find_in_roots(name, source_dir)
-            if found:
-                return f"[{display}](#file:{_url_quote(str(found))})"
-            return f"[{display}](#)"
-
-        content = re.sub(r"\[\[([^\]]+)\]\]", _repl_link, content)
-
-        def _repl_rel_img(m: re.Match[str]) -> str:
-            alt, src = m.group(1), m.group(2)
-            if src.startswith(("/", "http://", "https://", "data:")):
-                return m.group(0)
-            resolved = (source_dir / src).resolve()
-            if resolved.is_file() and self.contains(resolved):
-                return f"![{alt}](/api/fileviewer/raw?path={_url_quote(str(resolved))})"
-            return m.group(0)
-
-        return re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", _repl_rel_img, content)
+        """Rewrite ``![[embed]]``, ``[[link]]``, and relative images of *content* to standard markdown links to root files."""
+        return resolve_wiki_content(content, source_path, self._roots, self.contains)

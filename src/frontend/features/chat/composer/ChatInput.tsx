@@ -1,23 +1,17 @@
 "use client"
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type ElementType } from "react"
-import { createPortal } from "react-dom"
+import { forwardRef, useCallback, useImperativeHandle, useRef, useState, type ElementType } from "react"
 import { motion } from "framer-motion"
-import { ArrowUp, Loader2, Plus, LayoutGrid, Mic, Square, Pencil } from "lucide-react"
-import { blobToDataUrl, cn } from "@/lib/utils"
-import { attachReference, uploadFile as apiUploadFile } from "@/lib/backend/api"
-import { readReferences, saveAttachmentEdit, withReferenceRead } from "@/features/chat/attachments"
+import { Mic, Pencil } from "lucide-react"
+import { cn } from "@/lib/utils"
+import { useSpeechInput } from "@/hooks/useSpeechInput"
 import type { Attachment } from "@/lib/domain/types"
-import { useClickOutside } from "@/hooks/useClickOutside"
-import { useEnabledTools } from "@/features/chat/EnabledToolsContext"
-import { TOOLS } from "@/features/chat/tools"
-import { useSettings } from "@/contexts/SettingsContext"
-import { DrawingCanvas } from "./DrawingCanvas"
-import { OCRPanel } from "@/features/editor/OCRPanel"
 import { AttachmentPreview } from "@/features/chat/preview/AttachmentPreview"
 import { AttachmentChip, type ContextAttachment } from "./AttachmentChip"
-import { ToolMenuItem, ToolMenuSection } from "./ToolMenuItem"
 import { CompletionMenu, useCompletions, type CompleteDraft } from "./CompletionMenu"
+import { AttachMenu, ICON_BUTTON, SendButton, ToolsMenu } from "./ComposerControls"
+import { DrawingAttach, type DrawingMode } from "./DrawingAttach"
+import { useDraftAttachments } from "./useDraftAttachments"
 
 interface ChatInputProps {
   chatId: string
@@ -62,31 +56,6 @@ export interface ChatInputHandle {
   addFiles: (files: File[]) => void
 }
 
-/** One recognition alternative; the browser API has no DOM lib typings. */
-interface SpeechResultEvent {
-  resultIndex: number
-  results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }>
-}
-
-interface SpeechRecognitionLike {
-  continuous: boolean
-  interimResults: boolean
-  lang: string
-  onresult: ((event: SpeechResultEvent) => void) | null
-  onend: (() => void) | null
-  onerror: (() => void) | null
-  start: () => void
-  stop: () => void
-}
-
-type SpeechRecognitionConstructor = new () => SpeechRecognitionLike
-
-const ICON_BUTTON = "rounded-full p-1.5 text-ink-faint transition-colors hover:bg-surface-elevated hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted disabled:opacity-30"
-/** Send and stop share one circle: raised surface when actionable, outlined when not. */
-const SEND_BUTTON = "ml-1.5 flex h-8 w-8 items-center justify-center rounded-full border transition-all duration-200 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-ink-muted"
-const SEND_READY = "border-divider bg-surface-elevated text-ink hover:border-divider-strong active:scale-[0.96]"
-const SEND_IDLE = "border-divider/50 text-ink-faint"
-
 export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({
   chatId,
   onSend,
@@ -102,33 +71,11 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   context,
   attachMenuItems = [],
 }, ref) {
-  const { enabledTools, toggleTool } = useEnabledTools()
-  const { ocrModel } = useSettings()
-
-  const toolEntries = TOOLS.map((tool) => ({
-    id: tool.name,
-    label: tool.selectorLabel,
-    icon: tool.icon,
-    enabled: enabledTools.includes(tool.name),
-    toggle: () => toggleTool(tool.name),
-  }))
-
+  const drafts = useDraftAttachments(chatId, slug)
+  const { attachments, upload } = drafts
   const [text, setText] = useState("")
-  const [attachments, setAttachments] = useState<Attachment[]>([])
-  const [uploadingNames, setUploadingNames] = useState<Set<string>>(new Set())
-  const [showTools, setShowTools] = useState(false)
-  const [showAttachMenu, setShowAttachMenu] = useState(false)
-  const [drawing, setDrawing] = useState<null | "attach" | "ocr">(null)
-  const [drawingOcrImage, setDrawingOcrImage] = useState<string | null>(null)
-  // Name of the draft attachment whose full preview is open. Earlier messages' chips open the chat's preview.
-  const [previewName, setPreviewName] = useState<string | null>(null)
-  const [isListening, setIsListening] = useState(false)
-
+  const [drawing, setDrawing] = useState<DrawingMode | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const toolsRef = useRef<HTMLDivElement>(null)
-  const attachMenuRef = useRef<HTMLDivElement>(null)
-  const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
-  const textRef = useRef(text)
 
   const adjustHeight = useCallback(() => {
     const el = textareaRef.current
@@ -137,73 +84,42 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     el.style.height = "0"
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`
   }, [])
-
-  const upload = useCallback((file: File, name: string) => {
-    setUploadingNames(prev => new Set(prev).add(name))
-    apiUploadFile(chatId, file, slug)
-      .then(att => setAttachments(prev => [...prev, att]))
-      .catch(() => {})
-      .finally(() => setUploadingNames(prev => { const n = new Set(prev); n.delete(name); return n }))
-  }, [chatId, slug])
-  const uploadFiles = useCallback((files: File[]) => {
-    for (const file of files) upload(file, file.name)
-  }, [upload])
+  const adjustHeightNextFrame = useCallback(() => { requestAnimationFrame(() => adjustHeight()) }, [adjustHeight])
 
   const replaceText = useCallback((next: string) => {
     setText(next)
-    requestAnimationFrame(() => adjustHeight())
-  }, [adjustHeight])
+    adjustHeightNextFrame()
+  }, [adjustHeightNextFrame])
   const completions = useCompletions(complete, textareaRef, replaceText)
+  const { isListening, toggleListening } = useSpeechInput(text, setText, adjustHeightNextFrame)
 
   useImperativeHandle(ref, () => ({
-    addAttachment: (att: Attachment) => setAttachments(prev => {
-      const existing = prev.findIndex(a => a.name === att.name)
-      if (existing >= 0) { const copy = [...prev]; copy[existing] = att; return copy }
-      return [...prev, att]
-    }),
+    addAttachment: drafts.add,
     updateText: (update) => {
       setText(update)
       requestAnimationFrame(() => { adjustHeight(); textareaRef.current?.focus() })
     },
-    addFiles: uploadFiles,
-  }), [adjustHeight, uploadFiles])
+    addFiles: (files) => { for (const file of files) upload(file, file.name) },
+  }), [adjustHeight, drafts.add, upload])
 
-  const closeTools = useCallback(() => setShowTools(false), [])
-  const closeAttachMenu = useCallback(() => setShowAttachMenu(false), [])
-  useClickOutside(toolsRef, closeTools)
-  useClickOutside(attachMenuRef, closeAttachMenu)
-
-  // Mirror of `text` so speech callbacks read the latest value without re-binding
-  useEffect(() => { textRef.current = text }, [text])
-
-  const clearAttachments = useCallback(() => setAttachments([]), [])
-  const removeAttachment = useCallback((name: string) => setAttachments(prev => prev.filter(a => a.name !== name)), [])
-  const changeDraftContent = useCallback(async (name: string, content: string) => {
-    const attachment = attachments.find((a) => a.name === name)
-    if (!attachment) return
-    const saved = await saveAttachmentEdit(attachment, content)
-    setAttachments((prev) => prev.map((a) => a.name === name ? saved : a))
-  }, [attachments])
-
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = () => {
     const trimmed = text.trim()
     if (!trimmed && attachments.length === 0) return
     completions.close()
     onSend(trimmed || "", attachments)
     setText("")
-    clearAttachments()
-    requestAnimationFrame(() => adjustHeight())
-  }, [text, attachments, onSend, clearAttachments, adjustHeight, completions])
+    drafts.clear()
+    adjustHeightNextFrame()
+  }
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent) => {
     if (completions.handleKey(e, text)) return
     if (e.key === "Enter" && !e.shiftKey && !isStreaming && !extracting) { e.preventDefault(); handleSubmit() }
-  }, [handleSubmit, isStreaming, extracting, completions, text])
+  }
 
   // Only the first pasted image is attached
-  const handlePaste = useCallback((e: React.ClipboardEvent) => {
-    const items = e.clipboardData.items
-    for (const item of items) {
+  const handlePaste = (e: React.ClipboardEvent) => {
+    for (const item of e.clipboardData.items) {
       if (item.type.startsWith("image/")) {
         e.preventDefault()
         const blob = item.getAsFile()
@@ -212,58 +128,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
         break
       }
     }
-  }, [upload])
-
-  // Stale `recognitionRef` checks ignore events from a recognizer that was already replaced or stopped
-  const toggleListening = useCallback(() => {
-    if (isListening) { recognitionRef.current?.stop(); setIsListening(false); return }
-    const speechWindow = window as Window & { SpeechRecognition?: SpeechRecognitionConstructor; webkitSpeechRecognition?: SpeechRecognitionConstructor }
-    const SpeechRecognition = speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition
-    if (!SpeechRecognition) { alert("Voice input is not supported."); return }
-    const recognition = new SpeechRecognition()
-    recognition.continuous = false
-    recognition.interimResults = true
-    recognition.lang = "en-US"
-    let finalText = textRef.current.trim()
-    let interimText = ""
-    recognition.onresult = (event: SpeechResultEvent) => {
-      let interim = ""
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const r = event.results[i]
-        if (r.isFinal) finalText = finalText ? finalText + " " + r[0].transcript.trim() : r[0].transcript.trim()
-        else interim += r[0].transcript
-      }
-      interimText = interim
-      setText(finalText + (interimText ? " " + interimText : ""))
-      requestAnimationFrame(() => adjustHeight())
-    }
-    recognition.onend = () => {
-      if (interimText && recognitionRef.current === recognition) {
-        finalText = finalText ? finalText + " " + interimText.trim() : interimText.trim()
-        setText(finalText)
-      }
-      if (recognitionRef.current === recognition) setIsListening(false)
-    }
-    recognition.onerror = () => { if (recognitionRef.current === recognition) setIsListening(false) }
-    recognitionRef.current = recognition
-    recognition.start()
-    setIsListening(true)
-  }, [isListening, adjustHeight])
+  }
 
   const canSend = text.trim().length > 0 || attachments.length > 0
   const hintText = hint?.(text, attachments.length) ?? null
-  // Resolved each render so the window follows edits and closes once its attachment is removed.
-  const previewAttachment = attachments.find((a) => a.name === previewName) ?? null
-
-  /** Open a draft attachment's preview, a reference re-read first so Neovim never edits a stale copy. */
-  const openPreview = async (attachment: Attachment) => {
-    if (attachment.vaultPath) {
-      const reads = await readReferences([attachment.vaultPath], attachReference)
-      setAttachments((prev) => prev.map((a) => a.name === attachment.name ? withReferenceRead(a, reads) : a))
-    }
-    setPreviewName(attachment.name)
-  }
-
   const menuItems: (AttachMenuItem & { iconClassName?: string })[] = [
     ...attachMenuItems,
     { label: "Drawing", icon: Pencil, onClick: () => setDrawing("attach") },
@@ -287,9 +155,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             <AttachmentChip
               key={attachment.name}
               attachment={attachment}
-              uploading={uploadingNames.has(attachment.name)}
-              onOpen={() => void openPreview(attachment)}
-              onRemove={() => removeAttachment(attachment.name)}
+              uploading={drafts.uploadingNames.has(attachment.name)}
+              onOpen={() => void drafts.openPreview(attachment)}
+              onRemove={() => drafts.remove(attachment.name)}
             />
           ))}
         </div>
@@ -323,124 +191,29 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
           {hintText && <p className="mt-1 text-xs text-ink-muted">{hintText}</p>}
           <div className="mt-2 flex items-center justify-between">
             <div className="-ml-1.5 flex min-w-0 items-center gap-0.5">
-              <div className="relative" ref={attachMenuRef}>
-                <button aria-label="Add attachment"
-                  onClick={() => setShowAttachMenu(!showAttachMenu)}
-                  disabled={disabled}
-                  className={cn(ICON_BUTTON, showAttachMenu && "bg-surface-elevated text-ink")}
-                >
-                  <Plus className="h-4 w-4" />
-                </button>
-                {showAttachMenu && (
-                  <div className="absolute bottom-full left-0 mb-2 w-48 rounded-xl border border-divider bg-paper p-2 shadow-[var(--shadow-xl)]">
-                    {menuItems.map(({ label, icon: Icon, onClick, iconClassName = "text-ink-muted" }) => (
-                      <button
-                        key={label}
-                        onClick={() => { setShowAttachMenu(false); onClick() }}
-                        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-ink hover:bg-surface-elevated/50 transition-colors"
-                      >
-                        <Icon className={`h-3.5 w-3.5 ${iconClassName}`} />{label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <AttachMenu items={menuItems} disabled={disabled} />
             </div>
             <div className="flex items-center gap-0.5">
-              {toolsMenu && <div className="relative" ref={toolsRef}>
-                <button aria-label="Toggle tools"
-                  onClick={() => setShowTools(!showTools)}
-                  disabled={disabled}
-                  className={cn(ICON_BUTTON, showTools && "bg-surface-elevated text-ink")}
-                >
-                  <LayoutGrid className="h-4 w-4" />
-                </button>
-                {showTools && (
-                  <div className="absolute bottom-full right-0 mb-2 w-56 rounded-xl border border-divider bg-paper p-2 shadow-[var(--shadow-xl)]">
-                    <ToolMenuSection title="Tools">
-                      {toolEntries.map(t => (
-                        <ToolMenuItem key={t.id} icon={t.icon} label={t.label} active={t.enabled} onClick={t.toggle} />
-                      ))}
-                    </ToolMenuSection>
-                  </div>
-                )}
-              </div>}
-              <button aria-label={`${isListening ? "Stop listening" : "Start listening"}`}
+              {toolsMenu && <ToolsMenu disabled={disabled} />}
+              <button aria-label={isListening ? "Stop listening" : "Start listening"}
                 onClick={toggleListening}
                 disabled={disabled}
                 className={cn(ICON_BUTTON, isListening && "bg-danger-soft text-danger hover:bg-danger-soft hover:text-danger")}
               >
                 <Mic className={cn("h-4 w-4", isListening && "animate-pulse")} />
               </button>
-              {isStreaming ? (
-                <button
-                  onClick={onCancel}
-                  className={cn(SEND_BUTTON, SEND_READY)}
-                  aria-label="Stop generating"
-                >
-                  <Square className="h-3 w-3 fill-current" />
-                </button>
-              ) : extracting ? (
-                <button aria-label="Extracting attachment" disabled className={cn(SEND_BUTTON, SEND_IDLE)}>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                </button>
-              ) : (
-                <button aria-label="Send message"
-                  onClick={handleSubmit}
-                  disabled={disabled || !canSend}
-                  className={cn(SEND_BUTTON, canSend && !disabled ? SEND_READY : SEND_IDLE)}
-                >
-                  <ArrowUp className="h-4 w-4" />
-                </button>
-              )}
+              <SendButton isStreaming={isStreaming} extracting={extracting} ready={canSend} disabled={disabled} onCancel={onCancel} onSend={handleSubmit} />
             </div>
           </div>
         </div>
-      {drawing && (
-        <DrawingCanvas
-          chatId={chatId}
-          onConfirm={(att) => {
-            const mode = drawing
-            setDrawing(null)
-
-            // OCR drawings go to the OCR panel instead of being attached directly
-            if (mode === "ocr") {
-              fetch(att.url)
-                .then(response => response.blob())
-                .then(blobToDataUrl)
-                .then(setDrawingOcrImage)
-                .catch(() => {})
-            } else {
-              setAttachments(prev => [...prev, att])
-            }
-          }}
-          onClose={() => setDrawing(null)}
-        />
-      )}
-      {drawingOcrImage && createPortal(
-        <div className="fixed inset-0 z-[90]">
-          <OCRPanel
-            image={drawingOcrImage}
-            model={ocrModel}
-            onComplete={async (output) => {
-              setDrawingOcrImage(null)
-              const blob = new Blob([output], { type: "text/markdown" })
-              const file = new File([blob], `drawing-ocr-${Date.now()}.md`, { type: "text/markdown" })
-              try {
-                const att = await apiUploadFile(chatId, file, slug)
-                setAttachments(prev => [...prev, att])
-              } catch {}
-            }}
-            onClose={() => setDrawingOcrImage(null)}
-          />
-        </div>,
-        document.body,
-      )}
-      <AttachmentPreview
-        attachment={previewAttachment}
-        onClose={() => setPreviewName(null)}
-        onContentChange={previewName == null ? undefined : (newContent) => changeDraftContent(previewName, newContent)}
+      <DrawingAttach
+        mode={drawing}
+        chatId={chatId}
+        onClose={() => setDrawing(null)}
+        onAttach={drafts.add}
+        onUpload={(file) => upload(file, file.name)}
       />
+      <AttachmentPreview attachment={drafts.preview} onClose={drafts.closePreview} onContentChange={drafts.editPreview} />
     </motion.div>
   )
 })

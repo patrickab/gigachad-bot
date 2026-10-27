@@ -1,16 +1,19 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { Settings } from "lucide-react"
 import { Dialog } from "@/components/ui/Dialog"
 import { StyledSelect } from "@/components/ui/StyledSelect"
 import { ErrorText } from "@/components/ui/ErrorText"
+import { PillTabs } from "@/components/ui/PillTabs"
 import { errorMessage, cn } from "@/lib/utils"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
+import { useLoadWhile } from "@/hooks/useLoadWhile"
 import { useResetOnOpen } from "@/hooks/useResetOnChange"
 import { fetchFactoryDefaults, fetchModels, saveFactoryDefaults } from "@/lib/backend/api"
-import { FACTORY_AGENT_NAMES, type FactoryAgentName, type FactoryDefaults, type FactorySettings, type MergeMode, type ModelsResponse } from "@/lib/domain/types"
-import { Field } from "./Field"
+import type { ModelsResponse } from "@/lib/domain/types"
+import { FACTORY_AGENT_NAMES, type FactoryAgentName, type FactoryDefaults, type FactorySettings, type MergeMode } from "@/lib/domain/factory"
+import { Field } from "@/components/ui/Field"
 import { FIELD_CLASS, PRIMARY_BUTTON_CLASS, QUIET_BUTTON_CLASS } from "./styles"
 
 const MERGE_OPTIONS = [
@@ -19,6 +22,8 @@ const MERGE_OPTIONS = [
 ]
 
 const MAX_ROUNDS_LIMITS = { min: 1, max: 20 }
+
+const AGENT_TABS = FACTORY_AGENT_NAMES.map((name) => ({ value: name, label: name }))
 
 /** Models the user filled in; an empty selector means the agent keeps its own model. */
 function withoutEmptyModels(settings: FactorySettings): FactorySettings {
@@ -55,21 +60,8 @@ export function FactorySettingsDialog({ open, onClose }: { open: boolean; onClos
     setError("")
   })
 
-  useEffect(() => {
-    if (!open) return
-    let cancelled = false
-    fetchFactoryDefaults().then((loaded) => {
-      if (!cancelled) setDraft(loaded)
-    }).catch((cause: unknown) => {
-      if (!cancelled) setError(errorMessage(cause, "Could not load the defaults"))
-    })
-    fetchModels().then((loaded) => {
-      if (!cancelled) setCatalog(loaded)
-    }).catch((cause: unknown) => {
-      if (!cancelled) setModelError(errorMessage(cause, "Could not load OMP models"))
-    })
-    return () => { cancelled = true }
-  }, [open, setError])
+  useLoadWhile(open, fetchFactoryDefaults, setDraft, (cause) => setError(errorMessage(cause, "Could not load the defaults")))
+  useLoadWhile(open, fetchModels, setCatalog, (cause) => setModelError(errorMessage(cause, "Could not load OMP models")))
 
   const changeSettings = (change: Partial<FactorySettings>) =>
     setDraft((current) => current && { ...current, settings: { ...current.settings, ...change } })
@@ -138,25 +130,12 @@ export function FactorySettingsDialog({ open, onClose }: { open: boolean; onClos
               ? <ErrorText>{modelError}</ErrorText>
               : <p role="status" className="text-[11px] text-ink-faint">{catalog ? "OMP models added in Providers / Models. Applies to new tasks." : "Loading OMP models"}</p>}
             <div className="flex flex-col gap-2">
-              <div role="tablist" aria-label="Agent" className="flex gap-1">
-                {FACTORY_AGENT_NAMES.map((name) => (
-                  <button
-                    key={name}
-                    id={`agent-tab-${name}`}
-                    type="button"
-                    role="tab"
-                    aria-selected={agent === name}
-                    aria-controls="agent-markdown"
-                    onClick={() => setAgent(name)}
-                    className={cn(
-                      "rounded-full px-3 py-1 text-[11px] font-medium transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted",
-                      agent === name ? "bg-surface-elevated text-ink" : "text-ink-muted hover:bg-surface/50 hover:text-ink",
-                    )}
-                  >
-                    {name}
-                  </button>
-                ))}
-              </div>
+              <PillTabs
+                options={AGENT_TABS}
+                value={agent}
+                onChange={setAgent}
+                tabs={{ label: "Agent", idPrefix: "agent-tab", panelId: "agent-markdown" }}
+              />
               <textarea
                 id="agent-markdown"
                 role="tabpanel"

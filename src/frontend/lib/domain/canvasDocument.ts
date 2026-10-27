@@ -22,19 +22,43 @@ export interface CanvasFrame {
   path?: string // image source (library/project path); pages have none
 }
 
-export interface CanvasAttachment {
+type AttachmentBase = {
   id: string
-  kind: "pdf" | "canvas" | "architecture-graph" | "document"
-  path?: string // pdf source; nested canvases have none
-  canvas?: CanvasDocument // nested canvas contents (kind === "canvas")
   x: number
   y: number
   width: number
-  height?: number // Architecture Diagrams own their viewport height; legacy attachments retain their aspect
+  height?: number // Architecture Diagrams and documents own their viewport height; legacy attachments retain their aspect
   title?: string // user label, independent of the backing document filename
-  page?: number // selected PDF page, persisted with the canvas
-  edgeStyle?: EdgeStyle // architecture windows: how connections are drawn; LikeC4 has no such setting
 }
+
+export type PdfAttachment = AttachmentBase & {
+  kind: "pdf"
+  path: string
+  page?: number // selected PDF page, persisted with the canvas
+}
+
+export type NestedCanvasAttachment = AttachmentBase & {
+  kind: "canvas"
+  path?: string // a canvas file; inline canvases have none
+  canvas?: CanvasDocument // inline contents
+}
+
+export type ArchitectureAttachment = AttachmentBase & {
+  kind: "architecture-graph"
+  path: string
+  edgeStyle?: EdgeStyle // how connections are drawn; LikeC4 has no such setting
+}
+
+export type DocumentAttachment = AttachmentBase & {
+  kind: "document"
+  path: string
+}
+
+export type CanvasAttachment = PdfAttachment | NestedCanvasAttachment | ArchitectureAttachment | DocumentAttachment
+export type AttachmentKind = CanvasAttachment["kind"]
+
+/** Fields a placed attachment window may change. */
+export type AttachmentPatch = { path?: string; title?: string; page?: number; edgeStyle?: EdgeStyle; canvas?: CanvasDocument }
 
 export interface CanvasText {
   id: string
@@ -260,7 +284,8 @@ export function restoreHistory(doc: CanvasDocument, changes: CanvasHistoryChange
       if (!sameForHistory(collection, entity, expected)) return [entity]
       if (!replacement) return []
       if (collection === "attachments") {
-        const page = (entity as CanvasAttachment).page
+        const attachment = entity as CanvasAttachment
+        const page = "page" in attachment ? attachment.page : undefined
         return [{ ...(replacement as CanvasAttachment), ...(page === undefined ? {} : { page }) }]
       }
       return [replacement]

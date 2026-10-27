@@ -1,35 +1,23 @@
-"""Helpers for document MIME types, storage keys, and FileRoots path checks.
+"""Helpers for document metadata, storage keys, and FileRoots path checks.
 
 PDFs and MinerU output live in Postgres (``AssetStore``) and are mirrored to the
 Nextcloud ``Documents`` tree as a copy the app never reads back. The only path
 resolved off disk is a ``FileRoots`` reference: an external file with no database copy.
 
-Pure path and MIME logic. Project metadata belongs to ``ProjectStore`` and MinerU
-spawning to ``lib.mineru``. Staying free of route imports lets the ``files`` and
+Pure path logic, MIME types come from ``lib.mime``. Project metadata belongs to ``ProjectStore``
+and MinerU spawning to ``lib.mineru``. Staying free of route imports lets the ``files`` and
 ``documents`` routes share it without cycles.
 """
 
-import mimetypes
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from config import DOCUMENTS
 from lib.data_store import InvalidStorageKey, validate_key
+from lib.mime import mime_for
 
 if TYPE_CHECKING:
     from lib.file_roots import FileRoots
-
-
-def mime_for(path: str | Path) -> str:
-    """Best-effort MIME for a document path: PDF and registered types by suffix, everything else is text."""
-    p = Path(path)
-    suffix = p.suffix.lower()
-    if suffix == ".pdf":
-        return "application/pdf"
-    guessed, _ = mimetypes.guess_type(p.name)
-    if guessed:
-        return guessed
-    return "text/markdown" if suffix == ".md" else "text/plain"
 
 
 def document_meta(path: str | Path) -> dict[str, str]:

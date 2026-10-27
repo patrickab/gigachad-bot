@@ -1,12 +1,9 @@
 """Exercise checkout bootstrap using local Git repositories, without servers."""
 
-import os
-from pathlib import Path
-import subprocess
-
 from tests.conftest import git
+from tests.shell import REPOSITORY, environment_with, fake_command, run_script
 
-LAUNCHER = Path(__file__).resolve().parents[1] / "run-omp-web.sh"
+LAUNCHER = REPOSITORY / "run-omp-web.sh"
 
 
 def test_bootstrap_preserves_existing_checkout_and_rejects_unrelated_directory(tmp_path):
@@ -15,35 +12,27 @@ def test_bootstrap_preserves_existing_checkout_and_rejects_unrelated_directory(t
 
     git(tmp_path, "init", "--initial-branch=custom", str(source))
     # Replace the external app with an entrypoint that starts no services.
-    entrypoint = source / "run.sh"
-    entrypoint.write_text("#!/usr/bin/env bash\nexit 0\n")
-    entrypoint.chmod(0o755)
+    fake_command(source, "run.sh", "exit 0\n")
     git(source, "add", "run.sh")
     git(source, "commit", "-m", "Fixture")
     binaries = tmp_path / "bin"
     binaries.mkdir()
-    omp = binaries / "omp"
-    omp.write_text("#!/usr/bin/env bash\nexit 1\n")
-    omp.chmod(0o755)
+    fake_command(binaries, "omp", "exit 1\n")
     checkout = tmp_path / "nested" / "checkout"
     worktree = tmp_path / "worktree"
-    environment = os.environ.copy()
-    environment.update({
-        "PATH": f"{binaries}:{environment['PATH']}",
-        "GIGACHAD_OMP_WEB_REPO": str(checkout),
-        "GIGACHAD_OMP_WEB_DIR": str(worktree),
-        "GIGACHAD_OMP_WEB_REF": "custom",
-        "GIGACHAD_OMP_WEB_BIND": "127.0.0.1:0",
-        "GIT_CONFIG_COUNT": "1",
-        "GIT_CONFIG_KEY_0": f"url.{source.as_uri()}.insteadOf",
-        "GIT_CONFIG_VALUE_0": "https://github.com/patrickab/ompweb.git",
-    })
+    environment = environment_with(
+        binaries,
+        GIGACHAD_OMP_WEB_REPO=str(checkout),
+        GIGACHAD_OMP_WEB_DIR=str(worktree),
+        GIGACHAD_OMP_WEB_REF="custom",
+        GIGACHAD_OMP_WEB_BIND="127.0.0.1:0",
+        GIT_CONFIG_COUNT="1",
+        GIT_CONFIG_KEY_0=f"url.{source.as_uri()}.insteadOf",
+        GIT_CONFIG_VALUE_0="https://github.com/patrickab/ompweb.git",
+    )
 
     def launch():
-        return subprocess.run(
-            ["bash", str(LAUNCHER)], env=environment,
-            text=True, capture_output=True, timeout=15,
-        )
+        return run_script(LAUNCHER, environment, timeout=15)
 
     initial = launch()
     assert initial.returncode == 0, initial.stdout + initial.stderr

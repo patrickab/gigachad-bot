@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react"
 import { useTwoFingerGesture } from "@/hooks/useTwoFingerGesture"
+import { useViewportReframe } from "@/hooks/useViewportReframe"
 import { inOwnAttachment } from "@/features/editor/canvas/attachments/canvasTransfer"
-import { cameraToOffset, offsetToCamera, reframeCamera, zoomCamera, type ZoomAnchor } from "@/lib/domain/viewport"
+import { cameraToOffset, offsetToCamera, zoomCamera, type ZoomAnchor } from "@/lib/domain/viewport"
 import type { Point } from "@/lib/domain/edgeRouting"
 
 const MIN_SCALE = 0.15
@@ -32,9 +33,7 @@ export function useCanvasCamera(containerRef: RefObject<HTMLDivElement | null>, 
   const scaleRef = useRef(scale)
   const offsetRef = useRef(offset)
   const hostScaleRef = useRef(hostScale)
-  // Frame size the current offset was computed for; resizes re-project from it.
-  const viewportSizeRef = useRef({ width: 0, height: 0 })
-  const restoredRef = useRef(false)
+  useLayoutEffect(() => { hostScaleRef.current = hostScale }, [hostScale])
 
   const setCamera = useCallback((nextOffset: Point, nextScale = scaleRef.current) => {
     scaleRef.current = nextScale
@@ -46,44 +45,25 @@ export function useCanvasCamera(containerRef: RefObject<HTMLDivElement | null>, 
   // The canvas's own zoom is clamped; its host's zoom rides on top of it.
   const clampScale = (next: number) => Math.min(MAX_SCALE * hostScaleRef.current, Math.max(MIN_SCALE * hostScaleRef.current, next))
 
-  // Restore a legacy viewport once on mount, then keep the view centered across resizes.
+  // Restore a legacy viewport once on mount.
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
     const camera = { scale: (viewport?.scale ?? 0.5) * hostScaleRef.current, centerX: viewport?.centerX ?? 0, centerY: viewport?.centerY ?? 0 }
     setCamera(cameraToOffset(camera, { width: el.clientWidth, height: el.clientHeight }), camera.scale)
-    restoredRef.current = true
-    viewportSizeRef.current = { width: el.clientWidth, height: el.clientHeight }
-    const ro = new ResizeObserver(() => {
-      const next = { width: el.clientWidth, height: el.clientHeight }
-      const previous = viewportSizeRef.current
-      if (!restoredRef.current || (next.width === previous.width && next.height === previous.height)) return
-      // Keep the world point at the viewport's center fixed across resizes: the
-      // browser window for a top-level canvas, fullscreen or a resize drag for a
-      // nested one. Pinning the top-left instead would slide the middle away.
-      const view = reframeCamera(offsetRef.current, scaleRef.current, previous, next)
-      viewportSizeRef.current = next
-      setCamera(view.offset)
-    })
-    ro.observe(el)
-    return () => ro.disconnect()
   // Camera state is local after initialization.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Host zoom: the frame has already been resized by the same factor, so scale
-  // the view with it around the center. Runs before the ResizeObserver sees the
-  // new size and records it, so the resize isn't applied a second time.
-  useLayoutEffect(() => {
-    const factor = hostScale / hostScaleRef.current
-    hostScaleRef.current = hostScale
-    const el = containerRef.current
-    if (factor === 1 || !el || !restoredRef.current) return
-    const next = { width: el.clientWidth, height: el.clientHeight }
-    const view = reframeCamera(offsetRef.current, scaleRef.current, viewportSizeRef.current, next, factor)
-    viewportSizeRef.current = next
-    setCamera(view.offset, view.scale)
-  }, [hostScale, containerRef, setCamera])
+  // Then keep the view centered across resizes (the browser window for a top-level canvas,
+  // fullscreen or a resize drag for a nested one) and magnified with the host's zoom.
+  // Called after the restore effect, so it records the frame the restore used.
+  useViewportReframe(containerRef, {
+    hostScale,
+    ready: true,
+    read: () => ({ offset: offsetRef.current, scale: scaleRef.current }),
+    write: (nextOffset, nextScale) => setCamera(nextOffset, nextScale),
+  })
 
   // Wheel zoom
   useEffect(() => {

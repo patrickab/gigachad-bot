@@ -3,11 +3,10 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { FileType, ImageIcon, Network, Pencil, PenLine, Plus, SquarePen, X } from "lucide-react"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
-import { useTabActive } from "@/contexts/TabContext"
+import { useMenuPopover } from "@/components/ui/MenuPopover"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
-import { useOutsidePress } from "@/hooks/useOutsidePress"
 import { listNotes, listProjectDocuments, removeDocument, renameDocument } from "@/lib/backend/api"
-import type { ProjectDocument } from "@/lib/domain/types"
+import type { ProjectDocument } from "@/lib/domain/projects"
 import { baseName } from "@/lib/paths"
 
 const ITEM = "flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-muted hover:text-ink hover:bg-hover transition-colors truncate"
@@ -56,19 +55,15 @@ function FileButton({ icon, name, onClick }: { icon: ReactNode; name: string; on
  * Documents (generated tool artifacts included) are renamed and deleted in place.
  */
 export function CanvasAddMenu({ slug, depth, docPath, onAddPage, onAddImage, onAddPdf, onAddDocument, onAddArchitecture, onAddNewCanvas, onAddCanvasFile, onDocumentRenamed, onDocumentDeleted }: CanvasAddMenuProps) {
-  const [open, setOpen] = useState(false)
-  const menuRef = useRef<HTMLDivElement>(null)
+  const { ref: menuRef, open, toggle, close } = useMenuPopover({ escape: false })
   const [docs, setDocs] = useState<ProjectDocument[]>([])
   const [renamingPath, setRenamingPath] = useState<string | null>(null)
   const cancelRename = useRef(false)
   const renameInputRef = useRef<HTMLInputElement>(null)
-  const tabActive = useTabActive()
   // The rename input owns Escape while open: cancel it without closing an enclosing overlay.
-  useEscapeLayer(() => { cancelRename.current = true; renameInputRef.current?.blur() }, renamingPath !== null && tabActive)
+  useEscapeLayer(() => { cancelRename.current = true; renameInputRef.current?.blur() }, renamingPath !== null)
   const { schedule: scheduleDelete, pending: deletePending } = useUndoDelete()
   const deleteKey = (path: string) => `canvas-document:${slug ?? ""}:${path}`
-
-  useOutsidePress(menuRef, () => setOpen(false), { active: open })
 
   useEffect(() => {
     if (!open) return
@@ -82,7 +77,7 @@ export function CanvasAddMenu({ slug, depth, docPath, onAddPage, onAddImage, onA
   const canvases = slug && depth === 0 ? docs.filter((d) => d.path.endsWith(".canvas") && d.path !== docPath) : []
 
   /** Every pick closes the menu; renaming and deleting keep it open. */
-  const pick = (action: () => void) => () => { action(); setOpen(false) }
+  const pick = (action: () => void) => () => { action(); close() }
 
   const renameDocumentRow = async (path: string, currentName: string, nextName: string) => {
     setRenamingPath(null)
@@ -108,7 +103,7 @@ export function CanvasAddMenu({ slug, depth, docPath, onAddPage, onAddImage, onA
   return (
     <div className="relative" ref={menuRef}>
       <button aria-label="Add to canvas"
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggle}
         className="flex items-center gap-1 rounded px-2 py-1 text-[10px] font-medium text-ink-muted hover:text-ink hover:bg-hover transition-colors"
       >
         <Plus className="h-3 w-3" />

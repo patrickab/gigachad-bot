@@ -3,8 +3,8 @@
 import { useCallback, useState } from "react"
 import { errorMessage } from "@/lib/utils"
 
-/** Run `action` with pending and error state; `run` resolves false when it threw, `error` is "" when none. */
-export function useAsyncAction<A extends unknown[]>(action: (...args: A) => Promise<unknown>, fallback: string): {
+/** Run `action` with pending and error state; `run` resolves false when it threw, `error` is "" when none. A function `fallback` builds the message from the call's arguments. */
+export function useAsyncAction<A extends unknown[]>(action: (...args: A) => Promise<unknown>, fallback: string | ((...args: A) => string)): {
   run: (...args: A) => Promise<boolean>
   pending: boolean
   error: string
@@ -20,7 +20,7 @@ export function useAsyncAction<A extends unknown[]>(action: (...args: A) => Prom
       await action(...args)
       return true
     } catch (cause) {
-      setError(errorMessage(cause, fallback))
+      setError(errorMessage(cause, typeof fallback === "string" ? fallback : fallback(...args)))
       return false
     } finally {
       setPending(false)

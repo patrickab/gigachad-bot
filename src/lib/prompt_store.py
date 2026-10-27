@@ -7,9 +7,11 @@ includes from ``prompts/_blocks/*.md``.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from functools import cached_property
 import logging
 from pathlib import Path
 import re
+import sys
 
 import yaml
 
@@ -20,6 +22,7 @@ log = logging.getLogger(__name__)
 
 _FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 _INCLUDE_RE = re.compile(r"\{\{(\S+?)\}\}")
+ORDER_KEY = f"{PROMPT}/_order"
 
 
 def _parse_frontmatter(raw: str) -> tuple[dict[str, object], str]:
@@ -36,29 +39,53 @@ def _parse_frontmatter(raw: str) -> tuple[dict[str, object], str]:
     return meta, raw[m.end():]
 
 
+def seed_prompts(store: DataStore) -> None:
+    """Initialize editable prompts once from the shipped defaults.
+
+    An existing collection is authoritative, including deleted prompts. Defaults
+    remain source assets; all subsequent editor writes go to persistent storage.
+    """
+    source = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2])) / "prompts"
+    if not source.is_dir() or store.exists(PROMPT):
+        return
+    store.mkdir(PROMPT)
+    for path in source.rglob("*"):
+        relative = path.relative_to(source).as_posix()
+        key = f"{PROMPT}/{relative}"
+        if path.is_dir():
+            store.mkdir(key)
+        else:
+            store.write_bytes(key, path.read_bytes())
+
+
 class PromptStore:
-    """Reads, resolves, and manages stored prompt definitions."""
+    """Reads, resolves, and manages stored prompt definitions. The library is read on first use and after every write."""
 
-    def __init__(self, prefix: str = PROMPT, *, data_store: DataStore) -> None:
+    def __init__(self, data_store: DataStore) -> None:
         self._store = data_store
-        self._prefix = prefix
-        self._block_cache: dict[str, str] = {}
-        self._prompt_cache: dict[str, str] = {}  # name -> resolved_text
-        self._order: list[str] = []
-        self.reload()
 
-    def _key(self, slug: str) -> str:
-        return f"{self._prefix}/{slug}.md"
+    @staticmethod
+    def _key(slug: str) -> str:
+        return f"{PROMPT}/{slug}.md"
 
     def reload(self) -> None:
-        self._block_cache.clear()
-        self._prompt_cache.clear()
-        order = read_text_or(self._store, f"{self._prefix}/_order")
-        self._order = order.split() if order is not None else []
-        for stem, raw in self._md_entries(f"{self._prefix}/_blocks"):
-            self._block_cache[stem] = raw.strip()
-        for _, stem, meta, body in self._ranked_prompts():
-            self._prompt_cache[str(meta.get("name", stem))] = self._resolve(body).strip()
+        """Drop the cached library so the next resolved view reads it again."""
+        for name in ("_order", "_block_cache", "_prompt_cache"):
+            self.__dict__.pop(name, None)
+
+    @cached_property
+    def _order(self) -> list[str]:
+        order = read_text_or(self._store, ORDER_KEY)
+        return order.split() if order is not None else []
+
+    @cached_property
+    def _block_cache(self) -> dict[str, str]:
+        return {stem: raw.strip() for stem, raw in self._md_entries(f"{PROMPT}/_blocks")}
+
+    @cached_property
+    def _prompt_cache(self) -> dict[str, str]:
+        """Resolved text by prompt name."""
+        return {str(meta.get("name", stem)): self._resolve(body).strip() for _, stem, meta, body in self._ranked_prompts()}
 
     def _rank(self, stem: str) -> tuple:
         """Sort key: position in the ``_order`` manifest; unlisted prompts fall to the end, alphabetical."""
@@ -73,7 +100,7 @@ class PromptStore:
     def _ranked_prompts(self) -> list[tuple[tuple, str, dict[str, object], str]]:
         """Every prompt as `(rank, stem, frontmatter, body)` in display order."""
         parsed = []
-        for stem, raw in self._md_entries(self._prefix):
+        for stem, raw in self._md_entries(PROMPT):
             meta, body = _parse_frontmatter(raw)
             parsed.append((self._rank(stem), stem, meta, body))
         return sorted(parsed)
@@ -98,7 +125,7 @@ class PromptStore:
         return read_text_or(self._store, self._key(slug))
 
     def save(self, slug: str, content: str) -> str:
-        """Write a prompt file and reload. Returns the resolved name."""
+        """Write a prompt file. Returns the resolved name."""
         overwrite_text(self._store, self._key(slug), content)
         self.reload()
         meta, _ = _parse_frontmatter(content)
@@ -110,14 +137,14 @@ class PromptStore:
             return False
         self._store.delete(key)
         if slug in self._order:
-            self.set_order([s for s in self._order if s != slug])  # reloads
+            self.set_order([s for s in self._order if s != slug])
         else:
             self.reload()
         return True
 
     def set_order(self, slugs: list[str]) -> None:
         """Persist the prompt display order. Slugs not listed fall to the end, alphabetical."""
-        overwrite_text(self._store, f"{self._prefix}/_order", "\n".join(slugs) + "\n")
+        overwrite_text(self._store, ORDER_KEY, "\n".join(slugs) + "\n")
         self.reload()
 
     def list_prompts(self) -> list[dict[str, object]]:

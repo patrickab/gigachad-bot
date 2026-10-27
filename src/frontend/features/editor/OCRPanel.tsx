@@ -1,47 +1,39 @@
 "use client"
 
-import { useEffect, useRef, useState, useCallback } from "react"
+import { useRef, useState, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { X, Check, ChevronLeft, ChevronRight } from "lucide-react"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
 import { AssistedConsoleEditor } from "./AssistedConsoleEditor"
 import { EditorSidebar } from "./EditorSidebar"
-import { createOCRStream } from "@/lib/backend/api"
+import { useOcrStream } from "./useOcrStream"
 import { useEventListener } from "@/hooks/useEventListener"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
-import { useTabActive } from "@/contexts/TabContext"
-import { useResetOnChange } from "@/hooks/useResetOnChange"
-import { blobToDataUrl } from "@/lib/utils"
+import { blobToDataUrl, isModKey } from "@/lib/utils"
 
 interface OCRPanelProps {
   image: string
   model: string
+  /** Called once with the final text. The panel stops streaming only when the parent unmounts it, so unmount it here. */
   onComplete: (output: string) => void
   onClose: () => void
 }
 
 export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
-  const tabActive = useTabActive()
   // The image lives in state (seeded from the prop) so the panel can be reset
   // in place: Alt+R clears everything and waits for a newly pasted image.
   const [img, setImg] = useState<string | null>(image)
-  const [output, setOutput] = useState("")
-  const [isStreaming, setIsStreaming] = useState(true)
+  const { output, setOutput, streaming: isStreaming } = useOcrStream(img, model)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarWidth, setSidebarWidth] = useState(340)
-  const abortRef = useRef<(() => void) | null>(null)
-  // A new image or model restarts OCR, so the stream is live again (the effect below starts it)
-  useResetOnChange(img, (next) => { if (next) setIsStreaming(true) })
-  useResetOnChange(model, () => { if (img) setIsStreaming(true) })
   // Set once confirmed so a second confirm cannot call onComplete again
   const confirmedRef = useRef(false)
 
-  const reset = useCallback(() => {
-    abortRef.current?.()
+  // Clearing the image aborts its stream through the hook's effect cleanup
+  const reset = () => {
     setImg(null)
     setOutput("")
-    setIsStreaming(false)
-  }, [])
+  }
 
   // While awaiting a new image, a pasted image restarts OCR
   useEventListener("window", "paste", (e) => {
@@ -52,48 +44,15 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
     blobToDataUrl(blob).then(setImg).catch(() => {})
   }, { active: !img })
 
-  // Restart OCR whenever the image or model changes and abort the stream on cleanup
-  useEffect(() => {
-    if (!img) return
-    const stream = createOCRStream(img, model)
-    abortRef.current = stream.abort
-    let text = ""
-
-    async function read() {
-      try {
-        for await (const event of stream) {
-          if (event.event === "token") {
-            text += event.data
-            setOutput(text)
-          } else if (event.event === "done") {
-            break
-          } else if (event.event === "error") {
-            text += `\n\nError: ${event.data}`
-            setOutput(text)
-            break
-          }
-        }
-      } catch {
-        // aborted or error
-      } finally {
-        setIsStreaming(false)
-      }
-    }
-    read()
-
-    return () => { stream.abort() }
-  }, [img, model])
-
   // Guard against double confirm (key repeat, click plus shortcut)
   const doConfirm = useCallback(() => {
     if (confirmedRef.current) return
     confirmedRef.current = true
-    abortRef.current?.()
     onComplete(output)
   }, [output, onComplete])
 
   useEventListener("document", "keydown", (e) => {
-    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+    if (e.key === "Enter" && isModKey(e)) {
       e.preventDefault()
       doConfirm()
     }
@@ -103,11 +62,11 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
     }
   })
 
-  useEscapeLayer(onClose, tabActive)
+  useEscapeLayer(onClose)
 
   const handleSidebarApply = useCallback((newContent: string) => {
     setOutput(newContent)
-  }, [])
+  }, [setOutput])
 
   return (
     <AnimatePresence>

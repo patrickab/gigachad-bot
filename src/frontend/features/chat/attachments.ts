@@ -1,6 +1,7 @@
 import type { Attachment, ChatRequest, Message, ToolCallRecord } from "@/lib/domain/types"
 import { apiOrigin, chatFileUrl, fileViewerRawUrl } from "@/lib/backend/urls"
-import { ApiError, writeReference } from "@/lib/backend/api"
+import { ApiError } from "@/lib/backend/api"
+import { writeReference } from "@/lib/backend/references"
 import { toolPayload } from "./toolCalls"
 
 
@@ -80,6 +81,17 @@ export function buildHiddenContent(attachments: Attachment[]): string {
 /** Replace a message's attachments and rebuild the model-facing `hiddenContent` from them. */
 export function withAttachments(msg: Message, attachments: Attachment[]): Message {
   return { ...msg, attachments, hiddenContent: buildHiddenContent(attachments) || undefined }
+}
+
+/** The attachment of `msg` named `name`, if any. */
+export function findAttachment(msg: Message | undefined, name: string): Attachment | undefined {
+  return msg?.attachments?.find((a) => a.name === name)
+}
+
+/** `msg` with its attachment `name` replaced by `update(attachment)` (null drops it) and `hiddenContent` rebuilt; null when `msg` has no attachments. */
+export function withAttachment(msg: Message, name: string, update: (attachment: Attachment) => Attachment | null): Message | null {
+  if (!msg.attachments) return null
+  return withAttachments(msg, msg.attachments.flatMap((a) => a.name === name ? (update(a) ?? []) : [a]))
 }
 
 const ATTACHMENT_ONLY_PROMPT = "Please review the attached document and provide a summary."

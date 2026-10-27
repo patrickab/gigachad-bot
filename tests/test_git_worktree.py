@@ -2,17 +2,16 @@
 
 from pathlib import Path
 from types import SimpleNamespace
-from uuid import uuid4
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 import pytest
 
-from backend.identity import RequestIdentity, get_request_identity
+from backend.identity import get_request_identity
+from backend.routes import file_git as file_git_route
 from backend.routes import file_roots as file_roots_route
 from lib import git_worktree
 from lib.file_roots import FileRoots
-from tests.conftest import git
+from lib.git import GitError
+from tests.conftest import git, mounted_roots, request_identity, route_client
 
 
 def _commit(directory, name, content):
@@ -173,7 +172,7 @@ def test_deleting_an_unmerged_branch_needs_force(clone):
 def test_a_mounted_clone_admits_its_worktrees_and_shows_the_active_one(clone, tmp_path):
     worktree = git_worktree.create_worktree(clone.repository, "feature", "dev")
     _commit(worktree.path, "only-here.md", "x\n")
-    roots = FileRoots(repository=SimpleNamespace(load=lambda: [str(clone.repository)], save=lambda roots: None))
+    roots = mounted_roots(clone.repository)
 
     [main] = roots.tree()
     [switched] = roots.tree([worktree.path])
@@ -187,11 +186,7 @@ def test_a_mounted_clone_admits_its_worktrees_and_shows_the_active_one(clone, tm
 
 
 def test_worktree_routes_refuse_unmounted_roots_and_report_conflicts(clone):
-    roots = FileRoots(repository=SimpleNamespace(load=lambda: [str(clone.repository)], save=lambda roots: None))
-    app = FastAPI()
-    app.include_router(file_roots_route.router)
-    app.dependency_overrides[file_roots_route.get_file_roots] = lambda: roots
-    client = TestClient(app)
+    client = route_client(file_git_route.router, overrides={file_git_route.get_file_roots: mounted_roots(clone.repository)})
 
     created = client.post("/api/fileroots/worktrees", json={"root": str(clone.repository), "name": "feature", "base": "dev"}).json()
     (Path(created["path"]) / "draft.md").write_text("wip\n")
@@ -245,7 +240,7 @@ def test_clone_refuses_existing_folder_and_leaves_no_folder_after_failure(remote
     with pytest.raises(git_worktree.WorktreeError, match="already exists"):
         git_worktree.clone_repository("https://example.com/owner/taken.git")
 
-    with pytest.raises(git_worktree.WorktreeError):
+    with pytest.raises(GitError):
         git_worktree.clone_repository("https://127.0.0.1:1/owner/unreachable.git")
     assert not (remote.home / "unreachable").exists()
 
@@ -253,11 +248,9 @@ def test_clone_refuses_existing_folder_and_leaves_no_folder_after_failure(remote
 def test_clone_route_mounts_the_clone_and_reports_refusals(remote):
     saved = []
     roots = FileRoots(repository=SimpleNamespace(load=lambda: [], save=saved.append))
-    app = FastAPI()
-    app.include_router(file_roots_route.router)
-    app.dependency_overrides[file_roots_route.get_file_roots] = lambda: roots
-    app.dependency_overrides[get_request_identity] = lambda: RequestIdentity(uuid4(), "me@example.test", None, True)
-    client = TestClient(app)
+    client = route_client(
+        file_roots_route.router, overrides={file_roots_route.get_file_roots: roots, get_request_identity: request_identity()}
+    )
 
     cloned = client.post("/api/fileroots/clone", json={"url": remote.links[1]})
     again = client.post("/api/fileroots/clone", json={"url": remote.links[1]})

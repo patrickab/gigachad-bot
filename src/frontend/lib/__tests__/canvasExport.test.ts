@@ -1,0 +1,58 @@
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { renderCanvasToJpeg, renderPageToPng } from "@/lib/canvasExport"
+
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+})
+
+describe("renderCanvasToJpeg", () => {
+  it("sizes an image by its source dimensions", async () => {
+    const context = {
+      scale: vi.fn(),
+      fillStyle: "",
+      fillRect: vi.fn(),
+      drawImage: vi.fn(),
+    }
+    // CanvasRenderingContext2D has many unrelated methods that this stroke-free test never calls.
+    const canvasContext = context as unknown as CanvasRenderingContext2D
+    const sizes: number[][] = []
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(canvasContext)
+    vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation(function (this: HTMLCanvasElement, callback) {
+      sizes.push([this.width, this.height])
+      callback(new Blob())
+    })
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Blob(["image"]))))
+    // Only width and height are read from the browser ImageBitmap in this test.
+    const bitmap = { width: 120, height: 60 } as unknown as ImageBitmap
+    vi.stubGlobal("createImageBitmap", vi.fn(async () => bitmap))
+
+    await renderCanvasToJpeg([], 20, [{ url: "/image.png", x: 10, y: 20, width: 120 }])
+
+    expect(context.drawImage).toHaveBeenCalledWith(bitmap, 20, 20, 120, 60)
+    expect(sizes).toEqual([[320, 200]])
+  })
+})
+
+describe("renderPageToPng", () => {
+  it("draws an already-rendered PDF page without fetching it again", async () => {
+    const context = {
+      scale: vi.fn(),
+      fillStyle: "",
+      fillRect: vi.fn(),
+      drawImage: vi.fn(),
+    } as unknown as CanvasRenderingContext2D
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(context)
+    vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation(function (this: HTMLCanvasElement, callback) {
+      callback({ arrayBuffer: async () => new ArrayBuffer(0) } as Blob)
+    })
+    const fetch = vi.fn()
+    vi.stubGlobal("fetch", fetch)
+    const pdfPage = document.createElement("canvas")
+
+    await renderPageToPng([], 0, 0, 100, 100, [], [], [{ image: pdfPage, x: 10, y: 20, width: 50, aspect: 2 }])
+
+    expect(context.drawImage).toHaveBeenCalledWith(pdfPage, 10, 20, 50, 100)
+    expect(fetch).not.toHaveBeenCalled()
+  })
+})

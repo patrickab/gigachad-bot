@@ -1,80 +1,75 @@
 """Single seam for all project catalog I/O, slug logic, kanban CRUD, and tab management."""
 
-import json
-from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any, Callable
 import uuid
 
-from lib.chat_store import META_JSON, ChatStore
+from lib.chat_store import ChatStore, CleanupUploads
 from lib.clock import utc_now_iso
-from lib.data_store import DataStore, StorageConflictError, overwrite_text, read_text_or
-from lib.json_io import dump_json
+from lib.data_store import StorageConflictError
 from lib.naming import slugify
-from lib.storage_namespace import CHAT, PROJECT_JSON
+from lib.storage_namespace import META_JSON, PROJECT_JSON, chat_root, project_dir
+
+# Moves a project to a new slug: `(slug, new_slug, name)`.
+Rename = Callable[[str, str, str], None]
+
+_META_KEY = f"{chat_root()}/{META_JSON}"
+
+
+class ProjectExists(ValueError):
+    """A new project's directory is already taken."""
 
 
 def _by_file_name(path: str) -> str:
-    return Path(path).name.lower()
+    return PurePosixPath(path).name.lower()
+
+
+def _project_key(slug: str) -> str:
+    return f"{project_dir(slug)}/{PROJECT_JSON}"
 
 
 class ProjectStore:
     """Owns all project-catalog reads/writes, slug generation, kanban CRUD, and tab management."""
 
-    def __init__(self, prefix: str = CHAT, chat_store: ChatStore | None = None, *, data_store: DataStore) -> None:
-        self._data = data_store
-        self._prefix = prefix
-        self._store = chat_store or ChatStore(prefix, data_store=data_store)
-
-    def _meta_path(self) -> str:
-        return f"{self._prefix}/{META_JSON}"
-
-    def _resolve_project_dir(self, slug: str) -> str:
-        """Reject empty slugs and anything containing path separators."""
-        if Path(slug).name != slug or not slug:
-            raise ValueError("Invalid project slug")
-        return f"{self._prefix}/{slug}"
-
-    @staticmethod
-    def _json_key(directory: str) -> str:
-        return f"{directory}/{PROJECT_JSON}"
+    def __init__(self, chat_store: ChatStore, *, rename: Rename) -> None:
+        self._chats = chat_store
+        self._docs = chat_store.docs
+        self._rename = rename
 
     def _read_json(self, key: str, default: dict[str, Any]) -> dict[str, Any]:
         """Return *default* when the key is missing or holds invalid or non-object JSON."""
-        try:
-            data = json.loads(read_text_or(self._data, key, ""))
-        except ValueError:
-            return default
+        data = self._docs.read(key)
         return data if isinstance(data, dict) else default
 
     def _write_json(self, key: str, data: dict[str, Any]) -> None:
         """Write with the current revision so a concurrent change raises StorageConflictError."""
-        overwrite_text(self._data, key, dump_json(data))
+        self._docs.overwrite(key, data)
 
     def _read_meta(self) -> dict[str, Any]:
-        return self._read_json(self._meta_path(), {"projects": []})
+        return self._read_json(_META_KEY, {"projects": []})
 
     def _write_meta(self, meta: dict[str, Any]) -> None:
-        self._write_json(self._meta_path(), meta)
+        self._write_json(_META_KEY, meta)
 
-    def _find_entry(self, meta: dict[str, Any], slug: str) -> dict[str, Any] | None:
-        for p in meta.get("projects", []):
-            if p.get("slug") == slug:
-                return p
-        return None
+    @staticmethod
+    def _find_entry(meta: dict[str, Any], slug: str) -> dict[str, Any] | None:
+        return next((p for p in meta.get("projects", []) if p.get("slug") == slug), None)
 
-    def _require(self, slug: str) -> tuple[dict[str, Any], dict[str, Any], str]:
-        """The catalog, the entry of project *slug* and its directory key. Raises FileNotFoundError when the project is unknown."""
+    def _require(self, slug: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        """The catalog and the entry of project *slug*. Raises FileNotFoundError when the project is unknown."""
         meta = self._read_meta()
         entry = self._find_entry(meta, slug)
         if not entry:
             raise FileNotFoundError(f"Project not found: {slug}")
-        return meta, entry, self._resolve_project_dir(slug)
+        project_dir(slug)  # A malformed catalog slug raises ValueError before any write.
+        return meta, entry
 
     def require(self, slug: str) -> None:
         """Raise FileNotFoundError when the catalog has no project *slug*."""
         self._require(slug)
 
-    def _unique_slug(self, meta: dict[str, Any], base: str) -> str:
+    @staticmethod
+    def _unique_slug(meta: dict[str, Any], base: str) -> str:
         existing = {p.get("slug") for p in meta.get("projects", [])}
         slug = base
         i = 2
@@ -83,18 +78,16 @@ class ProjectStore:
             i += 1
         return slug
 
-    def _read_project(self, project_dir: str) -> dict[str, Any]:
-        return self._read_json(self._json_key(project_dir), {"name": Path(project_dir).name, "kanban": [], "tabs": [], "files": []})
+    def _read_project(self, slug: str) -> dict[str, Any]:
+        return self._read_json(_project_key(slug), {"name": slug, "kanban": [], "tabs": [], "files": []})
 
-    def _write_project(self, project_dir: str, data: dict[str, Any]) -> None:
-        self._write_json(self._json_key(project_dir), data)
+    def _write_project(self, slug: str, data: dict[str, Any]) -> None:
+        self._write_json(_project_key(slug), data)
 
     def list_projects(self) -> list[dict[str, Any]]:
-        meta = self._read_meta()
         projects: list[dict[str, Any]] = []
-        for p in meta.get("projects", []):
-            project_dir = self._resolve_project_dir(p["slug"])
-            data = self._read_project(project_dir)
+        for p in self._read_meta().get("projects", []):
+            data = self._read_project(p["slug"])
             projects.append(
                 {
                     "name": p["name"],
@@ -107,8 +100,8 @@ class ProjectStore:
         return projects
 
     def get_project(self, slug: str) -> dict[str, Any]:
-        _, entry, project_dir = self._require(slug)
-        data = self._read_project(project_dir)
+        _, entry = self._require(slug)
+        data = self._read_project(slug)
         return {"name": entry["name"], "slug": entry["slug"], "kanban": data.get("kanban", []), "tabs": data.get("tabs", []),
                 "linked_root": data.get("linked_root")}
 
@@ -118,31 +111,30 @@ class ProjectStore:
             raise ValueError("Project name required")
         meta = self._read_meta()
         slug = self._unique_slug(meta, slugify(name, fallback="project"))
-        project_dir = self._resolve_project_dir(slug)
-        if self._data.exists(project_dir):
-            raise ValueError(f"Project already exists: {slug}")
+        if self._docs.exists(project_dir(slug)):
+            raise ProjectExists(f"Project already exists: {slug}")
         now = utc_now_iso()
         entry = {"name": name, "slug": slug, "createdAt": now, "updatedAt": now}
         meta.setdefault("projects", []).append(entry)
         self._write_meta(meta)
-        self._write_project(project_dir, {"name": name, "kanban": [], "tabs": []})
+        self._write_project(slug, {"name": name, "kanban": [], "tabs": []})
         return {"name": name, "slug": slug, "kanban": [], "tabs": []}
 
     def update_project(self, slug: str, name: str | None = None, *, archived: bool | None = None) -> dict[str, Any]:
         """Update archival and name. A name with another slug moves the whole project to that slug."""
-        meta, entry, project_dir = self._require(slug)
+        meta, entry = self._require(slug)
         if name is not None:
             name = name.strip()
             if not name:
                 raise ValueError("Project name required")
             new_slug = slugify(name, fallback="project")
             if new_slug == slug:
-                self._write_project(project_dir, {**self._read_project(project_dir), "name": name})
+                self._write_project(slug, {**self._read_project(slug), "name": name})
             elif self._find_entry(meta, new_slug):
                 raise StorageConflictError(f"Project already exists: {new_slug}")
             else:
-                self._data.rename_project(self._prefix, slug, new_slug, name)
-                self._store.invalidate_index()
+                self._rename(slug, new_slug, name)
+                self._chats.invalidate_index()
                 slug, meta = new_slug, self._read_meta()
                 entry = self._find_entry(meta, slug)
             entry["name"] = name
@@ -153,58 +145,47 @@ class ProjectStore:
         self._write_meta(meta)
         return {"name": entry["name"], "slug": slug, "archived": entry.get("archived", False)}
 
-    def delete_project(self, slug: str, *, cleanup_uploads_fn: Callable[[str, str | None], None] | None = None) -> dict[str, str]:
-        meta, _, project_dir = self._require(slug)
-        if self._data.exists(project_dir):
+    def delete_project(self, slug: str, *, cleanup_uploads_fn: CleanupUploads | None = None) -> dict[str, str]:
+        meta, _ = self._require(slug)
+        if self._docs.exists(project_dir(slug)):
             if cleanup_uploads_fn:
-                for chat_id in self._chat_ids_in(project_dir):
+                for chat_id in self._chats.chat_ids_in(slug):
                     cleanup_uploads_fn(chat_id, slug)
-            self._data.delete(project_dir, recursive=True)
-            self._store.invalidate_index()
+            self._docs.delete(project_dir(slug), recursive=True)
+            self._chats.invalidate_index()
         meta["projects"] = [p for p in meta.get("projects", []) if p.get("slug") != slug]
         self._write_meta(meta)
         return {"status": "ok"}
 
-    def _chat_ids_in(self, project_dir: str) -> list[str]:
-        """Chat IDs of every tab file under a project, for cleanup before the directory is removed."""
-        chat_ids: list[str] = []
-        for item in self._data.list(project_dir, recursive=True):
-            if item.is_dir or not item.key.endswith(".json") or Path(item.key).name in (PROJECT_JSON, META_JSON):
-                continue
-            chat_id = self._read_json(item.key, {}).get("chat_id")
-            if isinstance(chat_id, str) and chat_id:
-                chat_ids.append(chat_id)
-        return chat_ids
-
     def add_card(self, slug: str, title: str, description: str = "", state: str = "backlog") -> dict[str, Any]:
-        _, _, project_dir = self._require(slug)
-        data = self._read_project(project_dir)
+        self._require(slug)
+        data = self._read_project(slug)
         card = {"id": str(uuid.uuid4()), "title": title, "description": description, "state": state}
         data.setdefault("kanban", []).append(card)
-        self._write_project(project_dir, data)
+        self._write_project(slug, data)
         return card
 
     def update_card(self, slug: str, card_id: str, updates: dict[str, Any]) -> dict[str, Any]:
-        _, _, project_dir = self._require(slug)
-        data = self._read_project(project_dir)
+        self._require(slug)
+        data = self._read_project(slug)
         for card in data.get("kanban", []):
             if card["id"] == card_id:
                 card.update(updates)
-                self._write_project(project_dir, data)
+                self._write_project(slug, data)
                 return card
         raise FileNotFoundError(f"Card not found: {card_id}")
 
     def delete_card(self, slug: str, card_id: str) -> dict[str, str]:
-        _, _, project_dir = self._require(slug)
-        data = self._read_project(project_dir)
+        self._require(slug)
+        data = self._read_project(slug)
         data["kanban"] = [c for c in data.get("kanban", []) if c["id"] != card_id]
-        self._write_project(project_dir, data)
+        self._write_project(slug, data)
         return {"status": "ok"}
 
     def save_tab(self, slug: str, filename: str, data: dict[str, Any]) -> dict[str, str]:
-        _, _, project_dir = self._require(slug)
-        self._store.save(f"{slug}/{filename}", data)
-        project_data = self._read_project(project_dir)
+        self._require(slug)
+        self._chats.save(f"{slug}/{filename}", data)
+        project_data = self._read_project(slug)
         tabs = project_data.get("tabs", [])
         existing = next((t for t in tabs if t["filename"] == filename), None)
         tab_name = data.get("tab_name")
@@ -217,7 +198,7 @@ class ProjectStore:
         else:
             tabs.append({"filename": filename, "name": tab_name, "title": title})
             project_data["tabs"] = tabs
-        self._write_project(project_dir, project_data)
+        self._write_project(slug, project_data)
         return {"status": "ok"}
 
     def list_files(self, slug: str) -> list[str]:
@@ -232,23 +213,36 @@ class ProjectStore:
 
     def replace_file(self, slug: str, old: str, new: str) -> list[str]:
         """Point the reference *old* at *new*, in place, merging when *new* is already referenced."""
-        return self._mutate_files(slug, lambda files: [f for f in files if f != old] if new in files else [new if f == old else f for f in files])
+        return self._mutate_files(
+            slug, lambda files: [f for f in files if f != old] if new in files else [new if f == old else f for f in files],
+        )
+
+    def replace_file_everywhere(self, old: str, new: str) -> None:
+        """In every project referencing *old*, drop it and reference *new* last unless it already is."""
+        for entry in self._read_meta().get("projects", []):
+            slug = entry["slug"]
+            data = self._read_project(slug)
+            files = [str(p) for p in data.get("files", [])]
+            if old in files:
+                kept = [f for f in files if f != old]
+                data["files"] = kept if new in kept else [*kept, new]
+                self._write_project(slug, data)
 
     def _mutate_files(self, slug: str, transform: Callable[[list[str]], list[str]]) -> list[str]:
         """Read, transform, and (when changed) persist a project's document list."""
-        _, _, project_dir = self._require(slug)
-        data = self._read_project(project_dir)
+        self._require(slug)
+        data = self._read_project(slug)
         current = [str(p) for p in data.get("files", [])]
         updated = transform(current)
         if updated != current:
             data["files"] = updated
-            self._write_project(project_dir, data)
+            self._write_project(slug, data)
         return updated
 
     def list_all_files(self) -> list[str]:
         """Union of every project's documents (the global document pool)."""
         files: dict[str, None] = {}
         for p in self._read_meta().get("projects", []):
-            data = self._read_project(self._resolve_project_dir(p["slug"]))
+            data = self._read_project(p["slug"])
             files.update(dict.fromkeys(str(f) for f in data.get("files", [])))
         return sorted(files, key=_by_file_name)

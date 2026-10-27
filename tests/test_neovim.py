@@ -1,19 +1,15 @@
 import asyncio
 from pathlib import Path
 import shutil
-from types import SimpleNamespace
-from uuid import uuid4
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 import pytest
 from starlette.websockets import WebSocketDisconnect
 
-from backend.identity import RequestIdentity, get_request_identity
+from backend.identity import get_request_identity
 from backend.routes import neovim as neovim_route
 from backend.routes.deps import get_file_roots
-from lib.file_roots import FileRoots
 from lib.neovim_session import NeovimSession, is_neovim_installed
+from tests.conftest import mounted_roots, request_identity, route_client
 
 requires_nvim = pytest.mark.skipif(shutil.which("nvim") is None, reason="nvim is not installed")
 
@@ -57,13 +53,12 @@ def test_neovim_needs_a_config_to_load(neovim_home):
 )
 def test_session_refuses_untrusted_requests(monkeypatch, neovim_home, has_host_access, origin):
     monkeypatch.setattr(neovim_route, "CORS_ORIGINS", ["*"])
-    app = FastAPI()
-    app.include_router(neovim_route.router)
-    app.dependency_overrides[get_request_identity] = lambda: RequestIdentity(uuid4(), "me@example.test", None, has_host_access)
-    app.dependency_overrides[get_file_roots] = lambda: None
+    client = route_client(
+        neovim_route.router, overrides={get_request_identity: request_identity(has_host_access), get_file_roots: None}
+    )
     with (
         pytest.raises(WebSocketDisconnect) as refused,
-        TestClient(app).websocket_connect("/api/neovim/session", headers={"origin": origin}),
+        client.websocket_connect("/api/neovim/session", headers={"origin": origin}),
     ):
         pass
     assert refused.value.code == 1008
@@ -73,7 +68,7 @@ def test_neovim_starts_in_innermost_root_holding_a_file_root_document(tmp_path):
     vault = tmp_path / "vault"
     project = vault / "projects" / "app"
     (project / "docs").mkdir(parents=True)
-    roots = FileRoots(repository=SimpleNamespace(load=lambda: [str(vault), str(project)], save=lambda roots: None))
+    roots = mounted_roots(vault, project)
 
     assert neovim_route.working_directory(roots, str(project / "docs" / "notes.md")) == project.resolve()
     assert neovim_route.working_directory(roots, str(vault / "inbox.md")) == vault.resolve()

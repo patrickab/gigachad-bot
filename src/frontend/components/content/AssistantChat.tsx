@@ -5,6 +5,7 @@ import { ArrowUp, Square } from "lucide-react"
 import { createChatStream } from "@/lib/backend/api"
 import type { ChatRequest } from "@/lib/domain/types"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
+import { Composer } from "@/components/ui/Composer"
 
 export interface AssistantMessage {
   role: "user" | "assistant"
@@ -45,6 +46,45 @@ function createFlush(onFlush: () => void) {
   return { schedule, final }
 }
 
+/** Request for one stateless reply: `messages` is the history before `userMsg`. */
+function replyRequest(model: string, userMsg: string, systemPrompt: string, messages: AssistantMessage[]): ChatRequest {
+  return { model, chat_id: crypto.randomUUID(), user_msg: userMsg, system_prompt: systemPrompt, messages, img_paths: [] }
+}
+
+/** The text a failed stream appends to its reply. */
+function errorLine(error: unknown) {
+  return `\n\n**Error:** ${(error as Error).message}`
+}
+
+/** One reply streaming at a time, aborted when the owner unmounts. */
+function useReplyStream() {
+  const [isStreaming, setIsStreaming] = useState(false)
+  const abortRef = useRef<(() => void) | null>(null)
+
+  // Abort a running reply when the owner unmounts
+  useEffect(() => () => abortRef.current?.(), [])
+
+  /** Stream `request` into `onToken`, calling `show` at most once per FLUSH_MS and once at the end. `onError` gets a failed stream, rethrow to reject. */
+  const stream = useCallback(async (request: ChatRequest, onToken: (token: string) => void, show: () => void, onError: (error: unknown) => void) => {
+    setIsStreaming(true)
+    const { schedule, final: flush } = createFlush(show)
+    try {
+      await runStream(abortRef, request, (token) => { onToken(token); schedule() })
+    } catch (error) {
+      onError(error)
+    } finally {
+      flush()
+      setIsStreaming(false)
+      abortRef.current = null
+    }
+  }, [])
+
+  const abort = useCallback(() => abortRef.current?.(), [])
+  const stop = useCallback(() => { abortRef.current?.(); setIsStreaming(false) }, [])
+
+  return { isStreaming, stream, abort, stop }
+}
+
 export interface AssistantChatState {
   messages: AssistantMessage[]
   isStreaming: boolean
@@ -55,11 +95,7 @@ export interface AssistantChatState {
 /** Stateless-backend chat: the whole history and `systemPrompt` go with every turn. */
 export function useAssistantChat(model: string, systemPrompt: string): AssistantChatState {
   const [messages, setMessages] = useState<AssistantMessage[]>([])
-  const [isStreaming, setIsStreaming] = useState(false)
-  const abortRef = useRef<(() => void) | null>(null)
-
-  // Abort a running reply when the owner unmounts
-  useEffect(() => () => abortRef.current?.(), [])
+  const { isStreaming, stream, stop } = useReplyStream()
 
   const send = useCallback(async (text: string) => {
     const trimmed = text.trim()
@@ -68,33 +104,17 @@ export function useAssistantChat(model: string, systemPrompt: string): Assistant
     const userMsg: AssistantMessage = { role: "user", content: trimmed }
     const assistantMsg: AssistantMessage = { role: "assistant", content: "" }
     setMessages(prev => [...prev, userMsg, assistantMsg])
-    setIsStreaming(true)
 
     // Snapshot before the new messages land. `assistantMsg` is mutated per token and copied on flush
     const history = messages.map(m => ({ role: m.role, content: m.content }))
-    const { schedule, final: flush } = createFlush(() => {
+    await stream(replyRequest(model, trimmed, systemPrompt, history), (t) => { assistantMsg.content += t }, () => {
       setMessages(prev => {
         const copy = [...prev]
         copy[copy.length - 1] = { ...assistantMsg }
         return copy
       })
-    })
-
-    try {
-      await runStream(abortRef, {
-        model, chat_id: crypto.randomUUID(), user_msg: trimmed,
-        system_prompt: systemPrompt, messages: history, img_paths: [],
-      }, (t) => { assistantMsg.content += t; schedule() })
-    } catch (e) {
-      assistantMsg.content += `\n\n**Error:** ${(e as Error).message}`
-    } finally {
-      flush()
-      setIsStreaming(false)
-      abortRef.current = null
-    }
-  }, [isStreaming, messages, model, systemPrompt])
-
-  const stop = useCallback(() => { abortRef.current?.(); setIsStreaming(false) }, [])
+    }, (e) => { assistantMsg.content += errorLine(e) })
+  }, [isStreaming, messages, model, systemPrompt, stream])
 
   return { messages, isStreaming, send, stop }
 }
@@ -102,37 +122,19 @@ export function useAssistantChat(model: string, systemPrompt: string): Assistant
 /** One streamed reply to a single question. `appendErrors` shows a failed stream as an error line, otherwise `ask` rejects. */
 export function useOneShotStream(model: string, { appendErrors }: { appendErrors: boolean }) {
   const [text, setText] = useState("")
-  const [isStreaming, setIsStreaming] = useState(false)
-  const abortRef = useRef<(() => void) | null>(null)
-
-  // Abort a running reply when the owner unmounts
-  useEffect(() => () => abortRef.current?.(), [])
+  const { isStreaming, stream, abort, stop } = useReplyStream()
 
   const ask = useCallback(async (question: string, systemPrompt: string) => {
     const trimmed = question.trim()
     if (!trimmed || isStreaming) return
-    setIsStreaming(true)
     setText("")
     // Plain object so the flush closure reads the latest text
     const buffer = { text: "" }
-    const { schedule, final: flush } = createFlush(() => setText(buffer.text))
-    try {
-      await runStream(abortRef, {
-        model, chat_id: crypto.randomUUID(), user_msg: trimmed,
-        system_prompt: systemPrompt, messages: [], img_paths: [],
-      }, (token) => { buffer.text += token; schedule() })
-    } catch (error) {
+    await stream(replyRequest(model, trimmed, systemPrompt, []), (token) => { buffer.text += token }, () => setText(buffer.text), (error) => {
       if (!appendErrors) throw error
-      buffer.text += `\n\n**Error:** ${(error as Error).message}`
-    } finally {
-      flush()
-      setIsStreaming(false)
-      abortRef.current = null
-    }
-  }, [isStreaming, model, appendErrors])
-
-  const abort = useCallback(() => abortRef.current?.(), [])
-  const stop = useCallback(() => { abortRef.current?.(); setIsStreaming(false) }, [])
+      buffer.text += errorLine(error)
+    })
+  }, [isStreaming, model, appendErrors, stream])
 
   return { text, isStreaming, ask, abort, stop }
 }
@@ -158,8 +160,8 @@ export function SendStopButton({ isStreaming, onStop, onSend, disabled, sendLabe
   )
 }
 
-/** Message list and composer of an assistant chat. `renderActions` adds controls under finished replies. `surfaceClassName` lifts user messages and the composer off their host. */
-export function AssistantChat({ chat, inputLabel, placeholder, disabled = false, surfaceClassName = "bg-surface", renderActions }: {
+/** Message list and composer of an assistant chat. `renderActions` adds controls under finished replies. `surfaceClassName` lifts user messages off their host. */
+export function AssistantChat({ chat, inputLabel, placeholder = "Message", disabled = false, surfaceClassName = "bg-surface", renderActions }: {
   chat: AssistantChatState
   inputLabel: string
   placeholder?: string
@@ -199,27 +201,17 @@ export function AssistantChat({ chat, inputLabel, placeholder, disabled = false,
           </div>
         ))}
       </div>
-      <div className="shrink-0 border-t border-divider/50 p-2">
-        <div className={`flex items-end gap-1.5 rounded-md px-2 py-1.5 ${surfaceClassName}`}>
-          <textarea
-            aria-label={inputLabel}
-            value={input}
-            disabled={disabled}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend() } }}
-            rows={1}
-            placeholder={placeholder}
-            className="flex-1 resize-none bg-transparent text-xs text-ink placeholder:text-ink-faint outline-none max-h-20 overflow-y-auto disabled:opacity-50"
-          />
-          <SendStopButton
-            isStreaming={isStreaming}
-            onStop={stop}
-            onSend={handleSend}
-            disabled={!input.trim() || disabled}
-            className="p-1 rounded text-ink-subtle hover:text-ink transition-colors shrink-0"
-            iconClassName="h-3.5 w-3.5"
-          />
-        </div>
+      <div className="shrink-0 p-3 pt-0">
+        <Composer
+          value={input}
+          onValueChange={setInput}
+          onSubmit={handleSend}
+          onStop={stop}
+          label={inputLabel}
+          placeholder={placeholder}
+          disabled={disabled}
+          isStreaming={isStreaming}
+        />
       </div>
     </>
   )

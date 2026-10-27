@@ -1,25 +1,26 @@
 "use client"
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { createPortal } from "react-dom"
 import {
   Background, ConnectionMode, ReactFlow, useEdgesState, useNodesState,
-  type Connection, type OnBeforeDelete, type OnConnect, type OnConnectEnd,
+  type Connection, type OnBeforeDelete, type OnConnect, type OnConnectEnd, type OnNodeDrag,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import { CircleDashed, Maximize, MoreHorizontal, Plus, RotateCcw, Trash2 } from "lucide-react"
-import { useEventListener } from "@/hooks/useEventListener"
 import { useSurfaceCamera } from "@/features/editor/architecture/useSurfaceCamera"
 import { useSurfaceDrawing } from "@/features/editor/architecture/useSurfaceDrawing"
-import { isDraft, nextDraftId, type DiagramEdge, type DiagramGraph, type DiagramNode } from "@/features/editor/architecture/diagramGraph"
-import { edgeAttachments, loadRouter, routeEdges, type EdgeStyle, type Point, type Rect, type RouteCard } from "@/lib/domain/edgeRouting"
+import { isDraft, nextDraftId, type DiagramEdge, type DiagramGraph } from "@/features/editor/architecture/diagramGraph"
+import type { EdgeStyle, Rect } from "@/lib/domain/edgeRouting"
 import { cn } from "@/lib/utils"
-import { SEPARATOR, ToolButton, type CanvasToolbarSlots } from "@/features/editor/canvas/CanvasToolbar"
-import { useTabActive } from "@/contexts/TabContext"
-import { ArchitectureEdge, EdgeGeometryContext, type EdgeEdits, type EdgeGeometry } from "./ArchitectureEdge"
+import { SEPARATOR, ToolButton } from "@/features/editor/canvas/CanvasToolbar"
+import { InTopBar, useHasTopBarSlot } from "@/features/navigation/TopBarSlots"
+import { ArchitectureEdge, EdgeGeometryContext } from "./ArchitectureEdge"
 import { ArchitectureMenu } from "./ArchitectureMenu"
 import { ArchitectureNodeCard } from "./ArchitectureNodeCard"
-import { FALLBACK_SIZE, GRID_SIZE, snapToGrid, type ArchitectureNodeData, type GraphFlowEdge, type GraphFlowNode, type NodeRemoval } from "./architectureFlow"
+import { reconcile, toFlowEdges, toFlowNodes, type GraphFlowEdge, type GraphFlowInstance, type GraphFlowNode, type NodePatch, type NodeRemoval } from "./architectureFlow"
+import { innermostNode, patchNode, settleDrag } from "./graphEdits"
+import { useEdgeGeometry } from "./useEdgeGeometry"
+import { useNodeClipboard } from "./useNodeClipboard"
 
 export interface ArchitectureDiagramSurfaceProps {
   graph: DiagramGraph
@@ -36,8 +37,6 @@ export interface ArchitectureDiagramSurfaceProps {
   hostScale?: number
   /** Extra controls for the toolbar, e.g. what a view shows. */
   toolbar?: ReactNode
-  /** Top-bar elements the toolbar renders into; without them it sits above the diagram. */
-  toolbarSlots?: CanvasToolbarSlots | null
   /** Given (saved views), removing a node only takes it out of this view; otherwise it deletes the element from the model. */
   onRemoveFromView?: (nodeIds: string[]) => void
   /** Selects this node whenever it changes, e.g. the module a window was opened on. */
@@ -55,121 +54,20 @@ const NO_KINDS: readonly string[] = []
 const NEW_NODE_WIDTH = 240
 const NEW_NODE_HEIGHT = 160
 
-// Clones `candidates` as titled drafts, so each copy becomes a new element,
-// offset diagonally so the copies read as new objects rather than sitting
-// exactly on their sources. Ids avoid `occupied` and each other.
-// Compounds are skipped: copying one would not copy what it contains.
-export function duplicateNodes(candidates: readonly DiagramNode[], occupied: Iterable<string>): DiagramNode[] {
-  const taken = new Set(occupied)
-  const clones: DiagramNode[] = []
-  for (const node of candidates) {
-    if (node.compound) continue
-    const id = nextDraftId(taken)
-    taken.add(id)
-    clones.push({ ...node, id, position: { x: snapToGrid(node.position.x + GRID_SIZE * 3), y: snapToGrid(node.position.y + GRID_SIZE * 3) } })
-  }
-  return clones
-}
-
 // Module-level so React Flow does not remount every card on each render.
 const nodeTypes = { "architecture-node": ArchitectureNodeCard }
 const edgeTypes = { "architecture-edge": ArchitectureEdge }
 
-// React Flow wants a parent before its children, and each child positioned
-// relative to its parent; the graph keeps absolute positions throughout.
-function toFlowNodes(nodes: DiagramNode[], onNodeChange: ArchitectureNodeData["onChange"], kinds: readonly string[], claimAutoEdit?: ArchitectureNodeData["claimAutoEdit"], remove?: NodeRemoval): GraphFlowNode[] {
-  const byId = new Map(nodes.map((node) => [node.id, node]))
-  const depth = (node: DiagramNode): number => {
-    const parent = node.parent ? byId.get(node.parent) : undefined
-    return parent ? 1 + depth(parent) : 0
-  }
-  return [...nodes].sort((a, b) => depth(a) - depth(b)).map((node) => {
-    const parent = node.parent ? byId.get(node.parent) : undefined
-    return {
-      id: node.id, type: "architecture-node",
-      position: parent ? { x: node.position.x - parent.position.x, y: node.position.y - parent.position.y } : node.position,
-      ...(parent ? { parentId: parent.id } : {}),
-      style: { width: node.width, height: node.height },
-      data: { ...node, onChange: onNodeChange, kinds, claimAutoEdit, remove },
-    }
-  })
-}
-
-// Live flow nodes as cards in absolute coordinates, so routing works across nesting levels mid-drag.
-// A node React Flow has not measured yet counts at FALLBACK_SIZE.
-function routeCards(nodes: readonly GraphFlowNode[]): RouteCard[] {
-  const byId = new Map(nodes.map((node) => [node.id, node]))
-  const absolute = (node: GraphFlowNode): Point => {
-    const parent = node.parentId ? byId.get(node.parentId) : undefined
-    if (!parent) return node.position
-    const origin = absolute(parent)
-    return { x: origin.x + node.position.x, y: origin.y + node.position.y }
-  }
-  return nodes.map((node) => ({
-    id: node.id, ...absolute(node),
-    width: node.measured?.width ?? FALLBACK_SIZE.width, height: node.measured?.height ?? FALLBACK_SIZE.height,
-    parent: node.parentId ?? null, compound: node.data.compound,
-  }))
-}
-
-/**
- * The deepest node whose box holds the point: where a drawn or dropped node
- * belongs. Drawing may nest into any element (a leaf then becomes a parent),
- * dropping only into one that already frames others. Ids are element FQNs, so
- * nesting depth is the FQN's length, and `excluded` drops a node's own subtree.
- */
-function innermostNode(nodes: readonly DiagramNode[], x: number, y: number, excluded: ReadonlySet<string>, compoundsOnly: boolean): string | null {
-  let best: string | null = null
-  for (const node of nodes) {
-    if ((compoundsOnly && !node.compound) || isDraft(node.id) || [...excluded].some((id) => node.id === id || node.id.startsWith(`${id}.`))) continue
-    if (x < node.position.x || y < node.position.y || x > node.position.x + node.width || y > node.position.y + node.height) continue
-    if (best === null || node.id.split(".").length > best.split(".").length) best = node.id
-  }
-  return best
-}
-
-function toFlowEdges(edges: DiagramEdge[]): GraphFlowEdge[] {
-  return edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target, type: "architecture-edge", data: { ...edge } }))
-}
-
-// Fields React Flow owns on a node/edge; the graph never describes them.
-const RETAINED_BY_FLOW = ["selected", "measured", "dragging"] as const
-
-// Rebuild flow items from the graph, carrying over only what React Flow owns. A
-// blind replace clears selection and drops measurements on every edit, making
-// edges jump and handles fade mid-interaction. Merging the other way round is
-// just as wrong: it would keep keys the rebuilt item deliberately omits, e.g. a
-// stale `parentId` after a node is dropped out of its frame.
-function reconcile<T extends { id: string }>(current: T[], next: T[]): T[] {
-  const previous = new Map(current.map((item) => [item.id, item as Record<string, unknown>]))
-  return next.map((item) => {
-    const existing = previous.get(item.id)
-    if (!existing) return item
-    // An update landing mid-drag must not yank the node back to its stored position.
-    if (existing.dragging) return existing as T
-    const merged: Record<string, unknown> = { ...item }
-    for (const key of RETAINED_BY_FLOW) if (key in existing) merged[key] = existing[key]
-    return merged as T
-  })
-}
-
 /** Sketch-style editor for a `DiagramGraph`: every edit is emitted through `onChange` as a whole new graph. */
-export function ArchitectureDiagramSurface({ graph, onChange, className, readOnly = false, edgeStyle, onEdgeStyleChange, autoFit = false, hostScale = 1, toolbar, toolbarSlots, onRemoveFromView, select = null, kinds = NO_KINDS, topLevelDrawing = true }: ArchitectureDiagramSurfaceProps) {
-  const active = useTabActive()
+export function ArchitectureDiagramSurface({ graph, onChange, className, readOnly = false, edgeStyle, onEdgeStyleChange, autoFit = false, hostScale = 1, toolbar, onRemoveFromView, select = null, kinds = NO_KINDS, topLevelDrawing = true }: ArchitectureDiagramSurfaceProps) {
+  // With drawing and view slots the toolbar renders into the top bar, otherwise it sits above the diagram.
+  const inTopBar = useHasTopBarSlot("drawing", "view")
   // Callbacks read the graph through a ref so they stay stable across renders.
   const graphRef = useRef(graph)
   useLayoutEffect(() => { graphRef.current = graph }, [graph])
   const emit = useCallback((patch: Partial<DiagramGraph>) => onChange({ ...graphRef.current, ...patch }), [onChange])
   // Cards report positions in React Flow's frame, which is relative to the parent for nested nodes.
-  const changeNode = useCallback((id: string, patch: Partial<Pick<DiagramNode, "title" | "bullets" | "kind" | "width" | "height" | "position">>) => {
-    const nodes = graphRef.current.nodes
-    const node = nodes.find((candidate) => candidate.id === id)
-    const parent = node?.parent ? nodes.find((candidate) => candidate.id === node.parent) : undefined
-    const absolute = patch.position && parent
-      ? { ...patch, position: { x: patch.position.x + parent.position.x, y: patch.position.y + parent.position.y } }
-      : patch
-    emit({ nodes: nodes.map((candidate) => candidate.id === id ? { ...candidate, ...absolute } : candidate) })
-  }, [emit])
+  const changeNode = useCallback((id: string, patch: NodePatch) => emit({ nodes: patchNode(graphRef.current.nodes, id, patch) }), [emit])
   // The node just created by the toolbar or a drawn shape opens straight into
   // title editing. Claimed once on mount, so a later remount of the same node
   // (tab switch, reload) doesn't grab focus again.
@@ -190,23 +88,10 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
       if (doomed.size > 0 || edges) emit({ nodes: graphRef.current.nodes.filter((node) => !doomed.has(node.id)), ...(edges ? { edges } : {}) })
     },
   }, [readOnly, onRemoveFromView, emit])
-  const [flow, setFlow] = useState<Parameters<typeof useSurfaceCamera>[0]["flow"]>(null)
+  const [flow, setFlow] = useState<GraphFlowInstance | null>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
-  const changeEdgePath = useCallback((id: string, path?: DiagramEdge["path"]) => {
-    emit({ edges: graphRef.current.edges.map((edge) => edge.id === id ? { ...edge, path } : edge) })
-  }, [emit])
-  const changeEdgeLabel = useCallback((id: string, label: string) => {
-    emit({ edges: graphRef.current.edges.map((edge) => edge.id === id ? { ...edge, label } : edge) })
-  }, [emit])
-  const toFlowPoint = useCallback((x: number, y: number) => flow?.screenToFlowPosition({ x, y }), [flow])
-  const [bendPreview, setBendPreview] = useState<{ id: string, bend: number } | null>(null)
-  const previewBend = useCallback((id: string, bend: number | null) => setBendPreview(bend === null ? null : { id, bend }), [])
-  const edit = useMemo<EdgeEdits | undefined>(() => readOnly ? undefined : {
-    onPathChange: changeEdgePath,
-    onLabelChange: changeEdgeLabel,
-    toFlowPoint,
-    onBendPreview: previewBend,
-  }, [changeEdgePath, changeEdgeLabel, previewBend, readOnly, toFlowPoint])
+  const changeEdgePath = useCallback((id: string, path?: DiagramEdge["path"]) => emit({ edges: graphRef.current.edges.map((edge) => edge.id === id ? { ...edge, path } : edge) }), [emit])
+  const changeEdgeLabel = useCallback((id: string, label: string) => emit({ edges: graphRef.current.edges.map((edge) => edge.id === id ? { ...edge, label } : edge) }), [emit])
   const nodeKinds = readOnly ? NO_KINDS : kinds
   // Filled by the layout effect below before the first paint: the card callbacks read refs, which render must not touch.
   const [nodes, setNodes, onNodesChange] = useNodesState<GraphFlowNode>([])
@@ -228,27 +113,7 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
   // on it pans (React Flow pans from non-draggable nodes), a pen draws on it,
   // and a click activates it.
   const flowNodes = useMemo(() => nodes.map((node) => node.draggable === !!node.selected ? node : { ...node, draggable: !!node.selected }), [nodes])
-  // Recomputed from the live node rects, so dragging a card re-slots and reroutes its edges.
-  const cards = useMemo(() => routeCards(nodes), [nodes])
-  const attachments = useMemo(() => edgeAttachments(cards, graph.edges), [cards, graph.edges])
-  // Until libavoid has loaded (or if it cannot), connections take the unrouted shapes.
-  const [routerReady, setRouterReady] = useState(false)
-  useEffect(() => {
-    let live = true
-    void loadRouter().then((ready) => { if (live) setRouterReady(ready) })
-    return () => { live = false }
-  }, [])
-  // A ~15-card view routes in about 15 ms.
-  const routes = useMemo(() => routerReady
-    ? routeEdges(cards, graph.edges.map((edge) => ({
-      id: edge.id, source: edge.source, target: edge.target,
-      bend: bendPreview?.id === edge.id ? bendPreview.bend : edge.path?.bend ?? 0,
-      sourcePoint: attachments.get(edge.id)?.source, targetPoint: attachments.get(edge.id)?.target,
-    })))
-    : null, [routerReady, cards, graph.edges, attachments, bendPreview])
-  const edgeGeometry = useMemo<EdgeGeometry>(() => ({
-    edgeStyle, cards: new Map(cards.map((card) => [card.id, card])), attachments, routes, bendPreview, edit,
-  }), [edgeStyle, cards, attachments, routes, bendPreview, edit])
+  const { cards, edgeGeometry } = useEdgeGeometry({ nodes, edges: graph.edges, edgeStyle, flow, readOnly, onPathChange: changeEdgePath, onLabelChange: changeEdgeLabel })
 
   // A new node lands in the innermost element under its centre, so drawing
   // inside an element creates something inside it. Where nothing frames it, a
@@ -266,91 +131,8 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
     addDraft({ x: offset, y: offset, width: NEW_NODE_WIDTH, height: NEW_NODE_HEIGHT })
   }, [addDraft])
   const { lasso, setLasso, preview, onPanePointerDown, lassoOverlay } = useSurfaceDrawing({ flow, viewportRef, readOnly, cards, selectNodes, setEdges, addDraft })
-  // Adds clones to the graph and selects them, not their sources, so repeated
-  // Ctrl+D / Ctrl+V walks diagonally instead of stacking on the same spot.
-  const addClones = useCallback((clones: DiagramNode[]) => {
-    if (clones.length === 0) return
-    const cloneIds = new Set(clones.map((clone) => clone.id))
-    emit({ nodes: [...graphRef.current.nodes, ...clones] })
-    selectNodes(cloneIds)
-  }, [emit, selectNodes])
-  // The selected nodes as the graph has them.
-  const selectedNodes = useCallback(() => {
-    const ids = new Set(nodes.filter((node) => node.selected).map((node) => node.id))
-    return graphRef.current.nodes.filter((node) => ids.has(node.id))
-  }, [nodes])
-  const duplicateSelectedNodes = useCallback(() => {
-    addClones(duplicateNodes(selectedNodes(), graphRef.current.nodes.map((node) => node.id)))
-  }, [selectedNodes, addClones])
-  // A snapshot, not ids: a paste repeats what was copied, even after the
-  // originals are edited or deleted.
-  const clipboardRef = useRef<DiagramNode[]>([])
-  const copySelectedNodes = useCallback(() => {
-    const selected = selectedNodes()
-    if (selected.length === 0) return false
-    clipboardRef.current = selected
-    return true
-  }, [selectedNodes])
-  const pasteNodes = useCallback(() => {
-    if (clipboardRef.current.length === 0) return false
-    const clones = duplicateNodes(clipboardRef.current, graphRef.current.nodes.map((node) => node.id))
-    // The next paste offsets from this one.
-    clipboardRef.current = clones
-    addClones(clones)
-    return true
-  }, [addClones])
-  useEventListener("window", "keydown", (event) => {
-    if (!(event.ctrlKey || event.metaKey)) return
-    const key = event.key.toLowerCase()
-    if (key !== "d" && key !== "c" && key !== "v") return
-    const tag = (event.target as HTMLElement | null)?.tagName
-    if (tag === "INPUT" || tag === "TEXTAREA") return
-    if (key === "d") { event.preventDefault(); duplicateSelectedNodes() }
-    else if (key === "c") { if (copySelectedNodes()) event.preventDefault() }
-    else if (pasteNodes()) event.preventDefault()
-  }, { active: !readOnly && active })
-  // Snaps every dragged node, carries nested nodes along (React Flow moves them
-  // relative to their parent; the graph stores absolute positions), and a
-  // single node dropped into a different compound moves into that element.
-  const onNodeDragStop = useCallback((_event: MouseEvent | TouchEvent, _node: GraphFlowNode, dragged: GraphFlowNode[]) => {
-    const current = graphRef.current.nodes
-    const byId = new Map(current.map((node) => [node.id, node]))
-    const shifts = new Map<string, Point>()
-    const placed = new Map<string, Point>()
-    for (const moved of dragged) {
-      const node = byId.get(moved.id)
-      if (!node) continue
-      const origin = node.parent ? byId.get(node.parent)?.position ?? { x: 0, y: 0 } : { x: 0, y: 0 }
-      const position = { x: snapToGrid(origin.x + moved.position.x), y: snapToGrid(origin.y + moved.position.y) }
-      placed.set(node.id, position)
-      shifts.set(node.id, { x: position.x - node.position.x, y: position.y - node.position.y })
-    }
-    const shiftOf = (node: DiagramNode): Point | undefined => {
-      for (let parent = node.parent; parent; parent = byId.get(parent)?.parent ?? null) {
-        const shift = shifts.get(parent)
-        if (shift) return shift
-      }
-      return undefined
-    }
-    let reparent: { id: string, parent: string | null } | null = null
-    const [single] = dragged
-    const lone = dragged.length === 1 && single ? byId.get(single.id) : undefined
-    if (lone && !lone.compound) {
-      const at = placed.get(lone.id)!
-      const width = single.measured?.width ?? lone.width
-      const height = single.measured?.height ?? lone.height
-      const parent = innermostNode(current, at.x + width / 2, at.y + height / 2, new Set([lone.id]), true)
-      if (parent !== lone.parent) reparent = { id: lone.id, parent }
-    }
-    emit({
-      nodes: current.map((node) => {
-        const position = placed.get(node.id)
-        const shift = position ? undefined : shiftOf(node)
-        const next = position ? { ...node, position } : shift ? { ...node, position: { x: node.position.x + shift.x, y: node.position.y + shift.y } } : node
-        return reparent?.id === node.id ? { ...next, parent: reparent.parent } : next
-      }),
-    })
-  }, [emit])
+  useNodeClipboard({ graphRef, nodes, emit, selectNodes, enabled: !readOnly })
+  const onNodeDragStop: OnNodeDrag<GraphFlowNode> = useCallback((_event, _node, dragged) => emit({ nodes: settleDrag(graphRef.current.nodes, dragged) }), [emit])
   const onConnect: OnConnect = useCallback((connection: Connection) => {
     if (!connection.source || !connection.target || connection.source === connection.target) return
     // A draft id, so it never matches the `source->target` id of a connection the view already shows.
@@ -403,7 +185,7 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
   </>
   const viewTools = !readOnly && (
     <ArchitectureMenu
-      label="Connection style" align="right" menuStyle={{ minWidth: 132 }} className={toolbarSlots ? undefined : "ml-auto"}
+      label="Connection style" align="right" menuStyle={{ minWidth: 132 }} className={inTopBar ? undefined : "ml-auto"}
       trigger={(open, toggle) => <ToolButton icon={MoreHorizontal} label="Connection style" active={open} onClick={toggle} aria-haspopup="menu" aria-expanded={open} />}
     >
       {(close) => <>
@@ -414,9 +196,9 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
   )
 
   return (
-    <div className={cn("architecture-diagram-surface", className)} style={{ display: "flex", minHeight: 0, height: "100%", flexDirection: "column", overflow: "hidden", borderTop: toolbarSlots ? undefined : "1px solid var(--divider)", backgroundColor: "var(--sketch-canvas)" }}>
-      {toolbarSlots
-        ? <>{createPortal(drawingTools, toolbarSlots.drawing)}{createPortal(viewTools, toolbarSlots.view)}</>
+    <div className={cn("architecture-diagram-surface", className)} style={{ display: "flex", minHeight: 0, height: "100%", flexDirection: "column", overflow: "hidden", borderTop: inTopBar ? undefined : "1px solid var(--divider)", backgroundColor: "var(--sketch-canvas)" }}>
+      {inTopBar
+        ? <><InTopBar name="drawing">{drawingTools}</InTopBar><InTopBar name="view">{viewTools}</InTopBar></>
         : <div className="architecture-diagram-toolbar">{drawingTools}{viewTools}</div>}
       <div ref={viewportRef} onWheelCapture={zoomGraphAtCenter} onPointerDown={onPanePointerDown} onContextMenu={(event) => event.preventDefault()} style={{ position: "relative", minHeight: 0, flex: 1 }}>
       {!readOnly && selectedEdge && <div className="architecture-diagram-edge-editor">

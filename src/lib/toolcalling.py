@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 import json
 import time
-from typing import Any
+from typing import Any, TypedDict
 from uuid import uuid4
 
 import litellm
@@ -16,7 +16,35 @@ from llm_baseclient.client import LLMClient
 from lib.async_utils import aiter_in_thread
 from lib.llm_json import extract_json_from_llm
 
-__all__ = ["ToolCatalog", "ToolDefinition", "ToolOutcome", "sandbox_unavailable", "stream_tool_turn"]
+__all__ = [
+    "Source",
+    "Stage",
+    "ToolCatalog",
+    "ToolDefinition",
+    "ToolOutcome",
+    "sandbox_unavailable",
+    "stream_tool_turn",
+]
+
+type Stage = Callable[[str], None]
+
+
+class Source(TypedDict):
+    """One cited web source; `content` is the evidence text the model sees, never the browser."""
+
+    label: str
+    url: str
+    title: str
+    content: str
+
+
+@dataclass(frozen=True)
+class ToolCall:
+    """One tool call requested by the model, native or recovered from text."""
+
+    id: str
+    name: str
+    arguments: dict[str, Any]
 
 
 @dataclass
@@ -25,10 +53,22 @@ class ToolOutcome:
 
     content: str
     summary: str = ""
-    sources: list[dict[str, str]] = field(default_factory=list)
+    sources: list[Source] = field(default_factory=list)
     detail: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
     sandbox: dict[str, Any] | None = None
+
+    def result_event(self, call: ToolCall) -> dict[str, Any]:
+        """The browser's `tool_result` payload: everything except model content and source evidence."""
+        return {
+            "id": call.id,
+            "name": call.name,
+            "summary": self.summary,
+            "sources": [{key: value for key, value in source.items() if key != "content"} for source in self.sources],
+            "detail": self.detail,
+            "error": self.error,
+            "sandbox": self.sandbox,
+        }
 
 
 def sandbox_unavailable(tool: str) -> ToolOutcome:
@@ -40,8 +80,40 @@ def sandbox_unavailable(tool: str) -> ToolOutcome:
 class ToolProgress:
     """A snapshot of a tool's stage timeline, safe to send over SSE."""
 
-    id: str
     stages: tuple[dict[str, Any], ...]
+
+
+class StageTimeline:
+    """Record a tool's stages, closing the running one whenever the next begins or the tool ends."""
+
+    def __init__(self) -> None:
+        self._stages: list[dict[str, Any]] = []
+
+    def _close(self, status: str, now: float) -> None:
+        if self._stages and self._stages[-1]["status"] == "running":
+            self._stages[-1]["status"] = status
+            self._stages[-1]["duration"] = now - self._stages[-1]["started_at"]
+
+    def _snapshot(self) -> ToolProgress:
+        return ToolProgress(stages=tuple(dict(stage) for stage in self._stages))
+
+    def begin(self, label: str) -> ToolProgress:
+        """Finish the running stage and start *label*."""
+        now = time.time()
+        self._close("done", now)
+        self._stages.append(
+            {"id": f"stage-{len(self._stages) + 1}", "label": label, "status": "running", "started_at": now, "duration": 0.0}
+        )
+        return self._snapshot()
+
+    def finish(self, *, error: bool) -> ToolProgress:
+        """Close the running stage as failed or done."""
+        self._close("error" if error else "done", time.time())
+        return self._snapshot()
+
+
+def _no_stage(_label: str) -> None:
+    """Discard stage reports when no timeline listens."""
 
 
 @dataclass(frozen=True)
@@ -49,7 +121,9 @@ class ToolDefinition[ContextT]:
     name: str
     description: str
     parameters: dict[str, Any]
-    run: Callable[[dict[str, Any], ContextT], Awaitable[ToolOutcome]]
+    run: Callable[[dict[str, Any], ContextT, Stage], Awaitable[ToolOutcome]]
+    # False when the tool result is the whole reply, so no answer round follows.
+    answers: bool = True
 
     @property
     def spec(self) -> dict[str, Any]:
@@ -90,12 +164,21 @@ class ToolCatalog[ContextT]:
         self.definitions = tuple(definitions)
         self._by_name = {definition.name: definition for definition in self.definitions}
 
+    def get(self, name: str) -> ToolDefinition[ContextT] | None:
+        return self._by_name.get(name)
+
     def specs(self, names: list[str]) -> list[dict[str, Any]]:
         """Drop unknown names so callers cannot widen the offered tool surface."""
         return [self._by_name[name].spec for name in dict.fromkeys(names) if name in self._by_name]
 
     async def execute(
-        self, name: str, args: dict[str, Any], context: ContextT, *, enabled: Iterable[str] | None = None
+        self,
+        name: str,
+        args: dict[str, Any],
+        context: ContextT,
+        *,
+        enabled: Iterable[str] | None = None,
+        stage: Stage = _no_stage,
     ) -> ToolOutcome:
         """Contain gating, validation and handler failures so the stream can continue."""
         definition = self._by_name.get(name)
@@ -114,7 +197,7 @@ class ToolCatalog[ContextT]:
         clean_args = {key: value.strip() if isinstance(value, str) else value for key, value in args.items()}
 
         try:
-            return await definition.run(clean_args, context)
+            return await definition.run(clean_args, context, stage)
         except Exception as exc:  # noqa: BLE001
             message = str(exc) or exc.__class__.__name__
             return ToolOutcome(content=f"The {name} tool failed: {message}", summary="Failed", error=message)
@@ -122,36 +205,21 @@ class ToolCatalog[ContextT]:
     async def execute_with_progress(
         self, name: str, args: dict[str, Any], context: ContextT, *, enabled: Iterable[str] | None = None
     ) -> AsyncIterator[ToolProgress | ToolOutcome]:
-        """Execute a tool while forwarding the optional stage hook on its context."""
-        stages: list[dict[str, Any]] = []
-        progress_queue: asyncio.Queue[ToolProgress] = asyncio.Queue()
+        """Execute a tool, yielding a timeline snapshot per reported stage, then the outcome."""
+        timeline = StageTimeline()
+        # None marks the end of the tool task.
+        progress: asyncio.Queue[ToolProgress | None] = asyncio.Queue()
 
-        def report(label: str) -> None:
-            now = time.time()
-            if stages and stages[-1]["status"] == "running":
-                stages[-1]["status"] = "done"
-                stages[-1]["duration"] = now - stages[-1]["started_at"]
-            stages.append(
-                {"id": f"stage-{len(stages) + 1}", "label": label, "status": "running", "started_at": now, "duration": 0.0}
-            )
-            progress_queue.put_nowait(ToolProgress(id="", stages=tuple(dict(stage) for stage in stages)))
+        def stage(label: str) -> None:
+            progress.put_nowait(timeline.begin(label))
 
-        report("Preparing")
-        with_progress = getattr(context, "with_progress", None)
-        progress_context = with_progress(report) if callable(with_progress) else context
-        task = asyncio.create_task(self.execute(name, args, progress_context, enabled=enabled))
-        while not task.done():
-            try:
-                # Short timeout lets the loop notice task completion without a sentinel.
-                yield await asyncio.wait_for(progress_queue.get(), timeout=0.05)
-            except TimeoutError:
-                continue
+        stage("Preparing")
+        task = asyncio.create_task(self.execute(name, args, context, enabled=enabled, stage=stage))
+        task.add_done_callback(lambda _task: progress.put_nowait(None))
+        while (snapshot := await progress.get()) is not None:
+            yield snapshot
         outcome = await task
-        now = time.time()
-        if stages and stages[-1]["status"] == "running":
-            stages[-1]["status"] = "error" if outcome.error else "done"
-            stages[-1]["duration"] = now - stages[-1]["started_at"]
-        yield ToolProgress(id="", stages=tuple(dict(stage) for stage in stages))
+        yield timeline.finish(error=bool(outcome.error))
         yield outcome
 
     def __contains__(self, name: object) -> bool:
@@ -173,13 +241,11 @@ def _accumulate_tool_calls(pending: dict[int, dict[str, Any]], deltas: list[Any]
             slot["arguments"] += function.arguments
 
 
-def _tool_call_from_text(text: str, catalog: ToolCatalog[Any]) -> dict[str, Any] | None:
+def _tool_call_from_text(text: str, catalog: ToolCatalog[Any]) -> ToolCall | None:
     """Parse a text-mode tool call, accepting only names registered in *catalog*."""
     try:
         payload = extract_json_from_llm(text)
-    except (ValueError, json.JSONDecodeError):
-        return None
-    if not isinstance(payload, dict):
+    except ValueError:
         return None
     if isinstance(payload.get("function"), dict):
         payload = payload["function"]
@@ -195,7 +261,7 @@ def _tool_call_from_text(text: str, catalog: ToolCatalog[Any]) -> dict[str, Any]
             args = json.loads(args)
         except json.JSONDecodeError:
             args = {}
-    return {"id": f"text_{name}_{uuid4().hex[:8]}", "name": name, "arguments": args if isinstance(args, dict) else {}}
+    return ToolCall(f"text_{name}_{uuid4().hex[:8]}", name, args if isinstance(args, dict) else {})
 
 
 def _start_stream(
@@ -222,7 +288,7 @@ def _start_stream(
 @dataclass
 class _Round:
     text: str = ""
-    call: dict[str, Any] | None = None
+    call: ToolCall | None = None
     usage: dict[str, int] = field(default_factory=lambda: {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
 
 
@@ -285,11 +351,7 @@ async def _run_round(
             args = json.loads(native["arguments"] or "{}")
         except json.JSONDecodeError:
             args = {}
-        out.call = {
-            "id": native["id"] or f"call_{uuid4().hex[:8]}",
-            "name": native["name"],
-            "arguments": args if isinstance(args, dict) else {},
-        }
+        out.call = ToolCall(native["id"] or f"call_{uuid4().hex[:8]}", native["name"], args if isinstance(args, dict) else {})
     # No native call: the held text may be a JSON tool call emitted as plain content.
     elif held:
         out.call = _tool_call_from_text(held, catalog)
@@ -342,36 +404,25 @@ async def stream_tool_turn[ContextT](
                 "content": None,
                 "tool_calls": [
                     {
-                        "id": call["id"],
+                        "id": call.id,
                         "type": "function",
-                        "function": {"name": call["name"], "arguments": json.dumps(call["arguments"])},
+                        "function": {"name": call.name, "arguments": json.dumps(call.arguments)},
                     }
                 ],
             }
         )
-        yield ("tool_call", call)
+        yield ("tool_call", asdict(call))
         async for execution_event in catalog.execute_with_progress(
-            call["name"], call["arguments"], context_for_call(call["id"]), enabled=enabled
+            call.name, call.arguments, context_for_call(call.id), enabled=enabled
         ):
             if isinstance(execution_event, ToolProgress):
-                yield ("tool_progress", {"id": call["id"], "stages": execution_event.stages})
+                yield ("tool_progress", {"id": call.id, "stages": execution_event.stages})
                 continue
             outcome = execution_event
-        yield (
-            "tool_result",
-            {
-                "id": call["id"],
-                "name": call["name"],
-                "summary": outcome.summary,
-                "sources": [{key: value for key, value in source.items() if key != "content"} for source in outcome.sources],
-                "detail": outcome.detail,
-                "error": outcome.error,
-                "sandbox": outcome.sandbox,
-            },
-        )
-        # The mindmap tool renders in the browser, so no follow-up answer round is requested.
-        if call["name"] != "mindmap":
-            messages.append({"role": "tool", "tool_call_id": call["id"], "content": outcome.content})
+        yield ("tool_result", outcome.result_event(call))
+        definition = catalog.get(call.name)
+        if definition is None or definition.answers:
+            messages.append({"role": "tool", "tool_call_id": call.id, "content": outcome.content})
 
             answer = _Round()
             async for event in _run_round(

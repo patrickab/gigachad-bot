@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 import hashlib
 
 from agent_sandbox import SandboxManifest
@@ -7,14 +8,14 @@ from agent_sandbox.manifest import Execution, Outputs, WorkspaceRef, to_yaml
 import pytest
 
 from config import TEST_MODEL
-from lib.agent_sandbox_adapter import FakeSandboxRunner
 from lib.asset_store import AssetStore, StorageNotFoundError
-from lib.data_store import DataStorePath
-from lib.json_io import safe_write_json
+from lib.changes import UserScope
+from lib.fake_sandbox_runner import FakeSandboxRunner
+from lib.json_docs import JsonDocs
 from lib.postgres_data_store import PostgresDataStore
 from lib.sandbox_service import PROMPT_MAX_LEN, SandboxRuntimeState, SandboxService
 from lib.sandbox_store import ActivePointer, AssetRef, SandboxStore
-from lib.storage_namespace import sandbox_asset, sandbox_manifest
+from lib.storage_namespace import sandbox_active, sandbox_asset, sandbox_manifest
 from tests.conftest import create_user
 
 # The model id is caller-supplied configuration; these tests only check it is forwarded.
@@ -28,12 +29,12 @@ def user_id(postgres_pool, clean_database) -> str:
 
 @pytest.fixture
 def data_store(postgres_pool, user_id) -> PostgresDataStore:
-    return PostgresDataStore(postgres_pool, user_id)
+    return PostgresDataStore(UserScope(postgres_pool, user_id))
 
 
 @pytest.fixture
 def asset_store(postgres_pool, user_id) -> AssetStore:
-    return AssetStore(postgres_pool, user_id)
+    return AssetStore(UserScope(postgres_pool, user_id))
 
 
 @pytest.fixture
@@ -108,8 +109,8 @@ async def test_legacy_manifest_resumes_with_its_embedded_aib_record(sandbox_serv
         execution=Execution(run_id="legacy-run", status="completed", exit_code=0, created_at=""),
     )
     legacy_manifest_id = "legacy-wrapper-id"
-    safe_write_json(
-        DataStorePath(data_store, sandbox_manifest(chat_id, legacy_manifest_id)),
+    JsonDocs(data_store).write(
+        sandbox_manifest(chat_id, legacy_manifest_id),
         {
             "version": 1,
             "workspace": AssetRef(workspace_sha256, "application/x-tar", len(workspace_bytes)).to_json(),
@@ -118,7 +119,7 @@ async def test_legacy_manifest_resumes_with_its_embedded_aib_record(sandbox_serv
         },
     )
     asset_store.write("sandbox", sandbox_asset(workspace_sha256), workspace_bytes, mime="application/x-tar")
-    SandboxStore(data_store).write_active(chat_id, ActivePointer(manifest_id=legacy_manifest_id, updated_at=1.0))
+    JsonDocs(data_store).write(sandbox_active(chat_id), asdict(ActivePointer(manifest_id=legacy_manifest_id, updated_at=1.0)))
 
     result = await sandbox_service.invoke(chat_id=chat_id, tool_call_id="legacy-call", prompt="Resume it")
 
@@ -156,7 +157,7 @@ async def test_idempotent_invoke_same_tool_call_id(sandbox_service, runner):
     result_2 = await sandbox_service.invoke(chat_id=chat_id, tool_call_id=tool_call_id, prompt=prompt)
 
     assert len(runner.calls) == 1
-    assert result_1.to_json() == result_2.to_json()
+    assert result_1 == result_2
 
 
 async def test_runner_failure_degrades_gracefully(sandbox_service, runner):

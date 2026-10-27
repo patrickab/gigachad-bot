@@ -12,32 +12,23 @@ from fastapi.testclient import TestClient
 import pytest
 
 from backend.identity import CAPABILITIES_HEADER, HOST_CAPABILITY
-from lib.db_schema import upgrade
-
-
-@pytest.fixture(scope="module")
-def database_url() -> str:
-    url = os.environ.get("POSTGRES_TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("POSTGRES_TEST_DATABASE_URL is required for Postgres end-to-end tests")
-    upgrade(url)
-    return url
+from tests.conftest import TRUNCATE_ALL
 
 
 @pytest.fixture
 def client(database_url, monkeypatch):
     monkeypatch.setenv("GIGACHAD_DATABASE_URL", database_url)
-    import config
+    from lib import postgres_pool
 
-    monkeypatch.setattr(config, "_postgres_pool", None)
+    monkeypatch.setattr(postgres_pool, "_postgres_pool", None)
     from backend.server import app
 
-    with config.get_postgres_pool().connection() as connection, connection.transaction():
-        connection.execute("TRUNCATE changes, assets, vault_roots, devices, documents, users CASCADE")
+    with postgres_pool.get_postgres_pool().connection() as connection, connection.transaction():
+        connection.execute(TRUNCATE_ALL)
     # The lifespan is skipped on purpose: it starts the MinerU queue and the LISTEN broker,
     # neither of which this gate needs.
     yield TestClient(app)
-    config.close_postgres_pool()
+    postgres_pool.close_postgres_pool()
 
 
 def headers(login: str, device_id: str | None = None, *, host: bool = False) -> dict[str, str]:
@@ -61,17 +52,14 @@ def test_unidentified_request_is_rejected(client):
 
 
 @pytest.fixture
-def c4_service(monkeypatch):
+def c4_service():
     import httpx
-
-    from lib import c4_service as service
 
     url = os.environ.get("C4_SERVICE_URL", "http://127.0.0.1:8011")
     try:
         httpx.get(f"{url}/health", timeout=1).raise_for_status()
     except httpx.HTTPError:
         pytest.skip("the C4 service (src/c4/server.ts) is required for architecture tests")
-    monkeypatch.setattr(service, "C4_SERVICE_URL", url)
 
 
 def test_architecture_edits_are_gated_by_the_model_and_user_scoped(client, c4_service):
@@ -218,9 +206,9 @@ def test_writes_append_a_replayable_change_log(client):
     for name in ("a.md", "b.md"):
         client.post("/api/documents/write", json={"slug": slug, "name": name, "content": name}, headers=alice)
 
-    import config
+    from lib.postgres_pool import get_postgres_pool
 
-    with config.get_postgres_pool().connection() as connection:
+    with get_postgres_pool().connection() as connection:
         rows = connection.execute(
             "SELECT seq, resource_kind, resource_key, device_id FROM changes ORDER BY seq"
         ).fetchall()
@@ -332,7 +320,7 @@ def test_library_pdf_serves_from_storage_after_its_files_are_gone(client, tmp_pa
     mount.mkdir()
     monkeypatch.setattr(lib_docs, "DOCUMENTS", mirror)
     monkeypatch.setattr(attachment_materialize, "DOCUMENTS", mirror)
-    monkeypatch.setattr(attachment_materialize.extract_queue, "enqueue", lambda name, content, assets: None)
+    monkeypatch.setattr(attachment_materialize.extract_queue, "enqueue", lambda name, content, store: None)
 
     alice = headers("alice@example.test", str(uuid4()), host=True)
     slug = f"pdf-{uuid4().hex[:8]}"

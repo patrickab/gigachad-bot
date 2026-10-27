@@ -1,24 +1,23 @@
 import json
-import os
 from uuid import uuid4
 
-from psycopg_pool import ConnectionPool
 from psycopg.types.json import Jsonb
 import pytest
 
 from lib.architecture_workspace import ArchitectureStore, DirectoryFiles
 from lib.asset_store import AssetStore
+from lib.changes import UserScope
 from lib.chat_store import ChatStore
 from lib.data_store import StorageConflictError, StorageNotFoundError
-from lib.db_schema import upgrade
-from lib.memory_store import MemoryStore
+from lib.memory_store import MemoryScope, MemoryStore
 from lib.postgres_data_store import PostgresDataStore
-from lib.project_rename import ProjectReferences, renamed_documents
+from lib.project_rename import PostgresProjectRenamer, ProjectReferences, renamed_documents
 from lib.project_store import ProjectStore
+from tests.conftest import create_user
 
 
 def test_references_move_owned_links_only():
-    refs = ProjectReferences("old", "new", "chat")
+    refs = ProjectReferences("old", "new")
     assert refs.value({"path": "project/old/document/a.md", "project_slug": "old", "history_file": "old/a.json"}) == {
         "path": "project/new/document/a.md", "project_slug": "new", "history_file": "new/a.json"}
     text = "old oldish project/older/a /home/project/old/a [doc](project/old/document/a.md) memory/project/old/x"
@@ -33,7 +32,7 @@ def test_renamed_documents_names_catalog_and_keeps_linked_folder():
     meta = {"projects": [{"name": "Old", "slug": "old", "createdAt": "original"}, {"name": "Older", "slug": "older"}]}
     rows = [("chat/projects-meta.json", json.dumps(meta).encode(), False), ("chat/old/project.json", b'{"name":"Old"}', False),
             ("chat/old", b"", True), ("project/older/document/a.md", b"old prose", False)]
-    changed = {target: content for _, target, content in renamed_documents(rows, ProjectReferences("old", "new", "chat"), "New", ["/mnt/old"])}
+    changed = {target: content for _, target, content in renamed_documents(rows, ProjectReferences("old", "new"), "New", ["/mnt/old"])}
     entries = json.loads(changed["chat/projects-meta.json"])["projects"]
     assert entries[0] | {"updatedAt": None} == {"name": "New", "slug": "new", "createdAt": "original", "updatedAt": None}
     assert entries[1] == {"name": "Older", "slug": "older"}
@@ -41,24 +40,15 @@ def test_renamed_documents_names_catalog_and_keeps_linked_folder():
     assert "chat/new" in changed and "project/older/document/a.md" not in changed
 
 
-@pytest.fixture(scope="module")
-def pool():
-    url = os.environ.get("POSTGRES_TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("POSTGRES_TEST_DATABASE_URL is required for transactional rename tests")
-    upgrade(url)
-    with ConnectionPool(url, min_size=1, max_size=4) as value:
-        yield value
-
-
 @pytest.fixture
-def stores(pool):
-    with pool.connection() as conn, conn.transaction():
-        user = conn.execute("INSERT INTO users (tailscale_login) VALUES (%s) RETURNING id", (f"rename-{uuid4()}@example.test",)).fetchone()[0]
-    docs = PostgresDataStore(pool, user)
-    yield docs, ProjectStore(data_store=docs), AssetStore(pool, user), user
-    with pool.connection() as conn, conn.transaction():
-        conn.execute("DELETE FROM users WHERE id = %s", (user,))
+def stores(postgres_pool, clean_database):
+    user = create_user(postgres_pool)
+    docs = PostgresDataStore(UserScope(postgres_pool, user))
+    return docs, project_store(docs, UserScope(postgres_pool, user)), AssetStore(UserScope(postgres_pool, user)), user
+
+
+def project_store(docs, scope):
+    return ProjectStore(ChatStore(data_store=docs), rename=PostgresProjectRenamer(scope).rename)
 
 
 def put(docs, key, value):
@@ -69,7 +59,7 @@ def get(docs, key):
     return json.loads(docs.read_bytes(key)[0])
 
 
-def test_rename_cascades_consumers_and_preserves_identity(stores, pool, tmp_path):
+def test_rename_cascades_consumers_and_preserves_identity(stores, postgres_pool, tmp_path):
     docs, projects, assets, user = stores
     projects.create_project("Old")
     projects.create_project("Other")
@@ -78,13 +68,13 @@ def test_rename_cascades_consumers_and_preserves_identity(stores, pool, tmp_path
     source = mount / "docs/architecture/system.c4"
     source.parent.mkdir(parents=True)
     source.write_text("model { system = system 'Original' }")
-    with pool.connection() as conn, conn.transaction():
+    with postgres_pool.connection() as conn, conn.transaction():
         conn.execute("INSERT INTO vault_roots (user_id, path) VALUES (%s, %s)", (user, str(mount)))
     chats = ChatStore(data_store=docs)
     chats.save("old/main.json", {"chat_id": "parent", "messages": [{"role": "user", "content": "old remains prose"}]})
     branch = chats.branch("old/main.json", 0)["child_file"]
     # Prime the ID index before moving its keys.
-    projects._store.find_by_chat_id("parent")
+    projects._chats._find("parent")
     attachment = {"id": "a", "path": "project/old/document/report.md", "projectSlug": "old"}
     canvas = "project/old/document/board.canvas"
     put(docs, canvas, {"version": 1, "attachments": [attachment]})
@@ -98,11 +88,11 @@ def test_rename_cascades_consumers_and_preserves_identity(stores, pool, tmp_path
     asset = assets.write("upload", "attachment/project/old/chat/parent/image.png", b"\x00\xffimage", mime="image/png")
     mutation = uuid4()
     secret = b"share-secret"
-    with pool.connection() as conn, conn.transaction():
+    with postgres_pool.connection() as conn, conn.transaction():
         conn.execute("INSERT INTO canvas_mutations (mutation_id,user_id,canvas_key,revision,position,kind,entity,entity_id,value) VALUES (%s,%s,%s,1,0,'upsert','attachment','a',%s)", (mutation, user, canvas, Jsonb(attachment)))
         conn.execute("INSERT INTO canvas_shares (secret_hash,user_id,canvas_key) VALUES (%s,%s,%s)", (secret, user, canvas))
     before = get(docs, "chat/projects-meta.json")["projects"][0]
-    with pool.connection() as conn:
+    with postgres_pool.connection() as conn:
         last_seq = conn.execute("SELECT max(seq) FROM changes WHERE user_id=%s", (user,)).fetchone()[0]
     assert projects.update_project("old", "New Name") == {"name": "New Name", "slug": "new-name", "archived": True}
     after = get(docs, "chat/projects-meta.json")["projects"][0]
@@ -110,12 +100,12 @@ def test_rename_cascades_consumers_and_preserves_identity(stores, pool, tmp_path
     assert projects.get_project("new-name")["linked_root"] == str(mount)
     with pytest.raises(FileNotFoundError):
         projects.get_project("old")
-    assert projects._store.find_by_chat_id("parent") == "new-name/main.json"
+    assert projects._chats._find("parent") == "chat/new-name/main.json"
     assert chats.load(branch.replace("old/", "new-name/", 1))["parent_id"] == "parent"
     assert get(docs, "project/other/document/cross.canvas")["attachments"][0]["path"] == "project/new-name/document/report.md"
     assert "project/new-name/document/report.md" in get(docs, "chat/other/external.json")["messages"][0]["content"]
     assert docs.read_bytes("graph/new-name/system.c4")[0] == b"model {}"
-    assert [m["text"] for m in MemoryStore(data_store=docs, model="test").list_memories("project", "new-name")] == ["old fact"]
+    assert [m["text"] for m in MemoryStore(docs).list_memories(MemoryScope("project", "new-name"))] == ["old fact"]
     assert isinstance(ArchitectureStore.for_project(docs, "new-name", [str(mount)])._files, DirectoryFiles)
     assert source.read_text() == "model { system = system 'Original' }"
     moved = assets.read_by_id(asset.id)
@@ -125,7 +115,7 @@ def test_rename_cascades_consumers_and_preserves_identity(stores, pool, tmp_path
         assets.read(asset.logical_path)
     assert get(docs, "model/unrelated.json") == {"slug": "old"}
     assert get(docs, "project/older/document/untouched.json") == {"text": "old"}
-    with pool.connection() as conn:
+    with postgres_pool.connection() as conn:
         events = conn.execute("SELECT resource_kind, resource_key FROM changes WHERE user_id=%s AND seq>%s", (user, last_seq)).fetchall()
         assert {("document", "chat/old/main.json"), ("document", "chat/new-name/main.json"), ("asset", asset.logical_path)} <= set(events)
         assert conn.execute("SELECT canvas_key,value FROM canvas_mutations WHERE mutation_id=%s", (mutation,)).fetchone() == (
@@ -135,7 +125,7 @@ def test_rename_cascades_consumers_and_preserves_identity(stores, pool, tmp_path
 
 
 def test_same_slug_renames_in_place_and_taken_slug_conflicts(stores):
-    docs, projects, _, _ = stores
+    _, projects, _, _ = stores
     projects.create_project("Old")
     assert projects.update_project("old", "OLD!") == {"name": "OLD!", "slug": "old", "archived": False}
     projects.create_project("New")
@@ -146,13 +136,13 @@ def test_same_slug_renames_in_place_and_taken_slug_conflicts(stores):
     assert projects.get_project("old")["name"] == "OLD!"
 
 
-def test_asset_conflict_rolls_back_every_document_and_change(stores, pool):
+def test_asset_conflict_rolls_back_every_document_and_change(stores, postgres_pool):
     docs, projects, assets, user = stores
     projects.create_project("Old")
     docs.write_bytes("project/old/document/a.md", b"hello")
     assets.write("upload", "attachment/project/old/chat/id/a.txt", b"source")
     assets.write("upload", "attachment/project/new/chat/id/a.txt", b"destination")
-    with pool.connection() as conn:
+    with postgres_pool.connection() as conn:
         count = conn.execute("SELECT count(*) FROM changes WHERE user_id=%s", (user,)).fetchone()[0]
     with pytest.raises(StorageConflictError):
         projects.update_project("old", "New", archived=True)
@@ -161,25 +151,20 @@ def test_asset_conflict_rolls_back_every_document_and_change(stores, pool):
     assert not docs.exists("project/new")
     assert assets.read("attachment/project/old/chat/id/a.txt").content == b"source"
     assert assets.read("attachment/project/new/chat/id/a.txt").content == b"destination"
-    with pool.connection() as conn:
+    with postgres_pool.connection() as conn:
         assert conn.execute("SELECT count(*) FROM changes WHERE user_id=%s", (user,)).fetchone()[0] == count
     assert projects.list_projects()[0]["archived"] is False
 
 
-def test_rename_never_crosses_user_namespace(stores, pool):
-    docs, projects, _, _ = stores
+def test_rename_never_crosses_user_namespace(stores, postgres_pool):
+    _, projects, _, _ = stores
     projects.create_project("Old")
-    with pool.connection() as conn, conn.transaction():
-        other_user = conn.execute("INSERT INTO users (tailscale_login) VALUES (%s) RETURNING id", (f"other-{uuid4()}@example.test",)).fetchone()[0]
-    try:
-        other_docs = PostgresDataStore(pool, other_user)
-        other_projects = ProjectStore(data_store=other_docs)
-        other_projects.create_project("Old")
-        other_docs.write_bytes("project/old/document/a.md", b"[old](project/old/document/a.md)")
-        projects.update_project("old", "New")
-        assert other_projects.get_project("old")["name"] == "Old"
-        assert other_docs.read_bytes("project/old/document/a.md")[0] == b"[old](project/old/document/a.md)"
-        assert not other_docs.exists("project/new")
-    finally:
-        with pool.connection() as conn, conn.transaction():
-            conn.execute("DELETE FROM users WHERE id = %s", (other_user,))
+    other_user = create_user(postgres_pool)
+    other_docs = PostgresDataStore(UserScope(postgres_pool, other_user))
+    other_projects = project_store(other_docs, UserScope(postgres_pool, other_user))
+    other_projects.create_project("Old")
+    other_docs.write_bytes("project/old/document/a.md", b"[old](project/old/document/a.md)")
+    projects.update_project("old", "New")
+    assert other_projects.get_project("old")["name"] == "Old"
+    assert other_docs.read_bytes("project/old/document/a.md")[0] == b"[old](project/old/document/a.md)"
+    assert not other_docs.exists("project/new")

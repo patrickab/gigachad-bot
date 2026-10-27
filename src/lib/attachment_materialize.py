@@ -6,6 +6,7 @@ the shared library namespace (``PDFs/<name>``, ``Mineru/<stem>.md``,
 reads back. This module is the one place that writes those namespaces.
 """
 
+from functools import partial
 import logging
 from pathlib import Path
 
@@ -13,17 +14,9 @@ from config import DOCUMENTS
 from lib import extract_queue
 from lib.asset_store import Asset, AssetStore
 from lib.data_store import StorageNotFoundError
-from lib.storage_namespace import MINERU, PDFS
+from lib.storage_namespace import library_images_prefix, library_markdown, library_pdf, pdf_stem
 
 log = logging.getLogger(__name__)
-
-
-def library_markdown_key(stem: str) -> str:
-    return f"{MINERU}/{stem}.md"
-
-
-def library_images_prefix(stem: str) -> str:
-    return f"{MINERU}/images/{stem}"
 
 
 def _mirror_quietly(assets: AssetStore, asset: Asset) -> None:
@@ -41,7 +34,7 @@ def store_library_pdf(assets: AssetStore, name: str, content: bytes) -> Asset:
     """Store (or refresh) a PDF in the shared per-user library and mirror it.
 
     The filename is the document's identity, so re-storing a name overwrites it."""
-    asset = assets.write("pdf", f"{PDFS}/{name}", content, mime="application/pdf")
+    asset = assets.write("pdf", library_pdf(name), content, mime="application/pdf")
     _mirror_quietly(assets, asset)
     return asset
 
@@ -49,7 +42,7 @@ def store_library_pdf(assets: AssetStore, name: str, content: bytes) -> Asset:
 def _library_pdf(assets: AssetStore, name: str) -> Asset | None:
     """The library copy of the PDF *name*, or None when it is not stored."""
     try:
-        return assets.read(f"{PDFS}/{name}")
+        return assets.read(library_pdf(name))
     except StorageNotFoundError:
         return None
 
@@ -60,20 +53,14 @@ def sync_library_pdf(assets: AssetStore, name: str, content: bytes) -> None:
     if stored is not None and stored.content == content:
         return
     store_library_pdf(assets, name, content)
-    images = assets.list(f"{library_images_prefix(_stem(name))}/")
-    for key in (library_markdown_key(_stem(name)), *(image.logical_path for image in images)):
+    images = assets.list(f"{library_images_prefix(pdf_stem(name))}/")
+    for key in (library_markdown(pdf_stem(name)), *(image.logical_path for image in images)):
         assets.delete(key)
-
-
-def is_superseded(assets: AssetStore, name: str, content: bytes) -> bool:
-    """True when the library copy of the PDF *name* now holds other bytes than *content*, making an extraction of *content* stale."""
-    stored = _library_pdf(assets, name)
-    return stored is not None and stored.content != content
 
 
 def store_library_output(assets: AssetStore, stem: str, md_path: Path, images_dir: Path) -> None:
     """Persist a completed MinerU parse into this user's shared library cache."""
-    md_asset = assets.write("mineru_markdown", library_markdown_key(stem), md_path.read_bytes(), mime="text/markdown")
+    md_asset = assets.write("mineru_markdown", library_markdown(stem), md_path.read_bytes(), mime="text/markdown")
     _mirror_quietly(assets, md_asset)
     if images_dir.is_dir():
         for image in sorted(images_dir.iterdir()):
@@ -83,8 +70,13 @@ def store_library_output(assets: AssetStore, stem: str, md_path: Path, images_di
                 _mirror_quietly(assets, assets.write("mineru_image", key, image.read_bytes()))
 
 
-def _stem(name: str) -> str:
-    return name[:-4] if name.lower().endswith(".pdf") else name
+def _store_extraction(assets: AssetStore, name: str, content: bytes, stem: str, md_path: Path, images_dir: Path) -> None:
+    """Persist a background parse of *content*, unless the library copy of the PDF *name* changed meanwhile."""
+    stored = _library_pdf(assets, name)
+    if stored is not None and stored.content != content:
+        log.info("Discarding extraction of %s: the PDF changed meanwhile", name)
+    else:
+        store_library_output(assets, stem, md_path, images_dir)
 
 
 def materialize(name: str, content: bytes, assets: AssetStore, *, enqueue_on_miss: bool = True) -> str | None:
@@ -94,8 +86,8 @@ def materialize(name: str, content: bytes, assets: AssetStore, *, enqueue_on_mis
     (for callers that parse synchronously). *content* is all extraction needs.
     """
     try:
-        return (assets.read(library_markdown_key(_stem(name))).content or b"").decode("utf-8")
+        return (assets.read(library_markdown(pdf_stem(name))).content or b"").decode("utf-8")
     except StorageNotFoundError:
         if enqueue_on_miss:
-            extract_queue.enqueue(name, content, assets)
+            extract_queue.enqueue(name, content, partial(_store_extraction, assets, name, content))
         return None

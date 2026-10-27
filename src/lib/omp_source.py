@@ -20,12 +20,12 @@ import json
 import os
 from pathlib import Path
 import subprocess
-import time
 from typing import Any
 import urllib.error
 import urllib.request
 
 from lib.omp_cli import OmpNotFound, run_omp
+from lib.ttl_cache import TtlCache
 
 # The LiteLLM provider prefix that carries an OMP model. Kept in one place
 # because the browser needs the same value to build selector strings.
@@ -64,8 +64,9 @@ _PROVIDER_LABELS = {
     "zai-coding-plan": "Z.AI Coding Plan",
 }
 
-_cache: tuple[float, dict[str, Any]] | None = None
-_thinking_cache: tuple[float, dict[str, list[str]]] | None = None
+# A catalog caches its failure too (an offline gateway is a normal state), thinking levels only a successful read.
+_catalog = TtlCache[dict[str, Any]](_CATALOG_TTL_SECONDS)
+_thinking = TtlCache[dict[str, list[str]]](_THINKING_TTL_SECONDS)
 
 
 def omp_home() -> Path:
@@ -149,18 +150,7 @@ def group_by_provider(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
-def catalog(*, refresh: bool = False) -> dict[str, Any]:
-    """Authenticated OMP providers and their models, or why they are missing.
-
-    An unreachable gateway is a normal state, not an error: OMP may be
-    installed while its services are down, so the browser gets
-    ``online: false`` plus a reason instead of a failed request.
-    """
-    global _cache
-    now = time.monotonic()
-    if not refresh and _cache is not None and now - _cache[0] < _CATALOG_TTL_SECONDS:
-        return _cache[1]
-
+def _read_catalog() -> dict[str, Any]:
     result: dict[str, Any] = {
         "installed": installed(),
         "online": False,
@@ -177,14 +167,22 @@ def catalog(*, refresh: bool = False) -> dict[str, Any]:
             result["error"] = f"No OMP gateway at {result['gateway']} ({exc})"
     else:
         result["error"] = f"No OMP credential store at {omp_home() / 'agent' / 'agent.db'}"
-
-    _cache = (now, result)
     return result
 
 
+def catalog(*, refresh: bool = False) -> dict[str, Any]:
+    """Authenticated OMP providers and their models, or why they are missing.
+
+    An unreachable gateway is a normal state, not an error: OMP may be
+    installed while its services are down, so the browser gets
+    ``online: false`` plus a reason instead of a failed request.
+    """
+    return _catalog.get(_read_catalog, refresh=refresh)
+
+
 def reset_cache() -> None:
-    global _cache, _thinking_cache
-    _cache = _thinking_cache = None
+    _catalog.clear()
+    _thinking.clear()
 
 
 def _fetch_thinking_levels() -> dict[str, list[str]]:
@@ -207,14 +205,11 @@ def thinking_levels(model_id: str) -> list[str] | None:
     - Same source ompweb uses: OMP's model registry, not LiteLLM's, which lacks gateway models
     - A missing or failing `omp` CLI counts as "unknown", the caller falls back to LiteLLM
     """
-    global _thinking_cache
-    now = time.monotonic()
-    if _thinking_cache is None or now - _thinking_cache[0] >= _THINKING_TTL_SECONDS:
-        try:
-            _thinking_cache = (now, _fetch_thinking_levels())
-        except (OSError, subprocess.SubprocessError, ValueError, AttributeError):
-            return None
-    return _thinking_cache[1].get(model_id)
+    try:
+        levels = _thinking.get(_fetch_thinking_levels)
+    except (OSError, subprocess.SubprocessError, ValueError, AttributeError):
+        return None
+    return levels.get(model_id)
 
 
 def fold_provider_rows(providers: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:

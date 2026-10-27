@@ -1,8 +1,9 @@
 "use client"
 
 import { useState } from "react"
-import { AnimatePresence, motion } from "framer-motion"
+import { motion } from "framer-motion"
 import { Plus, Settings } from "lucide-react"
+import { BoardColumn } from "@/components/ui/BoardColumn"
 import { ElevatedContainer, ElevationProvider } from "@/components/ui/ElevatedContainer"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { cn } from "@/lib/utils"
@@ -12,7 +13,7 @@ import { NewTaskDialog } from "./NewTaskDialog"
 import { BOARD_COLUMNS, PHASE_LABELS, phaseProgress, statusTone, taskStatusLine } from "./states"
 import { StatusDot } from "./StatusDot"
 import { ICON_BUTTON_CLASS, PRIMARY_BUTTON_CLASS } from "./styles"
-import type { FactoryTask, Phase } from "@/lib/domain/types"
+import type { FactoryTask, Phase } from "@/lib/domain/factory"
 import { useFactoryPolling } from "./useFactoryPolling"
 
 /** Done tasks shown before "Show all", the column otherwise grows without bound. */
@@ -104,41 +105,21 @@ export function FactoryBoard({ repo, onOpenTask }: { repo: string; onOpenTask: (
             const capped = column.id === "done" && !showAllDone && columnTasks.length > DONE_LIMIT
             const shown = capped ? columnTasks.slice(0, DONE_LIMIT) : columnTasks
             return (
-              <ElevatedContainer
+              <BoardColumn
                 key={column.id}
                 role="region"
                 aria-label={column.title}
-                className="flex min-h-0 min-w-[15rem] flex-1 flex-col overflow-hidden rounded-2xl border border-divider/40"
-              >
-                <div className="flex shrink-0 items-center justify-between px-4 pb-3 pt-4 select-none">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-[11px] font-bold uppercase tracking-[0.2em] text-ink-muted">{column.title}</h3>
-                    <span className="rounded-md bg-surface-elevated px-2 py-0.5 font-mono text-[10px] font-bold tabular-nums text-ink">
-                      {columnTasks.length}
-                    </span>
-                  </div>
-                  {column.id === "backlog" && (
-                    <button type="button" aria-label="New task" onClick={() => setNewTaskOpen(true)} className={ICON_BUTTON_CLASS}>
-                      <Plus className="h-4 w-4" />
-                    </button>
-                  )}
-                </div>
-                <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto px-4 pb-4 scrollbar-thin">
-                  <AnimatePresence mode="popLayout" initial={false}>
-                    {shown.map((task) => (
-                      <motion.div
-                        key={task.id}
-                        layout
-                        layoutId={task.id}
-                        initial={{ opacity: 0, scale: 0.95 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.95 }}
-                        transition={{ duration: 0.2 }}
-                      >
-                        <TaskCard task={task} onOpen={() => onOpenTask(task.id)} />
-                      </motion.div>
-                    ))}
-                  </AnimatePresence>
+                title={column.title}
+                titleAs="h3"
+                count={columnTasks.length}
+                className="min-w-[15rem] border-divider/40"
+                action={column.id === "backlog" && (
+                  <button type="button" aria-label="New task" onClick={() => setNewTaskOpen(true)} className={ICON_BUTTON_CLASS}>
+                    <Plus className="h-4 w-4" />
+                  </button>
+                )}
+                bodyProps={{ className: "flex min-h-0 flex-1 flex-col gap-2.5" }}
+                footer={<>
                   {tasks !== null && columnTasks.length === 0 && (
                     <div className="rounded-xl border border-dashed border-divider/60 px-4 py-6 text-center text-[11px] text-ink-faint">No tasks</div>
                   )}
@@ -151,8 +132,22 @@ export function FactoryBoard({ repo, onOpenTask }: { repo: string; onOpenTask: (
                       Show all {columnTasks.length}
                     </button>
                   )}
-                </div>
-              </ElevatedContainer>
+                </>}
+              >
+                {shown.map((task) => (
+                  <motion.div
+                    key={task.id}
+                    layout
+                    layoutId={task.id}
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <TaskCard task={task} onOpen={() => onOpenTask(task.id)} />
+                  </motion.div>
+                ))}
+              </BoardColumn>
             )
           })}
         </div>

@@ -3,7 +3,7 @@
 import { GitMerge, Trash2 } from "lucide-react"
 import { useMemo } from "react"
 import { cn } from "@/lib/utils"
-import type { BranchChild, BranchMeta } from "@/lib/domain/types"
+import type { BranchChild, BranchMeta } from "@/lib/domain/histories"
 import { useBranches, isAncestorOf } from "@/features/navigation/BranchContext"
 import { useDeleteChat } from "@/features/navigation/useDeleteChat"
 import { baseName } from "@/lib/paths"

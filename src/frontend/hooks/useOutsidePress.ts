@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useEffectEvent, type RefObject } from "react"
+import type { RefObject } from "react"
+import { useEventListener } from "@/hooks/useEventListener"
 
 /** Call `onOutside` on a document press outside `ref` while `active`; no Escape handling. */
 export function useOutsidePress(
@@ -8,14 +9,7 @@ export function useOutsidePress(
   onOutside: () => void,
   { active = true, event = "mousedown", capture = false }: { active?: boolean; event?: "mousedown" | "pointerdown"; capture?: boolean } = {},
 ) {
-  const onPress = useEffectEvent((e: Event) => {
+  useEventListener("document", event, (e) => {
     if (ref.current && !ref.current.contains(e.target as Node)) onOutside()
-  })
-
-  useEffect(() => {
-    if (!active) return
-    const listener = (e: Event) => onPress(e)
-    document.addEventListener(event, listener, capture)
-    return () => document.removeEventListener(event, listener, capture)
-  }, [active, event, capture])
+  }, { active, capture })
 }

@@ -1,14 +1,12 @@
 import pytest
 
 from lib.chat_store import ChatStore
-from lib.postgres_data_store import PostgresDataStore
 from lib.project_store import ProjectStore
-from tests.conftest import create_user
 
 
 @pytest.fixture
-def chat_store(postgres_pool, clean_database) -> ChatStore:
-    return ChatStore(data_store=PostgresDataStore(postgres_pool, create_user(postgres_pool)))
+def chat_store(data_store) -> ChatStore:
+    return ChatStore(data_store=data_store)
 
 
 def test_save_with_empty_messages_does_not_erase_existing_messages(chat_store: ChatStore) -> None:
@@ -51,7 +49,7 @@ def test_save_on_new_file_with_no_messages_is_empty(chat_store: ChatStore) -> No
 def test_histories_are_every_chat_outside_a_project_and_move_only_targets_projects(chat_store: ChatStore) -> None:
     store = chat_store
     store.save("loose.json", {"messages": [{"role": "user", "content": "a"}], "chat_id": "loose"})
-    ProjectStore(chat_store=store, data_store=store._base.store).create_project("proj")
+    ProjectStore(store, rename=lambda *_: None).create_project("proj")
     store.save("proj/inside.json", {"messages": [{"role": "user", "content": "b"}], "chat_id": "inside"})
 
     assert store.list_histories() == {"files": ["loose.json"]}
@@ -63,3 +61,18 @@ def test_histories_are_every_chat_outside_a_project_and_move_only_targets_projec
     assert store.list_histories() == {"files": []}
     assert store.move(moved, "")["new_path"] == "loose.json"
     assert store.list_histories() == {"files": ["loose.json"]}
+
+
+def test_failing_upload_cleanup_aborts_cascade_delete_before_anything_is_removed(chat_store: ChatStore) -> None:
+    store = chat_store
+    store.save("root.json", {"messages": [{"role": "user", "content": "a"}], "chat_id": "root"})
+    child = store.branch("root.json", 0)["child_file"]
+
+    def fail(chat_id: str, _slug: str | None) -> None:
+        raise RuntimeError(f"cleanup failed for {chat_id}")
+
+    with pytest.raises(RuntimeError):
+        store.cascade_delete("root.json", cleanup_uploads_fn=fail)
+
+    assert store.load("root.json") is not None
+    assert store.load(child) is not None

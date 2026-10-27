@@ -9,8 +9,8 @@ import type { StrokeData } from "@/lib/drawing"
 // the pen alone; a canvas with a different zoom is the opposite case).
 
 /** A canvas surface as the transfer sees it: where it sits on screen, and how it maps its own units onto that. `rect` only needs left/top, so tests can pass a bare object. */
-export interface CanvasView { rect: { left: number; top: number }; scale: number; offset: Point }
-export type StrokeDrop = (strokes: StrokeData[], from: CanvasView) => void
+export interface CanvasSurface { rect: { left: number; top: number }; scale: number; offset: Point }
+export type StrokeDrop = (strokes: StrokeData[], from: CanvasSurface) => void
 const canvasDropTargets = new Map<HTMLElement, StrokeDrop>()
 
 /** Register `el` as a drop surface; returns the unregister function. */
@@ -23,7 +23,7 @@ export function registerDropTarget(el: HTMLElement, drop: StrokeDrop): () => voi
 // it keeps both its position and its size on screen. `width` is in canvas units, so it
 // takes the zoom ratio too — dropping into a canvas zoomed out 2× would otherwise double
 // the apparent pen thickness.
-export function remapAcrossCanvases(stroke: StrokeData, from: CanvasView, to: CanvasView): StrokeData {
+export function remapAcrossCanvases(stroke: StrokeData, from: CanvasSurface, to: CanvasSurface): StrokeData {
   return {
     ...stroke,
     width: stroke.width * (from.scale / to.scale),

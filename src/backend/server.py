@@ -39,6 +39,8 @@ from lib.mineru import kill_all_mineru_servers, reset_cancel
 from lib import omp_source
 from backend.routes.models import router as models_router
 from backend.routes.file_roots import router as file_roots_router
+from backend.routes.file_attach import router as file_attach_router
+from backend.routes.file_git import router as file_git_router
 from backend.routes.factory import router as factory_router
 from backend.routes.ocr import router as ocr_router
 from backend.routes.omp import router as omp_router
@@ -46,7 +48,8 @@ from backend.routes.projects import router as projects_router
 from backend.routes.sync import router as sync_router
 from backend.sync import get_change_broker
 from lib.db_schema import database_url, upgrade
-from config import CORS_ORIGINS, close_postgres_pool, is_cors_unsafe_for_production
+from lib.postgres_pool import close_postgres_pool
+from config import CORS_ORIGINS, is_cors_unsafe_for_production
 
 if is_cors_unsafe_for_production():
     raise RuntimeError("GIGACHAD_CORS_ORIGINS must list exact browser origins in production, never `*`")
@@ -119,6 +122,7 @@ for _exception, _status in (
     (ArchitectureNotFound, 404),
     (ArchitectureError, 400),
     (C4ServiceUnavailable, 503),
+    # A stale revision or taken name. Project rename, chat save and document rename map it to 409 themselves.
     (StorageConflictError, 412),
 ):
     app.add_exception_handler(_exception, _json_error(_status))
@@ -137,6 +141,8 @@ app.include_router(models_router)
 app.include_router(neovim_router)
 app.include_router(deploy_router)
 app.include_router(file_roots_router)
+app.include_router(file_attach_router)
+app.include_router(file_git_router)
 app.include_router(ocr_router)
 app.include_router(projects_router)
 app.include_router(sync_router)

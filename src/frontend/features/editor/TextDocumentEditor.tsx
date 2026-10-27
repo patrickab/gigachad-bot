@@ -1,30 +1,28 @@
 "use client"
 
-import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
-import { createPortal } from "react-dom"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Maximize2, Minimize2, X } from "lucide-react"
-import { motion, AnimatePresence } from "framer-motion"
-import { cn } from "@/lib/utils"
+import { isModKey } from "@/lib/utils"
 import { AssistedConsoleEditor } from "./AssistedConsoleEditor"
 import { NeovimEditor, useNeovimTerminal } from "./NeovimEditor"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
 import { PlotElement } from "@/components/content/PlotElement"
-import type { PlotFigure } from "@/lib/domain/types"
-import { ResizableEditor } from "./ResizableEditor"
-import type { CanvasToolbarSlots } from "@/features/editor/canvas/CanvasToolbar"
+import { isPlotFigure, type PlotFigure } from "@/lib/domain/types"
 import { readFileRootRendered, writeArchitectureSource, writeDocument, writeRootFile } from "@/lib/backend/api"
 import { architectureSlug, architectureSource, isArchitecturePath } from "@/lib/domain/architecturePaths"
 import { baseName } from "@/lib/paths"
 import { useTabActive } from "@/contexts/TabContext"
 import { useNeovimSetting } from "@/contexts/SettingsContext"
-import { useRootFileDocument } from "./useRootFileDocument"
+import { TEXT_CODEC, useRootFileDocument } from "./useRootFileDocument"
+import { isToolArtifact, useEditorView } from "./useEditorView"
+import { ShowAsToggle, ViewPills } from "./EditorViewSwitch"
+import { EditorShell } from "./EditorShell"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { useEventListener } from "@/hooks/useEventListener"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
+import { useModeLabel } from "@/hooks/useModeLabel"
 import { useResetOnChange } from "@/hooks/useResetOnChange"
 import { LoadFailure, LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
-
-type EditorView = "edit" | "preview"
 
 export interface DocumentEditorProps {
   path: string
@@ -36,7 +34,6 @@ export interface DocumentEditorProps {
   onModeLabel?: (label: string) => void
   onNavigate?: (path: string) => void
   model?: string
-  canvasToolbarSlots?: CanvasToolbarSlots | null
 }
 
 function editorLanguage(path: string): string {
@@ -44,69 +41,14 @@ function editorLanguage(path: string): string {
   if (path.endsWith(".c4")) return "likec4"
   return "markdown"
 }
-function isToolArtifact(path: string, content: string): boolean {
-  return path.endsWith(".plot.json") || /```markmap\b/i.test(content)
-}
 
 function parsePlotFigure(content: string): PlotFigure | null {
   try {
     const figure: unknown = JSON.parse(content)
-    return figure && typeof figure === "object" && !Array.isArray(figure) ? figure as PlotFigure : null
+    return isPlotFigure(figure) ? figure : null
   } catch {
     return null
   }
-}
-
-function ViewSwitch({ view, onViewChange, options, className, buttonClass, inactiveClass }: {
-  view: EditorView
-  onViewChange: (v: EditorView) => void
-  options: readonly (readonly [EditorView, string])[]
-  className: string
-  buttonClass: string
-  inactiveClass: string
-}) {
-  return (
-    <div role="group" aria-label="Show as" className={className}>
-      {options.map(([option, label]) => (
-        <button
-          key={option}
-          type="button"
-          aria-pressed={view === option}
-          onClick={() => onViewChange(option)}
-          className={cn(buttonClass, view === option ? "bg-surface-elevated text-ink" : inactiveClass)}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
-  )
-}
-
-function ViewPills({ view, onViewChange }: { view: EditorView; onViewChange: (v: EditorView) => void }) {
-  return (
-    <ViewSwitch
-      view={view}
-      onViewChange={onViewChange}
-      options={[["edit", "Edit"], ["preview", "Preview"]]}
-      className="absolute top-2 left-3 z-10 flex items-center gap-px rounded-md bg-surface/80 backdrop-blur-sm p-0.5 opacity-0 hover:opacity-100 transition-opacity"
-      buttonClass="px-2 py-0.5 rounded text-[10px] font-medium transition-colors"
-      inactiveClass="text-ink-subtle hover:text-ink"
-    />
-  )
-}
-
-/** C4 "Show as" switch for tool artifacts: rendered view first, source text second. */
-function ShowAsToggle({ view, onViewChange }: { view: EditorView; onViewChange: (v: EditorView) => void }) {
-  return (
-    <ViewSwitch
-      view={view}
-      onViewChange={onViewChange}
-      options={[["preview", "Render"], ["edit", "Text"]]}
-      className="flex gap-px rounded bg-surface p-px"
-      buttonClass="rounded px-1.5 py-px transition-colors"
-      inactiveClass="hover:text-ink"
-    />
-  )
 }
 
 /** Edit a workspace's `.c4` source as text; the architecture route refuses text that no longer parses into a model. */
@@ -122,8 +64,6 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, overlay, pers
   const neovim = useNeovimSetting()
   const [renderedContent, setRenderedContent] = useState<string | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(!!overlay)
-  const [view, setView] = useState<EditorView>(() => path.endsWith(".plot.json") ? "preview" : "edit")
-  const initializedViewPath = useRef<string | null>(null)
 
   const filename = baseName(path)
   const write = useCallback(async (next: string) => {
@@ -134,21 +74,16 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, overlay, pers
   }, [slug, filename, path, persistOverride])
   // A confirmed-missing document legitimately starts blank. The server prunes uses of removed elements
   // from a hand-edited `.c4`, so its saves read back what it stored.
-  const { content, loadedPath, loadError, dirty, reload: loadFromServer, handleTextChange, persist, saveFromNeovim } = useRootFileDocument({
-    path, write, blankWhenMissing: true, readBackAfterSave: isArchitecturePath(path), onSaved,
+  const { value: content, loadedPath, loadError, dirty, reload: loadFromServer, setValue: handleTextChange, persist, saveFromNeovim } = useRootFileDocument({
+    path, codec: TEXT_CODEC, write, blankWhenMissing: true, readBackAfterSave: isArchitecturePath(path), onSaved,
   })
+  const [view, setView] = useEditorView(path, content, loadedPath)
 
   const language = editorLanguage(path)
   const isArtifact = isToolArtifact(path, content ?? "")
   const plotFigure = useMemo(() => path.endsWith(".plot.json") && content !== null ? parsePlotFigure(content) : null, [content, path])
 
-  useEffect(() => {
-    if (loadedPath !== path || content === null || initializedViewPath.current === path) return
-    initializedViewPath.current = path
-    setView(isToolArtifact(path, content) ? "preview" : "edit")
-  }, [path, content, loadedPath])
-  const announceMode = useEffectEvent(() => { if (overlay) onModeLabel?.(filename) })
-  useEffect(() => { announceMode() }, [overlay, filename])
+  useModeLabel(filename, !!overlay, onModeLabel)
 
   // Drop the rendered preview of the previous document or mode
   useResetOnChange(overlay ? path : null, () => setRenderedContent(null))
@@ -171,13 +106,13 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, overlay, pers
 
   useEventListener("document", "keydown", (event) => {
     if (!isActive) return
-    if (!neovim.enabled && (event.ctrlKey || event.metaKey) && (event.key === "s" || event.key === "Enter")) {
+    if (!neovim.enabled && isModKey(event) && (event.key === "s" || event.key === "Enter")) {
       event.preventDefault()
       handleSave()
     }
   })
 
-  useEscapeLayer(() => { if (overlay) onClose(); else setIsFullscreen(false) }, isActive && (!!overlay || isFullscreen))
+  useEscapeLayer(() => { if (overlay) onClose(); else setIsFullscreen(false) }, !!overlay || isFullscreen)
 
   const handlePreviewClick = useCallback((e: React.MouseEvent) => {
     const anchor = (e.target as HTMLElement).closest("a")
@@ -225,62 +160,32 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, overlay, pers
     </div>
   )
 
-  // Sidebar documents: C4-style header with filename, view switch and window controls.
-  const chrome = !overlay && (
-    <div className="flex h-6 shrink-0 items-center gap-2 border-b border-divider/50 px-2 text-[10px] text-ink-faint">
-      <span className="min-w-0 flex-1 truncate">{filename}{dirty && " (modified)"}</span>
-      {isArtifact && <ShowAsToggle view={view} onViewChange={setView} />}
-      <button aria-label={isFullscreen ? "Exit document fullscreen" : "Enter document fullscreen"} onClick={() => setIsFullscreen((f) => !f)} className="rounded p-0.5 hover:text-ink">
-        {isFullscreen ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
-      </button>
-      <button aria-label="Close document" onClick={onClose} className="rounded p-0.5 hover:text-danger">
-        <X className="h-3 w-3" />
-      </button>
-    </div>
-  )
-
-  if (overlay) {
-    return (
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.15 }}
-        className="absolute inset-0 z-30 flex flex-row bg-paper"
-      >
-        <div className="flex-1 min-w-0 flex flex-col relative">
+  // Overlays float their controls over the editor; sidebar documents get a C4-style header with filename, view switch and window controls.
+  return (
+    <EditorShell overlay={!!overlay} fullscreen={isFullscreen}>
+      {overlay ? (
+        <>
           {editorBody}
           <div className="absolute top-2 right-3 z-10 flex items-center gap-1">
             {saveError && <span role="alert" className="max-w-[min(60ch,60vw)] text-right text-[10px] leading-snug text-danger">{saveError}</span>}
             {isArtifact && <ShowAsToggle view={view} onViewChange={setView} />}
           </div>
-        </div>
-      </motion.div>
-    )
-  }
-
-  if (isFullscreen) {
-    return createPortal(
-      <AnimatePresence>
-        <motion.div
-          key="doc-editor-fullscreen"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.15 }}
-          className="fixed inset-0 z-[100] flex flex-col bg-paper"
-        >
-          {chrome}
+        </>
+      ) : (
+        <>
+          <div className="flex h-6 shrink-0 items-center gap-2 border-b border-divider/50 px-2 text-[10px] text-ink-faint">
+            <span className="min-w-0 flex-1 truncate">{filename}{dirty && " (modified)"}</span>
+            {isArtifact && <ShowAsToggle view={view} onViewChange={setView} />}
+            <button aria-label={isFullscreen ? "Exit document fullscreen" : "Enter document fullscreen"} onClick={() => setIsFullscreen((f) => !f)} className="rounded p-0.5 hover:text-ink">
+              {isFullscreen ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
+            </button>
+            <button aria-label="Close document" onClick={onClose} className="rounded p-0.5 hover:text-danger">
+              <X className="h-3 w-3" />
+            </button>
+          </div>
           {editorBody}
-        </motion.div>
-      </AnimatePresence>,
-      document.body,
-    )
-  }
-
-  return (
-    <ResizableEditor>
-      {chrome}
-      {editorBody}
-    </ResizableEditor>
+        </>
+      )}
+    </EditorShell>
   )
 }

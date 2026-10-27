@@ -6,15 +6,17 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 import os
-from dataclasses import dataclass
 from uuid import UUID
 
 from fastapi import Depends, Header, HTTPException
 from fastapi.params import Depends as DependsMarker
 
-from config import get_postgres_pool, is_development
+from config import is_development
+from lib.identity_store import resolve_user
+from lib.postgres_pool import get_postgres_pool
 
 # Granted in the tailnet policy file: the holder acts as the host user (omp, Neovim, every file outside the mounts).
 HOST_CAPABILITY = "gigachad.local/cap/host"
@@ -65,23 +67,7 @@ def get_request_identity(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="X-Device-Id must be a UUID") from exc
 
-    with get_postgres_pool().connection() as connection, connection.transaction():
-        user_id = connection.execute(
-            """
-            INSERT INTO users (tailscale_login) VALUES (%s)
-            ON CONFLICT (tailscale_login) DO UPDATE SET tailscale_login = EXCLUDED.tailscale_login
-            RETURNING id
-            """,
-            (login,),
-        ).fetchone()[0]
-        if parsed_device_id is not None:
-            connection.execute(
-                """
-                INSERT INTO devices (id, user_id) VALUES (%s, %s)
-                ON CONFLICT (id) DO UPDATE SET user_id = EXCLUDED.user_id, last_seen_at = now()
-                """,
-                (parsed_device_id, user_id),
-            )
+    user_id = resolve_user(get_postgres_pool(), login, parsed_device_id)
     return RequestIdentity(
         user_id=user_id, login=login, device_id=parsed_device_id, has_host_access=has_host_access(login, capabilities_header)
     )

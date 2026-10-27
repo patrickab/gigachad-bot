@@ -2,7 +2,9 @@
 // carries the workspace sources; the backend owns storage and revisions.
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { readPins, type Snapshots } from './layout.ts'
-import { applyOperations, OperationError, type Operation } from './operations.ts'
+import { applyOperations } from './ops/apply.ts'
+import { OperationError, type Operation } from './ops/operation.ts'
+import { renderModel } from './payload.ts'
 import { Workspace, type Sources } from './workspace.ts'
 
 const MAX_BODY_BYTES = 8 * 1024 * 1024
@@ -53,7 +55,7 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
   if (request.url === '/model') {
     const workspace = await Workspace.open(sourcesOf(body))
     try {
-      return send(response, 200, await workspace.render(readPins(snapshotsOf(body))))
+      return send(response, 200, await renderModel(workspace, readPins(snapshotsOf(body))))
     } finally {
       await workspace.dispose()
     }

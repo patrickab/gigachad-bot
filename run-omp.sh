@@ -40,6 +40,14 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 0' INT TERM
 
+# True once `bind` answers or the child `pid` has exited. An exit sets the caller's
+# `child_exited`, so start_service can tell a crashed service from a listening one.
+service_settled() {
+    port_open "$1" && return 0
+    kill -0 "$2" 2>/dev/null && return 1
+    child_exited=true
+}
+
 # Launches "$@" unless the bind address already answers. Sets `started_pid` to
 # the new child's pid, or to an empty string when an existing service is
 # reused. Returns non-zero only when nothing ends up listening.
@@ -55,28 +63,24 @@ start_service() {
 
     printf 'Starting OMP %s on %s\n' "$label" "$bind"
     "$@" &
-    local pid=$! tries=0
+    local pid=$! child_exited=false
     # Give up as soon as the child dies instead of waiting out the timeout:
     # a crashed service and a slow one need different reporting.
-    while (( tries < 120 )); do
-        if port_open "$bind"; then
+    if wait_until 120 0.25 service_settled "$bind" "$pid"; then
+        if [[ "$child_exited" == false ]]; then
             started_pid="$pid"
             owned_pids+=("$pid")
             return 0
         fi
-        if ! kill -0 "$pid" 2>/dev/null; then
-            wait "$pid" 2>/dev/null || true
-            # A racing instance may have won the port while this child died.
-            if port_open "$bind"; then
-                printf 'OMP %s lost a startup race; reusing the winner on %s\n' "$label" "$bind" >&2
-                return 0
-            fi
-            printf 'OMP %s exited during startup\n' "$label" >&2
-            return 1
+        wait "$pid" 2>/dev/null || true
+        # A racing instance may have won the port while this child died.
+        if port_open "$bind"; then
+            printf 'OMP %s lost a startup race; reusing the winner on %s\n' "$label" "$bind" >&2
+            return 0
         fi
-        sleep 0.25
-        tries=$(( tries + 1 ))
-    done
+        printf 'OMP %s exited during startup\n' "$label" >&2
+        return 1
+    fi
 
     printf 'OMP %s did not answer on %s\n' "$label" "$bind" >&2
     kill -TERM "$pid" 2>/dev/null || true

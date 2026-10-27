@@ -4,6 +4,7 @@ import { useEffect, useEffectEvent, useRef, useState } from "react"
 import "@xterm/xterm/css/xterm.css"
 import { cn, errorMessage } from "@/lib/utils"
 import { neovimSessionUrl } from "@/lib/backend/urls"
+import { useEventListener } from "@/hooks/useEventListener"
 
 const FONT_SIZE = 13
 // Local Nerd Fonts first, so icons from the user's config render as in a terminal. "Mono" keeps icons one cell wide.
@@ -196,13 +197,7 @@ export function NeovimEditor({ terminal, status, onRestart, className }: {
 }) {
   const slotRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    const slot = slotRef.current
-    if (!slot) return
-    const keepKey = (event: KeyboardEvent) => event.stopPropagation()
-    slot.addEventListener("keydown", keepKey)
-    return () => slot.removeEventListener("keydown", keepKey)
-  }, [])
+  useEventListener(slotRef, "keydown", (event) => event.stopPropagation())
 
   useEffect(() => {
     const slot = slotRef.current

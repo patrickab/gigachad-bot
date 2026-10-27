@@ -30,6 +30,7 @@ if [[ -z ${GIGACHAD_REDEPLOY_FRESH:-} ]]; then
         SSH_AUTH_SOCK="${SSH_AUTH_SOCK:-/run/user/$(id -u)/ssh-agent.socket}" \
         bash --noprofile --norc "${BASH_SOURCE[0]}" "$@"
 fi
+source "$(dirname -- "${BASH_SOURCE[0]}")/deploy/lib.sh"
 
 if [[ $# -ne 0 ]]; then
     printf "usage: %s\n" "$0" >&2
@@ -39,17 +40,6 @@ if [[ -n $(git -C "$prod" status --porcelain --untracked-files=no) ]]; then
     printf "Production worktree has uncommitted changes: %s\n" "$prod" >&2
     exit 1
 fi
-
-# Polls `check` once a second for `seconds`, true once it passes.
-wait_until() {
-    local seconds=$1
-    shift
-    for ((i = 0; i < seconds; i++)); do
-        "$@" && return 0
-        sleep 1
-    done
-    return 1
-}
 
 backend_up() {
     systemctl --user is-active --quiet "$unit" && curl -s -o /dev/null "http://127.0.0.1:$port/"
@@ -93,7 +83,7 @@ if ! git diff --quiet "$old" "$new" -- deploy; then
 fi
 
 systemctl --user restart "$unit"
-if ! wait_until 30 backend_up; then
+if ! wait_until 30 1 backend_up; then
     systemctl --user --no-pager status "$unit" >&2 || true
     printf "%s did not come up within 30s\n" "$unit" >&2
     exit 1
@@ -142,7 +132,7 @@ if [[ $omp_web_old != "$omp_web_new" ]] || ! omp_web_up; then
         fi
         printf "Restarting %s (a changed checkout rebuilds, about 2 min)\n" "$omp_web_unit"
         systemctl --user restart "$omp_web_unit"
-        if ! wait_until 600 omp_web_up; then
+        if ! wait_until 600 1 omp_web_up; then
             systemctl --user --no-pager status "$omp_web_unit" >&2 || true
             printf "%s did not come up within 10 min\n" "$omp_web_unit" >&2
             exit 1
@@ -152,7 +142,7 @@ fi
 printf "%s is up on %s at %s (protocol %s)\n" "$omp_web_unit" "$omp_web_url" "$(git -C "$omp_web_dir" rev-parse --short HEAD)" "$frame_protocol"
 
 systemctl --user restart "$omp_web_gate_unit"
-if ! wait_until 30 omp_web_gate_up; then
+if ! wait_until 30 1 omp_web_gate_up; then
     systemctl --user --no-pager status "$omp_web_gate_unit" >&2 || true
     printf "%s did not come up within 30s\n" "$omp_web_gate_unit" >&2
     exit 1

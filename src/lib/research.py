@@ -7,6 +7,7 @@ from collections.abc import Iterator
 import contextlib
 import json
 import os
+from pathlib import Path
 import tempfile
 from typing import Any
 
@@ -62,11 +63,11 @@ async def run_deep_research(
     }
     if reasoning:
         config["REASONING_EFFORT"] = reasoning
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", prefix="gpt-researcher-", delete=False) as tmp:
-        json.dump(config, tmp)
-    config_path = tmp.name
-    async with RESEARCH_ENV_LOCK:
-        try:
+    # GPT-Researcher reads its config from a file path.
+    with tempfile.TemporaryDirectory(prefix="gpt-researcher-") as config_dir:
+        config_path = Path(config_dir) / "config.json"
+        config_path.write_text(json.dumps(config))
+        async with RESEARCH_ENV_LOCK:
             with temp_environ(
                 OLLAMA_API_BASE=OLLAMA_BASE_URL,
                 OLLAMA_BASE_URL=OLLAMA_BASE_URL,
@@ -75,11 +76,8 @@ async def run_deep_research(
                 researcher = GPTResearcher(
                     query=query,
                     report_type=report_type,
-                    config_path=config_path,
+                    config_path=str(config_path),
                 )
                 await researcher.conduct_research()
                 report = await researcher.write_report()
                 return report or "", researcher.get_source_urls(), researcher.get_costs()
-        finally:
-            with contextlib.suppress(OSError):
-                os.unlink(config_path)

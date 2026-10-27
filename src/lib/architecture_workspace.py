@@ -16,9 +16,9 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from typing import Protocol
 
 from lib.data_store import (
+    ByteStore,
     DataStore,
     Entry,
     InvalidStorageKey,
@@ -67,19 +67,10 @@ class Snapshot:
     revisions: dict[str, Revision]
 
 
-class WorkspaceFiles(Protocol):
-    """The storage a workspace needs; ``PostgresDataStore`` and ``DirectoryFiles`` both provide it."""
-
-    def read_bytes(self, key: str) -> tuple[bytes, Revision]: ...
-    def write_many(self, writes: list[tuple[str, bytes, Revision | None]]) -> list[Revision]: ...
-    def list(self, prefix: str = "", *, recursive: bool = False) -> list[Entry]: ...
-    def delete(self, key: str) -> None: ...
-
-
 class DirectoryFiles:
     """A directory on disk as workspace storage, e.g. a checked-out repository.
 
-    Revisions are content digests. ``write_many`` checks every revision before
+    Revisions are content digests. ``apply`` checks every revision before
     writing anything, but unlike the database the writes are not one transaction.
     Inside a git work tree, listing follows git: ignored files and ``.git`` are
     skipped, exactly as ``git status`` sees them. Symlinks are never listed.
@@ -105,7 +96,7 @@ class DirectoryFiles:
             raise StorageNotFoundError(key) from exc
         return content, self._revision(content)
 
-    def write_many(self, writes: list[tuple[str, bytes, Revision | None]]) -> list[Revision]:
+    def apply(self, writes: list[tuple[str, bytes, Revision | None]], deletes: list[str]) -> list[Revision]:
         for key, _, expected in writes:
             if expected is None:
                 continue
@@ -123,6 +114,8 @@ class DirectoryFiles:
             staged.write_bytes(content)
             os.replace(staged, path)
             revisions.append(self._revision(content))
+        for key in deletes:
+            self.delete(key)
         return revisions
 
     def _files_under(self, base: Path) -> list[Path]:
@@ -162,7 +155,7 @@ class DirectoryFiles:
 class ArchitectureStore:
     """Reads and commits the workspace rooted at one location of *files*."""
 
-    def __init__(self, files: WorkspaceFiles, root: str = "") -> None:
+    def __init__(self, files: ByteStore, root: str = "") -> None:
         self._files = files
         self._root = validate_key(root, allow_empty=True)
 
@@ -245,7 +238,7 @@ class ArchitectureStore:
                 key = self.key(validate_key(relative))
                 writes.append((key, text.encode("utf-8"), snapshot.revisions.get(key)))
         if writes:
-            self._files.write_many(writes)
+            self._files.apply(writes, [])
         for key in gone:
             try:
                 self._files.delete(key)

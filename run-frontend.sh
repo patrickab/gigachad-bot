@@ -8,11 +8,13 @@ fi
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd -- "$REPO_ROOT"
+source "$REPO_ROOT/deploy/lib.sh"
 source "$REPO_ROOT/deploy/load-env.sh"
 
 echo "Installing frontend deps"
-python3 "$REPO_ROOT/src/backend/install_deps.py" python-lock "$REPO_ROOT"
-uv run --locked gigachad-install
+# Inexact like the `uv run` it replaces, so a standalone start keeps the sandbox-plot extra.
+sync_python_deps --inexact
+uv run --no-sync gigachad-install
 
 echo "Starting frontend on http://127.0.0.1:2999"
 exec .venv/bin/npm --prefix src/frontend run dev

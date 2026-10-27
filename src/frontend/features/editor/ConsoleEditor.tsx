@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useRef } from "react"
-import { cn } from "@/lib/utils"
+import { cn, isModKey } from "@/lib/utils"
 import { useHighlightedHtml } from "@/components/content/useHighlightedHtml"
 
 export const LINE_HEIGHT_PX = 12 * 1.625  // 0.75rem × 1.625
@@ -96,7 +96,7 @@ export function ConsoleEditor({
         onChange={(e) => onChange(e.target.value)}
         onScroll={syncScroll}
         onKeyDown={(e) => {
-          if ((e.ctrlKey || e.metaKey) && e.key === "i") {
+          if (isModKey(e) && e.key === "i") {
             const ta = textareaRef.current
             if (ta && ta.selectionStart !== ta.selectionEnd && onInlineEdit) {
               e.preventDefault()

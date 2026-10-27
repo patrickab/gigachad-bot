@@ -3,16 +3,10 @@ from uuid import uuid4
 
 import pytest
 
-from lib.asset_store import AssetStore
 from lib.data_store import StorageNotFoundError
-from tests.conftest import create_user_and_device
+from tests.conftest import make_asset_store
 
 pytestmark = pytest.mark.usefixtures("clean_database")
-
-
-def make_store(pool, login="alice@example.test"):
-    user_id, device_id = create_user_and_device(pool, login)
-    return AssetStore(pool, user_id, device_id=device_id), device_id
 
 
 def changes_for(pool, kind="asset"):
@@ -23,16 +17,10 @@ def changes_for(pool, kind="asset"):
         ).fetchall()
 
 
-@pytest.fixture
-def store(postgres_pool):
-    store, _ = make_store(postgres_pool)
-    return store
+def test_write_then_read_round_trip(asset_store):
+    written = asset_store.write("upload", "PDFs/paper.pdf", b"%PDF-1.7 body")
 
-
-def test_write_then_read_round_trip(store):
-    written = store.write("upload", "PDFs/paper.pdf", b"%PDF-1.7 body")
-
-    read = store.read("PDFs/paper.pdf")
+    read = asset_store.read("PDFs/paper.pdf")
 
     assert read.id == written.id
     assert read.content == b"%PDF-1.7 body"
@@ -40,56 +28,56 @@ def test_write_then_read_round_trip(store):
     assert read.size_bytes == len(b"%PDF-1.7 body")
     assert read.sha256 == written.sha256 == hashlib.sha256(b"%PDF-1.7 body").hexdigest()
     assert read.version == 1
-    assert store.read_by_id(written.id).content == b"%PDF-1.7 body"
+    assert asset_store.read_by_id(written.id).content == b"%PDF-1.7 body"
 
 
-def test_rewrite_bumps_version_and_replaces_content(store):
-    store.write("drawing", "drawings/sketch.json", b"first")
-    second = store.write("drawing", "drawings/sketch.json", b"second-longer")
+def test_rewrite_bumps_version_and_replaces_content(asset_store):
+    asset_store.write("drawing", "drawings/sketch.json", b"first")
+    second = asset_store.write("drawing", "drawings/sketch.json", b"second-longer")
 
     assert second.version == 2
-    current = store.read("drawings/sketch.json")
+    current = asset_store.read("drawings/sketch.json")
     assert current.version == 2
     assert current.content == b"second-longer"
     assert current.size_bytes == len(b"second-longer")
 
 
-def test_read_missing_path_raises_not_found(store):
+def test_read_missing_path_raises_not_found(asset_store):
     with pytest.raises(StorageNotFoundError):
-        store.read("PDFs/absent.pdf")
+        asset_store.read("PDFs/absent.pdf")
 
     with pytest.raises(StorageNotFoundError):
-        store.read_by_id(uuid4())
+        asset_store.read_by_id(uuid4())
 
 
-def test_list_filters_by_prefix_and_kind_without_content(store):
-    store.write("pdf", "PDFs/a.pdf", b"a")
-    store.write("mineru_markdown", "PDFs/a.md", b"# a")
-    store.write("drawing", "drawings/d.json", b"{}")
+def test_list_filters_by_prefix_and_kind_without_content(asset_store):
+    asset_store.write("pdf", "PDFs/a.pdf", b"a")
+    asset_store.write("mineru_markdown", "PDFs/a.md", b"# a")
+    asset_store.write("drawing", "drawings/d.json", b"{}")
 
-    under_pdfs = store.list("PDFs")
+    under_pdfs = asset_store.list("PDFs")
 
     assert [asset.logical_path for asset in under_pdfs] == ["PDFs/a.md", "PDFs/a.pdf"]
     assert all(asset.content is None for asset in under_pdfs)
     assert all(asset.size_bytes > 0 and asset.version == 1 for asset in under_pdfs)
-    assert [asset.logical_path for asset in store.list("PDFs", kind="pdf")] == ["PDFs/a.pdf"]
-    assert [asset.logical_path for asset in store.list(kind="drawing")] == ["drawings/d.json"]
-    assert len(store.list()) == 3
+    assert [asset.logical_path for asset in asset_store.list("PDFs", kind="pdf")] == ["PDFs/a.pdf"]
+    assert [asset.logical_path for asset in asset_store.list(kind="drawing")] == ["drawings/d.json"]
+    assert len(asset_store.list()) == 3
 
 
-def test_delete_removes_the_row(store):
-    store.write("upload", "PDFs/a.pdf", b"a")
+def test_delete_removes_the_row(asset_store):
+    asset_store.write("upload", "PDFs/a.pdf", b"a")
 
-    store.delete("PDFs/a.pdf")
+    asset_store.delete("PDFs/a.pdf")
 
-    assert store.list() == []
+    assert asset_store.list() == []
     with pytest.raises(StorageNotFoundError):
-        store.read("PDFs/a.pdf")
+        asset_store.read("PDFs/a.pdf")
 
 
 def test_one_user_cannot_touch_another_users_identical_path(postgres_pool):
-    alice, _ = make_store(postgres_pool, "alice@example.test")
-    bob, _ = make_store(postgres_pool, "bob@example.test")
+    alice, _ = make_asset_store(postgres_pool, "alice@example.test")
+    bob, _ = make_asset_store(postgres_pool, "bob@example.test")
     alice.write("upload", "PDFs/shared.pdf", b"alice bytes")
     bob.write("upload", "PDFs/shared.pdf", b"bob bytes")
 
@@ -104,7 +92,7 @@ def test_one_user_cannot_touch_another_users_identical_path(postgres_pool):
 
 
 def test_each_mutation_appends_a_change_row(postgres_pool):
-    store, device_id = make_store(postgres_pool)
+    store, device_id = make_asset_store(postgres_pool)
 
     store.write("upload", "PDFs/a.pdf", b"a")
     store.write("upload", "PDFs/a.pdf", b"aa")
@@ -118,29 +106,29 @@ def test_each_mutation_appends_a_change_row(postgres_pool):
     ]
 
 
-def test_mirror_writes_allowed_mineru_asset_bytes_under_root(store, tmp_path):
-    asset = store.write("mineru_image", "Mineru/doc/images/0.png", b"\x89PNG\r\n\x1a\nbody")
+def test_mirror_writes_allowed_mineru_asset_bytes_under_root(asset_store, tmp_path):
+    asset = asset_store.write("mineru_image", "Mineru/doc/images/0.png", b"\x89PNG\r\n\x1a\nbody")
 
-    path = store.mirror(asset, tmp_path)
+    path = asset_store.mirror(asset, tmp_path)
 
     assert path == tmp_path / "Mineru" / "doc" / "images" / "0.png"
     assert path.read_bytes() == b"\x89PNG\r\n\x1a\nbody"
     assert list(path.parent.iterdir()) == [path]
 
 
-def test_mirror_reads_content_back_when_listing_omitted_it(store, tmp_path):
-    store.write("pdf", "PDFs/paper.pdf", b"%PDF-1.7 body")
-    listed = store.list("PDFs")[0]
+def test_mirror_reads_content_back_when_listing_omitted_it(asset_store, tmp_path):
+    asset_store.write("pdf", "PDFs/paper.pdf", b"%PDF-1.7 body")
+    listed = asset_store.list("PDFs")[0]
 
-    path = store.mirror(listed, tmp_path)
+    path = asset_store.mirror(listed, tmp_path)
 
     assert path.read_bytes() == b"%PDF-1.7 body"
 
 
-def test_mirror_rejects_non_pdf_and_non_mineru_assets(store, tmp_path):
-    drawing = store.write("drawing", "drawing/sketch.json", b"{\"ok\":true}")
+def test_mirror_rejects_non_pdf_and_non_mineru_assets(asset_store, tmp_path):
+    drawing = asset_store.write("drawing", "drawing/sketch.json", b"{\"ok\":true}")
 
     with pytest.raises(ValueError, match="Only PDF and MinerU"):
-        store.mirror(drawing, tmp_path)
+        asset_store.mirror(drawing, tmp_path)
 
     assert list(tmp_path.iterdir()) == []

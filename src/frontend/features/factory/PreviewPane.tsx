@@ -6,7 +6,7 @@ import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { restartFactoryPreview } from "@/lib/backend/api"
 import { allowedActions } from "./states"
 import { ICON_BUTTON_CLASS } from "./styles"
-import type { FactoryTaskDetail } from "@/lib/domain/types"
+import type { FactoryTaskDetail } from "@/lib/domain/factory"
 
 function Message({ children }: { children: React.ReactNode }) {
   return <div className="flex h-full items-center justify-center px-6 text-center text-xs text-ink-faint">{children}</div>

@@ -6,33 +6,17 @@ import { CanvasEditor } from "./CanvasEditor"
 import { ResizableEditor } from "@/features/editor/ResizableEditor"
 import type { DocumentEditorProps } from "@/features/editor/TextDocumentEditor"
 import { A4_ASPECT, type CanvasDocument } from "@/lib/domain/canvasDocument"
+import { imageFrameEmbeds } from "@/lib/domain/canvasRender"
 import { storeDrawing, writeBinaryDocument } from "@/lib/backend/api"
-import { fileViewerRawUrl } from "@/lib/backend/urls"
-import { renderPageToPng, renderCanvasToJpeg, type EmbedRect } from "@/lib/drawing"
+import { renderPageToPng, renderCanvasToJpeg } from "@/lib/canvasExport"
 import { useCollaborativeCanvas } from "@/features/editor/canvas/useCollaborativeCanvas"
 import { baseName } from "@/lib/paths"
-import { useTabActive } from "@/contexts/TabContext"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
+import { useModeLabel } from "@/hooks/useModeLabel"
 import { LoadFailure, LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
 
-/** Load each image frame to measure its aspect ratio (falls back to 1 if it fails to load). */
-async function canvasImageEmbeds(doc: CanvasDocument): Promise<EmbedRect[]> {
-  return Promise.all(doc.frames.filter((f) => f.kind === "image" && f.path).map(async (f) => {
-    const url = fileViewerRawUrl(f.path!)
-    let aspect = 1
-    try {
-      const img = new Image()
-      img.crossOrigin = "anonymous"
-      await new Promise<void>((resolve, reject) => { img.onload = () => resolve(); img.onerror = reject; img.src = url })
-      if (img.naturalWidth > 0) aspect = img.naturalHeight / img.naturalWidth
-    } catch { /* */ }
-    return { url, x: f.x, y: f.y, width: f.width, aspect }
-  }))
-}
-
 /** Database canvas: the collaboration hook owns loading and saving. */
-export function CanvasDocumentEditor({ path, slug, onClose, onSaved, overlay, onModeLabel, canvasToolbarSlots }: DocumentEditorProps) {
-  const isActive = useTabActive()
+export function CanvasDocumentEditor({ path, slug, onClose, onSaved, overlay, onModeLabel }: DocumentEditorProps) {
   const { document: canvasDocument, replace, status, retry } = useCollaborativeCanvas(path)
   const filename = baseName(path)
   const [exporting, setExporting] = useState(false)
@@ -51,17 +35,14 @@ export function CanvasDocumentEditor({ path, slug, onClose, onSaved, overlay, on
       const { strokes, texts, frames } = canvasDocument
       if (!drawnRef.current || (strokes.length === 0 && texts.length === 0 && !frames.some((f) => f.kind === "image"))) return
       drawnRef.current = false
-      canvasImageEmbeds(canvasDocument)
-        .then((imgs) => renderCanvasToJpeg(strokes, 20, imgs, texts))
+      renderCanvasToJpeg(strokes, 20, imageFrameEmbeds(frames), texts)
         .then((blob) => storeDrawing(filename.replace(/\.canvas$/, ".jpg"), blob))
         .catch(() => {})
     }, 1000)
     return () => clearTimeout(timer)
   }, [filename, canvasDocument])
 
-  useEffect(() => {
-    if (overlay) onModeLabel?.(filename)
-  }, [overlay, filename, onModeLabel])
+  useModeLabel(filename, !!overlay, onModeLabel)
 
   const handleExportPdf = useCallback(async () => {
     if (!canvasDocument || exporting) return
@@ -71,7 +52,7 @@ export function CanvasDocumentEditor({ path, slug, onClose, onSaved, overlay, on
     try {
       const { PDFDocument } = await import("pdf-lib") // lazy: heavy, and only needed on export
       // A4 at 96dpi in px (1123x794) for the page crop, and in pt (595.28x841.89) for the PDF page
-      const imgs = await canvasImageEmbeds(canvasDocument)
+      const imgs = imageFrameEmbeds(canvasDocument.frames)
       const pdfDoc = await PDFDocument.create()
       for (const page of pages) {
         const pngBytes = await renderPageToPng(canvasDocument.strokes, page.x, page.y, page.width, page.width * A4_ASPECT, imgs, canvasDocument.texts)
@@ -87,7 +68,7 @@ export function CanvasDocumentEditor({ path, slug, onClose, onSaved, overlay, on
     setExporting(false)
   }, [canvasDocument, exporting, slug, filename, onSaved])
 
-  useEscapeLayer(onClose, !!overlay && isActive)
+  useEscapeLayer(onClose, !!overlay)
 
   if (!canvasDocument) {
     return status === "error"
@@ -109,7 +90,6 @@ export function CanvasDocumentEditor({ path, slug, onClose, onSaved, overlay, on
         slug={slug}
         docPath={path}
         onImageAdded={() => onSaved?.()}
-        toolbarSlots={canvasToolbarSlots}
       />
     </>
   )

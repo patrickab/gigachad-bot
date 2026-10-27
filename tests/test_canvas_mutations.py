@@ -4,14 +4,15 @@ import asyncio
 import json
 from uuid import UUID, uuid4
 
-import pytest
 from fastapi import HTTPException
 from psycopg_pool import ConnectionPool
+import pytest
 
-from backend.canvas import CanvasMutation, CanvasMutationStore, InvalidCanvasSnapshot
 from backend.identity import RequestIdentity
 from backend.routes.canvases import CanvasMutationBatchRequest, stream_canvas, submit_mutations
 from backend.sync import ChangeBroker
+from lib.canvas_store import CanvasMutation, CanvasMutationStore, InvalidCanvasSnapshot
+from lib.changes import UserScope
 from tests.conftest import create_user
 
 pytestmark = pytest.mark.usefixtures("clean_database")
@@ -43,7 +44,7 @@ def test_blank_canvas_reads_empty_and_accepts_its_first_mutation(postgres_pool):
     user_id = create_user(postgres_pool, "blank@example.test")
     key = "notes/blank.canvas"
     _canvas(postgres_pool, user_id, key, b"")
-    store = CanvasMutationStore(postgres_pool, user_id)
+    store = CanvasMutationStore(UserScope(postgres_pool, user_id))
     mutation = _text("first")
 
     assert store.snapshot(key) == (EMPTY, 0)
@@ -55,7 +56,7 @@ def test_malformed_canvas_fails_closed_on_read_and_write(postgres_pool):
     user_id = create_user(postgres_pool, "malformed@example.test")
     key = "notes/malformed.canvas"
     _canvas(postgres_pool, user_id, key, b"{")
-    store = CanvasMutationStore(postgres_pool, user_id)
+    store = CanvasMutationStore(UserScope(postgres_pool, user_id))
 
     with pytest.raises(InvalidCanvasSnapshot):
         store.snapshot(key)
@@ -68,7 +69,7 @@ def test_retried_mutations_are_acknowledged_at_their_original_revision(postgres_
     user_id = create_user(postgres_pool, "alice@example.test")
     key = "notes/board.canvas"
     _canvas(postgres_pool, user_id, key, EMPTY)
-    store = CanvasMutationStore(postgres_pool, user_id)
+    store = CanvasMutationStore(UserScope(postgres_pool, user_id))
     first, second = _text("first"), _text("second")
 
     assert store.apply(key, [first]) == 1
@@ -96,7 +97,7 @@ def test_legacy_canvas_reads_with_the_ids_its_first_write_persists(postgres_pool
         "strokes": [legacy_stroke, legacy_stroke],
         "texts": [{"id": "text-1", "x": 1, "y": 2, "text": "legacy"}],
     })
-    store = CanvasMutationStore(postgres_pool, user_id)
+    store = CanvasMutationStore(UserScope(postgres_pool, user_id))
 
     read, _ = store.snapshot(key)
     stroke_ids = [stroke["id"] for stroke in read["strokes"]]
@@ -123,7 +124,7 @@ def test_canvas_access_is_user_scoped(postgres_pool):
     key = "notes/private.canvas"
     _canvas(postgres_pool, alice, key, EMPTY)
     identity = RequestIdentity(user_id=bob, login="bob@example.test", device_id=None)
-    store = CanvasMutationStore(postgres_pool, bob)
+    store = CanvasMutationStore(UserScope(postgres_pool, bob))
 
     for attempt in (
         submit_mutations(key, CanvasMutationBatchRequest(mutations=[]), store),
@@ -139,7 +140,7 @@ async def test_canvas_stream_replays_then_delivers_live_batches(postgres_pool, d
     user_id = create_user(postgres_pool, "alice@example.test")
     key = "notes/board.canvas"
     _canvas(postgres_pool, user_id, key, EMPTY)
-    store = CanvasMutationStore(postgres_pool, user_id)
+    store = CanvasMutationStore(UserScope(postgres_pool, user_id))
     replayed = _text("replayed")
     store.apply(key, [replayed])
 

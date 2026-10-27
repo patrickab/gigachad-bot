@@ -1,17 +1,16 @@
 """omp-web answers become gigachad's snake_case contract, and a changed shape or refusal is reported, not hidden."""
 
 import json
-from uuid import uuid4
 
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import httpx
 import pytest
 
-from backend.identity import RequestIdentity, get_request_identity
+from backend.identity import get_request_identity
 from backend.routes.omp import router
 from lib import omp_web
 from lib.upstream import UpstreamContractError
+from tests.conftest import request_identity, route_client
 
 # Trimmed from a live omp-web 0.5.2 (patrickab fork) response.
 SESSIONS = {
@@ -84,10 +83,7 @@ async def test_system_prompt_joins_parts_and_is_none_while_stopped(monkeypatch):
 
 
 def _client(has_host_access: bool) -> TestClient:
-    app = FastAPI()
-    app.include_router(router)
-    app.dependency_overrides[get_request_identity] = lambda: RequestIdentity(uuid4(), "me@example.test", None, has_host_access)
-    return TestClient(app)
+    return route_client(router, overrides={get_request_identity: request_identity(has_host_access)})
 
 
 @pytest.fixture

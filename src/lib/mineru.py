@@ -17,12 +17,15 @@ import sys
 import tempfile
 import threading
 
-from fastapi import HTTPException
-
 from config import DIRECTORY_OUTPUT_MINERU, MINERU_SERVER_URL
-from lib.file_roots import IMAGE_SUFFIXES
+from lib.mime import IMAGE_SUFFIXES
 
 log = logging.getLogger(__name__)
+
+
+class MineruUnavailable(RuntimeError):
+    """MinerU cannot run in this process, the message says what to configure."""
+
 
 _active_servers: set[object] = set()
 _active_servers_lock = threading.Lock()
@@ -138,11 +141,9 @@ async def parse_pdf(
             # LocalAPIServer spawns `sys.executable -m mineru.cli.fast_api`,
             # which cannot work inside a PyInstaller bundle (sys.executable is
             # the frozen sidecar itself, and the ML stack isn't bundled).
-            # HTTPException so the actionable message reaches the UI.
-            raise HTTPException(
-                status_code=503,
-                detail="PDF OCR in the desktop app requires MINERU_SERVER_URL pointing at a "
-                "running MinerU server (e.g. `python -m mineru.cli.fast_api` from the repo venv).",
+            raise MineruUnavailable(
+                "PDF OCR in the desktop app requires MINERU_SERVER_URL pointing at a "
+                "running MinerU server (e.g. `python -m mineru.cli.fast_api` from the repo venv)."
             )
         else:
             local = api_client.LocalAPIServer()

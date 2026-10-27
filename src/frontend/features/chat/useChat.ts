@@ -1,10 +1,15 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { useStartupRead } from "@/contexts/StartupReadContext"
-import { fetchModels, fetchPrompts, saveModelDefaults as saveModelDefaultsRequest, saveModelProviders as saveModelProvidersRequest, saveModelTabOrder as saveModelTabOrderRequest } from "@/lib/backend/api"
-import type { ModelDefaults, ModelProvider, ModelsResponse } from "@/lib/domain/types"
+import { fetchModels, fetchPrompts, saveModelDefaults, saveModelProviders, saveModelTabOrder } from "@/lib/backend/api"
+import type { ModelsResponse } from "@/lib/domain/types"
 import { useChatStream } from "./useChatStream"
+
+/** `save` whose response becomes the loaded models. */
+function applyModels<A extends unknown[]>(setModels: (models: ModelsResponse) => void, save: (...args: A) => Promise<ModelsResponse>) {
+  return async (...args: A) => setModels(await save(...args))
+}
 
 /** Compose chat streaming with the model and prompt config loaded on mount. */
 export function useChat() {
@@ -17,14 +22,16 @@ export function useChat() {
   const { error: modelLoadError } = useStartupRead("Models", fetchModels, setModels)
   useStartupRead("Prompts", fetchPrompts, setPrompts)
 
-  const saveModelProviders = useCallback(async (providers: ModelProvider[]) => setModels(await saveModelProvidersRequest(providers)), [])
-  const saveModelTabOrder = useCallback(async (order: string[]) => setModels(await saveModelTabOrderRequest(order)), [])
-  const saveModelDefaults = useCallback(async (defaults: ModelDefaults) => setModels(await saveModelDefaultsRequest(defaults)), [])
+  const modelSaves = useMemo(() => ({
+    saveModelProviders: applyModels(setModels, saveModelProviders),
+    saveModelTabOrder: applyModels(setModels, saveModelTabOrder),
+    saveModelDefaults: applyModels(setModels, saveModelDefaults),
+  }), [])
 
   const reset = useCallback(() => {
     setMessages([])
     setTotalUsage({ prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 })
   }, [setMessages, setTotalUsage])
 
-  return { ...stream, reset, models, modelLoadError, saveModelProviders, saveModelTabOrder, saveModelDefaults, prompts, setPrompts }
+  return { ...stream, ...modelSaves, reset, models, modelLoadError, prompts, setPrompts }
 }

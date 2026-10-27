@@ -2,16 +2,18 @@ import type React from "react"
 import type { SSEEvent } from "./sse"
 import type { Message, ToolCallProgress, ToolCallRecord, ToolCallResult, ToolCallStarted, Usage } from "@/lib/domain/types"
 
-/** Applies `updater` to the trailing message only when it is from the assistant; any other trailing message leaves state untouched. */
-export function updateLastAssistant(
+/** Replace the message at `index` (negative counts from the end) with `update(message)`; a missing message or a null result leaves state untouched. */
+export function updateMessageAt(
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>,
-  updater: (msg: Message) => Message,
+  index: number,
+  update: (message: Message) => Message | null,
 ) {
   setMessages((prev) => {
-    const last = prev[prev.length - 1]
-    if (last?.role !== "assistant") return prev
+    const at = index < 0 ? prev.length + index : index
+    const next = prev[at] && update(prev[at])
+    if (!next) return prev
     const copy = [...prev]
-    copy[copy.length - 1] = updater(last)
+    copy[at] = next
     return copy
   })
 }

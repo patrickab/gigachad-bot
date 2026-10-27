@@ -15,25 +15,23 @@ from pathlib import Path
 import tempfile
 from uuid import UUID
 
-from psycopg_pool import ConnectionPool
-
-from lib.changes import record_change
+from lib.changes import UserScope, like_prefix
 from lib.data_store import StorageConflictError, StorageNotFoundError, validate_key
-from lib.document_library import mime_for
-from lib.postgres_data_store import like_prefix
+from lib.mime import mime_for
+from lib.storage_namespace import MINERU, PDFS
 
 ASSET_KINDS = ("upload", "pdf", "mineru_markdown", "mineru_image", "drawing", "sandbox")
 
 _COLUMNS = "id, kind, logical_path, mime, sha256, size_bytes, version"
 
+# Top-level path segment each mirrorable kind must live under on disk.
 _MIRROR_ROOTS = {
-    "pdf": "PDFs",
-    "mineru_markdown": "Mineru",
-    "mineru_image": "Mineru",
+    "pdf": PDFS,
+    "mineru_markdown": MINERU,
+    "mineru_image": MINERU,
 }
 
 
-# Top-level path segment each mirrorable kind must live under on disk.
 @dataclass(frozen=True)
 class Asset:
     id: UUID
@@ -49,10 +47,8 @@ class Asset:
 class AssetStore:
     """A binary asset store permanently scoped to one authenticated user."""
 
-    def __init__(self, pool: ConnectionPool, user_id: UUID, *, device_id: UUID | None = None) -> None:
-        self._pool = pool
-        self._user_id = user_id
-        self._device_id = device_id
+    def __init__(self, scope: UserScope) -> None:
+        self._scope = scope
 
     # Row layout is ``_COLUMNS`` order, optionally followed by ``content``.
     @staticmethod
@@ -68,13 +64,6 @@ class AssetStore:
             content=content,
         )
 
-    # `version` is None for deletes and the vacated side of a move.
-    def _change(self, connection, logical_path: str, version: int | None, operation: str) -> None:
-        record_change(
-            connection, user_id=self._user_id, device_id=self._device_id, kind="asset", key=logical_path, operation=operation,
-            version=version,
-        )
-
     def write(self, kind: str, logical_path: str, content: bytes, *, mime: str | None = None) -> Asset:
         """Upsert by path. Overwriting bumps ``version``, and the replicated change carries it."""
         if kind not in ASSET_KINDS:
@@ -82,7 +71,7 @@ class AssetStore:
         logical_path = validate_key(logical_path)
         mime = mime or mime_for(logical_path)
         sha256 = hashlib.sha256(content).hexdigest()
-        with self._pool.connection() as connection, connection.transaction():
+        with self._scope.connection() as connection, connection.transaction():
             row = connection.execute(
                 """
                 INSERT INTO assets (user_id, kind, logical_path, content, mime, sha256, size_bytes)
@@ -93,9 +82,9 @@ class AssetStore:
                     version = assets.version + 1, updated_at = now()
                 RETURNING id, version
                 """,
-                (self._user_id, kind, logical_path, content, mime, sha256, len(content)),
+                (self._scope.user_id, kind, logical_path, content, mime, sha256, len(content)),
             ).fetchone()
-            self._change(connection, logical_path, row[1], "write")
+            self._scope.record(connection, kind="asset", key=logical_path, operation="write", version=row[1])
         return Asset(
             id=row[0],
             kind=kind,
@@ -108,10 +97,10 @@ class AssetStore:
         )
 
     def _fetch(self, column: str, value: object, missing: str) -> Asset:
-        with self._pool.connection() as connection:
+        with self._scope.connection() as connection:
             row = connection.execute(
                 f"SELECT {_COLUMNS}, content FROM assets WHERE user_id = %s AND {column} = %s",
-                (self._user_id, value),
+                (self._scope.user_id, value),
             ).fetchone()
         if row is None:
             raise StorageNotFoundError(missing)
@@ -128,7 +117,7 @@ class AssetStore:
         """Assets under *prefix* (directory semantics) without content, ordered by path."""
         prefix = validate_key(prefix, allow_empty=True)
         clauses = [f"SELECT {_COLUMNS} FROM assets WHERE user_id = %s"]
-        params: list[object] = [self._user_id]
+        params: list[object] = [self._scope.user_id]
         if prefix:
             # Directory semantics: "notes" matches "notes" and "notes/a.md", never "notes-old/a.md".
             clauses.append("AND (logical_path = %s OR logical_path LIKE %s ESCAPE '\\')")
@@ -137,35 +126,35 @@ class AssetStore:
             clauses.append("AND kind = %s")
             params.append(kind)
         clauses.append("ORDER BY logical_path")
-        with self._pool.connection() as connection:
+        with self._scope.connection() as connection:
             rows = connection.execute(" ".join(clauses), params).fetchall()
         return [self._asset(row) for row in rows]
 
     def delete(self, logical_path: str) -> None:
         logical_path = validate_key(logical_path)
-        with self._pool.connection() as connection, connection.transaction():
+        with self._scope.connection() as connection, connection.transaction():
             deleted = connection.execute(
                 "DELETE FROM assets WHERE user_id = %s AND logical_path = %s",
-                (self._user_id, logical_path),
+                (self._scope.user_id, logical_path),
             ).rowcount
             if deleted:
-                self._change(connection, logical_path, None, "delete")
+                self._scope.record(connection, kind="asset", key=logical_path, operation="delete")
 
     def move(self, source: str, destination: str) -> Asset:
         """Rename one asset while retaining its content and identity."""
         source, destination = validate_key(source), validate_key(destination)
         if source == destination:
             return self.read(source)
-        with self._pool.connection() as connection, connection.transaction():
+        with self._scope.connection() as connection, connection.transaction():
             exists = connection.execute(
                 "SELECT 1 FROM assets WHERE user_id = %s AND logical_path = %s FOR UPDATE",
-                (self._user_id, source),
+                (self._scope.user_id, source),
             ).fetchone()
             if exists is None:
                 raise StorageNotFoundError(source)
             collision = connection.execute(
                 "SELECT 1 FROM assets WHERE user_id = %s AND logical_path = %s",
-                (self._user_id, destination),
+                (self._scope.user_id, destination),
             ).fetchone()
             if collision is not None:
                 raise StorageConflictError(f"Destination already exists: {destination}")
@@ -175,10 +164,10 @@ class AssetStore:
                 WHERE user_id = %s AND logical_path = %s
                 RETURNING {_COLUMNS}, content
                 """,
-                (destination, self._user_id, source),
+                (destination, self._scope.user_id, source),
             ).fetchone()
-            self._change(connection, source, None, "move")
-            self._change(connection, destination, row[6], "move")
+            self._scope.record(connection, kind="asset", key=source, operation="move")
+            self._scope.record(connection, kind="asset", key=destination, operation="move", version=row[6])
         return self._asset(row, bytes(row[7]))
 
     def mirror(self, asset: Asset, root: Path) -> Path:

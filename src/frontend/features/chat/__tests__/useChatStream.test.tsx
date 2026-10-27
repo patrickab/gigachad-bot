@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { useChatStream, type ChatStreamCompletion } from "@/features/chat/useChatStream"
-import type { ChatRequest } from "@/lib/domain/types"
+import type { ChatRequest, Message } from "@/lib/domain/types"
 import type { SSEEvent, SSEStreamResult } from "@/lib/backend/sse"
 
 const TEST_MODEL = "provider/test-model"
@@ -308,5 +308,44 @@ describe("useChatStream", () => {
     const assistant = result.current.messages[1]
     expect(assistant.content).toContain("upstream died")
     expect(assistant.tool_calls?.[0]).toMatchObject({ id: "call-1", status: "error", error: "upstream died" })
+  })
+
+  describe("removePair", () => {
+    const chat = (...texts: string[]): Message[] => texts.flatMap((text) => [
+      { role: "user" as const, content: text },
+      { role: "assistant" as const, content: `re ${text}` },
+    ])
+
+    it("restores the pair before the message that followed it, even after the chat shifted", () => {
+      const { result } = renderHook(() => useChatStream())
+      const [a1, a2, b1, b2, c1, c2] = chat("a", "b", "c")
+      act(() => { result.current.replaceMessages(() => [a1, a2, b1, b2, c1, c2]) })
+
+      const undo: { restore: (() => void) | null } = { restore: null }
+      act(() => { undo.restore = result.current.removePair(b1) })
+      expect(result.current.messages).toEqual([a1, a2, c1, c2])
+
+      // The first pair goes too, so the original index of b1 now points past the end of [c1, c2].
+      act(() => { result.current.removePair(a1) })
+      act(() => { undo.restore?.() })
+      expect(result.current.messages).toEqual([b1, b2, c1, c2])
+
+      // A second restore is a no-op.
+      act(() => { undo.restore?.() })
+      expect(result.current.messages).toEqual([b1, b2, c1, c2])
+    })
+
+    it("appends the pair once its follower is gone and ignores a user message outside the chat", () => {
+      const { result } = renderHook(() => useChatStream())
+      const [a1, a2, b1, b2] = chat("a", "b")
+      act(() => { result.current.replaceMessages(() => [a1, a2, b1, b2]) })
+
+      const undo: { restore: (() => void) | null } = { restore: null }
+      act(() => { undo.restore = result.current.removePair(a1) })
+      act(() => { result.current.removePair(b1) })
+      act(() => { undo.restore?.() })
+      expect(result.current.messages).toEqual([a1, a2])
+      expect(result.current.removePair({ role: "user", content: "a" })).toBeNull()
+    })
   })
 })

@@ -1,14 +1,11 @@
 "use client"
 
 import { useCallback, useMemo, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from "react"
-import { createPortal } from "react-dom"
 import { Camera, CircleDashed, Eraser, Highlighter, PenLine, Redo2, Undo2, type LucideIcon } from "lucide-react"
 import { DEFAULT_PEN_COLOR, HIGHLIGHT_COLORS, PRESET_COLORS, inkColor, strokeWidth, type InkTool, type StrokeSize } from "@/features/editor/canvas/ink/canvasInk"
 import { useOutsidePress } from "@/hooks/useOutsidePress"
 import { cn } from "@/lib/utils"
-
-/** Header elements the canvas toolbar portals into: drawing tools left, view and history controls right. */
-export type CanvasToolbarSlots = { drawing: HTMLElement; view: HTMLElement }
+import { InTopBar, useHasTopBarSlot } from "@/features/navigation/TopBarSlots"
 
 /** The pointer tool: `draw` is the default; select (lasso) and screenshot are modal and exclusive. */
 export type CanvasTool = "draw" | "select" | "screenshot"
@@ -87,7 +84,7 @@ function ColorPicker({ color, onChange, presets = PRESET_COLORS }: {
 const NEXT_SIZE: Record<StrokeSize, StrokeSize> = { thin: "medium", medium: "thick", thick: "thin" }
 
 /** Pen and highlighter settings behind `InkTools`. `color` and `width` are what a new stroke gets. */
-interface InkSettings {
+export interface InkSettings {
   tool: InkTool | null
   toggleTool: (tool: InkTool) => void
   clearTool: () => void
@@ -137,8 +134,6 @@ export function InkTools({ ink }: { ink: InkSettings }) {
 }
 
 interface CanvasToolbarProps {
-  /** When given, the toolbar renders into these external elements (the app header pills in canvas mode) instead of above the drawing surface. */
-  slots?: CanvasToolbarSlots | null
   /** The "+" popover. */
   addMenu: ReactNode
   ink: InkSettings
@@ -185,11 +180,12 @@ export function UndoRedoButtons({ onUndo, onRedo, canUndo, canRedo, separator }:
   return <>{historyButton("Undo", Undo2, onUndo, canUndo)}{separator}{historyButton("Redo", Redo2, onRedo, canRedo)}</>
 }
 
-/** Drawing tools on the left, view and history controls on the right. */
+/** Drawing tools on the left, view and history controls on the right; in the tab's top bar when it has drawing and view slots. */
 export function CanvasToolbar({
-  slots, addMenu, ink, tool, onToggleTool, isErasing, selectedCount,
+  addMenu, ink, tool, onToggleTool, isErasing, selectedCount,
   onUndo, onRedo, canUndo, canRedo, zoomPercent,
 }: CanvasToolbarProps) {
+  const inTopBar = useHasTopBarSlot("drawing", "view")
   const drawingTools = (
     <div className="flex items-center gap-1 shrink-0 min-w-0">
       {addMenu}
@@ -215,7 +211,7 @@ export function CanvasToolbar({
   )
 
   // Inline above the canvas, or portaled into the app header pills in canvas mode
-  if (slots) return <>{createPortal(drawingTools, slots.drawing)}{createPortal(viewTools, slots.view)}</>
+  if (inTopBar) return <><InTopBar name="drawing">{drawingTools}</InTopBar><InTopBar name="view">{viewTools}</InTopBar></>
   return (
     <div className="flex items-center gap-1 shrink-0 min-w-0 px-2 py-1.5 border-b border-divider/50">
       {drawingTools}

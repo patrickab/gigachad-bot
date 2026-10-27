@@ -1,4 +1,9 @@
-import type { Attachment, BackendConfig, BranchMeta, ChatHistoriesResponse, ChatRequest, DirectoryListing, KanbanCard, MemoryExtractResponse, MemoryOperation, MemoryScope, MemoryTopic, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpArchivedSession, OmpCatalog, OmpOverview, OmpSystemPrompt, FactoryDefaults, FactoryEvent, FactoryMessage, FactoryPreview, FactoryRepo, FactoryTask, FactoryTaskDetail, FactoryWorkflow, TaskAction, TaskCreate, ProjectData, ProjectDocument, ProjectListItem, StoredMemory, ReasoningLevels, Usage, RootFile, FileTreeNode } from "@/lib/domain/types"
+import type { Attachment, BackendConfig, ChatRequest, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpArchivedSession, OmpCatalog, OmpOverview, OmpSystemPrompt, PromptMeta, ProviderUsageReport, ReasoningLevels, Usage } from "@/lib/domain/types"
+import type { DiffStatus, DirectoryListing, FileTreeNode, RootDiffFiles, RootFile, WorktreeList } from "@/lib/domain/files"
+import type { BranchMeta, ChatHistoriesResponse, ChatHistory } from "@/lib/domain/histories"
+import type { KanbanCard, ProjectData, ProjectDocument, ProjectListItem } from "@/lib/domain/projects"
+import type { MemoryExtractResponse, MemoryOperation, MemoryScope, MemoryTopic, StoredMemory } from "@/lib/domain/memory"
+import type { FactoryDefaults, FactoryEvent, FactoryMessage, FactoryPreview, FactoryRepo, FactoryTask, FactoryTaskDetail, FactoryWorkflow, TaskAction, TaskCreate } from "@/lib/domain/factory"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { getApiBase } from "./config"
@@ -6,8 +11,7 @@ import type { ArchitectureOperation, ArchitectureWorkspace } from "@/lib/domain/
 import type { CanvasMutation, CanvasSnapshot } from "@/lib/domain/canvasDocument"
 import { deviceHeaders } from "./deviceId"
 import { chatFileUrl, encodePath, fileViewerRawUrl, toQuery } from "./urls"
-import { baseName, extOf, kindOf } from "@/lib/paths"
-import { architectureSlug, architectureSource, isArchitecturePath } from "@/lib/domain/architecturePaths"
+import { parseHistoryFile } from "@/lib/domain/historyFile"
 
 /** Carries the HTTP status so callers can tell a stale-revision rejection from a real failure. */
 export class ApiError extends Error {
@@ -41,14 +45,29 @@ async function ensureOk(res: Response): Promise<Response> {
   return res
 }
 
+/** The single place that adds the API base URL and the device headers, the status is left to the caller. */
+function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  const headers = { ...(init?.headers as Record<string, string> | undefined), ...deviceHeaders() }
+  return fetch(`${getApiBase()}${path}`, { ...init, headers })
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const headers = { ...(options?.headers as Record<string, string> | undefined), ...deviceHeaders() }
-  const res = await ensureOk(await fetch(`${getApiBase()}${path}`, { ...options, headers }))
+  const res = await ensureOk(await apiFetch(path, options))
   return res.json()
+}
+
+/** Like `request` for endpoints whose response body is not read. */
+async function requestVoid(path: string, init?: RequestInit): Promise<void> {
+  await ensureOk(await apiFetch(path, init))
 }
 
 function jsonInit(method: string, body: unknown, headers: Record<string, string> = {}): RequestInit {
   return { method, headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) }
+}
+
+/** POSTs `body` as JSON and streams the SSE response. */
+function sseStream(path: string, body: Record<string, unknown>): SSEStreamResult {
+  return createSSEStream((signal) => apiFetch(path, { ...jsonInit("POST", body), signal }))
 }
 
 function post<T>(path: string, body: unknown): Promise<T> {
@@ -76,21 +95,6 @@ function fileForm(file: File | Blob, filename?: string): FormData {
 
 export async function fetchModels(signal?: AbortSignal): Promise<ModelsResponse> {
   return request<ModelsResponse>("/models", { signal })
-}
-
-interface ProviderUsageWindow {
-  id: "5h" | "7d" | "30d"
-  percent: number
-  resets_in_minutes: number | null
-}
-
-export interface ProviderUsageReport {
-  provider: string
-  account: string | null
-  no_limits: boolean
-  /** omp could not read this account's usage this time, e.g. a rate-limited usage API. */
-  unavailable?: boolean
-  windows: ProviderUsageWindow[]
 }
 
 /** Subscription usage per OMP login; `refresh` skips the server's 5 minute cache. */
@@ -130,8 +134,6 @@ export async function fetchPrompts(signal?: AbortSignal): Promise<Record<string,
   const data = await request<{ prompts: Record<string, string> }>("/prompts", { signal })
   return data.prompts
 }
-
-export interface PromptMeta { slug: string; name: string; includes: string[] }
 
 export async function fetchPromptList(): Promise<PromptMeta[]> {
   return request<PromptMeta[]>("/prompts/list")
@@ -176,7 +178,7 @@ export function createChatStream(req: ChatRequest): SSEStreamResult {
   }
   if (req.reasoning_effort) body.reasoning_effort = req.reasoning_effort
 
-  return createSSEStream("/chat", body)
+  return sseStream("/chat", body)
 }
 
 export async function listChatHistories(signal?: AbortSignal): Promise<ChatHistoriesResponse> {
@@ -188,7 +190,7 @@ export async function fetchBranchMeta(dirs?: string[], signal?: AbortSignal): Pr
   return request(`/chat-histories/branch-meta${params}`, { signal })
 }
 
-export async function loadChatHistory(filename: string): Promise<{ messages: Message[]; filename: string; chat_id: string | null; title: string | null; usage: Usage | null; parent_id: string | null; branch_message_idx: number | null; children: BranchMeta["children"] }> {
+export async function loadChatHistory(filename: string): Promise<ChatHistory> {
   return request(`/chat-histories/${encodePath(filename)}`)
 }
 
@@ -230,7 +232,7 @@ export function createOCRStream(
   imgBase64: string,
   model?: string
 ): SSEStreamResult {
-  return createSSEStream("/ocr", { img_base64: imgBase64, model })
+  return sseStream("/ocr", { img_base64: imgBase64, model })
 }
 
 type AttachmentPayload = Omit<Attachment, "active" | "url">
@@ -269,24 +271,6 @@ export async function fileRootTree(worktrees: string[] = [], signal?: AbortSigna
   return request(`/fileroots/tree${toQuery({ worktree: worktrees })}`, { signal })
 }
 
-export interface Worktree {
-  path: string
-  branch: string | null
-  is_main: boolean
-  changed_files: number
-  ahead: number
-  behind: number
-}
-
-export interface WorktreeList {
-  /** The mount holds a `.git` folder, only clones have worktrees. */
-  is_clone: boolean
-  default_base: string | null
-  default_branch?: string | null
-  branches: string[]
-  worktrees: Worktree[]
-}
-
 export async function fetchWorktrees(root: string): Promise<WorktreeList> {
   return request(`/fileroots/worktrees${toQuery({ root })}`)
 }
@@ -317,13 +301,6 @@ const documentsOf = (data: DocumentList) => data.documents
 /** Add file-root files (folders expand to their valid files) to a project's documents. */
 export async function addRootFilesToProject(slug: string, paths: string[]): Promise<ProjectDocument[]> {
   return post<DocumentList>("/fileroots/add-to-project", { slug, paths }).then(documentsOf)
-}
-
-export type DiffStatus = "modified" | "added" | "deleted" | "renamed" | "untracked" | "conflict"
-
-export interface RootDiffFiles {
-  is_git_repository: boolean
-  files: { path: string; status: DiffStatus; stamp: string; added: number | null; removed: number | null }[]
 }
 
 /** Files of the git working tree at a mounted root that differ from HEAD. */
@@ -390,59 +367,12 @@ export async function submitCanvasMutations(canvasKey: string, mutations: Canvas
 }
 
 /** Attach a FileRoots file as a live reference: no copy, content is read from the source. */
-async function attachRootFile(path: string): Promise<Attachment> {
+export async function attachRootFile(path: string): Promise<Attachment> {
   const data = await request<{ name: string; mime: string; path: string; content?: string; parsedMd?: string }>(
     `/fileroots/attach${toQuery({ path })}`,
     { method: "POST" },
   )
   return { ...data, active: true, vaultPath: data.path, url: fileViewerRawUrl(data.path) }
-}
-
-/** MIME by extension for app documents, matching the backend's guess for the kinds the chat tells apart. */
-function documentMime(path: string): string {
-  const kind = kindOf(path)
-  if (kind === "image") return `image/${extOf(path)}`
-  if (kind === "pdf") return "application/pdf"
-  return kind === "markdown" ? "text/markdown" : "text/plain"
-}
-
-/**
- * Attach any document as a live reference, re-read on every send.
- *
- * - Mount files (absolute paths) and library PDFs (`PDFs/<name>`) go through the file roots, which follow moved files
- * - App documents (logical keys) are read by key, text only
- */
-export async function attachReference(path: string): Promise<Attachment> {
-  if (path.startsWith("/") || path.startsWith("PDFs/")) return attachRootFile(path)
-  const mime = documentMime(path)
-  const content = mime.startsWith("text/") ? await loadFileViewerText(path) : undefined
-  return { name: baseName(path), mime, url: fileViewerRawUrl(path), active: true, vaultPath: path, content }
-}
-
-/**
- * Save `content` to the source of the text reference `path` (an `Attachment.vaultPath`).
- *
- * - Mount files in place, project documents (`project/<slug>/document/<name>`) and loose notes (`note/<name>`) by name, architecture sources in their workspace
- * - Throws for sources that are not text documents (PDFs, images), so a text edit never overwrites them
- */
-export async function writeReference(path: string, content: string): Promise<void> {
-  if (!documentMime(path).startsWith("text/")) throw new Error(`Not a text document: ${path}`)
-  if (path.startsWith("/")) return writeRootFile(path, content)
-  if (isArchitecturePath(path)) {
-    await writeArchitectureSource(architectureSlug(path), architectureSource(path), content)
-    return
-  }
-  const projectDocument = /^project\/([^/]+)\/document\/([^/]+)$/.exec(path)
-  if (projectDocument) {
-    await writeDocument(projectDocument[1], projectDocument[2], content)
-    return
-  }
-  const note = /^note\/([^/]+)$/.exec(path)
-  if (note) {
-    await writeDocument("", note[1], content)
-    return
-  }
-  throw new Error(`Not a text document: ${path}`)
 }
 
 export async function listProjectDocuments(slug: string, signal?: AbortSignal): Promise<ProjectDocument[]> {
@@ -572,6 +502,14 @@ export async function saveProjectTab(name: string, filename: string, messages: M
   return put(`${projectPath(name)}/tabs/${encodeURIComponent(filename)}`, body)
 }
 
+/** Save a chat to `historyFile`: through its project's tab when it belongs to `projectSlug`, as a plain history otherwise. */
+export async function saveChat(historyFile: string, projectSlug: string | null, messages: Message[], opts: { chatId: string; title: string; tabName?: string; usage?: Usage }): Promise<void> {
+  const { slug, filename } = parseHistoryFile(historyFile)
+  const { tabName, ...historyOpts } = opts
+  if (slug && slug === projectSlug) await saveProjectTab(slug, filename, messages, { ...historyOpts, tabName })
+  else await saveChatHistory(historyFile, messages, historyOpts)
+}
+
 export async function extractMemories(
   messages: { role: string; content: string }[],
   projectSlug?: string | null,
@@ -638,7 +576,7 @@ export async function restoreOmpSession(key: string): Promise<string> {
 
 /** Archive an omp session. omp-web refuses (409) while forks of it exist. */
 export async function archiveOmpSession(sessionId: string): Promise<void> {
-  await ensureOk(await fetch(`${getApiBase()}/omp/sessions/${encodeURIComponent(sessionId)}/archive`, { method: "POST", headers: deviceHeaders() }))
+  await requestVoid(`/omp/sessions/${encodeURIComponent(sessionId)}/archive`, { method: "POST" })
 }
 
 export async function fetchOmpSystemPrompt(sessionId: string): Promise<OmpSystemPrompt> {
@@ -647,7 +585,7 @@ export async function fetchOmpSystemPrompt(sessionId: string): Promise<OmpSystem
 
 /** Start the production redeploy, the backend restarts shortly after. Host-access logins only. */
 export async function startRedeploy(): Promise<void> {
-  await ensureOk(await fetch(`${getApiBase()}/deploy/redeploy`, { method: "POST", headers: deviceHeaders() }))
+  await requestVoid("/deploy/redeploy", { method: "POST" })
 }
 
 export function fetchLatestFactoryEventSeq(): Promise<number> {

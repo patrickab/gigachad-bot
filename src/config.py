@@ -1,12 +1,5 @@
 import os
 from pathlib import Path
-import sys
-
-from psycopg_pool import ConnectionPool
-
-from lib.data_store import DataStore
-from lib.db_schema import database_url
-from lib.storage_namespace import PROMPT
 
 # All mutable application data belongs to the backend's storage root.
 # ponytail: one shared workspace for now; user-specific roots can come later.
@@ -57,51 +50,9 @@ DEFAULT_DOWNSCALE_IMAGES = True
 # authoritative, this tree exists only so MinerU can parse a real file.
 DIRECTORY_OUTPUT_MINERU = DOCUMENTS / "Mineru"
 
-_postgres_pool: ConnectionPool | None = None
-
-
-def get_postgres_pool() -> ConnectionPool:
-    """Return the process-wide connection pool for Postgres storage."""
-    global _postgres_pool
-    if _postgres_pool is None:
-        _postgres_pool = ConnectionPool(
-            database_url(),
-            min_size=int(os.environ.get("GIGACHAD_PG_POOL_MIN_SIZE", "1")),
-            max_size=int(os.environ.get("GIGACHAD_PG_POOL_MAX_SIZE", "10")),
-        )
-    return _postgres_pool
-
-
-def close_postgres_pool() -> None:
-    """Release database connections during backend shutdown."""
-    global _postgres_pool
-    if _postgres_pool is not None:
-        _postgres_pool.close()
-        _postgres_pool = None
-
-
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
 # External MinerU OCR server (mineru.cli.fast_api). When unset, the backend
 # spawns one per parse from its own environment. The frozen desktop sidecar
 # excludes the ML stack, so there it must be set.
 MINERU_SERVER_URL = os.environ.get("MINERU_SERVER_URL")
-
-
-def seed_prompts(store: DataStore, *, prefix: str = PROMPT) -> None:
-    """Initialize editable prompts once from the shipped defaults.
-
-    An existing collection is authoritative, including deleted prompts. Defaults
-    remain source assets; all subsequent editor writes go to persistent storage.
-    """
-    source = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent)) / "prompts"
-    if not source.is_dir() or store.exists(prefix):
-        return
-    store.mkdir(prefix)
-    for path in source.rglob("*"):
-        relative = path.relative_to(source).as_posix()
-        key = f"{prefix}/{relative}"
-        if path.is_dir():
-            store.mkdir(key)
-        else:
-            store.write_bytes(key, path.read_bytes())

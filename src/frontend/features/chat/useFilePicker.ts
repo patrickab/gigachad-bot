@@ -1,34 +1,34 @@
 "use client"
 
-import { useCallback, useState, type Dispatch, type RefObject, type SetStateAction } from "react"
+import { useCallback, useState, type RefObject } from "react"
 import { useStartupRead } from "@/contexts/StartupReadContext"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import type { ChatInputHandle } from "@/features/chat/composer/ChatInput"
-import { attachReference, listRootFiles } from "@/lib/backend/api"
-import type { RootFile } from "@/lib/domain/types"
+import { attachToComposer } from "@/features/chat/attachToComposer"
+import { listRootFiles } from "@/lib/backend/api"
+import type { RootFile } from "@/lib/domain/files"
 
-export function useFilePicker({ isActive, hasMessages, chatInputRef, setExtracting }: {
-  isActive: boolean
+/** A picked file opened on its own: a PDF viewer or a text editor. */
+export type StandaloneFile = { kind: "pdf" | "edit"; path: string }
+
+const NO_ROOT_FILES = { enabled: false, files: [] as RootFile[] }
+
+/** Own the mounted-file picker: the root file listing, standalone opening in an empty chat, and staging on the composer otherwise. */
+export function useFilePicker({ hasMessages, chatInputRef, track }: {
   hasMessages: boolean
   chatInputRef: RefObject<ChatInputHandle | null>
-  setExtracting: Dispatch<SetStateAction<number>>
+  track: <T>(work: () => Promise<T>) => Promise<T>
 }) {
-  const [filesEnabled, setFilesEnabled] = useState(false)
-  const [pickerFiles, setRootFiles] = useState<RootFile[]>([])
+  const [rootFiles, setRootFiles] = useState<{ enabled: boolean; files: RootFile[] }>(NO_ROOT_FILES)
   const [filePickerOpen, setFilePickerOpen] = useState(false)
-  const [fileEditPath, setFileEditPath] = useState<string | null>(null)
-  const [filePdfPath, setFilePdfPath] = useState<string | null>(null)
+  const [standaloneFile, setStandaloneFile] = useState<StandaloneFile | null>(null)
 
-  useStartupRead("Root files", listRootFiles, (result) => {
-    setFilesEnabled(result.enabled)
-    setRootFiles(result.files)
-  })
+  const applyRootFiles = useCallback(({ enabled, files }: { enabled: boolean; files: RootFile[] }) => setRootFiles({ enabled, files }), [])
+  useStartupRead("Root files", listRootFiles, applyRootFiles)
 
   const refreshFileList = useCallback(() => {
-    listRootFiles()
-      .then((r) => { setFilesEnabled(r.enabled); setRootFiles(r.files) })
-      .catch(() => {})
-  }, [])
+    listRootFiles().then(applyRootFiles).catch(() => {})
+  }, [applyRootFiles])
 
   const openFilePicker = useCallback(() => {
     setFilePickerOpen(true)
@@ -41,27 +41,18 @@ export function useFilePicker({ isActive, hasMessages, chatInputRef, setExtracti
     // Empty chat → open standalone (edit text files, view PDFs); active
     // conversation → stage a live reference on the chat input (the *next*
     // message), not the already-sent latest message.
-    if (!hasMessages) {
-      if (path.toLowerCase().endsWith(".pdf")) setFilePdfPath(path)
-      else setFileEditPath(path)
-    } else {
-      setExtracting((n) => n + 1)
-      try { chatInputRef.current?.addAttachment(await attachReference(path)) } catch { /* attach failure leaves the input unchanged */ }
-      finally { setExtracting((n) => n - 1) }
-    }
-  }, [hasMessages, chatInputRef, setExtracting])
+    if (!hasMessages) setStandaloneFile({ kind: path.toLowerCase().endsWith(".pdf") ? "pdf" : "edit", path })
+    else await attachToComposer(chatInputRef, track, path)
+  }, [hasMessages, chatInputRef, track])
 
-  useEscapeLayer(() => setFilePdfPath(null), isActive && !!filePdfPath)
+  useEscapeLayer(() => setStandaloneFile(null), standaloneFile?.kind === "pdf")
 
   return {
-    filesEnabled,
-    pickerFiles,
+    rootFiles,
     filePickerOpen,
     setFilePickerOpen,
-    fileEditPath,
-    setFileEditPath,
-    filePdfPath,
-    setFilePdfPath,
+    standaloneFile,
+    setStandaloneFile,
     refreshFileList,
     openFilePicker,
     handleFileSelect,

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react"
 import type { LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { useTabActive } from "@/contexts/TabContext"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 
 /** One suggestion for the draft. Applying it replaces `text.slice(from, to)` with `insert`, caret at `from + caretOffset`. */
@@ -35,7 +34,6 @@ export function useCompletions(
   setText: (text: string) => void,
 ) {
   const [items, setItems] = useState<ComposerCompletion[]>([])
-  const tabActive = useTabActive()
   const [activeIndex, setActiveIndex] = useState(0)
   const latestRequestRef = useRef(0)
   const timerRef = useRef<number | undefined>(undefined)
@@ -83,7 +81,7 @@ export function useCompletions(
     return true
   }, [items, activeIndex, apply])
 
-  useEscapeLayer(close, items.length > 0 && tabActive)
+  useEscapeLayer(close, items.length > 0)
 
   return { items, activeIndex, setActiveIndex, request, close, apply, handleKey }
 }

@@ -3,19 +3,11 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Plus, Trash2, Save, X, RefreshCw } from "lucide-react"
 import { FloatingWindow } from "@/components/ui/FloatingWindow"
-import { cn } from "@/lib/utils"
+import { cn, isModKey } from "@/lib/utils"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
-import {
-  fetchPromptList,
-  fetchPromptBlocks,
-  fetchPromptRaw,
-  savePrompt,
-  deletePrompt,
-  savePromptOrder,
-  fetchPrompts,
-  type PromptMeta,
-} from "@/lib/backend/api"
+import { fetchPromptList, fetchPromptBlocks, fetchPromptRaw, savePrompt, deletePrompt, savePromptOrder, fetchPrompts } from "@/lib/backend/api"
+import type { PromptMeta } from "@/lib/domain/types"
 
 interface PromptEditorProps {
   open: boolean
@@ -51,41 +43,44 @@ export function PromptEditor({ open, onClose, onPromptsChanged }: PromptEditorPr
   const [newName, setNewName] = useState("")
   useEscapeLayer(() => setCreating(false), creating)
   const dragSlug = useRef<string | null>(null)
+  // Mirror of `prompts` so a drop right after a reorder reads the newest order outside any state updater.
+  const order = useRef<PromptMeta[]>([])
+
+  const showPrompts = useCallback((next: PromptMeta[]) => {
+    order.current = next
+    setPrompts(next)
+  }, [])
 
   // Live-reorder the list as the dragged item passes over others; persist once on drop.
   const reorder = useCallback((overSlug: string) => {
     const from = dragSlug.current
     if (!from || from === overSlug) return
-    setPrompts(prev => {
-      const fi = prev.findIndex(p => p.slug === from)
-      const ti = prev.findIndex(p => p.slug === overSlug)
-      if (fi < 0 || ti < 0) return prev
-      const next = [...prev]
-      next.splice(ti, 0, next.splice(fi, 1)[0])
-      return next
-    })
-  }, [])
+    const fi = order.current.findIndex(p => p.slug === from)
+    const ti = order.current.findIndex(p => p.slug === overSlug)
+    if (fi < 0 || ti < 0) return
+    const next = [...order.current]
+    next.splice(ti, 0, next.splice(fi, 1)[0])
+    showPrompts(next)
+  }, [showPrompts])
 
   const persistOrder = useCallback(() => {
     dragSlug.current = null
-    // Read the latest order via the updater so a drop right after reorder sees it
-    setPrompts(prev => { void savePromptOrder(prev.map(p => p.slug)); return prev })
+    void savePromptOrder(order.current.map(p => p.slug))
   }, [])
 
   const applyLists = useCallback(({ list, blk }: PromptLists) => {
-    setPrompts(list)
+    showPrompts(list)
     setBlocks(blk)
-  }, [])
+  }, [showPrompts])
 
-  const refresh = useCallback(async () => {
+  /** Reload the lists and, with `notify`, tell the owner the resolved prompts changed. Both fetches run together, the lists apply as soon as they land. */
+  const reload = useCallback(async (notify: boolean) => {
+    const resolved = notify ? fetchPrompts() : null
+    // Awaited below, the no-op handler only keeps a rejection from going unhandled when the lists fail first.
+    resolved?.catch(() => {})
     applyLists(await fetchPromptLists())
-  }, [applyLists])
-
-  /** Reload the lists and tell the owner the resolved prompts changed. */
-  const afterChange = useCallback(async () => {
-    await refresh()
-    onPromptsChanged(await fetchPrompts())
-  }, [refresh, onPromptsChanged])
+    if (resolved) onPromptsChanged(await resolved)
+  }, [applyLists, onPromptsChanged])
 
   useEffect(() => {
     if (open) fetchPromptLists().then(applyLists)
@@ -103,20 +98,20 @@ export function PromptEditor({ open, onClose, onPromptsChanged }: PromptEditorPr
     if (!selected) return
     await savePrompt(selected, content)
     setDirty(false)
-    await afterChange()
-  }, [selected, content, afterChange])
+    await reload(true)
+  }, [selected, content, reload])
 
   const handleDelete = useCallback(() => {
     if (!selected) return
     const slug = selected
     schedule(`prompt:${slug}`, prompts.find((prompt) => prompt.slug === slug)?.name ?? slug, async () => {
       await deletePrompt(slug)
-      await afterChange()
+      await reload(true)
     })
     setSelected(null)
     setContent("")
     setDirty(false)
-  }, [selected, prompts, schedule, afterChange])
+  }, [selected, prompts, schedule, reload])
   const handleCreate = useCallback(async () => {
     if (!newName.trim()) return
     const slug = slugify(newName)
@@ -125,10 +120,9 @@ export function PromptEditor({ open, onClose, onPromptsChanged }: PromptEditorPr
     await savePrompt(slug, initial)
     setCreating(false)
     setNewName("")
-    await refresh()
+    await reload(true)
     await load(slug)
-    onPromptsChanged(await fetchPrompts())
-  }, [newName, refresh, load, onPromptsChanged])
+  }, [newName, reload, load])
 
   const insertBlock = useCallback((blockName: string) => {
     setContent(prev => prev + `\n{{${blockName}}}`)
@@ -148,7 +142,7 @@ export function PromptEditor({ open, onClose, onPromptsChanged }: PromptEditorPr
               <button aria-label="Create prompt" onClick={() => { setCreating(true); setNewName("") }} className="p-1 rounded hover:bg-hover text-ink-muted hover:text-ink">
                 <Plus className="h-3.5 w-3.5" />
               </button>
-              <button aria-label="Refresh prompts" onClick={refresh} className="p-1 rounded hover:bg-hover text-ink-muted hover:text-ink">
+              <button aria-label="Refresh prompts" onClick={() => void reload(false)} className="p-1 rounded hover:bg-hover text-ink-muted hover:text-ink">
                 <RefreshCw className="h-3.5 w-3.5" />
               </button>
             </div>
@@ -233,7 +227,7 @@ export function PromptEditor({ open, onClose, onPromptsChanged }: PromptEditorPr
               <textarea
                 value={content}
                 onChange={e => { setContent(e.target.value); setDirty(true) }}
-                onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === "s") { e.preventDefault(); handleSave() } }}
+                onKeyDown={e => { if (isModKey(e) && e.key === "s") { e.preventDefault(); handleSave() } }}
                 spellCheck={false}
                 className="flex-1 resize-none bg-transparent p-4 text-xs text-ink font-mono outline-none leading-relaxed"
                 placeholder="Write your prompt..."

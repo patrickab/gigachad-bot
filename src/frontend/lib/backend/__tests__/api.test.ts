@@ -80,3 +80,27 @@ describe("api.ts — ensureOk surfaces FastAPI detail on error", () => {
     await expect(api.deletePrompt("s")).rejects.toThrow("boom")
   })
 })
+
+describe("api.ts — saveChat", () => {
+  it("saves a chat of the open project through its project tab", async () => {
+    const calls: Call[] = []
+    vi.stubGlobal("fetch", fetchRecorder(calls))
+
+    await api.saveChat("proj/notes.json", "proj", [], { chatId: "c", tabName: "Tab", title: "notes" })
+
+    const { url, init } = lastCall(calls)
+    expect(url).toContain("/projects/proj/tabs/notes.json")
+    expect(JSON.parse(init.body as string)).toMatchObject({ filename: "notes.json", tab_name: "Tab", title: "notes" })
+  })
+
+  it("saves any other chat as a plain history without a tab name", async () => {
+    const calls: Call[] = []
+    vi.stubGlobal("fetch", fetchRecorder(calls))
+
+    await api.saveChat("other/notes.json", "proj", [], { chatId: "c", tabName: "Tab", title: "notes" })
+
+    const { url, init } = lastCall(calls)
+    expect(url).toContain("/chat-histories/other/notes.json")
+    expect(JSON.parse(init.body as string)).not.toHaveProperty("tab_name")
+  })
+})

@@ -79,6 +79,10 @@ cd "$PROD" && uv sync --python 3.12 --locked --no-dev
   `--upgrade` or `npm install --package-lock-only`, then retry installation once.
   Review and commit regenerated locks with manifests. Production never regenerates
   locks, other installation failures stop startup.
+- `run.sh` syncs Python once (with the `sandbox-plot` extra) and exports
+  `GIGACHAD_DEPS_SYNCED=1`, so `run-backend.sh`/`run-frontend.sh` skip their own
+  sync. `uv sync` is exact by default and removes extras it was not given, so a
+  standalone `uv sync --locked` drops `polars`. Run tests with `uv run --no-sync`.
 - Retain the seven-day release cooldown (`exclude-newer`, `.npmrc`'s
   `min-release-age`) and disabled npm install scripts (`ignore-scripts`). Review
   required scripts before explicitly running them. Neither cooldown nor automated
