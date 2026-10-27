@@ -135,12 +135,11 @@ The independent Agents-in-a-box engine runs agent workflows in task git worktree
 
 ## Memory system
 
-- Keep personal facts/preferences in global memory and project facts in project memory. Atomic memories are single user-confirmed facts, grouped into topics (complete memories with a name and summary).
-- Manage all memory in one window from the sidebar brain button: "You" topics and one group per project. Open a topic to edit its title, summary and facts, add facts, or delete it (with undo).
-- Extract proposed facts and corrections from a chat with the configured memory model. Global and project extraction are independent.
-- Accept, edit, or reject candidates before reconciling them into affected topics. Review the merged result before committing; untouched topics remain unchanged.
-- Commit to update canonical memory and advance that chat/scope's extraction position. Cancel without advancing it, so the same material remains eligible later.
-- Later local chats receive global memory plus their containing project's memory in the system prompt. Memory is explicit document-backed context, not automatic retrieval from every past conversation. Detailed storage and watermark contracts belong in [architecture](architecture.md).
+- Keep personal facts/preferences in global memory and project facts in project memory. Atomic memories are single user-confirmed facts, grouped into topics (complete memories with a name and summary). Global memory starts with Profile and Preferences, other topics emerge from extraction.
+- Manage all memory in one window from the sidebar brain button: "You" topics and one group per project. Open a topic to edit its title, summary and facts, move facts to another topic, merge it into another topic, or delete it (with undo). Regroup a scope to let the memory model propose subject topics, applied only after review.
+- Extract on demand (`/memorize`, `/memorize-global`, `/memorize-project`) with the configured memory model. It proposes additions, corrections and removals of stored facts, and new topics where no existing one fits.
+- Review every proposed change in one screen: accept, edit, move or deny it, then commit. Committing advances that chat/scope's extraction position, cancelling leaves the conversation eligible.
+- Later local chats receive global memory plus their containing project's memory in the system prompt, within a size budget: Profile and Preferences always, other topics newest first, the rest as summaries. Memory is explicit document-backed context, not automatic retrieval from every past conversation. Detailed storage and watermark contracts belong in [architecture](architecture.md).
 
 ## User-visible access and failure limits
 

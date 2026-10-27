@@ -2,12 +2,11 @@
 
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react"
 import { useTab } from "@/contexts/TabContext"
-import { useMemorizeFlow, type BoundMemoryActions, type MemoryPanelState } from "@/features/memory/useMemorizeFlow"
-import { useMemoryTopics } from "@/features/memory/useMemoryTopics"
-import type { MemoryTopic, Message } from "@/lib/domain/types"
+import { useMemorizeFlow, type MemoryPanelState, type MemoryReviewActions } from "@/features/memory/useMemorizeFlow"
+import type { MemoryScope, Message } from "@/lib/domain/types"
 
 /** Which memory stores an extraction targets: `null` is both global and project. */
-export type MemorizeScope = "global" | "project" | null
+export type MemorizeScope = MemoryScope | null
 
 export interface MemoryCommandBar {
   /** Neither the menu nor a memory panel is showing, so either may open. */
@@ -21,8 +20,7 @@ export interface MemoryCommandBar {
   memorize: (scope: MemorizeScope) => Promise<void>
   /** Null while no memorize flow is running. */
   panelState: MemoryPanelState | null
-  panelActions: BoundMemoryActions
-  topics: { globalTopics: MemoryTopic[]; projectTopics: MemoryTopic[] }
+  panelActions: MemoryReviewActions
 }
 
 /** Own the workspace command menu and the memory flow it launches. */
@@ -35,15 +33,13 @@ export function useMemoryCommandBar({ messages, chatId, branchMessageIdx }: {
   const { tab, setModeLabel } = useTab()
   const projectSlug = tab.projectSlug
   const flow = useMemorizeFlow()
-  const topics = useMemoryTopics(projectSlug)
   const [menuOpen, setMenuOpen] = useState(false)
   const [query, setQuery] = useState("")
 
   const phase = flow.state.phase
-  const memoryCount = flow.state.phase === "review"
-    ? flow.state.globalMemories.length + (flow.state.projectMemories?.length ?? 0)
+  const changeCount = flow.state.phase === "review"
+    ? Object.values(flow.state.scopes).reduce((count, review) => count + (review?.operations.length ?? 0), 0)
     : 0
-  const docReviewLoading = flow.state.phase === "doc-review" && flow.state.loadingScopes.length > 0
 
   const openMenu = useCallback(() => {
     setQuery("")
@@ -54,11 +50,10 @@ export function useMemoryCommandBar({ messages, chatId, branchMessageIdx }: {
   useEffect(() => {
     if (tab.appMode !== "chat") return
     if (phase === "extracting") setModeLabel("Memory Management", true)
-    else if (phase === "review") setModeLabel(`${memoryCount} ${memoryCount === 1 ? "memory" : "memories"} proposed`)
-    else if (phase === "doc-review") setModeLabel("Review memory docs", docReviewLoading)
+    else if (phase === "review") setModeLabel(`${changeCount} memory ${changeCount === 1 ? "change" : "changes"} proposed`)
     else if (phase === "error") setModeLabel("Memory error")
     else setModeLabel(tab.title ?? "Chat")
-  }, [phase, docReviewLoading, memoryCount, tab.title, tab.appMode, setModeLabel])
+  }, [phase, changeCount, tab.title, tab.appMode, setModeLabel])
 
   const { extract } = flow
 
@@ -77,7 +72,6 @@ export function useMemoryCommandBar({ messages, chatId, branchMessageIdx }: {
     setQuery,
     memorize,
     panelState: flow.state.phase === "idle" ? null : flow.state,
-    panelActions: flow.bindProject(projectSlug),
-    topics,
+    panelActions: flow.actions,
   }
 }

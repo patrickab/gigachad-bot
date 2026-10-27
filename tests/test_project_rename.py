@@ -91,8 +91,7 @@ def test_rename_cascades_consumers_and_preserves_identity(stores, pool, tmp_path
     put(docs, "project/other/document/cross.canvas", {"attachments": [attachment]})
     docs.write_bytes("project/old/document/report.md", b"old [self](project/old/document/report.md)")
     docs.write_bytes("graph/old/system.c4", b"model {}")
-    docs.write_bytes("memory/project/old/memory/memory.md", b"old facts")
-    put(docs, "memory/project/old/memory/memory.json", [])
+    put(docs, "memory/project/old/memory/memory.json", [{"id": "f", "text": "old fact", "topic": "note"}])
     put(docs, "chat/other/external.json", {"messages": [{"content": "[report](project/old/document/report.md)", "attachments": [{"vaultPath": attachment["path"]}]}]})
     put(docs, "model/unrelated.json", {"slug": "old"})
     put(docs, "project/older/document/untouched.json", {"text": "old"})
@@ -116,7 +115,7 @@ def test_rename_cascades_consumers_and_preserves_identity(stores, pool, tmp_path
     assert get(docs, "project/other/document/cross.canvas")["attachments"][0]["path"] == "project/new-name/document/report.md"
     assert "project/new-name/document/report.md" in get(docs, "chat/other/external.json")["messages"][0]["content"]
     assert docs.read_bytes("graph/new-name/system.c4")[0] == b"model {}"
-    assert MemoryStore(data_store=docs, model="test")._project_memory_path("new-name").read_bytes() == b"old facts"
+    assert [m["text"] for m in MemoryStore(data_store=docs, model="test").list_memories("project", "new-name")] == ["old fact"]
     assert isinstance(ArchitectureStore.for_project(docs, "new-name", [str(mount)])._files, DirectoryFiles)
     assert source.read_text() == "model { system = system 'Original' }"
     moved = assets.read_by_id(asset.id)

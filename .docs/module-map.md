@@ -149,8 +149,9 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |-- factory/              Boards, task details, settings and previews
 |       |   |   |-- FactoryBoard.tsx
 |       |   |   `-- TaskView.tsx
-|       |   |-- memory/               Review board, viewer and memory commands
-|       |   |   |-- MemoryBoard.tsx
+|       |   |-- memory/               Memory window, review panel and memory commands
+|       |   |   |-- MemoryViewer.tsx  Topic overview, topic page, regroup review
+|       |   |   |-- MemoryPanel.tsx   Single-screen review of proposed operations
 |       |   |   `-- useMemorizeFlow.ts Extraction, review and commit orchestration
 |       |   |-- projects/             Project dashboard/kanban
 |       |   |   `-- ProjectDashboard.tsx

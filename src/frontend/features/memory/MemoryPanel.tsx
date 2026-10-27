@@ -1,408 +1,190 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
-import { motion, AnimatePresence } from "framer-motion"
-import { Check, FolderOpen, GitCompare, Globe, Loader2, Plus, X } from "lucide-react"
+import { useEffect } from "react"
+import { Loader2, Minus, Pencil, Plus, RotateCcw, X } from "lucide-react"
 import { FloatingWindow } from "@/components/ui/FloatingWindow"
-import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
-import { AddMemoryCard, MemoryErrorCard } from "@/features/memory/MemoryCard"
-import { MemoryBoard } from "@/features/memory/MemoryBoard"
-import { computeLineDiff } from "@/lib/diff"
-import type { BoundMemoryActions, MemoryPanelState } from "@/features/memory/useMemorizeFlow"
-import type { MemoryTopic, PreviewMemory, ProposedMemory } from "@/lib/domain/types"
-import { groupByTopicOrder, renderMemoriesMarkdown } from "@/features/memory/memoryUtils"
+import { StyledSelect } from "@/components/ui/StyledSelect"
+import { cn } from "@/lib/utils"
+import { EditableText } from "@/features/memory/EditableText"
+import { acceptedChanges, type MemoryPanelState, type MemoryReviewActions, type ReviewOperation, type ReviewScope, type ReviewTopic } from "@/features/memory/useMemorizeFlow"
+import { formatTopicHeading } from "@/features/memory/memoryUtils"
+import { useChatColumnPadding } from "@/features/memory/useChatColumnPadding"
+import type { MemoryScope, MemoryTopic } from "@/lib/domain/types"
 
-interface MemoryPanelProps {
-  state: MemoryPanelState
-  projectEnabled: boolean
-  actions: BoundMemoryActions
-  globalTopics: MemoryTopic[]
-  projectTopics: MemoryTopic[]
+const SCOPE_LABELS: Record<MemoryScope, string> = { global: "You", project: "Project" }
+const OP_ICONS = { add: Plus, update: Pencil, delete: Minus }
+const OP_LABELS = { add: "Add", update: "Update", delete: "Delete" }
+const ICON_BUTTON_CLASS = "rounded p-0.5 text-ink-subtle transition-colors hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
+
+/** Topics of one reviewed scope in display order: stored topics first, then new ones, each with its operations. */
+function topicGroups(review: ReviewScope, stored: MemoryTopic[]) {
+  const order = [...stored.map((t) => t.name), ...review.topics.map((t) => t.name), ...review.operations.map((o) => o.topic)]
+  const names = [...new Set(order)].filter((name) => review.operations.some((o) => o.topic === name) || review.topics.some((t) => t.name === name))
+  return names.map((name) => ({
+    name,
+    proposal: review.topics.find((t) => t.name === name),
+    operations: review.operations.filter((o) => o.topic === name),
+  }))
 }
 
-function LoadingWorkspace({ message }: { message: string }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="flex h-full flex-col"
-      onClick={(e) => e.stopPropagation()}
-    >
-      <div className="flex items-center border-b border-divider/50 px-4 py-2 shrink-0">
-        <Loader2 className="h-3.5 w-3.5 animate-spin text-ink-muted mr-2" />
-        <span className="text-xs font-medium text-ink-muted">{message}</span>
-      </div>
-      <div className="flex-1" />
-    </motion.div>
-  )
-}
-
-function ErrorWorkspace({ error, onClose }: { error: string | null; onClose: () => void }) {
-  return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="flex h-full flex-col" onClick={(e) => e.stopPropagation()}>
-      <div className="flex items-center justify-between border-b border-divider/50 px-4 py-2 shrink-0">
-        <span className="text-xs font-medium text-ink-muted">Memory Management</span>
-        <button onClick={onClose}
-          className="flex items-center gap-1.5 text-xs text-ink-muted hover:text-ink transition-colors">
-          <X className="h-3 w-3" />Close
-        </button>
-      </div>
-      <MemoryErrorCard message={error || "Memory operation failed."} />
-    </motion.div>
-  )
-}
-
-// Candidate review: extracted memories, editable + accept/deny
-function CandidateWorkspace({
-  globalMemories,
-  projectMemories,
-  projectEnabled,
-  globalTopics,
-  projectTopics,
-  onAcceptRemaining,
-  onCancelRemaining,
-  onAcceptMemory,
-  onCancelMemory,
-  onAddMemory,
-  onEditMemory,
-  onEditTopic,
-}: {
-  globalMemories: ProposedMemory[]
-  projectMemories: ProposedMemory[] | null
-  projectEnabled: boolean
-  globalTopics: MemoryTopic[]
-  projectTopics: MemoryTopic[]
-  onAcceptRemaining: () => void
-  onCancelRemaining: () => void
-  onAcceptMemory: (memoryId: string) => void
-  onCancelMemory: (memoryId: string) => void
-  onAddMemory: (scope: "global" | "project", memory: string) => void
-  onEditMemory: (memoryId: string, text: string) => void
-  onEditTopic: (memoryId: string, topic: string) => void
-}) {
-  const total = globalMemories.length + (projectMemories?.length ?? 0)
-  const [addingScope, setAddingScope] = useState<"global" | "project" | null>(null)
-
-  return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="h-full flex flex-col" onClick={(e) => e.stopPropagation()}>
-      <div className="flex items-center justify-between border-b border-divider/50 px-4 py-2 shrink-0">
-        <div className="flex items-center gap-3">
-          <span className="text-xs font-medium text-ink-muted">Review memories</span>
-          <span className="text-[10px] text-ink-faint">{total} candidate{total === 1 ? "" : "s"}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={onCancelRemaining}
-            className="flex items-center gap-1.5 text-xs text-ink-muted hover:text-ink transition-colors">
-            <X className="h-3 w-3" />Deny remaining
-          </button>
-          <button onClick={onAcceptRemaining}
-            className="flex items-center gap-1.5 rounded-md border border-divider-strong bg-surface-elevated px-3 py-1.5 text-xs font-medium text-ink hover:bg-hover transition-colors">
-            <Check className="h-3 w-3" />Accept remaining
-          </button>
-        </div>
-      </div>
-
-      <div className="flex-1 flex min-h-0">
-        <div className="w-1/2 min-w-0 border-r border-divider/50 flex flex-col">
-          <div className="flex items-center justify-between border-b border-divider/30 px-3 py-1.5">
-            <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider text-ink-faint">
-              <Globe className="h-3 w-3" />Global profile
-            </div>
-            <button aria-label="Add global memory" onClick={() => setAddingScope(addingScope === "global" ? null : "global")}
-              className="rounded-md p-1 text-ink-subtle hover:bg-hover hover:text-ink transition-colors">
-              <Plus className="h-3.5 w-3.5" />
-            </button>
-          </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
-            {addingScope === "global" && (
-              <AddMemoryCard scope="global" onAddMemory={onAddMemory} onCancel={() => setAddingScope(null)} />
-            )}
-            {globalMemories.length > 0 || globalTopics.length > 0 ? (
-              <MemoryBoard
-                memories={globalMemories}
-                topicOrder={globalTopics}
-                mode="review"
-                onChange={onEditMemory}
-                onChangeTopic={onEditTopic}
-                onAccept={onAcceptMemory}
-                onCancel={onCancelMemory}
-              />
-            ) : (
-              <div className="text-xs italic text-ink-faint">No global candidates.</div>
-            )}
-          </div>
-        </div>
-        <div className="w-1/2 min-w-0 flex flex-col">
-          <div className="flex items-center justify-between border-b border-divider/30 px-3 py-1.5">
-            <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider text-ink-faint">
-              <FolderOpen className="h-3 w-3" />Project memory
-            </div>
-            {projectEnabled && (
-              <button aria-label="Add project memory" onClick={() => setAddingScope(addingScope === "project" ? null : "project")}
-                className="rounded-md p-1 text-ink-subtle hover:bg-hover hover:text-ink transition-colors">
-                <Plus className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
-            {addingScope === "project" && projectEnabled && (
-              <AddMemoryCard scope="project" onAddMemory={onAddMemory} onCancel={() => setAddingScope(null)} />
-            )}
-            {projectEnabled && (projectMemories && projectMemories.length > 0 || projectTopics.length > 0) ? (
-              <MemoryBoard
-                memories={projectMemories ?? []}
-                topicOrder={projectTopics}
-                mode="review"
-                onChange={onEditMemory}
-                onChangeTopic={onEditTopic}
-                onAccept={onAcceptMemory}
-                onCancel={onCancelMemory}
-              />
-            ) : (
-              <div className="text-xs italic text-ink-faint">No project candidates.</div>
-            )}
-          </div>
-        </div>
-      </div>
-    </motion.div>
-  )
-}
-
-// Doc review: reconciled memory cards + diff
-interface PreviewTab {
-  scope: "global" | "project"
-  icon: typeof Globe
-  title: string
-  existing_markdown: string
-  revised_markdown: string
-  existing_memories: PreviewMemory[]
-  revised_memories: PreviewMemory[]
-  loading: boolean
-}
-
-function DocumentWorkspace({
-  previews,
-  globalTopics,
-  projectTopics,
-  onCommitDocuments,
-  onCancelRemaining,
-  onEditMemory,
-  onEditTopic,
-  onRemoveMemory,
-}: {
-  previews: PreviewTab[]
-  globalTopics: MemoryTopic[]
-  projectTopics: MemoryTopic[]
-  onCommitDocuments: () => Promise<void>
-  onCancelRemaining: () => void
-  onEditMemory: (scope: "global" | "project", memoryId: string, text: string) => void
-  onEditTopic: (scope: "global" | "project", memoryId: string, topic: string) => void
-  onRemoveMemory: (scope: "global" | "project", memoryId: string) => void
-}) {
-  const [activeIdx, setActiveIdx] = useState(0)
-  const [processing, setProcessing] = useState(false)
-  const active = previews[activeIdx] ?? previews[0]
-
-  const handleCommit = useCallback(async () => {
-    setProcessing(true)
-    try { await onCommitDocuments() } finally { setProcessing(false) }
-  }, [onCommitDocuments])
-
-  if (!active) return null
-
-  const anyLoading = previews.some((p) => p.loading)
-  const ActiveIcon = active.icon
-  const memories = active.revised_memories
-  const activeTopics = active.scope === "global" ? globalTopics : projectTopics
-  const revisedMarkdown = renderMemoriesMarkdown(memories, active.title, activeTopics).trimEnd() + "\n"
-  const diff = active.loading ? "" : computeLineDiff(active.existing_markdown || "", revisedMarkdown)
-
-  return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="h-full flex flex-col" onClick={(e) => e.stopPropagation()}>
-      <div className="flex items-center justify-between border-b border-divider/50 px-4 py-2 shrink-0">
-        <div className="flex items-center gap-3">
-          {(processing || anyLoading) && <Loader2 className="h-3.5 w-3.5 animate-spin text-ink-muted" />}
-          <span className="text-xs font-medium text-ink-muted">{anyLoading ? "Preparing changes" : "Review changes"}</span>
-          {previews.length > 1 && (
-            <div className="flex items-center gap-1 rounded-lg border border-divider bg-surface p-1">
-              {previews.map((p, i) => {
-                const Icon = p.icon
-                return (
-                  <button key={p.scope} onClick={() => setActiveIdx(i)}
-                    className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs transition-colors ${i === activeIdx ? "bg-surface-elevated text-ink" : "text-ink-muted hover:text-ink hover:bg-hover"}`}>
-                    <Icon className="h-3.5 w-3.5" />{p.title}
-                  </button>
-                )
-              })}
-            </div>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={onCancelRemaining} disabled={processing}
-            className="flex items-center gap-1.5 text-xs text-ink-muted hover:text-ink disabled:opacity-40 transition-colors">
-            <X className="h-3 w-3" />Cancel
-          </button>
-          <button onClick={handleCommit} disabled={processing || anyLoading}
-            className="flex items-center gap-1.5 rounded-md border border-divider-strong bg-surface-elevated px-3 py-1.5 text-xs font-medium text-ink hover:bg-hover disabled:opacity-40 transition-colors">
-            {processing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
-            Commit
-          </button>
-        </div>
-      </div>
-
-      {active.loading ? (
-        <div className="flex flex-1 items-center justify-center gap-2 min-h-0">
-          <Loader2 className="h-4 w-4 animate-spin text-ink-muted" />
-          <span className="text-xs text-ink-muted">Reconciling memories…</span>
-        </div>
-      ) : (
-        <div className="flex-1 flex min-h-0">
-          <div className="w-1/2 min-w-0 border-r border-divider/50 flex flex-col">
-            <div className="flex items-center justify-between border-b border-divider/30 px-3 py-1.5">
-              <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider text-ink-faint">
-                <ActiveIcon className="h-3 w-3" />Merged memories
-              </div>
-              <span className="text-[10px] text-ink-faint">{memories.length} entries</span>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4">
-              <MemoryBoard
-                memories={memories}
-                topicOrder={activeTopics}
-                mode="display"
-                onChange={(id, text) => onEditMemory(active.scope, id, text)}
-                onChangeTopic={(id, cat) => onEditTopic(active.scope, id, cat)}
-                onRemove={(id) => onRemoveMemory(active.scope, id)}
-              />
-            </div>
-          </div>
-          <div className="w-1/2 min-w-0 flex flex-col">
-            <div className="flex items-center gap-2 border-b border-divider/30 px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-ink-faint">
-              <GitCompare className="h-3 w-3" />Diff
-            </div>
-            <div className="flex-1 overflow-auto p-4">
-              {diff ? (
-                <LaTeXMarkdown content={"```diff\n" + diff + "\n```"} compact />
-              ) : (
-                <div className="text-xs italic text-ink-faint">No changes.</div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </motion.div>
-  )
-}
-
-const NO_MEMORIES: ProposedMemory[] = []
-
-// Main MemoryPanel
-export function MemoryPanel({
-  state, projectEnabled, actions, globalTopics, projectTopics,
-}: MemoryPanelProps) {
-  const extractingMode = state.phase === "extracting"
-  const errorMode = state.phase === "error"
-  const candidatesMode = state.phase === "review"
-  const documentsMode = state.phase === "doc-review"
-  const globalMemories = candidatesMode ? state.globalMemories : NO_MEMORIES
-  const projectMemories = candidatesMode ? state.projectMemories : null
-  const error = errorMode ? state.error : null
-
-  // Global tab first, then project. A scope still reconciling gets a loading placeholder tab.
-  const previews: PreviewTab[] = []
-  if (state.phase === "doc-review") {
-    const tabDefs = [
-      { scope: "global" as const, icon: Globe, title: "Global Profile", preview: state.globalPreview },
-      { scope: "project" as const, icon: FolderOpen, title: "Project Memory", preview: state.projectPreview },
-    ]
-    for (const t of tabDefs) {
-      if (t.preview) {
-        previews.push({ scope: t.scope, icon: t.icon, title: t.title, ...t.preview, loading: false })
-      } else if (state.loadingScopes.includes(t.scope)) {
-        previews.push({
-          scope: t.scope, icon: t.icon, title: t.title,
-          existing_markdown: "", revised_markdown: "",
-          existing_memories: [], revised_memories: [], loading: true,
-        })
-      }
-    }
-  }
+/** Review proposed memory changes in one screen: Ctrl+Enter commits accepted ones, Esc cancels. */
+export function MemoryPanel({ state, actions }: { state: MemoryPanelState; actions: MemoryReviewActions }) {
+  const columnPadding = useChatColumnPadding()
+  const reviewing = state.phase === "review"
 
   useEffect(() => {
+    if (!reviewing) return
     function onKey(e: KeyboardEvent) {
-      const target = e.target as HTMLElement | null
-      const editable = !!target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
-      if (editable) return
-
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
         e.preventDefault()
-        if (documentsMode) actions.commitDocuments()
-        else actions.acceptRemaining()
-        return
-      }
-      // +/- act on the first candidate as displayed (global before project)
-      if (candidatesMode) {
-        const globalSections = groupByTopicOrder(globalTopics, globalMemories)
-        const projectSections = groupByTopicOrder(projectTopics, projectMemories ?? [])
-        const firstGlobal = globalSections.find(s => s.items.length > 0)?.items[0]
-        const firstProject = projectSections.find(s => s.items.length > 0)?.items[0]
-        const nextId = (firstGlobal ?? firstProject)?.id
-        if (!nextId) return
-        if (e.key === "+" || e.key === "=") {
-          e.preventDefault()
-          actions.acceptMemory(nextId)
-        } else if (e.key === "-") {
-          e.preventDefault()
-          actions.cancelMemory(nextId)
-        }
+        void actions.commit()
       }
     }
     document.addEventListener("keydown", onKey)
     return () => document.removeEventListener("keydown", onKey)
-  }, [actions, documentsMode, candidatesMode, globalTopics, projectTopics, globalMemories, projectMemories])
+  }, [reviewing, actions])
+
+  const acceptedCount = state.phase === "review"
+    ? Object.values(state.scopes).reduce((count, review) => count + (review ? acceptedChanges(review).operations.length : 0), 0)
+    : 0
 
   return (
-    <AnimatePresence>
-      <FloatingWindow
-        onClose={extractingMode ? undefined : actions.cancelRemaining}
-        overlayClassName="z-[80]"
-        panelClassName={(extractingMode || errorMode) ? "h-[420px] max-w-2xl" : "h-[86vh] max-h-[840px]"}
-      >
-        {extractingMode ? (
-          <LoadingWorkspace message="Reading conversation context" />
-        ) : errorMode ? (
-          <ErrorWorkspace error={error} onClose={actions.cancelRemaining} />
-        ) : documentsMode ? (
-          <DocumentWorkspace
-            previews={previews}
-            globalTopics={globalTopics}
-            projectTopics={projectEnabled ? projectTopics : []}
-            onCommitDocuments={actions.commitDocuments}
-            onCancelRemaining={actions.cancelRemaining}
-            onEditMemory={actions.editRevisedMemory}
-            onEditTopic={actions.editRevisedMemoryTopic}
-            onRemoveMemory={actions.removeRevisedMemory}
-          />
+    <FloatingWindow onClose={state.phase === "extracting" ? undefined : () => void actions.cancel()} label="Review memory"
+      overlayClassName="z-[80]" overlayStyle={columnPadding} panelClassName="h-auto max-h-[min(86vh,840px)] max-w-4xl bg-surface">
+      {state.phase === "extracting" && (
+        <div className="flex items-center gap-2 px-6 py-5 text-sm text-ink-muted">
+          <Loader2 className="h-4 w-4 animate-spin" />Reading the conversation
+        </div>
+      )}
+      {state.phase === "error" && (
+        <div className="flex items-center justify-between gap-4 px-6 py-5">
+          <p className="text-sm text-ink-muted">{state.error}</p>
+          <button onClick={() => void actions.cancel()} aria-label="Close" className="rounded-md p-1 text-ink-subtle hover:bg-hover hover:text-ink">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+      {state.phase === "review" && (
+        <>
+          <div className="flex shrink-0 items-center justify-between gap-4 px-6 pb-2 pt-5">
+            <h2 className="text-base font-semibold text-ink">Review memory</h2>
+            <div className="flex items-center gap-2">
+              <button onClick={() => void actions.cancel()} disabled={state.committing}
+                className="px-2 py-1.5 text-sm text-ink-muted transition-colors hover:text-ink disabled:opacity-40">Cancel</button>
+              <button onClick={() => void actions.commit()} disabled={state.committing}
+                className="flex items-center gap-1.5 rounded-md bg-surface-elevated px-3 py-1.5 text-sm text-ink transition-colors hover:bg-hover disabled:opacity-40 focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">
+                {state.committing && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {acceptedCount > 0 ? `Commit ${acceptedCount}` : "Commit"}
+              </button>
+            </div>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-8">
+            {(["global", "project"] as const).map((scope) => {
+              const review = state.scopes[scope]
+              if (!review) return null
+              const stored = state.storedTopics[scope] ?? []
+              const options = [...new Set([...stored.map((t) => t.name), ...review.topics.map((t) => t.name)])]
+                .map((name) => ({ value: name, label: formatTopicHeading(name) }))
+              return (
+                <section key={scope} aria-label={SCOPE_LABELS[scope]} className="pt-4">
+                  <h3 className="text-sm font-semibold text-ink">{SCOPE_LABELS[scope]}</h3>
+                  {topicGroups(review, stored).map((group) => (
+                    <TopicGroup key={group.name} scope={scope} name={group.name} proposal={group.proposal}
+                      operations={group.operations} topicOptions={options} actions={actions} />
+                  ))}
+                </section>
+              )
+            })}
+          </div>
+        </>
+      )}
+    </FloatingWindow>
+  )
+}
+
+function TopicGroup({ scope, name, proposal, operations, topicOptions, actions }: {
+  scope: MemoryScope
+  name: string
+  proposal: ReviewTopic | undefined
+  operations: ReviewOperation[]
+  topicOptions: { value: string; label: string }[]
+  actions: MemoryReviewActions
+}) {
+  const isNew = proposal?.previous_summary === null
+  const revision = proposal && !isNew ? proposal : undefined
+
+  return (
+    <div className="mt-4 border-b border-divider/40 pb-4">
+      <div className="flex items-baseline gap-2">
+        {isNew ? (
+          <EditableText value={formatTopicHeading(name)} label={`Title of new topic ${formatTopicHeading(name)}`}
+            onCommit={(title) => actions.renameTopic(scope, name, title)} className="w-auto text-sm font-medium text-ink" />
         ) : (
-          <CandidateWorkspace
-            globalMemories={globalMemories}
-            projectMemories={projectMemories}
-            projectEnabled={projectEnabled}
-            globalTopics={globalTopics}
-            projectTopics={projectEnabled ? projectTopics : []}
-            onAcceptRemaining={actions.acceptRemaining}
-            onCancelRemaining={actions.cancelRemaining}
-            onAcceptMemory={actions.acceptMemory}
-            onCancelMemory={actions.cancelMemory}
-            onAddMemory={actions.addMemory}
-            onEditMemory={actions.editMemory}
-            onEditTopic={actions.editMemoryTopic}
-          />
+          <span className="text-sm font-medium text-ink">{formatTopicHeading(name)}</span>
         )}
-      </FloatingWindow>
-    </AnimatePresence>
+        {isNew && <span className="text-xs text-ink-subtle">new topic</span>}
+      </div>
+
+      {isNew && proposal && (
+        <EditableText value={proposal.summary} label={`Summary of ${formatTopicHeading(name)}`} multiline
+          onCommit={(summary) => actions.editTopicSummary(scope, name, summary)} className="mt-0.5 text-sm text-ink-muted" />
+      )}
+      {revision && (
+        <div className={cn("group/row mt-1 flex items-start gap-2 text-sm", revision.excluded && "opacity-40")}>
+          <div className="min-w-0 flex-1">
+            <p className="text-ink-subtle line-through">{revision.previous_summary}</p>
+            <EditableText value={revision.summary} label={`Summary of ${formatTopicHeading(name)}`} multiline
+              onCommit={(summary) => actions.editTopicSummary(scope, name, summary)} className="text-ink-muted" />
+          </div>
+          <ExcludeButton excluded={revision.excluded} label={`summary of ${formatTopicHeading(name)}`} onToggle={() => actions.toggleTopic(scope, name)} />
+        </div>
+      )}
+
+      <ul className="mt-2 space-y-1.5">
+        {operations.map((operation) => (
+          <OperationRow key={operation.id} scope={scope} operation={operation} topicOptions={topicOptions} actions={actions} />
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function OperationRow({ scope, operation, topicOptions, actions }: {
+  scope: MemoryScope
+  operation: ReviewOperation
+  topicOptions: { value: string; label: string }[]
+  actions: MemoryReviewActions
+}) {
+  const Icon = OP_ICONS[operation.op]
+  return (
+    <li className={cn("group/row flex items-start gap-2 text-sm leading-6", operation.excluded && "opacity-40")}>
+      <Icon className="mt-1 h-3.5 w-3.5 shrink-0 text-ink-subtle" aria-label={OP_LABELS[operation.op]} />
+      <div className="min-w-0 flex-1">
+        {operation.target_text && (
+          <p className="text-ink-subtle line-through">{operation.target_text}</p>
+        )}
+        {operation.op !== "delete" && (
+          <EditableText value={operation.text} label="Memory" multiline className="text-ink"
+            onCommit={(text) => actions.editOperation(scope, operation.id, text)} />
+        )}
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        {operation.op !== "delete" && topicOptions.length > 1 && (
+          <div className="opacity-0 transition-opacity focus-within:opacity-100 group-hover/row:opacity-100">
+            <StyledSelect variant="inline" ariaLabel="Move to topic" value={operation.topic} options={topicOptions}
+              onChange={(topic) => actions.moveOperation(scope, operation.id, topic)} className="text-xs text-ink-subtle hover:text-ink" />
+          </div>
+        )}
+        <ExcludeButton excluded={operation.excluded} label="change" onToggle={() => actions.toggleOperation(scope, operation.id)} />
+      </div>
+    </li>
+  )
+}
+
+function ExcludeButton({ excluded, label, onToggle }: { excluded: boolean; label: string; onToggle: () => void }) {
+  return (
+    <button onClick={onToggle} aria-label={excluded ? `Include ${label}` : `Deny ${label}`} aria-pressed={excluded} className={ICON_BUTTON_CLASS}>
+      {excluded ? <RotateCcw className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
+    </button>
   )
 }

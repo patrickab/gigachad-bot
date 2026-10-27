@@ -1,4 +1,4 @@
-import type { Attachment, BackendConfig, BranchMeta, ChatHistoriesResponse, ChatRequest, DirectoryListing, KanbanCard, MemoryExtractResponse, MemoryPreviewResponse, MemoryTopic, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpArchivedSession, OmpCatalog, OmpOverview, OmpSystemPrompt, FactoryDefaults, FactoryEvent, FactoryMessage, FactoryPreview, FactoryRepo, FactoryTask, FactoryTaskDetail, FactoryWorkflow, TaskAction, TaskCreate, PreviewMemory, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, ProposedMemory, ReasoningLevels, Usage, RootFile, FileTreeNode } from "@/lib/domain/types"
+import type { Attachment, BackendConfig, BranchMeta, ChatHistoriesResponse, ChatRequest, DirectoryListing, KanbanCard, MemoryExtractResponse, MemoryOperation, MemoryScope, MemoryTopic, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpArchivedSession, OmpCatalog, OmpOverview, OmpSystemPrompt, FactoryDefaults, FactoryEvent, FactoryMessage, FactoryPreview, FactoryRepo, FactoryTask, FactoryTaskDetail, FactoryWorkflow, TaskAction, TaskCreate, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, StoredMemory, ReasoningLevels, Usage, RootFile, FileTreeNode } from "@/lib/domain/types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { getApiBase } from "./config"
@@ -577,7 +577,7 @@ export async function extractMemories(
   messages: { role: string; content: string }[],
   projectSlug?: string | null,
   chatId?: string | null,
-  scope?: "global" | "project" | null,
+  scope?: MemoryScope | null,
 ): Promise<MemoryExtractResponse> {
   return post<MemoryExtractResponse>("/memory/extract", {
     messages,
@@ -587,48 +587,40 @@ export async function extractMemories(
   })
 }
 
-export async function cancelMemories(reviewId: string, projectSlug?: string | null): Promise<void> {
-  await post("/memory/cancel", { review_id: reviewId, project_slug: projectSlug ?? null })
+export async function cancelMemories(reviewId: string): Promise<void> {
+  await post("/memory/cancel", { review_id: reviewId })
 }
 
-export async function commitMemoryDoc(
-  scope: string,
-  acceptedMemories: ProposedMemory[],
+/** Apply accepted operations and topics of one scope, advancing the review's watermark. */
+export async function commitMemories(
+  scope: MemoryScope,
+  operations: MemoryOperation[],
+  topics: MemoryTopic[],
   projectSlug: string | null,
-  reviewId: string | null,
-  revisedMemories?: PreviewMemory[] | null,
+  reviewId: string,
 ): Promise<void> {
-  await post("/memory/commit", {
-    scope,
-    accepted_memories: acceptedMemories,
-    project_slug: projectSlug,
-    review_id: reviewId,
-    ...(revisedMemories ? { revised_memories: revisedMemories } : {}),
-  })
+  await post("/memory/commit", { scope, operations, topics, project_slug: projectSlug, review_id: reviewId })
 }
 
-export async function previewMemoryDoc(
-  scope: string,
-  acceptedMemories: ProposedMemory[],
-  projectSlug: string | null,
-): Promise<MemoryPreviewResponse> {
-  return post("/memory/preview", {
-    scope,
-    accepted_memories: acceptedMemories,
-    project_slug: projectSlug,
-  })
-}
-
-export async function getMemories(scope: "global" | "project", projectSlug?: string | null): Promise<{ memories: PreviewMemory[] }> {
+export async function getMemories(scope: MemoryScope, projectSlug?: string | null): Promise<{ memories: StoredMemory[] }> {
   return request(`/memory/memories${toQuery({ scope, project_slug: projectSlug })}`)
 }
 
-export async function getTopics(scope: "global" | "project", projectSlug?: string | null, signal?: AbortSignal): Promise<{ topics: MemoryTopic[] }> {
+export async function saveMemories(scope: MemoryScope, memories: StoredMemory[], projectSlug?: string | null): Promise<void> {
+  await put("/memory/memories", { scope, memories, project_slug: projectSlug ?? null })
+}
+
+export async function getTopics(scope: MemoryScope, projectSlug?: string | null, signal?: AbortSignal): Promise<{ topics: MemoryTopic[] }> {
   return request(`/memory/topics${toQuery({ scope, project_slug: projectSlug })}`, { signal })
 }
 
-export async function saveTopics(scope: "global" | "project", topics: MemoryTopic[], projectSlug?: string | null): Promise<void> {
+export async function saveTopics(scope: MemoryScope, topics: MemoryTopic[], projectSlug?: string | null): Promise<void> {
   await put("/memory/topics", { scope, topics, project_slug: projectSlug ?? null })
+}
+
+/** Proposed regrouping of a scope's facts into subject topics, nothing is written. */
+export async function regroupMemories(scope: MemoryScope, projectSlug?: string | null): Promise<{ topics: MemoryTopic[]; memories: StoredMemory[] }> {
+  return post("/memory/regroup", { scope, project_slug: projectSlug ?? null })
 }
 
 export async function fetchOmpOverview(signal?: AbortSignal): Promise<OmpOverview> {

@@ -1,165 +1,148 @@
 from __future__ import annotations
 
-from typing import Annotated
+from dataclasses import asdict
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from backend.routes.deps import get_memory_store, request_client
-from lib.memory_store import FALLBACK_TOPIC, MemoryStore
-from lib.memory_store import ProposedMemory as MemoryProposedMemory
+from lib.memory_store import MemoryOperation, MemoryStore, ScopeProposal
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 
 MemoryStoreDep = Annotated[MemoryStore, Depends(get_memory_store)]
+Scope = Literal["global", "project"]
 
 
 class MemoryExtractRequest(BaseModel):
     messages: list[dict[str, str]]
     project_slug: str | None = None
     chat_id: str | None = None
-    scope: str | None = None  # "global" | "project" | None (both)
+    scope: Scope | None = None  # None extracts both
 
 
-class MemoryReviewRequest(BaseModel):
+class MemoryCancelRequest(BaseModel):
     review_id: str
-    project_slug: str | None = None
 
 
-class ProposedMemoryModel(BaseModel):
+class OperationModel(BaseModel):
     id: str
-    memory: str
-    scope: str
-    topic: str | None = None
+    op: Literal["add", "update", "delete"]
+    topic: str
+    text: str = ""
+    target_id: str | None = None
+
+
+class TopicModel(BaseModel):
+    name: str
+    summary: str
 
 
 class MemoryCommitRequest(BaseModel):
-    scope: str  # "global" | "project"
-    accepted_memories: list[ProposedMemoryModel]
+    scope: Scope
+    operations: list[OperationModel]
+    topics: list[TopicModel] = []
     project_slug: str | None = None
     review_id: str | None = None
-    revised_memories: list[dict] | None = None
 
 
-class MemoryPreviewRequest(BaseModel):
-    scope: str
-    accepted_memories: list[ProposedMemoryModel]
+class TopicSetRequest(BaseModel):
+    scope: Scope
+    topics: list[TopicModel]
     project_slug: str | None = None
+
+
+class MemoriesSetRequest(BaseModel):
+    scope: Scope
+    memories: list[dict]
+    project_slug: str | None = None
+
+
+class RegroupRequest(BaseModel):
+    scope: Scope
+    project_slug: str | None = None
+
+
+def _proposal_json(proposal: ScopeProposal | None) -> dict | None:
+    if not proposal:
+        return None
+    return {"operations": [asdict(o) for o in proposal.operations], "topics": [asdict(t) for t in proposal.topics]}
 
 
 @router.post("/extract")
-async def extract_memories(
-    req: MemoryExtractRequest,
-    store: MemoryStoreDep,
-) -> dict:
-    """Propose memories from a conversation for user review, `project` is None without project memories."""
+async def extract_memories(req: MemoryExtractRequest, store: MemoryStoreDep) -> dict:
+    """Propose memory operations from a conversation for user review, a scope is None when not extracted."""
     try:
         with request_client() as client:
-            result = await store.extract(
-                client, req.messages, project_slug=req.project_slug, chat_id=req.chat_id, scope=req.scope
-            )
+            result = await store.extract(client, req.messages, project_slug=req.project_slug, chat_id=req.chat_id, scope=req.scope)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     return {
         "review_id": result.review_id,
-        "global": [{"id": m.id, "memory": m.memory, "scope": m.scope, "topic": m.topic} for m in result.global_memories],
-        "project": [{"id": m.id, "memory": m.memory, "scope": m.scope, "topic": m.topic} for m in result.project_memories]
-        if result.project_memories
-        else None,
+        "global": _proposal_json(result.global_proposal),
+        "project": _proposal_json(result.project_proposal),
     }
 
 
 @router.post("/commit")
-async def commit_memory_docs(
-    req: MemoryCommitRequest,
-    store: MemoryStoreDep,
-) -> dict:
-    """Merge accepted memories into the stored memory documents."""
+def commit_memories(req: MemoryCommitRequest, store: MemoryStoreDep) -> dict:
+    """Apply accepted operations and topics, then advance the reviewed chat's watermark."""
+    operations = [MemoryOperation(o.id, o.op, req.scope, o.topic, o.text, o.target_id) for o in req.operations]
     try:
-        with request_client() as client:
-            accepted = [MemoryProposedMemory(m.id, m.memory, m.scope, m.topic or FALLBACK_TOPIC) for m in req.accepted_memories]
-            await store.commit_async(
-                llm=client,
-                scope=req.scope,
-                accepted_memories=accepted,
-                project_slug=req.project_slug,
-                review_id=req.review_id,
-                revised_memories=req.revised_memories,
-            )
+        store.commit(req.scope, operations, [t.model_dump() for t in req.topics], req.project_slug, req.review_id)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     return {"status": "committed"}
 
 
-@router.post("/preview")
-async def preview_memory_docs(
-    req: MemoryPreviewRequest,
-    store: MemoryStoreDep,
-) -> dict:
-    """Dry-run a commit, return the resulting memory documents without saving."""
-    try:
-        with request_client() as client:
-            accepted = [MemoryProposedMemory(m.id, m.memory, m.scope, m.topic or FALLBACK_TOPIC) for m in req.accepted_memories]
-            result = await store.preview(
-                llm=client,
-                scope=req.scope,
-                accepted_memories=accepted,
-                project_slug=req.project_slug,
-            )
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
-    return result
-
-
 @router.post("/cancel")
-async def cancel_memories(
-    req: MemoryReviewRequest,
-    store: MemoryStoreDep,
-) -> dict:
-    """Discard a pending extraction review."""
-    try:
-        await store.cancel_async(review_id=req.review_id)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
+def cancel_memories(req: MemoryCancelRequest, store: MemoryStoreDep) -> dict:
+    """Discard a pending review without advancing its watermark."""
+    store.cancel(req.review_id)
     return {"status": "cancelled"}
 
 
 @router.get("/memories")
-def list_memories(
-    store: MemoryStoreDep,
-    scope: str = Query(...),
-    project_slug: str | None = Query(None, alias="project_slug"),
-) -> dict:
+def list_memories(store: MemoryStoreDep, scope: Scope, project_slug: str | None = None) -> dict:
     try:
-        memories = store.list_memories(scope=scope, project_slug=project_slug)
+        return {"memories": store.list_memories(scope, project_slug)}
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
-    return {"memories": memories}
+
+
+@router.put("/memories")
+def set_memories(req: MemoriesSetRequest, store: MemoryStoreDep) -> dict:
+    """Replace a scope's stored memories, used by the memory window's direct edits."""
+    try:
+        store.write_memories(req.scope, req.memories, req.project_slug)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    return {"status": "saved"}
 
 
 @router.get("/topics")
-def get_topics(
-    store: MemoryStoreDep,
-    scope: str = Query(...),
-    project_slug: str | None = Query(None, alias="project_slug"),
-) -> dict:
+def get_topics(store: MemoryStoreDep, scope: Scope, project_slug: str | None = None) -> dict:
     try:
-        topics = store.get_topics(scope=scope, project_slug=project_slug)
+        return {"topics": store.get_topics(scope, project_slug)}
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
-    return {"topics": topics}
-
-
-class TopicSetRequest(BaseModel):
-    scope: str
-    topics: list[dict]
-    project_slug: str | None = None
 
 
 @router.put("/topics")
 def set_topics(req: TopicSetRequest, store: MemoryStoreDep) -> dict:
     try:
-        store.set_topics(scope=req.scope, topics=req.topics, project_slug=req.project_slug)
+        store.set_topics(req.scope, [t.model_dump() for t in req.topics], req.project_slug)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     return {"status": "saved"}
+
+
+@router.post("/regroup")
+async def regroup_memories(req: RegroupRequest, store: MemoryStoreDep) -> dict:
+    """Propose subject topics for a scope's facts as `{topics, memories}`, nothing is written."""
+    try:
+        with request_client() as client:
+            return await store.propose_regroup(client, req.scope, req.project_slug)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e

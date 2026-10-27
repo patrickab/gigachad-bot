@@ -11,7 +11,7 @@ export function MemoryCommandLayer({ bar, items, onRun }: {
   items: CommandMenuItem[]
   onRun: (command: string) => void
 }) {
-  const { tab, isActive } = useTab()
+  const { isActive } = useTab()
 
   return (
     <>
@@ -29,15 +29,7 @@ export function MemoryCommandLayer({ bar, items, onRun }: {
           <CommandMenu open items={items} query={bar.query} onRun={onRun} onClose={bar.closeMenu} />
         </div>
       </div>}
-      {isActive && bar.panelState && (
-        <MemoryPanel
-          state={bar.panelState}
-          projectEnabled={!!tab.projectSlug}
-          actions={bar.panelActions}
-          globalTopics={bar.topics.globalTopics}
-          projectTopics={bar.topics.projectTopics}
-        />
-      )}
+      {isActive && bar.panelState && <MemoryPanel state={bar.panelState} actions={bar.panelActions} />}
     </>
   )
 }

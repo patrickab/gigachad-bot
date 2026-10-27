@@ -344,44 +344,53 @@ export interface ProjectListItem {
   tabs?: ProjectTab[]
 }
 
-/** Atomic memory candidate from an extraction, awaiting user review. */
-export interface ProposedMemory {
-  id: string
-  memory: string
-  scope: "global" | "project"
-  topic?: string
-}
+export type MemoryScope = "global" | "project"
 
-export type MemoryStatus = "pre-existing" | "combined" | "new"
-
-/** Committed atomic memory, one fact within a topic. */
-export interface PreviewMemory {
+/** Atomic memory: one stored fact within a topic. */
+export interface StoredMemory {
   id: string
   text: string
   topic: string
-  scope: "global" | "project"
-  status?: MemoryStatus
+  scope: MemoryScope
   created_at?: string
   updated_at?: string
 }
 
-export interface MemoryExtractResponse {
-  review_id: string
-  global: ProposedMemory[]
-  project: ProposedMemory[] | null
-}
-
-export interface MemoryPreviewResponse {
-  existing_markdown: string
-  revised_markdown: string
-  existing_memories: PreviewMemory[]
-  revised_memories: PreviewMemory[]
-}
-
-/** Complete memory: a named bundle of atomic memories, also the extraction's tagging vocabulary. */
+/** Complete memory: a named subject bundling atomic memories. */
 export interface MemoryTopic {
   name: string
   summary: string
+}
+
+/** Proposed change to one fact, `target_*` name the stored fact an update or delete replaces. */
+export interface MemoryOperation {
+  id: string
+  op: "add" | "update" | "delete"
+  scope: MemoryScope
+  topic: string
+  text: string
+  target_id: string | null
+  target_text: string | null
+}
+
+/** New topic (`previous_summary` null) or a revised summary of an existing one. */
+export interface TopicProposal {
+  scope: MemoryScope
+  name: string
+  summary: string
+  previous_summary: string | null
+}
+
+export interface ScopeProposal {
+  operations: MemoryOperation[]
+  topics: TopicProposal[]
+}
+
+/** A scope is null when it was not extracted. */
+export interface MemoryExtractResponse {
+  review_id: string
+  global: ScopeProposal | null
+  project: ScopeProposal | null
 }
 
 /** One omp session file (`src/lib/omp_web.py` `OmpSession`). */

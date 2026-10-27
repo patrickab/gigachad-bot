@@ -1,310 +1,177 @@
 "use client"
 
-import { useCallback, useReducer } from "react"
-import {
-  cancelMemories,
-  commitMemoryDoc,
-  extractMemories,
-  previewMemoryDoc,
-} from "@/lib/backend/api"
-import { newManualMemoryId } from "@/features/memory/memoryUtils"
-import type { MemoryExtractResponse, Message, PreviewMemory, ProposedMemory } from "@/lib/domain/types"
+import { useCallback, useMemo, useReducer } from "react"
+import { cancelMemories, commitMemories, extractMemories, getTopics } from "@/lib/backend/api"
+import { topicNameFromTitle } from "@/features/memory/memoryUtils"
+import type { MemoryOperation, MemoryScope, MemoryTopic, Message, ScopeProposal, TopicProposal } from "@/lib/domain/types"
 
-interface ReviewState {
-  reviewId: string
-  globalMemories: ProposedMemory[]
-  projectMemories: ProposedMemory[] | null
-  acceptedMemories: ProposedMemory[]
-  rejectedMemories: ProposedMemory[]
-}
-
-type DocPreview = { existing_markdown: string; revised_markdown: string; existing_memories: PreviewMemory[]; revised_memories: PreviewMemory[] }
-
-interface DocumentReviewState {
-  reviewId: string
-  acceptedMemories: ProposedMemory[]
-  rejectedMemories: ProposedMemory[]
-  globalPreview: DocPreview | null
-  projectPreview: DocPreview | null
-  loadingScopes: ("global" | "project")[]
-}
+export interface ReviewOperation extends MemoryOperation { excluded: boolean }
+export interface ReviewTopic extends TopicProposal { excluded: boolean }
+export interface ReviewScope { operations: ReviewOperation[]; topics: ReviewTopic[] }
+export type ReviewScopes = Partial<Record<MemoryScope, ReviewScope>>
+/** Stored topics per reviewed scope, the targets an operation can move to. */
+export type StoredTopics = Partial<Record<MemoryScope, MemoryTopic[]>>
 
 type MemorizeFlowState =
   | { phase: "idle" }
   | { phase: "extracting" }
-  | ({ phase: "review" } & ReviewState)
-  | ({ phase: "doc-review" } & DocumentReviewState)
-  | { phase: "error"; error: string; reviewId?: string }
+  | { phase: "review"; reviewId: string; projectSlug: string | null; scopes: ReviewScopes; storedTopics: StoredTopics; committing: boolean }
+  | { phase: "error"; error: string }
 
 export type MemoryPanelState = Exclude<MemorizeFlowState, { phase: "idle" }>
 
-type ExtractScope = "global" | "project" | null
-
-export interface BoundMemoryActions {
-  acceptRemaining: () => Promise<void>
-  cancelRemaining: () => Promise<void>
-  acceptMemory: (memoryId: string) => Promise<void>
-  cancelMemory: (memoryId: string) => Promise<void>
-  addMemory: (scope: "global" | "project", memory: string) => void
-  editMemory: (memoryId: string, text: string) => void
-  editMemoryTopic: (memoryId: string, topic: string) => void
-  editRevisedMemory: (scope: "global" | "project", memoryId: string, text: string) => void
-  editRevisedMemoryTopic: (scope: "global" | "project", memoryId: string, topic: string) => void
-  removeRevisedMemory: (scope: "global" | "project", memoryId: string) => void
-  commitDocuments: () => Promise<void>
-}
-
-interface UseMemorizeFlowReturn {
-  state: MemorizeFlowState
-  /** Start a fresh extraction from `messages`; `null` scope targets both global and project memory. */
-  extract: (messages: Pick<Message, "role" | "content">[], projectSlug: string | null | undefined, chatId: string | null | undefined, scope: ExtractScope) => Promise<void>
-  bindProject: (projectSlug?: string | null) => BoundMemoryActions
-}
-
-const INITIAL: MemorizeFlowState = { phase: "idle" }
-
-function isReviewState(state: MemorizeFlowState): state is Extract<MemorizeFlowState, { phase: "review" }> {
-  return state.phase === "review"
-}
-
-function remaining(state: ReviewState): ProposedMemory[] {
-  return [...state.globalMemories, ...(state.projectMemories ?? [])]
-}
-
-function findMemory(state: ReviewState, id: string): ProposedMemory | undefined {
-  return remaining(state).find((m) => m.id === id)
+export interface MemoryReviewActions {
+  toggleOperation: (scope: MemoryScope, id: string) => void
+  editOperation: (scope: MemoryScope, id: string, text: string) => void
+  moveOperation: (scope: MemoryScope, id: string, topic: string) => void
+  /** Rename a proposed topic, a name already taken merges its operations into that topic. */
+  renameTopic: (scope: MemoryScope, name: string, title: string) => void
+  editTopicSummary: (scope: MemoryScope, name: string, summary: string) => void
+  toggleTopic: (scope: MemoryScope, name: string) => void
+  commit: () => Promise<void>
+  cancel: () => Promise<void>
 }
 
 type Action =
   | { type: "RESET" }
   | { type: "START_EXTRACT" }
-  | { type: "EXTRACT_OK"; reviewId: string; global: ProposedMemory[]; project: ProposedMemory[] | null }
-  | { type: "FAIL"; error: string; reviewId?: string }
-  | { type: "DECIDE_ONE"; memoryId: string; accept: boolean }
-  | { type: "ACCEPT_ALL" }
-  | { type: "ADD_MEMORY"; scope: "global" | "project"; memory: ProposedMemory }
-  | { type: "UPDATE_MEMORY"; memoryId: string; updates: Partial<Pick<ProposedMemory, "memory" | "topic">> }
-  | { type: "BEGIN_PREVIEW"; reviewId: string; acceptedMemories: ProposedMemory[]; rejectedMemories: ProposedMemory[]; loadingScopes: ("global" | "project")[] }
-  | { type: "PREVIEW_OK"; scope: "global" | "project"; preview: DocPreview; reviewId: string }
-  | { type: "UPDATE_REVISED"; scope: "global" | "project"; memoryId: string; updates: Partial<Pick<PreviewMemory, "text" | "topic">> }
-  | { type: "REMOVE_REVISED"; scope: "global" | "project"; memoryId: string }
+  | { type: "EXTRACT_OK"; reviewId: string; projectSlug: string | null; scopes: ReviewScopes; storedTopics: StoredTopics }
+  | { type: "FAIL"; error: string }
+  | { type: "COMMITTING" }
+  | { type: "UPDATE_SCOPE"; scope: MemoryScope; update: (review: ReviewScope) => ReviewScope }
 
-function revisedPreview(state: Extract<MemorizeFlowState, { phase: "doc-review" }>, scope: "global" | "project", fn: (ms: PreviewMemory[]) => PreviewMemory[]): MemorizeFlowState {
-  const key = scope === "global" ? "globalPreview" as const : "projectPreview" as const
-  const preview = state[key]
-  if (!preview) return state
-  return { ...state, [key]: { ...preview, revised_memories: fn(preview.revised_memories) } }
+function toReviewScope(proposal: ScopeProposal | null): ReviewScope | undefined {
+  if (!proposal || (proposal.operations.length === 0 && proposal.topics.length === 0)) return undefined
+  return {
+    operations: proposal.operations.map((o) => ({ ...o, excluded: false })),
+    topics: proposal.topics.map((t) => ({ ...t, excluded: false })),
+  }
 }
 
 function reducer(state: MemorizeFlowState, action: Action): MemorizeFlowState {
   switch (action.type) {
-    case "RESET": return INITIAL
+    case "RESET": return { phase: "idle" }
     case "START_EXTRACT": return { phase: "extracting" }
-    case "EXTRACT_OK": return {
-      phase: "review", reviewId: action.reviewId,
-      globalMemories: action.global, projectMemories: action.project,
-      acceptedMemories: [], rejectedMemories: [],
-    }
-    case "FAIL": {
-      // Ignore stale preview failures from a superseded review
-      if (state.phase === "doc-review" && action.reviewId && state.reviewId !== action.reviewId) return state
-      return { phase: "error", error: action.error, reviewId: action.reviewId }
-    }
-    case "DECIDE_ONE": {
-      if (!isReviewState(state)) return state
-      const m = findMemory(state, action.memoryId)
-      if (!m) return state
-      const id = action.memoryId
-      return {
-        ...state,
-        globalMemories: state.globalMemories.filter(x => x.id !== id),
-        projectMemories: state.projectMemories?.filter(x => x.id !== id) ?? null,
-        ...(action.accept
-          ? { acceptedMemories: [...state.acceptedMemories, m] }
-          : { rejectedMemories: [...state.rejectedMemories, m] }),
-      }
-    }
-    case "ACCEPT_ALL": {
-      if (!isReviewState(state)) return state
-      return { ...state, acceptedMemories: [...state.acceptedMemories, ...remaining(state)], globalMemories: [], projectMemories: null }
-    }
-    case "ADD_MEMORY": {
-      if (!isReviewState(state)) return state
-      return {
-        ...state,
-        globalMemories: action.scope === "global" ? [...state.globalMemories, action.memory] : state.globalMemories,
-        projectMemories: action.scope === "project" ? [...(state.projectMemories ?? []), action.memory] : state.projectMemories,
-      }
-    }
-    case "UPDATE_MEMORY": {
-      if (!isReviewState(state)) return state
-      const up = (list: ProposedMemory[]) => list.map(m => m.id === action.memoryId ? { ...m, ...action.updates } : m)
-      return { ...state, globalMemories: up(state.globalMemories), projectMemories: state.projectMemories ? up(state.projectMemories) : null }
-    }
-    case "BEGIN_PREVIEW": return {
-      phase: "doc-review", reviewId: action.reviewId,
-      acceptedMemories: action.acceptedMemories, rejectedMemories: action.rejectedMemories,
-      globalPreview: null, projectPreview: null, loadingScopes: action.loadingScopes,
-    }
-    case "PREVIEW_OK": {
-      if (state.phase !== "doc-review") return state
-      if (action.scope === "global") return { ...state, globalPreview: action.preview, loadingScopes: state.loadingScopes.filter(s => s !== "global") }
-      return { ...state, projectPreview: action.preview, loadingScopes: state.loadingScopes.filter(s => s !== "project") }
-    }
-    case "UPDATE_REVISED": {
-      if (state.phase !== "doc-review") return state
-      return revisedPreview(state, action.scope, list => list.map(m => m.id === action.memoryId ? { ...m, ...action.updates } : m))
-    }
-    case "REMOVE_REVISED": {
-      if (state.phase !== "doc-review") return state
-      return revisedPreview(state, action.scope, list => list.filter(m => m.id !== action.memoryId))
+    case "EXTRACT_OK": return { phase: "review", reviewId: action.reviewId, projectSlug: action.projectSlug, scopes: action.scopes, storedTopics: action.storedTopics, committing: false }
+    case "FAIL": return { phase: "error", error: action.error }
+    case "COMMITTING": return state.phase === "review" ? { ...state, committing: true } : state
+    case "UPDATE_SCOPE": {
+      const review = state.phase === "review" ? state.scopes[action.scope] : undefined
+      if (state.phase !== "review" || !review) return state
+      return { ...state, scopes: { ...state.scopes, [action.scope]: action.update(review) } }
     }
   }
 }
 
-/** Drive the memorize flow: extract, review each memory, preview revised docs, commit. Use `bindProject` to get actions scoped to a project. */
-export function useMemorizeFlow(): UseMemorizeFlowReturn {
-  const [state, dispatch] = useReducer(reducer, INITIAL)
+function patchOperation(id: string, patch: Partial<ReviewOperation>) {
+  return (review: ReviewScope): ReviewScope => ({
+    ...review, operations: review.operations.map((o) => o.id === id ? { ...o, ...patch } : o),
+  })
+}
 
-  const startPreview = useCallback(
-    async (accepted: ProposedMemory[], rejected: ProposedMemory[], reviewId: string, projectSlug?: string | null) => {
-      if (accepted.length === 0 && rejected.length === 0) {
-        await cancelMemories(reviewId, projectSlug).catch(() => {})
-        dispatch({ type: "RESET" })
+function patchTopic(name: string, patch: Partial<ReviewTopic>) {
+  return (review: ReviewScope): ReviewScope => ({
+    ...review, topics: review.topics.map((t) => t.name === name ? { ...t, ...patch } : t),
+  })
+}
+
+/** Move every operation of proposed topic `from` to `to`, merging into an existing proposal when one holds that name. */
+function renameProposedTopic(from: string, to: string) {
+  return (review: ReviewScope): ReviewScope => {
+    const merging = review.topics.some((t) => t.name === to)
+    return {
+      operations: review.operations.map((o) => o.topic === from ? { ...o, topic: to } : o),
+      topics: merging ? review.topics.filter((t) => t.name !== from) : review.topics.map((t) => t.name === from ? { ...t, name: to } : t),
+    }
+  }
+}
+
+/** Accepted operations and the topics they need, new topics only while some fact still lands in them. */
+export function acceptedChanges(review: ReviewScope) {
+  const operations = review.operations.filter((o) => !o.excluded)
+  const filled = new Set(operations.filter((o) => o.op !== "delete").map((o) => o.topic))
+  const topics = review.topics
+    .filter((t) => !t.excluded && (t.previous_summary !== null || filled.has(t.name)))
+    .map(({ name, summary }) => ({ name, summary }))
+  return { operations, topics }
+}
+
+/**
+ * Drive the memorize flow: extract proposed operations, review them in one screen, commit.
+ *
+ * - Every extracted scope commits, even with all operations denied, so denied proposals are not offered again
+ * - Cancelling commits nothing and keeps the conversation eligible
+ */
+export function useMemorizeFlow() {
+  const [state, dispatch] = useReducer(reducer, { phase: "idle" })
+
+  const extract = useCallback(async (
+    messages: Pick<Message, "role" | "content">[], projectSlug: string | null | undefined, chatId: string | null | undefined, scope: MemoryScope | null,
+  ) => {
+    dispatch({ type: "START_EXTRACT" })
+    try {
+      const response = await extractMemories(messages.map(({ role, content }) => ({ role, content })), projectSlug, chatId, scope)
+      const scopes: ReviewScopes = { global: toReviewScope(response.global), project: toReviewScope(response.project) }
+      if (!scopes.global && !scopes.project) {
+        await cancelMemories(response.review_id).catch(() => {})
+        dispatch({ type: "FAIL", error: "Nothing new to remember from this conversation." })
         return
       }
-      const byScope = (s: string) => accepted.filter(m => m.scope === s)
-      const scopes = [
-        ...(byScope("global").length ? ["global" as const] : []),
-        ...(byScope("project").length && projectSlug ? ["project" as const] : []),
-      ]
-      dispatch({ type: "BEGIN_PREVIEW", reviewId, acceptedMemories: accepted, rejectedMemories: rejected, loadingScopes: scopes })
-      await Promise.all(scopes.map(async s => {
-        try {
-          dispatch({ type: "PREVIEW_OK", scope: s, reviewId, preview: await previewMemoryDoc(s, byScope(s), s === "global" ? null : projectSlug ?? null) })
-        } catch (e) {
-          dispatch({ type: "FAIL", reviewId, error: (e as Error)?.message || "Preview failed" })
-        }
-      }))
-    },
-    [],
-  )
-
-  const extract = useCallback(
-    async (messages: Pick<Message, "role" | "content">[], projectSlug: string | null | undefined, chatId: string | null | undefined, scope: ExtractScope) => {
-      dispatch({ type: "START_EXTRACT" })
-      try {
-        const res: MemoryExtractResponse = await extractMemories(messages.map(({ role, content }) => ({ role, content })), projectSlug, chatId, scope)
-        if (res.global.length === 0 && (!res.project || res.project.length === 0)) {
-          dispatch({ type: "FAIL", error: "No new memories extracted from this conversation.", reviewId: res.review_id })
-        } else {
-          dispatch({ type: "EXTRACT_OK", reviewId: res.review_id, global: res.global, project: res.project })
-        }
-      } catch (e) {
-        dispatch({ type: "FAIL", error: (e as Error)?.message || "Extraction failed" })
-      }
-    },
-    [],
-  )
-
-  const accept = useCallback(
-    async (projectSlug?: string | null) => {
-      if (state.phase === "error") {
-        if (state.reviewId) await cancelMemories(state.reviewId, projectSlug).catch(() => {})
-        dispatch({ type: "RESET" })
-        return
-      }
-      if (!isReviewState(state)) return
-      dispatch({ type: "ACCEPT_ALL" })
-      await startPreview([...state.acceptedMemories, ...remaining(state)], state.rejectedMemories, state.reviewId, projectSlug)
-    },
-    [startPreview, state],
-  )
-
-  const cancel = useCallback(
-    async (projectSlug?: string | null) => {
-      if (state.phase === "idle" || state.phase === "extracting") return
-      if ("reviewId" in state && state.reviewId) {
-        await cancelMemories(state.reviewId, projectSlug).catch(() => {})
-      }
-      dispatch({ type: "RESET" })
-    },
-    [state],
-  )
-
-  const decideOne = useCallback(
-    async (memoryId: string, doAccept: boolean, projectSlug?: string | null) => {
-      if (!isReviewState(state)) return
-      const memory = findMemory(state, memoryId)
-      if (!memory) return
-      dispatch({ type: "DECIDE_ONE", memoryId, accept: doAccept })
-      if (remaining(state).filter(m => m.id !== memoryId).length === 0) {
-        const acc = doAccept ? [...state.acceptedMemories, memory] : state.acceptedMemories
-        const rej = doAccept ? state.rejectedMemories : [...state.rejectedMemories, memory]
-        await startPreview(acc, rej, state.reviewId, projectSlug)
-      }
-    },
-    [startPreview, state],
-  )
-
-  const commitDocs = useCallback(
-    async (projectSlug?: string | null) => {
-      if (state.phase !== "doc-review") return
-      try {
-        const gA = state.acceptedMemories.filter(m => m.scope === "global")
-        const gR = state.rejectedMemories.filter(m => m.scope === "global")
-        const pA = state.acceptedMemories.filter(m => m.scope === "project")
-        const pR = state.rejectedMemories.filter(m => m.scope === "project")
-        if (gA.length > 0 || gR.length > 0) {
-          await commitMemoryDoc("global", gA, null, state.reviewId, state.globalPreview?.revised_memories)
-        }
-        if ((pA.length > 0 || pR.length > 0) && projectSlug) {
-          await commitMemoryDoc("project", pA, projectSlug, state.reviewId, state.projectPreview?.revised_memories)
-        }
-        dispatch({ type: "RESET" })
-      } catch (e) {
-        dispatch({ type: "FAIL", reviewId: state.reviewId, error: (e as Error)?.message || "Commit failed" })
-      }
-    },
-    [state],
-  )
-
-  const addMemory = useCallback((scope: "global" | "project", memory: string) => {
-    const trimmed = memory.trim()
-    if (!trimmed) return
-    dispatch({
-      type: "ADD_MEMORY", scope,
-      memory: { id: newManualMemoryId(), memory: trimmed, scope, topic: "manual" },
-    })
+      const [globalTopics, projectTopics] = await Promise.all([
+        scopes.global ? getTopics("global") : undefined,
+        scopes.project ? getTopics("project", projectSlug) : undefined,
+      ])
+      const storedTopics: StoredTopics = { global: globalTopics?.topics, project: projectTopics?.topics }
+      dispatch({ type: "EXTRACT_OK", reviewId: response.review_id, projectSlug: projectSlug ?? null, scopes, storedTopics })
+    } catch (e) {
+      dispatch({ type: "FAIL", error: (e as Error)?.message || "Extraction failed" })
+    }
   }, [])
 
-  const editMemory = useCallback((memoryId: string, text: string) =>
-    dispatch({ type: "UPDATE_MEMORY", memoryId, updates: { memory: text } }), [])
+  const update = useCallback((scope: MemoryScope, fn: (review: ReviewScope) => ReviewScope) => dispatch({ type: "UPDATE_SCOPE", scope, update: fn }), [])
 
-  const editMemoryTopic = useCallback((memoryId: string, topic: string) =>
-    dispatch({ type: "UPDATE_MEMORY", memoryId, updates: { topic } }), [])
+  const actions = useMemo<MemoryReviewActions>(() => ({
+    toggleOperation: (scope, id) => update(scope, (review) => patchOperation(id, {
+      excluded: !review.operations.find((o) => o.id === id)?.excluded,
+    })(review)),
+    editOperation: (scope, id, text) => update(scope, patchOperation(id, { text })),
+    moveOperation: (scope, id, topic) => update(scope, patchOperation(id, { topic })),
+    renameTopic: (scope, name, title) => {
+      const next = topicNameFromTitle(title)
+      if (!next || next === name) return
+      update(scope, (review) => {
+        const renamed = renameProposedTopic(name, next)(review)
+        // Renaming onto a stored topic files the facts there, its summary stays as stored.
+        const stored = state.phase === "review" ? state.storedTopics[scope] ?? [] : []
+        return stored.some((t) => t.name === next) && !review.topics.some((t) => t.name === next)
+          ? { ...renamed, topics: renamed.topics.filter((t) => t.name !== next || t.previous_summary !== null) }
+          : renamed
+      })
+    },
+    editTopicSummary: (scope, name, summary) => update(scope, patchTopic(name, { summary })),
+    toggleTopic: (scope, name) => update(scope, (review) => patchTopic(name, {
+      excluded: !review.topics.find((t) => t.name === name)?.excluded,
+    })(review)),
+    commit: async () => {
+      if (state.phase !== "review" || state.committing) return
+      dispatch({ type: "COMMITTING" })
+      try {
+        for (const scope of ["global", "project"] as const) {
+          const review = state.scopes[scope]
+          if (!review) continue
+          const { operations, topics } = acceptedChanges(review)
+          await commitMemories(scope, operations, topics, scope === "project" ? state.projectSlug : null, state.reviewId)
+        }
+        dispatch({ type: "RESET" })
+      } catch (e) {
+        dispatch({ type: "FAIL", error: (e as Error)?.message || "Commit failed" })
+      }
+    },
+    cancel: async () => {
+      if (state.phase === "review") await cancelMemories(state.reviewId).catch(() => {})
+      if (state.phase !== "extracting") dispatch({ type: "RESET" })
+    },
+  }), [state, update])
 
-  const editRevisedMemory = useCallback((scope: "global" | "project", memoryId: string, text: string) =>
-    dispatch({ type: "UPDATE_REVISED", scope, memoryId, updates: { text } }), [])
-
-  const editRevisedMemoryTopic = useCallback((scope: "global" | "project", memoryId: string, topic: string) =>
-    dispatch({ type: "UPDATE_REVISED", scope, memoryId, updates: { topic } }), [])
-
-  const removeRevisedMemory = useCallback((scope: "global" | "project", memoryId: string) =>
-    dispatch({ type: "REMOVE_REVISED", scope, memoryId }), [])
-
-  const bindProject = useCallback(
-    (projectSlug?: string | null): BoundMemoryActions => ({
-      acceptRemaining: () => accept(projectSlug),
-      cancelRemaining: () => cancel(projectSlug),
-      acceptMemory: (id: string) => decideOne(id, true, projectSlug),
-      cancelMemory: (id: string) => decideOne(id, false, projectSlug),
-      addMemory, editMemory, editMemoryTopic,
-      editRevisedMemory, editRevisedMemoryTopic, removeRevisedMemory,
-      commitDocuments: () => commitDocs(projectSlug),
-    }),
-    [accept, addMemory, cancel, commitDocs, decideOne, editMemory, editMemoryTopic, editRevisedMemory, editRevisedMemoryTopic, removeRevisedMemory],
-  )
-
-  return { state, extract, bindProject }
+  return { state, extract, actions }
 }
