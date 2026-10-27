@@ -149,10 +149,11 @@ function BreadcrumbLabel({ project, category, file }: { project: string, categor
   </>
 }
 
-/** Reveal centered workspace navigation on hover, keyboard focus, or while its menu is open.
-
-- Trigger is as wide as the widest open tab label, so switching never moves it or its buttons
-*/
+/**
+ * Reveal centered workspace navigation on hover, keyboard focus, or while its menu is open.
+ *
+ * - Trigger is as wide as the widest open tab label and centered alone, so switching never moves it or its buttons
+ */
 export function TabSwitcher() {
   const strip = useContext(TabStripContext)
   const { tab, isActive } = useTab()
@@ -197,9 +198,9 @@ export function TabSwitcher() {
   const visibleTabs = orderedTabs.filter((entry) => `${entry.project} ${entry.category} ${entry.file}`.toLowerCase().includes(search))
   const following = orderedTabs[(orderedTabs.findIndex(({ item }) => item.id === strip.activeTabId) + 1) % orderedTabs.length].item
 
-  return <div ref={rootRef} data-tab-switcher data-open={open} className="pointer-events-auto flex w-[28rem] max-w-full flex-col items-center opacity-0 transition-opacity duration-160 [&:hover]:opacity-100 focus-within:opacity-100 data-[open=true]:opacity-100 motion-reduce:transition-none"
+  return <div ref={rootRef} data-tab-switcher data-open={open} className="pointer-events-auto flex w-[32rem] max-w-full flex-col items-center opacity-0 transition-opacity duration-160 [&:hover]:opacity-100 focus-within:opacity-100 data-[open=true]:opacity-100 motion-reduce:transition-none"
     onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) close() }}>
-    <div className="flex min-w-0 max-w-full items-center gap-1">
+    <div className="relative flex min-w-0 max-w-[calc(100%_-_9.5rem)]">
       <button ref={triggerRef} type="button" aria-label={`Switch tabs: ${breadcrumb}`} aria-haspopup="dialog" aria-expanded={open}
         aria-describedby={activityDescriptionId}
         onClick={() => {
@@ -209,7 +210,7 @@ export function TabSwitcher() {
             setOpen(true)
           }
         }}
-        className="flex h-8.5 min-w-0 items-center gap-1.5 rounded-full bg-paper px-2 text-xs text-ink-muted transition-colors hover:bg-surface-elevated hover:text-ink focus:bg-surface-elevated focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-subtle">
+        className="flex h-8.5 max-w-full min-w-0 items-center gap-1.5 rounded-full bg-paper px-2 text-xs text-ink-muted transition-colors hover:bg-surface-elevated hover:text-ink focus:bg-surface-elevated focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-subtle">
         <span className="grid min-w-0 grid-cols-[minmax(0,max-content)]">
           {orderedTabs.filter(({ item }) => item.id !== tab.id).map(({ item, project, category, file }) =>
             <span key={item.id} aria-hidden="true" className="invisible flex min-w-0 items-center gap-1.5 whitespace-nowrap [grid-area:1/1]">
@@ -221,20 +222,22 @@ export function TabSwitcher() {
         </span>
         <ChevronDown aria-hidden="true" className="h-3 w-3 shrink-0 text-ink-subtle" />
       </button>
-      <button type="button" aria-label="Next tab" disabled={strip.tabs.length < 2}
-        onClick={() => {
+      <div className="absolute inset-y-0 left-full ml-1 flex items-center gap-1">
+        <button type="button" aria-label="Next tab" disabled={strip.tabs.length < 2}
+          onClick={() => {
+            close()
+            strip.select(following.id)
+          }}
+          className={`${PILL_BUTTON_CLASS} disabled:cursor-default disabled:text-ink-faint`}>
+          <ArrowRightLeft aria-hidden="true" className="h-3 w-3" />
+        </button>
+        <button type="button" data-new-chat aria-label="New chat" onClick={() => {
           close()
-          strip.select(following.id)
-        }}
-        className={`${PILL_BUTTON_CLASS} disabled:cursor-default disabled:text-ink-faint`}>
-        <ArrowRightLeft aria-hidden="true" className="h-3 w-3" />
-      </button>
-      <button type="button" data-new-chat aria-label="New chat" onClick={() => {
-        close()
-        strip.add()
-      }} className={PILL_BUTTON_CLASS}>
-        <Plus aria-hidden="true" className="h-3 w-3" />
-      </button>
+          strip.add()
+        }} className={PILL_BUTTON_CLASS}>
+          <Plus aria-hidden="true" className="h-3 w-3" />
+        </button>
+      </div>
     </div>
     <span id={activityDescriptionId} className="sr-only">{strip.labelOf(tab)}</span>
     {open && isActive && <div ref={panelRef} role="dialog" aria-label="Open tabs"
