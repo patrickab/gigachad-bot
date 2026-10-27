@@ -11,16 +11,19 @@ export * from "../../../components/MarkdownBody";
 type Props = ComponentProps<typeof UpstreamMarkdownBody>;
 
 /**
- * Upstream markdown, rendered by gigachad-bot's shared renderer for user and assistant text when embedded.
+ * Upstream markdown, rendered by gigachad-bot's shared renderer for user, assistant and subagent text when embedded.
  *
- * - Embedded user and assistant text: `EmbeddedMarkdown` (`custom/components/EmbeddedMarkdown.tsx`), same props, same link and image behavior.
- *   Upstream gives every other surface its own class (compaction, custom and hub messages, subagent transcripts, release notes),
+ * - Embedded user and assistant text, a subagent's task and result (`markdown-subagent-text`, its transcript dialog):
+ *   `EmbeddedMarkdown` (`custom/components/EmbeddedMarkdown.tsx`), same props, same link and image behavior.
+ *   Upstream gives every other surface its own class (compaction, custom and hub messages, release notes),
  *   so a renamed or new class stays on upstream's renderer. Tool and thinking output never reach `MarkdownBody`
  * - Standalone and every other surface: upstream unchanged
  */
+/** `MarkdownBody` classes of the surfaces the shared renderer draws, `undefined` is assistant text. */
+const SHARED_RENDERER_CLASSES = new Set([undefined, "markdown-user-message", "markdown-subagent-text", "gc-markdown-compact"]);
+
 export function MarkdownBody(props: Props) {
   const embedded = useIsEmbedded();
   const isPreview = props.className === "gc-markdown-compact";
-  const isConversationText = props.className === undefined || props.className === "markdown-user-message" || isPreview;
-  return embedded && isConversationText ? <EmbeddedMarkdown {...props} compact={isPreview} /> : <UpstreamMarkdownBody {...props} />;
+  return embedded && SHARED_RENDERER_CLASSES.has(props.className) ? <EmbeddedMarkdown {...props} compact={isPreview} /> : <UpstreamMarkdownBody {...props} />;
 }

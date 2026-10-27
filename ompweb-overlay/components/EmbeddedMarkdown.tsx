@@ -48,7 +48,7 @@ function ThemedMarkmap({ code }: { code: string }) {
 const CODE_RENDERERS: CodeRenderers = { code: ThemedCodeBlock, mermaid: ThemedMermaid, markmap: ThemedMarkmap };
 
 /**
- * Markdown for omp's user and assistant text, rendered by gigachad-bot's shared renderer (`@gigachad/chat-ui`).
+ * Markdown for omp's user, assistant and subagent task/result text, rendered by gigachad-bot's shared renderer (`@gigachad/chat-ui`).
  * Tools, thinking, compaction and custom messages keep upstream's `MarkdownBody`.
  *
  * Links and images are upstream's renderers (`useMarkdownBodyRendering`), Streamdown passes them the same hast `node`.
