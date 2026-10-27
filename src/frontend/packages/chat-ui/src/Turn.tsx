@@ -74,7 +74,7 @@ export function TurnSurface({ children }: { children: ReactNode }) {
  * Avatar, content and hover actions for one side of a turn.
  *
  * - `tail="text"`: the content may end in a paragraph, whose last line then also holds the actions
- * - `onCollapse`: makes the question area clickable, retaining the chevron for keyboard access
+ * - `onCollapse`: makes the avatar, the strip above the content and the chevron collapse the turn, the content stays selectable
  */
 export function TurnRegion({ role, tail = "text", actions, onCollapse, collapseRef, children }: {
   role: TurnRole
@@ -87,15 +87,17 @@ export function TurnRegion({ role, tail = "text", actions, onCollapse, collapseR
   const actionCount = Children.toArray(actions).length
   const actionSpace = actionCount * ACTION_SIZE_PX + Math.max(0, actionCount - 1) * ACTION_GAP_PX + ACTION_END_GUTTER_PX
   const Avatar = role === "question" ? User : Bot
+  const avatarIcon = <Avatar size={14} aria-hidden="true" />
   return (
-    <div className="gc-turn-region" data-role={role} onClick={onCollapse ? (event) => {
-      const target = event.target as Element
-      if (!event.currentTarget.contains(target)) return
-      if (target.closest('a, button, input, textarea, select, summary, [role="button"], [role="link"], [contenteditable="true"]')) return
-      if (event.currentTarget.ownerDocument.getSelection()?.isCollapsed === false) return
-      onCollapse()
-    } : undefined}>
-      <span className="gc-turn-avatar"><Avatar size={14} aria-hidden="true" /></span>
+    <div className="gc-turn-region" data-role={role}>
+      {onCollapse && <span className="gc-turn-collapse-strip" aria-hidden="true" onClick={onCollapse} />}
+      {onCollapse ? (
+        <button type="button" className="gc-turn-avatar gc-turn-avatar-button" tabIndex={-1} onClick={onCollapse} aria-label="Collapse question and answer">
+          {avatarIcon}
+        </button>
+      ) : (
+        <span className="gc-turn-avatar">{avatarIcon}</span>
+      )}
       <div className="gc-turn-body" data-tail={tail} style={{ "--gc-turn-actions-space": `${actionSpace}px` } as CSSProperties}>
         <div className="gc-turn-content">{children}</div>
         {actionCount > 0 && (

@@ -121,13 +121,26 @@
   background-color: color-mix(in oklab, var(--surface-elevated) 45%, var(--surface));
 }
 .gc-turn-region {
+  position: relative;
   display: flex;
   align-items: flex-start;
   gap: 12px;
   padding: 20px;
 }
-.gc-turn-region:has(> .gc-turn-collapse) {
+/* Pointer-only collapse target over the region's top padding, keyboard users get the chevron. */
+.gc-turn-collapse-strip {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 20px;
   cursor: pointer;
+}
+.gc-turn-avatar-button {
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+}
+.gc-turn-avatar-button:hover {
+  color: var(--ink);
 }
 /* The text's first line is centered on the 28px avatar. */
 .gc-turn-body {

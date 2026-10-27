@@ -8,21 +8,27 @@ afterEach(() => {
 })
 
 describe("expanded question collapse", () => {
-  it.each(["text", "avatar", "padding", "chevron"])("collapses once when clicking %s", (target) => {
+  it.each(["avatar", "strip", "chevron"])("collapses once when clicking %s", (target) => {
     const onCollapse = vi.fn()
     const view = render(<TurnRegion role="question" onCollapse={onCollapse}><p>Question text</p></TurnRegion>)
     const region = view.container.querySelector(".gc-turn-region")!
     const targets = {
-      text: view.getByText("Question text"),
       avatar: region.querySelector(".gc-turn-avatar svg")!,
-      padding: region,
-      chevron: view.getByRole("button", { name: "Collapse question and answer" }),
+      strip: region.querySelector(".gc-turn-collapse-strip")!,
+      chevron: region.querySelector(".gc-turn-collapse")!,
     }
     fireEvent.click(targets[target as keyof typeof targets])
     expect(onCollapse).toHaveBeenCalledTimes(1)
   })
 
-  it("preserves nested links, attachments and actions", () => {
+  it.each(["text", "padding"])("keeps the card expanded when clicking %s", (target) => {
+    const onCollapse = vi.fn()
+    const view = render(<TurnRegion role="question" onCollapse={onCollapse}><p>Question text</p></TurnRegion>)
+    fireEvent.click(target === "text" ? view.getByText("Question text") : view.container.querySelector(".gc-turn-region")!)
+    expect(onCollapse).not.toHaveBeenCalled()
+  })
+
+  it("keeps nested links, attachments and actions independent", () => {
     const onCollapse = vi.fn()
     const onAttachment = vi.fn()
     const onAction = vi.fn()
@@ -37,17 +43,6 @@ describe("expanded question collapse", () => {
     fireEvent.click(view.getByRole("button", { name: "Copy question" }))
     expect(onAttachment).toHaveBeenCalledTimes(1)
     expect(onAction).toHaveBeenCalledTimes(1)
-    expect(onCollapse).not.toHaveBeenCalled()
-  })
-
-  it("keeps selected question text expanded", () => {
-    const onCollapse = vi.fn()
-    const view = render(<TurnRegion role="question" onCollapse={onCollapse}><p>Question text</p></TurnRegion>)
-    const text = view.getByText("Question text")
-    const range = document.createRange()
-    range.selectNodeContents(text)
-    window.getSelection()!.addRange(range)
-    fireEvent.click(text)
     expect(onCollapse).not.toHaveBeenCalled()
   })
 })
