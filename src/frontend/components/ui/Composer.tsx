@@ -50,12 +50,21 @@ export function Composer({
   const { isListening, toggleListening } = useSpeechInput(value, onValueChange)
   const sendable = canSend && !disabled
 
-  // Fit the textarea to its text, reset first so scrollHeight can shrink
+  // Fit the textarea to its text, reset first so scrollHeight can shrink. Width changes rewrap it, e.g. a side panel springing open
   useLayoutEffect(() => {
     const element = textarea.current
     if (!element) return
-    element.style.height = "0"
-    element.style.height = `${Math.min(element.scrollHeight, MAX_TEXTAREA_HEIGHT_PX)}px`
+    let fittedWidth = -1
+    const fit = () => {
+      fittedWidth = element.clientWidth
+      element.style.height = "0"
+      element.style.height = `${Math.min(element.scrollHeight, MAX_TEXTAREA_HEIGHT_PX)}px`
+    }
+    fit()
+    // Height changes from `fit` itself must not refit
+    const observer = new ResizeObserver(() => { if (element.clientWidth !== fittedWidth) fit() })
+    observer.observe(element)
+    return () => observer.disconnect()
   }, [value, textarea])
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
