@@ -186,10 +186,10 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
     if (isEditableTarget(e.target, { includeSelect: true })) return
 
     e.preventDefault()
-    const point = lastCanvasPoint.current
-      ?? screenToCanvas(containerRef.current?.clientWidth ?? 0, containerRef.current?.clientHeight ?? 0)
-    addText(point[0], point[1], TEXT_DEFAULT_WIDTH, TEXT_DEFAULT_HEIGHT, e.key)
-  }, [addText, screenToCanvas])
+    const centered = pointAtCenter(TEXT_DEFAULT_WIDTH, TEXT_DEFAULT_HEIGHT / TEXT_DEFAULT_WIDTH)
+    const [x, y] = lastCanvasPoint.current ?? [centered.cx, centered.cy]
+    addText(x, y, TEXT_DEFAULT_WIDTH, TEXT_DEFAULT_HEIGHT, e.key)
+  }, [addText, pointAtCenter])
 
   // --- Aspect cache (image frames + pdf attachments), keyed by element id ---
   const [aspects, setAspects] = useState<Record<string, number>>({})

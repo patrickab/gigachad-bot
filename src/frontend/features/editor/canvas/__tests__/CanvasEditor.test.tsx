@@ -447,6 +447,33 @@ describe("keyboard text entry", () => {
     expect(latest(seen).texts).toHaveLength(0)
   })
 
+  it("centres the note in the view when the pointer has not moved yet", () => {
+    // A container that is not at the page origin: the fallback must not confuse its size with screen coordinates.
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(800)
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600)
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(300, 100, 800, 600))
+    try {
+      const typeAt = (pointer?: { clientX: number; clientY: number }) => {
+        const seen: CanvasDocument[] = []
+        const { container, unmount } = render(<Harness seen={seen} />)
+        const surface = container.querySelector("[tabindex=\"0\"]") as HTMLDivElement
+        act(() => {
+          if (pointer) fireEvent(surface, new MouseEvent("pointermove", { bubbles: true, ...pointer }))
+          fireEvent.keyDown(surface, { key: "H" })
+        })
+        const [note] = latest(seen).texts
+        unmount()
+        return note!
+      }
+      const viewCentre = typeAt({ clientX: 300 + 400, clientY: 100 + 300 })
+      const note = typeAt()
+      expect(note.x + note.width / 2).toBeCloseTo(viewCentre.x)
+      expect(note.y + note.height / 2).toBeCloseTo(viewCentre.y)
+    } finally {
+      vi.restoreAllMocks()
+    }
+  })
+
   it("closes text notes with Enter while Ctrl+Enter keeps the native line break", () => {
     const seen: CanvasDocument[] = []
     const { container } = render(<Harness seen={seen} />)
