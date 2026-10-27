@@ -137,9 +137,22 @@ function tabLocation(tab: Tab) {
   return { category: "chats", file: tab.name ?? tab.title ?? (tab.historyFile ? baseName(tab.historyFile) : "New chat") }
 }
 
-const PILL_BUTTON_CLASS = "flex h-8.5 w-8.5 items-center justify-center rounded-full bg-paper text-ink-muted transition-colors hover:bg-surface-elevated hover:text-ink focus:bg-surface-elevated focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-subtle"
+const PILL_BUTTON_CLASS = "flex h-8.5 w-8.5 shrink-0 items-center justify-center rounded-full bg-paper text-ink-muted transition-colors hover:bg-surface-elevated hover:text-ink focus:bg-surface-elevated focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-subtle"
 
-/** Reveal centered workspace navigation on hover, keyboard focus, or while its menu is open. */
+function BreadcrumbLabel({ project, category, file }: { project: string, category: string, file: string }) {
+  return <>
+    <span className="max-w-24 truncate text-ink-subtle">{project}</span>
+    <span aria-hidden="true" className="text-ink-faint">/</span>
+    <span className="shrink-0 text-ink-subtle">{category}</span>
+    <span aria-hidden="true" className="text-ink-faint">/</span>
+    <span className="min-w-0 truncate text-ink">{file}</span>
+  </>
+}
+
+/** Reveal centered workspace navigation on hover, keyboard focus, or while its menu is open.
+
+- Trigger is as wide as the widest open tab label, so switching never moves it or its buttons
+*/
 export function TabSwitcher() {
   const strip = useContext(TabStripContext)
   const { tab, isActive } = useTab()
@@ -186,43 +199,43 @@ export function TabSwitcher() {
 
   return <div ref={rootRef} data-tab-switcher data-open={open} className="pointer-events-auto flex w-[28rem] max-w-full flex-col items-center opacity-0 transition-opacity duration-160 [&:hover]:opacity-100 focus-within:opacity-100 data-[open=true]:opacity-100 motion-reduce:transition-none"
     onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) close() }}>
-    <div className="relative flex min-w-0 max-w-[calc(100%_-_4.75rem)]">
-    <button ref={triggerRef} type="button" aria-label={`Switch tabs: ${breadcrumb}`} aria-haspopup="dialog" aria-expanded={open}
-      aria-describedby={activityDescriptionId}
-      onClick={() => {
-        if (open) close()
-        else {
-          setShowSearch(strip.tabs.length > 8)
-          setOpen(true)
-        }
-      }}
-      className="flex h-8.5 max-w-full min-w-0 items-center gap-1.5 rounded-full bg-paper px-2 text-xs text-ink-muted transition-colors hover:bg-surface-elevated hover:text-ink focus:bg-surface-elevated focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-subtle">
-      <span className="flex min-w-0 items-center gap-1.5">
-          <span data-workspace-breadcrumb className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
-            <span className="max-w-24 truncate text-ink-subtle">{projectName(tab.projectSlug)}</span>
-            <span aria-hidden="true" className="text-ink-faint">/</span>
-            <span className="shrink-0 text-ink-subtle">{location.category}</span>
-            <span aria-hidden="true" className="text-ink-faint">/</span>
-            <span className="min-w-0 truncate text-ink">{location.file}</span>
+    <div className="flex min-w-0 max-w-full items-center gap-1">
+      <button ref={triggerRef} type="button" aria-label={`Switch tabs: ${breadcrumb}`} aria-haspopup="dialog" aria-expanded={open}
+        aria-describedby={activityDescriptionId}
+        onClick={() => {
+          if (open) close()
+          else {
+            setShowSearch(strip.tabs.length > 8)
+            setOpen(true)
+          }
+        }}
+        className="flex h-8.5 min-w-0 items-center gap-1.5 rounded-full bg-paper px-2 text-xs text-ink-muted transition-colors hover:bg-surface-elevated hover:text-ink focus:bg-surface-elevated focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-subtle">
+        <span className="grid min-w-0 grid-cols-[minmax(0,max-content)]">
+          {orderedTabs.filter(({ item }) => item.id !== tab.id).map(({ item, project, category, file }) =>
+            <span key={item.id} aria-hidden="true" className="invisible flex min-w-0 items-center gap-1.5 whitespace-nowrap [grid-area:1/1]">
+              <BreadcrumbLabel project={project} category={category} file={file} />
+            </span>)}
+          <span data-workspace-breadcrumb className="flex min-w-0 items-center gap-1.5 whitespace-nowrap [grid-area:1/1]">
+            <BreadcrumbLabel project={projectName(tab.projectSlug)} category={location.category} file={location.file} />
           </span>
-          <ChevronDown aria-hidden="true" className="h-3 w-3 shrink-0 text-ink-subtle" />
         </span>
-    </button>
-      <button type="button" data-new-chat aria-label="New chat" onClick={() => {
-        close()
-        strip.add()
-      }} className={`${PILL_BUTTON_CLASS} absolute left-full ml-1`}>
-        <Plus aria-hidden="true" className="h-3 w-3" />
+        <ChevronDown aria-hidden="true" className="h-3 w-3 shrink-0 text-ink-subtle" />
       </button>
-    </div>
       <button type="button" aria-label="Next tab" disabled={strip.tabs.length < 2}
         onClick={() => {
           close()
           strip.select(following.id)
         }}
-        className={`${PILL_BUTTON_CLASS} shrink-0 disabled:cursor-default disabled:text-ink-faint`}>
+        className={`${PILL_BUTTON_CLASS} disabled:cursor-default disabled:text-ink-faint`}>
         <ArrowRightLeft aria-hidden="true" className="h-3 w-3" />
       </button>
+      <button type="button" data-new-chat aria-label="New chat" onClick={() => {
+        close()
+        strip.add()
+      }} className={PILL_BUTTON_CLASS}>
+        <Plus aria-hidden="true" className="h-3 w-3" />
+      </button>
+    </div>
     <span id={activityDescriptionId} className="sr-only">{strip.labelOf(tab)}</span>
     {open && isActive && <div ref={panelRef} role="dialog" aria-label="Open tabs"
       className="absolute left-1/2 top-full z-50 mt-1 flex w-max max-w-[min(36rem,100%)] -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-divider bg-surface shadow-[var(--shadow-lg)]">
