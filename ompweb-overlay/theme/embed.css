@@ -25,7 +25,7 @@ html.cf-embed :has(+ .chat-input-shell) {
 
 /* Endless scroll like a gigachad chat: the shell's top bar and composer lie over the frame (`embed/insets.ts`).
    The transcript runs the full height and pads past them, what is left of omp-web's composer area (queue, status,
-   Tasks/Subagents) floats right above the shell composer, its minimize chevron goes (nothing to minimize) */
+   /btw) floats right above the shell composer, its minimize chevron goes (nothing to minimize) */
 html.cf-embed :has(> :has(> [role=log])) {
   position: relative;
 }
@@ -46,6 +46,97 @@ html.cf-embed :has(> [role=log]) ~ div:has(.chat-input-shell) {
 
 html.cf-embed :has(> [role=log]) ~ div:has(.chat-input-shell) > div:first-child {
   display: none;
+}
+
+/* What floats over the transcript is opaque (upstream paints its panels 4% ink on transparent, text showed through)
+   and lines up with the shell composer (`max-w-2xl`, 672px at the shell's 16px root, omp-web's root is smaller).
+   Remaps the token, Tailwind's `bg-bg-subtle` reads the `--color-*` copy resolved at :root, so both go */
+html.cf-embed :has(> [role=log]) ~ div:has(.chat-input-shell) {
+  --bg-subtle: var(--bg-panel);
+  --color-bg-subtle: var(--bg-panel);
+}
+
+html.cf-embed :has(> [role=log]) ~ div:has(.chat-input-shell) > div:nth-child(2) > div {
+  max-width: 672px !important;
+}
+
+/* Tasks and Subagents close the chat history (`custom/overrides/components/ComposerPanels.tsx`), as Q&A cards
+   (`packages/chat-ui/src/turn.css`): `.gc-turn` surface and spacing, `.gc-turn-header` row with a round 28px avatar,
+   subagents as `.gc-turn-tool` insets. `!important` beats upstream's inline styles */
+html.cf-embed .cf-session-panels > div {
+  gap: 12px !important;
+  margin: 12px !important;
+}
+
+html.cf-embed .cf-session-panels section {
+  border-color: transparent !important;
+  border-radius: 24px !important;
+  background-color: color-mix(in oklab, var(--cf-surface) 65%, var(--cf-paper)) !important;
+  box-shadow: var(--cf-chat-shadow);
+
+  & > :first-child {
+    gap: 12px;
+    padding: 14px;
+    border-bottom-color: transparent;
+    color: var(--cf-ink-subtle);
+    font-size: 12px;
+  }
+
+  & > :first-child > svg:first-child {
+    box-sizing: content-box;
+    width: 14px;
+    height: 14px;
+    padding: 7px;
+    border-radius: 50%;
+    background: var(--cf-elevated);
+    color: var(--cf-ink-muted);
+  }
+
+  & > :first-child > strong {
+    color: var(--cf-ink-muted);
+    font-size: 14px;
+    font-weight: 400;
+  }
+
+  & > button:first-child:hover > strong {
+    color: var(--cf-ink);
+  }
+
+  & > :not(:first-child) {
+    padding-inline: 14px;
+    padding-bottom: 14px;
+    border-top-color: transparent;
+  }
+
+  /* Subagent chips (`.flex-wrap` rows of upstream's panel), two per row at full width. Upstream caps a chip at 320px
+     and its task text at 220px, the cell sets the width instead */
+  & .flex-wrap:has(> button) {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  & .flex-wrap > button {
+    min-width: 0;
+    max-width: none !important;
+    padding: 10px 14px !important;
+    border-color: transparent !important;
+    border-radius: 18px !important;
+    background: color-mix(in oklab, var(--cf-elevated) 45%, var(--cf-surface)) !important;
+  }
+
+  & .flex-wrap > button > span:first-child > span {
+    max-width: none !important;
+  }
+
+  & .flex-wrap > button:hover {
+    background: var(--cf-elevated) !important;
+  }
+}
+
+/* Dialogs (e.g. a subagent's transcript) center between the shell's top bar and composer, so their end stays reachable */
+html.cf-embed [data-base-ui-portal] > :is([role=dialog], [role=alertdialog]) {
+  top: calc(var(--cf-inset-top, 0px) + (100dvh - var(--cf-inset-top, 0px) - var(--cf-inset-bottom, 0px)) / 2) !important;
+  max-height: calc(100dvh - var(--cf-inset-top, 0px) - var(--cf-inset-bottom, 0px) - 24px) !important;
 }
 
 html.cf-embed .chat-scroll-bottom {

@@ -2,7 +2,7 @@
  * The shell lays its top bar and composer over the frame, the transcript scrolls beneath them like a gigachad chat.
  *
  * - `--cf-inset-top` / `--cf-inset-bottom`: shell chrome in px (`insets` message)
- * - `--cf-composer-area`: height of what is left of omp-web's composer area (queue, status, Tasks/Subagents), which
+ * - `--cf-composer-area`: height of what is left of omp-web's composer area (queue, status, /btw), which
  *   `theme/embed.css` floats above the shell composer, so the transcript pads past it too
  * - A session opens at its newest message, whatever settles in after upstream's first scroll
  */
