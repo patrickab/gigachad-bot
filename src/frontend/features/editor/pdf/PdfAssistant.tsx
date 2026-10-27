@@ -90,7 +90,7 @@ export function PdfAssistant({ model, path, chatOpen, onChatOpenChange, children
   return (
     <div className="relative h-full">
       {chatOpen && (
-        <FilePanel label="Chat" onClose={() => onChatOpenChange(false)} width={CHAT_PANEL_WIDTH_PX}>
+        <FilePanel label="Chat" bare onClose={() => onChatOpenChange(false)} width={CHAT_PANEL_WIDTH_PX}>
           <DocumentStatus pdfText={pdfText} />
           <AssistantChat chat={chat} inputLabel="Ask about this PDF" disabled={pdfText.status !== "ready"} surfaceClassName="bg-surface-elevated" />
         </FilePanel>

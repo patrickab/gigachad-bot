@@ -138,22 +138,28 @@ export function FilePanelSlot() {
   )
 }
 
-/** Top bar toggle collapsing the file panel, only while it shows something. */
+/** Top bar toggle reopening the collapsed file panel. Expanded, the panel's own corner holds the toggle. */
 export function FilePanelToggle() {
   const { ownerId, collapsed, toggleCollapsed } = useFilePanelContext()
-  if (ownerId === null) return null
-  return <PanelToggleButton open={!collapsed} onClick={toggleCollapsed} openLabel="Open file panel" closeLabel="Close file panel" />
+  if (ownerId === null || !collapsed) return null
+  return <PanelToggleButton open={false} onClick={toggleCollapsed} openLabel="Open file panel" closeLabel="Close file panel" />
 }
 
-/** Show `children` in the tab's file panel under a header with `label`, `actions` and a close button. `width` px replaces the half-share open width. */
-export function FilePanel({ label, onClose, actions, width, children }: {
+/**
+ * Show `children` in the tab's file panel. The header holds the collapse toggle in the panel's top-left corner, then `label`, `actions` and a close button.
+ *
+ * - `width` px replaces the half-share open width
+ * - `bare` keeps only the toggle, which then closes through `onClose`, for owners with their own reopen control (PDF chat)
+ */
+export function FilePanel({ label, onClose, actions, width, bare = false, children }: {
   label: string
   onClose: () => void
   actions?: ReactNode
   width?: number
+  bare?: boolean
   children: ReactNode
 }) {
-  const { slot, ownerId, claim, release } = useFilePanelContext()
+  const { slot, ownerId, claim, release, toggleCollapsed } = useFilePanelContext()
   const id = useId()
   const closeOwned = useEffectEvent(onClose)
   useEffect(() => {
@@ -164,12 +170,16 @@ export function FilePanel({ label, onClose, actions, width, children }: {
   if (ownerId !== id || !slot) return null
   return createPortal(
     <section aria-label={label} className="flex min-h-0 flex-1 flex-col">
+      {/* Insets mirror the left sidebar's header */}
       <div className="flex h-10 shrink-0 items-center gap-2 pl-4 pr-2 text-[11px] text-ink-subtle">
-        <span className="min-w-0 flex-1 truncate">{label}</span>
-        {actions}
-        <button type="button" aria-label="Close panel" onClick={onClose} className="rounded-md p-1 text-ink-subtle transition-colors hover:bg-surface-elevated hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">
-          <X className="h-3.5 w-3.5" />
-        </button>
+        <PanelToggleButton open onClick={bare ? onClose : toggleCollapsed} openLabel="Open file panel" closeLabel={bare ? `Close ${label.toLowerCase()}` : "Close file panel"} />
+        {!bare && <>
+          <span className="min-w-0 flex-1 truncate">{label}</span>
+          {actions}
+          <button type="button" aria-label="Close panel" onClick={onClose} className="rounded-md p-1 text-ink-subtle transition-colors hover:bg-surface-elevated hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </>}
       </div>
       {children}
     </section>,

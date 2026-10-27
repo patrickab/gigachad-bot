@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react"
 import { motion } from "framer-motion"
 import { Brain, Pencil } from "lucide-react"
+import { PanelToggleButton } from "@/components/ui/PanelToggleButton"
 import { SaveAsModal } from "@/components/ui/SaveAsModal"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { FileTree } from "@/components/ui/file-tree/FileTree"
@@ -48,7 +49,7 @@ interface SidebarProps {
 
 export function Sidebar(props: SidebarProps) {
   const { onNewChat, activeCanvasPath, renderSettings, appMode } = props
-  const { collapsed } = useSidebar()
+  const { collapsed, toggleCollapsed } = useSidebar()
   const { tab } = useTab()
   const branches = useBranches()
   const { projects, createProject } = useProject()
@@ -80,11 +81,12 @@ export function Sidebar(props: SidebarProps) {
       collapsed ? "border-0" : "m-3 mr-0 rounded-2xl border border-divider/50 bg-surface shadow-[var(--shadow-lg)]")}
   >
     {!collapsed && <>
-      <div className="flex h-10 shrink-0 items-center px-4">
+      <div className="flex h-10 shrink-0 items-center justify-between pl-4 pr-2">
         <button onClick={openMemoryViewer} aria-label="Open memory"
           className="rounded-md p-1 text-ink-subtle hover:bg-surface-elevated hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted transition-colors">
           <Brain className="h-4 w-4" />
         </button>
+        <PanelToggleButton side="left" open onClick={toggleCollapsed} openLabel="Open sidebar" closeLabel="Close sidebar" />
       </div>
       <nav aria-label="Workspace" className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
         <FileTree label="Projects" items={items} controller={controller} loading={branches.historiesLoading}

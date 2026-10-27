@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { PanelLeft, PanelLeftClose } from "lucide-react"
+import { PanelToggleButton } from "@/components/ui/PanelToggleButton"
 import { Sidebar } from "@/features/navigation/Sidebar"
 import { useSidebar } from "@/features/navigation/SidebarContext"
 import { ChatContainer, type ChatFocus } from "@/features/chat/ChatContainer"
@@ -100,15 +100,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onNewChat, 
       />
       <main ref={contentAreaRef} className="flex-1 min-w-0 flex flex-col relative bg-paper">
         <WorkspaceSurface
-          sidebarToggle={
-            <button
-              aria-label={sidebarCollapsed ? "Open sidebar" : "Close sidebar"}
-              onClick={toggleSidebar}
-              className="shrink-0 rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
-            >
-              {sidebarCollapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-            </button>
-          }
+          sidebarToggle={sidebarCollapsed && <PanelToggleButton side="left" open={false} onClick={toggleSidebar} openLabel="Open sidebar" closeLabel="Close sidebar" />}
           canvas={canvas}
           modelProps={modelProps}
           reasoningLevels={reasoningLevels}

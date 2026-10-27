@@ -2,6 +2,7 @@
 
 import { useState, type ComponentProps, type ReactNode } from "react"
 import { X } from "lucide-react"
+import { PanelToggleButton } from "@/components/ui/PanelToggleButton"
 import { ModelDropdown } from "@/features/settings/ModelDropdown"
 import { ReasoningSelector } from "@/features/settings/ReasoningSelector"
 import { ThemeToggle } from "@/features/settings/ThemeToggle"
@@ -33,7 +34,7 @@ type CanvasViewControls = Pick<ReturnType<typeof useCanvasView>,
   "view" | "navigateArchitecture" | "closeCanvas" | "openCreatedCanvas" | "architectureEdgeStyle" | "setArchitectureEdgeStyle">
 
 interface WorkspaceSurfaceProps {
-  /** Leads the top bar in every mode, so it stays mounted across mode switches. */
+  /** Leads the top bar in every mode while the sidebar is collapsed, the open sidebar holds its own toggle. */
   sidebarToggle: ReactNode
   canvas: CanvasViewControls
   modelProps: ModelProps
@@ -120,7 +121,9 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
               <X className="h-4 w-4" />
             </button>
           </TopBarTransparent>
-          {!isPdfDocument && filePanelToggle}
+          {isPdfDocument
+            ? !pdfChatOpen && <TopBarTransparent><PanelToggleButton open={false} onClick={() => setPdfChatOpen(true)} openLabel="Open chat" closeLabel="Close chat" /></TopBarTransparent>
+            : filePanelToggle}
         </>,
         runsUnderTopBar: isPdfDocument,
         body: diffItem ? <DiffViewer key={diffItem.path} root={diffItem.path} />
