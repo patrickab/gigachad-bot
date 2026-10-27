@@ -8,7 +8,7 @@ import { ArchitectureWindow } from "@/features/editor/architecture/ArchitectureW
 import { AnnotatedPdfViewer } from "@/features/editor/pdf/AnnotatedPdfViewer"
 import { CanvasDocumentAttachment } from "./CanvasDocumentAttachment"
 
-const PDF_LAYOUT_CAP = 916 // PdfViewer caps rendering at 900px + scrollbar gutter — wider layout gains no resolution
+const PDF_LAYOUT_CAP = 916 // PdfViewer caps rendering at 900px + its 8px side gaps — wider layout gains no resolution
 const PLOT_MIN_LAYOUT_WIDTH = 960 // plots lay out at least this wide and scale down, so legends/titles never collide
 const TITLE_BAR_PX = 31
 

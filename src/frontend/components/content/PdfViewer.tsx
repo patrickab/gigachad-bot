@@ -111,8 +111,8 @@ async function collectLinkRects(page: PdfPage): Promise<ImageRect[]> {
     })
 }
 
-// vertical scrollbar gutter reserved so a fitted page never triggers horizontal scroll
-const SCROLLBAR = 16
+// Gap left and right of a fitted page. The scroller reserves its scrollbar gutter on both edges, so the page stays centered
+const PAGE_SIDE_GAP = 8
 
 /** Re-attach a one-shot media query per DPR value, since each query only matches the DPR it was built for. */
 function subscribeDevicePixelRatio(onChange: () => void) {
@@ -344,6 +344,8 @@ export function PdfViewer({
   const rootRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [availWidth, setAvailWidth] = useState<number | null>(null)
+  // Both scrollbar gutters together, 0 for overlay scrollbars
+  const [scrollbarGutters, setScrollbarGutters] = useState(0)
   const [zoom, setZoom] = useState(1)
   const [rasterZoom, setRasterZoom] = useState(1)
   const zoomRef = useRef(1)
@@ -418,6 +420,8 @@ export function PdfViewer({
     let timer: ReturnType<typeof setTimeout> | null = null
     const update = () => {
       if (el.clientWidth > 0) setAvailWidth(el.clientWidth)
+      const scroller = scrollRef.current
+      if (scroller) setScrollbarGutters(scroller.offsetWidth - scroller.clientWidth)
     }
 
     update()
@@ -554,7 +558,7 @@ export function PdfViewer({
   let renderWidth = RENDER_WIDTH
   let boxHeight: number | undefined
   if (availWidth != null) {
-    renderWidth = Math.round(Math.min(RENDER_WIDTH, availWidth - SCROLLBAR))
+    renderWidth = Math.round(Math.min(RENDER_WIDTH, availWidth - scrollbarGutters - 2 * PAGE_SIDE_GAP))
     if (fitWidth && pageAspect != null) {
       boxHeight = Math.round(renderWidth * pageAspect)
     }
@@ -713,7 +717,7 @@ export function PdfViewer({
       </div>
       <div
         ref={setScroller}
-        className="pdf-scroll flex-1 min-h-0 overflow-auto focus:outline-none"
+        className="pdf-scroll flex-1 min-h-0 overflow-auto [scrollbar-gutter:stable_both-edges] focus:outline-none"
         tabIndex={0}
         onScroll={trackVisiblePage}
         // overflow-anchor off: the width-change effect above owns the scroll
