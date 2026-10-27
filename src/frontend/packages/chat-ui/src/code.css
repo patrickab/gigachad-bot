@@ -3,7 +3,9 @@
 
    - The color scheme is the components' `theme` prop, set as `data-theme` on `.gc-code`, never a host theme class.
      Highlighted code carries both Shiki themes as CSS variables (`--shiki-dark`, `--shiki-light`), the scheme picks one
-   - Host contract, the role tokens read here: --ink  --ink-subtle  --surface  --surface-elevated  --radius-md
+   - Code block: header (language, copy) over the code, lines numbered by a CSS counter on Shiki's `.line` spans, so
+     numbers are never selected or copied. `--gc-code-gutter` (set by `CodeBlock`) fits the widest number
+   - Host contract, the role tokens read here: --ink  --ink-subtle  --paper  --surface  --surface-elevated  --radius-md
      --shadow-sm  --shadow-md  --inner-highlight  --font-mono  --font-symbols. The shell defines them in
      `app/globals.css`, the overlay maps them on `[data-markdown-root]` (`ompweb-overlay/theme/chat-ui.css`)
    - Block margins sit in the `utilities` layer with a single class, where the shell's former `my-3` utilities were,
@@ -21,29 +23,63 @@
 }
 
 .gc-code {
-  position: relative;
-}
-
-.gc-code pre {
-  overflow-x: auto;
+  overflow: hidden;
   border-radius: var(--radius-md);
+  background-color: var(--surface);
   box-shadow: var(--shadow-md), var(--inner-highlight);
-  font-family: var(--font-mono), var(--font-symbols), 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
 }
 
-.gc-code[data-theme="light"] pre {
+.gc-code[data-theme="light"] {
   box-shadow: var(--shadow-sm), var(--inner-highlight);
 }
 
+.gc-code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.25rem 0.375rem 0.25rem 0.75rem;
+  border-bottom: 1px solid color-mix(in oklab, var(--ink) 8%, transparent);
+  background-color: color-mix(in oklab, var(--surface-elevated) 50%, var(--surface));
+  user-select: none;
+}
+
+.gc-code-language {
+  font-family: var(--font-mono), 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--ink-subtle);
+}
+
+/* Undoes the host's global `pre` card (radius, shadow): the block is the card */
+.gc-code pre {
+  overflow-x: auto;
+  border-radius: 0;
+  box-shadow: none;
+  font-family: var(--font-mono), var(--font-symbols), 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+}
+
 .gc-code code {
+  counter-reset: gc-code-line;
   font-family: var(--font-mono), var(--font-symbols), 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
   font-size: 0.875em;
 }
 
+.gc-code:not(.gc-code-plain) .line::before {
+  counter-increment: gc-code-line;
+  content: counter(gc-code-line);
+  display: inline-block;
+  width: var(--gc-code-gutter, 2ch);
+  margin-right: 1.25rem;
+  text-align: right;
+  color: var(--ink-subtle);
+  opacity: 0.6;
+}
+
 /* `!important` beats the inline styles Shiki puts on its `<pre>` */
 .gc-code-highlighted pre {
-  border-radius: var(--radius-md) !important;
-  padding: 1rem !important;
+  border-radius: 0 !important;
+  padding: 0.75rem 1rem !important;
   margin: 0 !important;
   font-size: 0.75rem !important;
   line-height: 1.6 !important;
@@ -52,19 +88,31 @@
 .gc-code .shiki,
 .gc-code .shiki span {
   color: var(--shiki-dark);
-  background-color: var(--shiki-dark-bg);
 }
 
 .gc-code[data-theme="light"] .shiki,
 .gc-code[data-theme="light"] .shiki span {
   color: var(--shiki-light);
+}
+
+.gc-code[data-theme="light"] .shiki {
   background-color: var(--shiki-light-bg);
+}
+
+/* The block paints its background once, the hosts' global `.shiki span` rules would repaint Shiki's under every token */
+.gc-code .shiki span {
+  background-color: transparent;
+}
+
+/* Dark: the palette's paper as a recessed well. Andromeeda's own slate-blue background clashes with the warm surfaces */
+.gc-code[data-theme="dark"] :is(.shiki, .gc-code-fallback) {
+  background-color: var(--paper);
 }
 
 /* Unhighlighted code: while highlighting runs, and text-drawn diagrams (`plain`) */
 .gc-code-fallback {
   margin: 0;
-  padding: 1rem;
+  padding: 0.75rem 1rem;
   font-size: 0.75rem;
   line-height: 1.6;
   background-color: var(--surface);
@@ -75,36 +123,53 @@
   white-space: pre;
 }
 
+/* Same shape and states as the turn actions (`.gc-turn-action`): shown on hover or focus, always on touch */
 .gc-code-copy {
-  position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
-  padding: 0.25rem;
-  border-radius: 0.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
   color: var(--ink-subtle);
+  cursor: pointer;
   opacity: 0;
-  transition-property: opacity;
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-  transition-duration: 150ms;
+  transition: opacity 150ms;
 }
 
-.gc-code-copy svg {
-  width: 0.875rem;
-  height: 0.875rem;
+.gc-code:hover .gc-code-copy,
+.gc-code-copy:focus-visible {
+  opacity: 1;
+}
+
+.gc-code-copy:focus-visible {
+  outline: 2px solid var(--ink-subtle);
+  outline-offset: 2px;
 }
 
 .gc-code-copy .gc-code-copied {
   color: var(--ink);
 }
 
-@media (hover: hover) {
-  .gc-code:hover > .gc-code-copy {
+@media (hover: none) {
+  .gc-code-copy {
     opacity: 1;
   }
+}
 
+@media (hover: hover) {
   .gc-code-copy:hover {
-    background-color: color-mix(in oklab, var(--surface-elevated) 60%, transparent);
+    background-color: var(--surface-elevated);
     color: var(--ink);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gc-code-copy {
+    transition: none;
   }
 }
 
