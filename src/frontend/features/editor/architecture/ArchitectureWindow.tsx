@@ -11,7 +11,9 @@ import { architectureSlug, architectureSource } from "@/lib/domain/architectureP
 import { diffGraph, fitGraph, graphFromView, type DiagramGraph, type DiagramNode } from "@/features/editor/architecture/diagramGraph"
 import type { EdgeStyle } from "@/lib/domain/edgeRouting"
 import { subscribeToChanges } from "@/lib/backend/syncStream"
+import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { useEventListener } from "@/hooks/useEventListener"
+import { useTabActive } from "@/contexts/TabContext"
 import { useResetOnChange } from "@/hooks/useResetOnChange"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { cn, errorMessage } from "@/lib/utils"
@@ -165,6 +167,7 @@ export function ArchitectureWindow({ path, maximized, hostScale, edgeStyle = "el
 }) {
   const slug = architectureSlug(path)
   const file = architectureSource(path)
+  const tabActive = useTabActive()
   const [treeOpen, setTreeOpen] = useState(true)
   const [mode, setMode] = useState<"diagram" | "text">("diagram")
   // The window's own mounting points inside the top-bar slots, so its controls keep a fixed order.
@@ -193,11 +196,12 @@ export function ArchitectureWindow({ path, maximized, hostScale, edgeStyle = "el
   }, [run, offered])
   // The dialog has the keyboard: Enter deletes, Escape keeps, whatever holds focus.
   useEventListener("window", "keydown", (event) => {
-    if (event.key !== "Enter" && event.key !== "Escape") return
+    if (event.key !== "Enter") return
     event.preventDefault()
     event.stopPropagation()
-    answer(event.key === "Enter")
+    answer(true)
   }, { active: offered.length > 0, capture: true })
+  useEscapeLayer(() => answer(false), offered.length > 0 && tabActive)
   // Another view or file is another question.
   useResetOnChange(view?.id, () => setOffered([]))
   // LikeC4's own complaints about the source, e.g. an unresolved reference; it counts lines from zero.

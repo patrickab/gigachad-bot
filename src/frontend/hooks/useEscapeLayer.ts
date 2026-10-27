@@ -8,10 +8,10 @@ type EscapeLayer = { current: () => void }
 /** Active layers, innermost (most recently activated) last. */
 const layers: EscapeLayer[] = []
 
-// Neovim owns Escape while its terminal has focus, so `:q` is the way out of a window holding it.
+// Neovim owns Escape while its terminal has focus, so `:q` is the way out of a window holding it. An IME owns it mid-composition.
 function handleEscape(event: KeyboardEvent) {
   const top = layers.at(-1)
-  if (event.key !== "Escape" || !top || isNeovimKeyEvent(event)) return
+  if (event.key !== "Escape" || !top || event.isComposing || isNeovimKeyEvent(event)) return
   event.preventDefault()
   event.stopImmediatePropagation()
   top.current()

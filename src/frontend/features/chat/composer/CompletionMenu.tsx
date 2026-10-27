@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react"
 import type { LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useTabActive } from "@/contexts/TabContext"
+import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 
 /** One suggestion for the draft. Applying it replaces `text.slice(from, to)` with `insert`, caret at `from + caretOffset`. */
 export interface ComposerCompletion {
@@ -24,7 +26,7 @@ const REQUEST_DELAY_MS = 80
  * Suggestion state for a composer textarea.
  *
  * - `request` after every edit, debounced, only the latest answer shows
- * - `handleKey` drives the open menu (arrows, Enter/Tab apply, Escape closes) and reports whether it took the key
+ * - `handleKey` drives the open menu (arrows, Enter/Tab apply) and reports whether it took the key; Escape closes it through an escape layer
  * - Applying asks again, so a directory keeps the menu open for its contents
  */
 export function useCompletions(
@@ -33,6 +35,7 @@ export function useCompletions(
   setText: (text: string) => void,
 ) {
   const [items, setItems] = useState<ComposerCompletion[]>([])
+  const tabActive = useTabActive()
   const [activeIndex, setActiveIndex] = useState(0)
   const latestRequestRef = useRef(0)
   const timerRef = useRef<number | undefined>(undefined)
@@ -75,11 +78,12 @@ export function useCompletions(
     const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0
     if (step !== 0) setActiveIndex((index) => (index + step + items.length) % items.length)
     else if ((event.key === "Enter" && !event.shiftKey) || event.key === "Tab") apply(text, items[activeIndex])
-    else if (event.key === "Escape") close()
     else return false
     event.preventDefault()
     return true
-  }, [items, activeIndex, apply, close])
+  }, [items, activeIndex, apply])
+
+  useEscapeLayer(close, items.length > 0 && tabActive)
 
   return { items, activeIndex, setActiveIndex, request, close, apply, handleKey }
 }

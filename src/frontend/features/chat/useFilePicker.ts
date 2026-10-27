@@ -2,7 +2,7 @@
 
 import { useCallback, useState, type Dispatch, type RefObject, type SetStateAction } from "react"
 import { useStartupRead } from "@/contexts/StartupReadContext"
-import { useEventListener } from "@/hooks/useEventListener"
+import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import type { ChatInputHandle } from "@/features/chat/composer/ChatInput"
 import { attachReference, listRootFiles } from "@/lib/backend/api"
 import type { RootFile } from "@/lib/domain/types"
@@ -51,10 +51,7 @@ export function useFilePicker({ isActive, hasMessages, chatInputRef, setExtracti
     }
   }, [hasMessages, chatInputRef, setExtracting])
 
-  // Capture phase so Escape closes the PDF viewer before other handlers see it.
-  useEventListener("window", "keydown", (e) => {
-    if (e.key === "Escape") { e.preventDefault(); setFilePdfPath(null) }
-  }, { active: isActive && !!filePdfPath, capture: true })
+  useEscapeLayer(() => setFilePdfPath(null), isActive && !!filePdfPath)
 
   return {
     filesEnabled,

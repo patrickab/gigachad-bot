@@ -11,6 +11,8 @@ import { baseName } from "@/lib/paths"
 import { cn, errorMessage } from "@/lib/utils"
 import { readStorage, writeStorage } from "@/lib/storage"
 import { useEventListener } from "@/hooks/useEventListener"
+import { useEscapeLayer } from "@/hooks/useEscapeLayer"
+import { useTabActive } from "@/contexts/TabContext"
 import { ErrorText } from "@/components/ui/ErrorText"
 import { useNeovimSetting } from "@/contexts/SettingsContext"
 import { NeovimEditor, useNeovimTerminal, type NeovimDocument } from "@/features/editor/NeovimEditor"
@@ -149,6 +151,10 @@ function LineNumbers({ numbers }: { numbers: (number | null)[] }) {
 
 function NoteEditor({ draft, actions }: { draft: Draft; actions: ReviewActions }) {
   const [comment, setComment] = useState(draft.comment)
+  const [focused, setFocused] = useState(false)
+  const tabActive = useTabActive()
+  // While the textarea has focus Escape discards the draft first, ahead of any enclosing overlay.
+  useEscapeLayer(actions.cancelDraft, focused && tabActive)
   const selectedText = draft.anchor.selectedText
   return <div className="rounded-lg border border-divider bg-surface px-3 py-2 font-sans focus-within:border-ink-muted">
     {selectedText && <pre className="mb-2 max-h-32 overflow-auto whitespace-pre-wrap font-mono text-[11px] text-ink-muted">{selectedText}</pre>}
@@ -158,11 +164,10 @@ function NoteEditor({ draft, actions }: { draft: Draft; actions: ReviewActions }
       rows={2}
       value={comment}
       onChange={(event) => setComment(event.target.value)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
       onKeyDown={(event) => {
-        if (event.key === "Escape") {
-          event.preventDefault()
-          actions.cancelDraft()
-        } else if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+        if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
           event.preventDefault()
           actions.saveDraft(draft, comment)
         }

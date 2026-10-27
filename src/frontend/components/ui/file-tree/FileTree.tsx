@@ -7,6 +7,8 @@ import { ErrorText } from "@/components/ui/ErrorText"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { StyledSelect } from "@/components/ui/StyledSelect"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
+import { useEscapeLayer } from "@/hooks/useEscapeLayer"
+import { useTabActive } from "@/contexts/TabContext"
 import type { FileBranchController } from "./useFileTree"
 
 /** A second input of a create form, e.g. the branch a new worktree starts from. */
@@ -317,6 +319,8 @@ function InlineCreateForm({ action, depth, onDone, onCancel }: {
   onCancel: () => void
 }) {
   const [name, setName] = useState("")
+  const tabActive = useTabActive()
+  useEscapeLayer(onCancel, tabActive)
   const [choice, setChoice] = useState(action.choice?.initial)
   const { run, pending: saving, error } = useAsyncAction(async () => {
     await action.onSubmit(name.trim(), choice)
@@ -333,10 +337,6 @@ function InlineCreateForm({ action, depth, onDone, onCancel }: {
         if (event.key === "Enter") {
           event.preventDefault()
           submit()
-        }
-        if (event.key === "Escape") {
-          event.stopPropagation()
-          onCancel()
         }
       }}
       className="h-6 w-full bg-transparent text-xs text-ink placeholder:text-ink-faint outline-none"

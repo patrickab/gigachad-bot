@@ -1,10 +1,13 @@
 "use client"
 
+import { useRef, useState } from "react"
 import type { CanvasText } from "@/lib/domain/canvasDocument"
 import type { Point } from "@/lib/domain/edgeRouting"
 import { CanvasResizeHandle } from "@/features/editor/canvas/CanvasResizeHandle"
 import { inkColor } from "@/features/editor/canvas/ink/canvasInk"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
+import { useTabActive } from "@/contexts/TabContext"
+import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 
 interface CanvasTextNoteProps {
   note: CanvasText
@@ -22,32 +25,46 @@ interface CanvasTextNoteProps {
 
 const DRAG_BAND_PX = 6
 
+type NoteSourceEditorProps = Pick<CanvasTextNoteProps, "scale" | "autoFocus" | "onEdit" | "onFocusNote" | "onBlurNote"> & { note: CanvasText }
+
+/** The note's source textarea: Enter or Escape blurs it, and while focused it owns Escape so an enclosing overlay stays open. */
+function NoteSourceEditor({ note: t, scale, autoFocus, onEdit, onFocusNote, onBlurNote }: NoteSourceEditorProps) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [focused, setFocused] = useState(false)
+  const tabActive = useTabActive()
+  useEscapeLayer(() => textareaRef.current?.blur(), focused && tabActive)
+  return (
+    <textarea
+      ref={textareaRef}
+      autoFocus={autoFocus}
+      value={t.text}
+      onChange={(e) => onEdit(e.target.value)}
+      onFocus={() => { setFocused(true); onFocusNote() }}
+      onBlur={() => { setFocused(false); onBlurNote() }}
+      onKeyDown={(e) => {
+        e.stopPropagation()
+        if (e.key === "Enter" && !(e.ctrlKey || e.metaKey)) {
+          e.preventDefault()
+          e.currentTarget.blur()
+        }
+      }}
+      onPointerDown={(e) => e.stopPropagation()}
+      className="absolute inset-0 resize-none bg-transparent outline-none border border-transparent focus:border-dashed focus:border-divider-strong rounded px-1"
+      style={{
+        fontSize: t.size * scale,
+        lineHeight: 1.2,
+        color: inkColor(t.color),
+      }}
+    />
+  )
+}
+
 /** A text note: Markdown while unfocused, a source textarea once clicked. Rasterized as source text in canvas exports. */
 export function CanvasTextNote({ note: t, scale, offset, editing, autoFocus, onStartEditing, onEdit, onFocusNote, onBlurNote, onDragStart }: CanvasTextNoteProps) {
   return (
     <div className="absolute group/text" style={{ left: t.x * scale + offset.x, top: t.y * scale + offset.y, width: t.width * scale, height: t.height * scale }}>
       {editing ? (
-        <textarea
-          autoFocus={autoFocus}
-          value={t.text}
-          onChange={(e) => onEdit(e.target.value)}
-          onFocus={onFocusNote}
-          onBlur={onBlurNote}
-          onKeyDown={(e) => {
-            e.stopPropagation()
-            if ((e.key === "Enter" && !(e.ctrlKey || e.metaKey)) || e.key === "Escape") {
-              e.preventDefault()
-              e.currentTarget.blur()
-            }
-          }}
-          onPointerDown={(e) => e.stopPropagation()}
-          className="absolute inset-0 resize-none bg-transparent outline-none border border-transparent focus:border-dashed focus:border-divider-strong rounded px-1"
-          style={{
-            fontSize: t.size * scale,
-            lineHeight: 1.2,
-            color: inkColor(t.color),
-          }}
-        />
+        <NoteSourceEditor note={t} scale={scale} autoFocus={autoFocus} onEdit={onEdit} onFocusNote={onFocusNote} onBlurNote={onBlurNote} />
       ) : (
         <div
           className="absolute inset-0 cursor-text overflow-auto rounded px-1 py-0.5"

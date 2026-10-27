@@ -9,6 +9,8 @@ import { ArchitectureWindow } from "@/features/editor/architecture/ArchitectureW
 import { CanvasResizeHandle } from "@/features/editor/canvas/CanvasResizeHandle"
 import { AnnotatedPdfViewer } from "@/features/editor/pdf/AnnotatedPdfViewer"
 import { CanvasDocumentAttachment } from "./CanvasDocumentAttachment"
+import { useTabActive } from "@/contexts/TabContext"
+import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 
 const PDF_LAYOUT_CAP = 916 // PdfViewer caps rendering at 900px + its 8px side gaps — wider layout gains no resolution
 const PLOT_MIN_LAYOUT_WIDTH = 960 // plots lay out at least this wide and scale down, so legends/titles never collide
@@ -44,6 +46,8 @@ export function CanvasAttachmentWindow({
   onDragStart, onToggleFullscreen, onRemove, onPatch, onRetitle, onPdfAspect, pdfPen, renderNestedCanvas,
 }: CanvasAttachmentWindowProps) {
   const [editingTitle, setEditingTitle] = useState(false)
+  const tabActive = useTabActive()
+  useEscapeLayer(() => setEditingTitle(false), editingTitle && tabActive)
   const nested = att.kind === "canvas"
   const architectureDiagram = att.kind === "architecture-graph"
   const isDocument = att.kind === "document"
@@ -92,10 +96,7 @@ export function CanvasAttachmentWindow({
             className="flex-1 min-w-0 bg-transparent text-[10px] font-medium text-ink outline-none select-text"
             onPointerDown={(e) => e.stopPropagation()}
             onBlur={(e) => commitTitle(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") commitTitle(e.currentTarget.value)
-              if (e.key === "Escape") setEditingTitle(false)
-            }}
+            onKeyDown={(e) => { if (e.key === "Enter") commitTitle(e.currentTarget.value) }}
           />
         ) : (
           <span

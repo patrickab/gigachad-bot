@@ -12,7 +12,7 @@ import { renderPageToPng, renderCanvasToJpeg, type EmbedRect } from "@/lib/drawi
 import { useCollaborativeCanvas } from "@/features/editor/canvas/useCollaborativeCanvas"
 import { baseName } from "@/lib/paths"
 import { useTabActive } from "@/contexts/TabContext"
-import { useEventListener } from "@/hooks/useEventListener"
+import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { LoadFailure, LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
 
 /** Load each image frame to measure its aspect ratio (falls back to 1 if it fails to load). */
@@ -87,11 +87,7 @@ export function CanvasDocumentEditor({ path, slug, onClose, onSaved, overlay, on
     setExporting(false)
   }, [canvasDocument, exporting, slug, filename, onSaved])
 
-  useEventListener("document", "keydown", (event) => {
-    if (event.key !== "Escape") return
-    event.preventDefault()
-    onClose()
-  }, { active: !!overlay && isActive })
+  useEscapeLayer(onClose, !!overlay && isActive)
 
   if (!canvasDocument) {
     return status === "error"

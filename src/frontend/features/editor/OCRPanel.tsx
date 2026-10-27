@@ -8,6 +8,8 @@ import { AssistedConsoleEditor } from "./AssistedConsoleEditor"
 import { EditorSidebar } from "./EditorSidebar"
 import { createOCRStream } from "@/lib/backend/api"
 import { useEventListener } from "@/hooks/useEventListener"
+import { useEscapeLayer } from "@/hooks/useEscapeLayer"
+import { useTabActive } from "@/contexts/TabContext"
 import { useResetOnChange } from "@/hooks/useResetOnChange"
 import { blobToDataUrl } from "@/lib/utils"
 
@@ -19,6 +21,7 @@ interface OCRPanelProps {
 }
 
 export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
+  const tabActive = useTabActive()
   // The image lives in state (seeded from the prop) so the panel can be reset
   // in place: Alt+R clears everything and waits for a newly pasted image.
   const [img, setImg] = useState<string | null>(image)
@@ -98,10 +101,9 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
       e.preventDefault()
       reset()
     }
-    if (e.key === "Escape") {
-      onClose()
-    }
   })
+
+  useEscapeLayer(onClose, tabActive)
 
   const handleSidebarApply = useCallback((newContent: string) => {
     setOutput(newContent)

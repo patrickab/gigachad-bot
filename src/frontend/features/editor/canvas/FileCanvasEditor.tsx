@@ -8,6 +8,8 @@ import { emptyCanvasDoc, parseCanvasDoc, serializeCanvasDoc, type CanvasDocument
 import { ApiError, loadFileViewerText } from "@/lib/backend/api"
 import { subscribeToChanges } from "@/lib/backend/syncStream"
 import { baseName } from "@/lib/paths"
+import { useTabActive } from "@/contexts/TabContext"
+import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { LoadFailure, LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
 
 interface FileCanvasEditorProps {
@@ -23,6 +25,7 @@ interface FileCanvasEditorProps {
 
 /** Full-screen overlay for a file-root canvas: loads through the file viewer, autosaves through `persistOverride`. */
 export function FileCanvasEditor({ path, slug, onClose, onSaved, persistOverride, onModeLabel, canvasToolbarSlots }: FileCanvasEditorProps) {
+  const tabActive = useTabActive()
   const [canvasDoc, setCanvasDoc] = useState<CanvasDocument | null>(null)
   const [loadError, setLoadError] = useState(false)
   const dirtyRef = useRef(false)
@@ -101,14 +104,12 @@ export function FileCanvasEditor({ path, slug, onClose, onSaved, persistOverride
         event.preventDefault()
         flush(true)
       }
-      if (event.key === "Escape") {
-        event.preventDefault()
-        onClose()
-      }
     }
     document.addEventListener("keydown", handler)
     return () => document.removeEventListener("keydown", handler)
-  }, [onClose])
+  }, [])
+
+  useEscapeLayer(onClose, tabActive)
 
   if (loadError) return <LoadFailure message="Failed to load this document. Its stored content was left untouched." onRetry={loadFromServer} />
 

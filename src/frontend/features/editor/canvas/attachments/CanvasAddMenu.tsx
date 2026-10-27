@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { FileType, ImageIcon, Network, Pencil, PenLine, Plus, SquarePen, X } from "lucide-react"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
+import { useTabActive } from "@/contexts/TabContext"
+import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { useOutsidePress } from "@/hooks/useOutsidePress"
 import { listNotes, listProjectDocuments, removeDocument, renameDocument } from "@/lib/backend/api"
 import type { ProjectDocument } from "@/lib/domain/types"
@@ -59,6 +61,10 @@ export function CanvasAddMenu({ slug, depth, docPath, onAddPage, onAddImage, onA
   const [docs, setDocs] = useState<ProjectDocument[]>([])
   const [renamingPath, setRenamingPath] = useState<string | null>(null)
   const cancelRename = useRef(false)
+  const renameInputRef = useRef<HTMLInputElement>(null)
+  const tabActive = useTabActive()
+  // The rename input owns Escape while open: cancel it without closing an enclosing overlay.
+  useEscapeLayer(() => { cancelRename.current = true; renameInputRef.current?.blur() }, renamingPath !== null && tabActive)
   const { schedule: scheduleDelete, pending: deletePending } = useUndoDelete()
   const deleteKey = (path: string) => `canvas-document:${slug ?? ""}:${path}`
 
@@ -128,15 +134,13 @@ export function CanvasAddMenu({ slug, depth, docPath, onAddPage, onAddImage, onA
                     <div className="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5">
                       <FileType className="h-3 w-3 shrink-0 text-ink-faint" />
                       <input
+                        ref={renameInputRef}
                         autoFocus
                         defaultValue={docItem.name}
                         aria-label={`New name for ${docItem.name}`}
                         className="min-w-0 flex-1 bg-transparent text-[11px] text-ink outline-none"
                         onBlur={(e) => { void renameDocumentRow(docItem.path, docItem.name, e.currentTarget.value) }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") e.currentTarget.blur()
-                          if (e.key === "Escape") { cancelRename.current = true; e.currentTarget.blur() }
-                        }}
+                        onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur() }}
                       />
                     </div>
                   ) : (

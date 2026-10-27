@@ -1,6 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
+import { useTabActive } from "@/contexts/TabContext"
+import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { useEventListener } from "@/hooks/useEventListener"
 import { isNeovimKeyEvent } from "@/lib/utils"
 
@@ -12,6 +14,7 @@ export function usePairFocus({ pairs, scrollContainerRef, togglePair }: {
   togglePair: (globalIndex: number) => void
 }) {
   const [keyboardFocusIdx, setKeyboardFocusIdx] = useState<number | null>(null)
+  const tabActive = useTabActive()
   const collapsedRefs = useRef<Map<number, HTMLDivElement>>(new Map())
 
   const focusedGlobalIndex =
@@ -48,11 +51,10 @@ export function usePairFocus({ pairs, scrollContainerRef, togglePair }: {
     } else if (e.key === "Enter" && keyboardFocusIdx !== null) {
       eat()
       confirmFocus()
-    } else if (e.key === "Escape" && keyboardFocusIdx !== null) {
-      eat()
-      setKeyboardFocusIdx(null)
     }
   }, { capture: true })
+
+  useEscapeLayer(() => setKeyboardFocusIdx(null), keyboardFocusIdx !== null && tabActive)
 
   useEffect(() => {
     if (keyboardFocusIdx === null) return

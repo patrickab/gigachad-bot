@@ -20,6 +20,7 @@ import { useNeovimSetting } from "@/contexts/SettingsContext"
 import { useRootFileDocument } from "./useRootFileDocument"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { useEventListener } from "@/hooks/useEventListener"
+import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { useResetOnChange } from "@/hooks/useResetOnChange"
 import { LoadFailure, LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
 
@@ -174,11 +175,9 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, overlay, pers
       event.preventDefault()
       handleSave()
     }
-    if (event.key === "Escape") {
-      if (overlay) { event.preventDefault(); onClose() }
-      else if (isFullscreen) { event.preventDefault(); setIsFullscreen(false) }
-    }
   })
+
+  useEscapeLayer(() => { if (overlay) onClose(); else setIsFullscreen(false) }, isActive && (!!overlay || isFullscreen))
 
   const handlePreviewClick = useCallback((e: React.MouseEvent) => {
     const anchor = (e.target as HTMLElement).closest("a")

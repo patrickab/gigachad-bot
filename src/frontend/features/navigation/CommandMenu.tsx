@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react"
 import { motion } from "framer-motion"
+import { useTabActive } from "@/contexts/TabContext"
+import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { useEventListener } from "@/hooks/useEventListener"
 import { useResetOnChange } from "@/hooks/useResetOnChange"
 import { cn, isNeovimKeyEvent } from "@/lib/utils"
@@ -31,10 +33,11 @@ export function CommandMenu({ items, query, onRun, onClose }: CommandMenuProps) 
   // Restart at the first entry whenever the filtered list changes.
   useResetOnChange(filtered, () => setSelectedIdx(0))
 
+  useEscapeLayer(onClose, useTabActive())
+
   // Capture phase so the keys are handled before the focused input sees them.
   useEventListener("window", "keydown", (e) => {
     if (isNeovimKeyEvent(e)) return
-    if (e.key === "Escape") { e.preventDefault(); onClose(); return }
     if (e.key === "ArrowDown") { e.preventDefault(); setSelectedIdx((i) => (i + 1) % filtered.length); return }
     if (e.key === "ArrowUp") { e.preventDefault(); setSelectedIdx((i) => (i - 1 + filtered.length) % filtered.length); return }
     if (e.key === "Enter" && filtered.length > 0) { e.preventDefault(); onRun(filtered[selectedIdx]?.command ?? filtered[0].command) }

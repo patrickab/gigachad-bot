@@ -1,6 +1,8 @@
 "use client"
 
 import { useEffect, useRef } from "react"
+import { useTabActive } from "@/contexts/TabContext"
+import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 
 const ANSWER_CLASS = "rounded px-1 text-ink-muted hover:bg-hover hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted disabled:opacity-50"
 
@@ -13,12 +15,13 @@ export function InlineConfirm({ question, busy, onYes, onNo }: {
 }) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => { ref.current?.focus() }, [question])
+  const tabActive = useTabActive()
+  useEscapeLayer(onNo, !busy && tabActive)
   return <div
     ref={ref} tabIndex={-1} role="group" aria-label={question}
     onKeyDown={(event) => {
       if (busy) return
       if (event.key === "Enter") { event.preventDefault(); onYes() }
-      if (event.key === "Escape") { event.stopPropagation(); onNo() }
     }}
     className="flex items-center gap-1 py-0.5 text-[11px] text-ink-subtle outline-none"
   >

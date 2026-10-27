@@ -15,6 +15,7 @@ import { useCanvasHistory, useUndoRedoKeys } from "@/features/editor/canvas/useC
 import { useCanvasInsert } from "@/features/editor/canvas/attachments/useCanvasInsert"
 import { useTabActive } from "@/contexts/TabContext"
 import { useCanvasSelection } from "@/features/editor/canvas/selection/useCanvasSelection"
+import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { useEventListener } from "@/hooks/useEventListener"
 import { LoadFailure, LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
 import { cn, isEditableTarget } from "@/lib/utils"
@@ -334,7 +335,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
   }, [])
 
   useEventListener("document", "pointerdown", () => setContextMenu(null), { active: !!contextMenu })
-  useEventListener("document", "keydown", (e) => { if (e.key === "Escape") setContextMenu(null) }, { active: !!contextMenu })
+  useEscapeLayer(() => setContextMenu(null), !!contextMenu && active)
 
   // --- Screenshot capture: rasterize a canvas-space rect and copy it to the clipboard ---
   const captureScreenshot = useCallback(async ([x0, y0]: [number, number], [x1, y1]: [number, number]) => {
@@ -523,13 +524,12 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
   // --- Keyboard: undo/redo, and Escape to cancel a band or drop the stroke selection ---
   useUndoRedoKeys(undo, redo, active)
 
-  useEventListener("document", "keydown", (e) => {
-    if (e.key !== "Escape") return
+  useEscapeLayer(() => {
     writeBand(null)
     setTool("draw")
     clearSelection()
     clearInkTool()
-  }, { active: tool !== "draw" || selection.selectedIds.size > 0 || !!inkTool })
+  }, active && (tool !== "draw" || selection.selectedIds.size > 0 || !!inkTool))
 
   const addMenu = (
     <CanvasAddMenu

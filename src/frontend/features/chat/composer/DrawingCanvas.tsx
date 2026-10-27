@@ -8,6 +8,8 @@ import { cn } from "@/lib/utils"
 import { type StrokeData, STROKE_OPTIONS as BASE_STROKE_OPTIONS, penPressure, renderStrokesToJpeg, strokeOutlinePath } from "@/lib/drawing"
 import { uploadFile as apiUploadFile } from "@/lib/backend/api"
 import { useEventListener } from "@/hooks/useEventListener"
+import { useEscapeLayer } from "@/hooks/useEscapeLayer"
+import { useTabActive } from "@/contexts/TabContext"
 import { useThemeName } from "@/hooks/useThemeName"
 import { readToken } from "@/lib/palette"
 import type { Attachment } from "@/lib/domain/types"
@@ -38,11 +40,9 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
 
   const svgRef = useRef<SVGSVGElement>(null)
 
+  useEscapeLayer(onClose, useTabActive())
+
   useEventListener("document", "keydown", (e) => {
-    if (e.key === "Escape") {
-      e.preventDefault()
-      onClose()
-    }
     if ((e.ctrlKey || e.metaKey) && e.key === "z") {
       e.preventDefault()
       setStrokes((prev) => prev.slice(0, -1))

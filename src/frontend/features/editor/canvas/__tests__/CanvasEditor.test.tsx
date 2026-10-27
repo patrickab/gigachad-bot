@@ -92,8 +92,10 @@ const collaboration = vi.hoisted(() => {
   }
 })
 vi.mock("@/features/editor/canvas/useCollaborativeCanvas", () => collaboration)
+vi.mock("@/lib/backend/syncStream", () => ({ subscribeToChanges: () => () => {} }))
 
 import { CanvasEditor } from "@/features/editor/canvas/CanvasEditor"
+import { FileCanvasEditor } from "@/features/editor/canvas/FileCanvasEditor"
 import { emptyCanvasDoc, parseCanvasDoc, serializeCanvasDoc } from "@/lib/domain/canvasDocument"
 import { appendStrokePoint } from "@/features/editor/canvas/ink/canvasInk"
 import { polyBounds, resizeBox, scalePoly, scaleStroke, type SelBox } from "@/features/editor/canvas/selection/canvasSelection"
@@ -493,6 +495,34 @@ describe("keyboard text entry", () => {
     expect(reopened).toHaveFocus()
     act(() => { fireEvent.change(reopened, { target: { value: "H\nI" } }) })
     expect(latest(seen).texts[0]!.text).toBe("H\nI")
+  })
+})
+
+describe("Escape inside a canvas overlay", () => {
+  it("blurs the focused text note first, then closes the overlay", async () => {
+    const onClose = vi.fn()
+    const { container } = render(
+      <UndoDeleteProvider>
+        <TabActiveProvider value>
+          <FileCanvasEditor path="project/proj/document/overlay.canvas" slug="proj" onClose={onClose} persistOverride={async () => {}} />
+        </TabActiveProvider>
+      </UndoDeleteProvider>,
+    )
+    const surface = await waitFor(() => {
+      const found = container.querySelector<HTMLDivElement>("[tabindex=\"0\"]")
+      expect(found).not.toBeNull()
+      return found!
+    })
+    act(() => { fireEvent.keyDown(surface, { key: "H" }) })
+    const note = container.querySelector("textarea") as HTMLTextAreaElement
+    expect(note).toHaveFocus()
+
+    act(() => { fireEvent.keyDown(note, { key: "Escape" }) })
+    expect(container.querySelector("textarea")).toBeNull()
+    expect(onClose).not.toHaveBeenCalled()
+
+    act(() => { fireEvent.keyDown(document.body, { key: "Escape" }) })
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 })
 

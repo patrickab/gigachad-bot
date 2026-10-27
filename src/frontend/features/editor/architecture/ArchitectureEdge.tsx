@@ -6,6 +6,8 @@ import { edgeSketchPaths, roughSeed } from "@/features/editor/architecture/archi
 import type { DiagramEdge } from "@/features/editor/architecture/diagramGraph"
 import { trackPointer } from "@/features/editor/architecture/trackPointer"
 import { useResetOnChange } from "@/hooks/useResetOnChange"
+import { useTabActive } from "@/contexts/TabContext"
+import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import {
   CORNER_RADIUS, arrowHeadPath, bendPoint, bendThrough, normalOffset, normalPoint, orthogonalRoute, polylineMidpoint, roundedPath,
   type EdgeAttachment, type EdgeStyle, type Point, type RouteCard,
@@ -133,6 +135,8 @@ export function ArchitectureEdge({ id, source, target, data, selected }: EdgePro
   const [editingLabel, setEditingLabel] = useState(false)
   // Deselecting ends label editing.
   useResetOnChange(selected, (isSelected) => { if (!isSelected) setEditingLabel(false) })
+  const tabActive = useTabActive()
+  useEscapeLayer(() => setEditingLabel(false), !!selected && editingLabel && !!edit && tabActive)
   // The label reaches the model once, when editing ends, not on every keystroke.
   const [labelDraft, setLabelDraft] = useState("")
   const commitLabel = () => {

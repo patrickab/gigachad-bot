@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState, type Dispatch, type PointerEv
 import { NODE_MIN_HEIGHT, type GraphFlowEdge, type GraphFlowInstance } from "@/features/editor/architecture/architectureFlow"
 import { NODE_MIN_WIDTH } from "@/features/editor/architecture/architectureLabelWidth"
 import { trackPointer } from "@/features/editor/architecture/trackPointer"
-import { useEventListener } from "@/hooks/useEventListener"
+import { useEscapeLayer } from "@/hooks/useEscapeLayer"
+import { useTabActive } from "@/contexts/TabContext"
 import { pointInPolygon, pointsBounds } from "@/lib/drawing"
 import { centre, type Point, type Rect, type RouteCard } from "@/lib/domain/edgeRouting"
 
@@ -59,7 +60,8 @@ export function useSurfaceDrawing({ flow, viewportRef, readOnly, cards, selectNo
   addDraft: (box: Rect) => void
 }) {
   const [lasso, setLasso] = useState(false)
-  useEventListener("window", "keydown", (event) => { if (event.key === "Escape") setLasso(false) }, { active: lasso })
+  const tabActive = useTabActive()
+  useEscapeLayer(() => setLasso(false), lasso && tabActive)
   // Points accumulate in a ref so every pointer sample doesn't re-render the
   // whole surface; the preview only syncs to state once per animation frame.
   const drawPointsRef = useRef<Point[]>([])

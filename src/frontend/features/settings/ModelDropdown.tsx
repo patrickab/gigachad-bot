@@ -6,7 +6,8 @@ import { fetchOmpCatalog } from "@/lib/backend/api"
 import { displayName, qualifiedModelIds } from "@/lib/models"
 import type { ModelDefaults, ModelProvider, ModelsResponse, OmpCatalog } from "@/lib/domain/types"
 import { errorMessage, cn } from "@/lib/utils"
-import { useEventListener } from "@/hooks/useEventListener"
+import { useEscapeLayer } from "@/hooks/useEscapeLayer"
+import { useTabActive } from "@/contexts/TabContext"
 import { PopoverSelector, PopoverSelectorAction } from "@/components/ui/PopoverSelector"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { StyledSelect } from "@/components/ui/StyledSelect"
@@ -150,6 +151,7 @@ function shortName(model: string): string {
 }
 
 export function ModelDropdown({ models, loadError, selectedModel, onSelect, onProvidersChange, onTabOrderChange, onDefaultsChange, placement = "above", chatColumn }: ModelDropdownProps) {
+  const tabActive = useTabActive()
   const [configuring, setConfiguring] = useState(false)
   const [settingsTab, setSettingsTab] = useState<"providers" | "defaults">("providers")
   const [error, setError] = useState<string | null>(null)
@@ -185,7 +187,7 @@ export function ModelDropdown({ models, loadError, selectedModel, onSelect, onPr
     pendingDefaults.current = null
     if (defaults) void onDefaultsChange(defaults).catch((reason) => setError(errorMessage(reason, "Could not save default models")))
   }, [onDefaultsChange])
-  useEventListener("window", "keydown", (event) => { if (event.key === "Escape") setConfiguring(false) }, { active: configuring })
+  useEscapeLayer(() => setConfiguring(false), configuring && tabActive)
   // Loaded when the settings panel opens, not on mount: OMP is optional, so
   // probing its gateway for every chat view would cost a request nobody asked
   // for. A failed probe stays null and simply hides the section.

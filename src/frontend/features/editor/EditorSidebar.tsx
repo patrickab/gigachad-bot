@@ -5,7 +5,8 @@ import { Check, X } from "lucide-react"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
 import { AssistantChat, SendStopButton, useAssistantChat, useOneShotStream } from "@/components/content/AssistantChat"
 import { SidePanelFrame } from "@/components/ui/SidePanel"
-import { useEventListener } from "@/hooks/useEventListener"
+import { useTabActive } from "@/contexts/TabContext"
+import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 
 const SYS_NOTE_EDIT = (doc: string) =>
   `You are an AI writing assistant helping edit a markdown document. Here is the current document:\n\n<document>\n${doc}\n</document>\n\nWhen asked to modify the document, respond with ONLY the complete modified document. No code fences, no explanations — just the raw markdown.`
@@ -56,13 +57,11 @@ export function InlineEditPanel({ selectedText, model, onApply, onClose }: Inlin
   const [input, setInput] = useState("")
   const { text: response, isStreaming, ask, abort, stop } = useOneShotStream(model, { appendErrors: false })
   const inputRef = useRef<HTMLInputElement>(null)
+  const tabActive = useTabActive()
 
   useEffect(() => { inputRef.current?.focus() }, [])
 
-  // Capture phase so Escape closes this panel before the editor's own handlers see it
-  useEventListener("document", "keydown", (e) => {
-    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); abort(); onClose() }
-  }, { capture: true })
+  useEscapeLayer(() => { abort(); onClose() }, tabActive)
 
   const handleSend = () => ask(input, SYS_INLINE_EDIT(selectedText))
 
