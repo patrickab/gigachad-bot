@@ -390,7 +390,7 @@ export function Sidebar({
         <FileTree label="Code" items={[...buildMounts(rootTreeData), ...buildUnmounted(), ...(archivedSessions ? [archivedSessions] : [])]} controller={fileMountController}
           headerActions={<ArchiveSelector noun="directories" entries={directoryEntries} onRestore={(path) => setDirectoryArchived(path, false)} />}
           labelAction={omp.available ? { label: "Open omp settings", onClick: omp.openSettings } : undefined}
-          create={{ label: "Add file mount", onClick: () => setFileMountPickerOpen(true) }}
+          create={hostAccess ? { label: "Add file mount", onClick: () => setFileMountPickerOpen(true) } : undefined}
         />
         <ErrorText className="px-2 py-1">{omp.error}</ErrorText>
       </nav>

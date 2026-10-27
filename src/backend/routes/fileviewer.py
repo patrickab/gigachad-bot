@@ -77,7 +77,11 @@ async def read_text_content(
 
     resolved = _resolve_allowed(path, roots)
     # Strict decode: a lossy one would let the editor save replacement characters over a binary file.
-    with http_errors((UnicodeDecodeError, 415, "Not a UTF-8 text file"), (OSError, 500, None)):
+    with http_errors(
+        (UnicodeDecodeError, 415, "Not a UTF-8 text file"),
+        (PermissionError, 403, "Unknown file path"),
+        (OSError, 500, None),
+    ):
         content = resolved.read_text(encoding="utf-8")
     return FileContent(path=path, content=content)
 

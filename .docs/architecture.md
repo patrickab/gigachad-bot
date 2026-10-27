@@ -55,12 +55,12 @@ change log + SSE        LikeC4  omp-web   factory
 
 | Operation | Policy |
 | --- | --- |
-| OMP, factory, Neovim | Require host access |
+| OMP, factory, Neovim, mounting/cloning roots, directory browser | Require host access. A mounted root is readable in full, so mounting is a host action. |
 | Ordinary file access | Restrict to that user's registered mounted roots and admitted linked worktrees |
-| Host-access file content | Allow outside mounts, retaining credential-store protection |
+| Host-access file content | Allow outside mounts only under the service user's home directory, retaining credential-store protection. Unreadable files return 403, not 500. |
 | Git/tree/worktree endpoints | Require a mounted/admitted root. Host-gated factory diff explicitly admits linked git worktrees without mounting the repo. |
-| Credential files | Outside mounted roots, host access rejects `.ssh`, `.gnupg`, `.secrets`, `.env`, `.env.*`, app runtime `gigachad-bot/env`, and OMP `agent.db` / `models.yml` names. Explicitly mounted roots remain admitted, so this is not a blanket denylist inside mounts. |
-| Directory browser | May list host directory names. Listing is not permission to read/write content. |
+| Credential files | Outside mounted roots, host access rejects `.ssh`, `.gnupg`, `.secrets`, `.aws`, `.azure`, `.kube`, `.docker`, `.password-store`, `.pki`, `.mozilla`, `.config/{gh,gcloud,google-chrome,chromium,BraveSoftware,op,rclone}`, `.local/share/keyrings`, token/history files (`.netrc`, `.git-credentials`, `.pgpass`, `.npmrc`, `.pypirc`, shell/psql/python history), `.env`, `.env.*`, app runtime `gigachad-bot/env`, and OMP `agent.db` / `models.yml`. Explicitly mounted roots remain admitted, so this is not a blanket denylist inside mounts. |
+| Directory browser | Lists host directory names for host-access logins. Listing is not permission to read/write content. |
 | File trees | Honor layered `.gitignore` rules and skip `.git`, `node_modules`, `.obsidian`, `.trash`. Explicit content paths still use access validation, not tree visibility. |
 | Text decoding | Return 415 for non-UTF-8 content instead of lossy binary overwrite |
 

@@ -42,18 +42,32 @@ _SKIP_DIRS = frozenset({".obsidian", ".trash", ".git", "node_modules"})
 _IgnoreLayers = tuple[tuple[str, GitIgnoreSpec], ...]
 IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp"})
 # Credential stores host access never opens outside the roots.
-_SECRET_DIRECTORIES = frozenset({".ssh", ".gnupg", ".secrets"})
+_SECRET_DIRECTORIES = frozenset({".ssh", ".gnupg", ".secrets", ".aws", ".azure", ".kube", ".docker", ".password-store", ".pki", ".mozilla"})
+# Credential stores below `~/.config` and `~/.local/share`, matched as `(parent, child)` directory pairs.
+_SECRET_SUBDIRECTORIES = frozenset({
+    *((".config", name) for name in ("gh", "gcloud", "google-chrome", "chromium", "BraveSoftware", "op", "rclone")),
+    ("share", "keyrings"),
+})
+_SECRET_NAMES = frozenset({
+    ".netrc", ".git-credentials", ".pgpass", ".npmrc", ".pypirc",
+    ".bash_history", ".zsh_history", ".psql_history", ".python_history",
+})
 _OMP_SECRET_NAMES = ("agent.db", "models.yml")
 
 
 def is_secret_path(path: Path) -> bool:
-    """Whether *path* is a credential store: SSH/GPG keys, env files, omp's API keys."""
+    """Whether *path* is a credential store: SSH/GPG/cloud keys, browser profiles, token files, env files, omp's API keys."""
     name = path.name.lower()
-    if _SECRET_DIRECTORIES.intersection(path.parts):
+    if _SECRET_DIRECTORIES.intersection(path.parts) or _SECRET_SUBDIRECTORIES.intersection(zip(path.parts, path.parts[1:])):
         return True
-    if name == ".env" or name.startswith(".env.") or (name == "env" and path.parent.name == "gigachad-bot"):
+    if name in _SECRET_NAMES or name == ".env" or name.startswith(".env.") or (name == "env" and path.parent.name == "gigachad-bot"):
         return True
     return ".omp" in path.parts and name.startswith(_OMP_SECRET_NAMES)
+
+
+def _host_readable(target: Path) -> bool:
+    """Whether host access may open *target* outside the roots: under the home directory and no credential store."""
+    return target.is_relative_to(Path.home().resolve()) and not is_secret_path(target)
 
 
 def _is_gitdir_pointer(git_file: Path) -> bool:
@@ -239,7 +253,7 @@ class FileRoots:
     def _root_for(self, path: str) -> Path:
         """Resolve *path*, rejecting anything outside all roots and their worktrees, unless host access reaches it."""
         target = Path(path).expanduser().resolve()
-        if self._accessible_roots(target) or (self._host_access and not is_secret_path(target)):
+        if self._accessible_roots(target) or (self._host_access and _host_readable(target)):
             return target
         raise ValueError(f"Path outside file roots: {path}")
 

@@ -4,12 +4,14 @@ Exercises the real ASGI app so route wiring, dependencies, and exception handler
 covered together rather than per module.
 """
 
+import json
 import os
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
 import pytest
 
+from backend.identity import CAPABILITIES_HEADER, HOST_CAPABILITY
 from lib.db_schema import upgrade
 
 
@@ -38,11 +40,20 @@ def client(database_url, monkeypatch):
     config.close_postgres_pool()
 
 
-def headers(login: str, device_id: str | None = None) -> dict[str, str]:
+def headers(login: str, device_id: str | None = None, *, host: bool = False) -> dict[str, str]:
     sent = {"Tailscale-User-Login": login}
     if device_id:
         sent["X-Device-Id"] = device_id
+    if host:
+        sent[CAPABILITIES_HEADER] = json.dumps({HOST_CAPABILITY: [{}]})
     return sent
+
+
+def test_mounting_host_folders_needs_the_host_capability(client, tmp_path):
+    body = {"path": str(tmp_path)}
+    assert client.post("/api/fileroots/roots", json=body, headers=headers("alice@example.test")).status_code == 403
+    assert client.get("/api/fileroots/browse", headers=headers("alice@example.test")).status_code == 403
+    assert client.post("/api/fileroots/roots", json=body, headers=headers("alice@example.test", host=True)).status_code == 200
 
 
 def test_unidentified_request_is_rejected(client):
@@ -323,7 +334,7 @@ def test_library_pdf_serves_from_storage_after_its_files_are_gone(client, tmp_pa
     monkeypatch.setattr(attachment_materialize, "DOCUMENTS", mirror)
     monkeypatch.setattr(attachment_materialize.extract_queue, "enqueue", lambda name, content, assets: None)
 
-    alice = headers("alice@example.test", str(uuid4()))
+    alice = headers("alice@example.test", str(uuid4()), host=True)
     slug = f"pdf-{uuid4().hex[:8]}"
     assert client.post("/api/projects", json={"name": slug}, headers=alice).status_code == 200
     assert client.post("/api/fileroots/roots", json={"path": str(mount)}, headers=alice).status_code == 200
@@ -343,7 +354,7 @@ def test_library_pdf_serves_from_storage_after_its_files_are_gone(client, tmp_pa
 
 def test_pdf_annotations_follow_content_not_path(client, tmp_path):
     """Copies of a PDF share one annotation canvas, reopening keeps its ink, other bytes get their own."""
-    alice = headers("alice@example.test", str(uuid4()))
+    alice = headers("alice@example.test", str(uuid4()), host=True)
     assert client.post("/api/fileroots/roots", json={"path": str(tmp_path)}, headers=alice).status_code == 200
     (tmp_path / "paper.pdf").write_bytes(b"%PDF-1.7 paper")
     (tmp_path / "moved").mkdir()

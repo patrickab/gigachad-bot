@@ -252,11 +252,14 @@ def test_diff_routes_admit_linked_worktrees_anywhere_for_host_access_only(tmp_pa
 
 
 @pytest.mark.parametrize("host_access", [False, True])
-def test_host_access_reaches_unmounted_files_but_never_credentials(tmp_path, host_access):
-    mounted, elsewhere = tmp_path / "mounted", tmp_path / "elsewhere"
-    for directory in (mounted, elsewhere, elsewhere / ".ssh"):
-        directory.mkdir()
-    for path in (mounted / ".env", elsewhere / "notes.md", elsewhere / ".env", elsewhere / ".ssh" / "id_ed25519"):
+def test_host_access_reaches_unmounted_home_files_but_never_credentials(tmp_path, monkeypatch, host_access):
+    home, outside = tmp_path / "home", tmp_path / "outside"
+    mounted, elsewhere = home / "mounted", home / "elsewhere"
+    monkeypatch.setenv("HOME", str(home))
+    for directory in (mounted, elsewhere / ".ssh", elsewhere / ".config" / "gh", outside):
+        directory.mkdir(parents=True)
+    secrets = (elsewhere / ".env", elsewhere / ".ssh" / "id_ed25519", elsewhere / ".netrc", elsewhere / ".config" / "gh" / "hosts.yml")
+    for path in (mounted / ".env", elsewhere / "notes.md", outside / "shadow", *secrets):
         path.write_text("v1")
     roots = FileRoots(repository=SimpleNamespace(load=lambda: [str(mounted)], save=lambda roots: None), host_access=host_access)
     app = FastAPI()
@@ -275,5 +278,24 @@ def test_host_access_reaches_unmounted_files_but_never_credentials(tmp_path, hos
     assert read_status(elsewhere / "notes.md") == (200 if host_access else 403)
     assert (saved.status_code < 400) == host_access
     assert (elsewhere / "notes.md").read_text() == ("v2" if host_access else "v1")
-    assert read_status(elsewhere / ".env") == 403
-    assert read_status(elsewhere / ".ssh" / "id_ed25519") == 403
+    assert read_status(outside / "shadow") == 403
+    for secret in secrets:
+        assert read_status(secret) == 403, secret
+
+
+def test_unreadable_file_is_refused_not_a_server_error(tmp_path):
+    mounted = tmp_path / "mounted"
+    mounted.mkdir()
+    locked = mounted / "locked.md"
+    locked.write_text("x")
+    locked.chmod(0)
+    roots = FileRoots(repository=SimpleNamespace(load=lambda: [str(mounted)], save=lambda roots: None))
+    app = FastAPI()
+    app.include_router(fileviewer_route.router)
+    app.dependency_overrides[fileviewer_route.get_file_roots] = lambda: roots
+    app.dependency_overrides[fileviewer_route.get_document_store] = lambda: None
+    try:
+        response = TestClient(app).get("/api/fileviewer/text", params={"path": str(locked)})
+    finally:
+        locked.chmod(0o600)
+    assert (response.status_code, response.json()["detail"]) == (403, "Unknown file path")

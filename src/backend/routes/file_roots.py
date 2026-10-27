@@ -15,7 +15,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from backend.identity import RequestIdentity, get_request_identity
+from backend.identity import host_access_only
 from backend.routes.deps import get_asset_store, get_file_roots, get_project_store, http_errors
 from backend.routes.schemas import AttachResult, FileContent, FileListResponse, FileMeta, file_meta
 from lib import document_library as lib_docs
@@ -97,14 +97,18 @@ def list_tree(worktree: list[str] = Query(default=[]), roots: FileRoots = Depend
     return FileTreeResponse(enabled=roots.enabled, tree=roots.tree(worktree))
 
 
-@router.post("/roots", response_model=FileTreeResponse)
+# Mounting, cloning and browsing act on the machine owner's host: a mounted root is readable in full.
+_MOUNTING = host_access_only("mounting host folders")
+
+
+@router.post("/roots", response_model=FileTreeResponse, dependencies=[_MOUNTING])
 def add_root(body: RootBody, roots: FileRoots = Depends(get_file_roots)) -> FileTreeResponse:
     with http_errors((ValueError, 400, None)):
         roots.add_root(body.path)
     return FileTreeResponse(enabled=roots.enabled, tree=roots.tree())
 
 
-@router.post("/clone", response_model=FileTreeResponse)
+@router.post("/clone", response_model=FileTreeResponse, dependencies=[_MOUNTING])
 def clone_root(body: CloneBody, roots: FileRoots = Depends(get_file_roots)) -> FileTreeResponse:
     """Clone an https or ssh repository link into `~/git/<repository>` and mount it."""
     with http_errors(*_GIT_REFUSALS):
@@ -118,11 +122,8 @@ def remove_root(path: str = Query(...), roots: FileRoots = Depends(get_file_root
     return FileTreeResponse(enabled=roots.enabled, tree=roots.tree())
 
 
-@router.get("/browse", response_model=DirectoryListing)
-def browse_directories(
-    path: str = Query(default="~"),
-    _identity: RequestIdentity = Depends(get_request_identity),
-) -> DirectoryListing:
+@router.get("/browse", response_model=DirectoryListing, dependencies=[_MOUNTING])
+def browse_directories(path: str = Query(default="~")) -> DirectoryListing:
     """List the subdirectories of *path* on the backend host, to pick a new root."""
     with http_errors((NotADirectoryError, 404, f"Not a directory: {path}"), (PermissionError, 403, f"Cannot read {path}")):
         directory, names = list_directories(path)

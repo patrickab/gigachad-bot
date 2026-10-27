@@ -2,11 +2,13 @@
 
 from pathlib import Path
 from types import SimpleNamespace
+from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
+from backend.identity import RequestIdentity, get_request_identity
 from backend.routes import file_roots as file_roots_route
 from lib import git_worktree
 from lib.file_roots import FileRoots
@@ -254,6 +256,7 @@ def test_clone_route_mounts_the_clone_and_reports_refusals(remote):
     app = FastAPI()
     app.include_router(file_roots_route.router)
     app.dependency_overrides[file_roots_route.get_file_roots] = lambda: roots
+    app.dependency_overrides[get_request_identity] = lambda: RequestIdentity(uuid4(), "me@example.test", None, True)
     client = TestClient(app)
 
     cloned = client.post("/api/fileroots/clone", json={"url": remote.links[1]})
