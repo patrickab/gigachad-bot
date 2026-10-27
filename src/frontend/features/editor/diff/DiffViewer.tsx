@@ -1,7 +1,7 @@
 "use client"
 
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react"
-import { createPortal } from "react-dom"
+import { SelectionBubble } from "@/components/ui/SelectionBubble"
 import { MessageSquare, Pencil, X } from "lucide-react"
 import { FileTree, type FileTreeItem } from "@/components/ui/file-tree/FileTree"
 import { useFileTree } from "@/components/ui/file-tree/useFileTree"
@@ -362,12 +362,7 @@ function selectedComment(container: HTMLElement, patches: Record<string, FilePat
   if (!selectedText.trim() || !lastCode || !bounds) return null
   const anchor = anchorAt(path, lines, Number(lastCode.dataset.index), lastCode.dataset.side as ReviewSide)
   if (!anchor) return null
-  return {
-    anchor: { ...anchor, selectedText },
-    // Match the bubble SVG's tip at (22, 1) to the highlight's lower-left corner.
-    left: bounds.left - 22,
-    top: bounds.bottom - 1,
-  }
+  return { anchor: { ...anchor, selectedText }, bounds }
 }
 
 /** Show working-tree changes with optional line notes and batched review delivery. */
@@ -630,22 +625,15 @@ export function DiffViewer({ root, review }: { root: string; review?: ReviewTarg
       >
         {content}
       </div>
-      {selectionAction && !editing && createPortal(<button
-        type="button"
-        aria-label="Add comment to selection"
-        onPointerDown={(event) => event.preventDefault()}
-        onClick={() => {
+      {selectionAction && !editing && <SelectionBubble
+        bounds={selectionAction.bounds}
+        label="Add comment to selection"
+        onActivate={() => {
           setDraft({ anchor: selectionAction.anchor, noteId: null, comment: "" })
           setSelectionAction(null)
           window.getSelection()?.removeAllRanges()
         }}
-        style={{ left: selectionAction.left, top: selectionAction.top }}
-        className={cn("fixed z-50 h-8 w-8 rounded text-ink-muted hover:text-ink", FOCUS_RING)}
-      >
-        <svg aria-hidden="true" viewBox="0 0 32 32" className="h-8 w-8 fill-paper stroke-current" strokeWidth="2.25" strokeLinejoin="round">
-          <path d="M22 1v6q0 3 3 3h1q5 0 5 6v8q0 6-6 6H7q-6 0-6-6v-8q0-6 6-6h5q2 0 4-2z" />
-        </svg>
-      </button>, document.body)}
+      />}
     </div>
   </div>
 }
