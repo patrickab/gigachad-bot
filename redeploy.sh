@@ -3,10 +3,10 @@
 # backend (gigachad-bot.service, which also starts the C4 service) from a clean
 # environment, so nothing inherited from the calling shell reaches uv, npm or the unit.
 #
-# Then omp-web (omp tabs): moves the served ompweb fork worktree to origin/custom,
-# restarts gigachad-bot-omp-web.service when it changed (never while an omp session
-# runs) and restarts its Tailnet gate. Refuses a fork whose bridge protocol
-# (EMBED_PROTOCOL_VERSION) differs from gigachad-bot's.
+# Then omp-web (omp tabs): restarts gigachad-bot-omp-web.service when the upstream ref
+# it serves (GIGACHAD_OMP_WEB_REF) moved or ompweb-overlay/ or the chat-ui package
+# changed, never while an omp session runs, and restarts its Tailnet gate. The unit's
+# run-omp-web.sh resets the served worktree to the ref and applies the overlay on start.
 set -euo pipefail
 
 unit=gigachad-bot.service
@@ -15,8 +15,7 @@ port=8002
 
 omp_web_unit=gigachad-bot-omp-web.service
 omp_web_gate_unit=gigachad-bot-omp-web-gate.service
-omp_web_repo="$HOME/git/ompweb"
-omp_web_dir="$HOME/.local/share/gigachad-bot/ompweb"
+omp_web_remote=https://github.com/kahme247/ompweb.git
 omp_web_url=http://127.0.0.1:30177
 omp_web_gate_url=http://127.0.0.1:30179
 
@@ -54,8 +53,9 @@ omp_web_gate_up() {
     systemctl --user is-active --quiet "$omp_web_gate_unit" && [[ $(curl -s -o /dev/null -w '%{http_code}' "$omp_web_gate_url/") == 403 ]]
 }
 
-protocol_version() {
-    grep -oE 'EMBED_PROTOCOL_VERSION = [0-9]+' | grep -oE '[0-9]+$'
+# A setting from the production env file the omp-web unit reads, else the launcher's default.
+omp_web_setting() {
+    (source "$prod/deploy/load-env.sh" && printf '%s' "${!1:-$2}")
 }
 
 running_omp_sessions() {
@@ -95,42 +95,29 @@ if ! systemctl --user cat "$omp_web_unit" "$omp_web_gate_unit" >/dev/null 2>&1; 
     printf "omp-web units are not installed: run %s/deploy/install-systemd-service.sh\n" "$prod" >&2
     exit 1
 fi
+omp_web_repo="$(omp_web_setting GIGACHAD_OMP_WEB_REPO "$HOME/git/ompweb_original")"
+omp_web_dir="$(omp_web_setting GIGACHAD_OMP_WEB_DIR "$HOME/.local/share/gigachad-bot/ompweb-upstream")"
+omp_web_ref="$(omp_web_setting GIGACHAD_OMP_WEB_REF integration_patrick_ab)"
 if [[ ! -d $omp_web_repo/.git ]]; then
-    printf "No ompweb fork at %s: git clone --branch custom https://github.com/patrickab/ompweb.git %s\n" "$omp_web_repo" "$omp_web_repo" >&2
+    printf "No omp-web checkout at %s: git clone %s %s\n" "$omp_web_repo" "$omp_web_remote" "$omp_web_repo" >&2
     exit 1
 fi
-git -C "$omp_web_repo" fetch origin custom
-omp_web_new="$(git -C "$omp_web_repo" rev-parse origin/custom)"
-
-shell_protocol="$(protocol_version <"$prod/src/frontend/packages/chat-ui/src/protocol.ts")"
-# The fork installs @gigachad/chat-ui as a vendored tarball, its protocol is the built dist/protocol.js inside.
-frame_tarball="$(git -C "$omp_web_repo" show "$omp_web_new:package.json" | python3 -c 'import json, sys; print(json.load(sys.stdin)["dependencies"]["@gigachad/chat-ui"].removeprefix("file:"))')"
-frame_protocol="$(git -C "$omp_web_repo" show "$omp_web_new:$frame_tarball" | tar -xzO package/dist/protocol.js | protocol_version)"
-if [[ $shell_protocol != "$frame_protocol" ]]; then
-    printf "omp-web not updated: gigachad-bot speaks bridge protocol %s, ompweb origin/custom %s. Deploy matching commits\n" \
-        "$shell_protocol" "$frame_protocol" >&2
-    exit 1
+if git -C "$omp_web_repo" rev-parse --verify --quiet "refs/remotes/$omp_web_ref" >/dev/null; then
+    git -C "$omp_web_repo" fetch "${omp_web_ref%%/*}"
 fi
+omp_web_new="$(git -C "$omp_web_repo" rev-parse "$omp_web_ref^{commit}")"
+omp_web_old="$(git -C "$omp_web_dir" rev-parse HEAD 2>/dev/null || true)"
 
-if [[ ! -d $omp_web_dir ]]; then
-    git -C "$omp_web_repo" worktree add --detach "$omp_web_dir" "$omp_web_new"
-fi
-if [[ -n $(git -C "$omp_web_dir" status --porcelain --untracked-files=no) ]]; then
-    printf "omp-web worktree has uncommitted changes: %s\n" "$omp_web_dir" >&2
-    exit 1
-fi
-omp_web_old="$(git -C "$omp_web_dir" rev-parse HEAD)"
-
-if [[ $omp_web_old != "$omp_web_new" ]] || ! omp_web_up; then
+if [[ $omp_web_old != "$omp_web_new" ]] || ! git diff --quiet "$old" "$new" -- ompweb-overlay src/frontend/packages/chat-ui || ! omp_web_up; then
     running="$(running_omp_sessions 2>/dev/null || echo 0)"
     if [[ $running != 0 ]]; then
-        printf "omp-web not restarted: %s omp session(s) running, rerun when they are idle\n" "$running" >&2
+        printf "omp-web not restarted: %s omp session(s) running, run systemctl --user restart %s when they are idle\n" \
+            "$running" "$omp_web_unit" >&2
     else
-        if [[ $omp_web_old != "$omp_web_new" ]]; then
-            git -C "$omp_web_repo" --no-pager log --oneline "$omp_web_old..$omp_web_new"
-            git -C "$omp_web_dir" checkout -q --detach "$omp_web_new"
+        if [[ -n $omp_web_old && $omp_web_old != "$omp_web_new" ]]; then
+            git -C "$omp_web_repo" --no-pager log --oneline "$omp_web_old..$omp_web_new" || true
         fi
-        printf "Restarting %s (a changed checkout rebuilds, about 2 min)\n" "$omp_web_unit"
+        printf "Restarting %s at %s (a change rebuilds, about 2 min)\n" "$omp_web_unit" "$omp_web_ref"
         systemctl --user restart "$omp_web_unit"
         if ! wait_until 600 1 omp_web_up; then
             systemctl --user --no-pager status "$omp_web_unit" >&2 || true
@@ -139,7 +126,7 @@ if [[ $omp_web_old != "$omp_web_new" ]] || ! omp_web_up; then
         fi
     fi
 fi
-printf "%s is up on %s at %s (protocol %s)\n" "$omp_web_unit" "$omp_web_url" "$(git -C "$omp_web_dir" rev-parse --short HEAD)" "$frame_protocol"
+printf "%s is up on %s at %s\n" "$omp_web_unit" "$omp_web_url" "$(git -C "$omp_web_dir" rev-parse --short HEAD)"
 
 systemctl --user restart "$omp_web_gate_unit"
 if ! wait_until 30 1 omp_web_gate_up; then

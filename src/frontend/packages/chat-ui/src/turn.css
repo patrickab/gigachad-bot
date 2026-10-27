@@ -1,4 +1,4 @@
-/* Q&A turn cards (`Turn.tsx`), the one definition gigachad-bot's chat and the ompweb fork's embedded chat render.
+/* Q&A turn cards (`Turn.tsx`), the one definition gigachad-bot's chat and the omp-web overlay's embedded chat render.
 
    Reads the host's role tokens: --paper, --surface, --surface-elevated, --ink, --ink-muted, --ink-subtle,
    --ink-faint, --divider-strong, --danger, --shadow-sm. A host with other token names maps them on `.gc-turn`. */

@@ -1,0 +1,45 @@
+/* Role tokens while embedded in gigachad-bot (`html.cf-embed`), the only place colors are defined.
+
+   - Ink, paper, surfaces, danger and shadows are the shell's own (`--gc-<mode>-*` from `@gigachad/chat-ui/palette.css`),
+     so the frame blends into it. Change those values in the package, never here
+   - Status hues and shadow tints have no shell counterpart: warm OKLCH, hue 85
+   - `:root:root.cf-embed` (0,3,0) outranks upstream's theme blocks (0,1,1), the dark variant (0,4,0) wins in dark mode
+   - Standalone omp-web keeps upstream's themes */
+
+:root:root.cf-embed {
+  color-scheme: light;
+  --cf-ink: var(--gc-light-ink);
+  --cf-ink-muted: var(--gc-light-ink-muted);
+  --cf-ink-subtle: var(--gc-light-ink-subtle);
+  --cf-ink-faint: var(--gc-light-ink-faint);
+  --cf-paper: var(--gc-light-paper);
+  --cf-surface: var(--gc-light-surface);
+  --cf-elevated: var(--gc-light-surface-elevated);
+  --cf-danger: var(--gc-light-danger);
+  --cf-chat-shadow: var(--gc-light-shadow-sm);
+  --cf-inner-highlight: var(--gc-light-inner-highlight);
+  --cf-success: oklch(50% 0.12 155);
+  --cf-warning: oklch(55% 0.13 75);
+  --cf-info: oklch(50% 0.13 255);
+  --cf-shadow-faint: color-mix(in oklab, oklch(35% 0.01 85) 4%, transparent);
+  --cf-shadow-soft: color-mix(in oklab, oklch(35% 0.01 85) 7%, transparent);
+}
+
+:root:root.cf-embed:is(.dark, .omp) {
+  color-scheme: dark;
+  --cf-ink: var(--gc-dark-ink);
+  --cf-ink-muted: var(--gc-dark-ink-muted);
+  --cf-ink-subtle: var(--gc-dark-ink-subtle);
+  --cf-ink-faint: var(--gc-dark-ink-faint);
+  --cf-paper: var(--gc-dark-paper);
+  --cf-surface: var(--gc-dark-surface);
+  --cf-elevated: var(--gc-dark-surface-elevated);
+  --cf-danger: var(--gc-dark-danger);
+  --cf-chat-shadow: var(--gc-dark-shadow-sm);
+  --cf-inner-highlight: var(--gc-dark-inner-highlight);
+  --cf-success: oklch(76% 0.13 155);
+  --cf-warning: oklch(80% 0.13 80);
+  --cf-info: oklch(74% 0.12 255);
+  --cf-shadow-faint: color-mix(in oklab, oklch(10% 0.011 83) 20%, transparent);
+  --cf-shadow-soft: color-mix(in oklab, oklch(10% 0.011 83) 32%, transparent);
+}

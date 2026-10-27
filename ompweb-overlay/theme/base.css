@@ -1,0 +1,21 @@
+/* Page type and interaction while embedded, matching the shell. Upstream's Midnight decoration goes, the frame shows plain content. */
+
+:root:root.cf-embed,
+:root:root.cf-embed body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+:root:root.cf-embed ::selection {
+  background: color-mix(in oklab, var(--cf-ink) 14%, transparent);
+  color: var(--text);
+}
+
+:root:root.cf-embed :focus-visible {
+  outline-color: color-mix(in oklab, var(--cf-ink) 40%, transparent);
+}
+
+:root:root.cf-embed.omp body {
+  background: var(--bg);
+}

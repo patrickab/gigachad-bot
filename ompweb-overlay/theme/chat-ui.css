@@ -1,0 +1,93 @@
+/* Host side of gigachad-bot's shared conversation UI (`@gigachad/chat-ui`, its markdown.css, code.css and turn.css import before this file).
+
+   The package owns every card, action and prose rule. This file only maps its role tokens and adapts the upstream
+   nodes an expanded card wraps. A visual change belongs in the package, never here.
+
+   - Tokens: mapped on the package roots alone, so no upstream token or surface changes. Ink, surface and shadow
+     roles come from `palette.css`, dividers and the code blocks' `--shadow-md` straight from the package palette
+     (`--gc-<mode>-*`), the values the shell uses
+   - Upstream hooks, scoped to `.gc-turn-content`: `.chat-message-card` (user bubble) and its wrappers, `.chat-message`
+     (assistant row), `.message-copy-actions` and `.message-model-label` (native chrome the card replaces),
+     `.message-overflow-toggle` (a control after the question's text) */
+
+:is(.gc-turn, [data-markdown-root]) {
+  --paper: var(--cf-paper);
+  --surface: var(--cf-surface);
+  --surface-elevated: var(--cf-elevated);
+  --ink: var(--cf-ink);
+  --ink-muted: var(--cf-ink-muted);
+  --ink-subtle: var(--cf-ink-subtle);
+  --ink-faint: var(--cf-ink-faint);
+  --danger: var(--cf-danger);
+  --shadow-sm: var(--cf-chat-shadow);
+  --shadow-md: var(--gc-light-shadow-md);
+  --inner-highlight: var(--cf-inner-highlight);
+  --divider: var(--gc-light-divider);
+  --divider-strong: var(--gc-light-divider-strong);
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --font-symbols: "Symbols Nerd Font Mono";
+}
+:root:is(.dark, .omp) :is(.gc-turn, [data-markdown-root]) {
+  --divider: var(--gc-dark-divider);
+  --divider-strong: var(--gc-dark-divider-strong);
+  --shadow-md: var(--gc-dark-shadow-md);
+}
+
+/* The lightbox button around a markdown image, as upstream's `.markdown-body .image-clickable` */
+[data-markdown-root] .image-clickable {
+  display: block;
+  width: fit-content;
+}
+
+/* Where ChatMinimap looks for a collapsed turn's messages */
+.cf-turn-anchor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+/* Upstream's user bubble: plain text in the card, left-aligned, full width */
+.gc-turn-content :has(> .chat-message-card) {
+  align-items: flex-start !important;
+  width: 100%;
+  max-width: 100% !important;
+}
+.gc-turn-content :has(> * > .chat-message-card) {
+  align-items: flex-start !important;
+  margin-bottom: 0 !important;
+  padding-right: 0 !important;
+}
+.gc-turn-content .chat-message-card,
+.gc-turn-content .chat-message-card:hover {
+  width: 100%;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  animation: none;
+}
+.gc-turn-content > :last-child .chat-message,
+.gc-turn-content > .chat-message:last-child {
+  margin-bottom: 0 !important;
+}
+/* The card's copy replaces native copy. Fork, edit and timestamp footers stay, tools keep their own controls. */
+.gc-turn-content .message-copy-actions,
+.gc-turn-content .message-model-label {
+  display: none !important;
+}
+/* Upstream's "show full input" toggle and the native footers follow the text, so the actions keep their own row.
+   `!important` outranks the shared placement rule's long selector. */
+.gc-turn-body:has(.message-overflow-toggle, .message-user-footer, .message-assistant-footer) {
+  & > .gc-turn-actions {
+    position: static !important;
+  }
+
+  & p::after {
+    content: none !important;
+  }
+}

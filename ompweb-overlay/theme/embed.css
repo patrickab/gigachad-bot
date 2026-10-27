@@ -1,0 +1,80 @@
+/* Embed mode: the app runs inside gigachad-bot's shell (html.cf-embed, set by EmbedMode).
+
+   - gigachad-bot owns navigation: ompweb's sidebar, topbar and file panel go
+   - Settings: Back and close go, the shell's tab closes Settings (Escape still returns to the chat, the shell reopens Settings)
+   - Composer: the input box goes, gigachad-bot's composer drives it (`custom/overrides/components/ChatInput.tsx`). The queue and status bar above it stay
+   - Hidden, not removed: the sidebar keeps its running-session stream and the Settings row the bridge clicks */
+
+html.cf-embed #workspace-sidebar,
+html.cf-embed .sidebar-resize-handle,
+html.cf-embed .shell-topbar,
+html.cf-embed .right-panel-container,
+html.cf-embed .right-panel-resize-handle,
+html.cf-embed .right-panel-backdrop,
+html.cf-embed .settings-header .settings-back,
+html.cf-embed .settings-close-btn,
+html.cf-embed .chat-input-shell {
+  display: none !important;
+}
+
+/* The queue or status bar sat on the input box's top edge, close its bottom */
+html.cf-embed :has(+ .chat-input-shell) {
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent) !important;
+  border-radius: var(--radius-card) !important;
+}
+
+/* Endless scroll like a gigachad chat: the shell's top bar and composer lie over the frame (`embed/insets.ts`).
+   The transcript runs the full height and pads past them, what is left of omp-web's composer area (queue, status,
+   Tasks/Subagents) floats right above the shell composer, its minimize chevron goes (nothing to minimize) */
+html.cf-embed :has(> :has(> [role=log])) {
+  position: relative;
+}
+
+html.cf-embed [data-selection-scope="chat"][role=log] {
+  padding-top: calc(var(--cf-inset-top, 0px) + 24px) !important;
+  padding-bottom: calc(var(--cf-inset-bottom, 0px) + var(--cf-composer-area, 0px) + 16px);
+}
+
+html.cf-embed :has(> [role=log]) ~ div:has(.chat-input-shell) {
+  position: absolute !important;
+  inset-inline: 0;
+  bottom: var(--cf-inset-bottom, 0px);
+  z-index: 36;
+}
+
+html.cf-embed :has(> [role=log]) ~ div:has(.chat-input-shell) > div:first-child {
+  display: none;
+}
+
+html.cf-embed .chat-scroll-bottom {
+  bottom: calc(var(--cf-inset-bottom, 0px) + var(--cf-composer-area, 0px) + 16px) !important;
+}
+
+/* Activity rows (thinking, tool calls) like gigachad's tool calls (`features/chat/messages/ToolCallElement.tsx`):
+   sans, muted labels in text-xs medium, neutral status icons, errors stay red */
+html.cf-embed .activity-row {
+  font-family: var(--font-sans);
+}
+
+html.cf-embed .activity-row-trigger {
+  font-size: 12px;
+  gap: 8px;
+}
+
+html.cf-embed .activity-row-tool {
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+html.cf-embed .activity-row-indicator {
+  color: var(--text-dim);
+}
+
+html.cf-embed .activity-row-indicator-error,
+html.cf-embed .activity-row-tool-error {
+  color: var(--status-error);
+}
+
+html.cf-embed .activity-row-preview {
+  color: var(--text-muted);
+}

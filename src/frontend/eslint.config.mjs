@@ -65,7 +65,7 @@ export default defineConfig([
     ignores: ["packages/**/__tests__/**"],
     rules: {
       "no-restricted-imports": ["error", { patterns: [{ group: ["@/*"], message: "A package must not import the app it ships from." }] }],
-      // Only what the package's own manifest declares ships to a consumer, an import that resolves through the shell's node_modules breaks in the fork.
+      // Only what the package's own manifest declares ships to a consumer, an import that resolves through the shell's node_modules breaks in omp-web's overlay.
       "import/no-extraneous-dependencies": ["error", { packageDir: [join(import.meta.dirname, "packages/chat-ui")], includeTypes: true }],
     },
   },

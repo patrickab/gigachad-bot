@@ -1,8 +1,8 @@
 /**
  * Role-token palette spec, the source of truth for the color system. `app/globals.css`
  * mirrors it in `:root` and `.light`. This TS copy is the fallback for non-DOM surfaces
- * (canvas fills, JPEG export) where `getComputedStyle` is unavailable. The ompweb fork's
- * `custom/theme/palette.css` copies the `globals.css` values for the embedded omp tabs.
+ * (canvas fills, JPEG export) where `getComputedStyle` is unavailable. The omp-web overlay's
+ * `ompweb-overlay/theme/palette.css` copies the `globals.css` values for the embedded omp tabs.
  * Colors are OKLCH with a warm hue (dark about 55-75, light about 85) and tiny chroma.
  *
  * To add a theme: add an entry to THEMES, add a matching `.name` block in globals.css

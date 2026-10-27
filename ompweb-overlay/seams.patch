@@ -1,0 +1,38 @@
+diff --git i/app/layout.tsx w/app/layout.tsx
+index 332597e..37b4d4b 100644
+--- i/app/layout.tsx
++++ w/app/layout.tsx
+@@ -7,6 +7,7 @@ import { IosFocusZoomGuard } from "@/components/IosFocusZoomGuard";
+ import { SIDEBAR_HISTORY_BRIDGE_SCRIPT } from "@/lib/sidebar-history-bridge";
+ import { getInstallName } from "@/lib/install-name";
+ import "./globals.css";
++import { CustomRoot } from "@/custom/root";
+ 
+ const geist = Geist({
+   subsets: ["latin"],
+@@ -111,6 +112,7 @@ export default function RootLayout({
+       <body translate="no" className="notranslate" style={{ height: "100%", maxHeight: "100%", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+         <IosFocusZoomGuard />
+         {children}
++        <CustomRoot />
+       </body>
+     </html>
+   );
+diff --git i/next.config.ts w/next.config.ts
+index 021b63d..a0bd316 100644
+--- i/next.config.ts
++++ w/next.config.ts
+@@ -4,6 +4,7 @@ import { readFileSync } from "fs";
+ import { dirname, join } from "path";
+ import { fileURLToPath } from "url";
+ import { PHASE_DEVELOPMENT_SERVER } from "next/constants.js";
++import { withCustom } from "./custom/next.config";
+ 
+ // The WASM SWC build used on wasm-first targets (e.g. aarch64-linux-android)
+ // does not transpile ESM to CJS, so this file loads as ESM there and
+@@ -135,4 +136,4 @@ const nextConfig = (phase: string): NextConfig => {
+   };
+ };
+ 
+-export default nextConfig;
++export default withCustom(nextConfig);
