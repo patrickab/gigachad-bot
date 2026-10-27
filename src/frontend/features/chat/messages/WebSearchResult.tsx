@@ -22,10 +22,11 @@ function truncateAtSections(text: string): string {
 interface Props {
   content: string
   search_result: NonNullable<Message["search_result"]>
+  compact?: boolean
 }
 
 /** Answer text with image markup and trailing sections stripped and citation markers rewritten to links for `citationMap`. */
-function WebSearchResultInner({ content, search_result }: Props) {
+function WebSearchResultInner({ content, search_result, compact }: Props) {
   const text = useMemo(() => {
     let text = content
 
@@ -64,7 +65,7 @@ function WebSearchResultInner({ content, search_result }: Props) {
 
   return (
     <>
-      <LaTeXMarkdown content={text} citationMap={search_result.citationMap} />
+      <LaTeXMarkdown content={text} citationMap={search_result.citationMap} compact={compact} />
       <WebSources result={search_result} />
     </>
   )

@@ -3,8 +3,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest"
 
 const markdown = vi.hoisted(() => vi.fn())
 vi.mock("@/features/chat/messages/ChatMessage", () => ({
-  AssistantMessageContent: ({ content }: { content: string }) => {
-    markdown(content)
+  AssistantMessageContent: ({ content, search_result }: { content: string; search_result?: unknown }) => {
+    markdown(content, search_result)
     return <div data-testid="markdown">{content}</div>
   },
   ChatMessage: ({ content }: { content: string }) => <div data-testid="message">{content}</div>,
@@ -68,6 +68,13 @@ it("loads the complete preview on keyboard focus before intersection", () => {
   render(<ChatPair {...props} />)
   fireEvent.focusIn(screen.getByRole("region", { name: "Answer preview" }))
   expect(screen.getByTestId("markdown")).toHaveTextContent(props.assistant.content)
+})
+
+it("gives the collapsed preview the search result so citations resolve to links", () => {
+  const search_result = { query: "banach", sources: [], images: [], videos: [], citationMap: {} }
+  render(<ChatPair {...props} assistant={{ ...props.assistant, search_result }} />)
+  fireEvent.focusIn(screen.getByRole("region", { name: "Answer preview" }))
+  expect(markdown).toHaveBeenCalledWith(props.assistant.content, search_result)
 })
 
 it("renders full messages and tool output on expansion without waiting for intersection", () => {

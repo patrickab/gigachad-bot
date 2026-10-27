@@ -21,7 +21,7 @@ function abbreviate(text: string, msg: Message): string {
 /** Clipping collapsed answers does not avoid parsing their equations. Reserve the
  * preview's 12.5vh cap offscreen, then use its natural height near the viewport.
  * Short answers can shrink from this estimate, but never stay artificially tall. */
-function CollapsedAnswerPreview({ content }: { content: string }) {
+function CollapsedAnswerPreview({ content, search_result }: { content: string; search_result: Message["search_result"] }) {
   const [ready, setReady] = useState(false)
 
   const attachPreview = useCallback((host: HTMLDivElement | null) => {
@@ -57,7 +57,7 @@ function CollapsedAnswerPreview({ content }: { content: string }) {
   return (
     <div ref={attachPreview} style={ready ? undefined : { height: "12.5vh" }}>
       {ready
-        ? <AssistantMessageContent content={content} compact />
+        ? <AssistantMessageContent content={content} search_result={search_result} compact />
         : <span className="sr-only">{content}</span>}
     </div>
   )
@@ -107,7 +107,7 @@ export function ChatPair({
         <TurnCard expanded={false} focused={focused} ref={collapsedRef}>
           <TurnHeader label={abbreviate(user.content, user)} onExpand={onExpand} />
           <TurnPreview tools={tools}>
-            {assistant.content ? <CollapsedAnswerPreview content={assistant.content} /> : null}
+            {assistant.content ? <CollapsedAnswerPreview content={assistant.content} search_result={assistant.search_result} /> : null}
           </TurnPreview>
         </TurnCard>
       </div>

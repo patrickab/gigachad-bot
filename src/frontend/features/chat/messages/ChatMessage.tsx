@@ -31,7 +31,7 @@ interface ChatMessageProps {
   isStreaming?: boolean
   attachments?: Attachment[]
   onAttachmentClick?: (attachment: Attachment) => void
-  /** Makes the question area clickable and adds a keyboard-accessible collapse chevron. */
+  /** Makes the question's avatar and top strip collapse the pair, alongside a keyboard-accessible chevron. */
   onCollapse?: () => void
 }
 
@@ -83,7 +83,7 @@ export function AssistantMessageContent({
     if (!content.trim() && isStreaming) {
       return <StatusLine>Searching…</StatusLine>
     }
-    return <WebSearchResult content={content} search_result={search_result} />
+    return <WebSearchResult content={content} search_result={search_result} compact={compact} />
   }
 
   return (
