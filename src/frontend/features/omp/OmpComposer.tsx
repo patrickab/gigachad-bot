@@ -5,6 +5,7 @@ import { File as FileIcon, Folder, MessageSquareText, Puzzle, Sparkles, type Luc
 import { withParsedAttachments } from "@/features/chat/attachments"
 import { ChatInput, type ChatInputHandle } from "@/features/chat/composer/ChatInput"
 import type { CompleteDraft, ComposerCompletion } from "@/features/chat/composer/CompletionMenu"
+import { TokenCounter } from "@/features/chat/TokenCounter"
 import { ModelDropdown } from "@/features/settings/ModelDropdown"
 import { ReasoningSelector } from "@/features/settings/ReasoningSelector"
 import { parseFiles } from "@/lib/backend/api"
@@ -139,4 +140,10 @@ export function OmpReasoningSelector({ view }: { view: OmpView }) {
       placement="below"
     />
   )
+}
+
+/** gigachad's token readout for an omp tab: the context tokens omp reports for the session, never a percentage. */
+export function OmpTokenCounter({ view }: { view: OmpView }) {
+  const { state } = useComposerFor(view)
+  return state?.contextTokens ? <TokenCounter tokens={state.contextTokens} /> : null
 }

@@ -41,6 +41,9 @@ export interface FrameAttachment {
   onOpenFile: (path: string) => void
 }
 
+/** Pixels of shell chrome over the frame's top and bottom edge. */
+export type FrameInsets = { top: number; bottom: number }
+
 interface OmpContextValue {
   /** Last good omp-web overview, null until one loaded. */
   overview: OmpOverview | null
@@ -51,6 +54,8 @@ interface OmpContextValue {
   branchTree: BranchTree | null
   selectLeaf: (sessionId: string, leafId: string | null) => void
   attachFrame: (attachment: FrameAttachment) => () => void
+  /** Shell chrome laid over the frame, its transcript scrolls beneath it. */
+  setFrameInsets: (insets: FrameInsets) => void
   reloadFrame: () => void
   /** Composer state of the session the frame shows, null until the frame reported one. */
   composer: ComposerState | null
@@ -162,6 +167,7 @@ export function OmpProvider({ children }: { children: ReactNode }) {
   const [frameKey, setFrameKey] = useState(0)
   const [branchTree, setBranchTree] = useState<BranchTree | null>(null)
   const [composer, setComposer] = useState<ComposerState | null>(null)
+  const [insets, setInsets] = useState<FrameInsets>({ top: 0, bottom: 0 })
   const frameRef = useRef<HTMLIFrameElement>(null)
   const [frame, setFrame] = useState<HTMLIFrameElement | null>(null)
   const attachFrameElement = useCallback((element: HTMLIFrameElement | null) => {
@@ -216,6 +222,7 @@ export function OmpProvider({ children }: { children: ReactNode }) {
     setFrameStatus("ready")
     setComposer(null)
     post({ type: "hello", version: EMBED_PROTOCOL_VERSION, forwardKeys: FORWARD_KEYS, theme })
+    post({ type: "insets", ...insets })
     if (attachment) navigate(attachment.view, true)
   })
 
@@ -244,6 +251,14 @@ export function OmpProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (readyRef.current) post({ type: "set-theme", theme })
   }, [theme, post])
+
+  useEffect(() => {
+    if (readyRef.current) post({ type: "insets", ...insets })
+  }, [insets, post])
+
+  const setFrameInsets = useCallback((next: FrameInsets) => {
+    setInsets((current) => (current.top === next.top && current.bottom === next.bottom ? current : next))
+  }, [])
 
   const attachedView = attachment?.view
   useEffect(() => {
@@ -281,8 +296,8 @@ export function OmpProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const value = useMemo<OmpContextValue>(() => ({
-    overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, reloadFrame, composer, sendToComposer: post, onComposerEvent,
-  }), [overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, reloadFrame, composer, post, onComposerEvent])
+    overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, setFrameInsets, reloadFrame, composer, sendToComposer: post, onComposerEvent,
+  }), [overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, setFrameInsets, reloadFrame, composer, post, onComposerEvent])
 
   const visible = attachment !== null && frameStatus === "ready"
   useEffect(() => {

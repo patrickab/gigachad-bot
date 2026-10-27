@@ -15,7 +15,7 @@ import { CanvasWorkspace } from "@/features/editor/canvas/CanvasWorkspace"
 import type { useCanvasView } from "@/features/editor/canvas/useCanvasView"
 import { ArchitectureWindow } from "@/features/editor/architecture/ArchitectureWindow"
 import { FactorySurface } from "@/features/factory/FactorySurface"
-import { OmpModelSelector, OmpReasoningSelector } from "@/features/omp/OmpComposer"
+import { OmpModelSelector, OmpReasoningSelector, OmpTokenCounter } from "@/features/omp/OmpComposer"
 import { OmpSurface } from "@/features/omp/OmpSurface"
 import { OmpSystemPrompt } from "@/features/omp/OmpSystemPrompt"
 import { TabSwitcher } from "@/features/navigation/TabSwitcher"
@@ -76,7 +76,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
       </>,
       right: <>
         <TopBarPill>
-          <TokenCounter usage={totalUsage} />
+          <TokenCounter tokens={totalUsage.total_tokens} />
           <ThemeToggle />
         </TopBarPill>
         {filePanelToggle}
@@ -162,11 +162,12 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
         right: <>
           <TopBarPill>
             {ompView && <OmpSystemPrompt view={ompView} />}
+            {ompView && <OmpTokenCounter view={ompView} />}
             <ThemeToggle />
           </TopBarPill>
           {filePanelToggle}
         </>,
-        runsUnderTopBar: false,
+        runsUnderTopBar: !!ompView && ompView.kind !== "settings",
         body: ompItem && ompView ? <OmpSurface view={ompView} onViewChange={(omp) => setWorkspaceItem({ ...ompItem, omp })} /> : chatBody,
       }
     },

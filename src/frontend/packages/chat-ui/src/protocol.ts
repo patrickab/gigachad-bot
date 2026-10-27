@@ -1,12 +1,12 @@
 /**
- * postMessage protocol between gigachad-bot's shell (parent window) and omp-web (ompweb fork) in its frame.
+ * postMessage protocol between gigachad-bot's shell (parent window) and omp-web's overlay (`ompweb-overlay/`) in its frame.
  *
- * - The one definition both sides import: the shell from source, the fork as `@gigachad/chat-ui/protocol`
+ * - The one definition both sides import: the shell from source, the overlay as `@gigachad/chat-ui/protocol`
  * - Bump `EMBED_PROTOCOL_VERSION` with every message change, a running frame may still be an older build
  * - Every message carries `channel: EMBED_CHANNEL` so unrelated postMessage traffic is ignored
  */
 export const EMBED_CHANNEL = "omp-embed"
-export const EMBED_PROTOCOL_VERSION = 6
+export const EMBED_PROTOCOL_VERSION = 7
 
 export type ThemeMode = "light" | "dark"
 
@@ -54,6 +54,8 @@ export type ShellMessage =
   | { type: "open-settings" }
   | { type: "set-theme"; theme: ThemeMode }
   | { type: "select-leaf"; sessionId: string; leafId: string | null }
+  /** Pixels of shell chrome laid over the frame's top (top bar) and bottom (composer). The transcript scrolls beneath them. Sent after `hello` and on every change. */
+  | { type: "insets"; top: number; bottom: number }
   /**
    * The shell's composer replaces omp-web's hidden one. Each names the session it was typed for (null: new-session screen), a frame showing another one ignores it.
    * `composer-send` submits like omp-web's composer: builtins (`/btw`), then a prompt, a follow-up while the agent is busy.
@@ -76,8 +78,9 @@ export type FrameMessage =
   /**
    * Composer state for the shell's composer. `sessionId` is the shown session, null on the new-session screen.
    * `thinkingLevels` is what omp-web's reasoning menu offers (`auto`, `off`, ... `max`), empty when it shows none. `thinkingLevel` is the selected one.
+   * `contextTokens` is the context omp reports in use (the count behind omp-web's context ring), null before the first report.
    */
-  | { type: "composer"; sessionId: string | null; streaming: boolean; model: ModelRef | null; thinkingLevel: string; thinkingLevels: string[] }
+  | { type: "composer"; sessionId: string | null; streaming: boolean; model: ModelRef | null; thinkingLevel: string; thinkingLevels: string[]; contextTokens: number | null }
   /**
    * Text and images omp handed back (an abort withdrew queued messages, the queue panel's Edit), for the shell's composer.
    * Merge like omp-web's `mergeRecoveredText` (`lib/draft-store.ts`): `replace` set and the draft starts with `replace.lead` -> that lead becomes `text`, else `replace.fallback` (or `text`) goes before the draft.
