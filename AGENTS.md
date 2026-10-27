@@ -19,6 +19,7 @@ via `run.sh`.
 - Regenerate `.docs/system-overview.md`, `.docs/architecture.md`, and `.docs/module-map.md` through `/repomix`. Preserve operational details in maintained runbooks and load them only for relevant tasks.
 - `.docs/deployment.md` — Private production deployment, identity, service configuration, verification, and rollback.
 - `.docs/remote-inference.md`: Remote OCR/Ollama setup, SSH tunnels, and environment configuration.
+- `.docs/ompweb-integration.md`: omp-web integration runbook: worktrees, where a change belongs, overlay/upstream workflows, shared services and concurrent agent work.
 
 ## UI hints
 
@@ -42,17 +43,19 @@ Clean, calm UI that lets the user focus on the content (chat, document, canvas).
 
 ## omp-web integration
 
-omp tabs embed omp-web from the fork `patrickab/ompweb` (branch `custom`), itself a fork of `kahme247/ompweb`. Both repos must keep rebasing onto upstream without conflicts, so gigachad-bot adapts to omp-web, never the reverse. Architecture: `.docs/architecture.md`, "omp tabs (omp-web)".
+omp tabs embed unmodified upstream omp-web (`kahme247/ompweb`). Everything gigachad-bot needs on its side is a private overlay in this repo, `ompweb-overlay/`: embed mode, the postMessage bridge, the composer, Q&A cards, Markdown and the embed-only theme. `run-omp-web.sh` copies it into the served worktree as `custom/` and applies `ompweb-overlay/seams.patch`, the two upstream lines that load it (`app/layout.tsx`, `next.config.ts`). gigachad-bot adapts to omp-web, never the reverse. Architecture: `.docs/architecture.md`, "omp tabs (omp-web)".
 
-- **Minimal delta upstream**: never ask for or make changes to omp-web's server API, session handling or protocol logic. Read what it already serves. A feature omp-web lacks is built here, or added in the fork's `custom/` following its `custom/AGENTS.md`
-- **Drop before you change**: omp-web UI gigachad-bot does not want is hidden in the fork's embed mode (`custom/theme/embed.css`), not rewritten. Prefer hiding a feature over porting or patching it
+- **Minimal delta upstream**: never ask for or make changes to omp-web's server API, session handling or protocol logic. Read what it already serves. Keep `seams.patch` at its two lines. A seam the overlay needs goes upstream as a pull request (the current ones: #314) that is a refactor or feature valuable to every omp-web user and easy for the maintainer to review, never gigachad-specific
+- **Overrides wrap upstream**: `ompweb-overlay/overrides/<path>` replaces upstream `<path>` (`ompweb-overlay/next.config.ts`). An override imports the upstream module by relative path and types against its exported props/types, so an upstream change fails `tsc`
+- **Embed only**: every overlay style is scoped to `html.cf-embed`, standalone omp-web keeps upstream's look
+- **Drop before you change**: omp-web UI gigachad-bot does not want is hidden in embed mode (`ompweb-overlay/theme/`), not rewritten. Prefer hiding a feature over porting or patching it
 - **Adapters own all omp-web knowledge**, one place per side, so an omp-web change lands in one file:
   - Backend: `src/lib/omp_web.py` only. Routes (`routes/omp.py`) map its errors, they never build omp-web URLs. Pydantic contract models validate every response, a shape change fails loudly with the field name (502). `src/backend/omp_web_gate.py` (production Tailnet gate in front of the frame) is a plain identity-checking proxy, keep omp-web API knowledge out of it
   - Frontend: `src/frontend/features/omp/` only. Nothing else knows the iframe, the postMessage protocol (defined in the shared package, eslint lets only this feature import it) or omp-web URLs. Other features import its public files (eslint `crossFeature`)
   - The browser never calls omp-web's API, the backend does, server to server
 - **Never vendor omp-web code** (components, hooks, CSS). Write new code against its API with omp-web as reference
-- **Shared contracts live once, in `src/frontend/packages/chat-ui/`** (`@gigachad/chat-ui`): the postMessage protocol (`src/protocol.ts`, bump `EMBED_PROTOCOL_VERSION` with every message change) and the role palette (`src/palette.css`). The shell imports the source, the fork the vendored tarball. Ship a change with `npm run sync:ompweb` (bump the package version first) and commit the fork's tarball, manifest and lock
+- **Shared contracts live once, in `src/frontend/packages/chat-ui/`** (`@gigachad/chat-ui`): the postMessage protocol (`src/protocol.ts`, bump `EMBED_PROTOCOL_VERSION` with every message change) and the role palette (`src/palette.css`). The shell imports the source, `run-omp-web.sh` packs it into the served worktree on every start, so both sides ship in one commit
 - **One shared iframe**: tabs switch it by message, never by reload or by moving it in the DOM. Do not add a second frame or a per-tab frame
 - **Atomic commits**: one concern each (adapter, frame, tabs, sidebar, ...), the body names what omp-web contract it relies on
-- **After an omp-web update**: commit it to the fork's `custom` branch and restart omp-web (its worktree follows `custom` on start), run `pytest tests/test_omp_web.py`, then smoke an omp tab: open a session, switch omp tabs, send a prompt
+- **After an omp-web or overlay change**: run the overlay checks in a private check checkout, then the integrator restarts omp-web (it resets its worktree to `GIGACHAD_OMP_WEB_REF` and reapplies the overlay on start), runs `pytest tests/test_omp_web.py` and smokes an omp tab: open a session, switch omp tabs, send a prompt only in an approved throwaway session. Concurrent work: `.docs/ompweb-integration.md`
 

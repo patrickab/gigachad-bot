@@ -46,9 +46,9 @@ The launcher installs dependencies, including Node.js, and starts the developmen
 
 To run services separately, use `./run-frontend.sh` or `./run-backend.sh`. Optional nonsecret configuration goes in `${XDG_CONFIG_HOME:-$HOME/.config}/gigachad-bot/env` as plain `KEY=value` lines.
 
-`./run.sh` also serves omp-web on `127.0.0.1:30177` for the omp tabs. It needs `omp` on `PATH`. If the checkout is missing, startup automatically clones the private `patrickab/ompweb` fork's `custom` branch into `~/git/ompweb`. Your Git credentials must have access to that repository. Set `GIGACHAD_OMP_WEB_REPO` to use another checkout path. Existing checkouts are left untouched.
+`./run.sh` also serves omp-web on `127.0.0.1:30177` for the omp tabs. It needs `omp` on `PATH`. If the checkout is missing, startup clones upstream `kahme247/ompweb` into `~/git/ompweb_original`. Set `GIGACHAD_OMP_WEB_REPO` to use another checkout path and `GIGACHAD_OMP_WEB_REF` for the served ref (default `integration_patrick_ab`, upstream plus the seams of PR #314). Existing checkouts are left untouched.
 
-The first start builds it in a separate worktree, which takes a few minutes. Set `GIGACHAD_OMP_WEB=0` to skip it. Updating omp-web means updating both repos together. See the [repository documentation index](AGENTS.md#documentation) for operational guidance.
+The first start builds it in a separate worktree with this repository's overlay (`ompweb-overlay/`), which takes a few minutes. Set `GIGACHAD_OMP_WEB=0` to skip it. See the [repository documentation index](AGENTS.md#documentation) for operational guidance.
 
 `./run.sh` also starts the factory engine on `127.0.0.1:8090`. First startup clones `patrickab/Agents-in-a-box` into `~/git/Agents-in-a-box`, installs its factory dependencies, creates `~/.config/agent-sandbox/factory.yaml`, and creates the `factory` database in the development PostgreSQL instance. Existing checkouts, configuration, and data are preserved. Set `GIGACHAD_FACTORY_REPO_DIR` to use another checkout or `GIGACHAD_FACTORY=0` to skip the factory. Running sandboxed agent tasks still requires sandbox runtime setup. Find the runbook in the [repository documentation index](AGENTS.md#documentation).
 

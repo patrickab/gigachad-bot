@@ -225,7 +225,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   `-- content/              Markdown, code, PDF and plot rendering
 |       |       |-- LaTeXMarkdown.tsx Markdown renderer shell
 |       |       |-- AssistantChat.tsx Ephemeral side chat shared by the editor sidebar and PDF assistant
-|       |       |-- diagrams/         MermaidDiagram, MarkmapDiagram, CitationPill
+|       |       |-- diagrams/         CitationPill (code, Mermaid and Markmap render from packages/chat-ui)
 |       |       |-- PdfViewer.tsx     PDF viewer orchestrator plus PdfPages
 |       |       |-- pdf/              Page slots, page window, zoom, zoom controls, layout and canvas helpers
 |       |       |-- PlotElement.tsx
@@ -251,7 +251,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |-- pointer.ts            Follow the pointer on window until it lifts
 |       |   `-- diff.ts               Diff parsing helpers
 |       `-- packages/
-|           `-- chat-ui/              Independently packaged local/OMP chat UI contract
+|           `-- chat-ui/              Independently packaged local/OMP chat UI contract: turns, markdown, code/Mermaid/Markmap renderers, palette, protocol
 |               |-- src/
 |               |   |-- index.ts      Public rendering exports
 |               |   |-- Turn.tsx      Shared turn rendering
@@ -303,7 +303,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 - Keep `components/`, `contexts/`, `hooks/`, and `lib/` independent of `features/` and `app/`. Reuse `components/ui/` before creating local interaction primitives.
 - Put browser API transport in `lib/backend/` and shared browser models/pure transformations in `lib/domain/`. These TypeScript contracts are separate from Python route models; coordinate both sides when changing payloads.
 - Keep all iframe URLs, bridge knowledge and message-protocol imports in `features/omp/`. The canonical protocol lives in `packages/chat-ui/src/protocol.ts`; other shell modules may consume the shared rendering package but not that protocol directly.
-- Keep `packages/chat-ui/` independently distributable: no `@/` app imports and no undeclared reliance on the shell's dependencies. `pack.mjs` owns packing/synchronization with the external fork; do not vendor the fork's implementation here.
+- Keep `packages/chat-ui/` independently distributable: no `@/` app imports and no undeclared reliance on the shell's dependencies. `pack.mjs` packs it for `run-omp-web.sh`, which installs it into the served omp-web for `ompweb-overlay/`; do not vendor omp-web code here.
 
 ### Backend and separate services
 

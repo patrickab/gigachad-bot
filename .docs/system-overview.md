@@ -27,7 +27,7 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 - Open the development UI at `localhost:2999`; the API runs at `127.0.0.1:8001`. LikeC4, omp-web, and factory are supporting services, not alternate user workspaces.
 - Startup reuses PostgreSQL credentials and data. If `POSTGRES_PASSWORD_DEV` is missing, setup asks before generating credentials and creating the database; declining stops startup without changes. Restore an existing database's original password rather than replacing it.
 - Keep provider credentials in private `~/.secrets` or the environment. Optional nonsecret configuration belongs in `${XDG_CONFIG_HOME:-$HOME/.config}/gigachad-bot/env`.
-- OMP tabs require `omp` on backend `PATH` and access to the private `patrickab/ompweb` fork. Startup can provision its checkout; set `GIGACHAD_OMP_WEB=0` to skip it.
+- OMP tabs require `omp` on backend `PATH` and an omp-web (`kahme247/ompweb`) checkout. Startup can provision it and applies this repository's overlay; set `GIGACHAD_OMP_WEB=0` to skip it.
 - The factory launcher can provision its separate engine checkout, configuration, and database while preserving existing state. Set `GIGACHAD_FACTORY=0` to skip it. Running sandboxed tasks still requires the sandbox runtime setup.
 - Keep production backend services private. Development launchers are not production deployment. Host-access users can trigger a production redeploy from settings. Remote inference, identity, production setup, and service updates belong to the maintained runbooks indexed in [AGENTS.md](../AGENTS.md#documentation).
 - Failed startup reads show a shared warning after an error or a 15-second timeout. Retry reloads only failed data without losing drafts or already-loaded content.
@@ -120,7 +120,7 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 - Navigate session forks and in-session branches, restore archives, and open returned file links under the shell's file-access policy.
 - Use the shell composer for prompts, images, documents, abort, model/thinking selection, and `/` or `@` completion. Omp-web owns execution, queueing, shell commands, and session creation.
 - Shell composition does not provide local-chat word prediction or busy-run steering/queueing. Persisted OMP messages cannot be deleted, and frame DOCX/PDF previews are blocked by `SAMEORIGIN`.
-- OMP features require host access and a running compatible omp-web service. Matching shell/fork versions matter; restart after updates. Integration ownership, shared rendering/bridge contracts, and deployment compatibility belong in [architecture](architecture.md); operational steps are indexed in [AGENTS.md](../AGENTS.md#documentation).
+- OMP features require host access and a running compatible omp-web service. Restart it after updates so it picks up the current overlay. Integration ownership, shared rendering/bridge contracts, and deployment compatibility belong in [architecture](architecture.md); operational steps are indexed in [AGENTS.md](../AGENTS.md#documentation).
 
 ## Agent factory
 

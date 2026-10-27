@@ -205,22 +205,22 @@ diagram / source edit -> serialized frontend reads/writes -> architecture route
 
 ## omp tabs (omp-web)
 
-- Adapt to `patrickab/ompweb` branch `custom`, preserving upstream compatibility. Never vendor its components/hooks/CSS or change its server/session/protocol logic to suit the shell.
-- Let `run-omp-web.sh` serve a detached worktree at the configured ref. It reuses existing listeners, so fork updates require restart. Allow the frontend's frame origin.
+- Serve unmodified upstream `kahme247/ompweb` plus the private overlay `ompweb-overlay/` (embed mode, bridge, composer, Q&A cards, Markdown, embed-only theme). Never vendor its components/hooks/CSS or change its server/session/protocol logic to suit the shell.
+- Let `run-omp-web.sh` serve a detached worktree at `GIGACHAD_OMP_WEB_REF`, with the overlay as `custom/` and the two-line `seams.patch` that loads it. Overrides wrap upstream modules by relative path, overlay CSS is scoped to `html.cf-embed`. It reuses existing listeners, so updates require restart. Allow the frontend's frame origin.
 
 | Owner | Contract |
 | --- | --- |
 | Backend adapter | Only `src/lib/omp_web.py` knows upstream URLs/response shapes. Pydantic validates responses, `/api/omp/*` maps errors. Browser-side shell code never calls upstream APIs directly. |
 | Gate | `src/backend/omp_web_gate.py` checks host identity before proxying the production frame. Keep upstream API knowledge out. |
 | Frontend adapter | Only `features/omp/` owns iframe URLs and postMessage details. `OmpProvider` keeps one frame, deep-links the initial session, switches by message without reload/DOM relocation. |
-| Shell composer | Send prompts/images/documents, abort, model/thinking changes, `/` and `@` completion. Merge returned drafts. |
+| Shell composer | Send prompts/images/documents, abort, model/thinking changes, `/` and `@` completion. Merge returned drafts. Lies over the full-height frame with the top bar like a chat, the `insets` message tells the overlay how far to pad the transcript (`embed/insets.ts`, `theme/embed.css`). |
 | Engine | omp-web owns execution, queueing, shell commands, session creation. Shell does not expose word prediction or busy-run steering/queueing. |
 | Navigation | Group project-linked mount sessions under code, others under OMP. Navigate forks/branches, restore archives, route file links through shell file policy. |
 
-- Keep shared chat rendering/protocol/palette canonical in `packages/chat-ui`. Local and OMP chat share Q&A turns, Markdown/LaTeX, source-preserving copy, and role colors.
+- Keep shared chat rendering/protocol/palette canonical in `packages/chat-ui`. Local and OMP chat share Q&A turns, Markdown/LaTeX, fenced code with Mermaid and Markmap diagrams (each host passes its own `light`/`dark` scheme), source-preserving copy, and role colors.
 - Map the palette to each side's tokens. Shell persists its theme preference and propagates it through the bridge.
-- Install a versioned tarball in the fork, never a sibling checkout. Bump package version and run `npm run sync:ompweb`, then commit tarball/manifest/lock together. Check with `npm run check:ompweb`.
-- Bump `EMBED_PROTOCOL_VERSION` on every message change and deploy matching sides. No runtime handshake detects mismatches.
+- `run-omp-web.sh` packs `packages/chat-ui` and installs it into the served worktree on every start, so overlay and shell always share one commit's package.
+- Bump `EMBED_PROTOCOL_VERSION` on every message change. No runtime handshake detects mismatches, a running omp-web keeps the old bundle until restarted.
 - Return 503 for unavailable upstream, 502 naming invalid response fields, and preserve explicit upstream refusals. Share HTTP/error plumbing with factory through `lib/upstream.py`.
 - Gate frame URL/API availability by host access. Persisted OMP-message deletion is unsupported. Frame DOCX/PDF previews are blocked by `SAMEORIGIN`. Standalone omp-web keeps its native UI.
 
@@ -316,4 +316,4 @@ Encode one payload as `?open=<base64url JSON>`:
 ## Production redeploy
 
 - `POST /api/deploy/redeploy` (host access, settings menu) starts `redeploy.sh` as transient user unit `gigachad-bot-redeploy` via `systemd-run`, so restarting the backend does not kill it. Returns 202, or 409 with stderr while one runs or when the start fails.
-- The script rebases the production worktree onto `origin/master`, refusing tracked changes, and restarts `gigachad-bot.service` from a clean environment. It then moves omp-web to `origin/custom`, refusing a fork whose `EMBED_PROTOCOL_VERSION` differs, never restarting it while an OMP session runs, and restarts its gate. Steps and rollback: [deployment](deployment.md).
+- The script rebases the production worktree onto `origin/master`, refusing tracked changes, and restarts `gigachad-bot.service` from a clean environment. It then restarts omp-web when its ref, `ompweb-overlay/` or `packages/chat-ui` changed, never while an OMP session runs, and restarts its gate. Steps and rollback: [deployment](deployment.md).

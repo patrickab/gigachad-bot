@@ -197,25 +197,28 @@ cd "$PROD" && uv run agent-sandbox doctor --profile gigachad
 
 ### Provision omp-web (omp tabs)
 
-- Use private [patrickab/ompweb](https://github.com/patrickab/ompweb), branch `custom`.
-- Put `omp` on `PATH` and authorize Git credentials for the fork.
+- Use unmodified upstream [kahme247/ompweb](https://github.com/kahme247/ompweb).
+  gigachad-bot's side is the overlay `ompweb-overlay/` in this repository.
+- Put `omp` on `PATH`.
 
 ```bash
-git clone --branch custom https://github.com/patrickab/ompweb.git "$HOME/git/ompweb"
-git -C "$HOME/git/ompweb" remote add upstream https://github.com/kahme247/ompweb
-git -C "$HOME/git/ompweb" remote set-url --push upstream no-push
+git clone https://github.com/kahme247/ompweb.git "$HOME/git/ompweb_original"
 ```
 
-- Use `upstream` for rebasing. Follow the fork's `custom/AGENTS.md`.
-- Let `run-omp-web.sh` serve a detached worktree and resolve its ref on each start.
+- Serve a ref containing the upstream seams the overlay uses. Until PR #314 is
+  merged that is the local branch `integration_patrick_ab` (upstream `main` plus
+  #314's commits), which a fresh clone lacks: create it, then use `origin/main`.
+- `run-omp-web.sh` serves a detached worktree reset to the ref on each start,
+  applies `ompweb-overlay/seams.patch`, copies the overlay to `custom/` and packs
+  `@gigachad/chat-ui` into it. The source checkout stays untouched.
 - Install/build initially and rebuild on source changes.
 - Restart after updates: an existing listener is reused.
 
 | Variable | Default / purpose |
 | --- | --- |
-| `GIGACHAD_OMP_WEB_REPO` | `~/git/ompweb`, fork checkout |
-| `GIGACHAD_OMP_WEB_DIR` | `~/.local/share/gigachad-bot/ompweb`, served worktree |
-| `GIGACHAD_OMP_WEB_REF` | `custom`, use `origin/custom` in production |
+| `GIGACHAD_OMP_WEB_REPO` | `~/git/ompweb_original`, upstream checkout |
+| `GIGACHAD_OMP_WEB_DIR` | `~/.local/share/gigachad-bot/ompweb-upstream`, served worktree |
+| `GIGACHAD_OMP_WEB_REF` | `integration_patrick_ab`, a remote-tracking ref (`origin/main`) is fetched by `redeploy.sh` |
 | `GIGACHAD_OMP_WEB_BIND` | `127.0.0.1:30177` |
 | `GIGACHAD_OMP_WEB_FRAME_ANCESTORS` | Local `:2999` origins, production units default to `GIGACHAD_CORS_ORIGINS` |
 | `GIGACHAD_OMP_WEB_URL` | `http://127.0.0.1:30177`, upstream for backend/gate |
@@ -239,7 +242,6 @@ Add to `$ENV`:
 
 ```dotenv
 GIGACHAD_OMP_WEB_FRAME_URL=https://<tailnet-hostname>:8443
-GIGACHAD_OMP_WEB_REF=origin/custom
 ```
 
 ```bash
@@ -257,34 +259,21 @@ systemctl --user restart gigachad-bot.service
 
 #### Update omp-web
 
-- Keep protocol, palette, Q&A cards, and Markdown in `src/frontend/packages/chat-ui/`.
-- Install versioned `custom/vendor/*.tgz` through the fork's lockfile.
-  Require no sibling checkout and no repacking during ordinary deployment.
-- For shared-package changes, bump its version and run from `src/frontend`:
+- Keep protocol, palette, Q&A cards, and Markdown in `src/frontend/packages/chat-ui/`,
+  the embed UI in `ompweb-overlay/`. Both ship with the gigachad-bot commit, so
+  `redeploy.sh` restarts omp-web when they or the served ref change.
+- Bump `EMBED_PROTOCOL_VERSION` on every message change: no runtime handshake
+  exists, a stale omp-web silently drops messages until restarted.
 
-```bash
-npm run sync:ompweb
-npm run check:ompweb
-```
-
-- Use project npm (`.venv/bin` first on `PATH`) for reproducible tarball bytes.
-- Commit fork tarball, manifest, and lock together. Deploy matching sides.
-- Check `EMBED_PROTOCOL_VERSION`: no runtime handshake exists, so mismatches
-  silently drop messages.
-
-```bash
-grep -h 'EMBED_PROTOCOL_VERSION =' \
-  "$REPO/src/frontend/packages/chat-ui/src/protocol.ts" \
-  "$HOME/.local/share/gigachad-bot/ompweb/node_modules/@gigachad/chat-ui/dist/protocol.js"
-```
+Manual update:
 
 1. Ensure no session is running before restart, which ends agent processes.
    `curl -s http://127.0.0.1:30177/api/sessions` must show no `runningSessionIds`.
-2. Fetch rather than pull the rebased/force-pushed fork:
-   `git -C "$HOME/git/ompweb" fetch origin custom`.
+2. Update the ref (`git -C "$HOME/git/ompweb_original" fetch origin` for
+   `origin/main`) and Gigachad, whose overlay the restart applies.
 3. Restart `gigachad-bot-omp-web.service` and verify
    `curl -sf http://127.0.0.1:30177/login`. The worktree follows its configured ref.
-4. Update Gigachad to the matching commit and reload the frontend.
+4. Reload the frontend.
 5. Smoke session loading, history, turn rendering, and tab switching. Test prompt
    sending, Stop, model/thinking controls, and completion only in an explicitly
    approved disposable session, never an existing conversation.
