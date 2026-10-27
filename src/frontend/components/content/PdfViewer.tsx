@@ -38,8 +38,13 @@ const ZOOM_STEP = 0.25
 const ZOOM_PRESETS = [1, 1.25, 1.5, 1.75, 2, 2.5]
 // zoom steps scale the current bitmaps, pages re-rasterize once the zoom rests this long
 const ZOOM_SETTLE_MS = 150
-// pages within one viewport height above or below the visible area keep a rendered canvas
-const MOUNT_MARGIN = "100% 0px"
+// pages within two viewport heights above or below the visible area keep a rendered canvas
+const MOUNT_MARGIN = "200% 0px"
+// pages this close keep a low-res placeholder, so scrolling never shows a blank page
+const PLACEHOLDER_MARGIN = "1500% 0px"
+const PLACEHOLDER_WIDTH = 480
+// scrolling must rest this long before a placeholder renders, so it never competes with visible pages
+const PLACEHOLDER_IDLE_MS = 120
 
 interface ScrollAnchor {
   mouseX: number
@@ -164,6 +169,36 @@ function releaseCanvas(canvas: HTMLCanvasElement | null) {
   canvas.style.display = "none"
 }
 
+/** Draw `source` into `target` scaled down to at most PLACEHOLDER_WIDTH px wide, and show it. */
+function showPlaceholder(target: HTMLCanvasElement, source: HTMLCanvasElement) {
+  const scale = Math.min(1, PLACEHOLDER_WIDTH / source.width)
+  target.width = Math.max(1, Math.round(source.width * scale))
+  target.height = Math.max(1, Math.round(source.height * scale))
+  const context = target.getContext("2d")
+  if (!context) return
+  context.imageSmoothingQuality = "high"
+  context.drawImage(source, 0, 0, target.width, target.height)
+  target.style.display = ""
+}
+
+type RenderTask = ReturnType<PdfPage["render"]>
+
+/** Rasterize a page at PLACEHOLDER_WIDTH into a scratch canvas, `onRenderTask` hands out the task for cancelling. */
+async function renderPlaceholder(pdf: PdfDocument, pageNumber: number, onRenderTask: (task: RenderTask | null) => void): Promise<HTMLCanvasElement> {
+  const page = await pdf.getPage(pageNumber)
+  const viewport = page.getViewport({ scale: PLACEHOLDER_WIDTH / page.getViewport({ scale: 1 }).width })
+  const scratch = document.createElement("canvas")
+  scratch.width = Math.ceil(viewport.width)
+  scratch.height = Math.ceil(viewport.height)
+  const canvasContext = scratch.getContext("2d")
+  if (!canvasContext) throw new Error("2d canvas context unavailable")
+  const task = page.render({ canvasContext, viewport })
+  onRenderTask(task)
+  await task.promise
+  onRenderTask(null)
+  return scratch
+}
+
 /** Every page's height / width, `fallback` for pages that fail to load. */
 async function readPageAspects(pdf: PdfDocument, fallback: number): Promise<number[]> {
   return Promise.all(Array.from({ length: pdf.numPages }, async (_, index) => {
@@ -189,10 +224,12 @@ function pageTops(aspects: number[], pageWidth: number): number[] {
 
 interface PageRegions { images: ImageRect[]; links: ImageRect[] }
 
-/** One page's box at its final size, its canvas exists only while `mounted`.
+/** One page's box at its final size, its live canvas exists only while `mounted`.
  *
  * - `rasterWidth` is the canvas' render width, CSS-scaled to `width` while a zoom settles
- * - Re-rasterizing blanks the canvas, a backup copy of the last bitmap covers the page until the new one lands
+ * - The backup canvas covers the page whenever the live canvas is blank: the last bitmap while re-rasterizing, a placeholder while unmounted
+ * - `keep` pages hold a low-res placeholder, copied from the canvas on unmount or rendered while `rendersPlaceholder`
+ * - `onPlaceholderChange` reports `settled`: a placeholder exists or its render was attempted
  */
 const PdfPageSlot = memo(function PdfPageSlot({
   pageNumber,
@@ -201,6 +238,10 @@ const PdfPageSlot = memo(function PdfPageSlot({
   rasterWidth,
   devicePixelRatio,
   mounted,
+  keep,
+  rendersPlaceholder,
+  documentRef,
+  onPlaceholderChange,
   snap,
   registerSlot,
   renderPageOverlay,
@@ -211,6 +252,10 @@ const PdfPageSlot = memo(function PdfPageSlot({
   rasterWidth: number
   devicePixelRatio: number
   mounted: boolean
+  keep: boolean
+  rendersPlaceholder: boolean
+  documentRef: { readonly current: PdfDocument | null }
+  onPlaceholderChange: (pageNumber: number, settled: boolean) => void
   snap: boolean
   registerSlot: (pageNumber: number, slot: HTMLDivElement | null) => void
   renderPageOverlay?: (page: number, pageWidth: number) => ReactNode
@@ -218,6 +263,7 @@ const PdfPageSlot = memo(function PdfPageSlot({
   const [regions, setRegions] = useState<PageRegions | null>(null)
   // masks over a blank canvas would show as light boxes
   const [drawn, setDrawn] = useState(false)
+  const [placeholder, setPlaceholder] = useState(false)
   if (!mounted && drawn) setDrawn(false)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const drawnCanvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -225,6 +271,11 @@ const PdfPageSlot = memo(function PdfPageSlot({
   const regionsRequestedRef = useRef(false)
 
   const slotRef = useCallback((slot: HTMLDivElement | null) => registerSlot(pageNumber, slot), [registerSlot, pageNumber])
+
+  const publishPlaceholder = useCallback((hasBitmap: boolean, settled = hasBitmap) => {
+    setPlaceholder(hasBitmap)
+    onPlaceholderChange(pageNumber, settled)
+  }, [onPlaceholderChange, pageNumber])
 
   // Layout effects run before react-pdf's passive effects clear the canvas, so the last bitmap is still intact here.
   useLayoutEffect(() => {
@@ -239,18 +290,47 @@ const PdfPageSlot = memo(function PdfPageSlot({
     backup.style.display = ""
   }, [rasterWidth, devicePixelRatio])
 
+  // Same timing on unmount: the detached canvas still holds its bitmap, shrink it into the backup.
   useLayoutEffect(() => {
     if (mounted) return
+    const drawnCanvas = drawnCanvasRef.current
+    const backup = backupRef.current
     drawnCanvasRef.current = null
-    releaseCanvas(backupRef.current)
-  }, [mounted])
+    if (!keep) releaseCanvas(backup)
+    else if (drawnCanvas?.width && backup) showPlaceholder(backup, drawnCanvas)
+    publishPlaceholder(!!backup?.width)
+  }, [mounted, keep, publishPlaceholder])
+
+  // Pages that never rendered get a placeholder from a scratch render, the live canvas takes over once mounted.
+  useEffect(() => {
+    const pdf = documentRef.current
+    const backup = backupRef.current
+    if (!rendersPlaceholder || mounted || !pdf || !backup) return
+    let cancelled = false
+    let task: RenderTask | null = null
+    renderPlaceholder(pdf, pageNumber, (renderTask) => { task = renderTask })
+      .then((scratch) => {
+        if (cancelled) return
+        showPlaceholder(backup, scratch)
+        publishPlaceholder(true)
+      })
+      .catch(() => {
+        // settled without a bitmap, so the scheduler moves on instead of retrying
+        if (!cancelled) publishPlaceholder(false, true)
+      })
+    return () => {
+      cancelled = true
+      task?.cancel()
+    }
+  }, [rendersPlaceholder, mounted, documentRef, pageNumber, publishPlaceholder])
 
   const onRenderSuccess = useCallback(() => {
     mapCanvasToDevicePixels(canvasRef.current, devicePixelRatio)
     drawnCanvasRef.current = canvasRef.current
     releaseCanvas(backupRef.current)
+    publishPlaceholder(false)
     setDrawn(true)
-  }, [devicePixelRatio])
+  }, [devicePixelRatio, publishPlaceholder])
 
   // Images skip both color layers, link text skips the ink layer. Shares the operator list the canvas render fetches.
   const collectRegions = useCallback((page: PdfPage) => {
@@ -263,11 +343,11 @@ const PdfPageSlot = memo(function PdfPageSlot({
 
   // The tint skips images, the ink layer also skips links, and the link layer caps link text at one link blue.
   const masks = useMemo(() => {
-    if (!drawn) return null
+    if (!drawn && !placeholder) return null
     const images = regions?.images ?? []
     const links = regions?.links ?? []
     return { tint: rectMask(images, true), ink: rectMask([...images, ...links], true), link: rectMask(links, false) }
-  }, [drawn, regions])
+  }, [drawn, placeholder, regions])
 
   const scale = width / rasterWidth
   return (
@@ -341,6 +421,11 @@ export function PdfViewer({
   const [numPages, setNumPages] = useState<number | null>(null)
   const [pageAspects, setPageAspects] = useState<number[] | null>(null) // height / width per page
   const [nearPages, setNearPages] = useState<ReadonlySet<number>>(() => new Set())
+  const [keepPages, setKeepPages] = useState<ReadonlySet<number>>(() => new Set())
+  // the one page currently rendering its placeholder
+  const [placeholderTarget, setPlaceholderTarget] = useState<number | null>(null)
+  const settledPlaceholdersRef = useRef(new Set<number>())
+  const lastScrollRef = useRef(0)
   const documentRef = useRef<PdfDocument | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -368,43 +453,51 @@ export function PdfViewer({
     onScrollerChangeRef.current?.(scroller)
   }, [])
   const pageRefs = useRef(new Map<number, HTMLDivElement>())
-  const pageObserverRef = useRef<IntersectionObserver | null>(null)
+  const pageObserversRef = useRef<IntersectionObserver[]>([])
   const devicePixelRatio = useDevicePixelRatio()
   const pageAspect = pageAspects?.[0] ?? null
 
-  // Mount pages near the viewport. A hidden scroller (inactive tab) reports nothing visible, its pages stay as they are.
+  // Track pages near the viewport: `nearPages` hold a canvas, `keepPages` a placeholder. A hidden scroller (inactive tab) reports nothing visible, its pages stay as they are.
   useEffect(() => {
     const scroller = scrollRef.current
     if (!scroller) return
-    const observer = new IntersectionObserver((entries) => {
-      if (!entries[0]?.rootBounds?.height) return
-      setNearPages((previous) => {
-        const next = new Set(previous)
-        for (const entry of entries) {
-          const pageNumber = Number((entry.target as HTMLElement).dataset.pageNumber)
-          if (entry.isIntersecting) next.add(pageNumber)
-          else next.delete(pageNumber)
-        }
-        return next
-      })
-    }, { root: scroller, rootMargin: MOUNT_MARGIN })
-    pageObserverRef.current = observer
-    for (const slot of pageRefs.current.values()) observer.observe(slot)
+    const observe = (rootMargin: string, setPages: (update: (previous: ReadonlySet<number>) => ReadonlySet<number>) => void) =>
+      new IntersectionObserver((entries) => {
+        if (!entries[0]?.rootBounds?.height) return
+        setPages((previous) => {
+          const next = new Set(previous)
+          for (const entry of entries) {
+            const pageNumber = Number((entry.target as HTMLElement).dataset.pageNumber)
+            if (entry.isIntersecting) next.add(pageNumber)
+            else next.delete(pageNumber)
+          }
+          return next
+        })
+      }, { root: scroller, rootMargin })
+    const observers = [observe(MOUNT_MARGIN, setNearPages), observe(PLACEHOLDER_MARGIN, setKeepPages)]
+    pageObserversRef.current = observers
+    for (const observer of observers) for (const slot of pageRefs.current.values()) observer.observe(slot)
     return () => {
-      observer.disconnect()
-      pageObserverRef.current = null
+      for (const observer of observers) observer.disconnect()
+      pageObserversRef.current = []
     }
   }, [])
 
   const registerSlot = useCallback((pageNumber: number, slot: HTMLDivElement | null) => {
     const previous = pageRefs.current.get(pageNumber)
-    if (previous) pageObserverRef.current?.unobserve(previous)
+    if (previous) for (const observer of pageObserversRef.current) observer.unobserve(previous)
     if (slot) {
       pageRefs.current.set(pageNumber, slot)
-      pageObserverRef.current?.observe(slot)
+      for (const observer of pageObserversRef.current) observer.observe(slot)
     } else {
       pageRefs.current.delete(pageNumber)
     }
+  }, [])
+
+  const onPlaceholderChange = useCallback((pageNumber: number, settled: boolean) => {
+    setPlaceholderTarget((target) => (target === pageNumber ? null : target))
+    if (settled) settledPlaceholdersRef.current.add(pageNumber)
+    else settledPlaceholdersRef.current.delete(pageNumber)
   }, [])
 
   // Re-rasterize once the zoom rests, until then the current bitmaps scale with it.
@@ -560,6 +653,29 @@ export function PdfViewer({
   const pageWidth = Math.round(renderWidth * zoom)
   const rasterPageWidth = Math.round(renderWidth * rasterZoom)
 
+  // The page rendering its placeholder. A target that got a live canvas or left the kept band is dropped, its scratch render cancels.
+  const activePlaceholderTarget = placeholderTarget != null && !nearPages.has(placeholderTarget) && keepPages.has(placeholderTarget) ? placeholderTarget : null
+
+  // While scrolling rests, render placeholders one page at a time for kept pages that have none, nearest to the current page first.
+  useEffect(() => {
+    if (!ready || activePlaceholderTarget != null) return
+    let timer: ReturnType<typeof setTimeout>
+    const scheduleNext = (delay: number) => {
+      timer = setTimeout(() => {
+        const sinceScroll = performance.now() - lastScrollRef.current
+        if (sinceScroll < PLACEHOLDER_IDLE_MS) return scheduleNext(PLACEHOLDER_IDLE_MS - sinceScroll)
+        let nearest: number | null = null
+        for (const page of keepPages) {
+          if (nearPages.has(page) || settledPlaceholdersRef.current.has(page)) continue
+          if (nearest == null || Math.abs(page - pageRef.current) < Math.abs(nearest - pageRef.current)) nearest = page
+        }
+        if (nearest != null) setPlaceholderTarget(nearest)
+      }, delay)
+    }
+    scheduleNext(PLACEHOLDER_IDLE_MS)
+    return () => clearTimeout(timer)
+  }, [ready, activePlaceholderTarget, nearPages, keepPages])
+
   // Keep the document spot at the viewport's top edge fixed across width
   // changes (container resize). Pages scale with width but the PAGE_GAPs
   // don't, so map scrollTop exactly: page index + fraction within that page,
@@ -711,7 +827,10 @@ export function PdfViewer({
         ref={setScroller}
         className="pdf-scroll flex-1 min-h-0 overflow-auto [scrollbar-gutter:stable_both-edges] focus:outline-none"
         tabIndex={0}
-        onScroll={trackVisiblePage}
+        onScroll={() => {
+          lastScrollRef.current = performance.now()
+          trackVisiblePage()
+        }}
         // overflow-anchor off: the width-change effect above owns the scroll
         // position; native scroll anchoring would apply a second correction
         style={{ overflowAnchor: "none", paddingTop: topInset, ...(fitWidth ? { scrollSnapType: "y proximity" as const } : undefined) }}
@@ -728,6 +847,10 @@ export function PdfViewer({
                   rasterWidth={rasterPageWidth}
                   devicePixelRatio={devicePixelRatio}
                   mounted={nearPages.has(index + 1)}
+                  keep={keepPages.has(index + 1)}
+                  rendersPlaceholder={activePlaceholderTarget === index + 1}
+                  documentRef={documentRef}
+                  onPlaceholderChange={onPlaceholderChange}
                   snap={!!fitWidth}
                   registerSlot={registerSlot}
                   renderPageOverlay={renderPageOverlay}
