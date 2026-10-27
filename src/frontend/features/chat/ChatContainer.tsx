@@ -13,11 +13,10 @@ import { usePairFocus } from "@/features/chat/usePairFocus"
 import { useStickToBottom } from "@/features/chat/useStickToBottom"
 import { useElementSize } from "@/hooks/useElementSize"
 import { pairMessages } from "@/lib/domain/pairs"
-import { MAX_SIDEBAR_WIDTH } from "@/components/ui/SidePanel"
 import { InTopBar } from "@/features/navigation/TopBarSlots"
 
-/** Column width floor, matching the composer's max-w-2xl, so the chat is never narrower than the input. */
-const MIN_CHAT_COLUMN_PX = 672
+/** Chat column cap, omp-web's (`CHAT_COLUMN_MAX_WIDTH` in its `lib/chat-layout.ts`), so chat and omp tabs read alike. */
+const CHAT_COLUMN_MAX_PX = 960
 /** Extra scroll padding below the last pair, on top of the floating input height. */
 const BOTTOM_GAP_PX = 16
 
@@ -120,8 +119,7 @@ export function ChatContainer({
     [attachmentActions, messages, openPreview],
   )
 
-  // Match the collapsed-sidebar width, shrinking only when the available column cannot fit it.
-  const effectiveMaxWidth = isWideMode ? undefined : `max(${MIN_CHAT_COLUMN_PX}px, calc(100vw - ${MAX_SIDEBAR_WIDTH}px))`
+  const effectiveMaxWidth = isWideMode ? undefined : CHAT_COLUMN_MAX_PX
   const toggleWideMode = useCallback(() => setIsWideMode((w) => !w), [])
 
   return (
