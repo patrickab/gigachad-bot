@@ -1,13 +1,11 @@
 from fastapi import APIRouter, Depends
-from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from lib.llm_resilience import api_query_resilient
 from lib.model_provider_store import ModelProviderStore
 from lib.prompts.internal import SYS_OCR_TEXT_EXTRACTION
 
-from .deps import decode_image, get_model_provider_store, request_client, sse_event_stream
+from .deps import decode_image, get_model_provider_store, request_client, stream_completion
 
 router = APIRouter(prefix="/api", tags=["ocr"])
 
@@ -21,15 +19,10 @@ class OCRRequest(BaseModel):
 async def ocr(req: OCRRequest, store: ModelProviderStore = Depends(get_model_provider_store)) -> EventSourceResponse:
     """Stream OCR text and LaTeX from an image as SSE, defaulting to the configured vision model."""
     with request_client() as c:
-        model = req.model or store.load_defaults()["vision_model"]
-        img = decode_image(req.img_base64)
-        chunks = await run_in_threadpool(
-            api_query_resilient,
+        return await stream_completion(
             c,
-            model=model,
+            model=req.model or store.load_defaults()["vision_model"],
             user_msg="Extract all text and LaTeX from this image.",
             system_prompt=SYS_OCR_TEXT_EXTRACTION,
-            img=img,
-            stream=True,
+            img=decode_image(req.img_base64),
         )
-        return sse_event_stream(chunks)

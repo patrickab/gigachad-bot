@@ -26,6 +26,19 @@ class SandboxRunner(Protocol):
     async def run_script(self, script: str, *, profile: str, interpreter: str, timeout: float) -> str: ...
 
 
+def write_temp_tar(content: bytes, prefix: str) -> str:
+    """Write *content* to a fresh temporary `.tar` file and return its path, removing it again on failure."""
+    fd, path = tempfile.mkstemp(prefix=prefix, suffix=".tar")
+    try:
+        with os.fdopen(fd, "wb") as archive:
+            archive.write(content)
+    except BaseException:
+        with suppress(FileNotFoundError):
+            os.unlink(path)
+        raise
+    return path
+
+
 class AgentSandboxRunnerAdapter:
     """Bridge one application-lifetime native sandbox into asyncio."""
 
@@ -79,7 +92,7 @@ class FakeSandboxRunner:
             ),
             outputs=(StreamEvent(name="stdout", text=summary),),
             workspace_changed=invocation.workspace is None or invocation.workspace.sha256 != workspace_sha256,
-            workspace=WorkspaceArchive(self._capture(workspace_bytes), workspace_sha256),
+            workspace=WorkspaceArchive(write_temp_tar(workspace_bytes, "gigachad-sandbox-fake-"), workspace_sha256),
         )
 
     @staticmethod
@@ -91,15 +104,3 @@ class FakeSandboxRunner:
             member.size = len(content)
             archive.addfile(member, io.BytesIO(content))
         return archive_bytes.getvalue()
-
-    @staticmethod
-    def _capture(content: bytes) -> str:
-        fd, capture_path = tempfile.mkstemp(prefix="gigachad-sandbox-fake-", suffix=".tar")
-        try:
-            with os.fdopen(fd, "wb") as capture:
-                capture.write(content)
-        except BaseException:
-            with suppress(FileNotFoundError):
-                os.unlink(capture_path)
-            raise
-        return capture_path

@@ -132,7 +132,7 @@ function migrateStrokes(strokes: LegacyStroke[] | undefined): StrokeData[] {
 }
 
 /** Copy of `value` without `key`; the type stays that of `value` since the key may be a legacy field. */
-function omitKey<T extends object>(value: T, key: string): T {
+export function omitKey<T extends object>(value: T, key: string): T {
   return Object.fromEntries(Object.entries(value).filter(([entryKey]) => entryKey !== key)) as T
 }
 

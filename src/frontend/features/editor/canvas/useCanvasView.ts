@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useState, type Dispatch, type SetStateAction } from "react"
 import type { CanvasSelection } from "@/features/editor/canvas/CanvasWorkspace"
+import type { CanvasToolbarSlots } from "@/features/editor/canvas/CanvasToolbar"
 import { architectureSlug } from "@/lib/domain/architecturePaths"
 import type { EdgeStyle } from "@/lib/domain/edgeRouting"
 import { useTab } from "@/contexts/TabContext"
@@ -28,7 +29,7 @@ interface CanvasViewState {
   architectureEdgeStyle: EdgeStyle
   setArchitectureEdgeStyle: Dispatch<SetStateAction<EdgeStyle>>
   /** Top-bar elements the canvas toolbar renders into; null until both mount. */
-  toolbarSlots: { drawing: HTMLElement; view: HTMLElement } | null
+  toolbarSlots: CanvasToolbarSlots | null
   setDrawingSlot: (element: HTMLElement | null) => void
   setViewSlot: (element: HTMLElement | null) => void
 }

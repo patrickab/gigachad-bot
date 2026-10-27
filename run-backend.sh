@@ -2,6 +2,7 @@
 set -euo pipefail
 
 root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+source "$root_dir/deploy/lib.sh"
 profile=development
 tailscale=false
 postgres_started=false
@@ -36,14 +37,11 @@ fi
 project="gigachad-dev"
 port=8001
 c4_port=8011
-pg_host=127.0.0.1
-pg_port=5432
+postgres_profile "$profile"
 if [[ "$profile" == production ]]; then
     project="gigachad-prod"
     port=8002
     c4_port=8012
-    pg_host=127.0.0.2
-    pg_port=5433
 fi
 
 compose() {
@@ -115,16 +113,10 @@ trap cleanup EXIT
 trap interrupt INT TERM
 
 cd "$root_dir"
-if [[ -f "$HOME/.secrets" ]]; then
-    source "$HOME/.secrets"
-fi
+load_secrets
 source "$root_dir/deploy/load-env.sh"
 
-if [[ "$profile" == production ]]; then
-    POSTGRES_PASSWORD="${POSTGRES_PASSWORD_PROD:-}"
-else
-    POSTGRES_PASSWORD="${POSTGRES_PASSWORD_DEV:-}"
-fi
+POSTGRES_PASSWORD="${!password_var:-}"
 if [[ -z "$POSTGRES_PASSWORD" ]]; then
     printf 'error: POSTGRES_PASSWORD_%s is required for the managed PostgreSQL container\n' "${profile^^}" >&2
     exit 1

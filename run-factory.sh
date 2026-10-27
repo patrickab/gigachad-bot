@@ -9,30 +9,22 @@
 # Idempotent: an engine already answering on the port is reused.
 set -euo pipefail
 
+root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+source "$root_dir/deploy/lib.sh"
 repo="${GIGACHAD_FACTORY_REPO_DIR:-$HOME/git/Agents-in-a-box}"
 config="${AGENT_SANDBOX_FACTORY_CONFIG:-$HOME/.config/agent-sandbox/factory.yaml}"
 bind=127.0.0.1:8090
 profile=development
-pg_host=127.0.0.1
-pg_port=5432
 
 case "${1:-}" in
     '') ;;
-    --prod) profile=production pg_host=127.0.0.2 pg_port=5433 ;;
+    --prod) profile=production ;;
     *)
         printf 'usage: %s [--prod]\n' "${BASH_SOURCE[0]}" >&2
         exit 2
         ;;
 esac
-
-port_open() {
-    local host="${1%%:*}" port="${1##*:}"
-    if (exec 3<>"/dev/tcp/$host/$port") 2>/dev/null; then
-        exec 3<&- 3>&-
-        return 0
-    fi
-    return 1
-}
+postgres_profile "$profile"
 
 if port_open "$bind"; then
     printf 'Reusing the factory engine already listening on %s\n' "$bind"
@@ -57,10 +49,7 @@ if ! port_open "$pg_host:$pg_port"; then
     exit 1
 fi
 
-if [[ -f "$HOME/.secrets" ]]; then
-    source "$HOME/.secrets"
-fi
-password_var="POSTGRES_PASSWORD_$([[ $profile == production ]] && echo PROD || echo DEV)"
+load_secrets
 if [[ -z "${!password_var:-}" ]]; then
     printf 'error: %s is required in ~/.secrets\n' "$password_var" >&2
     exit 1

@@ -2,22 +2,20 @@
 
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type RefObject } from "react"
 import { createPortal } from "react-dom"
-import { Redo2, Undo2 } from "lucide-react"
 import { PdfViewer } from "@/components/content/PdfViewer"
 import { useTabActive } from "@/contexts/TabContext"
-import { InkTools, SEPARATOR, useInkSettings } from "@/features/editor/canvas/CanvasToolbar"
-import { DEFAULT_PEN_COLOR, appendStrokePoint, strokePath, strokesAfterErase } from "@/features/editor/canvas/ink/canvasInk"
-import { useCanvasHistory } from "@/features/editor/canvas/useCanvasHistory"
+import { InkTools, SEPARATOR, UndoRedoButtons, useInkSettings } from "@/features/editor/canvas/CanvasToolbar"
+import { DEFAULT_PEN_COLOR, ERASER_RADIUS_PX, appendPointerSamples, finishStroke, newStroke, splitHighlights, strokePath, strokesAfterErase } from "@/features/editor/canvas/ink/canvasInk"
+import { useCanvasHistory, useUndoRedoKeys } from "@/features/editor/canvas/useCanvasHistory"
 import { useCollaborativeCanvas } from "@/features/editor/canvas/useCollaborativeCanvas"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { openPdfAnnotations } from "@/lib/backend/api"
 import { fileViewerRawUrl } from "@/lib/backend/urls"
-import { canvasEntityId, emptyCanvasDoc } from "@/lib/domain/canvasDocument"
+import { emptyCanvasDoc } from "@/lib/domain/canvasDocument"
 import { inkOutlinePath, penPressure } from "@/lib/drawing"
 import { cn } from "@/lib/utils"
 import { PAGE_UNITS, pageAt, strokesByPage, toPagePoint, type PageBox, type PdfStroke } from "./pdfInk"
 
-const ERASER_RADIUS_PX = 15
 const EMPTY_DOC = emptyCanvasDoc()
 
 /** Ink a stylus writes with when no tool of the viewer's own is selected. */
@@ -157,10 +155,7 @@ function InkedPdfViewer({ canvasKey, path, toolbarSlot, pen, clipToPages, viewer
       if (gesture.kind === "erase") { eraseAt(event.clientX, event.clientY); return }
       // The page can move under a held pointer (wheel scroll), so map every sample against its current rect.
       const rect = gesture.page.getBoundingClientRect()
-      // Coalesced events carry the pen's full sample rate instead of one point per frame.
-      for (const sample of event.getCoalescedEvents?.() ?? [event]) {
-        appendStrokePoint(gesture.points, [...toPagePoint(rect, sample.clientX, sample.clientY), penPressure(sample)])
-      }
+      appendPointerSamples(gesture.points, event, (x, y) => toPagePoint(rect, x, y))
       redrawLive(gesture)
     }
 
@@ -171,12 +166,10 @@ function InkedPdfViewer({ canvasKey, path, toolbarSlot, pen, clipToPages, viewer
       if (scroller.hasPointerCapture(event.pointerId)) scroller.releasePointerCapture(event.pointerId)
       if (finished.kind === "erase") { endGesture(); return }
       // pointercancel carries no usable final position, the last move sample is the end.
-      if (event.type === "pointerup") {
-        appendStrokePoint(finished.points, [...toPagePoint(finished.page.getBoundingClientRect(), event.clientX, event.clientY), penPressure(event)])
-      }
+      const points = finishStroke(finished.points, event, (x, y) => toPagePoint(finished.page.getBoundingClientRect(), x, y))
       setLive(null)
-      if (finished.points.length < 2) return
-      const stroke: PdfStroke = { id: canvasEntityId(), page: finished.pageNumber, points: finished.points, color: finished.color, width: finished.width, ...(finished.highlight && { highlight: true }) }
+      if (!points) return
+      const stroke: PdfStroke = { ...newStroke(points, finished), page: finished.pageNumber }
       const current = liveRef.current.doc
       commit({ ...current, strokes: [...current.strokes, stroke] })
     }
@@ -216,22 +209,7 @@ function InkedPdfViewer({ canvasKey, path, toolbarSlot, pen, clipToPages, viewer
   useEscapeLayer(ink.clearTool, hasToolbar && active && tool !== null)
 
   // Undo and redo belong to the top-bar owner, a canvas host keeps its own.
-  useEffect(() => {
-    if (!hasToolbar || !active) return
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || isEditable(event.target)) return
-      const key = event.key.toLowerCase() // Shift uppercases it, so Ctrl+Shift+Z arrives as "Z"
-      if (key === "z" && !event.shiftKey) {
-        event.preventDefault()
-        undo()
-      } else if (key === "y" || event.code === "KeyY" || (key === "z" && event.shiftKey)) {
-        event.preventDefault()
-        redo()
-      }
-    }
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
-  }, [hasToolbar, active, undo, redo])
+  useUndoRedoKeys(undo, redo, hasToolbar && active, true)
 
   const renderPageOverlay = useCallback((page: number, pageWidth: number) => (
     <PageInk
@@ -252,22 +230,13 @@ function InkedPdfViewer({ canvasKey, path, toolbarSlot, pen, clipToPages, viewer
         <div className="flex items-center gap-1">
           <InkTools ink={ink} />
           {SEPARATOR}
-          <button aria-label="Undo" onClick={undo} disabled={!canUndo} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors">
-            <Undo2 className="h-3.5 w-3.5" />
-          </button>
-          <button aria-label="Redo" onClick={redo} disabled={!canRedo} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors">
-            <Redo2 className="h-3.5 w-3.5" />
-          </button>
+          <UndoRedoButtons onUndo={undo} onRedo={redo} canUndo={canUndo} canRedo={canRedo} />
           {saveFailed && <span role="status" className="ml-1 text-[10px] text-danger">Annotations not saved</span>}
         </div>,
         toolbarSlot,
       )}
     </>
   )
-}
-
-function isEditable(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
 }
 
 /** One page's ink: highlights blend into the page under the pen strokes. Unclipped strokes spill into the margins. */
@@ -279,6 +248,7 @@ const PageInk = memo(function PageInk({ strokes, scale, clip, live, livePathRef 
   livePathRef: RefObject<SVGPathElement | null>
 }) {
   if (!strokes && !live) return null
+  const { highlights, pen } = splitHighlights(strokes ?? [])
   const layer = cn("pdf-ink absolute inset-0 h-full w-full pointer-events-none", clip ? "overflow-hidden" : "overflow-visible")
   const transform = `scale(${scale})`
   const livePath = (highlight: boolean) => live && live.highlight === highlight && (
@@ -288,13 +258,13 @@ const PageInk = memo(function PageInk({ strokes, scale, clip, live, livePathRef 
     <>
       <svg className={cn(layer, "ink-highlight")} aria-hidden>
         <g transform={transform}>
-          {strokes?.map((stroke) => stroke.highlight && <path key={stroke.id} d={strokePath(stroke)} fill={stroke.color} />)}
+          {highlights.map((stroke) => <path key={stroke.id} d={strokePath(stroke)} fill={stroke.color} />)}
           {livePath(true)}
         </g>
       </svg>
       <svg className={layer} aria-hidden>
         <g transform={transform}>
-          {strokes?.map((stroke) => !stroke.highlight && <path key={stroke.id} d={strokePath(stroke)} fill={stroke.color} className={inkClass(stroke.color)} />)}
+          {pen.map((stroke) => <path key={stroke.id} d={strokePath(stroke)} fill={stroke.color} className={inkClass(stroke.color)} />)}
           {livePath(false)}
         </g>
       </svg>

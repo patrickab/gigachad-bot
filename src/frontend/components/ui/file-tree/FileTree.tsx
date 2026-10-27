@@ -2,19 +2,21 @@
 
 import { useRef, useState, type ElementType, type ReactNode } from "react"
 import { ChevronRight, Plus, Trash2 } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { cn, errorMessage, toggled } from "@/lib/utils"
+import { ErrorText } from "@/components/ui/ErrorText"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { StyledSelect } from "@/components/ui/StyledSelect"
+import { useAsyncAction } from "@/hooks/useAsyncAction"
 import type { FileBranchController } from "./useFileTree"
 
 /** A second input of a create form, e.g. the branch a new worktree starts from. */
-export interface FileTreeCreateChoice {
+interface FileTreeCreateChoice {
   label: string
   options: string[]
   initial: string
 }
 
-export type FileTreeCreateAction =
+type FileTreeCreateAction =
   | {
     label: string
     placeholder: string
@@ -110,11 +112,7 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
   const selectionAnchorId = useRef<string | null>(null)
   const [uncappedIds, setUncappedIds] = useState<ReadonlySet<string>>(() => new Set())
 
-  const toggleCap = (id: string) => setUncappedIds((current) => {
-    const next = new Set(current)
-    if (!next.delete(id)) next.add(id)
-    return next
-  })
+  const toggleCap = (id: string) => setUncappedIds((current) => toggled(current, id))
 
   const startCreate = async (parentId: string | null, action: FileTreeCreateAction) => {
     setActionError("")
@@ -124,15 +122,13 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
       return
     }
     try { await action.onClick() }
-    catch (error) { setActionError(error instanceof Error ? error.message : "Could not create this item") }
+    catch (error) { setActionError(errorMessage(error, "Could not create this item")) }
   }
 
   const handleSelect = (item: FileTreeItem<T>, event: React.MouseEvent) => {
     if (item.multiSelect) {
       if (event.ctrlKey || event.metaKey) {
-        const next = new Set(selectedIds)
-        if (!next.delete(item.id)) next.add(item.id)
-        setSelectedIds(next)
+        setSelectedIds(toggled(selectedIds, item.id))
         selectionAnchorId.current = item.id
         return
       }
@@ -182,7 +178,7 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
         if (id) await (item ? item.onMoveHere?.(id) : onMoveToRoot?.(id))
       }
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : "Could not move this item")
+      setActionError(errorMessage(error, "Could not move this item"))
     }
   }
 
@@ -293,7 +289,7 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
         }}
         onDrop={(event) => { if (event.target === event.currentTarget) void handleDrop(event) }}
       >{renderItems(items, 0)}</div>}
-    {actionError && <p role="alert" className="px-2 py-1 text-xs text-danger">{actionError}</p>}
+    <ErrorText className="px-2 py-1">{actionError}</ErrorText>
   </div>
 }
 
@@ -322,19 +318,13 @@ function InlineCreateForm({ action, depth, onDone, onCancel }: {
 }) {
   const [name, setName] = useState("")
   const [choice, setChoice] = useState(action.choice?.initial)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState("")
-  const submit = async () => {
+  const { run, pending: saving, error } = useAsyncAction(async () => {
+    await action.onSubmit(name.trim(), choice)
+    onDone()
+  }, "Could not create this item")
+  const submit = () => {
     if (!name.trim() || saving) return
-    setSaving(true)
-    setError("")
-    try {
-      await action.onSubmit(name.trim(), choice)
-      onDone()
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not create this item")
-      setSaving(false)
-    }
+    void run()
   }
   return <div style={{ marginLeft: INDENT_BASE + depth * INDENT_STEP + 20 }}>
     <input autoFocus aria-label={action.placeholder} placeholder={action.placeholder} value={name} disabled={saving}
@@ -342,7 +332,7 @@ function InlineCreateForm({ action, depth, onDone, onCancel }: {
       onKeyDown={(event) => {
         if (event.key === "Enter") {
           event.preventDefault()
-          void submit()
+          submit()
         }
         if (event.key === "Escape") {
           event.stopPropagation()
@@ -357,6 +347,6 @@ function InlineCreateForm({ action, depth, onDone, onCancel }: {
         options={action.choice.options.map((option) => ({ value: option, label: option }))}
         className="text-[10px] text-ink-muted hover:text-ink" />
     </div>}
-    {error && <p role="alert" className="py-1 text-xs text-danger">{error}</p>}
+    <ErrorText className="py-1">{error}</ErrorText>
   </div>
 }

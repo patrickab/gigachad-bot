@@ -1,12 +1,12 @@
 """A workspace on disk (e.g. a checked-out repository) behaves like one in the database."""
 
 from pathlib import Path
-import subprocess
 
 import pytest
 
 from lib.architecture_workspace import ArchitectureError, ArchitectureNotFound, ArchitectureStore, DirectoryFiles
 from lib.data_store import StorageConflictError
+from tests.conftest import git
 
 
 def _write(root: Path, relative: str, text: str) -> None:
@@ -27,12 +27,12 @@ def _layout(root: Path) -> None:
 
 def test_sources_in_a_repository_skip_what_git_ignores(tmp_path):
     _layout(tmp_path)
-    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    git(tmp_path, "init", "-q")
     _write(tmp_path, ".gitignore", "node_modules/\n")
     _write(tmp_path, "docs/backend/.gitignore", "generated.c4\n")
     # Tracked or not, only ignore rules decide; a tracked file removed from disk is gone.
     _write(tmp_path, "docs/removed.c4", "deleted after commit")
-    subprocess.run(["git", "-C", str(tmp_path), "add", "docs/model.c4", "docs/removed.c4"], check=True)
+    git(tmp_path, "add", "docs/model.c4", "docs/removed.c4")
     (tmp_path / "docs" / "removed.c4").unlink()
 
     snapshot = ArchitectureStore(DirectoryFiles(tmp_path), "docs").read()

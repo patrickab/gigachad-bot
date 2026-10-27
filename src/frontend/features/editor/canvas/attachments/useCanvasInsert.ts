@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback, useEffect } from "react"
+import { useCallback } from "react"
+import { useEventListener } from "@/hooks/useEventListener"
 import { A4_WIDTH, CANVAS_ASPECT, FALLBACK_ASPECT, canvasEntityId, emptyCanvasDoc, type CanvasAttachment, type CanvasDocument } from "@/lib/domain/canvasDocument"
 import { writeBinaryDocument } from "@/lib/backend/api"
 
@@ -92,23 +93,19 @@ export function useCanvasInsert({ liveRef, commit, pointAtCenter, slug, depth, a
   }, [slug, uploadPastedImage])
 
   // Ctrl+V
-  useEffect(() => {
-    const handler = (e: ClipboardEvent) => {
-      // every canvas window listens on `window`; only the outermost, active one may act
-      if (!active || !slug || depth > 0) return
-      for (const item of e.clipboardData?.items ?? []) {
-        if (!item.type.startsWith("image/")) continue
-        e.preventDefault()
-        const blob = item.getAsFile()
-        if (!blob) continue
-        const { cx, cy } = pointAtCenter(DEFAULT_IMAGE_WIDTH, FALLBACK_ASPECT)
-        uploadPastedImage(blob, item.type, cx, cy).catch(() => {})
-        return
-      }
+  useEventListener("window", "paste", (e) => {
+    // every canvas window listens on `window`; only the outermost, active one may act
+    if (!active || !slug || depth > 0) return
+    for (const item of e.clipboardData?.items ?? []) {
+      if (!item.type.startsWith("image/")) continue
+      e.preventDefault()
+      const blob = item.getAsFile()
+      if (!blob) continue
+      const { cx, cy } = pointAtCenter(DEFAULT_IMAGE_WIDTH, FALLBACK_ASPECT)
+      uploadPastedImage(blob, item.type, cx, cy).catch(() => {})
+      return
     }
-    window.addEventListener("paste", handler)
-    return () => window.removeEventListener("paste", handler)
-  }, [active, slug, depth, pointAtCenter, uploadPastedImage])
+  })
 
   return { addPage, addImage, addPdf, addNewCanvas, addCanvasFile, addArchitecture, addDocument, pasteImageAtPoint }
 }

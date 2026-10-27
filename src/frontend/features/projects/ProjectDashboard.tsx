@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils"
 import { loadProject, addProjectCard, moveProjectCard, deleteProjectCard } from "@/lib/backend/api"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { Dialog } from "@/components/ui/Dialog"
+import { useResetOnOpen } from "@/hooks/useResetOnChange"
 import type { KanbanColumnId, ProjectData } from "@/lib/domain/types"
 import { ElevationProvider, ElevatedContainer } from "@/components/ui/ElevatedContainer"
 import { FloatingWindow } from "@/components/ui/FloatingWindow"
@@ -30,6 +31,19 @@ const PREV_STATE: Record<KanbanColumnId, KanbanColumnId> = {
   done: "doing",
 }
 
+const INPUT_CLASS = cn(
+  "w-full rounded-lg border border-divider-strong bg-surface-elevated/60 px-3 py-2.5 text-sm text-ink placeholder-ink-faint",
+  "outline-none transition-all duration-200 focus:border-ink-muted"
+)
+
+const emptyCounters = () => ({ backlog: 0, doing: 0, done: 0 })
+
+type Card = ProjectData["kanban"][number]
+
+/** `data` with card `cardId` replaced by `next(card)`. */
+const patchCard = (data: ProjectData | null, cardId: string, next: (card: Card) => Card): ProjectData | null =>
+  data ? { ...data, kanban: data.kanban.map((card) => card.id === cardId ? next(card) : card) } : data
+
 interface AddCardModalProps {
   open: boolean
   onClose: () => void
@@ -44,25 +58,17 @@ function AddCardModal({ open, onClose, onAdd, defaultState }: AddCardModalProps)
   const titleRef = useRef<HTMLInputElement>(null)
 
   // Start each opening with an empty form.
-  const [wasOpen, setWasOpen] = useState(open)
-  if (wasOpen !== open) {
-    setWasOpen(open)
-    if (open) {
-      setTitle("")
-      setDesc("")
-    }
-  }
-
-  const submit = () => {
-    if (!title.trim()) return
-    onAdd(title.trim(), desc.trim(), defaultState)
-    onClose()
-  }
+  useResetOnOpen(open, () => {
+    setTitle("")
+    setDesc("")
+  })
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLFormElement>) => {
     if (e.key === "Enter") {
       e.preventDefault()
-      submit()
+      if (!title.trim()) return
+      onAdd(title.trim(), desc.trim(), defaultState)
+      onClose()
     }
   }
 
@@ -75,23 +81,13 @@ function AddCardModal({ open, onClose, onAdd, defaultState }: AddCardModalProps)
       initialFocusRef={titleRef}
       panelClassName="rounded-2xl border border-divider-strong bg-surface shadow-[var(--shadow-lg)]"
     >
-      <form
-        onSubmit={(e) => {
-          e.preventDefault()
-          submit()
-        }}
-        onKeyDown={handleKeyDown}
-        className="px-5 pb-5 space-y-3"
-      >
+      <form onKeyDown={handleKeyDown} className="px-5 pb-5 space-y-3">
         <input
           ref={titleRef}
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          className={cn(
-            "w-full rounded-lg border border-divider-strong bg-surface-elevated/60 px-3 py-2.5 text-sm text-ink placeholder-ink-faint",
-            "outline-none transition-all duration-200 focus:border-ink-muted"
-          )}
+          className={INPUT_CLASS}
           placeholder="Title"
           required
           autoComplete="off"
@@ -101,15 +97,11 @@ function AddCardModal({ open, onClose, onAdd, defaultState }: AddCardModalProps)
           type="text"
           value={desc}
           onChange={(e) => setDesc(e.target.value)}
-          className={cn(
-            "w-full rounded-lg border border-divider-strong bg-surface-elevated/60 px-3 py-2.5 text-sm text-ink placeholder-ink-faint",
-            "outline-none transition-all duration-200 focus:border-ink-muted"
-          )}
+          className={INPUT_CLASS}
           placeholder="Description (optional)"
           autoComplete="off"
           spellCheck={false}
         />
-        <button type="submit" className="hidden" />
       </form>
     </Dialog>
   )
@@ -137,18 +129,17 @@ function useProjectBoard(slug: string, onLoadFailed: () => void) {
 
   const moveCard = useCallback(async (cardId: string, state: KanbanColumnId) => {
     // Optimistic move. `originalCard` is captured inside the updater so a failed call can restore it.
-    let originalCard: ProjectData["kanban"][number] | undefined
+    let originalCard: Card | undefined
     setProjectData((prev) => {
-      if (!prev) return prev
-      originalCard = prev.kanban.find((c) => c.id === cardId)
-      return { ...prev, kanban: prev.kanban.map((c) => c.id === cardId ? { ...c, state } : c) }
+      originalCard = prev?.kanban.find((c) => c.id === cardId)
+      return patchCard(prev, cardId, (card) => ({ ...card, state }))
     })
     try {
       const updated = await moveProjectCard(slug, cardId, state)
-      setProjectData((prev) => prev ? { ...prev, kanban: prev.kanban.map((c) => c.id === cardId ? updated : c) } : prev)
+      setProjectData((prev) => patchCard(prev, cardId, () => updated))
     } catch {
       const original = originalCard
-      if (original) setProjectData((prev) => prev ? { ...prev, kanban: prev.kanban.map((c) => c.id === cardId ? original : c) } : prev)
+      if (original) setProjectData((prev) => patchCard(prev, cardId, () => original))
     }
   }, [slug])
 
@@ -168,7 +159,7 @@ export function ProjectDashboard({ slug, onClose }: { slug: string; onClose: () 
   const [draggedCardId, setDraggedCardId] = useState<string | null>(null)
   const [dragOverCol, setDragOverCol] = useState<KanbanColumnId | null>(null)
   // Per-column drag-enter counter to avoid false dragLeave on child elements.
-  const dragCounters = useRef<Record<string, number>>({ backlog: 0, doing: 0, done: 0 })
+  const dragCounters = useRef<Record<string, number>>(emptyCounters())
 
   if (!projectData) return null
 
@@ -181,7 +172,7 @@ export function ProjectDashboard({ slug, onClose }: { slug: string; onClose: () 
       <AddCardModal
         open={addModalState !== null}
         onClose={() => setAddModalState(null)}
-        onAdd={(title, description, state) => addCard(title, description, state)}
+        onAdd={addCard}
         defaultState={addModalState ?? "backlog"}
       />
 
@@ -267,7 +258,7 @@ export function ProjectDashboard({ slug, onClose }: { slug: string; onClose: () 
                                   setTimeout(() => setDraggedCardId(card.id), 0)
                                 }}
                                 onDragEnd={() => {
-                                  dragCounters.current = { backlog: 0, doing: 0, done: 0 }
+                                  dragCounters.current = emptyCounters()
                                   setDraggedCardId(null)
                                   setDragOverCol(null)
                                 }}

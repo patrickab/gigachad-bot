@@ -18,6 +18,10 @@ import { baseName } from "@/lib/paths"
 import { useTabActive } from "@/contexts/TabContext"
 import { useNeovimSetting } from "@/contexts/SettingsContext"
 import { useRootFileDocument } from "./useRootFileDocument"
+import { useAsyncAction } from "@/hooks/useAsyncAction"
+import { useEventListener } from "@/hooks/useEventListener"
+import { useResetOnChange } from "@/hooks/useResetOnChange"
+import { LoadFailure, LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
 
 type EditorView = "edit" | "preview"
 
@@ -26,7 +30,6 @@ export interface DocumentEditorProps {
   slug: string
   onClose: () => void
   onSaved?: () => void
-  onLiveContent?: (path: string, content: string | null) => void
   overlay?: boolean
   persistOverride?: (content: string) => Promise<void>
   onModeLabel?: (label: string) => void
@@ -53,37 +56,55 @@ function parsePlotFigure(content: string): PlotFigure | null {
   }
 }
 
-function ViewPills({ view, onViewChange }: { view: EditorView; onViewChange: (v: EditorView) => void }) {
+function ViewSwitch({ view, onViewChange, options, className, buttonClass, inactiveClass }: {
+  view: EditorView
+  onViewChange: (v: EditorView) => void
+  options: readonly (readonly [EditorView, string])[]
+  className: string
+  buttonClass: string
+  inactiveClass: string
+}) {
   return (
-    <div role="group" aria-label="Show as" className="absolute top-2 left-3 z-10 flex items-center gap-px rounded-md bg-surface/80 backdrop-blur-sm p-0.5 opacity-0 hover:opacity-100 transition-opacity">
-      {(["edit", "preview"] as const).map((v) => (
+    <div role="group" aria-label="Show as" className={className}>
+      {options.map(([option, label]) => (
         <button
-          key={v}
+          key={option}
           type="button"
-          aria-pressed={view === v}
-          onClick={() => onViewChange(v)}
-          className={cn(
-            "px-2 py-0.5 rounded text-[10px] font-medium transition-colors",
-            view === v ? "bg-surface-elevated text-ink" : "text-ink-subtle hover:text-ink",
-          )}
+          aria-pressed={view === option}
+          onClick={() => onViewChange(option)}
+          className={cn(buttonClass, view === option ? "bg-surface-elevated text-ink" : inactiveClass)}
         >
-          {v === "edit" ? "Edit" : "Preview"}
+          {label}
         </button>
       ))}
     </div>
   )
 }
 
+function ViewPills({ view, onViewChange }: { view: EditorView; onViewChange: (v: EditorView) => void }) {
+  return (
+    <ViewSwitch
+      view={view}
+      onViewChange={onViewChange}
+      options={[["edit", "Edit"], ["preview", "Preview"]]}
+      className="absolute top-2 left-3 z-10 flex items-center gap-px rounded-md bg-surface/80 backdrop-blur-sm p-0.5 opacity-0 hover:opacity-100 transition-opacity"
+      buttonClass="px-2 py-0.5 rounded text-[10px] font-medium transition-colors"
+      inactiveClass="text-ink-subtle hover:text-ink"
+    />
+  )
+}
+
 /** C4 "Show as" switch for tool artifacts: rendered view first, source text second. */
 function ShowAsToggle({ view, onViewChange }: { view: EditorView; onViewChange: (v: EditorView) => void }) {
   return (
-    <div role="group" aria-label="Show as" className="flex gap-px rounded bg-surface p-px">
-      {(["preview", "edit"] as const).map((option) => (
-        <button key={option} type="button" aria-pressed={view === option} onClick={() => onViewChange(option)} className={cn("rounded px-1.5 py-px transition-colors", view === option ? "bg-surface-elevated text-ink" : "hover:text-ink")}>
-          {option === "preview" ? "Render" : "Text"}
-        </button>
-      ))}
-    </div>
+    <ViewSwitch
+      view={view}
+      onViewChange={onViewChange}
+      options={[["preview", "Render"], ["edit", "Text"]]}
+      className="flex gap-px rounded bg-surface p-px"
+      buttonClass="rounded px-1.5 py-px transition-colors"
+      inactiveClass="hover:text-ink"
+    />
   )
 }
 
@@ -95,12 +116,10 @@ export function ArchitectureSourceEditor(props: DocumentEditorProps) {
 }
 
 /** Text document editor; `persistOverride` replaces the default document write. */
-export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, overlay, persistOverride, onModeLabel, onNavigate, model }: DocumentEditorProps) {
+export function TextDocumentEditor({ path, slug, onClose, onSaved, overlay, persistOverride, onModeLabel, onNavigate, model }: DocumentEditorProps) {
   const isActive = useTabActive()
   const neovim = useNeovimSetting()
   const [renderedContent, setRenderedContent] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(!!overlay)
   const [view, setView] = useState<EditorView>(() => path.endsWith(".plot.json") ? "preview" : "edit")
   const initializedViewPath = useRef<string | null>(null)
@@ -127,26 +146,16 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent
     initializedViewPath.current = path
     setView(isToolArtifact(path, content) ? "preview" : "edit")
   }, [path, content, loadedPath])
-  const modeLabelRef = useRef(onModeLabel)
-  useEffect(() => { modeLabelRef.current = onModeLabel }, [onModeLabel])
-  useEffect(() => {
-    if (overlay) modeLabelRef.current?.(filename)
-  }, [overlay, filename])
+  const announceMode = useEffectEvent(() => { if (overlay) onModeLabel?.(filename) })
+  useEffect(() => { announceMode() }, [overlay, filename])
 
-  const [renderedScope, setRenderedScope] = useState({ path, overlay })
   // Drop the rendered preview of the previous document or mode
-  if (renderedScope.path !== path || renderedScope.overlay !== overlay) {
-    setRenderedScope({ path, overlay })
-    setRenderedContent(null)
-  }
+  useResetOnChange(overlay ? path : null, () => setRenderedContent(null))
 
   useEffect(() => {
     loadFromServer()
     if (overlay) readFileRootRendered(path).then(setRenderedContent).catch(() => {})
   }, [path, overlay, loadFromServer])
-
-  const clearLiveContent = useEffectEvent((livePath: string) => { onLiveContent?.(livePath, null) })
-  useEffect(() => () => { clearLiveContent(path) }, [path])
 
   const neovimSession = useNeovimTerminal(
     neovim.enabled && content !== null && loadedPath === path ? { key: path, path, filename, content } : null,
@@ -154,29 +163,22 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent
     onClose,
   )
 
-  const handleSave = useCallback(async () => {
-    if (content === null || saving) return
-    setSaving(true)
-    setSaveError(null)
-    try { await persist(content) } catch (err) { setSaveError(err instanceof Error ? err.message : "Save failed") }
-    setSaving(false)
-  }, [content, saving, persist])
+  const { run: save, pending: saving, error: saveError } = useAsyncAction(persist, "Save failed")
+  const handleSave = () => {
+    if (content !== null && !saving) void save(content)
+  }
 
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      if (!isActive) return
-      if (!neovim.enabled && (event.ctrlKey || event.metaKey) && (event.key === "s" || event.key === "Enter")) {
-        event.preventDefault()
-        handleSave()
-      }
-      if (event.key === "Escape") {
-        if (overlay) { event.preventDefault(); onClose() }
-        else if (isFullscreen) { event.preventDefault(); setIsFullscreen(false) }
-      }
+  useEventListener("document", "keydown", (event) => {
+    if (!isActive) return
+    if (!neovim.enabled && (event.ctrlKey || event.metaKey) && (event.key === "s" || event.key === "Enter")) {
+      event.preventDefault()
+      handleSave()
     }
-    document.addEventListener("keydown", handler)
-    return () => document.removeEventListener("keydown", handler)
-  }, [handleSave, isFullscreen, overlay, onClose, isActive, neovim.enabled])
+    if (event.key === "Escape") {
+      if (overlay) { event.preventDefault(); onClose() }
+      else if (isFullscreen) { event.preventDefault(); setIsFullscreen(false) }
+    }
+  })
 
   const handlePreviewClick = useCallback((e: React.MouseEvent) => {
     const anchor = (e.target as HTMLElement).closest("a")
@@ -191,21 +193,12 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent
     return <div className="flex items-center justify-center py-6 text-xs text-ink-faint">This is not a text file, so it cannot be opened in the editor.</div>
   }
 
-  if (loadError) {
-    return (
-      <div className="flex flex-col items-center justify-center gap-2 py-6 text-xs text-ink-faint">
-        <span>Failed to load this document. Its stored content was left untouched.</span>
-        <button onClick={() => loadFromServer()} className="rounded px-2 py-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors">
-          Retry
-        </button>
-      </div>
-    )
-  }
+  if (loadError) return <LoadFailure message="Failed to load this document. Its stored content was left untouched." onRetry={loadFromServer} />
 
   // After a path change, `content` still belongs to the previous document until the new load lands.
-  if (content === null || loadedPath !== path) {
-    return <div className="flex items-center justify-center py-6 text-xs text-ink-faint">Loading...</div>
-  }
+  if (content === null || loadedPath !== path) return <LoadingPlaceholder />
+
+  const pills = !isArtifact && <ViewPills view={view} onViewChange={setView} />
 
   const preview = (
     <div className="flex-1 overflow-y-auto min-h-0 p-4 pt-10" onClick={handlePreviewClick}>
@@ -218,17 +211,17 @@ export function TextDocumentEditor({ path, slug, onClose, onSaved, onLiveContent
   // Neovim stays mounted while previewing, so switching views keeps unsaved edits.
   const editorBody = neovim.enabled ? (
     <div className="relative flex-1 min-h-0 group/editor flex flex-col">
-      {!isArtifact && <ViewPills view={view} onViewChange={setView} />}
+      {pills}
       <NeovimEditor terminal={neovimSession.terminal} status={neovimSession.status} onRestart={neovimSession.restart} className={view === "edit" ? undefined : "hidden"} />
       {view === "preview" && preview}
     </div>
   ) : view === "edit" ? (
     <AssistedConsoleEditor value={content} onChange={handleTextChange} language={language} model={model} placeholder="Start writing..." className="group/editor">
-      {!isArtifact && <ViewPills view={view} onViewChange={setView} />}
+      {pills}
     </AssistedConsoleEditor>
   ) : (
     <div className="relative flex-1 min-h-0 group/editor flex flex-col">
-      {!isArtifact && <ViewPills view={view} onViewChange={setView} />}
+      {pills}
       {preview}
     </div>
   )

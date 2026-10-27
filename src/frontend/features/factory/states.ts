@@ -1,6 +1,6 @@
 import type { Phase, TaskState } from "@/lib/domain/types"
 
-export interface BoardColumn {
+interface BoardColumn {
   id: string
   title: string
   states: readonly TaskState[]

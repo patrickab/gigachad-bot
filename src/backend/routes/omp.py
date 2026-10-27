@@ -3,7 +3,8 @@ from typing import Annotated
 from fastapi import APIRouter, Path
 from pydantic import BaseModel
 
-from backend.routes.upstream import call_upstream, host_access_only
+from backend.identity import host_access_only
+from backend.routes.upstream import call_upstream
 from lib import omp_web
 
 router = APIRouter(prefix="/api/omp", tags=["omp"], dependencies=[host_access_only("omp")])

@@ -40,6 +40,12 @@ export const snapshotPath = (viewId: string) => `${SNAPSHOT_DIR}${viewId}${SNAPS
 
 export const edgeKey = (source: string, target: string) => `${source}->${target}`
 
+/** The inverse of `edgeKey`. */
+export const splitEdgeKey = (key: string): [string, string] => {
+  const [source = '', target = ''] = key.split('->')
+  return [source, target]
+}
+
 const centre = (rect: NodeRect) => ({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 })
 
 /** Midpoint of the centre line and its unit normal; a bend moves the curve along that normal. */
@@ -49,6 +55,12 @@ function chord(source: NodeRect, target: NodeRect) {
   const length = Math.hypot(b.x - a.x, b.y - a.y) || 1
   return { a, b, mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, normal: { x: -(b.y - a.y) / length, y: (b.x - a.x) / length } }
 }
+
+/** The point `t` of the way from `from` to `to`. */
+const lerp = (from: { x: number, y: number }, to: { x: number, y: number }, t: number) => ({ x: from.x + t * (to.x - from.x), y: from.y + t * (to.y - from.y) })
+
+/** Strips LikeC4's `drifts` field. */
+const withoutDrifts = <T extends { drifts?: unknown }>({ drifts: _drifts, ...rest }: T): Omit<T, 'drifts'> => rest
 
 /** Where the ray from the rect's centre towards `toward` leaves the rect. */
 function border(rect: NodeRect, toward: { x: number, y: number }) {
@@ -111,13 +123,12 @@ function edgePath(edge: DiagramEdge, source: NodeRect, target: NodeRect, bend: n
   const control = bend ? { x: mid.x + normal.x * bend * 2, y: mid.y + normal.y * bend * 2 } : mid
   const start = border(source, bend ? control : b)
   const end = border(target, bend ? control : a)
-  const c1 = { x: start.x + (2 / 3) * (control.x - start.x), y: start.y + (2 / 3) * (control.y - start.y) }
-  const c2 = { x: end.x + (2 / 3) * (control.x - end.x), y: end.y + (2 / 3) * (control.y - end.y) }
+  const c1 = lerp(start, control, 2 / 3)
+  const c2 = lerp(end, control, 2 / 3)
   // Cubic Bezier at t = 0.5, where the label sits.
   const at = { x: (start.x + 3 * c1.x + 3 * c2.x + end.x) / 8, y: (start.y + 3 * c1.y + 3 * c2.y + end.y) / 8 }
-  const { drifts: _drifts, ...rest } = edge
   return {
-    ...rest,
+    ...withoutDrifts(edge),
     points: [[start.x, start.y], [c1.x, c1.y], [c2.x, c2.y], [end.x, end.y]],
     controlPoints: bend ? [{ x: mid.x + normal.x * bend, y: mid.y + normal.y * bend }] : null,
     ...(edge.labelBBox ? { labelBBox: { ...edge.labelBBox, x: at.x - edge.labelBBox.width / 2, y: at.y - edge.labelBBox.height / 2 } } : {}),
@@ -148,7 +159,7 @@ export function pinView(view: LayoutedElementView, pins: ViewPins | undefined): 
   // LikeC4's placement, before any pin.
   const laid = new Map<string, DiagramNode>(view.nodes.map((node) => [node.id, node]))
   const byId = new Map(view.nodes.map((node): [string, DiagramNode] => {
-    const { drifts: _drifts, ...rest } = node
+    const rest = withoutDrifts(node)
     const pin = pins.nodes[node.id]
     return [node.id, pin ? place(rest, { x: pin.x, y: pin.y, width: pin.width ?? node.width, height: pin.height ?? node.height }) : rest]
   }))
@@ -193,8 +204,7 @@ export function pinView(view: LayoutedElementView, pins: ViewPins | undefined): 
   const edges = view.edges.map((edge) => {
     const bend = pins.edges[edgeKey(edge.source, edge.target)]
     if (!bend && unmoved(edge.source) && unmoved(edge.target)) {
-      const { drifts: _drifts, ...rest } = edge
-      return rest
+      return withoutDrifts(edge)
     }
     return edgePath(edge, byId.get(edge.source)!, byId.get(edge.target)!, bend)
   })
@@ -204,8 +214,7 @@ export function pinView(view: LayoutedElementView, pins: ViewPins | undefined): 
   const bounds = nodes.length === 0 ? view.bounds : {
     x: Math.min(...xs), y: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys),
   }
-  const { drifts: _drifts, ...rest } = view
-  return { ...rest, _layout: 'manual', nodes, edges, bounds }
+  return { ...withoutDrifts(view), _layout: 'manual', nodes, edges, bounds }
 }
 
 /** The snapshot file text, formatted as LikeC4 writes it. */

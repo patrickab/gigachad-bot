@@ -1,7 +1,3 @@
-import os
-from uuid import uuid4
-
-from psycopg_pool import ConnectionPool
 import pytest
 
 from lib.data_store import (
@@ -10,29 +6,13 @@ from lib.data_store import (
     StorageConflictError,
     StorageNotFoundError,
 )
-from lib.db_schema import upgrade
 from lib.postgres_data_store import PostgresDataStore
-
-
-@pytest.fixture(scope="session")
-def postgres_pool():
-    url = os.environ.get("POSTGRES_TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("POSTGRES_TEST_DATABASE_URL is required for Postgres DataStore conformance tests")
-    upgrade(url)
-    pool = ConnectionPool(url, min_size=1, max_size=4)
-    yield pool
-    pool.close()
+from tests.conftest import create_user
 
 
 @pytest.fixture
-def store(postgres_pool) -> DataStore:
-    with postgres_pool.connection() as connection, connection.transaction():
-        connection.execute("TRUNCATE changes, assets, vault_roots, devices, documents, users CASCADE")
-        user_id = connection.execute(
-            "INSERT INTO users (tailscale_login) VALUES (%s) RETURNING id", (f"test-{uuid4()}@example.test",)
-        ).fetchone()[0]
-    return PostgresDataStore(postgres_pool, user_id)
+def store(postgres_pool, clean_database) -> DataStore:
+    return PostgresDataStore(postgres_pool, create_user(postgres_pool))
 
 
 def entries_by_key(store: DataStore, prefix: str = "", *, recursive: bool = False):

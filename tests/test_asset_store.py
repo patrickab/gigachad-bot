@@ -1,37 +1,17 @@
 import hashlib
-import os
 from uuid import uuid4
 
-from psycopg_pool import ConnectionPool
 import pytest
 
 from lib.asset_store import AssetStore
 from lib.data_store import StorageNotFoundError
-from lib.db_schema import upgrade
+from tests.conftest import create_user_and_device
 
-
-@pytest.fixture(scope="module")
-def postgres_pool():
-    url = os.environ.get("POSTGRES_TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("POSTGRES_TEST_DATABASE_URL is required for asset store tests")
-    upgrade(url)
-    pool = ConnectionPool(url, min_size=1, max_size=4)
-    yield pool
-    pool.close()
-
-
-@pytest.fixture(autouse=True)
-def clean_database(postgres_pool):
-    with postgres_pool.connection() as connection, connection.transaction():
-        connection.execute("TRUNCATE changes, assets, vault_roots, devices, documents, users CASCADE")
+pytestmark = pytest.mark.usefixtures("clean_database")
 
 
 def make_store(pool, login="alice@example.test"):
-    device_id = uuid4()
-    with pool.connection() as connection, connection.transaction():
-        user_id = connection.execute("INSERT INTO users (tailscale_login) VALUES (%s) RETURNING id", (login,)).fetchone()[0]
-        connection.execute("INSERT INTO devices (id, user_id) VALUES (%s, %s)", (device_id, user_id))
+    user_id, device_id = create_user_and_device(pool, login)
     return AssetStore(pool, user_id, device_id=device_id), device_id
 
 

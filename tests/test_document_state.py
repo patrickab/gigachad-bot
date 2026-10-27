@@ -8,11 +8,7 @@ writes a test can produce are deliberate PDF mirrors. Any other file below that
 root is a policy violation.
 """
 
-import os
-from uuid import uuid4
-
 from fastapi import HTTPException
-from psycopg_pool import ConnectionPool
 import pytest
 
 from backend.routes import documents as route
@@ -20,35 +16,18 @@ from lib import attachment_materialize
 from lib.asset_store import AssetStore
 from lib.chat_store import ChatStore
 from lib.data_store import StorageNotFoundError
-from lib.db_schema import upgrade
 from lib.postgres_data_store import PostgresDataStore
 from lib.project_store import ProjectStore
+from tests.conftest import create_user_and_device
 
-
-@pytest.fixture(scope="module")
-def postgres_pool():
-    url = os.environ.get("POSTGRES_TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("POSTGRES_TEST_DATABASE_URL is required for document route tests")
-    upgrade(url)
-    pool = ConnectionPool(url, min_size=1, max_size=4)
-    yield pool
-    pool.close()
+pytestmark = pytest.mark.usefixtures("clean_database")
 
 
 @pytest.fixture(autouse=True)
-def clean_database(postgres_pool):
-    with postgres_pool.connection() as connection, connection.transaction():
-        connection.execute("TRUNCATE changes, assets, vault_roots, devices, documents, users CASCADE")
-
-
-@pytest.fixture(autouse=True)
-def documents_root(tmp_path, monkeypatch):
-    """Point the mirror root at a tmp dir: ``attachment_materialize`` and the routes read it at call time."""
-    root = tmp_path / "Documents"
-    monkeypatch.setattr(attachment_materialize, "DOCUMENTS", root, raising=True)
-    monkeypatch.setattr(route, "DOCUMENTS", root, raising=True)
-    return root
+def documents_root(documents_root, monkeypatch):
+    """The routes read their own ``DOCUMENTS`` at call time, alongside ``attachment_materialize``'s."""
+    monkeypatch.setattr(route, "DOCUMENTS", documents_root, raising=True)
+    return documents_root
 
 
 def written_files(root):
@@ -59,12 +38,7 @@ class Stores:
     """The three request-scoped stores a documents route is handed, for one user."""
 
     def __init__(self, pool, login):
-        device_id = uuid4()
-        with pool.connection() as connection, connection.transaction():
-            self.user_id = connection.execute(
-                "INSERT INTO users (tailscale_login) VALUES (%s) RETURNING id", (login,)
-            ).fetchone()[0]
-            connection.execute("INSERT INTO devices (id, user_id) VALUES (%s, %s)", (device_id, self.user_id))
+        self.user_id, device_id = create_user_and_device(pool, login)
         self.docs = PostgresDataStore(pool, self.user_id, device_id=device_id)
         self.assets = AssetStore(pool, self.user_id, device_id=device_id)
         self.projects = ProjectStore(chat_store=ChatStore(data_store=self.docs), data_store=self.docs)

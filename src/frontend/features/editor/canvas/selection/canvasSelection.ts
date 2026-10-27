@@ -1,4 +1,4 @@
-import { pointInPolygon, type StrokeData } from "@/lib/drawing"
+import { pointInPolygon, pointsBounds, type StrokeData } from "@/lib/drawing"
 
 // The lasso keeps its freehand shape — that outline is what you drag to move, and it
 // deforms along with the ink when scaled. A single handle at the shape's bottom-right
@@ -11,13 +11,8 @@ const LASSO_COVERAGE = 0.6 // fraction of a stroke's points that must fall insid
 const SELECTION_MIN = 24 // canvas units — selection box can be squeezed no smaller
 
 export function polyBounds(poly: Poly): SelBox | null {
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-  for (const [x, y] of poly) {
-    minX = Math.min(minX, x); maxX = Math.max(maxX, x)
-    minY = Math.min(minY, y); maxY = Math.max(maxY, y)
-  }
-  if (minX === Infinity) return null
-  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
+  const bounds = pointsBounds(poly)
+  return bounds && { x: bounds.minX, y: bounds.minY, w: bounds.maxX - bounds.minX, h: bounds.maxY - bounds.minY }
 }
 
 // The bottom-right handle: top-left stays put, both axes scale independently. Clamped to

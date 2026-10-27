@@ -255,34 +255,41 @@ export async function renderPageToPng(
   return new Uint8Array(await blob.arrayBuffer())
 }
 
+export interface Bounds { minX: number; minY: number; maxX: number; maxY: number }
+
+/** Bounding box of `[x, y, ...]` points, or null when there are none. */
+export function pointsBounds(points: Iterable<readonly number[]>): Bounds | null {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const [x, y] of points) {
+    if (x! < minX) minX = x!
+    if (x! > maxX) maxX = x!
+    if (y! < minY) minY = y!
+    if (y! > maxY) maxY = y!
+  }
+  return minX === Infinity ? null : { minX, minY, maxX, maxY }
+}
+
+/** Corner and sample points of every drawn element. */
+function* contentPoints(strokes: StrokeData[], images: LoadedEmbed[], texts: TextData[]): Generator<readonly number[]> {
+  for (const stroke of strokes) yield* stroke.points
+  for (const img of images) {
+    yield [img.x, img.y]
+    yield [img.x + img.width, img.y + img.width * img.aspect]
+  }
+  for (const t of texts) {
+    yield [t.x, t.y]
+    yield [t.x + t.width, t.y + t.height]
+  }
+}
+
 /** Crops to the bounding box of all content plus `padding`. Rejects when there is nothing to render. */
 export async function renderCanvasToJpeg(strokes: StrokeData[], padding = 20, images: EmbedRect[] = [], texts: TextData[] = []): Promise<Blob> {
   const loadedImages = await loadEmbeds(images)
-  if (strokes.length === 0 && loadedImages.length === 0 && texts.length === 0) return Promise.reject(new Error("Nothing to render"))
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-  for (const s of strokes) {
-    for (const p of s.points) {
-      if (p[0]! < minX) minX = p[0]!
-      if (p[1]! < minY) minY = p[1]!
-      if (p[0]! > maxX) maxX = p[0]!
-      if (p[1]! > maxY) maxY = p[1]!
-    }
-  }
-  for (const img of loadedImages) {
-    if (img.x < minX) minX = img.x
-    if (img.y < minY) minY = img.y
-    if (img.x + img.width > maxX) maxX = img.x + img.width
-    if (img.y + img.width * img.aspect > maxY) maxY = img.y + img.width * img.aspect
-  }
-  for (const t of texts) {
-    if (t.x < minX) minX = t.x
-    if (t.y < minY) minY = t.y
-    if (t.x + t.width > maxX) maxX = t.x + t.width
-    if (t.y + t.height > maxY) maxY = t.y + t.height
-  }
-  const w = maxX - minX + padding * 2
-  const h = maxY - minY + padding * 2
-  const canvas = await drawCanvas(strokes, loadedImages, w, h, minX - padding, minY - padding, "#ffffff", texts)
+  const bounds = pointsBounds(contentPoints(strokes, loadedImages, texts))
+  if (!bounds) return Promise.reject(new Error("Nothing to render"))
+  const w = bounds.maxX - bounds.minX + padding * 2
+  const h = bounds.maxY - bounds.minY + padding * 2
+  const canvas = await drawCanvas(strokes, loadedImages, w, h, bounds.minX - padding, bounds.minY - padding, "#ffffff", texts)
   return canvasToBlob(canvas, "image/jpeg", 0.92)
 }
 

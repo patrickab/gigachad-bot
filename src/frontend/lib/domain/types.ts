@@ -322,15 +322,9 @@ export interface ProjectData {
   slug: string
   linked_root?: string | null
   kanban: KanbanCard[]
-  tabs: ProjectTab[]
 }
 
-export interface ProjectStateUpdate {
-  kanban: KanbanCard[]
-  tabs: ProjectTab[]
-}
-
-export interface ProjectTab {
+interface ProjectTab {
   filename: string
   name: string | null
   title: string | null
@@ -411,7 +405,7 @@ export interface OmpSession {
 }
 
 /** A directory omp-web lists as workspace: registered, or discovered from its sessions. */
-export interface OmpWorkspace {
+interface OmpWorkspace {
   path: string
   alias: string | null
   added_at: string | null

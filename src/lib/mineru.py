@@ -20,10 +20,11 @@ import threading
 from fastapi import HTTPException
 
 from config import DIRECTORY_OUTPUT_MINERU, MINERU_SERVER_URL
+from lib.file_roots import IMAGE_SUFFIXES
 
 log = logging.getLogger(__name__)
 
-_active_servers: list[object] = []
+_active_servers: set[object] = set()
 _active_servers_lock = threading.Lock()
 _cancel_event = threading.Event()
 
@@ -50,17 +51,12 @@ def should_cancel() -> bool:
     return _cancel_event.is_set()
 
 
-def register_mineru_server(server: object) -> None:
-    with _active_servers_lock:
-        _active_servers.append(server)
-
-
-def unregister_mineru_server(server: object) -> None:
-    with _active_servers_lock:
-        try:
-            _active_servers.remove(server)
-        except ValueError:
-            pass
+def _copy_stem_images(source: Path, destination: Path, stem: str) -> None:
+    """Copy the images named after *stem* from the *source* directory, if it exists, into *destination*."""
+    if source.exists():
+        for img in source.iterdir():
+            if img.is_file() and img.name.startswith(stem):
+                shutil.copy2(img, destination / img.name)
 
 
 def _global_cache_path(stem: str) -> Path:
@@ -104,11 +100,7 @@ async def parse_pdf(
     if global_md.exists():
         log.info("MinerU already extracted for %s (global cache)", stem)
         shutil.copy2(global_md, extracted_md)
-        global_images = DIRECTORY_OUTPUT_MINERU / "images"
-        if global_images.exists():
-            for img in global_images.iterdir():
-                if img.is_file() and img.name.startswith(stem):
-                    shutil.copy2(img, images_dir / img.name)
+        _copy_stem_images(DIRECTORY_OUTPUT_MINERU / "images", images_dir, stem)
         return extracted_md, images_dir
 
     if backend == "auto":
@@ -154,7 +146,8 @@ async def parse_pdf(
             )
         else:
             local = api_client.LocalAPIServer()
-            register_mineru_server(local)
+            with _active_servers_lock:
+                _active_servers.add(local)
             base_url = local.start()
         async with httpx.AsyncClient(timeout=api_client.build_http_timeout()) as cli:
             try:
@@ -167,7 +160,8 @@ async def parse_pdf(
                 zp.unlink(missing_ok=True)
             finally:
                 if local is not None:
-                    unregister_mineru_server(local)
+                    with _active_servers_lock:
+                        _active_servers.discard(local)
                     local.stop()
 
         md_files = sorted(tmp_dir.glob("**/*.md"), key=lambda p: len(p.name))
@@ -177,34 +171,22 @@ async def parse_pdf(
         md_path = md_files[0]
         md_content = md_path.read_text(encoding="utf-8")
 
-        image_exts = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg"}
         all_images = sorted(
-            [p for p in tmp_dir.rglob("*") if p.suffix.lower() in image_exts],
+            [p for p in tmp_dir.rglob("*") if p.suffix.lower() in IMAGE_SUFFIXES],
             key=lambda p: p.name,
         )
+        width = len(str(len(all_images)))
 
-        count = len(all_images)
-        width = len(str(count)) if count > 0 else 1
-
-        renaming: list[tuple[Path, Path]] = []
         # Number images in filename order, zero-padded to the widest index.
         for idx, img_path in enumerate(all_images, start=1):
             new_name = f"{stem}-{idx:0{width}d}{img_path.suffix.lower()}"
-            new_dest = images_dir / new_name
-            renaming.append((img_path, new_dest))
-
-        for old_path, new_path in renaming:
-            old_name = old_path.name
-            new_name = new_path.name
             # Repoint any link ending in the old image filename at images/<new name>.
             md_content = re.sub(
-                r"\]\([^)]*" + re.escape(old_name) + r"\)",
+                r"\]\([^)]*" + re.escape(img_path.name) + r"\)",
                 r"](images/" + new_name + r")",
                 md_content,
             )
-
-        for old_path, new_path in renaming:
-            shutil.move(str(old_path), str(new_path))
+            shutil.move(img_path, images_dir / new_name)
 
         final_md_path = output_dir / f"{stem}.md"
         final_md_path.write_text(md_content, encoding="utf-8")
@@ -216,9 +198,7 @@ async def parse_pdf(
             global_images_dir = DIRECTORY_OUTPUT_MINERU / "images"
             global_images_dir.mkdir(parents=True, exist_ok=True)
             shutil.copy2(final_md_path, global_md_path)
-            for img in images_dir.iterdir():
-                if img.is_file() and img.name.startswith(stem):
-                    shutil.copy2(img, global_images_dir / img.name)
+            _copy_stem_images(images_dir, global_images_dir, stem)
 
     return final_md_path, images_dir
 

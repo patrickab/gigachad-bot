@@ -26,12 +26,12 @@ from sse_starlette.sse import EventSourceResponse
 from fastapi import APIRouter, Depends, Query
 
 from backend.identity import RequestIdentity, get_request_identity
+from backend.routes.deps import live_stream
 from backend.sync import get_change_broker
 from config import get_postgres_pool
 
 router = APIRouter(prefix="/api/sync", tags=["sync"])
 
-HEARTBEAT_SECONDS = 15
 EVENT_KEYS = ("seq", "resource_kind", "resource_key", "version", "device_id")
 
 
@@ -85,4 +85,4 @@ async def stream_changes(
                 delivered = change["seq"]
                 yield _event(change)
 
-    return EventSourceResponse(events(), ping=HEARTBEAT_SECONDS)
+    return live_stream(events())

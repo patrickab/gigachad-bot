@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
-import { AnimatePresence } from "framer-motion"
 import { Plus, Trash2, Save, X, RefreshCw } from "lucide-react"
 import { FloatingWindow } from "@/components/ui/FloatingWindow"
 import { cn } from "@/lib/utils"
@@ -82,6 +81,12 @@ export function PromptEditor({ open, onClose, onPromptsChanged }: PromptEditorPr
     applyLists(await fetchPromptLists())
   }, [applyLists])
 
+  /** Reload the lists and tell the owner the resolved prompts changed. */
+  const afterChange = useCallback(async () => {
+    await refresh()
+    onPromptsChanged(await fetchPrompts())
+  }, [refresh, onPromptsChanged])
+
   useEffect(() => {
     if (open) fetchPromptLists().then(applyLists)
   }, [open, applyLists])
@@ -98,23 +103,20 @@ export function PromptEditor({ open, onClose, onPromptsChanged }: PromptEditorPr
     if (!selected) return
     await savePrompt(selected, content)
     setDirty(false)
-    await refresh()
-    const resolved = await fetchPrompts()
-    onPromptsChanged(resolved)
-  }, [selected, content, refresh, onPromptsChanged])
+    await afterChange()
+  }, [selected, content, afterChange])
 
   const handleDelete = useCallback(() => {
     if (!selected) return
     const slug = selected
     schedule(`prompt:${slug}`, prompts.find((prompt) => prompt.slug === slug)?.name ?? slug, async () => {
       await deletePrompt(slug)
-      await refresh()
-      onPromptsChanged(await fetchPrompts())
+      await afterChange()
     })
     setSelected(null)
     setContent("")
     setDirty(false)
-  }, [selected, prompts, schedule, refresh, onPromptsChanged])
+  }, [selected, prompts, schedule, afterChange])
   const handleCreate = useCallback(async () => {
     if (!newName.trim()) return
     const slug = slugify(newName)
@@ -125,8 +127,7 @@ export function PromptEditor({ open, onClose, onPromptsChanged }: PromptEditorPr
     setNewName("")
     await refresh()
     await load(slug)
-    const resolved = await fetchPrompts()
-    onPromptsChanged(resolved)
+    onPromptsChanged(await fetchPrompts())
   }, [newName, refresh, load, onPromptsChanged])
 
   const insertBlock = useCallback((blockName: string) => {
@@ -137,134 +138,132 @@ export function PromptEditor({ open, onClose, onPromptsChanged }: PromptEditorPr
   if (!open) return null
 
   return (
-    <AnimatePresence>
-      <FloatingWindow onClose={onClose}>
-        <div className="flex h-full">
-          {/* Sidebar: prompt list */}
-          <div className="w-56 shrink-0 border-r border-divider/50 flex flex-col">
-            <div className="flex items-center justify-between p-3 border-b border-divider/50">
-              <span className="text-xs font-medium text-ink-subtle">Prompts</span>
-              <div className="flex gap-1">
-                <button aria-label="Create prompt" onClick={() => { setCreating(true); setNewName("") }} className="p-1 rounded hover:bg-hover text-ink-muted hover:text-ink">
-                  <Plus className="h-3.5 w-3.5" />
-                </button>
-                <button aria-label="Refresh prompts" onClick={refresh} className="p-1 rounded hover:bg-hover text-ink-muted hover:text-ink">
-                  <RefreshCw className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
-
-            {creating && (
-              <div className="p-2 border-b border-divider/50 flex gap-1">
-                <input
-                  autoFocus
-                  value={newName}
-                  onChange={e => setNewName(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter") handleCreate() }}
-                  placeholder="Prompt name..."
-                  className="flex-1 rounded border border-divider bg-surface px-2 py-1 text-xs text-ink outline-none"
-                />
-                <button aria-label="Save new prompt" onClick={handleCreate} className="p-1 rounded hover:bg-hover text-ink-muted hover:text-ink">
-                  <Save className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            )}
-
-            <div className="flex-1 overflow-y-auto">
-              {/* Hide prompts with a pending undoable delete */}
-              {prompts.filter((prompt) => !pending(`prompt:${prompt.slug}`)).map(p => (
-                <button
-                  key={p.slug}
-                  draggable
-                  onDragStart={() => { dragSlug.current = p.slug }}
-                  onDragEnter={() => reorder(p.slug)}
-                  onDragOver={e => e.preventDefault()}
-                  onDragEnd={persistOrder}
-                  onClick={() => load(p.slug)}
-                  className={cn(
-                    "w-full text-left px-3 py-2 text-xs transition-colors truncate cursor-grab active:cursor-grabbing",
-                    selected === p.slug ? "bg-surface text-ink" : "text-ink-muted hover:bg-hover hover:text-ink"
-                  )}
-                >
-                  {p.name}
-                </button>
-              ))}
+    <FloatingWindow onClose={onClose}>
+      <div className="flex h-full">
+        {/* Sidebar: prompt list */}
+        <div className="w-56 shrink-0 border-r border-divider/50 flex flex-col">
+          <div className="flex items-center justify-between p-3 border-b border-divider/50">
+            <span className="text-xs font-medium text-ink-subtle">Prompts</span>
+            <div className="flex gap-1">
+              <button aria-label="Create prompt" onClick={() => { setCreating(true); setNewName("") }} className="p-1 rounded hover:bg-hover text-ink-muted hover:text-ink">
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+              <button aria-label="Refresh prompts" onClick={refresh} className="p-1 rounded hover:bg-hover text-ink-muted hover:text-ink">
+                <RefreshCw className="h-3.5 w-3.5" />
+              </button>
             </div>
           </div>
 
-          {/* Main editor area */}
-          <div className="flex-1 flex flex-col min-w-0">
-            <div className="flex items-center justify-between p-3 border-b border-divider/50">
-              <div className="flex items-center gap-2">
-                {selected && (
-                  <>
-                    <span className="text-sm font-medium text-ink">
-                      {prompts.find(p => p.slug === selected)?.name ?? selected}
-                    </span>
-                    {dirty && <span className="text-[10px] text-ink-faint">(unsaved)</span>}
-                  </>
-                )}
-              </div>
-              <div className="flex items-center gap-1">
-                {selected && (
-                  <>
-                    <button
-                      onClick={handleSave}
-                      disabled={!dirty}
-                      className={cn("flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs transition-colors",
-                        dirty ? "bg-surface-elevated text-ink hover:bg-hover-strong" : "text-ink-faint cursor-default"
-                      )}
-                    >
-                      <Save className="h-3.5 w-3.5" /> Save
-                    </button>
-                    <button onClick={handleDelete} className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs text-danger hover:bg-danger-soft transition-colors">
-                      <Trash2 className="h-3.5 w-3.5" /> Delete
-                    </button>
-                  </>
-                )}
-                <button aria-label="Close prompt editor" onClick={onClose} className="p-1.5 rounded-lg hover:bg-hover text-ink-muted hover:text-ink ml-2">
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
+          {creating && (
+            <div className="p-2 border-b border-divider/50 flex gap-1">
+              <input
+                autoFocus
+                value={newName}
+                onChange={e => setNewName(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") handleCreate() }}
+                placeholder="Prompt name..."
+                className="flex-1 rounded border border-divider bg-surface px-2 py-1 text-xs text-ink outline-none"
+              />
+              <button aria-label="Save new prompt" onClick={handleCreate} className="p-1 rounded hover:bg-hover text-ink-muted hover:text-ink">
+                <Save className="h-3.5 w-3.5" />
+              </button>
             </div>
+          )}
 
-            {selected ? (
-              <div className="flex-1 flex min-h-0">
-                <textarea
-                  value={content}
-                  onChange={e => { setContent(e.target.value); setDirty(true) }}
-                  onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === "s") { e.preventDefault(); handleSave() } }}
-                  spellCheck={false}
-                  className="flex-1 resize-none bg-transparent p-4 text-xs text-ink font-mono outline-none leading-relaxed"
-                  placeholder="Write your prompt..."
-                />
-
-                {/* Blocks sidebar */}
-                <div className="w-44 shrink-0 border-l border-divider/50 flex flex-col">
-                  <div className="p-2 border-b border-divider/50">
-                    <span className="text-[10px] font-medium text-ink-subtle uppercase tracking-wide">Blocks</span>
-                  </div>
-                  <div className="flex-1 overflow-y-auto p-1">
-                    {Object.keys(blocks).map(name => (
-                      <button
-                        key={name}
-                        onClick={() => insertBlock(name)}
-                        className="w-full text-left px-2 py-1.5 text-xs text-ink-muted hover:text-ink hover:bg-hover rounded transition-colors truncate"
-                      >
-                        {`{{${name}}}`}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="flex-1 flex items-center justify-center text-ink-faint text-sm">
-                Select a prompt to edit, or create a new one
-              </div>
-            )}
+          <div className="flex-1 overflow-y-auto">
+            {/* Hide prompts with a pending undoable delete */}
+            {prompts.filter((prompt) => !pending(`prompt:${prompt.slug}`)).map(p => (
+              <button
+                key={p.slug}
+                draggable
+                onDragStart={() => { dragSlug.current = p.slug }}
+                onDragEnter={() => reorder(p.slug)}
+                onDragOver={e => e.preventDefault()}
+                onDragEnd={persistOrder}
+                onClick={() => load(p.slug)}
+                className={cn(
+                  "w-full text-left px-3 py-2 text-xs transition-colors truncate cursor-grab active:cursor-grabbing",
+                  selected === p.slug ? "bg-surface text-ink" : "text-ink-muted hover:bg-hover hover:text-ink"
+                )}
+              >
+                {p.name}
+              </button>
+            ))}
           </div>
         </div>
-      </FloatingWindow>
-    </AnimatePresence>
+
+        {/* Main editor area */}
+        <div className="flex-1 flex flex-col min-w-0">
+          <div className="flex items-center justify-between p-3 border-b border-divider/50">
+            <div className="flex items-center gap-2">
+              {selected && (
+                <>
+                  <span className="text-sm font-medium text-ink">
+                    {prompts.find(p => p.slug === selected)?.name ?? selected}
+                  </span>
+                  {dirty && <span className="text-[10px] text-ink-faint">(unsaved)</span>}
+                </>
+              )}
+            </div>
+            <div className="flex items-center gap-1">
+              {selected && (
+                <>
+                  <button
+                    onClick={handleSave}
+                    disabled={!dirty}
+                    className={cn("flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs transition-colors",
+                      dirty ? "bg-surface-elevated text-ink hover:bg-hover-strong" : "text-ink-faint cursor-default"
+                    )}
+                  >
+                    <Save className="h-3.5 w-3.5" /> Save
+                  </button>
+                  <button onClick={handleDelete} className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs text-danger hover:bg-danger-soft transition-colors">
+                    <Trash2 className="h-3.5 w-3.5" /> Delete
+                  </button>
+                </>
+              )}
+              <button aria-label="Close prompt editor" onClick={onClose} className="p-1.5 rounded-lg hover:bg-hover text-ink-muted hover:text-ink ml-2">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          {selected ? (
+            <div className="flex-1 flex min-h-0">
+              <textarea
+                value={content}
+                onChange={e => { setContent(e.target.value); setDirty(true) }}
+                onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === "s") { e.preventDefault(); handleSave() } }}
+                spellCheck={false}
+                className="flex-1 resize-none bg-transparent p-4 text-xs text-ink font-mono outline-none leading-relaxed"
+                placeholder="Write your prompt..."
+              />
+
+              {/* Blocks sidebar */}
+              <div className="w-44 shrink-0 border-l border-divider/50 flex flex-col">
+                <div className="p-2 border-b border-divider/50">
+                  <span className="text-[10px] font-medium text-ink-subtle uppercase tracking-wide">Blocks</span>
+                </div>
+                <div className="flex-1 overflow-y-auto p-1">
+                  {Object.keys(blocks).map(name => (
+                    <button
+                      key={name}
+                      onClick={() => insertBlock(name)}
+                      className="w-full text-left px-2 py-1.5 text-xs text-ink-muted hover:text-ink hover:bg-hover rounded transition-colors truncate"
+                    >
+                      {`{{${name}}}`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="flex-1 flex items-center justify-center text-ink-faint text-sm">
+              Select a prompt to edit, or create a new one
+            </div>
+          )}
+        </div>
+      </div>
+    </FloatingWindow>
   )
 }

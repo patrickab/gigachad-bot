@@ -1,9 +1,9 @@
 "use client"
 
-import { memo, useEffect, useState } from "react"
-import { ChevronDown, Loader2, Wrench } from "lucide-react"
+import { memo, useEffect, useState, type ReactNode } from "react"
+import { ChevronDown, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { TOOL_META } from "@/features/chat/tools"
+import { toolDisplay } from "@/features/chat/tools"
 import { toolPayload } from "@/features/chat/toolCalls"
 import type { ToolCallRecord } from "@/lib/domain/types"
 import { CodeBlock } from "@/components/content/CodeBlock"
@@ -29,12 +29,27 @@ function stageDuration(stage: NonNullable<ToolCallRecord["stages"]>[number], now
   return `${seconds.toFixed(1)}s`
 }
 
+/** A text-button toggle that reveals `children` below it. */
+function Disclosure({ label, children }: { label: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  return <>
+    <button
+      type="button"
+      onClick={() => setOpen((isOpen) => !isOpen)}
+      aria-expanded={open}
+      className="flex items-center gap-1 text-xs font-medium text-ink-subtle"
+    >
+      <ChevronDown className={cn("h-4 w-4 transition-transform", open && "rotate-180")} aria-hidden="true" />
+      <span>{label}</span>
+    </button>
+    {open && children}
+  </>
+}
+
 /** Sits between the question and the answer, wearing the same container optic as the
  *  assistant response: same row layout, same avatar, same type scale. */
 function ToolCallElementInner({ call }: ToolCallElementProps) {
   const [open, setOpen] = useState(false)
-  const [briefOpen, setBriefOpen] = useState(false)
-  const [codeOpen, setCodeOpen] = useState(false)
   const shown = toolPayload(call)
   const [now, setNow] = useState(() => Date.now())
   const stages = call.stages ?? []
@@ -45,9 +60,7 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
     const timer = window.setInterval(() => setNow(Date.now()), 100)
     return () => window.clearInterval(timer)
   }, [runningStage])
-  // Unknown saved names have no metadata; they keep the raw name and a neutral icon.
-  const meta = TOOL_META[call.name]
-  const Icon = meta?.icon ?? Wrench
+  const { icon: Icon, label } = toolDisplay(call.name)
   // A plot, diagram, or mind map is its own headline, so the header carries no argument.
   const argument = shown.family === "plot" || shown.family === "diagram" || shown.family === "mindmap" ? "" : primaryArgument(call.arguments)
   // A running stage already names itself inline beside the card label.
@@ -74,13 +87,19 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
     </div>
     <div className="min-w-0 flex-1 flex flex-col">
       <div className="flex min-h-7 min-w-0 items-center gap-x-4">
-        <span className="shrink-0 text-xs font-medium text-ink-subtle">{meta?.cardLabel ?? call.name}</span>
+        <span className="shrink-0 text-xs font-medium text-ink-subtle">{label}</span>
         {stageTimeline}
       </div>
       {argument && <span className="mt-0.5 truncate text-sm text-ink">{argument}</span>}
     </div>
     {status && <span className="mt-1 shrink-0 text-[10px] tabular-nums text-ink-faint">{status}</span>}
   </>
+
+  // Plots and diagrams are their own headline, so they have no disclosure.
+  const flat = shown.family === "plot" || shown.family === "diagram"
+  const inlineMarkdown = shown.family === "mindmap"
+    ? shown.content
+    : shown.family === "diagram" && shown.mermaid ? `\`\`\`mermaid\n${shown.mermaid}\n\`\`\`` : ""
 
   const familyDetails = shown.family === "sources" ? <>
     {shown.costs !== null && <p className="text-[10px] tabular-nums text-ink-faint">cost ${shown.costs.toFixed(4)}</p>}
@@ -105,7 +124,7 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
 
   return (
     <div className="text-ink">
-      {shown.family === "plot" || shown.family === "diagram" ? (
+      {flat ? (
         <div className="flex w-full items-start gap-3 px-6 py-5 text-left">
           {header}
         </div>
@@ -121,29 +140,17 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
         </button>
       )}
 
-      {shown.family === "mindmap" && (
+      {(shown.family === "mindmap" || shown.family === "diagram") && (
         <div className="px-6 pb-5 pl-[3.25rem]">
-          {shown.content ? <LaTeXMarkdown content={shown.content} /> : call.error ? <p className="text-xs text-danger">{call.error}</p> : null}
-        </div>
-      )}
-      {shown.family === "diagram" && (
-        <div className="px-6 pb-5 pl-[3.25rem]">
-          {shown.mermaid ? <LaTeXMarkdown content={`\`\`\`mermaid\n${shown.mermaid}\n\`\`\``} /> : call.error ? <p className="text-xs text-danger">{call.error}</p> : null}
+          {inlineMarkdown ? <LaTeXMarkdown content={inlineMarkdown} /> : call.error ? <p className="text-xs text-danger">{call.error}</p> : null}
         </div>
       )}
       {shown.family === "plot" && <>
         {shown.brief && (
           <div className="px-6 pb-3 pl-[3.25rem]">
-            <button
-              type="button"
-              onClick={() => setBriefOpen((isOpen) => !isOpen)}
-              aria-expanded={briefOpen}
-              className="flex items-center gap-1 text-xs font-medium text-ink-subtle"
-            >
-              <ChevronDown className={cn("h-4 w-4 transition-transform", briefOpen && "rotate-180")} aria-hidden="true" />
-              <span>Briefing</span>
-            </button>
-            {briefOpen && <p className="mt-2 whitespace-pre-line text-sm text-ink-muted">{shown.brief}</p>}
+            <Disclosure label="Briefing">
+              <p className="mt-2 whitespace-pre-line text-sm text-ink-muted">{shown.brief}</p>
+            </Disclosure>
           </div>
         )}
         {shown.figure && (
@@ -153,16 +160,9 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
         )}
         {shown.script && (
           <div className="px-6 pb-3 pl-[3.25rem]">
-            <button
-              type="button"
-              onClick={() => setCodeOpen((isOpen) => !isOpen)}
-              aria-expanded={codeOpen}
-              className="flex items-center gap-1 text-xs font-medium text-ink-subtle"
-            >
-              <ChevronDown className={cn("h-4 w-4 transition-transform", codeOpen && "rotate-180")} aria-hidden="true" />
-              <span>Code</span>
-            </button>
-            {codeOpen && <div className="mt-2"><CodeBlock codeString={shown.script} language="python" /></div>}
+            <Disclosure label="Code">
+              <div className="mt-2"><CodeBlock codeString={shown.script} language="python" /></div>
+            </Disclosure>
           </div>
         )}
         {/* Plots and diagrams have no disclosure, so a failed run states its error inline. */}
@@ -182,7 +182,7 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
         </div>
       )}
 
-      {open && shown.family !== "plot" && shown.family !== "diagram" && (
+      {open && !flat && (
         <div className="space-y-2 px-6 pb-5 pl-[4.5rem]">
           <dl className="space-y-1">
             {Object.entries(call.arguments).map(([key, value]) => (

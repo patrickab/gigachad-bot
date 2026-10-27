@@ -139,15 +139,14 @@ export function ChatContainer({
   }, [messages])
 
   // Per-pair expand/collapse overrides keyed by global message index
-  const [manualOverrides, setManualOverrides] = useState<Map<number, boolean>>(
-    () => new Map(focusQaIndex == null ? [] : [[focusQaIndex * 2, true]]),
-  )
+  const focusOverrides = () => new Map<number, boolean>(focusQaIndex == null ? [] : [[focusQaIndex * 2, true]])
+  const [manualOverrides, setManualOverrides] = useState(focusOverrides)
 
   // A new focus request replaces the overrides: it expands only the focused pair
   const [seenFocus, setSeenFocus] = useState({ qaIndex: focusQaIndex, key: focusKey })
   if (seenFocus.qaIndex !== focusQaIndex || seenFocus.key !== focusKey) {
     setSeenFocus({ qaIndex: focusQaIndex, key: focusKey })
-    setManualOverrides(new Map(focusQaIndex == null ? [] : [[focusQaIndex * 2, true]]))
+    setManualOverrides(focusOverrides())
   }
 
   // Depend on the length, not the array: in an empty chat every re-render hands

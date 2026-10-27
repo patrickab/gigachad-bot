@@ -4,9 +4,13 @@ import { useEffect, useState } from "react"
 import { Settings } from "lucide-react"
 import { Dialog } from "@/components/ui/Dialog"
 import { StyledSelect } from "@/components/ui/StyledSelect"
-import { cn } from "@/lib/utils"
+import { ErrorText } from "@/components/ui/ErrorText"
+import { errorMessage, cn } from "@/lib/utils"
+import { useAsyncAction } from "@/hooks/useAsyncAction"
+import { useResetOnOpen } from "@/hooks/useResetOnChange"
 import { fetchFactoryDefaults, fetchModels, saveFactoryDefaults } from "@/lib/backend/api"
 import { FACTORY_AGENT_NAMES, type FactoryAgentName, type FactoryDefaults, type FactorySettings, type MergeMode, type ModelsResponse } from "@/lib/domain/types"
+import { Field } from "./Field"
 import { FIELD_CLASS, PRIMARY_BUTTON_CLASS, QUIET_BUTTON_CLASS } from "./styles"
 
 const MERGE_OPTIONS = [
@@ -19,15 +23,6 @@ const MAX_ROUNDS_LIMITS = { min: 1, max: 20 }
 /** Models the user filled in; an empty selector means the agent keeps its own model. */
 function withoutEmptyModels(settings: FactorySettings): FactorySettings {
   return { ...settings, models: Object.fromEntries(Object.entries(settings.models).filter(([, selector]) => selector.trim() !== "")) }
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="text-[11px] text-ink-subtle">{label}</span>
-      {children}
-    </div>
-  )
 }
 
 function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
@@ -45,21 +40,20 @@ export function FactorySettingsDialog({ open, onClose }: { open: boolean; onClos
   const [catalog, setCatalog] = useState<ModelsResponse | null>(null)
   const [modelError, setModelError] = useState("")
   const [agent, setAgent] = useState<FactoryAgentName>(FACTORY_AGENT_NAMES[0])
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState("")
-  const [wasOpen, setWasOpen] = useState(open)
+  const { run: persist, pending: busy, error, setError } = useAsyncAction(async () => {
+    if (!draft) return
+    await saveFactoryDefaults({ ...draft, settings: withoutEmptyModels(draft.settings) })
+    onClose()
+  }, "Could not save the defaults")
 
   // Every opening reloads the saved defaults, so a discarded edit never lingers.
-  if (open !== wasOpen) {
-    setWasOpen(open)
-    if (open) {
-      setDraft(null)
-      setCatalog(null)
-      setModelError("")
-      setAgent(FACTORY_AGENT_NAMES[0])
-      setError("")
-    }
-  }
+  useResetOnOpen(open, () => {
+    setDraft(null)
+    setCatalog(null)
+    setModelError("")
+    setAgent(FACTORY_AGENT_NAMES[0])
+    setError("")
+  })
 
   useEffect(() => {
     if (!open) return
@@ -67,15 +61,15 @@ export function FactorySettingsDialog({ open, onClose }: { open: boolean; onClos
     fetchFactoryDefaults().then((loaded) => {
       if (!cancelled) setDraft(loaded)
     }).catch((cause: unknown) => {
-      if (!cancelled) setError(cause instanceof Error ? cause.message : "Could not load the defaults")
+      if (!cancelled) setError(errorMessage(cause, "Could not load the defaults"))
     })
     fetchModels().then((loaded) => {
       if (!cancelled) setCatalog(loaded)
     }).catch((cause: unknown) => {
-      if (!cancelled) setModelError(cause instanceof Error ? cause.message : "Could not load OMP models")
+      if (!cancelled) setModelError(errorMessage(cause, "Could not load OMP models"))
     })
     return () => { cancelled = true }
-  }, [open])
+  }, [open, setError])
 
   const changeSettings = (change: Partial<FactorySettings>) =>
     setDraft((current) => current && { ...current, settings: { ...current.settings, ...change } })
@@ -92,18 +86,8 @@ export function FactorySettingsDialog({ open, onClose }: { open: boolean; onClos
     }))) ?? []),
   ]
 
-  const save = async () => {
-    if (!draft || busy) return
-    setBusy(true)
-    setError("")
-    try {
-      await saveFactoryDefaults({ ...draft, settings: withoutEmptyModels(draft.settings) })
-      onClose()
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not save the defaults")
-    } finally {
-      setBusy(false)
-    }
+  const save = () => {
+    if (draft && !busy) void persist()
   }
 
   return (
@@ -151,7 +135,7 @@ export function FactorySettingsDialog({ open, onClose }: { open: boolean; onClos
               })}
             </div>
             {modelError
-              ? <p role="alert" className="text-xs text-danger">{modelError}</p>
+              ? <ErrorText>{modelError}</ErrorText>
               : <p role="status" className="text-[11px] text-ink-faint">{catalog ? "OMP models added in Providers / Models. Applies to new tasks." : "Loading OMP models"}</p>}
             <div className="flex flex-col gap-2">
               <div role="tablist" aria-label="Agent" className="flex gap-1">
@@ -189,7 +173,7 @@ export function FactorySettingsDialog({ open, onClose }: { open: boolean; onClos
         ) : (
           !error && <div className="py-8 text-center text-xs text-ink-faint">Loading defaults</div>
         )}
-        {error && <p role="alert" className="text-xs text-danger">{error}</p>}
+        <ErrorText>{error}</ErrorText>
         <div className="flex items-center justify-end gap-2">
           <button type="button" onClick={onClose} className={QUIET_BUTTON_CLASS}>Cancel</button>
           <button type="submit" disabled={!draft || busy} className={PRIMARY_BUTTON_CLASS}>Save</button>

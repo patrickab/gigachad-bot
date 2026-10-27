@@ -1,12 +1,9 @@
 import { useEffect, useEffectEvent, useRef, useState } from "react"
 import { useTabActive } from "@/contexts/TabContext"
 import { fetchFactoryEvents, fetchLatestFactoryEventSeq } from "@/lib/backend/api"
+import { errorMessage } from "@/lib/utils"
 
 export const POLL_INTERVAL_MS = 3000
-
-function describe(error: unknown): string {
-  return error instanceof Error ? error.message : "Factory is unreachable"
-}
 
 /**
  * Keep `refresh` in step with the engine while the tab is frontmost and the page visible.
@@ -54,7 +51,7 @@ export function useFactoryPolling(repo: string, refresh: (changedTaskIds: Readon
         }
         if (!cancelled) setError(null)
       } catch (cause) {
-        if (!cancelled) setError(describe(cause))
+        if (!cancelled) setError(errorMessage(cause, "Factory is unreachable"))
       } finally {
         busy = false
       }

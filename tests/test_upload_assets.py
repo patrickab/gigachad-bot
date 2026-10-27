@@ -1,58 +1,32 @@
 import io
-import os
-from uuid import uuid4
 
 from fastapi import HTTPException
-from psycopg_pool import ConnectionPool
 import pytest
 from starlette.datastructures import Headers, UploadFile
 
 from backend.routes import files
 from backend.routes.assets import get_asset
-from lib import attachment_materialize
 from lib.asset_store import AssetStore
-from lib.db_schema import upgrade
+from tests.conftest import create_user_and_device
 
-
-@pytest.fixture(scope="module")
-def postgres_pool():
-    url = os.environ.get("POSTGRES_TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("POSTGRES_TEST_DATABASE_URL is required for upload asset tests")
-    upgrade(url)
-    pool = ConnectionPool(url, min_size=1, max_size=4)
-    yield pool
-    pool.close()
+pytestmark = pytest.mark.usefixtures("documents_root")
 
 
 @pytest.fixture(autouse=True)
-def clean_database(request):
-    if "postgres_pool" not in request.fixturenames:
-        return
-    pool = request.getfixturevalue("postgres_pool")
-    with pool.connection() as connection, connection.transaction():
-        connection.execute("TRUNCATE changes, assets, vault_roots, devices, documents, users CASCADE")
+def _clean_database_when_used(request):
+    """Only tests that touch Postgres reset it; the rest run without a database."""
+    if "postgres_pool" in request.fixturenames:
+        request.getfixturevalue("clean_database")
 
 
 def make_store(pool, login="alice@example.test"):
-    device_id = uuid4()
-    with pool.connection() as connection, connection.transaction():
-        user_id = connection.execute("INSERT INTO users (tailscale_login) VALUES (%s) RETURNING id", (login,)).fetchone()[0]
-        connection.execute("INSERT INTO devices (id, user_id) VALUES (%s, %s)", (device_id, user_id))
+    user_id, device_id = create_user_and_device(pool, login)
     return AssetStore(pool, user_id, device_id=device_id)
 
 
 @pytest.fixture
 def store(postgres_pool):
     return make_store(postgres_pool)
-
-
-@pytest.fixture(autouse=True)
-def documents_root(tmp_path, monkeypatch):
-    """Point the Nextcloud mirror root at a tmp dir; ``attachment_materialize.py`` reads it at call time."""
-    root = tmp_path / "Documents"
-    monkeypatch.setattr(attachment_materialize, "DOCUMENTS", root, raising=True)
-    return root
 
 
 def upload(content: bytes, filename: str, mime: str) -> UploadFile:

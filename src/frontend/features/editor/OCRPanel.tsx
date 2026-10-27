@@ -7,6 +7,9 @@ import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
 import { AssistedConsoleEditor } from "./AssistedConsoleEditor"
 import { EditorSidebar } from "./EditorSidebar"
 import { createOCRStream } from "@/lib/backend/api"
+import { useEventListener } from "@/hooks/useEventListener"
+import { useResetOnChange } from "@/hooks/useResetOnChange"
+import { blobToDataUrl } from "@/lib/utils"
 
 interface OCRPanelProps {
   image: string
@@ -24,13 +27,9 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarWidth, setSidebarWidth] = useState(340)
   const abortRef = useRef<(() => void) | null>(null)
-  const [streamTarget, setStreamTarget] = useState({ img, model })
-
   // A new image or model restarts OCR, so the stream is live again (the effect below starts it)
-  if (streamTarget.img !== img || streamTarget.model !== model) {
-    setStreamTarget({ img, model })
-    if (img) setIsStreaming(true)
-  }
+  useResetOnChange(img, (next) => { if (next) setIsStreaming(true) })
+  useResetOnChange(model, () => { if (img) setIsStreaming(true) })
   // Set once confirmed so a second confirm cannot call onComplete again
   const confirmedRef = useRef(false)
 
@@ -42,20 +41,13 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
   }, [])
 
   // While awaiting a new image, a pasted image restarts OCR
-  useEffect(() => {
-    if (img) return
-    const onPaste = (e: ClipboardEvent) => {
-      const item = [...(e.clipboardData?.items ?? [])].find((i) => i.type.startsWith("image/"))
-      const blob = item?.getAsFile()
-      if (!blob) return
-      e.preventDefault()
-      const reader = new FileReader()
-      reader.onload = () => setImg(reader.result as string)
-      reader.readAsDataURL(blob)
-    }
-    window.addEventListener("paste", onPaste)
-    return () => window.removeEventListener("paste", onPaste)
-  }, [img])
+  useEventListener("window", "paste", (e) => {
+    const item = [...(e.clipboardData?.items ?? [])].find((i) => i.type.startsWith("image/"))
+    const blob = item?.getAsFile()
+    if (!blob) return
+    e.preventDefault()
+    blobToDataUrl(blob).then(setImg).catch(() => {})
+  }, { active: !img })
 
   // Restart OCR whenever the image or model changes and abort the stream on cleanup
   useEffect(() => {
@@ -97,23 +89,19 @@ export function OCRPanel({ image, model, onComplete, onClose }: OCRPanelProps) {
     onComplete(output)
   }, [output, onComplete])
 
-  useEffect(() => {
-    function handler(e: KeyboardEvent) {
-      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault()
-        doConfirm()
-      }
-      if (e.altKey && e.key.toLowerCase() === "r") {
-        e.preventDefault()
-        reset()
-      }
-      if (e.key === "Escape") {
-        onClose()
-      }
+  useEventListener("document", "keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault()
+      doConfirm()
     }
-    document.addEventListener("keydown", handler)
-    return () => document.removeEventListener("keydown", handler)
-  }, [doConfirm, onClose, reset])
+    if (e.altKey && e.key.toLowerCase() === "r") {
+      e.preventDefault()
+      reset()
+    }
+    if (e.key === "Escape") {
+      onClose()
+    }
+  })
 
   const handleSidebarApply = useCallback((newContent: string) => {
     setOutput(newContent)

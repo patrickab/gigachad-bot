@@ -12,13 +12,13 @@ from agent_sandbox import PromptImage
 from llm_baseclient.client import LLMClient
 from pydantic import BaseModel, Field
 
-from lib.llm_resilience import api_query_resilient
+from lib.llm_resilience import completion_text
 from lib.prompts.internal import SYS_OCR_TEXT_EXTRACTION
 from lib.prompts.non_user_prompts import SYS_DIAGRAM_MERMAID, SYS_STUDY_MINDMAP
 from lib.research import run_deep_research
 from lib.sandbox_plot import create_sandbox_plot
-from lib.sandbox_service import SandboxService
-from lib.toolcalling import ToolCatalog, ToolDefinition, ToolOutcome, stream_tool_turn
+from lib.sandbox_service import WORKSPACE_AGENT_SCOPE, SandboxService
+from lib.toolcalling import ToolCatalog, ToolDefinition, ToolOutcome, sandbox_unavailable, stream_tool_turn
 from lib.web_search import brave_sources, evidence_prompt, plan_query, source_label
 
 TOOL_GUIDANCE = (
@@ -81,6 +81,9 @@ def _single_text_parameter(name: str, description: str, *, max_length: int | Non
     }
 
 
+_NO_ARGUMENTS: dict[str, Any] = {"type": "object", "additionalProperties": False, "properties": {}}
+
+
 async def _web_search(args: dict[str, Any], context: ToolContext) -> ToolOutcome:
     context.stage("Planning search")
     planner_model = context.small_model or context.model
@@ -135,18 +138,14 @@ async def _sandbox_plot(_args: dict[str, Any], context: ToolContext) -> ToolOutc
 
 async def _workspace_agent(args: dict[str, Any], context: ToolContext) -> ToolOutcome:
     if context.sandbox_service is None:
-        return ToolOutcome(
-            content="The workspace agent tool is not configured.",
-            summary="Unavailable",
-            error="sandbox_service_unavailable",
-        )
+        return sandbox_unavailable("workspace agent")
     context.stage("Running workspace agent")
     result = await context.sandbox_service.invoke(
         chat_id=context.chat_id,
         tool_call_id=context.tool_call_id,
         prompt=args["prompt"],
         prompt_images=context.prompt_images,
-        scope="workspace_agent",
+        scope=WORKSPACE_AGENT_SCOPE,
     )
     return ToolOutcome(
         content=result.summary,
@@ -165,27 +164,28 @@ async def _workspace_agent(args: dict[str, Any], context: ToolContext) -> ToolOu
 _FENCED_CODE = re.compile(r"```[^\n]*\n(?P<body>.*?)\n?```", re.DOTALL)
 
 
-def _response_text(response: Any) -> str:
-    return response.choices[0].message.content or ""
-
-
-async def _diagram(_args: dict[str, Any], context: ToolContext) -> ToolOutcome:
-    context.stage("Creating diagram")
+async def _transcript_completion(context: ToolContext, instruction: str, system_prompt: str) -> str:
+    """Run one completion over the whole conversation so far and return the stripped reply."""
     transcript = "\n".join(
         f"[{message.get('role', 'user')}]: {message.get('content', '')}"
         for message in (*context.history, {"role": "user", "content": context.user_msg})
     )
-    response = await asyncio.to_thread(
-        api_query_resilient,
+    text = await asyncio.to_thread(
+        completion_text,
         context.client,
         model=context.model,
-        user_msg="Create a Mermaid diagram from this conversation.\n\n<transcript>\n" + transcript + "\n</transcript>",
+        user_msg=f"{instruction}\n\n<transcript>\n{transcript}\n</transcript>",
         user_msg_history=[],
-        system_prompt=SYS_DIAGRAM_MERMAID,
+        system_prompt=system_prompt,
         img=None,
         stream=False,
     )
-    content = _response_text(response).strip()
+    return text.strip()
+
+
+async def _diagram(_args: dict[str, Any], context: ToolContext) -> ToolOutcome:
+    context.stage("Creating diagram")
+    content = await _transcript_completion(context, "Create a Mermaid diagram from this conversation.", SYS_DIAGRAM_MERMAID)
     # Strip a Markdown fence if the model wrapped the source despite the prompt.
     if match := _FENCED_CODE.fullmatch(content):
         content = match.group("body").strip()
@@ -202,21 +202,7 @@ async def _diagram(_args: dict[str, Any], context: ToolContext) -> ToolOutcome:
 
 async def _mindmap(_args: dict[str, Any], context: ToolContext) -> ToolOutcome:
     context.stage("Creating mind map")
-    transcript = "\n".join(
-        f"[{message.get('role', 'user')}]: {message.get('content', '')}"
-        for message in (*context.history, {"role": "user", "content": context.user_msg})
-    )
-    content = await asyncio.to_thread(
-        api_query_resilient,
-        context.client,
-        model=context.model,
-        user_msg="Produce a mind map from this conversation.\n\n<transcript>\n" + transcript + "\n</transcript>",
-        user_msg_history=[],
-        system_prompt=SYS_STUDY_MINDMAP,
-        img=None,
-        stream=False,
-    )
-    mindmap = _response_text(content).strip()
+    mindmap = await _transcript_completion(context, "Produce a mind map from this conversation.", SYS_STUDY_MINDMAP)
     return ToolOutcome(content=mindmap, summary="Mind map ready", detail={"mindmap": mindmap})
 
 
@@ -228,8 +214,8 @@ async def _latex_ocr(_args: dict[str, Any], context: ToolContext) -> ToolOutcome
             error="Attach an image before requesting LaTeX OCR.",
         )
     context.stage("Extracting text and LaTeX")
-    response = await asyncio.to_thread(
-        api_query_resilient,
+    text = await asyncio.to_thread(
+        completion_text,
         context.client,
         model=context.vision_model or context.model,
         user_msg="Extract all text and LaTeX from this image.",
@@ -238,7 +224,7 @@ async def _latex_ocr(_args: dict[str, Any], context: ToolContext) -> ToolOutcome
         img=context.img,
         stream=False,
     )
-    text = _response_text(response).strip()
+    text = text.strip()
     return ToolOutcome(content=text, summary="Text extracted", detail={"text": text})
 
 
@@ -265,7 +251,7 @@ BUILTIN_TOOLS: ToolCatalog[ToolContext] = ToolCatalog(
             "Create or revise an interactive Plotly chart in a persistent, chat-scoped sandbox workspace. "
             "Use when the user asks for a chart, graph, or visual data analysis. Takes no arguments: the "
             "conversation already carries the request.",
-            {"type": "object", "additionalProperties": False, "properties": {}},
+            _NO_ARGUMENTS,
             _sandbox_plot,
         ),
         ToolDefinition(
@@ -274,21 +260,21 @@ BUILTIN_TOOLS: ToolCatalog[ToolContext] = ToolCatalog(
             "flowchart, sequence diagram, process map, architecture diagram, or visual relationship map. "
             "It may also be used whenever a diagram would significantly reduce the text needed to answer "
             "the user's request. Takes no arguments because the conversation already supplies the request.",
-            {"type": "object", "additionalProperties": False, "properties": {}},
+            _NO_ARGUMENTS,
             _diagram,
         ),
         ToolDefinition(
             "mindmap",
             "Create a visual mind map of the current conversation when the user asks to organize, map, or visualize its ideas. "
             "Takes no arguments because the conversation already supplies the material.",
-            {"type": "object", "additionalProperties": False, "properties": {}},
+            _NO_ARGUMENTS,
             _mindmap,
         ),
         ToolDefinition(
             "latex_ocr",
             "Extract exact Markdown text and LaTeX from the attached image. Use only when an image is attached and the user "
             "asks to transcribe, read, or extract equations from it. Takes no arguments.",
-            {"type": "object", "additionalProperties": False, "properties": {}},
+            _NO_ARGUMENTS,
             _latex_ocr,
         ),
         ToolDefinition(

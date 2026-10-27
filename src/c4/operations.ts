@@ -2,8 +2,8 @@
 // positions. Everything outside the touched spans stays byte-identical, so
 // hand-written or AI-written formatting and comments survive.
 import { AstUtils, GrammarUtils, type AstNode, type CstNode } from 'langium'
-import { edgeKey, type NodePin, type Pins, type Snapshots, type ViewPins } from './layout.ts'
-import { expressionEntries, nameOf, parentOf, Workspace, type ExpressionsNode, type ModelPayload, type Sources } from './workspace.ts'
+import { edgeKey, splitEdgeKey, type NodePin, type Pins, type Snapshots, type ViewPins } from './layout.ts'
+import { expressionEntries, nameOf, parentOf, Workspace, type ModelPayload, type PredicateNode, type Sources, type ViewNode } from './workspace.ts'
 
 export type Operation =
   | { op: 'createSystem', title: string }
@@ -48,6 +48,12 @@ interface Span {
 interface TextEdit extends Span {
   text: string
 }
+
+/** A syntax node that may own a `{ }` body. */
+type Bodied = AstNode & { body?: AstNode }
+
+/** A zero-width insertion of `text` at offset `at`. */
+const insertAt = (file: string, at: number, text: string): TextEdit => ({ file, start: at, end: at, text })
 
 interface Plan {
   edits: TextEdit[]
@@ -133,6 +139,13 @@ const propertyNode = (node: AstNode, property: string, index = 0): CstNode | und
 /** LikeC4 derives view titles from element titles and rejects newlines in them. */
 const singleLine = (value: string) => value.replace(/\s+/g, ' ').trim()
 
+/** The single-line title of a create or rename operation; an empty one fails with `message`. */
+function requireTitle(value: string, message: string): string {
+  const title = singleLine(value)
+  if (!title) throw new OperationError(message)
+  return title
+}
+
 /** One line stays a quoted string; several become a dedented ''' block, one bullet per line. */
 function descriptionValue(description: string, indent: string): string {
   const lines = description.split('\n').map((line) => line.trim()).filter(Boolean)
@@ -215,7 +228,7 @@ class Planner {
     if (block) return this.appendToBlock(block, lines)
     const text = this.text(file)
     const prefix = text && !text.endsWith('\n') ? '\n' : ''
-    return { file, start: text.length, end: text.length, text: `${prefix}model {\n${indented(lines, INDENT_UNIT)}\n}\n` }
+    return insertAt(file, text.length, `${prefix}model {\n${indented(lines, INDENT_UNIT)}\n}\n`)
   }
 
   /**
@@ -226,7 +239,7 @@ class Planner {
   private appendChildren(parent: string | null, lines: string[]): TextEdit {
     if (parent === null) return this.appendToModel(this.homeFile(), lines)
     const element = this.element(parent)
-    const body = (element as AstNode & { body?: AstNode }).body
+    const body = (element as Bodied).body
     return body ? this.appendToBlock(body, lines) : this.openBody(element, lines)
   }
 
@@ -235,7 +248,7 @@ class Planner {
     const file = this.ws.documentPath(element)
     const indent = indentAt(this.text(file), cst(element).offset)
     const end = cst(element).end
-    return { file, start: end, end, text: ` {\n${indented(lines, indent + INDENT_UNIT)}\n${indent}}` }
+    return insertAt(file, end, ` {\n${indented(lines, indent + INDENT_UNIT)}\n${indent}}`)
   }
 
   private appendToBlock(block: AstNode, lines: string[]): TextEdit {
@@ -247,8 +260,8 @@ class Planner {
     const owner = indentAt(text, node.offset)
     const content = indented(lines, owner + INDENT_UNIT)
     const closeLine = lineStart(text, close)
-    if (!text.slice(closeLine, close).trim()) return { file, start: closeLine, end: closeLine, text: `${content}\n` }
-    return { file, start: close, end: close, text: `\n${content}\n${owner}` }
+    if (!text.slice(closeLine, close).trim()) return insertAt(file, closeLine, `${content}\n`)
+    return insertAt(file, close, `\n${content}\n${owner}`)
   }
 
   private replace(node: CstNode, file: string, text: string): TextEdit {
@@ -261,8 +274,7 @@ class Planner {
   }
 
   async addElement(op: Extract<Operation, { op: 'addElement' }>): Promise<Plan> {
-    const title = singleLine(op.title)
-    if (!title) throw new OperationError('An element needs a title')
+    const title = requireTitle(op.title, 'An element needs a title')
     if (!(await this.kinds()).has(op.kind)) throw new OperationError(`Unknown element kind: ${op.kind}`)
     // Drawn on the open canvas of `view x of shop`, an element belongs to shop.
     const parent = op.parent ?? (op.layout ? await this.scopeOf(op.layout.view) : null)
@@ -297,8 +309,7 @@ class Planner {
 
   /** A system is a folder, `<id>/<id>.c4`, declaring one system and the view of it. */
   async createSystem(op: Extract<Operation, { op: 'createSystem' }>): Promise<Plan> {
-    const title = singleLine(op.title)
-    if (!title) throw new OperationError('A system needs a name')
+    const title = requireTitle(op.title, 'A system needs a name')
     // Neither an element nor a folder may already use the id, so `views/` is never a system.
     const folders = Object.keys(this.ws.sources).filter((path) => path.includes('/')).map((path) => path.slice(0, path.indexOf('/')))
     const id = uniqueId(idFromTitle(title), new Set([...await this.childNames(null), ...folders, VIEWS_DIR.slice(0, -1)]))
@@ -314,13 +325,12 @@ views {
   }
 }
 `
-    return { edits: [{ file: path, start: 0, end: 0, text }], created: path }
+    return { edits: [insertAt(path, 0, text)], created: path }
   }
 
   /** A module is a file beside its system's, adding one container to it with `extend`. */
   async createModule(op: Extract<Operation, { op: 'createModule' }>): Promise<Plan> {
-    const title = singleLine(op.title)
-    if (!title) throw new OperationError('A module needs a name')
+    const title = requireTitle(op.title, 'A module needs a name')
     const system = this.element(op.system)
     if (parentOf(op.system) !== null) throw new OperationError('Modules belong to a top-level system')
     const home = this.ws.documentPath(system)
@@ -332,16 +342,15 @@ views {
   }
 }
 `
-    return { edits: [{ file: path, start: 0, end: 0, text }], created: path }
+    return { edits: [insertAt(path, 0, text)], created: path }
   }
 
   /** A saved view is its own file, `views/<id>.c4`, and starts empty. */
   createView(op: Extract<Operation, { op: 'createView' }>): Plan {
-    const title = singleLine(op.title)
-    if (!title) throw new OperationError('A view needs a name')
+    const title = requireTitle(op.title, 'A view needs a name')
     const { id, path } = this.newFile(VIEWS_DIR, title, this.ws.viewIds())
     const text = `views {\n  view ${id} {\n    title ${quote(title)}\n  }\n}\n`
-    return { edits: [{ file: path, start: 0, end: 0, text }], created: path }
+    return { edits: [insertAt(path, 0, text)], created: path }
   }
 
   /** Gives a file without a view one: a view of its single system, else a list of what it declares. */
@@ -355,7 +364,7 @@ views {
     const text = this.text(file)
     const prefix = text && !text.endsWith('\n') ? '\n\n' : text ? '\n' : ''
     const views = `${prefix}views {\n${indented(body, INDENT_UNIT)}\n}\n`
-    return { edits: [{ file, start: text.length, end: text.length, text: views }], created: id }
+    return { edits: [insertAt(file, text.length, views)], created: id }
   }
 
   private editableView(id: string) {
@@ -367,9 +376,9 @@ views {
 
   /** Every `include`/`exclude` rule of a view, with the element each plain entry names. */
   private predicates(view: AstNode) {
-    const rules = (view as AstNode & { body?: { rules?: AstNode[] } }).body?.rules ?? []
+    const rules = (view as ViewNode).body?.rules ?? []
     return rules.filter((rule) => rule.$type === 'ViewRulePredicate').map((rule) => {
-      const predicate = rule as AstNode & { isInclude?: boolean, exprs?: ExpressionsNode }
+      const predicate = rule as PredicateNode
       const entries = expressionEntries(predicate.exprs).map((entry) => {
         const ref = entry as AstNode & { ref?: { value?: { ref?: AstNode } }, selector?: string }
         // Only a bare reference names exactly one element; `x.*` and friends name a family.
@@ -378,6 +387,13 @@ views {
       })
       return { rule: predicate, include: !!predicate.isInclude, entries }
     })
+  }
+
+  /** The plain entries of the view's include (or exclude) rules that name one of `elements`. */
+  private entriesNaming(view: AstNode, elements: string[], include: boolean) {
+    const wanted = new Set(elements)
+    return this.predicates(view).filter((rule) => rule.include === include).flatMap((rule) => rule.entries)
+      .filter((entry) => entry.element && wanted.has(entry.element))
   }
 
   /** Drops the given entries from their rules; a rule left empty goes entirely. */
@@ -399,7 +415,7 @@ views {
   }
 
   private appendRule(view: AstNode, line: string): TextEdit {
-    const body = (view as AstNode & { body?: AstNode }).body
+    const body = (view as Bodied).body
     if (!body) throw new OperationError('Unexpected view shape in source')
     return this.appendToBlock(body, [line])
   }
@@ -408,15 +424,12 @@ views {
     const view = this.editableView(op.view)
     for (const fqn of op.elements) this.element(fqn)
     if (op.elements.length === 0) return { edits: [] }
-    const wanted = new Set(op.elements)
-    const predicates = this.predicates(view)
     // An element the view excludes by name comes back by dropping that exclusion.
     // Whether a wider rule then draws it is checked afterwards (see followUp).
-    const unexcluded = predicates.filter((rule) => !rule.include).flatMap((rule) => rule.entries)
-      .filter((entry) => entry.element && wanted.has(entry.element))
+    const unexcluded = this.entriesNaming(view, op.elements, false)
     const doomed = new Set(unexcluded.map((entry) => entry.node))
     const named = new Set([
-      ...predicates.filter((rule) => rule.include).flatMap((rule) => rule.entries).map((entry) => entry.element),
+      ...this.predicates(view).filter((rule) => rule.include).flatMap((rule) => rule.entries).map((entry) => entry.element),
       ...unexcluded.map((entry) => entry.element),
     ])
     const added = op.elements.filter((fqn) => op.descendants || !named.has(fqn))
@@ -430,9 +443,7 @@ views {
   removeFromView(op: Extract<Operation, { op: 'removeFromView' }>): Plan {
     const view = this.editableView(op.view)
     for (const fqn of op.elements) this.element(fqn)
-    const unwanted = new Set(op.elements)
-    const own = this.predicates(view).filter((rule) => rule.include).flatMap((rule) => rule.entries)
-      .filter((entry) => entry.element && unwanted.has(entry.element))
+    const own = this.entriesNaming(view, op.elements, true)
     const edits = this.dropEntries(view, new Set(own.map((entry) => entry.node)))
     const named = new Set(own.map((entry) => entry.element))
     const excluded = op.elements.filter((fqn) => !named.has(fqn))
@@ -534,8 +545,7 @@ views {
   }
 
   setTitle(op: Extract<Operation, { op: 'setTitle' }>): Plan {
-    const title = singleLine(op.title)
-    if (!title) throw new OperationError('An element needs a title')
+    const title = requireTitle(op.title, 'An element needs a title')
     const element = this.element(op.element)
     const file = this.ws.documentPath(element)
     const bodyTitle = this.bodyProperty(element, 'title')?.value
@@ -544,7 +554,7 @@ views {
     if (inline) return { edits: [this.replace(inline, file, quote(title))] }
     const kind = propertyNode(element, 'kind')
     if (!kind) throw new OperationError('Unexpected element shape in source')
-    return { edits: [{ file, start: kind.end, end: kind.end, text: ` ${quote(title)}` }] }
+    return { edits: [insertAt(file, kind.end, ` ${quote(title)}`)] }
   }
 
   setDescription(op: Extract<Operation, { op: 'setDescription' }>): Plan {
@@ -577,10 +587,10 @@ views {
       const anchorEnd = cst(anchor).end
       const lineEnd = text.indexOf('\n', anchorEnd)
       const at = lineEnd === -1 ? text.length : lineEnd
-      return { file, start: at, end: at, text: `\n${inner}${line}` }
+      return insertAt(file, at, `\n${inner}${line}`)
     }
     const open = cst(body).offset + 1
-    return { file, start: open, end: open, text: `\n${inner}${line}` }
+    return insertAt(file, open, `\n${inner}${line}`)
   }
 
   async setKind(op: Extract<Operation, { op: 'setKind' }>): Promise<Plan> {
@@ -603,7 +613,7 @@ views {
     if (!label) return { edits: [] }
     const target = propertyNode(relation, 'target')
     if (!target) throw new OperationError('Unexpected connection shape in source')
-    return { edits: [{ file, start: target.end, end: target.end, text: ` ${quote(label)}` }] }
+    return { edits: [insertAt(file, target.end, ` ${quote(label)}`)] }
   }
 
   /** Every reference in the workspace, with the element FQN it resolves to. */
@@ -716,7 +726,7 @@ function renamePins(pins: Pins, renames: Record<string, string>): Pins {
   return Object.fromEntries(Object.entries(pins).map(([viewId, view]) => [viewId, {
     nodes: Object.fromEntries(Object.entries(view.nodes).map(([fqn, pin]) => [mapPrefix(fqn, renames), pin])),
     edges: Object.fromEntries(Object.entries(view.edges).map(([key, bend]) => {
-      const [source = '', target = ''] = key.split('->')
+      const [source, target] = splitEdgeKey(key)
       return [edgeKey(mapPrefix(source, renames), mapPrefix(target, renames)), bend]
     })),
   }]))

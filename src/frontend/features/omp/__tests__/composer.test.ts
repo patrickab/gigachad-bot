@@ -1,22 +1,20 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Attachment, ModelsResponse } from "@/lib/domain/types"
-import { composerFor, composerImageFile, mergeRestoredText, ompModelOf, ompPrompt, ompSelectorModels, selectorModelId, shellHint, type ComposerState } from "../composer"
+import { composerImageFile, isComposerOf, mergeRestoredText, ompModelOf, ompPrompt, ompSelectorModels, selectorModelId, shellHint } from "../composer"
 
-const state = (sessionId: string | null): ComposerState => ({ type: "composer", sessionId, streaming: false, model: null, thinkingLevel: "auto", thinkingLevels: [] })
-
-describe("composerFor", () => {
+describe("isComposerOf", () => {
   it("matches the session a view shows", () => {
-    expect(composerFor({ kind: "session", sessionId: "a" }, state("a"))).toEqual(state("a"))
-    expect(composerFor({ kind: "session", sessionId: "a" }, state("b"))).toBeNull()
+    expect(isComposerOf({ kind: "session", sessionId: "a" }, "a")).toBe(true)
+    expect(isComposerOf({ kind: "session", sessionId: "a" }, "b")).toBe(false)
   })
 
   it("matches the new-session screen only to a composer without session", () => {
-    expect(composerFor({ kind: "new", cwd: "/repo" }, state(null))).toEqual(state(null))
-    expect(composerFor({ kind: "new", cwd: "/repo" }, state("a"))).toBeNull()
+    expect(isComposerOf({ kind: "new", cwd: "/repo" }, null)).toBe(true)
+    expect(isComposerOf({ kind: "new", cwd: "/repo" }, "a")).toBe(false)
   })
 
   it("never offers a composer on the settings view", () => {
-    expect(composerFor({ kind: "settings" }, state(null))).toBeNull()
+    expect(isComposerOf({ kind: "settings" }, null)).toBe(false)
   })
 })
 

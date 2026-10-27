@@ -15,6 +15,8 @@ import { architectureSource, isArchitecturePath } from "@/lib/domain/architectur
 import { renderCanvasTextToJpeg } from "@/lib/domain/canvasRender"
 import type { ProjectDocument } from "@/lib/domain/types"
 import { baseName } from "@/lib/paths"
+import { errorMessage } from "@/lib/utils"
+import { useEventListener } from "@/hooks/useEventListener"
 
 /** Own the document picker: project and global lists, selection into chat attachments, and the Alt+X shortcut. */
 export function useProjectDocuments({
@@ -84,7 +86,7 @@ export function useProjectDocuments({
       const attachment = await uploadFile(chatId, file, projectSlug)
       chatInputRef.current?.addAttachment({ ...attachment, content })
     } catch (cause) {
-      setArchitectureError(cause instanceof Error ? cause.message : "Could not attach architecture")
+      setArchitectureError(errorMessage(cause, "Could not attach architecture"))
     } finally {
       setExtracting((count) => count - 1)
     }
@@ -103,21 +105,16 @@ export function useProjectDocuments({
     } catch { }
   }, [projectSlug, refreshDocuments])
 
-  useEffect(() => {
-    if (!isActive || appMode !== "chat") return
-    const onKey = (e: KeyboardEvent) => {
-      // Alt+X toggles the document picker
-      if (e.altKey && (e.key === "x" || e.key === "X")) {
-        e.preventDefault()
-        setDocumentOpen((open) => {
-          if (!open) refreshDocuments()
-          return !open
-        })
-      }
+  useEventListener("window", "keydown", (e) => {
+    // Alt+X toggles the document picker
+    if (e.altKey && (e.key === "x" || e.key === "X")) {
+      e.preventDefault()
+      setDocumentOpen((open) => {
+        if (!open) refreshDocuments()
+        return !open
+      })
     }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [isActive, appMode, refreshDocuments])
+  }, { active: isActive && appMode === "chat" })
 
   return {
     documentOpen,

@@ -1,6 +1,7 @@
 "use client"
 
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react"
+import { createContext, useCallback, useMemo, useState, type ReactNode } from "react"
+import { useRequiredContext } from "@/hooks/useRequiredContext"
 
 interface MemoryViewerContextState {
   isOpen: boolean
@@ -11,9 +12,7 @@ interface MemoryViewerContextState {
 const MemoryViewerContext = createContext<MemoryViewerContextState | null>(null)
 
 export function useMemoryViewer(): MemoryViewerContextState {
-  const ctx = useContext(MemoryViewerContext)
-  if (!ctx) throw new Error("useMemoryViewer must be used within MemoryViewerProvider")
-  return ctx
+  return useRequiredContext(MemoryViewerContext, "useMemoryViewer must be used within MemoryViewerProvider")
 }
 
 /** Owns whether the central memory window is open. */

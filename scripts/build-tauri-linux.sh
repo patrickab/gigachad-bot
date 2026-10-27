@@ -15,21 +15,17 @@ fi
 
 # mksquashfs: linuxdeploy's appimage plugin shells out to it to build the
 # .AppImage.
-for bin_pkg in mksquashfs:squashfs-tools; do
-  bin="${bin_pkg%%:*}"
-  pkg="${bin_pkg##*:}"
-  if ! command -v "$bin" >/dev/null 2>&1; then
-    echo "$bin not found; installing $pkg..." >&2
-    if command -v pacman >/dev/null 2>&1; then
-      sudo pacman -S --needed --noconfirm "$pkg"
-    elif command -v apt-get >/dev/null 2>&1; then
-      sudo apt-get update && sudo apt-get install -y "$pkg"
-    else
-      echo "Unsupported package manager: install $pkg manually." >&2
-      exit 1
-    fi
+if ! command -v mksquashfs >/dev/null 2>&1; then
+  echo "mksquashfs not found; installing squashfs-tools..." >&2
+  if command -v pacman >/dev/null 2>&1; then
+    sudo pacman -S --needed --noconfirm squashfs-tools
+  elif command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get update && sudo apt-get install -y squashfs-tools
+  else
+    echo "Unsupported package manager: install squashfs-tools manually." >&2
+    exit 1
   fi
-done
+fi
 
 mkdir -p "$binary_dir"
 mkdir -p "$build_dir"

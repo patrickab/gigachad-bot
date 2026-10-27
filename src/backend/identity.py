@@ -11,9 +11,10 @@ import os
 from dataclasses import dataclass
 from uuid import UUID
 
-from fastapi import Header, HTTPException
+from fastapi import Depends, Header, HTTPException
+from fastapi.params import Depends as DependsMarker
 
-from config import get_postgres_pool
+from config import get_postgres_pool, is_development
 
 # Granted in the tailnet policy file: the holder acts as the host user (omp, Neovim, every file outside the mounts).
 HOST_CAPABILITY = "gigachad.local/cap/host"
@@ -29,9 +30,7 @@ class RequestIdentity:
 
 
 def _development_login() -> str | None:
-    if os.environ.get("GIGACHAD_ENV") == "development":
-        return os.environ.get("GIGACHAD_DEV_USER")
-    return None
+    return os.environ.get("GIGACHAD_DEV_USER") if is_development() else None
 
 
 def is_host_capability_granted(capabilities_header: str | None) -> bool:
@@ -86,3 +85,18 @@ def get_request_identity(
     return RequestIdentity(
         user_id=user_id, login=login, device_id=parsed_device_id, has_host_access=has_host_access(login, capabilities_header)
     )
+
+
+def host_denied(feature: str) -> str:
+    """The refusal message for *feature* when the login lacks `HOST_CAPABILITY`."""
+    return f"{feature} is limited to logins granted {HOST_CAPABILITY}"
+
+
+def host_access_only(feature: str) -> DependsMarker:
+    """Router dependency refusing logins without the host capability, for features that act on the machine owner's host."""
+
+    def require_host_access(identity: RequestIdentity = Depends(get_request_identity)) -> None:
+        if not identity.has_host_access:
+            raise HTTPException(status_code=403, detail=host_denied(feature))
+
+    return Depends(require_host_access)

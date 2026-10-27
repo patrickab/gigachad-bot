@@ -1,6 +1,6 @@
 // The graph the architecture surface draws, and the adapter between it and LikeC4:
 // a parsed view becomes a graph, and an edited graph becomes operations for the C4 service.
-import type { ArchitectureOperation, ArchitectureView, NodePin } from "@/lib/domain/architecture"
+import type { ArchitectureOperation, ArchitectureView } from "@/lib/domain/architecture"
 
 export interface DiagramNode {
   /** Element FQN, or a DRAFT_PREFIX id for a drawn node that has no title yet. */
@@ -90,10 +90,7 @@ export function fitGraph(nodes: DiagramNode[], minWidth: (node: DiagramNode) => 
     const parent = node.parent && byId.has(node.parent) ? node.parent : null
     children.set(parent, [...children.get(parent) ?? [], node.id])
   }
-  const rect = (id: string) => {
-    const node = byId.get(id)!
-    return { x: node.position.x, y: node.position.y, width: node.width, height: node.height }
-  }
+  const rect = (id: string) => rectOf(byId.get(id)!)
   const shift = (id: string, dx: number) => {
     const node = byId.get(id)!
     byId.set(id, { ...node, position: { x: node.position.x + dx, y: node.position.y } })
@@ -148,7 +145,7 @@ interface GraphChange {
   rejected: string | null
 }
 
-const rectOf = (node: DiagramNode): NodePin => ({ x: node.position.x, y: node.position.y, width: node.width, height: node.height })
+const rectOf = (node: DiagramNode) => ({ x: node.position.x, y: node.position.y, width: node.width, height: node.height })
 
 /**
  * Turns one surface edit into operations. A delete names only the nodes and

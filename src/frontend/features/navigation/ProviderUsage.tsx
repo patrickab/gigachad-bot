@@ -1,8 +1,9 @@
 "use client"
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useStoredString } from "@/hooks/useStoredString"
 import { fetchProviderUsage, type ProviderUsageReport } from "@/lib/backend/api"
 
 const REFRESH_INTERVAL_MS = 5 * 60_000
@@ -57,19 +58,13 @@ function AccountRow({ report }: { report: ProviderUsageReport }) {
   </div>
 }
 
-const OPEN_EVENT = "provider-usage-open"
-
-function subscribeOpen(callback: () => void) {
-  window.addEventListener(OPEN_EVENT, callback)
-  return () => window.removeEventListener(OPEN_EVENT, callback)
-}
-
 /** Five-hour subscription usage with muted meters, expandable for other limits and reset times. */
 export function ProviderUsage() {
   const [reports, setReports] = useState<ProviderUsageReport[] | null>(null)
   const [failed, setFailed] = useState(false)
   const [loading, setLoading] = useState(false)
-  const open = useSyncExternalStore(subscribeOpen, () => localStorage.getItem(OPEN_STORAGE_KEY) === "true", () => false)
+  const [storedOpen, setOpen] = useStoredString(OPEN_STORAGE_KEY)
+  const open = storedOpen === "true"
 
   const load = useCallback((forced: boolean) => fetchProviderUsage(forced).then(
     (usage) => { setReports(usage.reports.filter((report) => !report.no_limits)); setFailed(false) },
@@ -96,7 +91,7 @@ export function ProviderUsage() {
     <div className="relative flex h-6 items-center px-2">
       <button
         aria-expanded={open}
-        onClick={() => { localStorage.setItem(OPEN_STORAGE_KEY, String(!open)); window.dispatchEvent(new Event(OPEN_EVENT)) }}
+        onClick={() => setOpen(String(!open))}
         className="flex min-w-0 flex-1 items-center justify-between gap-2 text-xs text-ink-subtle hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
       >
         <span className="font-medium">Usage</span>

@@ -4,7 +4,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useSta
 import { createPortal } from "react-dom"
 import { motion } from "framer-motion"
 import { ArrowUp, Loader2, Plus, LayoutGrid, Mic, Square, Pencil } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { blobToDataUrl, cn } from "@/lib/utils"
 import { attachReference, uploadFile as apiUploadFile } from "@/lib/backend/api"
 import { readReferences, saveAttachmentEdit, withReferenceRead } from "@/features/chat/attachments"
 import type { Attachment } from "@/lib/domain/types"
@@ -81,15 +81,6 @@ interface SpeechRecognitionLike {
 
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike
 
-async function toDataUrl(url: string): Promise<string> {
-  const blob = await (await fetch(url)).blob()
-  return new Promise<string>((resolve) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result as string)
-    reader.readAsDataURL(blob)
-  })
-}
-
 const ICON_BUTTON = "rounded-full p-1.5 text-ink-faint transition-colors hover:bg-surface-elevated hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted disabled:opacity-30"
 /** Send and stop share one circle: raised surface when actionable, outlined when not. */
 const SEND_BUTTON = "ml-1.5 flex h-8 w-8 items-center justify-center rounded-full border transition-all duration-200 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-ink-muted"
@@ -127,8 +118,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const [uploadingNames, setUploadingNames] = useState<Set<string>>(new Set())
   const [showTools, setShowTools] = useState(false)
   const [showAttachMenu, setShowAttachMenu] = useState(false)
-  const [showDrawing, setShowDrawing] = useState(false)
-  const [drawingOcrActive, setDrawingOcrActive] = useState(false)
+  const [drawing, setDrawing] = useState<null | "attach" | "ocr">(null)
   const [drawingOcrImage, setDrawingOcrImage] = useState<string | null>(null)
   // Name of the draft attachment whose full preview is open. Earlier messages' chips open the chat's preview.
   const [previewName, setPreviewName] = useState<string | null>(null)
@@ -148,16 +138,16 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`
   }, [])
 
-  const uploadFiles = useCallback((files: File[]) => {
-    for (const file of files) {
-      const name = file.name
-      setUploadingNames(prev => new Set(prev).add(name))
-      apiUploadFile(chatId, file, slug)
-        .then(att => setAttachments(prev => [...prev, att]))
-        .catch(() => {})
-        .finally(() => setUploadingNames(prev => { const n = new Set(prev); n.delete(name); return n }))
-    }
+  const upload = useCallback((file: File, name: string) => {
+    setUploadingNames(prev => new Set(prev).add(name))
+    apiUploadFile(chatId, file, slug)
+      .then(att => setAttachments(prev => [...prev, att]))
+      .catch(() => {})
+      .finally(() => setUploadingNames(prev => { const n = new Set(prev); n.delete(name); return n }))
   }, [chatId, slug])
+  const uploadFiles = useCallback((files: File[]) => {
+    for (const file of files) upload(file, file.name)
+  }, [upload])
 
   const replaceText = useCallback((next: string) => {
     setText(next)
@@ -218,16 +208,11 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
         e.preventDefault()
         const blob = item.getAsFile()
         if (!blob) continue
-        const name = blob.name || `pasted-image.${item.type.split("/")[1] || "png"}`
-        setUploadingNames(prev => new Set(prev).add(name))
-        apiUploadFile(chatId, blob, slug)
-          .then(att => setAttachments(prev => [...prev, att]))
-          .catch(() => {})
-          .finally(() => setUploadingNames(prev => { const n = new Set(prev); n.delete(name); return n }))
+        upload(blob, blob.name || `pasted-image.${item.type.split("/")[1] || "png"}`)
         break
       }
     }
-  }, [chatId, slug])
+  }, [upload])
 
   // Stale `recognitionRef` checks ignore events from a recognizer that was already replaced or stopped
   const toggleListening = useCallback(() => {
@@ -278,6 +263,12 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     }
     setPreviewName(attachment.name)
   }
+
+  const menuItems: (AttachMenuItem & { iconClassName?: string })[] = [
+    ...attachMenuItems,
+    { label: "Drawing", icon: Pencil, onClick: () => setDrawing("attach") },
+    { label: "Drawing (OCR)", icon: Pencil, onClick: () => setDrawing("ocr"), iconClassName: "text-ink" },
+  ]
 
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mx-auto w-full max-w-2xl">
@@ -342,27 +333,15 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                 </button>
                 {showAttachMenu && (
                   <div className="absolute bottom-full left-0 mb-2 w-48 rounded-xl border border-divider bg-paper p-2 shadow-[var(--shadow-xl)]">
-                    {attachMenuItems.map(({ label, icon: Icon, onClick }) => (
+                    {menuItems.map(({ label, icon: Icon, onClick, iconClassName = "text-ink-muted" }) => (
                       <button
                         key={label}
                         onClick={() => { setShowAttachMenu(false); onClick() }}
                         className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-ink hover:bg-surface-elevated/50 transition-colors"
                       >
-                        <Icon className="h-3.5 w-3.5 text-ink-muted" />{label}
+                        <Icon className={`h-3.5 w-3.5 ${iconClassName}`} />{label}
                       </button>
                     ))}
-                    <button
-                      onClick={() => { setShowAttachMenu(false); setShowDrawing(true) }}
-                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-ink hover:bg-surface-elevated/50 transition-colors"
-                    >
-                      <Pencil className="h-3.5 w-3.5 text-ink-muted" />Drawing
-                    </button>
-                    <button
-                      onClick={() => { setShowAttachMenu(false); setDrawingOcrActive(true); setShowDrawing(true) }}
-                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs text-ink hover:bg-surface-elevated/50 transition-colors"
-                    >
-                      <Pencil className="h-3.5 w-3.5 text-ink" />Drawing (OCR)
-                    </button>
                   </div>
                 )}
               </div>
@@ -378,12 +357,11 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                 </button>
                 {showTools && (
                   <div className="absolute bottom-full right-0 mb-2 w-56 rounded-xl border border-divider bg-paper p-2 shadow-[var(--shadow-xl)]">
-                    <ToolMenuSection title="Tools" first>
+                    <ToolMenuSection title="Tools">
                       {toolEntries.map(t => (
                         <ToolMenuItem key={t.id} icon={t.icon} label={t.label} active={t.enabled} onClick={t.toggle} />
                       ))}
                     </ToolMenuSection>
-
                   </div>
                 )}
               </div>}
@@ -418,23 +396,25 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             </div>
           </div>
         </div>
-      {showDrawing && (
+      {drawing && (
         <DrawingCanvas
           chatId={chatId}
           onConfirm={(att) => {
-            setShowDrawing(false)
+            const mode = drawing
+            setDrawing(null)
 
             // OCR drawings go to the OCR panel instead of being attached directly
-            if (drawingOcrActive) {
-              setDrawingOcrActive(false)
-              toDataUrl(att.url)
-                .then(b64 => setDrawingOcrImage(b64))
+            if (mode === "ocr") {
+              fetch(att.url)
+                .then(response => response.blob())
+                .then(blobToDataUrl)
+                .then(setDrawingOcrImage)
                 .catch(() => {})
             } else {
               setAttachments(prev => [...prev, att])
             }
           }}
-          onClose={() => { setShowDrawing(false); setDrawingOcrActive(false) }}
+          onClose={() => setDrawing(null)}
         />
       )}
       {drawingOcrImage && createPortal(

@@ -6,54 +6,22 @@ parse is persisted into the requesting user's Postgres library cache; the
 on-disk Nextcloud mirror is a write-only convenience copy, never read back.
 """
 
-import os
 from pathlib import Path
-from uuid import uuid4
 
-from psycopg_pool import ConnectionPool
 import pytest
 
 import lib.extract_queue as extract_queue
 from lib.asset_store import AssetStore
 from lib.attachment_materialize import library_markdown_key
-from lib.db_schema import upgrade
+from tests.conftest import create_user_and_device
 
-
-@pytest.fixture(scope="module")
-def postgres_pool():
-    url = os.environ.get("POSTGRES_TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("POSTGRES_TEST_DATABASE_URL is required")
-    upgrade(url)
-    pool = ConnectionPool(url, min_size=1, max_size=4)
-    yield pool
-    pool.close()
-
-
-@pytest.fixture(autouse=True)
-def clean_database(postgres_pool):
-    with postgres_pool.connection() as connection, connection.transaction():
-        connection.execute("TRUNCATE changes, assets, vault_roots, devices, documents, users CASCADE")
+pytestmark = pytest.mark.usefixtures("clean_database", "documents_root")
 
 
 @pytest.fixture
 def assets(postgres_pool):
-    device_id = uuid4()
-    with postgres_pool.connection() as connection, connection.transaction():
-        user_id = connection.execute(
-            "INSERT INTO users (tailscale_login) VALUES (%s) RETURNING id", ("alice@example.test",)
-        ).fetchone()[0]
-        connection.execute("INSERT INTO devices (id, user_id) VALUES (%s, %s)", (device_id, user_id))
+    user_id, device_id = create_user_and_device(postgres_pool)
     return AssetStore(postgres_pool, user_id, device_id=device_id)
-
-
-@pytest.fixture(autouse=True)
-def documents_root(tmp_path, monkeypatch):
-    import lib.attachment_materialize as attachment_materialize
-
-    root = tmp_path / "Documents"
-    monkeypatch.setattr(attachment_materialize, "DOCUMENTS", root, raising=True)
-    return root
 
 
 async def test_worker_persists_a_finished_parse_into_postgres(tmp_path, assets, monkeypatch):
@@ -90,4 +58,3 @@ async def test_worker_survives_a_failed_parse(assets, monkeypatch):
     await extract_queue.stop()
 
     assert assets.list("Mineru") == []
-    assert extract_queue.status() == {"in_progress": None, "queued": 0}

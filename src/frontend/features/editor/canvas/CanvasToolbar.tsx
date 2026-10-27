@@ -1,9 +1,10 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useCallback, useMemo, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from "react"
 import { createPortal } from "react-dom"
-import { Camera, CircleDashed, Eraser, Highlighter, PenLine, Redo2, Undo2 } from "lucide-react"
+import { Camera, CircleDashed, Eraser, Highlighter, PenLine, Redo2, Undo2, type LucideIcon } from "lucide-react"
 import { DEFAULT_PEN_COLOR, HIGHLIGHT_COLORS, PRESET_COLORS, inkColor, strokeWidth, type InkTool, type StrokeSize } from "@/features/editor/canvas/ink/canvasInk"
+import { useOutsidePress } from "@/hooks/useOutsidePress"
 import { cn } from "@/lib/utils"
 
 /** Header elements the canvas toolbar portals into: drawing tools left, view and history controls right. */
@@ -27,15 +28,7 @@ function ColorPicker({ color, onChange, presets = PRESET_COLORS }: {
   // close on outside click, skip if the native picker is active
   const nativePickerOpen = useRef(false)
 
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: MouseEvent) => {
-      if (nativePickerOpen.current) return
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener("mousedown", handler)
-    return () => document.removeEventListener("mousedown", handler)
-  }, [open])
+  useOutsidePress(ref, () => { if (!nativePickerOpen.current) setOpen(false) }, { active: open })
 
   const pick = (c: string, close = true) => {
     onChange(c)
@@ -94,7 +87,7 @@ function ColorPicker({ color, onChange, presets = PRESET_COLORS }: {
 const NEXT_SIZE: Record<StrokeSize, StrokeSize> = { thin: "medium", medium: "thick", thick: "thin" }
 
 /** Pen and highlighter settings behind `InkTools`. `color` and `width` are what a new stroke gets. */
-export interface InkSettings {
+interface InkSettings {
   tool: InkTool | null
   toggleTool: (tool: InkTool) => void
   clearTool: () => void
@@ -129,15 +122,9 @@ export function useInkSettings(): InkSettings {
 export function InkTools({ ink }: { ink: InkSettings }) {
   return (
     <>
-      <button aria-label="Pen" aria-pressed={ink.tool === "pen"} onClick={() => ink.toggleTool("pen")} className={toolButton(ink.tool === "pen")}>
-        <PenLine className="h-3.5 w-3.5" />
-      </button>
-      <button aria-label="Highlighter" aria-pressed={ink.highlighting} onClick={() => ink.toggleTool("highlighter")} className={toolButton(ink.highlighting)}>
-        <Highlighter className="h-3.5 w-3.5" />
-      </button>
-      <button aria-label="Eraser" aria-pressed={ink.tool === "eraser"} onClick={() => ink.toggleTool("eraser")} className={toolButton(ink.tool === "eraser")}>
-        <Eraser className="h-3.5 w-3.5" />
-      </button>
+      <ToolButton icon={PenLine} label="Pen" toggle active={ink.tool === "pen"} onClick={() => ink.toggleTool("pen")} />
+      <ToolButton icon={Highlighter} label="Highlighter" toggle active={ink.highlighting} onClick={() => ink.toggleTool("highlighter")} />
+      <ToolButton icon={Eraser} label="Eraser" toggle active={ink.tool === "eraser"} onClick={() => ink.toggleTool("eraser")} />
       {SEPARATOR}
       <button aria-label="Change stroke width" onClick={ink.cycleSize} className={toolButton(false)}>
         <svg width="10" height="10" viewBox="0 0 10 10" className="shrink-0">
@@ -168,6 +155,36 @@ interface CanvasToolbarProps {
 
 export const toolButton = (active: boolean) => cn("rounded p-1 transition-colors", active ? "text-ink bg-hover" : "text-ink-subtle hover:text-ink hover:bg-hover")
 
+/** Icon-only toolbar button. `active` styles it as the selected tool, `toggle` also reports that as aria-pressed. */
+export function ToolButton({ icon: Icon, label, active = false, toggle = false, ...props }: {
+  icon: LucideIcon
+  label: string
+  active?: boolean
+  toggle?: boolean
+} & Omit<ButtonHTMLAttributes<HTMLButtonElement>, "aria-label" | "aria-pressed" | "className" | "children">) {
+  return (
+    <button type="button" aria-label={label} aria-pressed={toggle ? active : undefined} className={toolButton(active)} {...props}>
+      <Icon className="h-3.5 w-3.5" />
+    </button>
+  )
+}
+
+/** Undo and Redo, with `separator` between them. */
+export function UndoRedoButtons({ onUndo, onRedo, canUndo, canRedo, separator }: {
+  onUndo: () => void
+  onRedo: () => void
+  canUndo: boolean
+  canRedo: boolean
+  separator?: ReactNode
+}) {
+  const historyButton = (label: string, Icon: LucideIcon, onClick: () => void, enabled: boolean) => (
+    <button aria-label={label} onClick={onClick} disabled={!enabled} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors">
+      <Icon className="h-3.5 w-3.5" />
+    </button>
+  )
+  return <>{historyButton("Undo", Undo2, onUndo, canUndo)}{separator}{historyButton("Redo", Redo2, onRedo, canRedo)}</>
+}
+
 /** Drawing tools on the left, view and history controls on the right. */
 export function CanvasToolbar({
   slots, addMenu, ink, tool, onToggleTool, isErasing, selectedCount,
@@ -179,9 +196,7 @@ export function CanvasToolbar({
       {SEPARATOR}
       <InkTools ink={ink} />
       {SEPARATOR}
-      <button aria-label="Select on canvas" onClick={() => onToggleTool("select")} className={toolButton(tool === "select")}>
-        <CircleDashed className="h-3.5 w-3.5" />
-      </button>
+      <ToolButton icon={CircleDashed} label="Select on canvas" active={tool === "select"} onClick={() => onToggleTool("select")} />
       {isErasing && <span className="text-[10px] text-ink-faint ml-1">(eraser)</span>}
       {tool === "select" && <span className="text-[10px] text-ink-faint ml-1">(draw a lasso to select)</span>}
       {selectedCount > 0 && <span className="text-[10px] text-ink-faint ml-1">({selectedCount} selected — drag, resize or Esc)</span>}
@@ -191,25 +206,9 @@ export function CanvasToolbar({
   const viewTools = (
     <div className="flex items-center gap-1 shrink-0">
       {tool === "screenshot" && <span className="text-[10px] text-ink-faint mr-1">(drag to capture)</span>}
-      <button aria-label="Capture canvas" onClick={() => onToggleTool("screenshot")} className={toolButton(tool === "screenshot")}>
-        <Camera className="h-3.5 w-3.5" />
-      </button>
+      <ToolButton icon={Camera} label="Capture canvas" active={tool === "screenshot"} onClick={() => onToggleTool("screenshot")} />
       {SEPARATOR}
-      <button aria-label="Undo"
-        onClick={onUndo}
-        disabled={!canUndo}
-        className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors"
-      >
-        <Undo2 className="h-3.5 w-3.5" />
-      </button>
-      {SEPARATOR}
-      <button aria-label="Redo"
-        onClick={onRedo}
-        disabled={!canRedo}
-        className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover disabled:opacity-30 transition-colors"
-      >
-        <Redo2 className="h-3.5 w-3.5" />
-      </button>
+      <UndoRedoButtons onUndo={onUndo} onRedo={onRedo} canUndo={canUndo} canRedo={canRedo} separator={SEPARATOR} />
       {SEPARATOR}
       <span className="text-[10px] text-ink-faint tabular-nums">{zoomPercent}%</span>
     </div>

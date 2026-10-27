@@ -14,20 +14,12 @@
 set -euo pipefail
 
 root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+source "$root_dir/deploy/lib.sh"
 bind="${GIGACHAD_OMP_WEB_BIND:-127.0.0.1:30177}"
 repo="${GIGACHAD_OMP_WEB_REPO:-$HOME/git/ompweb}"
 dir="${GIGACHAD_OMP_WEB_DIR:-$HOME/.local/share/gigachad-bot/ompweb}"
 ref="${GIGACHAD_OMP_WEB_REF:-custom}"
 frame_ancestors="${GIGACHAD_OMP_WEB_FRAME_ANCESTORS:-http://127.0.0.1:2999 http://localhost:2999}"
-
-port_open() {
-    local host="${1%%:*}" port="${1##*:}"
-    if (exec 3<>"/dev/tcp/$host/$port") 2>/dev/null; then
-        exec 3<&- 3>&-
-        return 0
-    fi
-    return 1
-}
 
 # The first listed origin must appear in the served CSP, else the frame stays blank.
 allows_framing() {

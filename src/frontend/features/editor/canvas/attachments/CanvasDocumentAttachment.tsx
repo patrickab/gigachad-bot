@@ -6,6 +6,7 @@ import { HostScaleContext } from "@/contexts/HostScaleContext"
 import type { PlotFigure } from "@/lib/domain/types"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
 import { PlotElement } from "@/components/content/PlotElement"
+import { LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
 
 // A document attachment is a read-only view of a generated chat artifact — a Mermaid
 // or markmap note rendered through the shared markdown renderer, or a Plotly figure
@@ -49,7 +50,7 @@ export function CanvasDocumentAttachment({ path, hostScale, plotFrame, collapsed
     return () => { alive = false }
   }, [path])
 
-  if (state.status === "loading") return <div className="flex h-full items-center justify-center text-[10px] text-ink-faint">Loading…</div>
+  if (state.status === "loading") return <LoadingPlaceholder size="fill" />
   if (state.status === "error") return <div className="flex h-full items-center justify-center px-3 text-center text-[10px] text-ink-faint">{state.message}</div>
   if (state.status === "plot") {
     if (!plotFrame) return <div className="h-full overflow-auto p-2"><PlotElement figure={state.figure} /></div>

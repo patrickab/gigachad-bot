@@ -8,7 +8,8 @@ from pathlib import Path
 import subprocess
 from typing import Literal
 
-GIT_TIMEOUT_SECONDS = 10
+from lib.git import run_git
+
 MAX_DIFF_BYTES = 1_000_000
 
 ChangeStatus = Literal["modified", "added", "deleted", "renamed", "untracked", "conflict"]
@@ -25,12 +26,7 @@ class ChangedFile:
 
 
 def _git(directory: Path, *args: str) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(directory), *args],
-        capture_output=True, text=True, timeout=GIT_TIMEOUT_SECONDS, check=True,
-        env={**os.environ, "LC_ALL": "C"},
-    )
-    return result.stdout
+    return run_git(directory, *args).stdout
 
 
 def _repository_root(directory: Path) -> Path | None:
@@ -125,6 +121,17 @@ def _find_change(directory: Path, relative_path: str) -> ChangedFile | None:
     return next((file for file in changed_files(directory) or [] if file.path == relative_path), None)
 
 
+def _read_text_candidate(target: Path) -> bytes | None:
+    """Bytes of a file small enough and free of NUL bytes to diff as text, else None."""
+    try:
+        if target.stat().st_size > MAX_DIFF_BYTES:
+            return None
+        content = target.read_bytes()
+    except OSError:
+        return None
+    return None if b"\0" in content else content
+
+
 def file_patch(directory: Path, relative_path: str) -> tuple[ChangeStatus, str] | None:
     """Unified patch of one changed file against HEAD, None when it is unchanged, binary or too large."""
     change = _find_change(directory, relative_path)
@@ -132,13 +139,8 @@ def file_patch(directory: Path, relative_path: str) -> tuple[ChangeStatus, str] 
         return None
     target = directory / relative_path
     if change.status == "untracked" or (change.status == "added" and not _has_head(directory)):
-        try:
-            if target.stat().st_size > MAX_DIFF_BYTES:
-                return None
-            content = target.read_bytes()
-        except OSError:
-            return None
-        if b"\0" in content:
+        content = _read_text_candidate(target)
+        if content is None:
             return None
         return change.status, _added_file_patch(relative_path, content.decode("utf-8", errors="replace"))
     paths = [change.original_path, relative_path] if change.original_path else [relative_path]
@@ -181,13 +183,8 @@ def _parse_numstat(output: str) -> dict[str, tuple[int, int]]:
 
 def _added_line_count(target: Path) -> tuple[int, int] | None:
     """Line count of a file that is new, None when `file_patch` would show no text diff."""
-    try:
-        if target.stat().st_size > MAX_DIFF_BYTES:
-            return None
-        content = target.read_bytes()
-    except OSError:
-        return None
-    if b"\0" in content:
+    content = _read_text_candidate(target)
+    if content is None:
         return None
     return content.count(b"\n") + (0 if not content or content.endswith(b"\n") else 1), 0
 
@@ -223,19 +220,14 @@ class UnsupportedDiffContent(ValueError):
 def _head_blob(repository: Path, repository_path: str) -> bytes:
     """Bytes of *repository_path* at HEAD; empty when HEAD or the path does not exist there."""
     spec = f"HEAD:{repository_path}"
-    env = {**os.environ, "LC_ALL": "C", "GIT_EXTERNAL_DIFF": "", "GIT_LITERAL_PATHSPECS": "1"}
-    base = ["git", "--no-pager", "-C", str(repository)]
+    env = {"GIT_EXTERNAL_DIFF": "", "GIT_LITERAL_PATHSPECS": "1"}
     try:
-        size = subprocess.run(
-            [*base, "cat-file", "-s", spec], capture_output=True, text=True, timeout=GIT_TIMEOUT_SECONDS, check=True, env=env,
-        ).stdout.strip()
+        size = run_git(repository, "--no-pager", "cat-file", "-s", spec, env=env).stdout.strip()
     except subprocess.CalledProcessError:
         return b""
     if int(size) > MAX_DIFF_BYTES:
         raise UnsupportedDiffContent("File is too large for a native diff")
-    return subprocess.run(
-        [*base, "cat-file", "blob", spec], capture_output=True, timeout=GIT_TIMEOUT_SECONDS, check=True, env=env,
-    ).stdout
+    return run_git(repository, "--no-pager", "cat-file", "blob", spec, text=False, env=env).stdout
 
 
 def _decode(data: bytes) -> str:

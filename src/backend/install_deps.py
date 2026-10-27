@@ -9,19 +9,24 @@ import sys
 NODE_VERSION = "26.10.0"
 
 
+def _fail_unless_repairable(result: subprocess.CompletedProcess[str], is_lock_failure: bool) -> None:
+    """Print a failed command's output, then raise unless this is a stale lock outside production."""
+    print(result.stdout, end="", flush=True)
+    print(result.stderr, end="", file=sys.stderr, flush=True)
+    if os.environ.get("GIGACHAD_ENV") == "production" or not is_lock_failure:
+        result.check_returncode()
+
+
 def sync_python_lock(project_dir: Path) -> None:
     """Refresh stale development locks without upgrading unchanged dependencies."""
     result = subprocess.run(["uv", "lock", "--check"], cwd=project_dir, capture_output=True, text=True)
     if result.returncode == 0:
         return
-    print(result.stdout, end="", flush=True)
-    print(result.stderr, end="", file=sys.stderr, flush=True)
-    is_lock_failure = (
+    _fail_unless_repairable(
+        result,
         "error: The lockfile at `uv.lock` needs to be updated, but `--check` was provided." in result.stderr
-        or "error: Unable to find lockfile at `uv.lock`, but `--check` was provided." in result.stderr
+        or "error: Unable to find lockfile at `uv.lock`, but `--check` was provided." in result.stderr,
     )
-    if os.environ.get("GIGACHAD_ENV") == "production" or not is_lock_failure:
-        result.check_returncode()
     print(f"Refreshing development lock: {project_dir / 'uv.lock'}. Review and commit the changes.", flush=True)
     subprocess.run(["uv", "lock"], cwd=project_dir, check=True)
     subprocess.run(["uv", "lock", "--check"], cwd=project_dir, check=True)
@@ -36,19 +41,14 @@ def sync_npm_dependencies(project_dir: Path, npm_path: str = "npm") -> None:
     if result.returncode == 0:
         print(f"Installed locked npm dependencies: {project_dir}", flush=True)
         return
-    print(result.stdout, end="", flush=True)
-    print(result.stderr, end="", file=sys.stderr, flush=True)
     try:
         error = json.loads(result.stdout).get("error", {})
     except json.JSONDecodeError:
-        result.check_returncode()
-        return
-    is_lock_failure = error.get("code") == "EUSAGE" and error.get("summary", "").startswith((
+        error = {}
+    _fail_unless_repairable(result, error.get("code") == "EUSAGE" and error.get("summary", "").startswith((
         "`npm ci` can only install packages when your package.json and package-lock.json or npm-shrinkwrap.json are in sync.",
         "The `npm ci` command can only install with an existing package-lock.json or",
-    ))
-    if os.environ.get("GIGACHAD_ENV") == "production" or not is_lock_failure:
-        result.check_returncode()
+    )))
     print(f"Refreshing development npm lock in {project_dir}. Review and commit the changes.", flush=True)
     subprocess.run([npm_path, "install", "--package-lock-only", *install_options], cwd=project_dir, check=True)
     subprocess.run([npm_path, "ci", *install_options], cwd=project_dir, check=True)

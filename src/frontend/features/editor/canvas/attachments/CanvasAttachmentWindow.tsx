@@ -3,8 +3,10 @@
 import { useState, type ReactNode } from "react"
 import { FileType, Maximize2, Minimize2, SquarePen, X } from "lucide-react"
 import { CANVAS_ASPECT, type CanvasAttachment } from "@/lib/domain/canvasDocument"
+import type { Point } from "@/lib/domain/edgeRouting"
 import { cn } from "@/lib/utils"
 import { ArchitectureWindow } from "@/features/editor/architecture/ArchitectureWindow"
+import { CanvasResizeHandle } from "@/features/editor/canvas/CanvasResizeHandle"
 import { AnnotatedPdfViewer } from "@/features/editor/pdf/AnnotatedPdfViewer"
 import { CanvasDocumentAttachment } from "./CanvasDocumentAttachment"
 
@@ -17,7 +19,7 @@ interface CanvasAttachmentWindowProps {
   /** Effective canvas zoom, the zoom it last settled at, and pan: the window is positioned HTML over the SVG. */
   scale: number
   settledScale: number
-  offset: { x: number; y: number }
+  offset: Point
   /** Height / width of a PDF page, until measured a fallback. */
   pdfAspect: number
   /** Blown up over the whole surface; fullscreen only restyles this wrapper so the editor inside keeps its state. */
@@ -146,16 +148,7 @@ export function CanvasAttachmentWindow({
           />
         )}
       </div>
-      {!full && (
-        <div
-          className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize"
-          onPointerDown={(e) => { e.stopPropagation(); onDragStart("resize", e.clientX, e.clientY) }}
-        >
-          <svg className="w-full h-full text-ink-faint" viewBox="0 0 16 16">
-            <path d="M14 2L2 14M14 6L6 14M14 10L10 14" stroke="currentColor" strokeWidth="1.5" fill="none" />
-          </svg>
-        </div>
-      )}
+      {!full && <CanvasResizeHandle className="w-4 h-4" onDragStart={onDragStart} />}
     </div>
   )
 }

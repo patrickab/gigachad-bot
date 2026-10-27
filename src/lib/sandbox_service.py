@@ -13,7 +13,6 @@ import hashlib
 import json
 import logging
 import os
-import tempfile
 import time
 from typing import Any, Literal
 
@@ -31,7 +30,7 @@ from agent_sandbox import (
 )
 from agent_sandbox.manifest import Artifact, Outputs
 
-from lib.agent_sandbox_adapter import SandboxRunner
+from lib.agent_sandbox_adapter import SandboxRunner, write_temp_tar
 from lib.asset_store import AssetStore
 from lib.data_store import DataStore, StorageNotFoundError
 from lib.sandbox_store import RunRecord, SandboxStore
@@ -154,6 +153,17 @@ def _discard_restore(restore: WorkspaceArchive | None) -> None:
             os.unlink(restore.path)
 
 
+def _failed_result(prior_manifest: SandboxManifest | None, error: str) -> SandboxToolResult:
+    """The result of a run that could not complete, still pointing at the manifest it started from."""
+    return SandboxToolResult(
+        "failed",
+        "The workspace agent could not complete this run.",
+        prior_manifest.manifest_id if prior_manifest else None,
+        False,
+        error=error,
+    )
+
+
 def _result_from_record(record: RunRecord) -> SandboxToolResult:
     if record.result is None:
         return SandboxToolResult(
@@ -217,17 +227,31 @@ class SandboxService:
         scoped_chat = f"{scope}:{chat_id}"
         return f"{self._slot_prefix}:{scoped_chat}" if self._slot_prefix else scoped_chat
 
-    @property
-    def model(self) -> str:
-        """Name the configured sandbox model."""
-        return self._model
-
     def _store_for(self, scope: str) -> SandboxStore:
         return SandboxStore(self._data_store, scope=scope)
 
     async def run_script(self, script: str, *, interpreter: str = "venv", timeout: float = SCRIPT_TIMEOUT_SECONDS) -> str:
         """Run one throwaway script with no workspace or secrets."""
         return await self._runner.run_script(script, profile=self._profile, interpreter=interpreter, timeout=timeout)
+
+    @staticmethod
+    def _replay_or_busy(store: SandboxStore, staged: _StagedState, chat_id: str, tool_call_id: str) -> SandboxToolResult | None:
+        """The recorded result of a finished call, None when the call must run. Raises while it is still running."""
+        staged_record = staged.runs.get(tool_call_id)
+        if staged_record is not None:
+            return _result_from_record(staged_record)
+
+        existing = store.read_run(chat_id, tool_call_id)
+        if existing is not None and existing.status == "running":
+            recovered = store.recover_completed_run(chat_id, tool_call_id)
+            if recovered is not None:
+                return _result_from_record(recovered)
+        if existing is not None and existing.status != "running":
+            return _result_from_record(existing)
+        # Fresh running record means a live run. Stale ones fall through and re-run.
+        if existing is not None and time.time() - existing.started_at < STALE_RUN_TIMEOUT_SECONDS:
+            raise SandboxBusyError(f"sandbox run {tool_call_id} is already in progress")
+        return None
 
     async def invoke(
         self,
@@ -254,21 +278,8 @@ class SandboxService:
         lock = await self._runtime.lock(slot_key)
         async with lock:
             staged = self._runtime.stage(slot_key)
-            # Replay of a finished call returns the recorded result instead of re-running.
-            staged_record = staged.runs.get(tool_call_id)
-            if staged_record is not None:
-                return _result_from_record(staged_record)
-
-            existing = store.read_run(chat_id, tool_call_id)
-            if existing is not None and existing.status == "running":
-                recovered = store.recover_completed_run(chat_id, tool_call_id)
-                if recovered is not None:
-                    return _result_from_record(recovered)
-            if existing is not None and existing.status != "running":
-                return _result_from_record(existing)
-            # Fresh running record means a live run. Stale ones fall through and re-run.
-            if existing is not None and time.time() - existing.started_at < STALE_RUN_TIMEOUT_SECONDS:
-                raise SandboxBusyError(f"sandbox run {tool_call_id} is already in progress")
+            if (replayed := self._replay_or_busy(store, staged, chat_id, tool_call_id)) is not None:
+                return replayed
 
             prior_manifest = staged.manifest
             started_at = time.time()
@@ -310,22 +321,10 @@ class SandboxService:
                 raise
             except SandboxServiceError:
                 logger.exception("sandbox run %s produced an incoherent manifest for slot %s", tool_call_id, slot_key)
-                result = SandboxToolResult(
-                    "failed",
-                    "The workspace agent could not complete this run.",
-                    prior_manifest.manifest_id if prior_manifest else None,
-                    False,
-                    error="invalid_manifest",
-                )
+                result = _failed_result(prior_manifest, "invalid_manifest")
             except Exception:  # noqa: BLE001 - contain runner failures within this tool call
                 logger.exception("sandbox runner failed for slot %s run %s", slot_key, tool_call_id)
-                result = SandboxToolResult(
-                    "failed",
-                    "The workspace agent could not complete this run.",
-                    prior_manifest.manifest_id if prior_manifest else None,
-                    False,
-                    error="runner_error",
-                )
+                result = _failed_result(prior_manifest, "runner_error")
             finally:
                 _discard_restore(restore)
                 if run is not None:
@@ -371,15 +370,7 @@ class SandboxService:
                 raise SandboxServiceError(f"workspace snapshot {sha256} is unavailable") from exc
         if content is None:
             raise SandboxServiceError(f"workspace snapshot {sha256} is unavailable")
-        fd, path = tempfile.mkstemp(prefix="gigachad-sandbox-restore-", suffix=".tar")
-        try:
-            with os.fdopen(fd, "wb") as archive:
-                archive.write(content)
-        except BaseException:
-            with suppress(FileNotFoundError):
-                os.unlink(path)
-            raise
-        return WorkspaceArchive(path, sha256)
+        return WorkspaceArchive(write_temp_tar(content, "gigachad-sandbox-restore-"), sha256)
 
     def _accept_run(self, run: SandboxRun, staged: _StagedState, *, tool_call_id: str) -> SandboxToolResult:
         """Persist outputs now and stage workspace bytes until checkpointing."""

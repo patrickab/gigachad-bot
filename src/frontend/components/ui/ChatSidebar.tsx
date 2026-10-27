@@ -1,8 +1,8 @@
 "use client"
 
 import { useState, type ReactNode } from "react"
-import { PanelRight, PanelRightClose } from "lucide-react"
 import { AssistantChat, type AssistantChatState } from "@/components/content/AssistantChat"
+import { PanelToggleButton } from "@/components/ui/PanelToggleButton"
 import { SidePanelFrame } from "@/components/ui/SidePanel"
 
 /** Opening width, narrow so the main content keeps the space. */
@@ -12,15 +12,7 @@ const TOP_GAP_PX = 8
 
 /** Mirror of the left sidebar toggle: on the top bar's grid while closed, in the panel's top-left corner while open. */
 function ChatSidebarToggle({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
-  return (
-    <button
-      aria-label={open ? "Close chat" : "Open chat"}
-      onClick={() => onOpenChange(!open)}
-      className="shrink-0 rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
-    >
-      {open ? <PanelRightClose className="h-4 w-4" /> : <PanelRight className="h-4 w-4" />}
-    </button>
-  )
+  return <PanelToggleButton open={open} onClick={() => onOpenChange(!open)} openLabel="Open chat" closeLabel="Close chat" />
 }
 
 /**

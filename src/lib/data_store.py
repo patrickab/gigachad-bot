@@ -105,9 +105,6 @@ class DataStorePath:
         parent = PurePosixPath(self.key).parent.as_posix()
         return DataStorePath(self.store, "" if parent == "." else parent)
 
-    def resolve(self) -> "DataStorePath":
-        return self
-
     def relative_to(self, other: "DataStorePath") -> PurePosixPath:
         if self.store is not other.store:
             raise ValueError("Paths belong to different data stores")
@@ -132,9 +129,6 @@ class DataStorePath:
 
     def _children(self, recursive: bool) -> list["DataStorePath"]:
         return [DataStorePath(self.store, entry.key) for entry in self.store.list(self.key, recursive=recursive)]
-
-    def iterdir(self):
-        return iter(self._children(False))
 
     def glob(self, pattern: str):
         """List direct children, matching on name only."""
@@ -178,6 +172,23 @@ def read_text(store: DataStore, key: str) -> tuple[str, Revision]:
 
 def write_text(store: DataStore, key: str, content: str, *, expected: Revision | None = None) -> Revision:
     return store.write_bytes(key, content.encode("utf-8"), expected=expected)
+
+
+def read_text_or(store: DataStore, key: str, default: str | None = None) -> str | None:
+    """Text stored at *key*, or *default* when the key does not exist."""
+    try:
+        return read_text(store, key)[0]
+    except StorageNotFoundError:
+        return default
+
+
+def overwrite_text(store: DataStore, key: str, content: str) -> Revision:
+    """Write *content* over the current value of *key*, guarded by the revision read just before."""
+    try:
+        revision = read_text(store, key)[1]
+    except StorageNotFoundError:
+        revision = None
+    return write_text(store, key, content, expected=revision)
 
 
 def validate_key(key: str, *, allow_empty: bool = False) -> str:

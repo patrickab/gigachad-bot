@@ -4,6 +4,8 @@
 - Failures are one of three exceptions the routes map to HTTP: unreachable 503, unknown shape 502, refusal passed through
 """
 
+import os
+
 import httpx
 from pydantic import TypeAdapter, ValidationError
 
@@ -24,6 +26,11 @@ class UpstreamRequestFailed(Exception):
     def __init__(self, status: int, message: str) -> None:
         super().__init__(message)
         self.status = status
+
+
+def upstream_url(env: str, default: str) -> str:
+    """Base URL from environment variable *env*, else *default*, without a trailing slash."""
+    return os.environ.get(env, default).rstrip("/")
 
 
 def _error_message(response: httpx.Response) -> str:

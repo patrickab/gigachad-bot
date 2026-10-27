@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react"
 import { setApiBase } from "@/lib/backend/config"
+import { errorMessage } from "@/lib/utils"
 
 interface BackendInfo {
   baseUrl: string
@@ -27,7 +28,7 @@ export function DesktopBackendProvider({ children }: { children: ReactNode }) {
         setState("ready")
       })
       .catch((reason: unknown) => {
-        setError(reason instanceof Error ? reason.message : String(reason))
+        setError(errorMessage(reason, String(reason)))
         setState("error")
       })
   }, [])

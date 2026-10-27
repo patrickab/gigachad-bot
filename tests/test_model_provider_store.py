@@ -1,11 +1,6 @@
-import os
-from uuid import uuid4
-
-from psycopg_pool import ConnectionPool
 import pytest
 
 from lib.data_store import StorageError
-from lib.db_schema import upgrade
 from lib.model_provider_store import (
     DEFAULT_MODEL_DEFAULTS,
     MODEL_DEFAULTS_FILE,
@@ -15,27 +10,12 @@ from lib.model_provider_store import (
     providers_for_ui,
 )
 from lib.postgres_data_store import PostgresDataStore
-
-
-@pytest.fixture(scope="module")
-def postgres_pool():
-    url = os.environ.get("POSTGRES_TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("POSTGRES_TEST_DATABASE_URL is required for Postgres-backed model provider store tests")
-    upgrade(url)
-    pool = ConnectionPool(url, min_size=1, max_size=4)
-    yield pool
-    pool.close()
+from tests.conftest import create_user
 
 
 @pytest.fixture
-def postgres_store(postgres_pool):
-    with postgres_pool.connection() as connection, connection.transaction():
-        connection.execute("TRUNCATE changes, assets, vault_roots, devices, documents, users CASCADE")
-        user_id = connection.execute(
-            "INSERT INTO users (tailscale_login) VALUES (%s) RETURNING id", (f"test-{uuid4()}@example.test",)
-        ).fetchone()[0]
-    return PostgresDataStore(postgres_pool, user_id)
+def postgres_store(postgres_pool, clean_database):
+    return PostgresDataStore(postgres_pool, create_user(postgres_pool))
 
 
 def test_provider_catalog_round_trips_yaml_and_rejects_duplicates(postgres_store):

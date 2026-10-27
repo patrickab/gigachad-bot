@@ -4,6 +4,7 @@ import { useState } from "react"
 import { FilePlus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { SaveAsModal } from "@/components/ui/SaveAsModal"
+import { useResetOnOpen } from "@/hooks/useResetOnChange"
 
 type DocType = "md" | "tex" | "canvas" | "c4"
 
@@ -18,13 +19,9 @@ interface CreateDocumentPanelProps {
 /** Modal that picks a document type and name, passing the full filename to `onCreate`. */
 export function CreateDocumentPanel({ open, onClose, onCreate }: CreateDocumentPanelProps) {
   const [type, setType] = useState<DocType>("md")
-  const [wasOpen, setWasOpen] = useState(open)
 
   // Reset to the default type each time the modal opens
-  if (open !== wasOpen) {
-    setWasOpen(open)
-    if (open) setType("md")
-  }
+  useResetOnOpen(open, () => setType("md"))
 
   const ext = `.${type}`
 

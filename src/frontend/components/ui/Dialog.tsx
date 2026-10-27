@@ -2,6 +2,7 @@
 
 import { useEffect, type ElementType, type ReactNode, type RefObject } from "react"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
+import { ModalBackdrop } from "@/components/ui/ModalBackdrop"
 import { motion, AnimatePresence } from "framer-motion"
 
 const DEFAULT_PANEL_CLASS = "rounded-xl border border-divider bg-paper shadow-[var(--shadow-xl)]"
@@ -34,14 +35,7 @@ export function Dialog({ open, onClose, icon: Icon, title, initialFocusRef, pane
   return (
     <AnimatePresence>
       {open && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.15 }}
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-backdrop backdrop-blur-[2px]"
-          onClick={onClose}
-        >
+        <ModalBackdrop onClose={onClose} className="z-[100]">
           <motion.div
             initial={{ opacity: 0, scale: 0.96, y: 8 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -58,7 +52,7 @@ export function Dialog({ open, onClose, icon: Icon, title, initialFocusRef, pane
             </div>
             {children}
           </motion.div>
-        </motion.div>
+        </ModalBackdrop>
       )}
     </AnimatePresence>
   )

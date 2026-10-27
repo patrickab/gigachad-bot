@@ -4,6 +4,8 @@ import { useState, useRef, type ElementType, type ReactNode } from "react"
 import { Save } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Dialog } from "./Dialog"
+import { ErrorText } from "./ErrorText"
+import { useResetOnOpen } from "@/hooks/useResetOnChange"
 
 interface SaveAsModalProps {
   open: boolean
@@ -24,14 +26,10 @@ interface SaveAsModalProps {
 /** Modal with one text input; Enter submits the trimmed value. */
 export function SaveAsModal({ open, onClose, onSave, title = "Save Chat", icon = Save, placeholder, beforeInput, initialName = "", pending = false, error, submitLabel }: SaveAsModalProps) {
   const [name, setName] = useState(initialName)
-  const [wasOpen, setWasOpen] = useState(open)
   const inputRef = useRef<HTMLInputElement>(null)
 
   // Reset to the supplied name on each opening.
-  if (open !== wasOpen) {
-    setWasOpen(open)
-    if (open) setName(initialName)
-  }
+  useResetOnOpen(open, () => setName(initialName))
 
   return (
     <Dialog open={open} onClose={onClose} icon={icon} title={title} initialFocusRef={inputRef}>
@@ -59,7 +57,7 @@ export function SaveAsModal({ open, onClose, onSave, title = "Save Chat", icon =
           autoComplete="off"
           spellCheck={false}
         />
-        {error && <p role="alert" className="mt-2 text-xs text-danger">{error}</p>}
+        <ErrorText className="mt-2">{error}</ErrorText>
         {submitLabel && <button type="submit" disabled={pending || !name.trim()} className="mt-3 rounded-md px-3 py-1.5 text-sm text-ink hover:bg-hover disabled:opacity-40">{pending ? "Renaming…" : submitLabel}</button>}
       </form>
     </Dialog>

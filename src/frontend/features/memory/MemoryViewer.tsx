@@ -9,7 +9,7 @@ import { useProject } from "@/contexts/ProjectContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { getMemories, getTopics, regroupMemories, saveMemories, saveTopics } from "@/lib/backend/api"
-import { cn } from "@/lib/utils"
+import { errorMessage, toggled, cn } from "@/lib/utils"
 import { EditableText } from "@/features/memory/EditableText"
 import { formatTopicHeading, groupByTopicOrder, newManualMemoryId, normalizeMemoryTopic, topicNameFromTitle } from "@/features/memory/memoryUtils"
 import { useChatColumnPadding } from "@/features/memory/useChatColumnPadding"
@@ -27,7 +27,7 @@ interface ScopeMemory {
 }
 
 type ScopeContent = Pick<ScopeMemory, "topics" | "memories">
-type ScopeChange = (scope: ScopeMemory) => ScopeContent
+type ScopeChange = (scope: ScopeMemory) => Partial<ScopeContent>
 
 interface TopicRow {
   topic: MemoryTopic
@@ -120,7 +120,7 @@ function useMemoryLibrary() {
         latest.current = loaded
         setScopes(loaded)
       })
-      .catch((e) => { if (!cancelled) setError((e as Error)?.message || "Failed to load memory") })
+      .catch((e) => { if (!cancelled) setError(errorMessage(e, "Failed to load memory")) })
     return () => { cancelled = true }
   }, [targets])
 
@@ -143,7 +143,7 @@ function useMemoryLibrary() {
   }, [])
 
   const reportError = useCallback((e: unknown) => {
-    setError(`Could not save memory: ${(e as Error)?.message || "unknown error"}`)
+    setError(`Could not save memory: ${errorMessage(e, "unknown error")}`)
   }, [])
 
   const update = useCallback((key: string, apply: ScopeChange) => {
@@ -166,65 +166,68 @@ function MemoryWindow({ onClose }: { onClose: () => void }) {
   // Projects holding memories start expanded, empty ones collapsed.
   const expandedScopes = expanded ?? new Set(scopes?.filter((s) => s.memories.length > 0).map((s) => s.key))
 
+  const scopeOf = useCallback((key: string) => scopes?.find((s) => s.key === key), [scopes])
+
+  /** Remove content optimistically; the delete is written when the undo window ends, `restore` puts it back and writes again. */
+  const removeWithUndo = useCallback((scopeKey: string, undoKey: string, label: string, remove: ScopeChange, restore: ScopeChange) => {
+    change(scopeKey, remove)
+    schedule(undoKey, label, () => save(scopeKey), () => {
+      change(scopeKey, restore)
+      save(scopeKey).catch(reportError)
+    })
+  }, [change, save, schedule, reportError])
+
   const deleteTopic = useCallback((scopeKey: string, name: string) => {
-    const scope = scopes?.find((s) => s.key === scopeKey)
+    const scope = scopeOf(scopeKey)
     if (!scope) return
     const topicIndex = scope.topics.findIndex((t) => t.name === name)
     const removedTopic = scope.topics[topicIndex]
     const removedMemories = scope.memories.filter((m) => normalizeMemoryTopic(m) === name)
-    change(scopeKey, (s) => ({
+    removeWithUndo(scopeKey, `memory-topic:${scopeKey}:${name}`, formatTopicHeading(name), (s) => ({
       topics: s.topics.filter((t) => t.name !== name),
       memories: s.memories.filter((m) => normalizeMemoryTopic(m) !== name),
-    }))
-    back()
-    schedule(`memory-topic:${scopeKey}:${name}`, formatTopicHeading(name), () => save(scopeKey), () => {
-      change(scopeKey, (s) => {
-        const topics = [...s.topics]
-        if (removedTopic) topics.splice(Math.min(topicIndex, topics.length), 0, removedTopic)
-        return { topics, memories: [...s.memories, ...removedMemories] }
-      })
-      save(scopeKey).catch(reportError)
+    }), (s) => {
+      const topics = [...s.topics]
+      if (removedTopic) topics.splice(Math.min(topicIndex, topics.length), 0, removedTopic)
+      return { topics, memories: [...s.memories, ...removedMemories] }
     })
-  }, [scopes, change, save, schedule, reportError, back])
+    back()
+  }, [scopeOf, removeWithUndo, back])
 
   const deleteMemory = useCallback((scopeKey: string, memoryId: string) => {
-    const scope = scopes?.find((s) => s.key === scopeKey)
+    const scope = scopeOf(scopeKey)
     const index = scope?.memories.findIndex((m) => m.id === memoryId) ?? -1
     if (!scope || index < 0) return
     const removed = scope.memories[index]
-    change(scopeKey, (s) => ({ topics: s.topics, memories: s.memories.filter((m) => m.id !== memoryId) }))
-    schedule(`memory:${memoryId}`, "memory", () => save(scopeKey), () => {
-      change(scopeKey, (s) => {
-        const memories = [...s.memories]
-        memories.splice(Math.min(index, memories.length), 0, removed)
-        return { topics: s.topics, memories }
-      })
-      save(scopeKey).catch(reportError)
+    removeWithUndo(scopeKey, `memory:${memoryId}`, "memory", (s) => ({ memories: s.memories.filter((m) => m.id !== memoryId) }), (s) => {
+      const memories = [...s.memories]
+      memories.splice(Math.min(index, memories.length), 0, removed)
+      return { memories }
     })
-  }, [scopes, change, save, schedule, reportError])
+  }, [scopeOf, removeWithUndo])
 
   const createTopic = useCallback((scopeKey: string, title: string): string | void => {
-    const scope = scopes?.find((s) => s.key === scopeKey)
+    const scope = scopeOf(scopeKey)
     const name = topicNameFromTitle(title)
     if (!scope || !name) return
     if (topicNames(scope).includes(name)) return "A topic with this name exists"
-    update(scopeKey, (s) => ({ topics: [...s.topics, { name, summary: "" }], memories: s.memories }))
+    update(scopeKey, (s) => ({ topics: [...s.topics, { name, summary: "" }] }))
     setView({ kind: "topic", scopeKey, name })
-  }, [scopes, update])
+  }, [scopeOf, update])
 
   const startRegroup = useCallback((scopeKey: string) => {
-    const scope = scopes?.find((s) => s.key === scopeKey)
+    const scope = scopeOf(scopeKey)
     if (!scope) return
     setView({ kind: "regroup", scopeKey, proposal: null })
     regroupMemories(scope.scope, scope.projectSlug)
       .then((proposal) => setView((current) => current.kind === "regroup" && current.scopeKey === scopeKey ? { ...current, proposal } : current))
       .catch((e) => {
-        setError(`Could not regroup: ${(e as Error)?.message || "unknown error"}`)
+        setError(`Could not regroup: ${errorMessage(e, "unknown error")}`)
         setView((current) => current.kind === "regroup" && current.scopeKey === scopeKey ? { kind: "overview" } : current)
       })
-  }, [scopes, setError])
+  }, [scopeOf, setError])
 
-  const activeScope = view.kind !== "overview" ? scopes?.find((s) => s.key === view.scopeKey) : undefined
+  const activeScope = view.kind !== "overview" ? scopeOf(view.scopeKey) : undefined
   const activeRow = activeScope && view.kind === "topic" ? topicRows(activeScope).find((row) => row.topic.name === view.name) : undefined
 
   let content
@@ -255,14 +258,13 @@ function MemoryWindow({ onClose }: { onClose: () => void }) {
           }))
           setView({ kind: "topic", scopeKey: activeScope.key, name: target })
         }}
-        onSummary={(summary) => update(activeScope.key, (s) => ({ topics: patchTopic(s.topics, name, { summary }), memories: s.memories }))}
+        onSummary={(summary) => update(activeScope.key, (s) => ({ topics: patchTopic(s.topics, name, { summary }) }))}
         onAddMemory={(text) => {
           const now = new Date().toISOString()
           const memory: StoredMemory = { id: newManualMemoryId(), text, topic: name, scope: activeScope.scope, created_at: now, updated_at: now }
           update(activeScope.key, (s) => ({ topics: patchTopic(s.topics, name, {}), memories: [...s.memories, memory] }))
         }}
         onEditMemory={(id, text) => update(activeScope.key, (s) => ({
-          topics: s.topics,
           memories: s.memories.map((m) => m.id === id ? { ...m, text, updated_at: new Date().toISOString() } : m),
         }))}
         onMoveMemory={(id, topic) => update(activeScope.key, (s) => ({
@@ -287,22 +289,13 @@ function MemoryWindow({ onClose }: { onClose: () => void }) {
           <Overview
             scopes={scopes}
             expanded={expandedScopes}
-            onToggle={(key) => setExpanded(() => {
-              const next = new Set(expandedScopes)
-              if (next.has(key)) next.delete(key)
-              else next.add(key)
-              return next
-            })}
+            onToggle={(key) => setExpanded(toggled(expandedScopes, key))}
             onOpen={(scopeKey, name) => setView({ kind: "topic", scopeKey, name })}
             onCreate={createTopic}
             onDelete={deleteTopic}
             onRegroup={startRegroup}
           />
-        ) : !library.error ? (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="h-4 w-4 animate-spin text-ink-muted" aria-label="Loading memory" />
-          </div>
-        ) : null}
+        ) : !library.error ? <Spinner label="Loading memory" /> : null}
       </>
     )
   }
@@ -418,6 +411,15 @@ function TopicListRow({ row, indent, onOpen, onDelete }: {
         className="mr-2 rounded-md p-1.5 text-ink-subtle opacity-0 transition-opacity hover:text-danger group-hover/row:opacity-100 focus-visible:opacity-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">
         <Trash2 className="h-3.5 w-3.5" />
       </button>
+    </div>
+  )
+}
+
+/** Centered loading indicator of a memory view. */
+function Spinner({ label }: { label: string }) {
+  return (
+    <div className="flex items-center justify-center py-16">
+      <Loader2 className="h-4 w-4 animate-spin text-ink-muted" aria-label={label} />
     </div>
   )
 }
@@ -564,11 +566,7 @@ function RegroupPage({ scope, proposal, onBack, onApply }: {
             </section>
           ))}
         </div>
-      ) : (
-        <div className="flex items-center justify-center py-16">
-          <Loader2 className="h-4 w-4 animate-spin text-ink-muted" aria-label="Regrouping" />
-        </div>
-      )}
+      ) : <Spinner label="Regrouping" />}
     </div>
   )
 }

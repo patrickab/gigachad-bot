@@ -1,6 +1,7 @@
 "use client"
 
 import { createContext, useCallback, useContext, useEffect, useEffectEvent, useId, useMemo, useRef, useState, type ReactNode } from "react"
+import { errorMessage } from "@/lib/utils"
 
 const STARTUP_TIMEOUT_MS = 15_000
 
@@ -79,7 +80,7 @@ export function useStartupRead<T>(label: string, load: (signal: AbortSignal) => 
         if (disposed) return
         attempt.abort()
         failed = true
-        const error = cause instanceof Error ? cause.message : "The backend request failed."
+        const error = errorMessage(cause, "The backend request failed.")
         setState({ loading: false, error })
         report(id, { label, error, loading: false, retry })
       } finally {

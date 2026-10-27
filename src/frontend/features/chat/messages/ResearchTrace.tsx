@@ -1,7 +1,8 @@
 "use client"
 
 import { memo, useState, useCallback } from "react"
-import { ChevronDown, ChevronRight, Clock, Search, Globe, FileText, Bot, Zap, DollarSign, Layers } from "lucide-react"
+import { ChevronDown, ChevronRight, Clock, Search, Globe, FileText, Bot, Zap, DollarSign, Layers, type LucideIcon } from "lucide-react"
+import { toggled } from "@/lib/utils"
 import type { ResearchTraceStep, ResearchTraceProgress } from "@/lib/domain/types"
 
 interface Props {
@@ -10,40 +11,33 @@ interface Props {
   isLive?: boolean
 }
 
-const STEP_ICONS: Record<string, React.ReactNode> = {
-  start: <Search className="h-3 w-3" />,
-  choose_agent: <Bot className="h-3 w-3" />,
-  agent_selected: <Bot className="h-3 w-3" />,
-  conducting_research: <Search className="h-3 w-3" />,
-  deep_research_initialize: <Layers className="h-3 w-3" />,
-  deep_research_start: <Layers className="h-3 w-3" />,
-  research_completed: <FileText className="h-3 w-3" />,
-  deep_research_complete: <FileText className="h-3 w-3" />,
-  writing_report: <FileText className="h-3 w-3" />,
-  report_completed: <FileText className="h-3 w-3" />,
-  writing_introduction: <FileText className="h-3 w-3" />,
-  introduction_completed: <FileText className="h-3 w-3" />,
-  writing_conclusion: <FileText className="h-3 w-3" />,
-  conclusion_completed: <FileText className="h-3 w-3" />,
-  cost_update: <DollarSign className="h-3 w-3" />,
-  planning_images: <FileText className="h-3 w-3" />,
-  images_pre_generated: <FileText className="h-3 w-3" />,
-}
-
-const TYPE_COLORS: Record<string, string> = {
-  research: "text-ink bg-surface-elevated",
-  tool: "text-ink bg-surface-elevated",
-  action: "text-ink bg-surface-elevated",
+const STEPS: Record<string, { icon: LucideIcon; label: string }> = {
+  start: { icon: Search, label: "Research started" },
+  choose_agent: { icon: Bot, label: "Selecting agent" },
+  agent_selected: { icon: Bot, label: "Agent selected" },
+  conducting_research: { icon: Search, label: "Researching..." },
+  deep_research_initialize: { icon: Layers, label: "Initializing deep research" },
+  deep_research_start: { icon: Layers, label: "Deep research started" },
+  research_completed: { icon: FileText, label: "Research completed" },
+  deep_research_complete: { icon: FileText, label: "Deep research completed" },
+  writing_report: { icon: FileText, label: "Writing report" },
+  report_completed: { icon: FileText, label: "Report completed" },
+  writing_introduction: { icon: FileText, label: "Writing introduction" },
+  introduction_completed: { icon: FileText, label: "Introduction completed" },
+  writing_conclusion: { icon: FileText, label: "Writing conclusion" },
+  conclusion_completed: { icon: FileText, label: "Conclusion completed" },
+  cost_update: { icon: DollarSign, label: "Cost update" },
+  planning_images: { icon: FileText, label: "Planning images" },
+  images_pre_generated: { icon: FileText, label: "Images generated" },
 }
 
 function stepIcon(step: string, eventType: string) {
-  if (STEP_ICONS[step]) return STEP_ICONS[step]
-  if (eventType === "tool") return <Zap className="h-3 w-3" />
-  return <Globe className="h-3 w-3" />
+  const Icon = STEPS[step]?.icon ?? (eventType === "tool" ? Zap : Globe)
+  return <Icon className="h-3 w-3" />
 }
 
 function stepColor(eventType: string) {
-  return TYPE_COLORS[eventType] || "text-ink-muted bg-hover"
+  return ["research", "tool", "action"].includes(eventType) ? "text-ink bg-surface-elevated" : "text-ink-muted bg-hover"
 }
 
 function formatTime(ts: number) {
@@ -55,14 +49,7 @@ function ResearchTraceInner({ steps = [], progress, isLive }: Props) {
   const [expanded, setExpanded] = useState(false)
   const [expandedSteps, setExpandedSteps] = useState<Set<number>>(new Set())
 
-  const toggleStep = useCallback((idx: number) => {
-    setExpandedSteps(prev => {
-      const next = new Set(prev)
-      if (next.has(idx)) next.delete(idx)
-      else next.add(idx)
-      return next
-    })
-  }, [])
+  const toggleStep = useCallback((idx: number) => setExpandedSteps(prev => toggled(prev, idx)), [])
 
   if (steps.length === 0 && !progress && !isLive) return null
 
@@ -149,29 +136,7 @@ function ResearchTraceInner({ steps = [], progress, isLive }: Props) {
 }
 
 function formatStepLabel(step: string, eventType: string): string {
-  const labels: Record<string, string> = {
-    start: "Research started",
-    choose_agent: "Selecting agent",
-    agent_selected: "Agent selected",
-    conducting_research: "Researching...",
-    deep_research_initialize: "Initializing deep research",
-    deep_research_start: "Deep research started",
-    research_completed: "Research completed",
-    deep_research_complete: "Deep research completed",
-    writing_report: "Writing report",
-    report_completed: "Report completed",
-    writing_introduction: "Writing introduction",
-    introduction_completed: "Introduction completed",
-    writing_conclusion: "Writing conclusion",
-    conclusion_completed: "Conclusion completed",
-    cost_update: "Cost update",
-    planning_images: "Planning images",
-    images_pre_generated: "Images generated",
-  }
-  if (labels[step]) return labels[step]
-  if (eventType === "tool") return `Tool: ${step}`
-  if (eventType === "action") return step
-  return step
+  return STEPS[step]?.label ?? (eventType === "tool" ? `Tool: ${step}` : step)
 }
 
 export const ResearchTrace = memo(ResearchTraceInner)

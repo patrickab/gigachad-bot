@@ -3,6 +3,7 @@
 import { Copy, Trash2 } from "lucide-react"
 import { inkColor, strokePath } from "@/features/editor/canvas/ink/canvasInk"
 import type { Poly, SelBox } from "@/features/editor/canvas/selection/canvasSelection"
+import type { Point } from "@/lib/domain/edgeRouting"
 import type { StrokeData } from "@/lib/drawing"
 
 interface CanvasSelectionOutlineProps {
@@ -66,7 +67,7 @@ export function CanvasSelectionOutline({ lasso, bounds: b, strokes, selectedIds,
 export function CanvasSelectionActions({ bounds, scale, offset, onCopy, onDelete }: {
   bounds: SelBox
   scale: number
-  offset: { x: number; y: number }
+  offset: Point
   onCopy: () => void
   onDelete: () => void
 }) {
@@ -107,7 +108,7 @@ export function CanvasLassoTrace({ points, scale }: { points: Poly; scale: numbe
 }
 
 /** Screenshot drag rectangle between two canvas points, above live attachments so it stays visible over a PDF (screen space). */
-export function CanvasScreenshotBox({ from, to, scale, offset }: { from: [number, number]; to: [number, number]; scale: number; offset: { x: number; y: number } }) {
+export function CanvasScreenshotBox({ from, to, scale, offset }: { from: [number, number]; to: [number, number]; scale: number; offset: Point }) {
   return (
     <div
       data-testid="screenshot-selection"

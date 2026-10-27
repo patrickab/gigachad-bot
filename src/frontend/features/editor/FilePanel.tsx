@@ -1,18 +1,19 @@
 "use client"
 
-import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { createContext, useCallback, useEffect, useEffectEvent, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom"
-import { PanelRight, PanelRightClose, X } from "lucide-react"
+import { X } from "lucide-react"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
-import { LazyPdfViewer } from "@/components/content/LazyPdfViewer"
+import { PanelToggleButton } from "@/components/ui/PanelToggleButton"
 import { SidePanelFrame } from "@/components/ui/SidePanel"
 import { useNeovimSetting } from "@/contexts/SettingsContext"
+import { useRequiredContext } from "@/hooks/useRequiredContext"
 import { writeRootFile } from "@/lib/backend/api"
-import { fileViewerRawUrl } from "@/lib/backend/urls"
 import { baseName, extOf, kindOf } from "@/lib/paths"
 import { cn } from "@/lib/utils"
 import { fenceCode } from "@gigachad/chat-ui"
 import { NeovimEditor, useNeovimTerminal } from "./NeovimEditor"
+import { RawFileView } from "./RawFileView"
 import { useRootFileDocument, type FileLoadFailure } from "./useRootFileDocument"
 
 /** Panel share of the width it splits with the main surface, on every open. */
@@ -34,9 +35,7 @@ interface FilePanelContextValue {
 const FilePanelContext = createContext<FilePanelContextValue | null>(null)
 
 function useFilePanelContext(): FilePanelContextValue {
-  const context = useContext(FilePanelContext)
-  if (!context) throw new Error("File panel used outside FilePanelProvider")
-  return context
+  return useRequiredContext(FilePanelContext, "File panel used outside FilePanelProvider")
 }
 
 /** Open an absolute file path in this tab's file panel. */
@@ -139,15 +138,7 @@ export function FilePanelSlot() {
 export function FilePanelToggle() {
   const { ownerId, collapsed, toggleCollapsed } = useFilePanelContext()
   if (ownerId === null) return null
-  return (
-    <button
-      aria-label={collapsed ? "Open file panel" : "Close file panel"}
-      onClick={toggleCollapsed}
-      className="shrink-0 rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors"
-    >
-      {collapsed ? <PanelRight className="h-4 w-4" /> : <PanelRightClose className="h-4 w-4" />}
-    </button>
-  )
+  return <PanelToggleButton open={!collapsed} onClick={toggleCollapsed} openLabel="Open file panel" closeLabel="Close file panel" />
 }
 
 /** Show `children` in the tab's file panel under a header with `label`, `actions` and a close button. */
@@ -159,10 +150,9 @@ export function FilePanel({ label, onClose, actions, children }: {
 }) {
   const { slot, ownerId, claim, release } = useFilePanelContext()
   const id = useId()
-  const onCloseRef = useRef(onClose)
-  useEffect(() => { onCloseRef.current = onClose }, [onClose])
+  const closeOwned = useEffectEvent(onClose)
   useEffect(() => {
-    claim(id, () => onCloseRef.current())
+    claim(id, () => closeOwned())
     return () => release(id)
   }, [id, claim, release])
 
@@ -192,17 +182,6 @@ const LOAD_MESSAGES: Record<FileLoadFailure, string> = {
 /** Markdown renders as itself, any other text as a code block highlighted by its extension. */
 function asMarkdown(path: string, content: string): string {
   return kindOf(path) === "markdown" ? content : fenceCode(extOf(path), content)
-}
-
-/** Image and PDF render from the raw file URL, the way the file finder previews them. */
-function RawFileView({ path, kind }: { path: string; kind: "image" | "pdf" }) {
-  if (kind === "pdf") return <div className="min-h-0 flex-1"><LazyPdfViewer key={path} url={fileViewerRawUrl(path)} /></div>
-  return (
-    <div className="min-h-0 flex-1 overflow-y-auto p-4">
-      {/* eslint-disable-next-line @next/next/no-img-element -- dynamic backend raw-file URL in a Tauri static export, next/image cannot optimize it */}
-      <img src={fileViewerRawUrl(path)} alt={baseName(path)} className="mx-auto max-h-full max-w-full rounded border border-divider object-contain" />
-    </div>
-  )
 }
 
 /** Show `path` (absolute, inside a file root): image and PDF as such, text in Neovim (setting on) or read-only. */

@@ -195,20 +195,16 @@ function MarkmapDiagram({ code }: { code: string }) {
 
         // Markmap's native drag and wheel controls make this a real viewport. Fit only
         // new content. A canvas resize must preserve the user's pan and zoom.
-        if (mmRef.current) {
-          await mmRef.current.setData(root)
-        } else {
-          mmRef.current = new Markmap(svgRef.current, {
-            autoFit: false,
-            duration: 300,
-            paddingX: 16,
-            initialExpandLevel: -1,
-            zoom: true,
-            pan: true,
-            color: () => linkColor,
-          })
-          await mmRef.current.setData(root)
-        }
+        mmRef.current ??= new Markmap(svgRef.current, {
+          autoFit: false,
+          duration: 300,
+          paddingX: 16,
+          initialExpandLevel: -1,
+          zoom: true,
+          pan: true,
+          color: () => linkColor,
+        })
+        await mmRef.current.setData(root)
         if (renderedRef.current?.code !== code) {
           try {
             await mmRef.current.fit()
@@ -319,25 +315,9 @@ function LaTeXMarkdownInner({
 }) {
   const components = useMemo<MarkdownComponents>(() => ({
     ...SHELL_COMPONENTS,
-    a({ children, href, title, ...props }) {
-      const num = String(children)
-      const info = citationMap?.[num]
-      if (info) {
-        return (
-          <CitationPill source={info}>
-            {children}
-          </CitationPill>
-        )
-      }
-      return (
-        <a
-          href={href}
-          title={title}
-          {...props}
-        >
-          {children}
-        </a>
-      )
+    a({ children, ...props }) {
+      const info = citationMap?.[String(children)]
+      return info ? <CitationPill source={info}>{children}</CitationPill> : <a {...props}>{children}</a>
     },
   }), [citationMap])
 

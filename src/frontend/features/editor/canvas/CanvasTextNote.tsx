@@ -1,6 +1,8 @@
 "use client"
 
 import type { CanvasText } from "@/lib/domain/canvasDocument"
+import type { Point } from "@/lib/domain/edgeRouting"
+import { CanvasResizeHandle } from "@/features/editor/canvas/CanvasResizeHandle"
 import { inkColor } from "@/features/editor/canvas/ink/canvasInk"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
 
@@ -8,7 +10,7 @@ interface CanvasTextNoteProps {
   note: CanvasText
   /** Effective canvas zoom and pan: the note is positioned HTML over the SVG. */
   scale: number
-  offset: { x: number; y: number }
+  offset: Point
   editing: boolean
   autoFocus: boolean
   onStartEditing: () => void
@@ -33,12 +35,9 @@ export function CanvasTextNote({ note: t, scale, offset, editing, autoFocus, onS
           onBlur={onBlurNote}
           onKeyDown={(e) => {
             e.stopPropagation()
-            if (e.key === "Enter" && !(e.ctrlKey || e.metaKey)) {
+            if ((e.key === "Enter" && !(e.ctrlKey || e.metaKey)) || e.key === "Escape") {
               e.preventDefault()
-              ;(e.target as HTMLTextAreaElement).blur()
-            } else if (e.key === "Escape") {
-              e.preventDefault()
-              ;(e.target as HTMLTextAreaElement).blur()
+              e.currentTarget.blur()
             }
           }}
           onPointerDown={(e) => e.stopPropagation()}
@@ -68,14 +67,7 @@ export function CanvasTextNote({ note: t, scale, offset, editing, autoFocus, onS
         onPointerDown={(e) => { e.stopPropagation(); onDragStart("move", e.clientX, e.clientY) }}
       />
       {/* resize handle (bottom-right) — broadens/elongates the box */}
-      <div
-        className="absolute bottom-0 right-0 w-3 h-3 opacity-0 group-hover/text:opacity-100 transition-opacity cursor-nwse-resize"
-        onPointerDown={(e) => { e.stopPropagation(); onDragStart("resize", e.clientX, e.clientY) }}
-      >
-        <svg className="w-full h-full text-ink-faint" viewBox="0 0 16 16">
-          <path d="M14 2L2 14M14 6L6 14M14 10L10 14" stroke="currentColor" strokeWidth="1.5" fill="none" />
-        </svg>
-      </div>
+      <CanvasResizeHandle className="w-3 h-3 opacity-0 group-hover/text:opacity-100 transition-opacity" onDragStart={onDragStart} />
     </div>
   )
 }

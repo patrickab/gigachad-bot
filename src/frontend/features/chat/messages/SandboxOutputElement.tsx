@@ -1,6 +1,6 @@
 "use client"
 
-import { memo } from "react"
+import { memo, type ReactNode } from "react"
 import { Download, FileText } from "lucide-react"
 import { sandboxAssetUrl } from "@/lib/backend/urls"
 import type { PlotFigure, SandboxOutputRecord } from "@/lib/domain/types"
@@ -22,6 +22,20 @@ function parsePlotFigure(text: string): PlotFigure | null {
   }
 }
 
+/** Underlined new-tab link to a sandbox asset, with `tone` setting its text size and color. */
+function AssetLink({ assetPath, tone, children }: { assetPath: string; tone: string; children: ReactNode }) {
+  return (
+    <a
+      href={sandboxAssetUrl(assetPath)}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={`flex items-center gap-2 ${tone} underline decoration-divider-strong`}
+    >
+      {children}
+    </a>
+  )
+}
+
 function SandboxOutputElementInner({ output }: SandboxOutputElementProps) {
   const mediaTypes = Object.keys(output.mime_bundle)
 
@@ -41,15 +55,10 @@ function SandboxOutputElementInner({ output }: SandboxOutputElementProps) {
   if (mediaTypes.includes("application/pdf")) {
     const ref = output.mime_bundle["application/pdf"]
     return (
-      <a
-        href={sandboxAssetUrl(ref.asset_path)}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="flex items-center gap-2 text-sm text-ink underline decoration-divider-strong"
-      >
+      <AssetLink assetPath={ref.asset_path} tone="text-sm text-ink">
         <FileText className="h-3.5 w-3.5" aria-hidden="true" />
         {output.title ?? "Open PDF"}
-      </a>
+      </AssetLink>
     )
   }
 
@@ -61,15 +70,10 @@ function SandboxOutputElementInner({ output }: SandboxOutputElementProps) {
   const ref = first ? output.mime_bundle[first] : null
   if (!ref) return null
   return (
-    <a
-      href={sandboxAssetUrl(ref.asset_path)}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="flex items-center gap-2 text-[10px] text-ink-faint underline decoration-divider-strong"
-    >
+    <AssetLink assetPath={ref.asset_path} tone="text-[10px] text-ink-faint">
       <Download className="h-3 w-3" aria-hidden="true" />
       {output.title ?? first} · {ref.size_bytes} bytes
-    </a>
+    </AssetLink>
   )
 }
 

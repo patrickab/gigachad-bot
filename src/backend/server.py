@@ -1,3 +1,4 @@
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 import signal
@@ -103,27 +104,24 @@ app.add_middleware(
 async def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
+
+def _json_error(status: int) -> Callable[[Request, Exception], Awaitable[JSONResponse]]:
+    async def handle(_request: Request, exc: Exception) -> JSONResponse:
+        return JSONResponse(status_code=status, content={"detail": str(exc)})
+
+    return handle
+
+
 # Architecture routes raise their store's vocabulary; map it to HTTP once here rather than per handler.
-# The subclass is registered first so Starlette's MRO lookup gives not-found a 404, not a 400.
-@app.exception_handler(ArchitectureNotFound)
-async def _architecture_not_found(_request: Request, exc: Exception) -> JSONResponse:
-    return JSONResponse(status_code=404, content={"detail": str(exc)})
-
-
-@app.exception_handler(ArchitectureError)
-async def _architecture_invalid(_request: Request, exc: Exception) -> JSONResponse:
-    return JSONResponse(status_code=400, content={"detail": str(exc)})
-
-
-@app.exception_handler(C4ServiceUnavailable)
-async def _c4_unavailable(_request: Request, exc: Exception) -> JSONResponse:
-    return JSONResponse(status_code=503, content={"detail": str(exc)})
-
-
+# Starlette resolves a handler along the exception's MRO, so a subclass entry wins over its base (not-found is 404, not 400).
 # A stale revision is a precondition failure, not a server error: the client must reload and retry.
-@app.exception_handler(StorageConflictError)
-async def _storage_conflict(_request: Request, exc: Exception) -> JSONResponse:
-    return JSONResponse(status_code=412, content={"detail": str(exc)})
+for _exception, _status in (
+    (ArchitectureNotFound, 404),
+    (ArchitectureError, 400),
+    (C4ServiceUnavailable, 503),
+    (StorageConflictError, 412),
+):
+    app.add_exception_handler(_exception, _json_error(_status))
 
 
 app.include_router(chat_router)

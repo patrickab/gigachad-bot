@@ -9,14 +9,14 @@ import { edgeKey, pinView, snapshotPath, snapshotText, type Pins, type Snapshots
 
 export type Sources = Record<string, string>
 
-export interface WorkspaceError {
+interface WorkspaceError {
   message: string
   file: string
   /** Zero-based, as LikeC4 reports it; shown to people as `line + 1`. */
   line: number
 }
 
-export interface ElementPayload {
+interface ElementPayload {
   id: string
   name: string
   kind: string
@@ -27,7 +27,7 @@ export interface ElementPayload {
   file: string | null
 }
 
-export interface NodePayload {
+interface NodePayload {
   id: string
   title: string
   kind: string
@@ -40,7 +40,7 @@ export interface NodePayload {
   height: number
 }
 
-export interface EdgePayload {
+interface EdgePayload {
   /** `source->target`: stable across parses, unlike LikeC4's hashed edge ids. */
   id: string
   source: string
@@ -51,7 +51,7 @@ export interface EdgePayload {
   bend: number | null
 }
 
-export interface ViewPayload {
+interface ViewPayload {
   id: string
   title: string
   /** The source file declaring the view; null for views LikeC4 generates, like a default `index`. */
@@ -71,7 +71,7 @@ export interface ViewPayload {
  * a system declares one top-level element, a module one element nested in
  * another file's, a view file only views; anything else is a plain file.
  */
-export interface TreeEntry {
+interface TreeEntry {
   path: string
   role: 'system' | 'module' | 'view' | 'file'
   /** The system's or module's element. */
@@ -88,7 +88,7 @@ export interface ModelPayload {
   tree: TreeEntry[]
 }
 
-export interface Rendered {
+interface Rendered {
   model: ModelPayload
   /** A snapshot file for every pinned view that still exists. */
   snapshots: Snapshots
@@ -100,8 +100,9 @@ const WORKSPACE_URI_PREFIX = '/workspace/'
 /** Predicates an editable view may use: `*` and element references, optionally with `.*`, `.**`, `._`. */
 const EDITABLE_EXPRESSIONS = new Set(['WildcardExpression', 'FqnRefExpr'])
 
-type ViewNode = AstNode & { name?: string, viewOf?: unknown, extends?: unknown, body?: { rules?: AstNode[] } }
-type PredicateNode = AstNode & { isInclude?: boolean, exprs?: ExpressionsNode }
+export type ViewNode = AstNode & { name?: string, extends?: unknown, body?: { rules?: AstNode[] } }
+export type PredicateNode = AstNode & { isInclude?: boolean, exprs?: ExpressionsNode }
+type SourceLocation = { uri: string, range: { start: { line: number, character: number } } }
 export type ExpressionsNode = AstNode & { value?: AstNode, prev?: ExpressionsNode }
 
 /** Entries of a predicate's comma list, in source order. */
@@ -212,7 +213,14 @@ export class Workspace {
     return this.computed
   }
 
-  private nodeAt(location: { uri: string, range: { start: { line: number, character: number } } }): AstNode | undefined {
+  /** The nearest `type` node at or above a `locate` result, which lands on a leaf inside it. */
+  private enclosing(location: SourceLocation | null, type: string): AstNode | undefined {
+    let node = location ? this.nodeAt(location) : undefined
+    while (node && node.$type !== type) node = node.$container
+    return node
+  }
+
+  private nodeAt(location: SourceLocation): AstNode | undefined {
     const path = this.relativePath(location.uri)
     const entry = this.documents().find((candidate) => candidate.path === path)
     if (!entry) return undefined
@@ -232,9 +240,7 @@ export class Workspace {
     const model = await this.model()
     for (const element of model.elements()) {
       const location = this.lc.languageServices.locate({ element: element.id })
-      // `locate` lands on a leaf (the name), so walk up to the `Element` node.
-      let node = location ? this.nodeAt(location) : undefined
-      while (node && node.$type !== 'Element') node = node.$container
+      const node = this.enclosing(location, 'Element')
       if (!node) continue
       this.elementNodes.set(element.id, node)
       this.fqnByNode.set(node, element.id)
@@ -250,11 +256,7 @@ export class Workspace {
   }
 
   relationNode(id: string): AstNode | undefined {
-    // `locate` lands on a leaf inside the relation, so walk up to the `Relation` node.
-    const location = this.lc.languageServices.locate({ relation: id as never })
-    let node = location ? this.nodeAt(location) : undefined
-    while (node && node.$type !== 'Relation') node = node.$container
-    return node
+    return this.enclosing(this.lc.languageServices.locate({ relation: id as never }), 'Relation')
   }
 
   async elementIds(): Promise<string[]> {

@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from config import MODEL_DEFAULT_KEYS, TEST_MODEL
-from lib import sandbox_plot, toolcalling, tools, web_search
+from lib import llm_resilience, sandbox_plot, toolcalling, tools, web_search
 from lib.agent_sandbox_adapter import SandboxScriptError
 from lib.sandbox_service import SandboxToolResult
 
@@ -321,7 +321,7 @@ def _script_reply(script: str) -> SimpleNamespace:
 async def test_sandbox_plot_treats_an_unfenced_reply_as_the_whole_script(monkeypatch: pytest.MonkeyPatch) -> None:
     """A model that forgets the fence still plots, and its code still reaches the answer round."""
     sandbox = SandboxServiceStub("unused", script_stdout='{"data": [{"type": "bar"}], "layout": {}}')
-    monkeypatch.setattr(sandbox_plot, "api_query_resilient", lambda *_a, **_k: _script_reply("print(fig.to_json())"))
+    monkeypatch.setattr(llm_resilience, "api_query_resilient", lambda *_a, **_k: _script_reply("print(fig.to_json())"))
     ctx = tools.ToolContext(
         client=ClientStub(),
         model=TEST_MODEL,
@@ -356,7 +356,7 @@ async def test_sandbox_plot_repairs_fast_script_once(
             raise SandboxScriptError("repairable script failure")
         return '{"data": [{"type": "bar"}], "layout": {}}'
 
-    monkeypatch.setattr(sandbox_plot, "api_query_resilient", reply)
+    monkeypatch.setattr(llm_resilience, "api_query_resilient", reply)
     monkeypatch.setattr(sandbox, "run_script", run_script)
     ctx = tools.ToolContext(
         client=ClientStub(),
@@ -393,7 +393,7 @@ async def test_sandbox_plot_generation_exception_hands_off_without_repair(
         generation_calls.append(kwargs)
         return RuntimeError("provider unavailable")
 
-    monkeypatch.setattr(sandbox_plot, "api_query_resilient", unavailable)
+    monkeypatch.setattr(llm_resilience, "api_query_resilient", unavailable)
     ctx = tools.ToolContext(
         client=ClientStub(),
         model=TEST_MODEL,
@@ -418,7 +418,7 @@ async def test_sandbox_plot_generation_exception_hands_off_without_repair(
 @pytest.mark.asyncio
 async def test_sandbox_plot_falls_back_to_the_agent_when_the_script_keeps_failing(monkeypatch: pytest.MonkeyPatch) -> None:
     sandbox = SandboxServiceStub('{"data": [{"type": "scatter"}], "layout": {}}', script_stdout=None)
-    monkeypatch.setattr(sandbox_plot, "api_query_resilient", lambda *_args, **_kwargs: _script_reply("print(fig.to_json())"))
+    monkeypatch.setattr(llm_resilience, "api_query_resilient", lambda *_args, **_kwargs: _script_reply("print(fig.to_json())"))
     ctx = tools.ToolContext(
         client=ClientStub(),
         model=TEST_MODEL,
@@ -552,10 +552,10 @@ def test_chat_route_streams_plain_turn_without_proxy_buffering(monkeypatch: pyte
     """The ordinary chat path uses the same unbuffered SSE contract as tool turns."""
     from fastapi.testclient import TestClient
 
-    from backend.routes import chat as chat_route
+    from backend.routes import chat as chat_route, deps
 
     monkeypatch.setattr(chat_route, "_resolve_images", lambda *_, **__: None)
-    monkeypatch.setattr(chat_route, "api_query_resilient", lambda *_, **__: iter(["First", " answer"]))
+    monkeypatch.setattr(deps, "api_query_resilient", lambda *_, **__: iter(["First", " answer"]))
 
     response = TestClient(_chat_app(monkeypatch)).post(
         "/api/chat",
@@ -621,7 +621,7 @@ async def test_mindmap_tool_returns_a_renderable_markmap(monkeypatch: pytest.Mon
         calls.append(kwargs)
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="```markmap\n# Topic\n```"))])
 
-    monkeypatch.setattr(tools, "api_query_resilient", fake_query)
+    monkeypatch.setattr(llm_resilience, "api_query_resilient", fake_query)
     context = tools.ToolContext(
         client=ClientStub(),
         model=TEST_MODEL,
@@ -645,7 +645,7 @@ async def test_diagram_tool_returns_mermaid_source_for_the_tool_card(monkeypatch
         calls.append(kwargs)
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="```diagram\nflowchart LR\nA --> B\n```"))])
 
-    monkeypatch.setattr(tools, "api_query_resilient", fake_query)
+    monkeypatch.setattr(llm_resilience, "api_query_resilient", fake_query)
     context = tools.ToolContext(
         client=ClientStub(),
         model=TEST_MODEL,
@@ -682,7 +682,7 @@ async def test_diagram_answer_round_keeps_main_system_prompt_and_rendered_source
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="```mermaid\nflowchart LR\nA --> B\n```"))])
 
     monkeypatch.setattr(toolcalling.litellm, "completion", fake_completion)
-    monkeypatch.setattr(tools, "api_query_resilient", fake_query)
+    monkeypatch.setattr(llm_resilience, "api_query_resilient", fake_query)
 
     events = await _collect(
         user_msg="Show the request lifecycle",
@@ -705,7 +705,7 @@ async def test_latex_ocr_tool_uses_the_vision_model_for_attached_images(monkeypa
         calls.append(kwargs)
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="$a^2 + b^2 = c^2$"))])
 
-    monkeypatch.setattr(tools, "api_query_resilient", fake_query)
+    monkeypatch.setattr(llm_resilience, "api_query_resilient", fake_query)
     context = tools.ToolContext(
         client=ClientStub(),
         model=TEST_MODEL,

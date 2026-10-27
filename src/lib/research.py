@@ -12,42 +12,8 @@ from typing import Any
 
 from config import OLLAMA_BASE_URL
 
-EMBEDDING_DEFAULT = "ollama:nomic-embed-text"
-RETRIEVER_DEFAULT = "duckduckgo"
-
 # GPT-Researcher reads process-wide env vars, so runs must not overlap.
 RESEARCH_ENV_LOCK = asyncio.Lock()
-
-
-def build_research_config(
-    fast_model: str,
-    smart_model: str,
-    strategic_model: str,
-    depth: int = 2,
-    breadth: int = 4,
-    reasoning_effort: str | None = None,
-    retriever: str = RETRIEVER_DEFAULT,
-    embedding: str = EMBEDDING_DEFAULT,
-) -> dict[str, Any]:
-    config: dict[str, Any] = {
-        "RETRIEVER": retriever,
-        "EMBEDDING": embedding,
-        "FAST_LLM": f"litellm:{fast_model}",
-        "SMART_LLM": f"litellm:{smart_model}",
-        "STRATEGIC_LLM": f"litellm:{strategic_model}",
-        "DEEP_RESEARCH_DEPTH": depth,
-        "DEEP_RESEARCH_BREADTH": breadth,
-    }
-    if reasoning_effort and reasoning_effort != "none":
-        config["REASONING_EFFORT"] = reasoning_effort
-    return config
-
-
-def write_research_config(config: dict[str, Any]) -> str:
-    """Write *config* to a temp JSON file and return its path. The caller deletes it."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", prefix="gpt-researcher-", delete=False) as tmp:
-        json.dump(config, tmp)
-        return tmp.name
 
 
 @contextlib.contextmanager
@@ -83,18 +49,22 @@ async def run_deep_research(
     # Imported lazily because gpt_researcher is heavy.
     from gpt_researcher import GPTResearcher
 
-    config_path = write_research_config(
-        build_research_config(
-            fast_model=fast_model or fallback_model,
-            smart_model=smart_model or fallback_model,
-            strategic_model=strategic_model or fallback_model,
-            depth=depth,
-            breadth=breadth,
-            reasoning_effort=reasoning_effort,
-        )
-    )
     # `none` means unset, and `temp_environ` skips None values.
     reasoning = reasoning_effort if reasoning_effort and reasoning_effort != "none" else None
+    config: dict[str, Any] = {
+        "RETRIEVER": "duckduckgo",
+        "EMBEDDING": "ollama:nomic-embed-text",
+        "FAST_LLM": f"litellm:{fast_model or fallback_model}",
+        "SMART_LLM": f"litellm:{smart_model or fallback_model}",
+        "STRATEGIC_LLM": f"litellm:{strategic_model or fallback_model}",
+        "DEEP_RESEARCH_DEPTH": depth,
+        "DEEP_RESEARCH_BREADTH": breadth,
+    }
+    if reasoning:
+        config["REASONING_EFFORT"] = reasoning
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", prefix="gpt-researcher-", delete=False) as tmp:
+        json.dump(config, tmp)
+    config_path = tmp.name
     async with RESEARCH_ENV_LOCK:
         try:
             with temp_environ(

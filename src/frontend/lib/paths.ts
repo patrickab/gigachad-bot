@@ -29,3 +29,6 @@ export function kindOf(path: string): FileKind {
   if (ext === "md" || ext === "markdown") return "markdown"
   return "text"
 }
+
+/** Natural, case-insensitive order for paths and file names ("file2" before "file10"). */
+export const PATH_COLLATOR = new Intl.Collator("en", { numeric: true, sensitivity: "base" })

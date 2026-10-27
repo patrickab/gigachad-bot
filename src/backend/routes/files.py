@@ -18,11 +18,6 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/files", tags=["files"])
 
 
-def upload_prefix(chat_id: str, slug: str | None) -> str:
-    """Database-native asset namespace for one chat's attachments."""
-    return chat_upload_prefix(chat_id, slug)
-
-
 def _asset_key(prefix: str, filename: str) -> str:
     """Join a client-supplied filename onto a prefix, rejecting traversal at the boundary."""
     try:
@@ -53,8 +48,16 @@ def _asset_exists(assets: AssetStore, key: str) -> bool:
     return any(asset.logical_path == key for asset in assets.list(key))
 
 
+def decode_text(content: bytes) -> str | None:
+    """The UTF-8 text of *content*, `None` when it is not valid UTF-8."""
+    try:
+        return content.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
 def delete_chat_upload_dir(chat_id: str, slug: str | None, assets: AssetStore) -> None:
-    for asset in assets.list(upload_prefix(chat_id, slug)):
+    for asset in assets.list(chat_upload_prefix(chat_id, slug)):
         assets.delete(asset.logical_path)
 
 
@@ -87,7 +90,7 @@ async def upload_file(
     content_b = await file.read()
     mime = file.content_type or "application/octet-stream"
 
-    prefix = upload_prefix(chat_id, slug)
+    prefix = chat_upload_prefix(chat_id, slug)
     deduped = file.filename if overwrite else _dedup_asset_name(assets, prefix, file.filename)
     assets.write("upload", _asset_key(prefix, deduped), content_b, mime=mime)
 
@@ -96,10 +99,7 @@ async def upload_file(
     result = AttachResult(name=deduped, mime=mime)
 
     if kind == "text":
-        try:
-            result.content = content_b.decode("utf-8")
-        except UnicodeDecodeError:
-            result.content = None
+        result.content = decode_text(content_b)
     elif kind == "pdf":
         # Mirror immediately: a PDF must reach Nextcloud whether or not the
         # user ever sends/parses it, and MinerU needs a real file to read.
@@ -113,7 +113,7 @@ async def _parse_assets(assets: AssetStore, filenames: list[str], chat_id: str, 
 
     The PDF library row is already written by `upload_file`, MinerU only needs a real file in a temp dir.
     """
-    prefix = upload_prefix(chat_id, slug)
+    prefix = chat_upload_prefix(chat_id, slug)
     results: list[AttachResult] = []
     with tempfile.TemporaryDirectory() as tmpdir:
         work = Path(tmpdir)
@@ -146,15 +146,9 @@ async def _parse_assets(assets: AssetStore, filenames: list[str], chat_id: str, 
                     parsed_md = md_path.read_text(encoding="utf-8")
                 assets.write("upload", _sidecar_key(key), parsed_md.encode("utf-8"), mime="text/markdown")
                 results.append(AttachResult(name=filename, mime=file_mime, parsedMd=parsed_md))
-            elif kind == "text":
-                try:
-                    parsed_md = (asset.content or b"").decode("utf-8")
-                except UnicodeDecodeError:
-                    results.append(AttachResult(name=filename, mime=file_mime))
-                else:
-                    results.append(AttachResult(name=filename, mime=file_mime, parsedMd=parsed_md))
             else:
-                results.append(AttachResult(name=filename, mime=file_mime))
+                parsed_md = decode_text(asset.content or b"") if kind == "text" else None
+                results.append(AttachResult(name=filename, mime=file_mime, parsedMd=parsed_md))
     return results
 
 
@@ -175,7 +169,7 @@ async def delete_single_file(
     slug: str | None = Query(default=None),
     assets: AssetStore = Depends(get_asset_store),
 ):
-    key = _asset_key(upload_prefix(chat_id, slug), filename)
+    key = _asset_key(chat_upload_prefix(chat_id, slug), filename)
     if not _asset_exists(assets, key):
         raise HTTPException(status_code=404, detail="File not found")
     assets.delete(key)

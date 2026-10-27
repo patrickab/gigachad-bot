@@ -12,6 +12,7 @@ import { FilePanelProvider } from "@/features/editor/FilePanel"
 import { useProject } from "@/contexts/ProjectContext"
 import { useSettings } from "@/contexts/SettingsContext"
 import { SidebarProvider } from "@/features/navigation/SidebarContext"
+import { useEventListener } from "@/hooks/useEventListener"
 import { OmpProvider } from "@/features/omp/OmpProvider"
 import { surfaceOf, type Tab, type WorkspaceItem } from "@/contexts/TabContext"
 import { TabContent } from "./TabContent"
@@ -46,11 +47,13 @@ export function AppShell() {
     setDashboardSlug((current) => current === tab.projectSlug ? current : null)
   }, [])
 
-  const handleNewChat = useCallback((slug: string | null) => {
-    const tab = nextTab(settings.tabDefaults)
-    tab.projectSlug = slug
-    tabManagerRef.current?.openTab(tab)
+  const openNewTab = useCallback((patch: Partial<Tab>) => {
+    tabManagerRef.current?.openTab({ ...nextTab(settings.tabDefaults), ...patch })
   }, [settings.tabDefaults])
+
+  const handleNewChat = useCallback((slug: string | null) => {
+    openNewTab({ projectSlug: slug })
+  }, [openNewTab])
 
   const handleOpenProject = useCallback((slug: string) => {
     const manager = tabManagerRef.current
@@ -72,9 +75,8 @@ export function AppShell() {
       tabManagerRef.current?.showItem(item)
       return
     }
-    const tab = nextTab(settings.tabDefaults)
-    tabManagerRef.current?.openTab({ ...tab, workspaceItem: item, projectSlug: item.projectSlug, appMode: surfaceOf(item) })
-  }, [settings.tabDefaults])
+    openNewTab({ workspaceItem: item, projectSlug: item.projectSlug, appMode: surfaceOf(item) })
+  }, [openNewTab])
 
   // A factory preview opens its scenario's chat, canvas, document or architecture through `?open=`, once at startup.
   const openFromLink = useEffectEvent(() => {
@@ -95,16 +97,12 @@ export function AppShell() {
     tabManagerRef.current?.relocateProject(oldSlug, newSlug)
   }, [])
 
-  useEffect(() => {
-    function handler(event: KeyboardEvent) {
-      if (!event.altKey || event.key !== "d") return
-      event.preventDefault()
-      const slug = activeTabRef.current?.projectSlug ?? null
-      setDashboardSlug((current) => current ? null : slug)
-    }
-    document.addEventListener("keydown", handler)
-    return () => document.removeEventListener("keydown", handler)
-  }, [])
+  useEventListener("document", "keydown", (event) => {
+    if (!event.altKey || event.key !== "d") return
+    event.preventDefault()
+    const slug = activeTabRef.current?.projectSlug ?? null
+    setDashboardSlug((current) => current ? null : slug)
+  })
 
   const closeDashboard = useCallback(() => setDashboardSlug(null), [])
 

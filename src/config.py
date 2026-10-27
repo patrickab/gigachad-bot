@@ -1,11 +1,11 @@
 import os
 from pathlib import Path
 import sys
-from uuid import UUID
 
 from psycopg_pool import ConnectionPool
 
 from lib.data_store import DataStore
+from lib.db_schema import database_url
 from lib.storage_namespace import PROMPT
 
 # All mutable application data belongs to the backend's storage root.
@@ -18,9 +18,29 @@ DOCUMENTS = REMOTE_ROOT / "Documents"
 CORS_ORIGINS = [origin.strip() for origin in os.environ.get("GIGACHAD_CORS_ORIGINS", "*").split(",") if origin.strip()]
 
 
+def is_production() -> bool:
+    """Whether this process runs as the production deployment."""
+    return os.environ.get("GIGACHAD_ENV") == "production"
+
+
+def is_development() -> bool:
+    """Whether this process runs as a local development checkout."""
+    return os.environ.get("GIGACHAD_ENV") == "development"
+
+
+def env_flag(name: str, default: bool) -> bool:
+    """Read a boolean env var: 1/true/yes and 0/false/no win in any case, anything else keeps *default*."""
+    value = os.environ.get(name, "").lower()
+    if value in {"1", "true", "yes"}:
+        return True
+    if value in {"0", "false", "no"}:
+        return False
+    return default
+
+
 def is_cors_unsafe_for_production() -> bool:
     """Whether production would let any web page call the API: identity comes from the tailnet, not a cookie."""
-    return os.environ.get("GIGACHAD_ENV") == "production" and (not CORS_ORIGINS or "*" in CORS_ORIGINS)
+    return is_production() and (not CORS_ORIGINS or "*" in CORS_ORIGINS)
 
 
 # --- Model configuration ---
@@ -44,12 +64,8 @@ def get_postgres_pool() -> ConnectionPool:
     """Return the process-wide connection pool for Postgres storage."""
     global _postgres_pool
     if _postgres_pool is None:
-        try:
-            database_url = os.environ["GIGACHAD_DATABASE_URL"]
-        except KeyError as exc:
-            raise RuntimeError("GIGACHAD_DATABASE_URL is required") from exc
         _postgres_pool = ConnectionPool(
-            database_url,
+            database_url(),
             min_size=int(os.environ.get("GIGACHAD_PG_POOL_MIN_SIZE", "1")),
             max_size=int(os.environ.get("GIGACHAD_PG_POOL_MAX_SIZE", "10")),
         )
@@ -62,13 +78,6 @@ def close_postgres_pool() -> None:
     if _postgres_pool is not None:
         _postgres_pool.close()
         _postgres_pool = None
-
-
-def get_data_store(user_id: UUID, *, device_id: UUID | None = None) -> DataStore:
-    """Return an immutable, user-scoped Postgres store."""
-    from lib.postgres_data_store import PostgresDataStore
-
-    return PostgresDataStore(get_postgres_pool(), user_id, device_id=device_id)
 
 
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")

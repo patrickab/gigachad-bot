@@ -1,21 +1,12 @@
 "use client"
 
 import { GitMerge, Trash2 } from "lucide-react"
-import { useCallback, useMemo } from "react"
+import { useMemo } from "react"
 import { cn } from "@/lib/utils"
 import type { BranchChild, BranchMeta } from "@/lib/domain/types"
 import { useBranches, isAncestorOf } from "@/features/navigation/BranchContext"
-import { useUndoDelete } from "@/contexts/UndoDeleteContext"
+import { useDeleteChat } from "@/features/navigation/useDeleteChat"
 import { baseName } from "@/lib/paths"
-
-/** Schedules an undoable delete of a chat together with its branches. */
-function useDeleteChat() {
-  const { cascadeDelete } = useBranches()
-  const { schedule } = useUndoDelete()
-  return useCallback((file: string) => {
-    schedule(`history:${file}`, baseName(file), async () => { await cascadeDelete(file) })
-  }, [cascadeDelete, schedule])
-}
 
 interface Node {
   file: string

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react"
 import { useTab } from "@/contexts/TabContext"
-import { useMemorizeFlow, type MemoryPanelState, type MemoryReviewActions } from "@/features/memory/useMemorizeFlow"
+import { countOperations, useMemorizeFlow, type MemoryPanelState, type MemoryReviewActions } from "@/features/memory/useMemorizeFlow"
 import type { MemoryScope, Message } from "@/lib/domain/types"
 
 /** Which memory stores an extraction targets: `null` is both global and project. */
@@ -37,9 +37,7 @@ export function useMemoryCommandBar({ messages, chatId, branchMessageIdx }: {
   const [query, setQuery] = useState("")
 
   const phase = flow.state.phase
-  const changeCount = flow.state.phase === "review"
-    ? Object.values(flow.state.scopes).reduce((count, review) => count + (review?.operations.length ?? 0), 0)
-    : 0
+  const changeCount = flow.state.phase === "review" ? countOperations(flow.state.scopes) : 0
 
   const openMenu = useCallback(() => {
     setQuery("")

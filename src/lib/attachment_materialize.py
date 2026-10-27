@@ -46,13 +46,19 @@ def store_library_pdf(assets: AssetStore, name: str, content: bytes) -> Asset:
     return asset
 
 
+def _library_pdf(assets: AssetStore, name: str) -> Asset | None:
+    """The library copy of the PDF *name*, or None when it is not stored."""
+    try:
+        return assets.read(f"{PDFS}/{name}")
+    except StorageNotFoundError:
+        return None
+
+
 def sync_library_pdf(assets: AssetStore, name: str, content: bytes) -> None:
     """Make the library copy of the PDF *name* equal *content*, dropping its cached extraction when it changed, so the next `materialize` re-extracts."""
-    try:
-        if assets.read(f"{PDFS}/{name}").content == content:
-            return
-    except StorageNotFoundError:
-        pass
+    stored = _library_pdf(assets, name)
+    if stored is not None and stored.content == content:
+        return
     store_library_pdf(assets, name, content)
     images = assets.list(f"{library_images_prefix(_stem(name))}/")
     for key in (library_markdown_key(_stem(name)), *(image.logical_path for image in images)):
@@ -61,10 +67,8 @@ def sync_library_pdf(assets: AssetStore, name: str, content: bytes) -> None:
 
 def is_superseded(assets: AssetStore, name: str, content: bytes) -> bool:
     """True when the library copy of the PDF *name* now holds other bytes than *content*, making an extraction of *content* stale."""
-    try:
-        return assets.read(f"{PDFS}/{name}").content != content
-    except StorageNotFoundError:
-        return False
+    stored = _library_pdf(assets, name)
+    return stored is not None and stored.content != content
 
 
 def store_library_output(assets: AssetStore, stem: str, md_path: Path, images_dir: Path) -> None:

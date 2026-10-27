@@ -1,7 +1,7 @@
 "use client"
 
 import { Check, ChevronDown } from "lucide-react"
-import { useCallback, useRef, useState } from "react"
+import { useRef, useState } from "react"
 import { useClickOutside } from "@/hooks/useClickOutside"
 import { cn } from "@/lib/utils"
 
@@ -21,7 +21,7 @@ export function StyledSelect({ options, value, onChange, ariaLabel = "Select opt
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const selected = options.find((option) => option.value === value)
-  useClickOutside(ref, useCallback(() => setOpen(false), []))
+  useClickOutside(ref, () => setOpen(false))
 
   const select = (next: string) => { onChange(next); setOpen(false) }
   const move = (direction: 1 | -1) => {
@@ -30,13 +30,21 @@ export function StyledSelect({ options, value, onChange, ariaLabel = "Select opt
     select(options[(index + direction + options.length) % options.length].value)
   }
 
+  const toggle = () => setOpen((current) => !current)
+  const keyActions: Record<string, () => void> = {
+    ArrowDown: () => open ? move(1) : setOpen(true),
+    ArrowUp: () => open ? move(-1) : setOpen(true),
+    ...options.length > 0 && { Home: () => select(options[0].value), End: () => select(options[options.length - 1].value) },
+    Enter: toggle,
+    " ": toggle,
+  }
+
   return <div ref={ref} className={cn("relative", inline && "inline-block")}>
-    <button type="button" aria-label={ariaLabel} aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((current) => !current)} onKeyDown={(event) => {
-      if (event.key === "ArrowDown") { event.preventDefault(); if (open) move(1); else setOpen(true); return }
-      if (event.key === "ArrowUp") { event.preventDefault(); if (open) move(-1); else setOpen(true); return }
-      if (event.key === "Home" && options[0]) { event.preventDefault(); select(options[0].value); return }
-      if (event.key === "End" && options.at(-1)) { event.preventDefault(); select(options.at(-1)!.value); return }
-      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setOpen((current) => !current) }
+    <button type="button" aria-label={ariaLabel} aria-haspopup="listbox" aria-expanded={open} onClick={toggle} onKeyDown={(event) => {
+      const action = keyActions[event.key]
+      if (!action) return
+      event.preventDefault()
+      action()
     }} className={inline
       ? cn("cursor-pointer border-0 bg-transparent p-0 focus:outline-none", className)
       : "flex w-full items-center gap-2 rounded-lg border border-divider bg-paper px-2.5 py-2 text-left text-xs text-ink shadow-[var(--inner-highlight)] transition-colors hover:bg-surface-elevated focus:outline-none focus-visible:border-divider-strong"}>

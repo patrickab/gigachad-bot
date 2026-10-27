@@ -1,8 +1,9 @@
 "use client"
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
+import { createContext, useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
 import type { ProjectListItem } from "@/lib/domain/types"
 import { useStartupRead } from "@/contexts/StartupReadContext"
+import { useRequiredContext } from "@/hooks/useRequiredContext"
 import { subscribeToChanges } from "@/lib/backend/syncStream"
 import {
   listProjects as apiListProjects,
@@ -26,9 +27,7 @@ interface ProjectContextState {
 const ProjectContext = createContext<ProjectContextState | null>(null)
 
 export function useProject(): ProjectContextState {
-  const ctx = useContext(ProjectContext)
-  if (!ctx) throw new Error("useProject must be used within ProjectProvider")
-  return ctx
+  return useRequiredContext(ProjectContext, "useProject must be used within ProjectProvider")
 }
 
 /** Owns the project list. Which project a chat belongs to is the tab's `projectSlug`, never provider state. */
@@ -45,27 +44,16 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
 
   useStartupRead("Projects", apiListProjects, setProjects)
 
-  const createProject = useCallback(async (name: string) => {
-    const created = await apiCreateProject(name)
+  const thenRefresh = useCallback(async <T,>(call: Promise<T>) => {
+    const result = await call
     await refreshProjects()
-    return created.slug
+    return result
   }, [refreshProjects])
 
-  const deleteProject = useCallback(async (name: string) => {
-    await apiDeleteProject(name)
-    await refreshProjects()
-  }, [refreshProjects])
-
-  const setProjectArchived = useCallback(async (slug: string, archived: boolean) => {
-    await apiSetProjectArchived(slug, archived)
-    await refreshProjects()
-  }, [refreshProjects])
-
-  const renameProject = useCallback(async (slug: string, name: string) => {
-    const renamed = await apiRenameProject(slug, name)
-    await refreshProjects()
-    return renamed.slug
-  }, [refreshProjects])
+  const createProject = useCallback(async (name: string) => (await thenRefresh(apiCreateProject(name))).slug, [thenRefresh])
+  const deleteProject = useCallback((name: string) => thenRefresh(apiDeleteProject(name)), [thenRefresh])
+  const setProjectArchived = useCallback((slug: string, archived: boolean) => thenRefresh(apiSetProjectArchived(slug, archived)), [thenRefresh])
+  const renameProject = useCallback(async (slug: string, name: string) => (await thenRefresh(apiRenameProject(slug, name))).slug, [thenRefresh])
 
   const value = useMemo<ProjectContextState>(
     () => ({ projects, refreshProjects, createProject, deleteProject, setProjectArchived, renameProject }),

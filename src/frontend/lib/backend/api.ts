@@ -1,4 +1,4 @@
-import type { Attachment, BackendConfig, BranchMeta, ChatHistoriesResponse, ChatRequest, DirectoryListing, KanbanCard, MemoryExtractResponse, MemoryOperation, MemoryScope, MemoryTopic, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpArchivedSession, OmpCatalog, OmpOverview, OmpSystemPrompt, FactoryDefaults, FactoryEvent, FactoryMessage, FactoryPreview, FactoryRepo, FactoryTask, FactoryTaskDetail, FactoryWorkflow, TaskAction, TaskCreate, ProjectData, ProjectDocument, ProjectListItem, ProjectStateUpdate, StoredMemory, ReasoningLevels, Usage, RootFile, FileTreeNode } from "@/lib/domain/types"
+import type { Attachment, BackendConfig, BranchMeta, ChatHistoriesResponse, ChatRequest, DirectoryListing, KanbanCard, MemoryExtractResponse, MemoryOperation, MemoryScope, MemoryTopic, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpArchivedSession, OmpCatalog, OmpOverview, OmpSystemPrompt, FactoryDefaults, FactoryEvent, FactoryMessage, FactoryPreview, FactoryRepo, FactoryTask, FactoryTaskDetail, FactoryWorkflow, TaskAction, TaskCreate, ProjectData, ProjectDocument, ProjectListItem, StoredMemory, ReasoningLevels, Usage, RootFile, FileTreeNode } from "@/lib/domain/types"
 import { createSSEStream } from "./sse"
 import type { SSEStreamResult } from "./sse"
 import { getApiBase } from "./config"
@@ -78,7 +78,7 @@ export async function fetchModels(signal?: AbortSignal): Promise<ModelsResponse>
   return request<ModelsResponse>("/models", { signal })
 }
 
-export interface ProviderUsageWindow {
+interface ProviderUsageWindow {
   id: "5h" | "7d" | "30d"
   percent: number
   resets_in_minutes: number | null
@@ -95,11 +95,11 @@ export interface ProviderUsageReport {
 
 /** Subscription usage per OMP login; `refresh` skips the server's 5 minute cache. */
 export async function fetchProviderUsage(refresh = false): Promise<{ reports: ProviderUsageReport[] }> {
-  return request<{ reports: ProviderUsageReport[] }>(`/provider-usage${refresh ? "?refresh=true" : ""}`)
+  return request<{ reports: ProviderUsageReport[] }>(`/provider-usage${toQuery({ refresh })}`)
 }
 
 export async function fetchReasoningLevels(model: string, signal?: AbortSignal): Promise<ReasoningLevels> {
-  return request<ReasoningLevels>(`/models/reasoning-levels?model=${encodeURIComponent(model)}`, { signal })
+  return request<ReasoningLevels>(`/models/reasoning-levels${toQuery({ model })}`, { signal })
 }
 
 export async function saveModelProviders(providers: ModelProvider[]): Promise<ModelsResponse> {
@@ -262,8 +262,10 @@ export async function listRootFiles(signal?: AbortSignal): Promise<{ enabled: bo
   return request("/fileroots/files", { signal })
 }
 
+type RootTree = { enabled: boolean; tree: FileTreeNode[] }
+
 /** Every mount's tree, a mount listed with one of its `worktrees` shows that worktree instead. */
-export async function fileRootTree(worktrees: string[] = [], signal?: AbortSignal): Promise<{ enabled: boolean; tree: FileTreeNode[] }> {
+export async function fileRootTree(worktrees: string[] = [], signal?: AbortSignal): Promise<RootTree> {
   return request(`/fileroots/tree${toQuery({ worktree: worktrees })}`, { signal })
 }
 
@@ -309,10 +311,12 @@ export async function deleteWorktreeBranch(root: string, branch: string, force =
   await del(`/fileroots/worktrees/branch${toQuery({ root, branch, force })}`)
 }
 
+type DocumentList = { documents: ProjectDocument[] }
+const documentsOf = (data: DocumentList) => data.documents
+
 /** Add file-root files (folders expand to their valid files) to a project's documents. */
 export async function addRootFilesToProject(slug: string, paths: string[]): Promise<ProjectDocument[]> {
-  const data = await post<{ documents: ProjectDocument[] }>("/fileroots/add-to-project", { slug, paths })
-  return data.documents
+  return post<DocumentList>("/fileroots/add-to-project", { slug, paths }).then(documentsOf)
 }
 
 export type DiffStatus = "modified" | "added" | "deleted" | "renamed" | "untracked" | "conflict"
@@ -324,29 +328,29 @@ export interface RootDiffFiles {
 
 /** Files of the git working tree at a mounted root that differ from HEAD. */
 export async function fetchRootDiffFiles(root: string): Promise<RootDiffFiles> {
-  return request(`/fileroots/diff/files?root=${encodeURIComponent(root)}`)
+  return request(`/fileroots/diff/files${toQuery({ root })}`)
 }
 
 /** Unified patch of one changed file, `supported` is false for binary or oversized files. */
 export async function fetchRootFileDiff(root: string, path: string): Promise<{ supported: boolean; status?: DiffStatus; patch?: string }> {
-  return request(`/fileroots/diff?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`)
+  return request(`/fileroots/diff${toQuery({ root, path })}`)
 }
 
 export async function fetchRootDiffContent(root: string, path: string): Promise<{ base_content: string; content: string }> {
-  return request(`/fileroots/diff/content?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`)
+  return request(`/fileroots/diff/content${toQuery({ root, path })}`)
 }
 
-export async function addFileRoot(path: string): Promise<{ enabled: boolean; tree: FileTreeNode[] }> {
+export async function addFileRoot(path: string): Promise<RootTree> {
   return post("/fileroots/roots", { path })
 }
 
 /** Clone an https or ssh git link into `~/git/<repository>` on the backend host and mount it. */
-export async function cloneFileRoot(url: string): Promise<{ enabled: boolean; tree: FileTreeNode[] }> {
+export async function cloneFileRoot(url: string): Promise<RootTree> {
   return post("/fileroots/clone", { url })
 }
 
-export async function removeFileRoot(path: string): Promise<{ enabled: boolean; tree: FileTreeNode[] }> {
-  return del(`/fileroots/roots?path=${encodeURIComponent(path)}`)
+export async function removeFileRoot(path: string): Promise<RootTree> {
+  return del(`/fileroots/roots${toQuery({ path })}`)
 }
 
 /** List a backend directory for picking a workspace; `~` is the backend user's home. */
@@ -355,7 +359,7 @@ export async function browseDirectories(path: string): Promise<DirectoryListing>
 }
 
 export async function readFileRootRendered(path: string): Promise<string> {
-  const data = await request<{ path: string; content: string }>(`/fileroots/rendered?path=${encodeURIComponent(path)}`)
+  const data = await request<{ path: string; content: string }>(`/fileroots/rendered${toQuery({ path })}`)
   return data.content
 }
 
@@ -365,13 +369,13 @@ export async function writeRootFile(path: string, content: string): Promise<void
 
 /** Read a file's text content (markdown / unknown-treated-as-text). */
 export async function loadFileViewerText(path: string): Promise<string> {
-  const data = await request<{ path: string; content: string }>(`/fileviewer/text?path=${encodeURIComponent(path)}`)
+  const data = await request<{ path: string; content: string }>(`/fileviewer/text${toQuery({ path })}`)
   return data.content
 }
 
 /** Annotation canvas key of a PDF, shared by every copy with the same bytes. Creates the empty canvas on first use. */
 export async function openPdfAnnotations(path: string): Promise<string> {
-  const data = await request<{ key: string }>(`/fileviewer/annotations?path=${encodeURIComponent(path)}`, { method: "POST" })
+  const data = await request<{ key: string }>(`/fileviewer/annotations${toQuery({ path })}`, { method: "POST" })
   return data.key
 }
 
@@ -388,7 +392,7 @@ export async function submitCanvasMutations(canvasKey: string, mutations: Canvas
 /** Attach a FileRoots file as a live reference: no copy, content is read from the source. */
 async function attachRootFile(path: string): Promise<Attachment> {
   const data = await request<{ name: string; mime: string; path: string; content?: string; parsedMd?: string }>(
-    `/fileroots/attach?path=${encodeURIComponent(path)}`,
+    `/fileroots/attach${toQuery({ path })}`,
     { method: "POST" },
   )
   return { ...data, active: true, vaultPath: data.path, url: fileViewerRawUrl(data.path) }
@@ -442,22 +446,19 @@ export async function writeReference(path: string, content: string): Promise<voi
 }
 
 export async function listProjectDocuments(slug: string, signal?: AbortSignal): Promise<ProjectDocument[]> {
-  const data = await request<{ documents: ProjectDocument[] }>(`/documents?slug=${encodeURIComponent(slug)}`, { signal })
-  return data.documents
+  return request<DocumentList>(`/documents${toQuery({ slug })}`, { signal }).then(documentsOf)
 }
 
 export async function listAllDocuments(): Promise<ProjectDocument[]> {
-  const data = await request<{ documents: ProjectDocument[] }>("/documents/all")
-  return data.documents
+  return request<DocumentList>("/documents/all").then(documentsOf)
 }
 
 export async function listNotes(signal?: AbortSignal): Promise<ProjectDocument[]> {
-  const data = await request<{ documents: ProjectDocument[] }>("/documents/notes", { signal })
-  return data.documents
+  return request<DocumentList>("/documents/notes", { signal }).then(documentsOf)
 }
 
 export async function addDocument(slug: string, path: string): Promise<ProjectDocument> {
-  return post<ProjectDocument>(`/documents/add?slug=${encodeURIComponent(slug)}`, { path })
+  return post<ProjectDocument>(`/documents/add${toQuery({ slug })}`, { path })
 }
 
 export async function removeDocument(slug: string, path: string): Promise<void> {
@@ -508,7 +509,7 @@ export function deleteArchitectureSources(slug: string, paths: string[]): Promis
 }
 
 export async function writeBinaryDocument(slug: string, filename: string, blob: Blob): Promise<ProjectDocument> {
-  return request<ProjectDocument>(`/documents/write-binary?slug=${encodeURIComponent(slug)}`, {
+  return request<ProjectDocument>(`/documents/write-binary${toQuery({ slug })}`, {
     method: "POST",
     body: fileForm(blob, filename),
   })
@@ -524,8 +525,10 @@ export async function listProjects(signal?: AbortSignal): Promise<ProjectListIte
   return data.projects
 }
 
+const projectPath = (slug: string) => `/projects/${encodeURIComponent(slug)}`
+
 export async function loadProject(name: string): Promise<ProjectData> {
-  return request<ProjectData>(`/projects/${encodeURIComponent(name)}`)
+  return request<ProjectData>(projectPath(name))
 }
 
 export async function createProject(name: string): Promise<ProjectData> {
@@ -533,31 +536,27 @@ export async function createProject(name: string): Promise<ProjectData> {
 }
 
 export async function deleteProject(name: string): Promise<void> {
-  await del(`/projects/${encodeURIComponent(name)}`)
+  await del(projectPath(name))
 }
 
 export async function setProjectArchived(slug: string, archived: boolean): Promise<void> {
-  await patch(`/projects/${encodeURIComponent(slug)}`, { archived })
+  await patch(projectPath(slug), { archived })
 }
 
 export function renameProject(slug: string, name: string): Promise<{ name: string; slug: string; archived: boolean }> {
-  return patch(`/projects/${encodeURIComponent(slug)}`, { name })
-}
-
-export async function updateProjectKanban(name: string, data: ProjectStateUpdate): Promise<ProjectData> {
-  return put<ProjectData>(`/projects/${encodeURIComponent(name)}/state`, data)
+  return patch(projectPath(slug), { name })
 }
 
 export async function addProjectCard(name: string, title: string, description: string = "", state: string = "backlog"): Promise<KanbanCard> {
-  return post<KanbanCard>(`/projects/${encodeURIComponent(name)}/cards`, { title, description, state })
+  return post<KanbanCard>(`${projectPath(name)}/cards`, { title, description, state })
 }
 
 export async function moveProjectCard(name: string, cardId: string, state: string): Promise<KanbanCard> {
-  return patch<KanbanCard>(`/projects/${encodeURIComponent(name)}/cards/${cardId}`, { state })
+  return patch<KanbanCard>(`${projectPath(name)}/cards/${cardId}`, { state })
 }
 
 export async function deleteProjectCard(name: string, cardId: string): Promise<void> {
-  await del(`/projects/${encodeURIComponent(name)}/cards/${cardId}`)
+  await del(`${projectPath(name)}/cards/${cardId}`)
 }
 
 /** Omitting a field leaves it unchanged server-side; passing null clears it. */
@@ -570,7 +569,7 @@ interface SaveProjectTabOptions {
 
 export async function saveProjectTab(name: string, filename: string, messages: Message[], opts: SaveProjectTabOptions = {}): Promise<{ status: string }> {
   const body: Record<string, unknown> = { filename, messages, chat_id: opts.chatId ?? null, tab_name: opts.tabName ?? null, title: opts.title ?? null, usage: opts.usage ?? null }
-  return put(`/projects/${encodeURIComponent(name)}/tabs/${encodeURIComponent(filename)}`, body)
+  return put(`${projectPath(name)}/tabs/${encodeURIComponent(filename)}`, body)
 }
 
 export async function extractMemories(
@@ -673,11 +672,11 @@ export function saveFactoryDefaults(defaults: FactoryDefaults): Promise<FactoryD
 }
 
 export function fetchFactoryWorkflows(repo: string): Promise<FactoryWorkflow[]> {
-  return request<FactoryWorkflow[]>(`/factory/workflows?repo=${encodeURIComponent(repo)}`)
+  return request<FactoryWorkflow[]>(`/factory/workflows${toQuery({ repo })}`)
 }
 
 export function fetchFactoryTasks(repo: string): Promise<FactoryTask[]> {
-  return request<FactoryTask[]>(`/factory/tasks?repo=${encodeURIComponent(repo)}`)
+  return request<FactoryTask[]>(`/factory/tasks${toQuery({ repo })}`)
 }
 
 export function fetchFactoryTask(id: string): Promise<FactoryTaskDetail> {
@@ -685,7 +684,7 @@ export function fetchFactoryTask(id: string): Promise<FactoryTaskDetail> {
 }
 
 export function fetchFactoryEvents(repo: string, after: number): Promise<FactoryEvent[]> {
-  return request<FactoryEvent[]>(`/factory/events?repo=${encodeURIComponent(repo)}&after=${after}`)
+  return request<FactoryEvent[]>(`/factory/events${toQuery({ repo, after })}`)
 }
 
 export function createFactoryTask(body: TaskCreate): Promise<FactoryTask> {

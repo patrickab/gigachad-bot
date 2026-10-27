@@ -2,7 +2,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Path, Query
 
-from backend.routes.upstream import call_upstream, host_access_only
+from backend.identity import host_access_only
+from backend.routes.upstream import call_upstream
 from lib import factory
 
 router = APIRouter(prefix="/api/factory", tags=["factory"], dependencies=[host_access_only("the factory")])

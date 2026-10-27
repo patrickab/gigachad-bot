@@ -9,6 +9,8 @@ import { DocumentEditor } from "@/features/editor/DocumentEditor"
 import { SaveAsModal } from "@/components/ui/SaveAsModal"
 import { writeDocument } from "@/lib/backend/api"
 import { useTabActive } from "@/contexts/TabContext"
+import { useEventListener } from "@/hooks/useEventListener"
+import { readStorage, writeStorage } from "@/lib/storage"
 
 // A canvas selection carries its owning scope: "" = chat_histories/_notes, otherwise a project slug.
 export interface CanvasSelection {
@@ -32,7 +34,7 @@ const SCRATCH_STORAGE_KEY = "scratch-canvas-doc"
 /** The scratch canvas persisted by a previous session, or an empty one when absent or corrupt. */
 function loadScratchDoc(): CanvasDocument {
   try {
-    const stored = localStorage.getItem(SCRATCH_STORAGE_KEY)
+    const stored = readStorage(SCRATCH_STORAGE_KEY)
     if (stored?.trim()) return parseCanvasDoc(stored)
   } catch { /* corrupt scratch — start empty */ }
   return emptyCanvasDoc()
@@ -47,36 +49,27 @@ export function CanvasWorkspace({ selected, slug, toolbarSlots, onCloseEditor, o
 
   // Debounced: serializing the doc and writing it is O(whole canvas) and localStorage is
   // synchronous, so doing it per stroke/pointermove stalls the drawing surface itself.
+  const saveScratch = useEffectEvent(() => writeStorage(SCRATCH_STORAGE_KEY, serializeCanvasDoc(doc)))
   useEffect(() => {
-    const t = setTimeout(() => {
-      try { localStorage.setItem(SCRATCH_STORAGE_KEY, serializeCanvasDoc(doc)) } catch { /* quota */ }
-    }, 500)
+    const t = setTimeout(() => saveScratch(), 500)
     return () => clearTimeout(t)
   }, [doc])
 
   // Unmount skips the pending debounce, so flush the latest doc here.
-  const flushScratch = useEffectEvent(() => {
-    try { localStorage.setItem(SCRATCH_STORAGE_KEY, serializeCanvasDoc(doc)) } catch { /* quota */ }
-  })
-  useEffect(() => () => { flushScratch() }, [])
+  useEffect(() => () => { saveScratch() }, [])
 
   const announceScratchLabel = useEffectEvent(() => { onModeLabel?.("new.canvas") })
   useEffect(() => {
     if (!selected) announceScratchLabel()
   }, [selected])
 
-  useEffect(() => {
-    if (selected || !isActive) return
-    // Alt+S opens the save-as dialog for the scratch canvas
-    const handler = (e: KeyboardEvent) => {
-      if (e.altKey && e.key === "s") {
-        e.preventDefault()
-        setSaveOpen(true)
-      }
+  // Alt+S opens the save-as dialog for the scratch canvas
+  useEventListener("document", "keydown", (e) => {
+    if (e.altKey && e.key === "s") {
+      e.preventDefault()
+      setSaveOpen(true)
     }
-    document.addEventListener("keydown", handler)
-    return () => document.removeEventListener("keydown", handler)
-  }, [selected, isActive])
+  }, { active: !selected && isActive })
 
   const handleSaveSubmit = useCallback(async (name: string) => {
     const filename = name.endsWith(".canvas") ? name : `${name}.canvas`

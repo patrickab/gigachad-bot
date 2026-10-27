@@ -1,4 +1,3 @@
-# ruff: noqa
 """Create interactive Plotly figures through the fast or persistent sandbox path."""
 
 from __future__ import annotations
@@ -15,9 +14,9 @@ from agent_sandbox import PromptImage
 from llm_baseclient.client import LLMClient
 
 from lib.agent_sandbox_adapter import SandboxScriptError
-from lib.llm_resilience import api_query_resilient
-from lib.sandbox_service import SandboxService
-from lib.toolcalling import ToolOutcome
+from lib.llm_resilience import completion_text
+from lib.sandbox_service import SANDBOX_PLOT_SCOPE, SandboxService
+from lib.toolcalling import ToolOutcome, sandbox_unavailable
 
 __all__ = ["PLOTLY_MEDIA_TYPE", "PlotContext", "create_sandbox_plot", "sandbox_plot_dependencies"]
 
@@ -84,7 +83,8 @@ The user is a visual learner and wants to understand a new concept. Optimize for
 
 - Write a self-contained Python script that creates a visually appealing didactic Plotly figure for the user's request.
 - Prefer well-behaved, nontrivial examples with meaningful spatial structure. This creates illustrative examples.
-- Never use unnecessary symmetry, singularities, extreme values, or discontinuities in illustrative examples unless they are essential to the concept.
+- Never use unnecessary symmetry, singularities, extreme values, or discontinuities in illustrative examples \
+unless they are essential to the concept.
 
 - Optimize the plot for visual understanding and visual appeal.
 
@@ -129,28 +129,15 @@ def _plot_script(text: str) -> str:
     return match.group("body").strip() if match else text.strip()
 
 
-def _completion_text(context: PlotContext, user_msg: str, system_prompt: str, **kwargs: object) -> str:
-    """Run one blocking completion, surfacing a returned Exception as a raised one."""
-    response = api_query_resilient(
-        context.client,
-        user_msg=user_msg,
-        system_prompt=system_prompt,
-        model=context.model,
-        **kwargs,
-    )
-    if isinstance(response, Exception):
-        raise response
-    return response.choices[0].message.content or ""
-
-
 def _generate_plot(context: PlotContext) -> str:
     """Ask the chat model for the plot script, guided by the styling prompt."""
     images = [image.content for image in context.prompt_images]
     return _plot_script(
-        _completion_text(
-            context,
-            context.user_msg,
-            _FAST_PLOT_SYSTEM,
+        completion_text(
+            context.client,
+            model=context.model,
+            user_msg=context.user_msg,
+            system_prompt=_FAST_PLOT_SYSTEM,
             user_msg_history=list(context.history),
             img=images or None,
         )
@@ -160,7 +147,7 @@ def _generate_plot(context: PlotContext) -> str:
 def _repair_plot_script(context: PlotContext, script: str, error: str) -> str:
     """Ask for a corrected script, given the broken one and what the sandbox reported."""
     request = f"# Script\n{script}\n\n# Error\n{error}"
-    return _plot_script(_completion_text(context, request, _REPAIR_SYSTEM))
+    return _plot_script(completion_text(context.client, model=context.model, user_msg=request, system_prompt=_REPAIR_SYSTEM))
 
 
 def _figure_from_sandbox_outputs(outputs: tuple[str, ...]) -> dict[str, Any] | None:
@@ -199,11 +186,7 @@ async def _fast_plot(context: PlotContext) -> tuple[dict[str, Any], str] | None:
 async def create_sandbox_plot(context: PlotContext) -> ToolOutcome:
     """Create a Plotly figure, then hand the answer round the code that drew it."""
     if context.sandbox_service is None:
-        return ToolOutcome(
-            content="The sandbox plot tool is not configured.",
-            summary="Unavailable",
-            error="sandbox_service_unavailable",
-        )
+        return sandbox_unavailable("sandbox plot")
 
     # Fast path is a throwaway script. On failure fall back to the persistent workspace agent.
     script = ""
@@ -217,7 +200,7 @@ async def create_sandbox_plot(context: PlotContext) -> ToolOutcome:
             prompt=context.user_msg,
             prompt_images=context.prompt_images,
             append_system=_SANDBOX_PLOT_APPEND_SYSTEM,
-            scope="sandbox_plot",
+            scope=SANDBOX_PLOT_SCOPE,
             thinking="low",
             lean=True,
         )

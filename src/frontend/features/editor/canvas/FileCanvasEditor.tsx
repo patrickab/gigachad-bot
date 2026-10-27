@@ -8,13 +8,13 @@ import { emptyCanvasDoc, parseCanvasDoc, serializeCanvasDoc, type CanvasDocument
 import { ApiError, loadFileViewerText } from "@/lib/backend/api"
 import { subscribeToChanges } from "@/lib/backend/syncStream"
 import { baseName } from "@/lib/paths"
+import { LoadFailure, LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
 
 interface FileCanvasEditorProps {
   path: string
   slug: string
   onClose: () => void
   onSaved?: (filename?: string, content?: string) => void
-  onLiveContent?: (path: string, content: string | null) => void
   /** Writes the serialized canvas to its storage. */
   persistOverride: (content: string) => Promise<void>
   onModeLabel?: (label: string) => void
@@ -22,7 +22,7 @@ interface FileCanvasEditorProps {
 }
 
 /** Full-screen overlay for a file-root canvas: loads through the file viewer, autosaves through `persistOverride`. */
-export function FileCanvasEditor({ path, slug, onClose, onSaved, onLiveContent, persistOverride, onModeLabel, canvasToolbarSlots }: FileCanvasEditorProps) {
+export function FileCanvasEditor({ path, slug, onClose, onSaved, persistOverride, onModeLabel, canvasToolbarSlots }: FileCanvasEditorProps) {
   const [canvasDoc, setCanvasDoc] = useState<CanvasDocument | null>(null)
   const [loadError, setLoadError] = useState(false)
   const dirtyRef = useRef(false)
@@ -30,9 +30,8 @@ export function FileCanvasEditor({ path, slug, onClose, onSaved, onLiveContent, 
 
   const filename = baseName(path)
 
-  const modeLabelRef = useRef(onModeLabel)
-  useEffect(() => { modeLabelRef.current = onModeLabel }, [onModeLabel])
-  useEffect(() => { modeLabelRef.current?.(filename) }, [filename])
+  const announceMode = useEffectEvent(() => onModeLabel?.(filename))
+  useEffect(() => { announceMode() }, [filename])
 
   const loadFromServer = useCallback(() => {
     const apply = (text: string) => {
@@ -63,9 +62,6 @@ export function FileCanvasEditor({ path, slug, onClose, onSaved, onLiveContent, 
     loadFromServer()
   }), [path, loadFromServer])
 
-  const publishLiveContent = useEffectEvent((livePath: string, content: string | null) => { onLiveContent?.(livePath, content) })
-  useEffect(() => () => { publishLiveContent(path, null) }, [path])
-
   // Saves are chained so an earlier slow write can never resolve after,
   // and silently clobber, a newer one.
   const saveChain = useRef(Promise.resolve())
@@ -80,17 +76,15 @@ export function FileCanvasEditor({ path, slug, onClose, onSaved, onLiveContent, 
     return run
   }, [persistOverride, filename, onSaved])
 
-  // Autosave: the one serialization per quiet second feeds both the write and
-  // the live content the chat reads at send time.
+  // Autosave once the canvas has been quiet for a second.
   useEffect(() => {
     if (!canvasDoc) return
     const timer = setTimeout(() => {
       const serialized = serializeCanvasDoc(canvasDoc)
-      publishLiveContent(path, serialized)
       if (serialized !== savedContentRef.current) persist(serialized).catch(() => {})
     }, 1000)
     return () => clearTimeout(timer)
-  }, [canvasDoc, path, persist])
+  }, [canvasDoc, persist])
 
   // Leaving the editor flushes a pending autosave immediately. The debounce
   // cleanup alone would drop strokes drawn in the final second.
@@ -116,20 +110,9 @@ export function FileCanvasEditor({ path, slug, onClose, onSaved, onLiveContent, 
     return () => document.removeEventListener("keydown", handler)
   }, [onClose])
 
-  if (loadError) {
-    return (
-      <div className="flex flex-col items-center justify-center gap-2 py-6 text-xs text-ink-faint">
-        <span>Failed to load this document. Its stored content was left untouched.</span>
-        <button onClick={() => loadFromServer()} className="rounded px-2 py-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors">
-          Retry
-        </button>
-      </div>
-    )
-  }
+  if (loadError) return <LoadFailure message="Failed to load this document. Its stored content was left untouched." onRetry={loadFromServer} />
 
-  if (!canvasDoc) {
-    return <div className="flex items-center justify-center py-6 text-xs text-ink-faint">Loading...</div>
-  }
+  if (!canvasDoc) return <LoadingPlaceholder />
 
   return (
     <motion.div

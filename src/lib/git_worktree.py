@@ -16,10 +16,11 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from lib.git import DEFAULT_TIMEOUT_SECONDS, run_git
+
 CLONES_HOME = Path.home() / "git"
 WORKTREES_HOME = CLONES_HOME / "worktrees"
 PREFERRED_BASE_BRANCH = "dev"
-_LOCAL_TIMEOUT_SECONDS = 10
 _NETWORK_TIMEOUT_SECONDS = 120
 _CLONE_TIMEOUT_SECONDS = 600
 
@@ -68,18 +69,16 @@ def _ssh_command() -> str:
     return f"ssh -F {shlex.quote(str(user_config) if user_config.is_file() else os.devnull)}"
 
 
-def _git(directory: Path, *args: str, timeout: float = _LOCAL_TIMEOUT_SECONDS) -> str:
+def _git(directory: Path, *args: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> str:
     try:
-        result = subprocess.run(
-            ["git", "-C", str(directory), *args],
-            capture_output=True, text=True, timeout=timeout, check=True,
-            env={"GIT_SSH_COMMAND": _ssh_command(), **os.environ, "LC_ALL": "C", "GIT_TERMINAL_PROMPT": "0"},
-        )
+        return run_git(
+            directory, *args, timeout=timeout,
+            env={"GIT_SSH_COMMAND": os.environ.get("GIT_SSH_COMMAND", _ssh_command()), "GIT_TERMINAL_PROMPT": "0"},
+        ).stdout
     except subprocess.CalledProcessError as exc:
         raise WorktreeError((exc.stderr or exc.stdout or str(exc)).strip()) from exc
     except (subprocess.TimeoutExpired, OSError) as exc:
         raise WorktreeError(str(exc)) from exc
-    return result.stdout
 
 
 def is_clone(directory: Path) -> bool:

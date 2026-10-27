@@ -31,11 +31,10 @@ export function ToolMenuItem({ icon: Icon, label, active, onClick }: ToolMenuIte
   )
 }
 
-/** Groups menu rows under a small tracked-out label, with a divider above every group after
- *  the first so the list reads as sections rather than one flat stack. */
-export function ToolMenuSection({ title, first, children }: { title: string; first?: boolean; children: ReactNode }) {
+/** Groups menu rows under a small tracked-out label. */
+export function ToolMenuSection({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className={cn(!first && "mt-1 border-t border-divider pt-1")}>
+    <div>
       <div className="px-3 pb-1 pt-1.5 text-[10px] font-medium uppercase tracking-wider text-ink-faint">{title}</div>
       {children}
     </div>

@@ -91,14 +91,10 @@ end
 """
 
 
-def neovim_config_dir() -> Path:
-    """Directory Neovim loads its config from, honoring `XDG_CONFIG_HOME`."""
-    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "nvim"
-
-
 def is_neovim_installed() -> bool:
-    """`nvim` on PATH and a config to load."""
-    return shutil.which("nvim") is not None and neovim_config_dir().is_dir()
+    """`nvim` on PATH and a config (under `XDG_CONFIG_HOME`) to load."""
+    config_dir = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "nvim"
+    return shutil.which("nvim") is not None and config_dir.is_dir()
 
 
 class NeovimRpcError(RuntimeError):

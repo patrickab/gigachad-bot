@@ -14,6 +14,9 @@
 # stopped on exit.
 set -euo pipefail
 
+root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+source "$root_dir/deploy/lib.sh"
+
 broker_bind="${GIGACHAD_OMP_BROKER_BIND:-127.0.0.1:8765}"
 gateway_bind="${GIGACHAD_OMP_GATEWAY_BIND:-127.0.0.1:4000}"
 owned_pids=()
@@ -36,15 +39,6 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 0' INT TERM
-
-port_open() {
-    local host="${1%%:*}" port="${1##*:}"
-    if (exec 3<>"/dev/tcp/$host/$port") 2>/dev/null; then
-        exec 3<&- 3>&-
-        return 0
-    fi
-    return 1
-}
 
 # Launches "$@" unless the bind address already answers. Sets `started_pid` to
 # the new child's pid, or to an empty string when an existing service is

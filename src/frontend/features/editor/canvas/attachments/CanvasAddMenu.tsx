@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { FileType, ImageIcon, Network, Pencil, PenLine, Plus, SquarePen, X } from "lucide-react"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
+import { useOutsidePress } from "@/hooks/useOutsidePress"
 import { listNotes, listProjectDocuments, removeDocument, renameDocument } from "@/lib/backend/api"
 import type { ProjectDocument } from "@/lib/domain/types"
 import { baseName } from "@/lib/paths"
@@ -61,14 +62,7 @@ export function CanvasAddMenu({ slug, depth, docPath, onAddPage, onAddImage, onA
   const { schedule: scheduleDelete, pending: deletePending } = useUndoDelete()
   const deleteKey = (path: string) => `canvas-document:${slug ?? ""}:${path}`
 
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener("mousedown", handler)
-    return () => document.removeEventListener("mousedown", handler)
-  }, [open])
+  useOutsidePress(menuRef, () => setOpen(false), { active: open })
 
   useEffect(() => {
     if (!open) return

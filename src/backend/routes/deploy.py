@@ -3,7 +3,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
-from backend.routes.upstream import host_access_only
+from backend.identity import host_access_only
 
 router = APIRouter(prefix="/api/deploy", tags=["deploy"], dependencies=[host_access_only("redeploying")])
 

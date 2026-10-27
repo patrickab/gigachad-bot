@@ -1,13 +1,14 @@
 "use client"
 
 import { useId } from "react"
+import type { Point } from "@/lib/domain/edgeRouting"
 
 const GRID_SPACING = 28 // canvas units between dots at the finest grid level
 const GRID_MIN_SCREEN_SPACING = 18
 const DOT_RADIUS = 0.8
 
 /** Keep a quiet, world-anchored grid with eased fades between density levels. */
-export function CanvasDotGrid({ offset, scale }: { offset: { x: number; y: number }; scale: number }) {
+export function CanvasDotGrid({ offset, scale }: { offset: Point; scale: number }) {
   const patternId = useId()
   let spacing = GRID_SPACING * scale
   while (spacing < GRID_MIN_SCREEN_SPACING) spacing *= 2

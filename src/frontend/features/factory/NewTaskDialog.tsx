@@ -4,8 +4,12 @@ import { useEffect, useRef, useState } from "react"
 import { ChevronRight, Factory } from "lucide-react"
 import { Dialog } from "@/components/ui/Dialog"
 import { StyledSelect } from "@/components/ui/StyledSelect"
-import { cn } from "@/lib/utils"
+import { ErrorText } from "@/components/ui/ErrorText"
+import { cn, errorMessage } from "@/lib/utils"
 import { createFactoryTask, fetchFactoryWorkflows } from "@/lib/backend/api"
+import { useAsyncAction } from "@/hooks/useAsyncAction"
+import { useResetOnOpen } from "@/hooks/useResetOnChange"
+import { Field } from "./Field"
 import { FIELD_CLASS, PRIMARY_BUTTON_CLASS, QUIET_BUTTON_CLASS } from "./styles"
 import type { FactoryOverrides, FactoryWorkflow, MergeMode } from "@/lib/domain/types"
 
@@ -40,23 +44,21 @@ export function NewTaskDialog({ repo, open, onClose }: {
   const [merge, setMerge] = useState<MergeMode | typeof INHERIT>(INHERIT)
   const [sandbox, setSandbox] = useState<SandboxChoice>(INHERIT)
   const [overridesOpen, setOverridesOpen] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState("")
   const titleRef = useRef<HTMLInputElement>(null)
-  const [wasOpen, setWasOpen] = useState(open)
+  const { run: create, pending: busy, error, setError } = useAsyncAction(async (start: boolean) => {
+    await createFactoryTask({ repo, workflow: workflowId, title: title.trim(), request: request.trim(), overrides: buildOverrides(merge, sandbox), start })
+    onClose()
+  }, "Could not create the task")
 
   // Every opening starts from an empty form.
-  if (open !== wasOpen) {
-    setWasOpen(open)
-    if (open) {
-      setTitle("")
-      setRequest("")
-      setMerge(INHERIT)
-      setSandbox(INHERIT)
-      setOverridesOpen(false)
-      setError("")
-    }
-  }
+  useResetOnOpen(open, () => {
+    setTitle("")
+    setRequest("")
+    setMerge(INHERIT)
+    setSandbox(INHERIT)
+    setOverridesOpen(false)
+    setError("")
+  })
 
   useEffect(() => {
     if (!open) return
@@ -66,26 +68,15 @@ export function NewTaskDialog({ repo, open, onClose }: {
       setWorkflows(loaded)
       setWorkflowId((current) => loaded.some((workflow) => workflow.id === current) ? current : loaded[0]?.id ?? "")
     }).catch((cause: unknown) => {
-      if (!cancelled) setError(cause instanceof Error ? cause.message : "Could not load workflows")
+      if (!cancelled) setError(errorMessage(cause, "Could not load workflows"))
     })
     return () => { cancelled = true }
-  }, [open, repo])
+  }, [open, repo, setError])
 
   const workflow = workflows?.find((candidate) => candidate.id === workflowId)
   const canSubmit = !busy && workflow !== undefined && title.trim() !== "" && request.trim() !== ""
-
-  const submit = async (start: boolean) => {
-    if (!canSubmit) return
-    setBusy(true)
-    setError("")
-    try {
-      await createFactoryTask({ repo, workflow: workflowId, title: title.trim(), request: request.trim(), overrides: buildOverrides(merge, sandbox), start })
-      onClose()
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not create the task")
-    } finally {
-      setBusy(false)
-    }
+  const submit = (start: boolean) => {
+    if (canSubmit) void create(start)
   }
 
   const mergeOptions = [
@@ -97,11 +88,10 @@ export function NewTaskDialog({ repo, open, onClose }: {
   return (
     <Dialog open={open} onClose={onClose} icon={Factory} title="New factory task" initialFocusRef={titleRef} widthClassName="max-w-lg">
       <form
-        onSubmit={(event) => { event.preventDefault(); void submit(true) }}
+        onSubmit={(event) => { event.preventDefault(); submit(true) }}
         className="flex flex-col gap-3 px-5 pb-5"
       >
-        <div className="flex flex-col gap-1">
-          <span className="text-[11px] text-ink-subtle">Workflow</span>
+        <Field label="Workflow">
           <StyledSelect
             ariaLabel="Workflow"
             value={workflowId}
@@ -109,7 +99,7 @@ export function NewTaskDialog({ repo, open, onClose }: {
             options={(workflows ?? []).map((candidate) => ({ value: candidate.id, label: candidate.name }))}
           />
           {workflow && <span className="text-[11px] text-ink-faint">{workflow.phases.join(" → ")}</span>}
-        </div>
+        </Field>
         <input
           ref={titleRef}
           type="text"
@@ -141,21 +131,19 @@ export function NewTaskDialog({ repo, open, onClose }: {
           </button>
           {overridesOpen && (
             <div className="mt-2 grid grid-cols-2 gap-3">
-              <div className="flex flex-col gap-1">
-                <span className="text-[11px] text-ink-subtle">Merge</span>
+              <Field label="Merge">
                 <StyledSelect ariaLabel="Merge" value={merge} onChange={(value) => setMerge(value as MergeMode | typeof INHERIT)} options={mergeOptions} />
-              </div>
-              <div className="flex flex-col gap-1">
-                <span className="text-[11px] text-ink-subtle">Sandbox</span>
+              </Field>
+              <Field label="Sandbox">
                 <StyledSelect ariaLabel="Sandbox" value={sandbox} onChange={(value) => setSandbox(value as SandboxChoice)} options={SANDBOX_OPTIONS} />
-              </div>
+              </Field>
             </div>
           )}
         </div>
-        {error && <p role="alert" className="text-xs text-danger">{error}</p>}
+        <ErrorText>{error}</ErrorText>
         <div className="flex items-center justify-end gap-2 pt-1">
           <button type="button" onClick={onClose} className={QUIET_BUTTON_CLASS}>Cancel</button>
-          <button type="button" disabled={!canSubmit} onClick={() => void submit(false)} className={QUIET_BUTTON_CLASS}>Save to backlog</button>
+          <button type="button" disabled={!canSubmit} onClick={() => submit(false)} className={QUIET_BUTTON_CLASS}>Save to backlog</button>
           <button type="submit" disabled={!canSubmit} className={PRIMARY_BUTTON_CLASS}>Start</button>
         </div>
       </form>

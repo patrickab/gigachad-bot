@@ -138,8 +138,14 @@ class SandboxStore:
         self._store = data_store
         self._scope = sandbox_scope(scope)
 
+    def _load(self, key: str) -> dict[str, Any] | list[Any] | None:
+        return load_json(DataStorePath(self._store, key))
+
+    def _save(self, key: str, data: dict[str, Any]) -> None:
+        safe_write_json(DataStorePath(self._store, key), data)
+
     def read_slot(self, chat_id: str) -> SlotRecord | None:
-        data = load_json(DataStorePath(self._store, sandbox_slot(chat_id, self._scope)))
+        data = self._load(sandbox_slot(chat_id, self._scope))
         return SlotRecord(**data) if isinstance(data, dict) else None
 
     def ensure_slot(self, chat_id: str, *, profile: str) -> SlotRecord:
@@ -154,14 +160,14 @@ class SandboxStore:
         return record
 
     def _write_slot(self, chat_id: str, record: SlotRecord) -> None:
-        safe_write_json(DataStorePath(self._store, sandbox_slot(chat_id, self._scope)), asdict(record))
+        self._save(sandbox_slot(chat_id, self._scope), asdict(record))
 
     def read_active(self, chat_id: str) -> ActivePointer | None:
-        data = load_json(DataStorePath(self._store, sandbox_active(chat_id, self._scope)))
+        data = self._load(sandbox_active(chat_id, self._scope))
         return ActivePointer(**data) if isinstance(data, dict) else None
 
     def write_active(self, chat_id: str, pointer: ActivePointer) -> None:
-        safe_write_json(DataStorePath(self._store, sandbox_active(chat_id, self._scope)), asdict(pointer))
+        self._save(sandbox_active(chat_id, self._scope), asdict(pointer))
 
     # Write the newest run's manifest and active pointer first, then the remaining run records.
     def checkpoint(
@@ -212,11 +218,11 @@ class SandboxStore:
         return recovered
 
     def read_run(self, chat_id: str, tool_call_id: str) -> RunRecord | None:
-        data = load_json(DataStorePath(self._store, sandbox_run(chat_id, tool_call_id, self._scope)))
+        data = self._load(sandbox_run(chat_id, tool_call_id, self._scope))
         return RunRecord(**data) if isinstance(data, dict) else None
 
     def write_run(self, chat_id: str, record: RunRecord) -> None:
-        safe_write_json(DataStorePath(self._store, sandbox_run(chat_id, record.tool_call_id, self._scope)), asdict(record))
+        self._save(sandbox_run(chat_id, record.tool_call_id, self._scope), asdict(record))
 
     def write_manifest(self, chat_id: str, manifest: SandboxManifest) -> str:
         manifest_asset_shas(manifest)
@@ -227,7 +233,7 @@ class SandboxStore:
         return manifest_id
 
     def read_manifest(self, chat_id: str, manifest_id: str) -> SandboxManifest:
-        data = load_json(DataStorePath(self._store, sandbox_manifest(chat_id, manifest_id, self._scope)))
+        data = self._load(sandbox_manifest(chat_id, manifest_id, self._scope))
         if not isinstance(data, dict):
             raise StorageNotFoundError(sandbox_manifest(chat_id, manifest_id, self._scope))
         manifest, legacy = _decode_manifest(data)
@@ -241,7 +247,7 @@ class SandboxStore:
         for entry in self._store.list(sandbox_manifest_prefix(chat_id, self._scope), recursive=False):
             if entry.is_dir:
                 continue
-            data = load_json(DataStorePath(self._store, entry.key))
+            data = self._load(entry.key)
             if not isinstance(data, dict):
                 continue
             try:
@@ -252,7 +258,7 @@ class SandboxStore:
         for entry in self._store.list(sandbox_run_prefix(chat_id, self._scope), recursive=False):
             if entry.is_dir:
                 continue
-            data = load_json(DataStorePath(self._store, entry.key))
+            data = self._load(entry.key)
             if not isinstance(data, dict):
                 continue
             for output in (data.get("result") or {}).get("outputs", []):
@@ -273,7 +279,7 @@ class SandboxStore:
             entry_chat_id, entry_scope = parts[1], parts[2]
             if entry_chat_id == exclude_chat_id and (exclude_scope is None or entry_scope == exclude_scope):
                 continue
-            data = load_json(DataStorePath(self._store, entry.key))
+            data = self._load(entry.key)
             if not isinstance(data, dict):
                 continue
             if parts[3] == "manifests":

@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import "react-pdf/dist/esm/Page/AnnotationLayer.css"
 import "react-pdf/dist/esm/Page/TextLayer.css"
 import { switchColors } from "@/lib/themeTransition"
+import { useOutsidePress } from "@/hooks/useOutsidePress"
 
 pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs"
 
@@ -434,16 +435,7 @@ export function PdfViewer({
     return () => { ro.disconnect(); if (timer) clearTimeout(timer) }
   }, [])
 
-  useEffect(() => {
-    if (!dropdownOpen) return
-    function handleClick(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setDropdownOpen(false)
-      }
-    }
-    document.addEventListener("mousedown", handleClick)
-    return () => document.removeEventListener("mousedown", handleClick)
-  }, [dropdownOpen])
+  useOutsidePress(dropdownRef, () => setDropdownOpen(false), { active: dropdownOpen })
 
   /** Zooms to `nextZoom`, keeping the client point under it (default: viewport center) fixed. */
   const zoomAt = useCallback((nextZoom: number, point?: { x: number; y: number }) => {

@@ -9,6 +9,7 @@ from psycopg.errors import UniqueViolation
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
+from lib.changes import record_change
 from lib.data_store import (
     Entry,
     Revision,
@@ -19,6 +20,12 @@ from lib.data_store import (
 from lib.project_rename import ProjectReferences, renamed_documents
 
 
+def like_prefix(key: str) -> str:
+    """LIKE pattern for descendants of *key* with wildcards escaped. Empty key matches everything."""
+    escaped = key.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"{escaped}/%" if escaped else "%"
+
+
 class PostgresDataStore:
     """A document store permanently scoped to one authenticated user."""
 
@@ -27,11 +34,8 @@ class PostgresDataStore:
         self._user_id = user_id
         self._device_id = device_id
 
-    @staticmethod
-    def _prefix(key: str) -> str:
-        """LIKE pattern for descendants of *key* with wildcards escaped. Empty key matches everything."""
-        escaped = key.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        return f"{escaped}/%" if escaped else "%"
+    def _entry(self, key: str, is_dir: bool, size: int, version: int) -> Entry:
+        return Entry(key, is_dir=bool(is_dir), size=None if is_dir else size, revision=None if is_dir else self._revision(version))
 
     @staticmethod
     def _revision(version: int) -> Revision:
@@ -39,12 +43,9 @@ class PostgresDataStore:
 
     def _change(self, connection, key: str, version: int | None, operation: str) -> None:
         """Append a row to the per-user change log used for cross-device sync."""
-        connection.execute(
-            """
-            INSERT INTO changes (user_id, resource_kind, resource_key, version, operation, device_id)
-            VALUES (%s, 'document', %s, %s, %s, %s)
-            """,
-            (self._user_id, key, version, operation, self._device_id),
+        record_change(
+            connection, user_id=self._user_id, device_id=self._device_id, kind="document", key=key, operation=operation,
+            version=version,
         )
 
     def read_bytes(self, key: str) -> tuple[bytes, Revision]:
@@ -111,23 +112,22 @@ class PostgresDataStore:
                 WHERE user_id = %s AND key LIKE %s ESCAPE '\\'
                 ORDER BY key
                 """,
-                (self._user_id, self._prefix(prefix)),
+                (self._user_id, like_prefix(prefix)),
             ).fetchall()
 
         # Directories can be implicit (only descendants stored), so synthesize missing ancestors.
         entries: dict[str, Entry] = {}
         for key, is_dir, size, version in rows:
-            relative = PurePosixPath(key).relative_to(prefix) if prefix else PurePosixPath(key)
-            parts = relative.parts
+            parts = PurePosixPath(key).relative_to(prefix).parts
             if recursive:
                 for index in range(1, len(parts)):
-                    ancestor = (PurePosixPath(prefix) / PurePosixPath(*parts[:index])).as_posix() if prefix else PurePosixPath(*parts[:index]).as_posix()
+                    ancestor = PurePosixPath(prefix, *parts[:index]).as_posix()
                     entries.setdefault(ancestor, Entry(ancestor, is_dir=True))
-                entries[key] = Entry(key, is_dir=bool(is_dir), size=None if is_dir else size, revision=None if is_dir else self._revision(version))
+                entries[key] = self._entry(key, is_dir, size, version)
             else:
-                child = (PurePosixPath(prefix) / parts[0]).as_posix() if prefix else parts[0]
+                child = PurePosixPath(prefix, parts[0]).as_posix()
                 if len(parts) == 1:
-                    entries[child] = Entry(child, is_dir=bool(is_dir), size=None if is_dir else size, revision=None if is_dir else self._revision(version))
+                    entries[child] = self._entry(child, is_dir, size, version)
                 else:
                     entries.setdefault(child, Entry(child, is_dir=True))
         return list(entries.values())
@@ -149,7 +149,7 @@ class PostgresDataStore:
                     SELECT 1 FROM documents WHERE user_id = %s AND (key = %s AND is_dir OR key LIKE %s ESCAPE '\\')
                 )
                 """,
-                (self._user_id, key, self._prefix(key)),
+                (self._user_id, key, like_prefix(key)),
             ).fetchone()[0]
 
     def exists(self, key: str) -> bool:
@@ -175,25 +175,16 @@ class PostgresDataStore:
         key = validate_key(key)
         with self._pool.connection() as connection, connection.transaction():
             if not recursive:
-                directory = connection.execute(
-                    """
-                    SELECT EXISTS (
-                        SELECT 1 FROM documents
-                        WHERE user_id = %s AND (key = %s AND is_dir OR key LIKE %s ESCAPE '\\')
-                    )
-                    """,
-                    (self._user_id, key, self._prefix(key)),
-                ).fetchone()[0]
                 child = connection.execute(
                     "SELECT 1 FROM documents WHERE user_id = %s AND key LIKE %s ESCAPE '\\' LIMIT 1",
-                    (self._user_id, self._prefix(key)),
+                    (self._user_id, like_prefix(key)),
                 ).fetchone()
-                if directory and child is not None:
+                if child is not None:
                     raise OSError(f"Directory not empty: {key}")
             # Non-recursive deletes only the exact key, since an empty LIKE pattern matches nothing.
             connection.execute(
                 "DELETE FROM documents WHERE user_id = %s AND (key = %s OR key LIKE %s ESCAPE '\\')",
-                (self._user_id, key, self._prefix(key) if recursive else ""),
+                (self._user_id, key, like_prefix(key) if recursive else ""),
             )
             self._change(connection, key, None, "delete")
 
@@ -202,13 +193,13 @@ class PostgresDataStore:
         with self._pool.connection() as connection, connection.transaction():
             rows = connection.execute(
                 "SELECT key FROM documents WHERE user_id = %s AND (key = %s OR key LIKE %s ESCAPE '\\') FOR UPDATE",
-                (self._user_id, source, self._prefix(source)),
+                (self._user_id, source, like_prefix(source)),
             ).fetchall()
             if not rows:
                 raise StorageNotFoundError(source)
             collision = connection.execute(
                 "SELECT 1 FROM documents WHERE user_id = %s AND (key = %s OR key LIKE %s ESCAPE '\\') LIMIT 1",
-                (self._user_id, destination, self._prefix(destination)),
+                (self._user_id, destination, like_prefix(destination)),
             ).fetchone()
             if collision is not None:
                 raise StorageConflictError(f"Destination already exists: {destination}")
@@ -255,9 +246,9 @@ class PostgresDataStore:
                         (target, self._user_id, source),
                     ).fetchone()[0]
                     for key, key_version in ((source, None), (target, version)):
-                        connection.execute(
-                            "INSERT INTO changes (user_id, resource_kind, resource_key, version, operation, device_id) VALUES (%s, 'asset', %s, %s, 'move', %s)",
-                            (self._user_id, key, key_version, self._device_id),
+                        record_change(
+                            connection, user_id=self._user_id, device_id=self._device_id, kind="asset", key=key, operation="move",
+                            version=key_version,
                         )
                 mutations = connection.execute(
                     "SELECT mutation_id, value FROM canvas_mutations WHERE user_id = %s AND value IS NOT NULL FOR UPDATE", (self._user_id,),

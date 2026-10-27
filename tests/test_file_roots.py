@@ -1,4 +1,3 @@
-import subprocess
 from types import SimpleNamespace
 
 from fastapi import FastAPI
@@ -11,6 +10,7 @@ from backend.routes import fileviewer as fileviewer_route
 from lib.attachment_materialize import library_images_prefix, library_markdown_key, sync_library_pdf
 from lib.data_store import StorageNotFoundError
 from lib.file_roots import FileRoots, list_directories
+from tests.conftest import git
 
 
 def test_list_directories_lists_only_subdirectories_case_insensitively_with_hidden(tmp_path):
@@ -48,6 +48,9 @@ class _Project:
 
     def __init__(self) -> None:
         self.files: list[str] = []
+
+    def require(self, slug: str) -> None:
+        """Every slug names an existing project."""
 
     def list_files(self, slug: str) -> list[str]:
         return list(self.files)
@@ -216,18 +219,14 @@ def test_diff_routes_serve_mounted_repositories_and_refuse_other_directories(tmp
     assert outside.status_code == 403
 
 
-def _git(directory, *args: str) -> None:
-    subprocess.run(["git", "-C", str(directory), *args], check=True, capture_output=True)
-
-
 @pytest.mark.parametrize("host_access", [True, False])
 def test_diff_routes_admit_linked_worktrees_anywhere_for_host_access_only(tmp_path, host_access):
     clone = tmp_path / "clone"
     clone.mkdir()
-    _git(clone, "init", "-q", "-b", "main")
-    _git(clone, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init")
+    git(clone, "init", "-q", "-b", "main")
+    git(clone, "commit", "-q", "--allow-empty", "-m", "init")
     linked = tmp_path / "elsewhere" / "task"
-    _git(clone, "worktree", "add", "-q", str(linked), "-b", "task")
+    git(clone, "worktree", "add", "-q", str(linked), "-b", "task")
     (linked / "src").mkdir()
     (linked / "src" / "new.md").write_text("hi\n")
     pointing_elsewhere = tmp_path / "not-a-worktree"

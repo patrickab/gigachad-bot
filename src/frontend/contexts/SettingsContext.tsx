@@ -4,6 +4,8 @@ import { createContext, useContext, useState, type ReactNode } from "react"
 import { fetchBackendConfig } from "@/lib/backend/api"
 import { STORAGE_KEY_NEOVIM } from "@/lib/backend/config"
 import { useStartupRead } from "@/contexts/StartupReadContext"
+import { useRequiredContext } from "@/hooks/useRequiredContext"
+import { readStorage, writeStorage } from "@/lib/storage"
 
 export interface TabConfig {
   selectedModel: string
@@ -63,9 +65,7 @@ interface SettingsValue {
 const SettingsContext = createContext<SettingsValue | null>(null)
 
 export function useSettings(): SettingsValue {
-  const ctx = useContext(SettingsContext)
-  if (!ctx) throw new Error("useSettings must be used within SettingsProvider")
-  return ctx
+  return useRequiredContext(SettingsContext, "useSettings must be used within SettingsProvider")
 }
 
 /** Neovim editor setting, unavailable outside a `SettingsProvider`. */
@@ -79,7 +79,7 @@ export function useHostAccess(): boolean {
 }
 
 function readNeovimPreference(): boolean {
-  try { return localStorage.getItem(STORAGE_KEY_NEOVIM) === "true" } catch { return false }
+  return readStorage(STORAGE_KEY_NEOVIM) === "true"
 }
 
 /** Owns the defaults new tabs inherit. Seeded from backend config without overriding existing values. */
@@ -109,7 +109,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     enabled: neovimAvailable && neovimPreferred,
     setPreferred: (preferred) => {
       setNeovimPreferred(preferred)
-      try { localStorage.setItem(STORAGE_KEY_NEOVIM, String(preferred)) } catch { /* quota */ }
+      writeStorage(STORAGE_KEY_NEOVIM, String(preferred))
     },
   }
 

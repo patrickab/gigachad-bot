@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import type { PatchLine } from "@/lib/diff"
+import { readStorage, writeStorage } from "@/lib/storage"
 
 export type ReviewSide = "old" | "new"
 
@@ -97,7 +98,7 @@ const storageKey = (root: string) => `diff-review:${root}`
 
 function loadNotes(root: string): ReviewNote[] {
   try {
-    const stored: unknown = JSON.parse(localStorage.getItem(storageKey(root)) ?? "[]")
+    const stored: unknown = JSON.parse(readStorage(storageKey(root)) ?? "[]")
     return Array.isArray(stored) ? stored as ReviewNote[] : []
   } catch {
     return []
@@ -115,7 +116,7 @@ export function useReviewNotes(root: string) {
   if (state.root !== root) setState({ root, notes: loadNotes(root) })
 
   useEffect(() => {
-    if (state.notes.length > 0) localStorage.setItem(storageKey(state.root), JSON.stringify(state.notes))
+    if (state.notes.length > 0) writeStorage(storageKey(state.root), JSON.stringify(state.notes))
     else discardReviewNotes(state.root)
   }, [state])
 

@@ -1,7 +1,6 @@
 """Worktrees branch off a mounted clone, update their base first, and only lose work on explicit force."""
 
 from pathlib import Path
-import subprocess
 from types import SimpleNamespace
 
 from fastapi import FastAPI
@@ -11,18 +10,13 @@ import pytest
 from backend.routes import file_roots as file_roots_route
 from lib import git_worktree
 from lib.file_roots import FileRoots
-
-
-def _git(directory, *args):
-    return subprocess.run(
-        ["git", "-C", str(directory), "-c", "user.email=t@t", "-c", "user.name=t", *args], check=True, capture_output=True, text=True,
-    ).stdout.strip()
+from tests.conftest import git
 
 
 def _commit(directory, name, content):
     (Path(directory) / name).write_text(content)
-    _git(directory, "add", name)
-    _git(directory, "commit", "-q", "-m", name)
+    git(directory, "add", name)
+    git(directory, "commit", "-q", "-m", name)
 
 
 @pytest.fixture
@@ -30,17 +24,17 @@ def clone(tmp_path, monkeypatch):
     """A clone of `origin` on `dev`, worktrees going to `tmp_path/worktrees`."""
     monkeypatch.setattr(git_worktree, "WORKTREES_HOME", tmp_path / "worktrees")
     upstream = tmp_path / "upstream"
-    _git(tmp_path, "init", "-q", "-b", "main", str(upstream))
+    git(tmp_path, "init", "-q", "-b", "main", str(upstream))
     _commit(upstream, "readme.md", "hi\n")
-    _git(upstream, "branch", "dev")
-    _git(tmp_path, "clone", "-q", "-b", "dev", str(upstream), str(tmp_path / "repo"))
+    git(upstream, "branch", "dev")
+    git(tmp_path, "clone", "-q", "-b", "dev", str(upstream), str(tmp_path / "repo"))
     return SimpleNamespace(upstream=upstream, repository=(tmp_path / "repo").resolve(), home=tmp_path / "worktrees")
 
 
 def test_default_branch_falls_back_to_main_checkout_not_an_arbitrary_branch(clone):
-    _git(clone.repository, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
+    git(clone.repository, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
     assert git_worktree.default_branch(clone.repository) == "dev"
-    _git(clone.repository, "checkout", "--detach")
+    git(clone.repository, "checkout", "--detach")
     assert git_worktree.default_branch(clone.repository) is None
     with pytest.raises(git_worktree.WorktreeError, match="Cannot infer"):
         git_worktree.default_worktree(clone.repository)
@@ -51,30 +45,30 @@ def test_default_checkout_creates_and_reuses_without_pulling_or_changing_main(cl
     assert git_worktree.default_branch(clone.repository) == "main"
     assert git_worktree.default_base_branch(clone.repository) == "dev"
     if local_branch:
-        _git(clone.repository, "branch", "main", "origin/main")
-    before = _git(clone.repository, "rev-parse", "HEAD")
+        git(clone.repository, "branch", "main", "origin/main")
+    before = git(clone.repository, "rev-parse", "HEAD")
     (clone.repository / "readme.md").write_text("unsaved changes\n")
     (clone.repository / "draft.md").write_text("untracked\n")
     _commit(clone.upstream, "later.md", "not fetched\n")
-    _git(clone.upstream, "branch", "-f", "dev", "main")
+    git(clone.upstream, "branch", "-f", "dev", "main")
 
     worktree = git_worktree.default_worktree(clone.repository)
 
     assert worktree.branch == "main"
     assert git_worktree.default_worktree(clone.repository) == worktree
-    assert _git(worktree.path, "rev-parse", "HEAD") == before
+    assert git(worktree.path, "rev-parse", "HEAD") == before
     assert not (Path(worktree.path) / "later.md").exists()
-    assert _git(clone.repository, "symbolic-ref", "--short", "HEAD") == "dev"
-    assert _git(clone.repository, "rev-parse", "HEAD") == before
+    assert git(clone.repository, "symbolic-ref", "--short", "HEAD") == "dev"
+    assert git(clone.repository, "rev-parse", "HEAD") == before
     assert (clone.repository / "readme.md").read_text() == "unsaved changes\n"
     assert (clone.repository / "draft.md").read_text() == "untracked\n"
     if not local_branch:
-        assert _git(clone.repository, "rev-parse", "--abbrev-ref", "main@{upstream}") == "origin/main"
+        assert git(clone.repository, "rev-parse", "--abbrev-ref", "main@{upstream}") == "origin/main"
 
 
 def test_default_checkout_reuses_an_existing_checkout_outside_standard_home(clone, tmp_path):
     path = tmp_path / "elsewhere"
-    _git(clone.repository, "worktree", "add", "-b", "main", str(path), "origin/main")
+    git(clone.repository, "worktree", "add", "-b", "main", str(path), "origin/main")
     (path / "draft.md").write_text("keep me\n")
 
     assert git_worktree.default_worktree(clone.repository) == git_worktree.Worktree(str(path.resolve()), "main", False)
@@ -83,7 +77,7 @@ def test_default_checkout_reuses_an_existing_checkout_outside_standard_home(clon
 
 
 def test_default_checkout_reuses_the_main_checkout_when_it_has_the_default_branch(clone):
-    _git(clone.repository, "checkout", "-b", "main", "origin/main")
+    git(clone.repository, "checkout", "-b", "main", "origin/main")
 
     assert git_worktree.default_worktree(clone.repository) == git_worktree.Worktree(str(clone.repository), "main", True)
     assert not clone.home.exists()
@@ -96,7 +90,7 @@ def test_default_checkout_refuses_existing_destination_without_creating_a_branch
     if collision == "broken_symlink":
         path.symlink_to(tmp_path / "missing")
     elif collision == "worktree":
-        _git(clone.repository, "worktree", "add", "-b", "other", str(path), "dev")
+        git(clone.repository, "worktree", "add", "-b", "other", str(path), "dev")
     else:
         path.mkdir()
         (path / "keep.md").write_text("keep me\n")
@@ -104,15 +98,15 @@ def test_default_checkout_refuses_existing_destination_without_creating_a_branch
     with pytest.raises(git_worktree.WorktreeError, match="Directory already exists"):
         git_worktree.default_worktree(clone.repository)
 
-    assert _git(clone.repository, "branch", "--list", "main") == ""
-    assert _git(clone.repository, "symbolic-ref", "--short", "HEAD") == "dev"
+    assert git(clone.repository, "branch", "--list", "main") == ""
+    assert git(clone.repository, "symbolic-ref", "--short", "HEAD") == "dev"
     if collision == "directory":
         assert (path / "keep.md").read_text() == "keep me\n"
 
 
 def test_a_new_worktree_branches_off_the_freshly_pulled_base(clone):
     _commit(clone.upstream, "later.md", "pushed after cloning\n")
-    _git(clone.upstream, "branch", "-f", "dev", "main")
+    git(clone.upstream, "branch", "-f", "dev", "main")
 
     worktree = git_worktree.create_worktree(clone.repository, "42 Fix Usage!", "dev")
 
@@ -125,12 +119,12 @@ def test_a_new_worktree_branches_off_the_freshly_pulled_base(clone):
 def test_a_base_not_checked_out_anywhere_is_fetched_from_origin(clone):
     worktree = git_worktree.create_worktree(clone.repository, "feature", "main")
 
-    assert _git(worktree.path, "rev-parse", "HEAD") == _git(clone.upstream, "rev-parse", "main")
+    assert git(worktree.path, "rev-parse", "HEAD") == git(clone.upstream, "rev-parse", "main")
 
 
 def test_an_existing_branch_or_folder_is_refused_not_reused(clone):
     git_worktree.create_worktree(clone.repository, "feature", "dev")
-    _git(clone.repository, "branch", "taken")
+    git(clone.repository, "branch", "taken")
 
     with pytest.raises(git_worktree.WorktreeError, match="Branch already exists"):
         git_worktree.create_worktree(clone.repository, "taken", "dev")
@@ -215,7 +209,7 @@ def remote(tmp_path, monkeypatch):
     """Clones go to `tmp_path/git`, git rewrites the `owner/repo` links below to a local upstream."""
     monkeypatch.setattr(git_worktree, "CLONES_HOME", tmp_path / "git")
     upstream = tmp_path / "upstream"
-    _git(tmp_path, "init", "-q", "-b", "main", str(upstream))
+    git(tmp_path, "init", "-q", "-b", "main", str(upstream))
     _commit(upstream, "readme.md", "hi\n")
     rewrites = {"https://example.com/owner/repo.git": upstream, "git@example.com:owner/repo.git": upstream, "ssh://git@example.com/owner/repo": upstream}
     monkeypatch.setenv("GIT_CONFIG_COUNT", str(len(rewrites)))

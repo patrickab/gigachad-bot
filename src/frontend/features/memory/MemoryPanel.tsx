@@ -1,12 +1,12 @@
 "use client"
 
-import { useEffect } from "react"
 import { Loader2, Minus, Pencil, Plus, RotateCcw, X } from "lucide-react"
 import { FloatingWindow } from "@/components/ui/FloatingWindow"
 import { StyledSelect } from "@/components/ui/StyledSelect"
+import { useEventListener } from "@/hooks/useEventListener"
 import { cn } from "@/lib/utils"
 import { EditableText } from "@/features/memory/EditableText"
-import { acceptedChanges, type MemoryPanelState, type MemoryReviewActions, type ReviewOperation, type ReviewScope, type ReviewTopic } from "@/features/memory/useMemorizeFlow"
+import { countOperations, type MemoryPanelState, type MemoryReviewActions, type ReviewOperation, type ReviewScope, type ReviewTopic } from "@/features/memory/useMemorizeFlow"
 import { formatTopicHeading } from "@/features/memory/memoryUtils"
 import { useChatColumnPadding } from "@/features/memory/useChatColumnPadding"
 import type { MemoryScope, MemoryTopic } from "@/lib/domain/types"
@@ -32,21 +32,14 @@ export function MemoryPanel({ state, actions }: { state: MemoryPanelState; actio
   const columnPadding = useChatColumnPadding()
   const reviewing = state.phase === "review"
 
-  useEffect(() => {
-    if (!reviewing) return
-    function onKey(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-        e.preventDefault()
-        void actions.commit()
-      }
+  useEventListener("document", "keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault()
+      void actions.commit()
     }
-    document.addEventListener("keydown", onKey)
-    return () => document.removeEventListener("keydown", onKey)
-  }, [reviewing, actions])
+  }, { active: reviewing })
 
-  const acceptedCount = state.phase === "review"
-    ? Object.values(state.scopes).reduce((count, review) => count + (review ? acceptedChanges(review).operations.length : 0), 0)
-    : 0
+  const acceptedCount = state.phase === "review" ? countOperations(state.scopes, true) : 0
 
   return (
     <FloatingWindow onClose={state.phase === "extracting" ? undefined : () => void actions.cancel()} label="Review memory"

@@ -2,15 +2,8 @@
 
 import { useCallback, useState, type ReactNode } from "react"
 import { cn } from "@/lib/utils"
-import { ConsoleEditor, LINE_HEIGHT_PX, PADDING_PX } from "./ConsoleEditor"
+import { ConsoleEditor, LINE_HEIGHT_PX, PADDING_PX, type InlineEditRequest } from "./ConsoleEditor"
 import { InlineEditPanel } from "./EditorSidebar"
-
-interface InlineEditState {
-  text: string
-  start: number
-  end: number
-  splitPx: number
-}
 
 interface AssistedConsoleEditorProps {
   value: string
@@ -26,17 +19,13 @@ interface AssistedConsoleEditorProps {
 
 /** `ConsoleEditor` plus Ctrl+I inline AI edit: the value splits after the selection's line around an edit panel. */
 export function AssistedConsoleEditor({ value, onChange, language, model, placeholder, className, children }: AssistedConsoleEditorProps) {
-  const [inlineEdit, setInlineEdit] = useState<InlineEditState | null>(null)
+  const [inlineEdit, setInlineEdit] = useState<InlineEditRequest | null>(null)
 
   const handleInlineApply = useCallback((replacement: string) => {
     if (!inlineEdit) return
     onChange(value.substring(0, inlineEdit.start) + replacement + value.substring(inlineEdit.end))
     setInlineEdit(null)
   }, [inlineEdit, value, onChange])
-
-  const handleInlineEditOpen = useCallback((text: string, start: number, end: number, splitPx: number) => {
-    setInlineEdit({ text, start, end, splitPx })
-  }, [])
 
   const split = inlineEdit && model ? splitAfterLine(value, inlineEdit.end) : null
 
@@ -61,7 +50,7 @@ export function AssistedConsoleEditor({ value, onChange, language, model, placeh
           </div>
         </>
       ) : (
-        <ConsoleEditor value={value} onChange={onChange} language={language} placeholder={placeholder} onInlineEdit={model ? handleInlineEditOpen : undefined} />
+        <ConsoleEditor value={value} onChange={onChange} language={language} placeholder={placeholder} onInlineEdit={model ? setInlineEdit : undefined} />
       )}
     </div>
   )

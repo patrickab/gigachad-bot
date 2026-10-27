@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useLayoutEffect, useRef, useState } from "react"
+import { ErrorText } from "@/components/ui/ErrorText"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { cn } from "@/lib/utils"
 
@@ -69,7 +70,7 @@ export function EditableText({ value, label, multiline = false, startEditing = f
         }}
         className="block w-full resize-none overflow-hidden rounded bg-transparent outline-none ring-1 ring-divider focus:ring-divider-strong"
       />
-      {error && <p role="alert" className="mt-1 text-xs text-danger">{error}</p>}
+      <ErrorText className="mt-1">{error}</ErrorText>
     </div>
   )
 }

@@ -3,7 +3,11 @@
 import { useEffect, useEffectEvent, useRef, useState } from "react"
 import { ChevronUp, Folder, FolderPlus } from "lucide-react"
 import { Dialog } from "@/components/ui/Dialog"
+import { ErrorText } from "@/components/ui/ErrorText"
+import { useAsyncAction } from "@/hooks/useAsyncAction"
+import { useResetOnOpen } from "@/hooks/useResetOnChange"
 import { browseDirectories } from "@/lib/backend/api"
+import { errorMessage } from "@/lib/utils"
 import type { DirectoryListing } from "@/lib/domain/types"
 
 const HOME = "~"
@@ -28,21 +32,20 @@ export function FileMountPicker({ open, onClose, onConfirm, onClone }: {
   const [path, setPath] = useState(HOME)
   const [listing, setListing] = useState<DirectoryListing | null>(null)
   const [listingError, setListingError] = useState("")
-  const [confirmError, setConfirmError] = useState("")
-  const [confirming, setConfirming] = useState(false)
-  const [wasOpen, setWasOpen] = useState(open)
+  const trimmed = path.trim()
+  const { run: submit, pending: confirming, error: confirmError, setError: setConfirmError } = useAsyncAction(async () => {
+    await (isRepositoryLink(trimmed) ? onClone(trimmed) : onConfirm(trimmed))
+    onClose()
+  }, isRepositoryLink(trimmed) ? "Could not clone this repository" : "Could not add this file mount")
   const inputRef = useRef<HTMLInputElement>(null)
   const requestRef = useRef(0)
 
   // Every opening starts again at home.
-  if (open !== wasOpen) {
-    setWasOpen(open)
-    if (open) {
-      setPath(HOME)
-      setListing(null)
-      setConfirmError("")
-    }
-  }
+  useResetOnOpen(open, () => {
+    setPath(HOME)
+    setListing(null)
+    setConfirmError("")
+  })
 
   // Typing keeps its own spelling, opening a directory shows its resolved path. Only the latest request applies.
   const load = (target: string, showResolved: boolean) => {
@@ -53,7 +56,7 @@ export function FileMountPicker({ open, onClose, onConfirm, onClone }: {
       setListingError("")
       if (showResolved) setPath(result.path)
     }, (error: unknown) => {
-      if (request === requestRef.current) setListingError(error instanceof Error ? error.message : "Cannot open this directory")
+      if (request === requestRef.current) setListingError(errorMessage(error, "Cannot open this directory"))
     })
   }
 
@@ -74,25 +77,15 @@ export function FileMountPicker({ open, onClose, onConfirm, onClone }: {
     inputRef.current?.focus()
   }
 
-  const confirm = async () => {
-    const target = path.trim()
-    if (!target || confirming) return
-    setConfirming(true)
-    setConfirmError("")
-    try {
-      await (isRepositoryLink(target) ? onClone(target) : onConfirm(target))
-      onClose()
-    } catch (error) {
-      setConfirmError(error instanceof Error ? error.message : isRepositoryLink(target) ? "Could not clone this repository" : "Could not add this file mount")
-    }
-    setConfirming(false)
+  const confirm = () => {
+    if (trimmed && !confirming) void submit()
   }
 
   const childPath = (name: string) => listing!.path === "/" ? `/${name}` : `${listing!.path}/${name}`
 
   return (
     <Dialog open={open} onClose={onClose} icon={FolderPlus} title="Add file mount" initialFocusRef={inputRef} widthClassName="max-w-lg">
-      <form onSubmit={(event) => { event.preventDefault(); void confirm() }} className="flex items-center gap-2 px-5 pb-3">
+      <form onSubmit={(event) => { event.preventDefault(); confirm() }} className="flex items-center gap-2 px-5 pb-3">
         <button
           type="button"
           aria-label="Open parent directory"
@@ -119,7 +112,7 @@ export function FileMountPicker({ open, onClose, onConfirm, onClone }: {
           {isRepositoryLink(path) ? (confirming ? "Cloning…" : "Clone") : "Add"}
         </button>
       </form>
-      {(confirmError || listingError) && <p role="alert" className="px-5 pb-2 text-xs text-danger">{confirmError || listingError}</p>}
+      <ErrorText className="px-5 pb-2">{confirmError || listingError}</ErrorText>
       <div role="list" aria-label="Directories" className="h-72 overflow-y-auto border-t border-divider/50 px-3 py-2">
         {listing?.directories.map((name) => (
           <div role="listitem" key={name}>

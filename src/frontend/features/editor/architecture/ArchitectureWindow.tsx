@@ -11,20 +11,19 @@ import { architectureSlug, architectureSource } from "@/lib/domain/architectureP
 import { diffGraph, fitGraph, graphFromView, type DiagramGraph, type DiagramNode } from "@/features/editor/architecture/diagramGraph"
 import type { EdgeStyle } from "@/lib/domain/edgeRouting"
 import { subscribeToChanges } from "@/lib/backend/syncStream"
-import { useClickOutside } from "@/hooks/useClickOutside"
+import { useEventListener } from "@/hooks/useEventListener"
+import { useResetOnChange } from "@/hooks/useResetOnChange"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
-import { cn } from "@/lib/utils"
+import { cn, errorMessage } from "@/lib/utils"
 import { FileTree, type FileTreeItem } from "@/components/ui/file-tree/FileTree"
 import { useFileTree } from "@/components/ui/file-tree/useFileTree"
-import { SEPARATOR, toolButton, type CanvasToolbarSlots } from "@/features/editor/canvas/CanvasToolbar"
+import { SEPARATOR, ToolButton, toolButton, type CanvasToolbarSlots } from "@/features/editor/canvas/CanvasToolbar"
 import { ArchitectureDiagramSurface } from "./ArchitectureDiagramSurface"
+import { ArchitectureMenu } from "./ArchitectureMenu"
 import { ArchitectureSourceEditor } from "@/features/editor/TextDocumentEditor"
 import { labelFontsReady, nodeMinWidth } from "./architectureLabelWidth"
 
 type Mutate = (write: () => Promise<ArchitectureWorkspace>) => Promise<ArchitectureWorkspace>
-
-/** The server's reason for a failed load or write, or `fallback` when it gave none. */
-const failure = (cause: unknown, fallback: string) => cause instanceof Error && cause.message ? cause.message : fallback
 
 /**
  * A `.c4` file of a project's architecture, drawn through the view it opens
@@ -72,17 +71,15 @@ function useArchitectureView(slug: string, file: string) {
     mutate(() => {
       queuedReadRef.current = null
       return readArchitecture(slug)
-    }).then(() => setLoadError(null), (cause: unknown) => setLoadError(failure(cause, "Could not load the architecture")))
+    }).then(() => setLoadError(null), (cause: unknown) => setLoadError(errorMessage(cause, "Could not load the architecture")))
   }, [mutate, slug])
 
   // Another file's project starts from nothing: no stale model, refusal, or load failure.
-  const [shownSlug, setShownSlug] = useState(slug)
-  if (shownSlug !== slug) {
-    setShownSlug(slug)
+  useResetOnChange(slug, () => {
     setWorkspace(null)
     setError(null)
     setLoadError(null)
-  }
+  })
   useEffect(() => { refresh() }, [refresh])
 
   // Writes from this device are already reflected locally; anyone else's reload the model.
@@ -96,12 +93,7 @@ function useArchitectureView(slug: string, file: string) {
   const view = useMemo(() => workspace?.model.views.find((candidate) => candidate.id === entry?.view) ?? null, [workspace, entry])
 
   // Drafts belong to the view they were drawn on.
-  const viewId = view?.id
-  const [draftsViewId, setDraftsViewId] = useState(viewId)
-  if (draftsViewId !== viewId) {
-    setDraftsViewId(viewId)
-    setDrafts([])
-  }
+  useResetOnChange(view?.id, () => setDrafts([]))
 
   const serverGraph = useMemo(() => view ? graphFromView(view) : null, [view])
   // Sized and spaced to fit their labels once, before drawing, and again once the real font has loaded.
@@ -118,7 +110,7 @@ function useArchitectureView(slug: string, file: string) {
 
   // A write from the diagram, whose refusal the window shows.
   const enqueue = useCallback((write: () => Promise<ArchitectureWorkspace>) => {
-    mutate(write).catch((cause: unknown) => setError(failure(cause, "The architecture could not be changed")))
+    mutate(write).catch((cause: unknown) => setError(errorMessage(cause, "The architecture could not be changed")))
   }, [mutate])
 
   // Runs operations the surface cannot express, e.g. adding to or removing from the view.
@@ -200,23 +192,14 @@ export function ArchitectureWindow({ path, maximized, hostScale, edgeStyle = "el
     setOffered([])
   }, [run, offered])
   // The dialog has the keyboard: Enter deletes, Escape keeps, whatever holds focus.
-  useEffect(() => {
-    if (offered.length === 0) return
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Enter" && event.key !== "Escape") return
-      event.preventDefault()
-      event.stopPropagation()
-      answer(event.key === "Enter")
-    }
-    window.addEventListener("keydown", onKey, true)
-    return () => window.removeEventListener("keydown", onKey, true)
-  }, [offered, answer])
+  useEventListener("window", "keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== "Escape") return
+    event.preventDefault()
+    event.stopPropagation()
+    answer(event.key === "Enter")
+  }, { active: offered.length > 0, capture: true })
   // Another view or file is another question.
-  const [offeredViewId, setOfferedViewId] = useState(view?.id)
-  if (offeredViewId !== view?.id) {
-    setOfferedViewId(view?.id)
-    setOffered([])
-  }
+  useResetOnChange(view?.id, () => setOffered([]))
   // LikeC4's own complaints about the source, e.g. an unresolved reference; it counts lines from zero.
   const diagnostics = workspace?.model.errors ?? []
   const notice = (text: string, action?: ReactNode) => (
@@ -266,9 +249,7 @@ export function ArchitectureWindow({ path, maximized, hostScale, edgeStyle = "el
     )
   }
   const treeToggle = workspace && (
-    <button type="button" aria-label={treeOpen ? "Hide files" : "Show files"} aria-expanded={treeOpen} onClick={() => setTreeOpen((current) => !current)} className={toolButton(treeOpen)}>
-      <ListTree className="h-3.5 w-3.5" />
-    </button>
+    <ToolButton icon={ListTree} label={treeOpen ? "Hide files" : "Show files"} active={treeOpen} aria-expanded={treeOpen} onClick={() => setTreeOpen((current) => !current)} />
   )
   const modeToggle = entry && (
     <div role="group" aria-label="Show as" className="flex gap-px rounded-md bg-surface p-0.5">
@@ -367,8 +348,7 @@ function ArchitectureTree({ slug, workspace, current, onOpen, mutate, floating }
     ?? (entry.role === "view" ? views.find((view) => view.id === entry.view)?.title : null)
     ?? entry.path.split("/").pop()!
   // Every system starts open, so its modules are visible.
-  const systemPaths = allSystems.map((entry) => entry.path).join("\n")
-  const defaultExpanded = systemPaths.split("\n")
+  const defaultExpanded = allSystems.map((entry) => entry.path)
   const controller = useFileTree({ storageKey: "expanded_architecture_tree", defaultExpanded })
   // A refused name throws, which keeps the tree's name field open with the server's reason.
   const create = async (operation: ArchitectureOperation) => {
@@ -422,9 +402,6 @@ function ArchitectureViewPicker({ elements, shown, onInclude }: {
   shown: ArchitectureViewNode[]
   onInclude: (elements: string[], descendants: boolean) => void
 }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  useClickOutside(ref, useCallback(() => setOpen(false), []))
   const groups = useMemo(() => {
     const visible = new Set(shown.map((node) => node.id))
     const byFile = new Map<string, ArchitectureElement[]>()
@@ -441,14 +418,18 @@ function ArchitectureViewPicker({ elements, shown, onInclude }: {
       }
     })
   }, [elements, shown])
-  const include = (ids: string[], descendants: boolean) => { onInclude(ids, descendants); setOpen(false) }
   return (
-    <div ref={ref} style={{ position: "relative" }}>
-      <button type="button" onClick={() => setOpen((current) => !current)} aria-haspopup="menu" aria-expanded={open} className={cn(toolButton(open), "flex items-center gap-1 text-xs")}>
-        <ListPlus className="h-3.5 w-3.5" /> Add to view
-      </button>
-      {open && (
-        <div role="menu" aria-label="Add to view" style={{ position: "absolute", zIndex: 10, top: "calc(100% + 4px)", left: 0, width: 260, maxHeight: 320, overflowY: "auto", padding: 4, border: "1px solid var(--divider)", borderRadius: 6, background: "var(--paper)", boxShadow: "var(--shadow-lg)" }}>
+    <ArchitectureMenu
+      label="Add to view" align="left" menuStyle={{ width: 260, maxHeight: 320, overflowY: "auto" }}
+      trigger={(open, toggle) => (
+        <button type="button" onClick={toggle} aria-haspopup="menu" aria-expanded={open} className={cn(toolButton(open), "flex items-center gap-1 text-xs")}>
+          <ListPlus className="h-3.5 w-3.5" /> Add to view
+        </button>
+      )}
+    >
+      {(close) => {
+        const include = (ids: string[], descendants: boolean) => { onInclude(ids, descendants); close() }
+        return <>
           {groups.length === 0 && <p className="px-2 py-1.5 text-[11px] text-ink-faint">Nothing to add yet: create an architecture file first.</p>}
           {groups.map((group) => (
             <div key={group.file} className="py-0.5">
@@ -464,8 +445,8 @@ function ArchitectureViewPicker({ elements, shown, onInclude }: {
               ))}
             </div>
           ))}
-        </div>
-      )}
-    </div>
+        </>
+      }}
+    </ArchitectureMenu>
   )
 }

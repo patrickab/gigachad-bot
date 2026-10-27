@@ -23,7 +23,6 @@ log = logging.getLogger(__name__)
 
 _queue: asyncio.Queue[tuple[str, bytes, AssetStore] | None] = asyncio.Queue()
 _worker_task: asyncio.Task | None = None
-_in_progress: str | None = None
 # PDFs queued or extracting, by name and content hash: live references re-attach the same PDF on every send.
 _pending: set[tuple[str, str]] = set()
 
@@ -33,14 +32,12 @@ def _pending_key(name: str, content: bytes) -> tuple[str, str]:
 
 
 async def _worker() -> None:
-    global _in_progress
     while True:
         item = await _queue.get()
         if item is None:  # shutdown sentinel from stop()
             _queue.task_done()
             break
         name, content, assets = item
-        _in_progress = name
         try:
             log.info("Extracting %s via MinerU", name)
             with tempfile.TemporaryDirectory() as tmp:
@@ -55,7 +52,6 @@ async def _worker() -> None:
         except Exception:
             log.exception("Background MinerU extraction failed for %s", name)
         finally:
-            _in_progress = None
             _pending.discard(_pending_key(name, content))
             _queue.task_done()
 
@@ -68,14 +64,6 @@ def enqueue(name: str, content: bytes, assets: AssetStore) -> None:
     _pending.add(key)
     _queue.put_nowait((name, content, assets))
     log.info("Queued for extraction: %s (queue depth: %d)", name, _queue.qsize())
-
-
-
-def status() -> dict:
-    return {
-        "in_progress": _in_progress,
-        "queued": _queue.qsize(),
-    }
 
 
 async def start() -> None:

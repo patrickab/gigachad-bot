@@ -5,7 +5,8 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { fetchOmpCatalog } from "@/lib/backend/api"
 import { displayName, qualifiedModelIds } from "@/lib/models"
 import type { ModelDefaults, ModelProvider, ModelsResponse, OmpCatalog } from "@/lib/domain/types"
-import { cn } from "@/lib/utils"
+import { errorMessage, cn } from "@/lib/utils"
+import { useEventListener } from "@/hooks/useEventListener"
 import { PopoverSelector, PopoverSelectorAction } from "@/components/ui/PopoverSelector"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { StyledSelect } from "@/components/ui/StyledSelect"
@@ -62,6 +63,10 @@ function ProviderRow({ provider, expanded, onToggle, onAddModel, onDeleteModel, 
   </div>
 }
 
+/** `providers` with the models of the provider labelled `label` replaced by `models(current)`. */
+const patchProvider = (providers: ModelProvider[], label: string, models: (current: string[]) => string[]): ModelProvider[] =>
+  providers.map((item) => item.label === label ? { ...item, models: models(item.models) } : item)
+
 const OMP_SOURCE = "omp"
 /** One catalog row holds every OMP pick, so the selector shows a single OMP
  *  tab listing `<omp-provider>/<model>` instead of a tab per login. */
@@ -86,10 +91,8 @@ function OmpSection({ catalog, providers, onChange }: {
 
   const ompModels = providers.find((item) => item.label === OMP_LABEL)?.models ?? []
   const toggle = (modelId: string) => {
-    const existing = providers.find((item) => item.label === OMP_LABEL)
-    if (!existing) return onChange([...providers, { label: OMP_LABEL, litellm_id: catalog.litellm_id, source: OMP_SOURCE, models: [modelId] }])
-    const models = existing.models.includes(modelId) ? existing.models.filter((value) => value !== modelId) : [...existing.models, modelId]
-    return onChange(providers.map((item) => item.label === OMP_LABEL ? { ...item, models } : item))
+    if (!providers.some((item) => item.label === OMP_LABEL)) return onChange([...providers, { label: OMP_LABEL, litellm_id: catalog.litellm_id, source: OMP_SOURCE, models: [modelId] }])
+    return onChange(patchProvider(providers, OMP_LABEL, (models) => models.includes(modelId) ? models.filter((value) => value !== modelId) : [...models, modelId]))
   }
 
   return <div className="border-t border-divider">
@@ -128,7 +131,7 @@ function ProviderSettings({ providers, ompCatalog, onChange }: { providers: Mode
   }
   return <>
     <div className="space-y-0.5 p-1.5">
-      {providers.map((provider) => <ProviderRow key={provider.label} provider={provider} expanded={expanded === provider.label} onToggle={() => setExpanded(expanded === provider.label ? null : provider.label)} onAddModel={(model) => { const value = model.trim(); if (value && !provider.models.includes(value)) void onChange(providers.map((item) => item.label === provider.label ? { ...item, models: [...item.models, value] } : item)) }} onDeleteModel={(model) => void onChange(providers.map((item) => item.label === provider.label ? { ...item, models: item.models.filter((value) => value !== model) } : item))} onDeleteProvider={() => void onChange(providers.filter((item) => item.label !== provider.label))} />)}
+      {providers.map((provider) => <ProviderRow key={provider.label} provider={provider} expanded={expanded === provider.label} onToggle={() => setExpanded(expanded === provider.label ? null : provider.label)} onAddModel={(model) => { const value = model.trim(); if (value && !provider.models.includes(value)) void onChange(patchProvider(providers, provider.label, (current) => [...current, value])) }} onDeleteModel={(model) => void onChange(patchProvider(providers, provider.label, (current) => current.filter((value) => value !== model)))} onDeleteProvider={() => void onChange(providers.filter((item) => item.label !== provider.label))} />)}
       {adding ? <AddProvider onAdd={(label, id) => void addProvider(label, id)} /> : <button onClick={() => setAdding(true)} className="flex w-full items-center gap-1 rounded-md px-2 py-2 text-xs text-ink-muted hover:bg-surface-elevated hover:text-ink"><Plus className="h-3.5 w-3.5" /> Add provider</button>}
     </div>
     <OmpSection catalog={ompCatalog} providers={providers} onChange={onChange} />
@@ -180,13 +183,9 @@ export function ModelDropdown({ models, loadError, selectedModel, onSelect, onPr
     setConfiguring(false)
     const defaults = pendingDefaults.current
     pendingDefaults.current = null
-    if (defaults) void onDefaultsChange(defaults).catch((reason) => setError((reason as Error).message || "Could not save default models"))
+    if (defaults) void onDefaultsChange(defaults).catch((reason) => setError(errorMessage(reason, "Could not save default models")))
   }, [onDefaultsChange])
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape" && configuring) setConfiguring(false) }
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
-  }, [configuring])
+  useEventListener("window", "keydown", (event) => { if (event.key === "Escape") setConfiguring(false) }, { active: configuring })
   // Loaded when the settings panel opens, not on mount: OMP is optional, so
   // probing its gateway for every chat view would cost a request nobody asked
   // for. A failed probe stays null and simply hides the section.
@@ -220,10 +219,10 @@ export function ModelDropdown({ models, loadError, selectedModel, onSelect, onPr
   const choices = available.flatMap((provider) => provider.models)
   const persist = async (next: ModelProvider[]) => {
     setError(null)
-    try { await onProvidersChange(next); return true } catch (reason) { setError((reason as Error).message || "Could not save providers"); return false }
+    try { await onProvidersChange(next); return true } catch (reason) { setError(errorMessage(reason, "Could not save providers")); return false }
   }
   const updateDefaults = (defaults: ModelDefaults) => { setDraftDefaults(defaults); pendingDefaults.current = defaults }
-  const reorderProviders = (labels: string[]) => void onTabOrderChange?.(labels).catch((reason) => setError((reason as Error).message || "Could not save provider order"))
+  const reorderProviders = (labels: string[]) => void onTabOrderChange?.(labels).catch((reason) => setError(errorMessage(reason, "Could not save provider order")))
   const fullLabel = selectedModel ? displayName(selectedModel) : "Select model"
   const errorLine = error && <p className="px-2 pb-1.5 text-xs text-danger">{error}</p>
 

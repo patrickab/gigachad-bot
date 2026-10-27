@@ -5,6 +5,7 @@ import type { WorkspaceItem } from "@/contexts/TabContext"
 import type { FileTreeItem } from "@/components/ui/file-tree/FileTree"
 import { ApiError, archiveOmpSession, fetchOmpArchive, restoreOmpSession } from "@/lib/backend/api"
 import type { OmpArchivedSession, OmpSession, OmpView } from "@/lib/domain/types"
+import { errorMessage } from "@/lib/utils"
 import { OmpBranchTree } from "./OmpBranchTree"
 import { useOmp } from "./OmpProvider"
 import { sessionForest, sessionTitle, sessionsInside, unlinkedWorkspaces, type SessionNode } from "./sessions"
@@ -62,7 +63,7 @@ export function useOmpSidebar({ onOpen, workspaceActions }: {
     } catch (cause) {
       forget(session.id)
       const forksFirst = cause instanceof ApiError && cause.status === 409
-      setError(forksFirst ? `Archive the forks of ${sessionTitle(session)} first` : cause instanceof Error ? cause.message : "Could not archive this session")
+      setError(forksFirst ? `Archive the forks of ${sessionTitle(session)} first` : errorMessage(cause, "Could not archive this session"))
     }
   }
 
@@ -73,7 +74,7 @@ export function useOmpSidebar({ onOpen, workspaceActions }: {
       refreshOverview()
       refreshArchive()
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not restore this session")
+      setError(errorMessage(cause, "Could not restore this session"))
     }
   }
 
@@ -119,7 +120,7 @@ export function useOmpSidebar({ onOpen, workspaceActions }: {
     label: "archived",
     type: "folder",
     children: archived.map((entry) => {
-      const title = entry.name || entry.first_message.trim() || "Untitled session"
+      const title = sessionTitle(entry)
       return { id: `omp-archived:${entry.key}`, label: title, type: "element", actions: [{ label: `Restore ${title}`, icon: RotateCcw, onClick: () => { void restore(entry) } }] }
     }),
   }

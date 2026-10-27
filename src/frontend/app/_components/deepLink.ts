@@ -1,7 +1,7 @@
 import type { WorkspaceItem } from "@/contexts/TabContext"
 
 /** What `?open=` asks the shell to show at startup. */
-export type DeepLinkTarget =
+type DeepLinkTarget =
   | { kind: "chat"; historyFile: string }
   | { kind: "item"; item: WorkspaceItem }
 

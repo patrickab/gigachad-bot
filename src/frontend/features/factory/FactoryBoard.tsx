@@ -4,6 +4,7 @@ import { useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { Plus, Settings } from "lucide-react"
 import { ElevatedContainer, ElevationProvider } from "@/components/ui/ElevatedContainer"
+import { ErrorText } from "@/components/ui/ErrorText"
 import { cn } from "@/lib/utils"
 import { fetchFactoryTasks } from "@/lib/backend/api"
 import { FactorySettingsDialog } from "./FactorySettingsDialog"
@@ -96,7 +97,7 @@ export function FactoryBoard({ repo, onOpenTask }: { repo: string; onOpenTask: (
             </button>
           </div>
         </div>
-        {error && <p role="alert" className="px-8 pt-3 text-xs text-danger">{error}</p>}
+        <ErrorText className="px-8 pt-3">{error}</ErrorText>
         <div className="flex min-h-0 flex-1 gap-4 overflow-x-auto px-8 pb-8 pt-6 scrollbar-thin">
           {BOARD_COLUMNS.map((column) => {
             const columnTasks = (tasks ?? []).filter((task) => column.states.includes(task.state)).sort(newestFirst)

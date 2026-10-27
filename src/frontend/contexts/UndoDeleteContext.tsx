@@ -1,6 +1,8 @@
 "use client"
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { createContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useRequiredContext } from "@/hooks/useRequiredContext"
+import { errorMessage } from "@/lib/utils"
 
 const UNDO_MS = 6000
 
@@ -39,7 +41,7 @@ export function UndoDeleteProvider({ children }: { children: ReactNode }) {
     }).catch((cause: unknown) => {
       candidate.onUndo?.()
       setItem((active) => active === candidate ? null : active)
-      setError(cause instanceof Error ? cause.message : `Could not delete ${candidate.label}`)
+      setError(errorMessage(cause, `Could not delete ${candidate.label}`))
     }).finally(() => setCommitting((keys) => {
       const remaining = new Set(keys)
       remaining.delete(candidate.key)
@@ -83,7 +85,5 @@ export function UndoDeleteProvider({ children }: { children: ReactNode }) {
 
 /** The app's undoable-deletion API; must be rendered under `UndoDeleteProvider`. */
 export function useUndoDelete(): UndoDeleteContextValue {
-  const context = useContext(UndoDeleteContext)
-  if (!context) throw new Error("useUndoDelete needs UndoDeleteProvider")
-  return context
+  return useRequiredContext(UndoDeleteContext, "useUndoDelete needs UndoDeleteProvider")
 }

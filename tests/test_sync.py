@@ -1,38 +1,16 @@
 import asyncio
 import json
-import os
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import psycopg
-from psycopg_pool import ConnectionPool
 import pytest
 
 from backend.identity import RequestIdentity
 from backend.routes.sync import replay_changes, stream_changes
 from backend.sync import CHANNEL, QUEUE_MAXSIZE, ChangeBroker
-from lib.db_schema import upgrade
+from tests.conftest import create_device, create_user
 
-
-@pytest.fixture(scope="module")
-def database_url():
-    url = os.environ.get("POSTGRES_TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("POSTGRES_TEST_DATABASE_URL is required for sync tests")
-    upgrade(url)
-    return url
-
-
-@pytest.fixture(scope="module")
-def postgres_pool(database_url):
-    pool = ConnectionPool(database_url, min_size=1, max_size=4)
-    yield pool
-    pool.close()
-
-
-@pytest.fixture(autouse=True)
-def clean_database(postgres_pool):
-    with postgres_pool.connection() as connection, connection.transaction():
-        connection.execute("TRUNCATE changes, assets, vault_roots, devices, documents, users CASCADE")
+pytestmark = pytest.mark.usefixtures("clean_database")
 
 
 @pytest.fixture
@@ -41,18 +19,6 @@ def listener(database_url):
     connection.execute(f"LISTEN {CHANNEL}")
     yield connection
     connection.close()
-
-
-def _user(pool, login) -> UUID:
-    with pool.connection() as connection:
-        return connection.execute("INSERT INTO users (tailscale_login) VALUES (%s) RETURNING id", (login,)).fetchone()[0]
-
-
-def _device(pool, user_id) -> UUID:
-    device_id = uuid4()
-    with pool.connection() as connection:
-        connection.execute("INSERT INTO devices (id, user_id) VALUES (%s, %s)", (device_id, user_id))
-    return device_id
 
 
 def _change(pool, user_id, resource_key, *, kind="document", version=1, device_id=None) -> int:
@@ -104,8 +70,8 @@ async def _await_listener(pool) -> None:
 
 
 def test_insert_notifies_once_with_metadata_only(postgres_pool, listener):
-    user_id = _user(postgres_pool, "alice@example.test")
-    device_id = _device(postgres_pool, user_id)
+    user_id = create_user(postgres_pool, "alice@example.test")
+    device_id = create_device(postgres_pool, user_id)
 
     seq = _change(postgres_pool, user_id, "notes/a.md", version=3, device_id=device_id)
 
@@ -124,7 +90,7 @@ def test_insert_notifies_once_with_metadata_only(postgres_pool, listener):
 
 def test_replay_returns_rows_after_since_in_seq_order(postgres_pool, monkeypatch):
     monkeypatch.setattr("backend.routes.sync.get_postgres_pool", lambda: postgres_pool)
-    user_id = _user(postgres_pool, "alice@example.test")
+    user_id = create_user(postgres_pool, "alice@example.test")
     seqs = [_change(postgres_pool, user_id, key) for key in ("c.md", "a.md", "b.md")]
 
     rows = replay_changes(user_id, 0)
@@ -137,7 +103,7 @@ def test_replay_returns_rows_after_since_in_seq_order(postgres_pool, monkeypatch
 
 def test_replay_keeps_only_the_latest_change_per_resource(postgres_pool, monkeypatch):
     monkeypatch.setattr("backend.routes.sync.get_postgres_pool", lambda: postgres_pool)
-    user_id = _user(postgres_pool, "alice@example.test")
+    user_id = create_user(postgres_pool, "alice@example.test")
     first = _change(postgres_pool, user_id, "a.md")
     other = _change(postgres_pool, user_id, "b.md")
     latest = _change(postgres_pool, user_id, "a.md", version=2)
@@ -151,8 +117,8 @@ def test_replay_keeps_only_the_latest_change_per_resource(postgres_pool, monkeyp
 
 def test_replay_excludes_other_users(postgres_pool, monkeypatch):
     monkeypatch.setattr("backend.routes.sync.get_postgres_pool", lambda: postgres_pool)
-    alice = _user(postgres_pool, "alice@example.test")
-    bob = _user(postgres_pool, "bob@example.test")
+    alice = create_user(postgres_pool, "alice@example.test")
+    bob = create_user(postgres_pool, "bob@example.test")
     _change(postgres_pool, bob, "bob.md")
     alice_seq = _change(postgres_pool, alice, "alice.md")
 
@@ -160,8 +126,8 @@ def test_replay_excludes_other_users(postgres_pool, monkeypatch):
 
 
 async def test_broker_delivers_only_the_subscribed_user(postgres_pool, database_url):
-    alice = _user(postgres_pool, "alice@example.test")
-    bob = _user(postgres_pool, "bob@example.test")
+    alice = create_user(postgres_pool, "alice@example.test")
+    bob = create_user(postgres_pool, "bob@example.test")
     broker = ChangeBroker()
     await broker.start(database_url)
     try:
@@ -192,9 +158,9 @@ async def test_stream_replays_missed_changes_then_live_ones(postgres_pool, datab
     broker = ChangeBroker()
     monkeypatch.setattr("backend.routes.sync.get_postgres_pool", lambda: postgres_pool)
     monkeypatch.setattr("backend.routes.sync.get_change_broker", lambda: broker)
-    user_id = _user(postgres_pool, "alice@example.test")
+    user_id = create_user(postgres_pool, "alice@example.test")
     missed = _change(postgres_pool, user_id, "old.md")
-    identity = RequestIdentity(user_id=user_id, login="alice@example.test", device_id=_device(postgres_pool, user_id))
+    identity = RequestIdentity(user_id=user_id, login="alice@example.test", device_id=create_device(postgres_pool, user_id))
     await broker.start(database_url)
     try:
         response = await stream_changes(since=0, identity=identity)
@@ -225,7 +191,7 @@ async def test_stream_replays_missed_changes_then_live_ones(postgres_pool, datab
 
 
 async def test_broker_reconnects_after_its_connection_is_terminated(postgres_pool, database_url):
-    user_id = _user(postgres_pool, "alice@example.test")
+    user_id = create_user(postgres_pool, "alice@example.test")
     broker = ChangeBroker()
     await broker.start(database_url)
     try:

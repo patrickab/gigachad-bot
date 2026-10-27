@@ -15,11 +15,6 @@ _gigachad_load_env() {
         [[ ! -e "$env_file" ]] && return 0
     fi
 
-    if [[ ! -e "$env_file" ]]; then
-        printf 'error: cannot read environment file: %s\n' "$env_file" >&2
-        return 1
-    fi
-
     if [[ ! -f "$env_file" || ! -r "$env_file" ]]; then
         printf 'error: cannot read environment file: %s\n' "$env_file" >&2
         return 1
@@ -52,10 +47,7 @@ _gigachad_load_env() {
     done < "$env_file"
 }
 
-if _gigachad_load_env; then
-    unset -f _gigachad_load_env
-else
-    _gigachad_load_env_status=$?
-    unset -f _gigachad_load_env
-    return "$_gigachad_load_env_status"
-fi
+_gigachad_load_env_status=0
+_gigachad_load_env || _gigachad_load_env_status=$?
+unset -f _gigachad_load_env
+return "$_gigachad_load_env_status"

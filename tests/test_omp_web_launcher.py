@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 import subprocess
 
+from tests.conftest import git
+
 LAUNCHER = Path(__file__).resolve().parents[1] / "run-omp-web.sh"
 
 
@@ -11,22 +13,13 @@ def test_bootstrap_preserves_existing_checkout_and_rejects_unrelated_directory(t
     source = tmp_path / "source"
     source.mkdir()
 
-    def git(*arguments):
-        return subprocess.run(
-            ["git", *map(str, arguments)],
-            check=True, text=True, capture_output=True,
-        ).stdout.strip()
-
-    git("init", "--initial-branch=custom", source)
+    git(tmp_path, "init", "--initial-branch=custom", str(source))
     # Replace the external app with an entrypoint that starts no services.
     entrypoint = source / "run.sh"
     entrypoint.write_text("#!/usr/bin/env bash\nexit 0\n")
     entrypoint.chmod(0o755)
-    git("-C", source, "add", "run.sh")
-    git(
-        "-C", source, "-c", "user.name=Test", "-c",
-        "user.email=test@example.invalid", "commit", "-m", "Fixture",
-    )
+    git(source, "add", "run.sh")
+    git(source, "commit", "-m", "Fixture")
     binaries = tmp_path / "bin"
     binaries.mkdir()
     omp = binaries / "omp"
@@ -54,8 +47,8 @@ def test_bootstrap_preserves_existing_checkout_and_rejects_unrelated_directory(t
 
     initial = launch()
     assert initial.returncode == 0, initial.stdout + initial.stderr
-    assert git("-C", checkout, "branch", "--show-current") == "custom"
-    assert git("-C", worktree, "rev-parse", "HEAD") == git("-C", source, "rev-parse", "HEAD")
+    assert git(checkout, "branch", "--show-current") == "custom"
+    assert git(worktree, "rev-parse", "HEAD") == git(source, "rev-parse", "HEAD")
 
     local_file = checkout / "local-file"
     local_file.write_text("preserve local changes")

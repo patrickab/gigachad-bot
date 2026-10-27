@@ -26,7 +26,7 @@ export function MemoryCommandLayer({ bar, items, onRun }: {
             spellCheck={false}
             className="w-full rounded-md bg-paper px-2 py-2 font-mono text-xs text-ink outline-none focus-visible:ring-1 focus-visible:ring-ink-faint"
           />
-          <CommandMenu open items={items} query={bar.query} onRun={onRun} onClose={bar.closeMenu} />
+          <CommandMenu items={items} query={bar.query} onRun={onRun} onClose={bar.closeMenu} />
         </div>
       </div>}
       {isActive && bar.panelState && <MemoryPanel state={bar.panelState} actions={bar.panelActions} />}

@@ -30,3 +30,11 @@ def api_query_resilient(client: Any, **kwargs: Any) -> Any:
             raise  # already retried this exact set, provider genuinely rejects it
         retry_kwargs = {**kwargs, "allowed_openai_params": sorted(already_allowed | unsupported)}
         return client.api_query(**retry_kwargs)
+
+
+def completion_text(client: Any, **kwargs: Any) -> str:
+    """Resilient ``api_query`` returning the first choice's text. Raises a returned exception."""
+    response = api_query_resilient(client, **kwargs)
+    if isinstance(response, Exception):
+        raise response
+    return response.choices[0].message.content or ""

@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useRef } from "react"
+import { useCallback, useRef } from "react"
+import { useEventListener } from "@/hooks/useEventListener"
 import type { CanvasAttachment, CanvasDocument, CanvasFrame, CanvasText } from "@/lib/domain/canvasDocument"
 
 type DragTarget = "frames" | "attachments" | "texts"
@@ -51,30 +52,22 @@ export function useCanvasDrag({ liveRef, scaleRef, snapshotOnce, applyChange, en
     }
   }, [liveRef])
 
-  useEffect(() => {
-    const onMove = (e: PointerEvent) => {
-      if (moveSelectionDrag(e)) return
-      const d = dragRef.current
-      if (!d) return
-      const dx = (e.clientX - d.startX) / scaleRef.current
-      const dy = (e.clientY - d.startY) / scaleRef.current
-      if (dx === 0 && dy === 0) return
-      snapshotOnce()
-      const cur = liveRef.current.doc
-      applyChange({ ...cur, [d.target]: (cur[d.target] as DragEntity[]).map((entity) => entity.id === d.id ? { ...entity, ...dragPatch(d, entity, dx, dy) } : entity) })
-    }
-    const onUp = (e: PointerEvent) => {
-      endSelectionDrag(e)
-      dragRef.current = null
-      endGesture()
-    }
-    window.addEventListener("pointermove", onMove)
-    window.addEventListener("pointerup", onUp)
-    return () => {
-      window.removeEventListener("pointermove", onMove)
-      window.removeEventListener("pointerup", onUp)
-    }
-  }, [liveRef, scaleRef, snapshotOnce, applyChange, endGesture, moveSelectionDrag, endSelectionDrag])
+  useEventListener("window", "pointermove", (e) => {
+    if (moveSelectionDrag(e)) return
+    const d = dragRef.current
+    if (!d) return
+    const dx = (e.clientX - d.startX) / scaleRef.current
+    const dy = (e.clientY - d.startY) / scaleRef.current
+    if (dx === 0 && dy === 0) return
+    snapshotOnce()
+    const cur = liveRef.current.doc
+    applyChange({ ...cur, [d.target]: (cur[d.target] as DragEntity[]).map((entity) => entity.id === d.id ? { ...entity, ...dragPatch(d, entity, dx, dy) } : entity) })
+  })
+  useEventListener("window", "pointerup", (e) => {
+    endSelectionDrag(e)
+    dragRef.current = null
+    endGesture()
+  })
 
   return startDrag
 }

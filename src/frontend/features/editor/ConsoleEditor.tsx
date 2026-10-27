@@ -1,13 +1,21 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useRef } from "react"
 import { cn } from "@/lib/utils"
-import { highlightCode } from "@/components/content/syntaxHighlighting"
+import { useHighlightedHtml } from "@/components/content/useHighlightedHtml"
 
 export const LINE_HEIGHT_PX = 12 * 1.625  // 0.75rem × 1.625
 export const PADDING_PX = 16              // 1rem — matches p-4
 
 const MONO_FONT = "var(--font-mono), 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace"
+
+/** A Ctrl/Cmd+I selection: its text and offsets, and the pixel offset just below its last line. */
+export interface InlineEditRequest {
+  text: string
+  start: number
+  end: number
+  splitPx: number
+}
 
 interface ConsoleEditorProps {
   value: string
@@ -18,7 +26,7 @@ interface ConsoleEditorProps {
   className?: string
   startLineNumber?: number
   /** Fired on Ctrl/Cmd+I with a non-empty selection. */
-  onInlineEdit?: (selectedText: string, selectionStart: number, selectionEnd: number, splitPx: number) => void
+  onInlineEdit?: (request: InlineEditRequest) => void
 }
 
 /** Code editor made of a transparent textarea over a Shiki-highlighted backdrop, with a line-number gutter. */
@@ -35,21 +43,11 @@ export function ConsoleEditor({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const backdropRef = useRef<HTMLDivElement>(null)
   const gutterRef  = useRef<HTMLDivElement>(null)
-  const [highlightedHtml, setHighlightedHtml] = useState("")
 
   const lineCount   = value.split("\n").length
   const gutterWidth = Math.max(2, String(lineCount).length) * 8 + 16  // px
 
-  // Highlight asynchronously, dropping results from superseded values
-  useEffect(() => {
-    let cancelled = false
-    highlightCode(value, language).then((html) => {
-      if (!cancelled) setHighlightedHtml(html)
-    }).catch(() => {
-      if (!cancelled) setHighlightedHtml("")
-    })
-    return () => { cancelled = true }
-  }, [value, language])
+  const highlightedHtml = useHighlightedHtml(value, language)
 
   const syncScroll = useCallback(() => {
     const ta = textareaRef.current
@@ -105,7 +103,7 @@ export function ConsoleEditor({
               // Pixel offset just below the selection's last line, where the inline edit panel is inserted
               const endLine = ta.value.substring(0, ta.selectionEnd).split("\n").length - 1
               const splitPx = PADDING_PX + (endLine + 1) * LINE_HEIGHT_PX
-              onInlineEdit(ta.value.substring(ta.selectionStart, ta.selectionEnd), ta.selectionStart, ta.selectionEnd, splitPx)
+              onInlineEdit({ text: ta.value.substring(ta.selectionStart, ta.selectionEnd), start: ta.selectionStart, end: ta.selectionEnd, splitPx })
             }
           }
         }}

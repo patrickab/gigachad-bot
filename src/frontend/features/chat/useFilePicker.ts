@@ -1,7 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useState, type Dispatch, type RefObject, type SetStateAction } from "react"
+import { useCallback, useState, type Dispatch, type RefObject, type SetStateAction } from "react"
 import { useStartupRead } from "@/contexts/StartupReadContext"
+import { useEventListener } from "@/hooks/useEventListener"
 import type { ChatInputHandle } from "@/features/chat/composer/ChatInput"
 import { attachReference, listRootFiles } from "@/lib/backend/api"
 import type { RootFile } from "@/lib/domain/types"
@@ -51,14 +52,9 @@ export function useFilePicker({ isActive, hasMessages, chatInputRef, setExtracti
   }, [hasMessages, chatInputRef, setExtracting])
 
   // Capture phase so Escape closes the PDF viewer before other handlers see it.
-  useEffect(() => {
-    if (!isActive || !filePdfPath) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { e.preventDefault(); setFilePdfPath(null) }
-    }
-    window.addEventListener("keydown", onKey, true)
-    return () => window.removeEventListener("keydown", onKey, true)
-  }, [isActive, filePdfPath])
+  useEventListener("window", "keydown", (e) => {
+    if (e.key === "Escape") { e.preventDefault(); setFilePdfPath(null) }
+  }, { active: isActive && !!filePdfPath, capture: true })
 
   return {
     filesEnabled,

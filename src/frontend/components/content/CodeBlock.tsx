@@ -1,8 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
 import { Check, Copy } from "lucide-react"
-import { highlightCode } from "@/components/content/syntaxHighlighting"
+import { useHighlightedHtml } from "@/components/content/useHighlightedHtml"
 import { useCopyFeedback } from "@/hooks/useCopyFeedback"
 import { cn } from "@/lib/utils"
 
@@ -11,17 +10,8 @@ import { cn } from "@/lib/utils"
  *  `plain` skips highlighting, for diagrams drawn with text characters. */
 export function CodeBlock({ codeString, language, plain = false }: { codeString: string; language: string; plain?: boolean }) {
   const { copied, copy } = useCopyFeedback(codeString)
-  const [html, setHtml] = useState("")
-
-  // Highlighting is async. Plain `<pre>` shows until it resolves, and `cancelled` drops stale results.
-  useEffect(() => {
-    if (plain) return
-    let cancelled = false
-    highlightCode(codeString, language).then((result) => {
-      if (!cancelled) setHtml(result)
-    })
-    return () => { cancelled = true }
-  }, [codeString, language, plain])
+  // Highlighting is async, so the plain `<pre>` shows until it resolves.
+  const html = useHighlightedHtml(codeString, language, !plain)
 
   return (
     <div className={cn("group/code relative", plain && "my-3")} data-code-language={language === "text" ? "" : language}>

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import os
-from uuid import uuid4
 
 from agent_sandbox import SandboxManifest
 from agent_sandbox.manifest import Execution, Outputs, WorkspaceRef, to_yaml
@@ -17,34 +15,15 @@ from lib.postgres_data_store import PostgresDataStore
 from lib.sandbox_service import PROMPT_MAX_LEN, SandboxRuntimeState, SandboxService
 from lib.sandbox_store import ActivePointer, AssetRef, SandboxStore
 from lib.storage_namespace import sandbox_asset, sandbox_manifest
+from tests.conftest import create_user
 
 # The model id is caller-supplied configuration; these tests only check it is forwarded.
 SANDBOX_MODEL = TEST_MODEL
 
 
-@pytest.fixture(scope="session")
-def postgres_pool():
-    url = os.environ.get("POSTGRES_TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("POSTGRES_TEST_DATABASE_URL not set")
-    from psycopg_pool import ConnectionPool
-
-    pool = ConnectionPool(url, min_size=1, max_size=4, open=False)
-    pool.open()
-    try:
-        yield pool
-    finally:
-        pool.close()
-
-
 @pytest.fixture
-def user_id(postgres_pool) -> str:
-    with postgres_pool.connection() as connection, connection.transaction():
-        connection.execute("TRUNCATE changes, assets, vault_roots, devices, documents, users CASCADE")
-        row = connection.execute(
-            "INSERT INTO users (tailscale_login) VALUES (%s) RETURNING id", (f"test-{uuid4()}@example.test",)
-        ).fetchone()
-    return str(row[0])
+def user_id(postgres_pool, clean_database) -> str:
+    return str(create_user(postgres_pool))
 
 
 @pytest.fixture

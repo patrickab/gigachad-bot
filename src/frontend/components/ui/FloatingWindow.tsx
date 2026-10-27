@@ -3,6 +3,7 @@
 import { useEffect, useRef, type CSSProperties, type ReactNode } from "react"
 import { motion } from "framer-motion"
 import { cn } from "@/lib/utils"
+import { ModalBackdrop } from "@/components/ui/ModalBackdrop"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 
 interface FloatingWindowProps {
@@ -30,15 +31,7 @@ export function FloatingWindow({ children, onClose, label, overlayClassName, ove
   }, [])
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.15 }}
-      className={cn("fixed inset-0 z-[90] flex items-center justify-center bg-backdrop p-3 backdrop-blur-[2px] sm:p-6", overlayClassName)}
-      onClick={onClose}
-      style={overlayStyle}
-    >
+    <ModalBackdrop onClose={onClose} className={cn("z-[90] p-3 sm:p-6", overlayClassName)} style={overlayStyle}>
       <motion.div
         ref={panelRef}
         role="dialog"
@@ -57,6 +50,6 @@ export function FloatingWindow({ children, onClose, label, overlayClassName, ove
       >
         {children}
       </motion.div>
-    </motion.div>
+    </ModalBackdrop>
   )
 }

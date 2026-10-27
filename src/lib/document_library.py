@@ -9,7 +9,6 @@ spawning to ``lib.mineru``. Staying free of route imports lets the ``files`` and
 ``documents`` routes share it without cycles.
 """
 
-import logging
 import mimetypes
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
@@ -19,8 +18,6 @@ from lib.data_store import InvalidStorageKey, validate_key
 
 if TYPE_CHECKING:
     from lib.file_roots import FileRoots
-
-log = logging.getLogger(__name__)
 
 
 def mime_for(path: str | Path) -> str:

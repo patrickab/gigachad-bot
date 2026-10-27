@@ -19,12 +19,13 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import time
 from typing import Any
 import urllib.error
 import urllib.request
+
+from lib.omp_cli import OmpNotFound, run_omp
 
 # The LiteLLM provider prefix that carries an OMP model. Kept in one place
 # because the browser needs the same value to build selector strings.
@@ -182,23 +183,17 @@ def catalog(*, refresh: bool = False) -> dict[str, Any]:
 
 
 def reset_cache() -> None:
-    global _cache
-    _cache = None
+    global _cache, _thinking_cache
+    _cache = _thinking_cache = None
 
 
 def _fetch_thinking_levels() -> dict[str, list[str]]:
     """`<provider>/<model>` -> OMP's baked effort ladder, empty for non-reasoning models."""
-    executable = shutil.which("omp")
-    if executable is None:
+    try:
+        output = run_omp("models", "--json", timeout=_CLI_TIMEOUT_SECONDS)
+    except OmpNotFound:
         return {}
-    completed = subprocess.run(
-        [executable, "models", "--json"],
-        capture_output=True,
-        text=True,
-        timeout=_CLI_TIMEOUT_SECONDS,
-        check=True,
-    )
-    models = json.loads(completed.stdout).get("models") or []
+    models = json.loads(output).get("models") or []
     return {
         model["selector"]: (model.get("thinking") or []) if model.get("reasoning") else []
         for model in models

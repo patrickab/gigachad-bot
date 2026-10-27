@@ -1,6 +1,7 @@
 "use client"
 
-import { createContext, useContext, useState, type ReactNode } from "react"
+import { createContext, useState, type ReactNode } from "react"
+import { useRequiredContext } from "@/hooks/useRequiredContext"
 
 interface SidebarContextValue {
   collapsed: boolean
@@ -23,7 +24,5 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
 }
 
 export function useSidebar() {
-  const ctx = useContext(SidebarContext)
-  if (!ctx) throw new Error("useSidebar must be inside SidebarProvider")
-  return ctx
+  return useRequiredContext(SidebarContext, "useSidebar must be inside SidebarProvider")
 }

@@ -1,23 +1,18 @@
 """The diff viewer lists a repository's changes and builds one patch per file."""
 
-import subprocess
-
 import pytest
 
 from lib.git_diff import UnsupportedDiffContent, changed_files, file_contents, file_patch, line_counts
-
-
-def _git(directory, *args):
-    subprocess.run(["git", "-C", str(directory), "-c", "user.email=t@t", "-c", "user.name=t", *args], check=True, capture_output=True)
+from tests.conftest import git
 
 
 @pytest.fixture
 def repository(tmp_path):
-    _git(tmp_path, "init", "-q")
+    git(tmp_path, "init", "-q")
     (tmp_path / "kept.txt").write_text("one\ntwo\n")
     (tmp_path / "gone.txt").write_text("bye\n")
-    _git(tmp_path, "add", ".")
-    _git(tmp_path, "commit", "-q", "-m", "init")
+    git(tmp_path, "add", ".")
+    git(tmp_path, "commit", "-q", "-m", "init")
     return tmp_path.resolve()
 
 
@@ -37,9 +32,9 @@ def test_line_counts_cover_tracked_untracked_renamed_and_binary_files(repository
     (repository / "new.txt").write_text("a\nb")
     (repository / "blob.bin").write_bytes(b"\0\1")
     (repository / "old.txt").write_text("1\n2\n3\n4\n")
-    _git(repository, "add", "old.txt")
-    _git(repository, "commit", "-q", "-m", "old")
-    _git(repository, "mv", "old.txt", "moved.txt")
+    git(repository, "add", "old.txt")
+    git(repository, "commit", "-q", "-m", "old")
+    git(repository, "mv", "old.txt", "moved.txt")
 
     counts = line_counts(repository, changed_files(repository))
 
@@ -86,14 +81,14 @@ def test_contents_pair_head_with_working_tree(repository):
 
 
 def test_contents_follow_renames_to_the_original_head_file(repository):
-    _git(repository, "mv", "kept.txt", "moved.txt")
+    git(repository, "mv", "kept.txt", "moved.txt")
     (repository / "moved.txt").write_text("one\ntwo\nthree\n")
 
     assert file_contents(repository, "moved.txt") == ("one\ntwo\n", "one\ntwo\nthree\n")
 
 
 def test_contents_of_unborn_repository_have_empty_base(tmp_path):
-    _git(tmp_path, "init", "-q")
+    git(tmp_path, "init", "-q")
     (tmp_path / "a.txt").write_text("a\n")
 
     assert file_contents(tmp_path, "a.txt") == ("", "a\n")
@@ -116,7 +111,7 @@ def test_contents_reject_unsupported_files(repository, tmp_path_factory):
 def test_contents_reject_renamed_baseline_outside_mount(repository):
     mount = repository / "mount"
     mount.mkdir()
-    _git(repository, "mv", "kept.txt", "mount/kept.txt")
+    git(repository, "mv", "kept.txt", "mount/kept.txt")
 
     with pytest.raises(UnsupportedDiffContent, match="Original path is outside the mount"):
         file_contents(mount, "kept.txt")

@@ -36,6 +36,8 @@ export function isImageAttachment(a: Attachment): boolean {
   return a.mime.startsWith("image/")
 }
 
+const isActiveImage = (a: Attachment) => a.active && isImageAttachment(a)
+
 // Stored `url`s are absolute against whatever API origin was active at upload time
 // (e.g. an old localhost dev backend), so trusting them breaks loads on other origins.
 // Path+query is the only reliable locator: chat_id/slug are NOT stable, since uploads
@@ -83,7 +85,7 @@ export function withAttachments(msg: Message, attachments: Attachment[]): Messag
 const ATTACHMENT_ONLY_PROMPT = "Please review the attached document and provide a summary."
 
 /** The text the model receives for a user turn: attached-file content ahead of the prompt, with a default prompt for attachment-only turns. */
-export function composeUserMessage(text: string, hiddenContent: string | undefined): string {
+export function composeUserMessage(text: string, hiddenContent = ""): string {
   const prompt = text.trim() ? text : ATTACHMENT_ONLY_PROMPT
   return hiddenContent ? `${hiddenContent}\n\n${prompt}` : prompt
 }
@@ -92,21 +94,8 @@ export function collectActiveImagePaths(
   messages: Message[],
   scope?: { userIndex: number },
 ): string[] {
-  const paths: string[] = []
-  if (scope) {
-    const msg = messages[scope.userIndex]
-    for (const a of msg?.attachments ?? []) {
-      if (a.active && isImageAttachment(a)) paths.push(a.name)
-    }
-    return paths
-  }
-  for (const m of messages) {
-    if (m.role !== "user" || !m.attachments) continue
-    for (const a of m.attachments) {
-      if (a.active && isImageAttachment(a)) paths.push(a.name)
-    }
-  }
-  return paths
+  const scoped = scope ? [messages[scope.userIndex]] : messages.filter((m) => m.role === "user")
+  return scoped.flatMap((m) => (m?.attachments ?? []).filter(isActiveImage).map((a) => a.name))
 }
 
 type ParseAttachments = (chatId: string, names: string[], slug: string | null) => Promise<{ name: string; parsedMd: string | null }[]>
@@ -198,12 +187,12 @@ export async function buildAttachedSend(
   const enriched = await withParsedAttachments(attachments, chatId, slug, parse)
 
   const priorImgPaths = collectActiveImagePaths(priorMessages)
-  const newImgPaths = enriched.filter((a) => a.active && isImageAttachment(a)).map((a) => a.name)
+  const newImgPaths = enriched.filter(isActiveImage).map((a) => a.name)
 
   const request: ChatRequest = {
     ...baseParams,
     chat_id: chatId,
-    user_msg: composeUserMessage(text, buildHiddenContent(enriched) || undefined),
+    user_msg: composeUserMessage(text, buildHiddenContent(enriched)),
     img_paths: [...priorImgPaths, ...newImgPaths],
     project_slug: slug,
   }
@@ -218,7 +207,7 @@ export function deactivateSentImages(messages: Message[], sentPaths: string[]): 
     if (m.role !== "user" || !m.attachments) return m
     let changed = false
     const attachments = m.attachments.map((a) => {
-      if (sent.has(a.name) && isImageAttachment(a) && a.active) {
+      if (sent.has(a.name) && isActiveImage(a)) {
         changed = true
         return { ...a, active: false }
       }

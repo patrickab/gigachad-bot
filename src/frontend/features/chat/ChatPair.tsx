@@ -1,13 +1,12 @@
 "use client"
 
 import { useCallback, useState } from "react"
-import { Wrench } from "lucide-react"
 import type { Attachment, Message } from "@/lib/domain/types"
 import { TurnCard, TurnHeader, TurnPreview, TurnSurface } from "@gigachad/chat-ui"
 import "@gigachad/chat-ui/turn.css"
 import { AssistantMessageContent, ChatMessage } from "@/features/chat/messages/ChatMessage"
 import { ToolCallElement } from "@/features/chat/messages/ToolCallElement"
-import { TOOL_META } from "@/features/chat/tools"
+import { toolDisplay } from "@/features/chat/tools"
 
 const MAX_LABEL_LENGTH = 80
 
@@ -100,9 +99,8 @@ export function ChatPair({
 }: ChatPairProps) {
   if (!expanded) {
     const tools = (assistant.tool_calls ?? []).map((call) => {
-      const meta = TOOL_META[call.name]
-      const Icon = meta?.icon ?? Wrench
-      return { key: call.id, label: meta?.cardLabel ?? call.name, icon: <Icon size={14} aria-hidden="true" /> }
+      const { icon: Icon, label } = toolDisplay(call.name)
+      return { key: call.id, label, icon: <Icon size={14} aria-hidden="true" /> }
     })
     return (
       <div data-qa-index={globalIndex}>

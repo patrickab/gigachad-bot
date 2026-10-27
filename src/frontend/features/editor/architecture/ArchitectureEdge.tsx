@@ -4,6 +4,8 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type K
 import { BaseEdge, type EdgeProps } from "@xyflow/react"
 import { edgeSketchPaths, roughSeed } from "@/features/editor/architecture/architectureSketch"
 import type { DiagramEdge } from "@/features/editor/architecture/diagramGraph"
+import { trackPointer } from "@/features/editor/architecture/trackPointer"
+import { useResetOnChange } from "@/hooks/useResetOnChange"
 import {
   CORNER_RADIUS, arrowHeadPath, bendPoint, bendThrough, normalOffset, normalPoint, orthogonalRoute, polylineMidpoint, roundedPath,
   type EdgeAttachment, type EdgeStyle, type Point, type RouteCard,
@@ -130,11 +132,7 @@ export function ArchitectureEdge({ id, source, target, data, selected }: EdgePro
   useEffect(() => () => stopDragRef.current?.(), [])
   const [editingLabel, setEditingLabel] = useState(false)
   // Deselecting ends label editing.
-  const [wasSelected, setWasSelected] = useState(selected)
-  if (wasSelected !== selected) {
-    setWasSelected(selected)
-    if (!selected) setEditingLabel(false)
-  }
+  useResetOnChange(selected, (isSelected) => { if (!isSelected) setEditingLabel(false) })
   // The label reaches the model once, when editing ends, not on every keystroke.
   const [labelDraft, setLabelDraft] = useState("")
   const commitLabel = () => {
@@ -159,33 +157,29 @@ export function ArchitectureEdge({ id, source, target, data, selected }: EdgePro
 
   if (!geometry) return null
   const { labelPoint, handle, axis } = geometry
+  const edgeProps = { className: cn("architecture-diagram-edge", selected && "architecture-diagram-edge-selected"), pointerEvents: "none" as const, stroke: "currentColor" }
 
   const startDrag = (event: ReactPointerEvent<SVGCircleElement>) => {
     event.preventDefault()
     event.stopPropagation()
     // The latest bend, read when the drag ends: a parent update must not run inside a state updater.
     let latest: number | null = null
-    const move = (pointer: PointerEvent) => {
-      const point = edit?.toFlowPoint(pointer.clientX, pointer.clientY)
-      if (!point) return
-      const value = geometry.project(point)
-      if (value !== null) {
-        latest = value
-        edit?.onBendPreview(id, value)
-      }
-    }
-    const stop = () => {
-      window.removeEventListener("pointermove", move)
-      window.removeEventListener("pointerup", stop)
-      window.removeEventListener("pointercancel", stop)
-      stopDragRef.current = null
-      edit?.onBendPreview(id, null)
-      if (latest !== null) edit?.onPathChange(id, { bend: latest })
-    }
-    stopDragRef.current = stop
-    window.addEventListener("pointermove", move)
-    window.addEventListener("pointerup", stop, { once: true })
-    window.addEventListener("pointercancel", stop, { once: true })
+    stopDragRef.current = trackPointer(
+      (pointer) => {
+        const point = edit?.toFlowPoint(pointer.clientX, pointer.clientY)
+        if (!point) return
+        const value = geometry.project(point)
+        if (value !== null) {
+          latest = value
+          edit?.onBendPreview(id, value)
+        }
+      },
+      () => {
+        stopDragRef.current = null
+        edit?.onBendPreview(id, null)
+        if (latest !== null) edit?.onPathChange(id, { bend: latest })
+      },
+    )
   }
   const nudge = (event: KeyboardEvent<SVGCircleElement>) => {
     const sign = axis && NUDGES[axis][event.key]
@@ -199,9 +193,9 @@ export function ArchitectureEdge({ id, source, target, data, selected }: EdgePro
       <BaseEdge id={id} path={geometry.edgePath} interactionWidth={20} style={{ stroke: "transparent" }} />
     </g>
     {geometry.rough
-      ? sketch.map((path, index) => <path key={index} d={path.d} fill="none" stroke="currentColor" strokeWidth={path.strokeWidth} strokeLinecap="round" className={cn("architecture-diagram-edge", selected && "architecture-diagram-edge-selected")} pointerEvents="none" />)
-      : <path d={geometry.edgePath} fill="none" stroke="currentColor" strokeWidth={selected ? 2 : 1.6} strokeLinecap="round" strokeLinejoin="round" className={cn("architecture-diagram-edge", selected && "architecture-diagram-edge-selected")} pointerEvents="none" />}
-    <path d={geometry.arrows} fill="currentColor" stroke="currentColor" strokeWidth={1.2} strokeLinejoin="round" className={cn("architecture-diagram-edge", selected && "architecture-diagram-edge-selected")} pointerEvents="none" />
+      ? sketch.map((path, index) => <path key={index} d={path.d} fill="none" strokeWidth={path.strokeWidth} strokeLinecap="round" {...edgeProps} />)
+      : <path d={geometry.edgePath} fill="none" strokeWidth={selected ? 2 : 1.6} strokeLinecap="round" strokeLinejoin="round" {...edgeProps} />}
+    <path d={geometry.arrows} fill="currentColor" strokeWidth={1.2} strokeLinejoin="round" {...edgeProps} />
     {selected && editingLabel && edit
       ? <foreignObject x={labelPoint.x - 70} y={labelPoint.y - 26} width={140} height={24} overflow="visible"><input autoFocus aria-label="Connection label" value={labelDraft} placeholder="Label" onChange={(event) => setLabelDraft(event.target.value)} onBlur={commitLabel} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur() } else if (event.key === "Escape") { event.preventDefault(); setEditingLabel(false) } }} className="architecture-diagram-edge-label-input nodrag nopan nowheel" /></foreignObject>
       : data?.label && (

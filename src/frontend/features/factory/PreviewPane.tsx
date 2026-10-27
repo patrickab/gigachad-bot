@@ -1,7 +1,8 @@
 "use client"
 
-import { useState } from "react"
 import { ExternalLink, RotateCw } from "lucide-react"
+import { ErrorText } from "@/components/ui/ErrorText"
+import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { restartFactoryPreview } from "@/lib/backend/api"
 import { allowedActions } from "./states"
 import { ICON_BUTTON_CLASS } from "./styles"
@@ -13,23 +14,12 @@ function Message({ children }: { children: React.ReactNode }) {
 
 /** Live preview of a task's worktree: the engine's preview URL in a frame, with restart and open-in-new-tab. */
 export function PreviewPane({ task, onChanged }: { task: FactoryTaskDetail; onChanged: () => void }) {
-  const [restarting, setRestarting] = useState(false)
-  const [error, setError] = useState("")
   const { preview } = task
   const canRestart = allowedActions(task.state).restartPreview
-
-  const restart = async () => {
-    setRestarting(true)
-    setError("")
-    try {
-      await restartFactoryPreview(task.id)
-      onChanged()
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not restart the preview")
-    } finally {
-      setRestarting(false)
-    }
-  }
+  const { run: restart, pending: restarting, error } = useAsyncAction(async () => {
+    await restartFactoryPreview(task.id)
+    onChanged()
+  }, "Could not restart the preview")
 
   if (!preview) return <Message>No preview for this task</Message>
 
@@ -48,7 +38,7 @@ export function PreviewPane({ task, onChanged }: { task: FactoryTaskDetail; onCh
           </a>
         )}
       </div>
-      {error && <p role="alert" className="px-3 py-1 text-xs text-danger">{error}</p>}
+      <ErrorText className="px-3 py-1">{error}</ErrorText>
       <div className="min-h-0 flex-1">
         {preview.status === "ready" ? (
           <iframe

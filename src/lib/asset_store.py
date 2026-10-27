@@ -17,8 +17,10 @@ from uuid import UUID
 
 from psycopg_pool import ConnectionPool
 
+from lib.changes import record_change
 from lib.data_store import StorageConflictError, StorageNotFoundError, validate_key
 from lib.document_library import mime_for
+from lib.postgres_data_store import like_prefix
 
 ASSET_KINDS = ("upload", "pdf", "mineru_markdown", "mineru_image", "drawing", "sandbox")
 
@@ -52,10 +54,6 @@ class AssetStore:
         self._user_id = user_id
         self._device_id = device_id
 
-    @staticmethod
-    def _escape_like(value: str) -> str:
-        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-
     # Row layout is ``_COLUMNS`` order, optionally followed by ``content``.
     @staticmethod
     def _asset(row, content: bytes | None = None) -> Asset:
@@ -72,12 +70,9 @@ class AssetStore:
 
     # `version` is None for deletes and the vacated side of a move.
     def _change(self, connection, logical_path: str, version: int | None, operation: str) -> None:
-        connection.execute(
-            """
-            INSERT INTO changes (user_id, resource_kind, resource_key, version, operation, device_id)
-            VALUES (%s, 'asset', %s, %s, %s, %s)
-            """,
-            (self._user_id, logical_path, version, operation, self._device_id),
+        record_change(
+            connection, user_id=self._user_id, device_id=self._device_id, kind="asset", key=logical_path, operation=operation,
+            version=version,
         )
 
     def write(self, kind: str, logical_path: str, content: bytes, *, mime: str | None = None) -> Asset:
@@ -112,26 +107,22 @@ class AssetStore:
             content=content,
         )
 
-    def read(self, logical_path: str) -> Asset:
-        logical_path = validate_key(logical_path)
+    def _fetch(self, column: str, value: object, missing: str) -> Asset:
         with self._pool.connection() as connection:
             row = connection.execute(
-                f"SELECT {_COLUMNS}, content FROM assets WHERE user_id = %s AND logical_path = %s",
-                (self._user_id, logical_path),
+                f"SELECT {_COLUMNS}, content FROM assets WHERE user_id = %s AND {column} = %s",
+                (self._user_id, value),
             ).fetchone()
         if row is None:
-            raise StorageNotFoundError(logical_path)
+            raise StorageNotFoundError(missing)
         return self._asset(row, bytes(row[7]))
 
+    def read(self, logical_path: str) -> Asset:
+        logical_path = validate_key(logical_path)
+        return self._fetch("logical_path", logical_path, logical_path)
+
     def read_by_id(self, asset_id: UUID) -> Asset:
-        with self._pool.connection() as connection:
-            row = connection.execute(
-                f"SELECT {_COLUMNS}, content FROM assets WHERE user_id = %s AND id = %s",
-                (self._user_id, asset_id),
-            ).fetchone()
-        if row is None:
-            raise StorageNotFoundError(str(asset_id))
-        return self._asset(row, bytes(row[7]))
+        return self._fetch("id", asset_id, str(asset_id))
 
     def list(self, prefix: str = "", *, kind: str | None = None) -> list[Asset]:
         """Assets under *prefix* (directory semantics) without content, ordered by path."""
@@ -141,7 +132,7 @@ class AssetStore:
         if prefix:
             # Directory semantics: "notes" matches "notes" and "notes/a.md", never "notes-old/a.md".
             clauses.append("AND (logical_path = %s OR logical_path LIKE %s ESCAPE '\\')")
-            params += [prefix, f"{self._escape_like(prefix)}/%"]
+            params += [prefix, like_prefix(prefix)]
         if kind is not None:
             clauses.append("AND kind = %s")
             params.append(kind)

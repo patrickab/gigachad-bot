@@ -25,6 +25,11 @@ def safe_read_json(path: DataStorePath, default: dict[str, Any]) -> dict[str, An
     return data
 
 
+def dump_json(data: dict[str, Any] | list[Any]) -> str:
+    """Serialize *data* in the stored format: 2-space indent, unescaped unicode, trailing newline."""
+    return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+
+
 def safe_write_json(path: DataStorePath, data: dict[str, Any] | list[Any]) -> None:
     """Write `data` as JSON to `path`."""
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    path.write_text(dump_json(data))

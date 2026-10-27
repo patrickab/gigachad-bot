@@ -6,13 +6,14 @@ includes from ``prompts/_blocks/*.md``.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 import logging
 from pathlib import Path
 import re
 
 import yaml
 
-from lib.data_store import DataStore, StorageNotFoundError, read_text, write_text
+from lib.data_store import DataStore, overwrite_text, read_text, read_text_or
 from lib.storage_namespace import PROMPT
 
 log = logging.getLogger(__name__)
@@ -42,32 +43,40 @@ class PromptStore:
         self._store = data_store
         self._prefix = prefix
         self._block_cache: dict[str, str] = {}
-        self._prompt_cache: dict[str, tuple[str, str]] = {}  # name -> (resolved_text, filename)
+        self._prompt_cache: dict[str, str] = {}  # name -> resolved_text
         self._order: list[str] = []
         self.reload()
+
+    def _key(self, slug: str) -> str:
+        return f"{self._prefix}/{slug}.md"
 
     def reload(self) -> None:
         self._block_cache.clear()
         self._prompt_cache.clear()
-        try:
-            order, _ = read_text(self._store, f"{self._prefix}/_order")
-            self._order = order.split()
-        except StorageNotFoundError:
-            self._order = []
-        self._load_blocks()
-        self._load_prompts()
+        order = read_text_or(self._store, f"{self._prefix}/_order")
+        self._order = order.split() if order is not None else []
+        for stem, raw in self._md_entries(f"{self._prefix}/_blocks"):
+            self._block_cache[stem] = raw.strip()
+        for _, stem, meta, body in self._ranked_prompts():
+            self._prompt_cache[str(meta.get("name", stem))] = self._resolve(body).strip()
 
     def _rank(self, stem: str) -> tuple:
         """Sort key: position in the ``_order`` manifest; unlisted prompts fall to the end, alphabetical."""
         return (0, self._order.index(stem)) if stem in self._order else (1, stem.lower())
 
-    def _load_blocks(self) -> None:
-        prefix = f"{self._prefix}/_blocks"
+    def _md_entries(self, prefix: str) -> Iterator[tuple[str, str]]:
+        """Yield `(stem, raw text)` of every `.md` file directly under *prefix*, ordered by key."""
         for entry in sorted(self._store.list(prefix), key=lambda item: item.key):
-            if entry.is_dir or not entry.key.endswith(".md"):
-                continue
-            raw, _ = read_text(self._store, entry.key)
-            self._block_cache[Path(entry.key).stem] = raw.strip()
+            if not entry.is_dir and entry.key.endswith(".md"):
+                yield Path(entry.key).stem, read_text(self._store, entry.key)[0]
+
+    def _ranked_prompts(self) -> list[tuple[tuple, str, dict[str, object], str]]:
+        """Every prompt as `(rank, stem, frontmatter, body)` in display order."""
+        parsed = []
+        for stem, raw in self._md_entries(self._prefix):
+            meta, body = _parse_frontmatter(raw)
+            parsed.append((self._rank(stem), stem, meta, body))
+        return sorted(parsed)
 
     def _resolve(self, body: str) -> str:
         def _repl(m: re.Match[str]) -> str:
@@ -78,48 +87,25 @@ class PromptStore:
             return m.group(0)
         return _INCLUDE_RE.sub(_repl, body)
 
-    def _load_prompts(self) -> None:
-        parsed = []
-        for entry in self._store.list(self._prefix):
-            if entry.is_dir or not entry.key.endswith(".md"):
-                continue
-            raw, _ = read_text(self._store, entry.key)
-            stem = Path(entry.key).stem
-            meta, body = _parse_frontmatter(raw)
-            parsed.append((self._rank(stem), meta, body, stem))
-        for _, meta, body, stem in sorted(parsed):
-            name = str(meta.get("name", stem))
-            self._prompt_cache[name] = (self._resolve(body).strip(), stem)
-
     def prompt_map(self) -> dict[str, str]:
-        return {name: text for name, (text, _) in self._prompt_cache.items()}
+        return dict(self._prompt_cache)
 
     def blocks(self) -> dict[str, str]:
         return dict(self._block_cache)
 
     def get_raw(self, slug: str) -> str | None:
         """Return the raw (unresolved) file content for a prompt by filename slug."""
-        key = f"{self._prefix}/{slug}.md"
-        try:
-            content, _ = read_text(self._store, key)
-        except StorageNotFoundError:
-            return None
-        return content
+        return read_text_or(self._store, self._key(slug))
 
     def save(self, slug: str, content: str) -> str:
         """Write a prompt file and reload. Returns the resolved name."""
-        key = f"{self._prefix}/{slug}.md"
-        try:
-            _, revision = read_text(self._store, key)
-        except StorageNotFoundError:
-            revision = None
-        write_text(self._store, key, content, expected=revision)
+        overwrite_text(self._store, self._key(slug), content)
         self.reload()
         meta, _ = _parse_frontmatter(content)
         return str(meta.get("name", slug))
 
     def delete(self, slug: str) -> bool:
-        key = f"{self._prefix}/{slug}.md"
+        key = self._key(slug)
         if not self._store.exists(key):
             return False
         self._store.delete(key)
@@ -131,29 +117,16 @@ class PromptStore:
 
     def set_order(self, slugs: list[str]) -> None:
         """Persist the prompt display order. Slugs not listed fall to the end, alphabetical."""
-        key = f"{self._prefix}/_order"
-        try:
-            _, revision = read_text(self._store, key)
-        except StorageNotFoundError:
-            revision = None
-        write_text(self._store, key, "\n".join(slugs) + "\n", expected=revision)
+        overwrite_text(self._store, f"{self._prefix}/_order", "\n".join(slugs) + "\n")
         self.reload()
 
     def list_prompts(self) -> list[dict[str, object]]:
         """Return metadata for all prompts (for the UI)."""
-        parsed = []
-        for entry in self._store.list(self._prefix):
-            if entry.is_dir or not entry.key.endswith(".md"):
-                continue
-            raw, _ = read_text(self._store, entry.key)
-            stem = Path(entry.key).stem
-            meta, body = _parse_frontmatter(raw)
-            parsed.append((self._rank(stem), stem, meta, body))
         return [
             {
                 "slug": stem,
                 "name": meta.get("name", stem),
                 "includes": _INCLUDE_RE.findall(body),  # derived from body, not frontmatter
             }
-            for _, stem, meta, body in sorted(parsed)
+            for _, stem, meta, body in self._ranked_prompts()
         ]

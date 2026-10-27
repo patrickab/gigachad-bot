@@ -1,7 +1,6 @@
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
-from fastapi.concurrency import run_in_threadpool
 import litellm
 from llm_baseclient.client import LLMClient
 from pydantic import BaseModel
@@ -9,7 +8,6 @@ from sse_starlette.sse import EventSourceResponse
 
 from lib.asset_store import AssetStore
 from lib.image_paths import resolve_chat_image_paths, resolve_sandbox_prompt_images
-from lib.llm_resilience import api_query_resilient
 from lib.memory_store import MemoryStore
 from lib.model_provider_store import ModelProviderStore
 from lib.sandbox_service import SandboxService
@@ -21,8 +19,8 @@ from .deps import (
     get_model_provider_store,
     get_sandbox_service,
     request_client,
-    sse_event_stream,
     sse_tool_event_stream,
+    stream_completion,
 )
 
 router = APIRouter(prefix="/api", tags=["chat"])
@@ -122,17 +120,14 @@ async def chat(
                     **kwargs,
                 )
             )
-        chunks = await run_in_threadpool(
-            api_query_resilient,
+        return await stream_completion(
             c,
             model=req.model,
             user_msg=req.user_msg,
             user_msg_history=req.messages,
             system_prompt=system_prompt,
             img=img,
-            stream=True,
             return_usage=True,
             **kwargs,
         )
-        return sse_event_stream(chunks)
 

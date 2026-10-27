@@ -85,17 +85,18 @@ export function PopoverSelector<T>({
     ?? categories[0]
   const select = (item: T) => { onSelect(item); close() }
 
+  const tabButton = (category: SelectorCategory<T>) => (
+    <button type="button" onClick={() => setManualCategory(category.key)} className={tabClass(category.key === active?.key)}>{category.label}</button>
+  )
   const tabs = categories.length > 1 && (onReorderCategories
     // Tabs size to their labels and scroll sideways once they outgrow the panel.
     ? <Reorder.Group as="div" axis="x" layoutScroll values={categories.map((category) => category.key)} onReorder={onReorderCategories} className="flex overflow-x-auto rounded-lg bg-paper p-0.5 [scrollbar-width:none]">
       {categories.map((category) => <Reorder.Item as="div" key={category.key} value={category.key} className="flex-auto shrink-0 cursor-grab active:cursor-grabbing">
-        <button type="button" onClick={() => setManualCategory(category.key)} className={tabClass(category.key === active?.key)}>{category.label}</button>
+        {tabButton(category)}
       </Reorder.Item>)}
     </Reorder.Group>
     : <div className="flex overflow-x-auto rounded-lg bg-paper p-0.5 [scrollbar-width:none]">
-      {categories.map((category) => <div key={category.key} className="flex-auto shrink-0">
-        <button type="button" onClick={() => setManualCategory(category.key)} className={tabClass(category.key === active?.key)}>{category.label}</button>
-      </div>)}
+      {categories.map((category) => <div key={category.key} className="flex-auto shrink-0">{tabButton(category)}</div>)}
     </div>)
 
   const list = active && active.items.length > 0

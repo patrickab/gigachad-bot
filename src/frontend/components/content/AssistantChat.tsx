@@ -14,7 +14,7 @@ export interface AssistantMessage {
 const FLUSH_MS = 60
 
 /** Pump a chat stream into `onToken`, exposing its abort via `abortRef`. Abort is swallowed silently. */
-export async function runStream(
+async function runStream(
   abortRef: { current: (() => void) | null },
   args: ChatRequest,
   onToken: (t: string) => void
@@ -32,7 +32,7 @@ export async function runStream(
 }
 
 /** Throttle flushes to one per FLUSH_MS. `final` flushes immediately and cancels the pending timer. */
-export function createFlush(onFlush: () => void) {
+function createFlush(onFlush: () => void) {
   let last = 0
   let timer: ReturnType<typeof setTimeout> | null = null
   const schedule = () => {
@@ -99,6 +99,65 @@ export function useAssistantChat(model: string, systemPrompt: string): Assistant
   return { messages, isStreaming, send, stop }
 }
 
+/** One streamed reply to a single question. `appendErrors` shows a failed stream as an error line, otherwise `ask` rejects. */
+export function useOneShotStream(model: string, { appendErrors }: { appendErrors: boolean }) {
+  const [text, setText] = useState("")
+  const [isStreaming, setIsStreaming] = useState(false)
+  const abortRef = useRef<(() => void) | null>(null)
+
+  // Abort a running reply when the owner unmounts
+  useEffect(() => () => abortRef.current?.(), [])
+
+  const ask = useCallback(async (question: string, systemPrompt: string) => {
+    const trimmed = question.trim()
+    if (!trimmed || isStreaming) return
+    setIsStreaming(true)
+    setText("")
+    // Plain object so the flush closure reads the latest text
+    const buffer = { text: "" }
+    const { schedule, final: flush } = createFlush(() => setText(buffer.text))
+    try {
+      await runStream(abortRef, {
+        model, chat_id: crypto.randomUUID(), user_msg: trimmed,
+        system_prompt: systemPrompt, messages: [], img_paths: [],
+      }, (token) => { buffer.text += token; schedule() })
+    } catch (error) {
+      if (!appendErrors) throw error
+      buffer.text += `\n\n**Error:** ${(error as Error).message}`
+    } finally {
+      flush()
+      setIsStreaming(false)
+      abortRef.current = null
+    }
+  }, [isStreaming, model, appendErrors])
+
+  const abort = useCallback(() => abortRef.current?.(), [])
+  const stop = useCallback(() => { abortRef.current?.(); setIsStreaming(false) }, [])
+
+  return { text, isStreaming, ask, abort, stop }
+}
+
+/** Stop button while streaming, otherwise the send button. */
+export function SendStopButton({ isStreaming, onStop, onSend, disabled, sendLabel = "Send to assistant", className, iconClassName }: {
+  isStreaming: boolean
+  onStop: () => void
+  onSend: () => void
+  disabled: boolean
+  sendLabel?: string
+  className: string
+  iconClassName: string
+}) {
+  return isStreaming ? (
+    <button aria-label="Stop assistant" onClick={onStop} className={className}>
+      <Square className={iconClassName} />
+    </button>
+  ) : (
+    <button aria-label={sendLabel} onClick={onSend} disabled={disabled} className={`${className} disabled:opacity-30`}>
+      <ArrowUp className={iconClassName} />
+    </button>
+  )
+}
+
 /** Message list and composer of an assistant chat. `renderActions` adds controls under finished replies. `surfaceClassName` lifts user messages and the composer off their host. */
 export function AssistantChat({ chat, inputLabel, placeholder, disabled = false, surfaceClassName = "bg-surface", renderActions }: {
   chat: AssistantChatState
@@ -152,15 +211,14 @@ export function AssistantChat({ chat, inputLabel, placeholder, disabled = false,
             placeholder={placeholder}
             className="flex-1 resize-none bg-transparent text-xs text-ink placeholder:text-ink-faint outline-none max-h-20 overflow-y-auto disabled:opacity-50"
           />
-          {isStreaming ? (
-            <button aria-label="Stop assistant" onClick={stop} className="p-1 rounded text-ink-subtle hover:text-ink transition-colors shrink-0">
-              <Square className="h-3.5 w-3.5" />
-            </button>
-          ) : (
-            <button aria-label="Send to assistant" onClick={handleSend} disabled={!input.trim() || disabled} className="p-1 rounded text-ink-subtle hover:text-ink disabled:opacity-30 transition-colors shrink-0">
-              <ArrowUp className="h-3.5 w-3.5" />
-            </button>
-          )}
+          <SendStopButton
+            isStreaming={isStreaming}
+            onStop={stop}
+            onSend={handleSend}
+            disabled={!input.trim() || disabled}
+            className="p-1 rounded text-ink-subtle hover:text-ink transition-colors shrink-0"
+            iconClassName="h-3.5 w-3.5"
+          />
         </div>
       </div>
     </>

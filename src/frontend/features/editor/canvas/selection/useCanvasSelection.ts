@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import { canvasEntityId, type CanvasDocument } from "@/lib/domain/canvasDocument"
+import type { Point } from "@/lib/domain/edgeRouting"
 import { polyBounds, resizeBox, scalePoly, scaleStroke, strokesInLasso, type Poly, type SelBox } from "@/features/editor/canvas/selection/canvasSelection"
 import { dropTargetAt, registerDropTarget, remapAcrossCanvases, type StrokeDrop } from "@/features/editor/canvas/attachments/canvasTransfer"
 import type { StrokeData } from "@/lib/drawing"
@@ -22,7 +23,7 @@ interface CanvasSelectionOptions {
   liveRef: { readonly current: { doc: CanvasDocument } }
   containerRef: RefObject<HTMLDivElement | null>
   scaleRef: { readonly current: number }
-  offsetRef: { readonly current: { x: number; y: number } }
+  offsetRef: { readonly current: Point }
   commit: (next: CanvasDocument) => void
 }
 

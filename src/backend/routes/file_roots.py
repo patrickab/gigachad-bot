@@ -10,15 +10,14 @@ Handlers are plain `def`: they walk directories and read files synchronously,
 so FastAPI runs them in its threadpool instead of blocking the event loop.
 """
 
-import logging
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from backend.identity import RequestIdentity, get_request_identity
-from backend.routes.deps import get_asset_store, get_file_roots, get_project_store
-from backend.routes.schemas import AttachResult, FileContent, FileListResponse, FileMeta
+from backend.routes.deps import get_asset_store, get_file_roots, get_project_store, http_errors
+from backend.routes.schemas import AttachResult, FileContent, FileListResponse, FileMeta, file_meta
 from lib import document_library as lib_docs
 from lib.asset_store import AssetStore
 from lib.attachment_materialize import materialize, sync_library_pdf
@@ -28,9 +27,25 @@ from lib.file_roots import FileRoots, list_directories
 from lib.project_store import ProjectStore
 from lib.storage_namespace import PDFS
 
-log = logging.getLogger(__name__)
-
 router = APIRouter(prefix="/api/fileroots", tags=["fileroots"])
+
+# A dirty worktree or an unmerged branch needs the user's decision (409), any other git refusal is a bad request.
+_GIT_REFUSALS = (((git_worktree.WorktreeDirty, git_worktree.BranchNotMerged), 409, None), (git_worktree.WorktreeError, 400, None))
+
+
+def _read_text_or_none(path: Path) -> str | None:
+    """The UTF-8 text of *path*, `None` when it is not valid UTF-8."""
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def _sync_pdf(assets: AssetStore, file: Path) -> str | None:
+    """Sync a mounted PDF into the shared library and queue its extraction, returning the parsed markdown when already cached."""
+    content = file.read_bytes()
+    sync_library_pdf(assets, file.name, content)
+    return materialize(file.name, content, assets, enqueue_on_miss=True)
 
 
 class RootFile(BaseModel):
@@ -84,20 +99,16 @@ def list_tree(worktree: list[str] = Query(default=[]), roots: FileRoots = Depend
 
 @router.post("/roots", response_model=FileTreeResponse)
 def add_root(body: RootBody, roots: FileRoots = Depends(get_file_roots)) -> FileTreeResponse:
-    try:
+    with http_errors((ValueError, 400, None)):
         roots.add_root(body.path)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return FileTreeResponse(enabled=roots.enabled, tree=roots.tree())
 
 
 @router.post("/clone", response_model=FileTreeResponse)
 def clone_root(body: CloneBody, roots: FileRoots = Depends(get_file_roots)) -> FileTreeResponse:
     """Clone an https or ssh repository link into `~/git/<repository>` and mount it."""
-    try:
+    with http_errors(*_GIT_REFUSALS):
         roots.add_root(str(git_worktree.clone_repository(body.url)))
-    except git_worktree.WorktreeError as exc:
-        raise _git_refusal(exc) from exc
     return FileTreeResponse(enabled=roots.enabled, tree=roots.tree())
 
 
@@ -113,32 +124,24 @@ def browse_directories(
     _identity: RequestIdentity = Depends(get_request_identity),
 ) -> DirectoryListing:
     """List the subdirectories of *path* on the backend host, to pick a new root."""
-    try:
+    with http_errors((NotADirectoryError, 404, f"Not a directory: {path}"), (PermissionError, 403, f"Cannot read {path}")):
         directory, names = list_directories(path)
-    except NotADirectoryError as exc:
-        raise HTTPException(status_code=404, detail=f"Not a directory: {path}") from exc
-    except PermissionError as exc:
-        raise HTTPException(status_code=403, detail=f"Cannot read {path}") from exc
     parent = str(directory.parent) if directory.parent != directory else None
     return DirectoryListing(path=str(directory), parent=parent, directories=names)
 
 
 @router.post("/file")
 def write_file(body: FileContent, roots: FileRoots = Depends(get_file_roots)) -> dict[str, bool]:
-    try:
+    with http_errors(((OSError, ValueError), 400, None)):
         roots.write(body.path, body.content)
-    except (OSError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True}
 
 
 @router.get("/rendered", response_model=FileContent)
 def read_rendered(path: str = Query(...), roots: FileRoots = Depends(get_file_roots)) -> FileContent:
-    try:
+    with http_errors(((FileNotFoundError, ValueError), 404, None)):
         raw = roots.read(path)
         return FileContent(path=path, content=roots.resolve_wiki_content(raw, path))
-    except (FileNotFoundError, ValueError) as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/attach", response_model=AttachResult)
@@ -156,26 +159,17 @@ def attach_file(
     """
     if Path(path).suffix.lower() == ".pdf" and not Path(path).is_absolute():
         name = Path(path).name
-        try:
+        with http_errors((StorageNotFoundError, 404, None)):
             content = assets.read(f"{PDFS}/{name}").content or b""
-        except StorageNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
         return AttachResult(name=name, mime=lib_docs.mime_for(path), path=f"{PDFS}/{name}", parsedMd=materialize(name, content, assets, enqueue_on_miss=True))
 
-    try:
+    with http_errors(((FileNotFoundError, ValueError), 404, None)):
         resolved = roots.resolve_reference(path)
-    except (FileNotFoundError, ValueError) as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
     result = AttachResult(name=resolved.name, mime=lib_docs.mime_for(resolved), path=str(resolved))
     if resolved.suffix.lower() == ".pdf":
-        content = resolved.read_bytes()
-        sync_library_pdf(assets, resolved.name, content)
-        result.parsedMd = materialize(resolved.name, content, assets, enqueue_on_miss=True)
-        return result
-    try:
-        result.content = resolved.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        result.content = None
+        result.parsedMd = _sync_pdf(assets, resolved)
+    else:
+        result.content = _read_text_or_none(resolved)
     return result
 
 
@@ -198,28 +192,19 @@ def add_to_project(
     - PDFs are also synced into the shared library and queued for extraction, as on attach
     - Files that are neither PDF nor valid UTF-8 text are skipped
     """
-    try:
-        store.list_files(body.slug)  # validates project exists
+    with http_errors((FileNotFoundError, 404, None), (ValueError, 400, None)):
+        store.require(body.slug)
         files = roots.files_under(body.paths)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     added: list[FileMeta] = []
     for file in files:
         if file.suffix.lower() == ".pdf":
-            content = file.read_bytes()
-            sync_library_pdf(assets, file.name, content)
-            materialize(file.name, content, assets, enqueue_on_miss=True)
-        else:
-            try:
-                file.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                continue
+            _sync_pdf(assets, file)
+        elif _read_text_or_none(file) is None:
+            continue
         key = str(file)
         store.add_file(body.slug, key)
-        added.append(FileMeta(**lib_docs.document_meta(key)))
+        added.append(file_meta(key))
     return FileListResponse(documents=added)
 
 
@@ -243,11 +228,9 @@ class FileDiffResponse(BaseModel):
 
 
 def _git_directory(root: str, roots: FileRoots) -> Path:
-    try:
+    with http_errors((ValueError, 403, None)):
         roots.root_of(root)
         directory = Path(root).expanduser().resolve()
-    except ValueError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
     if not directory.is_dir():
         raise HTTPException(status_code=404, detail=f"Not a directory: {root}")
     return directory
@@ -261,10 +244,12 @@ def list_changed_files(root: str = Query(...), roots: FileRoots = Depends(get_fi
     if files is None:
         return DiffStatusResponse(is_git_repository=False, files=[])
     counts = git_diff.line_counts(directory, files)
-    return DiffStatusResponse(is_git_repository=True, files=[
-        DiffFile(path=file.path, status=file.status, stamp=git_diff.file_stamp(directory, file.path), **dict(zip(("added", "removed"), counts.get(file.path, (None, None)))))
-        for file in files
-    ])
+    changed: list[DiffFile] = []
+    for file in files:
+        added, removed = counts.get(file.path, (None, None))
+        stamp = git_diff.file_stamp(directory, file.path)
+        changed.append(DiffFile(path=file.path, status=file.status, stamp=stamp, added=added, removed=removed))
+    return DiffStatusResponse(is_git_repository=True, files=changed)
 
 
 @router.get("/diff", response_model=FileDiffResponse)
@@ -284,10 +269,8 @@ class DiffContentResponse(BaseModel):
 @router.get("/diff/content", response_model=DiffContentResponse)
 def read_diff_content(root: str = Query(...), path: str = Query(...), roots: FileRoots = Depends(get_file_roots)) -> DiffContentResponse:
     """HEAD and working-tree text of *path* (relative to *root*) for the native Neovim diff."""
-    try:
+    with http_errors((git_diff.UnsupportedDiffContent, 422, None)):
         base, content = git_diff.file_contents(_git_directory(root, roots), path)
-    except git_diff.UnsupportedDiffContent as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return DiffContentResponse(base_content=base, content=content)
 
 
@@ -326,18 +309,13 @@ def _clone_root(root: str, roots: FileRoots) -> Path:
     return directory
 
 
-def _git_refusal(exc: git_worktree.WorktreeError) -> HTTPException:
-    conflict = isinstance(exc, (git_worktree.WorktreeDirty, git_worktree.BranchNotMerged))
-    return HTTPException(status_code=409 if conflict else 400, detail=str(exc))
-
-
 @router.get("/worktrees", response_model=WorktreeListResponse)
 def list_worktrees(root: str = Query(...), roots: FileRoots = Depends(get_file_roots)) -> WorktreeListResponse:
     """Worktrees of the clone mounted at *root*, each with its uncommitted files and commits ahead/behind the base."""
     repository = _clone_root(root, roots)
     if not git_worktree.is_clone(repository):
         return WorktreeListResponse(is_clone=False)
-    try:
+    with http_errors(*_GIT_REFUSALS):
         base = git_worktree.default_base_branch(repository)
         entries = [
             WorktreeEntry(path=worktree.path, branch=worktree.branch, is_main=worktree.is_main, **vars(git_worktree.status(Path(worktree.path), base)))
@@ -347,18 +325,14 @@ def list_worktrees(root: str = Query(...), roots: FileRoots = Depends(get_file_r
             is_clone=True, default_base=base, default_branch=git_worktree.default_branch(repository),
             branches=git_worktree.branches(repository), worktrees=entries,
         )
-    except git_worktree.WorktreeError as exc:
-        raise _git_refusal(exc) from exc
 
 
 @router.post("/worktrees", response_model=RootFile)
 def create_worktree(body: CreateWorktreeBody, roots: FileRoots = Depends(get_file_roots)) -> RootFile:
     """Pull *base* and branch a new worktree off it, `name` is the branch."""
     repository = _clone_root(body.root, roots)
-    try:
+    with http_errors(*_GIT_REFUSALS):
         worktree = git_worktree.create_worktree(repository, body.name, body.base)
-    except git_worktree.WorktreeError as exc:
-        raise _git_refusal(exc) from exc
     return RootFile(path=worktree.path, name=worktree.branch or Path(worktree.path).name)
 
 
@@ -366,10 +340,8 @@ def create_worktree(body: CreateWorktreeBody, roots: FileRoots = Depends(get_fil
 def default_worktree(body: DefaultWorktreeBody, roots: FileRoots = Depends(get_file_roots)) -> RootFile:
     """Open the inferred default branch, creating its checkout only when needed."""
     repository = _clone_root(body.root, roots)
-    try:
+    with http_errors(*_GIT_REFUSALS):
         worktree = git_worktree.default_worktree(repository)
-    except git_worktree.WorktreeError as exc:
-        raise _git_refusal(exc) from exc
     return RootFile(path=worktree.path, name=worktree.branch or Path(worktree.path).name)
 
 
@@ -378,10 +350,8 @@ def remove_worktree(
     root: str = Query(...), path: str = Query(...), force: bool = Query(default=False), roots: FileRoots = Depends(get_file_roots),
 ) -> dict[str, bool]:
     """Remove a worktree, keeping its branch. 409 when it holds uncommitted changes and *force* is off."""
-    try:
+    with http_errors(*_GIT_REFUSALS):
         git_worktree.remove_worktree(_clone_root(root, roots), path, force=force)
-    except git_worktree.WorktreeError as exc:
-        raise _git_refusal(exc) from exc
     return {"ok": True}
 
 
@@ -390,8 +360,6 @@ def delete_worktree_branch(
     root: str = Query(...), branch: str = Query(...), force: bool = Query(default=False), roots: FileRoots = Depends(get_file_roots),
 ) -> dict[str, bool]:
     """Delete a local branch. 409 when it is not fully merged and *force* is off."""
-    try:
+    with http_errors(*_GIT_REFUSALS):
         git_worktree.delete_branch(_clone_root(root, roots), branch, force=force)
-    except git_worktree.WorktreeError as exc:
-        raise _git_refusal(exc) from exc
     return {"ok": True}

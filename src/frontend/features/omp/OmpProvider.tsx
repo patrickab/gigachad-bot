@@ -1,18 +1,19 @@
 "use client"
 
-import { createContext, useCallback, useContext, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { createContext, useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useSettings } from "@/contexts/SettingsContext"
 import { useStartupRead } from "@/contexts/StartupReadContext"
+import { useRequiredContext } from "@/hooks/useRequiredContext"
 import { useThemeName } from "@/hooks/useThemeName"
 import { fetchOmpOverview } from "@/lib/backend/api"
 import type { OmpOverview, OmpView } from "@/lib/domain/types"
 import type { ComposerState } from "./composer"
 import { EMBED_CHANNEL, EMBED_PROTOCOL_VERSION, type BranchNode, type Envelope, type FrameMessage, type KeyChord, type ShellMessage } from "@gigachad/chat-ui/protocol"
 
-export type ComposerCommand = Extract<ShellMessage, { type: `composer-${string}` }>
+type ComposerCommand = Extract<ShellMessage, { type: `composer-${string}` }>
 /** Frame messages for one composer, not state: delivered to `onComposerEvent` listeners, never kept. */
 export type ComposerEvent = Extract<FrameMessage, { type: "composer-restore" | "composer-completions" }>
-type ComposerEventListener = (event: ComposerEvent) => void
+type ComposerEventListener<T extends ComposerEvent["type"]> = (event: Extract<ComposerEvent, { type: T }>) => void
 
 const OVERVIEW_POLL_MS = 15_000
 /** A navigation waits this long for the frame to report its view before reports count as user navigation again. */
@@ -54,16 +55,14 @@ interface OmpContextValue {
   /** Composer state of the session the frame shows, null until the frame reported one. */
   composer: ComposerState | null
   sendToComposer: (command: ComposerCommand) => void
-  /** Listen for composer events, returns the unsubscribe. */
-  onComposerEvent: (listener: ComposerEventListener) => () => void
+  /** Listen for composer events of one `type`, returns the unsubscribe. */
+  onComposerEvent: <T extends ComposerEvent["type"]>(type: T, listener: ComposerEventListener<T>) => () => void
 }
 
 const OmpContext = createContext<OmpContextValue | null>(null)
 
 export function useOmp(): OmpContextValue {
-  const value = useContext(OmpContext)
-  if (!value) throw new Error("useOmp must be used inside OmpProvider")
-  return value
+  return useRequiredContext(OmpContext, "useOmp must be used inside OmpProvider")
 }
 
 type FrameView = Extract<FrameMessage, { type: "view" }>
@@ -173,7 +172,7 @@ export function OmpProvider({ children }: { children: ReactNode }) {
   const lastNewCwdRef = useRef<string | null>(null)
   const pendingUntilRef = useRef(0)
   const readyRef = useRef(false)
-  const composerListenersRef = useRef(new Set<ComposerEventListener>())
+  const composerListenersRef = useRef(new Set<(event: ComposerEvent) => void>())
   useFrameOverSlot(frame, attachment?.slot ?? null)
   const frameOrigin = useMemo(() => (ompWebUrl ? new URL(ompWebUrl).origin : null), [ompWebUrl])
 
@@ -274,16 +273,16 @@ export function OmpProvider({ children }: { children: ReactNode }) {
     post({ type: "select-leaf", sessionId, leafId })
   }, [post])
 
-  const sendToComposer = useCallback((command: ComposerCommand) => post(command), [post])
-  const onComposerEvent = useCallback((listener: ComposerEventListener) => {
+  const onComposerEvent = useCallback(<T extends ComposerEvent["type"]>(type: T, listener: ComposerEventListener<T>) => {
     const listeners = composerListenersRef.current
-    listeners.add(listener)
-    return () => { listeners.delete(listener) }
+    const typed = (event: ComposerEvent) => { if (event.type === type) listener(event as Extract<ComposerEvent, { type: T }>) }
+    listeners.add(typed)
+    return () => { listeners.delete(typed) }
   }, [])
 
   const value = useMemo<OmpContextValue>(() => ({
-    overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, reloadFrame, composer, sendToComposer, onComposerEvent,
-  }), [overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, reloadFrame, composer, sendToComposer, onComposerEvent])
+    overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, reloadFrame, composer, sendToComposer: post, onComposerEvent,
+  }), [overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, reloadFrame, composer, post, onComposerEvent])
 
   const visible = attachment !== null && frameStatus === "ready"
   useEffect(() => {

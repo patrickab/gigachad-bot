@@ -1,38 +1,18 @@
-import os
-from uuid import uuid4
-
 from agent_sandbox import SandboxManifest, manifest_from_dict, manifest_to_dict
 from agent_sandbox.manifest import Artifact, Execution, OmpSessionState, Outputs, WorkspaceRef, to_yaml
-from psycopg_pool import ConnectionPool
 import pytest
 
 from lib.data_store import DataStore, DataStorePath, StorageNotFoundError
-from lib.db_schema import upgrade
 from lib.json_io import load_json, safe_write_json
 from lib.postgres_data_store import PostgresDataStore
 from lib.sandbox_store import ActivePointer, AssetRef, RunRecord, SandboxStore
 from lib.storage_namespace import sandbox_asset, sandbox_manifest, sandbox_run
-
-
-@pytest.fixture(scope="session")
-def postgres_pool():
-    url = os.environ.get("POSTGRES_TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("POSTGRES_TEST_DATABASE_URL is required for Postgres DataStore conformance tests")
-    upgrade(url)
-    pool = ConnectionPool(url, min_size=1, max_size=4)
-    yield pool
-    pool.close()
+from tests.conftest import create_user
 
 
 @pytest.fixture
-def store(postgres_pool) -> DataStore:
-    with postgres_pool.connection() as connection, connection.transaction():
-        connection.execute("TRUNCATE changes, assets, vault_roots, devices, documents, users CASCADE")
-        user_id = connection.execute(
-            "INSERT INTO users (tailscale_login) VALUES (%s) RETURNING id", (f"test-{uuid4()}@example.test",)
-        ).fetchone()[0]
-    return PostgresDataStore(postgres_pool, user_id)
+def store(postgres_pool, clean_database) -> DataStore:
+    return PostgresDataStore(postgres_pool, create_user(postgres_pool))
 
 
 @pytest.fixture

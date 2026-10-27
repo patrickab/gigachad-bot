@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState, type ComponentProps, type RefObject } from "react"
+import { useEffect, useMemo, useRef, type ComponentProps, type RefObject } from "react"
 import { File as FileIcon, Folder, MessageSquareText, Puzzle, Sparkles, type LucideIcon } from "lucide-react"
 import { withParsedAttachments } from "@/features/chat/attachments"
 import { ChatInput, type ChatInputHandle } from "@/features/chat/composer/ChatInput"
@@ -9,7 +9,9 @@ import { ModelDropdown } from "@/features/settings/ModelDropdown"
 import { ReasoningSelector } from "@/features/settings/ReasoningSelector"
 import { parseFiles } from "@/lib/backend/api"
 import type { Attachment, OmpView } from "@/lib/domain/types"
-import { composerFor, composerImageFile, isComposerOf, mergeRestoredText, ompModelOf, ompPrompt, ompSelectorModels, selectorModelId, shellHint } from "./composer"
+import { useAsyncAction } from "@/hooks/useAsyncAction"
+import { ErrorText } from "@/components/ui/ErrorText"
+import { composerImageFile, isComposerOf, mergeRestoredText, ompModelOf, ompPrompt, ompSelectorModels, selectorModelId, shellHint } from "./composer"
 import { useOmp } from "./OmpProvider"
 import type { Completion } from "@gigachad/chat-ui/protocol"
 
@@ -30,9 +32,7 @@ function toComposerCompletion(completion: Completion): ComposerCompletion {
 function useFrameCompletions(sessionId: string | null | undefined): CompleteDraft | undefined {
   const { sendToComposer, onComposerEvent } = useOmp()
   const pendingRef = useRef(new Map<number, (items: Completion[]) => void>())
-  useEffect(() => onComposerEvent((event) => {
-    if (event.type === "composer-completions") pendingRef.current.get(event.requestId)?.(event.items)
-  }), [onComposerEvent])
+  useEffect(() => onComposerEvent("composer-completions", (event) => pendingRef.current.get(event.requestId)?.(event.items)), [onComposerEvent])
 
   return useMemo(() => {
     if (sessionId === undefined) return undefined
@@ -54,8 +54,8 @@ function useFrameCompletions(sessionId: string | null | undefined): CompleteDraf
 /** Put what omp hands back for `view` (abort-withdrawn queue, queue Edit) into the composer behind `inputRef`. */
 function useComposerRestore(view: OmpView, inputRef: RefObject<ChatInputHandle | null>) {
   const { onComposerEvent } = useOmp()
-  useEffect(() => onComposerEvent((event) => {
-    if (event.type !== "composer-restore" || !isComposerOf(view, event.sessionId)) return
+  useEffect(() => onComposerEvent("composer-restore", (event) => {
+    if (!isComposerOf(view, event.sessionId)) return
     inputRef.current?.updateText((draft) => mergeRestoredText(draft, event))
     if (event.images.length > 0) inputRef.current?.addFiles(event.images.map(composerImageFile))
   }), [onComposerEvent, view, inputRef])
@@ -64,7 +64,7 @@ function useComposerRestore(view: OmpView, inputRef: RefObject<ChatInputHandle |
 /** The frame's composer state when it shows `view`, null while the frame loads or shows another view. */
 function useComposerFor(view: OmpView) {
   const { composer, frameStatus, sendToComposer } = useOmp()
-  return { state: frameStatus === "ready" ? composerFor(view, composer) : null, sendToComposer }
+  return { state: frameStatus === "ready" && composer && isComposerOf(view, composer.sessionId) ? composer : null, sendToComposer }
 }
 
 /**
@@ -78,23 +78,13 @@ export function OmpComposer({ view, chatId, slug }: { view: OmpView; chatId: str
   const { state, sendToComposer } = useComposerFor(view)
   const inputRef = useRef<ChatInputHandle>(null)
   useComposerRestore(view, inputRef)
-  const [preparing, setPreparing] = useState(false)
-  const [error, setError] = useState("")
   const sessionId = state?.sessionId ?? null
   const complete = useFrameCompletions(state?.sessionId)
 
-  const send = async (text: string, attachments: Attachment[]) => {
-    setError("")
-    setPreparing(true)
-    try {
-      const prompt = await ompPrompt(text, attachments, (documents) => withParsedAttachments(documents, chatId, slug, parseFiles))
-      sendToComposer({ type: "composer-send", sessionId, ...prompt })
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not attach these files")
-    } finally {
-      setPreparing(false)
-    }
-  }
+  const { run: send, pending: preparing, error } = useAsyncAction(async (text: string, attachments: Attachment[]) => {
+    const prompt = await ompPrompt(text, attachments, (documents) => withParsedAttachments(documents, chatId, slug, parseFiles))
+    sendToComposer({ type: "composer-send", sessionId, ...prompt })
+  }, "Could not attach these files")
 
   return (
     <div className="px-4 pb-6 pt-2">
@@ -112,7 +102,7 @@ export function OmpComposer({ view, chatId, slug }: { view: OmpView; chatId: str
         complete={complete}
         hint={shellHint}
       />
-      {error && <p role="alert" className="mx-auto mt-1 max-w-2xl px-1 text-xs text-danger">{error}</p>}
+      <ErrorText className="mx-auto mt-1 max-w-2xl px-1">{error}</ErrorText>
     </div>
   )
 }

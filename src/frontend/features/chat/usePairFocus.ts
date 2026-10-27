@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
+import { useEventListener } from "@/hooks/useEventListener"
 import { isNeovimKeyEvent } from "@/lib/utils"
 
 /** Ctrl+Up/Down keyboard focus over a chat's question/answer pairs. */
@@ -36,26 +37,22 @@ export function usePairFocus({ pairs, scrollContainerRef, togglePair }: {
   }, [keyboardFocusIdx, pairs, togglePair])
 
   // Capture phase so these shortcuts win over editor and input handlers
-  useEffect(() => {
-    const eat = (e: KeyboardEvent) => { e.preventDefault(); e.stopPropagation() }
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (isNeovimKeyEvent(e)) return
-      const ctrl = e.ctrlKey || e.metaKey
-      if (ctrl && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
-        eat(e)
-        navigateFocus(e.key)
-        scrollContainerRef.current?.focus()
-      } else if (e.key === "Enter" && keyboardFocusIdx !== null) {
-        eat(e)
-        confirmFocus()
-      } else if (e.key === "Escape" && keyboardFocusIdx !== null) {
-        eat(e)
-        setKeyboardFocusIdx(null)
-      }
+  useEventListener("window", "keydown", (e) => {
+    const eat = () => { e.preventDefault(); e.stopPropagation() }
+    if (isNeovimKeyEvent(e)) return
+    const ctrl = e.ctrlKey || e.metaKey
+    if (ctrl && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+      eat()
+      navigateFocus(e.key)
+      scrollContainerRef.current?.focus()
+    } else if (e.key === "Enter" && keyboardFocusIdx !== null) {
+      eat()
+      confirmFocus()
+    } else if (e.key === "Escape" && keyboardFocusIdx !== null) {
+      eat()
+      setKeyboardFocusIdx(null)
     }
-    window.addEventListener("keydown", handleKeyDown, true)
-    return () => window.removeEventListener("keydown", handleKeyDown, true)
-  }, [navigateFocus, confirmFocus, keyboardFocusIdx, scrollContainerRef])
+  }, { capture: true })
 
   useEffect(() => {
     if (keyboardFocusIdx === null) return

@@ -7,11 +7,11 @@ import { cn } from "@/lib/utils"
 // composer). Deeper nesting clamps to the top rung.
 const ELEVATION_LADDER = ["var(--paper)", "var(--surface)", "var(--surface-elevated)"]
 
-const ElevationContext = createContext<number | null>(null)
+const ElevationContext = createContext(0)
 
-/** Set the nesting level of the outermost `ElevatedContainer`s below. */
-export function ElevationProvider({ children, startLevel = 0 }: { children: React.ReactNode; startLevel?: number }) {
-  return <ElevationContext.Provider value={startLevel}>{children}</ElevationContext.Provider>
+/** Reset the nesting level to zero for the outermost `ElevatedContainer`s below. */
+export function ElevationProvider({ children }: { children: React.ReactNode }) {
+  return <ElevationContext.Provider value={0}>{children}</ElevationContext.Provider>
 }
 
 interface ElevatedContainerProps extends React.HTMLAttributes<HTMLDivElement> {
@@ -22,7 +22,7 @@ interface ElevatedContainerProps extends React.HTMLAttributes<HTMLDivElement> {
 
 /** A surface whose background climbs one `ELEVATION_LADDER` rung per nesting level. */
 export function ElevatedContainer({ hoverLift = false, className, style, children, ref, ...props }: ElevatedContainerProps) {
-  const level = useContext(ElevationContext) ?? 0
+  const level = useContext(ElevationContext)
 
   return (
     <ElevationContext.Provider value={level + 1}>

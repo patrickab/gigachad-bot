@@ -1,28 +1,23 @@
 "use client"
 
-import { useCallback, useRef, useState } from "react"
+import { useRef, useState } from "react"
 
 /** Fixed-height container with a bottom drag handle (min 200px). */
 export function ResizableEditor({ children }: { children: React.ReactNode }) {
   const [height, setHeight] = useState(400)
-  const dragging = useRef(false)
-  const startY = useRef(0)
-  const startH = useRef(0)
+  const drag = useRef<{ startY: number; startHeight: number } | null>(null)
 
-  const onPointerDown = useCallback((e: React.PointerEvent) => {
+  const onPointerDown = (e: React.PointerEvent) => {
     e.preventDefault()
-    dragging.current = true
-    startY.current = e.clientY
-    startH.current = height
+    drag.current = { startY: e.clientY, startHeight: height }
     ;(e.target as Element).setPointerCapture(e.pointerId)
-  }, [height])
+  }
 
-  const onPointerMove = useCallback((e: React.PointerEvent) => {
-    if (!dragging.current) return
-    setHeight(Math.max(200, startH.current + (e.clientY - startY.current)))
-  }, [])
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (drag.current) setHeight(Math.max(200, drag.current.startHeight + (e.clientY - drag.current.startY)))
+  }
 
-  const onPointerUp = useCallback(() => { dragging.current = false }, [])
+  const onPointerUp = () => { drag.current = null }
 
   return (
     <div className="flex flex-col" style={{ height }}>

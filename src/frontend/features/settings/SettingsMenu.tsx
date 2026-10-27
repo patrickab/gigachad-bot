@@ -5,7 +5,8 @@ import { AnimatePresence, motion } from "framer-motion"
 import { Check, ChevronDown, ChevronUp, ImageDown, Settings, BookOpen, Pencil, Telescope, SquareTerminal, Rocket } from "lucide-react"
 import { ParamSlider } from "./ParamSlider"
 import { StyledSelect } from "@/components/ui/StyledSelect"
-import { cn } from "@/lib/utils"
+import { ErrorText } from "@/components/ui/ErrorText"
+import { cn, errorMessage } from "@/lib/utils"
 import { REASONING_LEVELS } from "@/lib/backend/config"
 import { displayName, qualifiedModelIds } from "@/lib/models"
 import { useClickOutside } from "@/hooks/useClickOutside"
@@ -77,7 +78,7 @@ export function SettingsMenu({
       await startRedeploy()
       setRedeploy("started")
     } catch (error) {
-      setRedeploy(error instanceof Error ? error.message : "Redeploy failed")
+      setRedeploy(errorMessage(error, "Redeploy failed"))
     }
   }
 
@@ -268,9 +269,7 @@ export function SettingsMenu({
                 </button>
               </div>
             )}
-            {redeploy !== "idle" && redeploy !== "starting" && redeploy !== "started" && (
-              <p role="alert" className="text-xs text-danger">{redeploy}</p>
-            )}
+            {redeploy !== "idle" && redeploy !== "starting" && redeploy !== "started" && <ErrorText>{redeploy}</ErrorText>}
           </motion.div>
         )}
       </AnimatePresence>

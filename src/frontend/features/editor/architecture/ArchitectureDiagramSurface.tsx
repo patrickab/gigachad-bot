@@ -8,15 +8,16 @@ import {
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import { CircleDashed, Maximize, MoreHorizontal, Plus, RotateCcw, Trash2 } from "lucide-react"
-import { useClickOutside } from "@/hooks/useClickOutside"
+import { useEventListener } from "@/hooks/useEventListener"
 import { useSurfaceCamera } from "@/features/editor/architecture/useSurfaceCamera"
 import { useSurfaceDrawing } from "@/features/editor/architecture/useSurfaceDrawing"
 import { isDraft, nextDraftId, type DiagramEdge, type DiagramGraph, type DiagramNode } from "@/features/editor/architecture/diagramGraph"
 import { edgeAttachments, loadRouter, routeEdges, type EdgeStyle, type Point, type Rect, type RouteCard } from "@/lib/domain/edgeRouting"
 import { cn } from "@/lib/utils"
-import { SEPARATOR, toolButton, type CanvasToolbarSlots } from "@/features/editor/canvas/CanvasToolbar"
+import { SEPARATOR, ToolButton, type CanvasToolbarSlots } from "@/features/editor/canvas/CanvasToolbar"
 import { useTabActive } from "@/contexts/TabContext"
 import { ArchitectureEdge, EdgeGeometryContext, type EdgeEdits, type EdgeGeometry } from "./ArchitectureEdge"
+import { ArchitectureMenu } from "./ArchitectureMenu"
 import { ArchitectureNodeCard } from "./ArchitectureNodeCard"
 import { FALLBACK_SIZE, GRID_SIZE, snapToGrid, type ArchitectureNodeData, type GraphFlowEdge, type GraphFlowNode, type NodeRemoval } from "./architectureFlow"
 
@@ -191,9 +192,6 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
   }, [readOnly, onRemoveFromView, emit])
   const [flow, setFlow] = useState<Parameters<typeof useSurfaceCamera>[0]["flow"]>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
-  const [edgeMenuOpen, setEdgeMenuOpen] = useState(false)
-  const edgeMenuRef = useRef<HTMLDivElement>(null)
-  useClickOutside(edgeMenuRef, useCallback(() => setEdgeMenuOpen(false), []))
   const changeEdgePath = useCallback((id: string, path?: DiagramEdge["path"]) => {
     emit({ edges: graphRef.current.edges.map((edge) => edge.id === id ? { ...edge, path } : edge) })
   }, [emit])
@@ -212,6 +210,7 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
   const nodeKinds = readOnly ? NO_KINDS : kinds
   // Filled by the layout effect below before the first paint: the card callbacks read refs, which render must not touch.
   const [nodes, setNodes, onNodesChange] = useNodesState<GraphFlowNode>([])
+  const selectNodes = useCallback((ids: ReadonlySet<string>) => setNodes((current) => current.map((node) => ({ ...node, selected: ids.has(node.id) }))), [setNodes])
   const [edges, setEdges, onEdgesChange] = useEdgesState<GraphFlowEdge>(toFlowEdges(graph.edges))
   const { fitView, takeCamera, handleNodesChange, zoomGraphAtCenter } = useSurfaceCamera({ flow, viewportRef, onNodesChange, autoFit, hostScale, readOnly })
 
@@ -223,8 +222,8 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
     setEdges((current) => reconcile(current, toFlowEdges(graph.edges)))
   }, [graph.edges, setEdges])
   useEffect(() => {
-    if (select) setNodes((current) => current.map((node) => ({ ...node, selected: node.id === select })))
-  }, [select, setNodes])
+    if (select) selectNodes(new Set([select]))
+  }, [select, selectNodes])
   // Only an activated (selected) card moves. Any other card is paper: a drag
   // on it pans (React Flow pans from non-draggable nodes), a pen draws on it,
   // and a click activates it.
@@ -266,15 +265,15 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
     const offset = 100 + graphRef.current.nodes.length * 28
     addDraft({ x: offset, y: offset, width: NEW_NODE_WIDTH, height: NEW_NODE_HEIGHT })
   }, [addDraft])
-  const { lasso, setLasso, preview, onPanePointerDown, lassoOverlay } = useSurfaceDrawing({ flow, viewportRef, readOnly, cards, setNodes, setEdges, addDraft })
+  const { lasso, setLasso, preview, onPanePointerDown, lassoOverlay } = useSurfaceDrawing({ flow, viewportRef, readOnly, cards, selectNodes, setEdges, addDraft })
   // Adds clones to the graph and selects them, not their sources, so repeated
   // Ctrl+D / Ctrl+V walks diagonally instead of stacking on the same spot.
   const addClones = useCallback((clones: DiagramNode[]) => {
     if (clones.length === 0) return
     const cloneIds = new Set(clones.map((clone) => clone.id))
     emit({ nodes: [...graphRef.current.nodes, ...clones] })
-    setNodes((current) => current.map((node) => ({ ...node, selected: cloneIds.has(node.id) })))
-  }, [emit, setNodes])
+    selectNodes(cloneIds)
+  }, [emit, selectNodes])
   // The selected nodes as the graph has them.
   const selectedNodes = useCallback(() => {
     const ids = new Set(nodes.filter((node) => node.selected).map((node) => node.id))
@@ -300,21 +299,16 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
     addClones(clones)
     return true
   }, [addClones])
-  useEffect(() => {
-    if (readOnly || !active) return
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey)) return
-      const key = event.key.toLowerCase()
-      if (key !== "d" && key !== "c" && key !== "v") return
-      const tag = (event.target as HTMLElement | null)?.tagName
-      if (tag === "INPUT" || tag === "TEXTAREA") return
-      if (key === "d") { event.preventDefault(); duplicateSelectedNodes() }
-      else if (key === "c") { if (copySelectedNodes()) event.preventDefault() }
-      else if (pasteNodes()) event.preventDefault()
-    }
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
-  }, [readOnly, active, duplicateSelectedNodes, copySelectedNodes, pasteNodes])
+  useEventListener("window", "keydown", (event) => {
+    if (!(event.ctrlKey || event.metaKey)) return
+    const key = event.key.toLowerCase()
+    if (key !== "d" && key !== "c" && key !== "v") return
+    const tag = (event.target as HTMLElement | null)?.tagName
+    if (tag === "INPUT" || tag === "TEXTAREA") return
+    if (key === "d") { event.preventDefault(); duplicateSelectedNodes() }
+    else if (key === "c") { if (copySelectedNodes()) event.preventDefault() }
+    else if (pasteNodes()) event.preventDefault()
+  }, { active: !readOnly && active })
   // Snaps every dragged node, carries nested nodes along (React Flow moves them
   // relative to their parent; the graph stores absolute positions), and a
   // single node dropped into a different compound moves into that element.
@@ -393,10 +387,6 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
   // Selection lives in React Flow state, not in the graph.
   const selectedEdgeId = edges.find((edge) => edge.selected)?.id
   const selectedEdge = graph.edges.find((edge) => edge.id === selectedEdgeId)
-  const resetSelectedEdgePath = useCallback(() => {
-    if (!selectedEdgeId) return
-    emit({ edges: graphRef.current.edges.map((edge) => edge.id === selectedEdgeId ? { ...edge, path: undefined } : edge) })
-  }, [emit, selectedEdgeId])
   const deleteSelectedEdge = useCallback(() => {
     if (!selectedEdgeId) return
     emit({ edges: graphRef.current.edges.filter((edge) => edge.id !== selectedEdgeId) })
@@ -404,20 +394,24 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
 
   const drawingTools = <>
     {!readOnly && <>
-      {topLevelDrawing && <button type="button" onClick={addNode} className={toolButton(false)} aria-label="Add node"><Plus className="h-3.5 w-3.5" /></button>}
-      <button type="button" onClick={() => setLasso((current) => !current)} aria-pressed={lasso} className={toolButton(lasso)} aria-label="Lasso select"><CircleDashed className="h-3.5 w-3.5" /></button>
+      {topLevelDrawing && <ToolButton icon={Plus} label="Add node" onClick={addNode} />}
+      <ToolButton icon={CircleDashed} label="Lasso select" toggle active={lasso} onClick={() => setLasso((current) => !current)} />
       {SEPARATOR}
     </>}
-    <button type="button" onClick={fitView} className={toolButton(false)} aria-label="Fit view"><Maximize className="h-3.5 w-3.5" /></button>
+    <ToolButton icon={Maximize} label="Fit view" onClick={fitView} />
     {toolbar}
   </>
-  const viewTools = !readOnly && <div ref={edgeMenuRef} className={cn("relative", !toolbarSlots && "ml-auto")}>
-    <button type="button" onClick={() => setEdgeMenuOpen((current) => !current)} aria-label="Connection style" aria-haspopup="menu" aria-expanded={edgeMenuOpen} className={toolButton(edgeMenuOpen)}><MoreHorizontal className="h-3.5 w-3.5" /></button>
-    {edgeMenuOpen && <div role="menu" aria-label="Connection style" style={{ position: "absolute", zIndex: 10, top: "calc(100% + 4px)", right: 0, minWidth: 132, padding: 4, border: "1px solid var(--divider)", borderRadius: 6, background: "var(--paper)", boxShadow: "var(--shadow-lg)" }}>
-      <button type="button" role="menuitemradio" aria-checked={edgeStyle === "elbow"} onClick={() => { setEdgeStyle("elbow"); setEdgeMenuOpen(false) }} className="architecture-diagram-menu-item">Angled edges</button>
-      <button type="button" role="menuitemradio" aria-checked={edgeStyle === "curved"} onClick={() => { setEdgeStyle("curved"); setEdgeMenuOpen(false) }} className="architecture-diagram-menu-item">Curved edges</button>
-    </div>}
-  </div>
+  const viewTools = !readOnly && (
+    <ArchitectureMenu
+      label="Connection style" align="right" menuStyle={{ minWidth: 132 }} className={toolbarSlots ? undefined : "ml-auto"}
+      trigger={(open, toggle) => <ToolButton icon={MoreHorizontal} label="Connection style" active={open} onClick={toggle} aria-haspopup="menu" aria-expanded={open} />}
+    >
+      {(close) => <>
+        <button type="button" role="menuitemradio" aria-checked={edgeStyle === "elbow"} onClick={() => { setEdgeStyle("elbow"); close() }} className="architecture-diagram-menu-item">Angled edges</button>
+        <button type="button" role="menuitemradio" aria-checked={edgeStyle === "curved"} onClick={() => { setEdgeStyle("curved"); close() }} className="architecture-diagram-menu-item">Curved edges</button>
+      </>}
+    </ArchitectureMenu>
+  )
 
   return (
     <div className={cn("architecture-diagram-surface", className)} style={{ display: "flex", minHeight: 0, height: "100%", flexDirection: "column", overflow: "hidden", borderTop: toolbarSlots ? undefined : "1px solid var(--divider)", backgroundColor: "var(--sketch-canvas)" }}>
@@ -426,7 +420,7 @@ export function ArchitectureDiagramSurface({ graph, onChange, className, readOnl
         : <div className="architecture-diagram-toolbar">{drawingTools}{viewTools}</div>}
       <div ref={viewportRef} onWheelCapture={zoomGraphAtCenter} onPointerDown={onPanePointerDown} onContextMenu={(event) => event.preventDefault()} style={{ position: "relative", minHeight: 0, flex: 1 }}>
       {!readOnly && selectedEdge && <div className="architecture-diagram-edge-editor">
-        {selectedEdge.path && <button type="button" className="architecture-diagram-icon-button" onClick={resetSelectedEdgePath} aria-label="Reset connection path"><RotateCcw size={14} /></button>}
+        {selectedEdge.path && <button type="button" className="architecture-diagram-icon-button" onClick={() => changeEdgePath(selectedEdge.id)} aria-label="Reset connection path"><RotateCcw size={14} /></button>}
         <button type="button" className="architecture-diagram-icon-button architecture-diagram-delete" onClick={deleteSelectedEdge} aria-label="Delete connection"><Trash2 size={14} /></button>
       </div>}
       {lasso && !readOnly && <div className="architecture-diagram-draw-overlay" {...lassoOverlay} />}

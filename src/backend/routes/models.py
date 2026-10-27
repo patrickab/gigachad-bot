@@ -13,7 +13,7 @@ from lib.model_provider_store import ModelProviderStore, providers_for_ui
 from lib.provider_usage import UsageUnavailable, provider_usage
 from lib.prompt_store import PromptStore
 
-from .deps import get_model_provider_store, get_prompt_store
+from .deps import get_model_provider_store, get_prompt_store, http_errors
 
 router = APIRouter(prefix="/api", tags=["models"])
 
@@ -21,24 +21,37 @@ router = APIRouter(prefix="/api", tags=["models"])
 Slug = Annotated[str, Path(pattern=r"^[A-Za-z0-9_-]+$")]
 
 
-@router.get("/models")
-async def get_models(store: ModelProviderStore = Depends(get_model_provider_store)) -> dict:
-    providers = providers_for_ui(store.load())
+async def _models_payload(
+    store: ModelProviderStore,
+    *,
+    providers: dict | None = None,
+    defaults: dict | None = None,
+    tab_order: list[str] | None = None,
+) -> dict:
+    """The models catalog, where a part the caller just saved replaces re-reading it from the store."""
+    visible = providers_for_ui(store.load() if providers is None else providers)
     return {
         "ollama": await asyncio.to_thread(discover_ollama_models),
-        "providers": [{"label": label, **provider} for label, provider in providers.items()],
-        "defaults": store.load_defaults(),
-        "tab_order": store.load_tab_order(),
+        "providers": [{"label": label, **provider} for label, provider in visible.items()],
+        "defaults": store.load_defaults() if defaults is None else defaults,
+        "tab_order": store.load_tab_order() if tab_order is None else tab_order,
     }
+
+
+class OrderBody(BaseModel):
+    order: list[str]
+
+
+@router.get("/models")
+async def get_models(store: ModelProviderStore = Depends(get_model_provider_store)) -> dict:
+    return await _models_payload(store)
 
 
 @router.get("/provider-usage")
 async def get_provider_usage(refresh: bool = False) -> dict:
     """Subscription rate-limit usage per OMP login; `refresh` refetches instead of using the 5 minute cache."""
-    try:
+    with http_errors((UsageUnavailable, 502, None)):
         return await asyncio.to_thread(provider_usage, refresh)
-    except UsageUnavailable as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 # `none` is the app's "off": the chat route then omits `reasoning_effort` entirely.
@@ -163,40 +176,28 @@ class ModelDefaults(BaseModel):
     memory_model: str
     omp_model: str
 
+
 @router.put("/models/providers")
 async def save_model_providers(
     body: ProviderCatalog, store: ModelProviderStore = Depends(get_model_provider_store)
 ) -> dict:
-    try:
+    with http_errors((ValueError, 422, None)):
         providers = store.save({label: provider.model_dump() for label, provider in body.providers.items()})
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    visible = providers_for_ui(providers)
-    return {"ollama": await asyncio.to_thread(discover_ollama_models), "providers": [{"label": label, **provider} for label, provider in visible.items()], "defaults": store.load_defaults(), "tab_order": store.load_tab_order()}
+    return await _models_payload(store, providers=providers)
 
 
 @router.put("/models/defaults")
 async def save_model_defaults(body: ModelDefaults, store: ModelProviderStore = Depends(get_model_provider_store)) -> dict:
-    try:
+    with http_errors((ValueError, 422, None)):
         defaults = store.save_defaults(body.model_dump())
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    providers = providers_for_ui(store.load())
-    return {"ollama": await asyncio.to_thread(discover_ollama_models), "providers": [{"label": label, **provider} for label, provider in providers.items()], "defaults": defaults, "tab_order": store.load_tab_order()}
-
-
-class TabOrder(BaseModel):
-    order: list[str]
+    return await _models_payload(store, defaults=defaults)
 
 
 @router.put("/models/tab-order")
-async def save_model_tab_order(body: TabOrder, store: ModelProviderStore = Depends(get_model_provider_store)) -> dict:
-    try:
+async def save_model_tab_order(body: OrderBody, store: ModelProviderStore = Depends(get_model_provider_store)) -> dict:
+    with http_errors((ValueError, 422, None)):
         tab_order = store.save_tab_order(body.order)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    providers = providers_for_ui(store.load())
-    return {"ollama": await asyncio.to_thread(discover_ollama_models), "providers": [{"label": label, **provider} for label, provider in providers.items()], "defaults": store.load_defaults(), "tab_order": tab_order}
+    return await _models_payload(store, tab_order=tab_order)
 
 
 @router.get("/models/omp")
@@ -233,12 +234,8 @@ async def get_prompt(slug: Slug, store: PromptStore = Depends(get_prompt_store))
     return {"slug": slug, "content": raw}
 
 
-class PromptOrder(BaseModel):
-    order: list[str]
-
-
 @router.put("/prompt-order")
-async def set_prompt_order(body: PromptOrder, store: PromptStore = Depends(get_prompt_store)) -> dict[str, bool]:
+async def set_prompt_order(body: OrderBody, store: PromptStore = Depends(get_prompt_store)) -> dict[str, bool]:
     store.set_order(body.order)
     return {"ok": True}
 

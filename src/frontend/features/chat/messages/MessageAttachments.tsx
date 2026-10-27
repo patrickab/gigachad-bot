@@ -14,7 +14,7 @@ interface MessageAttachmentsProps {
 }
 
 /** Image preview filling its tile, an icon when the upload is gone or unreadable. */
-export function ImageThumbnail({ attachment }: { attachment: Attachment }) {
+function ImageThumbnail({ attachment }: { attachment: Attachment }) {
   const [failed, setFailed] = useState(false)
   if (failed || !attachment.url) return <ImageIcon className="h-4 w-4 text-ink-faint" />
   return (

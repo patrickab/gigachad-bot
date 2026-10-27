@@ -13,13 +13,12 @@ disk, and only after storage has been checked and found not to own the path.
 """
 
 import hashlib
-import logging
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import FileResponse
 
-from backend.routes.deps import get_asset_store, get_document_store, get_file_roots
+from backend.routes.deps import get_asset_store, get_document_store, get_file_roots, http_errors
 from backend.routes.schemas import FileContent
 from lib import document_library as lib_docs
 from lib.architecture_workspace import ArchitectureError, ArchitectureStore, split_source_path
@@ -27,8 +26,6 @@ from lib.asset_store import AssetStore
 from lib.data_store import DataStore, StorageNotFoundError, read_text
 from lib.file_roots import FileRoots
 from lib.storage_namespace import pdf_annotations
-
-log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/fileviewer", tags=["fileviewer"])
 
@@ -70,26 +67,18 @@ async def read_text_content(
 ) -> FileContent:
     if architecture := split_source_path(path):
         slug, relative = architecture
-        try:
+        with http_errors(((StorageNotFoundError, ArchitectureError), 404, "File not found")):
             return FileContent(path=path, content=ArchitectureStore.for_project(docs, slug, roots.roots()).read_source(relative))
-        except (StorageNotFoundError, ArchitectureError) as exc:
-            raise HTTPException(status_code=404, detail="File not found") from exc
     key = _stored(path, docs)
     if key is not None:
-        try:
+        with http_errors((StorageNotFoundError, 404, "File not found")):
             content, _ = read_text(docs, key)
-        except StorageNotFoundError as exc:
-            raise HTTPException(status_code=404, detail="File not found") from exc
         return FileContent(path=path, content=content)
 
     resolved = _resolve_allowed(path, roots)
-    try:
-        # Strict decode: a lossy one would let the editor save replacement characters over a binary file.
+    # Strict decode: a lossy one would let the editor save replacement characters over a binary file.
+    with http_errors((UnicodeDecodeError, 415, "Not a UTF-8 text file"), (OSError, 500, None)):
         content = resolved.read_text(encoding="utf-8")
-    except UnicodeDecodeError as exc:
-        raise HTTPException(status_code=415, detail="Not a UTF-8 text file") from exc
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
     return FileContent(path=path, content=content)
 
 
@@ -97,10 +86,8 @@ def _raw_source(path: str, roots: FileRoots, docs: DataStore, assets: AssetStore
     """Stored bytes with their MIME type, or the allowed host path when storage does not own *path*."""
     key = _stored(path, docs)
     if key is not None:
-        try:
+        with http_errors((StorageNotFoundError, 404, "File not found")):
             content, _ = docs.read_bytes(key)
-        except StorageNotFoundError as exc:
-            raise HTTPException(status_code=404, detail="File not found") from exc
         return content, lib_docs.mime_for(key)
     asset_content = _stored_asset(path, assets)
     if asset_content is not None:
@@ -136,11 +123,8 @@ async def open_pdf_annotations(
     """
     source = _raw_source(path, roots, docs, assets)
     if isinstance(source, Path):
-        try:
-            with source.open("rb") as file:
-                digest = hashlib.file_digest(file, "sha256").hexdigest()
-        except OSError as exc:
-            raise HTTPException(status_code=404, detail="File not found") from exc
+        with http_errors((OSError, 404, "File not found")), source.open("rb") as file:
+            digest = hashlib.file_digest(file, "sha256").hexdigest()
     else:
         digest = hashlib.sha256(source[0]).hexdigest()
     key = pdf_annotations(digest)

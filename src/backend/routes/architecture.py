@@ -58,7 +58,7 @@ class NewSourceFile(BaseModel):
 
 def _require_project(projects: ProjectStore, slug: str) -> None:
     try:
-        projects.list_files(slug)
+        projects.require(slug)
     except FileNotFoundError as exc:
         raise ArchitectureNotFound(str(exc)) from exc
 

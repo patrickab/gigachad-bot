@@ -8,13 +8,12 @@
 """
 
 from datetime import datetime
-import os
 from typing import Any, Literal
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
-from lib.upstream import TIMEOUT_SECONDS, request_json
+from lib.upstream import TIMEOUT_SECONDS, request_json, upstream_url
 
 DEFAULT_URL = "http://127.0.0.1:8090"
 # The engine's default readiness wait (180) plus its scenario run (120) plus headroom for starting the preview's processes.
@@ -174,7 +173,7 @@ class EventCursor(ContractModel):
 
 def factory_url() -> str:
     """Base URL the backend reaches the factory engine at."""
-    return os.environ.get("GIGACHAD_FACTORY_URL", DEFAULT_URL).rstrip("/")
+    return upstream_url("GIGACHAD_FACTORY_URL", DEFAULT_URL)
 
 
 async def repos() -> list[RepoInfo]:

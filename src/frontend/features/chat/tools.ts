@@ -1,4 +1,4 @@
-import { Globe, LineChart, Network, Search, Sigma, Terminal, Workflow, type LucideIcon } from "lucide-react"
+import { Globe, LineChart, Network, Search, Sigma, Terminal, Workflow, Wrench, type LucideIcon } from "lucide-react"
 import type { ToolName } from "@/lib/domain/types"
 
 interface ToolMeta {
@@ -25,4 +25,10 @@ export const TOOLS: readonly ToolMeta[] = [
 ]
 
 /** Keyed for lookup by a saved call's name, which an older chat may no longer match. */
-export const TOOL_META: Partial<Record<string, ToolMeta>> = Object.fromEntries(TOOLS.map((tool) => [tool.name, tool]))
+const TOOL_META: Partial<Record<string, ToolMeta>> = Object.fromEntries(TOOLS.map((tool) => [tool.name, tool]))
+
+/** Icon and card label of a saved call's tool. Unknown saved names keep the raw name and a neutral icon. */
+export function toolDisplay(name: string): { icon: LucideIcon; label: string } {
+  const meta = TOOL_META[name]
+  return { icon: meta?.icon ?? Wrench, label: meta?.cardLabel ?? name }
+}

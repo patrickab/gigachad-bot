@@ -1,7 +1,4 @@
-export interface ViewportPoint {
-  x: number
-  y: number
-}
+import type { Point } from "./edgeRouting"
 
 export interface ViewportSize {
   width: number
@@ -17,7 +14,7 @@ export interface InfiniteViewportCamera {
 export type ZoomAnchor = "cursor" | "viewport-center"
 
 /** Screen offset of the world origin for a camera centered on `centerX/centerY`. */
-export function cameraToOffset(camera: InfiniteViewportCamera, viewport: ViewportSize): ViewportPoint {
+export function cameraToOffset(camera: InfiniteViewportCamera, viewport: ViewportSize): Point {
   return {
     x: viewport.width / 2 - camera.centerX * camera.scale,
     y: viewport.height / 2 - camera.centerY * camera.scale,
@@ -25,7 +22,7 @@ export function cameraToOffset(camera: InfiniteViewportCamera, viewport: Viewpor
 }
 
 /** Inverse of `cameraToOffset` at a given scale. */
-export function offsetToCamera(offset: ViewportPoint, scale: number, viewport: ViewportSize): InfiniteViewportCamera {
+export function offsetToCamera(offset: Point, scale: number, viewport: ViewportSize): InfiniteViewportCamera {
   return {
     scale,
     centerX: (viewport.width / 2 - offset.x) / scale,
@@ -33,7 +30,7 @@ export function offsetToCamera(offset: ViewportPoint, scale: number, viewport: V
   }
 }
 
-export function screenToWorld(point: ViewportPoint, camera: InfiniteViewportCamera, viewport: ViewportSize): ViewportPoint {
+export function screenToWorld(point: Point, camera: InfiniteViewportCamera, viewport: ViewportSize): Point {
   const offset = cameraToOffset(camera, viewport)
   return {
     x: (point.x - offset.x) / camera.scale,
@@ -47,7 +44,7 @@ export function zoomCamera(
   factor: number,
   viewport: ViewportSize,
   anchor: ZoomAnchor,
-  cursor?: ViewportPoint,
+  cursor?: Point,
 ): InfiniteViewportCamera {
   const scale = camera.scale * factor
   if (anchor === "viewport-center" || !cursor) return { ...camera, scale }
@@ -63,7 +60,7 @@ export function zoomCamera(
 // Carry a view across a frame resize and an optional host zoom `factor`. The world
 // point at the frame center stays centered, so an embedded canvas magnifies with its
 // host while still showing the same view.
-export function reframeCamera(offset: ViewportPoint, scale: number, previous: ViewportSize, next: ViewportSize, factor = 1): { offset: ViewportPoint, scale: number } {
+export function reframeCamera(offset: Point, scale: number, previous: ViewportSize, next: ViewportSize, factor = 1): { offset: Point, scale: number } {
   const camera = offsetToCamera(offset, scale, previous)
   const scaled = { ...camera, scale: camera.scale * factor }
   return { offset: cameraToOffset(scaled, next), scale: scaled.scale }

@@ -1,4 +1,5 @@
-import { inkOutlinePath, type StrokeData } from "@/lib/drawing"
+import { canvasEntityId } from "@/lib/domain/canvasDocument"
+import { inkOutlinePath, penPressure, pointsBounds, type Bounds, type StrokeData } from "@/lib/drawing"
 
 export const PRESET_COLORS = [
   { name: "Black", value: "#000000" },
@@ -29,6 +30,9 @@ export function strokeWidth(size: StrokeSize, highlight: boolean): number {
 /** Stored colour of the default pen, displayed in the theme's text colour. */
 export const DEFAULT_PEN_COLOR = "#000000"
 
+/** Eraser radius in screen px. */
+export const ERASER_RADIUS_PX = 15
+
 /** Display colour of stored ink. The default pen (stored black) follows the theme's text colour (--ink, as the selected sidebar file). */
 export function inkColor(color: string): string {
   return color === DEFAULT_PEN_COLOR ? "var(--ink)" : color
@@ -44,10 +48,35 @@ export function appendStrokePoint(points: number[][], point: number[]): void {
   points.push(point)
 }
 
+/** Appends every coalesced sample of a pointer move: they carry the pen's full sample rate (~240Hz) instead of one point per frame. */
+export function appendPointerSamples(points: number[][], e: PointerEvent, toPoint: (clientX: number, clientY: number) => readonly number[]): void {
+  for (const sample of e.getCoalescedEvents?.() ?? [e]) appendStrokePoint(points, [...toPoint(sample.clientX, sample.clientY), penPressure(sample)])
+}
+
+/**
+ * Closes a stroke's points and returns them, or null when too short to keep. pointercancel and
+ * lostpointercapture carry no usable final position (often 0, 0, a diagonal to the origin), so
+ * only pointerup appends one and the latest move sample is otherwise the end.
+ */
+export function finishStroke(points: number[][], e: { type: string; clientX: number; clientY: number; pressure: number }, toPoint: (clientX: number, clientY: number) => readonly number[]): number[][] | null {
+  if (e.type === "pointerup") appendStrokePoint(points, [...toPoint(e.clientX, e.clientY), penPressure(e)])
+  return points.length >= 2 ? points : null
+}
+
+/** New stroke of the given ink. */
+export function newStroke(points: number[][], { color, width, highlight }: { color: string; width: number; highlight: boolean }): StrokeData {
+  return { id: canvasEntityId(), points, color, width, ...(highlight && { highlight: true }) }
+}
+
+/** Strokes split into the translucent highlight layer and the pen ink drawn over it. */
+export function splitHighlights<Stroke extends StrokeData>(strokes: readonly Stroke[]): { highlights: Stroke[]; pen: Stroke[] } {
+  return { highlights: strokes.filter((stroke) => stroke.highlight), pen: strokes.filter((stroke) => !stroke.highlight) }
+}
+
 // Committed strokes are immutable, so outline path and bounds are computed once per
 // object, not per render or eraser sample. Weak keys free the cache when an edit drops a stroke.
 const strokePathCache = new WeakMap<StrokeData, string>()
-const strokeBoundsCache = new WeakMap<StrokeData, [number, number, number, number]>()
+const strokeBoundsCache = new WeakMap<StrokeData, Bounds | null>()
 
 /** Outline path of a committed stroke, cached per stroke object. */
 export function strokePath(stroke: StrokeData): string {
@@ -61,15 +90,10 @@ export function strokePath(stroke: StrokeData): string {
 
 // The eraser tests every stroke on every pointermove, so reject cheaply with four
 // comparisons against a cached box instead of per-segment distances.
-function strokeBounds(s: StrokeData): [number, number, number, number] {
+function strokeBounds(s: StrokeData): Bounds | null {
   let b = strokeBoundsCache.get(s)
   if (b === undefined) {
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-    for (const p of s.points) {
-      minX = Math.min(minX, p[0]!); maxX = Math.max(maxX, p[0]!)
-      minY = Math.min(minY, p[1]!); maxY = Math.max(maxY, p[1]!)
-    }
-    b = [minX, minY, maxX, maxY]
+    b = pointsBounds(s.points)
     strokeBoundsCache.set(s, b)
   }
   return b
@@ -89,8 +113,8 @@ function distToSegment(px: number, py: number, ax: number, ay: number, bx: numbe
 /** Strokes that survive an eraser of radius `threshold` centred at (ex, ey), all in canvas units. */
 export function strokesAfterErase<Stroke extends StrokeData>(strokes: Stroke[], ex: number, ey: number, threshold: number): Stroke[] {
   return strokes.filter((stroke) => {
-    const [minX, minY, maxX, maxY] = strokeBounds(stroke)
-    if (ex < minX - threshold || ex > maxX + threshold || ey < minY - threshold || ey > maxY + threshold) return true
+    const bounds = strokeBounds(stroke)
+    if (!bounds || ex < bounds.minX - threshold || ex > bounds.maxX + threshold || ey < bounds.minY - threshold || ey > bounds.maxY + threshold) return true
     const pts = stroke.points
     if (pts.length === 1) return Math.hypot(pts[0]![0]! - ex, pts[0]![1]! - ey) >= threshold
     for (let i = 1; i < pts.length; i++) {

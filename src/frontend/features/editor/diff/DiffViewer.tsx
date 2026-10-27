@@ -8,7 +8,10 @@ import { useFileTree } from "@/components/ui/file-tree/useFileTree"
 import { fetchRootDiffFiles, fetchRootFileDiff, fetchRootDiffContent, writeRootFile, type DiffStatus, type RootDiffFiles } from "@/lib/backend/api"
 import { parsePatch, toSplitRows, type PatchLine } from "@/lib/diff"
 import { baseName } from "@/lib/paths"
-import { cn } from "@/lib/utils"
+import { cn, errorMessage } from "@/lib/utils"
+import { readStorage, writeStorage } from "@/lib/storage"
+import { useEventListener } from "@/hooks/useEventListener"
+import { ErrorText } from "@/components/ui/ErrorText"
 import { useNeovimSetting } from "@/contexts/SettingsContext"
 import { NeovimEditor, useNeovimTerminal, type NeovimDocument } from "@/features/editor/NeovimEditor"
 import { anchorAt, formatReview, locateNote, useReviewNotes, type NoteAnchor, type ReviewNote, type ReviewSide } from "./review"
@@ -294,11 +297,7 @@ const FileSection = memo(function FileSection({ path, added, removed, patch, edi
 })
 
 function storedLayout(): DiffLayout {
-  try {
-    return LAYOUTS.find((layout) => layout === localStorage.getItem(LAYOUT_STORAGE_KEY)) ?? "auto"
-  } catch {
-    return "auto"
-  }
+  return LAYOUTS.find((layout) => layout === readStorage(LAYOUT_STORAGE_KEY)) ?? "auto"
 }
 
 /** Persist layout choice and resolve auto from pane width. */
@@ -314,7 +313,7 @@ function useDiffLayout(container: RefObject<HTMLElement | null>) {
   }, [container])
   const choose = (next: DiffLayout) => {
     setLayout(next)
-    localStorage.setItem(LAYOUT_STORAGE_KEY, next)
+    writeStorage(LAYOUT_STORAGE_KEY, next)
   }
   return { layout, choose, split: layout === "split" || (layout === "auto" && wide) }
 }
@@ -387,21 +386,12 @@ export function DiffViewer({ root, review }: { root: string; review?: ReviewTarg
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState("")
   const [copied, setCopied] = useState(false)
-  useEffect(() => {
-    const update = () => {
-      const container = scrollContainer.current
-      setSelectionAction(container && patchesRef.current.root === root ? selectedComment(container, patchesRef.current.files) : null)
-    }
-    const dismiss = () => setSelectionAction(null)
-    document.addEventListener("selectionchange", update)
-    window.addEventListener("scroll", dismiss, true)
-    window.addEventListener("resize", dismiss)
-    return () => {
-      document.removeEventListener("selectionchange", update)
-      window.removeEventListener("scroll", dismiss, true)
-      window.removeEventListener("resize", dismiss)
-    }
-  }, [root])
+  useEventListener("document", "selectionchange", () => {
+    const container = scrollContainer.current
+    setSelectionAction(container && patchesRef.current.root === root ? selectedComment(container, patchesRef.current.files) : null)
+  })
+  useEventListener("window", "scroll", () => setSelectionAction(null), { capture: true })
+  useEventListener("window", "resize", () => setSelectionAction(null))
   const session = useNeovimTerminal(editing, async (text) => {
     if (!editing) throw new Error("No file selected")
     await writeRootFile(editing.path, text)
@@ -500,7 +490,7 @@ export function DiffViewer({ root, review }: { root: string; review?: ReviewTarg
         setCopied(true)
       }
     } catch (error) {
-      setSendError(error instanceof Error ? error.message : "Could not export the review")
+      setSendError(errorMessage(error, "Could not export the review"))
     } finally {
       setSending(false)
     }
@@ -514,7 +504,7 @@ export function DiffViewer({ root, review }: { root: string; review?: ReviewTarg
       const path = `${root}/${filePath}`
       setEditing({ key: path, path, filename: baseName(path), ...contents })
     } catch (error) {
-      setEditError(error instanceof Error ? error.message : "Cannot edit this file")
+      setEditError(errorMessage(error, "Cannot edit this file"))
     } finally {
       setOpeningPath(null)
     }
@@ -589,7 +579,7 @@ export function DiffViewer({ root, review }: { root: string; review?: ReviewTarg
         </div>
         {review && !review.canSend && <p className="mt-1.5 text-[11px] text-ink-faint">Sendable once the agent waits for you</p>}
         {!review && copied && <p role="status" className="mt-1.5 text-[11px] text-ink-faint">Review copied</p>}
-        {sendError && <p role="alert" className="mt-1.5 text-xs text-danger">{sendError}</p>}
+        <ErrorText className="mt-1.5">{sendError}</ErrorText>
       </div>}
     </nav>
     <div className="flex min-w-0 flex-1 flex-col">
@@ -605,7 +595,7 @@ export function DiffViewer({ root, review }: { root: string; review?: ReviewTarg
           >{option}</button>)}
         </div>}
       </div>
-      {editError && <p role="alert" className="px-3 py-1 text-xs text-danger">{editError}</p>}
+      <ErrorText className="px-3 py-1">{editError}</ErrorText>
       {editing && <div className="min-h-0 flex-1 overflow-hidden"><NeovimEditor terminal={session.terminal} status={session.status} onRestart={session.restart} className="h-full" /></div>}
       <div
         ref={scrollContainer}

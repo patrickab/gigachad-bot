@@ -16,16 +16,17 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timezone
 import json
 import logging
 import re
 from typing import Any, Protocol
 import uuid
 
+from lib.clock import utc_now_iso
 from lib.data_store import DataStore, DataStorePath
 from lib.json_io import safe_write_json
-from lib.llm_resilience import api_query_resilient
+from lib.llm_json import extract_json_from_llm
+from lib.llm_resilience import completion_text
 from lib.storage_namespace import MEMORY
 
 log = logging.getLogger(__name__)
@@ -33,10 +34,6 @@ log = logging.getLogger(__name__)
 
 class MemoryLLM(Protocol):
     def api_query(self, **kwargs: object) -> object: ...
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 EXTRACT_TIMEOUT = 90
@@ -78,6 +75,22 @@ class StoredMemory:
     scope: str  # "global" | "project"
     created_at: str
     updated_at: str
+
+    @classmethod
+    def from_raw(cls, scope: str, raw: dict[str, Any], now: str, *, normalize: bool = False) -> StoredMemory:
+        """Memory from a stored or user-supplied dict. *normalize* also strips the text and canonicalizes the topic name."""
+        if normalize:
+            text, topic = str(raw.get("text") or "").strip(), topic_name(raw.get("topic")) or FALLBACK_TOPIC
+        else:
+            text, topic = str(raw.get("text", "")), str(raw.get("topic") or FALLBACK_TOPIC)
+        return cls(
+            id=str(raw.get("id") or uuid.uuid4()),
+            text=text,
+            topic=topic,
+            scope=scope,
+            created_at=str(raw.get("created_at") or now),
+            updated_at=str(raw.get("updated_at") or now),
+        )
 
 
 @dataclass
@@ -142,10 +155,18 @@ def topic_title(name: str) -> str:
     return name.replace("_", " ").title()
 
 
-def _json_from_response(text: str) -> dict[str, Any]:
-    from lib.llm_json import extract_json_from_llm
+def _dicts(raw: object) -> list[dict[str, Any]]:
+    """The dict entries of *raw* when it is a list, else nothing."""
+    return [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
 
-    return extract_json_from_llm(text)
+
+def _short_ids(memories: list[StoredMemory]) -> dict[str, StoredMemory]:
+    """Short ids keep prompts small and give the model fewer chances to garble a uuid."""
+    return {f"m{i + 1}": m for i, m in enumerate(memories)}
+
+
+def _facts_block(short_ids: dict[str, StoredMemory]) -> str:
+    return "\n".join(f"{sid} [{m.topic}] {m.text}" for sid, m in short_ids.items())
 
 
 class MemoryStore:
@@ -155,8 +176,7 @@ class MemoryStore:
         # The user's stored default is authoritative; nothing here may name a model.
         self.model = model
         self.base_dir = DataStorePath(data_store, prefix)
-        self.memory_root = self.base_dir
-        self.pending_dir = self.memory_root / "pending"
+        self.pending_dir = self.base_dir / "pending"
 
     # ------------------------------------------------------------------
     # Chat injection
@@ -237,7 +257,7 @@ class MemoryStore:
         are tracked per ``(chat_id, scope)`` and advance only when that scope commits, so cancelling
         leaves the messages eligible next time.
         """
-        self._ensure_dirs()
+        self.pending_dir.mkdir(parents=True, exist_ok=True)
         review_id = str(uuid.uuid4())
         targets = [s for s in ("global", "project") if scope in (None, s) and (s == "global" or project_slug)]
 
@@ -259,7 +279,7 @@ class MemoryStore:
         topics = self.get_topics(scope, project_slug)
         memories = self._read_memories(scope, project_slug)
         # Short ids keep the prompt small and give the model fewer chances to garble a uuid.
-        short_ids = {f"m{i + 1}": m for i, m in enumerate(memories)}
+        short_ids = _short_ids(memories)
         guidance = GLOBAL_SCOPE_GUIDANCE if scope == "global" else PROJECT_SCOPE_GUIDANCE
 
         system_prompt = (
@@ -282,7 +302,7 @@ class MemoryStore:
             "- Empty lists are valid."
         )
         topics_block = "\n".join(f"- {t['name']}: {t['summary']}" for t in topics) or "(none yet)"
-        facts_block = "\n".join(f"{sid} [{m.topic}] {m.text}" for sid, m in short_ids.items()) or "(none yet)"
+        facts_block = _facts_block(short_ids) or "(none yet)"
         user_prompt = f"""
 Conversation:
 {transcript}
@@ -308,9 +328,8 @@ Return JSON with this exact shape:
         known_texts = {m.text.strip().lower() for m in short_ids.values()}
         targeted: set[str] = set()
         operations: list[MemoryOperation] = []
-        raw_ops = data.get("operations")
-        for item in raw_ops if isinstance(raw_ops, list) else []:
-            if not isinstance(item, dict) or item.get("op") not in OPERATIONS:
+        for item in _dicts(data.get("operations")):
+            if item.get("op") not in OPERATIONS:
                 continue
             op = item["op"]
             text = str(item.get("text") or "").strip()
@@ -335,10 +354,7 @@ Return JSON with this exact shape:
         summary_by_name = {t["name"]: t["summary"] for t in topics}
         used_topics = {o.topic for o in operations if o.op != "delete"}
         proposals: dict[str, TopicProposal] = {}
-        raw_topics = data.get("topics")
-        for item in raw_topics if isinstance(raw_topics, list) else []:
-            if not isinstance(item, dict):
-                continue
+        for item in _dicts(data.get("topics")):
             name = topic_name(item.get("name"))
             summary = str(item.get("summary") or "").strip()
             if not name or name in proposals:
@@ -371,7 +387,7 @@ Return JSON with this exact shape:
         """
         memories = self._read_memories(scope, project_slug)
         by_id = {m.id: m for m in memories}
-        now = _now_iso()
+        now = utc_now_iso()
         for operation in operations:
             text = operation.text.strip()
             topic = topic_name(operation.topic) or FALLBACK_TOPIC
@@ -418,7 +434,7 @@ Return JSON with this exact shape:
         memories = self._read_memories(scope, project_slug)
         if not memories:
             return {"topics": self.get_topics(scope, project_slug), "memories": []}
-        short_ids = {f"m{i + 1}": m for i, m in enumerate(memories)}
+        short_ids = _short_ids(memories)
         pinned = (
             "Two topics have fixed names, use them verbatim: `profile` (who the user is) and `preferences` "
             "(how the user wants the assistant to respond and work). "
@@ -431,7 +447,7 @@ Return JSON with this exact shape:
             f"{pinned}Group facts by subject, not by kind of fact. Prefer few, well-filled topics over many "
             "small ones. Assign every fact to exactly one topic. Output valid JSON without prose."
         )
-        facts_block = "\n".join(f"{sid} [{m.topic}] {m.text}" for sid, m in short_ids.items())
+        facts_block = _facts_block(short_ids)
         user_prompt = f"""
 Facts (id [current topic] text):
 {facts_block}
@@ -442,15 +458,13 @@ Return JSON with this exact shape:
         data = await self._generate_json(llm, system_prompt, user_prompt)
 
         topics: list[dict[str, str]] = []
-        raw_topics = data.get("topics")
-        for item in raw_topics if isinstance(raw_topics, list) else []:
-            name = topic_name(item.get("name")) if isinstance(item, dict) else ""
+        for item in _dicts(data.get("topics")):
+            name = topic_name(item.get("name"))
             if name and all(t["name"] != name for t in topics):
                 topics.append({"name": name, "summary": str(item.get("summary") or "").strip()})
         assignments: dict[str, str] = {}
-        raw_assignments = data.get("assignments")
-        for item in raw_assignments if isinstance(raw_assignments, list) else []:
-            if isinstance(item, dict) and (target := short_ids.get(str(item.get("id") or "").strip())):
+        for item in _dicts(data.get("assignments")):
+            if target := short_ids.get(str(item.get("id") or "").strip()):
                 assignments[target.id] = topic_name(item.get("topic")) or target.topic
 
         # Unassigned facts keep their topic, which keeps its summary.
@@ -475,7 +489,6 @@ Return JSON with this exact shape:
 
     def _write_pending(self, review_id: str, chat_id: str | None, target_index: int, scopes: list[str]) -> None:
         """Buffer the watermark target each proposing scope advances to when it commits."""
-        self._ensure_dirs()
         safe_write_json(self._pending_path(review_id), {"chat_id": chat_id, "target_index": target_index, "scopes": scopes})
 
     def _delete_pending(self, review_id: str) -> None:
@@ -487,16 +500,10 @@ Return JSON with this exact shape:
     def _consume_pending_scope(self, review_id: str, scope: str) -> None:
         """Advance ``(chat_id, scope)``'s watermark and drop *scope* from the buffer, deleting it once empty."""
         path = self._pending_path(review_id)
-        if not path.exists():
-            return
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as e:
-            log.warning("Failed to read pending buffer %s: %s", review_id, e)
-            self._delete_pending(review_id)
-            return
+        data = self._read_json(path, "Failed to read pending buffer %s: %s", review_id, level=logging.WARNING)
         if not isinstance(data, dict):
-            self._delete_pending(review_id)
+            if path.exists():
+                self._delete_pending(review_id)
             return
 
         chat_id = data.get("chat_id")
@@ -517,17 +524,10 @@ Return JSON with this exact shape:
     # ------------------------------------------------------------------
 
     def _watermarks_path(self) -> DataStorePath:
-        return self.memory_root / "watermarks.json"
+        return self.base_dir / "watermarks.json"
 
     def _read_watermarks(self) -> dict[str, dict[str, int]]:
-        path = self._watermarks_path()
-        if not path.exists():
-            return {}
-        try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as e:
-            log.error("Failed to read watermarks: %s", e)
-            return {}
+        raw = self._read_json(self._watermarks_path(), "Failed to read watermarks: %s")
         if not isinstance(raw, dict):
             return {}
         out: dict[str, dict[str, int]] = {}
@@ -557,27 +557,20 @@ Return JSON with this exact shape:
 
     def _topics_path(self, scope: str, project_slug: str | None) -> DataStorePath:
         if scope == "global":
-            return self.memory_root / "global-topics.json"
+            return self.base_dir / "global-topics.json"
         return self._project_dir(project_slug) / "memory/topics.json"
 
     def _memories_path(self, scope: str, project_slug: str | None) -> DataStorePath:
         if scope == "global":
-            return self.memory_root / "global-profile.json"
+            return self.base_dir / "global-profile.json"
         return self._project_dir(project_slug) / "memory/memory.json"
 
     def get_topics(self, scope: str, project_slug: str | None = None) -> list[dict[str, str]]:
         """Return the stored topics of *scope*, or the defaults before the first write."""
-        defaults = DEFAULT_GLOBAL_TOPICS if scope == "global" else DEFAULT_PROJECT_TOPICS
-        path = self._topics_path(scope, project_slug)
-        if not path.exists():
-            return [dict(t) for t in defaults]
-        try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as e:
-            log.error("Failed to read topics for %r: %s", scope, e)
-            return [dict(t) for t in defaults]
+        fallback = [dict(t) for t in (DEFAULT_GLOBAL_TOPICS if scope == "global" else DEFAULT_PROJECT_TOPICS)]
+        raw = self._read_json(self._topics_path(scope, project_slug), "Failed to read topics for %r: %s", scope)
         if not isinstance(raw, list):
-            return [dict(t) for t in defaults]
+            return fallback
         return [
             {"name": str(t["name"]), "summary": str(t["summary"])}
             for t in raw if isinstance(t, dict) and "name" in t and "summary" in t
@@ -592,51 +585,34 @@ Return JSON with this exact shape:
 
     def write_memories(self, scope: str, memories: list[dict[str, Any]], project_slug: str | None = None) -> None:
         """Replace the stored memories of *scope*, normalizing every entry."""
-        now = _now_iso()
+        now = utc_now_iso()
         normalized = [
-            StoredMemory(
-                id=str(m.get("id") or uuid.uuid4()),
-                text=str(m.get("text") or "").strip(),
-                topic=topic_name(m.get("topic")) or FALLBACK_TOPIC,
-                scope=scope,
-                created_at=str(m.get("created_at") or now),
-                updated_at=str(m.get("updated_at") or now),
-            )
-            for m in memories
-            if isinstance(m, dict) and str(m.get("text") or "").strip()
+            m
+            for m in (StoredMemory.from_raw(scope, raw, now, normalize=True) for raw in memories if isinstance(raw, dict))
+            if m.text
         ]
         safe_write_json(self._memories_path(scope, project_slug), [vars(m) for m in normalized])
 
     def _read_memories(self, scope: str, project_slug: str | None) -> list[StoredMemory]:
         path = self._memories_path(scope, project_slug)
+        raw = self._read_json(path, "Failed to read stored memories from %s: %s", path)
+        now = utc_now_iso()
+        return [StoredMemory.from_raw(scope, m, now) for m in _dicts(raw)]
+
+    @staticmethod
+    def _read_json(path: DataStorePath, failure: str, *args: object, level: int = logging.ERROR) -> object:
+        """Parsed JSON at *path*, or None when missing or unreadable (the failure is logged with *args* and the error)."""
         if not path.exists():
-            return []
+            return None
         try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
+            return json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as e:
-            log.error("Failed to read stored memories from %s: %s", path, e)
-            return []
-        now = _now_iso()
-        return [
-            StoredMemory(
-                id=str(m.get("id") or uuid.uuid4()),
-                text=str(m.get("text", "")),
-                topic=str(m.get("topic") or FALLBACK_TOPIC),
-                scope=scope,
-                created_at=str(m.get("created_at") or now),
-                updated_at=str(m.get("updated_at") or now),
-            )
-            for m in (raw if isinstance(raw, list) else [])
-            if isinstance(m, dict)
-        ]
+            log.log(level, failure, *args, e)
+            return None
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-
-    def _ensure_dirs(self) -> None:
-        self.memory_root.mkdir(parents=True, exist_ok=True)
-        self.pending_dir.mkdir(parents=True, exist_ok=True)
 
     def _project_dir(self, project_slug: str | None) -> DataStorePath:
         # Reject separators and dot segments so a slug cannot escape the project directory.
@@ -667,16 +643,13 @@ Return JSON with this exact shape:
             )
             if force_json:
                 kwargs["response_format"] = {"type": "json_object"}
-            response = api_query_resilient(llm, **kwargs)
-            if isinstance(response, Exception):
-                raise response
-            return response.choices[0].message.content or "{}"
+            return completion_text(llm, **kwargs) or "{}"
 
         last_err: Exception | None = None
         for force_json in (True, False):
             try:
                 text = await asyncio.wait_for(asyncio.to_thread(call, force_json), timeout=EXTRACT_TIMEOUT)
-                return _json_from_response(text)
+                return extract_json_from_llm(text)
             except Exception as e:  # noqa: BLE001 - retry both transport and parse failures
                 last_err = e
                 log.warning("Memory JSON call failed (response_format=%s): %s", force_json, e)

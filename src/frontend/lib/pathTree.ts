@@ -4,6 +4,8 @@
  * at the common root and branches only where paths diverge.
  */
 
+import { baseName, dirName } from "@/lib/paths"
+
 export interface PathTreeNode {
   /** Absolute directory path this node represents. */
   path: string
@@ -37,8 +39,7 @@ function compress(raw: RawNode): PathTreeNode {
 export function buildPathTree(paths: string[]): PathTreeNode {
   const root: RawNode = { path: "", children: new Map(), files: [] }
   for (const p of paths) {
-    const slash = p.lastIndexOf("/")
-    const dir = slash === -1 ? "" : p.slice(0, slash)
+    const dir = dirName(p)
     let node = root
     if (dir !== "") {
       let cur = ""
@@ -62,6 +63,5 @@ export function relativeName(parentPath: string, childPath: string): string {
   if (parentPath && childPath.startsWith(parentPath === "/" ? "/" : parentPath + "/")) {
     return childPath.slice(parentPath === "/" ? 1 : parentPath.length + 1)
   }
-  const i = childPath.lastIndexOf("/")
-  return i === -1 ? childPath : childPath.slice(i + 1)
+  return baseName(childPath)
 }

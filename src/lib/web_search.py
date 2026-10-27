@@ -11,7 +11,7 @@ import httpx
 from llm_baseclient.client import LLMClient
 
 from lib.llm_json import extract_json_from_llm
-from lib.llm_resilience import api_query_resilient
+from lib.llm_resilience import completion_text
 
 BRAVE_CONTEXT_URL = "https://api.search.brave.com/res/v1/llm/context"
 
@@ -119,7 +119,7 @@ def search_plan(raw_query: str, plan: dict[str, Any]) -> tuple[str, dict[str, in
 def plan_query(client: LLMClient, raw_query: str, model: str) -> tuple[str, dict[str, int]]:
     """Plan with the caller's fast model, falling back safely when it cannot plan JSON."""
     try:
-        response = api_query_resilient(
+        reply = completion_text(
             client,
             model=model,
             user_msg=raw_query,
@@ -128,9 +128,7 @@ def plan_query(client: LLMClient, raw_query: str, model: str) -> tuple[str, dict
             stream=False,
             response_format={"type": "json_object"},
         )
-        if isinstance(response, Exception):
-            raise response
-        return search_plan(raw_query, extract_json_from_llm(response.choices[0].message.content or "{}"))
+        return search_plan(raw_query, extract_json_from_llm(reply or "{}"))
     except Exception:
         # ponytail: one failed planning call must not turn a usable user query into a failed search.
         return search_plan(raw_query, {"complexity": "medium", "search_query": raw_query})

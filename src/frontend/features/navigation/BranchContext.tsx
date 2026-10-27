@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react"
+import { createContext, useCallback, useMemo, useState, type ReactNode } from "react"
 import {
   createBranch as apiCreateBranch,
   mergeBranch as apiMergeBranch,
@@ -11,6 +11,7 @@ import {
 } from "@/lib/backend/api"
 import type { BranchMeta } from "@/lib/domain/types"
 import { useStartupRead } from "@/contexts/StartupReadContext"
+import { useRequiredContext } from "@/hooks/useRequiredContext"
 
 /** Chat id -> history filename. */
 type ChatIdMap = Map<string, string>
@@ -18,7 +19,6 @@ type ChatIdMap = Map<string, string>
 interface BranchContextValue {
   branchMeta: Record<string, BranchMeta>
   chatIdMap: ChatIdMap
-  rootFiles: string[]
   visibleRootFiles: string[]
   historiesLoading: boolean
   activeFile: string | null
@@ -40,13 +40,16 @@ interface Histories {
   branchData: Record<string, BranchMeta>
 }
 
+/** History filenames in locale order. */
+const sortedHistoryFiles = (data: { files?: string[] }): string[] => [...(data.files ?? [])].sort((a, b) => a.localeCompare(b))
+
 /** Fetch both history sources before applying an explicit refresh. */
 async function fetchHistories(): Promise<Histories> {
   const [histData, branchData] = await Promise.all([
     listChatHistories(),
     fetchBranchMeta(),
   ])
-  const sortedFiles = (histData.files ?? []).slice().sort((a: string, b: string) => a.localeCompare(b))
+  const sortedFiles = sortedHistoryFiles(histData)
   return { sortedFiles, branchData }
 }
 
@@ -71,7 +74,7 @@ export function BranchProvider({ onFileClick, onHistoriesMoved, children }: {
   }, [applyHistories])
 
   const { loading: historiesLoading } = useStartupRead("Chat histories", listChatHistories, (histData) => {
-    setRootFiles((histData.files ?? []).slice().sort((a: string, b: string) => a.localeCompare(b)))
+    setRootFiles(sortedHistoryFiles(histData))
   })
   const loadBranchMeta = useCallback((signal: AbortSignal) => fetchBranchMeta(undefined, signal), [])
   useStartupRead("Branch metadata", loadBranchMeta, setBranchMeta)
@@ -119,7 +122,6 @@ export function BranchProvider({ onFileClick, onHistoriesMoved, children }: {
     <BranchContext.Provider value={{
       branchMeta,
       chatIdMap,
-      rootFiles,
       visibleRootFiles,
       historiesLoading,
       activeFile,
@@ -139,9 +141,7 @@ export function BranchProvider({ onFileClick, onHistoriesMoved, children }: {
 }
 
 export function useBranches() {
-  const ctx = useContext(BranchContext)
-  if (!ctx) throw new Error("useBranches must be inside BranchProvider")
-  return ctx
+  return useRequiredContext(BranchContext, "useBranches must be inside BranchProvider")
 }
 
 /** Index branch metadata by `chat_id` to resolve `parent_id` links back to filenames. */

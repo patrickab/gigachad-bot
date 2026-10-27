@@ -1,21 +1,23 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 import { ImageIcon } from "lucide-react"
-import { A4_ASPECT, FALLBACK_ASPECT, TEXT_DEFAULT_HEIGHT, TEXT_DEFAULT_WIDTH, canvasEntityId, emptyCanvasDoc, type CanvasAttachment, type CanvasDocument, type CanvasFrame } from "@/lib/domain/canvasDocument"
-import { appendStrokePoint, inkColor, strokesAfterErase } from "@/features/editor/canvas/ink/canvasInk"
+import { A4_ASPECT, FALLBACK_ASPECT, TEXT_DEFAULT_HEIGHT, TEXT_DEFAULT_WIDTH, canvasEntityId, emptyCanvasDoc, omitKey, type CanvasAttachment, type CanvasDocument, type CanvasFrame } from "@/lib/domain/canvasDocument"
+import { imageFrameEmbeds } from "@/lib/domain/canvasRender"
+import { ERASER_RADIUS_PX, appendPointerSamples, finishStroke, inkColor, newStroke, strokesAfterErase } from "@/features/editor/canvas/ink/canvasInk"
 import type { Poly } from "@/features/editor/canvas/selection/canvasSelection"
-import { inkOutlinePath, penPressure, renderPageToPng, type CanvasEmbedRect, type EmbedRect } from "@/lib/drawing"
+import { inkOutlinePath, penPressure, renderPageToPng, type CanvasEmbedRect } from "@/lib/drawing"
 import { renameDocument } from "@/lib/backend/api"
-import { fileViewerRawUrl } from "@/lib/backend/urls"
 import { useCollaborativeCanvas } from "@/features/editor/canvas/useCollaborativeCanvas"
 import { useCanvasCamera } from "@/features/editor/canvas/camera/useCanvasCamera"
 import { useCanvasDrag } from "@/features/editor/canvas/selection/useCanvasDrag"
-import { useCanvasHistory } from "@/features/editor/canvas/useCanvasHistory"
+import { useCanvasHistory, useUndoRedoKeys } from "@/features/editor/canvas/useCanvasHistory"
 import { useCanvasInsert } from "@/features/editor/canvas/attachments/useCanvasInsert"
 import { useTabActive } from "@/contexts/TabContext"
 import { useCanvasSelection } from "@/features/editor/canvas/selection/useCanvasSelection"
-import { cn } from "@/lib/utils"
+import { useEventListener } from "@/hooks/useEventListener"
+import { LoadFailure, LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
+import { cn, isEditableTarget } from "@/lib/utils"
 import { CanvasAddMenu } from "@/features/editor/canvas/attachments/CanvasAddMenu"
 import { CanvasAttachmentWindow } from "@/features/editor/canvas/attachments/CanvasAttachmentWindow"
 import { CanvasDotGrid } from "@/features/editor/canvas/camera/CanvasDotGrid"
@@ -33,19 +35,11 @@ const STRAIGHTEN_HOLD_MS = 500 // hold the pen still mid-stroke to snap it into 
 const STRAIGHTEN_MOVE_TOLERANCE = 5 // px of client movement that resets the "holding still" timer
 const LONG_PRESS_MS = 500 // touch/mouse press-and-hold opens the context menu
 const LONG_PRESS_TOLERANCE = 5 // px of client movement that cancels a long press
-const ERASER_RADIUS_PX = 15
 const SCREENSHOT_MIN = 4 // canvas units — smaller drags are accidents
 
 // Stable fallback for a nested canvas saved without contents — a fresh object per
 // render would reset the nested editor's identity on every parent re-render.
 const EMPTY_NESTED = emptyCanvasDoc()
-
-/** Copy of `record` without `key`. */
-function omitKey<T>(record: Record<string, T>, key: string): Record<string, T> {
-  const rest = { ...record }
-  delete rest[key]
-  return rest
-}
 
 interface CanvasEditorProps {
   doc: CanvasDocument
@@ -187,10 +181,9 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
   const handleCanvasKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
     // Only a single printable character starts a note (named keys like "Enter" are longer).
     if (e.ctrlKey || e.metaKey || e.altKey || e.nativeEvent.isComposing || Array.from(e.key).length !== 1) return
-    const target = e.target as HTMLElement
     // Only the bare canvas surface should turn typing into a new text note.
     // Any nested editable (architecture diagram fields, modals, contenteditable) keeps its keystrokes.
-    if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable) return
+    if (isEditableTarget(e.target, { includeSelect: true })) return
 
     e.preventDefault()
     const point = lastCanvasPoint.current
@@ -205,11 +198,13 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
   }, [])
   const aspectFor = useCallback((f: CanvasFrame) => f.kind === "page" ? A4_ASPECT : (aspects[f.id] ?? FALLBACK_ASPECT), [aspects])
 
-  const removeFrame = useCallback((id: string) => {
+  /** Commits the document without entity `id` of `collection`, dropping its measured aspect. */
+  const removeEntity = useCallback((collection: "frames" | "attachments", id: string) => {
     const cur = liveRef.current.doc
-    commit({ ...cur, frames: cur.frames.filter((f) => f.id !== id) })
+    commit({ ...cur, [collection]: cur[collection].filter((entity) => entity.id !== id) })
     setAspects((prev) => omitKey(prev, id))
   }, [liveRef, commit])
+  const removeFrame = useCallback((id: string) => removeEntity("frames", id), [removeEntity])
 
   // --- Attachment windows ---
   // Which attachment window, if any, is blown up over the whole surface. Exiting drops
@@ -217,21 +212,25 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
   const [fullscreenId, setFullscreenId] = useState<string | null>(null)
 
   const removeAttachment = useCallback((id: string) => {
-    const cur = liveRef.current.doc
-    commit({ ...cur, attachments: cur.attachments.filter((a) => a.id !== id) })
-    setAspects((prev) => omitKey(prev, id))
+    removeEntity("attachments", id)
     setFullscreenId((fullscreen) => (fullscreen === id ? null : fullscreen))
-  }, [liveRef, commit])
+  }, [removeEntity])
+
+  /** Applies `edit` to the live attachments; nothing is written when it hands them back unchanged. */
+  const editAttachments = useCallback((edit: (all: CanvasAttachment[]) => CanvasAttachment[]) => {
+    const cur = liveRef.current.doc
+    const attachments = edit(cur.attachments)
+    if (attachments !== cur.attachments) applyChange({ ...cur, attachments })
+  }, [liveRef, applyChange])
 
   // Navigation, window state and titles (the tree's file, the PDF page, the connection style) persist without an undo step.
   // ponytail: nested canvas edits bypass the parent's history too — the nested editor has its own
   // undo/redo, and snapshotting the whole parent per nested stroke would be absurd.
-  const patchAttachment = useCallback((id: string, patch: Partial<CanvasAttachment>) => {
-    const cur = liveRef.current.doc
-    const attachment = cur.attachments.find((a) => a.id === id)
-    if (!attachment || Object.entries(patch).every(([key, value]) => attachment[key as keyof CanvasAttachment] === value)) return
-    applyChange({ ...cur, attachments: cur.attachments.map((a) => a.id === id ? { ...a, ...patch } : a) })
-  }, [liveRef, applyChange])
+  const patchAttachment = useCallback((id: string, patch: Partial<CanvasAttachment>) => editAttachments((all) => {
+    const attachment = all.find((a) => a.id === id)
+    if (!attachment || Object.entries(patch).every(([key, value]) => attachment[key as keyof CanvasAttachment] === value)) return all
+    return all.map((a) => a.id === id ? { ...a, ...patch } : a)
+  }), [editAttachments])
 
   const retitleAttachment = useCallback(async (id: string, nextTitle: string) => {
     const attachment = liveRef.current.doc.attachments.find((a) => a.id === id)
@@ -247,19 +246,15 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
 
   // Attachments on this canvas follow a file the add menu renames; they go once its delete commits, since the file is then gone for good.
   const followRenamedDocument = useCallback((oldPath: string, newPath: string) => {
-    const cur = liveRef.current.doc
-    if (cur.attachments.some((a) => a.path === oldPath)) {
-      applyChange({ ...cur, attachments: cur.attachments.map((a) => a.path === oldPath ? { ...a, path: newPath } : a) })
-    }
-  }, [liveRef, applyChange])
+    editAttachments((all) => all.some((a) => a.path === oldPath) ? all.map((a) => a.path === oldPath ? { ...a, path: newPath } : a) : all)
+  }, [editAttachments])
 
   const dropDeletedDocument = useCallback((path: string) => {
-    const cur = liveRef.current.doc
-    const gone = cur.attachments.filter((a) => a.path === path).map((a) => a.id)
+    const gone = liveRef.current.doc.attachments.filter((a) => a.path === path).map((a) => a.id)
     if (gone.length === 0) return
-    applyChange({ ...cur, attachments: cur.attachments.filter((a) => a.path !== path) })
+    editAttachments((all) => all.filter((a) => a.path !== path))
     setFullscreenId((id) => (id && gone.includes(id) ? null : id))
-  }, [liveRef, applyChange])
+  }, [liveRef, editAttachments])
 
   // A canvas window's body. Passed down rather than imported by the window, so editor and window stay out of an import cycle.
   const renderNestedCanvas = (att: CanvasAttachment, name: string) => {
@@ -338,14 +333,8 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
     longPressPos.current = null
   }, [])
 
-  useEffect(() => {
-    if (!contextMenu) return
-    const close = () => setContextMenu(null)
-    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") close() }
-    document.addEventListener("pointerdown", close)
-    document.addEventListener("keydown", esc)
-    return () => { document.removeEventListener("pointerdown", close); document.removeEventListener("keydown", esc) }
-  }, [contextMenu])
+  useEventListener("document", "pointerdown", () => setContextMenu(null), { active: !!contextMenu })
+  useEventListener("document", "keydown", (e) => { if (e.key === "Escape") setContextMenu(null) }, { active: !!contextMenu })
 
   // --- Screenshot capture: rasterize a canvas-space rect and copy it to the clipboard ---
   const captureScreenshot = useCallback(async ([x0, y0]: [number, number], [x1, y1]: [number, number]) => {
@@ -356,9 +345,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
     if (w < SCREENSHOT_MIN || h < SCREENSHOT_MIN) return
     const sequence = ++screenshotSequence.current
     const { frames, strokes, texts } = liveRef.current.doc
-    const images: EmbedRect[] = frames
-      .filter((f) => f.kind === "image" && f.path)
-      .map((f) => ({ url: fileViewerRawUrl(f.path!), x: f.x, y: f.y, width: f.width, aspect: aspectFor(f) }))
+    const images = imageFrameEmbeds(frames, aspectFor)
     const pdfPages: CanvasEmbedRect[] = Array.from(
       containerRef.current?.querySelectorAll<HTMLCanvasElement>("[data-canvas-attachment] .react-pdf__Page__canvas") ?? [],
     ).flatMap((image) => {
@@ -378,14 +365,8 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
 
   // --- Container pointer handling: pan, pen side-button and typing position ---
   const spaceDown = useRef(false)
-  useEffect(() => {
-    if (!active) return
-    const down = (e: KeyboardEvent) => { if (e.code === "Space" && !e.repeat) spaceDown.current = true }
-    const up = (e: KeyboardEvent) => { if (e.code === "Space") spaceDown.current = false }
-    window.addEventListener("keydown", down)
-    window.addEventListener("keyup", up)
-    return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up) }
-  }, [active])
+  useEventListener("window", "keydown", (e) => { if (e.code === "Space" && !e.repeat) spaceDown.current = true }, { active })
+  useEventListener("window", "keyup", (e) => { if (e.code === "Space") spaceDown.current = false }, { active })
 
   const handleContainerPointerDown = useCallback((e: React.PointerEvent) => {
     if (e.pointerType === "touch") return
@@ -507,13 +488,7 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
       const dy = e.clientY - straightenAnchor.current.clientY
       if (dx * dx + dy * dy > STRAIGHTEN_MOVE_TOLERANCE * STRAIGHTEN_MOVE_TOLERANCE) armStraighten(e.clientX, e.clientY)
     }
-    // coalesced events surface the pen's full sample rate (~240Hz on pen hardware)
-    // instead of one point per display frame
-    const native = e.nativeEvent
-    for (const ev of native.getCoalescedEvents?.() ?? [native]) {
-      const [cx, cy] = screenToCanvas(ev.clientX, ev.clientY)
-      appendStrokePoint(currentPointsRef.current, [cx, cy, penPressure(ev)])
-    }
+    appendPointerSamples(currentPointsRef.current, e.nativeEvent, screenToCanvas)
     redrawLive()
   }, [isDrawing, isErasing, liveRef, scaleRef, screenToCanvas, extendBand, cancelLongPress, armStraighten, redrawLive, snapshotOnce, applyChange])
 
@@ -536,54 +511,25 @@ export function CanvasEditor({ doc, onChange, slug, onImageAdded, toolbarSlots, 
     }
     if (!isDrawing || e.pointerId !== drawingPointerId.current) return
     setIsDrawing(false)
-    const pts = currentPointsRef.current
-    // pointercancel and lostpointercapture do not carry a usable final position.
-    // Appending their default (often 0, 0) coordinate creates a diagonal to the
-    // canvas origin. The most recent move sample is the safe final point instead.
-    if (e.type === "pointerup") {
-      const [cx, cy] = screenToCanvas(e.clientX, e.clientY)
-      appendStrokePoint(pts, [cx, cy, penPressure(e)])
-    }
+    const pts = finishStroke(currentPointsRef.current, e, screenToCanvas)
     currentPointsRef.current = []
     drawingPointerId.current = null
     redrawLive()
-    if (pts.length < 2) return
+    if (!pts) return
     const cur = liveRef.current.doc
-    commit({ ...cur, strokes: [...cur.strokes, { id: canvasEntityId(), points: pts, color: inkStrokeColor, width: inkWidth, ...(highlighting && { highlight: true }) }] })
+    commit({ ...cur, strokes: [...cur.strokes, newStroke(pts, { color: inkStrokeColor, width: inkWidth, highlight: highlighting })] })
   }, [isDrawing, isErasing, inkStrokeColor, inkWidth, highlighting, liveRef, selection, cancelLongPress, cancelStraighten, captureScreenshot, writeBand, screenToCanvas, redrawLive, commit, endGesture])
 
   // --- Keyboard: undo/redo, and Escape to cancel a band or drop the stroke selection ---
-  useEffect(() => {
-    if (!active) return
-    const handler = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return
-      const key = e.key.toLowerCase() // shift uppercases it, so Ctrl+Shift+Z arrives as "Z"
-      // Redo also matches `code` — the physical key — for layouts where `key` isn't "y".
-      // The undo branch must stay first: on QWERTZ the KeyY position is labelled Z.
-      if (key === "z" && !e.shiftKey) {
-        e.preventDefault()
-        undo()
-      } else if (key === "y" || e.code === "KeyY" || (key === "z" && e.shiftKey)) {
-        e.preventDefault()
-        redo()
-      }
-    }
-    window.addEventListener("keydown", handler)
-    return () => window.removeEventListener("keydown", handler)
-  }, [undo, redo, active])
+  useUndoRedoKeys(undo, redo, active)
 
-  useEffect(() => {
-    if (tool === "draw" && selection.selectedIds.size === 0 && !inkTool) return
-    const esc = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return
-      writeBand(null)
-      setTool("draw")
-      clearSelection()
-      clearInkTool()
-    }
-    document.addEventListener("keydown", esc)
-    return () => document.removeEventListener("keydown", esc)
-  }, [tool, inkTool, selection.selectedIds, writeBand, clearSelection, clearInkTool])
+  useEventListener("document", "keydown", (e) => {
+    if (e.key !== "Escape") return
+    writeBand(null)
+    setTool("draw")
+    clearSelection()
+    clearInkTool()
+  }, { active: tool !== "draw" || selection.selectedIds.size > 0 || !!inkTool })
 
   const addMenu = (
     <CanvasAddMenu
@@ -759,17 +705,9 @@ function NestedCanvasFile({ path, slug, depth, hostScale }: {
   const { document, replace, status, retry } = useCollaborativeCanvas(path)
 
   if (!document) {
-    if (status === "error") {
-      return (
-        <div className="flex h-full flex-col items-center justify-center gap-2 text-[10px] text-ink-faint">
-          <span>Failed to load this canvas.</span>
-          <button onClick={retry} className="rounded px-2 py-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors">
-            Retry
-          </button>
-        </div>
-      )
-    }
-    return <div className="flex h-full items-center justify-center text-[10px] text-ink-faint">Loading…</div>
+    return status === "error"
+      ? <LoadFailure message="Failed to load this canvas." onRetry={retry} size="fill" />
+      : <LoadingPlaceholder size="fill" />
   }
   return (
     <CanvasEditor

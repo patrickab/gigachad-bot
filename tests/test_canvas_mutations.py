@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import os
 from uuid import UUID, uuid4
 
 import pytest
@@ -13,34 +12,9 @@ from backend.canvas import CanvasMutation, CanvasMutationStore, InvalidCanvasSna
 from backend.identity import RequestIdentity
 from backend.routes.canvases import CanvasMutationBatchRequest, stream_canvas, submit_mutations
 from backend.sync import ChangeBroker
-from lib.db_schema import upgrade
+from tests.conftest import create_user
 
-
-@pytest.fixture(scope="module")
-def database_url() -> str:
-    url = os.environ.get("POSTGRES_TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("POSTGRES_TEST_DATABASE_URL is required for canvas mutation tests")
-    upgrade(url)
-    return url
-
-
-@pytest.fixture(scope="module")
-def postgres_pool(database_url: str):
-    pool = ConnectionPool(database_url, min_size=1, max_size=4)
-    yield pool
-    pool.close()
-
-
-@pytest.fixture(autouse=True)
-def clean_database(postgres_pool):
-    with postgres_pool.connection() as connection, connection.transaction():
-        connection.execute("TRUNCATE users CASCADE")
-
-
-def _user(pool: ConnectionPool, login: str) -> UUID:
-    with pool.connection() as connection:
-        return connection.execute("INSERT INTO users (tailscale_login) VALUES (%s) RETURNING id", (login,)).fetchone()[0]
+pytestmark = pytest.mark.usefixtures("clean_database")
 
 
 def _canvas(pool: ConnectionPool, user_id: UUID, key: str, content: bytes | dict) -> None:
@@ -66,7 +40,7 @@ EMPTY = {"version": 1, "frames": [], "strokes": [], "attachments": [], "texts": 
 
 
 def test_blank_canvas_reads_empty_and_accepts_its_first_mutation(postgres_pool):
-    user_id = _user(postgres_pool, "blank@example.test")
+    user_id = create_user(postgres_pool, "blank@example.test")
     key = "notes/blank.canvas"
     _canvas(postgres_pool, user_id, key, b"")
     store = CanvasMutationStore(postgres_pool, user_id)
@@ -78,7 +52,7 @@ def test_blank_canvas_reads_empty_and_accepts_its_first_mutation(postgres_pool):
 
 
 def test_malformed_canvas_fails_closed_on_read_and_write(postgres_pool):
-    user_id = _user(postgres_pool, "malformed@example.test")
+    user_id = create_user(postgres_pool, "malformed@example.test")
     key = "notes/malformed.canvas"
     _canvas(postgres_pool, user_id, key, b"{")
     store = CanvasMutationStore(postgres_pool, user_id)
@@ -91,7 +65,7 @@ def test_malformed_canvas_fails_closed_on_read_and_write(postgres_pool):
 
 
 def test_retried_mutations_are_acknowledged_at_their_original_revision(postgres_pool):
-    user_id = _user(postgres_pool, "alice@example.test")
+    user_id = create_user(postgres_pool, "alice@example.test")
     key = "notes/board.canvas"
     _canvas(postgres_pool, user_id, key, EMPTY)
     store = CanvasMutationStore(postgres_pool, user_id)
@@ -110,7 +84,7 @@ def test_retried_mutations_are_acknowledged_at_their_original_revision(postgres_
 
 
 def test_legacy_canvas_reads_with_the_ids_its_first_write_persists(postgres_pool):
-    user_id = _user(postgres_pool, "legacy@example.test")
+    user_id = create_user(postgres_pool, "legacy@example.test")
     key = "notes/legacy.canvas"
     legacy_stroke = {"points": [[2, 3], [5, 8]], "color": "#123", "width": 4}
     _canvas(postgres_pool, user_id, key, {
@@ -143,17 +117,17 @@ def test_legacy_canvas_reads_with_the_ids_its_first_write_persists(postgres_pool
     }
 
 
-def test_canvas_access_is_user_scoped(postgres_pool, monkeypatch):
-    alice = _user(postgres_pool, "alice@example.test")
-    bob = _user(postgres_pool, "bob@example.test")
+def test_canvas_access_is_user_scoped(postgres_pool):
+    alice = create_user(postgres_pool, "alice@example.test")
+    bob = create_user(postgres_pool, "bob@example.test")
     key = "notes/private.canvas"
     _canvas(postgres_pool, alice, key, EMPTY)
-    monkeypatch.setattr("backend.routes.canvases.get_postgres_pool", lambda: postgres_pool)
     identity = RequestIdentity(user_id=bob, login="bob@example.test", device_id=None)
+    store = CanvasMutationStore(postgres_pool, bob)
 
     for attempt in (
-        submit_mutations(key, CanvasMutationBatchRequest(mutations=[]), identity),
-        stream_canvas(key, sinceRevision=0, identity=identity),
+        submit_mutations(key, CanvasMutationBatchRequest(mutations=[]), store),
+        stream_canvas(key, sinceRevision=0, identity=identity, store=store),
     ):
         with pytest.raises(HTTPException) as error:
             asyncio.run(attempt)
@@ -162,7 +136,7 @@ def test_canvas_access_is_user_scoped(postgres_pool, monkeypatch):
 
 
 async def test_canvas_stream_replays_then_delivers_live_batches(postgres_pool, database_url, monkeypatch):
-    user_id = _user(postgres_pool, "alice@example.test")
+    user_id = create_user(postgres_pool, "alice@example.test")
     key = "notes/board.canvas"
     _canvas(postgres_pool, user_id, key, EMPTY)
     store = CanvasMutationStore(postgres_pool, user_id)
@@ -170,12 +144,11 @@ async def test_canvas_stream_replays_then_delivers_live_batches(postgres_pool, d
     store.apply(key, [replayed])
 
     broker = ChangeBroker()
-    monkeypatch.setattr("backend.routes.canvases.get_postgres_pool", lambda: postgres_pool)
     monkeypatch.setattr("backend.routes.canvases.get_change_broker", lambda: broker)
     identity = RequestIdentity(user_id=user_id, login="alice@example.test", device_id=None)
     await broker.start(database_url)
     try:
-        events = (await stream_canvas(key, sinceRevision=0, identity=identity)).body_iterator
+        events = (await stream_canvas(key, sinceRevision=0, identity=identity, store=store)).body_iterator
         first = json.loads((await asyncio.wait_for(anext(events), timeout=5))["data"])
         for _ in range(40):
             with postgres_pool.connection() as connection:

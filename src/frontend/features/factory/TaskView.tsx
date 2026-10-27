@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { ArrowLeft } from "lucide-react"
+import { ErrorText } from "@/components/ui/ErrorText"
 import { SidePanelFrame } from "@/components/ui/SidePanel"
 import { DiffViewer } from "@/features/editor/diff/DiffViewer"
 import { discardReviewNotes } from "@/features/editor/diff/review"
@@ -86,7 +87,7 @@ export function TaskView({ repo, taskId, onBack }: { repo: string; taskId: strin
             ))}
           </div>
         </div>
-        {error && <p role="alert" className="px-3 py-1 text-xs text-danger">{error}</p>}
+        <ErrorText className="px-3 py-1">{error}</ErrorText>
         <div id="task-pane" role="tabpanel" aria-labelledby={`task-tab-${pane}`} className="min-h-0 flex-1">
           {!current ? (
             <div className="flex h-full items-center justify-center text-xs text-ink-faint">Loading task</div>

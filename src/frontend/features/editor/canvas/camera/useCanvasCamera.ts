@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react"
 import { useTwoFingerGesture } from "@/hooks/useTwoFingerGesture"
 import { inOwnAttachment } from "@/features/editor/canvas/attachments/canvasTransfer"
-import { cameraToOffset, offsetToCamera, reframeCamera, zoomCamera, type ViewportPoint, type ZoomAnchor } from "@/lib/domain/viewport"
+import { cameraToOffset, offsetToCamera, reframeCamera, zoomCamera, type ZoomAnchor } from "@/lib/domain/viewport"
+import type { Point } from "@/lib/domain/edgeRouting"
 
 const MIN_SCALE = 0.15
 const MAX_SCALE = 3
@@ -35,7 +36,7 @@ export function useCanvasCamera(containerRef: RefObject<HTMLDivElement | null>, 
   const viewportSizeRef = useRef({ width: 0, height: 0 })
   const restoredRef = useRef(false)
 
-  const setCamera = useCallback((nextOffset: ViewportPoint, nextScale = scaleRef.current) => {
+  const setCamera = useCallback((nextOffset: Point, nextScale = scaleRef.current) => {
     scaleRef.current = nextScale
     offsetRef.current = nextOffset
     setScale(nextScale)

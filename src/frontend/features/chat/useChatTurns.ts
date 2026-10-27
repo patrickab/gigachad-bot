@@ -24,6 +24,22 @@ import type { Attachment, ChatRequest, Message, Usage } from "@/lib/domain/types
 
 type BaseChatRequest = Omit<ChatRequest, "chat_id" | "user_msg" | "img_paths" | "project_slug">
 
+/** Replace the message at `index` (negative counts from the end) with `update(message)`; a missing message or a null result leaves state untouched. */
+function updateMessageAt(
+  setMessages: React.Dispatch<React.SetStateAction<Message[]>>,
+  index: number,
+  update: (message: Message) => Message | null,
+) {
+  setMessages((prev) => {
+    const at = index < 0 ? prev.length + index : index
+    const next = prev[at] && update(prev[at])
+    if (!next) return prev
+    const copy = [...prev]
+    copy[at] = next
+    return copy
+  })
+}
+
 /** Build the request fields a tab's config decides. UI-only "none" reasoning maps to null. */
 function baseRequest(config: TabConfig, reasoningEffort: string, prompts: Record<string, string>, enabledTools: ChatRequest["tools"]): BaseChatRequest {
   return {
@@ -146,12 +162,7 @@ export function useChatTurns({
       return
     }
 
-    setMessages(prev => {
-      const copy = [...prev]
-      const idx = copy.length - 2
-      if (idx >= 0 && copy[idx].role === "user") copy[idx] = withAttachments(copy[idx], built.enriched)
-      return copy
-    })
+    updateMessageAt(setMessages, -2, (m) => m.role === "user" ? withAttachments(m, built.enriched) : null)
     await finishTurn(await send(built.request, true))
   }, [runSlashCommand, refreshForSend, finishTurn, send, baseParams, chatId, projectSlug, setMessages, replaceMessages])
 
@@ -176,13 +187,9 @@ export function useChatTurns({
   }, [isStreaming, messages, refreshForSend, regenerateAt, finishTurn, baseParams, chatId, projectSlug])
 
   const handleToggleAttachmentActive = useCallback((messageIndex: number, attachmentName: string) => {
-    setMessages(prev => {
-      const msg = prev[messageIndex]
-      if (!msg?.attachments) return prev
-      const copy = [...prev]
-      copy[messageIndex] = withAttachments(msg, msg.attachments.map(a => a.name === attachmentName ? { ...a, active: !a.active } : a))
-      return copy
-    })
+    updateMessageAt(setMessages, messageIndex, (msg) => msg.attachments
+      ? withAttachments(msg, msg.attachments.map(a => a.name === attachmentName ? { ...a, active: !a.active } : a))
+      : null)
   }, [setMessages])
 
   const handleRemoveAttachment = useCallback((messageIndex: number, attachmentName: string) => {
@@ -190,12 +197,8 @@ export function useChatTurns({
     const att = original?.attachments?.find(a => a.name === attachmentName)
     if (!original?.attachments || !att) return
     const scheduledChat = chatId
-    const patch = ({ attachments, hiddenContent }: Message) => setMessages(prev => {
-      if (chatIdRef.current !== scheduledChat || !prev[messageIndex]?.attachments) return prev
-      const copy = [...prev]
-      copy[messageIndex] = { ...prev[messageIndex], attachments, hiddenContent }
-      return copy
-    })
+    const patch = ({ attachments, hiddenContent }: Message) => updateMessageAt(setMessages, messageIndex, (msg) =>
+      chatIdRef.current !== scheduledChat || !msg.attachments ? null : { ...msg, attachments, hiddenContent })
     // Removed from the chat (and from what the model sees) at once; the upload goes after the undo window.
     patch(withAttachments(original, original.attachments.filter(a => a.name !== attachmentName)))
     scheduleDelete(
@@ -229,13 +232,9 @@ export function useChatTurns({
     const attachment = messages[messageIndex]?.attachments?.find((a) => a.name === attachmentName)
     if (!attachment) return
     const saved = await saveAttachmentEdit(attachment, newContent)
-    setMessages(prev => {
-      const msg = prev[messageIndex]
-      if (!msg?.attachments) return prev
-      const copy = [...prev]
-      copy[messageIndex] = withAttachments(msg, msg.attachments.map(a => a.name === attachmentName ? saved : a))
-      return copy
-    })
+    updateMessageAt(setMessages, messageIndex, (msg) => msg.attachments
+      ? withAttachments(msg, msg.attachments.map(a => a.name === attachmentName ? saved : a))
+      : null)
   }, [messages, setMessages])
 
   return {

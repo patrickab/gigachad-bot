@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { FolderOpen, Library, PanelLeft, PanelLeftClose, X } from "lucide-react"
 import { Sidebar } from "@/features/navigation/Sidebar"
 import { ChatContainer, type ChatFocus } from "@/features/chat/ChatContainer"
@@ -27,7 +27,7 @@ import { OmpSystemPrompt } from "@/features/omp/OmpSystemPrompt"
 import { TabSwitcher } from "@/features/navigation/TabManager"
 import { TokenCounter } from "@/features/chat/TokenCounter"
 import { TopBar, TopBarPill, TopBarTransparent } from "@/features/navigation/TopBar"
-import { LazyPdfViewer } from "@/components/content/LazyPdfViewer"
+import { RawFileView } from "@/features/editor/RawFileView"
 import { LazyAnnotatedPdfViewer } from "@/features/editor/pdf/LazyAnnotatedPdfViewer"
 import { useBranches } from "@/features/navigation/BranchContext"
 import { useEnabledTools } from "@/features/chat/EnabledToolsContext"
@@ -44,8 +44,8 @@ import { useSlashCommands } from "@/features/navigation/useSlashCommands"
 import { loadChatHistory, writeRootFile } from "@/lib/backend/api"
 import { liveReferencePaths, normalizeMessageAttachments } from "@/features/chat/attachments"
 import { parseHistoryFile } from "@/lib/domain/historyFile"
-import { fileViewerRawUrl } from "@/lib/backend/urls"
-import { isNeovimKeyEvent } from "@/lib/utils"
+import { isEditableTarget, isNeovimKeyEvent } from "@/lib/utils"
+import { useEventListener } from "@/hooks/useEventListener"
 import { MemoryCommandLayer } from "./MemoryCommandLayer"
 
 /** One tab's workspace: the chat (or canvas) with its sidebar, top bar, modals and keyboard shortcuts. */
@@ -152,7 +152,8 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
     return () => { loadIdRef.current++ }
   }, [tab.historyFile, setMessages, setTitle, setTotalUsage, syncReferences])
 
-  const onKeyDown = useEffectEvent((e: KeyboardEvent) => {
+  // Capture phase so the shortcuts win over handlers inside focused editors.
+  useEventListener("window", "keydown", (e) => {
     if (isNeovimKeyEvent(e)) return
     if (e.altKey && e.key === "s") {
       e.preventDefault()
@@ -163,20 +164,17 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
     if (e.altKey && e.key.toLowerCase() === "m") {
       e.preventDefault()
       if (memory.isIdle) void memory.memorize(null)
-      return
     }
     if (e.altKey && e.key.toLowerCase() === "o") {
       e.preventDefault()
       if (filePicker.filesEnabled) filePicker.openFilePicker()
-      return
     }
 
     const isSlash = e.key === "/" && !e.altKey && !e.ctrlKey && !e.metaKey
     const isCtrlK = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k"
 
     if (isSlash || isCtrlK) {
-      const tag = (e.target as HTMLElement).tagName
-      if (isSlash && (tag === "TEXTAREA" || tag === "INPUT" || (e.target as HTMLElement).isContentEditable)) return
+      if (isSlash && isEditableTarget(e.target)) return
       e.preventDefault()
       e.stopPropagation()
       e.stopImmediatePropagation()
@@ -184,16 +182,7 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
         memory.openMenu()
       }
     }
-  })
-
-  useEffect(() => {
-    if (!isActive || appMode !== "chat") return
-    // Capture phase so the shortcuts win over handlers inside focused editors.
-    window.addEventListener("keydown", onKeyDown, true)
-    return () => {
-      window.removeEventListener("keydown", onKeyDown, true)
-    }
-  }, [isActive, appMode])
+  }, { active: isActive && appMode === "chat", capture: true })
 
   // Picking a menu entry always closes the menu first; memorizing then replaces it with the review panel.
   const { closeMenu: closeMemoryMenu } = memory
@@ -233,6 +222,11 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
     </button>
   )
   const filePanelToggle = <TopBarTransparent><FilePanelToggle /></TopBarTransparent>
+  const modelProps = { models, loadError: modelLoadError, onProvidersChange: saveModelProviders, onTabOrderChange: saveModelTabOrder, onDefaultsChange: saveModelDefaults, placement: "below" as const }
+  /** Top bar with the sidebar toggle and tab switcher every mode shows. */
+  const topBar = (left: ReactNode, right: ReactNode) => (
+    <TopBar center={<TabSwitcher />} left={<><TopBarTransparent>{sidebarToggle}</TopBarTransparent>{left}</>} right={right} />
+  )
   const isPdfDocument = appMode === "document" && !diffItem && !!documentItem?.path.toLowerCase().endsWith(".pdf")
   // Scrolling surfaces run on under the floating TopBar. The rest start below it.
   const surfaceRunsUnderTopBar = appMode === "canvas" ? canvasView.kind !== "architecture"
@@ -261,88 +255,65 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
         appMode={appMode}
       />
       <main className="flex-1 min-w-0 flex flex-col relative bg-paper">
-        {appMode === "canvas" ? (
-          <TopBar
-            center={<TabSwitcher />}
-            left={<>
-              <TopBarTransparent>{sidebarToggle}</TopBarTransparent>
-              <TopBarPill ref={setDrawingSlot} />
-            </>}
-            right={<>
-              <TopBarPill>
-                <div ref={setViewSlot} className="contents" />
-                <ThemeToggle />
-              </TopBarPill>
-              {filePanelToggle}
-            </>}
-          />
-        ) : appMode === "omp" ? (
-          <TopBar
-            center={<TabSwitcher />}
-            left={<>
-              <TopBarTransparent>{sidebarToggle}</TopBarTransparent>
-              {ompView && <TopBarPill>
-                <OmpReasoningSelector view={ompView} />
-              </TopBarPill>}
-              {ompView && <TopBarTransparent>
-                <OmpModelSelector view={ompView} models={models} loadError={modelLoadError} onProvidersChange={saveModelProviders} onTabOrderChange={saveModelTabOrder} onDefaultsChange={saveModelDefaults} placement="below" />
-              </TopBarTransparent>}
-            </>}
-            right={<>
-              <TopBarPill>
-                {ompView && <OmpSystemPrompt view={ompView} />}
-                <ThemeToggle />
-              </TopBarPill>
-              {filePanelToggle}
-            </>}
-          />
-        ) : appMode === "factory" ? (
-          <TopBar
-            center={<TabSwitcher />}
-            left={<TopBarTransparent>{sidebarToggle}</TopBarTransparent>}
-            right={<><TopBarPill><ThemeToggle /></TopBarPill>{filePanelToggle}</>}
-          />
-        ) : appMode === "document" ? (
-          <TopBar
-            center={<TabSwitcher />}
-            left={<>
-              <TopBarTransparent>{sidebarToggle}</TopBarTransparent>
-              <TopBarTransparent>
-                <ModelDropdown models={models} loadError={modelLoadError} selectedModel={config.selectedModel} onSelect={(model) => updateConfig({ selectedModel: model })} onProvidersChange={saveModelProviders} onTabOrderChange={saveModelTabOrder} onDefaultsChange={saveModelDefaults} placement="below" />
-              </TopBarTransparent>
-            </>}
-            right={<>
-              {isPdfDocument && <TopBarPill ref={setPdfToolbarSlot} />}
-              <TopBarTransparent>
-                <ThemeToggle />
-                <button aria-label="Close file" onClick={() => setAppMode("chat")} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover">
-                  <X className="h-4 w-4" />
-                </button>
-              </TopBarTransparent>
-              {!isPdfDocument && filePanelToggle}
-            </>}
-          />
-        ) : (
-          <TopBar
-            center={<TabSwitcher />}
-            left={<>
-              <TopBarTransparent>{sidebarToggle}</TopBarTransparent>
-              <TopBarPill>
-                <ReasoningSelector levels={reasoningLevels} reasoningEffort={reasoningEffort} onReasoningChange={(v) => updateConfig({ reasoningEffort: v })} placement="below" />
-              </TopBarPill>
-              <TopBarTransparent>
-                <ModelDropdown models={models} loadError={modelLoadError} selectedModel={config.selectedModel} onSelect={(m) => updateConfig({ selectedModel: m })} onProvidersChange={saveModelProviders} onTabOrderChange={saveModelTabOrder} onDefaultsChange={saveModelDefaults} placement="below" chatColumn={chatColumn} />
-              </TopBarTransparent>
-              <TopBarTransparent ref={setWideToggleSlot} />
-            </>}
-            right={<>
-              <TopBarPill>
-                <TokenCounter usage={totalUsage} />
-                <ThemeToggle />
-              </TopBarPill>
-              {filePanelToggle}
-            </>}
-          />
+        {appMode === "canvas" ? topBar(
+          <TopBarPill ref={setDrawingSlot} />,
+          <>
+            <TopBarPill>
+              <div ref={setViewSlot} className="contents" />
+              <ThemeToggle />
+            </TopBarPill>
+            {filePanelToggle}
+          </>,
+        ) : appMode === "omp" ? topBar(
+          <>
+            {ompView && <TopBarPill>
+              <OmpReasoningSelector view={ompView} />
+            </TopBarPill>}
+            {ompView && <TopBarTransparent>
+              <OmpModelSelector view={ompView} {...modelProps} />
+            </TopBarTransparent>}
+          </>,
+          <>
+            <TopBarPill>
+              {ompView && <OmpSystemPrompt view={ompView} />}
+              <ThemeToggle />
+            </TopBarPill>
+            {filePanelToggle}
+          </>,
+        ) : appMode === "factory" ? topBar(
+          null,
+          <><TopBarPill><ThemeToggle /></TopBarPill>{filePanelToggle}</>,
+        ) : appMode === "document" ? topBar(
+          <TopBarTransparent>
+            <ModelDropdown selectedModel={config.selectedModel} onSelect={(model) => updateConfig({ selectedModel: model })} {...modelProps} />
+          </TopBarTransparent>,
+          <>
+            {isPdfDocument && <TopBarPill ref={setPdfToolbarSlot} />}
+            <TopBarTransparent>
+              <ThemeToggle />
+              <button aria-label="Close file" onClick={() => setAppMode("chat")} className="rounded p-1 text-ink-subtle hover:text-ink hover:bg-hover">
+                <X className="h-4 w-4" />
+              </button>
+            </TopBarTransparent>
+            {!isPdfDocument && filePanelToggle}
+          </>,
+        ) : topBar(
+          <>
+            <TopBarPill>
+              <ReasoningSelector levels={reasoningLevels} reasoningEffort={reasoningEffort} onReasoningChange={(v) => updateConfig({ reasoningEffort: v })} placement="below" />
+            </TopBarPill>
+            <TopBarTransparent>
+              <ModelDropdown selectedModel={config.selectedModel} onSelect={(m) => updateConfig({ selectedModel: m })} {...modelProps} chatColumn={chatColumn} />
+            </TopBarTransparent>
+            <TopBarTransparent ref={setWideToggleSlot} />
+          </>,
+          <>
+            <TopBarPill>
+              <TokenCounter usage={totalUsage} />
+              <ThemeToggle />
+            </TopBarPill>
+            {filePanelToggle}
+          </>,
         )}
         <div data-workspace-surface className={`absolute inset-x-0 bottom-0 ${surfaceRunsUnderTopBar ? "top-0" : "top-11"} ${appMode === "canvas" ? "overflow-hidden" : ""}`}>
           {appMode === "omp" && ompItem && ompView ? (
@@ -424,9 +395,7 @@ export function TabContent({ onOpenChat, onOpenProject, onProjectRenamed, onNewC
                 <div className="flex h-9 shrink-0 items-center border-b border-divider/50 px-4">
                   <span className="truncate text-xs font-medium text-ink">{filePicker.filePdfPath.split("/").pop()}</span>
                 </div>
-                <div className="min-h-0 flex-1">
-                  <LazyPdfViewer url={fileViewerRawUrl(filePicker.filePdfPath)} />
-                </div>
+                <RawFileView path={filePicker.filePdfPath} kind="pdf" />
               </div>
             )}
           </div>

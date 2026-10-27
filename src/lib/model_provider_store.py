@@ -9,7 +9,7 @@ import yaml
 
 from config import MODEL_DEFAULT_KEYS, TEST_MODEL
 from lib import omp_source
-from lib.data_store import DataStore, StorageNotFoundError, read_text, write_text
+from lib.data_store import DataStore, StorageNotFoundError, overwrite_text, read_text
 
 MODEL_PROVIDERS_FILE = "model-providers.yaml"
 MODEL_DEFAULTS_FILE = "model-defaults.yaml"
@@ -81,45 +81,37 @@ class ModelProviderStore:
             result[label.strip()] = entry
         return result
 
-    def _read(self, store: DataStore) -> dict[str, dict[str, Any]]:
-        raw, _ = read_text(store, self._key(MODEL_PROVIDERS_FILE))
+    def _load_yaml(self, filename: str, empty: object) -> object:
+        """Parse a stored YAML file, `empty` for blank content. Raises StorageNotFoundError when absent."""
+        raw, _ = read_text(self._store, self._key(filename))
         try:
-            data = yaml.safe_load(raw) or {}
+            return yaml.safe_load(raw) or empty
         except yaml.YAMLError as exc:
-            raise ValueError("model-providers.yaml is not valid YAML") from exc
-        return self._validate(data)
+            raise ValueError(f"{filename} is not valid YAML") from exc
 
-    def _write(self, store: DataStore, providers: dict[str, dict[str, Any]]) -> None:
-        key = self._key(MODEL_PROVIDERS_FILE)
-        try:
-            _, revision = read_text(store, key)
-        except StorageNotFoundError:
-            revision = None
-        write_text(store, key, yaml.safe_dump(providers, allow_unicode=True, sort_keys=False), expected=revision)
+    def _dump_yaml(self, filename: str, data: object, **options: bool) -> None:
+        overwrite_text(self._store, self._key(filename), yaml.safe_dump(data, sort_keys=False, **options))
 
     def load(self) -> dict[str, dict[str, Any]]:
         """Return the catalog, seeding `DEFAULT_PROVIDERS` when none is stored."""
         try:
-            return self._read(self._store)
+            return self._validate(self._load_yaml(MODEL_PROVIDERS_FILE, {}))
         except StorageNotFoundError:
             providers = self._validate(DEFAULT_PROVIDERS)
-            self._write(self._store, providers)
+            self._dump_yaml(MODEL_PROVIDERS_FILE, providers, allow_unicode=True)
             return providers
 
     def save(self, providers: object) -> dict[str, dict[str, Any]]:
         cleaned = self._validate(providers)
-        self._write(self._store, cleaned)
+        self._dump_yaml(MODEL_PROVIDERS_FILE, cleaned, allow_unicode=True)
         return cleaned
 
     def load_defaults(self) -> dict[str, str]:
         """Return the stored defaults, resetting any file that does not match the current keys."""
         try:
-            raw, _ = read_text(self._store, self._key(MODEL_DEFAULTS_FILE))
-            defaults = yaml.safe_load(raw) or {}
+            defaults = self._load_yaml(MODEL_DEFAULTS_FILE, {})
         except StorageNotFoundError:
             defaults = {}
-        except yaml.YAMLError as exc:
-            raise ValueError("model-defaults.yaml is not valid YAML") from exc
         usable = (
             isinstance(defaults, dict)
             and set(defaults) == set(DEFAULT_MODEL_DEFAULTS)
@@ -128,16 +120,8 @@ class ModelProviderStore:
         if usable:
             return defaults
         defaults = dict(DEFAULT_MODEL_DEFAULTS)
-        self._write_defaults(defaults)
+        self._dump_yaml(MODEL_DEFAULTS_FILE, defaults)
         return defaults
-
-    def _write_defaults(self, defaults: dict[str, str]) -> None:
-        key = self._key(MODEL_DEFAULTS_FILE)
-        try:
-            _, revision = read_text(self._store, key)
-        except StorageNotFoundError:
-            revision = None
-        write_text(self._store, key, yaml.safe_dump(defaults, sort_keys=False), expected=revision)
 
     def save_defaults(self, defaults: object) -> dict[str, str]:
         if not isinstance(defaults, dict) or set(defaults) != set(DEFAULT_MODEL_DEFAULTS):
@@ -145,8 +129,14 @@ class ModelProviderStore:
         if any(not isinstance(value, str) or not value.strip() for value in defaults.values()):
             raise ValueError("Default models must be non-empty strings")
         cleaned = {key: value.strip() for key, value in defaults.items()}
-        self._write_defaults(cleaned)
+        self._dump_yaml(MODEL_DEFAULTS_FILE, cleaned)
         return cleaned
+
+    @staticmethod
+    def _clean_labels(order: object, message: str) -> list[str]:
+        if not isinstance(order, list) or any(not isinstance(label, str) or not label.strip() for label in order):
+            raise ValueError(message)
+        return [label.strip() for label in order]
 
     def load_tab_order(self) -> list[str]:
         """Persisted selector-tab order, e.g. `["Ollama", "OMP", "OpenAI"]`.
@@ -156,25 +146,12 @@ class ModelProviderStore:
         tab alphabetically, so a stale or empty order never hides a tab.
         """
         try:
-            raw, _ = read_text(self._store, self._key(MODEL_TAB_ORDER_FILE))
+            order = self._load_yaml(MODEL_TAB_ORDER_FILE, [])
         except StorageNotFoundError:
             return []
-        try:
-            order = yaml.safe_load(raw) or []
-        except yaml.YAMLError as exc:
-            raise ValueError("model-tab-order.yaml is not valid YAML") from exc
-        if not isinstance(order, list) or any(not isinstance(label, str) or not label.strip() for label in order):
-            raise ValueError("model-tab-order.yaml must be a list of non-empty tab labels")
-        return [label.strip() for label in order]
+        return self._clean_labels(order, "model-tab-order.yaml must be a list of non-empty tab labels")
 
     def save_tab_order(self, order: object) -> list[str]:
-        if not isinstance(order, list) or any(not isinstance(label, str) or not label.strip() for label in order):
-            raise ValueError("Tab order must be a list of non-empty labels")
-        cleaned = [label.strip() for label in order]
-        key = self._key(MODEL_TAB_ORDER_FILE)
-        try:
-            _, revision = read_text(self._store, key)
-        except StorageNotFoundError:
-            revision = None
-        write_text(self._store, key, yaml.safe_dump(cleaned, allow_unicode=True, sort_keys=False), expected=revision)
+        cleaned = self._clean_labels(order, "Tab order must be a list of non-empty labels")
+        self._dump_yaml(MODEL_TAB_ORDER_FILE, cleaned, allow_unicode=True)
         return cleaned

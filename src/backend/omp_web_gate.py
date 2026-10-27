@@ -18,7 +18,7 @@ from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response, StreamingResponse
 from starlette.routing import Route
 
-from backend.identity import CAPABILITIES_HEADER, HOST_CAPABILITY, is_host_capability_granted
+from backend.identity import CAPABILITIES_HEADER, host_denied, is_host_capability_granted
 from lib.omp_web import omp_web_url
 
 LOGIN_HEADER = "tailscale-user-login"
@@ -52,7 +52,7 @@ def upstream_target(request: Request) -> str:
 
 async def proxy(request: Request) -> Response:
     if not is_allowed(request):
-        return PlainTextResponse(f"omp-web is limited to logins granted {HOST_CAPABILITY}\n", status_code=403)
+        return PlainTextResponse(f"{host_denied('omp-web')}\n", status_code=403)
     client: httpx.AsyncClient = request.app.state.client
     upstream_request = client.build_request(
         request.method, upstream_target(request), headers=upstream_headers(request), content=request.stream()

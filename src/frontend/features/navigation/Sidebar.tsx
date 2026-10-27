@@ -8,12 +8,15 @@ import { PopoverSelector } from "@/components/ui/PopoverSelector"
 import { SaveAsModal } from "@/components/ui/SaveAsModal"
 import { CreateDocumentPanel } from "./CreateDocumentPanel"
 import { ProviderUsage } from "./ProviderUsage"
-import { cn } from "@/lib/utils"
+import { ErrorText } from "@/components/ui/ErrorText"
+import { cn, errorMessage } from "@/lib/utils"
+import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { FileTree, type FileTreeItem } from "@/components/ui/file-tree/FileTree"
 import { useFileTree, usePathTree } from "@/components/ui/file-tree/useFileTree"
 import { useMemoryViewer } from "@/features/memory/MemoryViewerContext"
 import { useProject } from "@/contexts/ProjectContext"
 import { useBranches } from "@/features/navigation/BranchContext"
+import { useDeleteChat } from "@/features/navigation/useDeleteChat"
 import { useSidebar } from "@/features/navigation/SidebarContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { useStartupRead } from "@/contexts/StartupReadContext"
@@ -61,10 +64,11 @@ export function Sidebar({
   const hostAccess = useHostAccess()
   const isActive = useTabActive()
   const { tab } = useTab()
-  const { branchMeta, visibleRootFiles, historiesLoading, moveHistory, onFileClick, activeFile, activeQaIndex, cascadeDelete, refreshAll } = useBranches()
+  const { branchMeta, visibleRootFiles, historiesLoading, moveHistory, onFileClick, activeFile, activeQaIndex, refreshAll } = useBranches()
   const { projects, createProject, deleteProject, setProjectArchived, renameProject } = useProject()
   const { openMemoryViewer } = useMemoryViewer()
   const { schedule, pending } = useUndoDelete()
+  const deleteChat = useDeleteChat()
   const defaultExpanded = useMemo(() => [
     "shared", "shared:canvases",
     ...projects.flatMap((project) => ["chats", "canvases", "files"].map((category) => `project:${project.slug}:${category}`)),
@@ -77,53 +81,44 @@ export function Sidebar({
   const [createDocumentSlug, setCreateDocumentSlug] = useState<string | null>(null)
   const [fileMountPickerOpen, setFileMountPickerOpen] = useState(false)
   const { archived: archivedDirectories, setArchived: setDirectoryArchived } = useArchivedDirectories()
-  const [projectArchiveError, setProjectArchiveError] = useState("")
+  const { run: archiveProject, error: projectArchiveError } = useAsyncAction(setProjectArchived, "Could not update project archive")
   const [archivingProject, setArchivingProject] = useState<string | null>(null)
   const [renameTarget, setRenameTarget] = useState<ProjectListItem | null>(null)
-  const [renamePending, setRenamePending] = useState(false)
-  const [renameError, setRenameError] = useState("")
-  const submitRename = async (name: string) => {
-    if (!renameTarget || renamePending) return
-    setRenamePending(true)
-    setRenameError("")
-    try {
-      const slug = await renameProject(renameTarget.slug, name)
-      if (slug !== renameTarget.slug) {
-        onProjectRenamed?.(renameTarget.slug, slug)
-        void refreshAll().catch(() => {})
-      }
-      setRenameTarget(null)
-    } catch (cause) {
-      setRenameError(cause instanceof Error ? cause.message : "Could not rename project")
-    } finally { setRenamePending(false) }
-  }
-
-  const changeProjectArchive = async (slug: string, archived: boolean) => {
-    setProjectArchiveError("")
-    setArchivingProject(slug)
-    try {
-      await setProjectArchived(slug, archived)
-    } catch (cause) {
-      setProjectArchiveError(cause instanceof Error ? cause.message : "Could not update project archive")
-    } finally {
-      setArchivingProject(null)
+  const { run: rename, pending: renamePending, error: renameError, setError: setRenameError } = useAsyncAction(async (target: ProjectListItem, name: string) => {
+    const slug = await renameProject(target.slug, name)
+    if (slug !== target.slug) {
+      onProjectRenamed?.(target.slug, slug)
+      void refreshAll().catch(() => {})
     }
+    setRenameTarget(null)
+  }, "Could not rename project")
+  const submitRename = (name: string) => {
+    if (renameTarget && !renamePending) void rename(renameTarget, name)
+  }
+  const changeProjectArchive = async (slug: string, archived: boolean) => {
+    setArchivingProject(slug)
+    await archiveProject(slug, archived)
+    setArchivingProject(null)
   }
 
-  const refreshDocuments = useCallback(async () => {
-    const [loose, entries] = await Promise.all([
-      listNotes(),
-      Promise.all(projects.map(async (project) => [project.slug, await listProjectDocuments(project.slug)] as const)),
-    ])
-    setNotes(loose)
-    setDocuments(Object.fromEntries(entries))
-  }, [projects])
-
-  const loadProjectDocuments = useCallback(async (signal: AbortSignal) => {
+  const loadProjectDocuments = useCallback(async (signal?: AbortSignal) => {
     const entries = await Promise.all(projects.map(async (project) =>
       [project.slug, await listProjectDocuments(project.slug, signal)] as const))
     return Object.fromEntries(entries)
   }, [projects])
+
+  const refreshDocuments = useCallback(async () => {
+    const [loose, entries] = await Promise.all([listNotes(), loadProjectDocuments()])
+    setNotes(loose)
+    setDocuments(entries)
+  }, [loadProjectDocuments])
+
+  /** Create `name` in `scope`, refresh the lists and hand the new path to `open`. */
+  const createAndOpen = async (scope: string, name: string, open: (path: string) => void) => {
+    const { path } = await writeDocument(scope, name)
+    await refreshDocuments()
+    open(path)
+  }
 
   const { retry: reloadNotes } = useStartupRead("Sidebar notes", listNotes, setNotes, isActive)
   const { retry: reloadDocuments } = useStartupRead("Sidebar project documents", loadProjectDocuments, setDocuments, isActive)
@@ -133,7 +128,7 @@ export function Sidebar({
     reloadDocuments()
   }, [activeCanvasPath, appMode, isActive, reloadNotes, reloadDocuments])
 
-  const mounts = rootTreeData.map((node) => node.mount ?? node.path)
+  const mounts = rootTreeData.map(mountOf)
   const openFactoryRepo = useFactoryRepos(hostAccess)
   const omp = useOmpSidebar({
     onOpen: onItemOpen,
@@ -145,7 +140,7 @@ export function Sidebar({
         try {
           onItemOpen?.(factoryItem((await openFactoryRepo(directory)).name))
         } catch (cause) {
-          reportError(cause instanceof Error ? cause.message : "Could not open the factory")
+          reportError(errorMessage(cause, "Could not open the factory"))
         }
       },
     }],
@@ -154,12 +149,15 @@ export function Sidebar({
   const { reload: reloadWorktrees } = worktrees
   const activeWorktreesKey = worktrees.activeWorktrees.join("\n")
 
-  const loadRootTree = useCallback(() => fileRootTree(activeWorktreesKey.split("\n").filter(Boolean))
-    .then((result) => setRootTreeData(result.tree)), [activeWorktreesKey])
-
-  const readRootTree = useCallback((signal: AbortSignal) =>
-    fileRootTree(activeWorktreesKey.split("\n").filter(Boolean), signal), [activeWorktreesKey])
+  const worktreeKeys = useMemo(() => activeWorktreesKey.split("\n").filter(Boolean), [activeWorktreesKey])
+  const readRootTree = useCallback((signal?: AbortSignal) => fileRootTree(worktreeKeys, signal), [worktreeKeys])
+  const loadRootTree = useCallback(() => readRootTree().then((result) => setRootTreeData(result.tree)), [readRootTree])
   useStartupRead("Sidebar file mounts", readRootTree, (result) => setRootTreeData(result.tree), isActive)
+  const mountThen = async (add: () => Promise<unknown>) => {
+    await add()
+    await loadRootTree()
+    onRootsChanged?.()
+  }
 
   useEffect(() => {
     if (isActive) reloadWorktrees()
@@ -206,9 +204,9 @@ export function Sidebar({
 
   /** Mounts keep their registered path as id, so switching worktrees keeps them expanded. */
   const buildMounts = (nodes: FileTreeNode[]): FileTreeItem<string>[] => nodes
-    .filter((node) => !pending(`root:${node.mount ?? node.path}`) && !archivedDirectories.has(node.mount ?? node.path))
+    .filter((node) => !pending(`root:${mountOf(node)}`) && !archivedDirectories.has(mountOf(node)))
     .map((node) => {
-      const mount = node.mount ?? node.path
+      const mount = mountOf(node)
       const folder = worktrees.folder(mount)
       const code = omp.directoryCode(mount, node.name, projects.find((project) => (project.linked_root ?? projectMount(project.slug, mounts)) === mount)?.slug ?? null)
       return {
@@ -296,7 +294,7 @@ export function Sidebar({
             badge: count > 0 ? `@${count - 1}` : undefined,
             isActive: appMode === "chat" && activeFile === chat.path && activeQaIndex == null,
             onSelect: () => onFileClick(chat.path),
-            onDelete: () => schedule(`history:${chat.path}`, baseName(chat.path), async () => { await cascadeDelete(chat.path) }),
+            onDelete: () => deleteChat(chat.path),
           }
         }),
       },
@@ -305,11 +303,7 @@ export function Sidebar({
         onMoveHere: (path) => moveToProject(path, scope),
         create: {
           label: `New canvas in ${owner}`, placeholder: "Canvas name",
-          onSubmit: async (name) => {
-            const doc = await writeDocument(scope, name.endsWith(".canvas") ? name : `${name}.canvas`)
-            await refreshDocuments()
-            onCanvasSelect?.(doc.path, scope)
-          },
+          onSubmit: (name) => createAndOpen(scope, name.endsWith(".canvas") ? name : `${name}.canvas`, (path) => onCanvasSelect?.(path, scope)),
         },
         children: docs.filter((doc) => doc.name.endsWith(".canvas")).map((doc) => ({
           id: doc.path, label: doc.name.replace(/\.canvas$/, ""), type: "element", draggable: true,
@@ -322,11 +316,7 @@ export function Sidebar({
         id: `${prefix}:files`, label: "files", type: "folder" as const,
         create: {
           label: `New file in ${owner}`, placeholder: "File name",
-          onSubmit: async (name: string) => {
-            const doc = await writeDocument(scope, name)
-            await refreshDocuments()
-            onDocumentSelect?.(doc.path, scope)
-          },
+          onSubmit: (name: string) => createAndOpen(scope, name, (path) => onDocumentSelect?.(path, scope)),
         },
         onDropFiles: (paths: string[]) => importFiles(scope, paths),
         children: docs.filter((doc) => !doc.name.endsWith(".canvas") && !isArchitecturePath(doc.path)).map((doc): FileTreeItem<string> => ({
@@ -364,7 +354,7 @@ export function Sidebar({
   ]
   const archivedSessions = omp.archivedSessions()
   const directoryEntries = [
-    ...rootTreeData.filter((node) => !pending(`root:${node.mount ?? node.path}`)).map((node) => ({ key: node.mount ?? node.path, name: node.name })),
+    ...rootTreeData.filter((node) => !pending(`root:${mountOf(node)}`)).map((node) => ({ key: mountOf(node), name: node.name })),
     ...unmounted.map((workspace) => ({ key: workspace.path, name: workspace.label })),
   ].map((entry) => ({ ...entry, archived: archivedDirectories.has(entry.key) }))
 
@@ -395,34 +385,29 @@ export function Sidebar({
           renderBeforeItem={(item) => item.data ? <ChatBranchPreview file={item.data} /> : null}
           onMoveToRoot={(path) => moveToProject(path, "")}
         />
-        {projectArchiveError && <p role="alert" className="px-2 py-1 text-xs text-danger">{projectArchiveError}</p>}
+        <ErrorText className="px-2 py-1">{projectArchiveError}</ErrorText>
         <div role="separator" className="my-4 border-t border-divider/50" />
         <FileTree label="Code" items={[...buildMounts(rootTreeData), ...buildUnmounted(), ...(archivedSessions ? [archivedSessions] : [])]} controller={fileMountController}
           headerActions={<ArchiveSelector noun="directories" entries={directoryEntries} onRestore={(path) => setDirectoryArchived(path, false)} />}
           labelAction={omp.available ? { label: "Open omp settings", onClick: omp.openSettings } : undefined}
           create={{ label: "Add file mount", onClick: () => setFileMountPickerOpen(true) }}
         />
-        {omp.error && <p role="alert" className="px-2 py-1 text-xs text-danger">{omp.error}</p>}
+        <ErrorText className="px-2 py-1">{omp.error}</ErrorText>
       </nav>
       <ProviderUsage />
       {renderSettings && <div className="shrink-0 p-2">{renderSettings()}</div>}
     </>}
-    <FileMountPicker open={fileMountPickerOpen} onClose={() => setFileMountPickerOpen(false)} onConfirm={async (path) => {
-      await addFileRoot(path)
-      await loadRootTree()
-      onRootsChanged?.()
-    }} onClone={async (url) => {
-      await cloneFileRoot(url)
-      await loadRootTree()
-      onRootsChanged?.()
-    }} />
+    <FileMountPicker open={fileMountPickerOpen} onClose={() => setFileMountPickerOpen(false)} onConfirm={(path) => mountThen(() => addFileRoot(path))} onClone={(url) => mountThen(() => cloneFileRoot(url))} />
     <SaveAsModal open={renameTarget != null} onClose={() => { if (!renamePending) setRenameTarget(null) }}
       title="Rename project" icon={Pencil} initialName={renameTarget?.name} pending={renamePending} error={renameError}
-      submitLabel="Rename" onSave={(name) => { void submitRename(name) }} />
+      submitLabel="Rename" onSave={submitRename} />
     <CreateDocumentPanel open={createDocumentSlug != null} onClose={() => setCreateDocumentSlug(null)}
       onCreate={(name) => { if (createDocumentSlug) void createDocument(createDocumentSlug, name) }} />
   </motion.aside>
 }
+
+/** Registered path of a file-root node: its mount when set, else its own path. */
+const mountOf = (node: FileTreeNode): string => node.mount ?? node.path
 
 interface ArchiveEntry {
   key: string

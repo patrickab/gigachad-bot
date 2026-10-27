@@ -14,7 +14,7 @@ import httpx
 from pydantic import AliasGenerator, BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 
-from lib.upstream import request_json
+from lib.upstream import request_json, upstream_url
 
 DEFAULT_URL = "http://127.0.0.1:30177"
 TRUSTED_HEADER = "x-omp-web-auth"
@@ -106,12 +106,12 @@ class _Restored(ContractModel):
 
 def omp_web_url() -> str:
     """Base URL the backend reaches omp-web at."""
-    return os.environ.get("GIGACHAD_OMP_WEB_URL", DEFAULT_URL).rstrip("/")
+    return upstream_url("GIGACHAD_OMP_WEB_URL", DEFAULT_URL)
 
 
 def omp_web_frame_url() -> str:
     """Base URL the browser frames omp-web from, `GIGACHAD_OMP_WEB_FRAME_URL` when omp-web sits behind the Tailnet gate."""
-    return os.environ.get("GIGACHAD_OMP_WEB_FRAME_URL", omp_web_url()).rstrip("/")
+    return upstream_url("GIGACHAD_OMP_WEB_FRAME_URL", omp_web_url())
 
 
 def _headers() -> dict[str, str]:

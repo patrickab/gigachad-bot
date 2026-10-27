@@ -16,7 +16,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import subprocess
 from typing import Protocol
 
 from lib.data_store import (
@@ -30,7 +29,8 @@ from lib.data_store import (
     read_text,
     validate_key,
 )
-from lib.storage_namespace import GRAPH, architecture_prefix
+from lib.git import run_git
+from lib.storage_namespace import GRAPH, architecture_prefix, project_json
 
 SOURCE_SUFFIX = ".c4"
 # Where a project's architecture lives inside its linked workspace (the file root named like the project).
@@ -129,11 +129,7 @@ class DirectoryFiles:
         """Every file below *base* git does not ignore; every file when *base* is outside a work tree."""
         if not base.is_dir():
             return []
-        listed = subprocess.run(
-            ["git", "-C", str(base), "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-            capture_output=True,
-            check=False,
-        )
+        listed = run_git(base, "ls-files", "--cached", "--others", "--exclude-standard", "-z", timeout=None, text=False, check=False)
         if listed.returncode == 0:
             # Tracked files deleted from disk are still listed; they are not part of the workspace.
             candidates = [base / name for name in sorted(listed.stdout.decode().split("\0")) if name]
@@ -177,7 +173,7 @@ class ArchitectureStore:
         - Linked root: `linked_root` of the project, else the file root named *slug*
         """
         try:
-            linked_root = json.loads(read_text(docs, f"chat/{slug}/project.json")[0]).get("linked_root")
+            linked_root = json.loads(read_text(docs, project_json(slug))[0]).get("linked_root")
         except (StorageNotFoundError, ValueError):
             linked_root = None
         for root in map(Path, workspace_roots):

@@ -1,12 +1,13 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import { X, Check, Maximize2, Minimize2, Undo2, Trash2, Pencil } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { type StrokeData, STROKE_OPTIONS as BASE_STROKE_OPTIONS, penPressure, renderStrokesToJpeg, strokeOutlinePath } from "@/lib/drawing"
 import { uploadFile as apiUploadFile } from "@/lib/backend/api"
+import { useEventListener } from "@/hooks/useEventListener"
 import { useThemeName } from "@/hooks/useThemeName"
 import { readToken } from "@/lib/palette"
 import type { Attachment } from "@/lib/domain/types"
@@ -37,20 +38,16 @@ export function DrawingCanvas({ chatId, onConfirm, onClose, slug = null }: Drawi
 
   const svgRef = useRef<SVGSVGElement>(null)
 
-  useEffect(() => {
-    function handler(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        e.preventDefault()
-        onClose()
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === "z") {
-        e.preventDefault()
-        setStrokes((prev) => prev.slice(0, -1))
-      }
+  useEventListener("document", "keydown", (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault()
+      onClose()
     }
-    document.addEventListener("keydown", handler)
-    return () => document.removeEventListener("keydown", handler)
-  }, [onClose])
+    if ((e.ctrlKey || e.metaKey) && e.key === "z") {
+      e.preventDefault()
+      setStrokes((prev) => prev.slice(0, -1))
+    }
+  })
 
   const baseWidth = strokeWidth === "thin" ? THIN_WIDTH : THICK_WIDTH
   const color = readToken("ink")

@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react"
 import { Send } from "lucide-react"
 import { InlineConfirm } from "@/components/ui/InlineConfirm"
-import { cn } from "@/lib/utils"
+import { cn, errorMessage } from "@/lib/utils"
+import { ErrorText } from "@/components/ui/ErrorText"
 import { runFactoryTaskAction, sendFactoryMessage } from "@/lib/backend/api"
 import { PHASE_LABELS, STATE_LABELS, allowedActions, type StatusTone } from "./states"
 import { StatusDot } from "./StatusDot"
@@ -85,7 +86,7 @@ function Composer({ taskId, disabled, onSent, onFailed }: { taskId: string; disa
       setText("")
       onSent()
     } catch (cause) {
-      onFailed(cause instanceof Error ? cause.message : "Could not send the message")
+      onFailed(errorMessage(cause, "Could not send the message"))
     } finally {
       setSending(false)
     }
@@ -114,6 +115,12 @@ function Composer({ taskId, disabled, onSent, onFailed }: { taskId: string; disa
   )
 }
 
+const PRIMARY_ACTIONS = [
+  { action: "start", label: "Start" },
+  { action: "approve", label: "Approve" },
+  { action: "retry", label: "Retry" },
+] as const
+
 /** Side panel of a task: state actions, request, phase runs with gate results and review findings, messages and the composer. */
 export function AgentPanel({ task, onChanged }: { task: FactoryTaskDetail; onChanged: () => void }) {
   const [busy, setBusy] = useState(false)
@@ -133,7 +140,7 @@ export function AgentPanel({ task, onChanged }: { task: FactoryTaskDetail; onCha
       await runFactoryTaskAction(task.id, action)
       onChanged()
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : `Could not ${action} the task`)
+      setError(errorMessage(cause, `Could not ${action} the task`))
     } finally {
       setBusy(false)
       setConfirmingCancel(false)
@@ -144,13 +151,11 @@ export function AgentPanel({ task, onChanged }: { task: FactoryTaskDetail; onCha
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-12 shrink-0 items-center gap-1 border-b border-divider/20 px-4">
         <span className="min-w-0 flex-1 truncate text-[11px] font-bold uppercase tracking-[0.2em] text-ink-muted">{STATE_LABELS[task.state]}</span>
-        {allowed.start && <button type="button" disabled={busy} onClick={() => void run("start")} className={PRIMARY_BUTTON_CLASS}>Start</button>}
-        {allowed.approve && <button type="button" disabled={busy} onClick={() => void run("approve")} className={PRIMARY_BUTTON_CLASS}>Approve</button>}
-        {allowed.retry && <button type="button" disabled={busy} onClick={() => void run("retry")} className={PRIMARY_BUTTON_CLASS}>Retry</button>}
+        {PRIMARY_ACTIONS.map(({ action, label }) => allowed[action] && <button key={action} type="button" disabled={busy} onClick={() => void run(action)} className={PRIMARY_BUTTON_CLASS}>{label}</button>)}
         {allowed.cancel && !confirmingCancel && <button type="button" disabled={busy} onClick={() => setConfirmingCancel(true)} className={QUIET_BUTTON_CLASS}>Cancel</button>}
       </div>
       {confirmingCancel && <div className="px-4 pt-2"><InlineConfirm question="Cancel this task?" busy={busy} onYes={() => void run("cancel")} onNo={() => setConfirmingCancel(false)} /></div>}
-      {(error || task.error) && <p role="alert" className="px-4 pt-2 text-[11px] text-danger">{error || task.error}</p>}
+      <ErrorText className="px-4 pt-2 text-[11px]">{error || task.error}</ErrorText>
       <div ref={scroller} className="min-h-0 flex-1 space-y-6 overflow-y-auto px-4 py-4 scrollbar-thin">
         <section aria-label="Request">
           <h3 className={SECTION_TITLE_CLASS}>Request</h3>

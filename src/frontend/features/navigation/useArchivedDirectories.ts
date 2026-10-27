@@ -1,18 +1,10 @@
 "use client"
 
-import { useMemo, useSyncExternalStore } from "react"
+import { useMemo } from "react"
+import { useStoredString } from "@/hooks/useStoredString"
+import { readStorage } from "@/lib/storage"
 
 const STORAGE_KEY = "archived_code_directories"
-const CHANGE_EVENT = "archived-code-directories"
-
-function subscribe(callback: () => void) {
-  window.addEventListener(CHANGE_EVENT, callback)
-  window.addEventListener("storage", callback)
-  return () => {
-    window.removeEventListener(CHANGE_EVENT, callback)
-    window.removeEventListener("storage", callback)
-  }
-}
 
 function parse(stored: string): string[] {
   try {
@@ -23,15 +15,14 @@ function parse(stored: string): string[] {
 
 /** Directories of the Code section archived on this device, shared across tabs. */
 export function useArchivedDirectories() {
-  const stored = useSyncExternalStore(subscribe, () => localStorage.getItem(STORAGE_KEY) ?? "[]", () => "[]")
-  const archived = useMemo(() => new Set(parse(stored)), [stored])
+  const [stored, store] = useStoredString(STORAGE_KEY)
+  const archived = useMemo(() => new Set(parse(stored ?? "[]")), [stored])
 
   const setArchived = (path: string, value: boolean) => {
-    const next = new Set(parse(localStorage.getItem(STORAGE_KEY) ?? "[]"))
+    const next = new Set(parse(readStorage(STORAGE_KEY) ?? "[]"))
     if (value) next.add(path)
     else next.delete(path)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify([...next]))
-    window.dispatchEvent(new Event(CHANGE_EVENT))
+    store(JSON.stringify([...next]))
   }
 
   return { archived, setArchived }

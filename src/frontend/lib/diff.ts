@@ -36,7 +36,7 @@ export function parsePatch(patch: string): PatchLine[] {
 }
 
 /** Patch indices per split row, full-width for headers and patch notes. */
-export type SplitRow = { full: number } | { old: number | null; new: number | null }
+type SplitRow = { full: number } | { old: number | null; new: number | null }
 
 /** Pair each run of removed lines with the added run after it, context lines appear on both sides. */
 export function toSplitRows(lines: PatchLine[]): SplitRow[] {

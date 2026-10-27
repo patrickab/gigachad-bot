@@ -2,25 +2,16 @@
 set -euo pipefail
 
 root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-if (($# > 1))
-then
+if ! [[ $# -eq 0 || ($# -eq 1 && "$1" == --tailscale) ]]; then
     printf 'usage: %s [--tailscale]\n' "${BASH_SOURCE[0]}" >&2
     exit 2
 fi
-if (($# == 1)) && [[ "$1" != "--tailscale" ]]
-then
-    printf 'usage: %s [--tailscale]\n' "${BASH_SOURCE[0]}" >&2
-    exit 2
-fi
+source "$root_dir/deploy/lib.sh"
 
-if [[ -f "$HOME/.secrets" ]]; then
-    source "$HOME/.secrets"
-fi
+load_secrets
 if [[ -z "${POSTGRES_PASSWORD_DEV:-}" ]]; then
     "$root_dir/scripts/setup-postgres.sh"
-    if [[ -f "$HOME/.secrets" ]]; then
-        source "$HOME/.secrets"
-    fi
+    load_secrets
     if [[ -z "${POSTGRES_PASSWORD_DEV:-}" ]]; then
         printf 'Startup cancelled: development database credentials are missing.\n' >&2
         exit 1
@@ -28,9 +19,8 @@ if [[ -z "${POSTGRES_PASSWORD_DEV:-}" ]]; then
 fi
 backend_pid=''
 frontend_pid=''
-omp_pid=''
-omp_web_pid=''
-factory_pid=''
+# Optional services, kept separate because only the backend and frontend end the run.
+service_pids=()
 cleaned_up=false
 
 cleanup() {
@@ -40,13 +30,13 @@ cleanup() {
     cleaned_up=true
 
     printf 'Shutting down...\n'
-    for pid in "$backend_pid" "$frontend_pid" "$omp_pid" "$omp_web_pid" "$factory_pid"; do
+    for pid in "$backend_pid" "$frontend_pid" "${service_pids[@]}"; do
         if [[ -n "$pid" ]]; then
             kill -TERM "$pid" 2>/dev/null || true
         fi
     done
     pkill -f "mineru.cli.fast_api" 2>/dev/null || true
-    for pid in "$backend_pid" "$frontend_pid" "$omp_pid" "$omp_web_pid" "$factory_pid"; do
+    for pid in "$backend_pid" "$frontend_pid" "${service_pids[@]}"; do
         if [[ -n "$pid" ]]; then
             wait "$pid" 2>/dev/null || true
         fi
@@ -65,21 +55,21 @@ uv --directory "$root_dir" sync --locked --extra sandbox-plot
 # and the backend hides the OMP model source when its gateway is unreachable.
 if [[ "${GIGACHAD_OMP:-1}" != "0" ]]; then
     "$root_dir/run-omp.sh" &
-    omp_pid=$!
+    service_pids+=($!)
 fi
 
 # Opt out with GIGACHAD_OMP_WEB=0. Serves the omp tabs' chat and settings
 # (omp-web), reusing an instance already on its port.
 if [[ "${GIGACHAD_OMP_WEB:-1}" != "0" ]]; then
     "$root_dir/run-omp-web.sh" &
-    omp_web_pid=$!
+    service_pids+=($!)
 fi
 
 # Opt out with GIGACHAD_FACTORY=0. Serves the Factory board's engine, reusing an
 # instance already on its port. It waits for the PostgreSQL run-backend.sh starts.
 if [[ "${GIGACHAD_FACTORY:-1}" != "0" ]]; then
     "$root_dir/run-factory.sh" &
-    factory_pid=$!
+    service_pids+=($!)
 fi
 
 "$root_dir/run-backend.sh" "$@" &

@@ -1,29 +1,9 @@
-import os
 from uuid import uuid4
 
 from fastapi import HTTPException
-from psycopg_pool import ConnectionPool
 import pytest
 
 from backend import identity
-from lib.db_schema import upgrade
-
-
-@pytest.fixture(scope="module")
-def postgres_pool():
-    url = os.environ.get("POSTGRES_TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("POSTGRES_TEST_DATABASE_URL is required for identity tests")
-    upgrade(url)
-    pool = ConnectionPool(url, min_size=1, max_size=4)
-    yield pool
-    pool.close()
-
-
-@pytest.fixture
-def clean_database(postgres_pool):
-    with postgres_pool.connection() as connection, connection.transaction():
-        connection.execute("TRUNCATE changes, assets, vault_roots, devices, documents, users CASCADE")
 
 
 @pytest.fixture

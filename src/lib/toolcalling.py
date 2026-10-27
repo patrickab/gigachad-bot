@@ -7,18 +7,16 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterat
 from dataclasses import dataclass, field
 import json
 import time
-from typing import Any, Generic, TypeVar
+from typing import Any
 from uuid import uuid4
 
 import litellm
 from llm_baseclient.client import LLMClient
 
+from lib.async_utils import aiter_in_thread
 from lib.llm_json import extract_json_from_llm
 
-__all__ = ["ToolCatalog", "ToolDefinition", "ToolOutcome", "stream_tool_turn"]
-
-ContextT = TypeVar("ContextT")
-_SENTINEL = object()
+__all__ = ["ToolCatalog", "ToolDefinition", "ToolOutcome", "sandbox_unavailable", "stream_tool_turn"]
 
 
 @dataclass
@@ -33,6 +31,11 @@ class ToolOutcome:
     sandbox: dict[str, Any] | None = None
 
 
+def sandbox_unavailable(tool: str) -> ToolOutcome:
+    """Report that a sandbox-backed tool has no sandbox service configured."""
+    return ToolOutcome(content=f"The {tool} tool is not configured.", summary="Unavailable", error="sandbox_service_unavailable")
+
+
 @dataclass(frozen=True)
 class ToolProgress:
     """A snapshot of a tool's stage timeline, safe to send over SSE."""
@@ -42,7 +45,7 @@ class ToolProgress:
 
 
 @dataclass(frozen=True)
-class ToolDefinition(Generic[ContextT]):
+class ToolDefinition[ContextT]:
     name: str
     description: str
     parameters: dict[str, Any]
@@ -80,7 +83,7 @@ def _argument_error(parameters: dict[str, Any], args: dict[str, Any]) -> tuple[s
     return None
 
 
-class ToolCatalog(Generic[ContextT]):
+class ToolCatalog[ContextT]:
     """Offer and execute a closed set of tool definitions."""
 
     def __init__(self, definitions: Iterable[ToolDefinition[ContextT]]) -> None:
@@ -151,7 +154,7 @@ class ToolCatalog(Generic[ContextT]):
         yield ToolProgress(id="", stages=tuple(dict(stage) for stage in stages))
         yield outcome
 
-    def _contains(self, name: str) -> bool:
+    def __contains__(self, name: object) -> bool:
         return name in self._by_name
 
 
@@ -182,7 +185,7 @@ def _tool_call_from_text(text: str, catalog: ToolCatalog[Any]) -> dict[str, Any]
         payload = payload["function"]
     # Models without native tool calling emit `{"name": ..., "arguments": ...}` or variants as text.
     name = payload.get("name") or payload.get("tool") or payload.get("tool_name")
-    if not isinstance(name, str) or not catalog._contains(name):
+    if not isinstance(name, str) or name not in catalog:
         return None
     args = payload.get("arguments")
     if args is None:
@@ -235,16 +238,12 @@ async def _run_round(
 ) -> AsyncIterator[tuple[str, Any]]:
     """Stream one completion, yielding `token` events and filling *out* with text, call and usage."""
     stream = await asyncio.to_thread(_start_stream, client, model, messages, specs, kwargs)
-    iterator = iter(stream)
     pending: dict[int, dict[str, Any]] = {}
     in_reasoning = False
     # Buffer leading text only when tools are offered, to detect text-mode calls before streaming.
     held: str | None = "" if specs else None
 
-    while True:
-        chunk = await asyncio.to_thread(next, iterator, _SENTINEL)
-        if chunk is _SENTINEL:
-            break
+    async for chunk in aiter_in_thread(stream):
         usage = getattr(chunk, "usage", None)
         if usage is not None:
             for key in out.usage:
@@ -298,7 +297,7 @@ async def _run_round(
             yield ("token", held)
 
 
-async def stream_tool_turn(
+async def stream_tool_turn[ContextT](
     *,
     client: LLMClient,
     model: str,

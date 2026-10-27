@@ -1,11 +1,14 @@
 """Rewrite stored references from one project slug to another."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
 from typing import Any, Iterable, Iterator
+
+from lib.clock import utc_now_iso
+from lib.json_io import dump_json
+from lib.storage_namespace import PROJECT_JSON
 
 SLUG_FIELDS = {"project_slug", "projectSlug", "slug"}
 HISTORY_FIELDS = {"history_file", "historyFile", "parent_file", "filename"}
@@ -63,11 +66,7 @@ class ProjectReferences:
         except ValueError:
             return content
         updated = self.value(data)
-        return content if updated == data else dump_json(updated)
-
-
-def dump_json(data: Any) -> bytes:
-    return (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode()
+        return content if updated == data else dump_json(updated).encode()
 
 
 def renamed_documents(
@@ -80,21 +79,21 @@ def renamed_documents(
     - A disk folder linked by the old slug's folder name stays linked through `linked_root`
     """
     meta_key = f"{refs.chat_prefix}/projects-meta.json"
-    project_key = f"{refs.chat_prefix}/{refs.old}/project.json"
+    project_key = f"{refs.chat_prefix}/{refs.old}/{PROJECT_JSON}"
     for key, content, is_dir in rows:
         target = refs.key(key)
         updated = content if is_dir else refs.content(key, content)
         if key == meta_key:
             meta = json.loads(updated)
             entry = next(project for project in meta["projects"] if project["slug"] == refs.new)
-            entry.update(name=name, updatedAt=datetime.now(timezone.utc).isoformat())
-            updated = dump_json(meta)
+            entry.update(name=name, updatedAt=utc_now_iso())
+            updated = dump_json(meta).encode()
         elif key == project_key:
             project = json.loads(updated)
             project["name"] = name
             linked_root = project.get("linked_root") or next((root for root in linked_roots if Path(root).name == refs.old), None)
             if linked_root:
                 project["linked_root"] = linked_root
-            updated = dump_json(project)
+            updated = dump_json(project).encode()
         if target != key or updated != content:
             yield key, target, updated

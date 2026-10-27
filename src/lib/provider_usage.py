@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 import threading
 import time
 from typing import Any
+
+from lib.omp_cli import run_omp
 
 _CLI_TIMEOUT_SECONDS = 30
 _CACHE_SECONDS = 5 * 60
@@ -27,13 +28,8 @@ class UsageUnavailable(RuntimeError):
 
 
 def _run_omp(*arguments: str) -> str:
-    executable = shutil.which("omp")
-    if executable is None:
-        raise UsageUnavailable("omp binary not found")
     try:
-        return subprocess.run(
-            [executable, *arguments], capture_output=True, text=True, timeout=_CLI_TIMEOUT_SECONDS, check=True
-        ).stdout
+        return run_omp(*arguments, timeout=_CLI_TIMEOUT_SECONDS)
     except (OSError, subprocess.SubprocessError) as exc:
         raise UsageUnavailable(str(exc)) from exc
 
@@ -106,6 +102,15 @@ def parse_usage(output: str, now_ms: float) -> dict[str, Any]:
     return {"generated_at": payload.get("generatedAt"), "reports": reports}
 
 
+def _aged_report(report: dict[str, Any], elapsed_minutes: int) -> dict[str, Any]:
+    """*report* with every window's reset countdown reduced by the minutes since it was read."""
+    windows = [
+        {**window, "resets_in_minutes": max(0, window["resets_in_minutes"] - elapsed_minutes)} if window["resets_in_minutes"] is not None else window
+        for window in report["windows"]
+    ]
+    return {**report, "windows": windows}
+
+
 def _with_dropped_providers(usage: dict[str, Any], now: float) -> dict[str, Any]:
     """Replace providers this fetch could not read with their last report, so a failed fetch does not hide them."""
     fresh = [report for report in usage["reports"] if not report.get("unavailable")]
@@ -119,9 +124,7 @@ def _with_dropped_providers(usage: dict[str, Any], now: float) -> dict[str, Any]
         if now - seen_at > _STALE_REPORT_SECONDS:
             del _last_reports[provider]
             continue
-        elapsed_minutes = round((now - seen_at) / 60)
-        windows = [{**window, "resets_in_minutes": max(0, window["resets_in_minutes"] - elapsed_minutes)} if window["resets_in_minutes"] is not None else window for window in report["windows"]]
-        reports.append({**report, "windows": windows})
+        reports.append(_aged_report(report, round((now - seen_at) / 60)))
     known = {report["provider"] for report in reports}
     reports += [report for report in usage["reports"] if report.get("unavailable") and report["provider"] not in known]
     return {**usage, "reports": reports}

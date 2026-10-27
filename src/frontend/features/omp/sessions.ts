@@ -1,8 +1,8 @@
 import type { OmpOverview, OmpSession, OmpView } from "@/lib/domain/types"
-import { baseName } from "@/lib/paths"
+import { PATH_COLLATOR, baseName } from "@/lib/paths"
 
 /** Sidebar and tab title of a session: its name, else its first prompt. */
-export function sessionTitle(session: OmpSession): string {
+export function sessionTitle(session: Pick<OmpSession, "name" | "first_message">): string {
   return session.name || session.first_message.trim() || "Untitled session"
 }
 
@@ -25,7 +25,7 @@ export function isInside(path: string, root: string): boolean {
 }
 
 /** Directory a session belongs to: its main repository for a worktree cwd, else the cwd. */
-export function sessionDirectory(session: OmpSession): string {
+function sessionDirectory(session: OmpSession): string {
   return session.project_root ?? session.cwd
 }
 
@@ -58,13 +58,11 @@ export function sessionForest(sessions: readonly OmpSession[]): SessionNode[] {
   return roots
 }
 
-export interface WorkspaceGroup {
+interface WorkspaceGroup {
   path: string
   label: string
   sessions: OmpSession[]
 }
-
-const PATH_COLLATOR = new Intl.Collator("en", { numeric: true, sensitivity: "base" })
 
 /**
  * Group sessions outside every `linkedPaths` entry by omp-web workspace.

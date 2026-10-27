@@ -1,8 +1,8 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useEffectEvent, useRef, useState } from "react"
 import "@xterm/xterm/css/xterm.css"
-import { cn } from "@/lib/utils"
+import { cn, errorMessage } from "@/lib/utils"
 import { neovimSessionUrl } from "@/lib/backend/urls"
 
 const FONT_SIZE = 13
@@ -52,18 +52,13 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
   const [terminal, setTerminal] = useState<NeovimTerminal | null>(null)
   const [status, setStatus] = useState<NeovimStatus>({ state: "running" })
   const [generation, setGeneration] = useState(0)
-  const documentRef = useRef(document)
-  const saveRef = useRef(save)
-  const onQuitRef = useRef(onQuit)
-  useEffect(() => {
-    documentRef.current = document
-    saveRef.current = save
-    onQuitRef.current = onQuit
-  })
+  const readDocument = useEffectEvent(() => document)
+  const saveText = useEffectEvent(save)
+  const quit = useEffectEvent(onQuit)
 
   const documentKey = document?.key ?? null
   useEffect(() => {
-    const opened = documentRef.current
+    const opened = readDocument()
     if (documentKey === null || !opened) return
     let disposed = false
     let dispose = () => {}
@@ -127,14 +122,14 @@ export function useNeovimTerminal(document: NeovimDocument | null, save: (text: 
         if (message.type === "yank") { void navigator.clipboard.writeText(message.content).catch(() => {}); return }
         if (message.type !== "save") return
         try {
-          send(JSON.stringify({ type: "saved", id: message.id, content: await saveRef.current(message.content) }))
+          send(JSON.stringify({ type: "saved", id: message.id, content: await saveText(message.content) }))
         } catch (error) {
-          send(JSON.stringify({ type: "saved", id: message.id, error: error instanceof Error ? error.message : "Save failed" }))
+          send(JSON.stringify({ type: "saved", id: message.id, error: errorMessage(error, "Save failed") }))
         }
       }
       socket.onclose = (event) => {
         if (disposed) return
-        if (exitCode === 0) { onQuitRef.current(); return }
+        if (exitCode === 0) { quit(); return }
         setStatus({ state: "stopped", message: stoppedMessage(exitCode, event.code) })
       }
       xterm.onData((data) => send(encoder.encode(data)))

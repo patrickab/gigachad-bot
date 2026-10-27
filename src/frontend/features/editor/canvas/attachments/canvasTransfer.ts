@@ -1,3 +1,4 @@
+import type { Point } from "@/lib/domain/edgeRouting"
 import type { StrokeData } from "@/lib/drawing"
 
 // Every mounted canvas registers its drawing surface here, so a selection dragged out of
@@ -8,7 +9,7 @@ import type { StrokeData } from "@/lib/drawing"
 // the pen alone; a canvas with a different zoom is the opposite case).
 
 /** A canvas surface as the transfer sees it: where it sits on screen, and how it maps its own units onto that. `rect` only needs left/top, so tests can pass a bare object. */
-export interface CanvasView { rect: { left: number; top: number }; scale: number; offset: { x: number; y: number } }
+export interface CanvasView { rect: { left: number; top: number }; scale: number; offset: Point }
 export type StrokeDrop = (strokes: StrokeData[], from: CanvasView) => void
 const canvasDropTargets = new Map<HTMLElement, StrokeDrop>()
 

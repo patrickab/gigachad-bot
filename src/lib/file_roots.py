@@ -26,7 +26,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import re
-from typing import Iterable, Protocol
+from typing import Iterable, Iterator, Protocol
 from urllib.parse import quote as _url_quote
 from uuid import UUID
 
@@ -34,12 +34,13 @@ from pathspec import GitIgnoreSpec
 from psycopg_pool import ConnectionPool
 
 from lib import git_worktree
+from lib.changes import record_change
 
 # Directories that hold app internals (e.g. Obsidian's) or noise rather than files, skipped even without a .gitignore.
 _SKIP_DIRS = frozenset({".obsidian", ".trash", ".git", "node_modules"})
 # Each layer is one directory's `.gitignore`: (directory path, compiled patterns), outermost first.
 _IgnoreLayers = tuple[tuple[str, GitIgnoreSpec], ...]
-_IMG_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp"})
+IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp"})
 # Credential stores host access never opens outside the roots.
 _SECRET_DIRECTORIES = frozenset({".ssh", ".gnupg", ".secrets"})
 _OMP_SECRET_NAMES = ("agent.db", "models.yml")
@@ -136,13 +137,7 @@ class PostgresFileRootRepository:
         return [path for (path,) in rows]
 
     def _change(self, connection, path: str, operation: str) -> None:
-        connection.execute(
-            """
-            INSERT INTO changes (user_id, resource_kind, resource_key, operation, device_id)
-            VALUES (%s, 'vault_root', %s, %s, %s)
-            """,
-            (self._user_id, path, operation, self._device_id),
-        )
+        record_change(connection, user_id=self._user_id, device_id=self._device_id, kind="vault_root", key=path, operation=operation)
 
     def save(self, roots: list[str]) -> None:
         # ponytail: whole-registry replace, mirroring the JSON file it replaces,
@@ -241,18 +236,6 @@ class FileRoots:
         holding = [root for root in self._roots if target.is_relative_to(root)]
         return holding or [worktree for root in self._roots for worktree in self.worktrees_of(root) if target.is_relative_to(worktree)]
 
-    def _linked_worktree(self, target: Path) -> list[Path]:
-        """The git linked worktree holding *target* (a `.git` file pointing at the clone), for host-access logins only."""
-        if not self._host_access:
-            return []
-        for directory in (target, *target.parents):
-            marker = directory / ".git"
-            if marker.is_file():
-                return [directory] if _is_gitdir_pointer(marker) else []
-            if marker.exists():
-                return []
-        return []
-
     def _root_for(self, path: str) -> Path:
         """Resolve *path*, rejecting anything outside all roots and their worktrees, unless host access reaches it."""
         target = Path(path).expanduser().resolve()
@@ -270,7 +253,14 @@ class FileRoots:
     def root_of(self, path: str) -> Path:
         """Innermost registered root or clone worktree, else (host access) any linked git worktree holding *path*, else ValueError."""
         target = Path(path).expanduser().resolve()
-        holding = self._accessible_roots(target) or self._linked_worktree(target)
+        holding = self._accessible_roots(target)
+        if not holding and self._host_access:
+            # A linked worktree is a directory whose `.git` file points at the clone.
+            for directory in (target, *target.parents):
+                marker = directory / ".git"
+                if marker.exists():
+                    holding = [directory] if marker.is_file() and _is_gitdir_pointer(marker) else []
+                    break
         if not holding:
             raise ValueError(f"Path outside file roots: {path}")
         return max(holding, key=lambda root: len(root.parts))
@@ -283,22 +273,19 @@ class FileRoots:
         Kept for the picker/attach flow, which wants a flat, searchable list
         rather than the nested tree.
         """
-        files: list[dict[str, str]] = []
-        for root in self._roots:
-            if root.is_dir():
-                self._collect_files(root, files)
+        files = [{"path": entry.path, "name": entry.name} for root in self._roots if root.is_dir() for entry in self._walk_files(root)]
         files.sort(key=lambda f: f["path"].lower())
         return files
 
     @staticmethod
-    def _collect_files(base: Path | str, out: list[dict[str, str]], inherited: _IgnoreLayers = ()) -> None:
-        """Append listed files below *base*, skipping ignored entries and not following directory symlinks."""
+    def _walk_files(base: Path | str, inherited: _IgnoreLayers = ()) -> Iterator[os.DirEntry]:
+        """Yield listed files below *base*, skipping ignored entries and not following directory symlinks."""
         entries, layers = _visible_entries(base, inherited)
         for entry, is_dir in entries:
             if is_dir:
-                FileRoots._collect_files(entry.path, out, layers)
+                yield from FileRoots._walk_files(entry.path, layers)
             elif entry.is_file():
-                out.append({"path": entry.path, "name": entry.name})
+                yield entry
 
     def files_under(self, paths: list[str]) -> list[Path]:
         """Files among *paths*, expanding folders recursively. Deduplicated, order kept."""
@@ -306,9 +293,7 @@ class FileRoots:
         for path in paths:
             target = self._root_for(path)
             if target.is_dir():
-                entries: list[dict[str, str]] = []
-                self._collect_files(target, entries)
-                found.update(dict.fromkeys(Path(entry["path"]) for entry in entries))
+                found.update(dict.fromkeys(Path(entry.path) for entry in self._walk_files(target)))
             elif target.is_file():
                 found[target] = None
         return list(found)
@@ -322,11 +307,9 @@ class FileRoots:
             root = self.root_of(path)
         except ValueError:
             return None
-        entries: list[dict[str, str]] = []
-        if root.is_dir():
-            self._collect_files(root, entries)
-        matches = {entry["path"] for entry in entries if entry["name"] == Path(path).name}
-        return Path(matches.pop()) if len(matches) == 1 else None
+        name = Path(path).name
+        matches = {Path(entry.path) for entry in self._walk_files(root) if entry.name == name} if root.is_dir() else set()
+        return matches.pop() if len(matches) == 1 else None
 
     def resolve_reference(self, path: str) -> Path:
         """`resolve` *path*, following the file to its new place when it moved. FileNotFoundError when it is gone or ambiguous."""
@@ -410,15 +393,12 @@ class FileRoots:
         """Rewrite ``![[embed]]``, ``[[link]]``, and relative images to standard markdown."""
         source_dir = Path(source_path).parent
 
-        def _resolve(name: str) -> Path | None:
-            return self.find_in_roots(name, source_dir)
-
         def _repl_embed(m: re.Match[str]) -> str:
             name = m.group(1).split("|")[0].strip()
-            found = _resolve(name)
+            found = self.find_in_roots(name, source_dir)
             if not found:
                 return m.group(0)
-            if found.suffix.lower() in _IMG_SUFFIXES:
+            if found.suffix.lower() in IMAGE_SUFFIXES:
                 return f"![{name}](/api/fileviewer/raw?path={_url_quote(str(found))})"
             return f"[{name}](#file:{_url_quote(str(found))})"
 
@@ -429,7 +409,7 @@ class FileRoots:
             parts = m.group(1).split("|", 1)
             name = parts[0].strip()
             display = parts[1].strip() if len(parts) > 1 else name
-            found = _resolve(name)
+            found = self.find_in_roots(name, source_dir)
             if found:
                 return f"[{display}](#file:{_url_quote(str(found))})"
             return f"[{display}](#)"

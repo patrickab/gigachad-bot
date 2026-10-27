@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type PointerEvent as ReactPointerEvent, type RefObject, type SetStateAction } from "react"
-import { NODE_MIN_HEIGHT, type GraphFlowEdge, type GraphFlowInstance, type GraphFlowNode } from "@/features/editor/architecture/architectureFlow"
+import { NODE_MIN_HEIGHT, type GraphFlowEdge, type GraphFlowInstance } from "@/features/editor/architecture/architectureFlow"
 import { NODE_MIN_WIDTH } from "@/features/editor/architecture/architectureLabelWidth"
-import { pointInPolygon } from "@/lib/drawing"
+import { trackPointer } from "@/features/editor/architecture/trackPointer"
+import { useEventListener } from "@/hooks/useEventListener"
+import { pointInPolygon, pointsBounds } from "@/lib/drawing"
 import { centre, type Point, type Rect, type RouteCard } from "@/lib/domain/edgeRouting"
 
 // Any closed loop drawn on the canvas becomes a node in its bounding box; an
@@ -10,6 +12,8 @@ import { centre, type Point, type Rect, type RouteCard } from "@/lib/domain/edge
 const MIN_DRAW_SIZE = 30
 const MAX_OPEN_GAP_RATIO = 0.3
 
+const boundsOf = (points: readonly Point[]) => pointsBounds(points.map(({ x, y }) => [x, y]))
+
 /**
  * The box a freehand loop encloses, in the points' own coordinate space (the
  * surface passes flow coordinates). Null for fewer than three points, an open
@@ -17,13 +21,11 @@ const MAX_OPEN_GAP_RATIO = 0.3
  * under MIN_DRAW_SIZE on both axes.
  */
 export function drawnBox(points: Point[]): Rect | null {
-  if (points.length < 3) return null
-  const xs = points.map((p) => p.x)
-  const ys = points.map((p) => p.y)
-  const minX = Math.min(...xs), maxX = Math.max(...xs)
-  const minY = Math.min(...ys), maxY = Math.max(...ys)
-  const width = maxX - minX
-  const height = maxY - minY
+  const bounds = points.length < 3 ? null : boundsOf(points)
+  if (!bounds) return null
+  const { minX, minY } = bounds
+  const width = bounds.maxX - minX
+  const height = bounds.maxY - minY
   if (Math.max(width, height) < MIN_DRAW_SIZE) return null
 
   let pathLength = 0
@@ -37,9 +39,8 @@ export function drawnBox(points: Point[]): Rect | null {
 // independent of canvas zoom.
 const DRAW_MIN_SCREEN_SIZE = 30
 const isTap = (points: readonly Point[]) => {
-  const xs = points.map((p) => p.x)
-  const ys = points.map((p) => p.y)
-  return points.length === 0 || Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) < DRAW_MIN_SCREEN_SIZE
+  const bounds = boundsOf(points)
+  return !bounds || Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) < DRAW_MIN_SCREEN_SIZE
 }
 
 /**
@@ -48,22 +49,17 @@ const isTap = (points: readonly Point[]) => {
  * nodes whose centres it encloses. Points are sampled in screen pixels and
  * converted to flow space when the stroke ends.
  */
-export function useSurfaceDrawing({ flow, viewportRef, readOnly, cards, setNodes, setEdges, addDraft }: {
+export function useSurfaceDrawing({ flow, viewportRef, readOnly, cards, selectNodes, setEdges, addDraft }: {
   flow: GraphFlowInstance | null
   viewportRef: RefObject<HTMLDivElement | null>
   readOnly: boolean
   cards: readonly RouteCard[]
-  setNodes: Dispatch<SetStateAction<GraphFlowNode[]>>
+  selectNodes: (ids: ReadonlySet<string>) => void
   setEdges: Dispatch<SetStateAction<GraphFlowEdge[]>>
   addDraft: (box: Rect) => void
 }) {
   const [lasso, setLasso] = useState(false)
-  useEffect(() => {
-    if (!lasso) return
-    const onKeyDown = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") setLasso(false) }
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
-  }, [lasso])
+  useEventListener("window", "keydown", (event) => { if (event.key === "Escape") setLasso(false) }, { active: lasso })
   // Points accumulate in a ref so every pointer sample doesn't re-render the
   // whole surface; the preview only syncs to state once per animation frame.
   const drawPointsRef = useRef<Point[]>([])
@@ -103,7 +99,7 @@ export function useSurfaceDrawing({ flow, viewportRef, readOnly, cards, setNodes
         const middle = centre(card)
         return pointInPolygon(middle.x, middle.y, polygon)
       }).map((card) => card.id))
-      setNodes((current) => current.map((node) => ({ ...node, selected: picked.has(node.id) })))
+      selectNodes(picked)
       setEdges((current) => current.map((edge) => ({ ...edge, selected: picked.has(edge.source) && picked.has(edge.target) })))
       // Leave the tool once something is caught: the overlay would otherwise
       // swallow the drag that moves the selection.
@@ -114,7 +110,7 @@ export function useSurfaceDrawing({ flow, viewportRef, readOnly, cards, setNodes
     if (tap) return
     const box = drawnBox(points.map((p) => flow.screenToFlowPosition(p)))
     if (box) addDraft({ x: box.x, y: box.y, width: Math.max(NODE_MIN_WIDTH, Math.round(box.width)), height: Math.max(NODE_MIN_HEIGHT, Math.round(box.height)) })
-  }, [flow, addDraft, lasso, cards, setNodes, setEdges])
+  }, [flow, addDraft, lasso, cards, selectNodes, setEdges])
   // Pen draws, on the bare canvas and on any card that is not activated, which
   // is just more paper; touch and mouse pan. Window listeners, not pointer
   // capture: the pane still receives its click.
@@ -127,13 +123,8 @@ export function useSurfaceDrawing({ flow, viewportRef, readOnly, cards, setNodes
     // Stops the pen's compatibility mousedown, which would also start React Flow's pan.
     event.preventDefault()
     startDraw(event)
-    const cleanup = () => {
-      window.removeEventListener("pointermove", onDrawPointerMove)
-      window.removeEventListener("pointerup", up)
-      window.removeEventListener("pointercancel", cancel)
-    }
-    const up = () => {
-      cleanup()
+    trackPointer(onDrawPointerMove, (cancelled) => {
+      if (cancelled) { finishDraw(false); return }
       const stroke = !isTap(drawPointsRef.current)
       finishDraw(true)
       if (!onCard || !stroke) return
@@ -141,11 +132,7 @@ export function useSurfaceDrawing({ flow, viewportRef, readOnly, cards, setNodes
       const swallow = (click: MouseEvent) => click.stopPropagation()
       window.addEventListener("click", swallow, { capture: true, once: true })
       setTimeout(() => window.removeEventListener("click", swallow, { capture: true }))
-    }
-    const cancel = () => { cleanup(); finishDraw(false) }
-    window.addEventListener("pointermove", onDrawPointerMove)
-    window.addEventListener("pointerup", up)
-    window.addEventListener("pointercancel", cancel)
+    })
   }, [readOnly, lasso, startDraw, onDrawPointerMove, finishDraw])
   // The lasso draws on an overlay that captures the pointer.
   const lassoOverlay = {

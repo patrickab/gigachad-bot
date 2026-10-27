@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react"
 import { createPortal } from "react-dom"
-import { ArrowUp, Square } from "lucide-react"
 import { LaTeXMarkdown } from "@/components/content/LaTeXMarkdown"
-import { createFlush, runStream, useAssistantChat } from "@/components/content/AssistantChat"
+import { SendStopButton, useAssistantChat, useOneShotStream } from "@/components/content/AssistantChat"
 import { ChatSidebar } from "@/components/ui/ChatSidebar"
 import { SelectionBubble } from "@/components/ui/SelectionBubble"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
+import { useEventListener } from "@/hooks/useEventListener"
 import { attachReference } from "@/lib/backend/api"
+import { errorMessage } from "@/lib/utils"
 
 /** Poll interval while MinerU extracts the PDF. */
 const EXTRACTION_POLL_MS = 5000
@@ -58,7 +59,7 @@ function usePdfMarkdown(path: string): PdfMarkdown {
         setState({ status: "extracting" })
         timer = setTimeout(load, EXTRACTION_POLL_MS)
       } catch (error) {
-        if (!cancelled) setState({ status: "error", message: (error as Error).message })
+        if (!cancelled) setState({ status: "error", message: errorMessage(error, "Could not load the document text.") })
       }
     }
     void load()
@@ -218,45 +219,22 @@ function SelectionQuestionCard({ selection, pdfText, model, onClose }: {
 }) {
   const cardRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-  const abortRef = useRef<(() => void) | null>(null)
   const [question, setQuestion] = useState("")
-  const [answer, setAnswer] = useState("")
-  const [isStreaming, setIsStreaming] = useState(false)
+  const { text: answer, isStreaming, ask: askModel, abort, stop } = useOneShotStream(model, { appendErrors: true })
   const ready = pdfText.status === "ready"
 
-  const close = useCallback(() => { abortRef.current?.(); onClose() }, [onClose])
+  const close = useCallback(() => { abort(); onClose() }, [abort, onClose])
   useEscapeLayer(close)
   useLayoutEffect(() => { inputRef.current?.focus() }, [])
-  useEffect(() => () => abortRef.current?.(), [])
 
   // Any press outside the card closes it, including the press that starts the next selection
-  useEffect(() => {
-    const onPointerDown = (event: PointerEvent) => {
-      if (!cardRef.current?.contains(event.target as Node)) close()
-    }
-    window.addEventListener("pointerdown", onPointerDown, true)
-    return () => window.removeEventListener("pointerdown", onPointerDown, true)
-  }, [close])
+  useEventListener("window", "pointerdown", (event) => {
+    if (!cardRef.current?.contains(event.target as Node)) close()
+  }, { capture: true })
 
   const ask = async () => {
-    const trimmed = question.trim()
-    if (!trimmed || isStreaming || pdfText.status !== "ready") return
-    setIsStreaming(true)
-    setAnswer("")
-    const buffer = { text: "" }
-    const { schedule, final: flush } = createFlush(() => setAnswer(buffer.text))
-    try {
-      await runStream(abortRef, {
-        model, chat_id: crypto.randomUUID(), user_msg: trimmed,
-        system_prompt: SYS_SELECTION(pdfText.markdown, selection.text, selection.page), messages: [], img_paths: [],
-      }, (token) => { buffer.text += token; schedule() })
-    } catch (error) {
-      buffer.text += `\n\n**Error:** ${(error as Error).message}`
-    } finally {
-      flush()
-      setIsStreaming(false)
-      abortRef.current = null
-    }
+    if (pdfText.status !== "ready") return
+    await askModel(question, SYS_SELECTION(pdfText.markdown, selection.text, selection.page))
   }
 
   // Focus moved into the card, so copy still copies the page selection while the question is empty
@@ -292,15 +270,15 @@ function SelectionQuestionCard({ selection, pdfText, model, onClose }: {
           onKeyDown={onKeyDown}
           className="flex-1 bg-transparent text-xs text-ink outline-none disabled:opacity-50"
         />
-        {isStreaming ? (
-          <button aria-label="Stop assistant" onClick={() => { abortRef.current?.(); setIsStreaming(false) }} className="shrink-0 p-1 text-ink-subtle hover:text-ink">
-            <Square className="h-3 w-3" />
-          </button>
-        ) : (
-          <button aria-label="Ask" onClick={() => void ask()} disabled={!question.trim() || !ready} className="shrink-0 p-1 text-ink-subtle hover:text-ink disabled:opacity-30">
-            <ArrowUp className="h-3 w-3" />
-          </button>
-        )}
+        <SendStopButton
+          isStreaming={isStreaming}
+          onStop={stop}
+          onSend={() => void ask()}
+          disabled={!question.trim() || !ready}
+          sendLabel="Ask"
+          className="shrink-0 p-1 text-ink-subtle hover:text-ink"
+          iconClassName="h-3 w-3"
+        />
       </div>
     </div>
   )

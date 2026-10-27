@@ -22,6 +22,7 @@ PDFS = "PDFs"
 MINERU = "Mineru"
 SANDBOX = "sandbox"
 PDF_ANNOTATION = "pdf-annotation"
+PROJECT_JSON = "project.json"
 
 def _part(value: str, label: str) -> str:
     """Validate *value* as a single key segment (no separators)."""
@@ -38,12 +39,13 @@ def project_document(slug: str, name: str) -> str:
     return f"{PROJECT}/{_part(slug, 'project slug')}/document/{_part(name, 'document name')}"
 
 
-def project_memory(slug: str, name: str) -> str:
-    return f"{MEMORY}/project/{_part(slug, 'project slug')}/{_part(name, 'memory name')}"
-
-
 def project_document_prefix(slug: str) -> str:
     return f"{PROJECT}/{_part(slug, 'project slug')}/document"
+
+
+def project_json(slug: str) -> str:
+    """Per-project state (name, kanban, tabs, files, linked root) in the chat namespace."""
+    return f"{CHAT}/{_part(slug, 'project slug')}/{PROJECT_JSON}"
 
 
 def architecture_prefix(slug: str) -> str:

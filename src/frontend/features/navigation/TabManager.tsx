@@ -2,14 +2,15 @@
 
 import { createContext, useCallback, useContext, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { ArrowRightLeft, Check, ChevronDown, Plus, X } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { cn, isEditableTarget } from "@/lib/utils"
 import { DEFAULT_TAB_CONFIG, type TabConfig } from "@/contexts/SettingsContext"
 import { TabContext, surfaceOf, useTab, type Tab, type TabActions, type TabContextValue, type WorkspaceItem } from "@/contexts/TabContext"
-import { baseName } from "@/lib/paths"
+import { PATH_COLLATOR, baseName } from "@/lib/paths"
 import { parseHistoryFile } from "@/lib/domain/historyFile"
 import { useProject } from "@/contexts/ProjectContext"
 import { useClickOutside } from "@/hooks/useClickOutside"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
+import { useEventListener } from "@/hooks/useEventListener"
 
 interface TabManagerProps {
   /** Rendered once per tab inside that tab's `TabContext`. */
@@ -136,7 +137,7 @@ function tabLocation(tab: Tab) {
   return { category: "chats", file: tab.name ?? tab.title ?? (tab.historyFile ? baseName(tab.historyFile) : "New chat") }
 }
 
-const TAB_PATH_COLLATOR = new Intl.Collator("en", { numeric: true, sensitivity: "base" })
+const PILL_BUTTON_CLASS = "flex h-8.5 w-8.5 items-center justify-center rounded-full bg-paper text-ink-muted transition-colors hover:bg-surface-elevated hover:text-ink focus:bg-surface-elevated focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-subtle"
 
 /** Reveal centered workspace navigation on hover, keyboard focus, or while its menu is open. */
 export function TabSwitcher() {
@@ -176,12 +177,12 @@ export function TabSwitcher() {
   const search = query.trim().toLowerCase()
   const orderedTabs = strip.tabs.map((item) => ({ item, project: projectName(item.projectSlug), ...tabLocation(item) }))
     .sort((left, right) => Number(left.project === "general") - Number(right.project === "general")
-      || TAB_PATH_COLLATOR.compare(left.project, right.project)
-      || TAB_PATH_COLLATOR.compare(left.category, right.category)
-      || TAB_PATH_COLLATOR.compare(left.file, right.file)
+      || PATH_COLLATOR.compare(left.project, right.project)
+      || PATH_COLLATOR.compare(left.category, right.category)
+      || PATH_COLLATOR.compare(left.file, right.file)
       || left.item.id.localeCompare(right.item.id))
   const visibleTabs = orderedTabs.filter((entry) => `${entry.project} ${entry.category} ${entry.file}`.toLowerCase().includes(search))
-  const nextTab = orderedTabs[(orderedTabs.findIndex(({ item }) => item.id === strip.activeTabId) + 1) % orderedTabs.length].item
+  const following = orderedTabs[(orderedTabs.findIndex(({ item }) => item.id === strip.activeTabId) + 1) % orderedTabs.length].item
 
   return <div ref={rootRef} data-tab-switcher data-open={open} className="pointer-events-auto flex w-[28rem] max-w-full flex-col items-center opacity-0 transition-opacity duration-160 [&:hover]:opacity-100 focus-within:opacity-100 data-[open=true]:opacity-100 motion-reduce:transition-none"
     onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) close() }}>
@@ -210,16 +211,16 @@ export function TabSwitcher() {
       <button type="button" data-new-chat aria-label="New chat" onClick={() => {
         close()
         strip.add()
-      }} className="absolute left-full ml-1 flex h-8.5 w-8.5 items-center justify-center rounded-full bg-paper text-ink-muted transition-colors hover:bg-surface-elevated hover:text-ink focus:bg-surface-elevated focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-subtle">
+      }} className={`${PILL_BUTTON_CLASS} absolute left-full ml-1`}>
         <Plus aria-hidden="true" className="h-3 w-3" />
       </button>
     </div>
       <button type="button" aria-label="Next tab" disabled={strip.tabs.length < 2}
         onClick={() => {
           close()
-          strip.select(nextTab.id)
+          strip.select(following.id)
         }}
-        className="flex h-8.5 w-8.5 shrink-0 items-center justify-center rounded-full bg-paper text-ink-muted transition-colors hover:bg-surface-elevated hover:text-ink focus:bg-surface-elevated focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-subtle disabled:cursor-default disabled:text-ink-faint">
+        className={`${PILL_BUTTON_CLASS} shrink-0 disabled:cursor-default disabled:text-ink-faint`}>
         <ArrowRightLeft aria-hidden="true" className="h-3 w-3" />
       </button>
     <span id={activityDescriptionId} className="sr-only">{strip.labelOf(tab)}</span>
@@ -364,55 +365,30 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
     })
   }, [activeTab, setActiveTab])
 
-  const closeActiveTab = useCallback(() => {
-    closeTab(activeTab)
-  }, [activeTab, closeTab])
-
-  const switchToNextTab = useCallback(() => {
+  const cycleTab = useCallback((delta: 1 | -1) => {
     setActiveTab((current) => {
       const idx = tabs.findIndex((t) => t.id === current)
-      const next = (idx + 1) % tabs.length
-      return tabs[next].id
+      return tabs[(idx + delta + tabs.length) % tabs.length].id
     })
   }, [tabs, setActiveTab])
 
-  const switchToPrevTab = useCallback(() => {
-    setActiveTab((current) => {
-      const idx = tabs.findIndex((t) => t.id === current)
-      const prev = (idx - 1 + tabs.length) % tabs.length
-      return tabs[prev].id
-    })
-  }, [tabs, setActiveTab])
-
-  useEffect(() => {
-    function handler(e: KeyboardEvent) {
-      if (e.altKey && e.key === "t") {
+  useEventListener("document", "keydown", (e) => {
+    if (e.altKey && e.key === "t") {
+      e.preventDefault()
+      addTab()
+    }
+    if (e.altKey && e.key === "w") {
+      e.preventDefault()
+      closeTab(activeTab)
+    }
+    if (e.key === "Tab" && !e.altKey && !e.ctrlKey && !e.metaKey) {
+      const target = e.target as HTMLElement
+      if (!isEditableTarget(target) && !target.closest("[data-file-tree], [data-tab-switcher]")) {
         e.preventDefault()
-        addTab()
-      }
-      if (e.altKey && e.key === "w") {
-        e.preventDefault()
-        closeActiveTab()
-      }
-      if (e.key === "Tab" && !e.altKey && !e.ctrlKey && !e.metaKey) {
-        const target = e.target as HTMLElement
-        const isEditable =
-          target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.isContentEditable
-        if (!isEditable && !target.closest("[data-file-tree], [data-tab-switcher]")) {
-          e.preventDefault()
-          if (e.shiftKey) {
-            switchToPrevTab()
-          } else {
-            switchToNextTab()
-          }
-        }
+        cycleTab(e.shiftKey ? -1 : 1)
       }
     }
-    document.addEventListener("keydown", handler)
-    return () => document.removeEventListener("keydown", handler)
-  }, [addTab, closeActiveTab, switchToNextTab, switchToPrevTab])
+  })
 
 
   const updateModeLabel = useCallback((id: string, label: string, loading = false) => {

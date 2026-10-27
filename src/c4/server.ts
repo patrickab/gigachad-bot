@@ -7,6 +7,8 @@ import { Workspace, type Sources } from './workspace.ts'
 
 const MAX_BODY_BYTES = 8 * 1024 * 1024
 
+const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
+
 async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = []
   let size = 0
@@ -16,13 +18,13 @@ async function readJson(request: IncomingMessage): Promise<Record<string, unknow
     chunks.push(chunk as Buffer)
   }
   const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new OperationError('Expected a JSON object')
-  return parsed as Record<string, unknown>
+  if (!isRecord(parsed)) throw new OperationError('Expected a JSON object')
+  return parsed
 }
 
 function sourcesOf(body: Record<string, unknown>): Sources {
   const sources = body.sources
-  if (!sources || typeof sources !== 'object' || Array.isArray(sources)) throw new OperationError('sources must be an object')
+  if (!isRecord(sources)) throw new OperationError('sources must be an object')
   for (const [path, text] of Object.entries(sources)) {
     if (typeof text !== 'string' || !path.endsWith('.c4') || path.startsWith('/') || path.split('/').includes('..')) {
       throw new OperationError(`Invalid source file: ${path}`)

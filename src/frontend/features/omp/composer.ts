@@ -1,4 +1,5 @@
 import type { Attachment, ModelsResponse, OmpView } from "@/lib/domain/types"
+import { blobToDataUrl } from "@/lib/utils"
 import { OMP_LITELLM_ID } from "@/lib/models"
 import { buildHiddenContent, composeUserMessage, isImageAttachment } from "@/features/chat/attachments"
 import type { ComposerImage, FrameMessage, ModelRef } from "@gigachad/chat-ui/protocol"
@@ -12,11 +13,6 @@ const OMP_MODEL_SOURCE = "omp"
 export function isComposerOf(view: OmpView, sessionId: string | null): boolean {
   if (view.kind === "settings") return false
   return sessionId === (view.kind === "session" ? view.sessionId : null)
-}
-
-/** The frame's composer state when it belongs to `view`, else null (frame elsewhere, Settings, still loading). */
-export function composerFor(view: OmpView, composer: ComposerState | null): ComposerState | null {
-  return composer && isComposerOf(view, composer.sessionId) ? composer : null
 }
 
 /** Draft after a restore, mirror of omp-web's `mergeRecoveredText` (`lib/draft-store.ts`): later restores replace the block an earlier one put in front. */
@@ -63,12 +59,7 @@ export function ompModelOf(selectorId: string): ModelRef | null {
 
 async function base64Image(attachment: Attachment): Promise<ComposerImage> {
   const blob = await (await fetch(attachment.url)).blob()
-  const dataUrl = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result as string)
-    reader.onerror = () => reject(new Error(`Could not read ${attachment.name}`))
-    reader.readAsDataURL(blob)
-  })
+  const dataUrl = await blobToDataUrl(blob).catch(() => { throw new Error(`Could not read ${attachment.name}`) })
   return { data: dataUrl.slice(dataUrl.indexOf(",") + 1), mimeType: blob.type || attachment.mime }
 }
 
@@ -88,5 +79,5 @@ export async function ompPrompt(
   const documents = active.filter((attachment) => !isImageAttachment(attachment))
   if (documents.length === 0) return { text, images }
   const hiddenContent = buildHiddenContent(await parse(documents))
-  return { text: composeUserMessage(text, hiddenContent || undefined), images }
+  return { text: composeUserMessage(text, hiddenContent), images }
 }

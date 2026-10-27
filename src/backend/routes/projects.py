@@ -3,8 +3,9 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from backend.routes.deps import get_asset_store, get_project_store, get_sandbox_service
+from backend.routes.deps import get_asset_store, get_project_store, get_sandbox_service, http_errors
 from backend.routes.histories import cleanup_after_delete
+from backend.routes.schemas import ChatSnapshot
 from lib.asset_store import AssetStore
 from lib.data_store import StorageConflictError
 from lib.project_store import ProjectStore
@@ -12,18 +13,7 @@ from lib.sandbox_service import SandboxService
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
-
-class KanbanCardModel(BaseModel):
-    id: str
-    title: str
-    description: str = ""
-    state: str = "backlog"
-
-
-class ProjectTabModel(BaseModel):
-    filename: str
-    name: str | None = None
-    title: str | None = None
+_PROJECT_NOT_FOUND = (FileNotFoundError, 404, "Project not found")
 
 
 class CreateProjectRequest(BaseModel):
@@ -45,14 +35,7 @@ class UpdateCardRequest(BaseModel):
     description: str | None = None
 
 
-class SaveTabRequest(BaseModel):
-    messages: list[dict[str, Any]] = []
-    chat_id: str | None = None
-    title: str | None = None
-    usage: dict[str, int] | None = None
-    parent_id: str | None = None
-    branch_message_idx: int | None = None
-    children: list[dict[str, Any]] | None = None
+class SaveTabRequest(ChatSnapshot):
     filename: str
     tab_name: str | None = None
 
@@ -62,23 +45,6 @@ class UpdateProjectRequest(BaseModel):
     archived: bool | None = None
 
 
-class ProjectStateModel(BaseModel):
-    kanban: list[KanbanCardModel] = []
-    tabs: list[ProjectTabModel] = []
-
-
-def _not_found(detail: str = "Project not found") -> HTTPException:
-    return HTTPException(status_code=404, detail=detail)
-
-
-def _bad_request(detail: str) -> HTTPException:
-    return HTTPException(status_code=400, detail=detail)
-
-
-def _conflict(detail: str) -> HTTPException:
-    return HTTPException(status_code=409, detail=detail)
-
-
 @router.get("")
 async def list_projects(store: ProjectStore = Depends(get_project_store)) -> dict[str, Any]:
     return {"projects": store.list_projects()}
@@ -86,10 +52,8 @@ async def list_projects(store: ProjectStore = Depends(get_project_store)) -> dic
 
 @router.get("/{slug}")
 async def get_project(slug: str, store: ProjectStore = Depends(get_project_store)) -> dict[str, Any]:
-    try:
+    with http_errors(_PROJECT_NOT_FOUND):
         return store.get_project(slug)
-    except FileNotFoundError:
-        raise _not_found()
 
 
 @router.post("")
@@ -97,21 +61,13 @@ async def create_project(req: CreateProjectRequest, store: ProjectStore = Depend
     try:
         return store.create_project(req.name)
     except ValueError as e:
-        if "already exists" in str(e):
-            raise _conflict(str(e))
-        raise _bad_request(str(e))
+        raise HTTPException(status_code=409 if "already exists" in str(e) else 400, detail=str(e)) from e
 
 
 @router.patch("/{slug}")
 async def update_project(slug: str, req: UpdateProjectRequest, store: ProjectStore = Depends(get_project_store)) -> dict[str, Any]:
-    try:
+    with http_errors((StorageConflictError, 409, None), _PROJECT_NOT_FOUND, (ValueError, 400, None)):
         return store.update_project(slug, name=req.name, archived=req.archived)
-    except StorageConflictError as e:
-        raise _conflict(str(e))
-    except FileNotFoundError:
-        raise _not_found()
-    except ValueError as e:
-        raise _bad_request(str(e))
 
 
 @router.delete("/{slug}")
@@ -121,32 +77,16 @@ async def delete_project(
     assets: AssetStore = Depends(get_asset_store),
     sandbox_service: SandboxService = Depends(get_sandbox_service),
 ) -> dict[str, str]:
-    try:
+    with http_errors(_PROJECT_NOT_FOUND):
         return await cleanup_after_delete(
             assets, sandbox_service, lambda cleanup: store.delete_project(slug, cleanup_uploads_fn=cleanup)
         )
-    except FileNotFoundError:
-        raise _not_found()
-
-
-@router.put("/{slug}/state")
-async def update_project_state(
-    slug: str,
-    state: ProjectStateModel,
-    store: ProjectStore = Depends(get_project_store),
-) -> dict[str, Any]:
-    try:
-        return store.update_project_state(slug, [c.model_dump() for c in state.kanban], [t.model_dump() for t in state.tabs])
-    except FileNotFoundError:
-        raise _not_found()
 
 
 @router.post("/{slug}/cards")
 async def add_card(slug: str, req: AddCardRequest, store: ProjectStore = Depends(get_project_store)) -> dict[str, Any]:
-    try:
+    with http_errors(_PROJECT_NOT_FOUND):
         return store.add_card(slug, req.title, req.description, req.state)
-    except FileNotFoundError:
-        raise _not_found()
 
 
 @router.patch("/{slug}/cards/{card_id}")
@@ -157,7 +97,7 @@ async def move_card(
     store: ProjectStore = Depends(get_project_store),
 ) -> dict[str, Any]:
     """Move a card (body `state`) or edit it (body `title`/`description`), omitted fields stay unchanged."""
-    try:
+    with http_errors((FileNotFoundError, 404, None)):
         updates: dict[str, Any] = {}
         if req is not None:
             if isinstance(req, MoveCardRequest):
@@ -168,16 +108,12 @@ async def move_card(
                 if req.description is not None:
                     updates["description"] = req.description
         return store.update_card(slug, card_id, updates)
-    except FileNotFoundError as e:
-        raise _not_found(str(e))
 
 
 @router.delete("/{slug}/cards/{card_id}")
 async def delete_card(slug: str, card_id: str, store: ProjectStore = Depends(get_project_store)) -> dict[str, str]:
-    try:
+    with http_errors(_PROJECT_NOT_FOUND):
         return store.delete_card(slug, card_id)
-    except FileNotFoundError:
-        raise _not_found()
 
 
 @router.put("/{slug}/tabs/{filename:path}")
@@ -188,12 +124,8 @@ async def save_project_tab(
     store: ProjectStore = Depends(get_project_store),
     sandbox_service: SandboxService = Depends(get_sandbox_service),
 ) -> dict[str, str]:
-    try:
+    with http_errors(_PROJECT_NOT_FOUND, (ValueError, 409, None)):
         result = store.save_tab(slug, filename, data.model_dump())
         if data.chat_id:
             await sandbox_service.checkpoint(chat_id=data.chat_id)
         return result
-    except FileNotFoundError:
-        raise _not_found()
-    except ValueError as e:
-        raise _conflict(str(e))

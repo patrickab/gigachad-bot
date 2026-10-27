@@ -17,6 +17,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
+from lib.changes import record_change
 from lib.data_store import InvalidStorageKey, validate_key
 
 Entity = Literal["stroke", "frame", "attachment", "text"]
@@ -270,11 +271,8 @@ class CanvasMutationStore:
                 """,
                 (json.dumps(document, ensure_ascii=False, separators=(",", ":")).encode(), self._user_id, key),
             ).fetchone()[0]
-            connection.execute(
-                """
-                INSERT INTO changes (user_id, resource_kind, resource_key, version, operation, device_id)
-                VALUES (%s, 'document', %s, %s, 'write', %s)
-                """,
-                (self._user_id, key, version, self._device_id),
+            record_change(
+                connection, user_id=self._user_id, device_id=self._device_id, kind="document", key=key, operation="write",
+                version=version,
             )
         return revision

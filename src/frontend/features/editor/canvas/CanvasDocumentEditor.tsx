@@ -1,17 +1,19 @@
 "use client"
 
-import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Download, X } from "lucide-react"
 import { CanvasEditor } from "./CanvasEditor"
 import { ResizableEditor } from "@/features/editor/ResizableEditor"
 import type { DocumentEditorProps } from "@/features/editor/TextDocumentEditor"
-import { A4_ASPECT, serializeCanvasDoc, type CanvasDocument } from "@/lib/domain/canvasDocument"
+import { A4_ASPECT, type CanvasDocument } from "@/lib/domain/canvasDocument"
 import { storeDrawing, writeBinaryDocument } from "@/lib/backend/api"
 import { fileViewerRawUrl } from "@/lib/backend/urls"
 import { renderPageToPng, renderCanvasToJpeg, type EmbedRect } from "@/lib/drawing"
 import { useCollaborativeCanvas } from "@/features/editor/canvas/useCollaborativeCanvas"
 import { baseName } from "@/lib/paths"
 import { useTabActive } from "@/contexts/TabContext"
+import { useEventListener } from "@/hooks/useEventListener"
+import { LoadFailure, LoadingPlaceholder } from "@/components/ui/DocumentLoadState"
 
 /** Load each image frame to measure its aspect ratio (falls back to 1 if it fails to load). */
 async function canvasImageEmbeds(doc: CanvasDocument): Promise<EmbedRect[]> {
@@ -29,12 +31,11 @@ async function canvasImageEmbeds(doc: CanvasDocument): Promise<EmbedRect[]> {
 }
 
 /** Database canvas: the collaboration hook owns loading and saving. */
-export function CanvasDocumentEditor({ path, slug, onClose, onSaved, onLiveContent, overlay, onModeLabel, canvasToolbarSlots }: DocumentEditorProps) {
+export function CanvasDocumentEditor({ path, slug, onClose, onSaved, overlay, onModeLabel, canvasToolbarSlots }: DocumentEditorProps) {
   const isActive = useTabActive()
   const { document: canvasDocument, replace, status, retry } = useCollaborativeCanvas(path)
   const filename = baseName(path)
   const [exporting, setExporting] = useState(false)
-  const publishLiveContent = useEffectEvent((livePath: string, content: string | null) => { onLiveContent?.(livePath, content) })
   // Only local edits refresh the drawing JPEG, otherwise every open client would
   // re-render and upload it for each remote change.
   const drawnRef = useRef(false)
@@ -44,11 +45,9 @@ export function CanvasDocumentEditor({ path, slug, onClose, onSaved, onLiveConte
     replace(next)
   }, [replace])
 
-  // The one serialization per quiet second feeds the live content the chat reads at send time.
   useEffect(() => {
     if (!canvasDocument) return
     const timer = setTimeout(() => {
-      publishLiveContent(path, serializeCanvasDoc(canvasDocument))
       const { strokes, texts, frames } = canvasDocument
       if (!drawnRef.current || (strokes.length === 0 && texts.length === 0 && !frames.some((f) => f.kind === "image"))) return
       drawnRef.current = false
@@ -58,11 +57,7 @@ export function CanvasDocumentEditor({ path, slug, onClose, onSaved, onLiveConte
         .catch(() => {})
     }, 1000)
     return () => clearTimeout(timer)
-  }, [path, filename, canvasDocument])
-
-  useEffect(() => () => {
-    publishLiveContent(path, null)
-  }, [path])
+  }, [filename, canvasDocument])
 
   useEffect(() => {
     if (overlay) onModeLabel?.(filename)
@@ -92,30 +87,16 @@ export function CanvasDocumentEditor({ path, slug, onClose, onSaved, onLiveConte
     setExporting(false)
   }, [canvasDocument, exporting, slug, filename, onSaved])
 
-  useEffect(() => {
-    if (!overlay || !isActive) return
-    const handler = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault()
-        onClose()
-      }
-    }
-    document.addEventListener("keydown", handler)
-    return () => document.removeEventListener("keydown", handler)
-  }, [overlay, onClose, isActive])
+  useEventListener("document", "keydown", (event) => {
+    if (event.key !== "Escape") return
+    event.preventDefault()
+    onClose()
+  }, { active: !!overlay && isActive })
 
   if (!canvasDocument) {
-    if (status === "error") {
-      return (
-        <div className="flex flex-col items-center justify-center gap-2 py-6 text-xs text-ink-faint">
-          <span>Failed to load this canvas. Its stored content was left untouched.</span>
-          <button onClick={retry} className="rounded px-2 py-1 text-ink-subtle hover:text-ink hover:bg-hover transition-colors">
-            Retry
-          </button>
-        </div>
-      )
-    }
-    return <div className="flex items-center justify-center py-6 text-xs text-ink-faint">Loading...</div>
+    return status === "error"
+      ? <LoadFailure message="Failed to load this canvas. Its stored content was left untouched." onRetry={retry} />
+      : <LoadingPlaceholder />
   }
 
   const editor = (

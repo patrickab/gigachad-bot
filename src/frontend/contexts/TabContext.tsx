@@ -1,6 +1,7 @@
 "use client"
 
 import { createContext, useContext } from "react"
+import { useRequiredContext } from "@/hooks/useRequiredContext"
 import type { TabConfig } from "@/contexts/SettingsContext"
 import type { OmpView } from "@/lib/domain/types"
 
@@ -57,9 +58,7 @@ export const TabContext = createContext<TabContextValue | null>(null)
 
 /** The enclosing tab. Throws outside a `TabManager`. */
 export function useTab(): TabContextValue {
-  const value = useContext(TabContext)
-  if (!value) throw new Error("useTab must be used inside a tab")
-  return value
+  return useRequiredContext(TabContext, "useTab must be used inside a tab")
 }
 
 /** Whether the enclosing tab is frontmost; true outside a tab. */

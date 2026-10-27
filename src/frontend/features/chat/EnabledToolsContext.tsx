@@ -1,6 +1,8 @@
 "use client"
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
+import { createContext, useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
+import { useRequiredContext } from "@/hooks/useRequiredContext"
+import { readStorage, writeStorage } from "@/lib/storage"
 import { TOOLS } from "@/features/chat/tools"
 import type { ToolName } from "@/lib/domain/types"
 
@@ -17,9 +19,7 @@ interface EnabledToolsState {
 const EnabledToolsContext = createContext<EnabledToolsState | null>(null)
 
 export function useEnabledTools(): EnabledToolsState {
-  const ctx = useContext(EnabledToolsContext)
-  if (!ctx) throw new Error("useEnabledTools must be used within EnabledToolsProvider")
-  return ctx
+  return useRequiredContext(EnabledToolsContext, "useEnabledTools must be used within EnabledToolsProvider")
 }
 
 /** Storage never changes under a mounted provider, so there is nothing to subscribe to. */
@@ -28,11 +28,7 @@ function subscribeNever(): () => void {
 }
 
 function readSavedTools(): string | null {
-  try { return window.localStorage.getItem(TOOLS_STORAGE_KEY) } catch { return null }
-}
-
-function writeSavedTools(tools: ToolName[]): void {
-  try { window.localStorage.setItem(TOOLS_STORAGE_KEY, JSON.stringify(tools)) } catch { /* quota */ }
+  return readStorage(TOOLS_STORAGE_KEY)
 }
 
 function readServerSavedTools(): string | null {
@@ -63,7 +59,7 @@ export function EnabledToolsProvider({ children }: { children: ReactNode }) {
   const enabledTools = useMemo(() => chosen ?? parseSavedTools(saved), [chosen, saved])
 
   useEffect(() => {
-    if (chosen) writeSavedTools(chosen)
+    if (chosen) writeStorage(TOOLS_STORAGE_KEY, JSON.stringify(chosen))
   }, [chosen])
 
   // Tools are independent: enabling one must not disable another, because a chat can call a

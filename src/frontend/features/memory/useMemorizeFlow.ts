@@ -3,14 +3,15 @@
 import { useCallback, useMemo, useReducer } from "react"
 import { cancelMemories, commitMemories, extractMemories, getTopics } from "@/lib/backend/api"
 import { topicNameFromTitle } from "@/features/memory/memoryUtils"
+import { errorMessage } from "@/lib/utils"
 import type { MemoryOperation, MemoryScope, MemoryTopic, Message, ScopeProposal, TopicProposal } from "@/lib/domain/types"
 
 export interface ReviewOperation extends MemoryOperation { excluded: boolean }
 export interface ReviewTopic extends TopicProposal { excluded: boolean }
 export interface ReviewScope { operations: ReviewOperation[]; topics: ReviewTopic[] }
-export type ReviewScopes = Partial<Record<MemoryScope, ReviewScope>>
+type ReviewScopes = Partial<Record<MemoryScope, ReviewScope>>
 /** Stored topics per reviewed scope, the targets an operation can move to. */
-export type StoredTopics = Partial<Record<MemoryScope, MemoryTopic[]>>
+type StoredTopics = Partial<Record<MemoryScope, MemoryTopic[]>>
 
 type MemorizeFlowState =
   | { phase: "idle" }
@@ -96,6 +97,11 @@ export function acceptedChanges(review: ReviewScope) {
   return { operations, topics }
 }
 
+/** Operations across the reviewed scopes, only the accepted ones when `onlyAccepted`. */
+export function countOperations(scopes: ReviewScopes, onlyAccepted = false): number {
+  return Object.values(scopes).reduce((count, review) => count + (review ? (onlyAccepted ? acceptedChanges(review).operations : review.operations).length : 0), 0)
+}
+
 /**
  * Drive the memorize flow: extract proposed operations, review them in one screen, commit.
  *
@@ -124,7 +130,7 @@ export function useMemorizeFlow() {
       const storedTopics: StoredTopics = { global: globalTopics?.topics, project: projectTopics?.topics }
       dispatch({ type: "EXTRACT_OK", reviewId: response.review_id, projectSlug: projectSlug ?? null, scopes, storedTopics })
     } catch (e) {
-      dispatch({ type: "FAIL", error: (e as Error)?.message || "Extraction failed" })
+      dispatch({ type: "FAIL", error: errorMessage(e, "Extraction failed") })
     }
   }, [])
 
@@ -164,7 +170,7 @@ export function useMemorizeFlow() {
         }
         dispatch({ type: "RESET" })
       } catch (e) {
-        dispatch({ type: "FAIL", error: (e as Error)?.message || "Commit failed" })
+        dispatch({ type: "FAIL", error: errorMessage(e, "Commit failed") })
       }
     },
     cancel: async () => {
