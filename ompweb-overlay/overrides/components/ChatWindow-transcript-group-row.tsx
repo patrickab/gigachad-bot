@@ -22,11 +22,11 @@ function skillQuestion(messages: readonly AgentMessage[], userIndex: number, inv
 }
 
 /**
- * Upstream's turn nodes; embedded, a typed prompt's or a skill invocation's turn sits in one Q&A card.
+ * Upstream's turn nodes; embedded, the turn of a typed prompt, a skill invocation or a compaction sits in one Q&A card.
  *
  * - Relies on upstream rendering `renderMessage(row.userIndex)` first, in the live and the folded branch alike: that node is the question
  * - Messages load client-side after hydration, so reading the embed class here never mismatches server markup
- * - Standalone, or another anchor (compaction, branch summary): upstream unchanged
+ * - Standalone, or a branch summary anchor: upstream unchanged
  */
 export function renderTranscriptGroupRow(row: TranscriptGroupRow, context: TranscriptGroupRowContext): ReactNode[] {
   const rendered = renderUpstreamTranscriptGroupRow(row, context);

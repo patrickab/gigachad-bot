@@ -1,10 +1,12 @@
+import { parseCompactionSummary } from "@/lib/compaction-summary";
+import { formatCompactNumber } from "@/lib/format";
 import type { AgentMessage, AssistantMessage, CustomMessage, UserMessage } from "@/lib/types";
 
 /** What a Q&A card shows and copies, derived from the turn's messages. */
 export interface TurnSummary {
-  /** The prompt's markdown source. */
+  /** The prompt's markdown source, for a compaction its summary. */
   question: string;
-  /** One line for the collapsed header: the prompt's first line, else what it attached. */
+  /** One line for the collapsed header: the prompt's first line, else what it attached, for a compaction what it saved. */
   label: string;
   /** Every text block the agent wrote in the turn, markdown source, in order. */
   answer: string;
@@ -53,16 +55,43 @@ export function skillInvocation(message: AgentMessage): string | null {
   return typeof args === "string" && args.trim() ? `${command} ${args}` : command;
 }
 
-/** Turns the card shows: anchored by a typed prompt or a skill invocation. A compaction or branch summary is not one, those render as upstream does. */
+/** omp records a compaction as this custom message, the turn that continues after it is anchored there. */
+export function isCompaction(message: AgentMessage): message is CustomMessage {
+  return message.role === "custom" && (message as CustomMessage).customType === "compaction";
+}
+
+/** The compaction's summary, markdown source, without the trailing file lists. */
+export function compactionSummary(message: CustomMessage): string {
+  const { content } = message;
+  const text = typeof content === "string" ? content : content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("\n");
+  return parseCompactionSummary(text).body.trim();
+}
+
+/** "Conversation compacted · 85k → 44k tokens", the counts when the entry records them. */
+export function compactionLabel(message: CustomMessage): string {
+  const { tokensBefore, tokensAfter } = (message.details ?? {}) as { tokensBefore?: unknown; tokensAfter?: unknown };
+  if (typeof tokensBefore !== "number" || typeof tokensAfter !== "number") return "Conversation compacted";
+  return `Conversation compacted · ${formatCompactNumber(tokensBefore)} → ${formatCompactNumber(tokensAfter)} tokens`;
+}
+
+/** Turns the card shows: anchored by a typed prompt, a skill invocation or a compaction. A branch summary is not one, it renders as upstream does. */
 export function isQaTurn(messages: readonly AgentMessage[], userIndex: number): boolean {
   const anchor = messages[userIndex];
-  return (anchor.role === "user" && !anchor.branchSummary) || isSkillPrompt(anchor);
+  return (anchor.role === "user" && !anchor.branchSummary) || isSkillPrompt(anchor) || isCompaction(anchor);
+}
+
+/** The anchor's markdown source and its one-line label. */
+function anchorQuestion(anchor: AgentMessage): { question: string; label: string } {
+  if (isCompaction(anchor)) return { question: compactionSummary(anchor), label: compactionLabel(anchor) };
+  const skill = skillInvocation(anchor);
+  if (skill !== null) return { question: skill, label: questionLabel(skill, 0) };
+  const { text, images } = userBlocks(anchor as UserMessage);
+  return { question: text, label: questionLabel(text, images) };
 }
 
 /** Summarize turn `[userIndex, endIndex)` of `messages`; `messages[userIndex]` must be a Q&A anchor (`isQaTurn`). */
 export function summarizeTurn(messages: readonly AgentMessage[], userIndex: number, endIndex: number): TurnSummary {
-  const skill = skillInvocation(messages[userIndex]);
-  const { text: question, images } = skill === null ? userBlocks(messages[userIndex] as UserMessage) : { text: skill, images: 0 };
+  const { question, label } = anchorQuestion(messages[userIndex]);
   const answers: string[] = [];
   let lastMessage: AgentMessage | undefined;
   for (let idx = userIndex + 1; idx < endIndex; idx++) {
@@ -76,7 +105,7 @@ export function summarizeTurn(messages: readonly AgentMessage[], userIndex: numb
   }
   return {
     question,
-    label: questionLabel(question, images),
+    label,
     answer: answers.join("\n\n"),
     endsWithText: endsInText(lastMessage),
   };

@@ -1,9 +1,10 @@
 "use client";
 
 import { Children, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { FoldVertical } from "lucide-react";
 import { CopyAction, TurnCard, TurnHeader, TurnPreview, TurnRegion, TurnSurface } from "@gigachad/chat-ui";
 import type { AgentMessage } from "@/lib/types";
-import { summarizeTurn } from "./turn-summary";
+import { isCompaction, summarizeTurn } from "./turn-summary";
 
 export interface QaTurnProps {
   /** The whole committed transcript; the turn is `[userIndex, endIndex)`, its typed prompt first. */
@@ -40,7 +41,7 @@ function currentSessionId(): string {
 }
 
 /** Copy for one side of the turn, none while it runs. */
-function copyAction(text: string, subject: "question" | "answer") {
+function copyAction(text: string, subject: "question" | "summary" | "answer") {
   return text.trim() ? [<CopyAction key="copy" text={text} label={`Copy ${subject} as markdown`} />] : undefined;
 }
 
@@ -52,9 +53,12 @@ function copyAction(text: string, subject: "question" | "answer") {
  * - Expanded: the question and the answer's nodes untouched, upstream's per-message fork/edit stay inside; the card owns copy
  * - The newest turn starts expanded, older ones collapsed; the reader's choice sticks per session and turn
  * - A running turn stays expanded and has no actions
+ * - A compaction's turn asks with the compaction (fold icon, its summary as the question), the continued run answers
  */
 export function QaTurn({ messages, userIndex, endIndex, live, question, children }: QaTurnProps) {
   const summary = useMemo(() => summarizeTurn(messages, userIndex, endIndex), [messages, userIndex, endIndex]);
+  const compacted = isCompaction(messages[userIndex]);
+  const anchorIcon = compacted ? <FoldVertical size={14} aria-hidden="true" /> : undefined;
   const choiceKey = `${currentSessionId()}:${qaTurnId(messages, userIndex)}`;
   const [choice, setChoice] = useState(() => expansionChoices.get(choiceKey));
   const [seenKey, setSeenKey] = useState(choiceKey);
@@ -91,7 +95,7 @@ export function QaTurn({ messages, userIndex, endIndex, live, question, children
     return (
       <TurnCard expanded={false}>
         {anchors.map((idx) => <span key={idx} className="cf-turn-anchor" data-message-index={idx} aria-hidden="true" />)}
-        <TurnHeader label={summary.label} onExpand={toggle} ref={toggleRef} />
+        <TurnHeader label={summary.label} icon={anchorIcon} onExpand={toggle} ref={toggleRef} />
         <TurnPreview tools={[]}>
           {hasAnswer ? <div className="gc-turn-content">{children}</div> : null}
         </TurnPreview>
@@ -103,7 +107,8 @@ export function QaTurn({ messages, userIndex, endIndex, live, question, children
     <TurnCard expanded>
       <TurnRegion
         role="question"
-        actions={live ? undefined : copyAction(summary.question, "question")}
+        icon={anchorIcon}
+        actions={live ? undefined : copyAction(summary.question, compacted ? "summary" : "question")}
         onCollapse={live ? undefined : toggle}
         collapseRef={toggleRef}
       >

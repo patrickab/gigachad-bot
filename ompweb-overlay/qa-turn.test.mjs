@@ -110,6 +110,21 @@ test("turn copying excludes reasoning and tool results, retaining answer order",
   });
 });
 
+test("embedded, a compaction anchors a card in context order: what it saved asks, the kept tail and the continuation answer", () => {
+  setEmbedded(true);
+  const compaction = { role: "custom", customType: "compaction", display: true, timestamp: 5000, details: { tokensBefore: 85000, tokensAfter: 44000 },
+    content: "## Goal\n\nDark mode\n\n<read-files>\na.ts\n</read-files>" };
+  const kept = { role: "assistant", content: [{ type: "text", text: "Kept before compaction" }], timestamp: 4000 };
+  const continued = { role: "assistant", content: [{ type: "text", text: "Continued after" }], timestamp: 6000 };
+  const transcript = [compaction, kept, continued, messages[4]];
+  const [row] = planTranscriptRows(transcript);
+  assert.deepEqual({ kind: row.kind, userIndex: row.userIndex, endIndex: row.endIndex }, { kind: "group", userIndex: 0, endIndex: 3 });
+  assert.deepEqual(summarizeTurn(transcript, 0, 3), {
+    question: "## Goal\n\nDark mode", label: "Conversation compacted · 85k → 44k tokens",
+    answer: "Kept before compaction\n\nContinued after", endsWithText: true,
+  });
+});
+
 test("embedded, a collapsed turn previews upstream's answer nodes, tools folded into its Process details row", () => {
   setEmbedded(true);
   window.history.replaceState(null, "", "/?session=qa-preview");

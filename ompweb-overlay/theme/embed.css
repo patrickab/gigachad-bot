@@ -171,3 +171,20 @@ html.cf-embed .activity-row-tool-error {
 html.cf-embed .activity-row-preview {
   color: var(--text-muted);
 }
+
+/* A compaction's question (`custom/overrides/components/MessageView.tsx`): its label opens the summary.
+   Closed, the label is the last line, so the card's actions share it like a question's last paragraph. */
+html.cf-embed .cf-compaction > summary {
+  cursor: pointer;
+  padding-right: var(--gc-turn-actions-space);
+}
+
+html.cf-embed .cf-compaction[open] > summary {
+  margin-bottom: 8px;
+}
+
+html.cf-embed .gc-turn-body:has(> .gc-turn-content .cf-compaction:not([open])) > .gc-turn-actions {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+}

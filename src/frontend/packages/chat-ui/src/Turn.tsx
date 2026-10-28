@@ -75,16 +75,15 @@ export function TurnSurface({ children }: { children: ReactNode }) {
  *
  * - `tail="text"`: the content may end in a paragraph, whose last line then also holds the actions
  * - `onCollapse`: makes the avatar, the strip above the content and the chevron collapse the turn, the content stays selectable
- * - `icon` and `collapseLabel` replace the role's avatar and the collapse buttons' name, for a card that is no question and answer
+ * - `icon` replaces the role's avatar, for a question that is no typed prompt
  */
-export function TurnRegion({ role, tail = "text", actions, onCollapse, collapseRef, icon, collapseLabel = "Collapse question and answer", children }: {
+export function TurnRegion({ role, tail = "text", actions, onCollapse, collapseRef, icon, children }: {
   role: TurnRole
   tail?: "text" | "activity"
   actions?: ReactNode
   onCollapse?: () => void
   collapseRef?: Ref<HTMLButtonElement>
   icon?: ReactNode
-  collapseLabel?: string
   children: ReactNode
 }) {
   const actionCount = Children.toArray(actions).length
@@ -95,7 +94,7 @@ export function TurnRegion({ role, tail = "text", actions, onCollapse, collapseR
     <div className="gc-turn-region" data-role={role}>
       {onCollapse && <span className="gc-turn-collapse-strip" aria-hidden="true" onClick={onCollapse} />}
       {onCollapse ? (
-        <button type="button" className="gc-turn-avatar gc-turn-avatar-button" tabIndex={-1} onClick={onCollapse} aria-label={collapseLabel}>
+        <button type="button" className="gc-turn-avatar gc-turn-avatar-button" tabIndex={-1} onClick={onCollapse} aria-label="Collapse question and answer">
           {avatarIcon}
         </button>
       ) : (
@@ -110,7 +109,7 @@ export function TurnRegion({ role, tail = "text", actions, onCollapse, collapseR
         )}
       </div>
       {onCollapse && (
-        <button type="button" ref={collapseRef} className="gc-turn-collapse" aria-expanded onClick={onCollapse} aria-label={collapseLabel}>
+        <button type="button" ref={collapseRef} className="gc-turn-collapse" aria-expanded onClick={onCollapse} aria-label="Collapse question and answer">
           <ChevronDown size={16} aria-hidden="true" />
         </button>
       )}
