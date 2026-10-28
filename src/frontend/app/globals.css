@@ -40,7 +40,7 @@
    --diff-removed: oklch(73% 0.17 25);
 
    /* --- Backdrop for modal scrims --- */
-   --backdrop:    oklch(0% 0 0 / 0.65);
+   --backdrop:    var(--gc-dark-backdrop);
 
    /* --- Chart grid: opaque rgb, about 12% --ink over --surface-elevated. Plotly can't parse
           color-mix(), and its WebGL 3D scenes render translucent or oklch colors near-white --- */
@@ -89,8 +89,7 @@
   
     --chart-grid:  rgb(225, 223, 218);
   
-    /* Backdrop: a scrim darkens regardless of mode */
-    --backdrop:    oklch(0% 0 0 / 0.55);
+    --backdrop:    var(--gc-light-backdrop);
   
     --divider:        var(--gc-light-divider);
     --divider-strong: var(--gc-light-divider-strong);

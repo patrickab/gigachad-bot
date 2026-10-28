@@ -29,6 +29,8 @@
                        0 8px 20px color-mix(in oklab, var(--gc-dark-shadow-color) 25%, transparent);
   /* On near-black the top-edge highlight, not the shadow, carries depth */
   --gc-dark-inner-highlight: inset 0 1px 0 0 oklch(100% 0 0 / 0.05);
+  /* Modal scrim, a scrim darkens in both modes */
+  --gc-dark-backdrop: oklch(0% 0 0 / 0.65);
 
   /* --- Light --- */
   --gc-light-ink: oklch(30% 0.012 85);
@@ -49,4 +51,5 @@
                         0 4px 12px color-mix(in oklab, var(--gc-light-shadow-color) 5%, transparent),
                         0 8px 20px color-mix(in oklab, var(--gc-light-shadow-color) 3%, transparent);
   --gc-light-inner-highlight: inset 0 1px 0 0 oklch(100% 0 0 / 0.5);
+  --gc-light-backdrop: oklch(0% 0 0 / 0.55);
 }

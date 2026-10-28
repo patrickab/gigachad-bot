@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 import { useContentInsets } from "@/components/ui/ContentArea"
 
 /** Full-screen fading overlay that centers its children over the content area and calls `onClose` when the backdrop itself is clicked. */
-export function ModalBackdrop({ onClose, className, children }: { onClose?: () => void; className?: string; children: ReactNode }) {
+export function ModalBackdrop({ onClose, className, children }: { onClose?: () => void; className?: string; children?: ReactNode }) {
   const [backdrop, setBackdrop] = useState<HTMLDivElement | null>(null)
   const insets = useContentInsets(backdrop)
   return (

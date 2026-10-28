@@ -5,6 +5,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { OPEN_SESSION_EVENT } from "@/lib/notification-client";
 import { onShellMessage, postToShell } from "../embed/channel";
 import { applyShellInsets, settleTranscriptAtBottom, trackComposerArea } from "../embed/insets";
+import { closeModal, trackModal } from "../embed/modal";
 import type { FrameMessage, KeyChord } from "@gigachad/chat-ui/protocol";
 import { isEmbedded } from "./EmbedMode";
 
@@ -39,8 +40,8 @@ function openSettings() {
 /**
  * Connect the app to gigachad-bot's shell while it runs in its frame (`@gigachad/chat-ui/protocol`).
  *
- * - In: open a session (upstream's notification-click event), open Settings, theme. New session: `custom/overrides/hooks/useKeyboardShortcuts.ts`
- * - Out: the current view, polled from the URL and the sidebar's presence, and the shell's own shortcuts
+ * - In: open a session (upstream's notification-click event), open Settings, theme, close the open dialog. New session: `custom/overrides/hooks/useKeyboardShortcuts.ts`
+ * - Out: the current view, polled from the URL and the sidebar's presence, whether a modal dialog is open, and the shell's own shortcuts
  */
 export function EmbedBridge() {
   const { setTheme } = useTheme();
@@ -73,8 +74,10 @@ export function EmbedBridge() {
       onShellMessage("open-settings", openSettings),
       onShellMessage("set-theme", (message) => setTheme(message.theme)),
       onShellMessage("insets", applyShellInsets),
+      onShellMessage("close-modal", closeModal),
       trackComposerArea(),
       settleTranscriptAtBottom(),
+      trackModal(),
     ];
     window.addEventListener("keydown", forwardShellShortcut, true);
     const viewPoll = window.setInterval(reportViewChange, VIEW_POLL_MS);

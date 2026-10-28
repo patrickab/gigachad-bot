@@ -214,6 +214,7 @@ diagram / source edit -> serialized frontend reads/writes -> architecture route
 | Gate | `src/backend/omp_web_gate.py` checks host identity before proxying the production frame. Keep upstream API knowledge out. |
 | Frontend adapter | Only `features/omp/` owns iframe URLs and postMessage details. `OmpProvider` keeps one frame, deep-links the initial session, switches by message without reload/DOM relocation. |
 | Shell composer | Send prompts/images/documents, abort, model/thinking changes, `/` and `@` completion. Merge returned drafts. Lies over the full-height frame with the top bar like a chat, the `insets` message tells the overlay how far to pad the transcript (`embed/insets.ts`, `theme/embed.css`). |
+| Frame dialogs | The overlay reports an open modal dialog (`modal`, `embed/modal.ts`). `OmpProvider` lays `FloatingWindow`'s backdrop over the whole shell and lifts the frame above it, omp-web's backdrop (the shell's scrim, `theme/tokens.css`) covers the frame. A click on it or Escape in the shell sends `close-modal`. |
 | Engine | omp-web owns execution, queueing, shell commands, session creation. Shell does not expose word prediction or busy-run steering/queueing. |
 | Navigation | Group project-linked mount sessions under code, others under OMP. Navigate forks/branches, restore archives, route file links through shell file policy. |
 

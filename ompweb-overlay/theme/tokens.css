@@ -27,7 +27,7 @@
   --status-warning: var(--cf-warning);
   --status-modified: var(--cf-warning);
   --status-renamed: var(--cf-info);
-  --overlay-backdrop: color-mix(in oklab, var(--cf-paper) 60%, transparent);
+  --overlay-backdrop: var(--cf-backdrop);
   --focus-ring: 0 0 0 3px color-mix(in oklab, var(--cf-ink) 12%, transparent);
 
   --shadow-card: 0 1px 2px var(--cf-shadow-soft), 0 2px 8px var(--cf-shadow-faint);

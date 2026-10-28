@@ -1,8 +1,11 @@
 "use client"
 
 import { createContext, useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { AnimatePresence } from "framer-motion"
+import { ModalBackdrop } from "@/components/ui/ModalBackdrop"
 import { useSettings } from "@/contexts/SettingsContext"
 import { useStartupRead } from "@/contexts/StartupReadContext"
+import { useEscapeLayer } from "@/hooks/useEscapeLayer"
 import { useRequiredContext } from "@/hooks/useRequiredContext"
 import { useThemeName } from "@/hooks/useThemeName"
 import { fetchOmpOverview } from "@/lib/backend/api"
@@ -149,6 +152,20 @@ function useFrameOverSlot(frame: HTMLIFrameElement | null, slot: HTMLElement | n
   }, [frame, slot])
 }
 
+/** z-index of `FloatingWindow`'s backdrop, the frame rises above it while its dialog is open. */
+const FLOATING_WINDOW_Z = "z-[90]"
+
+/**
+ * The shell's half of a modal dialog open in the frame: `FloatingWindow`'s backdrop over everything, the lifted frame on top.
+ *
+ * - The frame dims and blurs itself under its dialog (omp-web's backdrop in the shell's scrim, overlay `theme/tokens.css`)
+ * - A click on it or Escape in the shell closes the dialog in the frame
+ */
+function FrameModalBackdrop({ onClose }: { onClose: () => void }) {
+  useEscapeLayer(onClose)
+  return <ModalBackdrop onClose={onClose} className={FLOATING_WINDOW_Z} />
+}
+
 /**
  * Own omp-web's single shared frame and the overview every omp surface reads.
  *
@@ -168,6 +185,8 @@ export function OmpProvider({ children }: { children: ReactNode }) {
   const [branchTree, setBranchTree] = useState<BranchTree | null>(null)
   const [composer, setComposer] = useState<ComposerState | null>(null)
   const [insets, setInsets] = useState<FrameInsets>({ top: 0, bottom: 0 })
+  /** A modal dialog is open in the frame. */
+  const [modalOpen, setModalOpen] = useState(false)
   const frameRef = useRef<HTMLIFrameElement>(null)
   const [frame, setFrame] = useState<HTMLIFrameElement | null>(null)
   const attachFrameElement = useCallback((element: HTMLIFrameElement | null) => {
@@ -221,6 +240,7 @@ export function OmpProvider({ children }: { children: ReactNode }) {
     lastNewCwdRef.current = null
     setFrameStatus("ready")
     setComposer(null)
+    setModalOpen(false)
     post({ type: "hello", version: EMBED_PROTOCOL_VERSION, forwardKeys: FORWARD_KEYS, theme })
     post({ type: "insets", ...insets })
     if (attachment) navigate(attachment.view, true)
@@ -243,6 +263,7 @@ export function OmpProvider({ children }: { children: ReactNode }) {
         document.dispatchEvent(new KeyboardEvent("keydown", { key, altKey, ctrlKey, metaKey, shiftKey, bubbles: true, cancelable: true }))
       }
       else if (message.type === "open-file") onOpenFile(message.path)
+      else if (message.type === "modal") setModalOpen(message.open)
     }
     window.addEventListener("message", onMessage)
     return () => window.removeEventListener("message", onMessage)
@@ -304,6 +325,8 @@ export function OmpProvider({ children }: { children: ReactNode }) {
     // A hidden frame keeps focus, keystrokes would land in it (e.g. after Alt+T from inside it opened a chat tab).
     if (!visible && document.activeElement === frameRef.current) frameRef.current?.blur()
   }, [visible])
+  const closeModal = useCallback(() => post({ type: "close-modal" }), [post])
+  const showsModal = visible && modalOpen
   return (
     <OmpContext.Provider value={value}>
       {children}
@@ -314,13 +337,16 @@ export function OmpProvider({ children }: { children: ReactNode }) {
           src={frameUrl(ompWebUrl, loadedView)}
           title="omp"
           allow="clipboard-read; clipboard-write"
-          className="fixed z-0 border-0 bg-paper"
+          className={`fixed border-0 bg-paper ${showsModal ? "z-[91]" : "z-0"}`}
           // Position and size come from useFrameOverSlot, React never writes them. Hidden by opacity, not visibility:
           // Chrome stops rendering a visibility-hidden cross-origin frame, and omp-web then never reports ready
           inert={!visible}
           style={{ opacity: visible ? 1 : 0, pointerEvents: visible ? undefined : "none" }}
         />
       )}
+      <AnimatePresence>
+        {showsModal && <FrameModalBackdrop onClose={closeModal} />}
+      </AnimatePresence>
     </OmpContext.Provider>
   )
 }

@@ -1,6 +1,6 @@
 /* Role tokens while embedded in gigachad-bot (`html.cf-embed`), the only place colors are defined.
 
-   - Ink, paper, surfaces, danger and shadows are the shell's own (`--gc-<mode>-*` from `@gigachad/chat-ui/palette.css`),
+   - Ink, paper, surfaces, danger, shadows and the modal scrim are the shell's own (`--gc-<mode>-*` from `@gigachad/chat-ui/palette.css`),
      so the frame blends into it. Change those values in the package, never here
    - Status hues and shadow tints have no shell counterpart: warm OKLCH, hue 85
    - `:root:root.cf-embed` (0,3,0) outranks upstream's theme blocks (0,1,1), the dark variant (0,4,0) wins in dark mode
@@ -18,6 +18,7 @@
   --cf-danger: var(--gc-light-danger);
   --cf-chat-shadow: var(--gc-light-shadow-sm);
   --cf-inner-highlight: var(--gc-light-inner-highlight);
+  --cf-backdrop: var(--gc-light-backdrop);
   --cf-success: oklch(50% 0.12 155);
   --cf-warning: oklch(55% 0.13 75);
   --cf-info: oklch(50% 0.13 255);
@@ -37,6 +38,7 @@
   --cf-danger: var(--gc-dark-danger);
   --cf-chat-shadow: var(--gc-dark-shadow-sm);
   --cf-inner-highlight: var(--gc-dark-inner-highlight);
+  --cf-backdrop: var(--gc-dark-backdrop);
   --cf-success: oklch(76% 0.13 155);
   --cf-warning: oklch(80% 0.13 80);
   --cf-info: oklch(74% 0.12 255);

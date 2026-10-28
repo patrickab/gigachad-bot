@@ -6,7 +6,7 @@
  * - Every message carries `channel: EMBED_CHANNEL` so unrelated postMessage traffic is ignored
  */
 export const EMBED_CHANNEL = "omp-embed"
-export const EMBED_PROTOCOL_VERSION = 7
+export const EMBED_PROTOCOL_VERSION = 8
 
 export type ThemeMode = "light" | "dark"
 
@@ -56,6 +56,8 @@ export type ShellMessage =
   | { type: "select-leaf"; sessionId: string; leafId: string | null }
   /** Pixels of shell chrome laid over the frame's top (top bar) and bottom (composer). The transcript scrolls beneath them. Sent after `hello` and on every change. */
   | { type: "insets"; top: number; bottom: number }
+  /** Close the frame's open modal dialog (`modal`) like Escape inside it: the shell's backdrop was clicked or Escape pressed in the shell. */
+  | { type: "close-modal" }
   /**
    * The shell's composer replaces omp-web's hidden one. Each names the session it was typed for (null: new-session screen), a frame showing another one ignores it.
    * `composer-send` submits like omp-web's composer: builtins (`/btw`), then a prompt, a follow-up while the agent is busy.
@@ -90,5 +92,7 @@ export type FrameMessage =
   | { type: "composer-completions"; sessionId: string | null; requestId: number; items: Completion[] }
   /** The user clicked a link to a local file, the shell shows it instead of omp-web's file panel. `path` is absolute. */
   | { type: "open-file"; path: string }
+  /** Whether a modal dialog (e.g. a subagent transcript) is open. The shell dims and blurs its own chrome around the frame alike. */
+  | { type: "modal"; open: boolean }
 
 export type Envelope<Message> = Message & { channel: typeof EMBED_CHANNEL }
