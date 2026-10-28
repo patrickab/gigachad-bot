@@ -92,6 +92,14 @@ test("embedded, a skill invocation's turn is a card asking what the user typed, 
   assert.equal(summarizeTurn(skillTurn, 0, 4).question, "/skill:teach diffusion");
 });
 
+test("embedded, a skill invoked after a turn with tools starts its own turn instead of folding into it", () => {
+  setEmbedded(true);
+  const skill = { role: "custom", customType: "skill-prompt", display: true, content: "SKILL BODY", details: { name: "teach" }, timestamp: 3000 };
+  const transcript = [...messages.slice(0, 4), skill, ...messages.slice(1, 4)];
+  const turns = planTranscriptRows(transcript).map(({ kind, userIndex, endIndex }) => ({ kind, userIndex, endIndex }));
+  assert.deepEqual(turns, [{ kind: "group", userIndex: 0, endIndex: 4 }, { kind: "group", userIndex: 4, endIndex: 8 }]);
+});
+
 test("standalone or a non-prompt anchor, the group row renders exactly as upstream", () => {
   const [row] = planTranscriptRows(messages);
   const standalone = renderTranscriptGroupRow(row, groupContext(messages));

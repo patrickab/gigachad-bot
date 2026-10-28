@@ -42,7 +42,7 @@ function endsInText(message: AgentMessage | undefined): boolean {
 }
 
 /** omp records a skill invocation (`/skill:name args`) as this custom message alone, no user message. */
-function isSkillPrompt(message: AgentMessage): message is CustomMessage {
+export function isSkillPrompt(message: AgentMessage): message is CustomMessage {
   return message.role === "custom" && (message as CustomMessage).customType === "skill-prompt";
 }
 

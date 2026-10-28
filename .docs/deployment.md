@@ -205,9 +205,11 @@ cd "$PROD" && uv run agent-sandbox doctor --profile gigachad
 git clone https://github.com/kahme247/ompweb.git "$HOME/git/ompweb_original"
 ```
 
-- Serve a ref containing the upstream seams the overlay uses. Until PR #314 is
-  merged that is the local branch `integration_patrick_ab` (upstream `main` plus
-  #314's commits), which a fresh clone lacks: create it, then use `origin/main`.
+- Serve a ref containing the upstream seams the overlay uses. Until PR #332
+  (issue #314) is merged that is the local branch `integration_patrick_ab`
+  (upstream `main` plus #332's commits), which a fresh clone lacks: create it
+  from `patrickab/ompweb-fork` branch `refactor/314-ui-customization-seams`,
+  then use `origin/main`.
 - `run-omp-web.sh` serves a detached worktree reset to the ref on each start,
   applies `ompweb-overlay/seams.patch`, copies the overlay to `custom/` and packs
   `@gigachad/chat-ui` into it. The source checkout stays untouched.
