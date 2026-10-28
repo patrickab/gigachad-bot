@@ -30,11 +30,11 @@ export function TurnCard({ expanded, focused, ref, children }: {
   )
 }
 
-/** Collapsed header: question avatar, one-line label and the expand chevron. */
-export function TurnHeader({ label, onExpand, ref }: { label: string; onExpand: () => void; ref?: Ref<HTMLButtonElement> }) {
+/** Collapsed header: avatar (the question's unless `icon` is given), one-line label and the expand chevron. */
+export function TurnHeader({ label, icon, onExpand, ref }: { label: string; icon?: ReactNode; onExpand: () => void; ref?: Ref<HTMLButtonElement> }) {
   return (
     <button type="button" ref={ref} className="gc-turn-header" aria-expanded={false} onClick={onExpand}>
-      <span className="gc-turn-avatar"><User size={14} aria-hidden="true" /></span>
+      <span className="gc-turn-avatar">{icon ?? <User size={14} aria-hidden="true" />}</span>
       <span className="gc-turn-label">{label}</span>
       <ChevronRight className="gc-turn-chevron" size={16} aria-hidden="true" />
     </button>
@@ -75,24 +75,27 @@ export function TurnSurface({ children }: { children: ReactNode }) {
  *
  * - `tail="text"`: the content may end in a paragraph, whose last line then also holds the actions
  * - `onCollapse`: makes the avatar, the strip above the content and the chevron collapse the turn, the content stays selectable
+ * - `icon` and `collapseLabel` replace the role's avatar and the collapse buttons' name, for a card that is no question and answer
  */
-export function TurnRegion({ role, tail = "text", actions, onCollapse, collapseRef, children }: {
+export function TurnRegion({ role, tail = "text", actions, onCollapse, collapseRef, icon, collapseLabel = "Collapse question and answer", children }: {
   role: TurnRole
   tail?: "text" | "activity"
   actions?: ReactNode
   onCollapse?: () => void
   collapseRef?: Ref<HTMLButtonElement>
+  icon?: ReactNode
+  collapseLabel?: string
   children: ReactNode
 }) {
   const actionCount = Children.toArray(actions).length
   const actionSpace = actionCount * ACTION_SIZE_PX + Math.max(0, actionCount - 1) * ACTION_GAP_PX + ACTION_END_GUTTER_PX
   const Avatar = role === "question" ? User : Bot
-  const avatarIcon = <Avatar size={14} aria-hidden="true" />
+  const avatarIcon = icon ?? <Avatar size={14} aria-hidden="true" />
   return (
     <div className="gc-turn-region" data-role={role}>
       {onCollapse && <span className="gc-turn-collapse-strip" aria-hidden="true" onClick={onCollapse} />}
       {onCollapse ? (
-        <button type="button" className="gc-turn-avatar gc-turn-avatar-button" tabIndex={-1} onClick={onCollapse} aria-label="Collapse question and answer">
+        <button type="button" className="gc-turn-avatar gc-turn-avatar-button" tabIndex={-1} onClick={onCollapse} aria-label={collapseLabel}>
           {avatarIcon}
         </button>
       ) : (
@@ -107,7 +110,7 @@ export function TurnRegion({ role, tail = "text", actions, onCollapse, collapseR
         )}
       </div>
       {onCollapse && (
-        <button type="button" ref={collapseRef} className="gc-turn-collapse" aria-expanded onClick={onCollapse} aria-label="Collapse question and answer">
+        <button type="button" ref={collapseRef} className="gc-turn-collapse" aria-expanded onClick={onCollapse} aria-label={collapseLabel}>
           <ChevronDown size={16} aria-hidden="true" />
         </button>
       )}
