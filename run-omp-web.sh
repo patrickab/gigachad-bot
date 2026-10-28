@@ -86,16 +86,19 @@ if [[ "$(cat node_modules/.gigachad-chat-ui.sha256 2>/dev/null)" != "$chat_ui_di
     printf '%s' "$chat_ui_digest" >node_modules/.gigachad-chat-ui.sha256
 fi
 
-# Webpack's persistent cache misses module-replacement changes, it then resolves overrides stale.
-if [[ -f .next/BUILD_ID && -n "$(find next.config.ts custom/next.config.ts custom/overrides -newer .next/BUILD_ID -print -quit)" ]]; then
+build_stamp=.next/gigachad-build
+built_inputs="$(cat "$build_stamp" 2>/dev/null || true)"
+# Webpack's persistent cache misses module-replacement changes and a repacked chat-ui (it takes a node_modules package as
+# immutable per version), it then builds them stale.
+if [[ -f .next/BUILD_ID ]] && { [[ -n "$(find next.config.ts custom/next.config.ts custom/overrides -newer .next/BUILD_ID -print -quit)" ]] \
+    || [[ "${built_inputs##* }" != "$chat_ui_digest" ]]; }; then
     rm -rf .next/cache
 fi
 export OMP_WEB_FRAME_ANCESTORS="$frame_ancestors"
-build_stamp=.next/gigachad-build
 build_inputs="$frame_ancestors $chat_ui_digest"
 if [[ ! -f .next/BUILD_ID ]] \
     || [[ -n "$(find . \( -path ./.next -o -path ./node_modules -o -path ./.git \) -prune -o -type f -newer .next/BUILD_ID -print -quit)" ]] \
-    || [[ "$(cat "$build_stamp" 2>/dev/null)" != "$build_inputs" ]]; then
+    || [[ "$built_inputs" != "$build_inputs" ]]; then
     printf 'Building omp-web (~2 min)\n'
     npm run build 2>&1 | tee node_modules/.gigachad-build.log
     # Next only warns when an override lacks an export upstream modules import, the page would then crash at runtime.

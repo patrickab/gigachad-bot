@@ -219,7 +219,7 @@ diagram / source edit -> serialized frontend reads/writes -> architecture route
 
 - Keep shared chat rendering/protocol/palette canonical in `packages/chat-ui`. Local and OMP chat share Q&A turns, Markdown/LaTeX, fenced code with Mermaid and Markmap diagrams (each host passes its own `light`/`dark` scheme), source-preserving copy, and role colors.
 - Map the palette to each side's tokens. Shell persists its theme preference and propagates it through the bridge.
-- `run-omp-web.sh` packs `packages/chat-ui` and installs it into the served worktree on every start, so overlay and shell always share one commit's package.
+- `run-omp-web.sh` packs `packages/chat-ui` and installs it into the served worktree on every start, so overlay and shell always share one commit's package. A changed package also drops webpack's build cache, which takes `node_modules` packages as immutable per version.
 - Bump `EMBED_PROTOCOL_VERSION` on every message change. No runtime handshake detects mismatches, a running omp-web keeps the old bundle until restarted.
 - Return 503 for unavailable upstream, 502 naming invalid response fields, and preserve explicit upstream refusals. Share HTTP/error plumbing with factory through `lib/upstream.py`.
 - Gate frame URL/API availability by host access. Persisted OMP-message deletion is unsupported. Frame DOCX/PDF previews are blocked by `SAMEORIGIN`. Standalone omp-web keeps its native UI.
