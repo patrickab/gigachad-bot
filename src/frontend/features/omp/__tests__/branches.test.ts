@@ -7,7 +7,7 @@ function entry(id: string, role: "user" | "assistant" | undefined, preview: stri
 }
 
 describe("sessionBranches", () => {
-  it("labels each branch by its first prompt after the fork and counts the prompts before it", () => {
+  it("labels each branch by its first prompt after the fork", () => {
     const tree = [entry("model", undefined, "", [
       entry("u1", "user", "plan the feature", [
         entry("a1", "assistant", "here is a plan", [
@@ -17,14 +17,22 @@ describe("sessionBranches", () => {
       ]),
     ])]
     expect(sessionBranches(tree)).toEqual([
-      { leafId: "a2", label: "use polars", branchPoint: 1 },
-      { leafId: "a3", label: "use duckdb", branchPoint: 1 },
+      { leafId: "a2", label: "use polars" },
+      { leafId: "a3", label: "use duckdb" },
     ])
+  })
+
+  it("drops a branch an unsent Edit left without messages, labels others by their contracted chain's first message", () => {
+    // omp-web's projected tree: the fork, a contracted branch ending in a custom entry, an Edit's history-navigation marker
+    const sent = { id: "exit", type: "custom", role: "user" as const, preview: "fix the latex", children: [] }
+    const abandonedEdit = { id: "nav", type: "custom", preview: "", children: [] }
+    const tree = [entry("model", undefined, "", [{ id: "fork", type: "custom_message", preview: "", children: [sent, abandonedEdit] }])]
+    expect(sessionBranches(tree)).toEqual([{ leafId: "exit", label: "fix the latex" }])
   })
 
   it("keeps a straight session as one branch and survives very deep sessions", () => {
     let deep = entry("last", "assistant", "final answer")
     for (let index = 0; index < 20_000; index++) deep = entry(`e${index}`, index % 2 ? "user" : "assistant", "", [deep])
-    expect(sessionBranches([deep])).toEqual([{ leafId: "last", label: "final answer", branchPoint: 0 }])
+    expect(sessionBranches([deep])).toEqual([{ leafId: "last", label: "final answer" }])
   })
 })

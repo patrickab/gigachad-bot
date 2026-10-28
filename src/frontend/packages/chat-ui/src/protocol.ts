@@ -13,13 +13,17 @@ export type ThemeMode = "light" | "dark"
 /** Key combination the frame hands back to the shell instead of handling it, e.g. Alt+T for a new tab. `key` is `KeyboardEvent.key`. */
 export type KeyChord = { key: string; altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }
 
-/** Message-only view of an omp session tree entry, omp-web's `SessionTreeNode` (`lib/types.ts`). */
+/**
+ * Message-only view of a node of omp-web's projected session tree (`SessionTreeNode`, `lib/types.ts`): roots, branch points and leaves,
+ * each single-child chain contracted into the node it leads to.
+ */
 export type BranchNode = {
   id: string
   /** Entry type from the session file (`message`, `model_change`, `compaction`, ...). */
   type: string
+  /** Role of `preview`'s message, absent when neither the node nor its contracted chain holds one. */
   role?: "user" | "assistant"
-  /** First 80 characters of the message text, empty for non-message entries. */
+  /** Start of the first message text in the node's contracted chain (omp-web's `branchPreview`), else of its own, empty without a message. */
   preview: string
   label?: string
   children: BranchNode[]

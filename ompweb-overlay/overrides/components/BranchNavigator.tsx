@@ -26,13 +26,18 @@ function messageContent(entry: SessionEntry): unknown {
   return entry.type === "message" && "message" in entry && "content" in entry.message ? entry.message.content : undefined;
 }
 
+/**
+ * Message view of one node of omp-web's projected tree (`app/api/sessions/[id]/route.ts`): roots, branch points and
+ * leaves only, each single-child chain contracted into the node it leads to. `branchPreview` is the chain's first
+ * message, so a branch is labeled by what follows its fork, not by the entry that happens to end it.
+ */
 function toBranchNode(node: SessionTreeNode): BranchNode {
-  const { entry } = node;
-  const text = messageText(messageContent(entry));
+  const { entry, branchPreview } = node;
+  const text = branchPreview?.text ?? messageText(messageContent(entry));
   return {
     id: entry.id,
     type: entry.type,
-    role: messageRole(entry),
+    role: branchPreview ? branchPreview.role : messageRole(entry),
     preview: text.replace(/\s+/g, " ").trim().slice(0, PREVIEW_LENGTH),
     label: node.label,
     children: node.children.map(toBranchNode),

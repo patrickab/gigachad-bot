@@ -28,7 +28,6 @@ export function OmpBranchTree({ sessionId }: { sessionId: string }) {
                 active ? "bg-surface-elevated font-semibold text-ink" : "text-ink-muted hover:bg-surface-elevated/50 hover:text-ink")}
             >
               <span className="min-w-0 flex-1 truncate">{branch.label}</span>
-              <span className="shrink-0 font-mono text-[10px] tabular-nums text-ink-faint">@{branch.branchPoint}</span>
             </button>
           </div>
         )
