@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@likec4/core": "1.59.4",
-    "@likec4/language-services": "1.59.4",
+    "@likec4/language-services": "1.60.0",
     "bundle-require": "5.1.0",
     "esbuild": "0.28.2",
     "json5": "2.2.3",
