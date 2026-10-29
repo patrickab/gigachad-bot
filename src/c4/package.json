@@ -12,7 +12,7 @@
     "check": "tsc --noEmit"
   },
   "dependencies": {
-    "@likec4/core": "1.59.4",
+    "@likec4/core": "1.60.0",
     "@likec4/language-services": "1.59.4",
     "bundle-require": "5.1.0",
     "esbuild": "0.28.2",
