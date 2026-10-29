@@ -33,3 +33,4 @@ src/frontend/.env.local
 src/frontend/tsconfig.tsbuildinfo
 .omp/*
 !.omp/agents/
+.wayfinder/
