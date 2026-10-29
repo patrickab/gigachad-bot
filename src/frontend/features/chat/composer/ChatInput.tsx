@@ -54,6 +54,7 @@ export interface ChatInputHandle {
   updateText: (update: (current: string) => string) => void
   /** Upload and attach files, e.g. images pasted into an omp tab. */
   addFiles: (files: File[]) => void
+  focus: () => void
 }
 
 export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({
@@ -100,6 +101,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       requestAnimationFrame(() => { adjustHeight(); textareaRef.current?.focus() })
     },
     addFiles: (files) => { for (const file of files) upload(file, file.name) },
+    focus: () => textareaRef.current?.focus(),
   }), [adjustHeight, drafts.add, upload])
 
   const handleSubmit = () => {

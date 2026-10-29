@@ -62,6 +62,20 @@ function useComposerRestore(view: OmpView, inputRef: RefObject<ChatInputHandle |
   }), [onComposerEvent, view, inputRef])
 }
 
+/**
+ * Focus the composer once `view`'s extension `select` closes: the send that opened it disabled the input, which dropped focus.
+ * A file the pick opens in Neovim takes focus later, once its terminal attaches.
+ */
+function useFocusAfterSelect(view: OmpView, inputRef: RefObject<ChatInputHandle | null>) {
+  const { pendingSelect } = useOmp()
+  const selectOpen = pendingSelect !== null && isComposerOf(view, pendingSelect.sessionId)
+  const wasOpenRef = useRef(false)
+  useEffect(() => {
+    if (wasOpenRef.current && !selectOpen) inputRef.current?.focus()
+    wasOpenRef.current = selectOpen
+  }, [selectOpen, inputRef])
+}
+
 /** The frame's composer state when it shows `view`, null while the frame loads or shows another view. */
 function useComposerFor(view: OmpView) {
   const { composer, frameStatus, sendToComposer } = useOmp()
@@ -79,6 +93,7 @@ export function OmpComposer({ view, chatId, slug }: { view: OmpView; chatId: str
   const { state, sendToComposer } = useComposerFor(view)
   const inputRef = useRef<ChatInputHandle>(null)
   useComposerRestore(view, inputRef)
+  useFocusAfterSelect(view, inputRef)
   const sessionId = state?.sessionId ?? null
   const complete = useFrameCompletions(state?.sessionId)
 
