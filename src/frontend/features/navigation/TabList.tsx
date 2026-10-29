@@ -1,7 +1,7 @@
 "use client"
 
 import { useContext } from "react"
-import { X } from "lucide-react"
+import { Plus, X } from "lucide-react"
 import { FileTree, type FileTreeItem } from "@/components/ui/file-tree/FileTree"
 import { usePathTree } from "@/components/ui/file-tree/useFileTree"
 import { useStoredString } from "@/hooks/useStoredString"
@@ -47,7 +47,12 @@ export function TabList() {
 
   return <FileTree label="Tabs" items={items} controller={controller}
     labelAction={{ label: `Tabs, ${strip.tabs.length} open`, expanded, onClick: () => saveExpanded(String(!expanded)) }}
-    headerActions={<span className="text-[10px] tabular-nums text-ink-faint">{strip.tabs.length}</span>}
-    create={{ label: "New chat", onClick: strip.add }}
+    labelSuffix={<>
+      <span className="text-[10px] tabular-nums text-ink-faint">{strip.tabs.length}</span>
+      <button type="button" data-new-chat aria-label="New chat" onClick={strip.add}
+        className="rounded p-0.5 text-ink-faint hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">
+        <Plus aria-hidden="true" className="h-3 w-3" />
+      </button>
+    </>}
   />
 }

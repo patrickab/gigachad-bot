@@ -78,6 +78,8 @@ interface FileTreeProps<T> {
   onMoveToRoot?: (id: string) => Promise<void>
   /** Makes the section label a button named `label`, e.g. to open the section's settings. `expanded` makes it a disclosure toggle, `false` hides the items. */
   labelAction?: { label: string; onClick: () => void; expanded?: boolean }
+  /** Always-visible content right after the label, e.g. a count and an action. */
+  labelSuffix?: ReactNode
 }
 
 const FILE_DRAG_TYPE = "application/x-file-tree-ids"
@@ -107,7 +109,7 @@ function selectableIds<T>(items: FileTreeItem<T>[], controller: FileBranchContro
 }
 
 /** Render every hierarchy level with the same indentation, disclosure, selection and action rules. */
-export function FileTree<T>({ items, controller, label, loading, create, headerActions, renderBeforeItem, onMoveToRoot, labelAction }: FileTreeProps<T>) {
+export function FileTree<T>({ items, controller, label, loading, create, headerActions, renderBeforeItem, onMoveToRoot, labelAction, labelSuffix }: FileTreeProps<T>) {
   const [creation, setCreation] = useState<{
     parentId: string | null
     action: Extract<FileTreeCreateAction, { onSubmit: unknown }>
@@ -277,9 +279,12 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
   const collapsed = labelAction?.expanded === false
   return <div aria-label={label} data-file-tree>
     <div className={cn("group/row flex h-6 items-center justify-between px-2", !collapsed && "mb-2")}>
-      {labelAction
-        ? <button type="button" aria-label={labelAction.label} aria-expanded={labelAction.expanded} onClick={labelAction.onClick} className="rounded text-xs font-medium text-ink-subtle hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">{label}</button>
-        : <span className="text-xs font-medium text-ink-subtle">{label}</span>}
+      <div className="flex items-center gap-1.5">
+        {labelAction
+          ? <button type="button" aria-label={labelAction.label} aria-expanded={labelAction.expanded} onClick={labelAction.onClick} className="rounded text-xs font-medium text-ink-subtle hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">{label}</button>
+          : <span className="text-xs font-medium text-ink-subtle">{label}</span>}
+        {labelSuffix}
+      </div>
       <div className="flex items-center gap-0.5">
         {headerActions}
         {create && <div className={ACTIONS_CLASS}>
