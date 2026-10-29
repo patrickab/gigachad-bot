@@ -37,6 +37,10 @@ if port_open "$bind"; then
         printf 'omp-web on %s refuses frames from %s: restart it with OMP_WEB_FRAME_ANCESTORS="%s"\n' \
             "$bind" "${frame_ancestors%% *}" "$frame_ancestors" >&2
     fi
+    # It was built from whatever overlay its launcher copied in: another checkout's, or this one's before an edit.
+    if [[ -d "$dir/custom" && -n "$(rsync -rnic --delete "$overlay/" "$dir/custom/")" ]]; then
+        printf 'omp-web on %s serves another overlay than %s: stop it (when idle) and rerun to rebuild\n' "$bind" "$overlay" >&2
+    fi
     exit 0
 fi
 if ! command -v omp >/dev/null 2>&1; then

@@ -5,8 +5,7 @@ How to change the omp tabs (gigachad-bot shell + upstream omp-web + private over
 ## Map
 
 ```
-~/git/gigachad-bot/                      gigachad-bot main checkout (master)
-~/git/worktrees/gigachad-bot/<branch>/   gigachad-bot worktrees, one per task
+~/git/gigachad-bot/                      gigachad-bot checkout (master), run.sh serves it, the only gigachad-bot checkout
   ompweb-overlay/                        private overlay, becomes custom/ in the served omp-web
     root.tsx, framing.ts, next.config.ts   entry (CustomRoot), frame-ancestors CSP, module overrides
     components/                          EmbedBridge, EmbedMode, QaTurn, turn-summary, EmbeddedMarkdown
@@ -42,8 +41,7 @@ Upstream changes must be refactors without behaviour change or features/fixes va
 
 ### gigachad-bot change (overlay, chat-ui, shell)
 
-1. Own worktree off the integration branch of gigachad-bot (`ompweb-upstream` until merged to master):
-   `git -C ~/git/gigachad-bot worktree add -b <task> ~/git/worktrees/gigachad-bot/<task> ompweb-upstream`
+1. Edit in `~/git/gigachad-bot` on `master`. `run.sh` serves this checkout's overlay and chat-ui, no gigachad-bot worktree is involved.
 2. Edit. Protocol change → bump `EMBED_PROTOCOL_VERSION` in `packages/chat-ui/src/protocol.ts`, handle the message on both sides in the same commit.
 3. Shell checks (`src/frontend`): `npx tsc --noEmit`, `npx eslint .`, `npx vitest run`. Backend: `pytest tests/test_omp_web.py tests/test_omp_web_launcher.py`.
 4. Overlay checks need a private omp-web checkout (below). Never rsync into the served checkout D, another agent's overlay would be replaced.
@@ -51,7 +49,7 @@ Upstream changes must be refactors without behaviour change or features/fixes va
 ### Private overlay check checkout
 
 ```bash
-task=<task>; G=~/git/worktrees/gigachad-bot/$task; C=~/.local/share/gigachad-bot/ompweb-check-$task
+task=<task>; G=~/git/gigachad-bot; C=~/.local/share/gigachad-bot/ompweb-check-$task
 git -C ~/git/ompweb_original worktree add --detach "$C" integration_patrick_ab   # once
 cd "$C" && npm ci && git apply "$G/ompweb-overlay/seams.patch"                    # once
 # every check:
@@ -75,24 +73,24 @@ An override typechecks against the upstream module it wraps, so an upstream chan
 
 | Resource | Owner | Rule |
 |---|---|---|
-| Frontend 2999 + backend 8001 (`run.sh`, tmux `gigachad-bot`) | user | Never start a second copy, never restart without the user. Serves one gigachad-bot worktree only |
+| Frontend 2999 + backend 8001 (`run.sh`, tmux `gigachad-bot`) | user | Never start a second copy, never restart without the user. Serves `~/git/gigachad-bot` |
 | omp-web 30177 (served checkout D) | integrator | One instance per machine, it owns the omp session processes. Others never stop or rebuild it |
 | `integration_patrick_ab` branch | integrator | Agents commit to topic branches, the integrator cherry-picks |
-| `ompweb-upstream` branch (gigachad-bot) | integrator | Agents commit to task branches, the integrator merges |
+| `master` (gigachad-bot) | user | The one branch `run.sh` serves. Commit only on the user's request |
 | omp sessions | user | Never send prompts or click Edit/Fork in existing sessions. Live tests only in a throwaway session the user approved (e.g. new session in `/tmp`) |
 
 Parallel-safe slices: overlay theme/CSS, a single overlay override, shell `features/omp/`, `chat-ui` components, one upstream seam per topic. Serialize: `protocol.ts` (one owner per protocol version), `seams.patch`, `run-omp-web.sh`, the overlay `next.config.ts` override list.
 
 ## Restart and live smoke (integrator)
 
-1. Merge task branches into the served gigachad-bot worktree, cherry-pick upstream commits into `integration_patrick_ab`.
+1. Cherry-pick upstream commits into `integration_patrick_ab`. gigachad-bot changes are already in `~/git/gigachad-bot`.
 2. Check omp-web is idle: `curl -s http://127.0.0.1:30177/api/sessions` → `runningSessionIds` empty.
-3. Restart: stop the `node bin/omp-web.js --port 30177` process, then `agent-proc start ompweb ./run-omp-web.sh` from the served worktree. Build takes ~2 min.
+3. Restart: restarting `run.sh` rebuilds omp-web, it stops the omp-web it started on exit. Without it: stop the `node bin/omp-web.js --port 30177` process, then `agent-proc start ompweb ./run-omp-web.sh` from `~/git/gigachad-bot`. Build takes ~2 min.
 4. Smoke at `http://localhost:2999` (not `127.0.0.1`: Next dev never hydrates there): open an omp session, switch omp tabs, check the changed surface. Send prompts only in an approved throwaway session.
 
 ## Pitfalls
 
-- `run.sh` relaunches `run-omp-web.sh` when 30177 is down: stopping omp-web while `run.sh` runs races two builds ("Another next build process is already running"). Wait for the port instead of starting a second launch.
+- `run.sh` reuses an omp-web already on 30177 (e.g. started by `agent-proc`) and keeps it running on exit, so its overlay stays until that process is restarted. The launcher warns when the reused instance serves another overlay.
 - A launch fails if `src/frontend/node_modules` is being reinstalled (`pack.mjs` needs `typescript`). Retry after the install.
 - Moving or deleting frontend files under a running `next dev` can leave a stale module graph (500, "Element type is invalid"). Restarting `run.sh` fixes it, ask the user.
 - The served checkout D only changes on a restart. A built overlay change is invisible until then.
