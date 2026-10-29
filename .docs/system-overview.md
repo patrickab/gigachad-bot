@@ -117,7 +117,7 @@ Use [architecture](architecture.md) for implementation, persistence, access boun
 ## omp tabs (omp-web)
 
 - Open external OMP coding sessions as workspace tabs. Sessions for a project's linked code mount appear under code; other workspaces appear under OMP.
-- Navigate session forks and in-session branches, restore archives, and open returned file links under the shell's file-access policy.
+- Navigate session forks and in-session branches, restore archives, and open returned file links under the shell's file-access policy. An extension command can open a file the same way, e.g. `/files` picks a file the session changed and opens it in the file panel (Neovim when enabled).
 - Use the shell composer for prompts, images, documents, abort, model/thinking selection, and `/` or `@` completion. Omp-web owns execution, queueing, shell commands, and session creation.
 - Shell composition does not provide local-chat word prediction or busy-run steering/queueing. Persisted OMP messages cannot be deleted, and frame DOCX/PDF previews are blocked by `SAMEORIGIN`.
 - OMP features require host access and a running compatible omp-web service. Restart it after updates so it picks up the current overlay. Integration ownership, shared rendering/bridge contracts, and deployment compatibility belong in [architecture](architecture.md); operational steps are indexed in [AGENTS.md](../AGENTS.md#documentation).
