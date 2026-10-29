@@ -78,6 +78,10 @@ uv sync --python 3.12 --no-dev
 if [[ ! -d src/c4/node_modules ]] || ! git diff --quiet "$old" "$new" -- src/c4/package-lock.json; then
     npm ci --prefix src/c4 --no-audit --no-fund
 fi
+# run-omp-web.sh packs @gigachad/chat-ui with src/frontend's tsc and types. Scripts stay off, only tsc runs.
+if [[ ! -d src/frontend/node_modules ]] || ! git diff --quiet "$old" "$new" -- src/frontend/package-lock.json; then
+    npm ci --prefix src/frontend --ignore-scripts --no-audit --no-fund
+fi
 if ! git diff --quiet "$old" "$new" -- deploy; then
     printf "deploy/ changed: run deploy/install-systemd-service.sh to reinstall the units\n" >&2
 fi

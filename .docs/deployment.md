@@ -213,6 +213,9 @@ git clone https://github.com/kahme247/ompweb.git "$HOME/git/ompweb_original"
 - `run-omp-web.sh` serves a detached worktree reset to the ref on each start,
   applies `ompweb-overlay/seams.patch`, copies the overlay to `custom/` and packs
   `@gigachad/chat-ui` into it. The source checkout stays untouched.
+- Packing compiles with `src/frontend`'s TypeScript and types, so production
+  needs `src/frontend/node_modules`. `redeploy.sh` installs it (`npm ci
+  --ignore-scripts`) when missing or when the lockfile changed.
 - Install/build initially and rebuild on source changes.
 - Restart after updates: an existing listener is reused.
 
