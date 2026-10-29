@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { File as FileIcon } from "lucide-react"
 import type { Attachment } from "@/lib/domain/types"
 import { TabContext } from "@/contexts/TabContext"
 import { nextTab } from "@/features/navigation/tabs"
@@ -55,6 +56,29 @@ describe("ChatInput context chips", () => {
     expect(screen.getByRole("button", { name: "Preview Roadmap.md" })).toHaveTextContent("Roadmap.md")
     fireEvent.click(screen.getByRole("button", { name: "Remove Roadmap.md" }))
     expect(context.onRemove).toHaveBeenCalledWith(0, "plan.md")
+  })
+})
+
+describe("ChatInput Escape", () => {
+  afterEach(() => { cleanup(); vi.useRealTimers() })
+
+  it("closes an open completion menu first, then leaves the draft", async () => {
+    vi.useFakeTimers()
+    const complete = async () => [{ label: "a.ts", icon: FileIcon, from: 0, to: 2, insert: "@a.ts ", caretOffset: 6 }]
+    render(<ChatInput chatId="c1" onSend={() => {}} complete={complete} />)
+    const draft = screen.getByRole("textbox") as HTMLTextAreaElement
+    draft.focus()
+    fireEvent.change(draft, { target: { value: "@a", selectionStart: 2 } })
+    await act(() => vi.advanceTimersByTimeAsync(100))
+    expect(screen.getByRole("listbox")).toBeInTheDocument()
+
+    fireEvent.keyDown(draft, { key: "Escape" })
+    expect(screen.queryByRole("listbox")).toBeNull()
+    expect(draft).toHaveFocus()
+
+    fireEvent.keyDown(draft, { key: "Escape" })
+    expect(draft).not.toHaveFocus()
+    expect(draft.value).toBe("@a")
   })
 })
 

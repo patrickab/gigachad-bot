@@ -120,8 +120,10 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     adjustHeightNextFrame()
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  // Escape layers (completion menu, dialogs) take Escape first, a free Escape leaves the draft
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (draftPicker.handleKey(e) || completions.handleKey(e, text)) return
+    if (e.key === "Escape" && !e.nativeEvent.isComposing) { e.preventDefault(); e.currentTarget.blur() }
     if (e.key === "Enter" && !e.shiftKey && !isStreaming && !extracting) { e.preventDefault(); handleSubmit() }
   }
 
