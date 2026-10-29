@@ -193,8 +193,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   `-- useWorktrees.tsx
 |       |   |-- omp/                  Single-frame surface, bridge, composer and sessions
 |       |   |   |-- OmpProvider.tsx
-|       |   |   |-- OmpComposer.tsx
-|       |   |   `-- OmpSelect.tsx     Fuzzy finder for an omp extension's `select` (e.g. `/files`)
+|       |   |   `-- OmpComposer.tsx   Shell composer: `/` menu, skills, extension selects as an inline picker
 |       |   |-- factory/              Boards, task details, settings and previews
 |       |   |   |-- FactoryBoard.tsx
 |       |   |   `-- TaskView.tsx

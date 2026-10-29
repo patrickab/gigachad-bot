@@ -8,7 +8,7 @@ import { useSpeechInput } from "@/hooks/useSpeechInput"
 import type { Attachment } from "@/lib/domain/types"
 import { AttachmentPreview } from "@/features/chat/preview/AttachmentPreview"
 import { AttachmentChip, type ContextAttachment } from "./AttachmentChip"
-import { CompletionMenu, useCompletions, type CompleteDraft } from "./CompletionMenu"
+import { CompletionMenu, useCompletions, useDraftPicker, type CompleteDraft, type DraftPicker } from "./CompletionMenu"
 import { AttachMenu, ICON_BUTTON, SendButton, ToolsMenu } from "./ComposerControls"
 import { DrawingAttach, type DrawingMode } from "./DrawingAttach"
 import { useDraftAttachments } from "./useDraftAttachments"
@@ -26,6 +26,8 @@ interface ChatInputProps {
   placeholder?: string
   /** Suggestions while typing (omp commands and files), none without. */
   complete?: CompleteDraft
+  /** A choice the draft filters (an omp extension's `select`), shown instead of suggestions. Enter picks, never sends, while set. */
+  picker?: DraftPicker
   /** Mode note under the draft, e.g. that `!ls` runs in a shell, null for none. */
   hint?: (text: string, attachmentCount: number) => string | null
   /** Attachments of earlier messages, shown as chips before the draft's own. */
@@ -68,6 +70,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   toolsMenu = true,
   placeholder = "Message",
   complete,
+  picker,
   hint,
   context,
   attachMenuItems = [],
@@ -92,6 +95,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     adjustHeightNextFrame()
   }, [adjustHeightNextFrame])
   const completions = useCompletions(complete, textareaRef, replaceText)
+  const focusDraft = useCallback(() => textareaRef.current?.focus(), [])
+  const clearDraft = useCallback(() => replaceText(""), [replaceText])
+  const draftPicker = useDraftPicker(picker, text, focusDraft, clearDraft)
   const { isListening, toggleListening } = useSpeechInput(text, setText, adjustHeightNextFrame)
 
   useImperativeHandle(ref, () => ({
@@ -115,7 +121,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (completions.handleKey(e, text)) return
+    if (draftPicker.handleKey(e) || completions.handleKey(e, text)) return
     if (e.key === "Enter" && !e.shiftKey && !isStreaming && !extracting) { e.preventDefault(); handleSubmit() }
   }
 
@@ -132,7 +138,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     }
   }
 
-  const canSend = text.trim().length > 0 || attachments.length > 0
+  const canSend = !picker && (text.trim().length > 0 || attachments.length > 0)
   const hintText = hint?.(text, attachments.length) ?? null
   const menuItems: (AttachMenuItem & { iconClassName?: string })[] = [
     ...attachMenuItems,
@@ -166,17 +172,28 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       )}
 
       <div className="relative z-20 rounded-2xl border border-divider/50 px-4 pb-2.5 pt-3.5 transition-all duration-300 bg-surface shadow-[var(--shadow-xl),var(--inner-highlight)] focus-within:border-divider focus-within:shadow-[var(--shadow-xl),var(--inner-highlight-strong)]">
-          <CompletionMenu
-            items={completions.items}
-            activeIndex={completions.activeIndex}
-            onHover={completions.setActiveIndex}
-            onApply={(item) => completions.apply(text, item)}
-          />
+          {picker ? (
+            <CompletionMenu
+              label={picker.label}
+              items={draftPicker.items}
+              activeIndex={draftPicker.activeIndex}
+              onHover={draftPicker.setActiveIndex}
+              onApply={(item) => draftPicker.pick(item.key)}
+              emptyText="No matches"
+            />
+          ) : (
+            <CompletionMenu
+              items={completions.items}
+              activeIndex={completions.activeIndex}
+              onHover={completions.setActiveIndex}
+              onApply={(item) => completions.apply(text, item)}
+            />
+          )}
           <textarea
             ref={textareaRef}
             rows={1}
             value={text}
-            onChange={(e) => { setText(e.target.value); adjustHeight(); completions.request(e.target.value, e.target.selectionStart) }}
+            onChange={(e) => { setText(e.target.value); adjustHeight(); if (!picker) completions.request(e.target.value, e.target.selectionStart) }}
             onKeyDown={handleKeyDown}
             onBlur={completions.close}
             onPaste={handlePaste}

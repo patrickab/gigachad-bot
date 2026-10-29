@@ -7,8 +7,6 @@ import { useElementSize } from "@/hooks/useElementSize"
 import type { OmpView } from "@/lib/domain/types"
 import { useOmp } from "./OmpProvider"
 import { OmpComposer } from "./OmpComposer"
-import { OmpSelect } from "./OmpSelect"
-import { isComposerOf } from "./composer"
 import { viewTitle } from "./sessions"
 
 /** Height of the shell's top bar (`TopBar`, h-11) the transcript scrolls beneath. */
@@ -22,7 +20,7 @@ const TOP_BAR_PX = 44
  */
 export function OmpSurface({ view, onViewChange }: { view: OmpView; onViewChange: (view: OmpView) => void }) {
   const { tab, isActive, setTitle } = useTab()
-  const { attachFrame, setFrameInsets, frameStatus, ompWebUrl, overview, reloadFrame, pendingSelect, answerSelect } = useOmp()
+  const { attachFrame, setFrameInsets, frameStatus, ompWebUrl, overview, reloadFrame } = useOmp()
   const openFile = useOpenFile()
   const [slot, setSlot] = useState<HTMLDivElement | null>(null)
   const title = viewTitle(view, overview)
@@ -46,7 +44,6 @@ export function OmpSurface({ view, onViewChange }: { view: OmpView; onViewChange
     setFrameInsets(hasComposer ? { top: TOP_BAR_PX, bottom: composerHeight } : { top: 0, bottom: 0 })
   }, [isActive, hasComposer, composerHeight, setFrameInsets])
 
-  const shownSelect = isActive && pendingSelect && isComposerOf(view, pendingSelect.sessionId) ? pendingSelect.request : null
   return (
     <div className="relative h-full w-full">
       <div ref={setSlot} className="absolute inset-0 flex items-center justify-center">
@@ -67,7 +64,6 @@ export function OmpSurface({ view, onViewChange }: { view: OmpView; onViewChange
           </div>
         </div>
       )}
-      {shownSelect && <OmpSelect key={shownSelect.id} request={shownSelect} onAnswer={answerSelect} />}
     </div>
   )
 }

@@ -10,7 +10,7 @@ import { useRequiredContext } from "@/hooks/useRequiredContext"
 import { useThemeName } from "@/hooks/useThemeName"
 import { fetchOmpOverview } from "@/lib/backend/api"
 import type { OmpOverview, OmpView } from "@/lib/domain/types"
-import type { ComposerState } from "./composer"
+import type { ComposerCommands, ComposerState } from "./composer"
 import { EMBED_CHANNEL, EMBED_PROTOCOL_VERSION, type BranchNode, type Envelope, type FrameMessage, type KeyChord, type SelectRequest, type ShellMessage } from "@gigachad/chat-ui/protocol"
 
 type ComposerCommand = Extract<ShellMessage, { type: `composer-${string}` }>
@@ -64,6 +64,8 @@ interface OmpContextValue {
   reloadFrame: () => void
   /** Composer state of the session the frame shows, null until the frame reported one. */
   composer: ComposerState | null
+  /** Skills and slash commands of the composer the frame shows, null until reported. */
+  composerCommands: ComposerCommands | null
   sendToComposer: (command: ComposerCommand) => void
   /** Listen for composer events of one `type`, returns the unsubscribe. */
   onComposerEvent: <T extends ComposerEvent["type"]>(type: T, listener: ComposerEventListener<T>) => () => void
@@ -190,6 +192,7 @@ export function OmpProvider({ children }: { children: ReactNode }) {
   const [frameKey, setFrameKey] = useState(0)
   const [branchTree, setBranchTree] = useState<BranchTree | null>(null)
   const [composer, setComposer] = useState<ComposerState | null>(null)
+  const [composerCommands, setComposerCommands] = useState<ComposerCommands | null>(null)
   const [insets, setInsets] = useState<FrameInsets>({ top: 0, bottom: 0 })
   /** A modal dialog is open in the frame. */
   const [modalOpen, setModalOpen] = useState(false)
@@ -247,6 +250,7 @@ export function OmpProvider({ children }: { children: ReactNode }) {
     lastNewCwdRef.current = null
     setFrameStatus("ready")
     setComposer(null)
+    setComposerCommands(null)
     setModalOpen(false)
     setPendingSelect(null)
     post({ type: "hello", version: EMBED_PROTOCOL_VERSION, forwardKeys: FORWARD_KEYS, theme })
@@ -265,6 +269,7 @@ export function OmpProvider({ children }: { children: ReactNode }) {
       else if (message.type === "view") onFrameView(message)
       else if (message.type === "branch-tree") setBranchTree({ sessionId: message.sessionId, tree: message.tree, activeLeafId: message.activeLeafId })
       else if (message.type === "composer") setComposer(message)
+      else if (message.type === "composer-commands") setComposerCommands(message)
       else if (message.type === "composer-restore" || message.type === "composer-completions") composerListenersRef.current.forEach((listener) => listener(message))
       else if (message.type === "key") {
         const { key, altKey, ctrlKey, metaKey, shiftKey } = message
@@ -336,9 +341,9 @@ export function OmpProvider({ children }: { children: ReactNode }) {
   }, [pendingSelect, post])
 
   const value = useMemo<OmpContextValue>(() => ({
-    overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, setFrameInsets, reloadFrame, composer, sendToComposer: post, onComposerEvent,
+    overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, setFrameInsets, reloadFrame, composer, composerCommands, sendToComposer: post, onComposerEvent,
     pendingSelect, answerSelect,
-  }), [overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, setFrameInsets, reloadFrame, composer, post, onComposerEvent, pendingSelect, answerSelect])
+  }), [overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, setFrameInsets, reloadFrame, composer, composerCommands, post, onComposerEvent, pendingSelect, answerSelect])
 
   const visible = attachment !== null && frameStatus === "ready"
   useEffect(() => {

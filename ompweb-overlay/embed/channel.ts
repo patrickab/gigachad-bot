@@ -5,7 +5,8 @@ type ShellHandler<Type extends ShellMessageType> = (message: Extract<ShellMessag
 
 /** Frame messages that describe current state: kept and replayed on every `hello`. */
 const IS_STATE_MESSAGE: Record<FrameMessage["type"], boolean> = {
-  ready: false, view: true, "branch-tree": true, key: false, composer: true, "composer-restore": false, "composer-completions": false, "open-file": false, modal: true, select: true,
+  ready: false, view: true, "branch-tree": true, key: false, composer: true, "composer-restore": false, "composer-completions": false, "composer-commands": true,
+  "open-file": false, modal: true, select: true,
 };
 
 let shellOrigin: string | null = null;

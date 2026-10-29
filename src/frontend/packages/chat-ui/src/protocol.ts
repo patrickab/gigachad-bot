@@ -6,7 +6,7 @@
  * - Every message carries `channel: EMBED_CHANNEL` so unrelated postMessage traffic is ignored
  */
 export const EMBED_CHANNEL = "omp-embed"
-export const EMBED_PROTOCOL_VERSION = 9
+export const EMBED_PROTOCOL_VERSION = 10
 
 export type ThemeMode = "light" | "dark"
 
@@ -36,11 +36,11 @@ export type ModelRef = { provider: string; modelId: string }
 export type ComposerImage = { data: string; mimeType: string }
 
 /**
- * One autocomplete row: an omp command (`/name`, extensions, prompts and skills only) or a file under the session cwd (`@path`).
+ * One `@` autocomplete row: a file or directory under the session cwd.
  * Applying it replaces `text.slice(from, to)` with `insert` and puts the caret at `from + caretOffset`.
  */
 export type Completion = {
-  kind: "extension" | "prompt" | "skill" | "file" | "directory"
+  kind: "file" | "directory"
   label: string
   detail?: string
   from: number
@@ -48,6 +48,12 @@ export type Completion = {
   insert: string
   caretOffset: number
 }
+
+/** An omp slash command other than a skill (`/name`): an extension command or a prompt template. */
+export type SlashCommand = { name: string; description?: string; kind: "extension" | "prompt" }
+
+/** A skill omp resolves for the session's directory, run as `/skill:<name>`. */
+export type Skill = { name: string; description?: string }
 
 /** An omp extension's `select` request (`ctx.ui.select`), e.g. `/files`. `options` are its labels in the extension's order. */
 export type SelectRequest = { id: string; title: string; options: string[] }
@@ -74,8 +80,10 @@ export type ShellMessage =
   | ({ type: "composer-set-model"; sessionId: string | null } & ModelRef)
   /** One of the composer's `thinkingLevels`. */
   | { type: "composer-set-thinking"; sessionId: string | null; level: string }
-  /** Completions for the draft at `caret`, answered by `composer-completions` with the same `requestId`. */
+  /** `@` completions for the draft at `caret`, answered by `composer-completions` with the same `requestId`. */
   | { type: "composer-complete"; sessionId: string | null; requestId: number; text: string; caret: number }
+  /** Load the session's slash commands, reported in `composer-commands`. Resumes the session's omp process when idle, so sent on the first `/` only. */
+  | { type: "composer-load-commands"; sessionId: string }
   /** Answer to `select`: the picked option, null cancels. Ignored unless `id` is still the request shown for `sessionId`. */
   | { type: "select-answer"; sessionId: string | null; id: string; value: string | null }
 
@@ -99,6 +107,8 @@ export type FrameMessage =
   | { type: "composer-restore"; sessionId: string | null; text: string; replace: { lead: string; fallback: string } | null; images: ComposerImage[] }
   /** Answer to `composer-complete`, empty when nothing matches or the lookup failed. */
   | { type: "composer-completions"; sessionId: string | null; requestId: number; items: Completion[] }
+  /** Skills of the composer's directory and the session's other slash commands (empty until `composer-load-commands`), on every change. The shell filters its `/` menu from them. */
+  | { type: "composer-commands"; sessionId: string | null; skills: Skill[]; commands: SlashCommand[] }
   /** The user clicked a link to a local file, the shell shows it instead of omp-web's file panel. `path` is absolute. */
   | { type: "open-file"; path: string }
   /** Whether a modal dialog (e.g. a subagent transcript) is open. The shell dims and blurs its own chrome around the frame alike. */

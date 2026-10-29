@@ -57,3 +57,45 @@ describe("ChatInput context chips", () => {
     expect(context.onRemove).toHaveBeenCalledWith(0, "plan.md")
   })
 })
+
+describe("ChatInput picker", () => {
+  afterEach(cleanup)
+
+  const options = ["./scripts/setup.sh", "./README.md", "./notes/readme-old.md"]
+
+  function renderPicker() {
+    const onSend = vi.fn()
+    const picker = {
+      label: "Files changed by this session",
+      items: (query: string) => options.filter((option) => option.toLowerCase().includes(query)).map((option) => ({ key: option, label: option })),
+      onPick: vi.fn(),
+      onCancel: vi.fn(),
+    }
+    render(<ChatInput chatId="c1" onSend={onSend} picker={picker} />)
+    return { onSend, picker, draft: screen.getByRole("textbox") as HTMLTextAreaElement }
+  }
+
+  it("takes focus, filters by the draft and picks the arrowed row on Enter without sending it", () => {
+    const { onSend, picker, draft } = renderPicker()
+    expect(draft).toHaveFocus()
+    fireEvent.change(draft, { target: { value: "readme" } })
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(["./README.md", "./notes/readme-old.md"])
+    fireEvent.keyDown(draft, { key: "ArrowDown" })
+    fireEvent.keyDown(draft, { key: "Enter" })
+    expect(picker.onPick).toHaveBeenCalledWith("./notes/readme-old.md")
+    expect(onSend).not.toHaveBeenCalled()
+    expect(draft.value).toBe("")
+  })
+
+  it("keeps the menu open without matches, Enter then neither picks nor sends, Escape cancels", () => {
+    const { onSend, picker, draft } = renderPicker()
+    fireEvent.change(draft, { target: { value: "zzz" } })
+    expect(screen.getByRole("listbox", { name: "Files changed by this session" })).toHaveTextContent("No matches")
+    fireEvent.keyDown(draft, { key: "Enter" })
+    expect(picker.onPick).not.toHaveBeenCalled()
+    expect(onSend).not.toHaveBeenCalled()
+    fireEvent.keyDown(draft, { key: "Escape" })
+    expect(picker.onCancel).toHaveBeenCalledOnce()
+    expect(draft.value).toBe("")
+  })
+})

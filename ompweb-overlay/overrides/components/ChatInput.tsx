@@ -8,10 +8,11 @@ import { getSubmitDuringRunBehavior } from "@/lib/composer-prefs";
 import { clearDraft, subscribeDraftRecovery } from "@/lib/draft-store";
 import { selectableThinkingLevels } from "@/lib/thinking-levels";
 import { isEmbedded } from "../../components/EmbedMode";
+import { useIsEmbedded } from "../../components/useIsEmbedded";
 import { isShellConnected, onShellMessage, postToShell } from "../../embed/channel";
-import { commandCompletions, fileCompletions, slashQueryOf } from "../../embed/completions";
+import { fileCompletions } from "../../embed/completions";
+import { useShellCommands } from "../../embed/slash-commands";
 import type { Completion, ComposerImage } from "@gigachad/chat-ui/protocol";
-import type { SlashCommandInfo } from "@/hooks/useAgentSession";
 
 export * from "../../../components/ChatInput";
 
@@ -44,18 +45,8 @@ function showAttachError(error: string | null) {
   if (error) toast.error(error);
 }
 
-/**
- * Completions for the shell's draft: omp commands for a `/word` draft, else files for an `@` token before the caret.
- *
- * - `loadCommands` runs only when the session reported no commands yet, the way upstream's menu asks once per open
- * - No `cwd` (new session without a directory): no file completions, like upstream
- */
-async function completionsFor(props: Props, text: string, caret: number, loadCommands: () => Promise<SlashCommandInfo[]>): Promise<Completion[]> {
-  const slashQuery = slashQueryOf(text);
-  if (slashQuery !== null) {
-    const commands = props.slashCommands?.length ? props.slashCommands : await loadCommands();
-    return commandCompletions(commands, text, slashQuery);
-  }
+/** `@` completions for the shell's draft. No `cwd` (new session without a directory): none, like upstream. */
+async function completionsFor(props: Props, text: string, caret: number): Promise<Completion[]> {
   if (!props.cwd) return [];
   return (await fileCompletions(props.cwd, text, caret)) ?? [];
 }
@@ -67,13 +58,14 @@ async function completionsFor(props: Props, text: string, caret: number, loadCom
  * - In: `composer-abort`, `composer-set-model`, `composer-set-thinking`, through the same props upstream's own controls call
  * - `composer-send` goes through upstream's `useComposerSubmit` like its Enter key: a follow-up (or steer, per Settings) while busy.
  *   Text the submit path keeps (refused, `/btw` with images, failed builtin) returns as `composer-restore`, as do rejected prompts
- * - `composer-complete` is answered with `composer-completions` (commands, `@` files)
+ * - `composer-complete` is answered with `composer-completions` (`@` files), `/` commands go out as `composer-commands` state
  * - Standalone: upstream unchanged
  */
 export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatInput(props, ref) {
   const propsRef = useRef(props);
   useEffect(() => { propsRef.current = props; });
   const sessionId = composerSessionId(props.draftKey);
+  useShellCommands(useIsEmbedded(), sessionId, props.cwd ?? undefined, props.slashCommands, props.onLoadSlashCommands);
   const { isStreaming, availableThinkingLevels } = props;
   const provider = props.model?.provider;
   const modelId = props.model?.modelId;
@@ -163,18 +155,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     postToShell({ type: "composer-restore", sessionId, text, replace: null, images });
   }, [resume]);
 
-  // One command load per composer key: a session without commands must not reload on every keystroke.
-  const commandsRequestedForRef = useRef<string | undefined>(undefined);
-
   useEffect(() => {
     if (!isEmbedded()) return;
     const isForThisComposer = (target: string | null) => target === composerSessionId(propsRef.current.draftKey);
-    const loadCommands = async () => {
-      const { draftKey, onLoadSlashCommands } = propsRef.current;
-      if (!onLoadSlashCommands || commandsRequestedForRef.current === draftKey) return [];
-      commandsRequestedForRef.current = draftKey;
-      return onLoadSlashCommands();
-    };
     const unsubscribers = [
       onShellMessage("composer-send", (message) => {
         if (!isForThisComposer(message.sessionId)) return;
@@ -192,7 +175,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       onShellMessage("composer-complete", ({ sessionId: target, requestId, text, caret }) => {
         if (!isForThisComposer(target)) return;
         const answer = (items: Completion[]) => postToShell({ type: "composer-completions", sessionId: target, requestId, items });
-        completionsFor(propsRef.current, text, caret, loadCommands).then(answer, () => answer([]));
+        completionsFor(propsRef.current, text, caret).then(answer, () => answer([]));
       }),
     ];
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());

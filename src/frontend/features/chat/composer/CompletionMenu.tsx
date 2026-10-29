@@ -1,15 +1,20 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react"
 import type { LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useEscapeLayer } from "@/hooks/useEscapeLayer"
+import { useResetOnChange } from "@/hooks/useResetOnChange"
 
-/** One suggestion for the draft. Applying it replaces `text.slice(from, to)` with `insert`, caret at `from + caretOffset`. */
-export interface ComposerCompletion {
+/** One row of the menu above the composer. */
+export interface MenuItem {
   label: string
   detail?: string
-  icon: LucideIcon
+  icon?: LucideIcon
   /** Monospace label, for paths. */
   mono?: boolean
+}
+
+/** One suggestion for the draft. Applying it replaces `text.slice(from, to)` with `insert`, caret at `from + caretOffset`. */
+export interface ComposerCompletion extends MenuItem {
   from: number
   to: number
   insert: string
@@ -27,6 +32,7 @@ const REQUEST_DELAY_MS = 80
  * - `request` after every edit, debounced, only the latest answer shows
  * - `handleKey` drives the open menu (arrows, Enter/Tab apply) and reports whether it took the key; Escape closes it through an escape layer
  * - Applying asks again, so a directory keeps the menu open for its contents
+ * - A new `complete` (its source loaded more) answers the open query again
  */
 export function useCompletions(
   complete: CompleteDraft | undefined,
@@ -37,17 +43,21 @@ export function useCompletions(
   const [activeIndex, setActiveIndex] = useState(0)
   const latestRequestRef = useRef(0)
   const timerRef = useRef<number | undefined>(undefined)
+  /** Draft of the latest request, null once closed. */
+  const openQueryRef = useRef<{ text: string; caret: number } | null>(null)
 
   useEffect(() => () => window.clearTimeout(timerRef.current), [])
 
   const close = useCallback(() => {
     latestRequestRef.current += 1
+    openQueryRef.current = null
     window.clearTimeout(timerRef.current)
     setItems([])
   }, [])
 
   const request = useCallback((text: string, caret: number) => {
     if (!complete) return
+    openQueryRef.current = { text, caret }
     const requestId = ++latestRequestRef.current
     window.clearTimeout(timerRef.current)
     timerRef.current = window.setTimeout(() => {
@@ -58,6 +68,11 @@ export function useCompletions(
       }, () => {})
     }, REQUEST_DELAY_MS)
   }, [complete])
+
+  useEffect(() => {
+    const query = openQueryRef.current
+    if (query) request(query.text, query.caret)
+  }, [request])
 
   const apply = useCallback((text: string, item: ComposerCompletion) => {
     const next = text.slice(0, item.from) + item.insert + text.slice(item.to)
@@ -86,25 +101,90 @@ export function useCompletions(
   return { items, activeIndex, setActiveIndex, request, close, apply, handleKey }
 }
 
-/** Suggestion list above the composer, keyboard state from `useCompletions`. */
-export function CompletionMenu({ items, activeIndex, onHover, onApply }: {
-  items: ComposerCompletion[]
+/** A row of a `DraftPicker`, `key` identifies the pick. */
+export interface PickerItem extends MenuItem {
+  key: string
+}
+
+/**
+ * A choice the draft filters, shown in the menu instead of suggestions, e.g. an omp extension's `select`.
+ *
+ * Attributes
+ * ----------
+ * label : string
+ *     Accessible name of the menu.
+ * items : (query: string) => PickerItem[]
+ *     Rows matching the draft, best first.
+ */
+export interface DraftPicker {
+  label: string
+  items: (query: string) => PickerItem[]
+  onPick: (key: string) => void
+  onCancel: () => void
+}
+
+/**
+ * Keyboard state of a `DraftPicker` over the draft `text`: arrows move, Enter picks, Escape cancels, `onSettled` follows either.
+ *
+ * - Takes every Enter while open, so the draft (the picker's query) is never sent
+ * - Focuses the draft when the picker opens: the send that triggered it may have disabled, and so blurred, the textarea
+ */
+export function useDraftPicker(picker: DraftPicker | undefined, text: string, focusDraft: () => void, onSettled: () => void) {
+  const items = useMemo(() => picker?.items(text) ?? [], [picker, text])
+  const [activeIndex, setActiveIndex] = useState(0)
+  useResetOnChange(text, () => setActiveIndex(0))
+  useResetOnChange(picker, () => setActiveIndex(0))
+
+  const open = picker !== undefined
+  useEffect(() => { if (open) focusDraft() }, [open, focusDraft])
+
+  const pick = (key: string) => {
+    picker?.onPick(key)
+    onSettled()
+  }
+  useEscapeLayer(() => {
+    picker?.onCancel()
+    onSettled()
+  }, open)
+
+  const handleKey = (event: KeyboardEvent): boolean => {
+    if (!picker || event.nativeEvent.isComposing) return false
+    const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0
+    if (step !== 0) {
+      if (items.length > 0) setActiveIndex((index) => (index + step + items.length) % items.length)
+    } else if (event.key === "Enter" && !event.shiftKey) {
+      const item = items[activeIndex]
+      if (item) pick(item.key)
+    } else return false
+    event.preventDefault()
+    return true
+  }
+
+  return { items, activeIndex, setActiveIndex, pick, handleKey }
+}
+
+/** List above the composer, keyboard state from `useCompletions` or `useDraftPicker`. `emptyText` keeps it open without rows. */
+export function CompletionMenu<Item extends MenuItem>({ items, activeIndex, onHover, onApply, label = "Suggestions", emptyText }: {
+  items: Item[]
   activeIndex: number
   onHover: (index: number) => void
-  onApply: (item: ComposerCompletion) => void
+  onApply: (item: Item) => void
+  label?: string
+  emptyText?: string
 }) {
   const listRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     listRef.current?.querySelector(`[data-index="${activeIndex}"]`)?.scrollIntoView?.({ block: "nearest" })
   }, [activeIndex, items])
 
-  if (items.length === 0) return null
+  if (items.length === 0 && emptyText === undefined) return null
   return (
-    <div ref={listRef} role="listbox" aria-label="Suggestions"
+    <div ref={listRef} role="listbox" aria-label={label}
       className="absolute inset-x-0 bottom-full mb-2 max-h-72 overflow-y-auto rounded-xl border border-divider bg-paper p-1.5 shadow-[var(--shadow-xl)]"
     >
+      {items.length === 0 && <div className="px-3 py-1.5 text-xs text-ink-subtle">{emptyText}</div>}
       {items.map((item, index) => (
-        <button key={`${item.from}:${item.label}`} type="button" role="option" data-index={index}
+        <button key={`${index}:${item.label}`} type="button" role="option" data-index={index}
           aria-selected={index === activeIndex}
           // Keep focus in the textarea, its blur closes the menu
           onMouseDown={(event) => event.preventDefault()}
@@ -115,7 +195,7 @@ export function CompletionMenu({ items, activeIndex, onHover, onApply }: {
             index === activeIndex && "bg-surface-elevated",
           )}
         >
-          <item.icon className="h-3.5 w-3.5 shrink-0 text-ink-muted" />
+          {item.icon && <item.icon className="h-3.5 w-3.5 shrink-0 text-ink-muted" />}
           <span className={cn("max-w-[60%] shrink-0 truncate", item.mono && "font-mono")}>{item.label}</span>
           {item.detail && <span className="min-w-0 flex-1 truncate text-ink-subtle">{item.detail}</span>}
         </button>

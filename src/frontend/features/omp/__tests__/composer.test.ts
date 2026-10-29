@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Attachment, ModelsResponse } from "@/lib/domain/types"
-import { composerImageFile, isComposerOf, mergeRestoredText, ompModelOf, ompPrompt, ompSelectorModels, selectorModelId, shellHint } from "../composer"
+import {
+  composerImageFile, isComposerOf, mergeRestoredText, offersSkills, ompModelOf, ompPrompt, ompSelectorModels, optionParts, rankByName, rankOptions, selectorModelId, shellHint,
+  skillQueryOf, slashQueryOf,
+} from "../composer"
 
 describe("isComposerOf", () => {
   it("matches the session a view shows", () => {
@@ -105,5 +108,48 @@ describe("shellHint", () => {
 
   it("treats a draft with attachments as a prompt, like omp-web", () => {
     expect(shellHint("!ls", 1)).toBeNull()
+  })
+})
+
+describe("slash menu", () => {
+  it("opens only while the whole draft is one /word", () => {
+    expect(slashQueryOf("/Fi")).toBe("fi")
+    expect(slashQueryOf("/")).toBe("")
+    expect(slashQueryOf("/files now")).toBeNull()
+    expect(slashQueryOf("see /files")).toBeNull()
+  })
+
+  it("offers /skill: while typing towards it, and lists skills once the prefix is complete", () => {
+    expect(["", "s", "skill", "skill:"].map(offersSkills)).toEqual([true, true, true, true])
+    expect(["f", "skills", "sx"].map(offersSkills)).toEqual([false, false, false])
+    expect(skillQueryOf("skill:re")).toBe("re")
+    expect(skillQueryOf("skill:")).toBe("")
+    expect(skillQueryOf("skill")).toBeNull()
+  })
+
+  it("ranks commands by name match, alphabetical without a query", () => {
+    const commands = [
+      { name: "rmodel", kind: "extension" as const },
+      { name: "files", kind: "extension" as const },
+      { name: "fix-tests", kind: "prompt" as const },
+    ]
+    expect(rankByName(commands, "").map((command) => command.name)).toEqual(["files", "fix-tests", "rmodel"])
+    expect(rankByName(commands, "fi").map((command) => command.name)).toEqual(["files", "fix-tests"])
+    expect(rankByName(commands, "zz")).toEqual([])
+  })
+})
+
+describe("extension select options", () => {
+  const options = ["./scripts/setup_agent_sandbox.sh", "./README.md", "[agent session] ~/.omp/agent/sessions/a/2026.jsonl"]
+
+  it("splits a path into its last segment and the folder", () => {
+    expect(optionParts("./scripts/a.sh")).toEqual({ name: "a.sh", lead: "./scripts" })
+    expect(optionParts("plain")).toEqual({ name: "plain", lead: "" })
+  })
+
+  it("keeps the extension's order without a query and ranks a file name match first", () => {
+    expect(rankOptions(options, " ")).toEqual(options)
+    expect(rankOptions(options, "rdme")).toEqual(["./README.md"])
+    expect(rankOptions(options, "zzz")).toEqual([])
   })
 })

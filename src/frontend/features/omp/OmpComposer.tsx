@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useRef, type ComponentProps, type RefObject } from "react"
 import { File as FileIcon, Folder, MessageSquareText, Puzzle, Sparkles, type LucideIcon } from "lucide-react"
 import { withParsedAttachments } from "@/features/chat/attachments"
+import { useTab } from "@/contexts/TabContext"
 import { ChatInput, type ChatInputHandle } from "@/features/chat/composer/ChatInput"
-import type { CompleteDraft, ComposerCompletion } from "@/features/chat/composer/CompletionMenu"
+import type { CompleteDraft, ComposerCompletion, DraftPicker } from "@/features/chat/composer/CompletionMenu"
 import { TokenCounter } from "@/features/chat/TokenCounter"
 import { ModelDropdown } from "@/features/settings/ModelDropdown"
 import { ReasoningSelector } from "@/features/settings/ReasoningSelector"
@@ -12,24 +13,49 @@ import { parseFiles } from "@/lib/backend/api"
 import type { Attachment, OmpView } from "@/lib/domain/types"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
 import { ErrorText } from "@/components/ui/ErrorText"
-import { composerImageFile, isComposerOf, mergeRestoredText, ompModelOf, ompPrompt, ompSelectorModels, selectorModelId, shellHint } from "./composer"
+import {
+  composerImageFile, isComposerOf, mergeRestoredText, offersSkills, ompModelOf, ompPrompt, ompSelectorModels, optionParts, rankByName, rankOptions, selectorModelId,
+  shellHint, SKILL_PREFIX, skillQueryOf, slashQueryOf, type ComposerCommands,
+} from "./composer"
 import { useOmp } from "./OmpProvider"
-import type { Completion } from "@gigachad/chat-ui/protocol"
+import type { Completion, SlashCommand } from "@gigachad/chat-ui/protocol"
 
-const COMPLETION_ICONS: Record<Completion["kind"], LucideIcon> = {
-  extension: Puzzle, prompt: MessageSquareText, skill: Sparkles, file: FileIcon, directory: Folder,
-}
+const FILE_ICONS: Record<Completion["kind"], LucideIcon> = { file: FileIcon, directory: Folder }
+const COMMAND_ICONS: Record<SlashCommand["kind"], LucideIcon> = { extension: Puzzle, prompt: MessageSquareText }
 /** An unanswered completion request (frame reloading) resolves empty after this. */
 const COMPLETION_TIMEOUT_MS = 3_000
 /** Shared by every omp composer: answers go to all of them, the id picks the asker. */
 let lastCompletionRequestId = 0
 
 function toComposerCompletion(completion: Completion): ComposerCompletion {
-  const isPath = completion.kind === "file" || completion.kind === "directory"
-  return { ...completion, icon: COMPLETION_ICONS[completion.kind], mono: isPath }
+  return { ...completion, icon: FILE_ICONS[completion.kind], mono: true }
 }
 
-/** Ask the frame for suggestions for `sessionId`'s draft (`undefined`: no composer state yet, no suggestions). */
+/**
+ * The `/` menu for `query`, the whole draft replaced by the pick.
+ *
+ * - `/skill:` first, then the other commands. Picking it keeps the menu open on the skills, filtered by what follows `skill:`
+ */
+function slashCompletions(text: string, query: string, commands: ComposerCommands | null): ComposerCompletion[] {
+  const replaceDraft = { from: 0, to: text.length }
+  const skills = commands?.skills ?? []
+  const skillQuery = skillQueryOf(query)
+  if (skillQuery !== null) {
+    return rankByName(skills, skillQuery).map((skill) => {
+      const insert = `/${SKILL_PREFIX}${skill.name} `
+      return { label: `/${SKILL_PREFIX}${skill.name}`, detail: skill.description, icon: Sparkles, ...replaceDraft, insert, caretOffset: insert.length }
+    })
+  }
+  const skillEntry: ComposerCompletion[] = skills.length > 0 && offersSkills(query)
+    ? [{ label: `/${SKILL_PREFIX}`, detail: `${skills.length} skills`, icon: Sparkles, ...replaceDraft, insert: `/${SKILL_PREFIX}`, caretOffset: SKILL_PREFIX.length + 1 }]
+    : []
+  return [...skillEntry, ...rankByName(commands?.commands ?? [], query).map((command) => {
+    const insert = `/${command.name} `
+    return { label: `/${command.name}`, detail: command.description, icon: COMMAND_ICONS[command.kind], ...replaceDraft, insert, caretOffset: insert.length }
+  })]
+}
+
+/** Ask the frame for `@` suggestions for `sessionId`'s draft (`undefined`: no composer state yet, no suggestions). */
 function useFrameCompletions(sessionId: string | null | undefined): CompleteDraft | undefined {
   const { sendToComposer, onComposerEvent } = useOmp()
   const pendingRef = useRef(new Map<number, (items: Completion[]) => void>())
@@ -52,6 +78,29 @@ function useFrameCompletions(sessionId: string | null | undefined): CompleteDraf
   }, [sessionId, sendToComposer])
 }
 
+/**
+ * Suggestions for the draft: the `/` menu from the reported commands, filtered here so typing never waits on the frame, else the frame's `@` files.
+ *
+ * - The first `/` of a session asks the frame to load its commands (`composer-load-commands`), the open menu follows once they arrive
+ */
+function useComposerCompletions(sessionId: string | null | undefined, commands: ComposerCommands | null): CompleteDraft | undefined {
+  const { sendToComposer } = useOmp()
+  const frameComplete = useFrameCompletions(sessionId)
+  const loadRequestedRef = useRef(new Set<string>())
+  return useMemo(() => {
+    if (!frameComplete) return undefined
+    return async (text: string, caret: number) => {
+      const query = slashQueryOf(text)
+      if (query === null) return frameComplete(text, caret)
+      if (sessionId && !loadRequestedRef.current.has(sessionId)) {
+        loadRequestedRef.current.add(sessionId)
+        sendToComposer({ type: "composer-load-commands", sessionId })
+      }
+      return slashCompletions(text, query, commands)
+    }
+  }, [frameComplete, sessionId, commands, sendToComposer])
+}
+
 /** Put what omp hands back for `view` (abort-withdrawn queue, queue Edit) into the composer behind `inputRef`. */
 function useComposerRestore(view: OmpView, inputRef: RefObject<ChatInputHandle | null>) {
   const { onComposerEvent } = useOmp()
@@ -62,24 +111,34 @@ function useComposerRestore(view: OmpView, inputRef: RefObject<ChatInputHandle |
   }), [onComposerEvent, view, inputRef])
 }
 
-/**
- * Focus the composer once `view`'s extension `select` closes: the send that opened it disabled the input, which dropped focus.
- * A file the pick opens in Neovim takes focus later, once its terminal attaches.
- */
-function useFocusAfterSelect(view: OmpView, inputRef: RefObject<ChatInputHandle | null>) {
-  const { pendingSelect } = useOmp()
-  const selectOpen = pendingSelect !== null && isComposerOf(view, pendingSelect.sessionId)
-  const wasOpenRef = useRef(false)
-  useEffect(() => {
-    if (wasOpenRef.current && !selectOpen) inputRef.current?.focus()
-    wasOpenRef.current = selectOpen
-  }, [selectOpen, inputRef])
+/** `view`'s pending extension `select` (e.g. `/files`) as the active tab's draft picker, answered through the frame. A path option shows its folder beside it. */
+function useSelectPicker(view: OmpView): DraftPicker | undefined {
+  const { isActive } = useTab()
+  const { pendingSelect, answerSelect } = useOmp()
+  const request = isActive && pendingSelect && isComposerOf(view, pendingSelect.sessionId) ? pendingSelect.request : null
+  return useMemo(() => {
+    if (!request) return undefined
+    return {
+      label: request.title,
+      items: (query: string) => rankOptions(request.options, query).map((option) => {
+        const { name, lead } = optionParts(option)
+        return { key: option, label: name, detail: lead || undefined, icon: lead ? FileIcon : undefined }
+      }),
+      onPick: answerSelect,
+      onCancel: () => answerSelect(null),
+    }
+  }, [request, answerSelect])
 }
 
-/** The frame's composer state when it shows `view`, null while the frame loads or shows another view. */
+/** The frame's composer state and commands when it shows `view`, null while the frame loads or shows another view. */
 function useComposerFor(view: OmpView) {
-  const { composer, frameStatus, sendToComposer } = useOmp()
-  return { state: frameStatus === "ready" && composer && isComposerOf(view, composer.sessionId) ? composer : null, sendToComposer }
+  const { composer, composerCommands, frameStatus, sendToComposer } = useOmp()
+  const shown = frameStatus === "ready"
+  return {
+    state: shown && composer && isComposerOf(view, composer.sessionId) ? composer : null,
+    commands: shown && composerCommands && isComposerOf(view, composerCommands.sessionId) ? composerCommands : null,
+    sendToComposer,
+  }
 }
 
 /**
@@ -87,15 +146,17 @@ function useComposerFor(view: OmpView) {
  *
  * - Images go as omp images, documents as text the way gigachad chats send them
  * - Text and images omp hands back land in this composer
+ * - `/skill:` drills into the skills in the same menu, a pick becomes the draft `/skill:<name> `
+ * - An extension's `select` (e.g. `/files`) takes over the same menu, the draft filtering its options
  * - Disabled until the frame reports the composer of this tab's session
  */
 export function OmpComposer({ view, chatId, slug }: { view: OmpView; chatId: string; slug: string | null }) {
-  const { state, sendToComposer } = useComposerFor(view)
+  const { state, commands, sendToComposer } = useComposerFor(view)
   const inputRef = useRef<ChatInputHandle>(null)
   useComposerRestore(view, inputRef)
-  useFocusAfterSelect(view, inputRef)
+  const picker = useSelectPicker(view)
   const sessionId = state?.sessionId ?? null
-  const complete = useFrameCompletions(state?.sessionId)
+  const complete = useComposerCompletions(state?.sessionId, commands)
 
   const { run: send, pending: preparing, error } = useAsyncAction(async (text: string, attachments: Attachment[]) => {
     const prompt = await ompPrompt(text, attachments, (documents) => withParsedAttachments(documents, chatId, slug, parseFiles))
@@ -116,6 +177,7 @@ export function OmpComposer({ view, chatId, slug }: { view: OmpView; chatId: str
         toolsMenu={false}
         placeholder="Message omp"
         complete={complete}
+        picker={picker}
         hint={shellHint}
       />
       <ErrorText className="mx-auto mt-1 max-w-2xl px-1">{error}</ErrorText>
