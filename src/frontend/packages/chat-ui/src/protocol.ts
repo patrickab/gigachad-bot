@@ -6,7 +6,7 @@
  * - Every message carries `channel: EMBED_CHANNEL` so unrelated postMessage traffic is ignored
  */
 export const EMBED_CHANNEL = "omp-embed"
-export const EMBED_PROTOCOL_VERSION = 8
+export const EMBED_PROTOCOL_VERSION = 9
 
 export type ThemeMode = "light" | "dark"
 
@@ -49,6 +49,9 @@ export type Completion = {
   caretOffset: number
 }
 
+/** An omp extension's `select` request (`ctx.ui.select`), e.g. `/files`. `options` are its labels in the extension's order. */
+export type SelectRequest = { id: string; title: string; options: string[] }
+
 export type ShellMessage =
   /** Sent on every `ready`: the frame learns the shell origin and replays its current state. */
   | { type: "hello"; version: number; forwardKeys: KeyChord[]; theme: ThemeMode }
@@ -73,6 +76,8 @@ export type ShellMessage =
   | { type: "composer-set-thinking"; sessionId: string | null; level: string }
   /** Completions for the draft at `caret`, answered by `composer-completions` with the same `requestId`. */
   | { type: "composer-complete"; sessionId: string | null; requestId: number; text: string; caret: number }
+  /** Answer to `select`: the picked option, null cancels. Ignored unless `id` is still the request shown for `sessionId`. */
+  | { type: "select-answer"; sessionId: string | null; id: string; value: string | null }
 
 export type FrameMessage =
   /** Posted on every page load, the only message sent before `hello` (target origin "*", no data). */
@@ -98,5 +103,7 @@ export type FrameMessage =
   | { type: "open-file"; path: string }
   /** Whether a modal dialog (e.g. a subagent transcript) is open. The shell dims and blurs its own chrome around the frame alike. */
   | { type: "modal"; open: boolean }
+  /** The shown session's pending extension `select` (null: none). The shell picks in its finder, omp-web's own panel stays hidden. */
+  | { type: "select"; sessionId: string | null; request: SelectRequest | null }
 
 export type Envelope<Message> = Message & { channel: typeof EMBED_CHANNEL }

@@ -5,6 +5,7 @@ import { useAgentSession as useUpstreamAgentSession, type UseAgentSessionOptions
 import { useIsEmbedded } from "../../components/useIsEmbedded";
 import { postToShell } from "../../embed/channel";
 import { openFileNoticePath } from "../../embed/open-file";
+import { useShellSelect } from "../../embed/select";
 
 export * from "../../../hooks/useAgentSession";
 
@@ -13,11 +14,12 @@ function isOpenFileNotice(notice: { message: string }): boolean {
 }
 
 /**
- * Upstream session, whose open-file notices (`embed/open-file.ts`) open the file in gigachad-bot's file view when embedded.
+ * Upstream session with two extension UI requests handed to the shell when embedded.
  *
- * - An extension command reaches the browser only through omp's RPC UI requests, `notify` is the one carrying a value once
- * - The notice never shows, it is dismissed once the shell has the path
- * - Standalone: upstream unchanged, the notice names the file
+ * - Open-file notices (`embed/open-file.ts`) open the file in gigachad-bot's file view and never show. An extension command
+ *   reaches the browser only through omp's RPC UI requests, `notify` is the one carrying a value once
+ * - A `select` is picked in the shell's fuzzy finder (`embed/select.ts`), upstream's panel gets no dialog to render
+ * - Standalone: upstream unchanged
  */
 export function useAgentSession(options: UseAgentSessionOptions) {
   const session = useUpstreamAgentSession(options);
@@ -34,6 +36,9 @@ export function useAgentSession(options: UseAgentSessionOptions) {
     }
   }, [embedded, notices, dismissNotice]);
 
+  const selectInShell = useShellSelect(embedded, options.session?.id ?? null, session.extensionDialog, session.respondToExtensionUi);
+
   const shownNotices = useMemo(() => notices.filter((notice) => !isOpenFileNotice(notice)), [notices]);
-  return embedded && shownNotices.length !== notices.length ? { ...session, notices: shownNotices } : session;
+  if (!embedded) return session;
+  return { ...session, notices: shownNotices, extensionDialog: selectInShell ? null : session.extensionDialog };
 }

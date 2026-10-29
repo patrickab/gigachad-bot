@@ -11,11 +11,13 @@ import { useThemeName } from "@/hooks/useThemeName"
 import { fetchOmpOverview } from "@/lib/backend/api"
 import type { OmpOverview, OmpView } from "@/lib/domain/types"
 import type { ComposerState } from "./composer"
-import { EMBED_CHANNEL, EMBED_PROTOCOL_VERSION, type BranchNode, type Envelope, type FrameMessage, type KeyChord, type ShellMessage } from "@gigachad/chat-ui/protocol"
+import { EMBED_CHANNEL, EMBED_PROTOCOL_VERSION, type BranchNode, type Envelope, type FrameMessage, type KeyChord, type SelectRequest, type ShellMessage } from "@gigachad/chat-ui/protocol"
 
 type ComposerCommand = Extract<ShellMessage, { type: `composer-${string}` }>
 /** Frame messages for one composer, not state: delivered to `onComposerEvent` listeners, never kept. */
 export type ComposerEvent = Extract<FrameMessage, { type: "composer-restore" | "composer-completions" }>
+/** An omp extension's pending `select` and the session it belongs to. */
+export type PendingSelect = Extract<FrameMessage, { type: "select" }> & { request: SelectRequest }
 type ComposerEventListener<T extends ComposerEvent["type"]> = (event: Extract<ComposerEvent, { type: T }>) => void
 
 const OVERVIEW_POLL_MS = 15_000
@@ -65,6 +67,10 @@ interface OmpContextValue {
   sendToComposer: (command: ComposerCommand) => void
   /** Listen for composer events of one `type`, returns the unsubscribe. */
   onComposerEvent: <T extends ComposerEvent["type"]>(type: T, listener: ComposerEventListener<T>) => () => void
+  /** Extension `select` waiting in the session the frame shows, null when none. */
+  pendingSelect: PendingSelect | null
+  /** Answer `pendingSelect` with the picked option, null cancels. */
+  answerSelect: (value: string | null) => void
 }
 
 const OmpContext = createContext<OmpContextValue | null>(null)
@@ -187,6 +193,7 @@ export function OmpProvider({ children }: { children: ReactNode }) {
   const [insets, setInsets] = useState<FrameInsets>({ top: 0, bottom: 0 })
   /** A modal dialog is open in the frame. */
   const [modalOpen, setModalOpen] = useState(false)
+  const [pendingSelect, setPendingSelect] = useState<PendingSelect | null>(null)
   const frameRef = useRef<HTMLIFrameElement>(null)
   const [frame, setFrame] = useState<HTMLIFrameElement | null>(null)
   const attachFrameElement = useCallback((element: HTMLIFrameElement | null) => {
@@ -241,6 +248,7 @@ export function OmpProvider({ children }: { children: ReactNode }) {
     setFrameStatus("ready")
     setComposer(null)
     setModalOpen(false)
+    setPendingSelect(null)
     post({ type: "hello", version: EMBED_PROTOCOL_VERSION, forwardKeys: FORWARD_KEYS, theme })
     post({ type: "insets", ...insets })
     if (attachment) navigate(attachment.view, true)
@@ -264,6 +272,11 @@ export function OmpProvider({ children }: { children: ReactNode }) {
       }
       else if (message.type === "open-file") onOpenFile(message.path)
       else if (message.type === "modal") setModalOpen(message.open)
+      else if (message.type === "select") {
+        const { request, sessionId } = message
+        // A session's withdrawal must not clear the next session's request, its report may arrive first.
+        setPendingSelect((current) => (request ? { ...message, request } : current?.sessionId === sessionId ? null : current))
+      }
     }
     window.addEventListener("message", onMessage)
     return () => window.removeEventListener("message", onMessage)
@@ -316,9 +329,16 @@ export function OmpProvider({ children }: { children: ReactNode }) {
     return () => { listeners.delete(typed) }
   }, [])
 
+  const answerSelect = useCallback((value: string | null) => {
+    if (!pendingSelect) return
+    post({ type: "select-answer", sessionId: pendingSelect.sessionId, id: pendingSelect.request.id, value })
+    setPendingSelect(null)
+  }, [pendingSelect, post])
+
   const value = useMemo<OmpContextValue>(() => ({
     overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, setFrameInsets, reloadFrame, composer, sendToComposer: post, onComposerEvent,
-  }), [overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, setFrameInsets, reloadFrame, composer, post, onComposerEvent])
+    pendingSelect, answerSelect,
+  }), [overview, refreshOverview, frameStatus, ompWebUrl, branchTree, selectLeaf, attachFrame, setFrameInsets, reloadFrame, composer, post, onComposerEvent, pendingSelect, answerSelect])
 
   const visible = attachment !== null && frameStatus === "ready"
   useEffect(() => {
