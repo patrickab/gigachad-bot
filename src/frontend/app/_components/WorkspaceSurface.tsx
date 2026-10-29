@@ -18,7 +18,6 @@ import { FactorySurface } from "@/features/factory/FactorySurface"
 import { OmpModelSelector, OmpReasoningSelector, OmpTokenCounter } from "@/features/omp/OmpComposer"
 import { OmpSurface } from "@/features/omp/OmpSurface"
 import { OmpSystemPrompt } from "@/features/omp/OmpSystemPrompt"
-import { TabSwitcher } from "@/features/navigation/TabSwitcher"
 import { TokenCounter } from "@/features/chat/TokenCounter"
 import { TopBar, TopBarPill, TopBarTransparent } from "@/features/navigation/TopBar"
 import { TopBarSlot } from "@/features/navigation/TopBarSlots"
@@ -185,7 +184,6 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
 
   return <>
     <TopBar
-      center={<TabSwitcher />}
       left={<><TopBarTransparent>{sidebarToggle}</TopBarTransparent>{surface.left}</>}
       right={surface.right}
     />

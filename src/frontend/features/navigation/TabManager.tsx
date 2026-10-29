@@ -154,7 +154,7 @@ export function TabManager({ children, onTabsChange, onActiveTabChange, defaultC
     }
     if (e.key === "Tab" && !e.altKey && !e.ctrlKey && !e.metaKey) {
       const target = e.target as HTMLElement
-      if (!isEditableTarget(target) && !target.closest("[data-file-tree], [data-tab-switcher]")) {
+      if (!isEditableTarget(target) && !target.closest("[data-file-tree]")) {
         e.preventDefault()
         cycleTab(e.shiftKey ? -1 : 1)
       }

@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState, type ElementType, type ReactNode } from "react"
+import { useId, useRef, useState, type ElementType, type ReactNode } from "react"
 import { ChevronRight, Plus, Trash2 } from "lucide-react"
 import { cn, errorMessage, toggled } from "@/lib/utils"
 import { ErrorText } from "@/components/ui/ErrorText"
@@ -33,6 +33,10 @@ type FileTreeCreateAction =
 export interface FileTreeItem<T = unknown> {
   id: string
   label: string
+  /** Faint text before the label, e.g. a tab's project and category. */
+  prefix?: string
+  /** Screen-reader description of the row, e.g. a tab's latest activity. */
+  description?: string
   type: "root" | "folder" | "element"
   data?: T
   children?: FileTreeItem<T>[]
@@ -72,8 +76,8 @@ interface FileTreeProps<T> {
   headerActions?: ReactNode
   renderBeforeItem?: (item: FileTreeItem<T>) => ReactNode
   onMoveToRoot?: (id: string) => Promise<void>
-  /** Makes the section label a button named `label`, e.g. to open the section's settings. */
-  labelAction?: { label: string; onClick: () => void }
+  /** Makes the section label a button named `label`, e.g. to open the section's settings. `expanded` makes it a disclosure toggle, `false` hides the items. */
+  labelAction?: { label: string; onClick: () => void; expanded?: boolean }
 }
 
 const FILE_DRAG_TYPE = "application/x-file-tree-ids"
@@ -113,6 +117,7 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
   const selectionAnchorId = useRef<string | null>(null)
   const [uncappedIds, setUncappedIds] = useState<ReadonlySet<string>>(() => new Set())
+  const descriptionId = useId()
 
   const toggleCap = (id: string) => setUncappedIds((current) => toggled(current, id))
 
@@ -223,6 +228,7 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
         <button
           aria-expanded={branch && !item.onSelect ? expanded : undefined}
           aria-current={!branch && item.isActive ? "page" : undefined}
+          aria-describedby={item.description ? `${descriptionId}-${item.id}` : undefined}
           draggable={item.draggable || item.multiSelect}
           onDragStart={(event) => handleDragStart(event, item)}
           onClick={(event) => handleSelect(item, event)}
@@ -236,11 +242,13 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
             className={cn("flex min-w-0 items-center gap-2 rounded px-1 transition-colors duration-160 motion-reduce:transition-none",
               (item.type === "element" && item.isActive || selected) && "bg-surface-elevated/70")}
           >
+            {item.prefix && <span className="-mr-1 min-w-0 shrink-[2] truncate text-ink-faint">{`${item.prefix} `}</span>}
             <span className="truncate">{item.label}</span>
             {item.badge != null && <span className="shrink-0 text-[10px] text-ink-faint">{item.badge}</span>}
           </span>
           {item.meta != null && <span className="ml-auto flex shrink-0 gap-1.5 text-[10px] tabular-nums">{item.meta}</span>}
         </button>
+        {item.description && <span id={`${descriptionId}-${item.id}`} className="sr-only">{item.description}</span>}
         <div className={ACTIONS_CLASS}>
           {item.actions?.map((action) => <button key={action.label} aria-label={action.label} onClick={action.onClick} className={ACTION_CLASS}>
             <action.icon className="h-3 w-3" />
@@ -266,10 +274,11 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
     </div>
   })
 
+  const collapsed = labelAction?.expanded === false
   return <div aria-label={label} data-file-tree>
-    <div className="group/row mb-2 flex h-6 items-center justify-between px-2">
+    <div className={cn("group/row flex h-6 items-center justify-between px-2", !collapsed && "mb-2")}>
       {labelAction
-        ? <button type="button" aria-label={labelAction.label} onClick={labelAction.onClick} className="rounded text-xs font-medium text-ink-subtle hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">{label}</button>
+        ? <button type="button" aria-label={labelAction.label} aria-expanded={labelAction.expanded} onClick={labelAction.onClick} className="rounded text-xs font-medium text-ink-subtle hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted">{label}</button>
         : <span className="text-xs font-medium text-ink-subtle">{label}</span>}
       <div className="flex items-center gap-0.5">
         {headerActions}
@@ -282,7 +291,7 @@ export function FileTree<T>({ items, controller, label, loading, create, headerA
     </div>
     {creation?.parentId === null && <InlineCreateForm action={creation.action} depth={0}
       onDone={() => setCreation((current) => current === creation ? null : current)} onCancel={() => setCreation(null)} />}
-    {loading ? <div className="space-y-2 px-2 py-1"><Skeleton className="h-3 w-24" /><Skeleton className="h-3 w-32" /></div>
+    {collapsed ? null : loading ? <div className="space-y-2 px-2 py-1"><Skeleton className="h-3 w-24" /><Skeleton className="h-3 w-32" /></div>
       : <div className="min-h-2"
         onDragOver={(event) => {
           if (event.target !== event.currentTarget || !onMoveToRoot || event.dataTransfer.types.includes(FILE_DRAG_TYPE)) return

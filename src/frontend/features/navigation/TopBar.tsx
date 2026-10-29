@@ -1,5 +1,4 @@
 import type { ReactNode, Ref } from "react"
-import { ContentCentered } from "@/components/ui/ContentArea"
 
 /** Single-row app toolbar floating over the workspace, so content scrolls on underneath it.
  *
@@ -17,11 +16,10 @@ import { ContentCentered } from "@/components/ui/ContentArea"
  * ...   right={<TopBarPill><TokenCounter … /></TopBarPill>}
  * ... />
  */
-export function TopBar({ left, center, right }: { left?: ReactNode; center?: ReactNode; right?: ReactNode }) {
+export function TopBar({ left, right }: { left?: ReactNode; right?: ReactNode }) {
   // The bar ignores pointer events so clicks between controls reach the content beneath.
   return <header className="pointer-events-none absolute inset-x-0 top-0 z-40 flex h-11 items-center justify-between gap-3 px-3">
     <div className="relative z-10 flex min-w-0 items-center gap-3">{left}</div>
-    <ContentCentered className="top-[5px] px-4">{center}</ContentCentered>
     <div className="relative z-10 flex shrink-0 items-center justify-end gap-3">{right}</div>
   </header>
 }

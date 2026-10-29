@@ -71,11 +71,11 @@ export function tabLabel(tab: Tab, modeLabel: string | undefined, shownName: Sho
   return tab.name ?? (modeLabel || "Chat")
 }
 
-/** Tab state and actions shared by toolbar workspace switchers. */
+/** Tab state and actions shared by the sidebar's tab list. */
 export interface TabStripValue {
   tabs: Tab[]
   activeTabId: string
-  /** Activity description exposed alongside the workspace breadcrumb. */
+  /** Activity description exposed on each tab's sidebar row. */
   labelOf: (tab: Tab) => string
   isLoading: (tab: Tab) => boolean
   select: (id: string) => void

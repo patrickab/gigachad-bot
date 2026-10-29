@@ -188,7 +188,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |   |-- Sidebar.tsx       Composition of the hooks below
 |       |   |   |-- workspaceTree.ts  Pure Projects and Code tree builders
 |       |   |   |-- useWorkspaceDocuments.ts, useCodeMounts.ts, useProjectActions.ts
-|       |   |   |-- TabManager.tsx    Tab state provider; tabs.ts pure helpers, useWorkspaceSwitch.ts, TabSwitcher.tsx
+|       |   |   |-- TabManager.tsx    Tab state provider; tabs.ts pure helpers, useWorkspaceSwitch.ts, TabList.tsx (sidebar Tabs section)
 |       |   |   |-- ArchiveSelector.tsx, useArchivedDirectories.ts Restore archived projects/Code directories
 |       |   |   `-- useWorktrees.tsx
 |       |   |-- omp/                  Single-frame surface, bridge, composer and sessions
