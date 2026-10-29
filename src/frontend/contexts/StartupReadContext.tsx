@@ -1,6 +1,7 @@
 "use client"
 
 import { createContext, useCallback, useContext, useEffect, useEffectEvent, useId, useMemo, useRef, useState, type ReactNode } from "react"
+import { currentConnectionPool, leaveConnectionPool } from "@/lib/backend/api"
 import { syncCursorReady } from "@/lib/backend/syncStream"
 import { errorMessage } from "@/lib/utils"
 
@@ -61,6 +62,7 @@ export function useStartupRead<T>(label: string, load: (signal: AbortSignal) => 
     const run = async () => {
       if (controller) return
       const attempt = new AbortController()
+      const pool = currentConnectionPool()
       controller = attempt
       setState({ loading: true, error: null })
       if (failed) report(id, { label, error: "", loading: true, retry })
@@ -69,6 +71,7 @@ export function useStartupRead<T>(label: string, load: (signal: AbortSignal) => 
           timer = setTimeout(() => {
             reject(new Error("The backend did not respond within 15 seconds."))
             attempt.abort()
+            leaveConnectionPool(pool)
           }, STARTUP_TIMEOUT_MS)
         })
         // Reading after the change feed holds its head means every later change arrives as an event, none is replayed.

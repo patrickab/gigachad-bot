@@ -45,10 +45,24 @@ async function ensureOk(res: Response): Promise<Response> {
   return res
 }
 
+// Chrome pools uncredentialed and credentialed requests on separate connections. Tailscale Serve can drop an
+// HTTP/2 connection without a reset, and the browser reuses it until TCP gives up, so a stuck caller switches pools.
+let connectionPool = 0
+
+export function currentConnectionPool(): number {
+  return connectionPool
+}
+
+/** Send later requests over a fresh connection, once per stuck pool however many callers report it. */
+export function leaveConnectionPool(pool: number): void {
+  if (pool === connectionPool) connectionPool += 1
+}
+
 /** The single place that adds the API base URL and the device headers, the status is left to the caller. */
 function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   const headers = { ...(init?.headers as Record<string, string> | undefined), ...deviceHeaders() }
-  return fetch(`${getApiBase()}${path}`, { ...init, headers })
+  const credentials: RequestCredentials = connectionPool % 2 ? "include" : "same-origin"
+  return fetch(`${getApiBase()}${path}`, { credentials, ...init, headers })
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {

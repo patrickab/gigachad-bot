@@ -118,6 +118,9 @@ app.add_middleware(
     # exact set of origins. Granting it alongside the wildcard default would
     # let any public web page reach this unauthenticated backend.
     allow_private_network="*" not in CORS_ORIGINS,
+    # The frontend switches to credentialed requests to escape a dead pooled connection. Echoing any origin with
+    # credentials would be unsafe, so only exact allow-lists grant them.
+    allow_credentials="*" not in CORS_ORIGINS,
 )
 
 

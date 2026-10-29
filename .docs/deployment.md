@@ -119,6 +119,10 @@ OLLAMA_BASE_URL=http://127.0.0.1:11434
 
 - `GIGACHAD_CORS_ORIGINS`: required exact origins. Production rejects `*` and empty
   lists because Tailnet identity alone would let arbitrary pages act as the user.
+- Exact origins also enable credentialed CORS. A startup read that times out (15 s)
+  switches later API calls to credentialed requests, which Chrome sends over a separate
+  connection pool. This recovers from a dead HTTP/2 connection that Tailscale Serve
+  dropped without a reset (tailscaled logs `packet was not handled`).
 - `NEXT_PUBLIC_API_BASE`: public, build-time frontend configuration. The example
   serves local development, configure Vercel's private HTTPS value separately.
 - `OLLAMA_BASE_URL`: needed only for Ollama. `MINERU_SERVER_URL`: optional remote OCR.
