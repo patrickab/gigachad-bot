@@ -11,7 +11,7 @@
      `.message-overflow-toggle` (a control after the question's text), `.message-assistant-footer` (dropped in the
      collapsed preview) */
 
-:is(.gc-turn, [data-markdown-root]) {
+:is(.gc-turn, [data-markdown-root], .gc-hints) {
   --paper: var(--cf-paper);
   --surface: var(--cf-surface);
   --surface-elevated: var(--cf-elevated);
@@ -29,7 +29,7 @@
   --radius-md: 0.375rem;
   --font-symbols: "Symbols Nerd Font Mono";
 }
-:root:is(.dark, .omp) :is(.gc-turn, [data-markdown-root]) {
+:root:is(.dark, .omp) :is(.gc-turn, [data-markdown-root], .gc-hints) {
   --divider: var(--gc-dark-divider);
   --divider-strong: var(--gc-dark-divider-strong);
   --shadow-md: var(--gc-dark-shadow-md);

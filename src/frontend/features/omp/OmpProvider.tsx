@@ -11,7 +11,10 @@ import { useThemeName } from "@/hooks/useThemeName"
 import { fetchOmpOverview } from "@/lib/backend/api"
 import type { OmpOverview, OmpView } from "@/lib/domain/types"
 import type { ComposerCommands, ComposerState } from "./composer"
-import { EMBED_CHANNEL, type BranchNode, type Envelope, type FrameMessage, type KeyChord, type SelectRequest, type ShellMessage } from "@gigachad/chat-ui/protocol"
+import { createFrameHints, isHintMessage } from "./clickHints"
+import { installClickHints } from "@gigachad/chat-ui/hints"
+import "@gigachad/chat-ui/hints.css"
+import { EMBED_CHANNEL, type BranchNode, type Envelope, type FrameMessage, type HintMessage, type KeyChord, type SelectRequest, type ShellMessage } from "@gigachad/chat-ui/protocol"
 
 type ComposerCommand = Extract<ShellMessage, { type: `composer-${string}` }>
 /** Frame messages for one composer, not state: delivered to `onComposerEvent` listeners, never kept. */
@@ -180,6 +183,7 @@ function FrameModalBackdrop({ onClose }: { onClose: () => void }) {
  * - One `<iframe>` for all omp tabs, mounted on the first attach and laid over the active tab's slot
  * - Tabs switch it by postMessage (`protocol.ts`), never by reload
  * - Polls the overview every 15s and on window focus
+ * - Click hints (`f`) for the whole shell, joined by the frame's clickables while it shows (`clickHints.ts`)
  */
 export function OmpProvider({ children }: { children: ReactNode }) {
   const { ompWebUrl, hostAccess } = useSettings()
@@ -259,6 +263,11 @@ export function OmpProvider({ children }: { children: ReactNode }) {
   })
 
   const onOpenFile = useEffectEvent((path: string) => attachment?.onOpenFile(path))
+  const frameHintsRef = useRef<ReturnType<typeof createFrameHints> | null>(null)
+  useEffect(() => {
+    frameHintsRef.current = createFrameHints(post)
+  }, [post])
+  const onHintMessage = useEffectEvent((message: HintMessage) => frameHintsRef.current?.handle(message))
 
   useEffect(() => {
     function onMessage(event: MessageEvent) {
@@ -271,6 +280,7 @@ export function OmpProvider({ children }: { children: ReactNode }) {
       else if (message.type === "composer") setComposer(message)
       else if (message.type === "composer-commands") setComposerCommands(message)
       else if (message.type === "composer-restore" || message.type === "composer-completions") composerListenersRef.current.forEach((listener) => listener(message))
+      else if (isHintMessage(message)) onHintMessage(message)
       else if (message.type === "key") {
         const { key, altKey, ctrlKey, metaKey, shiftKey } = message
         document.dispatchEvent(new KeyboardEvent("keydown", { key, altKey, ctrlKey, metaKey, shiftKey, bubbles: true, cancelable: true }))
@@ -350,6 +360,8 @@ export function OmpProvider({ children }: { children: ReactNode }) {
     // A hidden frame keeps focus, keystrokes would land in it (e.g. after Alt+T from inside it opened a chat tab).
     if (!visible && document.activeElement === frameRef.current) frameRef.current?.blur()
   }, [visible])
+  const framePeer = useEffectEvent(() => (visible ? frameHintsRef.current?.peer ?? null : null))
+  useEffect(() => installClickHints({ peer: framePeer }), [])
   const closeModal = useCallback(() => post({ type: "close-modal" }), [post])
   const showsModal = visible && modalOpen
   return (

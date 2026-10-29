@@ -251,12 +251,13 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |       |   |-- pointer.ts            Follow the pointer on window until it lifts
 |       |   `-- diff.ts               Diff parsing helpers
 |       `-- packages/
-|           `-- chat-ui/              Independently packaged local/OMP chat UI contract: turns, markdown, code/Mermaid/Markmap renderers, palette, protocol
+|           `-- chat-ui/              Independently packaged local/OMP chat UI contract: turns, markdown, code/Mermaid/Markmap renderers, click hints, palette, protocol
 |               |-- src/
 |               |   |-- index.ts      Public rendering exports
 |               |   |-- Turn.tsx      Shared turn rendering
 |               |   |-- MarkdownRenderer.tsx
 |               |   |-- protocol.ts   Iframe message protocol, unversioned
+|               |   |-- hints.ts/.css Vimium-style `f` click hints, one session across shell and frame (`features/omp/clickHints.ts`, overlay `embed/hints.ts`)
 |               |   `-- palette.css   Canonical role palette
 |               |-- pack.mjs          Build/pack/sync tooling
 |               `-- package.json      Package-local dependencies and distribution contract

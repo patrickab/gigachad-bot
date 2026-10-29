@@ -57,6 +57,20 @@ export type Skill = { name: string; description?: string }
 /** An omp extension's `select` request (`ctx.ui.select`), e.g. `/files`. `options` are its labels in the extension's order. */
 export type SelectRequest = { id: string; title: string; options: string[] }
 
+/**
+ * One click hint session across shell and frame (`hints.ts`), sent by either side. The side that got `f` hosts it, the other is the guest.
+ *
+ * - `hints-open`: host asks the guest to collect its visible clickables, answered by `hints-targets`
+ * - `hints-show`: labels for the guest's clickables in its order, null hides one, `typed` already entered
+ * - `hints-activate`: the guest clicks or focuses its clickable at `index`, `hints-close` ends the session
+ */
+export type HintMessage =
+  | { type: "hints-open" }
+  | { type: "hints-targets"; count: number }
+  | { type: "hints-show"; labels: (string | null)[]; typed: string }
+  | { type: "hints-activate"; index: number }
+  | { type: "hints-close" }
+
 export type ShellMessage =
   /** Sent on every `ready`: the frame learns the shell origin and replays its current state. */
   | { type: "hello"; forwardKeys: KeyChord[]; theme: ThemeMode }
@@ -85,6 +99,7 @@ export type ShellMessage =
   | { type: "composer-load-commands"; sessionId: string }
   /** Answer to `select`: the picked option, null cancels. Ignored unless `id` is still the request shown for `sessionId`. */
   | { type: "select-answer"; sessionId: string | null; id: string; value: string | null }
+  | HintMessage
 
 export type FrameMessage =
   /** Posted on every page load, the only message sent before `hello` (target origin "*", no data). */
@@ -114,5 +129,6 @@ export type FrameMessage =
   | { type: "modal"; open: boolean }
   /** The shown session's pending extension `select` (null: none). The shell picks in its finder, omp-web's own panel stays hidden. */
   | { type: "select"; sessionId: string | null; request: SelectRequest | null }
+  | HintMessage
 
 export type Envelope<Message> = Message & { channel: typeof EMBED_CHANNEL }

@@ -7,6 +7,7 @@ type ShellHandler<Type extends ShellMessageType> = (message: Extract<ShellMessag
 const IS_STATE_MESSAGE: Record<FrameMessage["type"], boolean> = {
   ready: false, view: true, "branch-tree": true, key: false, composer: true, "composer-restore": false, "composer-completions": false, "composer-commands": true,
   "open-file": false, modal: true, select: true,
+  "hints-open": false, "hints-targets": false, "hints-show": false, "hints-activate": false, "hints-close": false,
 };
 
 let shellOrigin: string | null = null;

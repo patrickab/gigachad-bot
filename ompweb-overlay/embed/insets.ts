@@ -1,7 +1,7 @@
 /**
  * The shell lays its top bar and composer over the frame, the transcript scrolls beneath them like a gigachad chat.
  *
- * - `--cf-inset-top` / `--cf-inset-bottom`: shell chrome in px (`insets` message)
+ * - `--cf-inset-top` / `--cf-inset-bottom`: shell chrome in px (`insets` message), `isUnderShellChrome`: what that chrome hides
  * - `--cf-composer-area`: height of what is left of omp-web's composer area (queue, status, /btw), which
  *   `theme/embed.css` floats above the shell composer, so the transcript pads past it too
  * - A session opens at its newest message, whatever settles in after upstream's first scroll
@@ -15,6 +15,14 @@ const TRANSCRIPT = '[data-selection-scope="chat"][role=log]';
 const READER_INPUT_EVENTS = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
 const AREA_POLL_MS = 500;
 
+let shellInsets = { top: 0, bottom: 0 };
+
+/** Whether the shell's top bar or composer strip covers `rect`'s center, so it is not clickable here. */
+export function isUnderShellChrome(rect: DOMRect): boolean {
+  const centerY = rect.top + rect.height / 2;
+  return centerY < shellInsets.top || centerY > window.innerHeight - shellInsets.bottom;
+}
+
 function setPixels(name: string, pixels: number) {
   document.documentElement.style.setProperty(name, `${Math.max(0, Math.round(pixels))}px`);
 }
@@ -22,6 +30,7 @@ function setPixels(name: string, pixels: number) {
 export function applyShellInsets({ top, bottom }: { top: number; bottom: number }) {
   setPixels("--cf-inset-top", top);
   setPixels("--cf-inset-bottom", bottom);
+  shellInsets = { top, bottom };
 }
 
 /** Keep `--cf-composer-area` at the composer area's height, re-finding it when omp-web remounts the chat. Returns the stop. */
