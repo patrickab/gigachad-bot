@@ -7,7 +7,15 @@
  * - Text fields, selects and editables get focus, everything else a click
  * - Across a frame boundary: the document that got `f` hosts the session, its `peer` (the frame, or the window
  *   around it) joins as a guest (`openHintGuest`). One label set covers both, each side draws its own labels
- * - Styles: `hints.css`, which reads the host's role tokens
+ * - Styles: `hints.css`, which reads the host's role tokens and falls back to system colors
+ * - Standalone: `hints.ts` and `hints.css` import nothing, copy both into any web app. Needs the Popover API and
+ *   `checkVisibility` (Chrome 114, Firefox 125, Safari 17.4)
+ *
+ * @example React, once at the app root
+ * useEffect(() => installClickHints(), [])
+ *
+ * @example Plain JS
+ * const stop = installClickHints()
  */
 
 /** Home row first, then the easiest reaches. */
