@@ -271,8 +271,8 @@ systemctl --user restart gigachad-bot.service
 - Keep protocol, palette, Q&A cards, and Markdown in `src/frontend/packages/chat-ui/`,
   the embed UI in `ompweb-overlay/`. Both ship with the gigachad-bot commit, so
   `redeploy.sh` restarts omp-web when they or the served ref change.
-- Bump `EMBED_PROTOCOL_VERSION` on every message change: no runtime handshake
-  exists, a stale omp-web silently drops messages until restarted.
+- The protocol is unversioned: a stale omp-web silently drops messages it does
+  not know until restarted.
 
 Manual update:
 

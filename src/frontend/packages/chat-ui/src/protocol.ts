@@ -2,11 +2,10 @@
  * postMessage protocol between gigachad-bot's shell (parent window) and omp-web's overlay (`ompweb-overlay/`) in its frame.
  *
  * - The one definition both sides import: the shell from source, the overlay as `@gigachad/chat-ui/protocol`
- * - Bump `EMBED_PROTOCOL_VERSION` with every message change, a running frame may still be an older build
+ * - Unversioned: a running omp-web keeps its old bundle until restarted and drops messages it does not know
  * - Every message carries `channel: EMBED_CHANNEL` so unrelated postMessage traffic is ignored
  */
 export const EMBED_CHANNEL = "omp-embed"
-export const EMBED_PROTOCOL_VERSION = 10
 
 export type ThemeMode = "light" | "dark"
 
@@ -60,7 +59,7 @@ export type SelectRequest = { id: string; title: string; options: string[] }
 
 export type ShellMessage =
   /** Sent on every `ready`: the frame learns the shell origin and replays its current state. */
-  | { type: "hello"; version: number; forwardKeys: KeyChord[]; theme: ThemeMode }
+  | { type: "hello"; forwardKeys: KeyChord[]; theme: ThemeMode }
   | { type: "open-session"; sessionId: string }
   /** Opens the new-session composer in `cwd`, like Ctrl+Alt+N. */
   | { type: "new-session"; cwd: string }
@@ -89,7 +88,7 @@ export type ShellMessage =
 
 export type FrameMessage =
   /** Posted on every page load, the only message sent before `hello` (target origin "*", no data). */
-  | { type: "ready"; version: number }
+  | { type: "ready" }
   /** Session shown in the chat (null: new-session screen) and whether full-page Settings covers it. */
   | { type: "view"; sessionId: string | null; settingsOpen: boolean }
   | { type: "branch-tree"; sessionId: string; tree: BranchNode[]; activeLeafId: string | null }

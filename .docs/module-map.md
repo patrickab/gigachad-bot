@@ -256,7 +256,7 @@ Use this file to locate the owner of a change. Read [system overview](system-ove
 |               |   |-- index.ts      Public rendering exports
 |               |   |-- Turn.tsx      Shared turn rendering
 |               |   |-- MarkdownRenderer.tsx
-|               |   |-- protocol.ts   Versioned iframe message protocol
+|               |   |-- protocol.ts   Iframe message protocol, unversioned
 |               |   `-- palette.css   Canonical role palette
 |               |-- pack.mjs          Build/pack/sync tooling
 |               `-- package.json      Package-local dependencies and distribution contract

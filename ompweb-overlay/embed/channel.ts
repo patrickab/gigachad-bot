@@ -1,4 +1,4 @@
-import { EMBED_CHANNEL, EMBED_PROTOCOL_VERSION, type Envelope, type FrameMessage, type ShellMessage } from "@gigachad/chat-ui/protocol";
+import { EMBED_CHANNEL, type Envelope, type FrameMessage, type ShellMessage } from "@gigachad/chat-ui/protocol";
 
 type ShellMessageType = ShellMessage["type"];
 type ShellHandler<Type extends ShellMessageType> = (message: Extract<ShellMessage, { type: Type }>) => void;
@@ -43,7 +43,7 @@ export function startEmbedChannel() {
   if (isListening) return;
   isListening = true;
   window.addEventListener("message", handleMessage);
-  send({ type: "ready", version: EMBED_PROTOCOL_VERSION }, "*");
+  send({ type: "ready" }, "*");
 }
 
 /** Post to the shell once it said hello. State messages are also kept for the next `hello`. */

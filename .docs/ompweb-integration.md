@@ -42,7 +42,7 @@ Upstream changes must be refactors without behaviour change or features/fixes va
 ### gigachad-bot change (overlay, chat-ui, shell)
 
 1. Edit in `~/git/gigachad-bot` on `master`. `run.sh` serves this checkout's overlay and chat-ui, no gigachad-bot worktree is involved.
-2. Edit. Protocol change → bump `EMBED_PROTOCOL_VERSION` in `packages/chat-ui/src/protocol.ts`, handle the message on both sides in the same commit.
+2. Edit. Protocol change → handle the message on both sides in the same commit.
 3. Shell checks (`src/frontend`): `npx tsc --noEmit`, `npx eslint .`, `npx vitest run`. Backend: `pytest tests/test_omp_web.py tests/test_omp_web_launcher.py`.
 4. Overlay checks need a private omp-web checkout (below). Never rsync into the served checkout D, another agent's overlay would be replaced.
 
@@ -79,7 +79,7 @@ An override typechecks against the upstream module it wraps, so an upstream chan
 | `master` (gigachad-bot) | user | The one branch `run.sh` serves. Commit only on the user's request |
 | omp sessions | user | Never send prompts or click Edit/Fork in existing sessions. Live tests only in a throwaway session the user approved (e.g. new session in `/tmp`) |
 
-Parallel-safe slices: overlay theme/CSS, a single overlay override, shell `features/omp/`, `chat-ui` components, one upstream seam per topic. Serialize: `protocol.ts` (one owner per protocol version), `seams.patch`, `run-omp-web.sh`, the overlay `next.config.ts` override list.
+Parallel-safe slices: overlay theme/CSS, a single overlay override, shell `features/omp/`, `chat-ui` components, one upstream seam per topic. Serialize: `protocol.ts` (one owner at a time), `seams.patch`, `run-omp-web.sh`, the overlay `next.config.ts` override list.
 
 ## Restart and live smoke (integrator)
 

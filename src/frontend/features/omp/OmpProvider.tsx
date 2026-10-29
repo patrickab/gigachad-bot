@@ -11,7 +11,7 @@ import { useThemeName } from "@/hooks/useThemeName"
 import { fetchOmpOverview } from "@/lib/backend/api"
 import type { OmpOverview, OmpView } from "@/lib/domain/types"
 import type { ComposerCommands, ComposerState } from "./composer"
-import { EMBED_CHANNEL, EMBED_PROTOCOL_VERSION, type BranchNode, type Envelope, type FrameMessage, type KeyChord, type SelectRequest, type ShellMessage } from "@gigachad/chat-ui/protocol"
+import { EMBED_CHANNEL, type BranchNode, type Envelope, type FrameMessage, type KeyChord, type SelectRequest, type ShellMessage } from "@gigachad/chat-ui/protocol"
 
 type ComposerCommand = Extract<ShellMessage, { type: `composer-${string}` }>
 /** Frame messages for one composer, not state: delivered to `onComposerEvent` listeners, never kept. */
@@ -253,7 +253,7 @@ export function OmpProvider({ children }: { children: ReactNode }) {
     setComposerCommands(null)
     setModalOpen(false)
     setPendingSelect(null)
-    post({ type: "hello", version: EMBED_PROTOCOL_VERSION, forwardKeys: FORWARD_KEYS, theme })
+    post({ type: "hello", forwardKeys: FORWARD_KEYS, theme })
     post({ type: "insets", ...insets })
     if (attachment) navigate(attachment.view, true)
   })
