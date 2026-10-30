@@ -103,22 +103,54 @@ def test_cancel_leaves_messages_eligible(store):
     assert store.watermark("c1", "global") == 0
 
 
-def test_prompt_keeps_pinned_topics_and_indexes_overflow(store, monkeypatch):
-    monkeypatch.setattr(memory_context, "PROMPT_CHAR_BUDGET", 120)
+def test_extract_places_facts_by_position_and_drops_moves_that_change_nothing(store):
+    seed(store)
+    llm = ScriptedLLM({
+        "operations": [
+            {"op": "add", "topic": "profile", "text": "Studies physics", "position": 1},
+            {"op": "update", "id": "m2", "text": "Prefers terse answers", "position": 1},
+            {"op": "update", "id": "m1", "text": "Uses Arch Linux", "position": 1},  # already first
+            {"op": "add", "topic": "profile", "text": "Owns a cat", "position": "top"},  # not a position
+            {"op": "add", "topic": "profile", "text": "Likes tea", "position": 0},  # positions are 1-based
+        ],
+        "topics": [],
+    })
+
+    operations = extract(store, llm, [{"role": "user", "content": "hi"}]).global_proposal.operations
+
+    assert [(o.op, o.text, o.index) for o in operations] == [
+        ("add", "Studies physics", 0),
+        ("update", "Prefers terse answers", 0),
+        ("add", "Owns a cat", None),
+        ("add", "Likes tea", None),
+    ]
+
+
+def test_commit_places_added_and_moved_facts_in_relevance_order(store):
+    seed(store)
+    store.commit(GLOBAL, [
+        MemoryOperation("1", "add", "global", "profile", "Studies physics", index=1),
+        MemoryOperation("2", "update", "global", "preferences", "Prefers terse answers", target_id="b", index=0),
+        MemoryOperation("3", "add", "global", "profile", "Owns a cat"),
+        MemoryOperation("4", "add", "global", "profile", "Likes tea", index=99),
+    ], [])
+
+    assert [m["text"] for m in store.list_memories(GLOBAL)] == [
+        "Prefers terse answers", "Uses Arch Linux", "Studies physics", "Owns a cat", "Likes tea",
+    ]
+
+
+def test_prompt_injects_every_fact_most_relevant_first(store):
     store.write_memories(GLOBAL, [
-        {"id": "a", "text": "Old preference " + "x" * 200, "topic": "preferences", "updated_at": "2020-01-01"},
-        {"id": "b", "text": "Recent hobby", "topic": "gardening", "updated_at": "2026-01-02"},
-        {"id": "c", "text": "Older hobby " + "y" * 100, "topic": "chess", "updated_at": "2026-01-01"},
+        {"id": "a", "text": "Prefers terse answers", "topic": "preferences"},
+        {"id": "b", "text": "Uses Arch " + "x" * 20_000, "topic": "profile"},
+        {"id": "c", "text": "Plays chess", "topic": "hobbies"},
     ])
-    store.set_topics(GLOBAL, [
-        {"name": "preferences", "summary": "How to respond"},
-        {"name": "chess", "summary": "Chess openings"},
-        {"name": "gardening", "summary": "Pond plants"},
-    ])
+    store.write_memories(MemoryScope("project", "demo"), [{"id": "p", "text": "Targets Python 3.13", "topic": "stack"}])
 
-    prompt = memory_context.augment_system_prompt(store, "Base")
+    prompt = memory_context.augment_system_prompt(store, "Base", "demo")
 
-    assert "Old preference" in prompt  # pinned beats the budget
-    assert "- Recent hobby" in prompt  # newest unpinned topic fills the remaining budget
-    assert "Older hobby" not in prompt
-    assert "- Chess: Chess openings" in prompt
+    assert prompt.startswith("Base\n\n# Persistent Memory Context")
+    texts = ["Prefers terse answers", "Uses Arch", "Plays chess", "Targets Python 3.13"]
+    assert [prompt.index(t) for t in texts] == sorted(prompt.index(t) for t in texts)
+    assert "- [Hobbies] Plays chess" in prompt

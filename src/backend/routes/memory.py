@@ -35,6 +35,7 @@ class OperationModel(BaseModel):
     topic: str
     text: str = ""
     target_id: str | None = None
+    index: int | None = None
 
 
 class TopicModel(BaseModel):
@@ -86,7 +87,7 @@ async def extract_memories(req: MemoryExtractRequest, store: MemoryStoreDep, def
 @router.post("/commit")
 def commit_memories(req: MemoryCommitRequest, store: MemoryStoreDep) -> dict:
     """Apply accepted operations and topics, then advance the reviewed chat's watermark."""
-    operations = [MemoryOperation(o.id, o.op, req.scope, o.topic, o.text, o.target_id) for o in req.operations]
+    operations = [MemoryOperation(o.id, o.op, req.scope, o.topic, o.text, o.target_id, index=o.index) for o in req.operations]
     with http_errors(_STORE_FAILURE):
         store.commit(req.memory_scope(), operations, [t.model_dump() for t in req.topics], req.review_id)
     return {"status": "committed"}

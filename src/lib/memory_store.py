@@ -80,7 +80,11 @@ class MemoryScope:
 
 @dataclass
 class MemoryOperation:
-    """Proposed change to one fact, `target_*` name the stored fact an update or delete replaces."""
+    """Proposed change to one fact, `target_*` name the stored fact an update or delete replaces.
+
+    `index` is the 0-based place the fact takes in the scope's relevance order (0 = most relevant).
+    None appends an add and keeps an update where it is.
+    """
 
     id: str
     op: str  # "add" | "update" | "delete"
@@ -89,6 +93,7 @@ class MemoryOperation:
     text: str = ""
     target_id: str | None = None
     target_text: str | None = None
+    index: int | None = None
 
 
 
@@ -162,10 +167,13 @@ class MemoryStore:
             text = operation.text.strip()
             topic = topic_name(operation.topic) or FALLBACK_TOPIC
             if operation.op == "add" and text:
-                memories.append(StoredMemory(str(uuid.uuid4()), text, topic, scope.kind, now, now))
+                _place(memories, StoredMemory(str(uuid.uuid4()), text, topic, scope.kind, now, now), operation.index)
             elif operation.op == "update" and text and operation.target_id in by_id:
                 target = by_id[operation.target_id]
                 target.text, target.topic, target.updated_at = text, topic, now
+                if operation.index is not None:
+                    memories.remove(target)
+                    _place(memories, target, operation.index)
             elif operation.op == "delete" and operation.target_id in by_id:
                 memories.remove(by_id.pop(operation.target_id))
 
@@ -246,6 +254,11 @@ class MemoryStore:
         if not chat_id:
             return 0
         return self._read_watermarks().get(chat_id, {}).get(kind, 0)
+
+
+def _place(memories: list[StoredMemory], memory: StoredMemory, index: int | None) -> None:
+    """Insert *memory* so it ends up at *index* of *memories*, appended when None or past the end."""
+    memories.insert(len(memories) if index is None else max(0, min(index, len(memories))), memory)
 
 
 def _normalized(scope: MemoryScope, memories: list[dict[str, Any]]) -> list[dict[str, Any]]:

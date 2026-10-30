@@ -9,6 +9,7 @@ import { topicNameFromTitle } from "@/features/memory/memoryUtils"
 import { useMemoryViewer } from "@/features/memory/MemoryViewerContext"
 import { Spinner } from "@/features/memory/MemoryChrome"
 import { Overview } from "@/features/memory/Overview"
+import { RankingPage } from "@/features/memory/RankingPage"
 import { RegroupPage } from "@/features/memory/RegroupPage"
 import { TopicPage } from "@/features/memory/TopicPage"
 import { createTopic, topicNames, topicRows, type ScopeContent } from "@/features/memory/scopeEdits"
@@ -20,7 +21,7 @@ interface RegroupState {
   proposal: ScopeContent | null
 }
 
-type View = { kind: "overview" } | { kind: "topic"; scopeKey: string; name: string } | { kind: "regroup" } & RegroupState
+type View = { kind: "overview" } | { kind: "topic"; scopeKey: string; name: string } | { kind: "ranking"; scopeKey: string } | { kind: "regroup" } & RegroupState
 
 export function MemoryViewer() {
   const { isOpen, closeMemoryViewer } = useMemoryViewer()
@@ -73,6 +74,8 @@ function MemoryWindow({ onClose }: { onClose: () => void }) {
       <RegroupPage scope={activeScope} proposal={view.proposal} onBack={back}
         onApply={(proposal) => { update(activeScope.key, () => proposal); back() }} />
     )
+  } else if (activeScope && view.kind === "ranking") {
+    content = <RankingPage scope={activeScope} onBack={back} onEdit={(change) => update(activeScope.key, change)} />
   } else if (activeScope && activeRow) {
     content = (
       <TopicPage
@@ -105,6 +108,7 @@ function MemoryWindow({ onClose }: { onClose: () => void }) {
             onCreate={addTopic}
             onDelete={deleteTopic}
             onRegroup={startRegroup}
+            onRank={(scopeKey) => setView({ kind: "ranking", scopeKey })}
           />
         ) : !error ? <Spinner label="Loading memory" /> : null}
       </>

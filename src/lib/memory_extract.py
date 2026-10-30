@@ -61,6 +61,7 @@ EXTRACT_RESPONSE_SHAPE = json.dumps({
         "id": "<recorded id, update and delete only>",
         "topic": "<topic name, add and update only>",
         "text": "<fact, add and update only>",
+        "position": "<1 = most relevant, add and update only, optional>",
     }],
     "topics": [{"name": "...", "summary": "..."}],
 })
@@ -98,12 +99,17 @@ def _dicts(raw: object) -> list[dict[str, Any]]:
 
 
 def _short_ids(memories: list[StoredMemory]) -> dict[str, StoredMemory]:
-    """Short ids keep prompts small and give the model fewer chances to garble a uuid."""
+    """Short ids keep prompts small and give the model fewer chances to garble a uuid. `m<N>` is the fact's 1-based position."""
     return {f"m{i + 1}": m for i, m in enumerate(memories)}
 
 
 def _facts_block(short_ids: dict[str, StoredMemory]) -> str:
     return "\n".join(f"{sid} [{m.topic}] {m.text}" for sid, m in short_ids.items())
+
+
+def _position_to_index(raw: object) -> int | None:
+    """0-based index of a model-given 1-based position, None when absent or not a positive integer."""
+    return raw - 1 if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 1 else None
 
 
 def _transcript(messages: list[dict[str, str]]) -> str:
@@ -116,6 +122,7 @@ def build_proposal(
 ) -> ScopeProposal:
     """Validate model output: drop unknown ids, duplicates and no-ops, give every new topic a proposal."""
     known_texts = {m.text.strip().lower() for m in short_ids.values()}
+    current_index = {m.id: i for i, m in enumerate(short_ids.values())}
     targeted: set[str] = set()
     operations: list[MemoryOperation] = []
     for item in _dicts(data.get("operations")):
@@ -124,21 +131,24 @@ def build_proposal(
         op = item["op"]
         text = str(item.get("text") or "").strip()
         topic = topic_name(item.get("topic"))
+        index = _position_to_index(item.get("position"))
         if op == "add":
             if not text or text.lower() in known_texts:
                 continue
             known_texts.add(text.lower())
-            operations.append(MemoryOperation(str(uuid.uuid4()), op, kind, topic or FALLBACK_TOPIC, text))
+            operations.append(MemoryOperation(str(uuid.uuid4()), op, kind, topic or FALLBACK_TOPIC, text, index=index))
             continue
         target = short_ids.get(str(item.get("id") or "").strip())
         if not target or target.id in targeted:
             continue
-        if op == "update" and (not text or (text == target.text and topic in ("", target.topic))):
+        if index == current_index.get(target.id):
+            index = None
+        if op == "update" and (not text or (text == target.text and topic in ("", target.topic) and index is None)):
             continue
         targeted.add(target.id)
         operations.append(MemoryOperation(
             str(uuid.uuid4()), op, kind, (topic if op == "update" and topic else target.topic),
-            text if op == "update" else "", target.id, target.text,
+            text if op == "update" else "", target.id, target.text, index if op == "update" else None,
         ))
 
     summary_by_name = {t["name"]: t["summary"] for t in topics}
@@ -231,6 +241,10 @@ class MemoryExtractor:
             "- update: a recorded fact the conversation refines or contradicts. Give its id and the full corrected text.\n"
             "- delete: a recorded fact the conversation shows is no longer true. Give its id.\n\n"
             "Rules:\n"
+            "- Facts on record are listed most relevant first, `m<N>` is position N. Every fact reaches the "
+            "assistant, but order decides how prominently. Rank by how often a fact changes a good answer. "
+            "Give `position` on add and update to place the fact in the list as shown, omit it to append an add "
+            "at the end or keep an update in place.\n"
             "- Never re-output a recorded fact unchanged.\n"
             "- One fact per operation, maximal information in minimal words.\n"
             "- Skip session-transient details such as current errors or one-off requests.\n"

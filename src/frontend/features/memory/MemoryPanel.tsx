@@ -160,6 +160,9 @@ function OperationRow({ scope, operation, topicOptions, actions }: {
             onCommit={(text) => actions.editOperation(scope, operation.id, text)} />
         )}
       </div>
+      {operation.index !== null && (
+        <span className="mt-0.5 shrink-0 text-xs tabular-nums text-ink-subtle" aria-label="Relevance rank">#{operation.index + 1}</span>
+      )}
       <div className="flex shrink-0 items-center gap-1">
         {operation.op !== "delete" && topicOptions.length > 1 && (
           <div className="opacity-0 transition-opacity focus-within:opacity-100 group-hover/row:opacity-100">

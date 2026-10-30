@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { ChevronDown, ChevronRight, Plus, Shuffle, Trash2 } from "lucide-react"
+import { ChevronDown, ChevronRight, ListOrdered, Plus, Shuffle, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { EditableText } from "@/features/memory/EditableText"
 import { formatTopicHeading, formatUpdated } from "@/features/memory/memoryUtils"
@@ -10,7 +10,7 @@ import { topicRows, type ScopeMemory, type TopicRow } from "@/features/memory/sc
 const SECTION_ACTION_CLASS = "rounded-md p-1 text-ink-subtle opacity-0 transition-opacity hover:bg-hover hover:text-ink group-hover/section:opacity-100 focus-visible:opacity-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink-muted"
 
 /** Every scope with its topics: "You" first, then collapsible projects. */
-export function Overview({ scopes, expanded, onToggle, onOpen, onCreate, onDelete, onRegroup }: {
+export function Overview({ scopes, expanded, onToggle, onOpen, onCreate, onDelete, onRegroup, onRank }: {
   scopes: ScopeMemory[]
   expanded: Set<string>
   onToggle: (scopeKey: string) => void
@@ -18,6 +18,7 @@ export function Overview({ scopes, expanded, onToggle, onOpen, onCreate, onDelet
   onCreate: (scopeKey: string, title: string) => string | void
   onDelete: (scopeKey: string, name: string) => void
   onRegroup: (scopeKey: string) => void
+  onRank: (scopeKey: string) => void
 }) {
   const [creatingIn, setCreatingIn] = useState<string | null>(null)
   const [you, ...projects] = scopes
@@ -41,9 +42,14 @@ export function Overview({ scopes, expanded, onToggle, onOpen, onCreate, onDelet
   const actions = (scope: ScopeMemory) => (
     <div className="flex items-center gap-0.5">
       {scope.memories.length > 1 && (
-        <button onClick={(e) => { e.stopPropagation(); onRegroup(scope.key) }} aria-label={`Regroup topics in ${scope.label}`} className={SECTION_ACTION_CLASS}>
-          <Shuffle className="h-3.5 w-3.5" />
-        </button>
+        <>
+          <button onClick={(e) => { e.stopPropagation(); onRank(scope.key) }} aria-label={`Relevance order in ${scope.label}`} className={SECTION_ACTION_CLASS}>
+            <ListOrdered className="h-3.5 w-3.5" />
+          </button>
+          <button onClick={(e) => { e.stopPropagation(); onRegroup(scope.key) }} aria-label={`Regroup topics in ${scope.label}`} className={SECTION_ACTION_CLASS}>
+            <Shuffle className="h-3.5 w-3.5" />
+          </button>
+        </>
       )}
       <button onClick={(e) => { e.stopPropagation(); setCreatingIn(scope.key) }} aria-label={`New topic in ${scope.label}`} className={SECTION_ACTION_CLASS}>
         <Plus className="h-3.5 w-3.5" />

@@ -16,7 +16,7 @@ export interface MemoryTopic {
   summary: string
 }
 
-/** Proposed change to one fact, `target_*` name the stored fact an update or delete replaces. */
+/** Proposed change to one fact, `target_*` name the stored fact an update or delete replaces. `index` is the 0-based place in the relevance order, null appends an add and keeps an update in place. */
 export interface MemoryOperation {
   id: string
   op: "add" | "update" | "delete"
@@ -25,6 +25,7 @@ export interface MemoryOperation {
   text: string
   target_id: string | null
   target_text: string | null
+  index: number | null
 }
 
 /** New topic (`previous_summary` null) or a revised summary of an existing one. */

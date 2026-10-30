@@ -72,6 +72,18 @@ export function moveMemory(id: string, topic: string): ScopeChange {
   return (s) => ({ topics: patchTopic(s.topics, topic, {}), memories: s.memories.map((m) => m.id === id ? { ...m, topic } : m) })
 }
 
+/** Swap a memory with its neighbour in the scope's relevance order, which is the stored order. */
+export function shiftMemory(id: string, offset: -1 | 1): ScopeChange {
+  return (s) => {
+    const from = s.memories.findIndex((m) => m.id === id)
+    const to = from + offset
+    if (from < 0 || to < 0 || to >= s.memories.length) return {}
+    const memories = [...s.memories]
+    ;[memories[from], memories[to]] = [memories[to], memories[from]]
+    return { memories }
+  }
+}
+
 export function deleteTopic(name: string): ScopeChange {
   return (s) => ({ topics: s.topics.filter((t) => t.name !== name), memories: s.memories.filter((m) => normalizeMemoryTopic(m) !== name) })
 }
