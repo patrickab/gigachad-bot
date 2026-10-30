@@ -1,6 +1,6 @@
 # omp-web integration runbook
 
-How to change the omp tabs (gigachad-bot shell + upstream omp-web + private overlay), and how several agents work on it at once. Rules and ownership: `AGENTS.md`, "omp-web integration". Contracts: `.docs/architecture.md`, "omp tabs (omp-web)".
+How to change the omp tabs (gigachad-bot shell + upstream omp-web + private overlay), and how several agents work on it at once. Rules and ownership: `AGENTS.md`, "omp-web integration". Contracts: `.docs/architecture.md`, "omp tabs (omp-web)". Learn mode follows the same pattern with LearnHarness: `.docs/integration-learnharness.md`.
 
 ## Map
 
@@ -17,11 +17,11 @@ How to change the omp tabs (gigachad-bot shell + upstream omp-web + private over
   src/frontend/features/omp/             shell adapter: frame, protocol, composer, tabs (only place that knows omp-web)
   src/frontend/packages/chat-ui/         @gigachad/chat-ui: protocol.ts, palette, Q&A cards, markdown, code/diagram renderers
   src/lib/omp_web.py                     backend adapter (only place that builds omp-web URLs)
-  run-omp-web.sh                         builds and serves omp-web (reset to ref + seams.patch + overlay + chat-ui)
+  run-omp-web.sh                         builds and serves omp-web (auto-rebase onto origin/main, reset to ref + seams.patch + overlay + chat-ui)
 
 ~/git/ompweb_original/                   upstream clone kahme247/ompweb (main), never edited for gigachad
 ~/git/worktrees/ompweb_original/<topic>/ upstream topic worktrees (seams, fixes meant as upstream PRs)
-  integration_patrick_ab                 integration branch: upstream main + our pending upstream PRs, the ref we serve
+  integration_patrick_ab                 integration branch: upstream main + our pending upstream PRs, the ref we serve, rebased onto origin/main by run-omp-web.sh
 ~/.local/share/gigachad-bot/ompweb-upstream/   served build checkout (D), owned by run-omp-web.sh, never edit by hand
 ```
 
@@ -62,11 +62,23 @@ node_modules/.bin/tsc --noEmit && npx eslint custom && node --experimental-strip
 
 An override typechecks against the upstream module it wraps, so an upstream change that breaks it fails `tsc` here.
 
+### Automatic upstream rebase
+
+Every real start of `run-omp-web.sh` (`run.sh`, and in production `gigachad-bot-omp-web.service` via `deploy/run-production-omp-web.sh server`) first updates the ref branch, so omp-web serves the newest upstream `main` the overlay passes on. An omp-web already listening is reused untouched: the update applies at its next start. `redeploy.sh` also restarts the unit when `origin/main` moved past the branch, unless the last update already failed for that same branch tip and `origin/main`, or an omp session runs. `GIGACHAD_AUTO_UPDATE=0` opts out.
+
+1. `git fetch origin` in `GIGACHAD_OMP_WEB_REPO` (60 s limit, no prompts). Branch already contains `origin/main` → nothing to do, silently.
+2. A worktree holding the branch (e.g. `~/git/worktrees/ompweb_original/integration_patrick_ab`) with tracked changes → keep, it gets moved only when clean.
+3. Rebase a copy in a temporary detached worktree `<GIGACHAD_OMP_WEB_DIR>.update.XXXXXX` (no autostash, autosquash or update-refs: topic branches stay). Conflict → `rebase --abort`.
+4. Overlay checks on the result, as in the private check checkout: `seams.patch` applies, overlay as `custom/`, `npm ci`, chat-ui packed, `tsc --noEmit`, `node --experimental-strip-types --test custom/*.test.mjs`. Output: `<GIGACHAD_OMP_WEB_DIR>.auto-update.log`.
+5. Pass → the branch moves to the result (`reset --keep` in its worktree, else a compare-and-swap `update-ref`), the temporary worktree is removed. Never pushed.
+
+Any failure (offline, no `origin/main`, conflict, failed check, dirty or moved worktree) keeps the branch exactly as it was, prints one `omp-web auto-update: kept …` line with the reason to stderr and serves the last working version. A failed rebase or check is remembered in `<GIGACHAD_OMP_WEB_DIR>.auto-update-failed` per (branch tip, `origin/main`, overlay and chat-ui sources): later starts print the same reason without retrying until one of them changes. To resolve a conflict, rebase `integration_patrick_ab` by hand in its worktree; a failing check means the overlay needs adapting to upstream (fix it in `ompweb-overlay/`, the next start retries). A lock (`<GIGACHAD_OMP_WEB_DIR>.auto-update.lock`) keeps concurrent launchers from updating at once.
+
 ### Upstream change (seam or fix)
 
 1. Topic worktree off upstream `main` (PRs target main): `git -C ~/git/ompweb_original worktree add -b <topic> ~/git/worktrees/ompweb_original/<topic> main`
 2. Change, add/adjust upstream tests, run upstream checks. Baseline: `npm test` passes ~1700, lint has ~10 pre-existing warnings.
-3. The integrator cherry-picks the commit into `integration_patrick_ab`. Only commits there reach the served omp-web: `run-omp-web.sh` resets D to the ref, uncommitted edits in any worktree are invisible to it.
+3. The integrator cherry-picks the commit into `integration_patrick_ab`. Only commits there reach the served omp-web: `run-omp-web.sh` resets D to the ref, uncommitted edits in any worktree are invisible to it (and block its automatic rebase until committed or stashed).
 4. PR to kahme247/ompweb only with the user's approval. Never push without it.
 
 ## Shared resources and concurrency
@@ -83,7 +95,7 @@ Parallel-safe slices: overlay theme/CSS, a single overlay override, shell `featu
 
 ## Restart and live smoke (integrator)
 
-1. Cherry-pick upstream commits into `integration_patrick_ab`. gigachad-bot changes are already in `~/git/gigachad-bot`.
+1. Cherry-pick upstream commits into `integration_patrick_ab`. gigachad-bot changes are already in `~/git/gigachad-bot`. Upstream `main` needs no manual rebase: the restart does it (above).
 2. Check omp-web is idle: `curl -s http://127.0.0.1:30177/api/sessions` → `runningSessionIds` empty.
 3. Restart: restarting `run.sh` rebuilds omp-web, it stops the omp-web it started on exit. Without it: stop the `node bin/omp-web.js --port 30177` process, then `agent-proc start ompweb ./run-omp-web.sh` from `~/git/gigachad-bot`. Build takes ~2 min.
 4. Smoke at `http://localhost:2999` (not `127.0.0.1`: Next dev never hydrates there): open an omp session, switch omp tabs, check the changed surface. Send prompts only in an approved throwaway session.

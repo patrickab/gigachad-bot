@@ -10,10 +10,12 @@
 #             worktree's manifest or lock
 #   framing   omp-web refuses frames unless OMP_WEB_FRAME_ANCESTORS lists the frontend origin (custom/framing.ts),
 #             `next build` bakes the headers in, so a changed value rebuilds
+#   update    before serving, the ref branch is rebased locally onto origin/main when it lacks it (auto_update below),
+#             GIGACHAD_AUTO_UPDATE=0 opts out
 #
 # Idempotent: an omp-web already answering on the port is reused rather than
 # restarted (one instance per machine, it owns the omp session processes), with
-# a warning when it would refuse the frontend's frame.
+# a warning when it would refuse the frontend's frame. Its update waits for the next start.
 set -euo pipefail
 
 root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -29,6 +31,111 @@ overlay="$root_dir/ompweb-overlay"
 allows_framing() {
     local first_origin="${frame_ancestors%% *}"
     curl -sIL "http://$bind/" | grep -i '^content-security-policy:' | grep -qF "$first_origin"
+}
+
+note() {
+    printf 'omp-web auto-update: %s\n' "$*" >&2
+}
+
+# True when the worktree has no tracked changes: untracked files survive the move, `reset --keep` refuses to clobber them.
+clean() {
+    [[ -z "$(git -C "$1" status --porcelain --untracked-files=no 2>/dev/null)" ]] && git -C "$1" rev-parse --verify --quiet HEAD >/dev/null
+}
+
+# The runbook's overlay checks (.docs/integration-ompweb.md, "Private overlay check checkout") in worktree $1.
+# `&&` chains them: set -e is off inside a function called from a condition.
+overlay_checks() (
+    local tarball
+    cd -- "$1" \
+        && git apply "$overlay/seams.patch" \
+        && rsync -a --delete "$overlay/" custom/ \
+        && npm ci --no-audit --no-fund \
+        && tarball="$(cd -- "$root_dir/src/frontend" && node packages/chat-ui/pack.mjs --out "$1/node_modules/.gigachad-chat-ui")" \
+        && npm install --no-save --no-audit --no-fund --ignore-scripts "$tarball" \
+        && node_modules/.bin/tsc --noEmit \
+        && node --experimental-strip-types --test custom/*.test.mjs
+)
+
+# Rebases a copy of the ref branch onto origin/main in a temporary worktree, runs the overlay checks on it, then moves
+# the branch (and the clean worktree holding it) there. Local only, never pushes. Every failure keeps the branch and
+# notes why: a start is never blocked. A failed rebase or check is remembered per (branch, origin/main, overlay and
+# chat-ui sources), so later starts skip the npm ci and checks until one of them changes.
+auto_update() {
+    local branch="refs/heads/$ref" old main held="" wt="" line key stamp="$dir.auto-update-failed" error
+    local log="$dir.auto-update.log" work reason="" new="" seen_key="" seen_reason=""
+    if ! git -C "$repo" show-ref --verify --quiet "$branch"; then
+        note "skipped, $ref is not a local branch of $repo"
+        return 0
+    fi
+    # stdin closed and no prompts: ssh or credential prompts would otherwise hang a systemd start.
+    if ! error="$(GIT_TERMINAL_PROMPT=0 timeout 60 git -C "$repo" fetch --quiet origin 2>&1 </dev/null)"; then
+        error="${error%%$'\n'*}"
+        note "kept $ref, fetching origin failed (offline?): ${error:-timed out}"
+        return 0
+    fi
+    if ! main="$(git -C "$repo" rev-parse --verify --quiet refs/remotes/origin/main)"; then
+        note "kept $ref, origin has no main branch"
+        return 0
+    fi
+    old="$(git -C "$repo" rev-parse "$branch")" || return 0
+    if git -C "$repo" merge-base --is-ancestor "$main" "$old"; then
+        return 0
+    fi
+    while IFS= read -r line; do
+        case $line in
+            "worktree "*) wt="${line#worktree }" ;;
+            "branch $branch") held="$wt" ;;
+        esac
+    done < <(git -C "$repo" worktree list --porcelain)
+    if [[ -n $held ]] && ! clean "$held"; then
+        note "kept $ref, its worktree $held has uncommitted changes: commit or stash them to update"
+        return 0
+    fi
+    key="$old $main $( { find "$overlay" "$root_dir/src/frontend/packages/chat-ui" -name node_modules -prune -o -type f \
+        -printf '%P %s %T@\n' 2>/dev/null || true; } | sort | sha256sum | cut -c1-64)"
+    { read -r seen_key && read -r seen_reason; } 2>/dev/null <"$stamp" || true
+    if [[ $seen_key == "$key" ]]; then
+        note "kept $ref, $seen_reason (as on the last start)"
+        return 0
+    fi
+    if ! work="$(mktemp -d "$dir.update.XXXXXX")"; then
+        note "kept $ref, could not create a temporary directory next to $dir"
+        return 0
+    fi
+    if ! git -C "$repo" worktree add --quiet --detach "$work" "$old" >"$log" 2>&1; then
+        rm -rf "$work"
+        note "kept $ref, could not create a temporary worktree, see $log"
+        return 0
+    fi
+    printf 'omp-web auto-update: rebasing %s onto origin/main %s and checking the overlay\n' "$ref" "${main:0:7}"
+    # No updateRefs: other branches at the rebased commits (topic branches) stay where they are.
+    if ! git -C "$work" -c rebase.updateRefs=false rebase --no-autosquash --no-autostash "$main" >>"$log" 2>&1; then
+        git -C "$work" rebase --abort >>"$log" 2>&1
+        reason="rebasing onto origin/main ${main:0:7} conflicts"
+    elif ! overlay_checks "$work" >>"$log" 2>&1; then
+        reason="the overlay checks fail after rebasing onto origin/main ${main:0:7}, see $log"
+    else
+        new="$(git -C "$work" rev-parse HEAD)"
+    fi
+    git -C "$repo" worktree remove --force "$work" >>"$log" 2>&1 || { rm -rf "$work" && git -C "$repo" worktree prune; }
+    if [[ -z $new ]]; then
+        printf '%s\n%s\n' "$key" "$reason" >"$stamp"
+        note "kept $ref, $reason"
+        return 0
+    fi
+    # Compare-and-swap: the branch or its worktree may have moved during the checks.
+    if [[ -n $held ]]; then
+        if [[ "$(git -C "$held" rev-parse HEAD 2>/dev/null)" != "$old" ]] || ! clean "$held" \
+            || ! git -C "$held" reset --quiet --keep "$new" >>"$log" 2>&1; then
+            note "kept $ref, its worktree $held changed during the update"
+            return 0
+        fi
+    elif ! git -C "$repo" update-ref -m "gigachad auto-update: rebase onto origin/main" "$branch" "$new" "$old" >>"$log" 2>&1; then
+        note "kept $ref, it moved during the update"
+        return 0
+    fi
+    rm -f "$stamp"
+    printf 'omp-web auto-update: rebased %s onto origin/main %s (%s -> %s)\n' "$ref" "${main:0:7}" "${old:0:7}" "${new:0:7}"
 }
 
 if port_open "$bind"; then
@@ -62,6 +169,21 @@ if [[ ! -d "$dir" ]]; then
     git -C "$repo" worktree add --detach "$dir" "$ref"
 fi
 
+# Node >= 24 comes from the project venv, like the frontend's.
+export PATH="$root_dir/.venv/bin:$PATH"
+if [[ ${GIGACHAD_AUTO_UPDATE:-1} != 0 ]]; then
+    # One update at a time per served checkout, e.g. run.sh and the systemd unit starting together.
+    mkdir -p "$(dirname -- "$dir")"
+    exec {update_lock}>"$dir.auto-update.lock"
+    if flock -n "$update_lock"; then
+        auto_update || true
+    else
+        note "skipped, another launcher is updating $ref"
+    fi
+    # Closed before exec, else the server would hold the lock for its lifetime.
+    exec {update_lock}>&-
+fi
+
 # Reset to the ref and apply the seams only when the worktree is elsewhere or the patch changed, a needless reset
 # would touch the patched files and force a rebuild. rsync keeps unchanged files' mtimes for the same reason.
 # Detached because the ref is usually checked out in the source checkout itself.
@@ -73,8 +195,6 @@ fi
 rsync -a --delete "$overlay/" "$dir/custom/"
 printf 'omp-web worktree at %s (%s) + ompweb-overlay\n' "$ref" "$(git -C "$dir" log -1 --format='%h %s')"
 
-# Node >= 24 comes from the project venv, like the frontend's.
-export PATH="$root_dir/.venv/bin:$PATH"
 cd -- "$dir"
 
 if [[ ! -f node_modules/.package-lock.json || package-lock.json -nt node_modules/.package-lock.json ]]; then
