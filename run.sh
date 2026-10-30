@@ -52,6 +52,12 @@ trap 'exit 0' INT TERM
 sync_python_deps --extra sandbox-plot
 export GIGACHAD_DEPS_SYNCED=1
 
+# `npm ci` rewrites src/frontend/node_modules: finish it before the sidecars pack chat-ui with its tsc and before the
+# backend's reloader starts watching.
+printf 'Installing frontend deps\n'
+install_frontend_deps
+export GIGACHAD_FRONTEND_DEPS_INSTALLED=1
+
 # Opt out with GIGACHAD_OMP=0. The script exits quietly when OMP is absent,
 # and the backend hides the OMP model source when its gateway is unreachable.
 if [[ "${GIGACHAD_OMP:-1}" != "0" ]]; then

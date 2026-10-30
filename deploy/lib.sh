@@ -31,6 +31,16 @@ sync_python_deps() {
     uv --directory "$root" sync --locked "$@"
 }
 
+# Runs `npm ci` for src/frontend, which deletes and rewrites its node_modules. run.sh does it once up front and
+# exports GIGACHAD_FRONTEND_DEPS_INSTALLED=1: the sidecars' chat-ui pack (tsc from that node_modules) and the
+# backend's reloader would otherwise run into the rewrite.
+install_frontend_deps() {
+    if [[ -n "${GIGACHAD_FRONTEND_DEPS_INSTALLED:-}" ]]; then
+        return 0
+    fi
+    uv --directory "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)" run --no-sync gigachad-install
+}
+
 # Loads ~/.secrets into the caller's shell when it exists.
 load_secrets() {
     if [[ -f "$HOME/.secrets" ]]; then
