@@ -5,20 +5,34 @@ import type { ChatFocus } from "@/features/chat/ChatContainer"
 import type { AttachMenuItem, ChatInputHandle } from "@/features/chat/composer/ChatInput"
 import { effectiveReasoningEffort, useReasoningLevels } from "@/features/settings/ReasoningSelector"
 import { useBranches } from "@/features/navigation/BranchContext"
-import { useTab } from "@/contexts/TabContext"
+import { itemOf, useTab, type Tab } from "@/contexts/TabContext"
 import { useChat } from "@/features/chat/useChat"
 import { useChatPersistence } from "@/features/chat/useChatPersistence"
 import { useChatTurns } from "@/features/chat/useChatTurns"
 import { useFilePicker } from "@/features/chat/useFilePicker"
 import { useMemoryCommandBar } from "@/features/memory/useMemoryCommandBar"
+import type { MemorizeSource } from "@/features/memory/useMemorizeFlow"
+import type { ShellCommands } from "@/features/omp/OmpComposer"
 import { useProjectDocuments } from "@/features/chat/useProjectDocuments"
 import { useSlashCommands } from "@/features/navigation/useSlashCommands"
-import { loadChatHistory } from "@/lib/backend/api"
+import { fetchOmpSessionHistory, loadChatHistory } from "@/lib/backend/api"
+import type { Message } from "@/lib/domain/types"
 import { liveReferencePaths, normalizeMessageAttachments } from "@/features/chat/attachments"
 import { parseHistoryFile } from "@/lib/domain/historyFile"
 import { isEditableTarget, isModKey, isNeovimKeyEvent } from "@/lib/utils"
 import { useBusyCount } from "@/hooks/useBusyCount"
 import { useEventListener } from "@/hooks/useEventListener"
+
+/** What `/memorize` reads in `tab`: the omp session an omp tab shows, else the chat, never a branch chat. Null when there is none. */
+function useMemorizeSource(tab: Tab, messages: Message[], chatId: string, branchMessageIdx: number | null): (() => Promise<MemorizeSource>) | null {
+  const isOmpTab = tab.appMode === "omp"
+  const ompView = isOmpTab ? itemOf(tab, "omp")?.omp : null
+  const ompSessionId = ompView?.kind === "session" ? ompView.sessionId : null
+  return useMemo(() => {
+    if (isOmpTab) return ompSessionId ? async () => ({ messages: await fetchOmpSessionHistory(ompSessionId), conversationId: ompSessionId }) : null
+    return branchMessageIdx == null ? async () => ({ messages, conversationId: chatId }) : null
+  }, [isOmpTab, ompSessionId, branchMessageIdx, messages, chatId])
+}
 
 /** Run one tab's chat (history, turns, attachments, memory commands, shortcuts); called in every mode so the chat survives mode switches. */
 export function useTabChat({ focus, onOpenChat }: { focus: ChatFocus; onOpenChat: (historyFile: string) => void }) {
@@ -42,13 +56,13 @@ export function useTabChat({ focus, onOpenChat }: { focus: ChatFocus; onOpenChat
   const filesEnabled = filePicker.rootFiles.enabled
   const docs = useProjectDocuments({ isActive, appMode, projectSlug, chatId, chatInputRef, track })
   const persistence = useChatPersistence({ tab, projectSlug, messages, chatId, usage, refreshAll, setHistoryFile })
-  const memory = useMemoryCommandBar({ messages, chatId, branchMessageIdx })
+  const memory = useMemoryCommandBar({ loadSource: useMemorizeSource(tab, messages, chatId, branchMessageIdx) })
   const { menuItems, runSlashCommand } = useSlashCommands({
-    filesEnabled,
-    hasProject: projectSlug != null,
+    filesEnabled: filesEnabled && appMode !== "omp",
     openFilePicker: filePicker.openFilePicker,
     memorize: memory.memorize,
   })
+  const ompShellCommands = useMemo<ShellCommands>(() => ({ names: menuItems.map((item) => item.command.slice(1)), run: runSlashCommand }), [menuItems, runSlashCommand])
   const turns = useChatTurns({
     chat,
     chatId,
@@ -111,7 +125,7 @@ export function useTabChat({ focus, onOpenChat }: { focus: ChatFocus; onOpenChat
     if (e.altKey && e.key === "r") { e.preventDefault(); reset() }
     if (e.altKey && e.key.toLowerCase() === "m") {
       e.preventDefault()
-      if (memory.isIdle) void memory.memorize(null)
+      if (memory.isIdle) void memory.memorize()
     }
     if (e.altKey && e.key.toLowerCase() === "o") {
       e.preventDefault()
@@ -162,7 +176,7 @@ export function useTabChat({ focus, onOpenChat }: { focus: ChatFocus; onOpenChat
 
   return {
     chat, chatId, branchMessageIdx, extracting, chatInputRef, reasoningLevels, reasoningEffort,
-    filePicker, docs, persistence, memory, menuItems, runMenuCommand, turns, attachmentActions, attachMenuItems,
+    filePicker, docs, persistence, memory, menuItems, runMenuCommand, ompShellCommands, turns, attachmentActions, attachMenuItems,
     onBranch: tab.historyFile ? handleBranch : undefined,
   }
 }

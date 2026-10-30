@@ -86,7 +86,7 @@ def test_memory_extract_and_regroup_touch_the_store_off_the_loop(data_store, mon
     regroup = {"topics": [{"name": "profile", "summary": "Who the user is"}], "assignments": [{"id": "m1", "topic": "profile"}]}
     extractor = MemoryExtractor(store, ScriptedLLM(add, regroup), "test")
 
-    result = asyncio.run(extractor.extract([{"role": "user", "content": "hi"}], chat_id="c1", scope="global"))
+    result = asyncio.run(extractor.extract([{"role": "user", "content": "hi"}], chat_id="c1"))
     regrouped = asyncio.run(extractor.propose_regroup(GLOBAL))
 
     assert [o.text for o in result.global_proposal.operations] == ["Runs iwd"]

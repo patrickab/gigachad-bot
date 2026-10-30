@@ -49,7 +49,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onNewChat, 
   const canvas = useCanvasView()
   const {
     chat, chatId, branchMessageIdx, extracting, chatInputRef, reasoningLevels, reasoningEffort,
-    filePicker, docs, persistence, memory, menuItems, runMenuCommand, turns, attachmentActions, attachMenuItems, onBranch,
+    filePicker, docs, persistence, memory, menuItems, runMenuCommand, ompShellCommands, turns, attachmentActions, attachMenuItems, onBranch,
   } = useTabChat({ focus, onOpenChat })
   const { models, prompts, setPrompts } = chat
   const { standaloneFile } = filePicker
@@ -109,6 +109,7 @@ function TabWorkspace({ onOpenChat, onOpenProject, onProjectRenamed, onNewChat, 
           chatColumn={chatColumn}
           chatBody={chatBody}
           refreshDocuments={docs.refreshDocuments}
+          ompShellCommands={ompShellCommands}
         />
         {isActive && standaloneFile && (
           // File-picker overlays sit below the bar, over whatever surface is open.

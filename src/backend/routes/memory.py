@@ -23,7 +23,6 @@ class MemoryExtractRequest(BaseModel):
     messages: list[dict[str, str]]
     project_slug: str | None = None
     chat_id: str | None = None
-    scope: ScopeKind | None = None  # None extracts both
 
 
 class MemoryCancelRequest(BaseModel):
@@ -76,7 +75,7 @@ async def extract_memories(req: MemoryExtractRequest, store: MemoryStoreDep, def
     """Propose memory operations from a conversation for user review, a scope is None when not extracted."""
     with http_errors(_STORE_FAILURE), request_client() as client:
         extractor = MemoryExtractor(store, client, defaults["memory_model"])
-        result = await extractor.extract(req.messages, project_slug=req.project_slug, chat_id=req.chat_id, scope=req.scope)
+        result = await extractor.extract(req.messages, project_slug=req.project_slug, chat_id=req.chat_id)
     return {
         "review_id": result.review_id,
         "global": _proposal_json(result.global_proposal),

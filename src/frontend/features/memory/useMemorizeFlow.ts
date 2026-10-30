@@ -14,6 +14,12 @@ type ReviewScopes = Partial<Record<MemoryScope, ReviewScope>>
 /** Stored topics per reviewed scope, the targets an operation can move to. */
 type StoredTopics = Partial<Record<MemoryScope, MemoryTopic[]>>
 
+/** What one memorization reads: the conversation and the id its extraction watermark is kept under (a chat or an omp session). */
+export interface MemorizeSource {
+  messages: Pick<Message, "role" | "content">[]
+  conversationId: string
+}
+
 type MemorizeFlowState =
   | { phase: "idle" }
   | { phase: "extracting" }
@@ -112,12 +118,11 @@ export function countOperations(scopes: ReviewScopes, onlyAccepted = false): num
 export function useMemorizeFlow() {
   const [state, dispatch] = useReducer(reducer, { phase: "idle" })
 
-  const extract = useCallback(async (
-    messages: Pick<Message, "role" | "content">[], projectSlug: string | null | undefined, chatId: string | null | undefined, scope: MemoryScope | null,
-  ) => {
+  const extract = useCallback(async (loadSource: () => Promise<MemorizeSource>, projectSlug: string | null | undefined) => {
     dispatch({ type: "START_EXTRACT" })
     try {
-      const response = await extractMemories(messages.map(({ role, content }) => ({ role, content })), projectSlug, chatId, scope)
+      const { messages, conversationId } = await loadSource()
+      const response = await extractMemories(messages.map(({ role, content }) => ({ role, content })), projectSlug, conversationId)
       const scopes: ReviewScopes = { global: toReviewScope(response.global), project: toReviewScope(response.project) }
       if (!scopes.global && !scopes.project) {
         await cancelMemories(response.review_id).catch(() => {})

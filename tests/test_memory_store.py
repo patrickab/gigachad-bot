@@ -17,7 +17,7 @@ def store(data_store) -> MemoryStore:
 
 
 def extract(store: MemoryStore, llm: object, messages: list[dict[str, str]]):
-    return asyncio.run(MemoryExtractor(store, llm, "test").extract(messages, chat_id="c1", scope="global"))
+    return asyncio.run(MemoryExtractor(store, llm, "test").extract(messages, chat_id="c1"))
 
 
 class ScriptedLLM:

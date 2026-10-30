@@ -18,7 +18,7 @@ import { FactorySurface } from "@/features/factory/FactorySurface"
 import { LearnModelSelector, LearnReasoningSelector } from "@/features/learn/LearnModel"
 import { LearnPlanButton } from "@/features/learn/LearnPlanButton"
 import { LearnSurface } from "@/features/learn/LearnSurface"
-import { OmpModelSelector, OmpReasoningSelector, OmpTokenCounter } from "@/features/omp/OmpComposer"
+import { OmpModelSelector, OmpReasoningSelector, OmpTokenCounter, type ShellCommands } from "@/features/omp/OmpComposer"
 import { OmpSurface } from "@/features/omp/OmpSurface"
 import { OmpSystemPrompt } from "@/features/omp/OmpSystemPrompt"
 import { TokenCounter } from "@/features/chat/TokenCounter"
@@ -47,6 +47,8 @@ interface WorkspaceSurfaceProps {
   /** The chat, shown in chat mode and whenever another mode has no item to show. */
   chatBody: ReactNode
   refreshDocuments: () => void
+  /** The tab's slash commands an omp tab's composer offers (`/memorize`). */
+  ompShellCommands: ShellCommands
 }
 
 /** What one mode puts in the top bar beside the sidebar toggle, and the surface below it. */
@@ -59,7 +61,7 @@ interface Surface {
 }
 
 /** The top bar and the surface of the tab's current mode. */
-export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningLevels, reasoningEffort, totalUsage, chatColumn, chatBody, refreshDocuments }: WorkspaceSurfaceProps) {
+export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningLevels, reasoningEffort, totalUsage, chatColumn, chatBody, refreshDocuments, ompShellCommands }: WorkspaceSurfaceProps) {
   const { tab, setModeLabel, updateConfig, setAppMode, setWorkspaceItem } = useTab()
   const [pdfChatOpen, setPdfChatOpen] = useState(false)
   const { config, projectSlug, appMode } = tab
@@ -170,7 +172,7 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
           {filePanelToggle}
         </>,
         runsUnderTopBar: !!ompView && ompView.kind !== "settings",
-        body: ompItem && ompView ? <OmpSurface view={ompView} onViewChange={(omp) => setWorkspaceItem({ ...ompItem, omp })} /> : chatBody,
+        body: ompItem && ompView ? <OmpSurface view={ompView} onViewChange={(omp) => setWorkspaceItem({ ...ompItem, omp })} shellCommands={ompShellCommands} /> : chatBody,
       }
     },
     factory: () => {

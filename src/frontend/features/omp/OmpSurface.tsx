@@ -6,7 +6,7 @@ import { useOpenFile } from "@/features/editor/FilePanel"
 import { useElementSize } from "@/hooks/useElementSize"
 import type { OmpView } from "@/lib/domain/types"
 import { useOmp } from "./OmpProvider"
-import { OmpComposer } from "./OmpComposer"
+import { OmpComposer, type ShellCommands } from "./OmpComposer"
 import { viewTitle } from "./sessions"
 
 /** Height of the shell's top bar (`TopBar`, h-11) the transcript scrolls beneath. */
@@ -18,7 +18,7 @@ const TOP_BAR_PX = 44
  * - Sessions run under the top bar and gigachad's composer like a chat, the frame pads its transcript by these insets
  * - Settings keep the plain layout below the top bar (`WorkspaceSurface`)
  */
-export function OmpSurface({ view, onViewChange }: { view: OmpView; onViewChange: (view: OmpView) => void }) {
+export function OmpSurface({ view, onViewChange, shellCommands }: { view: OmpView; onViewChange: (view: OmpView) => void; shellCommands: ShellCommands }) {
   const { tab, isActive, setTitle } = useTab()
   const { attachFrame, setFrameInsets, frameStatus, ompWebUrl, overview, reloadFrame } = useOmp()
   const openFile = useOpenFile()
@@ -60,7 +60,7 @@ export function OmpSurface({ view, onViewChange }: { view: OmpView; onViewChange
         <div ref={composerRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-10">
           <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-paper via-paper/40 via-30% to-transparent" />
           <div className="pointer-events-auto relative">
-            <OmpComposer view={view} chatId={tab.chatId} slug={tab.projectSlug} />
+            <OmpComposer view={view} chatId={tab.chatId} slug={tab.projectSlug} shellCommands={shellCommands} />
           </div>
         </div>
       )}

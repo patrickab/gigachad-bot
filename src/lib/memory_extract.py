@@ -182,16 +182,15 @@ class MemoryExtractor:
         messages: list[dict[str, str]],
         project_slug: str | None = None,
         chat_id: str | None = None,
-        scope: ScopeKind | None = None,
     ) -> ExtractResult:
         """Propose memory operations from messages since this conversation's last memorization.
 
-        *scope* is ``"global"``, ``"project"``, or ``None`` for both, extracted in parallel. Watermarks
+        Extracts the global scope and, with *project_slug*, the project scope in parallel. Watermarks
         are tracked per ``(chat_id, scope)`` and advance only when that scope commits, so cancelling
         leaves the messages eligible next time.
         """
         review_id = str(uuid.uuid4())
-        kinds: list[ScopeKind] = [k for k in ("global", "project") if scope in (None, k) and (k == "global" or project_slug)]
+        kinds: list[ScopeKind] = ["global", "project"] if project_slug else ["global"]
 
         def load() -> dict[ScopeKind, _ScopeInput | None]:
             """Each scope's new messages with its topics and facts, None when nothing is new."""

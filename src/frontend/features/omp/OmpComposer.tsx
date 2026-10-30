@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, type ComponentProps, type RefObject } from "react"
-import { File as FileIcon, Folder, MessageSquareText, Puzzle, Sparkles, type LucideIcon } from "lucide-react"
+import { Brain, File as FileIcon, Folder, MessageSquareText, Puzzle, Sparkles, type LucideIcon } from "lucide-react"
 import { withParsedAttachments } from "@/features/chat/attachments"
 import { useTab } from "@/contexts/TabContext"
 import { ChatInput, type ChatInputHandle } from "@/features/chat/composer/ChatInput"
@@ -27,6 +27,14 @@ const COMPLETION_TIMEOUT_MS = 3_000
 /** Shared by every omp composer: answers go to all of them, the id picks the asker. */
 let lastCompletionRequestId = 0
 
+/** gigachad's own `/` commands in an omp tab (`/memorize`): listed in the `/` menu and run by the shell, never sent to omp. */
+export interface ShellCommands {
+  /** Command names without the `/`. */
+  names: string[]
+  /** Run `text` if it is one of them and report whether it was. */
+  run: (text: string) => Promise<boolean>
+}
+
 function toComposerCompletion(completion: Completion): ComposerCompletion {
   return { ...completion, icon: FILE_ICONS[completion.kind], mono: true }
 }
@@ -34,9 +42,9 @@ function toComposerCompletion(completion: Completion): ComposerCompletion {
 /**
  * The `/` menu for `query`, the whole draft replaced by the pick.
  *
- * - `/skill:` first, then the other commands. Picking it keeps the menu open on the skills, filtered by what follows `skill:`
+ * - `/skill:` first, then gigachad's and omp's commands ranked together. Picking `/skill:` keeps the menu open on the skills, filtered by what follows `skill:`
  */
-function slashCompletions(text: string, query: string, commands: ComposerCommands | null): ComposerCompletion[] {
+function slashCompletions(text: string, query: string, commands: ComposerCommands | null, shellCommands: string[]): ComposerCompletion[] {
   const replaceDraft = { from: 0, to: text.length }
   const skills = commands?.skills ?? []
   const skillQuery = skillQueryOf(query)
@@ -49,9 +57,13 @@ function slashCompletions(text: string, query: string, commands: ComposerCommand
   const skillEntry: ComposerCompletion[] = skills.length > 0 && offersSkills(query)
     ? [{ label: `/${SKILL_PREFIX}`, detail: `${skills.length} skills`, icon: Sparkles, ...replaceDraft, insert: `/${SKILL_PREFIX}`, caretOffset: SKILL_PREFIX.length + 1 }]
     : []
-  return [...skillEntry, ...rankByName(commands?.commands ?? [], query).map((command) => {
-    const insert = `/${command.name} `
-    return { label: `/${command.name}`, detail: command.description, icon: COMMAND_ICONS[command.kind], ...replaceDraft, insert, caretOffset: insert.length }
+  const entries = [
+    ...shellCommands.map((name) => ({ name, detail: undefined, icon: Brain })),
+    ...(commands?.commands ?? []).map((command) => ({ name: command.name, detail: command.description, icon: COMMAND_ICONS[command.kind] })),
+  ]
+  return [...skillEntry, ...rankByName(entries, query).map(({ name, detail, icon }) => {
+    const insert = `/${name} `
+    return { label: `/${name}`, detail, icon, ...replaceDraft, insert, caretOffset: insert.length }
   })]
 }
 
@@ -83,7 +95,7 @@ function useFrameCompletions(sessionId: string | null | undefined): CompleteDraf
  *
  * - The first `/` of a session asks the frame to load its commands (`composer-load-commands`), the open menu follows once they arrive
  */
-function useComposerCompletions(sessionId: string | null | undefined, commands: ComposerCommands | null): CompleteDraft | undefined {
+function useComposerCompletions(sessionId: string | null | undefined, commands: ComposerCommands | null, shellCommands: string[]): CompleteDraft | undefined {
   const { sendToComposer } = useOmp()
   const frameComplete = useFrameCompletions(sessionId)
   const loadRequestedRef = useRef(new Set<string>())
@@ -96,9 +108,9 @@ function useComposerCompletions(sessionId: string | null | undefined, commands: 
         loadRequestedRef.current.add(sessionId)
         sendToComposer({ type: "composer-load-commands", sessionId })
       }
-      return slashCompletions(text, query, commands)
+      return slashCompletions(text, query, commands, shellCommands)
     }
-  }, [frameComplete, sessionId, commands, sendToComposer])
+  }, [frameComplete, sessionId, commands, shellCommands, sendToComposer])
 }
 
 /** Put what omp hands back for `view` (abort-withdrawn queue, queue Edit) into the composer behind `inputRef`. */
@@ -147,21 +159,25 @@ function useComposerFor(view: OmpView) {
  * - Images go as omp images, documents as text the way gigachad chats send them
  * - Text and images omp hands back land in this composer
  * - `/skill:` drills into the skills in the same menu, a pick becomes the draft `/skill:<name> `
+ * - `shellCommands` (`/memorize`) share the `/` menu, the shell runs them instead of sending them
  * - An extension's `select` (e.g. `/files`) takes over the same menu, the draft filtering its options
  * - Disabled until the frame reports the composer of this tab's session
  */
-export function OmpComposer({ view, chatId, slug }: { view: OmpView; chatId: string; slug: string | null }) {
+export function OmpComposer({ view, chatId, slug, shellCommands }: { view: OmpView; chatId: string; slug: string | null; shellCommands: ShellCommands }) {
   const { state, commands, sendToComposer } = useComposerFor(view)
   const inputRef = useRef<ChatInputHandle>(null)
   useComposerRestore(view, inputRef)
   const picker = useSelectPicker(view)
   const sessionId = state?.sessionId ?? null
-  const complete = useComposerCompletions(state?.sessionId, commands)
+  const complete = useComposerCompletions(state?.sessionId, commands, shellCommands.names)
 
   const { run: send, pending: preparing, error } = useAsyncAction(async (text: string, attachments: Attachment[]) => {
     const prompt = await ompPrompt(text, attachments, (documents) => withParsedAttachments(documents, chatId, slug, parseFiles))
     sendToComposer({ type: "composer-send", sessionId, ...prompt })
   }, "Could not attach these files")
+  const submit = async (text: string, attachments: Attachment[]) => {
+    if (!(await shellCommands.run(text.trim()))) await send(text, attachments)
+  }
 
   return (
     <div className="px-4 pb-6 pt-2">
@@ -169,7 +185,7 @@ export function OmpComposer({ view, chatId, slug }: { view: OmpView; chatId: str
         ref={inputRef}
         chatId={chatId}
         slug={slug}
-        onSend={(text, attachments) => { void send(text, attachments) }}
+        onSend={(text, attachments) => { void submit(text, attachments) }}
         disabled={!state || preparing}
         extracting={preparing}
         isStreaming={state?.streaming ?? false}

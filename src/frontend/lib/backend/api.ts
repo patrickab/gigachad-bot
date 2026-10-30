@@ -524,17 +524,16 @@ export async function saveChat(historyFile: string, projectSlug: string | null, 
   else await saveChatHistory(historyFile, messages, historyOpts)
 }
 
+/** Propose memory operations for the global scope and, with `projectSlug`, the project scope. */
 export async function extractMemories(
   messages: { role: string; content: string }[],
   projectSlug?: string | null,
   chatId?: string | null,
-  scope?: MemoryScope | null,
 ): Promise<MemoryExtractResponse> {
   return post<MemoryExtractResponse>("/memory/extract", {
     messages,
     project_slug: projectSlug ?? null,
     chat_id: chatId ?? null,
-    scope: scope ?? null,
   })
 }
 
@@ -595,6 +594,11 @@ export async function archiveOmpSession(sessionId: string): Promise<void> {
 
 export async function fetchOmpSystemPrompt(sessionId: string): Promise<OmpSystemPrompt> {
   return request<OmpSystemPrompt>(`/omp/sessions/${encodeURIComponent(sessionId)}/system-prompt`)
+}
+
+/** An omp session's active branch as a chat history: user and assistant text, no thinking or tool calls. */
+export async function fetchOmpSessionHistory(sessionId: string): Promise<Pick<Message, "role" | "content">[]> {
+  return request<Pick<Message, "role" | "content">[]>(`/omp/sessions/${encodeURIComponent(sessionId)}/history`)
 }
 
 /** Every learn session with the project it is grouped under. Host-access logins only. */

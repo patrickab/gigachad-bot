@@ -2,12 +2,7 @@
 
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react"
 import { useTab } from "@/contexts/TabContext"
-import { countOperations, useMemorizeFlow, type MemoryPanelState, type MemoryReviewActions } from "@/features/memory/useMemorizeFlow"
-import type { Message } from "@/lib/domain/types"
-import type { MemoryScope } from "@/lib/domain/memory"
-
-/** Which memory stores an extraction targets: `null` is both global and project. */
-export type MemorizeScope = MemoryScope | null
+import { countOperations, useMemorizeFlow, type MemorizeSource, type MemoryPanelState, type MemoryReviewActions } from "@/features/memory/useMemorizeFlow"
 
 export interface MemoryCommandBar {
   /** Neither the menu nor a memory panel is showing, so either may open. */
@@ -17,19 +12,17 @@ export interface MemoryCommandBar {
   closeMenu: () => void
   query: string
   setQuery: Dispatch<SetStateAction<string>>
-  /** Extract memories from the main branch; a branch chat does nothing. Starting one closes the menu. */
-  memorize: (scope: MemorizeScope) => Promise<void>
+  /** Extract global and (in a project) project memories from the tab's conversation, nothing without one. Starting one closes the menu. */
+  memorize: () => Promise<void>
   /** Null while no memorize flow is running. */
   panelState: MemoryPanelState | null
   panelActions: MemoryReviewActions
 }
 
 /** Own the workspace command menu and the memory flow it launches. */
-export function useMemoryCommandBar({ messages, chatId, branchMessageIdx }: {
-  messages: Message[]
-  chatId: string
-  /** Index where this chat branched off its parent, null for a main chat. */
-  branchMessageIdx: number | null
+export function useMemoryCommandBar({ loadSource }: {
+  /** Loads the conversation `/memorize` reads, null when the tab has none to memorize (a branch chat, no omp session). */
+  loadSource: (() => Promise<MemorizeSource>) | null
 }): MemoryCommandBar {
   const { tab, setModeLabel } = useTab()
   const projectSlug = tab.projectSlug
@@ -56,11 +49,11 @@ export function useMemoryCommandBar({ messages, chatId, branchMessageIdx }: {
 
   const { extract } = flow
 
-  const memorize = useCallback(async (scope: MemorizeScope) => {
-    if (branchMessageIdx != null) return
+  const memorize = useCallback(async () => {
+    if (!loadSource) return
     setMenuOpen(false)
-    await extract(messages, projectSlug, chatId, scope)
-  }, [branchMessageIdx, extract, messages, projectSlug, chatId])
+    await extract(loadSource, projectSlug)
+  }, [loadSource, extract, projectSlug])
 
   return {
     isIdle: !menuOpen && phase === "idle",
