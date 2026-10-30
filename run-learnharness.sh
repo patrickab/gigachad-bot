@@ -206,8 +206,7 @@ install_dependencies() {
         isolated npm ci --no-audit --no-fund || return 1
         rm -f node_modules/.gigachad-chat-ui.sha256
     fi
-    chat_ui_tarball="$(cd -- "$root_dir/src/frontend" && node packages/chat-ui/pack.mjs --out "$checkout/node_modules/.gigachad-chat-ui")" \
-        || return 1
+    chat_ui_tarball="$(pack_chat_ui "$checkout/node_modules/.gigachad-chat-ui")" || return 1
     chat_ui_digest="$(sha256sum "$chat_ui_tarball" | cut -d' ' -f1)"
     if [[ "$(cat node_modules/.gigachad-chat-ui.sha256 2>/dev/null)" != "$chat_ui_digest" ]]; then
         isolated npm install --no-save --no-audit --no-fund --ignore-scripts "$chat_ui_tarball" || return 1

@@ -50,7 +50,7 @@ overlay_checks() (
         && git apply "$overlay/seams.patch" \
         && rsync -a --delete "$overlay/" custom/ \
         && npm ci --no-audit --no-fund \
-        && tarball="$(cd -- "$root_dir/src/frontend" && node packages/chat-ui/pack.mjs --out "$1/node_modules/.gigachad-chat-ui")" \
+        && tarball="$(pack_chat_ui "$1/node_modules/.gigachad-chat-ui")" \
         && npm install --no-save --no-audit --no-fund --ignore-scripts "$tarball" \
         && node_modules/.bin/tsc --noEmit \
         && node --experimental-strip-types --test custom/*.test.mjs
@@ -203,7 +203,7 @@ if [[ ! -f node_modules/.package-lock.json || package-lock.json -nt node_modules
 fi
 # Packed into node_modules, which the rebuild check below skips: the build stamp tracks the tarball's digest instead.
 # `npm install --no-save` keeps manifest and lock upstream's, a later `npm ci` removes the package and resets the stamp.
-chat_ui_tarball="$(cd -- "$root_dir/src/frontend" && node packages/chat-ui/pack.mjs --out "$dir/node_modules/.gigachad-chat-ui")"
+chat_ui_tarball="$(pack_chat_ui "$dir/node_modules/.gigachad-chat-ui")"
 chat_ui_digest="$(sha256sum "$chat_ui_tarball" | cut -d' ' -f1)"
 if [[ "$(cat node_modules/.gigachad-chat-ui.sha256 2>/dev/null)" != "$chat_ui_digest" ]]; then
     npm install --no-save --no-audit --no-fund --ignore-scripts "$chat_ui_tarball"

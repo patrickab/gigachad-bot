@@ -83,12 +83,17 @@ cd "$PROD" && uv sync --python 3.12 --locked --no-dev
   `GIGACHAD_DEPS_SYNCED=1`, so `run-backend.sh`/`run-frontend.sh` skip their own
   sync. `uv sync` is exact by default and removes extras it was not given, so a
   standalone `uv sync --locked` drops `polars`. Run tests with `uv run --no-sync`.
-- `run.sh` also runs the frontend `npm ci` once up front and exports
-  `GIGACHAD_FRONTEND_DEPS_INSTALLED=1`, so `run-frontend.sh` skips it. `npm ci`
-  rewrites `src/frontend/node_modules`, which the omp-web/LearnHarness chat-ui
-  pack (`tsc` from it) cannot run during and which makes the backend's reloader
-  restart. Started separately, run `run-frontend.sh` to completion of its install
-  before the sidecars.
+- Development npm installs (`install_deps.py`) run `npm ci` only when `package.json`,
+  the lock or `.npmrc` changed since the last successful install (stamp in
+  `node_modules/.gigachad-npm-inputs.sha256`), as `npm ci` rewrites `node_modules`
+  (25s+ for the frontend). Production still runs `npm ci` on every start.
+- `run.sh` installs the frontend once up front and exports
+  `GIGACHAD_FRONTEND_DEPS_INSTALLED=1`, so `run-frontend.sh` skips it. A running
+  install breaks the chat-ui pack (`tsc` from `src/frontend/node_modules`) and makes
+  the backend's reloader restart. Started separately, run `run-frontend.sh` to
+  completion of its install before the sidecars.
+- `run.sh` also packs `@gigachad/chat-ui` once for omp-web and LearnHarness and exports
+  `GIGACHAD_CHAT_UI_TARBALL`, which `pack_chat_ui` (`deploy/lib.sh`) prefers over packing.
 - Retain the seven-day release cooldown (`exclude-newer`, `.npmrc`'s
   `min-release-age`) and disabled npm install scripts (`ignore-scripts`). Review
   required scripts before explicitly running them. Neither cooldown nor automated

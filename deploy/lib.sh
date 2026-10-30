@@ -41,6 +41,17 @@ install_frontend_deps() {
     uv --directory "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)" run --no-sync gigachad-install
 }
 
+
+# Prints the @gigachad/chat-ui tarball path. run.sh packs it once for both sidecars and exports
+# GIGACHAD_CHAT_UI_TARBALL, otherwise it is packed into directory $1 (node >= 24 on PATH).
+pack_chat_ui() {
+    if [[ -f "${GIGACHAD_CHAT_UI_TARBALL:-}" ]]; then
+        printf '%s\n' "$GIGACHAD_CHAT_UI_TARBALL"
+        return 0
+    fi
+    (cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../src/frontend" && node packages/chat-ui/pack.mjs --out "$1")
+}
+
 # Loads ~/.secrets into the caller's shell when it exists.
 load_secrets() {
     if [[ -f "$HOME/.secrets" ]]; then
