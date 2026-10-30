@@ -115,6 +115,7 @@ export function Sidebar(props: SidebarProps) {
           onMoveToRoot={(path) => documents.move(path, "")}
         />
         <ErrorText className="px-2 py-1">{projectActions.archiveError}</ErrorText>
+        <ErrorText className="px-2 py-1">{documents.uploadError}</ErrorText>
         <div role="separator" className="my-4 border-t border-divider/50" />
         <FileTree label="Code" items={codeItems(codeContext)} controller={fileMountController}
           headerActions={<ArchiveSelector noun="directories" entries={directoryEntries(codeContext)} onRestore={(path) => code.setArchived(path, false)} />}

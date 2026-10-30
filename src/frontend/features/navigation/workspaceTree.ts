@@ -1,4 +1,4 @@
-import { Archive, FilePlus, GitCompare } from "lucide-react"
+import { Archive, FilePlus, GitCompare, Upload } from "lucide-react"
 import { ArchitectureIcon } from "@/components/ui/ArchitectureIcon"
 import type { FileTreeItem } from "@/components/ui/file-tree/FileTree"
 import type { AppSurface } from "@/contexts/TabContext"
@@ -17,7 +17,7 @@ type CodeMounts = ReturnType<typeof useCodeMounts>
 
 /** Everything the Projects tree shows and does. */
 type ProjectTreeContext =
-  & Pick<ReturnType<typeof useWorkspaceDocuments>, "documents" | "notes" | "move" | "createAndOpen" | "remove" | "importFiles" | "hasArchitecture" | "openArchitecture" | "setCreateTarget">
+  & Pick<ReturnType<typeof useWorkspaceDocuments>, "documents" | "notes" | "move" | "createAndOpen" | "remove" | "importFiles" | "uploadFiles" | "hasArchitecture" | "openArchitecture" | "setCreateTarget">
   & Pick<ReturnType<typeof useProjectActions>, "startRename" | "removeProject" | "changeArchive">
   & Pick<ReturnType<typeof useBranches>, "branchMeta" | "visibleRootFiles" | "activeFile" | "activeQaIndex" | "onFileClick">
   & {
@@ -119,6 +119,7 @@ function categoryItems(context: ProjectTreeContext, project: ProjectListItem | n
     },
     ...(project ? [{
       id: `${prefix}:files`, label: "files", type: "folder" as const,
+      actions: [{ label: `Upload files to ${owner}`, icon: Upload, onClick: () => void context.uploadFiles(scope) }],
       create: {
         label: `New file in ${owner}`, placeholder: "File name",
         onSubmit: (name: string) => createAndOpen(scope, name, (path) => onDocumentSelect?.(path, scope)),

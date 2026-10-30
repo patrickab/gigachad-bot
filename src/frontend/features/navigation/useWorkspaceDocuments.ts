@@ -4,9 +4,22 @@ import { useCallback, useState } from "react"
 import { useStartupRead } from "@/contexts/StartupReadContext"
 import { useTabActive } from "@/contexts/TabContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
-import { addRootFilesToProject, createArchitectureSource, listNotes, listProjectDocuments, moveDocument, removeDocument, writeDocument } from "@/lib/backend/api"
+import { addRootFilesToProject, createArchitectureSource, listNotes, listProjectDocuments, moveDocument, removeDocument, writeBinaryDocument, writeDocument } from "@/lib/backend/api"
 import { isArchitecturePath } from "@/lib/domain/architecturePaths"
 import type { ProjectDocument, ProjectListItem } from "@/lib/domain/projects"
+import { errorMessage } from "@/lib/utils"
+
+/** Open the OS file dialog (any platform, the webview provides it) and resolve with the chosen files, none when cancelled. */
+function pickFiles(): Promise<File[]> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input")
+    input.type = "file"
+    input.multiple = true
+    input.onchange = () => resolve(Array.from(input.files ?? []))
+    input.oncancel = () => resolve([])
+    input.click()
+  })
+}
 
 interface WorkspaceDocumentsOptions {
   projects: ProjectListItem[]
@@ -30,6 +43,7 @@ export function useWorkspaceDocuments({
   const [notes, setNotes] = useState<ProjectDocument[]>([])
   /** Project whose create-document panel is open. */
   const [createTarget, setCreateTarget] = useState<string | null>(null)
+  const [uploadError, setUploadError] = useState("")
 
   const loadProjectDocuments = useCallback(async (signal?: AbortSignal) => {
     const entries = await Promise.all(projects.map(async (project) =>
@@ -66,6 +80,20 @@ export function useWorkspaceDocuments({
     } else {
       await moveHistory(path, scope)
     }
+  }
+
+  /** Pick files from this device and store them as documents of project `scope`. */
+  const uploadFiles = async (scope: string) => {
+    const files = await pickFiles()
+    if (files.length === 0) return
+    setUploadError("")
+    try {
+      await Promise.all(files.map((file) => writeBinaryDocument(scope, file.name, file)))
+    } catch (cause) {
+      setUploadError(errorMessage(cause, "Could not upload files"))
+    }
+    await refresh()
+    onDocumentsChanged?.()
   }
 
   const remove = ({ path, name }: ProjectDocument, scope: string) => {
@@ -113,5 +141,5 @@ export function useWorkspaceDocuments({
     } catch { /* the panel stays open to retry */ }
   }
 
-  return { documents, notes, createAndOpen, move, remove, importFiles, hasArchitecture, openArchitecture, createTarget, setCreateTarget, createDocument }
+  return { documents, notes, createAndOpen, move, remove, importFiles, uploadFiles, uploadError, hasArchitecture, openArchitecture, createTarget, setCreateTarget, createDocument }
 }
