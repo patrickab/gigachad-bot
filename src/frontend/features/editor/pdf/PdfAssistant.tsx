@@ -195,8 +195,10 @@ function SelectionQuestionCard({ selection, pdfText, model, onClose }: {
   }, { capture: true })
 
   const ask = async () => {
-    if (pdfText.status !== "ready") return
-    await askModel(question, SYS_SELECTION(pdfText.markdown, selection.text, selection.page))
+    if (pdfText.status !== "ready" || !question.trim()) return
+    const sentQuestion = question
+    setQuestion("")
+    await askModel(sentQuestion, SYS_SELECTION(pdfText.markdown, selection.text, selection.page))
   }
 
   // Focus moved into the card, so copy still copies the page selection while the question is empty
