@@ -61,3 +61,7 @@ The first start builds it in a separate worktree with this repository's overlay 
 - Prefer one private HTTPS origin for the UI and `/api` in production. The existing split Vercel/Tailscale setup remains documented for current deployments.
 
 The local launchers are for development, not production. Keep the backend private rather than exposing it directly to the internet.
+
+## License
+
+GigaChad Bot is licensed under the [GNU AGPL-3.0-only](LICENSE), with an additional permission for MinerU in [LICENSE-EXCEPTION](LICENSE-EXCEPTION).
