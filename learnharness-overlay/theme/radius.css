@@ -1,0 +1,57 @@
+/* gigachad-bot's corner radii over LearnHarness's ladder, embedded only (`html.cf-embed`).
+
+   LearnHarness's ladder is 4 / 8 / 12 / 16px literals baked into the utilities (`@theme inline`, `app/globals.css`),
+   gigachad-bot's is Tailwind's (`--radius-*` in the shell's `app/globals.css`). Same class, the shell's value:
+
+   | class            | LearnHarness | gigachad-bot | here  |
+   |------------------|--------------|--------------|-------|
+   | `rounded-sm`     | 4px          | 4px          | 4px   |
+   | `rounded`        | 8px          | 4px          | 4px   |
+   | `rounded-[6px]`  | 6px          | —            | 6px   |
+   | `rounded-md`     | 8px          | 6px          | 6px   |
+   | `rounded-l-md`, `rounded-r-md` | 8px | 6px     | 6px   |
+   | `rounded-[10px]` | 10px         | —            | 10px  |
+   | `rounded-lg`     | 12px         | 8px          | 8px   |
+   | `rounded-xl`     | 16px         | 12px         | 12px  |
+   | `rounded-2xl`    | 16px         | 16px         | 16px  |
+
+   - `rounded-2xl` is the composer shell (dock, home) and stays 16px like the shell's composer, so its 10px buttons
+     (`composer.tsx`: 16px shell − 6px padding) stay concentric
+   - Same placement as `type.css`: the `utilities` layer, 0-1-1. Upstream's state, group and child variants (0-2-0,
+     e.g. the button group's joined corners) keep their own values
+   - `look.test.mjs` fails when upstream uses a radius class this file does not map */
+
+@layer utilities {
+  :where(html.cf-embed) body .rounded-sm {
+    border-radius: 4px;
+  }
+  :where(html.cf-embed) body .rounded {
+    border-radius: 4px;
+  }
+  :where(html.cf-embed) body .rounded-\[6px\] {
+    border-radius: 6px;
+  }
+  :where(html.cf-embed) body .rounded-md {
+    border-radius: 6px;
+  }
+  :where(html.cf-embed) body .rounded-l-md {
+    border-top-left-radius: 6px;
+    border-bottom-left-radius: 6px;
+  }
+  :where(html.cf-embed) body .rounded-r-md {
+    border-top-right-radius: 6px;
+    border-bottom-right-radius: 6px;
+  }
+  :where(html.cf-embed) body .rounded-\[10px\] {
+    border-radius: 10px;
+  }
+  :where(html.cf-embed) body .rounded-lg {
+    border-radius: 8px;
+  }
+  :where(html.cf-embed) body .rounded-xl {
+    border-radius: 12px;
+  }
+  :where(html.cf-embed) body .rounded-2xl {
+    border-radius: 16px;
+  }
+}

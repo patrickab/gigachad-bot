@@ -18,7 +18,7 @@ export interface Attachment {
 }
 
 /** The tools this build can actually offer the model. */
-export type ToolName = "web_search" | "deep_research" | "sandbox_plot" | "diagram" | "mindmap" | "latex_ocr" | "workspace_agent"
+export type ToolName = "web_search" | "deep_research" | "sandbox_plot" | "diagram" | "mindmap" | "latex_ocr" | "workspace_agent" | "start_learn_session"
 
 /** A name read back from a saved chat. Widened past `ToolName` so old chats still render,
  *  while only `ToolName` may be sent as an offered tool. */
@@ -226,6 +226,8 @@ export interface BackendConfig {
   host_access: boolean
   /** omp-web's address, the source of the omp tabs' frame. */
   omp_web_url: string
+  /** LearnHarness's address, the source of the learn frame. Null for logins without host access. */
+  learnharness_url: string | null
 }
 
 interface ProviderUsageWindow {
@@ -338,3 +340,28 @@ export type OmpView =
   /** New-session composer in `cwd`. */
   | { kind: "new"; cwd: string }
   | { kind: "settings" }
+
+/** What a learn tab shows in LearnHarness's shared frame. */
+export type LearnView =
+  | { kind: "home" }
+  /** A new session, teaching unless `sessionKind` says practice (LearnHarness's Practice entry). */
+  | { kind: "new"; sessionKind?: "teach" | "practice" }
+  | { kind: "session"; sessionId: string }
+
+/** A LearnHarness learn session and the project it is grouped under (`GET /api/learn/sessions`). */
+export interface LearnSession {
+  id: string
+  title: string
+  kind: string | null
+  /** A teach turn is running. */
+  busy: boolean
+  /** The sidebar row's state (`GET /api/learn/sessions` always sends it): a context compaction runs. */
+  compacting?: boolean
+  /** A question waits for the learner. */
+  pending_question?: boolean
+  /** Practice: a posed problem waits for the learner. */
+  pending_problem?: boolean
+  /** When the session last changed (ISO time), null for a fresh one. */
+  updated_at?: string | null
+  project_slug: string | null
+}

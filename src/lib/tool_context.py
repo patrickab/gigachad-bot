@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from agent_sandbox import PromptImage
     from llm_baseclient.client import LLMClient
 
+    from lib.project_store import ProjectStore
     from lib.sandbox_service import SandboxService
 
 
@@ -44,3 +45,6 @@ class ToolContext:
     user_msg: str = ""
     img: Any = None
     vision_model: str = ""
+    # The chat's project (None outside projects) and the store its learn sessions are grouped in.
+    project_slug: str | None = None
+    project_store: ProjectStore | None = None

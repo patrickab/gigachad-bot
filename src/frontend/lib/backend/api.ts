@@ -1,4 +1,4 @@
-import type { Attachment, BackendConfig, ChatRequest, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpArchivedSession, OmpCatalog, OmpOverview, OmpSystemPrompt, PromptMeta, ProviderUsageReport, ReasoningLevels, Usage } from "@/lib/domain/types"
+import type { Attachment, BackendConfig, ChatRequest, LearnSession, Message, ModelDefaults, ModelProvider, ModelsResponse, OmpArchivedSession, OmpCatalog, OmpOverview, OmpSystemPrompt, PromptMeta, ProviderUsageReport, ReasoningLevels, Usage } from "@/lib/domain/types"
 import type { DiffStatus, DirectoryListing, FileTreeNode, RootDiffFiles, RootFile, WorktreeList } from "@/lib/domain/files"
 import type { BranchMeta, ChatHistoriesResponse, ChatHistory } from "@/lib/domain/histories"
 import type { KanbanCard, ProjectData, ProjectDocument, ProjectListItem } from "@/lib/domain/projects"
@@ -595,6 +595,34 @@ export async function archiveOmpSession(sessionId: string): Promise<void> {
 
 export async function fetchOmpSystemPrompt(sessionId: string): Promise<OmpSystemPrompt> {
   return request<OmpSystemPrompt>(`/omp/sessions/${encodeURIComponent(sessionId)}/system-prompt`)
+}
+
+/** Every learn session with the project it is grouped under. Host-access logins only. */
+export async function fetchLearnSessions(signal?: AbortSignal): Promise<LearnSession[]> {
+  return request<LearnSession[]>("/learn/sessions", { signal })
+}
+
+/** Group a learn session under `projectSlug` (out of any other project), or under none. */
+export async function assignLearnSession(sessionId: string, projectSlug: string | null): Promise<void> {
+  await requestVoid(`/learn/sessions/${encodeURIComponent(sessionId)}/project`, jsonInit("PUT", { project_slug: projectSlug }))
+}
+
+/** Rename a learn session in LearnHarness, resolving to the title it stored. */
+export async function renameLearnSession(sessionId: string, title: string): Promise<string> {
+  return (await patch<{ title: string }>(`/learn/sessions/${encodeURIComponent(sessionId)}`, { title })).title
+}
+
+/** How a learn session is deleted: its Knowledge stays in the graph, or (LearnHarness's "Also remove its graph traces") goes too. */
+export type LearnDeleteMode = "preserve-graph" | "delete-nodes"
+
+/** Delete a learn session in LearnHarness and drop it from its project. */
+export async function deleteLearnSession(sessionId: string, mode: LearnDeleteMode = "preserve-graph"): Promise<void> {
+  await requestVoid(`/learn/sessions/${encodeURIComponent(sessionId)}${toQuery({ mode })}`, { method: "DELETE" })
+}
+
+/** A learn session as LearnHarness exports it: one Markdown document and the file name it suggests. */
+export async function exportLearnSession(sessionId: string): Promise<{ filename: string; markdown: string }> {
+  return request<{ filename: string; markdown: string }>(`/learn/sessions/${encodeURIComponent(sessionId)}/markdown`)
 }
 
 /** Start the production redeploy, the backend restarts shortly after. Host-access logins only. */

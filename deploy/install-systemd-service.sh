@@ -22,6 +22,8 @@ require_runner backend "${worktree}/run-backend.sh"
 require_runner OMP "${script_dir}/run-production-omp.sh"
 require_runner omp-web "${script_dir}/run-production-omp-web.sh"
 require_runner factory "${worktree}/run-factory.sh"
+require_runner "learn mode" "${script_dir}/run-production-learnharness.sh"
+require_runner "LearnHarness backup" "${script_dir}/backup-learnharness.sh"
 
 readonly units=(
     gigachad-bot.service
@@ -29,10 +31,16 @@ readonly units=(
     gigachad-bot-omp-web.service
     gigachad-bot-omp-web-gate.service
     gigachad-bot-factory.service
+    gigachad-bot-litellm-proxy.service
+    gigachad-bot-learnharness.service
+    gigachad-bot-learnharness-gate.service
 )
-for unit in "${units[@]}"; do
+# Started by its timer, not enabled itself.
+readonly timer_units=(gigachad-bot-learnharness-backup.service gigachad-bot-learnharness-backup.timer)
+for unit in "${units[@]}" "${timer_units[@]}"; do
     install -D --mode=0644 "${script_dir}/${unit}" "${unit_dir}/${unit}"
 done
 systemctl --user daemon-reload
-systemctl --user enable "${units[@]}"
-printf 'User services installed and enabled. Start them with: systemctl --user start %s\n' "${units[*]}"
+systemctl --user enable "${units[@]}" gigachad-bot-learnharness-backup.timer
+printf 'User services installed and enabled. Start them with: systemctl --user start %s gigachad-bot-learnharness-backup.timer\n' \
+    "${units[*]}"

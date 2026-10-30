@@ -1,0 +1,28 @@
+[Unit]
+Description=gigachad-bot LiteLLM proxy (learn mode's models)
+# The generator reads the catalog from the production PostgreSQL (started by the backend) and the OMP gateway
+Wants=network-online.target gigachad-bot.service gigachad-bot-omp.service
+After=network-online.target gigachad-bot.service gigachad-bot-omp.service
+
+[Service]
+Type=exec
+WorkingDirectory=%h/git/gigachad-bot-prod
+Environment=GIGACHAD_ENV_FILE=%h/.config/gigachad-bot/env
+# uv serves the proxy (uv tool run), its first start downloads the pinned LiteLLM into uv's cache. omp (its model registry)
+# is in ~/.local/bin
+Environment=PATH=%h/.local/bin:/home/linuxbrew/.linuxbrew/bin:%h/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/git/gigachad-bot-prod/deploy/run-production-learnharness.sh proxy
+Restart=on-failure
+RestartSec=5s
+# 78: GIGACHAD_LEARNHARNESS_LOGIN or the database password is missing, a restart would not help. Exit 1 (database or
+# gateway not up yet, and no earlier config.yaml) is retried
+RestartPreventExitStatus=78
+# uv tool run passes the proxy's TERM exit on
+SuccessExitStatus=143
+TimeoutStopSec=30s
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=default.target

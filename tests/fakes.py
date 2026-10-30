@@ -1,5 +1,6 @@
 """In-memory stand-ins for the stores, sandbox and LLM client that tests share."""
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 import hashlib
 import io
@@ -32,6 +33,9 @@ class MemoryDataStore:
         except KeyError as exc:
             raise StorageNotFoundError(key) from exc
         return content, Revision(hashlib.sha256(content).hexdigest())
+
+    def read_many(self, keys: Iterable[str]) -> dict[str, tuple[bytes, Revision]]:
+        return {key: self.read_bytes(key) for key in keys if key in self._documents}
 
     def write_bytes(
         self, key: str, content: bytes, *, expected: Revision | None = None, meta: dict[str, Any] | None = None

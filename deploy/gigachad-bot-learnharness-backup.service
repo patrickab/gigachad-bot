@@ -1,0 +1,11 @@
+[Unit]
+Description=gigachad-bot LearnHarness data backup
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/git/gigachad-bot-prod
+Environment=GIGACHAD_ENV_FILE=%h/.config/gigachad-bot/env
+ExecStart=%h/git/gigachad-bot-prod/deploy/backup-learnharness.sh
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077

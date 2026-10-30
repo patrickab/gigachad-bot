@@ -110,7 +110,8 @@ def provider_label(provider_id: str) -> str:
     return known if known else provider_id.replace("-", " ").replace("_", " ").title()
 
 
-def _fetch_catalog_entries() -> list[dict[str, Any]]:
+def catalog_entries() -> list[dict[str, Any]]:
+    """The gateway's raw `/models` rows, uncached. An unreachable gateway or a bad body raises (URLError, OSError, ValueError)."""
     request = urllib.request.Request(
         f"{gateway_url()}/models",
         headers={"Authorization": f"Bearer {gateway_token()}"},
@@ -161,7 +162,7 @@ def _read_catalog() -> dict[str, Any]:
     }
     if result["installed"]:
         try:
-            result["providers"] = group_by_provider(_fetch_catalog_entries())
+            result["providers"] = group_by_provider(catalog_entries())
             result["online"] = True
         except (urllib.error.URLError, OSError, ValueError) as exc:
             result["error"] = f"No OMP gateway at {result['gateway']} ({exc})"
@@ -185,8 +186,12 @@ def reset_cache() -> None:
     _thinking.clear()
 
 
-def _fetch_thinking_levels() -> dict[str, list[str]]:
-    """`<provider>/<model>` -> OMP's baked effort ladder, empty for non-reasoning models."""
+def thinking_registry() -> dict[str, list[str]]:
+    """`<provider>/<model>` -> OMP's baked effort ladder, empty for non-reasoning models, uncached.
+
+    Empty only when the `omp` CLI is absent. A failing CLI or bad output raises (`OSError`, `SubprocessError`,
+    `ValueError`, `AttributeError`), unlike `thinking_levels`, which reads a failure as "unknown model".
+    """
     try:
         output = run_omp("models", "--json", timeout=_CLI_TIMEOUT_SECONDS)
     except OmpNotFound:
@@ -206,7 +211,7 @@ def thinking_levels(model_id: str) -> list[str] | None:
     - A missing or failing `omp` CLI counts as "unknown", the caller falls back to LiteLLM
     """
     try:
-        levels = _thinking.get(_fetch_thinking_levels)
+        levels = _thinking.get(thinking_registry)
     except (OSError, subprocess.SubprocessError, ValueError, AttributeError):
         return None
     return levels.get(model_id)

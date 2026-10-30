@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Any
 from agent_sandbox import PromptImage
 from llm_baseclient.client import LLMClient
 
+from lib import learnharness
+from lib.data_store import StorageConflictError
 from lib.llm_resilience import completion_text
 from lib.prompts.non_user_prompts import SYS_DIAGRAM_MERMAID, SYS_OCR_TEXT_EXTRACTION, SYS_STUDY_MINDMAP
 from lib.research import run_deep_research
@@ -16,16 +18,22 @@ from lib.sandbox_plot import create_sandbox_plot
 from lib.sandbox_service import PROMPT_MAX_LEN, WORKSPACE_AGENT_SCOPE, SandboxService
 from lib.tool_context import ToolContext, ToolOptions
 from lib.toolcalling import Stage, ToolCatalog, ToolDefinition, ToolOutcome, sandbox_unavailable, stream_tool_turn
+from lib.upstream import UpstreamContractError, UpstreamRequestFailed, UpstreamUnavailable
 from lib.web_search import brave_sources, evidence_prompt, plan_query, source_label
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+    from lib.project_store import ProjectStore
 
 TOOL_GUIDANCE = (
     "Call tools yourself when a request needs them; never ask permission and never claim you cannot "
     "browse. A short, vague, or nonsense message is not automatically a lookup request — respond "
     "normally, or ask what the user means, instead of guessing at what it 'means' via search."
 )
+
+# Tools that act on the machine owner's host, offered only to logins with the host capability.
+HOST_TOOLS = frozenset({"start_learn_session"})
 
 
 def _single_text_parameter(name: str, description: str, *, max_length: int | None = None) -> dict[str, Any]:
@@ -179,6 +187,46 @@ async def _latex_ocr(_args: dict[str, Any], context: ToolContext, stage: Stage) 
     return ToolOutcome(content=text, summary="Text extracted", detail={"text": text})
 
 
+# A goal's first sentence titles its learn session, LearnHarness shortens it further.
+_FIRST_SENTENCE = re.compile(r"(?<=[.!?])\s")
+
+
+async def _start_learn_session(args: dict[str, Any], context: ToolContext, stage: Stage) -> ToolOutcome:
+    goal = args["goal"]
+    stage("Creating learn session")
+    session = await learnharness.create_session(_FIRST_SENTENCE.split(goal, maxsplit=1)[0])
+    store, project_slug = context.project_store, context.project_slug
+    ungrouped = ""
+    if store is None or project_slug is None:
+        project_slug = None
+    else:
+        try:
+            await asyncio.to_thread(store.assign_learn_session, session.id, project_slug)
+        except (FileNotFoundError, StorageConflictError) as exc:
+            # The session exists either way: link it ungrouped (it shows under Learn) and start it, never orphan it.
+            ungrouped = f"It could not join the chat's project ({exc}), so it is listed under Learn on its own. "
+            project_slug = None
+    detail = {"session_id": session.id, "title": session.title, "project_slug": project_slug}
+    stage("Starting the tutor")
+    try:
+        await learnharness.submit_text_turn(session.id, goal)
+    except (UpstreamUnavailable, UpstreamRequestFailed, UpstreamContractError) as exc:
+        return ToolOutcome(
+            content=f'The learn session "{session.title}" was created, but its tutor did not start: {exc}. {ungrouped}'
+            "The user can open it from the link above and send the goal again.",
+            summary="Tutor not started",
+            detail=detail,
+            error=str(exc),
+        )
+    return ToolOutcome(
+        content=f'Started the learn session "{session.title}": its tutor is already working on the goal. {ungrouped}The user '
+        "opens it from the link shown above this reply, so write no link or URL. Say so in one or two sentences, do not start "
+        "teaching here.",
+        summary="Session started" if not ungrouped else "Session started outside the project",
+        detail=detail,
+    )
+
+
 BUILTIN_TOOLS: ToolCatalog[ToolContext] = ToolCatalog(
     (
         ToolDefinition(
@@ -238,8 +286,25 @@ BUILTIN_TOOLS: ToolCatalog[ToolContext] = ToolCatalog(
             _single_text_parameter("prompt", "Describe the work to perform in the chat workspace.", max_length=PROMPT_MAX_LEN),
             _workspace_agent,
         ),
+        ToolDefinition(
+            "start_learn_session",
+            "Start a learn session in Learn mode, where a tutor probes what the user knows, plans and teaches the topic "
+            "with quizzes and demos. Use when the user asks to learn, study, or master a topic properly or in depth, or to "
+            "be taught, tutored, or quizzed on it, rather than to get an answer here.",
+            _single_text_parameter(
+                "goal",
+                "The learning goal in a few sentences, condensed from the conversation: the topic, what the user already "
+                "knows or struggles with, and what they want to be able to do. Written as the user, addressed to the tutor.",
+            ),
+            _start_learn_session,
+        ),
     )
 )
+
+
+def offered_tools(enabled: list[str], *, host_access: bool) -> list[str]:
+    """The tools of *enabled* this login may be offered: `HOST_TOOLS` only with the host capability."""
+    return enabled if host_access else [name for name in enabled if name not in HOST_TOOLS]
 
 
 async def stream_chat_with_tools(
@@ -257,9 +322,15 @@ async def stream_chat_with_tools(
     prompt_images: tuple[PromptImage, ...] = (),
     small_model: str = "",
     vision_model: str = "",
+    host_access: bool = False,
+    project_slug: str | None = None,
+    project_store: ProjectStore | None = None,
     **kwargs: Any,
 ) -> AsyncIterator[tuple[str, Any]]:
-    """Bind request dependencies, then stream one optional tool call and the answer."""
+    """Bind request dependencies, then stream one optional tool call and the answer.
+
+    *host_access*: the login holds the host capability, without it `HOST_TOOLS` are never offered.
+    """
 
     def context_for_call(tool_call_id: str) -> ToolContext:
         return ToolContext(
@@ -275,6 +346,8 @@ async def stream_chat_with_tools(
             user_msg=user_msg,
             img=img,
             vision_model=vision_model,
+            project_slug=project_slug,
+            project_store=project_store,
         )
 
     async for event in stream_tool_turn(
@@ -284,7 +357,7 @@ async def stream_chat_with_tools(
         history=history,
         system_prompt=system_prompt,
         img=img,
-        enabled=enabled,
+        enabled=offered_tools(enabled, host_access=host_access),
         catalog=BUILTIN_TOOLS,
         context_for_call=context_for_call,
         guidance=TOOL_GUIDANCE,

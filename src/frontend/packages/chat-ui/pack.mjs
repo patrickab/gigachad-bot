@@ -11,7 +11,7 @@
 // resolve them. The tarball is reproducible: tsc output is deterministic and npm pack writes fixed timestamps,
 // so its digest changes only with its sources.
 import { execFileSync } from "node:child_process"
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
@@ -39,6 +39,8 @@ try {
   for (const stylesheet of readdirSync(join(packageDir, "src")).filter((name) => name.endsWith(".css"))) {
     copyFileSync(join(packageDir, "src", stylesheet), join(staging, "dist", stylesheet))
   }
+  // The font files `fonts.css` points at, next to it as in src/.
+  cpSync(join(packageDir, "src", "fonts"), join(staging, "dist", "fonts"), { recursive: true })
   copyFileSync(join(packageDir, "package.json"), join(staging, "package.json"))
   mkdirSync(outDir, { recursive: true })
   execFileSync("npm", ["pack", "--ignore-scripts", "--silent", "--pack-destination", outDir], { cwd: staging, stdio: ["ignore", "ignore", "inherit"] })

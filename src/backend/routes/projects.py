@@ -7,6 +7,8 @@ from pydantic import BaseModel
 from backend.http_plumbing import http_errors
 from backend.routes.deps import get_chat_cleanup, get_project_store, get_sandbox_service
 from backend.routes.schemas import ChatSnapshot
+from backend.routes.upstream import call_upstream
+from lib import learnharness
 from lib.chat_cleanup import ChatCleanup
 from lib.data_store import StorageConflictError
 from lib.project_store import ProjectExists, ProjectStore
@@ -77,7 +79,16 @@ async def delete_project(
     store: ProjectStore = Depends(get_project_store),
     cleanup: ChatCleanup = Depends(get_chat_cleanup),
 ) -> dict[str, str]:
-    with http_errors(_PROJECT_NOT_FOUND):
+    """Delete the project's learn sessions (their Knowledge stays), then the project. A refused session delete keeps the project.
+
+    Each deleted session leaves the mapping at once, so a refusal midway leaves exactly the sessions that still exist.
+    The mapping is read again until it is empty: a session assigned meanwhile (the tool, the frame) is deleted too.
+    """
+    with http_errors(_PROJECT_NOT_FOUND, (StorageConflictError, 409, None)):
+        while session_ids := await asyncio.to_thread(store.learn_sessions, slug):
+            for session_id in session_ids:
+                await call_upstream(learnharness.delete_session(session_id))
+                await asyncio.to_thread(store.forget_learn_sessions, {session_id})
         return await cleanup.after(lambda released: store.delete_project(slug, released=released))
 
 

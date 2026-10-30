@@ -170,6 +170,8 @@ curl --fail --show-error http://127.0.0.1:8002/healthz
 | LikeC4 | `127.0.0.1:8011` | `127.0.0.1:8012` |
 | PostgreSQL | `gigachad-dev` container/volume | `gigachad-prod` container/volume |
 | OMP auth broker / gateway | `127.0.0.1:8765` / `127.0.0.1:4000` | Same defaults, reuse existing listeners |
+| omp-web / its gate | `127.0.0.1:30177` / - | Same omp-web, gate `127.0.0.1:30179` (Serve `:8443`) |
+| LearnHarness / LiteLLM proxy / gate | `127.0.0.1:30181` / `127.0.0.1:30183` / - | Same defaults, one instance per machine, gate `127.0.0.1:30182` (Serve `:8444`) |
 
 Inspect failures rather than exposing another listener:
 
@@ -220,8 +222,16 @@ git clone https://github.com/kahme247/ompweb.git "$HOME/git/ompweb_original"
 - Packing compiles with `src/frontend`'s TypeScript and types, so production
   needs `src/frontend/node_modules`. `redeploy.sh` installs it (`npm ci
   --ignore-scripts`) when missing or when the lockfile changed.
+- Before serving, `run-omp-web.sh` fetches `origin` and, when the ref branch
+  lacks `origin/main`, rebases a copy onto it in a temporary worktree, runs the
+  overlay checks (`tsc`, overlay node tests) and moves the branch (and its clean
+  worktree) there. Local only, never pushed. A conflict, failed check, dirty
+  branch worktree or offline start keeps the branch and prints one
+  `omp-web auto-update:` line why; the start goes on. Details:
+  `.docs/integration-ompweb.md`, "Automatic upstream rebase".
 - Install/build initially and rebuild on source changes.
-- Restart after updates: an existing listener is reused.
+- Restart after updates: an existing listener is reused, its update applies at
+  its next start.
 
 | Variable | Default / purpose |
 | --- | --- |
@@ -235,6 +245,7 @@ git clone https://github.com/kahme247/ompweb.git "$HOME/git/ompweb_original"
 | `GIGACHAD_OMP_WEB_GATE_PORT` | `30179`, loopback identity gate |
 | `GIGACHAD_OMP_WEB_AUTH` | Optional trusted upstream auth header |
 | `GIGACHAD_OMP_WEB` | `1`, set `0` to skip development startup |
+| `GIGACHAD_AUTO_UPDATE` | `1`, set `0` to serve the ref as is (no fetch, no rebase) |
 
 #### Production: units and the Tailnet gate
 
@@ -278,10 +289,13 @@ Manual update:
 
 1. Ensure no session is running before restart, which ends agent processes.
    `curl -s http://127.0.0.1:30177/api/sessions` must show no `runningSessionIds`.
-2. Update the ref (`git -C "$HOME/git/ompweb_original" fetch origin` for
-   `origin/main`) and Gigachad, whose overlay the restart applies.
+2. Update Gigachad, whose overlay the restart applies. The restart fetches
+   `origin` and rebases `integration_patrick_ab` onto `origin/main` itself
+   (fetch by hand for a remote-tracking ref such as `origin/main`).
 3. Restart `gigachad-bot-omp-web.service` and verify
-   `curl -sf http://127.0.0.1:30177/login`. The worktree follows its configured ref.
+   `curl -sf http://127.0.0.1:30177/login`. The worktree follows its configured ref;
+   `journalctl --user -u gigachad-bot-omp-web.service | grep auto-update` shows
+   whether the rebase applied or why it was kept.
 4. Reload the frontend.
 5. Smoke session loading, history, turn rendering, and tab switching. Test prompt
    sending, Stop, model/thinking controls, and completion only in an explicitly
@@ -289,6 +303,10 @@ Manual update:
 
 **Known limitation:** after a fresh frame load, a session created by the first tab
 uses omp-web's last folder rather than that tab's folder. Later tabs are unaffected.
+
+### Provision learn mode (LearnHarness)
+
+Units, environment, gate, backup and restore: `.docs/integration-learnharness.md`, "Production deployment".
 
 ### Provision the agent factory
 
@@ -328,6 +346,9 @@ tailscale serve status
 
 - Expect persistent private HTTPS from the helper:
   `tailscale serve --bg --https=443 --accept-app-caps=gigachad.local/cap/host http://127.0.0.1:8002`.
+- The frame gates get their own HTTPS ports with the same helper: omp-web
+  `30179 8443`, LearnHarness `30182 8444` (see their sections). Serve accepts any
+  HTTPS port, only Funnel is limited to 443, 8443 and 10000.
 - Verify from another permitted Tailnet device. Never add a public fallback:
 
 ```bash
@@ -339,7 +360,7 @@ curl --fail --show-error https://<tailnet-hostname>/api/config
 
 | Identity | Authority |
 | --- | --- |
-| Host-capable login | Host-user execution through OMP, Neovim, factory, and files outside mounts, excluding credential stores |
+| Host-capable login | Host-user execution through OMP, Neovim, factory, and files outside mounts, excluding credential stores. Learn mode (LearnHarness) |
 | Other login | Own mounted roots only |
 | Trusted ingress | Tailscale v1.92+ accepts `gigachad.local/cap/host` and forwards `Tailscale-App-Capabilities`, stripping client-supplied copies |
 | Backend / gate | Trust only private ingress to loopback (`backend/identity.py`) |
@@ -360,7 +381,8 @@ curl --fail --show-error https://<tailnet-hostname>/api/config
 ```
 
 - Fail closed on missing grants or unsupported Serve flags.
-- Check `/api/config`: `omp_web_url` is set for granted logins, `null` otherwise.
+- Check `/api/config`: `omp_web_url` and `learnharness_url` are set for granted
+  logins, `null` otherwise.
 
 ## 3. Configure the Vercel frontend
 
@@ -395,13 +417,15 @@ systemctl --user restart gigachad-bot.service
 1. Update the production worktree and install locked dependencies.
 2. Confirm nonsecret `$ENV` and separate `~/.secrets`. Leave `GIGACHAD_BASE_DIR`
    unset, leave `MINERU_SERVER_URL` unset when using local OCR.
-3. Provision sandbox/optional OMP/factory services, then pass sandbox doctor.
+3. Provision sandbox/optional OMP/factory/learn mode services, then pass sandbox doctor.
 4. Start or restart the backend and verify loopback health.
 5. Publish private Serve ingress and verify it from another permitted device.
 6. Deploy the frontend with the matching API base and authorized origin.
 7. Perform the verification below before use.
 
 - Back up PostgreSQL and the shared Documents/PDF mirror before state-affecting updates.
+  LearnHarness data has its own daily backup (section 1, "Back up and restore
+  LearnHarness data"), and the launcher snapshots it before a ref bump.
 - Avoid destructive backup synchronization.
 - Do not treat code worktrees as application-data backups.
 
@@ -457,5 +481,12 @@ unchanged: step 0013 only deleted superseded `changes` rows (replay output is
 identical) and added an index, older code merely stops pruning. The sync
 stream tolerates a frontend and backend from different revisions in both
 directions, an older backend just replays from `since=0` again.
+
+A rolled-back LearnHarness ref serves data a newer commit may have changed, and
+upstream keeps no backward compatibility for it. Stop the LearnHarness unit, move
+its home aside, copy the matching `snapshots/<old-sha>-<utc>/` back into a new
+home (its `data/`, `auth.json` and credential files) and write `<old-sha>` to its
+`served-commit`, or restore a backup taken under that commit. Then start it
+(`.docs/integration-learnharness.md`, "Back up and restore LearnHarness data").
 
 Repeat health, CORS, SSE, and persistence verification before resuming use.

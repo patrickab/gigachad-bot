@@ -9,7 +9,7 @@ from backend import http_plumbing
 from backend.routes import chat as chat_route
 from config import MODEL_DEFAULT_KEYS, TEST_MODEL
 from lib import toolcalling, tools
-from tests.conftest import route_client
+from tests.conftest import request_identity, route_client
 from tests.fakes import ClientStub, text_chunk, tool_chunk
 
 
@@ -21,7 +21,7 @@ class _client_ctx:  # noqa: N801 - stands in for the request_client contextmanag
         return None
 
 
-def _chat_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+def _chat_client(monkeypatch: pytest.MonkeyPatch, *, has_host_access: bool = True) -> TestClient:
     monkeypatch.setattr(chat_route, "request_client", lambda: _client_ctx())
     monkeypatch.setattr(chat_route, "augment_system_prompt", lambda store, prompt, slug: prompt)  # noqa: ARG005 - signature parity
     monkeypatch.setattr(chat_route, "_resolve_images", lambda *_, **__: None)
@@ -31,6 +31,8 @@ def _chat_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
             chat_route.get_memory_store: None,
             chat_route.get_asset_store: None,
             chat_route.get_sandbox_service: None,
+            chat_route.get_project_store: None,
+            chat_route.get_request_identity: request_identity(has_host_access),
             chat_route.get_model_defaults: dict.fromkeys(MODEL_DEFAULT_KEYS, TEST_MODEL),
         },
     )
@@ -94,3 +96,23 @@ def test_chat_route_streams_plain_turn_without_proxy_buffering(monkeypatch: pyte
     assert response.headers["cache-control"] == "no-cache, no-transform"
     assert response.headers["x-accel-buffering"] == "no"
     assert _sse_events(response.text) == [("token", "First"), ("token", " answer"), ("done", "")]
+
+
+@pytest.mark.parametrize(("has_host_access", "offered"), [(True, ["web_search", "start_learn_session"]), (False, ["web_search"])])
+def test_learn_sessions_are_offered_to_host_logins_only(monkeypatch: pytest.MonkeyPatch, has_host_access, offered) -> None:
+    """A browser asking for a host tool without the host capability never gets it in front of the model."""
+    offers: list[list[str]] = []
+
+    def completion(**kwargs: Any) -> Any:
+        offers.append([spec["function"]["name"] for spec in kwargs.get("tools") or []])
+        return iter([text_chunk("Hi")])
+
+    monkeypatch.setattr(toolcalling.litellm, "completion", completion)
+
+    response = _chat_client(monkeypatch, has_host_access=has_host_access).post(
+        "/api/chat",
+        json={"model": TEST_MODEL, "chat_id": "c1", "user_msg": "teach me", "tools": ["web_search", "start_learn_session"]},
+    )
+
+    assert response.status_code == 200, response.text
+    assert offers == [offered]

@@ -6,6 +6,7 @@ import { ChevronDown, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toolDisplay } from "@/features/chat/tools"
 import { toolPayload } from "@/features/chat/toolCalls"
+import { LearnSessionLink } from "@/features/learn/LearnSessionLink"
 import type { ToolCallRecord } from "@/lib/domain/types"
 import { useThemeName } from "@/hooks/useThemeName"
 import { PlotElement } from "@/components/content/PlotElement"
@@ -186,6 +187,12 @@ function ToolCallElementInner({ call }: ToolCallElementProps) {
           ) : (
             <p className="text-xs text-ink-faint">Workspace updated.</p>
           )}
+        </div>
+      )}
+
+      {shown.family === "learn" && shown.session && (
+        <div className="px-6 pb-5 pl-[3.25rem]">
+          <LearnSessionLink sessionId={shown.session.sessionId} title={shown.session.title} projectSlug={shown.session.projectSlug} />
         </div>
       )}
 

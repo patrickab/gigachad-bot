@@ -1,0 +1,39 @@
+diff --git i/app/layout.tsx w/app/layout.tsx
+index 2343a78..1c06b6b 100644
+--- i/app/layout.tsx
++++ w/app/layout.tsx
+@@ -7,6 +7,7 @@ import { ActivityProvider } from "@/components/activity-dock";
+ import { ServerEventsProvider } from "@/components/server-events";
+ import { AppearanceProvider } from "@/components/settings/appearance";
+ import UpdateBanner from "@/components/update-banner";
++import { CustomRoot } from "@/custom/root";
+ 
+ // Chrome = JetBrains Mono, teaching prose = Source Sans 3, titles = CMU
+ // Serif (the bundled lh-cmu @font-face in globals.css — no CDN).
+@@ -22,6 +23,7 @@ export default function RootLayout({ children }: { children: React.ReactNode })
+ 	return (
+ 		<html lang="en" className={`dark ${ui.variable} ${prose.variable}`}>
+ 			<body className="min-h-dvh antialiased">
++			<CustomRoot />
+ 			{/* The notification channel rides OUTSIDE everything: sidebar, dock,
+ 				 and pages all subscribe as the polls retire (push S3, 2026-10-02). */}
+ 			<ServerEventsProvider>
+diff --git i/next.config.ts w/next.config.ts
+index 43aef8d..d4a4096 100644
+--- i/next.config.ts
++++ w/next.config.ts
+@@ -1,5 +1,6 @@
+ import { readFileSync } from "node:fs";
+ import type { NextConfig } from "next";
++import { withCustom } from "./custom/next.config";
+ 
+ const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version: string; homepage: string };
+ 
+@@ -116,4 +117,4 @@ const nextConfig: NextConfig = {
+ 	],
+ };
+ 
+-export default nextConfig;
+\ No newline at end of file
++export default withCustom(nextConfig);
+\ No newline at end of file

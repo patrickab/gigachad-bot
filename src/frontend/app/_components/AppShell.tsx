@@ -15,6 +15,7 @@ import { useSettings } from "@/contexts/SettingsContext"
 import { SidebarProvider } from "@/features/navigation/SidebarContext"
 import { useEventListener } from "@/hooks/useEventListener"
 import { OmpProvider } from "@/features/omp/OmpProvider"
+import { LearnProvider } from "@/features/learn/LearnProvider"
 import { showingItem, type Tab, type WorkspaceItem } from "@/contexts/TabContext"
 import { ContentAreaProvider } from "@/components/ui/ContentArea"
 import { TabContent } from "./TabContent"
@@ -120,13 +121,15 @@ export function AppShell() {
         <SidebarProvider>
           <MemoryViewerProvider>
             <OmpProvider>
-              <TabManager ref={tabManagerRef} onActiveTabChange={handleActiveTabChange} defaultConfig={settings.tabDefaults}>
-                <EnabledToolsProvider>
-                  <FilePanelProvider>
-                    <TabContent onOpenChat={handleOpenChat} onOpenProject={handleOpenProject} onProjectRenamed={handleProjectRenamed} onNewChat={handleNewChat} onOpenItem={handleOpenItem} focus={focus} />
-                  </FilePanelProvider>
-                </EnabledToolsProvider>
-              </TabManager>
+              <LearnProvider onOpenItem={handleOpenItem}>
+                <TabManager ref={tabManagerRef} onActiveTabChange={handleActiveTabChange} defaultConfig={settings.tabDefaults}>
+                  <EnabledToolsProvider>
+                    <FilePanelProvider>
+                      <TabContent onOpenChat={handleOpenChat} onOpenProject={handleOpenProject} onProjectRenamed={handleProjectRenamed} onNewChat={handleNewChat} onOpenItem={handleOpenItem} focus={focus} />
+                    </FilePanelProvider>
+                  </EnabledToolsProvider>
+                </TabManager>
+              </LearnProvider>
             </OmpProvider>
             {dashboardSlug && <ProjectDashboard key={dashboardSlug} slug={dashboardSlug} onClose={closeDashboard} />}
             <ProjectListSync />

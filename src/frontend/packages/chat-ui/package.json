@@ -1,8 +1,8 @@
 {
   "name": "@gigachad/chat-ui",
   "version": "1.2.0",
-  "description": "gigachad-bot UI shared with its omp-web overlay: Q&A turn cards, the Streamdown/KaTeX markdown renderer with its code, Mermaid and Markmap renderers, the role palette, keyboard click hints and the omp embed protocol",
-  "license": "UNLICENSED",
+  "description": "gigachad-bot UI shared with its omp-web and LearnHarness overlays: Q&A turn cards, the Streamdown/KaTeX markdown renderer with its code, Mermaid and Markmap renderers, the role palette, the Outfit UI font, keyboard click hints and the omp and learn embed protocols",
+  "license": "AGPL-3.0-only",
   "type": "module",
   "sideEffects": true,
   "main": "./dist/index.js",
@@ -16,6 +16,10 @@
       "types": "./dist/protocol.d.ts",
       "default": "./dist/protocol.js"
     },
+    "./learn-protocol": {
+      "types": "./dist/learn-protocol.d.ts",
+      "default": "./dist/learn-protocol.js"
+    },
     "./hints": {
       "types": "./dist/hints.d.ts",
       "default": "./dist/hints.js"
@@ -24,7 +28,8 @@
     "./markdown.css": "./dist/markdown.css",
     "./turn.css": "./dist/turn.css",
     "./hints.css": "./dist/hints.css",
-    "./palette.css": "./dist/palette.css"
+    "./palette.css": "./dist/palette.css",
+    "./fonts.css": "./dist/fonts.css"
   },
   "files": [
     "dist"

@@ -1,0 +1,105 @@
+/* gigachad-bot's type sizes over LearnHarness's ladder, embedded only (`html.cf-embed`).
+
+   LearnHarness bakes its ladder into the utilities as literals (`@theme inline`, `app/globals.css`), so every rung is
+   re-declared here by class. Each LearnHarness role takes the size gigachad-bot's chat uses for the same role:
+
+   | LearnHarness       | role there                        | gigachad-bot                       | here         |
+   |--------------------|-----------------------------------|------------------------------------|--------------|
+   | `text-[10px]`      | counters, tiny meta               | `text-[10px]` (counters)           | 10px         |
+   | `text-xs` 11px     | meta, labels ("You", "Problem")   | `text-[11px]` (meta)               | 11px / 16px  |
+   | `text-[11px]`      | meta                              | `text-[11px]`                      | 11px         |
+   | `text-sm` 12.5px   | chrome body: rows, buttons, menus | `text-xs` 12px (sidebar, menus)    | 12px / 16px  |
+   | `text-[13px]`      | chain-table labels                | chat prose 13px (`.gc-markdown`)   | 13px         |
+   | `text-[15px]`      | problem statements, thinking      | chat prose 13px                    | 13px         |
+   | `text-base` 14px   | inputs, larger chrome             | `text-sm` 14px (composer, turns)   | 14px / 20px  |
+   | `text-lg` 16px     | section titles                    | `text-base` 16px (turn body)       | 16px / 24px  |
+   | `text-xl` 20px     | headings                          | `text-lg`                          | 18px / 28px  |
+   | `text-2xl` 25px    | dialog titles                     | `text-xl`                          | 20px / 28px  |
+   | `text-3xl` 32px    | session title                     | `text-2xl`                         | 24px / 32px  |
+   | `--lh-prose-size`  | reading size 16px, `.lh-prose`    | chat prose 13px, leading 1.625     | × 13/16      |
+   | `.lh-input`        | home and dock input, 16px         | composer `text-sm` 14px            | × 14/16      |
+
+   - Rungs sit in the `utilities` layer at one element above upstream's specificity (`:where(html.cf-embed) body .x`,
+     0-1-1): they replace the plain utility wherever the stylesheets land, upstream's unlayered rules still win
+     (`.lh-prose` over `text-sm`), so do its state and group variants (0-2-0) and `leading-*` (`--tw-leading`).
+     Responsive and pseudo-element variants (`md:`, `file:`, `before:`) tie with a plain class, so they are mapped
+     explicitly and come last
+   - The reading size scales the learner's choice: LearnHarness's Appearance settings always write `--lh-prose-size`
+     inline on <html> (16px by default), so it is read there and re-declared, scaled, on <body>. 20px reads 16.25px
+   - `look.test.mjs` fails when upstream uses a size class this file does not map */
+
+:root:root.cf-embed {
+  --cf-learner-prose-size: var(--lh-prose-size);
+  --lh-prose-leading: 1.625;
+}
+
+:where(html.cf-embed) body {
+  --lh-prose-size: calc(var(--cf-learner-prose-size) * 13 / 16);
+}
+
+:where(html.cf-embed) body .lh-input {
+  font-size: calc(var(--cf-learner-prose-size) * 14 / 16);
+}
+
+/* Session and dialog titles: the sans face at the shell's heading weight, not the serif's black */
+:where(html.cf-embed) body .font-title {
+  font-weight: 600;
+}
+
+@layer utilities {
+  :where(html.cf-embed) body .text-\[10px\] {
+    font-size: 10px;
+  }
+  :where(html.cf-embed) body .text-xs {
+    font-size: 11px;
+    line-height: var(--tw-leading, calc(16 / 11));
+  }
+  :where(html.cf-embed) body .text-\[11px\] {
+    font-size: 11px;
+  }
+  :where(html.cf-embed) body .text-sm {
+    font-size: 12px;
+    line-height: var(--tw-leading, calc(16 / 12));
+  }
+  :where(html.cf-embed) body .text-\[13px\] {
+    font-size: 13px;
+  }
+  :where(html.cf-embed) body .text-\[15px\] {
+    font-size: 13px;
+  }
+  :where(html.cf-embed) body .text-base {
+    font-size: 14px;
+    line-height: var(--tw-leading, calc(20 / 14));
+  }
+  :where(html.cf-embed) body .text-lg {
+    font-size: 16px;
+    line-height: var(--tw-leading, calc(24 / 16));
+  }
+  :where(html.cf-embed) body .text-xl {
+    font-size: 18px;
+    line-height: var(--tw-leading, calc(28 / 18));
+  }
+  :where(html.cf-embed) body .text-2xl {
+    font-size: 20px;
+    line-height: var(--tw-leading, calc(28 / 20));
+  }
+  :where(html.cf-embed) body .text-3xl {
+    font-size: 24px;
+    line-height: var(--tw-leading, calc(32 / 24));
+  }
+
+  /* Variants that tie with a plain class, after the rungs */
+  :where(html.cf-embed) body .file\:text-sm::file-selector-button {
+    font-size: 12px;
+    line-height: var(--tw-leading, calc(16 / 12));
+  }
+  :where(html.cf-embed) body .before\:text-\[13px\]::before {
+    font-size: 13px;
+  }
+  @media (width >= 48rem) {
+    :where(html.cf-embed) body .md\:text-sm {
+      font-size: 12px;
+      line-height: var(--tw-leading, calc(16 / 12));
+    }
+  }
+}

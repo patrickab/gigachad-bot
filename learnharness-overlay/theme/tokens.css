@@ -1,0 +1,28 @@
+/* LearnHarness's colour tokens (`app/globals.css`, `:root` and `.dark`) expressed through the role colours in palette.css, embedded only.
+
+   - Tailwind's `@theme inline` maps every colour utility (`bg-background`, `border-border`, ...) to these runtime variables,
+     so this file restyles the frame without touching a component
+   - Accent is monochrome ink: chrome stays neutral like the shell's
+   - Radii and the type ladder are literals baked into upstream's utilities: `radius.css` and `type.css` re-declare them by class
+   - Colours a learner sets in LearnHarness's Appearance settings are inline styles on <html> and win over these */
+
+:root:root.cf-embed {
+  --background: var(--cf-paper);
+  --foreground: var(--cf-ink);
+  --card: var(--cf-surface);
+  --card-foreground: var(--cf-ink);
+  --popover: var(--cf-elevated);
+  --popover-foreground: var(--cf-ink);
+  --primary: var(--cf-ink);
+  --primary-foreground: var(--cf-paper);
+  --secondary: var(--cf-surface);
+  --secondary-foreground: var(--cf-ink);
+  --muted: var(--cf-surface);
+  --muted-foreground: var(--cf-ink-muted);
+  --accent: color-mix(in oklab, var(--cf-ink) 8%, var(--cf-surface));
+  --accent-foreground: var(--cf-ink);
+  --destructive: var(--cf-danger);
+  --border: var(--cf-divider);
+  --input: var(--cf-divider-strong);
+  --ring: var(--cf-ink-subtle);
+}

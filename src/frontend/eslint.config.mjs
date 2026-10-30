@@ -8,8 +8,9 @@ import boundaries from "eslint-plugin-boundaries"
 // A feature's public API: files at its root or at a sub-feature root, never inside concept folders.
 const publicEntry = ["*", "*/*"]
 
-// Package files any module may import: all but the omp protocol (`packages/chat-ui/src/protocol.ts`), which only `features/omp` may.
-const PACKAGE_FILES_BESIDES_PROTOCOL = "src/!(protocol).*"
+// Package files any module may import: all but the embed protocols, which only their feature may (`packages/chat-ui/src/protocol.ts`
+// for `features/omp`, `packages/chat-ui/src/learn-protocol.ts` for `features/learn`).
+const PACKAGE_FILES_BESIDES_PROTOCOLS = "src/!(protocol|learn-protocol).*"
 
 const crossFeature = (from, to) => ({
   from: { element: { type: "feature", captured: { feature: from } } },
@@ -41,15 +42,20 @@ export default defineConfig([
           { allow: { to: { module: { origin: ["external", "core"] } } } },
           { allow: { dependency: { relationship: { to: "internal" } } } },
           { from: { element: { type: ["app", "feature", "shared"] } }, allow: { to: { element: { type: "shared" } } } },
-          // The omp protocol is the one package file the shell keeps behind its omp adapter.
-          { from: { element: { type: ["app", "feature", "shared"] } }, allow: { to: { element: { type: "package", fileInternalPath: PACKAGE_FILES_BESIDES_PROTOCOL } } } },
+          // The embed protocols are the package files the shell keeps behind its omp and learn adapters.
+          { from: { element: { type: ["app", "feature", "shared"] } }, allow: { to: { element: { type: "package", fileInternalPath: PACKAGE_FILES_BESIDES_PROTOCOLS } } } },
           { from: { element: { type: "app" } }, allow: { to: { element: { type: "feature", fileInternalPath: publicEntry } } } },
-          { from: { element: { type: "feature", captured: { feature: "omp" } } }, allow: { to: { element: { type: "package" } } } },
+          { from: { element: { type: "feature", captured: { feature: "omp" } } }, allow: { to: { element: { type: "package", fileInternalPath: "src/protocol.*" } } } },
+          { from: { element: { type: "feature", captured: { feature: "learn" } } }, allow: { to: { element: { type: "package", fileInternalPath: "src/learn-protocol.*" } } } },
           crossFeature("chat", "editor"),
+          crossFeature("chat", "learn"),
           crossFeature("chat", "navigation"),
           crossFeature("editor", "navigation"),
           crossFeature("factory", "editor"),
           crossFeature("navigation", "factory"),
+          crossFeature("navigation", "learn"),
+          crossFeature("learn", "chat"),
+          crossFeature("learn", "settings"),
           crossFeature("navigation", "memory"),
           crossFeature("navigation", "omp"),
           crossFeature("omp", "chat"),

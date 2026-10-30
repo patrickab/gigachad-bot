@@ -2,7 +2,7 @@
 
    - Every upstream component reads these, so this file restyles the frame without touching components
    - Accent is monochrome ink: chrome stays neutral, only status colors carry hue
-   - Rounding: panels 16px, dialogs 20px, controls 8px. Type: Outfit (fonts.css) */
+   - Rounding: panels 16px, dialogs 20px, controls 8px. Type: Outfit (`@gigachad/chat-ui/fonts.css`) */
 
 :root:root.cf-embed {
   --bg: var(--cf-paper);

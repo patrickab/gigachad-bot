@@ -1,0 +1,12 @@
+/* Every place LearnHarness takes a provider key or subscription, embedded or not: provider keys live in gigachad-bot and
+   reach LearnHarness through the LiteLLM proxy only.
+   - The Providers settings section, nav item and content. `custom/embed/settings.ts` moves the dialog off it when opened there
+   - The setup dialog's first-key stage and the home's "Add a provider key" pill, shown while no provider is keyed
+   The gate (backend/learnharness_gate.py) refuses the key and subscription writes behind them. */
+
+[data-testid="settings-nav-keys"],
+[data-testid="section-keys"],
+[data-testid="setup-stage-keys"],
+[data-testid="setup-cta-keys"] {
+  display: none !important;
+}

@@ -19,7 +19,8 @@ via `run.sh`.
 - Regenerate `.docs/system-overview.md`, `.docs/architecture.md`, and `.docs/module-map.md` through `/repomix`. Preserve operational details in maintained runbooks and load them only for relevant tasks.
 - `.docs/deployment.md` — Private production deployment, identity, service configuration, verification, and rollback.
 - `.docs/remote-inference.md`: Remote OCR/Ollama setup, SSH tunnels, and environment configuration.
-- `.docs/ompweb-integration.md`: omp-web integration runbook: worktrees, where a change belongs, overlay/upstream workflows, shared services and concurrent agent work.
+- `.docs/integration-ompweb.md`: omp-web integration runbook: worktrees, where a change belongs, overlay/upstream workflows, shared services and concurrent agent work.
+- `.docs/integration-learnharness.md`: everything about learn mode (LearnHarness): goal, decisions, architecture, rules, operations. Read it only when working on learn mode.
 
 ## UI hints
 
@@ -57,5 +58,4 @@ omp tabs embed unmodified upstream omp-web (`kahme247/ompweb`). Everything gigac
 - **Shared contracts live once, in `src/frontend/packages/chat-ui/`** (`@gigachad/chat-ui`): the postMessage protocol (`src/protocol.ts`) and the role palette (`src/palette.css`). The shell imports the source, `run-omp-web.sh` packs it into the served worktree on every start, so both sides ship in one commit
 - **One shared iframe**: tabs switch it by message, never by reload or by moving it in the DOM. Do not add a second frame or a per-tab frame
 - **Atomic commits**: one concern each (adapter, frame, tabs, sidebar, ...), the body names what omp-web contract it relies on
-- **After an omp-web or overlay change**: run the overlay checks in a private check checkout, then the integrator restarts omp-web (it resets its worktree to `GIGACHAD_OMP_WEB_REF` and reapplies the overlay on start), runs `pytest tests/test_omp_web.py` and smokes an omp tab: open a session, switch omp tabs, send a prompt only in an approved throwaway session. Concurrent work: `.docs/ompweb-integration.md`
-
+- **After an omp-web or overlay change**: run the overlay checks in a private check checkout, then the integrator restarts omp-web (it resets its worktree to `GIGACHAD_OMP_WEB_REF` and reapplies the overlay on start), runs `pytest tests/test_omp_web.py` and smokes an omp tab: open a session, switch omp tabs, send a prompt only in an approved throwaway session. Concurrent work: `.docs/integration-ompweb.md`

@@ -58,6 +58,8 @@ interface SettingsValue {
   neovim: NeovimSetting
   /** omp-web's address for the omp tabs' frame, null until the backend config loaded. */
   ompWebUrl: string | null
+  /** LearnHarness's address for the learn frame, null until the backend config loaded and for logins without host access. */
+  learnharnessUrl: string | null
   /** This login may use host-only features such as the factory. */
   hostAccess: boolean
 }
@@ -89,6 +91,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [neovimAvailable, setNeovimAvailable] = useState(false)
   const [neovimPreferred, setNeovimPreferred] = useState(readNeovimPreference)
   const [ompWebUrl, setOmpWebUrl] = useState<string | null>(null)
+  const [learnharnessUrl, setLearnharnessUrl] = useState<string | null>(null)
   const [hostAccess, setHostAccess] = useState(false)
 
   useStartupRead("Settings", fetchBackendConfig, (cfg) => {
@@ -101,6 +104,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setOCRModel((prev) => prev || cfg.vision_model)
     setNeovimAvailable(cfg.neovim_available)
     setOmpWebUrl(cfg.omp_web_url)
+    setLearnharnessUrl(cfg.learnharness_url)
     setHostAccess(cfg.host_access)
   })
 
@@ -114,7 +118,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <SettingsContext.Provider value={{ tabDefaults, ocrModel, neovim, ompWebUrl, hostAccess }}>
+    <SettingsContext.Provider value={{ tabDefaults, ocrModel, neovim, ompWebUrl, learnharnessUrl, hostAccess }}>
       {children}
     </SettingsContext.Provider>
   )

@@ -1,0 +1,94 @@
+/* gigachad-bot's markdown, code and chat look over LearnHarness's transcript, embedded only (`html.cf-embed`).
+
+   - Markdown: `overrides/components/ai-elements/message.tsx` wraps every `MessageResponse` and `ToolContentResponse`
+     in the package root (`.gc-markdown`, `data-markdown-root`) while embedded, so `@gigachad/chat-ui/markdown.css`
+     styles them as the shell's chat. Upstream's renderer stays (mermaid, callouts, copy corners, math repair).
+     The package file is imported here like `fonts.css` imports the font: it never changes while the app runs
+   - Host contract of markdown.css: its role tokens are mapped on the root, from the frame's palette (`palette.css`)
+   - Thinking blocks and every other Streamdown keep `.lh-prose` and reach the shell's face and reading size through
+     `fonts.css` and `type.css`. Code blocks and tables are restyled wherever Streamdown draws them
+   - Chat look: assistant prose in the shell's muted ink, the learner's message as the shell's question surface.
+     Hooks are upstream's `.is-assistant` (the `Message` row) and `data-testid="user-message"`: a rename only drops
+     the restyle, nothing is hidden by them
+   - Cards and docks keep the colours their callers set (`text-muted-foreground`, `text-foreground/50`): the root
+     inherits there, only the transcript takes the package's muted ink */
+
+@import "@gigachad/chat-ui/markdown.css";
+
+:root:root.cf-embed [data-markdown-root] {
+  --paper: var(--cf-paper);
+  --surface: var(--cf-surface);
+  --surface-elevated: var(--cf-elevated);
+  --ink: var(--cf-ink);
+  --ink-muted: var(--cf-ink-muted);
+  --ink-subtle: var(--cf-ink-subtle);
+  --divider: var(--cf-divider);
+  --divider-strong: var(--cf-divider-strong);
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --inner-highlight: var(--gc-light-inner-highlight);
+  --font-mono: var(--cf-font-mono);
+  --font-symbols: "Symbols Nerd Font Mono";
+}
+
+:root:root.cf-embed.dark [data-markdown-root] {
+  --inner-highlight: var(--gc-dark-inner-highlight);
+}
+
+:root:root.cf-embed .gc-markdown {
+  color: inherit;
+}
+
+:root:root.cf-embed .is-assistant .gc-markdown {
+  color: var(--cf-ink-muted);
+}
+
+/* Streamdown's `py-1` on list items, which the shell's renderer does not set */
+:root:root.cf-embed .gc-markdown li {
+  padding-block: 0;
+}
+
+/* Fenced code: the shell's code card (`@gigachad/chat-ui/code.css` `.gc-code`) on Streamdown's block, header stays hidden.
+   The shell draws dark code as a paper well inside a surface card. Here prose sits on the paper itself, so the card is
+   the surface in both modes */
+:root:root.cf-embed [data-streamdown="code-block"] {
+  padding: 0;
+  border: 0;
+  border-radius: 0.375rem;
+  background: var(--cf-surface);
+  box-shadow: var(--gc-light-shadow-sm), var(--gc-light-inner-highlight);
+  overflow: hidden;
+}
+
+:root:root.cf-embed.dark [data-streamdown="code-block"] {
+  box-shadow: var(--gc-dark-shadow-md), var(--gc-dark-inner-highlight);
+}
+
+:root:root.cf-embed [data-streamdown="code-block-body"] {
+  padding: 0.75rem 1rem;
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+
+:root:root.cf-embed [data-streamdown="code-block-body"] :is(pre, code) {
+  font-size: inherit;
+  line-height: inherit;
+}
+
+/* Tables: the shell's cell rules and header tint */
+:root:root.cf-embed [data-streamdown="table"] {
+  border-color: var(--cf-divider);
+}
+
+:root:root.cf-embed [data-streamdown="table-header"] {
+  background: var(--cf-surface);
+}
+
+/* The learner's message: the shell's question surface (`turn.css` `.gc-turn-surface`), no rail */
+:root:root.cf-embed [data-testid="user-message"] {
+  border-left-width: 0;
+  border-radius: 18px;
+  padding: 12px 18px;
+  background: color-mix(in oklab, var(--cf-elevated) 45%, var(--cf-surface));
+  color: var(--cf-ink);
+}

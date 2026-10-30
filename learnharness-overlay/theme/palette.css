@@ -1,0 +1,32 @@
+/* Role colours while embedded in gigachad-bot (`html.cf-embed`), the only place colours are chosen.
+
+   - Every value is the shell's own (`--gc-<mode>-*` from `@gigachad/chat-ui/palette.css`), so the frame blends into it.
+     Change those values in the package, never here
+   - LearnHarness is dark-only upstream: dark is `<html class="dark">`, light is that class removed (`custom/embed/theme.ts`)
+   - `:root:root.cf-embed` (0,3,0) outranks upstream's `:root` and `.dark` (0,1,0), the dark variant (0,4,0) wins in dark mode */
+
+:root:root.cf-embed {
+  color-scheme: light;
+  --cf-ink: var(--gc-light-ink);
+  --cf-ink-muted: var(--gc-light-ink-muted);
+  --cf-ink-subtle: var(--gc-light-ink-subtle);
+  --cf-paper: var(--gc-light-paper);
+  --cf-surface: var(--gc-light-surface);
+  --cf-elevated: var(--gc-light-surface-elevated);
+  --cf-danger: var(--gc-light-danger);
+  --cf-divider: var(--gc-light-divider);
+  --cf-divider-strong: var(--gc-light-divider-strong);
+}
+
+:root:root.cf-embed.dark {
+  color-scheme: dark;
+  --cf-ink: var(--gc-dark-ink);
+  --cf-ink-muted: var(--gc-dark-ink-muted);
+  --cf-ink-subtle: var(--gc-dark-ink-subtle);
+  --cf-paper: var(--gc-dark-paper);
+  --cf-surface: var(--gc-dark-surface);
+  --cf-elevated: var(--gc-dark-surface-elevated);
+  --cf-danger: var(--gc-dark-danger);
+  --cf-divider: var(--gc-dark-divider);
+  --cf-divider-strong: var(--gc-dark-divider-strong);
+}

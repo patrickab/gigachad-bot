@@ -7,11 +7,13 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from backend.http_plumbing import sse_tool_event_stream, stream_completion
+from backend.identity import RequestIdentity, get_request_identity
 from lib import reasoning_levels
 from lib.asset_store import AssetStore
 from lib.image_paths import resolve_chat_image_paths, resolve_sandbox_prompt_images
 from lib.memory_context import augment_system_prompt
 from lib.memory_store import MemoryStore
+from lib.project_store import ProjectStore
 from lib.sandbox_service import SandboxService
 from lib.tool_context import ToolOptions
 from lib.tools import stream_chat_with_tools
@@ -20,6 +22,7 @@ from .deps import (
     get_asset_store,
     get_memory_store,
     get_model_defaults,
+    get_project_store,
     get_sandbox_service,
     request_client,
 )
@@ -65,6 +68,8 @@ async def chat(
     assets: Annotated[AssetStore, Depends(get_asset_store)],
     sandbox_service: Annotated[SandboxService, Depends(get_sandbox_service)],
     model_defaults: Annotated[dict[str, str], Depends(get_model_defaults)],
+    identity: Annotated[RequestIdentity, Depends(get_request_identity)],
+    project_store: Annotated[ProjectStore, Depends(get_project_store)],
 ) -> EventSourceResponse:
     """Stream a completion as SSE, running the tool loop when `req.tools` is non-empty."""
     with request_client() as c:
@@ -101,6 +106,9 @@ async def chat(
                     prompt_images=prompt_images,
                     small_model=model_defaults["small_model"],
                     vision_model=model_defaults["vision_model"],
+                    host_access=identity.has_host_access,
+                    project_slug=req.project_slug,
+                    project_store=project_store,
                     **kwargs,
                 )
             )

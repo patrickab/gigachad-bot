@@ -1,0 +1,31 @@
+[Unit]
+Description=gigachad-bot LearnHarness (learn mode), runs the sandboxed unit gigachad-learnharness-<port>
+Wants=network-online.target gigachad-bot-litellm-proxy.service dbus.socket
+After=network-online.target gigachad-bot-litellm-proxy.service dbus.socket
+
+[Service]
+Type=exec
+WorkingDirectory=%h/git/gigachad-bot-prod
+Environment=GIGACHAD_ENV_FILE=%h/.config/gigachad-bot/env
+# Node >= 24 and npm (build and `next start`), git, rsync, flatpak, systemd-run. LearnHarness inherits this PATH, so no
+# mise shims: inside its sandbox HOME is private, mise finds its config untrusted and every shim exits 1
+Environment=PATH=%h/.local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin
+# The launcher starts LearnHarness through the user manager (systemd-run --user), and LearnHarness's demos run in flatpak
+# Chrome, which reaches its portal over the user session bus
+Environment=XDG_RUNTIME_DIR=%t
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus
+ExecStart=%h/git/gigachad-bot-prod/deploy/run-production-learnharness.sh server
+Restart=on-failure
+RestartSec=5s
+# Only the launcher gets TERM: its trap stops the transient unit, which systemd-run alone would leave running, and exits
+# 143, a clean stop
+KillMode=mixed
+SuccessExitStatus=143
+TimeoutStopSec=60s
+# The sandbox (InaccessiblePaths, private HOME, environment allowlist, UMask) is the transient unit's, set by
+# run-learnharness.sh. No PrivateTmp here: it would put the launcher in a user namespace of its own
+NoNewPrivileges=true
+UMask=0077
+
+[Install]
+WantedBy=default.target

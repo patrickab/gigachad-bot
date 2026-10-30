@@ -1,4 +1,4 @@
-"""Built-in tools: web search labels, the workspace agent and the LLM-rendered mind map, diagram and OCR cards."""
+"""Built-in tools: web search labels, the workspace agent, the LLM-rendered mind map, diagram and OCR cards, learn sessions."""
 
 from types import SimpleNamespace
 from typing import Any
@@ -6,9 +6,12 @@ from typing import Any
 import pytest
 
 from config import TEST_MODEL
-from lib import llm_resilience, toolcalling, tools, web_search
+from lib import learnharness, llm_resilience, toolcalling, tools, web_search
+from lib.chat_store import ChatStore
+from lib.project_store import ProjectStore
 from lib.tool_context import ToolContext, ToolOptions
-from tests.fakes import ClientStub, SandboxServiceStub, collect_tool_turn, text_chunk, tool_chunk
+from lib.upstream import UpstreamContractError, UpstreamRequestFailed
+from tests.fakes import ClientStub, MemoryDataStore, SandboxServiceStub, collect_tool_turn, text_chunk, tool_chunk
 
 
 def test_source_label_extracts_a_stable_hostname_label() -> None:
@@ -164,3 +167,102 @@ async def test_latex_ocr_tool_uses_the_vision_model_for_attached_images(monkeypa
     assert outcome.detail["text"] == "$a^2 + b^2 = c^2$"
     assert calls[0]["model"] == "provider/vision"
     assert calls[0]["img"] == b"image-bytes"
+
+
+class _LearnHarnessStub:
+    """Records the sessions the tool creates and the turns it starts, `refusal` makes the turn fail."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, refusal: Exception | None = None) -> None:
+        self.titles: list[str] = []
+        self.turns: list[tuple[str, str]] = []
+        self._refusal = refusal
+        monkeypatch.setattr(learnharness, "create_session", self.create_session)
+        monkeypatch.setattr(learnharness, "submit_text_turn", self.submit_text_turn)
+
+    async def create_session(self, title: str) -> learnharness.LearnSession:
+        self.titles.append(title)
+        return learnharness.LearnSession(id="chat_new_1", title=title)
+
+    async def submit_text_turn(self, session_id: str, text: str) -> None:
+        if self._refusal is not None:
+            raise self._refusal
+        self.turns.append((session_id, text))
+
+
+def _learn_context(project_slug: str | None) -> tuple[ToolContext, ProjectStore]:
+    store = ProjectStore(ChatStore(data_store=MemoryDataStore()), rename=lambda *_: None)
+    store.create_project("Physics")
+    context = ToolContext(client=ClientStub(), model=TEST_MODEL, opts=ToolOptions(), project_slug=project_slug, project_store=store)
+    return context, store
+
+
+GOAL = "I want to understand Fourier series properly. I know calculus but not complex numbers."
+
+
+@pytest.mark.asyncio
+async def test_start_learn_session_starts_the_tutor_on_the_goal_in_the_chats_project(monkeypatch: pytest.MonkeyPatch) -> None:
+    harness = _LearnHarnessStub(monkeypatch)
+    context, store = _learn_context("physics")
+
+    outcome = await tools.BUILTIN_TOOLS.execute("start_learn_session", {"goal": GOAL}, context)
+
+    assert outcome.error is None
+    assert harness.titles[0].startswith("I want to understand Fourier series")
+    assert "complex numbers" not in harness.titles[0]
+    assert harness.turns == [("chat_new_1", GOAL)]
+    assert outcome.detail == {"session_id": "chat_new_1", "title": harness.titles[0], "project_slug": "physics"}
+    assert store.learn_session_projects() == {"chat_new_1": "physics"}
+
+
+@pytest.mark.asyncio
+async def test_start_learn_session_outside_a_project_joins_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    _LearnHarnessStub(monkeypatch)
+    context, store = _learn_context(None)
+
+    outcome = await tools.BUILTIN_TOOLS.execute("start_learn_session", {"goal": GOAL}, context)
+
+    assert outcome.detail["project_slug"] is None
+    assert store.learn_session_projects() == {}
+
+
+@pytest.mark.asyncio
+async def test_a_refused_first_turn_still_links_the_created_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    _LearnHarnessStub(monkeypatch, refusal=UpstreamRequestFailed(503, "No model configured — set up your models first"))
+    context, store = _learn_context("physics")
+
+    outcome = await tools.BUILTIN_TOOLS.execute("start_learn_session", {"goal": GOAL}, context)
+
+    assert outcome.error == "No model configured — set up your models first"
+    assert outcome.detail["session_id"] == "chat_new_1"
+    assert store.learn_session_projects() == {"chat_new_1": "physics"}
+
+
+@pytest.mark.asyncio
+async def test_an_unexpected_turn_answer_still_links_the_created_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    _LearnHarnessStub(monkeypatch, refusal=UpstreamContractError("LearnHarness /api/chat: field `ok` field required"))
+    context, _ = _learn_context("physics")
+
+    outcome = await tools.BUILTIN_TOOLS.execute("start_learn_session", {"goal": GOAL}, context)
+
+    assert "`ok`" in (outcome.error or "")
+    assert outcome.detail["session_id"] == "chat_new_1"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_assignment_still_starts_and_links_the_session_outside_the_project(monkeypatch: pytest.MonkeyPatch) -> None:
+    harness = _LearnHarnessStub(monkeypatch)
+    context, store = _learn_context("deleted-meanwhile")
+
+    outcome = await tools.BUILTIN_TOOLS.execute("start_learn_session", {"goal": GOAL}, context)
+
+    assert outcome.error is None
+    assert outcome.detail["project_slug"] is None
+    assert harness.turns == [("chat_new_1", GOAL)]
+    assert "listed under Learn" in outcome.content
+    assert store.learn_session_projects() == {}
+
+
+def test_host_tools_are_offered_to_host_logins_only() -> None:
+    enabled = ["web_search", "start_learn_session"]
+    assert tools.offered_tools(enabled, host_access=True) == enabled
+    assert tools.offered_tools(enabled, host_access=False) == ["web_search"]

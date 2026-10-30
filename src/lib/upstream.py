@@ -34,7 +34,8 @@ def upstream_url(env: str, default: str) -> str:
     return os.environ.get(env, default).rstrip("/")
 
 
-def _error_message(response: httpx.Response) -> str:
+def error_message(response: httpx.Response) -> str:
+    """The upstream's own error text: `detail` or `error` of a JSON body, else the body's start, else the status."""
     try:
         body = response.json()
     except ValueError:
@@ -64,7 +65,7 @@ async def request_json[Result](
     except httpx.HTTPError as exc:
         raise UpstreamUnavailable(f"{label} at {base_url} does not answer: {exc}") from exc
     if response.is_error:
-        raise UpstreamRequestFailed(response.status_code, _error_message(response))
+        raise UpstreamRequestFailed(response.status_code, error_message(response))
     try:
         return TypeAdapter(result).validate_json(response.content)
     except ValidationError as exc:

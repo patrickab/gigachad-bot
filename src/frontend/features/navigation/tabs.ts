@@ -47,6 +47,9 @@ export function tabLocation(tab: Tab, shownName: ShownName) {
   if (tab.appMode === "factory") {
     return { category: "factory", file: tab.name ?? (tab.workspaceItem?.path.includes("/") ? "task" : tab.workspaceItem?.path ?? "board") }
   }
+  if (tab.appMode === "learn") {
+    return { category: "learn", file: tab.name ?? tab.title ?? "Learn" }
+  }
   if (tab.appMode === "canvas") {
     return tab.workspaceItem?.kind === "architecture"
       ? { category: "architecture", file: tab.name ?? "System overview" }
@@ -65,6 +68,7 @@ export function tabLocation(tab: Tab, shownName: ShownName) {
 export function tabLabel(tab: Tab, modeLabel: string | undefined, shownName: ShownName): string {
   if (tab.appMode !== "chat" && tab.workspaceItem) {
     if (tab.appMode === "omp") return tab.name ?? tab.title ?? "omp"
+    if (tab.appMode === "learn") return tab.name ?? tab.title ?? "Learn"
     if (tab.appMode === "factory") return tab.name ?? "Factory"
     return tab.name ?? (tab.workspaceItem.kind === "architecture" ? "Architecture" : itemName(tab.workspaceItem, shownName))
   }

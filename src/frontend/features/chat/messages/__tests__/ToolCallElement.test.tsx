@@ -29,6 +29,16 @@ vi.mock("@/components/content/LaTeXMarkdown", () => ({
   },
 }))
 
+const learn = vi.hoisted(() => ({
+  learnUrl: "http://127.0.0.1:30181",
+  openItem: vi.fn(),
+  sessions: {
+    sessions: [] as import("@/lib/domain/types").LearnSession[], error: null, refresh: vi.fn(), claim: vi.fn(),
+    lookUp: vi.fn<(sessionId: string) => Promise<void>>(async () => {}), missing: new Set<string>(),
+  },
+}))
+vi.mock("@/features/learn/LearnProvider", () => ({ useLearn: () => learn }))
+
 import { ToolCallElement } from "@/features/chat/messages/ToolCallElement"
 
 const sandboxPlotCall: ToolCallRecord = {
@@ -136,5 +146,57 @@ describe("ToolCallElement sandbox plots", () => {
 
     expect(screen.getByText("0.2s").parentElement).toHaveTextContent(/0\.2s\s*Planning search/)
     expect(screen.getByText("1.4s").parentElement).toHaveTextContent(/1\.4s\s*Searching sources/)
+  })
+})
+
+describe("ToolCallElement learn sessions", () => {
+  const learnCall: ToolCallRecord = {
+    id: "learn-1",
+    name: "start_learn_session",
+    arguments: { goal: "I want to understand Fourier series properly." },
+    status: "done",
+    summary: "Session started",
+    detail: { session_id: "chat_mvtsqwg2_5e0e6463", title: "Understand Fourier series", project_slug: "physics" },
+  }
+
+  beforeEach(() => {
+    learn.sessions.sessions = []
+    learn.sessions.missing = new Set()
+    learn.sessions.lookUp.mockClear()
+    learn.openItem.mockReset()
+  })
+
+  it("links the started session, opening the learn view at it in a new tab of its project", () => {
+    render(<ToolCallElement call={learnCall} />)
+
+    expect(screen.getByText("Learn session")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Understand Fourier series" }))
+
+    expect(learn.openItem).toHaveBeenCalledWith({
+      kind: "learn", path: "", projectSlug: "physics", learn: { kind: "session", sessionId: "chat_mvtsqwg2_5e0e6463" },
+    }, true)
+    // A session the sidebar does not list yet is looked up at once.
+    expect(learn.sessions.lookUp).toHaveBeenCalledWith("chat_mvtsqwg2_5e0e6463")
+  })
+
+  it("looks up no session the sidebar already lists", () => {
+    learn.sessions.sessions = [{ id: "chat_mvtsqwg2_5e0e6463", title: "Understand Fourier series", kind: null, busy: true, project_slug: "physics" }]
+    render(<ToolCallElement call={learnCall} />)
+
+    expect(learn.sessions.lookUp).not.toHaveBeenCalled()
+  })
+
+  it("names a session LearnHarness no longer has instead of linking it", () => {
+    learn.sessions.missing = new Set(["chat_mvtsqwg2_5e0e6463"])
+    render(<ToolCallElement call={learnCall} />)
+
+    expect(screen.queryByRole("button", { name: "Understand Fourier series" })).not.toBeInTheDocument()
+    expect(screen.getByText("Understand Fourier series (deleted)")).toBeInTheDocument()
+  })
+
+  it("shows no link while the session is being created", () => {
+    render(<ToolCallElement call={{ ...learnCall, status: "running", summary: undefined, detail: undefined }} />)
+
+    expect(screen.queryByRole("button", { name: "Understand Fourier series" })).not.toBeInTheDocument()
   })
 })

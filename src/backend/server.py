@@ -46,6 +46,7 @@ from backend.routes.file_git import router as file_git_router
 from backend.routes.factory import router as factory_router
 from backend.routes.ocr import router as ocr_router
 from backend.routes.omp import router as omp_router
+from backend.routes.learn import router as learn_router
 from backend.routes.projects import router as projects_router
 from backend.routes.sync import router as sync_router
 from backend.sync import get_change_broker
@@ -169,5 +170,6 @@ app.include_router(projects_router)
 app.include_router(sync_router)
 app.include_router(canvases_router)
 app.include_router(omp_router)
+app.include_router(learn_router)
 app.include_router(factory_router)
 

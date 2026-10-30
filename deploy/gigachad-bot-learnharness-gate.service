@@ -1,0 +1,19 @@
+[Unit]
+Description=gigachad-bot LearnHarness Tailnet identity gate
+Wants=network-online.target gigachad-bot-learnharness.service
+After=network-online.target gigachad-bot-learnharness.service
+
+[Service]
+Type=exec
+WorkingDirectory=%h/git/gigachad-bot-prod
+Environment=GIGACHAD_ENV_FILE=%h/.config/gigachad-bot/env
+ExecStart=%h/git/gigachad-bot-prod/deploy/run-production-learnharness.sh gate
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=default.target

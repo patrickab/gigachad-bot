@@ -15,6 +15,9 @@ import { CanvasWorkspace } from "@/features/editor/canvas/CanvasWorkspace"
 import type { useCanvasView } from "@/features/editor/canvas/useCanvasView"
 import { ArchitectureWindow } from "@/features/editor/architecture/ArchitectureWindow"
 import { FactorySurface } from "@/features/factory/FactorySurface"
+import { LearnModelSelector, LearnReasoningSelector } from "@/features/learn/LearnModel"
+import { LearnPlanButton } from "@/features/learn/LearnPlanButton"
+import { LearnSurface } from "@/features/learn/LearnSurface"
 import { OmpModelSelector, OmpReasoningSelector, OmpTokenCounter } from "@/features/omp/OmpComposer"
 import { OmpSurface } from "@/features/omp/OmpSurface"
 import { OmpSystemPrompt } from "@/features/omp/OmpSystemPrompt"
@@ -177,6 +180,26 @@ export function WorkspaceSurface({ sidebarToggle, canvas, modelProps, reasoningL
         right: <><TopBarPill><ThemeToggle /></TopBarPill>{filePanelToggle}</>,
         runsUnderTopBar: false,
         body: factoryItem ? <FactorySurface item={factoryItem} /> : chatBody,
+      }
+    },
+    learn: () => {
+      const learnItem = itemOf(tab, "learn")
+      const learnView = learnItem?.learn ?? null
+      return {
+        left: learnView && <>
+          <TopBarPill>
+            <LearnReasoningSelector view={learnView} />
+          </TopBarPill>
+          <TopBarTransparent>
+            <LearnModelSelector view={learnView} {...modelProps} />
+          </TopBarTransparent>
+        </>,
+        right: <TopBarPill>
+          {learnView && <LearnPlanButton view={learnView} />}
+          <ThemeToggle />
+        </TopBarPill>,
+        runsUnderTopBar: false,
+        body: learnItem && learnView ? <LearnSurface view={learnView} onViewChange={(learn) => setWorkspaceItem({ ...learnItem, learn })} /> : chatBody,
       }
     },
   }

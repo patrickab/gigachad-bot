@@ -12,6 +12,7 @@ import { useProject } from "@/contexts/ProjectContext"
 import { useTab, type AppSurface, type WorkspaceItem } from "@/contexts/TabContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { useMemoryViewer } from "@/features/memory/MemoryViewerContext"
+import { LearnSection, useLearnSidebar } from "@/features/learn/LearnSidebar"
 import { addFileRoot, cloneFileRoot } from "@/lib/backend/api"
 import { cn } from "@/lib/utils"
 import { ArchiveSelector } from "./ArchiveSelector"
@@ -59,7 +60,7 @@ export function Sidebar(props: SidebarProps) {
   const deleteChat = useDeleteChat()
   const defaultExpanded = useMemo(() => [
     "shared", "shared:canvases",
-    ...projects.flatMap((project) => ["chats", "canvases", "files"].map((category) => `project:${project.slug}:${category}`)),
+    ...projects.flatMap((project) => ["chats", "canvases", "files", "learn"].map((category) => `project:${project.slug}:${category}`)),
   ], [projects])
   const controller = useFileTree({ storageKey: "expanded_workspace_projects", defaultExpanded })
   const fileMountController = usePathTree()
@@ -71,9 +72,16 @@ export function Sidebar(props: SidebarProps) {
   const code = useCodeMounts(props)
   const { omp } = code
 
-  const items = projectItems({
+  const learn = useLearnSidebar({ open: props.onItemOpen ?? (() => {}), projects, sidebar: { collapsed, toggle: toggleCollapsed } })
+
+  const projectTree = projectItems({
     ...props, ...branches, ...documents, ...projectActions, projects, pending, deleteChat, activeProjectSlug: tab.projectSlug,
   })
+  // Host logins see each project's learn sessions in its group.
+  const items = code.hostAccess ? projectTree.map((root) => {
+    const project = projects.find((candidate) => candidate.slug === root.id)
+    return project ? learn.withProjectLearn(root, project) : root
+  }) : projectTree
   const codeContext = { ...props, ...code, projects, pending }
 
   return <motion.aside
@@ -114,6 +122,10 @@ export function Sidebar(props: SidebarProps) {
           create={code.hostAccess ? { label: "Add file mount", onClick: () => setFileMountPickerOpen(true) } : undefined}
         />
         <ErrorText className="px-2 py-1">{omp.error}</ErrorText>
+        {code.hostAccess && <>
+          <div role="separator" className="my-4 border-t border-divider/50" />
+          <LearnSection section={learn.section} renameDialog={learn.renameDialog} />
+        </>}
       </nav>
       <ProviderUsage />
       {renderSettings && <div className="shrink-0 p-2">{renderSettings()}</div>}

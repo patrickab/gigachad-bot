@@ -3,8 +3,9 @@
 import { ArrowUp, LayoutGrid, Loader2, Plus, Square } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { MenuPopover } from "@/components/ui/MenuPopover"
+import { useHostAccess } from "@/contexts/SettingsContext"
 import { useEnabledTools } from "@/features/chat/EnabledToolsContext"
-import { TOOLS } from "@/features/chat/tools"
+import { availableTools } from "@/features/chat/tools"
 import { ToolMenuItem, ToolMenuSection } from "./ToolMenuItem"
 import type { AttachMenuItem } from "./ChatInput"
 
@@ -45,6 +46,7 @@ export function AttachMenu({ items, disabled }: { items: (AttachMenuItem & { ico
 /** Toggles for gigachad's chat tools; it stays open while toggling. */
 export function ToolsMenu({ disabled }: { disabled?: boolean }) {
   const { enabledTools, toggleTool } = useEnabledTools()
+  const hostAccess = useHostAccess()
   return (
     <MenuPopover
       trigger={(open, toggle) => (
@@ -56,7 +58,7 @@ export function ToolsMenu({ disabled }: { disabled?: boolean }) {
       {(open) => open && (
         <div className={`absolute bottom-full right-0 mb-2 w-56 ${MENU}`}>
           <ToolMenuSection title="Tools">
-            {TOOLS.map((tool) => (
+            {availableTools(hostAccess).map((tool) => (
               <ToolMenuItem key={tool.name} icon={tool.icon} label={tool.selectorLabel} active={enabledTools.includes(tool.name)} onClick={() => toggleTool(tool.name)} />
             ))}
           </ToolMenuSection>

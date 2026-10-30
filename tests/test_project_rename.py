@@ -48,6 +48,13 @@ def test_project_rename_moves_named_file_entries_and_keeps_their_names():
     }
 
 
+def test_renamed_project_json_keeps_learn_session_ids():
+    rows = [("chat/old/project.json", json.dumps({"name": "Old", "learn_sessions": ["chat_old_1"]}).encode(), False)]
+    [(_, target, content)] = renamed_documents(rows, ProjectReferences("old", "new"), "New", [])
+    assert target == "chat/new/project.json"
+    assert json.loads(content)["learn_sessions"] == ["chat_old_1"]
+
+
 @pytest.fixture
 def stores(postgres_pool, clean_database):
     user = create_user(postgres_pool)
@@ -142,6 +149,17 @@ def test_same_slug_renames_in_place_and_taken_slug_conflicts(stores):
     with pytest.raises(ValueError):
         projects.update_project("old", " ")
     assert projects.get_project("old")["name"] == "OLD!"
+
+
+def test_rename_keeps_the_projects_learn_sessions(stores):
+    _, projects, _, _ = stores
+    projects.create_project("Old")
+    projects.assign_learn_session("chat_mvtsqwg2_5e0e6463", "old")
+
+    projects.update_project("old", "New")
+
+    assert projects.learn_sessions("new") == ["chat_mvtsqwg2_5e0e6463"]
+    assert projects.learn_session_projects() == {"chat_mvtsqwg2_5e0e6463": "new"}
 
 
 def test_asset_conflict_rolls_back_every_document_and_change(stores, postgres_pool):

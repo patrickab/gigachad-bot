@@ -3,25 +3,28 @@
 import { createContext, useContext } from "react"
 import { useRequiredContext } from "@/hooks/useRequiredContext"
 import type { TabConfig } from "@/contexts/SettingsContext"
-import type { OmpView } from "@/lib/domain/types"
+import type { LearnView, OmpView } from "@/lib/domain/types"
 
 /** Top-level workspace mode of a tab. */
-export type AppSurface = "chat" | "canvas" | "document" | "omp" | "factory"
+export type AppSurface = "chat" | "canvas" | "document" | "omp" | "factory" | "learn"
 
 export interface WorkspaceItem {
-  kind: "canvas" | "architecture" | "document" | "diff" | "omp" | "factory"
-  /** A `diff` item holds the mounted directory it compares against HEAD, an `omp` item its workspace directory ("" for settings), a `factory` item `<repo>` for its board or `<repo>/<task id>`. */
+  kind: "canvas" | "architecture" | "document" | "diff" | "omp" | "factory" | "learn"
+  /** A `diff` item holds the mounted directory it compares against HEAD, an `omp` item its workspace directory ("" for settings), a `factory` item `<repo>` for its board or `<repo>/<task id>`, a `learn` item "". */
   path: string
   projectSlug: string | null
   rootFile?: boolean
   /** What an `omp` item shows in omp-web's frame. */
   omp?: OmpView
+  /** What a `learn` item shows in LearnHarness's frame. */
+  learn?: LearnView
 }
 
 /** Surface that shows `item`. */
 function surfaceOf(item: WorkspaceItem): AppSurface {
   if (item.kind === "omp") return "omp"
   if (item.kind === "factory") return "factory"
+  if (item.kind === "learn") return "learn"
   return item.kind === "document" || item.kind === "diff" ? "document" : "canvas"
 }
 

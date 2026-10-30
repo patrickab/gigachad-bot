@@ -19,6 +19,10 @@ if TYPE_CHECKING:
 Rename = Callable[[str, str, str], None]
 
 _META_KEY = f"{chat_root()}/{META_JSON}"
+# The project.json field holding the ids of the project's learn sessions (LearnHarness chats).
+LEARN_SESSIONS = "learn_sessions"
+# Tries of a guarded read-modify-write of `project.json` before it gives up.
+_GUARDED_ATTEMPTS = 3
 
 
 class ProjectExists(ValueError):
@@ -194,6 +198,67 @@ class ProjectStore:
         meta["projects"] = [p for p in meta.get("projects", []) if p.get("slug") != slug]
         self._write_meta(meta)
         return {"status": "ok"}
+
+    def learn_sessions(self, slug: str) -> list[str]:
+        """Ids of the learn sessions grouped under project *slug*. Raises FileNotFoundError when the project is unknown."""
+        self._require(slug)
+        return list(self._read_project(slug).get(LEARN_SESSIONS, []))
+
+    def learn_session_projects(self) -> dict[str, str]:
+        """The project slug of every grouped learn session, by session id."""
+        slugs = [p["slug"] for p in self._read_meta().get("projects", [])]
+        return {
+            session_id: slug
+            for slug, data in zip(slugs, self._read_projects(slugs), strict=True)
+            for session_id in data.get(LEARN_SESSIONS, [])
+        }
+
+    def assign_learn_session(self, session_id: str, slug: str | None) -> None:
+        """Group learn session *session_id* under project *slug*, moving it out of any other project; None ungroups it.
+
+        Raises FileNotFoundError when project *slug* is unknown.
+        """
+        if slug is not None:
+            self._require(slug)
+        slugs = [p["slug"] for p in self._read_meta().get("projects", [])]
+        for owner, data in zip(slugs, self._read_projects(slugs), strict=True):
+            sessions = data.get(LEARN_SESSIONS, [])
+            if owner == slug and session_id not in sessions:
+                self._update_learn_sessions(owner, lambda ids: ids if session_id in ids else [*ids, session_id])
+            elif owner != slug and session_id in sessions:
+                self._update_learn_sessions(owner, lambda ids: [s for s in ids if s != session_id])
+
+    def forget_learn_sessions(self, session_ids: set[str]) -> None:
+        """Drop *session_ids* from every project's learn sessions: sessions deleted in LearnHarness."""
+        slugs = [p["slug"] for p in self._read_meta().get("projects", [])]
+        for owner, data in zip(slugs, self._read_projects(slugs), strict=True):
+            if not session_ids.isdisjoint(data.get(LEARN_SESSIONS, [])):
+                self._update_learn_sessions(owner, lambda ids: [s for s in ids if s not in session_ids])
+
+    def _update_learn_sessions(self, slug: str, change: Callable[[list[str]], list[str]]) -> None:
+        """Apply *change* to project *slug*'s learn sessions, guarded by the revision of the read it changes.
+
+        Another writer of `project.json` in between (tab autosave, cards, files) retries on its result, so neither
+        write is lost. Raises StorageConflictError when the file keeps changing.
+        """
+        key = _project_key(slug)
+        for _ in range(_GUARDED_ATTEMPTS):
+            try:
+                data, revision = self._docs.read_with_revision(key)
+            except FileNotFoundError:
+                data, revision = None, None
+            if not isinstance(data, dict):
+                data = self._default_project(slug)
+            sessions = list(data.get(LEARN_SESSIONS, []))
+            changed = change(sessions)
+            if changed == sessions:
+                return
+            try:
+                self._docs.write(key, {**data, LEARN_SESSIONS: changed}, expected=revision)
+            except StorageConflictError:
+                continue
+            return
+        raise StorageConflictError(f"{key} kept changing while its learn sessions were updated")
 
     def add_card(self, slug: str, title: str, description: str = "", state: str = "backlog") -> dict[str, Any]:
         self._require(slug)

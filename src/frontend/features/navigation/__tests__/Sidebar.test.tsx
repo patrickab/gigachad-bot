@@ -48,6 +48,7 @@ const api = vi.hoisted(() => ({
   archiveOmpSession: vi.fn<typeof import("@/lib/backend/api").archiveOmpSession>(async () => {}),
   restoreOmpSession: vi.fn<typeof import("@/lib/backend/api").restoreOmpSession>(async () => "restored"),
   fetchFactoryRepos: vi.fn<typeof import("@/lib/backend/api").fetchFactoryRepos>(async () => []),
+  exportLearnSession: vi.fn<typeof import("@/lib/backend/api").exportLearnSession>(),
   registerFactoryRepo: vi.fn<typeof import("@/lib/backend/api").registerFactoryRepo>(),
 }))
 const login = vi.hoisted(() => ({ hostAccess: false }))
@@ -55,13 +56,17 @@ vi.mock("@/contexts/SettingsContext", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/contexts/SettingsContext")>(),
   useHostAccess: () => login.hostAccess,
 }))
-vi.mock("@/lib/backend/api", async (importOriginal) => ({
-  ...api,
-  ApiError: (await importOriginal<typeof import("@/lib/backend/api")>()).ApiError,
-  addFileRoot: vi.fn(), createArchitectureSource: vi.fn(), createWorktree: vi.fn(), fetchProviderUsage: vi.fn(async () => ({ reports: [] })),
-  removeFileRoot: vi.fn(), moveDocument: vi.fn(), removeDocument: vi.fn(),
-}))
-vi.mock("@/features/navigation/SidebarContext", () => ({ useSidebar: () => ({ collapsed: false }) }))
+vi.mock("@/lib/backend/api", async (importOriginal) => {
+  const { ApiError, currentConnectionPool, leaveConnectionPool } = await importOriginal<typeof import("@/lib/backend/api")>()
+  return {
+    ...api,
+    ApiError, currentConnectionPool, leaveConnectionPool,
+    addFileRoot: vi.fn(), createArchitectureSource: vi.fn(), createWorktree: vi.fn(), fetchProviderUsage: vi.fn(async () => ({ reports: [] })),
+    removeFileRoot: vi.fn(), moveDocument: vi.fn(), removeDocument: vi.fn(),
+  }
+})
+const sidebarFrame = vi.hoisted(() => ({ collapsed: false, toggleCollapsed: vi.fn() }))
+vi.mock("@/features/navigation/SidebarContext", () => ({ useSidebar: () => sidebarFrame }))
 vi.mock("@/features/navigation/BranchContext", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/features/navigation/BranchContext")>(),
   useBranches: vi.fn(() => ({
@@ -80,9 +85,60 @@ vi.mock("@/contexts/ProjectContext", async () => {
   }
 })
 vi.mock("@/features/memory/MemoryViewerContext", () => ({ useMemoryViewer: () => ({ openMemoryViewer: vi.fn() }) }))
-vi.mock("@/contexts/UndoDeleteContext", () => ({ useUndoDelete: () => ({ schedule: vi.fn(), pending: () => false }) }))
+const undo = vi.hoisted(() => ({ schedule: vi.fn<(key: string, label: string, run: () => Promise<void>) => void>() }))
+vi.mock("@/contexts/UndoDeleteContext", () => ({ useUndoDelete: () => ({ schedule: undo.schedule, pending: () => false }) }))
 const omp = vi.hoisted(() => ({ overview: null as import("@/lib/domain/types").OmpOverview | null, refreshOverview: () => {} }))
 vi.mock("@/features/omp/OmpProvider", () => ({ useOmp: () => omp }))
+const learn = vi.hoisted(() => ({
+  sessions: {
+    sessions: [] as import("@/lib/domain/types").LearnSession[], error: null as string | null, refresh: vi.fn(async () => {}), claim: async () => {},
+    rename: vi.fn<(sessionId: string, title: string) => Promise<void>>(), remove: vi.fn<(sessionId: string, mode?: string) => Promise<void>>(),
+    retitle: vi.fn<(sessionId: string, title: string) => void>(), missing: new Set<string>() as ReadonlySet<string>,
+  },
+  sendToLearnFrame: vi.fn<(message: import("@gigachad/chat-ui/learn-protocol").LearnShellMessage) => boolean>(),
+  showInFrame: vi.fn<(message: import("@gigachad/chat-ui/learn-protocol").LearnShellMessage, session?: { id: string; project_slug: string | null }) => void>(),
+}))
+type FrameMessageOf<Type extends import("@gigachad/chat-ui/learn-protocol").LearnFrameMessageType> = import("@gigachad/chat-ui/learn-protocol").LearnFrameMessageOf<Type>
+const learnFrame = vi.hoisted(() => ({
+  drive: "matched" as "waiting" | "matched" | "mismatch",
+  metas: {} as Record<string, FrameMessageOf<"session-meta">>,
+  plans: {} as Record<string, FrameMessageOf<"session-plan">>,
+  activity: null as FrameMessageOf<"activity"> | null,
+  chromeKeys: new Set<(message: FrameMessageOf<"chrome-key">) => void>(),
+}))
+vi.mock("@/features/learn/LearnProvider", async () => {
+  const { useEffect } = await import("react")
+  return {
+    useLearn: () => learn,
+    useLearnDrive: () => learnFrame.drive,
+    useLearnFrameState: (type: string) => type === "session-meta" ? learnFrame.metas : type === "session-plan" ? learnFrame.plans : learnFrame.activity,
+    useLearnFrameEvent: (_type: "chrome-key", listener: (message: FrameMessageOf<"chrome-key">) => void) => {
+      useEffect(() => {
+        learnFrame.chromeKeys.add(listener)
+        return () => { learnFrame.chromeKeys.delete(listener) }
+      })
+    },
+  }
+})
+
+/** A learn session row as `GET /api/learn/sessions` lists it. */
+function learnSession(id: string, title: string, fields: Partial<import("@/lib/domain/types").LearnSession> = {}): import("@/lib/domain/types").LearnSession {
+  return { id, title, kind: "teach", busy: false, compacting: false, pending_question: false, pending_problem: false, updated_at: null, project_slug: null, ...fields }
+}
+
+function sessionMeta(sessionId: string, title: string, fields: Partial<FrameMessageOf<"session-meta">> = {}): FrameMessageOf<"session-meta"> {
+  return { type: "session-meta", sessionId, title, kind: "teach", phase: "probe", status: null, updatedAt: "2026-10-29T10:00:00.000Z", ...fields }
+}
+
+/** Render `element` in a tab showing learn session `sessionId`, `setWorkspaceItem` recording what the tab is sent to. */
+function renderInLearnTab(element: ReactElement, sessionId: string, setWorkspaceItem = vi.fn()) {
+  const tab = { ...nextTab(), appMode: "learn" as const, workspaceItem: { kind: "learn" as const, path: "", projectSlug: null, learn: { kind: "session" as const, sessionId } } }
+  return testingRender(
+    <TabContext.Provider value={{ tab, isActive: true, setModeLabel: vi.fn(), updateConfig: vi.fn(), setAppMode: vi.fn(), setWorkspaceItem, setHistoryFile: vi.fn(), setTitle: vi.fn() }}>
+      {element}
+    </TabContext.Provider>,
+  )
+}
 
 function ompSession(id: string, cwd: string, extra: Partial<import("@/lib/domain/types").OmpSession> = {}) {
   return {
@@ -443,6 +499,275 @@ describe("Project navigation", () => {
     } finally {
       omp.overview = null
       login.hostAccess = false
+    }
+  })
+
+  it("offers Learn to host logins only: a new session, the knowledge graph and practice", async () => {
+    const onItemOpen = vi.fn()
+    const guest = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
+    await act(async () => {})
+    expect(guest.queryByRole("button", { name: "Open learn" })).not.toBeInTheDocument()
+    expect(guest.queryByRole("button", { name: "New teaching session" })).not.toBeInTheDocument()
+    guest.unmount()
+
+    login.hostAccess = true
+    try {
+      const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
+      await act(async () => {})
+      fireEvent.click(view.getByRole("button", { name: "Open learn" }))
+      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "learn", path: "", projectSlug: null, learn: { kind: "new" } })
+      fireEvent.click(view.getByRole("button", { name: "Open knowledge graph" }))
+      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "learn", path: "", projectSlug: null, learn: { kind: "home" } })
+      fireEvent.click(view.getByRole("button", { name: "New teaching session" }))
+      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "learn", path: "", projectSlug: null, learn: { kind: "new" } }, true)
+      fireEvent.click(view.getByRole("button", { name: "New practice session" }))
+      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "learn", path: "", projectSlug: null, learn: { kind: "new", sessionKind: "practice" } }, true)
+
+      // A project without learn sessions shows no learn folder, only the action starting one.
+      fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
+      expect(within(view.getByLabelText("Proj contents")).queryByRole("button", { name: "learn" })).not.toBeInTheDocument()
+      expect(view.getByRole("button", { name: "New learn session in Proj" })).toBeInTheDocument()
+    } finally {
+      login.hostAccess = false
+    }
+  })
+
+  it("groups learn sessions under their project, lists the rest under Learn, and opens the frame at a clicked session", async () => {
+    learn.sessions.sessions = [learnSession("chat_a", "Fourier series", { project_slug: "proj" }), learnSession("chat_b", "Eigenvalues")]
+    const onItemOpen = vi.fn()
+    const guest = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
+    expect(guest.queryByRole("button", { name: "New learn session in Proj" })).not.toBeInTheDocument()
+    expect(guest.queryByRole("button", { name: "Eigenvalues" })).not.toBeInTheDocument()
+    guest.unmount()
+
+    login.hostAccess = true
+    try {
+      const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
+      await act(async () => {})
+      fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
+      const project = within(view.getByLabelText("Proj contents"))
+      expect(project.getByRole("button", { name: "learn" })).toHaveAttribute("aria-expanded", "true")
+      fireEvent.click(project.getByRole("button", { name: "Fourier series" }))
+      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "learn", path: "", projectSlug: "proj", learn: { kind: "session", sessionId: "chat_a" } })
+      fireEvent.click(view.getByRole("button", { name: "New learn session in Proj" }))
+      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "learn", path: "", projectSlug: "proj", learn: { kind: "new" } }, true)
+
+      const section = within(view.getByLabelText("Learn"))
+      expect(section.queryByRole("button", { name: "Fourier series" })).not.toBeInTheDocument()
+      fireEvent.click(section.getByRole("button", { name: "Eigenvalues" }))
+      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "learn", path: "", projectSlug: null, learn: { kind: "session", sessionId: "chat_b" } })
+    } finally {
+      login.hostAccess = false
+      learn.sessions.sessions = []
+    }
+  })
+
+  it("opens LearnHarness's settings in the frame, keeping a frame at another version on its own settings", async () => {
+    login.hostAccess = true
+    try {
+      const view = render(<Sidebar appMode="chat" onItemOpen={vi.fn()} />)
+      await act(async () => {})
+      fireEvent.click(view.getByRole("button", { name: "Open learn settings" }))
+      expect(learn.showInFrame.mock.calls).toEqual([[{ type: "open-settings", section: null }]])
+      view.unmount()
+
+      learnFrame.drive = "mismatch"
+      const mismatched = render(<Sidebar appMode="chat" onItemOpen={vi.fn()} />)
+      expect(mismatched.queryByRole("button", { name: "Open learn settings" })).not.toBeInTheDocument()
+    } finally {
+      login.hostAccess = false
+      learnFrame.drive = "matched"
+      learn.showInFrame.mockClear()
+    }
+  })
+
+  it("renames and deletes learn sessions, showing the hidden chrome's state, practice tag or phase chip", async () => {
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60_000).toISOString()
+    learn.sessions.sessions = [
+      learnSession("chat_a", "Fourier series", { project_slug: "proj" }),
+      learnSession("chat_b", "Eigenvalues", { kind: "practice" }),
+      learnSession("chat_c", "Pendulum"),
+      learnSession("chat_d", "Waves", { pending_question: true, busy: true, updated_at: fiveMinutesAgo }),
+      learnSession("chat_e", "Optics", { busy: true }),
+    ]
+    learnFrame.metas = {
+      chat_c: sessionMeta("chat_c", "Pendulum", { phase: "plan" }),
+      chat_e: sessionMeta("chat_e", "Optics", { status: "compacting", updatedAt: fiveMinutesAgo }),
+    }
+    login.hostAccess = true
+    try {
+      const view = render(<Sidebar appMode="chat" onItemOpen={vi.fn()} />)
+      await act(async () => {})
+      const section = within(view.getByLabelText("Learn"))
+      expect(section.getByRole("button", { name: "Eigenvalues practice" })).toBeInTheDocument()
+      expect(section.getByRole("button", { name: "Pendulum plan" })).toBeInTheDocument()
+      expect(section.getByRole("button", { name: "Waves waiting 5m" })).toBeInTheDocument()
+      expect(section.getByRole("button", { name: "Optics compacting 5m" })).toBeInTheDocument()
+
+      fireEvent.doubleClick(section.getByRole("button", { name: "Eigenvalues practice" }))
+      const input = view.getByRole("textbox", { name: "Rename learn session" })
+      expect(input).toHaveValue("Eigenvalues")
+      fireEvent.change(input, { target: { value: "Linear algebra" } })
+      fireEvent.submit(input.closest("form")!)
+      await waitFor(() => expect(view.queryByRole("dialog", { name: "Rename learn session" })).not.toBeInTheDocument())
+      expect(learn.sessions.rename).toHaveBeenCalledWith("chat_b", "Linear algebra")
+
+      fireEvent.click(section.getByRole("button", { name: "Delete Pendulum" }))
+      const [key, label, run] = undo.schedule.mock.lastCall!
+      expect([key, label]).toEqual(["learn:chat_c", "Pendulum"])
+      await run()
+      expect(learn.sessions.remove).toHaveBeenCalledWith("chat_c")
+    } finally {
+      login.hostAccess = false
+      learn.sessions.sessions = []
+      learnFrame.metas = {}
+    }
+  })
+
+  it("filters learn sessions by LearnHarness's ranking and kind, Enter opens the walked match", async () => {
+    learn.sessions.sessions = [
+      learnSession("chat_a", "Series and Fourier", { project_slug: "proj" }),
+      learnSession("chat_b", "Fourier practice", { kind: "practice" }),
+      learnSession("chat_c", "Fourier series"),
+      learnSession("chat_d", "Pendulum"),
+    ]
+    const onItemOpen = vi.fn()
+    login.hostAccess = true
+    try {
+      const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
+      await act(async () => {})
+      const section = within(view.getByLabelText("Learn"))
+      fireEvent.click(view.getByRole("button", { name: "Filter learn sessions" }))
+      const search = view.getByRole("searchbox", { name: "Filter learn sessions" })
+      fireEvent.change(search, { target: { value: "fourier ser" } })
+      // Every token must match, a title starting with the query ranks first, a project's session names its project.
+      const rows = () => section.getAllByRole("button", { name: /^(Proj )?(Fourier|Series)/ }).map((row) => row.textContent)
+      expect(rows()).toEqual(["Fourier series", "Proj Series and Fourier"])
+      expect(section.getByRole("button", { name: "Fourier series" })).toHaveAttribute("aria-current", "page")
+
+      fireEvent.keyDown(search, { key: "ArrowDown" })
+      fireEvent.keyDown(search, { key: "Enter" })
+      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "learn", path: "", projectSlug: "proj", learn: { kind: "session", sessionId: "chat_a" } })
+
+      fireEvent.change(search, { target: { value: "fourier" } })
+      fireEvent.click(view.getByRole("button", { name: "Practice" }))
+      expect(rows()).toEqual(["Fourier practicepractice"])
+      expect(localStorage.getItem("learn_session_kind_filter")).toBe("practice")
+      fireEvent.click(view.getByRole("button", { name: "All" }))
+      expect(rows()).toHaveLength(3)
+
+      fireEvent.keyDown(document, { key: "Escape" })
+      expect(view.queryByRole("searchbox", { name: "Filter learn sessions" })).not.toBeInTheDocument()
+      expect(section.queryByRole("button", { name: "Proj Series and Fourier" })).not.toBeInTheDocument()
+    } finally {
+      login.hostAccess = false
+      learn.sessions.sessions = []
+    }
+  })
+
+  it("opens upstream's session panels in the frame and exports or deletes with the graph traces from a session's menu", async () => {
+    learn.sessions.sessions = [learnSession("chat_a", "Fourier series", { project_slug: "proj" }), learnSession("chat_b", "Eigenvalues")]
+    learnFrame.plans = { chat_b: { type: "session-plan", sessionId: "chat_b", available: true } }
+    api.exportLearnSession.mockResolvedValue({ filename: "eigenvalues.md", markdown: "# Eigenvalues" })
+    const createObjectURL = vi.fn(() => "blob:export")
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() }))
+    const clicked = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
+    login.hostAccess = true
+    try {
+      const view = render(<Sidebar appMode="chat" onItemOpen={vi.fn()} />)
+      await act(async () => {})
+      const section = within(view.getByLabelText("Learn"))
+      const menu = () => {
+        fireEvent.click(section.getByRole("button", { name: "More actions for Eigenvalues" }))
+        return within(view.getByRole("menu", { name: "Session actions" }))
+      }
+      expect(menu().getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Plan", "Coverage", "Export as Markdown", "Delete with graph traces"])
+      fireEvent.keyDown(document, { key: "Escape" })
+      expect(view.queryByRole("menu", { name: "Session actions" })).not.toBeInTheDocument()
+
+      const eigenvalues = learn.sessions.sessions[1]
+      for (const panel of ["Plan", "Coverage"]) fireEvent.click(menu().getByRole("menuitem", { name: panel }))
+      expect(learn.showInFrame.mock.calls).toEqual(["plan", "coverage"].map((panel) => [{ type: "open-panel", panel, sessionId: "chat_b" }, eigenvalues]))
+
+      fireEvent.click(menu().getByRole("menuitem", { name: "Export as Markdown" }))
+      await waitFor(() => expect(clicked).toHaveBeenCalledOnce())
+      expect(api.exportLearnSession).toHaveBeenCalledWith("chat_b")
+      expect(clicked.mock.contexts[0]).toMatchObject({ download: "eigenvalues.md", href: "blob:export" })
+
+      fireEvent.click(menu().getByRole("menuitem", { name: "Delete with graph traces" }))
+      const [key, label, run] = undo.schedule.mock.lastCall!
+      expect([key, label]).toEqual(["learn:chat_b", "Eigenvalues and its graph traces"])
+      await run()
+      expect(learn.sessions.remove).toHaveBeenLastCalledWith("chat_b", "delete-nodes")
+
+      // No plan reported: no Plan entry.
+      fireEvent.click(view.getByRole("button", { name: "Expand Proj" }))
+      fireEvent.click(view.getByRole("button", { name: "More actions for Fourier series" }))
+      expect(within(view.getByRole("menu", { name: "Session actions" })).queryByRole("menuitem", { name: "Plan" })).not.toBeInTheDocument()
+    } finally {
+      login.hostAccess = false
+      learn.sessions.sessions = []
+      learnFrame.plans = {}
+      learn.showInFrame.mockClear()
+      clicked.mockRestore()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it("lists the frame's background agents and opens upstream's section with their details and stop buttons", async () => {
+    learn.sessions.sessions = [learnSession("chat_b", "Eigenvalues")]
+    learnFrame.activity = { type: "activity", items: [{ id: "job_1", label: "Extracting Eigenvalues", status: "running", sessionId: "chat_b" }] }
+    const onItemOpen = vi.fn()
+    login.hostAccess = true
+    try {
+      const view = render(<Sidebar appMode="chat" onItemOpen={onItemOpen} />)
+      await act(async () => {})
+      const section = within(view.getByLabelText("Learn"))
+      fireEvent.click(section.getByRole("button", { name: "background agents" }))
+      fireEvent.click(section.getByRole("button", { name: "Extracting Eigenvalues running" }))
+      expect(onItemOpen).toHaveBeenLastCalledWith({ kind: "learn", path: "", projectSlug: null, learn: { kind: "session", sessionId: "chat_b" } })
+      fireEvent.click(section.getByRole("button", { name: "Show background agents" }))
+      expect(learn.showInFrame).toHaveBeenLastCalledWith({ type: "open-panel", panel: "activity", sessionId: null })
+    } finally {
+      login.hostAccess = false
+      learn.sessions.sessions = []
+      learnFrame.activity = null
+      learn.showInFrame.mockClear()
+    }
+  })
+
+  it("acts on the hidden chrome's shortcuts from the frame and on F2, and leaves a session deleted here", async () => {
+    learn.sessions.sessions = [learnSession("chat_b", "Eigenvalues")]
+    login.hostAccess = true
+    try {
+      const setWorkspaceItem = vi.fn()
+      const view = renderInLearnTab(<Sidebar appMode="learn" onItemOpen={vi.fn()} />, "chat_b", setWorkspaceItem)
+      await act(async () => {})
+      const press = (action: FrameMessageOf<"chrome-key">["action"]) => act(() => learnFrame.chromeKeys.forEach((listener) => listener({ type: "chrome-key", action })))
+
+      await press("toggle-sidebar")
+      expect(sidebarFrame.toggleCollapsed).toHaveBeenCalledOnce()
+      await press("sessions-search")
+      expect(view.getByRole("searchbox", { name: "Filter learn sessions" })).toHaveFocus()
+      await press("rename-session")
+      expect(view.getByRole("textbox", { name: "Rename learn session" })).toHaveValue("Eigenvalues")
+      fireEvent.keyDown(document, { key: "Escape" })
+      await waitFor(() => expect(view.queryByRole("dialog", { name: "Rename learn session" })).not.toBeInTheDocument())
+
+      fireEvent.keyDown(window, { key: "F2" })
+      expect(view.getByRole("textbox", { name: "Rename learn session" })).toHaveValue("Eigenvalues")
+      expect(setWorkspaceItem).not.toHaveBeenCalled()
+      view.unmount()
+
+      learn.sessions.missing = new Set(["chat_b"])
+      renderInLearnTab(<Sidebar appMode="learn" onItemOpen={vi.fn()} />, "chat_b", setWorkspaceItem)
+      await act(async () => {})
+      expect(setWorkspaceItem).toHaveBeenCalledWith({ kind: "learn", path: "", projectSlug: null, learn: { kind: "home" } })
+    } finally {
+      login.hostAccess = false
+      learn.sessions.sessions = []
+      learn.sessions.missing = new Set()
+      sidebarFrame.toggleCollapsed.mockClear()
     }
   })
 

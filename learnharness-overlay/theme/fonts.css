@@ -1,0 +1,31 @@
+/* gigachad-bot's faces over LearnHarness's, embedded only (`html.cf-embed`).
+
+   - Outfit comes from `@gigachad/chat-ui/fonts.css` (the face only, it styles nothing). It is the one package
+     stylesheet imported here and not from `index.ts`: it never changes while the app runs, so Turbopack's
+     @import tracking does not matter
+   - LearnHarness: chrome in JetBrains Mono (`--font-jetbrains`, `.font-ui`, `body`, Tailwind's `.font-mono`), prose in
+     Source Sans 3 (`--font-sans3`, `.lh-prose`, `.lh-input`), titles in CMU Serif (`--font-title`). next/font sets the
+     first two on <html>, `:root:root.cf-embed` (0-3-0) outranks its class
+   - gigachad-bot: Outfit for chrome and prose, JetBrains Mono for code only. So every family variable becomes the
+     shell's sans stack, and code (`.font-mono`, `code`, `kbd`, `pre`, `samp`) is pointed back at JetBrains Mono, still
+     loaded by LearnHarness's next/font under its own name
+   - A learner's Appearance font (`--font-prose` inline on <html>) still wins for prose, with this stack behind it */
+
+@import "@gigachad/chat-ui/fonts.css";
+
+:root:root.cf-embed {
+  --cf-font-sans: "Outfit Variable", "Symbols Nerd Font Mono", system-ui, -apple-system, sans-serif;
+  --cf-font-mono: "JetBrains Mono", "JetBrains Mono Fallback", "Symbols Nerd Font Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --font-jetbrains: var(--cf-font-sans);
+  --font-sans3: var(--cf-font-sans);
+  --font-ui: var(--cf-font-sans);
+  --font-sans: var(--cf-font-sans);
+  --font-prose: var(--cf-font-sans);
+  --font-title: var(--cf-font-sans);
+  --font-mono: var(--cf-font-mono);
+}
+
+/* Tailwind bakes `.font-mono` as `var(--font-jetbrains)`, now the sans stack: unlayered, so it beats the utility */
+:where(html.cf-embed) :is(.font-mono, code, kbd, pre, samp) {
+  font-family: var(--cf-font-mono);
+}

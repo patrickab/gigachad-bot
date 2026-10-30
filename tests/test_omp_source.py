@@ -27,7 +27,7 @@ def test_catalog_reports_missing_install_without_probing(tmp_path, monkeypatch):
     def fail() -> list[dict]:
         raise AssertionError("must not probe a gateway when OMP is not installed")
 
-    monkeypatch.setattr(omp_source, "_fetch_catalog_entries", fail)
+    monkeypatch.setattr(omp_source, "catalog_entries", fail)
     catalog = omp_source.catalog()
 
     assert catalog["installed"] is False
@@ -50,7 +50,7 @@ def test_catalog_groups_gateway_models_by_authenticated_provider(tmp_path, monke
         {"id": "openai-codex/gpt-5.2", "owned_by": "openai-codex"},
         {"id": "", "owned_by": "anthropic"},
     ]
-    monkeypatch.setattr(omp_source, "_fetch_catalog_entries", lambda: entries)
+    monkeypatch.setattr(omp_source, "catalog_entries", lambda: entries)
     catalog = omp_source.catalog()
 
     assert catalog["installed"] is True
@@ -74,12 +74,34 @@ def test_catalog_reports_offline_gateway_instead_of_raising(tmp_path, monkeypatc
     def refuse() -> list[dict]:
         raise OSError("connection refused")
 
-    monkeypatch.setattr(omp_source, "_fetch_catalog_entries", refuse)
+    monkeypatch.setattr(omp_source, "catalog_entries", refuse)
     catalog = omp_source.catalog()
 
     assert catalog["installed"] is True
     assert catalog["online"] is False
     assert "connection refused" in catalog["error"]
+
+
+def test_thinking_registry_raises_where_thinking_levels_reads_unknown(monkeypatch):
+    def timed_out(*_args, **_kwargs) -> str:
+        raise OSError("omp timed out")
+
+    monkeypatch.setattr(omp_source, "run_omp", timed_out)
+    with pytest.raises(OSError, match="omp timed out"):
+        omp_source.thinking_registry()
+    assert omp_source.thinking_levels("anthropic/claude-sonnet-5-5") is None
+
+
+def test_thinking_registry_is_empty_only_without_omp(monkeypatch):
+    def absent(*_args, **_kwargs) -> str:
+        raise omp_source.OmpNotFound("omp")
+
+    monkeypatch.setattr(omp_source, "run_omp", absent)
+    assert omp_source.thinking_registry() == {}
+
+    listing = '{"models": [{"selector": "anthropic/claude-sonnet-5-5", "reasoning": true, "thinking": ["low", "high"]}]}'
+    monkeypatch.setattr(omp_source, "run_omp", lambda *_args, **_kwargs: listing)
+    assert omp_source.thinking_registry() == {"anthropic/claude-sonnet-5-5": ["low", "high"]}
 
 
 def test_gateway_token_prefers_env_then_file(tmp_path, monkeypatch):

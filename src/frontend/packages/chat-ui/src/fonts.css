@@ -1,4 +1,8 @@
-/* Outfit variable font, vendored from @fontsource-variable/outfit (SIL OFL 1.1, see fonts/Outfit-LICENSE). */
+/* gigachad-bot's UI typeface for hosts that do not load it themselves, `@gigachad/chat-ui/fonts.css`: the omp-web and
+   LearnHarness overlays import it, the shell loads the same font through next/font (`app/layout.tsx`).
+
+   - Outfit variable, vendored from @fontsource-variable/outfit (SIL OFL 1.1, see fonts/Outfit-LICENSE)
+   - Family "Outfit Variable", a host puts it in its own sans stack. Declaring the face styles nothing */
 @font-face {
   font-family: "Outfit Variable";
   font-style: normal;

@@ -1,0 +1,33 @@
+/* Upstream's chrome while the shell drives the frame (`html.cf-shell-drive`): the shell's sidebar and learn tabs stand in
+   for LearnHarness's sessions sidebar and session title bar. Hidden, never unmounted: their logic keeps running.
+   Keyed to markers the overlay sets (`embed/chrome.tsx`, `overrides/components/top-bar.tsx`), each on its surface's
+   content: a surface the overlay does not recognise, or a new one upstream adds, stays visible. */
+
+[data-cf-app-shell],
+[data-cf-sidebar-toggle],
+[data-cf-top-bar] {
+  display: contents;
+}
+
+/* The sessions sidebar (the app frame's `<aside>` with the new-session entry), the reopen buttons, the session title bar
+   (the top bar with a phase chip). */
+html.cf-shell-drive [data-cf-sessions-sidebar],
+html.cf-shell-drive [data-cf-sidebar-toggle],
+html.cf-shell-drive [data-cf-top-bar][data-cf-session-title] {
+  display: none !important;
+}
+
+/* Upstream's panels the shell opens (`open-panel`): a floating card at the frame's top right. Nothing to show (a
+   coverage read failed) shows no empty card. */
+[data-cf-chrome-panel] {
+  position: fixed;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 50;
+  max-height: calc(100dvh - 1.5rem);
+  overflow-y: auto;
+}
+
+html.cf-shell-drive [data-cf-chrome-panel]:empty {
+  display: none;
+}
