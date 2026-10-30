@@ -35,6 +35,8 @@ change log + SSE        LikeC4  omp-web   factory
 | omp-web | `127.0.0.1:30177` | Same upstream behind identity gate |
 | Factory | `127.0.0.1:8090` | Same default, separate production configuration/database |
 
+- `TransferMiddleware` (`backend/http_plumbing.py`) handles every whole `200` JSON/text body without its own `ETag` or encoding: GET gets a weak body-hash `ETag` with `private, no-cache`, so an unchanged reread answers `304` without the body; bodies of 1 KiB and up are gzipped (level 1) for clients that accept it. Bodies over 256 KiB hash/compress in a thread. SSE, streamed proxies, files, ranges and routes with their own validator (`/fileviewer/raw`) pass through. A 304 still runs the handler, it saves transfer, not server work.
+
 ## Frontend read recovery
 
 - `contexts/StartupReadContext.tsx` bounds initial settings, models, prompts, projects, histories, sidebar listings, reasoning levels, and OMP overview reads to 15 seconds.

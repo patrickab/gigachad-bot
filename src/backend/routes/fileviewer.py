@@ -25,7 +25,7 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 
-from backend.http_plumbing import http_errors
+from backend.http_plumbing import REVALIDATE, etag_matches, http_errors
 from backend.routes.deps import get_asset_store, get_document_store, get_file_roots
 from backend.routes.schemas import FileContent
 from lib import document_library as lib_docs
@@ -38,8 +38,6 @@ from lib.references import annotation_canvas
 
 router = APIRouter(prefix="/api/fileviewer", tags=["fileviewer"])
 
-# Cacheable per browser, but revalidated on every use, so an edit shows on the next open.
-_CACHE_CONTROL = "private, no-cache"
 _SINGLE_RANGE = re.compile(r"bytes=(\d*)-(\d*)")
 
 
@@ -87,13 +85,9 @@ def read_text_content(
 
 def _not_modified(request: Request, etag: str) -> Response | None:
     """A 304 when the request's ``If-None-Match`` lists *etag* (weak comparison), else None."""
-    header = request.headers.get("if-none-match")
-    if header is None:
+    if not etag_matches(request.headers.get("if-none-match"), etag):
         return None
-    tags = {tag.strip().removeprefix("W/") for tag in header.split(",")}
-    if "*" not in tags and etag.removeprefix("W/") not in tags:
-        return None
-    return Response(status_code=304, headers={"ETag": etag, "Cache-Control": _CACHE_CONTROL})
+    return Response(status_code=304, headers={"ETag": etag, "Cache-Control": REVALIDATE})
 
 
 def _byte_range(request: Request, etag: str, size: int) -> tuple[int, int] | None:
@@ -136,7 +130,7 @@ class _StoredFile:
     def response(self, request: Request) -> Response:
         if (not_modified := _not_modified(request, self.etag)) is not None:
             return not_modified
-        headers = {"Content-Disposition": "inline", "Accept-Ranges": "bytes", "Cache-Control": _CACHE_CONTROL}
+        headers = {"Content-Disposition": "inline", "Accept-Ranges": "bytes", "Cache-Control": REVALIDATE}
         span = _byte_range(request, self.etag, self.size)
         with http_errors((StorageNotFoundError, 404, "File not found")):
             if span is None:
@@ -214,7 +208,7 @@ class _HostFile:
             media_type=mime_for(self.path),
             content_disposition_type="inline",
             stat_result=stat,
-            headers={"Cache-Control": _CACHE_CONTROL},
+            headers={"Cache-Control": REVALIDATE},
         )
         return _not_modified(request, response.headers["etag"]) or response
 

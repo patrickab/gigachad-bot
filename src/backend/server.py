@@ -21,6 +21,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from backend.http_plumbing import TransferMiddleware
 from backend.routes.architecture import router as architecture_router
 from backend.routes.canvases import router as canvases_router
 from backend.routes.assets import router as assets_router
@@ -105,6 +106,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="gigachad-bot", lifespan=lifespan)
 
+# Inside CORS, so 304s and gzipped bodies still carry the CORS headers.
+app.add_middleware(TransferMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
