@@ -22,6 +22,16 @@ export function newManualMemoryId(): string {
   return `manual-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
+const GLOBAL_MEMORY_KEYS = new Set(["memory/global-topics.json", "memory/global-profile.json"])
+const PROJECT_MEMORY_KEY = /^memory\/project\/([^/]+)\/memory\/(?:topics|memory)\.json$/
+
+/** Library scope key (`global`, `project:<slug>`) a changed storage key belongs to, null for pending buffers and watermarks. */
+export function memoryScopeKey(storageKey: string): string | null {
+  if (GLOBAL_MEMORY_KEYS.has(storageKey)) return "global"
+  const slug = PROJECT_MEMORY_KEY.exec(storageKey)?.[1]
+  return slug ? `project:${slug}` : null
+}
+
 /** Group memories by topic in stored topic order (empty topics included), then topics only facts reference. */
 export function groupByTopicOrder(topics: MemoryTopic[], memories: StoredMemory[]): { topic: MemoryTopic; items: StoredMemory[] }[] {
   const byTopic = new Map<string, StoredMemory[]>()

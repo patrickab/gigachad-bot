@@ -4,11 +4,24 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useProject } from "@/contexts/ProjectContext"
 import { useUndoDelete } from "@/contexts/UndoDeleteContext"
 import { getMemories, getTopics, saveMemories, saveTopics } from "@/lib/backend/api"
+import { subscribeToChanges } from "@/lib/backend/syncStream"
 import { errorMessage } from "@/lib/utils"
-import { formatTopicHeading, normalizeMemoryTopic } from "@/features/memory/memoryUtils"
+import { formatTopicHeading, memoryScopeKey, normalizeMemoryTopic } from "@/features/memory/memoryUtils"
 import { deleteMemory, deleteTopic, restoreMemory, restoreTopic, type ScopeChange, type ScopeMemory } from "@/features/memory/scopeEdits"
 
-/** Load every scope once, apply changes locally and write each scope in order. */
+type ScopeTarget = Omit<ScopeMemory, "topics" | "memories">
+
+async function loadScope(target: ScopeTarget): Promise<ScopeMemory> {
+  const [topicsResponse, memoriesResponse] = await Promise.all([
+    getTopics(target.scope, target.projectSlug),
+    getMemories(target.scope, target.projectSlug),
+  ])
+  return { ...target, topics: topicsResponse.topics, memories: memoriesResponse.memories }
+}
+
+const sameContent = (a: ScopeMemory, b: ScopeMemory) => JSON.stringify([a.topics, a.memories]) === JSON.stringify([b.topics, b.memories])
+
+/** Load every scope, apply changes locally, write each scope in order and reload a scope when another writer changes it. */
 export function useMemoryLibrary() {
   const { projects } = useProject()
   const { schedule } = useUndoDelete()
@@ -16,6 +29,8 @@ export function useMemoryLibrary() {
   const [error, setError] = useState<string | null>(null)
   const latest = useRef<ScopeMemory[]>([])
   const writes = useRef(new Map<string, Promise<void>>())
+  const savesInFlight = useRef(new Map<string, number>())
+  const localEdits = useRef(new Map<string, number>())
 
   // Reload only when the set of visible projects changes, not on every catalog refresh.
   const projectList = projects.filter((p) => !p.archived).map((p) => `${p.slug}\n${p.name}`).join("\n\n")
@@ -29,13 +44,7 @@ export function useMemoryLibrary() {
 
   useEffect(() => {
     let cancelled = false
-    Promise.all(targets.map(async (target) => {
-      const [topicsResponse, memoriesResponse] = await Promise.all([
-        getTopics(target.scope, target.projectSlug),
-        getMemories(target.scope, target.projectSlug),
-      ])
-      return { ...target, topics: topicsResponse.topics, memories: memoriesResponse.memories }
-    }))
+    Promise.all(targets.map(loadScope))
       .then((loaded) => {
         if (cancelled) return
         latest.current = loaded
@@ -45,7 +54,39 @@ export function useMemoryLibrary() {
     return () => { cancelled = true }
   }, [targets])
 
+  // Memorize commits and other devices rewrite the memory documents. A reload yields to any local edit made meanwhile.
+  useEffect(() => {
+    let disposed = false
+    const timers = new Map<string, ReturnType<typeof setTimeout>>()
+    const reload = async (target: ScopeTarget) => {
+      const editsBefore = localEdits.current.get(target.key) ?? 0
+      try {
+        const fresh = await loadScope(target)
+        const edited = (localEdits.current.get(target.key) ?? 0) !== editsBefore || (savesInFlight.current.get(target.key) ?? 0) > 0
+        const current = latest.current.find((s) => s.key === target.key)
+        if (disposed || edited || !current || sameContent(current, fresh)) return
+        latest.current = latest.current.map((s) => s.key === target.key ? fresh : s)
+        setScopes(latest.current)
+      } catch (e) {
+        if (!disposed) setError(errorMessage(e, "Failed to refresh memory"))
+      }
+    }
+    const unsubscribe = subscribeToChanges((event) => {
+      const key = event.resource_kind === "document" ? memoryScopeKey(event.resource_key) : null
+      const target = targets.find((t) => t.key === key)
+      if (!target) return
+      clearTimeout(timers.get(target.key))
+      timers.set(target.key, setTimeout(() => void reload(target), 150))
+    })
+    return () => {
+      disposed = true
+      unsubscribe()
+      timers.forEach(clearTimeout)
+    }
+  }, [targets])
+
   const change = useCallback((key: string, apply: ScopeChange) => {
+    localEdits.current.set(key, (localEdits.current.get(key) ?? 0) + 1)
     latest.current = latest.current.map((s) => s.key === key ? { ...s, ...apply(s) } : s)
     setScopes(latest.current)
   }, [])
@@ -53,12 +94,13 @@ export function useMemoryLibrary() {
   // Writes queue per scope and read the newest state when they run, so rapid edits never land out of order.
   const save = useCallback((key: string): Promise<void> => {
     const previous = writes.current.get(key) ?? Promise.resolve()
+    savesInFlight.current.set(key, (savesInFlight.current.get(key) ?? 0) + 1)
     const write = previous.catch(() => {}).then(async () => {
       const scope = latest.current.find((s) => s.key === key)
       if (!scope) return
       await saveTopics(scope.scope, scope.topics, scope.projectSlug)
       await saveMemories(scope.scope, scope.memories, scope.projectSlug)
-    })
+    }).finally(() => savesInFlight.current.set(key, (savesInFlight.current.get(key) ?? 1) - 1))
     writes.current.set(key, write)
     return write
   }, [])
